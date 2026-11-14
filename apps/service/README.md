@@ -51,7 +51,7 @@
 
 ## 图片输入协议
 
-默认装配增加 `files.view_images@1`／模型名 `view_images`，位于同一个 `builtin.files` 扩展；普通无 Shell 目录为13项，有 Shell为17项，浏览器工具另按实际宿主选择。它从真实 Execution/Workspace 和当前输入登记派生读取范围，使用原只读权限与父子交集；子 Agent 的准确只读定义白名单也包含该版本。受保护根包括 Profile、协调目录、处理程序／摘要与实际 Sharp/native 依赖闭包。单次`paths`最多10张，兼容互斥的单图`path`，私有原件派发revision绑定完整有序批次；失败不交付部分图片。新增工具不增加 HTTP 图片协议、调试入口或文件写入权。
+默认装配增加 `files.view_images@1`／模型名 `view_images`，位于同一个 `builtin.files` 扩展；普通目录随实际 Shell、任务和浏览器能力选择；Shell 可用时选入既有 `skills.load/resource` 读取入口。它从真实 Execution/Workspace 和当前输入登记派生读取范围，使用原只读权限与父子交集；子 Agent 的准确只读定义白名单也包含该版本。受保护根包括 Profile、协调目录、处理程序／摘要与实际 Sharp/native 依赖闭包。单次`paths`最多10张，兼容互斥的单图`path`，私有原件派发revision绑定完整有序批次；失败不交付部分图片。新增工具不增加 HTTP 图片协议、调试入口或文件写入权。
 
 图片结果沿现有 Artifact 和后继模型链传递；本地原件／视觉结果的目录与 GC 由[Files owner](../../packages/agent/src/tools/files/README.md#本地保存与缓存目录)维护。[默认 Service 联验](test/isolated/image-reading.test.ts)覆盖真实持久化、外部／私有路径、两个图片调用、冷重开／Fork和两协议实际 SDK 编码；真实视觉识别及性能范围见同一 owner。
 
@@ -96,7 +96,7 @@ HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core �
 
 默认 FileRestore 的准确人工确认现由真实 `files.checkpoint.restore` Action owner 通过 `toolBehaviors.executionConfirmation` 在资源前发起，通用权限层不按恢复工具名称强制审批。三模式均保 owner 人答；当前 Restore Action 只有自身准确的 namespaced Job 载体，声明 steps 为空，原 once 只覆盖本调用，不额外运行默认 reviewer 或普通人卡。其他 owner 的有限封闭 Job 能力由通用确认合同约束。当前能力、信任、父子条件、原恢复摘要、quiescence、来源、取消及最终 SQL 仍核；不支持的独立权限挑战直接失败。2026-11-07 本轮 apply 复核补齐[默认消费者整文件](test/isolated/file-checkpoint-default.test.ts)三模式3项282断言：前置两Run仍Full，只在原Restore前切换模式；每例均只有一张准确once卡、一个Action载体，固定Provider始终8次，恢复与冷开无新Model或reviewer，原来源、完整字节、幂等与冷水位保持。源码外 NativeFileRecovery 配对先前3项95断言覆盖原once、三恢复范围、丢回复、漂移及冷读，后者不是Electron窗口。通用新确认／嵌套／等待／计时／模式五整文件57项405断言，完整边界归[权限 owner](../../packages/agent/src/permissions/README.md)与[Interaction owner](../../packages/agent/src/storage/sqlite/interactions/README.md)。
 
-Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短 Tool 结果并直接停止当前 root work，不再续答模型；revise 仍交模型按反馈修订，普通权限拒绝不改变语义。三模式和新输入恢复由[按 Run 配置回归](test/isolated/per-run-planning-configuration.test.ts)核验。默认装配提供准确原 Run 的计划批准要求与当前计划，不给 Agent 定义 planning/building 阶段；批准仍按原 Run、版本、digest 与 accepted Interaction，工具权限独立核验。步骤进度通过 `read_plan` 查询，不参与稳定计划来源摘要；当前任务的旧 Tool／Job 则由[执行证据扩展](../../packages/agent/src/business/execution-evidence/README.md)按需读取。`read_execution_evidence` 复用同 Store 的真实执行记录与固定范围 SQL 分页，列表不给任意其他 Session／Run，详情不开放私有 Model／Provider 正文；Files 目标与可绑定 checkpoint 只是原证据，不能把 Shell 当前文件或累计 diff 归为本 Agent 改动。
+Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短 Tool 结果并直接停止当前 root work，不再续答模型；revise 仍交模型按反馈修订，普通权限拒绝不改变语义。三模式和新输入恢复由[按 Run 配置回归](test/isolated/per-run-planning-configuration.test.ts)核验。默认装配提供准确原 Run 的计划批准要求与当前计划，不给 Agent 定义 planning/building 阶段；批准仍按原 Run、版本、digest 与 accepted Interaction，工具权限独立核验。步骤进度通过 `read_plan` 查询，不参与稳定计划来源摘要；不再注册独立执行回执检索工具。原记录由宿主保留，但存储历史不等于模型仍可查询。
 
 [审核模型装配](src/authorization-check-model.ts)复用当前选定模型的凭据和传输绑定，创建独立 low reasoning preset。普通 compatible 连接在模型已选用 reasoningEffort 时使用 low，已支持 reasoning 的登录 adapter 同样使用 low。默认 Shell 风险审核省略 `maxOutputTokens`。通用内置 checker 在接口支持时使用 `min(原设置,256)`。注入的自定义 checker 使用其自有设置。默认总期限 8000ms，显式配置优先。checker identity 按实际 checkOptions 与 Shell 风险合同摘要计算，`snapshot.authorizationCheckPreset` 封存真实设置与期限。活动旧 Run 如果无法重建原绑定，恢复明确失败。[Auto 回归](test/isolated/auto-configuration.test.ts)核通用设置与失败路径。[Windows Shell 回归](test/isolated/windows-shell-auto.test.ts)核默认审核省略输出上限、超时零派发和迟到结果。
 
@@ -405,7 +405,7 @@ W09 二进制内容使用 `GET /v1/sessions/{id}/artifacts/{refId}?storeId=&scop
 
 默认全局登记 `@kite-ai/agent/files` 的 6 个 `files.*` Tool，每 Run 装配针对实际持久 Workspace root 选择这组定义，以及普通 version-1 `skills.load`/`skills.resource`。`effective.tools` 选择准确 ID；禁用项不在目录，未知 ID 拒绝新 Run，明确选择的 builtin version 必须匹配实际注册版本（`files.read@3`）。非空 Tool/Skill `options` 当前不支持，局部失败，不显示为未实际应用的 effective 设置。可信额外 Tool ID 只能经宿主 `knownToolIds` 提供，Runtime 仍核真实注册。配置不能提供 root、权限、Tool 实现或 capability grant。
 
-显式配置的 Skills 使用 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。路径越界和重复物理位置局部不可用。用户安装目录按[同源知识目录](#同源-skill-知识目录)接入。可选 digest 固定 Skill 字节。摘要/版本/依赖事实进入 `skills.catalogue`；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
+显式配置的 Skills 使用 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。路径越界和重复物理位置局部不可用。用户安装目录按[同源知识目录](#同源-skill-知识目录)接入。可选 digest 固定 Skill 字节。摘要/版本/依赖事实进入 `skills.catalogue`；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。Skill 工具描述要求先等待成功结果、读取指导，再规划依赖工具调用，不将依赖命令与该知识加载同批发送；这只是模型指导，不代替来源新鲜度检查，也不自动重放已退休调用。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
 
 默认 Run 的完整来源请求接入 `captureBatch`：项目来源按全部原定义/输入核实际目标，Skill catalogue及已加载正文仅在该检查点复用；下一检查点重新捕获。所选 MCP 来源继续对每个原请求执行现有 scope/read-set 核验，Workflow fork fence仍在捕获前检查。总唯一 source和冲突摘要门禁保持，不能按 Tool 名丢弃不同文件输入。[默认长任务](test/isolated/long-run-sources.test.ts)经正式 paired 装配、公开 Client和 compatible SDK 完成同 Run 的 257 次不同 Files读取，完整原指令进入 18 次实际请求，两次冷历史读取零重放；[公开长历史接续](test/isolated/long-run-resume.test.ts)另核 4096 次原效果后恢复同一 Run。两项证据不替代 installed客户端、真实 Provider或平台资格。
 
@@ -592,7 +592,7 @@ Model 必须有准确 kind 的允许项，不给同名 Tool 授权。所有非 M
 
 Plan 文件编辑委派到 `planning.write` 后，FileCheckpoint 只从准确父 Tool／命令／Session／Store／定义版本及完整 input 绑定的持久 Action 终态读取公开反馈。普通失败保留原原因及有限 code，不再只给 `plan_file_write_failed`；缺记录、非终态、错绑定、宿主异常与已派发取消保 unknown，只有确有未派发证明的取消才说明未发布修改。[实际链回归](test/isolated/file-checkpoint-plan-feedback.test.ts)核真实人工拒绝、版本冲突、发布后 CAS、取消、观察缺失及私有异常，原因到原 Tool 和下一 Model，未改变授权或 Action 协议。
 
-摘要指引保留修改路径及已知 Agent／Run 归属、原 receipt／Shell key、验证结果与未知效果。缺少进度或调用引用时分别经 `read_plan`／`read_execution_evidence` 按需找回当前任务证据，旧工具正文不会因存库而自动重新注入。摘要校验不证明任意多轮语义完全保真；两次故意遗漏摘要后的原证据读取由[扩展回归](../../packages/agent/test/isolated/business/execution-evidence.test.ts)和[真实分页反例](../../packages/agent/test/isolated/storage/execution-evidence.test.ts)核验，固定回复不代替真实模型质量验收。
+摘要指引保留修改路径及已知 Agent／Run 归属、原 receipt／Shell key、验证结果与未知效果。计划进度仍经 `read_plan` 找回，原操作结果只能通过已有允许的读取工具及保留的准确引用恢复。旧工具正文不会因存库自动重新注入，引用和正文都丢失时报告证据不足，不重放操作。摘要校验不证明任意多轮语义完全保真。
 
 ## 只读授权观察
 
@@ -1120,3 +1120,19 @@ owned navigate沿原35秒默认／既有配置请求预算，不再被普通私�
 浏览器新授权的私有请求标识由 Service 生成并持久化一次，携带固定时间范围；冷恢复沿原记录 inspect，不因超时、Main重启或记录丢失重新 prepare。旧格式申请仍按原记录只读恢复，未知结果不能重放。此调整不改变公开工具或协议版本。
 
 2026-11-06 持久默认目录差量：[权限链路](test/isolated/git-worktree-permissions.test.ts)整文件10项／109断言通过（5个启动隔离HOME子进程各自核1pass0fail），验证根与默认 worker child 的手动／Auto 省略 path 流程、批准前零mkdir、四个原Job复用、按原回执删除保留分支，以及 workspace_write 不扩权。默认根为可信 homedir() 下 `.kite-code/worktrees`，Bun会缓存启动HOME，测试必须在子进程启动时隔离并在任何Git变更前核对。
+
+## 办公文件交付与工作副本
+
+默认生产装配从现有 Shell 执行环境提供固定办公[运行时资产](../../packages/agent/src/tools/documents/README.md)，确切 OfficeCLI executable 进入平台身份，helper/字体/预览资源只读；`OFFICECLI_NO_AUTO_RESIDENT/SKIP_UPDATE/NO_AUTO_INSTALL=1` 禁止运行时驻留、更新和安装。真实 Shell Job 在私有持久 staging 分配后才启动，`KITE_OUTPUT_DIR` 由宿主派生。输出收集属于[现有 Files/Job owner](../../packages/agent/src/business/output-collection.README.md)，不新增模型工具或下一轮模型提示。
+
+默认权限装配只接纳宿主实际 Files collector Job，并用 Store 的原 Action/operation/producer/allocation 完整链及当前 attempt/startCommand/intent 请求证明动态描述。其已绑定自有暂存到私有 Artifact 的归档属于 `read`＋`record_write` 内部持久化，不是 safeRead 或用户任意外部文件写；三种模式沿原 policy 自动归档，当前 trust 与注入 ceiling 不放宽。模型 Run 不增加此 Job 能力。adapter 前权限拒绝以可见失败收口，禁普通重试、冷 owner 不重放，原执行事实保留；私有暂存独立保留7天后才可清理，未知执行仍保留。对应[默认权限回归](test/isolated/output-collection.test.ts)覆盖三种模式、伪造来源/attempt、trust 撤销和注入拒绝。
+
+具备流式 Artifact port 的 Service 宣告 `output_files`。同源 schema 定义 `/output-files` 列表、`/resolve`、`/retry` 与 `/pdf-page`；全部按认证主体及准确 Store/Session/locator 解析。PDF 页图由现有 PDF.js worker按需生成，返回指定页 PNG 及可选的有界真实文本层；原始文件可独立下载。文本层使用与 PNG 相同的 viewport，保留文本顺序、方向和变换，字体仅允许通用白名单；缺文本与不可用明确区分，不执行 OCR、不接受任意 HTML，也不扩大原文件权限。Artifact GET 为有背压的二进制流，完整EOF验证原字节，关闭和取消等待原迭代器释放。Main必须在临时落盘完成SHA/size核实后才发布保存文件，HTTP头不单独证明完整文件。
+
+`input-files/from-output` 将精确来源导入目标 Session 的合法 input ref；`input-files/prepare-working` 在原 command ID 提交前创建工作区 `.kite-inputs` 副本。映射由Store持久保存并与原输入绑定同事务落定，模型只收到工作路径，不收到私有Blob路径或交付catalog。ACK重入不会覆盖已绑定命令的编辑；祖先symlink、hardlink、来源中断或hash不符均拒绝；生产装配额外拒绝Profile、协调目录和Runtime资产内的Workspace，逐4MiB核验让出事件循环以响应取消。路径/复制事实归[工作副本实现](../../packages/agent/src/tools/input-working-files.ts)。
+
+2026-11-11 Linux x64/Bun1.4.4基于`0d17ab9`的办公分支，[真实 Bash→HTTP→输入→工作副本回归](test/isolated/output-files.test.ts)1项17断言、[native路径与失败安全回归](../../packages/agent/test/isolated/tools/input-working-files.test.ts)5项20断言通过。模型由固定fixture提供，Bash、SQLite、Artifact、native文件I/O及HTTP为真实链路；不是外部模型或Electron视觉验收。
+
+HTTP流的[传输owner](src/artifact-stream.ts)对正常EOF、客户端取消和异常next/return统一落定；清理未知保留原错误并使Service关闭失败，不把已closed generator的后续return成功当成首次清理成功。[故障回归](test/isolated/artifact-stream.test.ts)专门覆盖return和EOF-finally抛错、取消、背压及单次结算。
+
+本地文件只读预览使用内部 UI `POST /v1/sessions/:id/preview/pdf-snapshot`：Main 先授权并冻结原文件字节，Service 只接受受限 base64、SHA-256、Store/Session 与页码，不接收路径、不注册产物。请求体90MiB、解码64MiB、最多2个渲染、60秒取消；现有 Bun PDF owner 在单次私有临时缓存渲染，finally清理，返回既有页图DTO。原生预览按页缓存已验证图片，避免缩略图与正文重复渲染。

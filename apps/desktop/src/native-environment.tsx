@@ -1,6 +1,6 @@
 import type { BackgroundExecutionItem } from '@kite-ai/client';
 import { type BackgroundExecutionSummary, BackgroundExecutions } from '@kite-ai/ui/desktop';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NativeBackgroundChild } from './background-bridge';
 import { type NativeAgentActivity, nativeAgentActivities } from './native-agent-activity';
 import { readNativeBackground, readNativeBackgroundChild } from './native-background';
@@ -170,6 +170,7 @@ export function useNativeEnvironment({
   paused = false,
   submissions,
   onChanged,
+  references,
   onOpenChild,
 }: {
   bridge?: NativeBridge;
@@ -186,6 +187,7 @@ export function useNativeEnvironment({
   /** A known selection handoff pauses IO while retaining the displayed card. */
   paused?: boolean;
   submissions?: readonly NativeCallerMetadata[];
+  references?: ReactNode;
   onChanged: () => Promise<void>;
   /** A tab host may route navigation before activating this hook's one visible child reader. */
   onOpenChild?: (
@@ -861,6 +863,7 @@ export function useNativeEnvironment({
                 canStop: row.canStop && !executionUnconfirmed && !blocked.has(row.executionId),
               })) ?? []
             }
+            references={references}
             currentOnly
             stale={stale}
             busy={busy}

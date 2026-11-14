@@ -4,7 +4,7 @@
 
 宿主引用承载准确文件基线、计划版本、MCP连接及工作身份，模型复制返回引用而不重建这些字段。引用不授予权限，计划人答与原工具权限审批保持独立。
 
-普通 CLI、TUI 和 Desktop 默认提供文件读写、图片读取、`ask_user`、`read_execution_evidence`、`web_fetch` 和主 Agent 的六个协作工具。基础模型目录有13项，Shell 提供4项，Git 工作树另占1项。浏览器能力按宿主配置提供。`read_file` 同时接受准确工作区外绝对路径，不加载外部项目指令。有效 Full 模式下，`write_file` 和 `edit_file` 也可直接修改普通外部绝对路径，其他模式的外部修改仍使用经过原权限检查的 Shell。专用 `read_user_file/write_user_file/edit_user_file` 已移除。显式禁用或移除仍不向后续 Run 提供工具，实际调用继续核当前权限、工作区信任和平台能力。
+普通 CLI、TUI 和 Desktop 默认提供文件读写、图片读取、`ask_user`、`web_fetch` 和主 Agent 的六个协作工具。基础模型目录有12项，Shell 提供4项，Git 工作树另占1项。浏览器能力按宿主配置提供。`read_file` 同时接受准确工作区外绝对路径，不加载外部项目指令。有效 Full 模式下，`write_file` 和 `edit_file` 也可直接修改普通外部绝对路径，其他模式的外部修改仍使用经过原权限检查的 Shell。专用 `read_user_file/write_user_file/edit_user_file` 已移除。显式禁用或移除仍不向后续 Run 提供工具，实际调用继续核当前权限、工作区信任和平台能力。
 
 `view_images({paths:[...]})` 按文件只读权限一次读取1至10张本地 PNG、JPEG、WebP 或 GIF，也兼容单图 `view_images({path})`，两种参数不能同时传入，列表不能含重复路径。支持工作区路径、允许的外部绝对路径和当前有效的上传原件，不接受 URL。每张原图最多16MiB、3200万像素、单边16384；应用 EXIF，动画取首帧，最长边缩至2048且不放大，每张PNG结果最多8MiB、整批最多16MiB，实际缩放在结果中说明。按请求顺序处理和交图；任一图片失败、取消或超限，整批不向模型交付部分图片。失败不会授予换路径或绕过权限的许可。所选历史中该工具图片合计超过32MiB时明确失败，不静默删图。工具读取不提供编辑基线。
 
@@ -53,7 +53,6 @@ remove 只接受同仓库的 linked worktree，保护主树、当前来源、已
 | 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent` | 新默认 `preset:general/explore`，省略与显式 `general` 等价；稳定 `agent_id`，消息只排队，显式追问才续轮 |
 | 子 Agent 等待与目录 | `wait_agent_events`、`list_agents` | 事件等待仅向主 Agent 开放，只读其自身邮箱，使用 `work_refs/cursor/wait_ms`；列表按稳定身份分页，并提供原委派/最近工作/结果的可读来源 |
 | 计划 | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 计划保存、批准和基于真实回执的进度分别核实 |
-| 当前任务证据 | `read_execution_evidence` | 按真实任务分页列出 Tool／Job；`execution_id` 查询原公开结果，不重跑操作 |
 
 了解、解释、检查或审查项目本身不授权修改项目。未要求保存时直接回复分析，不为探索创建占位文件或报告；误提出的写入仍须经过原审批与派发核验。
 

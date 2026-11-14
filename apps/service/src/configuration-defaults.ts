@@ -25,7 +25,6 @@ export function ordinaryHostConfigurationDefaults(
     tools: [
       ...defaultConfiguration.tools,
       ...[
-        'execution_evidence.read',
         'files.read',
         'files.view_images',
         'files.write',
@@ -34,10 +33,9 @@ export function ordinaryHostConfigurationDefaults(
           ? shellToolIds.filter((id) => id !== 'git.worktree' || gitWorktreeAvailable)
           : []),
         'web_fetch',
-        ...(browserAllowed
-          ? unifiedBrowser
-            ? ['browser.execute', 'skills.load', 'skills.resource']
-            : browserToolIds
+        ...(browserAllowed ? (unifiedBrowser ? ['browser.execute'] : browserToolIds) : []),
+        ...(shellAvailable || (browserAllowed && unifiedBrowser)
+          ? ['skills.load', 'skills.resource']
           : []),
         ...(taskAvailable
           ? [

@@ -226,8 +226,13 @@ export class NativeCallerJournal {
   records() {
     return this.data.callers();
   }
-  prepare(sessionId: string, raw: NativeCallerCommandRequest, draft?: NativeCallerIntent['draft']) {
-    return this.prepareIntent(sessionId, raw, draft);
+  prepare(
+    sessionId: string,
+    raw: NativeCallerCommandRequest,
+    draft?: NativeCallerIntent['draft'],
+    beforePersist?: () => Promise<void>,
+  ) {
+    return this.prepareIntent(sessionId, raw, draft, undefined, beforePersist);
   }
   /** Main supplies an authenticated original directory item; renderer cannot name a child Session. */
   async prepareBackgroundStop(item: BackgroundExecutionItem, commandId: string) {
@@ -270,6 +275,7 @@ export class NativeCallerJournal {
     raw: NativeCallerCommandRequest,
     draft?: NativeCallerIntent['draft'],
     backgroundRoot?: string,
+    beforePersist?: () => Promise<void>,
   ) {
     const canonical = canonicalNativeCallerRequest(raw),
       request = JSON.parse(JSON.stringify(raw)) as NativeCallerCommandRequest;
@@ -299,6 +305,7 @@ export class NativeCallerJournal {
         (draft && callerDigest(existing.intent.draft) !== callerDigest(draft))
       )
         throw Error('caller_intent_conflict');
+      if (beforePersist) await beforePersist();
       return existing;
     }
     if (request.kind === 'input.steer' || request.kind === 'input.follow_up') {
@@ -349,6 +356,7 @@ export class NativeCallerJournal {
       )
         throw Error('caller_draft_unavailable');
     }
+    if (beforePersist) await beforePersist();
     const row = validateCallerRecord({
       intent: {
         scope,

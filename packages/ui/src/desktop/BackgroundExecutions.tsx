@@ -1,5 +1,6 @@
 import { ArrowRight01Icon, BotIcon, TerminalIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import type { ReactNode } from 'react';
 import { ChildAgentIcon } from './ApprovalHeader';
 import { useDesktopDiagnostics } from './diagnostics';
 import { Button } from './ui';
@@ -38,6 +39,7 @@ export interface BackgroundExecutionsProps {
   readonly stale?: boolean;
   readonly busy?: boolean;
   readonly currentOnly?: boolean;
+  readonly references?: ReactNode;
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
   readonly subagentDetails?: {
@@ -55,6 +57,7 @@ export function BackgroundExecutions({
   stale,
   busy = false,
   currentOnly,
+  references,
   stoppingExecutionId,
   onStop,
   subagentDetails,
@@ -99,6 +102,7 @@ export function BackgroundExecutions({
           busy={busy}
           subagentDetails={subagentDetails}
         />
+        {references}
       </section>
     );
   }

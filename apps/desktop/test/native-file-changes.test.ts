@@ -23,6 +23,7 @@ import { decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import { NativeProcessOwner } from '../electron/native-processes';
 import type { NativeFileChangeScope } from '../src/file-changes-bridge';
 import { type NativeReply, nativeChannel } from '../src/native-bridge';
+import { nativePreviewLayoutChannel } from '../src/native-preview-layout-bridge';
 
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-files-'))),
@@ -407,7 +408,7 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
     viewSelection: 1,
     historyEpoch: 0,
     messageId: 'message',
-    path: 'space 雪.txt',
+    path: 'space 雪.ts',
     line: 94,
     editor: 'vscode',
   } as const;
@@ -462,7 +463,8 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
   const remove = registerNativeIpc({
     ipcMain: {
       handle(channel: string, value: typeof handler) {
-        expect(channel).toBe(nativeChannel);
+        expect([nativeChannel, nativePreviewLayoutChannel]).toContain(channel);
+        if (channel !== nativeChannel) return;
         handler = value;
       },
       removeHandler() {},
@@ -887,5 +889,64 @@ test('explicit per-operation diff wins over simultaneous snapshot, while histori
     expect(reads).toBe(1);
   } finally {
     f.close();
+  }
+});
+
+test('clicked txt returns scoped local preview handle and never launches external editor', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-txt-preview-'));
+  const path = join(root, 'space 雪.txt');
+  writeFileSync(path, 'plain text');
+  const frame = { url: pathToFileURL(join(root, 'index.html')).href },
+    contents = { mainFrame: frame };
+  const window = { isDestroyed: () => false, webContents: contents } as unknown as BrowserWindow;
+  const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent;
+  let handler!: (event: IpcMainInvokeEvent, payload: unknown) => Promise<NativeReply>,
+    launches = 0;
+  const caller = {
+    messagePreviewScope: () => ({ storeId: 'store', sessionId: 'session' }),
+    openMessageFile: async (
+      _request: unknown,
+      perform: (editor: 'vscode', path: string) => Promise<void>,
+    ) => perform('vscode', path),
+  } as unknown as NativeCaller;
+  const stop = registerNativeIpc({
+    ipcMain: {
+      handle(channel: string, value: typeof handler) {
+        if (channel === nativeChannel) handler = value;
+      },
+      removeHandler() {},
+    } as unknown as IpcMain,
+    window: () => window,
+    rendererUrl: frame.url,
+    caller: async () => caller,
+    openEditor: async () => {
+      launches++;
+    },
+  });
+  try {
+    const reply = await handler(event, {
+      method: 'messageFile.open',
+      generation: 1,
+      viewSelection: 1,
+      historyEpoch: 0,
+      messageId: 'message',
+      path: 'space 雪.txt',
+      editor: 'vscode',
+    });
+    expect(reply).toMatchObject({
+      ok: true,
+      value: {
+        kind: 'messageFile.preview',
+        name: 'space 雪.txt',
+        storeId: 'store',
+        sessionId: 'session',
+      },
+    });
+    expect(reply.ok && reply.value).toHaveProperty('handleId');
+    expect(reply.ok && reply.value).not.toHaveProperty('path');
+    expect(launches).toBe(0);
+  } finally {
+    stop();
+    rmSync(root, { recursive: true, force: true });
   }
 });

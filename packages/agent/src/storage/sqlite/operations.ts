@@ -127,6 +127,7 @@ import {
   listPendingInputs,
   validateInputAdmission,
 } from './input-operations';
+import { getWorkingInput, registerWorkingInput } from './input-working-files';
 import { callInteraction, verifyInteractionDispatch } from './interaction-operations';
 import {
   dispatchInternalModel,
@@ -156,6 +157,11 @@ import {
   registerMutationIntent,
   settleMutation,
 } from './mutation-operations';
+import {
+  outputCollectionOperation,
+  registerOutputCollectionAtTerminal,
+  registerTextOutputAtTerminal,
+} from './output-collection';
 import { getPendingInputQueue, mutatePendingInputQueue } from './pending-input-queue';
 import { callPermissionGrant, verifyPermissionGrantDispatch } from './permission-grants';
 import { closeReconciledHistory } from './reconciliation-admission';
@@ -1221,6 +1227,18 @@ export class SqliteOperations {
           this,
           args[0] as Parameters<Store['readExecutionGroupSafety']>[0],
         );
+      case 'getWorkingInput':
+        return getWorkingInput(this, args[0] as Parameters<Store['getWorkingInput']>[0]);
+      case 'registerWorkingInput':
+        return registerWorkingInput(this, args[0] as Parameters<Store['registerWorkingInput']>[0]);
+      case 'allocateOutputCollection':
+      case 'mutateOutputCollection':
+      case 'getOutputCollection':
+      case 'getOutputCollectorAuthorization':
+      case 'queryOutputFiles':
+      case 'resolveOutputFile':
+      case 'retryOutputCollection':
+        return outputCollectionOperation(this, method, input);
       case 'getMetadata':
         return this.metadata();
       case 'getWorkspace': {
@@ -2114,6 +2132,8 @@ export class SqliteOperations {
             canonicalJson(result),
             input.executionId,
           );
+          registerOutputCollectionAtTerminal(this, input.executionId);
+          registerTextOutputAtTerminal(this, input.executionId);
           settleMutation(this, this.row('SELECT * FROM execution WHERE id=?', input.executionId)!);
           settleAgentMessages(
             this,

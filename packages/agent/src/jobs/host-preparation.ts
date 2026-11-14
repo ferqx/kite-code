@@ -25,6 +25,7 @@ export interface MacosHostPaths {
   readonly readonlyAssets?: readonly string[];
   readonly runtimeReadOnlyRoots?: readonly string[];
   readonly temporaryRoot?: string;
+  readonly trustedExecutables?: readonly string[];
   /** Trusted host selection from the actual dispatched authorization, never command JSON. */
   readonly executionScope?: HostShellExecutionScope | HostShellExecutionScopeResolver;
   readonly filesystemScope:
@@ -72,7 +73,6 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
     readOnlySourceRoot: options.readOnlySourceRoot,
   });
   if (
-    within(workspace.canonical, tempBase.canonical) ||
     protectedRoots.some(
       (root) =>
         within(root.canonical, workspace.canonical) ||
@@ -151,6 +151,9 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
     const temp = realpathSync.native(mkdtempSync(join(tempBase.canonical, 'kite-host-job-')));
     chmodSync(temp, 0o700);
     const runtimeTemp = launchIdentity(temp);
+    // A persistent staging base may already be inside the Workspace. Only the
+    // freshly allocated child is writable/owned; never accept a Workspace ancestor.
+    if (within(temp, workspace.canonical)) throw Error('shell_runtime_temp_overlaps_workspace');
     const cleanup = () => removeRuntimeTemp(runtimeTemp);
     try {
       const assetFilters = assets.map((asset) =>

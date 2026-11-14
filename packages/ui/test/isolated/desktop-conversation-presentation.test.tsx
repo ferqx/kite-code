@@ -466,3 +466,73 @@ test('a loading round trip restores an explicitly open process marker and manual
     await f.close();
   }
 });
+
+test('output footer uses the canonical final once and the failed terminal when no final exists', async () => {
+  const view = await fixture(
+    [
+      { id: 'user', role: 'user', text: 'create', settled: true },
+      {
+        id: 'earlier',
+        role: 'assistant',
+        turnId: 'run',
+        text: 'earlier',
+        settled: true,
+        finalReply: true,
+      },
+      {
+        id: 'last',
+        role: 'assistant',
+        turnId: 'run',
+        text: 'saved',
+        settled: true,
+        finalReply: true,
+      },
+    ],
+    false,
+  );
+  try {
+    await view.render({
+      renderTurnOutputs: ({ turnId, finalMessageId }) => (
+        <aside data-output-turn={turnId} data-final={finalMessageId}>
+          Saved attachment
+        </aside>
+      ),
+    });
+    expect(document.querySelectorAll('[data-output-turn="run"]')).toHaveLength(1);
+    expect(document.querySelector('[data-output-turn="run"]')?.getAttribute('data-final')).toBe(
+      'last',
+    );
+    expect(
+      document.querySelector('[data-output-turn="run"]')?.previousElementSibling?.className,
+    ).toBe('agent-turn-final');
+    await view.render({
+      messages: [
+        { id: 'failed-user', role: 'user', text: 'create', settled: true },
+        {
+          id: 'failure:failed',
+          role: 'system',
+          turnId: 'failed',
+          text: 'failed',
+          status: 'failed',
+          systemKind: 'turn_failure',
+          settled: true,
+        },
+        {
+          id: 'terminal:failed',
+          role: 'system',
+          turnId: 'failed',
+          text: '',
+          systemKind: 'turn_terminal',
+          turnTerminalStatus: 'failed',
+          settled: true,
+        },
+      ],
+    });
+    expect(document.querySelectorAll('[data-output-turn="failed"]')).toHaveLength(1);
+    expect(
+      document.querySelector('[data-output-turn="failed"]')?.getAttribute('data-final'),
+    ).toBeNull();
+  } finally {
+    await view.close();
+  }
+});

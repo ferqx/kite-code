@@ -266,6 +266,24 @@ export function createDefaultPermissionConfiguration(options: {
         JSON.stringify([capability.kind, capability.definitionId, capability.definitionVersion]),
         capability,
       );
+  // Only this actual host-created Files Job participates in global policy. It is
+  // absent from model Runs, and its dynamic descriptor requires the Store proof.
+  const outputCollector = files.extension.jobs?.find(
+    (job) => job.id === 'builtin.files/collect' && job.version === '1',
+  );
+  const outputCollectorKey = outputCollector
+    ? JSON.stringify(['job', outputCollector.id, outputCollector.version])
+    : null;
+  if (outputCollector && outputCollectorKey)
+    globalCapabilities.set(outputCollectorKey, {
+      kind: 'job',
+      definitionId: outputCollector.id,
+      definitionVersion: outputCollector.version,
+      revision: `${files.extension.id}:${files.extension.version}:${outputCollector.version}`,
+      effects: ['read', 'record_write'],
+      hardAllowed: true,
+      safeRead: false,
+    });
   const globalDefaultPolicy = createPermissionPolicy({
     readPolicy: (request) =>
       currentPolicy(
@@ -282,6 +300,21 @@ export function createDefaultPermissionConfiguration(options: {
         })),
       ),
     describeCapability: async (request) => {
+      if (
+        outputCollectorKey &&
+        JSON.stringify([request.kind, request.definitionId, request.definitionVersion]) ===
+          outputCollectorKey
+      ) {
+        const proof = await options.readRuntime()?.getOutputCollectorAuthorization(request);
+        if (!proof) return null;
+        // Private Artifact persistence and cleanup of this exact owned staging
+        // directory are host record maintenance, never arbitrary file writes.
+        return {
+          ...globalCapabilities.get(outputCollectorKey)!,
+          revision: proof.revision,
+          internalRecordOnly: true,
+        };
+      }
       const description = globalCapabilities.get(
         JSON.stringify([request.kind, request.definitionId, request.definitionVersion]),
       );
@@ -552,6 +585,7 @@ export function createDefaultPermissionConfiguration(options: {
         );
       }
       for (const job of extension.jobs ?? []) {
+        if (extension === files.extension && job === outputCollector) continue;
         const capability = builtinCapability(
           extension.id,
           job.id,

@@ -22,6 +22,7 @@ import type {
   NativeBackgroundChildOpen,
   NativeBackgroundPage,
 } from '../src/background-bridge';
+import { composeBrowserDraft } from '../src/browser-annotation-content';
 import {
   type NativeRequest,
   type NativeShellPreference,
@@ -29,6 +30,7 @@ import {
   nativeChannel,
 } from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
+import { nativePreviewLayoutChannel } from '../src/native-preview-layout-bridge';
 import { backgroundItem } from './background-item.fixture';
 import { sessionChange } from './native-change.fixture';
 import { memoryPrivateData } from './private-data.fixture';
@@ -114,8 +116,14 @@ test('execution observation progresses while an admission permission read is hel
             sessionId: 's',
             originStoreId: 'store',
             originCommandId: 'work',
-            isActive: cursor !== '3',
-            status: cursor === '3' ? 'completed' : 'running',
+            isActive: !['3', '5', '6', '7'].includes(cursor),
+            status:
+              (
+                { '3': 'completed', '5': 'failed', '6': 'cancelled', '7': 'interrupted' } as Record<
+                  string,
+                  string
+                >
+              )[cursor] ?? 'running',
           },
         ],
       };
@@ -156,7 +164,9 @@ test('execution observation progresses while an admission permission read is hel
     cursor = '3';
     const event = { ...sessionChange('s', cursor), type: 'run.finished', objectId: 'r' };
     const terminal = performance.now();
+    const outputRevision = caller.state().outputFilesRevision!;
     await observe.onChange?.(event);
+    expect(caller.state().outputFilesRevision).toBe(outputRevision + 1);
     await terminalReady;
     expect(views).toBeGreaterThan(before);
     expect(caller.state().executionObservation).toMatchObject({
@@ -171,12 +181,38 @@ test('execution observation progresses while an admission permission read is hel
     expect(caller.state().selection?.runs[0]).toMatchObject({ id: 'r', status: 'running' });
     cursor = '4';
     await observe.onChange?.({ ...event, cursor, type: 'run.started' });
+    expect(caller.state().outputFilesRevision).toBe(outputRevision + 2);
+    await observe.onChange?.({ ...event, sessionId: 'foreign' });
+    expect(caller.state().outputFilesRevision).toBe(outputRevision + 2);
     await Bun.sleep(0);
     expect(caller.state().executionObservation).toMatchObject({
       observedCursor: '4',
       runs: [{ id: 'r', status: 'running', isActive: true }],
     });
     expect(caller.state().selection?.permissions).toBeUndefined();
+    for (const [nextCursor, status] of [
+      ['5', 'failed'],
+      ['6', 'cancelled'],
+    ] as const) {
+      cursor = nextCursor;
+      const beforeRevision = caller.state().outputFilesRevision!;
+      await observe.onChange?.({ ...event, cursor, type: 'run.finished' });
+      await Bun.sleep(20);
+      expect(caller.state().outputFilesRevision).toBe(beforeRevision + 1);
+      expect(caller.state().executionObservation?.runs[0]).toMatchObject({
+        status,
+        isActive: false,
+      });
+    }
+    cursor = '7';
+    const beforeInterrupted = caller.state().outputFilesRevision!;
+    await observe.onChange?.({ ...event, cursor, type: 'run.interrupted' });
+    await Bun.sleep(20);
+    expect(caller.state().outputFilesRevision).toBe(beforeInterrupted);
+    expect(caller.state().executionObservation?.runs[0]).toMatchObject({
+      status: 'interrupted',
+      isActive: false,
+    });
     console.log(
       JSON.stringify({
         measurement: 'native-held-admission',
@@ -2736,8 +2772,8 @@ test('main IPC denies foreign/subframe senders and closed or oversized requests 
     calls = 0;
   const ipcMain = {
     handle(channel: string, value: typeof handler) {
-      expect(channel).toBe(nativeChannel);
-      handler = value;
+      expect([nativeChannel, nativePreviewLayoutChannel]).toContain(channel);
+      if (channel === nativeChannel) handler = value;
     },
     removeHandler() {},
   } as unknown as IpcMain;
@@ -4417,4 +4453,353 @@ test('Native settings rejects legacy Session/project MCP management before readi
   } finally {
     await caller.close();
   }
+});
+
+test('isolated Office submit rejects forged metadata, preserves composer and journals unknown across caller reopen', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  const target = {
+    storeId: 'store',
+    sessionId: 's',
+    fileId: 'output',
+    locator: { kind: 'delivery' as const, key: 'delivery/output' },
+  };
+  const context = {
+    sourceHash: 'a'.repeat(64),
+    selection: { kind: 'powerpoint' as const, slide: 1, objectPath: '/shape/1', text: 'Original' },
+  };
+  const output = {
+    id: 'office-input',
+    name: 'deck.pptx',
+    ownerRunId: 'source-run',
+    target,
+    context,
+  };
+  const document = { content: 'Change only this title', outputFiles: [output] };
+  const reference = {
+    id: 'input-file-office',
+    storeId: 'store',
+    sessionId: 's',
+    subjectId: 'local-user',
+    scope: { kind: 'session', id: 's' },
+    hash: context.sourceHash,
+    size: '8',
+    mediaType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  };
+  let sends = 0;
+  Object.assign(port, {
+    resolveOutputFile: async () => ({
+      summary: { name: output.name, ownerRunId: output.ownerRunId },
+      reference,
+    }),
+    prepareInputFromOutput: async () => ({
+      name: output.name,
+      uri: 'file:///original.pptx',
+      reference,
+    }),
+    prepareWorkingInputs: async () => ({}),
+    startRun: async () => {
+      sends++;
+      throw new ClientError('network_error');
+    },
+    getCommand: async () => {
+      throw new ClientError('network_error');
+    },
+  });
+  let caller = new NativeCaller(port, () => {}, data);
+  try {
+    let { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await caller.invoke({
+      method: 'draft.write',
+      generation,
+      sessionId: 's',
+      revision: 0,
+      content: 'Unrelated composer text',
+      outputFiles: [{ ...output, id: 'unrelated-composer-attachment' }],
+    });
+    const before = await caller.invoke({ method: 'draft.read', generation, sessionId: 's' });
+    const originalResolve = port.resolveOutputFile;
+    let releasePreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let enteredPreparation!: () => void;
+    const preparationStarted = new Promise<void>((resolve) => {
+      enteredPreparation = resolve;
+    });
+    port.resolveOutputFile = async (...args) => {
+      enteredPreparation();
+      await preparationGate;
+      return originalResolve(...args);
+    };
+    const pendingPreparation = caller.invoke({
+      method: 'input.files.fromOutput',
+      generation,
+      id: 'released-while-pending',
+      target,
+      context,
+    });
+    await preparationStarted;
+    await caller.invoke({
+      method: 'input.files.release',
+      generation,
+      id: 'released-while-pending',
+    });
+    releasePreparation();
+    await expect(pendingPreparation).rejects.toMatchObject({ code: 'native_file_missing' });
+    port.resolveOutputFile = originalResolve;
+    // A composer attachment remains live while transient inline staging exceeds
+    // the total concurrent budget over its lifetime without exhausting it.
+    for (let index = 0; index < 140; index++) {
+      const id = `temporary-office-${index}`;
+      await caller.invoke({ method: 'input.files.fromOutput', generation, id, target, context });
+      await caller.invoke({ method: 'input.files.release', generation, id });
+    }
+    await caller.invoke({
+      method: 'input.files.fromOutput',
+      generation,
+      id: output.id,
+      target,
+      context,
+    });
+    const submit = (officeDocument: typeof document, commandId = 'inline-command') =>
+      caller.invoke({
+        method: 'submit',
+        generation,
+        sessionId: 's',
+        fileIds: [output.id],
+        officeDocument,
+        intent: {
+          kind: 'run.start',
+          commandId,
+          expectedStoreId: 'store',
+          content: composeBrowserDraft(officeDocument),
+        },
+      });
+    for (const file of [
+      { ...output, name: 'forged.pptx' },
+      { ...output, context: { ...context, sourceHash: 'b'.repeat(64) } },
+      {
+        ...output,
+        context: { ...context, selection: { ...context.selection, text: 'Forged selection' } },
+      },
+    ])
+      await expect(submit({ ...document, outputFiles: [file] })).rejects.toMatchObject({
+        code: 'output_draft_mismatch',
+      });
+    await expect(
+      caller.invoke({
+        method: 'submit',
+        generation,
+        sessionId: 's',
+        fileIds: [output.id],
+        officeDocument: document,
+        intent: {
+          kind: 'run.start',
+          commandId: 'forged-extra-file',
+          expectedStoreId: 'store',
+          content: composeBrowserDraft(document),
+          files: [
+            { name: 'injected.pptx', uri: 'file:///other.pptx', reference: reference as never },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'output_draft_mismatch' });
+    expect(sends).toBe(0);
+    await submit(document);
+    await caller.invoke({ method: 'input.files.release', generation, id: output.id });
+    expect(sends).toBe(1);
+    expect(data.callers()[0]?.phase).toBe('unknown');
+    expect(data.callers()[0]?.intent.draft).toBeUndefined();
+    expect(data.callers()[0]?.intent.request).toMatchObject({
+      content: composeBrowserDraft(document),
+    });
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toEqual(
+      before,
+    );
+    await caller.close();
+    caller = new NativeCaller(port, () => {}, data);
+    ({ generation } = (await caller.invoke({ method: 'attach' })) as NativeState);
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await expect(submit(document, 'second-command')).rejects.toMatchObject({
+      code: 'caller_clear_unconfirmed',
+    });
+    expect(sends).toBe(1);
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toEqual(
+      before,
+    );
+  } finally {
+    await caller.close();
+  }
+});
+
+test('local PDF source guard rejects during prepare before persistence and cold recovery cannot dispatch it', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  let valid = true,
+    sends = 0;
+  const getView = port.getView.bind(port);
+  port.getView = async (...args) => {
+    const result = await getView(...args);
+    valid = false;
+    return result;
+  };
+  port.startRun = async () => {
+    sends++;
+    throw Error('must_not_dispatch');
+  };
+  const journal = new NativeCallerJournal(port, data);
+  const intent = {
+    kind: 'run.start' as const,
+    commandId: 'local-pdf',
+    expectedStoreId: 'store',
+    content: 'Main original reference',
+  };
+  await expect(
+    journal.prepare('s', intent, undefined, async () => {
+      if (!valid) throw Error('local_preview_changed');
+    }),
+  ).rejects.toThrow('local_preview_changed');
+  expect(data.callers()).toEqual([]);
+  const cold = new NativeCallerJournal(port, data);
+  expect(() => cold.submit(intent.commandId)).toThrow('caller_intent_missing');
+  expect(sends).toBe(0);
+});
+
+test('local PDF prepare guard throws without a row and cannot replace an existing unknown intent', async () => {
+  const port = client(),
+    data = memoryPrivateData(),
+    journal = new NativeCallerJournal(port, data);
+  const intent = {
+    kind: 'run.start' as const,
+    commandId: 'local-pdf-guard',
+    expectedStoreId: 'store',
+    content: 'Main original reference',
+  };
+  await expect(
+    journal.prepare('s', intent, undefined, () => {
+      throw Error('scope_revoked');
+    }),
+  ).rejects.toThrow('scope_revoked');
+  expect(data.callers()).toEqual([]);
+  let checks = 0;
+  await journal.prepare('s', intent, undefined, async () => {
+    checks++;
+  });
+  expect(checks).toBe(1);
+  let sends = 0;
+  port.startRun = async () => {
+    sends++;
+    throw new ClientError('network_error');
+  };
+  await expect(journal.submit(intent.commandId)).rejects.toThrow();
+  const previous = structuredClone(data.callers());
+  expect(previous[0]?.phase).toBe('unknown');
+  await expect(
+    journal.prepare('s', intent, undefined, async () => {
+      throw Error('source_changed');
+    }),
+  ).rejects.toThrow('source_changed');
+  expect(data.callers()).toEqual(previous);
+  expect(sends).toBe(1);
+});
+
+test('local PDF submit uses Main content and original journal without uploading or consuming composer', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  let sends = 0,
+    guards = 0;
+  port.startRun = async () => {
+    sends++;
+    throw new ClientError('network_error');
+  };
+  const caller = new NativeCaller(port, () => {}, data);
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await caller.invoke({
+      method: 'draft.write',
+      generation,
+      sessionId: 's',
+      revision: 0,
+      content: 'Unrelated composer',
+    });
+    const before = await caller.invoke({ method: 'draft.read', generation, sessionId: 's' });
+    const request = {
+      method: 'localPreview.submit' as const,
+      generation,
+      sessionId: 's',
+      handleId: 'handle',
+      previewId: 'preview',
+      requestId: 'request',
+      intent: {
+        kind: 'run.start' as const,
+        commandId: 'local-pdf-once',
+        expectedStoreId: 'store',
+        content: 'renderer-forged-path',
+      },
+    };
+    expect(
+      await caller.submitLocalPreview(request, 'Main trusted original reference', async () => {
+        guards++;
+      }),
+    ).toMatchObject({ phase: 'unknown' });
+    expect(guards).toBe(2);
+    expect(sends).toBe(1);
+    expect(data.callers()[0]?.intent.request).toMatchObject({
+      content: 'Main trusted original reference',
+    });
+    expect(data.callers()[0]?.intent.request).not.toHaveProperty('files');
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toEqual(
+      before,
+    );
+    await expect(
+      caller.submitLocalPreview(request, 'Main trusted original reference', async () => {}),
+    ).rejects.toThrow('caller_clear_unconfirmed');
+    expect(sends).toBe(1);
+  } finally {
+    await caller.close();
+  }
+});
+
+test('dedicated preview geometry channel rejects foreign frames and cannot acknowledge a missing view or start caller', async () => {
+  const auth = authority();
+  const handlers = new Map<string, (event: IpcMainInvokeEvent, value: unknown) => unknown>();
+  let calls = 0;
+  const stop = registerNativeIpc({
+    ipcMain: {
+      handle(channel: string, handler: (event: IpcMainInvokeEvent, value: unknown) => unknown) {
+        handlers.set(channel, handler);
+      },
+      removeHandler(channel: string) {
+        handlers.delete(channel);
+      },
+    } as unknown as IpcMain,
+    window: () => auth.window,
+    rendererUrl: auth.frame.url,
+    caller: async () => {
+      calls++;
+      throw Error('must_not_start');
+    },
+  });
+  try {
+    const handle = handlers.get(nativePreviewLayoutChannel)!;
+    const request = { previewId: 'view', generation: 1, presentationRevision: 1, bounds: null };
+    expect(
+      handle(
+        { ...auth.event, senderFrame: { url: auth.frame.url } } as IpcMainInvokeEvent,
+        request,
+      ),
+    ).toEqual({ ok: false, code: 'native_sender_denied' });
+    expect(handle(auth.event, { ...request, path: '/private' })).toEqual({
+      ok: false,
+      code: 'invalid_preview_layout',
+    });
+    expect(handle(auth.event, request)).toEqual({ ok: false, code: 'preview_replaced' });
+    expect(calls).toBe(0);
+  } finally {
+    stop();
+  }
+  expect(handlers.size).toBe(0);
 });

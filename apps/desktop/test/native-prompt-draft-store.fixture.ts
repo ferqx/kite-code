@@ -7,7 +7,17 @@ import { canonicalCallerCommandRequest } from '@kite-ai/client';
 import { callerDigest, callerTarget, callerTextDigest } from '../electron/caller-journal';
 import { openPrivateData } from '../electron/private-data';
 import { acquireDesktopProfileAccess } from '../electron/profile-access';
+import {
+  browserDraftMatches,
+  browserDraftProofText,
+  composeBrowserDraft,
+} from '../src/browser-annotation-content';
 import type { NativeCallerRecord } from '../src/native-bridge';
+import {
+  isOfficeEditContext,
+  outputDraftLabel,
+  readOutputDraftFiles,
+} from '../src/output-files-bridge';
 
 const input = JSON.parse(process.argv[2]!);
 let access: Awaited<ReturnType<typeof acquireDesktopProfileAccess>>;
@@ -274,6 +284,91 @@ try {
     revision: 1,
   });
   checked.push('bounded-hot-consumption-proof');
+
+  // An actual historical envelope bypasses the new writer: cold read must not
+  // rewrite or discard its sparse range, ordinary prompt, or other attachment.
+  const legacyScope = { storeId: 'store', workspaceId: 'workspace', rootSessionId: 'legacy-excel' };
+  const legacySaved = data.save(legacyScope, 0, 'seed');
+  const legacyFile = {
+    id: 'legacy-excel',
+    name: 'budget.xlsx',
+    target: {
+      storeId: 'store',
+      sessionId: 'legacy-excel',
+      fileId: 'file',
+      locator: { kind: 'delivery' as const, key: 'delivery/excel' },
+    },
+    context: {
+      sourceHash: 'a'.repeat(64),
+      selection: {
+        kind: 'excel' as const,
+        sheet: '预算',
+        range: 'A1:C3',
+        cells: [{ address: 'A1', path: '/预算/A1', value: '12' }],
+      },
+    },
+  };
+  const plainFile = {
+    id: 'ordinary-file',
+    name: 'notes.txt',
+    target: {
+      ...legacyFile.target,
+      fileId: 'plain',
+      locator: { kind: 'delivery' as const, key: 'delivery/plain' },
+    },
+  };
+  const originalContent = '普通草稿文字保留：雪🙂';
+  const envelope = JSON.stringify({
+    kind: 'browser_annotation_draft',
+    content: originalContent,
+    browserAnnotations: [],
+    annotationImageOffset: 0,
+    outputFiles: [legacyFile, plainFile],
+  });
+  const legacyDb = new DatabaseSync(path);
+  legacyDb.prepare('UPDATE drafts SET content=? WHERE id=?').run(envelope, legacySaved.id);
+  const before = legacyDb.prepare('SELECT * FROM drafts WHERE id=?').get(legacySaved.id);
+  legacyDb.close();
+  close();
+  data = await open();
+  const recovered = data.read(legacyScope);
+  assert.equal(recovered.content, originalContent);
+  assert.equal(recovered.revision, legacySaved.revision);
+  assert.deepEqual(recovered.outputFiles, [legacyFile, plainFile]);
+  assert.deepEqual(data.readId(legacySaved.id), recovered);
+  assert.match(outputDraftLabel(recovered.outputFiles![0]!), /范围需重选/);
+  assert.equal(isOfficeEditContext(legacyFile.context), false);
+  assert.throws(() => readOutputDraftFiles(recovered.outputFiles));
+  assert.throws(() => composeBrowserDraft(recovered));
+  assert.equal(browserDraftMatches(recovered, originalContent), false);
+  assert.equal(
+    JSON.parse(browserDraftProofText(recovered)).outputFiles[0].context.selection.range,
+    'A1:C3',
+  );
+  const afterDb = new DatabaseSync(path);
+  assert.deepEqual(afterDb.prepare('SELECT * FROM drafts WHERE id=?').get(legacySaved.id), before);
+  afterDb.close();
+  // Explicit later edits preserve the legacy metadata exactly, until the user
+  // removes that attachment. Both writes obey the existing revision CAS.
+  const edited = data.save(
+    legacyScope,
+    recovered.revision,
+    `${originalContent} edited`,
+    [],
+    0,
+    recovered.outputFiles,
+  );
+  assert.deepEqual(edited.outputFiles, [legacyFile, plainFile]);
+  assert.equal(edited.revision, recovered.revision + 1);
+  assert.throws(
+    () => data.save(legacyScope, recovered.revision, 'stale', [], 0, []),
+    /draft_revision_conflict/,
+  );
+  const removed = data.save(legacyScope, edited.revision, edited.content, [], 0, [plainFile]);
+  assert.deepEqual(removed.outputFiles, [plainFile]);
+  assert.equal(removed.revision, edited.revision + 1);
+  assert.equal(composeBrowserDraft(removed), edited.content);
+  checked.push('legacy-excel-draft-read-preserve-and-explicit-remove');
   console.log(JSON.stringify({ checked }));
 } finally {
   close();

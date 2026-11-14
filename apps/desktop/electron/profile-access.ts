@@ -3,7 +3,11 @@ import { closeSync, constants, fstatSync, lstatSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { verifyNativeAsset } from './native-assets';
-import { loadWindowsAccess, type WindowsAccessLease } from './windows-access';
+import {
+  loadWindowsAccess,
+  type WindowsAccessLease,
+  type WindowsOfficeStorage,
+} from './windows-access';
 
 export type DesktopProfileAccess = Readonly<{ close(): void }>;
 type LeaseState = {
@@ -24,6 +28,19 @@ export function verifyWindowsPrivateUi(lease: DesktopProfileAccess): void {
   const state = leases.get(lease);
   if (!state?.native || state.closed || !state.attached) throw Error('profile_access_unavailable');
   state.native.verifyPrivateUi();
+}
+/** Office paths are derived inside the original native Profile; this port never accepts an ACL. */
+export function windowsOfficeStorage(lease: DesktopProfileAccess): WindowsOfficeStorage {
+  const native = () => {
+    const state = leases.get(lease);
+    if (!state?.native || state.closed || !state.attached)
+      throw Error('profile_access_unavailable');
+    return state.native;
+  };
+  native().verifyPrivateUi();
+  return Object.freeze({
+    access: (relative: string) => native().officeAccess(relative),
+  });
 }
 /** A one-shot trusted Bun helper obtains flock on Node's original open file description. */
 export async function acquireDesktopProfileAccess(input: {

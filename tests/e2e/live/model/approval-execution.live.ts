@@ -801,7 +801,6 @@ async function run(entry: Case) {
             ],
         ...(configuredAutoApproval === undefined ? {} : { autoApproval: configuredAutoApproval }),
         tools: [
-          'execution_evidence.read',
           'files.read',
           'files.write',
           'files.edit',

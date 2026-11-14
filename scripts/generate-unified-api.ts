@@ -137,6 +137,10 @@ const responseNames = [
   'InputImage',
   'InputFileReference',
   'InputFileImport',
+  'OutputFilesPage',
+  'OutputFileResolution',
+  'WorkingInputsResponse',
+  'OutputPdfPage',
   'Change',
   'WorkspaceList',
   'SessionList',
@@ -148,6 +152,12 @@ const responseNames = [
   'MessageChangesPage',
 ];
 const requestNames = [
+  'OutputPdfPageRequest',
+  'OutputFilesQuery',
+  'OutputFileResolveRequest',
+  'OutputCollectionRetryRequest',
+  'PrepareInputFromOutputRequest',
+  'PrepareWorkingInputsRequest',
   ...new Set(
     traceExtensionRoutes.flatMap((route) =>
       'request' in route && route.request ? [route.request] : [],

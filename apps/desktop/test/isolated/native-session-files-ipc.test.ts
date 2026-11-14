@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { createWorkingInputFiles } from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -81,6 +82,7 @@ test('built preload and Main file IPC retry failed Artifact writes and preserve 
     permissions: host.permissions!,
     store,
     artifacts: createArtifactStore({ profile, store }),
+    workingInputFiles: createWorkingInputFiles(),
     workspaceSerialLocks: locks,
   });
   host.permissionManagement?.(runtime);

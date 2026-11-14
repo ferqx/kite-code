@@ -18,9 +18,9 @@ import {
   nativeBrowserPresentationChannel,
   parseNativeBrowserMenuRequest,
   parseNativeBrowserRequest,
-  projectNativeBrowserBounds,
   projectNativeBrowserLayout,
 } from '../src/native-browser-bridge';
+import { assertPanelMeasurement, currentPanelMeasurement } from '../src/native-content-geometry';
 import { createBrowserAnnotationStyle } from './browser-annotation-style';
 import { browserDecorationScript } from './browser-decoration';
 import { createBrowserDocumentReady } from './browser-document-ready';
@@ -31,6 +31,8 @@ import { createBrowserNavigation } from './browser-navigation';
 import { BrowserPagePreflightError, type NativeBrowserPageHost } from './browser-page-host';
 import { createBrowserPaneFrame } from './browser-pane-frame';
 import { browserTypingCursorScript } from './browser-typing-cursor';
+import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
+import { waitForNativeFrame } from './native-frame-readiness';
 import { assertNativeSender } from './native-ipc';
 import { addNativeWindowView } from './native-overlay-layer';
 import { type NativeRootWindow as BrowserWindow, onNativeRootWillShow } from './native-root-window';
@@ -86,66 +88,8 @@ type BrowserTab = {
     restoreThrottling?: () => void;
   };
 };
-/** Only coherent current two-Panel Groups may establish a resize anchor.
- * Both the outer shell and nested content retain their measured CSS gutters.
- * CSS handles occupy 0..1px; one CSS pixel covers measurement rounding, not gutters. */
-function currentPanelMeasurement(
-  layout: NativeBrowserLayout,
-  width: number,
-  height: number,
-): boolean {
-  if (Math.abs(layout.windowWidth - width) > 1 || Math.abs(layout.windowHeight - height) > 1)
-    return false;
-  let parentWidth = layout.windowWidth;
-  for (const group of layout.groups) {
-    if (
-      group.gap > 2 ||
-      Math.abs(
-        group.left +
-          group.panels[0].size +
-          group.gap +
-          group.panels[1].size +
-          group.right -
-          parentWidth,
-      ) > 1
-    )
-      return false;
-    parentWidth = group.panels[1].size;
-  }
-  return true;
-}
-function assertPanelMeasurement(
-  bounds: NativeBrowserBounds,
-  layout: NativeBrowserLayout,
-  width: number,
-  height: number,
-): void {
-  if (!currentPanelMeasurement(layout, width, height)) throw Error('invalid_browser_request');
-  const measured = projectNativeBrowserBounds(
-    bounds,
-    layout,
-    layout.windowWidth,
-    layout.windowHeight,
-  );
-  if (
-    !measured ||
-    Math.abs(measured.x - bounds.x) > 1 ||
-    Math.abs(measured.width - bounds.width) > 1
-  )
-    throw Error('invalid_browser_request');
-}
 function sameRectangle(a: Electron.Rectangle, b: Electron.Rectangle): boolean {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-}
-function fullFrameMatches(image: Electron.NativeImage, bounds: Electron.Rectangle): boolean {
-  const size = image.getSize();
-  return (
-    !image.isEmpty() &&
-    [size.width, size.height].every(Number.isFinite) &&
-    size.width >= bounds.width &&
-    size.height >= bounds.height &&
-    Math.abs(size.height - (size.width / bounds.width) * bounds.height) <= 2
-  );
 }
 function httpUrl(value: string): boolean {
   try {
@@ -1358,15 +1302,11 @@ export function registerNativeBrowserIpc(options: {
       withdraw(tab);
       return;
     }
-    const x = Math.max(0, Math.min(width, Math.ceil(bounds.x * zoom))),
-      y = Math.max(0, Math.min(height, Math.ceil(bounds.y * zoom))),
-      right = Math.min(width, Math.floor((bounds.x + bounds.width) * zoom)),
-      bottom = Math.min(height, Math.floor((bounds.y + bounds.height) * zoom));
-    if (right <= x || bottom <= y) {
+    const next = nativeContentBounds(bounds, zoom, width, height);
+    if (!next) {
       withdraw(tab);
       return;
     }
-    const next = { x, y, width: right - x, height: bottom - y };
     paneFrame.sync(
       bounds,
       projected?.layout ?? anchor.layout,
@@ -1486,46 +1426,17 @@ export function registerNativeBrowserIpc(options: {
         tab.view.setVisible(true);
         automation?.present(tab.state.id, false);
         syncInput();
-        await new Promise<void>((resolve, reject) => {
-          let subscribed = false,
-            settled = false;
-          const finish = (error?: unknown) => {
-            if (settled) return;
-            settled = true;
-            job.controller.signal.removeEventListener('abort', abort);
-            if (job.stopFrame === abort) {
-              job.stopFrame = undefined;
-              if (subscribed && !contents.isDestroyed()) {
-                try {
-                  contents.endFrameSubscription();
-                } catch (cause) {
-                  error = cause;
-                }
-              }
-            }
-            if (error) reject(error);
-            else resolve();
-          };
-          const abort = () => finish(cancelled);
-          job.stopFrame = abort;
-          job.controller.signal.addEventListener('abort', abort, { once: true });
-          if (!current() || !coveredByRoot(tab)) {
-            job.controller.abort(cancelled);
-            return;
-          }
-          try {
-            subscribed = true;
-            contents.beginFrameSubscription(false, (image) => {
-              if (!current() || contents.mainFrame !== pageFrame || !coveredByRoot(tab)) {
-                job.controller.abort(cancelled);
-                return;
-              }
-              if (fullFrameMatches(image, job.bounds)) finish();
-            });
-            contents.invalidate();
-          } catch (cause) {
-            finish(cause);
-          }
+        await waitForNativeFrame({
+          contents,
+          bounds: job.bounds,
+          signal: job.controller.signal,
+          cancelled,
+          current: () => current() && contents.mainFrame === pageFrame && coveredByRoot(tab),
+          setStop: (stop) => {
+            job.stopFrame = stop;
+          },
+          ownsStop: (stop) => job.stopFrame === stop,
+          cancel: () => job.controller.abort(cancelled),
         });
         if (!current()) throw Error('browser_presentation_cancelled');
         if (contents.mainFrame !== pageFrame || !coveredByRoot(tab)) {
@@ -2150,14 +2061,14 @@ export function registerNativeBrowserIpc(options: {
     }
     owner.send(nativeBrowserPresentationChannel, true);
   };
-  window.on('resize', resize);
-  const applicationRoot = rootView();
-  applicationRoot?.on('bounds-changed', resize);
+  const unwatchWindow = watchNativeContentWindow(window, rootView(), {
+    resize,
+    hide: suspendWindow,
+    minimize,
+    show: resume,
+    restore: resume,
+  });
   const unwatchWillShow = onNativeRootWillShow(window, beforeShow);
-  window.on('hide', suspendWindow);
-  window.on('minimize', minimize);
-  window.on('show', resume);
-  window.on('restore', resume);
   const dispose = () => {
     if (disposed) return;
     disposed = true;
@@ -2180,13 +2091,8 @@ export function registerNativeBrowserIpc(options: {
     owner.off('did-start-navigation', navigation);
     owner.off('render-process-gone', replaceRenderer);
     owner.off('preload-error', replaceRenderer);
-    window.off('resize', resize);
-    applicationRoot?.off('bounds-changed', resize);
+    unwatchWindow();
     unwatchWillShow();
-    window.off('hide', suspendWindow);
-    window.off('minimize', minimize);
-    window.off('show', resume);
-    window.off('restore', resume);
   };
   window.once('closed', dispose);
   return dispose;

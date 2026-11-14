@@ -1,3 +1,8 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { open, rename, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { Readable } from 'node:stream';
+import type { OutputFileTarget } from '@kite-ai/client';
 import {
   type AgentClient,
   type AppliedCursor,
@@ -9,7 +14,7 @@ import {
   type SessionView,
   type Workspace,
 } from '@kite-ai/client';
-import { browserDraftMatches } from '../src/browser-annotation-content';
+import { browserDraftMatches, composeBrowserDraft } from '../src/browser-annotation-content';
 import {
   createDesktopController,
   type DesktopController,
@@ -29,6 +34,7 @@ import type {
   NativeState,
 } from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
+import type { OutputDraftFile } from '../src/output-files-bridge';
 import { NativeAnswerJournal } from './answer-journal';
 import { NativeBackground } from './background';
 import {
@@ -56,6 +62,8 @@ import { verifyNativeMcpSourceAnswer } from './mcp-source-answer';
 import { NativeModelOutputReads } from './model-output-reads';
 import { NativeInputQueue } from './native-input-queue';
 import { NativeProcessOwner } from './native-processes';
+import { NativeOfficeEditor } from './office-editor';
+import { saveOutputFile } from './output-files';
 import { NativePermissionGrants } from './permission-grants';
 import type { PrivateData } from './private-data';
 import { NativeProviderSettings } from './provider-settings';
@@ -78,6 +86,7 @@ export function createNativeCallerGenerationOwner(): () => number {
 }
 
 export class NativeCaller {
+  private readonly localFileReferences: boolean;
   private generation = 0;
   private selection = 0;
   private activation: { id: number; sessionId: string; selection: number } | undefined;
@@ -105,7 +114,11 @@ export class NativeCaller {
   private executionRefreshing?: Promise<void>;
   private executionTarget?: { selection: number; cursor: string };
   private admissionRevision = 0;
-  private admissionView?: { selection: number; revision: number; view: SessionView };
+  private admissionView?: {
+    selection: number;
+    revision: number;
+    view: SessionView;
+  };
   private readonly workspaceAccessPreparations = new Set<string>();
   private workspaceAccessRefreshRequested = false;
   private readonly outputReads: NativeModelOutputReads;
@@ -122,7 +135,11 @@ export class NativeCaller {
   private readonly inputConfiguration: NativeConfiguration;
   private readonly preparationConfiguration: NativeConfiguration;
   private readonly conversation: NativeConversation;
-  private workspaceObservation?: { generation: number; storeId: string; workspaces: Workspace[] };
+  private workspaceObservation?: {
+    generation: number;
+    storeId: string;
+    workspaces: Workspace[];
+  };
   private directory?: NativeDirectory;
   private directoryUnavailable = false;
   private directoryEnabled = false;
@@ -139,6 +156,11 @@ export class NativeCaller {
   private readonly providers: NativeProviderSettings;
   private readonly images = new NativeInputImages();
   private readonly inputFiles = new NativeInputFiles();
+  private readonly pendingInlineOfficeFiles = new Map<string, { released: boolean }>();
+  private readonly inlineOfficeFiles = new Map<
+    string,
+    { generation: number; file: OutputDraftFile }
+  >();
   private readonly imageReads: NativeInputImageReads;
   private readonly mcp: NativeMcpSettings;
   private readonly userMcp: NativeUserMcpSettings;
@@ -159,9 +181,14 @@ export class NativeCaller {
   private readonly environment: NativeBackground;
   private environmentRevision = 0;
   private selectedEnvironmentRevision = 0;
+  private outputFilesRevision = 0;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
-  private historyHead?: { sessionId: string; selection: number; cursor: string };
+  private historyHead?: {
+    sessionId: string;
+    selection: number;
+    cursor: string;
+  };
   private observationUnavailable = false;
   private messageRead:
     | {
@@ -201,6 +228,8 @@ export class NativeCaller {
   private readonly client: AgentClient;
   private readonly emit: (event: NativeEvent) => void;
   private readonly privateData: PrivateData | undefined;
+  private officeEditor?: NativeOfficeEditor;
+  private officeAssetsRoot?: string;
   private initialAdmission: (() => boolean) | undefined;
   private readonly processes: NativeProcessOwner;
   private readonly nextGeneration: () => number;
@@ -215,7 +244,9 @@ export class NativeCaller {
     nextGeneration = createNativeCallerGenerationOwner(),
     initialSelectionHint?: Readonly<{ storeId: string; sessionId: string }>,
     skillMarketplace?: ReturnType<typeof createSkillMarketplace>,
+    localFileReferences = false,
   ) {
+    this.localFileReferences = localFileReferences;
     this.nextGeneration = nextGeneration;
     this.initialSelectionHint = initialSelectionHint;
     this.processes = processes;
@@ -262,7 +293,11 @@ export class NativeCaller {
       () => {
         const info = this.client.serverInfo;
         return !this.closed && this.generation > 0 && info?.storeId && info.subjectId
-          ? { generation: this.generation, storeId: info.storeId, subjectId: info.subjectId }
+          ? {
+              generation: this.generation,
+              storeId: info.storeId,
+              subjectId: info.subjectId,
+            }
           : undefined;
       },
       (id) => {
@@ -284,7 +319,11 @@ export class NativeCaller {
           this.generation > 0 &&
           info?.storeId &&
           info.subjectId
-          ? { generation: this.generation, storeId: info.storeId, subjectId: info.subjectId }
+          ? {
+              generation: this.generation,
+              storeId: info.storeId,
+              subjectId: info.subjectId,
+            }
           : undefined;
       },
       {
@@ -337,7 +376,10 @@ export class NativeCaller {
     });
     const preparationScope = () =>
       !this.closed && !this.observationUnavailable && this.generation > 0
-        ? { generation: this.generation, storeId: this.client.serverInfo!.storeId! }
+        ? {
+            generation: this.generation,
+            storeId: this.client.serverInfo!.storeId!,
+          }
         : undefined;
     this.preparationConfiguration = new NativeConfiguration(client, () => {
       const scope = preparationScope();
@@ -476,7 +518,10 @@ export class NativeCaller {
           snapshot?.sessionId === scope.sessionId &&
           snapshot.view.session.parentSessionId === null &&
           snapshot.view.session.deletedAt === null
-          ? { ...scope, contextSelectionId: snapshot.view.session.contextSelectionId }
+          ? {
+              ...scope,
+              contextSelectionId: snapshot.view.session.contextSelectionId,
+            }
           : undefined;
       },
       {
@@ -835,7 +880,9 @@ export class NativeCaller {
     const abort = new AbortController(),
       storeId = this.client.serverInfo!.storeId!;
     const promise = (async () => {
-      const workspaces = await this.client.listAllWorkspaces({ signal: abort.signal });
+      const workspaces = await this.client.listAllWorkspaces({
+        signal: abort.signal,
+      });
       const sessions = this.client.serverInfo!.capabilities.includes('session_directory_activity')
         ? (await this.client.listAllSessionDirectory({ signal: abort.signal })).map((item) => ({
             ...item.session,
@@ -947,7 +994,10 @@ export class NativeCaller {
     const target = this.executionTarget;
     const admissionRevision = this.admissionRevision;
     if (this.executionObservation?.viewSelection === selection)
-      this.executionObservation = { ...this.executionObservation, phase: 'refreshing' };
+      this.executionObservation = {
+        ...this.executionObservation,
+        phase: 'refreshing',
+      };
     const reading = (async () => {
       try {
         let view = await this.controller.refreshExecution(sessionId, signal);
@@ -970,7 +1020,10 @@ export class NativeCaller {
           epoch === this.historyEpoch &&
           this.executionObservation
         )
-          this.executionObservation = { ...this.executionObservation, phase: 'unavailable' };
+          this.executionObservation = {
+            ...this.executionObservation,
+            phase: 'unavailable',
+          };
       }
     })();
     this.executionRefreshing = reading;
@@ -1108,7 +1161,9 @@ export class NativeCaller {
         try {
           if (reset) {
             readySeen = false;
-            const info = await this.client.verifyConnection({ signal: signal.signal });
+            const info = await this.client.verifyConnection({
+              signal: signal.signal,
+            });
             if (info.dataAvailability !== 'available') throw new ClientError('data_unavailable');
             if (this.client.serverInfo!.storeId !== originalStore)
               throw new ClientError('store_identity_mismatch');
@@ -1116,7 +1171,10 @@ export class NativeCaller {
               { storeId: originalStore, limit: 1 },
               { signal: signal.signal },
             );
-            startAfter = { storeId: originalStore, sequence: baseline.snapshotCursor };
+            startAfter = {
+              storeId: originalStore,
+              sequence: baseline.snapshotCursor,
+            };
             if (this.directoryEnabled) await this.readDirectory();
             // The replacement history depends on admitted Main reads. Establish
             // it after ready; awaiting it here would prevent the stream opening.
@@ -1153,6 +1211,7 @@ export class NativeCaller {
               readySeen = true;
               this.environmentRevision++;
               this.selectedEnvironmentRevision++;
+              this.outputFilesRevision++;
               this.observationUnavailable = false;
               this.permissionUnavailable = false;
               this.changed();
@@ -1229,6 +1288,14 @@ export class NativeCaller {
             },
             onChange: (change) => {
               this.environmentRevision++;
+              if (
+                change.sessionId === this.selected &&
+                ((change.type === 'extension.record_updated' &&
+                  /^builtin\.files\/(delivery|collection|output)\//.test(change.objectId)) ||
+                  change.type === 'run.finished' ||
+                  change.type === 'run.started')
+              )
+                this.outputFilesRevision++;
               const historyOnly =
                 !!this.selected &&
                 this.client.serverInfo?.capabilities.includes('message_changes') &&
@@ -1335,7 +1402,9 @@ export class NativeCaller {
 
   private callerState() {
     try {
-      return { callerSubmissions: this.requireCaller().records().map(callerMetadata) };
+      return {
+        callerSubmissions: this.requireCaller().records().map(callerMetadata),
+      };
     } catch {
       return { callerSubmissions: [], callerUnavailable: true };
     }
@@ -1356,7 +1425,11 @@ export class NativeCaller {
       this.permissionUnavailable ||
       !fresh ||
       fresh.sessionId !== this.selected;
-    return { snapshot, unavailable, viewLoading: !fresh && !this.permissionUnavailable };
+    return {
+      snapshot,
+      unavailable,
+      viewLoading: !fresh && !this.permissionUnavailable,
+    };
   }
   /** Main-only presentation/input identity; never projects unrelated durable submissions. */
   browserScope(kind: 'presentation' | 'input'): NativeBrowserRestoreScope | undefined {
@@ -1445,8 +1518,10 @@ export class NativeCaller {
         : undefined;
     return {
       generation: this.generation,
+      localFileReferences: this.localFileReferences,
       environmentRevision: this.environmentRevision,
       selectedEnvironmentRevision: this.selectedEnvironmentRevision,
+      outputFilesRevision: this.outputFilesRevision,
       environmentReadUnavailable:
         this.observationUnavailable || this.permissionUnavailable || !this.environmentSnapshot(),
       directory: this.directoryState(),
@@ -1607,15 +1682,40 @@ export class NativeCaller {
     await this.fileChanges.openMessageFile(request, perform);
     this.assertGeneration(request.generation);
   }
-  async invoke(request: NativeRequest): Promise<NativeResult> {
+  /** Only Main may supply this source check; it is not part of the renderer request schema. */
+  async submitLocalPreview(
+    request: Extract<NativeRequest, { method: 'localPreview.submit' }>,
+    content: string,
+    check: () => Promise<void>,
+  ): Promise<NativeResult> {
+    if (request.intent.files?.length || request.intent.images?.length)
+      throw new ClientError('local_preview_request_invalid');
+    return this.invoke(
+      {
+        method: 'submit',
+        generation: request.generation,
+        sessionId: request.sessionId,
+        intent: { ...request.intent, content },
+      },
+      check,
+    );
+  }
+  async invoke(
+    request: NativeRequest,
+    localSourceCheck?: () => Promise<void>,
+  ): Promise<NativeResult> {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
       const previousSelection =
         this.selected && this.client.serverInfo?.storeId
-          ? { storeId: this.client.serverInfo.storeId, sessionId: this.selected }
+          ? {
+              storeId: this.client.serverInfo.storeId,
+              sessionId: this.selected,
+            }
           : this.detachedSelection;
       this.images.reset();
       this.inputFiles.reset();
+      this.inlineOfficeFiles.clear();
       this.releaseReads();
       this.background.release();
       this.invalidateDirectory(true);
@@ -1637,7 +1737,11 @@ export class NativeCaller {
       if (!restoreSelection) this.detachedSelection = undefined;
       if (restoreSelection) {
         try {
-          return await this.invoke({ method: 'select', generation, sessionId: restoreSelection });
+          return await this.invoke({
+            method: 'select',
+            generation,
+            sessionId: restoreSelection,
+          });
         } catch (error) {
           this.assertGeneration(generation);
           if (!(error instanceof ClientError) || error.code !== 'session_not_found') throw error;
@@ -1849,6 +1953,131 @@ export class NativeCaller {
         this.images.begin(request);
         result = null;
         break;
+      case 'outputs.retry': {
+        if (
+          request.scope.storeId !== this.client.serverInfo?.storeId ||
+          request.scope.sessionId !== this.selected
+        )
+          throw new ClientError('output_scope_unavailable');
+        await this.client.retryOutputCollection({
+          scope: request.scope,
+          collectionId: request.collectionId,
+          expectedRevision: request.expectedRevision,
+        });
+        if (request.scope.sessionId !== this.selected)
+          throw new ClientError('output_scope_unavailable');
+        result = null;
+        break;
+      }
+      case 'outputs.query': {
+        if (
+          request.scope.storeId !== this.client.serverInfo?.storeId ||
+          request.scope.sessionId !== this.selected
+        )
+          throw new ClientError('output_scope_unavailable');
+        const page = await this.client.queryOutputFiles({
+          scope: request.scope,
+          runId: request.runId,
+          beforeKey: request.beforeKey,
+          collectionBeforeKey: request.collectionBeforeKey,
+          limit: request.limit,
+        });
+        if (request.scope.sessionId !== this.selected)
+          throw new ClientError('output_scope_unavailable');
+        result = { kind: 'outputs.page', page };
+        break;
+      }
+      case 'outputs.pdf.page': {
+        this.checkOutputScope(generation, request.target);
+        const page = await this.client.renderOutputPdfPage(request.target, {
+          page: request.page,
+        });
+        this.checkOutputScope(generation, request.target);
+        result = { kind: 'outputs.pdf.page', pdf: page };
+        break;
+      }
+      case 'outputs.info': {
+        if (
+          request.target.storeId !== this.client.serverInfo?.storeId ||
+          request.target.sessionId !== this.selected
+        )
+          throw new ClientError('output_scope_unavailable');
+        const resolved = await this.client.resolveOutputFile(request.target);
+        if (request.target.sessionId !== this.selected)
+          throw new ClientError('output_scope_unavailable');
+        result = { kind: 'outputs.info', file: resolved.summary };
+        break;
+      }
+      case 'outputs.office.preview':
+      case 'outputs.office.save':
+      case 'outputs.preview.interaction':
+      case 'outputs.preview.control':
+      case 'outputs.save':
+      case 'localPreview.open':
+      case 'localPreview.release':
+      case 'localPreview.check':
+      case 'localPreview.interaction':
+      case 'localPreview.request.result':
+      case 'localPreview.submit':
+      case 'outputs.preview.open':
+      case 'outputs.preview.close':
+      case 'outputs.preview.request.result':
+      case 'outputs.preview.bounds':
+        throw new ClientError('native_host_operation_unavailable');
+      case 'input.files.fromOutput': {
+        if (this.pendingInlineOfficeFiles.has(request.id))
+          throw new ClientError('native_file_invalid');
+        const preparation = { released: false };
+        this.pendingInlineOfficeFiles.set(request.id, preparation);
+        try {
+          if (
+            request.target.storeId !== this.client.serverInfo?.storeId ||
+            request.target.sessionId !== this.selected
+          )
+            throw new ClientError('output_scope_unavailable');
+          const resolved = await this.client.resolveOutputFile(request.target);
+          this.assertGeneration(generation);
+          if (request.target.sessionId !== this.selected)
+            throw new ClientError('output_scope_unavailable');
+          await this.prepareOfficeDraft(
+            {
+              id: request.id,
+              name: resolved.summary.name,
+              target: request.target,
+              context: request.context,
+            },
+            generation,
+          );
+          try {
+            this.checkOutputScope(generation, request.target);
+            if (preparation.released) throw new ClientError('native_file_missing');
+          } catch (error) {
+            this.inputFiles.release(request.id);
+            this.inlineOfficeFiles.delete(request.id);
+            throw error;
+          }
+          if (this.inlineOfficeFiles.size >= 128)
+            this.inlineOfficeFiles.delete(this.inlineOfficeFiles.keys().next().value!);
+          this.inlineOfficeFiles.set(request.id, {
+            generation,
+            file: structuredClone({
+              id: request.id,
+              name: resolved.summary.name,
+              ownerRunId: resolved.summary.ownerRunId,
+              target: request.target,
+              ...(request.context ? { context: request.context } : {}),
+            }),
+          });
+          result = null;
+        } finally {
+          this.pendingInlineOfficeFiles.delete(request.id);
+          if (preparation.released) {
+            this.inputFiles.release(request.id);
+            this.inlineOfficeFiles.delete(request.id);
+          }
+        }
+        break;
+      }
       case 'input.files.begin':
         this.inputFiles.begin(request);
         result = null;
@@ -1862,6 +2091,9 @@ export class NativeCaller {
         result = null;
         break;
       case 'input.files.release':
+        if (this.pendingInlineOfficeFiles.has(request.id))
+          this.pendingInlineOfficeFiles.get(request.id)!.released = true;
+        this.inlineOfficeFiles.delete(request.id);
         this.inputFiles.release(request.id);
         result = null;
         break;
@@ -2346,13 +2578,18 @@ export class NativeCaller {
         result = {
           ...facts,
           ...(this.privateData?.modelRoute(facts.storeId, sessionId)
-            ? { selectedModelId: this.privateData.modelRoute(facts.storeId, sessionId) }
+            ? {
+                selectedModelId: this.privateData.modelRoute(facts.storeId, sessionId),
+              }
             : {}),
         };
         break;
       }
       case 'conversation.models.read':
-        result = { ...(await this.preparationConfiguration.read()), canWrite: false };
+        result = {
+          ...(await this.preparationConfiguration.read()),
+          canWrite: false,
+        };
         break;
       case 'conversation.branch':
         result = await this.conversation.branch(request.workspaceId);
@@ -2399,7 +2636,11 @@ export class NativeCaller {
           request.observationId,
           request.method === 'settings.models.default'
             ? { kind: 'default', modelId: request.modelId }
-            : { kind: 'enabled', modelId: request.modelId, enabled: request.enabled },
+            : {
+                kind: 'enabled',
+                modelId: request.modelId,
+                enabled: request.enabled,
+              },
         );
         break;
       case 'settings.models.lookup':
@@ -2490,7 +2731,11 @@ export class NativeCaller {
         this.activation =
           request.activationId === undefined
             ? undefined
-            : { id: request.activationId, sessionId: request.sessionId, selection: this.selection };
+            : {
+                id: request.activationId,
+                sessionId: request.sessionId,
+                selection: this.selection,
+              };
         const view = this.selection;
         const reading = this.activateSelectedSession(request.sessionId)
           .then(() => {
@@ -2821,7 +3066,10 @@ export class NativeCaller {
           .records()
           .find((r) => r.intent.request.commandId === request.commandId);
         if (!row) throw new ClientError('caller_intent_missing');
-        result = { ...callerMetadata(row), ...(!verified ? { phase: 'unknown' as const } : {}) };
+        result = {
+          ...callerMetadata(row),
+          ...(!verified ? { phase: 'unknown' as const } : {}),
+        };
         break;
       }
       case 'caller.clear':
@@ -2880,6 +3128,17 @@ export class NativeCaller {
         result = null;
         break;
       case 'submit': {
+        if (
+          (request.officeDocument || localSourceCheck) &&
+          this.requireCaller()
+            .records()
+            .some(
+              (row) =>
+                row.intent.scope.sessionId === request.sessionId &&
+                ['submitting', 'unknown'].includes(row.phase),
+            )
+        )
+          throw new ClientError('caller_clear_unconfirmed');
         const originalSelection = this.selection;
         const snapshot = this.availableWorkspaceScope(request.sessionId);
         if (request.intent.expectedStoreId !== snapshot.view.storeId)
@@ -2904,6 +3163,30 @@ export class NativeCaller {
           if (originalSelection !== this.selection || this.selected !== request.sessionId)
             throw new ClientError('native_selection_changed');
         }
+        if (request.officeDocument) {
+          const document = request.officeDocument;
+          const file = document.outputFiles?.[0];
+          const registered = file && this.inlineOfficeFiles.get(file.id);
+          if (
+            !file ||
+            document.outputFiles?.length !== 1 ||
+            !file.context ||
+            file.context.editor ||
+            document.browserAnnotations?.length ||
+            request.imageIds?.length ||
+            request.intent.images?.length ||
+            request.intent.files?.length ||
+            request.draft ||
+            request.fileIds?.length !== 1 ||
+            request.fileIds[0] !== file.id ||
+            !registered ||
+            registered.generation !== generation ||
+            callerCanonical(registered.file) !== callerCanonical(file) ||
+            composeBrowserDraft(document) !== request.intent.content
+          )
+            throw new ClientError('output_draft_mismatch');
+        }
+        if (localSourceCheck) await localSourceCheck();
         let intent = request.intent;
         if (request.imageIds?.length) {
           const images = await this.images.publish(
@@ -2927,24 +3210,47 @@ export class NativeCaller {
           this.assertGeneration(generation);
           if (originalSelection !== this.selection || this.selected !== request.sessionId)
             throw new ClientError('native_selection_changed');
-          intent = { ...intent, files };
+          await this.client.prepareWorkingInputs({
+            expectedStoreId: snapshot.view.storeId,
+            targetSessionId: request.sessionId,
+            commandId: request.intent.commandId,
+            files,
+          });
+          this.assertGeneration(generation);
+          if (originalSelection !== this.selection || this.selected !== request.sessionId)
+            throw new ClientError('native_selection_changed');
+          intent = { ...intent, files: [...(intent.files ?? []), ...files] };
         }
         let draftProof = request.draft;
-        if (!draftProof) {
-          const saved = this.requirePrivateData().read({
+        if (!request.officeDocument && !localSourceCheck) {
+          const savedOutputDraft = this.requirePrivateData().read({
             storeId: snapshot.view.storeId,
             workspaceId: snapshot.view.session.workspaceId,
-            rootSessionId: request.sessionId,
+            rootSessionId: snapshot.view.session.rootSessionId ?? snapshot.view.session.id,
           });
-          if (
-            saved.browserAnnotations?.length &&
-            !browserDraftMatches(saved, request.intent.content)
-          )
-            throw new ClientError('caller_draft_unavailable');
-          if (browserDraftMatches(saved, request.intent.content))
-            draftProof = nativeDraftProof(saved);
+          if (savedOutputDraft.outputFiles?.some((file) => !request.fileIds?.includes(file.id)))
+            throw new ClientError('output_draft_mismatch');
+          if (!draftProof) {
+            const saved = this.requirePrivateData().read({
+              storeId: snapshot.view.storeId,
+              workspaceId: snapshot.view.session.workspaceId,
+              rootSessionId: request.sessionId,
+            });
+            if (
+              saved.browserAnnotations?.length &&
+              !browserDraftMatches(saved, request.intent.content)
+            )
+              throw new ClientError('caller_draft_unavailable');
+            if (browserDraftMatches(saved, request.intent.content))
+              draftProof = nativeDraftProof(saved);
+          }
         }
-        const prepared = await this.requireCaller().prepare(request.sessionId, intent, draftProof);
+        const prepared = await this.requireCaller().prepare(
+          request.sessionId,
+          intent,
+          draftProof,
+          localSourceCheck,
+        );
         if (intent.kind !== 'input.steer' && intent.modelId)
           this.requirePrivateData().rememberModelRoute(
             intent.expectedStoreId,
@@ -3121,6 +3427,19 @@ export class NativeCaller {
           workspaceId: snapshot.view.session.workspaceId,
           rootSessionId: snapshot.view.session.rootSessionId ?? snapshot.view.session.id,
         };
+        if (request.method === 'draft.write') {
+          for (const file of request.outputFiles ?? []) {
+            this.checkOutputScope(generation, file.target);
+            const resolved = await this.client.resolveOutputFile(file.target);
+            this.checkOutputScope(generation, file.target);
+            if (
+              resolved.summary.name !== file.name ||
+              (file.ownerRunId !== undefined && file.ownerRunId !== resolved.summary.ownerRunId)
+            )
+              throw new ClientError('output_draft_mismatch');
+            await this.prepareOfficeDraft(file, generation);
+          }
+        }
         result =
           request.method === 'draft.read'
             ? this.requirePrivateData().read(scope)
@@ -3130,7 +3449,21 @@ export class NativeCaller {
                 request.content,
                 request.browserAnnotations,
                 request.annotationImageOffset,
+                request.outputFiles,
               );
+        if (result && 'outputFiles' in result) {
+          for (const file of result.outputFiles ?? []) {
+            if (
+              file.target.storeId !== snapshot.view.storeId ||
+              file.target.sessionId !== request.sessionId
+            )
+              throw new ClientError('output_scope_unavailable');
+            this.assertGeneration(generation);
+            if (this.selected !== request.sessionId)
+              throw new ClientError('output_scope_unavailable');
+            await this.prepareOfficeDraft(file, generation);
+          }
+        }
         break;
       }
       case 'grants.read':
@@ -3147,6 +3480,272 @@ export class NativeCaller {
     }
     this.assertGeneration(generation);
     return result;
+  }
+  messagePreviewScope(generation: number) {
+    this.assertGeneration(generation);
+    const storeId = this.client.serverInfo?.storeId;
+    const sessionId = this.selected;
+    if (!storeId || !sessionId) throw new ClientError('output_scope_unavailable');
+    this.availableWorkspaceScope(sessionId);
+    return { storeId, sessionId };
+  }
+  checkOutputGeneration(generation: number) {
+    this.assertGeneration(generation);
+  }
+  checkOutputScope(generation: number, target: OutputFileTarget) {
+    this.assertGeneration(generation);
+    if (this.client.serverInfo?.storeId !== target.storeId || this.selected !== target.sessionId)
+      throw new ClientError('output_scope_unavailable');
+  }
+  async renderLocalPreviewPdf(
+    generation: number,
+    bytes: Uint8Array,
+    sourceHash: string,
+    page: number,
+    signal: AbortSignal,
+  ) {
+    const scope = this.messagePreviewScope(generation);
+    const result = await this.client.renderLocalPdfSnapshot(
+      {
+        expectedStoreId: scope.storeId,
+        sessionId: scope.sessionId,
+        sourceHash,
+        page,
+        data: Buffer.from(bytes).toString('base64'),
+      },
+      signal,
+    );
+    const current = this.messagePreviewScope(generation);
+    if (current.storeId !== scope.storeId || current.sessionId !== scope.sessionId)
+      throw new ClientError('local_preview_replaced');
+    return result;
+  }
+  async renderPreviewPdf(
+    generation: number,
+    target: OutputFileTarget,
+    page: number,
+    signal: AbortSignal,
+  ) {
+    this.checkOutputScope(generation, target);
+    const result = await this.client.renderOutputPdfPage(target, { page, signal });
+    this.checkOutputScope(generation, target);
+    return result;
+  }
+  configureOfficeRuntime(assetsRoot?: string) {
+    if (
+      this.officeAssetsRoot !== undefined &&
+      assetsRoot !== undefined &&
+      this.officeAssetsRoot !== assetsRoot
+    )
+      throw Error('office_assets_changed');
+    this.officeAssetsRoot ??= assetsRoot;
+  }
+  private officeSourceKey(target: OutputFileTarget) {
+    return callerCanonical([target.storeId, target.sessionId, target.fileId, target.locator]);
+  }
+  private async openOfficeEditor(
+    request: { generation: number; target: OutputFileTarget },
+    assetsRoot?: string,
+    checkSender: () => void = () => {},
+  ) {
+    const check = () => {
+      this.checkOutputScope(request.generation, request.target);
+      checkSender();
+    };
+    check();
+    const resolved = await this.client.resolveOutputFile(request.target);
+    check();
+    if (!this.officeEditor) {
+      const root = this.requirePrivateData().officeEditorRoot?.();
+      if (!root) throw new ClientError('office_editor_storage_unavailable');
+      this.officeAssetsRoot = assetsRoot ?? this.officeAssetsRoot;
+      this.officeEditor = new NativeOfficeEditor({
+        root,
+        assetsRoot: this.officeAssetsRoot,
+        storage: this.requirePrivateData().officeEditorStorage?.(),
+      });
+    }
+    const editor = this.officeEditor;
+    const snapshot = await editor.open({
+      sourceKey: this.officeSourceKey(request.target),
+      name: resolved.summary.name,
+      check,
+    });
+    check();
+    return { editor, snapshot, summary: resolved.summary, check };
+  }
+  async officeRevision(
+    request: {
+      generation: number;
+      target: OutputFileTarget;
+      editorId: string;
+      revision: number;
+    },
+    assetsRoot?: string,
+    checkSender: () => void = () => {},
+  ) {
+    const state = await this.openOfficeEditor(request, assetsRoot, checkSender);
+    state.editor.assertSource(request.editorId, this.officeSourceKey(request.target));
+    const revision = await state.editor.resolve(request.editorId, request.revision);
+    state.check();
+    return { ...state, revision };
+  }
+  private async prepareOfficeDraft(file: OutputDraftFile, generation: number) {
+    this.checkOutputScope(generation, file.target);
+    const resolved = await this.client.resolveOutputFile(file.target);
+    this.checkOutputScope(generation, file.target);
+    if (
+      resolved.summary.name !== file.name ||
+      (file.ownerRunId && file.ownerRunId !== resolved.summary.ownerRunId)
+    )
+      throw new ClientError('output_draft_mismatch');
+    if (!file.context?.editor) {
+      if (file.context && file.context.sourceHash !== resolved.reference.hash)
+        throw new ClientError('output_draft_mismatch');
+      this.inputFiles.fromOutput(file.id, file.target, file.name);
+      return;
+    }
+    const ref = file.context.editor;
+    const state = await this.officeRevision({
+      generation,
+      target: file.target,
+      editorId: ref.editorId,
+      revision: ref.revision,
+    });
+    if (state.revision.hash !== ref.sourceHash) throw new ClientError('output_draft_mismatch');
+    const editor = state.editor;
+    this.inputFiles.fromOutput(file.id, file.target, file.name, {
+      identity: JSON.stringify(ref),
+      publish: async (client, storeId, sessionId, importId) => {
+        const revision = await editor.resolve(ref.editorId, ref.revision);
+        if (revision.hash !== ref.sourceHash) throw new ClientError('output_draft_mismatch');
+        const mediaType =
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+        try {
+          const previous = await client.getInputFileImport(sessionId, importId);
+          if (
+            previous.originStoreId !== storeId ||
+            previous.sessionId !== sessionId ||
+            previous.state === 'released' ||
+            previous.name !== file.name ||
+            previous.reference.hash !== ref.sourceHash ||
+            previous.reference.size !== String(revision.size) ||
+            previous.reference.mediaType !== mediaType
+          )
+            throw new ClientError('input_file_import_conflict');
+          return {
+            name: previous.name,
+            uri: previous.uri,
+            reference: previous.reference,
+          };
+        } catch (error) {
+          if (!(error instanceof ClientError) || error.code !== 'input_file_not_found') throw error;
+        }
+        const stream = revision.openStream();
+        try {
+          return await client.uploadInputFile(
+            sessionId,
+            {
+              expectedStoreId: storeId,
+              id: importId,
+              name: file.name,
+              mediaType,
+              size: String(revision.size),
+              hash: revision.hash,
+            },
+            Readable.toWeb(stream) as ReadableStream<Uint8Array>,
+          );
+        } finally {
+          stream.destroy();
+        }
+      },
+    });
+  }
+  async saveOfficeRevision(
+    request: {
+      generation: number;
+      target: OutputFileTarget;
+      editorId: string;
+      revision: number;
+    },
+    pick: (name: string) => Promise<string | undefined>,
+    assetsRoot?: string,
+    checkSender: () => void = () => {},
+  ) {
+    const state = await this.officeRevision(request, assetsRoot, checkSender);
+    const destination = await pick(state.summary.name);
+    state.check();
+    if (!destination) return { kind: 'outputs.saved' as const, cancelled: true };
+    const temporary = join(dirname(destination), `.kite-office-save-${randomUUID()}.tmp`);
+    let file: Awaited<ReturnType<typeof open>> | undefined;
+    const stream = state.revision.openStream();
+    try {
+      file = await open(temporary, 'wx', 0o600);
+      const hash = createHash('sha256');
+      let size = 0;
+      for await (const chunk of stream) {
+        state.check();
+        size += chunk.length;
+        if (size > state.revision.size) throw Error('office_editor_integrity_failed');
+        hash.update(chunk);
+        let offset = 0;
+        while (offset < chunk.length) {
+          const written = await file.write(chunk, offset, chunk.length - offset);
+          if (!written.bytesWritten) throw Error('office_editor_write_failed');
+          offset += written.bytesWritten;
+        }
+      }
+      if (size !== state.revision.size || hash.digest('hex') !== state.revision.hash)
+        throw Error('office_editor_integrity_failed');
+      await file.sync();
+      await file.close();
+      file = undefined;
+      state.check();
+      await rename(temporary, destination);
+      return { kind: 'outputs.saved' as const, cancelled: false };
+    } finally {
+      stream.destroy();
+      await file?.close().catch(() => {});
+      await rm(temporary, { force: true }).catch(() => {});
+    }
+  }
+  async materializeOutput(
+    generation: number,
+    target: OutputFileTarget,
+    path: string,
+    check: () => void,
+  ) {
+    this.checkOutputScope(generation, target);
+    check();
+    const resolved = await this.client.resolveOutputFile(target);
+    await saveOutputFile(this.client, target, path, () => {
+      this.checkOutputScope(generation, target);
+      check();
+    });
+    return { ...resolved.summary, sourceHash: resolved.reference.hash };
+  }
+  async saveOutput(
+    request: { generation: number; target: OutputFileTarget },
+    pick: (name: string) => Promise<string | undefined>,
+    checkSender: () => void,
+  ) {
+    const current = () => {
+      this.assertGeneration(request.generation);
+      checkSender();
+      if (
+        this.client.serverInfo?.storeId !== request.target.storeId ||
+        this.selected !== request.target.sessionId
+      )
+        throw new ClientError('output_scope_unavailable');
+    };
+    current();
+    const resolved = await this.client.resolveOutputFile(request.target);
+    current();
+    const destination = await pick(resolved.summary.name);
+    current();
+    if (!destination) return { kind: 'outputs.saved' as const, cancelled: true };
+    await saveOutputFile(this.client, request.target, destination, current);
+    return { kind: 'outputs.saved' as const, cancelled: false };
   }
   detach() {
     if (this.selected && this.client.serverInfo?.storeId)
@@ -3190,6 +3789,7 @@ export class NativeCaller {
     try {
       await this.images.close();
       await this.inputFiles.close();
+      await this.officeEditor?.close();
       await this.imageReads.closeAll();
       await this.trajectory.close();
       await this.disposeNetwork();

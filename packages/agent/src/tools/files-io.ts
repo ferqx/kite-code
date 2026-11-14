@@ -29,7 +29,11 @@ export interface WorkspaceFileIo {
   sync(id: number): void;
   publishAt(parent: number, temp: string, target: string, createOnly: boolean): void;
   unlinkAt(parent: number, name: string, strict?: boolean): void;
-  listAt(parent: number): {
+  /** Optional encountered-entry budget, including protected entries; overflow returns no list. */
+  listAt(
+    parent: number,
+    maxEntries?: number,
+  ): {
     name: string;
     kind: 'file' | 'directory' | 'symlink' | 'other';
   }[];

@@ -277,8 +277,10 @@ test('global Skills reads only merged user configuration and trusted user/Profil
       });
       all.push(...page.entries);
     }
-    expect(all).toHaveLength(307);
-    expect(all.filter((row) => row.id !== 'computer-use')).toHaveLength(306);
+    expect(all).toHaveLength(308);
+    expect(
+      all.filter((row) => !['computer-use', 'office-documents'].includes(row.id)),
+    ).toHaveLength(306);
     expect(all.find((row) => row.id === 'computer-use')).toMatchObject({
       name: 'computer-use',
       source: null,
@@ -355,6 +357,14 @@ test('global user source lists the installed builtin without creating a missing 
           reason: 'skill_capability_missing',
           requiredCapabilities: ['browser.execute'],
           missingCapabilities: ['browser.execute'],
+        },
+        {
+          id: 'office-documents',
+          name: 'office-documents',
+          state: 'available',
+          reason: null,
+          requiredCapabilities: [],
+          missingCapabilities: [],
         },
       ],
       complete: true,

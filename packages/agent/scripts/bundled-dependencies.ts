@@ -10,4 +10,6 @@ export const agentBundledDependencies: readonly string[] = Object.freeze([
   'yaml',
   '@mozilla/readability',
   'turndown',
+  'pdf-lib',
+  '@pdf-lib/fontkit',
 ]);

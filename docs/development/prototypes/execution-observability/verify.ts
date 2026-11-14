@@ -370,19 +370,14 @@ try {
   assert.equal(fact('suppressed')?.raw, undefined);
 
   click('[data-view="catalog"]');
-  assert.match(document.body.textContent ?? '', /execution_evidence\.read/);
-  click('[data-open-family="execution-evidence"]');
-  assert.match(document.body.textContent ?? '', /read_execution_evidence/);
-  assert.match(document.body.textContent ?? '', /真实分页|固定范围分页/);
+  assert.equal(document.querySelector('[data-open-family="execution-evidence"]'), null);
+  assert.match(document.body.textContent ?? '', /通用执行回执模型入口已退役/);
   click('[data-view="loop"]');
   select('loop-scenario', 'compression');
   click('[data-node="compress"]');
   assert.match(document.getElementById('node-detail')?.textContent ?? '', /不创建新Run/);
   click('[data-node="publish"]');
-  assert.match(
-    document.getElementById('node-detail')?.textContent ?? '',
-    /read_execution_evidence/,
-  );
+  assert.match(document.getElementById('node-detail')?.textContent ?? '', /通用回执模型入口已退役/);
   assert.match(
     document.getElementById('node-detail')?.textContent ?? '',
     /累计checkpoint|累计checkpoint清单/,

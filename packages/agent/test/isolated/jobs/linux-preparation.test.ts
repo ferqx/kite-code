@@ -197,9 +197,9 @@ test('strict compensation has no broad root read and carries the exact cwd for n
   }));
 test('changed binaries and overlapping protected/temp paths reject before allocating runtime temp', () =>
   fixture((options, shell) => {
-    expect(() => captureLinuxLaunch({ ...options, temporaryRoot: options.cwd }, [shell])).toThrow(
-      'linux_shell_workspace_protected',
-    );
+    expect(() =>
+      captureLinuxLaunch({ ...options, temporaryRoot: options.protectedRoots[0] }, [shell]),
+    ).toThrow('linux_shell_workspace_protected');
     expect(() =>
       captureLinuxLaunch({ ...options, protectedRoots: [options.workspaceRoot!] }, [shell]),
     ).toThrow('linux_shell_workspace_protected');
@@ -496,4 +496,45 @@ test('explicit filesystem and network scopes are independent in the trusted Linu
           launch.cleanup();
         }
       }
+  }));
+
+test('persistent staging inside Workspace allocates an exact child without granting an external base', () =>
+  fixture((options, shell) => {
+    const staging = join(options.workspaceRoot!, 'coordination', 'managed-shell-staging');
+    mkdirSync(staging, { recursive: true });
+    const prepare = captureLinuxLaunch({ ...options, temporaryRoot: staging }, [shell]);
+    const launch = prepare('unused', shell, context);
+    try {
+      expect(launch.temp.startsWith(`${staging}/kite-linux-job-`)).toBe(true);
+      expect(launch.runtimeTemp.canonical).toBe(launch.temp);
+      expect(mount(launch, '--bind', launch.temp, launch.temp)).toBe(true);
+      expect(launch.noExecPaths).toContain(launch.temp);
+    } finally {
+      launch.cleanup();
+    }
+    expect(existsSync(staging)).toBe(true);
+  }));
+
+test('exact trusted helper executable is identity-bound without making its directory writable', () =>
+  fixture((options, shell) => {
+    const helper = join(options.runtimeReadOnlyRoots![0]!, 'officecli');
+    writeFileSync(helper, 'fixed office executable');
+    const prepare = captureLinuxLaunch(options, [shell, helper]);
+    const launch = prepare('unused', shell, context);
+    try {
+      expect(launch.trustedExecutableFiles).toContain(helper);
+      expect(mount(launch, '--ro-bind', helper, helper)).toBe(true);
+      expect(
+        mount(
+          launch,
+          '--bind',
+          options.runtimeReadOnlyRoots![0]!,
+          options.runtimeReadOnlyRoots![0]!,
+        ),
+      ).toBe(false);
+    } finally {
+      launch.cleanup();
+    }
+    writeFileSync(helper, 'changed office executable');
+    expect(() => prepare('unused', shell, context)).toThrow('confined_launch_changed');
   }));

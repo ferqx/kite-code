@@ -30,6 +30,7 @@ import {
   SettingsNavigationIcon,
   ToolActivity,
   type TrajectoryViewState,
+  WebLinkContext,
 } from '@kite-ai/ui/desktop';
 import {
   type CSSProperties,
@@ -113,11 +114,13 @@ import {
   nativeInputFailureMessage,
   nativeTextIntent,
 } from './native-input';
+import { nativeInputFileIntent } from './native-input-file-intent';
 import { useNativeInputImages } from './native-input-images';
 import { useNativeInputQueue } from './native-input-queue';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
 import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
+import { submitLocalOfficeRequest } from './native-local-request-submit';
 import { NativeMcpSettings } from './native-mcp-settings';
 import { humanReadableOperationError, NativeToast, type NativeToastProps } from './native-message';
 import { createNativeModelInputPort } from './native-model-input';
@@ -131,6 +134,8 @@ import {
   type NativePreparedModels,
   nativeModelScope,
 } from './native-model-picker';
+import { submitOfficeRequest } from './native-office-request-submit';
+import { useNativeOutputFiles } from './native-output-files';
 import {
   desktopConversationMessages,
   desktopMessages,
@@ -171,6 +176,8 @@ import {
   isNativeWorktreeExitCommand,
   resolveNativeWorktreeExit,
 } from './native-worktree-navigation';
+import { reconciledNoteRevision } from './note-draft-revision';
+import { outputDraftLabel, outputDraftUri } from './output-files-bridge';
 import { promptTextForSend } from './prompt-text';
 import { cleanupNativeTrajectoryCaches } from './trajectory-bridge';
 import { useNativePermissionChange } from './use-native-permission-change';
@@ -344,6 +351,14 @@ function NativeDesktopContent({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
   const [agentBrowserRequest, setAgentBrowserRequest] = useState(0);
+  const webLinkSequence = useRef(0);
+  const [webLinkRequest, setWebLinkRequest] = useState<{
+    requestId: number;
+    generation: number;
+    sessionId: string;
+    viewIntent: number;
+    url: string;
+  }>();
   const [browserLeaseRestore, setBrowserLeaseRestore] = useState(0);
   const browserDrafts = useRef(new Map<string, string>());
   const agentBrowserPresentation = useRef(new AgentBrowserPresentation());
@@ -404,7 +419,12 @@ function NativeDesktopContent({
     permissionMode: 'accept_edits' | 'auto' | 'full';
     imageIds?: readonly string[];
     images?: readonly { name: string }[];
-    files?: readonly { id: string; name: string; uri: string; prepared?: boolean }[];
+    files?: readonly {
+      id: string;
+      name: string;
+      uri: string;
+      prepared?: boolean;
+    }[];
     imageScope?: string;
     result?: NativeConversationResult;
   }>();
@@ -445,7 +465,12 @@ function NativeDesktopContent({
     nonce: number;
     text: string;
   }>();
-  const imageDrafts = useNativeInputImages(bridge, state?.generation, directory?.storeId);
+  const imageDrafts = useNativeInputImages(
+    bridge,
+    state?.generation,
+    directory?.storeId,
+    state?.localFileReferences,
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: Prepared bytes must not cross a Store boundary.
   const browserNotes = useMemo(
     () => new BrowserAnnotationDrafts(bridge, state?.generation),
@@ -459,11 +484,20 @@ function NativeDesktopContent({
   const noteDraftStates = useRef(
     new Map<
       string,
-      { revision: number; signature?: string; uncertain?: boolean; managed?: boolean }
+      {
+        revision: number;
+        signature?: string;
+        consumedCommand?: string;
+        uncertain?: boolean;
+        managed?: boolean;
+      }
     >(),
   );
   const noteSaveQueue = useRef(Promise.resolve());
-  const [noteSaveError, setNoteSaveErrorState] = useState({ key: '', message: '' });
+  const [noteSaveError, setNoteSaveErrorState] = useState({
+    key: '',
+    message: '',
+  });
   function setNoteSaveError(message: string, key = draftOwner.current ?? '') {
     setNoteSaveErrorState({ key, message });
   }
@@ -969,7 +1003,10 @@ function NativeDesktopContent({
     const current = generation.current,
       epoch = readLifecycle.current.epoch;
     try {
-      const value = await bridge.request({ method: 'directory', generation: current });
+      const value = await bridge.request({
+        method: 'directory',
+        generation: current,
+      });
       if (!isCurrentRead(current, epoch)) return;
       if (!value || !('workspaces' in value)) throw Error('native_directory_unavailable');
       acceptDirectory(value);
@@ -1069,10 +1106,17 @@ function NativeDesktopContent({
     selected.current = sessionId;
     history.current?.close();
     // Revoke actions now; any retained target display remains presentation only.
-    setHistoryState((previous) => ({ ...previous, phase: 'loading', error: undefined }));
+    setHistoryState((previous) => ({
+      ...previous,
+      phase: 'loading',
+      error: undefined,
+    }));
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
-    await readSelection(sessionId, current, nonce, epoch, { freshPresentation, admitted });
+    await readSelection(sessionId, current, nonce, epoch, {
+      freshPresentation,
+      admitted,
+    });
   }
   async function exitWorktree() {
     if (
@@ -1131,7 +1175,11 @@ function NativeDesktopContent({
       freshPresentation = false,
       preserveHistory = false,
       admitted,
-    }: { freshPresentation?: boolean; preserveHistory?: boolean; admitted?: NativeState } = {},
+    }: {
+      freshPresentation?: boolean;
+      preserveHistory?: boolean;
+      admitted?: NativeState;
+    } = {},
   ) {
     if (!isCurrentRead(current, epoch, nonce)) return;
     const original: NonNullable<typeof selectionRead.current> = {
@@ -1195,7 +1243,11 @@ function NativeDesktopContent({
         ) {
           try {
             preparedDraft = {
-              value: await bridge.request({ method: 'draft.read', generation: current, sessionId }),
+              value: await bridge.request({
+                method: 'draft.read',
+                generation: current,
+                sessionId,
+              }),
             };
           } catch (error) {
             preparedDraft = { error };
@@ -1254,7 +1306,11 @@ function NativeDesktopContent({
         if (preparedDraft && 'error' in preparedDraft) throw preparedDraft.error;
         const saved = preparedDraft
           ? preparedDraft.value
-          : await bridge.request({ method: 'draft.read', generation: current, sessionId });
+          : await bridge.request({
+              method: 'draft.read',
+              generation: current,
+              sessionId,
+            });
         if (!isCurrentRead(current, epoch, nonce)) return;
         if (saved && 'content' in saved && 'revision' in saved) {
           setDraft(
@@ -1262,6 +1318,16 @@ function NativeDesktopContent({
           );
           const key = imageScope(saved.storeId, sessionId);
           browserNotesRef.current.restore(key, saved.browserAnnotations);
+          imageDrafts.addFiles(
+            key,
+            (saved.outputFiles ?? []).map((output) => ({
+              id: output.id,
+              name: outputDraftLabel(output),
+              uri: outputDraftUri(output),
+              prepared: true,
+              output,
+            })),
+          );
           for (const caller of noteReceipts.current)
             if (
               imageScope(caller.scope.storeId, caller.scope.sessionId) === key &&
@@ -1285,7 +1351,9 @@ function NativeDesktopContent({
               JSON.stringify(caller.draft.browserAnnotations) ===
                 JSON.stringify(annotationReceiptRefs(saved))
             ) {
-              const restored = draftCache.current.get(key) ?? { content: saved.content };
+              const restored = draftCache.current.get(key) ?? {
+                content: saved.content,
+              };
               if (!draftCache.current.has(key)) draftCache.current.set(key, restored);
               submittedDrafts.current.set(caller.request.commandId, {
                 storeId: saved.storeId,
@@ -1301,7 +1369,8 @@ function NativeDesktopContent({
           noteDraftStates.current.set(key, {
             revision: saved.revision,
             signature,
-            managed: !!saved.browserAnnotations?.length || known?.managed,
+            managed:
+              !!saved.browserAnnotations?.length || !!saved.outputFiles?.length || known?.managed,
           });
           draftRevision.current = saved.revision;
         }
@@ -1356,7 +1425,10 @@ function NativeDesktopContent({
         if (quitting === readLifecycle.current.quitting) return;
         if (quitting) sessionRecovery.current.close();
         if (quitting && !selectionRead.current) rememberLatestDraft.current();
-        readLifecycle.current = { epoch: readLifecycle.current.epoch + 1, quitting };
+        readLifecycle.current = {
+          epoch: readLifecycle.current.epoch + 1,
+          quitting,
+        };
         viewIntent.current++;
         if (!quitting) {
           if (!generation.current) setStartupAttempt((value) => value + 1);
@@ -1734,7 +1806,146 @@ function NativeDesktopContent({
     });
   }, [bridge, inputStore, inputSession, inputEnabled, inputGeneration, inputView]);
   const childParent = JSON.stringify([selection?.storeId, selection?.session.id]);
+  const outputFiles = useNativeOutputFiles({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    storeId: selection?.storeId,
+    sessionId: selection?.session.id,
+    revision: state?.outputFilesRevision ?? state?.historyEpoch ?? 0,
+    turnLabel: (runId) => `来源轮次 ${runId.slice(0, 8)}`,
+    onRequestLocalEdit: async (file, request) => {
+      if (
+        !bridge ||
+        !selection ||
+        executionUnconfirmed ||
+        writing.current ||
+        worktreeExitRead.current ||
+        historyState.phase !== 'complete' ||
+        file.storeId !== selection.storeId ||
+        file.sessionId !== selection.session.id
+      )
+        return { status: 'failed' as const, message: '会话尚未就绪，请稍后重试。' };
+      const current = state?.generation ?? generation.current;
+      const nonce = viewIntent.current;
+      const sessionId = selection.session.id;
+      writing.current = true;
+      setPending(true);
+      setSending(true);
+      try {
+        return await submitLocalOfficeRequest({
+          bridge,
+          generation: current,
+          selection,
+          request,
+          isCurrent: () =>
+            current === generation.current &&
+            nonce === viewIntent.current &&
+            selected.current === sessionId,
+          modelReady: nextModelReady,
+          modelChoice:
+            resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice : undefined,
+        });
+      } finally {
+        writing.current = false;
+        setPending(false);
+        setSending(false);
+        await refresh().catch(() => {});
+      }
+    },
+    onRequestEdit: async (file, context, prompt) => {
+      if (
+        !bridge ||
+        !selection ||
+        executionUnconfirmed ||
+        writing.current ||
+        worktreeExitRead.current ||
+        historyState.phase !== 'complete'
+      )
+        return {
+          status: 'failed' as const,
+          message: '会话尚未就绪，请稍后重试。',
+        };
+      const current = state?.generation ?? generation.current;
+      const nonce = viewIntent.current;
+      const sessionId = selection.session.id;
+      writing.current = true;
+      setPending(true);
+      setSending(true);
+      try {
+        return await submitOfficeRequest({
+          bridge,
+          generation: current,
+          selection,
+          file,
+          context,
+          prompt,
+          isCurrent: () =>
+            current === generation.current &&
+            nonce === viewIntent.current &&
+            selected.current === sessionId,
+          modelReady: nextModelReady,
+          modelChoice:
+            resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice : undefined,
+        });
+      } finally {
+        writing.current = false;
+        setPending(false);
+        setSending(false);
+        await refresh().catch(() => {});
+      }
+    },
+    onEdit: async (file, context) => {
+      if (!bridge || !selection) throw Error('output_scope_unavailable');
+      const id = crypto.randomUUID();
+      await bridge.request({
+        method: 'input.files.fromOutput',
+        generation: state!.generation,
+        id,
+        context,
+        target: {
+          storeId: file.storeId,
+          sessionId: file.sessionId,
+          fileId: file.fileId,
+          locator: file.locator,
+        },
+      });
+      imageDrafts.addFiles(imageScope(file.storeId, file.sessionId), [
+        {
+          id,
+          name: outputDraftLabel({
+            name: file.name,
+            ownerRunId: file.ownerRunId,
+            context,
+          }),
+          uri: outputDraftUri({ id, target: file, context }),
+          prepared: true,
+          output: {
+            id,
+            name: file.name,
+            ...(context ? { context } : {}),
+            ownerRunId: file.ownerRunId,
+            target: {
+              storeId: file.storeId,
+              sessionId: file.sessionId,
+              fileId: file.fileId,
+              locator: file.locator,
+            },
+          },
+        },
+      ]);
+      const key = imageScope(file.storeId, file.sessionId);
+      await saveBrowserDraft(key, file.sessionId, {
+        content: draftCache.current.get(key)?.content ?? draft,
+        browserAnnotations: browserNotes.document(key),
+        annotationImageOffset: imageDrafts.get(key).length,
+        outputFiles: imageDrafts
+          .files(key)
+          .flatMap((entry) => (entry.output ? [entry.output] : [])),
+      });
+    },
+  });
   const environment = useNativeEnvironment({
+    references: outputFiles.references,
     bridge,
     generation: state?.generation ?? generation.current,
     historyEpoch: state?.historyEpoch ?? 0,
@@ -2108,7 +2319,12 @@ function NativeDesktopContent({
     state?.generation ?? generation.current,
     directory?.storeId,
   ]);
-  const domMembership = useRef({ scope: '', sessions: new Set<string>(), revision: 0, directory });
+  const domMembership = useRef({
+    scope: '',
+    sessions: new Set<string>(),
+    revision: 0,
+    directory,
+  });
   if (directory && !directory.unavailable) {
     const previous = domMembership.current;
     if (previous.scope !== conversationDomScope || previous.directory !== directory) {
@@ -2201,7 +2417,11 @@ function NativeDesktopContent({
         targetCommandId: activeInputRun.originCommandId,
       },
     });
-    await bridge.request({ method: 'caller.submit', generation: state.generation, commandId });
+    await bridge.request({
+      method: 'caller.submit',
+      generation: state.generation,
+      commandId,
+    });
   }
   function rememberDraft() {
     if (state?.selection && selected.current === state.selection.session.id) {
@@ -2218,7 +2438,7 @@ function NativeDesktopContent({
     browserNotesRef.current.settle(commandId, 'accepted', key);
     const savedState = noteDraftStates.current.get(key);
     if (savedState?.signature) {
-      savedState.revision++;
+      savedState.consumedCommand = commandId;
       savedState.signature = undefined;
     }
     if (draftCache.current.get(key) !== submitted.draft) return;
@@ -2599,7 +2819,10 @@ function NativeDesktopContent({
       async () => {
         const current = generation.current,
           page = pageIntent.current;
-        const picked = await bridge.request({ method: 'workspace.pick', generation: current });
+        const picked = await bridge.request({
+          method: 'workspace.pick',
+          generation: current,
+        });
         if (
           current !== generation.current ||
           page !== pageIntent.current ||
@@ -2630,19 +2853,23 @@ function NativeDesktopContent({
   function firstIntent(
     commandId: string,
     text: string,
-    files: readonly { name: string; uri: string }[] = [],
+    files: readonly { name: string; uri: string; prepared?: boolean }[] = [],
   ): Extract<NativeRequest, { method: 'conversation.send' }>['intent'] {
     return {
       kind: 'run.start',
       expectedStoreId: directory!.storeId,
       commandId,
       content: text,
-      ...(files.length ? { files: files.map(({ name, uri }) => ({ name, uri })) } : {}),
+      ...nativeInputFileIntent(files),
       ...newModelReady.choice,
       ...(newPlanMode
         ? {
             extensionInputs: [
-              { extensionId: 'builtin.planning', definitionVersion: '1', input: { mode: 'plan' } },
+              {
+                extensionId: 'builtin.planning',
+                definitionVersion: '1',
+                input: { mode: 'plan' },
+              },
             ],
           }
         : {}),
@@ -2701,7 +2928,10 @@ function NativeDesktopContent({
         const next = value.phase === 'accepted' ? { content: '' } : original.draft;
         draftCache.current.set(key, next);
         if (value.phase === 'accepted')
-          firstAcceptedDraft.current = { commandId: original.commandId, draft: next };
+          firstAcceptedDraft.current = {
+            commandId: original.commandId,
+            draft: next,
+          };
       }
       if (
         (page === pageIntent.current || firstOpenPage.current === pageIntent.current) &&
@@ -2774,7 +3004,9 @@ function NativeDesktopContent({
           creation: original.creation,
           intent: firstIntent(original.commandId, original.text, original.files),
           ...(original.draft.content.length > original.text.length
-            ? { draftLineEndings: original.draft.content.slice(original.text.length) }
+            ? {
+                draftLineEndings: original.draft.content.slice(original.text.length),
+              }
             : {}),
           imageIds: original.imageIds,
           fileIds: original.files?.filter((file) => file.prepared).map((file) => file.id),
@@ -2825,14 +3057,39 @@ function NativeDesktopContent({
         throw Error('native_selection_changed');
       const saved = noteDraftStates.current.get(key);
       if (!saved || saved.uncertain) throw Error('browser_draft_save_unconfirmed');
+      if (saved.consumedCommand) {
+        const commandId = saved.consumedCommand;
+        const observed = await bridge.request({
+          method: 'draft.read',
+          generation: currentGeneration,
+          sessionId,
+        });
+        if (
+          generation.current !== currentGeneration ||
+          selected.current !== sessionId ||
+          draftOwner.current !== key ||
+          noteDraftStates.current.get(key) !== saved
+        )
+          throw Error('native_selection_changed');
+        if (
+          !observed ||
+          !('revision' in observed) ||
+          !('content' in observed) ||
+          imageScope(observed.storeId, observed.rootSessionId) !== key
+        )
+          throw Error('browser_draft_save_unconfirmed');
+        saved.revision = reconciledNoteRevision(saved.revision, commandId, observed);
+        if (saved.consumedCommand === commandId) saved.consumedCommand = undefined;
+      }
       if (saved.signature === serialized) return;
+      const expectedRevision = saved.revision;
       let result: NativeResult;
       try {
         result = await bridge.request({
           method: 'draft.write',
           generation: currentGeneration,
           sessionId,
-          revision: saved.revision,
+          revision: expectedRevision,
           ...document,
           browserAnnotations: document.browserAnnotations ?? [],
         });
@@ -2844,7 +3101,7 @@ function NativeDesktopContent({
         !result ||
         !('revision' in result) ||
         !('content' in result) ||
-        result.revision !== saved.revision + 1
+        result.revision !== expectedRevision + 1
       ) {
         saved.uncertain = true;
         throw Error('browser_draft_save_unconfirmed');
@@ -2866,7 +3123,9 @@ function NativeDesktopContent({
     if (
       selected.current !== selection.session.id ||
       browserNotes.blocked(key) ||
-      (!browserNotes.get(key).length && !noteDraftStates.current.get(key)?.managed)
+      (!browserNotes.get(key).length &&
+        !imageDrafts.files(key).some((file) => file.output) &&
+        !noteDraftStates.current.get(key)?.managed)
     )
       return;
     try {
@@ -2874,6 +3133,7 @@ function NativeDesktopContent({
         content: draftCache.current.get(key)?.content ?? draft,
         browserAnnotations: browserNotes.document(key),
         annotationImageOffset: imageDrafts.get(key).length,
+        outputFiles: imageDrafts.files(key).flatMap((file) => (file.output ? [file.output] : [])),
       };
       void saveBrowserDraft(key, selection.session.id, document).then(
         () => setNoteSaveError('', key),
@@ -2889,6 +3149,9 @@ function NativeDesktopContent({
         noteRevision,
         draft,
         imageDrafts.get(imageScope(selection.storeId, selection.session.id)).length,
+        imageDrafts
+          .files(imageScope(selection.storeId, selection.session.id))
+          .flatMap((file) => (file.output ? [file.output] : [])),
       ])
     : '';
   useEffect(() => {
@@ -2901,7 +3164,9 @@ function NativeDesktopContent({
     const images = imageDrafts.get(imageScope(selection.storeId, selection.session.id));
     const files = imageDrafts.files(imageScope(selection.storeId, selection.session.id));
     const draftKey = imageScope(selection.storeId, selection.session.id);
-    const submittedDraft = draftCache.current.get(draftKey) ?? { content: draft };
+    const submittedDraft = draftCache.current.get(draftKey) ?? {
+      content: draft,
+    };
     if (
       isNativeWorktreeExitCommand(submittedDraft.content) &&
       !images.length &&
@@ -2920,6 +3185,7 @@ function NativeDesktopContent({
         content: submittedDraft.content,
         browserAnnotations: browserNotes.document(draftKey),
         annotationImageOffset: images.length,
+        outputFiles: files.flatMap((file) => (file.output ? [file.output] : [])),
       };
       submittedText = composeBrowserDraft(noteDocument);
     } catch {
@@ -2941,7 +3207,11 @@ function NativeDesktopContent({
         nonce = viewIntent.current,
         sessionId = selection.session.id,
         commandId = crypto.randomUUID();
-      if (noteBatch.entries.length || noteDraftStates.current.get(draftKey)?.managed)
+      if (
+        noteBatch.entries.length ||
+        noteDocument.outputFiles?.length ||
+        noteDraftStates.current.get(draftKey)?.managed
+      )
         await saveBrowserDraft(draftKey, sessionId, noteDocument);
       const submittedRevision = draftRevision.current;
       if (
@@ -2961,7 +3231,7 @@ function NativeDesktopContent({
           planMode,
           resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice : undefined,
         ),
-        ...(files.length ? { files: files.map(({ name, uri }) => ({ name, uri })) } : {}),
+        ...nativeInputFileIntent(files),
       };
       if (intent.kind !== 'input.steer' && !nextModelReady)
         throw Error('model_selection_unavailable');
@@ -3002,7 +3272,9 @@ function NativeDesktopContent({
             intent,
             ...(noteBatch.entries.length ? { draftDocument: noteDocument } : {}),
             ...(!noteBatch.entries.length && submittedDraft.content.length > submittedText.length
-              ? { draftLineEndings: submittedDraft.content.slice(submittedText.length) }
+              ? {
+                  draftLineEndings: submittedDraft.content.slice(submittedText.length),
+                }
               : {}),
             permissionMode: original.permissionMode,
             imageIds,
@@ -3142,7 +3414,11 @@ function NativeDesktopContent({
         if (value && 'draft' in value)
           rememberConsumedDraft(
             commandId,
-            { storeId: selection.storeId, workspaceId: selection.session.workspaceId, sessionId },
+            {
+              storeId: selection.storeId,
+              workspaceId: selection.session.workspaceId,
+              sessionId,
+            },
             value.draft,
           );
         consumeInputDraft(commandId, selection.storeId, sessionId);
@@ -3991,7 +4267,10 @@ function NativeDesktopContent({
             type="button"
             onClick={() =>
               void write(async () => {
-                await bridge.request({ method: 'workspace.pick', generation: generation.current });
+                await bridge.request({
+                  method: 'workspace.pick',
+                  generation: generation.current,
+                });
                 await readDirectory();
               })
             }
@@ -4103,7 +4382,10 @@ function NativeDesktopContent({
                           commandId: submission.input.commandId,
                         });
                         apply(
-                          await bridge.request({ method: 'state', generation: generation.current }),
+                          await bridge.request({
+                            method: 'state',
+                            generation: generation.current,
+                          }),
                         );
                         await readDirectory();
                       })
@@ -4457,7 +4739,8 @@ function NativeDesktopContent({
                 })
               }
             >
-              只查原答复{diagnostics ? ` · ${submission.request.commandId}` : ''}
+              只查原答复
+              {diagnostics ? ` · ${submission.request.commandId}` : ''}
             </button>
           </div>
         ))}
@@ -4631,8 +4914,9 @@ function NativeDesktopContent({
         selected.current !== selection.session.id
       )
         return;
-      void report(() =>
-        bridge.request({
+      const intent = viewIntent.current;
+      void report(async () => {
+        const result = await bridge.request({
           method: 'messageFile.open',
           generation: state.generation,
           viewSelection: selection.viewSelection ?? selection.viewGeneration,
@@ -4641,8 +4925,32 @@ function NativeDesktopContent({
           path,
           ...(line === undefined ? {} : { line }),
           editor,
-        }),
-      );
+        });
+        if (
+          !result ||
+          !('kind' in result) ||
+          result.kind !== 'messageFile.preview' ||
+          !('handleId' in result)
+        )
+          return;
+        if (
+          generation.current !== state.generation ||
+          viewIntent.current !== intent ||
+          selected.current !== selection.session.id ||
+          result.storeId !== selection.storeId ||
+          result.sessionId !== selection.session.id
+        ) {
+          void bridge
+            .request({
+              method: 'localPreview.release',
+              generation: state.generation,
+              handleId: result.handleId,
+            })
+            .catch(() => {});
+          return;
+        }
+        outputFiles.openLocal({ ...result, kind: 'local-preview' });
+      });
     };
     if (
       model.role === 'user' &&
@@ -4716,55 +5024,76 @@ function NativeDesktopContent({
     )
       return null;
     return (
-      <NativeModelOutputMessage
-        key={JSON.stringify([
-          state.generation,
-          selection.storeId,
-          selection.session.id,
-          message.id,
-        ])}
-        message={message}
-        storeId={selection.storeId}
-        terminalObserved={modelOutputTerminalObserved(
-          message,
-          selection.executions,
-          runMessages.runs,
-        )}
-        canReadRestoredOrigin
-        openFile={openFile}
-        fileRootUri={messageFileRootUri}
-        onContent={(text) => {
-          const key = JSON.stringify([replyDisplayScope, message.id]);
-          const before = verifiedReplyBodies.current.get(key),
-            identity = nativeReplyKey(replyDisplayScope, message);
-          if (text === undefined) verifiedReplyBodies.current.delete(key);
-          else verifiedReplyBodies.current.set(key, { identity, text });
-          if (before?.text !== text || (before && before.identity !== identity))
-            renderVerifiedReply((value) => value + 1);
+      <WebLinkContext.Provider
+        value={(url) => {
+          if (
+            !state ||
+            !selection ||
+            selection.viewLoading ||
+            historyState.phase !== 'complete' ||
+            selected.current !== selection.session.id ||
+            !/^https?:\/\//i.test(url)
+          )
+            return;
+          setWebLinkRequest({
+            requestId: ++webLinkSequence.current,
+            generation: state.generation,
+            sessionId: selection.session.id,
+            viewIntent: viewIntent.current,
+            url,
+          });
         }}
-        onRead={
-          selection.canReadModelOutput
-            ? async ({ sessionId, executionId, signal }) => {
-                const current = state.generation,
-                  nonce = viewIntent.current;
-                return readNativeModelOutput({
-                  bridge,
-                  generation: current,
-                  expectedStoreId: selection.storeId,
-                  sessionId,
-                  viewSessionId: selection.session.id,
-                  messageId: message.id,
-                  executionId,
-                  signal,
-                  isCurrent: () =>
-                    generation.current === current &&
-                    viewIntent.current === nonce &&
-                    selected.current === selection.session.id,
-                });
-              }
-            : undefined
-        }
-      />
+      >
+        <NativeModelOutputMessage
+          key={JSON.stringify([
+            state.generation,
+            selection.storeId,
+            selection.session.id,
+            message.id,
+          ])}
+          message={message}
+          storeId={selection.storeId}
+          terminalObserved={modelOutputTerminalObserved(
+            message,
+            selection.executions,
+            runMessages.runs,
+          )}
+          canReadRestoredOrigin
+          openFile={openFile}
+          fileRootUri={messageFileRootUri}
+          onContent={(text) => {
+            const key = JSON.stringify([replyDisplayScope, message.id]);
+            const before = verifiedReplyBodies.current.get(key),
+              identity = nativeReplyKey(replyDisplayScope, message);
+            if (text === undefined) verifiedReplyBodies.current.delete(key);
+            else verifiedReplyBodies.current.set(key, { identity, text });
+            if (before?.text !== text || (before && before.identity !== identity))
+              renderVerifiedReply((value) => value + 1);
+          }}
+          onRead={
+            selection.canReadModelOutput
+              ? async ({ sessionId, executionId, signal }) => {
+                  const current = state.generation,
+                    nonce = viewIntent.current;
+                  return readNativeModelOutput({
+                    bridge,
+                    generation: current,
+                    expectedStoreId: selection.storeId,
+                    sessionId,
+                    viewSessionId: selection.session.id,
+                    messageId: message.id,
+                    executionId,
+                    signal,
+                    isCurrent: () =>
+                      generation.current === current &&
+                      viewIntent.current === nonce &&
+                      selected.current === selection.session.id,
+                  });
+                }
+              : undefined
+          }
+        />
+      </WebLinkContext.Provider>
     );
   };
   const renderNativeTools = (
@@ -4930,7 +5259,14 @@ function NativeDesktopContent({
         directTraceDetails={controls.directTraceDetails}
         unverified
         metadataPending={toolMessages.pendingMessageIds.has(model.id)}
-        messages={[{ ...model, toolName: undefined, title: model.title ?? '工具结果', text: '' }]}
+        messages={[
+          {
+            ...model,
+            toolName: undefined,
+            title: model.title ?? '工具结果',
+            text: '',
+          },
+        ]}
         expanded={expanded}
         onToggle={onToggle}
         activityId={
@@ -4980,9 +5316,11 @@ function NativeDesktopContent({
       return target?.path && target.operation
         ? {
             ...model,
-            toolName: { read: 'read_file', write: 'write_file', edit: 'edit_file' }[
-              target.operation
-            ],
+            toolName: {
+              read: 'read_file',
+              write: 'write_file',
+              edit: 'edit_file',
+            }[target.operation],
             target: target.path,
             arguments: { path: target.path },
             status: 'completed' as const,
@@ -5298,7 +5636,9 @@ function NativeDesktopContent({
             ? {
                 ...transcript.turnActivity,
                 ...(firstRun && firstRun.id === activeExecutionRun?.id
-                  ? { responsePhase: firstModelDispatched ? 'thinking' : 'preparing' }
+                  ? {
+                      responsePhase: firstModelDispatched ? 'thinking' : 'preparing',
+                    }
                   : {}),
                 executionUnconfirmed,
                 // Read admission is revoked during scans; the last observed Run still owns its label.
@@ -5513,6 +5853,10 @@ function NativeDesktopContent({
           />
         ) : undefined
       }
+      fileTabRequest={outputFiles.request}
+      renderFile={outputFiles.renderFile}
+      closeFile={outputFiles.closeFile}
+      renderTurnOutputs={outputFiles.renderTurnOutputs}
       environmentInformation={environment.card}
       connected={generation.current > 0}
       connectionLabel={
@@ -6173,12 +6517,41 @@ function NativeDesktopContent({
       }
       readOnlyReason={selection?.session.parentSessionId ? '子会话只读' : undefined}
       browserTabRequest={
-        agentBrowserOpen && selection && !preparing && !scheduledTasksView
+        webLinkRequest &&
+        state &&
+        selection &&
+        webLinkRequest.generation === state.generation &&
+        webLinkRequest.sessionId === selection.session.id &&
+        webLinkRequest.viewIntent === viewIntent.current &&
+        !preparing &&
+        !scheduledTasksView
           ? {
-              requestId: agentBrowserRequest,
-              createIfMissing: false,
+              requestId: webLinkRequest.requestId,
+              createIfMissing: true,
+              onOpen: (id) => {
+                setWebLinkRequest(undefined);
+                if (
+                  generation.current !== webLinkRequest.generation ||
+                  selected.current !== webLinkRequest.sessionId ||
+                  viewIntent.current !== webLinkRequest.viewIntent
+                )
+                  return;
+                void report(async () => {
+                  if (!window.kiteNative?.browserRequest) throw Error('browser_unavailable');
+                  await window.kiteNative.browserRequest({
+                    action: 'navigate',
+                    id,
+                    input: webLinkRequest.url,
+                  });
+                });
+              },
             }
-          : undefined
+          : agentBrowserOpen && selection && !preparing && !scheduledTasksView
+            ? {
+                requestId: agentBrowserRequest,
+                createIfMissing: false,
+              }
+            : undefined
       }
       detailPanel={
         diagnostics && toolsOpen

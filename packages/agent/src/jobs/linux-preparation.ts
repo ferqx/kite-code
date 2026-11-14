@@ -29,6 +29,7 @@ export interface LinuxPaths {
   readonly readonlyAssets?: readonly string[];
   readonly runtimeReadOnlyRoots?: readonly string[];
   readonly temporaryRoot?: string;
+  readonly trustedExecutables?: readonly string[];
   readonly executionScope?: HostShellExecutionScope | HostShellExecutionScopeResolver;
   readonly filesystemScope:
     | 'workspace_write'
@@ -181,7 +182,6 @@ export function captureLinuxLaunch(
       : [];
   if (
     workspace.canonical === '/' ||
-    within(workspace.canonical, tempBase.canonical) ||
     protectedRoots.some(
       (root) =>
         root.canonical === '/' ||
@@ -345,6 +345,9 @@ export function captureLinuxLaunch(
     const temp = realpathSync.native(mkdtempSync(join(tempBase.canonical, 'kite-linux-job-')));
     chmodSync(temp, 0o700);
     const runtimeTemp = launchIdentity(temp);
+    // A persistent staging base may already be inside the Workspace. Only the
+    // freshly allocated child is writable/owned; never accept a Workspace ancestor.
+    if (within(temp, workspace.canonical)) throw Error('shell_runtime_temp_overlaps_workspace');
     const cleanup = () => removeRuntimeTemp(runtimeTemp);
     let args: string[] = [];
     let noExecPaths: string[] = [];

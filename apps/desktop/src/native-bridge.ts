@@ -39,6 +39,7 @@ import type {
 import type { NativeBackgroundRequest, NativeBackgroundResult } from './background-bridge';
 import type {
   BrowserAnnotationReceiptRef,
+  BrowserDraftDocument,
   BrowserSavedAnnotation,
 } from './browser-annotation-content';
 import type {
@@ -73,8 +74,17 @@ import type {
 import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeModelPreferenceBridge } from './native-model-preference-bridge';
+import type {
+  NativePreviewLayoutIdentity,
+  NativePreviewLayoutRequest,
+} from './native-preview-layout-bridge';
 import type { NativeTraceRequest, NativeTraceResult } from './native-trace-bridge';
 import type { NativeTrajectoryFileBridge } from './native-trajectory-file-bridge';
+import type {
+  NativeOutputRequest,
+  NativeOutputResult,
+  OutputDraftFile,
+} from './output-files-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
 import type {
   NativeSkillMarketplaceRequest,
@@ -105,10 +115,19 @@ export type * from './skills-bridge';
 export type * from './workspace-changes-bridge';
 
 export type NativeAnswerMetadata = {
-  scope: { storeId: string; sessionId: string; workspaceId: string; contextSelectionId: string };
+  scope: {
+    storeId: string;
+    sessionId: string;
+    workspaceId: string;
+    contextSelectionId: string;
+  };
   subjectId: string;
   interaction: Pick<Interaction, 'id' | 'revision' | 'kind'>;
-  request: { expectedStoreId: string; commandId: string; expectedRevision: string };
+  request: {
+    expectedStoreId: string;
+    commandId: string;
+    expectedRevision: string;
+  };
   bodyDigest: string;
   requestDigest: string;
   phase: 'submitting' | 'unknown' | 'accepted' | 'failed';
@@ -153,7 +172,9 @@ export type NativeFullPermissionConfirmationRequest = {
 export type NativeFullPermissionConfirmationReply =
   | { ok: true; value: boolean }
   | { ok: false; code: string };
-export type NativeWindowAppearance = { readonly backgroundMaterial: 'mica' | 'vibrancy' | 'none' };
+export type NativeWindowAppearance = {
+  readonly backgroundMaterial: 'mica' | 'vibrancy' | 'none';
+};
 export type NativeWindowAppearanceReply =
   | { ok: true; value: NativeWindowAppearance }
   | { ok: false; code: string };
@@ -245,6 +266,7 @@ export type NativeSelection = {
   readonly permissions?: DesktopPermissionFacts;
 };
 export type NativeDraft = {
+  outputFiles?: readonly OutputDraftFile[];
   id: string;
   storeId: string;
   workspaceId: string;
@@ -409,7 +431,9 @@ export type NativeContextResultFacts = {
   observationId: number;
   historicalResults: NativeContextResults;
 };
-export type NativeContextFacts = NativeContextResultFacts & { page: SelectedContextPage };
+export type NativeContextFacts = NativeContextResultFacts & {
+  page: SelectedContextPage;
+};
 export type NativeCompressionSubmission = {
   kind: 'compress' | 'reset';
   sessionId: string;
@@ -513,11 +537,14 @@ export type NativeWorkspaceRemoval = {
   error?: string;
 };
 export type NativeState = {
+  /** Main-owned paired Service shares this computer; not a permission grant. */
+  readonly localFileReferences?: boolean;
   readonly workspaceRemovalSubmissions?: readonly NativeWorkspaceRemoval[];
   readonly workspaceRemovalUnavailable?: boolean;
   readonly environmentRevision?: number;
   /** Invalidations within the selected root, independent of unrelated background sessions. */
   readonly selectedEnvironmentRevision?: number;
+  readonly outputFilesRevision?: number;
   /** Read admission remains available while same-selection metadata is merely refreshing. */
   readonly environmentReadUnavailable?: boolean;
   readonly directory?: NativeDirectory;
@@ -650,10 +677,19 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeOutputRequest
   | NativeTraceRequest
   | { method: 'trajectory.open'; generation: number; request: TrajectoryScope }
-  | { method: 'trajectory.events'; generation: number; request: TrajectoryReadRequest }
-  | { method: 'trajectory.evidence.open'; generation: number; request: TrajectoryEvidenceOpen }
+  | {
+      method: 'trajectory.events';
+      generation: number;
+      request: TrajectoryReadRequest;
+    }
+  | {
+      method: 'trajectory.evidence.open';
+      generation: number;
+      request: TrajectoryEvidenceOpen;
+    }
   | {
       method: 'trajectory.evidence.read';
       generation: number;
@@ -687,7 +723,12 @@ export type NativeRequest =
   | NativeJobOutputRequest
   | NativeUserMcpRequest
   | NativeMcpRequest
-  | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
+  | {
+      method: 'interactions.next';
+      generation: number;
+      viewGeneration: number;
+      afterId: string;
+    }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
   | { method: 'settings.general.shell.read'; generation: number }
   | {
@@ -741,7 +782,11 @@ export type NativeRequest =
       operation: NativeProviderOperation;
       secret?: string;
     }
-  | { method: 'settings.providers.lookup'; generation: number; commandId: string }
+  | {
+      method: 'settings.providers.lookup';
+      generation: number;
+      commandId: string;
+    }
   | { method: 'settings.models.close'; generation: number }
   | {
       method: 'settings.models.enabled';
@@ -764,10 +809,25 @@ export type NativeRequest =
       targetId?: string;
       readId: string;
     }
-  | { method: 'recovery.submit'; generation: number; observationId: number; confirm: boolean }
-  | { method: 'recovery.lookup'; generation: number; commandId: string; readId: string }
+  | {
+      method: 'recovery.submit';
+      generation: number;
+      observationId: number;
+      confirm: boolean;
+    }
+  | {
+      method: 'recovery.lookup';
+      generation: number;
+      commandId: string;
+      readId: string;
+    }
   | { method: 'recovery.close'; generation: number; readId: string }
-  | { method: 'fileRecovery.list'; generation: number; readId: string; afterKey?: string }
+  | {
+      method: 'fileRecovery.list';
+      generation: number;
+      readId: string;
+      afterKey?: string;
+    }
   | {
       method: 'fileRecovery.detail';
       generation: number;
@@ -791,7 +851,12 @@ export type NativeRequest =
       inputRevision: number;
     }
   | { method: 'fileRecovery.continue'; generation: number; intentId: string }
-  | { method: 'fileRecovery.lookup'; generation: number; intentId: string; readId: string }
+  | {
+      method: 'fileRecovery.lookup';
+      generation: number;
+      intentId: string;
+      readId: string;
+    }
   | { method: 'fileRecovery.listSaved'; generation: number }
   | { method: 'fileRecovery.close'; generation: number; readId: string }
   | { method: 'session.observe'; generation: number; sessionId: string }
@@ -817,7 +882,11 @@ export type NativeRequest =
       readId: string;
     }
   | { method: 'context.close'; generation: number; readId: string }
-  | { method: 'context.results.next'; generation: number; observationId: number }
+  | {
+      method: 'context.results.next';
+      generation: number;
+      observationId: number;
+    }
   | {
       method: 'context.rewind';
       generation: number;
@@ -838,8 +907,17 @@ export type NativeRequest =
       };
     }
   | { method: 'lookupContext'; generation: number; commandId: string }
-  | { method: 'context.compress'; generation: number; observationId: number; focus?: string }
-  | { method: 'context.resetCompression'; generation: number; observationId: number }
+  | {
+      method: 'context.compress';
+      generation: number;
+      observationId: number;
+      focus?: string;
+    }
+  | {
+      method: 'context.resetCompression';
+      generation: number;
+      observationId: number;
+    }
   | { method: 'lookupCompression'; generation: number; commandId: string }
   | {
       method: 'grants.read';
@@ -870,7 +948,13 @@ export type NativeRequest =
       sessionId: string;
       executionId: string;
     }
-  | { method: 'modelInput.read'; generation: number; readId: string; offset: number; limit: number }
+  | {
+      method: 'modelInput.read';
+      generation: number;
+      readId: string;
+      offset: number;
+      limit: number;
+    }
   | { method: 'modelInput.close'; generation: number; readId: string }
   | {
       method: 'modelOutput.open';
@@ -889,7 +973,12 @@ export type NativeRequest =
       limit: number;
     }
   | { method: 'modelOutput.close'; generation: number; readId: string }
-  | { method: 'interactionAttachment.open'; generation: number; readId: string; key: string }
+  | {
+      method: 'interactionAttachment.open';
+      generation: number;
+      readId: string;
+      key: string;
+    }
   | {
       method: 'interactionAttachment.read';
       generation: number;
@@ -897,12 +986,28 @@ export type NativeRequest =
       offset: number;
       limit: number;
     }
-  | { method: 'interactionAttachment.close'; generation: number; readId: string }
+  | {
+      method: 'interactionAttachment.close';
+      generation: number;
+      readId: string;
+    }
   | { method: 'attach' }
-  | { method: 'state' | 'directory' | 'detach' | 'workspace.pick'; generation: number }
+  | {
+      method: 'state' | 'directory' | 'detach' | 'workspace.pick';
+      generation: number;
+    }
   | { method: 'workspace.remove'; generation: number; workspaceId: string }
-  | { method: 'workspace.removal.lookup'; generation: number; commandId: string }
-  | { method: 'select'; generation: number; sessionId: string; activationId?: number }
+  | {
+      method: 'workspace.removal.lookup';
+      generation: number;
+      commandId: string;
+    }
+  | {
+      method: 'select';
+      generation: number;
+      sessionId: string;
+      activationId?: number;
+    }
   | {
       method: 'createSession';
       generation: number;
@@ -926,6 +1031,7 @@ export type NativeRequest =
   | { method: 'messages.close'; generation: number; readId: string }
   | {
       method: 'submit';
+      officeDocument?: BrowserDraftDocument;
       generation: number;
       sessionId: string;
       intent: InputRequest;
@@ -966,6 +1072,7 @@ export type NativeRequest =
   | { method: 'draft.read'; generation: number; sessionId: string }
   | {
       method: 'draft.write';
+      outputFiles?: readonly OutputDraftFile[];
       generation: number;
       sessionId: string;
       revision: number;
@@ -980,7 +1087,12 @@ export type NativeRequest =
       mode: 'accept_edits' | 'auto' | 'full';
       makeDefault: boolean;
     }
-  | { method: 'permission.trust'; generation: number; observationId: number; trusted: boolean }
+  | {
+      method: 'permission.trust';
+      generation: number;
+      observationId: number;
+      trusted: boolean;
+    }
   | { method: 'permission.refresh'; generation: number }
   | {
       method: 'interaction.answer';
@@ -990,10 +1102,14 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeOutputResult
   | NativeTraceResult
   | { kind: 'trajectory.snapshot'; trajectory: TrajectorySnapshot }
   | { kind: 'trajectory.page'; trajectory: TrajectoryPage }
-  | { kind: 'trajectory.evidence.opened'; trajectory: TrajectoryEvidenceDescriptor }
+  | {
+      kind: 'trajectory.evidence.opened';
+      trajectory: TrajectoryEvidenceDescriptor;
+    }
   | { kind: 'trajectory.evidence.chunk'; trajectory: TrajectoryEvidenceChunk }
   | NativeInputQueueResult
   | NativeInputFileResult
@@ -1074,6 +1190,11 @@ export type NativeResult =
   | null;
 export type NativeReply = { ok: true; value: NativeResult } | { ok: false; code: string };
 export interface NativeBridge {
+  presentPreviewLayout?(input: NativePreviewLayoutRequest): void;
+  presentPreviewLayoutAsync?(
+    input: NativePreviewLayoutRequest,
+  ): Promise<NativePreviewLayoutIdentity>;
+  subscribePreviewPresentation?(listener: () => void): () => void;
   readonly trajectoryFiles?: NativeTrajectoryFileBridge;
   fileReferences?(files: readonly File[]): readonly { name: string; uri: string }[];
   request(input: NativeRequest): Promise<NativeResult>;

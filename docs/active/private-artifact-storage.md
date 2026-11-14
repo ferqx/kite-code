@@ -16,6 +16,14 @@
 
 第一方读取经过相应 typed owner，通用 Artifact 权限不能下载私有模型封装／opaque continuation。每份公开 view 有独立 SHA／总长／转换标记，分片重核原来源和主体；缺失／损坏／回收明确失败，不以当前行或当前磁盘补旧游标。轨迹导出只复制选择时获准的公开 view，离线打开不初始化 Runtime、不恢复旧执行。消费者已复制的自包含材料与原生命周期分离，未来外发仍受独立任务／Trace grant 约束。
 
+## 当前办公交付与编辑边界
+
+Native Office预览不创建或修改本地PPT副本。旧desktop-private/office-editor仅保留宿主私有不可变历史的读取路径，绑定原授权target、revision和SHA；缺失或损坏不可用原件替代。Windows从原attached Profile派生固定只读命名空间与独立使用权，核真实ACL和原对象HANDLE，不提供创建目录/新版本、写锁、flush或修权限入口。旧副本发送仍经 InputFile 稳定 import 与工作副本流程。局部请求引用原输出，Main 冻结选区与原 SHA，并核注册引用和独立提交正文后复用原 journal；不消费普通聊天草稿。独立可信 sandbox 输入 View 与不可信预览 DOM 分离，预览仅接 manifest 与固定 isolated-world 交互，两者均无 Native bridge；选区描述本身不是授权。平台证据归[Desktop owner](../../apps/desktop/README.md#办公输出文件)；Agent OfficeCLI、原输出收集、私有Blob权限和GC边界不变。
+
+Shell 自动产物沿[输出 owner](../../packages/agent/src/business/output-collection.README.md)登记现有不可变 Artifact，文件身份独立于正文消息；绑定精确生产者与原 Run，不把交付清单注入模型上下文。Fork只继承可验证原引用，不复制执行中的收集权。用户保存先从原引用流式写临时文件，完整SHA/size核实后发布；中断、陈旧引用或校验失败不产生完成文件。
+
+继续修改必须经合法 input import 与[工作副本端口](../../packages/agent/src/tools/input-working-files.ts)，持久映射绑定原 command/import，命令受理后不覆盖用户编辑；不能直接写历史Blob或把私有Blob目录加入普通Shell写范围。Preview只消费原不可变快照，外部HTML/脚本不进入主Renderer。桌面隔离、导航和缓存限制归[Desktop owner](../../apps/desktop/README.md)。这不改变既有私有模型正文的下载禁令或Artifact GC授权。
+
 ## 当前存储模型
 
 `packages/builtin-runtime/src/model/private-immutable-artifacts.ts` 是共享的私有、不可变、内容寻址原语。每个实例必须在App注入的durable

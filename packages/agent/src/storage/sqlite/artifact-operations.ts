@@ -319,3 +319,26 @@ export function callArtifact(
     return get(ops, input, true)!;
   });
 }
+
+/** Existing transaction only: exact authorization and immutable ref lookup. */
+export function artifactReferenceInTransaction(
+  ops: SqliteOperations,
+  input: Get,
+): ArtifactReference | null {
+  ops.identity(input.expectedStoreId);
+  scope(ops, input, false);
+  return get(ops, input);
+}
+
+/** Authorization-only companion for host metadata indexes using the same session/child scope. */
+export function assertArtifactSessionScope(
+  ops: SqliteOperations,
+  input: { expectedStoreId: string; sessionId: string; subjectId: string },
+) {
+  ops.identity(input.expectedStoreId);
+  scope(
+    ops,
+    { ...input, refId: 'output-scope-probe', scope: { kind: 'session', id: input.sessionId } },
+    true,
+  );
+}

@@ -22,6 +22,7 @@ import type {
   NativeRecoveryIntent,
   NativeRequest,
 } from '../src/native-bridge';
+import { type OutputDraftFile, readOutputDraftFiles } from '../src/output-files-bridge';
 import {
   assertAnswerRecords,
   type NativeAnswerData,
@@ -64,6 +65,7 @@ import {
   type DesktopProfileAccess,
   prepareWindowsPrivateUi,
   verifyWindowsPrivateUi,
+  windowsOfficeStorage,
 } from './profile-access';
 import { recoveryPending, validateRecoveryIntent } from './recovery-journal';
 import {
@@ -71,6 +73,7 @@ import {
   type NativeScheduledTaskData,
   scheduledTaskSchemas,
 } from './scheduled-tasks';
+import type { WindowsOfficeStorage } from './windows-access';
 
 import {
   parseWorkspaceRemovalIntent,
@@ -84,6 +87,8 @@ export type PrivateData = NativeScheduledTaskData &
   WorkspaceRemovalData &
   NativeFileRecoveryJournal &
   NativeAnswerData & {
+    officeEditorRoot?(): string;
+    officeEditorStorage?(): WindowsOfficeStorage | undefined;
     readTurns(storeId: string): [string, string][];
     markTurnRead(input: Extract<NativeRequest, { method: 'session.markRead' }>): void;
     read(scope: DraftScope): NativeDraft;
@@ -93,6 +98,7 @@ export type PrivateData = NativeScheduledTaskData &
       content: string,
       browserAnnotations?: readonly BrowserSavedAnnotation[],
       annotationImageOffset?: number,
+      outputFiles?: readonly OutputDraftFile[],
     ): NativeDraft;
     list(after?: string): { drafts: Omit<NativeDraft, 'content'>[]; nextId: string | null };
     readId(id: string): NativeDraft;
@@ -123,9 +129,11 @@ function encodeDraft(
   content: string,
   notes?: readonly BrowserSavedAnnotation[],
   imageOffset = 0,
+  outputFiles?: readonly OutputDraftFile[],
 ): string {
   const annotations = readBrowserAnnotations(notes);
-  if (!annotations.length) return JSON.stringify(content);
+  const files = readOutputDraftFiles(outputFiles, { allowLegacyExcelRanges: true });
+  if (!annotations.length && !files.length) return JSON.stringify(content);
   composeBrowserDraft({
     content,
     browserAnnotations: annotations,
@@ -133,6 +141,7 @@ function encodeDraft(
   });
   const encoded = JSON.stringify({
     kind: 'browser_annotation_draft',
+    ...(files.length ? { outputFiles: files } : {}),
     content,
     browserAnnotations: annotations,
     annotationImageOffset: imageOffset,
@@ -625,18 +634,22 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     } catch {
       failure();
     }
+    let outputFiles: readonly OutputDraftFile[] = [];
     let browserAnnotations: readonly BrowserSavedAnnotation[] = [],
       annotationImageOffset = 0;
     if (content && typeof content === 'object' && !Array.isArray(content)) {
       const envelope = content as Record<string, unknown>;
       if (
-        Object.keys(envelope).sort().join(',') !==
-          'annotationImageOffset,browserAnnotations,content,kind' ||
+        ![
+          'annotationImageOffset,browserAnnotations,content,kind',
+          'annotationImageOffset,browserAnnotations,content,kind,outputFiles',
+        ].includes(Object.keys(envelope).sort().join(',')) ||
         envelope.kind !== 'browser_annotation_draft' ||
         Buffer.byteLength(String(row.content)) > 1048576
       )
         failure();
       try {
+        outputFiles = readOutputDraftFiles(envelope.outputFiles, { allowLegacyExcelRanges: true });
         browserAnnotations = readBrowserAnnotations(envelope.browserAnnotations);
         if (typeof envelope.annotationImageOffset !== 'number') failure();
         annotationImageOffset = envelope.annotationImageOffset;
@@ -657,6 +670,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       revision: Number(row.revision),
       content,
       ...(browserAnnotations.length ? { browserAnnotations, annotationImageOffset } : {}),
+      ...(outputFiles.length ? { outputFiles } : {}),
     };
   };
   const creation = (row: Record<string, unknown>): NativeCreation => {
@@ -766,13 +780,18 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       : [];
     if (!exact && (!partial || remaining.length === (saved.browserAnnotations?.length ?? 0)))
       return;
-    if (!saved.content && !saved.browserAnnotations?.length) return;
+    if (!saved.content && !saved.browserAnnotations?.length && !saved.outputFiles?.length) return;
     if (!Number.isSafeInteger(saved.revision + 1)) throw Error('draft_revision_conflict');
     const result = database()
       .prepare('UPDATE drafts SET revision=?,content=? WHERE id=? AND revision=?')
       .run(
         saved.revision + 1,
-        encodeDraft(exact ? '' : saved.content, remaining, saved.annotationImageOffset),
+        encodeDraft(
+          exact ? '' : saved.content,
+          remaining,
+          saved.annotationImageOffset,
+          exact ? [] : saved.outputFiles,
+        ),
         saved.id,
         saved.revision,
       );
@@ -800,6 +819,14 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     return withConsumption(result);
   };
   const port: PrivateData = {
+    officeEditorStorage() {
+      database();
+      return process.platform === 'win32' ? windowsOfficeStorage(access) : undefined;
+    },
+    officeEditorRoot() {
+      database();
+      return join(realpathSync(profilePath), 'desktop-private', 'office-editor');
+    },
     readTurns(storeId) {
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(storeId)) throw Error('turn_read_storage_unavailable');
       if (Number(database().prepare('PRAGMA user_version').get()!.user_version) < 12) return [];
@@ -1008,10 +1035,13 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           .run(record.request.commandId, JSON.stringify(record));
       });
     },
-    save(scope, revision, content, browserAnnotations, annotationImageOffset) {
+    save(scope, revision, content, browserAnnotations, annotationImageOffset, outputFiles) {
       if (Buffer.byteLength(content) > 1048576) throw Error('draft_capacity_exceeded');
       const result = transaction(() => {
         const previous = readDraft(scope);
+        if (previous.outputFiles?.length && outputFiles === undefined)
+          throw Error('output_draft_required');
+        readOutputDraftFiles(outputFiles, { allowLegacyExcelRanges: true });
         if (previous.browserAnnotations?.length && browserAnnotations === undefined)
           throw Error('browser_annotation_draft_required');
         if (previous.revision !== revision) throw Error('draft_revision_conflict');
@@ -1026,12 +1056,18 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
             scope.workspaceId,
             scope.rootSessionId,
             revision + 1,
-            encodeDraft(content, browserAnnotations, annotationImageOffset),
+            encodeDraft(content, browserAnnotations, annotationImageOffset, outputFiles),
           );
-        const { browserAnnotations: _notes, annotationImageOffset: _offset, ...base } = previous;
+        const {
+          browserAnnotations: _notes,
+          annotationImageOffset: _offset,
+          outputFiles: _files,
+          ...base
+        } = previous;
         return {
           ...base,
           content,
+          ...(outputFiles?.length ? { outputFiles: structuredClone(outputFiles) } : {}),
           ...(browserAnnotations?.length
             ? {
                 browserAnnotations: structuredClone(browserAnnotations),
@@ -1457,6 +1493,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     'draft_capacity_exceeded',
     'draft_revision_conflict',
     'browser_annotation_draft_required',
+    'output_draft_required',
+    'output_draft_invalid',
     'draft_not_found',
     'creation_intent_conflict',
     'creation_capacity_exceeded',

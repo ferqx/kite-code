@@ -765,3 +765,73 @@ test('a first accepted command can resolve to a pre-Run rejection and an explici
     await f.close();
   }
 });
+
+for (const mode of ['new', 'existing'] as const) {
+  test(`${mode} Main submission retains legacy links alongside host-published prepared files`, async () => {
+    const f = fixture();
+    const legacy = { name: 'linked.txt', uri: 'file:///workspace/linked.txt' };
+    const published = {
+      name: 'uploaded.txt',
+      uri: 'file:///workspace/uploaded.txt',
+      reference: {
+        id: 'input-file-artifact',
+        storeId: 'store',
+        sessionId: mode === 'new' ? 'new-session' : 'existing',
+        subjectId: 'user',
+        scope: { kind: 'session' as const, id: mode === 'new' ? 'new-session' : 'existing' },
+        hash: 'a'.repeat(64),
+        size: '1',
+        mediaType: 'text/plain',
+      },
+    };
+    const preparations: unknown[] = [];
+    Object.assign(f.port, {
+      getInputFileImport: async () => {
+        throw new ClientError('input_file_not_found');
+      },
+      uploadInputFile: async () => published,
+      prepareWorkingInputs: async (input: unknown) => {
+        preparations.push(input);
+        return [published];
+      },
+    });
+    try {
+      await f.ready();
+      await f.caller.invoke({ method: 'select', generation: 1, sessionId: 'existing' });
+      await f.caller.invoke({
+        method: 'input.files.begin',
+        generation: 1,
+        id: 'prepared',
+        name: 'uploaded.txt',
+        mediaType: 'text/plain',
+        size: 1,
+      });
+      await f.caller.invoke({
+        method: 'input.files.append',
+        generation: 1,
+        id: 'prepared',
+        offset: 0,
+        data: new Uint8Array([65]),
+      });
+      await f.caller.invoke({ method: 'input.files.finish', generation: 1, id: 'prepared' });
+      const intent = { ...f.request.intent, files: [legacy] };
+      const result = await f.caller.invoke(
+        mode === 'new'
+          ? { ...f.request, intent, fileIds: ['prepared'] }
+          : {
+              method: 'submit',
+              generation: 1,
+              sessionId: 'existing',
+              intent,
+              fileIds: ['prepared'],
+            },
+      );
+      expect(result).toMatchObject({ phase: 'accepted' });
+      expect(preparations).toHaveLength(1);
+      expect(preparations[0]).toMatchObject({ files: [published] });
+      expect(f.data.callers()[0]!.intent.request).toMatchObject({ files: [legacy, published] });
+    } finally {
+      await f.close();
+    }
+  });
+}

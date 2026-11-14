@@ -8,12 +8,14 @@ import { desktopAsset } from '../../platform/desktop-assets';
 import { createOwnedWorker } from '../../platform/process/owned-worker';
 import { AgentError } from '../../storage/types';
 import { createWorkspaceFiles } from '../files';
+import { type PdfTextLayer, validPdfTextLayer } from './pdf-text-layer';
 
 export interface PdfPage {
   number: number;
   label: string | null;
   text: string;
   image?: Uint8Array;
+  textLayer?: PdfTextLayer;
 }
 export interface PdfResult {
   totalPages: number;
@@ -25,7 +27,7 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 /** Disposable derivative, never a grant to read the source or a historical result. */
 export async function readCachedPdf(
   bytes: Uint8Array,
-  input: { pages?: string; mode?: string },
+  input: { pages?: string; mode?: string; textLayer?: boolean },
   scope: { profilePath: string; storeId: string; sourceHash: string },
   signal: AbortSignal,
 ): Promise<PdfResult> {
@@ -35,6 +37,7 @@ export async function readCachedPdf(
     worker: checksum,
     pages: input.pages ?? '1',
     mode: input.mode ?? 'text',
+    ...(input.textLayer ? { textLayer: true } : {}),
   });
   const root = join(
     scope.profilePath,
@@ -99,7 +102,7 @@ export async function readCachedPdf(
 }
 function decodeCachedResult(
   value: unknown,
-  input: { pages?: string; mode?: string },
+  input: { pages?: string; mode?: string; textLayer?: boolean },
 ): PdfResult | null {
   if (!value || typeof value !== 'object') return null;
   const data = value as PdfResult;
@@ -114,6 +117,7 @@ function decodeCachedResult(
     start < 1 ||
     end < start ||
     !['text', 'image'].includes(mode) ||
+    (input.textLayer && mode !== 'image') ||
     end - start >= (mode === 'image' ? 4 : 20) ||
     !Number.isSafeInteger(data.totalPages) ||
     data.totalPages < start ||
@@ -149,6 +153,11 @@ function decodeCachedResult(
       page.image = image;
       size += image.byteLength;
     } else if (candidate.image !== undefined) return null;
+    if (input.textLayer && mode === 'image') {
+      if (!validPdfTextLayer(candidate.textLayer)) return null;
+      page.textLayer = candidate.textLayer;
+      size += Buffer.byteLength(JSON.stringify(page.textLayer));
+    } else if (candidate.textLayer !== undefined) return null;
     if (size > 16 * 1024 * 1024) return null;
     pages.push(page);
   }
@@ -209,7 +218,7 @@ async function acquire(signal: AbortSignal) {
 /** Finite per-request worker lifetime; no PDF parser runs on the Service event loop. */
 export async function readPdf(
   bytes: Uint8Array,
-  input: { pages?: string; mode?: string },
+  input: { pages?: string; mode?: string; textLayer?: boolean },
   signal: AbortSignal,
 ): Promise<PdfResult> {
   const mode = input.mode ?? 'text';
@@ -223,7 +232,8 @@ export async function readPdf(
     !Number.isSafeInteger(end) ||
     end < start ||
     end - start >= (mode === 'image' ? 4 : 20) ||
-    !['text', 'image'].includes(mode)
+    !['text', 'image'].includes(mode) ||
+    (input.textLayer && mode !== 'image')
   )
     throw new AgentError('pdf_range_invalid');
   if (
@@ -259,7 +269,13 @@ export async function readPdf(
         event.data.error ? finish(new AgentError(event.data.error)) : finish(undefined, event.data);
       if (requestSignal.aborted) abort();
       else
-        worker.postMessage({ bytes: Uint8Array.from(bytes), start, count: end - start + 1, mode });
+        worker.postMessage({
+          bytes: Uint8Array.from(bytes),
+          start,
+          count: end - start + 1,
+          mode,
+          textLayer: input.textLayer,
+        });
     });
   } finally {
     // Never release a parser slot while its original worker may still be live.

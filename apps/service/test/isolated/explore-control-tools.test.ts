@@ -52,7 +52,6 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
     'task.spawn',
     'task.message',
     'task.events',
-    'execution_evidence.read',
     ...(options.shell
       ? ['shell.execute', 'shell.stop', 'shell.read', 'shell.wait']
       : ['web_fetch']),
@@ -160,8 +159,7 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
         if (parentStep++ === 0)
           yield* call('spawn_agent', {
             preset: 'explore',
-            prompt:
-              'Read the task evidence, send the parent the exact report, and use the selected tools.',
+            prompt: 'Send the parent the exact report and use the selected tools.',
           });
         else {
           const executions = await activeStore.listExecutions('s');
@@ -189,15 +187,14 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
         childRequests.push(request);
         if (childStep++ === 0)
           yield* call('send_agent_message', { target: 'parent', content: message });
-        else if (childStep === 2) yield* call('read_execution_evidence', { limit: 10 });
-        else if (childStep === 3)
+        else if (childStep === 2)
           yield* options.shell
             ? call('shell_execute', {
                 command: 'printf explore-shell-ready; sleep 30',
                 background: true,
               })
             : call('web_fetch', { url: `http://explore.fixture.test:${web.port}/page` });
-        else if (options.shell && childStep === 4) {
+        else if (options.shell && childStep === 3) {
           const last = request.messages.filter((item) => item.role === 'tool').at(-1)!;
           const { shellId } = parseShellModelFeedback(last.content);
           const carrier = (await activeStore.listExecutions('s')).find(
@@ -314,7 +311,7 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
     const childID = carrier.childSessionId!;
     await runtime.waitForCommand(`child-start-${carrier.id}`, { timeoutMs: 5000 });
     const executions = await activeStore.listExecutions(childID);
-    for (const definitionId of ['task.message', 'execution_evidence.read'])
+    for (const definitionId of ['task.message'])
       expect(executions.find((execution) => execution.definitionId === definitionId)).toMatchObject(
         {
           status: 'succeeded',
@@ -327,23 +324,15 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
     expect(
       JSON.parse(childRequests[1]!.messages.filter((item) => item.role === 'tool').at(-1)!.content),
     ).toEqual({ accepted: true, delivery: 'queued' });
-    const evidence = childRequests
-      .flatMap((request) => request.messages)
-      .find(
-        (message) =>
-          message.role === 'tool' && message.content.includes('Recorded execution evidence,'),
-      );
-    expect(evidence).toBeDefined();
-    expect(JSON.parse(evidence!.content)).toMatchObject({
-      items: [{ tool: 'task.message', status: 'succeeded' }],
-      complete: true,
-    });
-    expect(childRequests.length).toBeGreaterThanOrEqual(4);
+    expect(
+      executions.some((execution) => execution.definitionId === 'execution_evidence.read'),
+    ).toBe(false);
+    expect(childRequests.length).toBeGreaterThanOrEqual(3);
     for (const request of childRequests) {
       const names = request.tools.map((tool) => tool.id);
-      for (const name of ['send_agent_message', 'read_execution_evidence'])
-        expect(names).toContain(name);
+      for (const name of ['send_agent_message']) expect(names).toContain(name);
       for (const name of [
+        'read_execution_evidence',
         'spawn_agent',
         'wait_agent_events',
         'ask_user',
@@ -392,7 +381,7 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
 }
 
 test(
-  'default explore continues after the send acknowledgment without a wait tool, reads evidence and fetches allowed Web content',
+  'default explore continues after the send acknowledgment without a wait tool, fetches allowed Web content',
   () => scenario(),
   20000,
 );

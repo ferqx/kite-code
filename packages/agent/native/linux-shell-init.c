@@ -604,7 +604,14 @@ static int prepare_noexec(void) {
       caps[0].effective != admin || caps[0].permitted != admin ||
       (caps[0].inheritable & ~admin) || caps[1].effective ||
       caps[1].permitted || caps[1].inheritable) return -1;
-  int failed = inspect_submounts() != 0;
+  /* With --dev, Bubblewrap can enter a second user namespace after building
+   * the mounts. Its mount namespace is then owned by the parent user namespace,
+   * where our sole CAP_SYS_ADMIN grants no authority. Clone the existing mount
+   * view into a namespace owned by this user namespace before sealing it. This
+   * runs only after P, before any business child, and never changes the PID/user
+   * namespaces, mount layout, or the capability drop below. Failure is closed. */
+  int failed = syscall(SYS_unshare, CLONE_NEWNS) != 0;
+  if (!failed && inspect_submounts() != 0) failed = 1;
   if (!failed && source_root && prepare_scaffolds() != 0) failed = 1;
   for (size_t i = 0; !failed && i < exec_count; i++)
     if (listed(exec_files[i], seal_paths, seal_count) ||

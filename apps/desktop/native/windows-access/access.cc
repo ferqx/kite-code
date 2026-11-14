@@ -760,6 +760,7 @@ static napi_value operation(napi_env env, napi_callback_info info) {
   } catch (const std::exception& error) { return failure(env, error); }
   catch (...) { p_napi_throw_error(env, "windows_access_unavailable", "windows_access_unavailable"); return nullptr; }
 }
+#include "office-access.h"
 static napi_value factory(napi_env env, napi_callback_info info) {
   std::unique_ptr<Lease> lease;
   try {
@@ -797,6 +798,10 @@ static napi_value factory(napi_env env, napi_callback_info info) {
     napi_value object; check(p_napi_create_object(env, &object));
     for (const auto& method : {std::pair<const char*, void*>("verify", nullptr), {"release", reinterpret_cast<void*>(1)}, {"preparePrivateUi", reinterpret_cast<void*>(2)}, {"verifyPrivateUi", reinterpret_cast<void*>(3)}}) {
       napi_value function; check(p_napi_create_function(env, method.first, NAPI_AUTO_LENGTH, operation, method.second, &function));
+      check(p_napi_set_named_property(env, object, method.first, function));
+    }
+    for (const auto& method : {std::pair<const char*, void*>("officeAccess", nullptr)}) {
+      napi_value function; check(p_napi_create_function(env, method.first, NAPI_AUTO_LENGTH, officeFactory, method.second, &function));
       check(p_napi_set_named_property(env, object, method.first, function));
     }
     check(p_napi_type_tag_object(env, object, &leaseTag));

@@ -36,6 +36,8 @@ import {
   type SessionChildPageProps,
   type SessionChildTabRequest,
   type SessionChildTarget,
+  type SessionFilePageProps,
+  type SessionFileTabRequest,
   SessionTabs,
   type SessionTabsModel,
   type SessionTrajectoryPageProps,
@@ -224,6 +226,7 @@ export interface SessionPageProps {
   messages: readonly Message[];
   renderMessage?: (message: Message) => ReactNode;
   renderMessageContent?: (message: Message) => ReactNode;
+  renderTurnOutputs?: React.ComponentProps<typeof Conversation>['renderTurnOutputs'];
   renderMessageAttachments?: (message: Message) => ReactNode;
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   traceTurns?: boolean;
@@ -267,7 +270,11 @@ export interface SessionPageProps {
     onClose: () => void;
   };
   /** Reveal the ordinary browser, using a verified retained page when present. */
-  browserTabRequest?: { requestId: number; createIfMissing: boolean };
+  browserTabRequest?: {
+    requestId: number;
+    createIfMissing: boolean;
+    onOpen?: (id: string) => void;
+  };
   diagnosticView?: ReactNode;
   historyPanel?: { id: string; labelledBy: string };
   historyError?: { title: string; detail: string; retry: () => void };
@@ -283,6 +290,9 @@ export interface SessionPageProps {
   browserRestoreKey?: string;
   browserPending?: boolean;
   childTabRequest?: SessionChildTabRequest;
+  fileTabRequest?: SessionFileTabRequest;
+  renderFile?: (props: SessionFilePageProps) => ReactNode;
+  closeFile?: (target: SessionFilePageProps['target']) => void;
   trajectoryTabRequest?: { requestId: number };
   renderTrajectory?: (props: SessionTrajectoryPageProps) => ReactNode;
   renderChildSession?: (props: SessionChildPageProps) => ReactNode;
@@ -305,13 +315,15 @@ export function SessionPage(props: SessionPageProps) {
       props.fileChanges !== undefined ||
       props.fileChangesContent !== undefined ||
       props.renderChildSession !== undefined ||
-      props.renderTrajectory !== undefined);
+      props.renderTrajectory !== undefined ||
+      props.renderFile !== undefined);
   const tabModel = useSessionTabs(
     hasTabs ? (props.tabsScopeKey ?? props.readingKey) : 'inactive',
     props.closeBrowser,
     hasTabs ? props.restoreBrowser : undefined,
     props.browserRestoreKey,
     props.browserPending,
+    props.closeFile,
   );
   return (
     <NativeScrollbars enabled={!props.workbench && !props.scheduledTasks}>
@@ -760,16 +772,22 @@ function SessionPageContent({
       tabModel.restoreIssue
     )
       return;
-    const key = JSON.stringify([tabsScopeKey, request.requestId]);
+    const key = JSON.stringify([
+      tabsScopeKey,
+      request.onOpen ? 'link' : 'reveal',
+      request.requestId,
+    ]);
     if (browserRequest.current === key) return;
     const page =
       tabModel.tabs.find(
         (tab) => tab.kind === 'browser' && tab.id === tabModel.restoredBrowserId,
       ) ?? tabModel.tabs.find((tab) => tab.kind === 'browser');
     if (!page && !request.createIfMissing) return;
+    const id = page?.id ?? tabModel.addBrowser();
+    if (!id) return;
     browserRequest.current = key;
     if (page) tabModel.select(page.id);
-    else tabModel.addBrowser();
+    request.onOpen?.(id);
     detailClose.current?.();
     changeTabsOpen(true);
   }, [
@@ -889,6 +907,32 @@ function SessionPageContent({
   }, [
     props.trajectoryTabRequest,
     props.renderTrajectory,
+    props.loading,
+    hasTabs,
+    tabsScopeKey,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+    changeTabsOpen,
+  ]);
+  const fileOpener = useRef(tabModel.openFile);
+  fileOpener.current = tabModel.openFile;
+  const fileCloser = useRef(props.closeFile);
+  fileCloser.current = props.closeFile;
+  const handledFileRequest = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    const request = props.fileTabRequest;
+    if (!hasTabs || !request || props.loading || tabModel.restoring || tabModel.restoreIssue)
+      return;
+    if (handledFileRequest.current !== undefined && request.requestId <= handledFileRequest.current)
+      return;
+    handledFileRequest.current = request.requestId;
+    const opened = fileOpener.current(request.target, request.title);
+    if (!opened) fileCloser.current?.(request.target);
+    setTabLimitKey(opened ? undefined : tabsScopeKey);
+    detailClose.current?.();
+    changeTabsOpen(true);
+  }, [
+    props.fileTabRequest,
     props.loading,
     hasTabs,
     tabsScopeKey,
@@ -1285,6 +1329,7 @@ function SessionPageContent({
       messages={messages}
       renderMessage={props.renderMessage}
       renderMessageContent={props.renderMessageContent}
+      renderTurnOutputs={props.renderTurnOutputs}
       renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}
       traceTurns={props.traceTurns}
@@ -1703,6 +1748,7 @@ function SessionPageContent({
                       present={tabsPresent && !props.covered && !props.detailPanel}
                       renderBrowser={props.renderBrowser}
                       renderChildSession={props.renderChildSession}
+                      renderFile={props.renderFile}
                       renderTrajectory={props.renderTrajectory}
                       onChildSessionChange={props.onChildSessionChange}
                       changes={
