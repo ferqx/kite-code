@@ -40,6 +40,7 @@ test('quality prepares Web exports without install scripts and retains every qua
     .map((step) => step.run)
     .filter(Boolean);
   expect(commands).toEqual([
+    'echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/kite-bun-install-cache" >> "$GITHUB_ENV"',
     'bun install --frozen-lockfile --ignore-scripts',
     'bun run build',
     'bun run typecheck',
@@ -69,7 +70,10 @@ test('quality caches only Bun downloads by exact platform, runtime and dependenc
   const root = resolve(import.meta.dir, '../../..');
   const workflow = parse(readFileSync(join(root, '.github/workflows/required.yml'), 'utf8'));
   const quality = workflow.jobs.quality;
-  expect(quality.env.BUN_INSTALL_CACHE_DIR).toBe('${{ runner.temp }}/kite-bun-install-cache');
+  expect(quality.env).toBeUndefined();
+  expect(quality.steps[0].run).toBe(
+    'echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/kite-bun-install-cache" >> "$GITHUB_ENV"',
+  );
   const caches = quality.steps.filter((step: { uses?: string }) =>
     step.uses?.startsWith('actions/cache@'),
   );
@@ -1073,4 +1077,21 @@ test('native stdio schedules the real host logged-shell tests before the complet
       ),
     ).toBe(true);
   }
+});
+
+test('required workflow prepares runner paths inside steps without expanding triggers', () => {
+  const root = resolve(import.meta.dir, '../../..');
+  const workflow = parse(readFileSync(join(root, '.github/workflows/required.yml'), 'utf8'));
+  expect(workflow.on).toEqual({
+    pull_request: null,
+    push: { branches: ['main', 'compact', 'man'] },
+  });
+  for (const job of Object.values(workflow.jobs) as { env?: Record<string, string> }[]) {
+    for (const value of Object.values(job.env ?? {}))
+      expect(value).not.toMatch(/\$\{\{[^}]*\brunner\./u);
+  }
+  expect(workflow.jobs.unit.env).toBeUndefined();
+  expect(workflow.jobs.unit.steps[0].run).toBe(
+    'echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/kite-playwright-browsers" >> "$GITHUB_ENV"',
+  );
 });

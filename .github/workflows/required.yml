@@ -34,9 +34,9 @@ jobs:
     name: quality
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/kite-bun-install-cache
     steps:
+      - name: Prepare Bun cache path
+        run: echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/kite-bun-install-cache" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
@@ -68,9 +68,9 @@ jobs:
     name: unit
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/kite-playwright-browsers
     steps:
+      - name: Prepare browser path
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/kite-playwright-browsers" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
