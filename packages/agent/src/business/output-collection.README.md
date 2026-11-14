@@ -4,6 +4,12 @@
 
 宿主收集、模型轮次与不可变快照分离的取舍见[Agent Note](../../../../.agents/notes/implemented/architecture/2026-11-11-host-output-snapshots.md)。
 
+## 同任务同路径的当前产物
+
+仅原轮次 Run 已 completed／failed／cancelled 且不再 active 时，列表在分页前按原 Store／Session／Run 与完整相对路径投影当前产物，不按 basename、发布时间或 UUID 推断版本。只有两份产物均来自成功 producer、collection 完整 ready、producer result revision 匹配，且后续根 Tool 的 `execution.planned` cursor 晚于旧 producer 的 `completed_cursor`，才用后续产物替代旧卡。同一 Tool 内并发子任务、重叠执行、缺少原始顺序证明、不同 Run／目录以及 legacy／Fork 不据名称猜测替代。轮次运行中、等待、取消中或 interrupted 尚可恢复时保留全部产物；单次模型调用结束不等于轮次结束。失败、unknown 和未完整收集不能替代既有成功交付；旧 collector 迟到或重试不改变 producer 因果顺序。三产物偏序中只隐藏有明确成功后继的记录，仍保留互相并发的后继。
+
+这是可重算的列表投影，不删除 delivery 或 Artifact。已有精确 `OutputFileTarget` 继续解析原字节，不暗中重定向到另一个版本；重新读取历史列表取得当前投影。客户端须按同一 revision 原子刷新已加载分页，不能把新的去重结果追加到旧列表而复活旧卡。
+
 ## 生命周期
 
 宿主在平台准备开始前以 `prepareOutputStaging` 创建 Profile coordination 下私有持久 base。每个真实 `shell.command` Job 在 spawn 前创建 `out`，登记原 producer、准确父 Tool/Run 和目录身份，再注入 `KITE_OUTPUT_DIR`。平台仅移交已登记暂存目录的递归删除责任，进程、supervisor、IPC 和真实停止证明不变。

@@ -115,8 +115,14 @@ test('execution observation progresses while an admission permission read is hel
             sessionId: 's',
             originStoreId: 'store',
             originCommandId: 'work',
-            isActive: cursor !== '3',
-            status: cursor === '3' ? 'completed' : 'running',
+            isActive: !['3', '5', '6', '7'].includes(cursor),
+            status:
+              (
+                { '3': 'completed', '5': 'failed', '6': 'cancelled', '7': 'interrupted' } as Record<
+                  string,
+                  string
+                >
+              )[cursor] ?? 'running',
           },
         ],
       };
@@ -157,7 +163,9 @@ test('execution observation progresses while an admission permission read is hel
     cursor = '3';
     const event = { ...sessionChange('s', cursor), type: 'run.finished', objectId: 'r' };
     const terminal = performance.now();
+    const outputRevision = caller.state().outputFilesRevision!;
     await observe.onChange?.(event);
+    expect(caller.state().outputFilesRevision).toBe(outputRevision + 1);
     await terminalReady;
     expect(views).toBeGreaterThan(before);
     expect(caller.state().executionObservation).toMatchObject({
@@ -172,12 +180,38 @@ test('execution observation progresses while an admission permission read is hel
     expect(caller.state().selection?.runs[0]).toMatchObject({ id: 'r', status: 'running' });
     cursor = '4';
     await observe.onChange?.({ ...event, cursor, type: 'run.started' });
+    expect(caller.state().outputFilesRevision).toBe(outputRevision + 2);
+    await observe.onChange?.({ ...event, sessionId: 'foreign' });
+    expect(caller.state().outputFilesRevision).toBe(outputRevision + 2);
     await Bun.sleep(0);
     expect(caller.state().executionObservation).toMatchObject({
       observedCursor: '4',
       runs: [{ id: 'r', status: 'running', isActive: true }],
     });
     expect(caller.state().selection?.permissions).toBeUndefined();
+    for (const [nextCursor, status] of [
+      ['5', 'failed'],
+      ['6', 'cancelled'],
+    ] as const) {
+      cursor = nextCursor;
+      const beforeRevision = caller.state().outputFilesRevision!;
+      await observe.onChange?.({ ...event, cursor, type: 'run.finished' });
+      await Bun.sleep(20);
+      expect(caller.state().outputFilesRevision).toBe(beforeRevision + 1);
+      expect(caller.state().executionObservation?.runs[0]).toMatchObject({
+        status,
+        isActive: false,
+      });
+    }
+    cursor = '7';
+    const beforeInterrupted = caller.state().outputFilesRevision!;
+    await observe.onChange?.({ ...event, cursor, type: 'run.interrupted' });
+    await Bun.sleep(20);
+    expect(caller.state().outputFilesRevision).toBe(beforeInterrupted);
+    expect(caller.state().executionObservation?.runs[0]).toMatchObject({
+      status: 'interrupted',
+      isActive: false,
+    });
     console.log(
       JSON.stringify({
         measurement: 'native-held-admission',

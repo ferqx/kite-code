@@ -311,3 +311,5 @@ Cookie Browser 也提供 `listBackgroundExecutions` / `listAllBackgroundExecutio
 `output_files` 能力提供 `queryOutputFiles/resolveOutputFile/retryOutputCollection`，目标始终携带 Store、Session、fileId 和原 locator；列表只读固定来源元数据，不递归扩展轨迹或猜测 latest。分页最多50项，已指定 Run 只展示原 Run 产物；Fork 下载沿验证后的原 Artifact Session。响应核当前连接代次、目标和引用大小/MIME，不改变原模型工具或协议版本。
 
 `readOutputFileStream` 使用认证 Artifact HTTP 二进制流，核全部响应头和总长；调用方必须只写临时文件、增量核完整 SHA/size 后发布，并在失败、提前退出或取消时调用 cancel。SDK 不把文件整体塞进 JSON/base64，也不将 Blob 路径交给 Renderer。`prepareInputFromOutput` 复制精确选择到新合法 input import，`prepareWorkingInputs` 在命令提交前创建独立工作副本。POST 不自动重试或更换 ID，未知结果按原身份查询与重入。实际闭环与不覆写编辑行为由[真实 HTTP 回归](../../apps/service/test/isolated/output-files.test.ts)验证。
+
+Native 本地 PDF 只读预览使用 `renderLocalPdfSnapshot`，仅允许明确回环 IP endpoint，沿现有认证、禁止重定向、连接代际与 OutputPdfPage 响应检查。快照请求不包含磁盘路径、写回授权或产物身份；服务端仍验证有界 bytes/hash、会话与 Store。它是 UI 读取适配，不是新增 Agent 工具或协议版本。

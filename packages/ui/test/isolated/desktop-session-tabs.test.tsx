@@ -1470,7 +1470,9 @@ test('file tabs deduplicate full Store Session file identity and share the eight
         visible
         changes={null}
         onClose={() => {}}
-        renderFile={({ target }) => <p data-file={target.fileId}>{target.sessionId}</p>}
+        renderFile={({ target }) => (
+          <p data-file={'fileId' in target ? target.fileId : target.handleId}>{target.sessionId}</p>
+        )}
       />
     );
   }
@@ -1502,4 +1504,56 @@ test('file tabs deduplicate full Store Session file identity and share the eight
   });
   expect(document.querySelectorAll('[data-file]')).toHaveLength(1);
   expect(document.querySelector('[data-file]')?.getAttribute('data-file')).toBe('file');
+});
+
+test('local read handles remain distinct from deliveries and release only on explicit tab close', async () => {
+  let model!: SessionTabsModel;
+  const released: string[] = [];
+  function Harness() {
+    model = useSessionTabs('local-preview', undefined, undefined, undefined, false, (target) => {
+      if ('handleId' in target) released.push(target.handleId);
+    });
+    return (
+      <SessionTabs
+        model={model}
+        visible
+        changes={null}
+        onClose={() => {}}
+        renderFile={({ target }) => <p>{'handleId' in target ? target.handleId : target.fileId}</p>}
+      />
+    );
+  }
+  root = createRoot(document.body);
+  await act(() => root!.render(<Harness />));
+  const local = {
+    kind: 'local-preview' as const,
+    storeId: 's',
+    sessionId: 'session',
+    handleId: 'same',
+    name: 'report.pdf',
+    mediaType: 'application/pdf',
+  };
+  await act(() => {
+    expect(model.openFile(local, local.name)).toBe(true);
+  });
+  const id = model.active;
+  await act(() => {
+    model.openFile(
+      {
+        storeId: 's',
+        sessionId: 'session',
+        fileId: 'same',
+        locator: { kind: 'delivery', key: 'delivery/same' },
+      },
+      'saved.pdf',
+    );
+  });
+  expect(model.tabs).toHaveLength(2);
+  expect(released).toEqual([]);
+  await act(() => model.select(id));
+  expect(released).toEqual([]);
+  await act(() => model.closeTab(id));
+  expect(released).toEqual(['same']);
+  await act(() => model.closeTab(id));
+  expect(released).toEqual(['same']);
 });

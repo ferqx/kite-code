@@ -212,7 +212,7 @@ export async function createPdfDocument(input: {
     const draft = join(directory, 'output.pdf');
     await writeFile(draft, output, { mode: 0o600 });
     signal.throwIfAborted();
-    await exportDocument(draft, input.out, signal, directory);
+    await exportDocument(draft, input.out, signal);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { CallerCommandRequest } from '@kite-ai/client';
 import { canonicalCallerCommandRequest } from '@kite-ai/client';
 import { initializeDesktopBuildEnvironment } from '../../../../scripts/development/windows-desktop-environment';
@@ -101,7 +102,12 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
           },
           attachmentBytes,
         );
-        input = { ...input, files: [file] };
+        const local = join(f.root, 'direct-reference.txt');
+        writeFileSync(local, 'local input, no upload');
+        input = {
+          ...input,
+          files: [file, { name: 'direct-reference.txt', uri: pathToFileURL(local).href }],
+        };
       }
       const helper = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],

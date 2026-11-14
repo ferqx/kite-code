@@ -2,7 +2,7 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -26,7 +26,7 @@ const finish = {
   usage: { inputTokens: 1, outputTokens: 1 },
 } as const;
 async function fixture(
-  command: string,
+  command: string | string[],
   fault?: {
     afterRef?: number;
     beforeRef?: number;
@@ -36,7 +36,8 @@ async function fixture(
     denyAfterAttempt?: number;
   },
 ) {
-  const root = await mkdtemp(join(tmpdir(), 'kite-output-real-'));
+  // Match the production coordination root: macOS tmpdir may use the /var alias.
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'kite-output-real-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
   let runtime!: AgentRuntime;
@@ -86,15 +87,15 @@ async function fixture(
     async dispose() {},
   };
   const responses: ModelEvent[][] = [
-    [
+    ...(typeof command === 'string' ? [command] : command).map((text, index) => [
       {
-        type: 'tool_call',
+        type: 'tool_call' as const,
         name: 'shell_execute',
-        id: 'generate',
-        arguments: JSON.stringify({ command }),
+        id: typeof command === 'string' ? 'generate' : `generate-${index}`,
+        arguments: JSON.stringify({ command: text }),
       },
-      { ...finish, reason: 'tool_calls' },
-    ] as ModelEvent[],
+      { ...finish, reason: 'tool_calls' as const },
+    ]),
     [{ type: 'text_delta', text: 'Done' }, finish],
   ];
   const model = createFixedModel([...responses, ...responses]);
@@ -879,3 +880,146 @@ test('refusal on a later collection attempt keeps already delivered files visibl
     await f.close();
   }
 }, 20000);
+
+test('serial same-path deliveries project the latest complete successor without deleting history', async () => {
+  const f = await fixture([
+    'printf original > "$KITE_OUTPUT_DIR/report.txt"; mkdir "$KITE_OUTPUT_DIR/sub"; printf nested > "$KITE_OUTPUT_DIR/sub/report.txt"',
+    'printf corrected > "$KITE_OUTPUT_DIR/report.txt"',
+    'printf final > "$KITE_OUTPUT_DIR/report.txt"',
+  ]);
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+    await f.wait(
+      (p) => p.collections.length === 3 && p.collections.every((c) => c.state === 'ready'),
+    );
+    const db = new Database(join(f.profile.dataRoot, 'test/core.db'));
+    db.run('PRAGMA busy_timeout = 5000');
+    try {
+      const rows = db
+        .query<{ key: string; json: string }, []>(
+          "SELECT key,json FROM extension_record WHERE key LIKE 'delivery/%'",
+        )
+        .all();
+      const records = rows.map((r) => ({ ...JSON.parse(r.json), key: r.key }));
+      const plain = records.filter((r) => r.relativePath === 'report.txt');
+      const order = (id: string) =>
+        db
+          .query<{ completed_cursor: number }, [string]>(
+            'SELECT completed_cursor FROM execution WHERE id=?',
+          )
+          .get(id)!.completed_cursor;
+      plain.sort((a, b) => order(a.sourceExecutionId) - order(b.sourceExecutionId));
+      const [old, middle, latest] = plain;
+      const ids = async () => (await f.page()).items.map((i) => i.fileId);
+      expect(await ids()).toContain(latest.fileId);
+      expect(await ids()).not.toContain(old.fileId);
+      expect((await ids()).length).toBe(2); // Same basename in another directory stays independent.
+      const oldTarget = {
+        storeId: f.base.expectedStoreId,
+        sessionId: 's',
+        fileId: old.fileId,
+        locator: { kind: 'delivery' as const, key: old.key },
+      };
+      expect(
+        (await f.runtime.resolveOutputFile({ ...f.base, target: oldTarget })).reference.hash,
+      ).toBe(old.reference.hash);
+      // A turn is a Run, not an individual model call: do not fold its live outputs.
+      for (const state of [
+        'running',
+        'waiting_interaction',
+        'waiting_execution',
+        'cancelling',
+        'interrupted',
+      ]) {
+        db.query('UPDATE run SET status=?,is_active=1 WHERE id=?').run(state, old.sourceRunId);
+        expect((await ids()).length).toBe(4);
+      }
+      db.query("UPDATE run SET status='interrupted',is_active=0 WHERE id=?").run(old.sourceRunId);
+      expect((await ids()).length).toBe(4);
+      for (const state of ['completed', 'failed', 'cancelled']) {
+        db.query('UPDATE run SET status=?,is_active=0 WHERE id=?').run(state, old.sourceRunId);
+        expect((await ids()).length).toBe(2);
+      }
+      db.query("UPDATE run SET status='completed',is_active=0 WHERE id=?").run(old.sourceRunId);
+      // A delayed old collector timestamp cannot replace the causally later producer.
+      db.query(
+        "UPDATE extension_record SET json=json_set(json,'$.publishedAt','2999-01-01T00:00:00Z') WHERE key=?",
+      ).run(old.key);
+      expect(await ids()).not.toContain(old.fileId);
+      // Incomplete / failed collection and unknown producer cannot suppress a known output.
+      for (const state of ['pending', 'failed']) {
+        db.query("UPDATE extension_record SET json=json_set(json,'$.state',?) WHERE key=?").run(
+          state,
+          latest.collectionId,
+        );
+        expect(await ids()).toContain(middle.fileId);
+      }
+      db.query("UPDATE extension_record SET json=json_set(json,'$.state','ready') WHERE key=?").run(
+        latest.collectionId,
+      );
+      db.query("UPDATE execution SET state='outcome_unknown' WHERE id=?").run(
+        latest.sourceExecutionId,
+      );
+      expect(await ids()).toContain(middle.fileId);
+      db.query("UPDATE execution SET state='succeeded' WHERE id=?").run(latest.sourceExecutionId);
+      // Counterexample: overlapping producers lack causal succession, despite ordered plans.
+      const completed = order(old.sourceExecutionId);
+      db.query('UPDATE execution SET completed_cursor=? WHERE id=?').run(
+        order(latest.sourceExecutionId) + 1,
+        old.sourceExecutionId,
+      );
+      expect(await ids()).toContain(old.fileId);
+      expect(await ids()).toContain(latest.fileId);
+      db.query('UPDATE execution SET completed_cursor=? WHERE id=?').run(
+        completed,
+        old.sourceExecutionId,
+      );
+      // Partial order A -> B and A -> C, but B overlaps C: only A is replaced.
+      const middleCompleted = order(middle.sourceExecutionId);
+      db.query('UPDATE execution SET completed_cursor=? WHERE id=?').run(
+        order(latest.sourceExecutionId) + 1,
+        middle.sourceExecutionId,
+      );
+      expect(await ids()).not.toContain(old.fileId);
+      expect(await ids()).toContain(middle.fileId);
+      expect(await ids()).toContain(latest.fileId);
+      db.query('UPDATE execution SET completed_cursor=? WHERE id=?').run(
+        middleCompleted,
+        middle.sourceExecutionId,
+      );
+      // Missing historical completion evidence is not permission to guess a replacement.
+      db.query('UPDATE execution SET completed_cursor=NULL WHERE id=?').run(old.sourceExecutionId);
+      expect(await ids()).toContain(old.fileId);
+      db.query('UPDATE execution SET completed_cursor=? WHERE id=?').run(
+        completed,
+        old.sourceExecutionId,
+      );
+      // Winner filtering precedes pagination, so older pages cannot resurrect the old card.
+      let cursor: string | undefined;
+      const paged: string[] = [];
+      do {
+        const page = await f.runtime.queryOutputFiles({
+          ...f.base,
+          limit: 1,
+          ...(cursor ? { beforeKey: cursor } : {}),
+        });
+        paged.push(...page.items.map((i) => i.fileId));
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(paged).not.toContain(old.fileId);
+      expect(new Set(paged).size).toBe(2);
+    } finally {
+      db.close();
+    }
+    await f.run('work-next');
+    await f.runtime.waitForCommand('work-next', { timeoutMs: 10000 });
+    const otherRun = await f.wait(
+      (p) => p.collections.length === 6 && p.collections.every((c) => c.state === 'ready'),
+    );
+    expect(otherRun.items.length).toBe(4);
+    expect(new Set(otherRun.items.map((i) => i.ownerRunId)).size).toBe(2);
+  } finally {
+    await f.close();
+  }
+}, 30000);

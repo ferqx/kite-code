@@ -25,7 +25,7 @@
 
 三个文件检索工具已移除，分析角色通过准确的 `shell.execute@1`／`shell.launch@1` 查询。只读要求作为可信任务指导进入 `explore` 的模型输入，并随原配置快照冻结；工具集合继续收窄，Shell 则继承父会话当前权限策略和沙箱。`cat`、复合命令和管道不因角色身份被固定命令表拒绝，仍按实际内容走普通权限链。只读角色不提供独立的 Shell 禁写／禁网保证，Full 下只读属于模型须遵循的任务约束。[默认角色回归](../../../../../apps/service/test/isolated/default-task-roles.test.ts)核工具交集，[指导输入回归](../../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核实际子模型输入，[Service 检索回归](../../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核继承的三模式执行。
 
-`general` 的模型工具来自父当前选中集合，继续去除根专属创建、邮箱等待和 `ask_user`。`explore` 在原准确只读绑定外增加 `builtin.task/task.message@1`、`builtin.shell/shell.stop@1`、`builtin.execution-evidence/execution_evidence.read@1`、`builtin.web/web_fetch@1`；每项仍需当前父集合及准确定义支持，不补 `task.list/follow_up/interrupt`，Skills 和 MCP 继承策略保持。消息成功入队即返回原回执，不再等待收件确认，也不自行续轮；子 Agent 的模型目录和实际内置调用入口均不开放 `task.events@1`，主 Agent 保留观察能力。内部静态注册不授予子模型调用资格。Shell 停止须核原句柄与真实终态，证据读取不重跑效果，网页继续受联网权限约束。
+`general` 的模型工具来自父当前选中集合，继续去除根专属创建、邮箱等待和 `ask_user`。`explore` 在原准确只读绑定外增加 `builtin.task/task.message@1`、`builtin.shell/shell.stop@1`、`builtin.web/web_fetch@1`；每项仍需当前父集合及准确定义支持，不补 `task.list/follow_up/interrupt`，Skills 和 MCP 继承策略保持。消息成功入队即返回原回执，不再等待收件确认，也不自行续轮；子 Agent 的模型目录和实际内置调用入口均不开放 `task.events@1`，主 Agent 保留观察能力。内部静态注册不授予子模型调用资格。Shell 停止须核原句柄与真实终态，网页继续受联网权限约束。
 
 当前版本同一协作者的续作与冷恢复保留 role／Model、冻结工具集合和原 Source。[Runtime](../../runtime.ts)重读并核准确 carrier、Store、直接父子及根会话关系，再向 [Service](../../../../../apps/service/src/child-configuration.ts)提供原配置；调用者不能伪造这份宿主输入。当前父工具收窄、来源变化或配置不能准确绑定时明确拒绝，不回退其他角色、模型或较宽工具，未知效果不重跑。
 
@@ -69,7 +69,7 @@ list_agents 按首次创建 Command 的不可变 seq 每个 Session 只列一次
 
 成功结果及历史可安全读取的失败结果可包含宿主从准确 Tool 回执封存的 details.evidence。失败不撤销此前成功的工具；原失败原因和状态保留，失败结果不采用半成品助手回答作为完成报告。失败历史不可读时只缺失预览，不推断零动作；取消和未知路径不增加历史读取。工具统计、来源版本和有界原文供父级核验，child 总结不能替换事实；接纳成功也不证明结论正确。完整正文和独立核查仍由原 Source、Artifact 与权限合同保障。
 
-实际冻结的内置 Shell 注册及原 Tool→Job 归属匹配时，预览另附命令、请求权限、真实 Job 状态／退出码和有限 stdout／stderr。实际执行范围仅在已有派发记录提供时呈现；请求范围不冒充实际范围，缺输出不表示零输出，截断和省略明确标记。原 Tool／Job 若保存了审核决定、人类答案接纳或策略依据，只附其有限状态／决定／依据类型，不复制风险理由、私有证明或任务授权结论；没有这些事实时省略，不能从已派发、Full 或超时继续伪造模型批准。它与文件观察共用有界预览预算，不公开进程私有信息，也不推断任务合规、服务是否监听或业务已完成。父当前 Run 可通过 [执行证据工具](../../business/execution-evidence/README.md)重新读取自己准确 carrier 的公开结果；`list_agents` 继续提供完整报告正文，不代替这些宿主证据。
+实际冻结的内置 Shell 注册及原 Tool→Job 归属匹配时，预览另附命令、请求权限、真实 Job 状态／退出码和有限 stdout／stderr。实际执行范围仅在已有派发记录提供时呈现；请求范围不冒充实际范围，缺输出不表示零输出，截断和省略明确标记。原 Tool／Job 若保存了审核决定、人类答案接纳或策略依据，只附其有限状态／决定／依据类型，不复制风险理由、私有证明或任务授权结论；没有这些事实时省略，不能从已派发、Full 或超时继续伪造模型批准。它与文件观察共用有界预览预算，不公开进程私有信息，也不推断任务合规、服务是否监听或业务已完成。[执行记录宿主接口](../../business/execution-evidence/README.md)保留，但不再向父模型提供独立回执检索工具；`list_agents` 继续提供完整报告正文，不代替这些宿主证据。
 
 ## 实现与验证边界
 

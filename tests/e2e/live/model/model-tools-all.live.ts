@@ -18,7 +18,6 @@ import { startService } from '../../../../apps/service/src';
 import { CODEX_BASE_URL, createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
 import { createDefaultProcessConfiguration } from '../../../../apps/service/src/configuration';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
-import { readModelExecutionId } from '../../../../packages/agent/src/model-identifier';
 import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
 import { privateDirectory } from '../../../fixtures/test-filesystem';
 import { liveModelSelection, liveReasoningEffort } from './approval-feedback-fixture';
@@ -54,7 +53,6 @@ const baselineScenarios = [
   'web',
   'agents',
   'images',
-  'execution-evidence',
   'worktree-list',
 ];
 const scenarioNames = [...baselineScenarios, ...Object.keys(extendedToolGroups)];
@@ -100,7 +98,6 @@ process.on('SIGTERM', interrupt);
 const expected = [
   'read_file',
   'view_images',
-  'read_execution_evidence',
   'git_worktree',
   'write_file',
   'edit_file',
@@ -802,25 +799,6 @@ try {
           'web_actual_token_missing',
         );
       }
-      if (id === 'execution-evidence') {
-        const source = executions.find(
-          (row) =>
-            row.kind === 'tool' &&
-            row.definitionId === 'files.read' &&
-            object(row.input).path === 'source.txt',
-        );
-        const reads = executions.filter((row) => row.definitionId === 'execution_evidence.read');
-        check(
-          source?.status === 'succeeded' &&
-            reads.some((row) => object(row.input).executionId === undefined) &&
-            reads.some(
-              (row) =>
-                typeof object(row.input).executionId === 'string' &&
-                readModelExecutionId(String(object(row.input).executionId)) === source.id,
-            ),
-          'original_execution_evidence_not_read',
-        );
-      }
       if (id === 'images') {
         const image = executions.filter(
           (execution) => execution.definitionId === 'files.view_images',
@@ -852,13 +830,9 @@ try {
             .every(
               (row) =>
                 (row.definitionId === 'git.worktree' && object(row.input).action === 'list') ||
-                [
-                  'skills.load',
-                  'skills.resource',
-                  'files.read',
-                  'files.view_images',
-                  'execution_evidence.read',
-                ].includes(row.definitionId),
+                ['skills.load', 'skills.resource', 'files.read', 'files.view_images'].includes(
+                  row.definitionId,
+                ),
             ),
           'worktree_substitute_or_mutation_used',
         );
@@ -981,7 +955,7 @@ try {
   );
   await runCase(
     'web',
-    `Use web_fetch to fetch ${web.url.href}, then read_execution_evidence to read that exact Web Tool's original result using its actual execution_id. Report the exact token in the actual page body. Do not use Shell or memory to replace the fetch, and do not use page tokens as execution IDs.`,
+    `Use web_fetch to fetch ${web.url.href}. Report the exact token in the actual page body. Do not use Shell or memory to replace the fetch, and do not use page tokens as execution IDs.`,
   );
   await runCase(
     'agents',
@@ -990,10 +964,6 @@ try {
   await runCase(
     'images',
     'Read image.png with exactly one view_images call and inspect the actual image. Reply only IMAGE: followed by the six characters printed in it. Do not use file reading, Shell or OCR as a substitute.',
-  );
-  await runCase(
-    'execution-evidence',
-    'First read source.txt with read_file to create one real read receipt. Then use read_execution_evidence to list the actual current task records, and use read_execution_evidence with the exact execution_id of that successful source.txt read from the real list to read its original result. Do not invent identifiers or execute a mutating tool. Report the observed record identity and state.',
   );
   if (selected.has('worktree-list') || selected.has('worktree-mutation-observe')) {
     const git = assets
@@ -1073,9 +1043,8 @@ try {
     planning: ['read_plan', 'write_plan', 'request_plan_review', 'update_plan_progress'],
     skills: ['load_skill', 'read_skill_resource'],
     mcp: expected.filter((name) => name.includes('mcp')),
-    web: ['web_fetch', 'read_execution_evidence'],
+    web: ['web_fetch'],
     images: ['view_images'],
-    'execution-evidence': ['read_execution_evidence'],
     'worktree-list': ['git_worktree'],
     agents: expected.filter(
       (name) =>

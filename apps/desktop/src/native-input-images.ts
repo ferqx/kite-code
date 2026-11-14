@@ -42,6 +42,7 @@ export function useNativeInputImages(
   bridge: NativeBridge | undefined,
   generation: number | undefined,
   storeId: string | undefined,
+  localFileReferences = false,
 ) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: Derived content cannot cross a connection, generation or Store boundary.
   const previews = useMemo(() => new NativeImagePreviews(), [bridge, generation, storeId]);
@@ -324,7 +325,7 @@ export function useNativeInputImages(
       { once: true },
     );
     const prepare = async () => {
-      const result: { name: string; uri: string; id: string; prepared: true }[] = [];
+      const result: { name: string; uri: string; id: string; prepared?: boolean }[] = [];
       const check = () => {
         controller.signal.throwIfAborted();
         if (
@@ -337,8 +338,13 @@ export function useNativeInputImages(
       try {
         for (const [index, file] of selected.entries()) {
           check();
-          if (file.size > 256 * 1024 * 1024) throw Error('input_file_too_large');
           const id = crypto.randomUUID();
+          const reference = references[index];
+          if (localFileReferences && reference?.uri.startsWith('file://')) {
+            result.push({ ...reference, id });
+            continue;
+          }
+          if (file.size > 256 * 1024 * 1024) throw Error('input_file_too_large');
           ids.push(id);
           preparedFiles.current.add(id);
           await bridge.request({
@@ -364,7 +370,12 @@ export function useNativeInputImages(
           check();
           await bridge.request({ method: 'input.files.finish', generation, id });
           check();
-          result.push({ ...references[index]!, id, prepared: true });
+          result.push({
+            name: reference?.name || file.name,
+            uri: reference?.uri || `file:///kite-prepared/${id}/${encodeURIComponent(file.name)}`,
+            id,
+            prepared: true,
+          });
         }
         check();
         ready = true;

@@ -57,6 +57,14 @@ export type OfficePreviewControl =
   | { kind: 'presentation'; value: boolean };
 export type NativeOutputRequest =
   | {
+      method: 'localPreview.open';
+      generation: number;
+      handleId: string;
+      previewId: string;
+      bounds: { x: number; y: number; width: number; height: number };
+    }
+  | { method: 'localPreview.release' | 'localPreview.check'; generation: number; handleId: string }
+  | {
       method: 'outputs.preview.request.result';
       generation: number;
       previewId: string;
@@ -133,6 +141,14 @@ export type NativeOutputRequest =
       context?: OfficeEditContext;
     };
 export type NativeOutputResult =
+  | {
+      kind: 'messageFile.preview';
+      handleId: string;
+      name: string;
+      mediaType: string;
+      storeId: string;
+      sessionId: string;
+    }
   | { kind: 'outputs.preview.interaction'; interaction: OfficePreviewInteraction }
   | {
       kind: 'outputs.pdf.page';

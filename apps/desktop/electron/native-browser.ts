@@ -31,6 +31,7 @@ import { createBrowserNavigation } from './browser-navigation';
 import { BrowserPagePreflightError, type NativeBrowserPageHost } from './browser-page-host';
 import { createBrowserPaneFrame } from './browser-pane-frame';
 import { browserTypingCursorScript } from './browser-typing-cursor';
+import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
 import { assertNativeSender } from './native-ipc';
 import { addNativeWindowView } from './native-overlay-layer';
 import { type NativeRootWindow as BrowserWindow, onNativeRootWillShow } from './native-root-window';
@@ -1358,15 +1359,11 @@ export function registerNativeBrowserIpc(options: {
       withdraw(tab);
       return;
     }
-    const x = Math.max(0, Math.min(width, Math.ceil(bounds.x * zoom))),
-      y = Math.max(0, Math.min(height, Math.ceil(bounds.y * zoom))),
-      right = Math.min(width, Math.floor((bounds.x + bounds.width) * zoom)),
-      bottom = Math.min(height, Math.floor((bounds.y + bounds.height) * zoom));
-    if (right <= x || bottom <= y) {
+    const next = nativeContentBounds(bounds, zoom, width, height);
+    if (!next) {
       withdraw(tab);
       return;
     }
-    const next = { x, y, width: right - x, height: bottom - y };
     paneFrame.sync(
       bounds,
       projected?.layout ?? anchor.layout,
@@ -2150,14 +2147,14 @@ export function registerNativeBrowserIpc(options: {
     }
     owner.send(nativeBrowserPresentationChannel, true);
   };
-  window.on('resize', resize);
-  const applicationRoot = rootView();
-  applicationRoot?.on('bounds-changed', resize);
+  const unwatchWindow = watchNativeContentWindow(window, rootView(), {
+    resize,
+    hide: suspendWindow,
+    minimize,
+    show: resume,
+    restore: resume,
+  });
   const unwatchWillShow = onNativeRootWillShow(window, beforeShow);
-  window.on('hide', suspendWindow);
-  window.on('minimize', minimize);
-  window.on('show', resume);
-  window.on('restore', resume);
   const dispose = () => {
     if (disposed) return;
     disposed = true;
@@ -2180,13 +2177,8 @@ export function registerNativeBrowserIpc(options: {
     owner.off('did-start-navigation', navigation);
     owner.off('render-process-gone', replaceRenderer);
     owner.off('preload-error', replaceRenderer);
-    window.off('resize', resize);
-    applicationRoot?.off('bounds-changed', resize);
+    unwatchWindow();
     unwatchWillShow();
-    window.off('hide', suspendWindow);
-    window.off('minimize', minimize);
-    window.off('show', resume);
-    window.off('restore', resume);
   };
   window.once('closed', dispose);
   return dispose;

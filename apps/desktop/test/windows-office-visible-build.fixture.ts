@@ -3,7 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const repo = resolve(import.meta.dir, '../../..');
-const out = resolve(repo, '../visible-inline-1/app');
+const output = process.argv.find((arg) => arg.startsWith('--out='))?.slice(6);
+const out = output ? resolve(output) : resolve(repo, '../visible-inline-1/app');
 await mkdir(out, { recursive: true });
 for (const [entry, target] of [
   ['windows-office-visible.fixture.ts', 'node', 'main.cjs'],

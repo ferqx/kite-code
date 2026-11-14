@@ -175,7 +175,8 @@ export function createShellToolBehaviors(options: {
                   label: '本会话内相同命令',
                   details: [
                     `Session: ${request.sessionId}`,
-                    `Command: ${typeof input.command === 'string' ? input.command : '(exact frozen invocation)'}`,
+                    // Presentation is bounded; commandDigest and the review request retain full input.
+                    `Command: ${typeof input.command === 'string' ? (input.command.length > 8000 ? `${input.command.slice(0, 8000)}… [truncated]` : input.command) : '(exact frozen invocation)'}`,
                     `Tool: ${definition.id}@${definition.version}`,
                     'Only the exact command, execution directory, environment, runner/assets, timeout and filesystem/network scope. Current hard limits remain.',
                   ],

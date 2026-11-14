@@ -50,7 +50,7 @@ export interface SessionChildPageProps extends SessionChildTarget {
   readonly onTitleChange: (title: string) => void;
 }
 
-export interface SessionFileTarget {
+export interface SessionOutputFileTarget {
   readonly storeId: string;
   readonly sessionId: string;
   readonly fileId: string;
@@ -59,6 +59,16 @@ export interface SessionFileTarget {
     | { kind: 'legacy-operation'; executionId: string }
     | { kind: 'legacy-inherited'; key: string };
 }
+export type SessionFileTarget =
+  | SessionOutputFileTarget
+  | {
+      readonly kind: 'local-preview';
+      readonly storeId: string;
+      readonly sessionId: string;
+      readonly handleId: string;
+      readonly name: string;
+      readonly mediaType: string;
+    };
 export interface SessionFilePageProps {
   readonly target: SessionFileTarget;
   readonly visible: boolean;
@@ -129,7 +139,7 @@ export interface SessionTabsModel {
   readonly active: string;
   readonly select: (id: string) => void;
   readonly title: (id: string, title: string) => void;
-  readonly addBrowser: () => void;
+  readonly addBrowser: () => string | undefined;
   readonly openChanges: () => void;
   readonly openTrajectory: () => boolean;
   readonly openChild: (
@@ -281,6 +291,7 @@ export function useSessionTabs(
   restoreBrowser?: () => Promise<SessionBrowserRestorePage | null>,
   restoreKey?: string,
   browserPending = false,
+  closeFile?: (target: SessionFileTarget) => void,
 ): SessionTabsModel {
   const [state, setState] = useState(() => initialTabs(scope, !!restoreBrowser));
   const [restoreAttempt, setRestoreAttempt] = useState(0);
@@ -301,6 +312,8 @@ export function useSessionTabs(
   }
   const latest = useRef(current);
   latest.current = current;
+  const fileClose = useRef(closeFile);
+  fileClose.current = closeFile;
   const close = useRef(closeBrowser);
   close.current = closeBrowser;
   const intent = useRef(0);
@@ -427,6 +440,7 @@ export function useSessionTabs(
     intent.current++;
     const tab = newBrowserTab();
     update((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
+    return tab.id;
   };
   const openChanges = () => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return;
@@ -482,7 +496,7 @@ export function useSessionTabs(
   };
   const openFile = (target: SessionFileTarget, title: string) => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
-    const id = `file-${JSON.stringify([target.storeId, target.sessionId, target.fileId])}`;
+    const id = `file-${JSON.stringify([target.storeId, target.sessionId, 'handleId' in target ? ['local', target.handleId] : target.fileId])}`;
     const existing = latest.current.tabs.find((tab) => tab.id === id);
     if (!existing && occupiedSlots() >= maxTabs) return false;
     intent.current++;
@@ -563,6 +577,7 @@ export function useSessionTabs(
       tabs: remaining,
       selected: active === id ? (successor?.id ?? '') : value.selected,
     }));
+    if (closedTab.kind === 'file') fileClose.current?.(closedTab.target);
     committed?.();
     if (result) void Promise.resolve(result).then(release, failed);
   };

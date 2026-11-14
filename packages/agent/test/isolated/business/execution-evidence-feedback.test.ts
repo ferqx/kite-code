@@ -1,7 +1,8 @@
+// Legacy compatibility coverage, not a supported current model tool.
 import { expect, test } from 'bun:test';
-import { createExecutionEvidenceExtension } from '../../../src/business/execution-evidence';
 import type { ToolContext } from '../../../src/extensions';
 import { AgentError } from '../../../src/storage/types';
+import { createExecutionEvidenceExtension } from '../../fixtures/legacy-execution-evidence';
 
 const context = {
   sessionId: 'owner',

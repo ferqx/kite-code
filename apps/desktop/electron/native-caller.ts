@@ -85,6 +85,7 @@ export function createNativeCallerGenerationOwner(): () => number {
 }
 
 export class NativeCaller {
+  private readonly localFileReferences: boolean;
   private generation = 0;
   private selection = 0;
   private activation: { id: number; sessionId: string; selection: number } | undefined;
@@ -242,7 +243,9 @@ export class NativeCaller {
     nextGeneration = createNativeCallerGenerationOwner(),
     initialSelectionHint?: Readonly<{ storeId: string; sessionId: string }>,
     skillMarketplace?: ReturnType<typeof createSkillMarketplace>,
+    localFileReferences = false,
   ) {
+    this.localFileReferences = localFileReferences;
     this.nextGeneration = nextGeneration;
     this.initialSelectionHint = initialSelectionHint;
     this.processes = processes;
@@ -1249,8 +1252,10 @@ export class NativeCaller {
               this.environmentRevision++;
               if (
                 change.sessionId === this.selected &&
-                change.type === 'extension.record_updated' &&
-                /^builtin\.files\/(delivery|collection|output)\//.test(change.objectId)
+                ((change.type === 'extension.record_updated' &&
+                  /^builtin\.files\/(delivery|collection|output)\//.test(change.objectId)) ||
+                  change.type === 'run.finished' ||
+                  change.type === 'run.started')
               )
                 this.outputFilesRevision++;
               const historyOnly =
@@ -1475,6 +1480,7 @@ export class NativeCaller {
         : undefined;
     return {
       generation: this.generation,
+      localFileReferences: this.localFileReferences,
       environmentRevision: this.environmentRevision,
       selectedEnvironmentRevision: this.selectedEnvironmentRevision,
       outputFilesRevision: this.outputFilesRevision,
@@ -1940,6 +1946,9 @@ export class NativeCaller {
       case 'outputs.preview.interaction':
       case 'outputs.preview.control':
       case 'outputs.save':
+      case 'localPreview.open':
+      case 'localPreview.release':
+      case 'localPreview.check':
       case 'outputs.preview.open':
       case 'outputs.preview.close':
       case 'outputs.preview.request.result':
@@ -3361,6 +3370,14 @@ export class NativeCaller {
     this.assertGeneration(generation);
     return result;
   }
+  messagePreviewScope(generation: number) {
+    this.assertGeneration(generation);
+    const storeId = this.client.serverInfo?.storeId;
+    const sessionId = this.selected;
+    if (!storeId || !sessionId) throw new ClientError('output_scope_unavailable');
+    this.availableWorkspaceScope(sessionId);
+    return { storeId, sessionId };
+  }
   checkOutputGeneration(generation: number) {
     this.assertGeneration(generation);
   }
@@ -3368,6 +3385,40 @@ export class NativeCaller {
     this.assertGeneration(generation);
     if (this.client.serverInfo?.storeId !== target.storeId || this.selected !== target.sessionId)
       throw new ClientError('output_scope_unavailable');
+  }
+  async renderLocalPreviewPdf(
+    generation: number,
+    bytes: Uint8Array,
+    sourceHash: string,
+    page: number,
+    signal: AbortSignal,
+  ) {
+    const scope = this.messagePreviewScope(generation);
+    const result = await this.client.renderLocalPdfSnapshot(
+      {
+        expectedStoreId: scope.storeId,
+        sessionId: scope.sessionId,
+        sourceHash,
+        page,
+        data: Buffer.from(bytes).toString('base64'),
+      },
+      signal,
+    );
+    const current = this.messagePreviewScope(generation);
+    if (current.storeId !== scope.storeId || current.sessionId !== scope.sessionId)
+      throw new ClientError('local_preview_replaced');
+    return result;
+  }
+  async renderPreviewPdf(
+    generation: number,
+    target: OutputFileTarget,
+    page: number,
+    signal: AbortSignal,
+  ) {
+    this.checkOutputScope(generation, target);
+    const result = await this.client.renderOutputPdfPage(target, { page, signal });
+    this.checkOutputScope(generation, target);
+    return result;
   }
   configureOfficeRuntime(assetsRoot?: string) {
     if (

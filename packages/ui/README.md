@@ -2,12 +2,14 @@
 
 ## 输出文件展示
 
-[Conversation](src/desktop/Conversation.tsx) 的 `renderTurnOutputs` 只挂在该轮最后已确认 finalReply 之后；没有最终回复的失败／终态轮次放在最后该轮区域之后。文件状态不改变正文、阅读位置或折叠过程。[OutputFiles](src/desktop/OutputFiles.tsx) 显示独立文件卡、已保存项与整理错误；预期数量未知或为零不闪现整理提示，参考项默认五项，可展开／分页。宿主负责可信元数据、另存、准确引用和重试，不向公共组件传 ArtifactReference。
+[Conversation](src/desktop/Conversation.tsx) 的 `renderTurnOutputs` 只挂在该轮最后已确认 finalReply 之后；没有最终回复的失败／终态轮次放在最后该轮区域之后。文件状态不改变正文、阅读位置或折叠过程。[OutputFiles](src/desktop/OutputFiles.tsx) 显示紧凑交付卡与整理错误；未进入文件整理、无已发布文件的 producer_failed 仅保留在工具执行轨迹，不在产物区重复提示；不据此推断已恢复，也不依赖任何成功文件卡。结果未知、真正整理失败、过期和有明确数量的待整理仍在产物区提示；会话最终失败与工具历史不改；主卡通常仅显示文件名、类型和“打开”；同一展示列表内重名卡额外显示收集时间（本地时间，精确到毫秒）和字节大小，时间无效时明确未知，不按名称或时间合并、重排或判定最终版本，不暗示已导出到用户目录，“另存为”与“继续修改”及大小／来源移入更多菜单；预期数量未知或为零不闪现整理提示，环境信息卡的“参考”栏复用当前会话权威输出列表，位于 Shell／子智能体状态之下，默认五项，可展开／分页；不按名称再次去重。列表读取失败时已有条目保留并提示上次结果，每文件为单行可键盘聚焦的文字链接，点击文件名直接打开准确产物；窄栏省略但 title 保留全名，不显示打开／更多按钮。会话独立产物卡的更多操作不变。宿主负责可信元数据、另存、准确引用和重试，不向公共组件传 ArtifactReference。
 
 [SessionTabs](src/desktop/SessionTabs.tsx) 的 file 标签按 Store／Session／fileId 去重，与原标签共用八项容量；只有明确打开动作激活标签，后台文件到达不会打开侧栏。文件页仅在活动可见时挂载，宿主负责原生预览生命周期。相关回归归原 [Conversation 呈现](test/isolated/desktop-conversation-presentation.test.tsx) 与 [会话标签](test/isolated/desktop-session-tabs.test.tsx)：Linux／Bun 1.4.4，2026-11-11 工作树分别9项／152断言与31项／465断言通过。DOM证据不代替实际Electron窗口验收。
 
 
 Shell 活动摘要采用原调用的可选 description，省略时沿用命令预览；展开仍显示完整命令和原执行结果。统一 shell_execute 的 background:true 显示后台受理，受理不代表成功或完成；历史 shell.launch 保持原解释。展示不参与风险判断、授权或操作身份。
+
+`ToolActivity` 对准确 failed Job 的失败调用且非零整数退出码显示“已执行 · 非零退出”，仍保 failed 样式、实际退出码与完整诊断，不把输出存在解释为成功；超时、取消与未知优先级不变。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)覆盖有输出、无输出、独立错误、未知与超时边界。
 
 # UI
 
@@ -712,3 +714,7 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 同日按用户确认的树与三个 Tab 改造后，`e8a483d65` 加本轮工作树、macOS arm64／Bun1.4.4：共享树、状态与协议／reader回归53项／302断言，完整标签 DOM 30项／401断言，树 DOM 6项／105断言，离线 DOM 9项／74断言，共98项／882断言通过。树 DOM 包含真实组件10,000层执行链的完整节点、原事件、真实父身份和层级；首次／重开读取未决时保持原 Tab，用加载占位替代根节点和零记录闪现，索引到达后恢复原选择与滚动。UI类型636文件、Desktop类型1,392文件通过；UI／Desktop构建、定向Biome、文档、API、边界和测试归属检查通过。实际编译Chrome156隔离页面的连续操作与范围归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)，不将旧列表布局的Native窗口画面作为本次树界面的像素验收。
 
 2026-11-08，本机 macOS／Bun1.4.4，完整[标签页 DOM 回归](test/isolated/desktop-session-tabs.test.tsx)和[纯值状态回归](test/trajectory-view-state.test.ts)共31 pass／0 fail、406断言，UI类型633文件通过；UI build在本轮轨迹组件边界建立时通过，后续布局与游标修复复验上述DOM及类型。新增断言覆盖8项共享容量、唯一轨迹页、显隐／切scope释放、正式入口、旧游标不展示未来正文、Evidence原版本、超安全整数位置和卸载暂停。此为共享组件与JSDOM验证，完整Native窗口过程及安装／其他平台资格归[Desktop owner](../../apps/desktop/README.md)，不以DOM或最终画面代替。
+
+Desktop `MessageContent` 的 `WebLinkContext` 由Native宿主注入，仅在当前可读正文中将HTTP(S)点击路由到右侧浏览器；无宿主仍使用隔离opener链接。文件回调独立，不把网页或不安全scheme传给文件编辑器。`SessionPage.browserTabRequest.onOpen` 只在真实标签存在后调用，同一request不重复导航；Main仍负责地址与页面权限校验。
+
+文件标签的 `SessionFileTarget` 区分真实产物与 `local-preview` 只读handle，`OutputFileSummary` 仅继承产物类型，不伪造文件卡。标签身份含种类，切换不撤销handle；显式关闭或标签已满未接纳时调用宿主释放。

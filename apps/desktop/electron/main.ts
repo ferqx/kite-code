@@ -365,6 +365,7 @@ async function openCaller(): Promise<NativeCaller> {
           session.fromPartition('skills-marketplace', { cache: false }).fetch(url.href, init),
         trashItem: (path) => shell.trashItem(path),
       }),
+      true, // This Main owns the paired Service on the same computer.
     );
     scheduledTasks = new ScheduledTaskRunner(paired.client, privateData);
     caller.setScheduledTasks(scheduledTasks);

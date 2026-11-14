@@ -1,3 +1,4 @@
+// Legacy compatibility coverage, not a supported current model tool.
 import { expect, test } from 'bun:test';
 import {
   chmodSync,
@@ -14,13 +15,13 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
-import { createExecutionEvidenceExtension } from '../../../src/business/execution-evidence';
 import type { Extension, JobDefinition, JobEvent, Json } from '../../../src/extensions';
 import { createTaskExtension } from '../../../src/extensions/task';
 import { modelExecutionId } from '../../../src/model-identifier';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import { createShellExtension } from '../../../src/tools/shell';
+import { createExecutionEvidenceExtension } from '../../fixtures/legacy-execution-evidence';
 
 const stdout = '原始业务🪁\r\n{"job":"订单","metadata":{"dispatch":"原值"}}\n';
 const stderr = '诊断：退出17；保留原文。\n';

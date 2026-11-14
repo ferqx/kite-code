@@ -12,6 +12,9 @@ test('file references are bounded, retries use collection revision, and stale sc
     'navigator',
     'HTMLElement',
     'Node',
+    'Element',
+    'NodeFilter',
+    'CustomEvent',
     'MutationObserver',
     'getComputedStyle',
     'IS_REACT_ACT_ENVIRONMENT',
@@ -106,6 +109,9 @@ test('file references are bounded, retries use collection revision, and stale sc
     });
     return (
       <>
+        <output data-testid="opened-file">
+          {output.request && 'fileId' in output.request.target ? output.request.target.fileId : ''}
+        </output>
         {output.references}
         {output.renderTurnOutputs({
           turnId: JSON.stringify(['native-run', 'store', sessionId, 'run']),
@@ -120,13 +126,22 @@ test('file references are bounded, retries use collection revision, and stale sc
     await act(async () => {
       await Bun.sleep(130);
     });
-    expect(document.querySelector('[aria-label="参考项"]')?.querySelectorAll('li')).toHaveLength(5);
+    expect(document.querySelector('[aria-label="参考"]')?.querySelectorAll('li')).toHaveLength(5);
     const more = [...document.querySelectorAll('button')].find(
       (button) => button.textContent === '展开更多',
     )!;
     await act(() => more.click());
-    expect(document.querySelector('[aria-label="参考项"]')?.querySelectorAll('li')).toHaveLength(7);
-    const edit = [...document.querySelectorAll('button')].find(
+    expect(document.querySelector('[aria-label="参考"]')?.querySelectorAll('li')).toHaveLength(7);
+    const moreAction = document.querySelector<HTMLButtonElement>(
+      '[aria-label="session-report-0.docx 的更多操作"]',
+    )!;
+    await act(() => {
+      moreAction.focus();
+      moreAction.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    const edit = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
       (button) => button.textContent === '继续修改',
     )!;
     await act(() => edit.click());
@@ -177,27 +192,73 @@ test('file references are bounded, retries use collection revision, and stale sc
     queryPage = (request) => ({ ...filePages(request), scope: request.scope });
     await settle();
     await click('加载更多文件');
-    expect(
-      document.querySelector('[aria-label="已保存的文件"]')?.querySelectorAll('li'),
-    ).toHaveLength(100);
+    expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
+      100,
+    );
     // A status-only head refresh must allow the same cursor to be requested again.
     await act(() => root.render(<Harness sessionId="pages" revision={3} />));
     await settle();
-    await click('加载更多文件');
-    expect(
-      document.querySelector('[aria-label="已保存的文件"]')?.querySelectorAll('li'),
-    ).toHaveLength(100);
+    expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
+      100,
+    );
     // A burst larger than one page must bridge the new head to retained old files.
     lateBatch = true;
     await act(() => root.render(<Harness sessionId="pages" revision={4} />));
     await settle();
-    expect(
-      document.querySelector('[aria-label="已保存的文件"]')?.querySelectorAll('li'),
-    ).toHaveLength(150);
+    expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
+      100,
+    );
     await click('加载更多文件');
-    expect(
-      document.querySelector('[aria-label="已保存的文件"]')?.querySelectorAll('li'),
-    ).toHaveLength(200);
+    expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
+      150,
+    );
+    queryPage = (request) => ({
+      ...page,
+      scope: request.scope,
+      revision: request.beforeKey ? '1001' : '1000',
+      items: Array.from({ length: 50 }, (_, i) => file(500 + i)),
+      collections: [],
+      nextCursor: request.beforeKey ? undefined : 'mixed',
+    });
+    await act(() => root.render(<Harness sessionId="pages" revision={40} />));
+    await settle();
+    expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
+      150,
+    );
+    expect(document.body.textContent).toContain('读取文件失败');
+    queryPage = (request) => ({
+      ...page,
+      scope: request.scope,
+      revision: '1001',
+      items: [{ ...file(999, request.scope.sessionId), name: '替换后的文件.xlsx' }],
+      collections: [],
+    });
+    await act(() => root.render(<Harness sessionId="pages" revision={41} />));
+    await settle();
+    const output = document.querySelector('[aria-label="本次产出"]')!;
+    expect(output.querySelectorAll('li')).toHaveLength(1);
+    expect(output.textContent).toContain('替换后的文件.xlsx');
+    expect(output.textContent).not.toContain('report-199');
+    const newOpen = output.querySelector<HTMLButtonElement>(
+      '[aria-label="打开 替换后的文件.xlsx"]',
+    )!;
+    await act(() => newOpen.click());
+    expect(document.querySelector('[data-testid="opened-file"]')?.textContent).toBe('file-999');
+    queryPage = (request) => ({
+      ...page,
+      scope: request.scope,
+      revision: '1002',
+      items: [
+        { ...file(1000, request.scope.sessionId), name: '并发.xlsx' },
+        { ...file(1001, request.scope.sessionId), name: '并发.xlsx' },
+      ],
+      collections: [],
+    });
+    await act(() => root.render(<Harness sessionId="pages" revision={42} />));
+    await settle();
+    expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
+      2,
+    );
     queryPage = (request) => {
       const offset = Number(request.collectionBeforeKey ?? 0);
       return {
@@ -214,13 +275,9 @@ test('file references are bounded, retries use collection revision, and stale sc
     };
     await act(() => root.render(<Harness sessionId="statuses" revision={5} />));
     await settle();
-    expect(document.querySelectorAll('[aria-label="已保存的文件"] [role="alert"]')).toHaveLength(
-      50,
-    );
+    expect(document.querySelectorAll('[aria-label="本次产出"] [role="alert"]')).toHaveLength(50);
     await click('更多整理状态');
-    expect(document.querySelectorAll('[aria-label="已保存的文件"] [role="alert"]')).toHaveLength(
-      61,
-    );
+    expect(document.querySelectorAll('[aria-label="本次产出"] [role="alert"]')).toHaveLength(61);
     expect(
       calls.some((call) => call.method === 'outputs.query' && call.collectionBeforeKey === '50'),
     ).toBe(true);
@@ -235,7 +292,7 @@ test('file references are bounded, retries use collection revision, and stale sc
     ).toMatchObject({ expectedRevision: '8' });
     queryPage = (request) => ({ ...page, scope: request.scope, items: [], collections: [] });
     await settle();
-    expect(document.querySelectorAll('[aria-label="已保存的文件"] [role="alert"]')).toHaveLength(0);
+    expect(document.querySelectorAll('[aria-label="本次产出"] [role="alert"]')).toHaveLength(0);
     queryPage = (request) => ({
       ...page,
       scope: request.scope,

@@ -103,6 +103,7 @@ function harness(
     open?: () => Promise<void>;
     input?: () => Promise<Input>;
     settle?: () => Promise<void>;
+    close?: () => void;
     release?: (serial: number) => Promise<void>;
   } = {},
 ) {
@@ -125,6 +126,7 @@ function harness(
     }
     close() {
       this.closed = true;
+      options.close?.();
     }
   }
   const source = readFileSync(
@@ -598,4 +600,152 @@ test('locate rechecks serial, frozen requests and active owner before dispatch',
   racing.preview.active = racing.active('B');
   delayed.release(excelEvidence());
   await expect(result).rejects.toThrow('preview_replaced');
+});
+
+test('accepted acknowledgement survives polling retirement of the same request', async () => {
+  const settling = gate<void>();
+  const entered = gate<void>();
+  let cancelled = false;
+  const h = harness({
+    input: async () => ({ cancelled, pending: { serial: 1, prompt: 'accepted once' } }),
+    settle: async () => {
+      // Actual request controller marks accepted as cancelled before its IPC promise settles.
+      cancelled = true;
+      entered.release();
+      await settling.promise;
+    },
+  });
+  const request = (await h.preview.readInteraction('A', 1)).inlineRequest!;
+  const acknowledgement = h.preview.settleRequest('A', 1, request.requestId, {
+    status: 'accepted',
+  });
+  await entered.promise;
+  const polled = await h.preview.readInteraction('A', 1);
+  expect(polled.requestOpen).toBe(false);
+  expect(polled.inlineRequest).toBeUndefined();
+  expect(h.requests[0]!.closed).toBe(true);
+  expect(h.released).toEqual([1]);
+  settling.release();
+  await expect(acknowledgement).resolves.toBeUndefined();
+  expect(h.requests).toHaveLength(1);
+  expect(h.released).toEqual([1]);
+  h.preview.close();
+});
+
+test('poll retirement never turns failed or unknown acknowledgements into accepted success', async () => {
+  for (const status of ['failed', 'unknown'] as const) {
+    const settling = gate<void>(),
+      entered = gate<void>();
+    let cancelled = false;
+    const h = harness({
+      input: async () => ({ cancelled, pending: { serial: 1, prompt: 'once' } }),
+      settle: async () => {
+        cancelled = true;
+        entered.release();
+        await settling.promise;
+      },
+    });
+    const sent = (await h.preview.readInteraction('A', 1)).inlineRequest!;
+    const pending = h.preview.settleRequest('A', 1, sent.requestId, { status });
+    await entered.promise;
+    await h.preview.readInteraction('A', 1);
+    settling.release();
+    await expect(pending).rejects.toThrow('preview_request_replaced');
+    h.preview.close();
+  }
+});
+
+test('accepted acknowledgement requires successful exact retirement and unchanged ownership', async () => {
+  for (const mode of [
+    'release-fails',
+    'close-fails',
+    'new-request',
+    'retired-new-request',
+    'new-preview',
+  ] as const) {
+    const settling = gate<void>(),
+      entered = gate<void>();
+    let cancelled = false;
+    const h = harness({
+      input: async () => ({ cancelled, pending: { serial: 1, prompt: 'once' } }),
+      settle: async () => {
+        cancelled = true;
+        entered.release();
+        await settling.promise;
+      },
+      release: async () => {
+        if (mode === 'release-fails') throw Error('release_failed');
+      },
+      close: () => {
+        if (mode === 'close-fails') throw Error('close_failed');
+      },
+    });
+    const sent = (await h.preview.readInteraction('A', 1)).inlineRequest!;
+    const pending = h.preview.settleRequest('A', 1, sent.requestId, { status: 'accepted' });
+    await entered.promise;
+    const poll = h.preview.readInteraction('A', 1);
+    if (mode === 'release-fails' || mode === 'close-fails')
+      await expect(poll).rejects.toThrow(
+        mode === 'release-fails' ? 'release_failed' : 'close_failed',
+      );
+    else await poll;
+    let replacement: ReturnType<typeof h.active>['request'];
+    if (mode === 'new-request' || mode === 'retired-new-request') {
+      cancelled = false;
+      await h.preview.readInteraction('A', 1);
+      replacement = h.preview.active!.request;
+      if (mode === 'retired-new-request') {
+        cancelled = true;
+        await h.preview.readInteraction('A', 1);
+      }
+    } else if (mode === 'new-preview') {
+      h.preview.close();
+      h.preview.active = h.active('B');
+    }
+    settling.release();
+    await expect(pending).rejects.toThrow(
+      mode === 'release-fails'
+        ? 'release_failed'
+        : mode === 'close-fails'
+          ? 'close_failed'
+          : 'preview_request_replaced',
+    );
+    if (mode === 'new-request') expect(h.preview.active?.request).toBe(replacement);
+    if (mode === 'new-preview') expect(h.preview.active?.id).toBe('B');
+    try {
+      h.preview.close();
+    } catch (error) {
+      if (mode !== 'close-fails') throw error;
+    }
+  }
+});
+
+test('local read-only preview cannot expose delivery identity or trigger modification', async () => {
+  const h = harness();
+  Reflect.deleteProperty(h.preview.active!, 'target');
+  await expect(h.preview.readInteraction('A', 1)).rejects.toThrow('local_preview_readonly');
+  await expect(h.preview.control('A', 1, { kind: 'request-edit' })).rejects.toThrow(
+    'local_preview_readonly',
+  );
+  await expect(h.preview.control('A', 1, { kind: 'presentation', value: true })).rejects.toThrow(
+    'local_preview_readonly',
+  );
+  await h.preview.control('A', 1, { kind: 'zoom', value: 150 });
+  expect(h.requests).toHaveLength(0);
+});
+
+test('generic local preview zoom uses the control ratio without dividing by 100', async () => {
+  const scripts: string[] = [];
+  const h = harness({
+    evidence: async (code) => {
+      if (code) scripts.push(code);
+      return evidence();
+    },
+  });
+  Reflect.deleteProperty(h.preview.active!, 'target');
+  Reflect.deleteProperty(h.preview.active!, 'officeKind');
+  await h.preview.control('A', 1, { kind: 'zoom', value: 1.5 });
+  expect(scripts.at(-1)).toBe('document.documentElement.style.zoom = "1.5"');
+  await h.preview.control('A', 1, { kind: 'zoom', value: 'fit' });
+  expect(scripts.at(-1)).toBe('document.documentElement.style.zoom = "1"');
 });

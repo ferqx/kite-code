@@ -6,9 +6,11 @@
 
 [helper](kite-documents.ts)由已有 Bun 执行：`"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" office --format docx --input ops.json --out "$KITE_OUTPUT_DIR/report.docx"`。修改使用 `--source working.docx`；`--input -`接 JSON stdin。操作直接采用上游 OfficeCLI batch 数组，不另造编辑 DSL。
 
+Skill 默认要求 POSIX Shell 兼容语法，额外比对先在工作区副本完成，不用忽略错误来制造成功。helper 成功或输出路径不等于交付：整个 producer Shell 成功后才开始收集；非零退出不收集该次残留，结果未知先核原执行状态。恢复从已核验且仍可用的工作区源开始，在新 Shell 当前 KITE_OUTPUT_DIR 导出并核终态，不引用旧临时目录，不凭对话重建无法读取的原件；收集未确认时明确保留未完成步骤。此为技能指导，不新增工具、不修改权限或放宽收集失败检测。
+
 [Office adapter](office-command.ts)创建私有工作稿，一次 batch 后核每项 success；退出2仅在明确的 LaTeX warning 且各项成功时进入后续 validate。结构错误或失败项不交付。XLSX 另读 content issues，明确公式求值或缺失工作表错误阻断；未计算、旧缓存及普通可选检查失败保留计算未完全验证警告。进程退出／清理未知、执行范围或输出身份变化、路径安全失败必须透传并停止导出，不能降级为计算警告。没有 issues 不证明 Excel 全功能重算。
 
-[稳定导出](document-export.ts)用打开的 regular-file 身份、固定字节上限、读前后 size/mtime/ctime 核验和当前Shell allocation内、out之外的排他临时文件；fsync 完成后排他 link 到最终名称，不覆盖同名输出。源文件始终不修改。当前执行成功结束后的自动归档由 Shell 输出 owner 负责；helper 本身不保存 Artifact，不重试生成。
+[稳定导出](document-export.ts)用打开的 regular-file 身份、固定字节上限、读前后 size/mtime/ctime 核验和目标父目录下私有临时子目录中的排他临时文件；fsync 完成后排他 link 到最终名称，不覆盖同名输出。避免跨 Shell 临时目录与工作区进行硬链接；失败或取消清理本次临时文件与目录，不删除目标。工作区中的新路径可作中间副本，最终交付使用 KITE_OUTPUT_DIR 中的新路径。源文件始终不修改。当前执行成功结束后的自动归档由 Shell 输出 owner 负责；helper 本身不保存 Artifact，不重试生成。
 
 [PDF adapter](pdf-command.ts)固定 pdf-lib 1.17.1 与 fontkit 1.1.0。create 使用 A4、固定字号、随包 Noto SansSC 的 wght=400 实例子集、真实字宽换行和显式页面，超限返回 layout_overflow。merge 和 edit 支持页面选择（拆分、删除、重排）、旋转、文字/PNG/JPEG 叠加及 text/checkbox/dropdown/option-list 表单；页面重组与表单填写不能同时指定。不支持任意正文原位编辑、自动重排、HTML 转 PDF 或复杂跨页表格。
 
@@ -41,3 +43,9 @@ DOCX recipe 仅在固定渲染器的精确函数锚点匹配时补布局就绪�
 [隔离测试](../../../test/isolated/tools/documents/office.test.ts)核registry绑定、batch退出码、Excel严重/不完整问题、固定离线改写、源不变与失败不发布。[真实fixture脚本](../../../scripts/office-documents-smoke.ts)在构建资产后运行：`bun packages/agent/scripts/office-documents-smoke.ts`。2026-11-11 Linux x64/Bun1.4.4，三种Office格式的制作/validate/HTML，以及PDF中文、合并、页面操作、叠加、表单和overflow拒绝通过。后续真实页图发现早期中文提取检查遗漏空白字形，现已按上述固定实例与补丁修正；fixture逐字栅格检查104个中文、标点、英文大小写和数字，分别覆盖create、重组页面叠加及可见表单，并限制子集输出体积。独立Poppler逐页检查中文换行和显式分页，FontTools解码实际嵌入字形，不以系统字体回退或可提取文字作为成功依据。普通直接进程smoke不等于受管noexec、macOS签名allow-jit、Windows Job清理或完整安装发布资格，这些仍须各平台owner实际核验。随后Linux真实云桌面Electron44.3.0正常沙箱沿独立Main预览核DOCX中文滚动、XLSX双表往返、PPTX页宽／键盘／全屏与退出；另以含分式、根号、求和的DOCX／PPTX实际观察离线KaTeX，外网、localhost、file、导航、新窗口和Native bridge隔离保持。单样本preview.open首次／同hash重开分别1482／166ms、1590／356ms，不含人工驻留，不外推大文件整体表现。PPTX提示挤版修复和首次合成花屏／冷启恢复的准确证据边界归[Desktop owner](../../../../../apps/desktop/README.md#办公输出文件)，不将单个隔离预览当完整Service交付链路。
 
 预览字体不再给 body 或所有后代强制套用随包字体；font.css 仅声明本地 KiteDocument @font-face，保留作者 CSS／inline 字体及系统回退。缺少作者字体时仍可能发生替代与排版差异，不下载外部字体，也不承诺各平台原字体存在。内部渲染缓存身份改为 offline-author-fonts，沿原 sourceHash／renderer／recipe 键隔离旧 offline-1 强制字体产物；不改变工具或公开协议版本。Word 字体 loading／loadingdone／loadingerror 继续使布局代次失效并重新分页，标记不授予文件权限。
+
+技能的能力发现使用固定二进制 `--help` 与已发现子命令的 `--help`，不猜 mode/属性，也不把上游参数交给 helper。修改验收分别核原件字节完整、另存目标变更和相关内容语义不变；ZIP 包装或 XML 序列化差异本身不判内容回归，结构合法不代替任务验收。手动固定资产回归：`bun test packages/agent/test/integration/office-skill-contract.test.ts`；要求本地已准备且校验通过的资产，不安装或下载，覆盖真实帮助、helper 修改、原件保护及独立读取的目标／邻格／公式和归档元数据差异，不代表真实模型或任意格式保真。
+
+编辑产生的元数据仅按已解释的准确 part／节点／命名空间／字段建立窄例外，并核字段身份、类型和新值合法性；不忽略整个 metadata，邻段、正文、样式、表格和关系仍严格核验。上述手动固定资产回归另用本机 Python 3 标准库独立读取真实两段 DOCX：只允许目标段 w14:textId 与准确 OfficeCLI.LastModified 时间值变化，核原件 hash，并注入13种邻段、内容、样式、表格、关系及字段身份／类型／非法值变化确认拒绝。测试专用 oracle 不进入产品、不提供通用 Office 比较引擎；缺本机 Python 或固定资产按失败报告，不下载替代。
+
+原件 hash 指导使用已有 KITE_DOCUMENTS_BUN 的 node:crypto，不假设 macOS 存在 sha256sum。包集合先枚举差异：首次编辑新增的已知编辑器属性 part 也须逐字段解释，并核唯一配套 ContentType 和 relationship；未知新增／删除仍拒绝，不降低正文、样式和关系检查。固定资产回归补无 custom 属性的外来 DOCX 副本，真实 helper 编辑后精确核 OfficeCLI.Version／LastModified、新增 part 及关联，并注入未知 part、属性、关系、类型、正文和样式变化确认拒绝。失败 Shell 临时输出不能跨调用恢复的现有指导保持，不以本回归声称模型总能遵循。

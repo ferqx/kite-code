@@ -93,6 +93,7 @@ function segmentLongTextNodes({ source }: { source: string }) {
   };
 }
 
+export const WebLinkContext = createContext<((url: string) => void) | undefined>(undefined);
 const FileLinkContext = createContext<((path: string) => void) | undefined>(undefined);
 
 const alertIcons = new Map([
@@ -125,6 +126,7 @@ function MarkdownLink({
   ...props
 }: ComponentPropsWithoutRef<'a'> & ExtraProps) {
   const openFile = useContext(FileLinkContext);
+  const openWebLink = useContext(WebLinkContext);
   const readActive = useConversationReadActive();
   if (!href) return <span>{children}</span>;
   if (href.startsWith('#'))
@@ -149,7 +151,16 @@ function MarkdownLink({
     );
   if (/^https?:\/\//i.test(href))
     return (
-      <a {...props} href={href} target="_blank" rel="noreferrer">
+      <a
+        {...props}
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(event) => {
+          if (!readActive || openWebLink) event.preventDefault();
+          if (readActive) openWebLink?.(href);
+        }}
+      >
         {children}
       </a>
     );

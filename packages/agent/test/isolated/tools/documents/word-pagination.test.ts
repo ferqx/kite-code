@@ -12,7 +12,8 @@ else{setTimeout(positionFootnotes,0);setTimeout(wrapFloats,0);setTimeout(applyLi
 }
 window._wordPaginate=function(){renderNewContent();setTimeout(paginate,0);};
 var _resizeTimer;window.addEventListener('resize',function(){clearTimeout(_resizeTimer);_resizeTimer=setTimeout(function(){scalePages(true);},100);});
-window._wpSync=false;if(window._wpSync){paginate();}else{setTimeout(paginate,100);}
+var SCREENSHOT=location.hash.indexOf('screenshot')>=0||navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent);
+window._wpSync=SCREENSHOT;if(window._wpSync){paginate();}else{setTimeout(paginate,100);}
 }_wordInit();</script></body></html>`;
 
 function harness(
@@ -225,4 +226,11 @@ test('continuous resize settles only the last generation', async () => {
   await h.settle();
   expect(h.attrs.get('data-kite-word-pagination-state')).toBe('settled');
   expect(h.attrs.get('data-kite-word-pagination-generation')).toBe(generation);
+});
+
+test('interactive Word recipe does not switch to screenshot export under automation', () => {
+  const html = offlineOfficeHtml(fixture, true);
+  expect(html).toContain('var SCREENSHOT=false;');
+  expect(html).not.toContain('navigator.webdriver');
+  expect(offlineOfficeHtml(fixture, false)).toContain('navigator.webdriver');
 });

@@ -81,6 +81,7 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     objectPath: '/slide[2]/shape[1]',
     text: 'Selected title',
   };
+  let notes = 'Read-only notes';
   const interaction = (): OfficePreviewInteraction => ({
     previewId: nextId,
     generation: 1,
@@ -88,7 +89,7 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     sourceHash: 'a'.repeat(64),
     currentSlide: actualSlide,
     slideCount: 3,
-    notes: 'Read-only notes',
+    notes,
     selection,
     ...(inlineRequest ? { inlineRequest } : {}),
   });
@@ -187,8 +188,8 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
   try {
     await render();
     expect(document.body.textContent).not.toContain('来源：Run run');
-    expect(document.querySelector('.native-office-identity')?.getAttribute('title')).toBe(
-      '来源：Run run',
+    expect(document.querySelector('.native-office-toolbar')?.getAttribute('title')).toBe(
+      '来源：Run run。只读预览，排版可能与 Office 不同；复杂 3D 与动画不受支持。',
     );
     for (const removed of ['＋ 新增页', 'T 文本', '▧ 图片', '插入 ▾', '应用'])
       expect(button(removed)).toBeUndefined();
@@ -196,6 +197,16 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     expect(document.querySelector('.native-office-notes')?.textContent).toContain(
       'Read-only notes',
     );
+    notes = '   ';
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    expect(document.querySelector('.native-office-notes')).toBeNull();
+    notes = 'Read-only notes';
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    expect(document.querySelector('.native-office-notes')?.textContent).toContain(notes);
     expect(requests.find((r) => r.method === 'outputs.preview.open')).toMatchObject({
       bounds: { x: 10 },
     });
@@ -230,10 +241,17 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     expect(document.body.textContent).not.toContain('预览回执暂时不可用');
     expect(edits[0]).toEqual({ sourceHash: 'a'.repeat(64), selection });
     expect(edits[0]).not.toHaveProperty('editor');
-    await click('↓ 下载');
+    await act(async () =>
+      (document.querySelector('[aria-label="另存为"]') as HTMLButtonElement).click(),
+    );
     expect(saves).toEqual(['deck.pptx']);
-    await expectControl({ kind: 'slide', value: 3 }, () => click('下一页'));
-    await expectControl({ kind: 'presentation', value: true }, () => click('▷ 放映'));
+    expect(document.querySelector('.native-office-footer')).toBeNull();
+    expect(document.body.textContent).not.toContain('下一页');
+    expect(document.body.textContent).not.toContain('此页暂无备注');
+    expect(document.body.textContent).not.toContain('预览说明');
+    await expectControl({ kind: 'presentation', value: true }, () =>
+      act(async () => (document.querySelector('[aria-label="放映"]') as HTMLButtonElement).click()),
+    );
     await expectControl({ kind: 'zoom', value: 1.25 }, () =>
       act(async () => {
         const zoom = document.querySelector<HTMLSelectElement>('select[aria-label="预览缩放"]')!;
@@ -308,7 +326,7 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
         await new Promise((r) => setTimeout(r, 250));
       });
       expect(edits.at(-1)).toEqual({ sourceHash: 'a'.repeat(64), selection });
-      expect(button('▷ 放映')).toBeUndefined();
+      expect(document.querySelector('[aria-label="放映"]')).toBeNull();
     }
     fail = true;
     await click('请求修改');
@@ -429,7 +447,7 @@ test('trusted Excel bar preserves drag anchor, text-only formula and local expan
       (document.querySelector('[aria-label="定位当前选区"]') as HTMLButtonElement).click(),
     );
     expect(calls).toEqual([7, 8]);
-    expect(document.querySelector('details')!.open).toBe(false);
+    expect(document.querySelector('.native-excel-help')).toBeNull();
   } finally {
     await act(async () => root.unmount());
     dom.window.close();

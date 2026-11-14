@@ -4,6 +4,7 @@ import type {
   OfficePreviewControl,
   OfficeSelection,
 } from '../src/output-files-bridge';
+import { installPageRail as sharedPageRail } from './document-page-rail';
 import { officeChromeCss } from './office-request-input';
 
 export type { OfficePreviewControl } from '../src/output-files-bridge';
@@ -23,7 +24,11 @@ export type OfficeInteraction = {
 export const officeInteractionWorld = 1004;
 
 /** Serialized into an isolated world: no preload, IPC, callbacks or host objects. */
-function installInteraction(kind: 'word' | 'excel' | 'powerpoint', chromeCss: string) {
+function installInteraction(
+  kind: 'word' | 'excel' | 'powerpoint',
+  chromeCss: string,
+  pageRail: typeof sharedPageRail,
+) {
   const scope = globalThis as typeof globalThis & {
     kiteOfficeInteraction?: ReturnType<typeof controller>;
   };
@@ -35,6 +40,20 @@ function installInteraction(kind: 'word' | 'excel' | 'powerpoint', chromeCss: st
       el.remove();
     });
   }
+  // Identify only the exact locally generated notice shell, never authored details.
+  // This is layout recognition, not a source of selection or host authority.
+  const notice = [
+    ...document.querySelectorAll<HTMLDetailsElement>('body > details[role="note"]'),
+  ].find(
+    (node) =>
+      node.style.position === 'fixed' &&
+      node.style.top === '8px' &&
+      node.style.right === '8px' &&
+      node.querySelector(':scope > summary')?.textContent === 'Kite 离线预览说明' &&
+      node.textContent === 'Kite 离线预览说明排版可能与 Office 不同；复杂 3D 与动画不受支持。',
+  );
+  // The trusted host renders its own fixed copy. Never transfer document HTML.
+  notice?.remove();
   const MAX_NODES = 50000,
     MAX_TEXT = 2_000_000;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ALL);
@@ -71,6 +90,28 @@ function installInteraction(kind: 'word' | 'excel' | 'powerpoint', chromeCss: st
   const slides = Array.from(
     document.querySelectorAll<HTMLElement>('.main > .slide-container'),
   ).slice(0, 1000);
+  const speakerNotes = new Map<HTMLElement, Element>();
+  if (kind === 'powerpoint') {
+    for (const slide of slides) {
+      const notes = slide.querySelector<HTMLElement>(':scope > .slide-notes');
+      const label = notes?.children[0];
+      const body = notes?.children[1];
+      // Only the fixed converter's sibling chrome is duplicated by the trusted
+      // host notes disclosure. Keep its text in place for read(), never alter the deck.
+      if (
+        notes?.children.length === 2 &&
+        label?.className === 'slide-notes-label' &&
+        label.textContent?.trim() === 'Notes' &&
+        body?.className === 'slide-notes-body' &&
+        !notes.matches('[data-path]') &&
+        !notes.querySelector('[data-path]')
+      ) {
+        speakerNotes.set(slide, body);
+        notes.style.setProperty('display', 'none', 'important');
+        notes.setAttribute('aria-hidden', 'true');
+      }
+    }
+  }
   let selected: OfficeSelection | null = null,
     anchor: Element | null = null,
     selectedSheet: Element | null = null;
@@ -135,7 +176,7 @@ function installInteraction(kind: 'word' | 'excel' | 'powerpoint', chromeCss: st
 body{background:#fafafa!important}.sidebar{background:#f5f5f5!important}.slide-label{color:#666!important}
 @media(prefers-color-scheme:dark){body{background:#181818!important}.sidebar{background:#242424!important}.slide-label{color:#c6c6c6!important}}
 body .kite-office-chrome.kite-office-range-status,body .kite-office-chrome.kite-office-request-trigger,body .kite-office-chrome.kite-thumbnail-rail,body .kite-thumbnail-rail .kite-thumbnail-button,body .kite-thumbnail-rail .kite-thumbnail-number,body .kite-office-chrome.kite-word-rail,body .kite-word-rail .kite-word-page-button,body .kite-word-rail .kite-word-number{font-family:var(--office-font)!important}
-body.kite-present .sidebar,body.kite-present .file-title,body.kite-present .slide-notes{display:none!important}body.kite-present .main>.slide-container{display:none!important}body.kite-present .main>.slide-container.kite-current{display:flex!important}
+body.kite-present .sidebar,body.kite-present .file-title{display:none!important}body.kite-present .main>.slide-container{display:none!important}body.kite-present .main>.slide-container.kite-current{display:flex!important}
 `;
   document.head.append(style);
   const paintHost = document.createElement('div');
@@ -181,6 +222,31 @@ body.kite-present .sidebar,body.kite-present .file-title,body.kite-present .slid
       title.setAttribute('aria-hidden', 'true');
     });
   if (kind === 'excel') {
+    const fitSheet = () => {
+      if (zoom !== 'fit') return;
+      const table = document.querySelector<HTMLElement>(
+        '.sheet-content.active .table-wrapper > table, .sheet-content.active > table',
+      );
+      if (!table) return;
+      const currentScale = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+      const naturalWidth = table.getBoundingClientRect().width / currentScale;
+      const available = document.documentElement.clientWidth || window.innerWidth;
+      if (!(naturalWidth > 0 && available > 2)) return;
+      // Fit the complete grid, including row headers, without rewriting author column widths.
+      // Fixed chrome below counter-scales against this same root scale.
+      const scale = Math.min(1, (available - 2) / naturalWidth);
+      document.documentElement.style.zoom = String(scale);
+    };
+    window.addEventListener('resize', fitSheet);
+    const refitSheet = () => {
+      if (zoom === 'fit') window.dispatchEvent(new Event('resize'));
+    };
+    const sheets = document.querySelectorAll('.sheet-content');
+    const fitObserver = new MutationObserver(refitSheet);
+    for (const sheet of sheets)
+      fitObserver.observe(sheet, { attributes: true, attributeFilter: ['class'] });
+    void document.fonts?.ready.then(refitSheet);
+    if (!document.documentElement.style.zoom) fitSheet();
     const sheetBars = Array.from(document.querySelectorAll<HTMLElement>('body > .sheet-tabs'));
     const sheetBody = document.body;
     const sheetSlider = sheetBody.querySelector(':scope > .sheet-slider');
@@ -1096,9 +1162,7 @@ body.kite-present .sidebar,body.kite-present .file-title,body.kite-present .slid
             ? {
                 currentSlide: slide,
                 slideCount: slides.length,
-                notes: (
-                  slides[slide - 1]?.querySelector('.slide-notes-body')?.textContent ?? ''
-                ).slice(0, 8192),
+                notes: (speakerNotes.get(slides[slide - 1]!)?.textContent ?? '').slice(0, 8192),
               }
             : {}),
           ...(request ? { floatingRequest: request, floatingSelection } : {}),
@@ -1467,20 +1531,6 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td{b
 body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:first-of-type{box-shadow:inset -1px -1px 0 #e0e0e0,inset 1px 0 0 #e0e0e0}
 `;
     document.head.append(css);
-    // Identify only the exact locally generated notice shell, never authored details.
-    // This is layout recognition, not a source of selection or host authority.
-    const notice = [
-      ...document.querySelectorAll<HTMLDetailsElement>('body > details[role="note"]'),
-    ].find(
-      (node) =>
-        node.style.position === 'fixed' &&
-        node.style.top === '8px' &&
-        node.style.right === '8px' &&
-        node.querySelector(':scope > summary')?.textContent === 'Kite 离线预览说明' &&
-        node.textContent === 'Kite 离线预览说明排版可能与 Office 不同；复杂 3D 与动画不受支持。',
-    );
-    // The trusted host renders its own fixed copy. Never transfer document HTML.
-    notice?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'kite-excel-range-layer';
     overlay.inert = true;
@@ -1671,6 +1721,11 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
     resetExcel();
   }
 
+  /** Trusted navigation remains at interface scale; narrow previews use an overlay, not a smaller document. */
+  function installPageRail(rail: HTMLElement) {
+    pageRail(rail, () => presentation);
+  }
+
   function installWordPages() {
     const initialState = document.documentElement.getAttribute('data-kite-word-pagination-state');
     if (initialState !== 'pending' && initialState !== 'settled') return;
@@ -1684,6 +1739,7 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
     rail.style.cssText =
       'display:none;position:fixed;left:0;top:0;bottom:0;width:104px;overflow-y:auto;overflow-x:hidden;padding:8px 4px;box-sizing:border-box;background:var(--office-background);z-index:100';
     document.body.append(rail);
+    installPageRail(rail);
     const css = document.createElement('style');
     css.textContent =
       'body.kite-word-pages{padding-left:112px!important}.kite-word-page-button{display:block;position:relative;width:100%;max-width:96px;height:128px;margin:0 auto 4px;padding:4px 2px 18px;border:1px solid var(--office-border);border-radius:8px;background:transparent;color:var(--office-muted);cursor:pointer;box-sizing:border-box}.kite-word-page-button:hover{background:var(--office-hover)}.kite-word-page-button:focus-visible{outline:1px solid var(--office-foreground);outline-offset:-2px}.kite-word-visual{position:relative;width:88px;height:104px;overflow:hidden;pointer-events:none}.kite-word-number{position:absolute;bottom:2px;left:0;right:0;text-align:center}body .kite-word-page-button,body .kite-word-number{font:11px var(--office-font)!important}';
@@ -1695,6 +1751,7 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
       button: HTMLButtonElement;
       selection?: OfficeSelection;
       valid: () => boolean;
+      navigable: () => boolean;
     };
     let generation = 0,
       pages: Page[] = [];
@@ -1994,6 +2051,12 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
           body,
           button,
           valid: pageValid,
+          navigable: () =>
+            marker() === next &&
+            page.isConnected &&
+            button.parentElement === rail &&
+            originalPages().length === original.length &&
+            originalPages().every((entry, i) => entry === original[i]),
           ...(complete ? { selection } : {}),
         };
         pages.push(item);
@@ -2012,7 +2075,7 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
             page.button === event.target ||
             (event.target instanceof Node && page.button.contains(event.target)),
         );
-        if (!item?.valid()) return;
+        if (!item?.navigable()) return;
         event.preventDefault();
         closeMenu();
         item.page.scrollIntoView({ block: 'start', behavior: 'instant' });
@@ -2020,6 +2083,11 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
       true,
     );
     rail.addEventListener('scroll', renderThumbnails);
+    // Navigation also serves read-only previews, which never poll edit interactions.
+    new MutationObserver(() => refreshWordPages()).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-kite-word-pagination-state', 'data-kite-word-pagination-generation'],
+    });
     refreshWordPages();
     window.dispatchEvent(new Event('resize'));
   }
@@ -2033,9 +2101,10 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
     rail.className = 'kite-office-chrome kite-thumbnail-rail';
     rail.setAttribute('aria-label', '幻灯片缩略图');
     rail.style.cssText =
-      'width:104px;min-width:104px;flex:0 0 104px;height:100vh;overflow-y:auto;overflow-x:hidden;padding:8px 4px;background:var(--office-background);box-sizing:border-box';
+      '--kite-thumb-scale:1;--kite-rail-width:104px;width:var(--kite-rail-width);min-width:var(--kite-rail-width);flex:0 0 var(--kite-rail-width);height:100vh;overflow-y:auto;overflow-x:hidden;padding:8px 4px;background:var(--office-background);box-sizing:border-box';
     main.style.minWidth = '0';
     main.before(rail);
+    installPageRail(rail);
     // OfficeCLI maintains its own stale counter state after host navigation. Only
     // hide that known top-level badge; the trusted toolbar/rail own page status.
     document.querySelectorAll('body > .page-counter').forEach((el) => {
@@ -2043,7 +2112,7 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
     });
     const railStyle = document.createElement('style');
     railStyle.textContent =
-      'body>.page-counter{display:none!important}.kite-thumbnail-button{display:block;position:relative;width:96px;height:82px;margin:0;padding:4px 2px 18px;border:2px solid transparent;border-radius:8px;background:transparent;color:var(--office-muted);cursor:pointer;box-sizing:border-box}.kite-thumbnail-button:hover{background:var(--office-hover)}.kite-thumbnail-button:active{background:var(--office-pressed)}.kite-thumbnail-button[aria-current="true"]{border-color:var(--office-foreground);background:var(--office-selected);color:var(--office-foreground)}.kite-thumbnail-visual{position:relative;width:88px;height:54px;overflow:hidden;background:#eee;pointer-events:none}.kite-thumbnail-visual *{pointer-events:none!important}.kite-thumbnail-number{position:absolute;bottom:0;left:0;right:0;font:11px var(--office-font);text-align:center}body.kite-present .kite-thumbnail-rail{display:none!important}';
+      'body>.page-counter{display:none!important}.kite-thumbnail-button{display:block;position:relative;width:100%;height:calc(54px * var(--kite-thumb-scale) + 28px);margin:0;padding:4px 2px 18px;border:2px solid transparent;border-radius:8px;background:transparent;color:var(--office-muted);cursor:pointer;box-sizing:border-box}.kite-thumbnail-button:hover{background:var(--office-hover)}.kite-thumbnail-button:active{background:var(--office-pressed)}.kite-thumbnail-button[aria-current="true"]{border-color:var(--office-foreground);background:var(--office-selected);color:var(--office-foreground)}.kite-thumbnail-visual{position:relative;transform:scale(var(--kite-thumb-scale));transform-origin:left top;width:88px;height:54px;overflow:hidden;background:#eee;pointer-events:none}.kite-thumbnail-visual *{pointer-events:none!important}.kite-thumbnail-number{position:absolute;bottom:0;left:0;right:0;font:11px var(--office-font);text-align:center}body.kite-present .kite-thumbnail-rail{display:none!important}@media(max-width:480px){.kite-thumbnail-rail{--kite-rail-width:80px!important;--kite-thumb-scale:0.75!important}}@media(max-width:360px){.kite-thumbnail-rail{--kite-rail-width:64px!important;--kite-thumb-scale:0.55!important}}';
     document.head.append(railStyle);
     const buttons: HTMLButtonElement[] = [];
     const buttonPages = new Map<Element, number>();
@@ -2097,8 +2166,11 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
       });
       // No clones while presenting; otherwise render viewport plus one-page overscan,
       // capped independently from the document size and from zoom/viewport claims.
-      const first = Math.max(0, Math.floor(rail.scrollTop / 82) - 1);
-      const count = Math.min(12, Math.max(3, Math.ceil((rail.clientHeight || 600) / 82) + 2));
+      const first = Math.max(0, Math.floor(rail.scrollTop / (buttons[0]?.offsetHeight || 82)) - 1);
+      const count = Math.min(
+        12,
+        Math.max(3, Math.ceil((rail.clientHeight || 600) / (buttons[0]?.offsetHeight || 82)) + 2),
+      );
       const last = Math.min(slides.length, first + count);
       for (const [i, entry] of loaded) {
         if (presentation || i < first || i >= last) {
@@ -2172,7 +2244,7 @@ body.kite-excel-preview .kite-excel-grid:not(.no-grid)>tbody>tr:first-child>td:f
   }
 }
 export const officeInteractionInstallScript = (kind: 'word' | 'excel' | 'powerpoint') =>
-  `(${installInteraction.toString()})(${JSON.stringify(kind)},${JSON.stringify(officeChromeCss)})`;
+  `(${installInteraction.toString()})(${JSON.stringify(kind)},${JSON.stringify(officeChromeCss)},${sharedPageRail.toString()})`;
 export const officeInteractionReadScript =
   'globalThis.kiteOfficeInteraction?.read() ?? {selection:null}';
 export const officeInteractionPeekScript =

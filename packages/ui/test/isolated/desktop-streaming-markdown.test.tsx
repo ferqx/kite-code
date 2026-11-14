@@ -3,7 +3,7 @@ import { JSDOM } from 'jsdom';
 import { Activity, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConversationActivityContext } from '../../src/conversation-activity';
-import { MessageContent } from '../../src/desktop/MessageContent';
+import { MessageContent, WebLinkContext } from '../../src/desktop/MessageContent';
 import { StreamingTextReveal } from '../../src/desktop/streaming-text-reveal';
 
 type Fiber = {
@@ -105,16 +105,19 @@ async function fixture() {
     active = true,
     openFile?: (path: string) => void,
     hidden = false,
+    openWebLink?: (url: string) => void,
   ) =>
     act(async () =>
       root.render(
         <ConversationActivityContext value={{ readActive: active, resume: 0 }}>
           <Activity mode={hidden ? 'hidden' : 'visible'}>
-            <MessageContent
-              text={text}
-              streaming={streaming === 'static' ? undefined : streaming}
-              openFile={openFile}
-            />
+            <WebLinkContext.Provider value={openWebLink}>
+              <MessageContent
+                text={text}
+                streaming={streaming === 'static' ? undefined : streaming}
+                openFile={openFile}
+              />
+            </WebLinkContext.Provider>
           </Activity>
         </ConversationActivityContext>,
       ),
@@ -594,6 +597,38 @@ test('long entity and escaped text preserves source offsets for later live suffi
       expect(f.host.textContent).toBe(`${decoded}${body}NEW`);
       expect(f.reveals.slice(count).map((animation) => animation.text)).toEqual(['N', 'E', 'W']);
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test('native web links dispatch separately, prevent external windows and respect read suspension', async () => {
+  const f = await fixture();
+  try {
+    const opened: string[] = [],
+      files: string[] = [];
+    const text = '[网页](https://example.com/path) [代码](src/a.ts) [危险](javascript:alert(1))';
+    const web = (url: string) => opened.push(url);
+    const file = (path: string) => files.push(path);
+    await f.render(text, 'static', true, file, false, web);
+    const link = f.host.querySelector('a')!;
+    const click = new f.dom.window.MouseEvent('click', { bubbles: true, cancelable: true });
+    await act(async () => {
+      link.dispatchEvent(click);
+    });
+    expect(click.defaultPrevented).toBe(true);
+    expect(opened).toEqual(['https://example.com/path']);
+    expect(files).toEqual([]);
+    await act(async () => (f.host.querySelector('.file-link') as HTMLElement).click());
+    expect(files).toEqual(['src/a.ts']);
+    expect(f.host.querySelector('[href^="javascript:"]')).toBeNull();
+    await f.render(text, 'static', false, file, false, web);
+    const suspended = new f.dom.window.MouseEvent('click', { bubbles: true, cancelable: true });
+    await act(async () => {
+      f.host.querySelector('a')!.dispatchEvent(suspended);
+    });
+    expect(suspended.defaultPrevented).toBe(true);
+    expect(opened).toHaveLength(1);
   } finally {
     await f.close();
   }

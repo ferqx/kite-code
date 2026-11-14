@@ -465,9 +465,9 @@ test('default paired main exposes actual Model logs and complete original >64KiB
     const tools = requests[0]!.tools as { function: { name: string } }[];
     const expectedTools = [
       { id: 'ask_user', definitionVersion: '1' },
-      { id: 'read_execution_evidence', definitionVersion: '1' },
       { id: 'edit_file', definitionVersion: '2' },
       { id: 'read_file', definitionVersion: '5' },
+      { id: 'view_images', definitionVersion: '1' },
       { id: 'write_file', definitionVersion: '3' },
       { id: 'wait_agent_events', definitionVersion: '1' },
       { id: 'follow_up_agent', definitionVersion: '1' },

@@ -11,20 +11,24 @@ export function NativeOfficeToolbar(props: {
   presentation: boolean;
   onZoom: (zoom: number | 'fit') => void;
   onPresentation: () => void;
-  onEdit: () => void;
-  onSave: () => void;
+  onEdit?: () => void;
+  onSave?: () => void;
 }) {
   return (
-    <header className="native-office-toolbar">
-      <div className="native-office-identity" title={props.source}>
-        <strong>{props.name}</strong>
-      </div>
-      <div className="native-office-pill">
-        <button type="button" onClick={props.onEdit}>
-          请求修改
-        </button>
-      </div>
-      <div className="native-office-pill">
+    <fieldset
+      className="native-office-toolbar"
+      aria-label={`${props.name} 预览工具栏`}
+      aria-description="只读预览，排版可能与 Office 不同；复杂 3D 与动画不受支持。"
+      title={`${props.source}。只读预览，排版可能与 Office 不同；复杂 3D 与动画不受支持。`}
+    >
+      {props.onEdit && (
+        <div className="native-office-pill native-office-edit-actions">
+          <button type="button" onClick={props.onEdit}>
+            请求修改
+          </button>
+        </div>
+      )}
+      <div className="native-office-pill native-office-view-actions">
         <select
           aria-label="预览缩放"
           value={props.zoom}
@@ -44,19 +48,52 @@ export function NativeOfficeToolbar(props: {
           <button
             type="button"
             disabled={!props.ready}
+            className="native-office-icon-button"
+            aria-label={props.presentation ? '退出放映' : '放映'}
+            title={props.presentation ? '退出放映' : '放映'}
             aria-pressed={props.presentation}
             onClick={props.onPresentation}
           >
-            {props.presentation ? '退出放映' : '▷ 放映'}
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              aria-hidden="true"
+            >
+              {props.presentation ? (
+                <rect x="6" y="6" width="12" height="12" rx="1" />
+              ) : (
+                <path d="m8 4 12 8-12 8Z" strokeLinejoin="round" />
+              )}
+            </svg>
           </button>
         )}
       </div>
-      <div className="native-office-pill">
-        <button type="button" onClick={props.onSave}>
-          ↓ 下载
-        </button>
-      </div>
-    </header>
+      {props.onSave && (
+        <div className="native-office-pill native-office-file-actions">
+          <button
+            type="button"
+            className="native-office-icon-button"
+            aria-label="另存为"
+            title="另存为"
+            onClick={props.onSave}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 3v12m-5-5 5 5 5-5M4 15v5h16v-5" />
+            </svg>
+          </button>
+        </div>
+      )}
+    </fieldset>
   );
 }
 
@@ -119,10 +156,6 @@ export function NativeExcelReadonlyBar(props: {
           {expanded ? '收起' : '展开'}
         </button>
       </div>
-      <details className="native-excel-help">
-        <summary>预览说明</summary>
-        <p>只读预览。选择单元格后可请求修改；值与公式可直接选择复制。显示效果可能与 Excel 不同。</p>
-      </details>
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { link, open, unlink } from 'node:fs/promises';
+import { link, mkdtemp, open, rmdir, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 /** Shell allocation owns helper temporaries; standalone developer fixtures use OS temp. */
@@ -43,20 +43,20 @@ export async function readBoundedDocument(path: string, limit = maximum): Promis
   }
 }
 /** Exclusive atomic publication. Partial bytes stay private; never overwrites an existing output. */
-export async function exportDocument(
-  source: string,
-  out: string,
-  signal?: AbortSignal,
-  stagingRoot = dirname(out),
-) {
+export async function exportDocument(source: string, out: string, signal?: AbortSignal) {
   signal?.throwIfAborted();
   const input = await open(source, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  const temporary = join(stagingRoot, `.kite-export-${randomUUID()}`);
+  let directory: string | undefined;
+  let temporary: string | undefined;
   let target: Awaited<ReturnType<typeof open>> | undefined;
   try {
     const before = await input.stat({ bigint: true });
     if (!before.isFile() || before.size === 0n || before.size > BigInt(maximum))
       throw Error('document_source_invalid');
+    // Publish within the destination filesystem and sandbox write root. A private
+    // sibling directory hides partial bytes without linking across Shell roots.
+    directory = await mkdtemp(join(dirname(out), '.kite-export-'));
+    temporary = join(directory, randomUUID());
     target = await open(temporary, 'wx', 0o600);
     let count = 0;
     const buffer = Buffer.allocUnsafe(1024 * 1024);
@@ -91,8 +91,10 @@ export async function exportDocument(
   } finally {
     await input.close();
     await target?.close();
-    await unlink(temporary).catch((error) => {
-      if (error.code !== 'ENOENT') throw error;
-    });
+    if (temporary)
+      await unlink(temporary).catch((error) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    if (directory) await rmdir(directory);
   }
 }

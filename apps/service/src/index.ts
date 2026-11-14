@@ -29,6 +29,7 @@ import {
 } from './http/schema';
 import { FileCheckpointListQuerySchema } from './http/schema/file-checkpoints';
 import { HostStatusQuerySchema, HostStatusSchema } from './http/schema/host-status';
+import { PdfSnapshotRequest } from './http/schema/pdf-snapshot';
 import { SessionLogPageSchema, SessionLogQuerySchema } from './http/schema/session-logs';
 import {
   SkillCataloguePageSchema,
@@ -1089,6 +1090,26 @@ export async function startService(options: ServiceOptions) {
         }),
       ),
     );
+  });
+  app.post('/v1/sessions/:id/preview/pdf-snapshot', async (context) => {
+    const input = await readBusinessBody(context.req.raw, PdfSnapshotRequest, 90 * 1024 * 1024);
+    if (input.sessionId !== context.req.param('id'))
+      throw new HttpFailure('output_file_scope_denied', 403);
+    if (!options.outputPreviews) throw new HttpFailure('output_preview_unavailable', 503);
+    const controller = new AbortController();
+    subscribers.add(controller);
+    const signal = AbortSignal.any([
+      controller.signal,
+      context.req.raw.signal,
+      AbortSignal.timeout(60000),
+    ]);
+    try {
+      return context.json(
+        schemas.OutputPdfPage.parse(await options.outputPreviews.renderPdfSnapshot(input, signal)),
+      );
+    } finally {
+      subscribers.delete(controller);
+    }
   });
   app.post('/v1/sessions/:id/output-files/pdf-page', async (context) => {
     const input = await readBusinessBody(context.req.raw, schemas.OutputPdfPageRequest, 4096);

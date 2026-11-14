@@ -274,6 +274,11 @@ for (const { guardedReset, rejectedSummary } of [
         expect(instructions[0]!.content).toContain('successful execution receipt references');
         expect(instructions[0]!.content).toContain('Shell operation keys');
         expect(instructions[0]!.content).toContain('recover it with read_plan when available');
+        expect(instructions[0]!.content).not.toContain('read_execution_evidence');
+        expect(instructions[0]!.content).toContain('no model-callable task-wide receipt lookup');
+        expect(instructions[0]!.content).toContain(
+          'Never replace a successful operation with a new execution',
+        );
         expect(instructions[0]!.content).toEndWith(`Focus (user data): ${intent.focus}`);
         expect((await client.getModelOutput('s', recorded.executionId)).output.content).toBe(
           'Factual recorded summary of original user and answer',
@@ -358,6 +363,11 @@ for (const { guardedReset, rejectedSummary } of [
       expect(instructions[0]!.content).toContain('unknown or unconfirmed effects');
       expect(instructions[0]!.content).toContain('not evidence of change ownership');
       expect(instructions[0]!.content).toContain('recover it with read_plan when available');
+      expect(instructions[0]!.content).not.toContain('read_execution_evidence');
+      expect(instructions[0]!.content).toContain('no model-callable task-wide receipt lookup');
+      expect(instructions[0]!.content).toContain(
+        'Never replace a successful operation with a new execution',
+      );
       expect(instructions[0]!.content).toEndWith(`Focus (user data): ${intent.focus}`);
       expect(instructions[0]!.sourceIds).toEqual([compression.id]);
       expect((await client.getModelOutput('s', compression.modelExecutionId)).output.content).toBe(

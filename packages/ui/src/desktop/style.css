@@ -7735,7 +7735,6 @@ body {
 .output-references {
   margin-block: 12px;
 }
-.turn-output-files h4,
 .output-references h4 {
   margin: 4px 0;
   font-size: inherit;
@@ -7745,18 +7744,118 @@ body {
   list-style: none;
   padding: 0;
   margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.kite-client .agent-turn-final:has(+ .turn-output-files) .message.assistant {
+  margin-bottom: 0;
 }
 .output-file-card {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  padding-block: 4px;
-}
-.output-file-card > button:first-child {
+  gap: 12px;
   min-width: 0;
-  overflow-wrap: anywhere;
+  padding: 12px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
 }
-.output-file-card small {
-  opacity: 0.7;
+.output-file-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  height: 40px;
+  color: var(--muted-foreground);
+  border-radius: 8px;
+  background: var(--muted);
+}
+.output-file-icon svg {
+  width: 22px;
+  height: 22px;
+}
+.output-file-description {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.output-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.output-file-description small {
+  color: var(--muted-foreground);
+}
+.output-file-open {
+  flex-shrink: 0;
+}
+
+/* The environment card reuses the authoritative file list, not a second inventory. */
+.kite-client .environment-information .output-references {
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.kite-client .environment-information .output-references h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-weight: 400;
+}
+.kite-client .environment-information .output-references h4 svg {
+  width: 18px;
+  height: 18px;
+}
+.kite-client .environment-information .output-references > ul {
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.kite-client .environment-information .output-references li {
+  min-width: 0;
+  margin: 0;
+}
+.output-reference-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.output-reference-link > svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.output-reference-link > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.output-reference-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.output-reference-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.kite-client .environment-information .output-references > small {
+  display: block;
+  color: var(--muted-foreground);
 }

@@ -27,6 +27,7 @@ import type {
   NativeBrowserToolbarAction,
   NativeBrowserToolbarPresentation,
 } from './native-browser-toolbar-types';
+import { observeNativeContent } from './native-content-observer';
 
 const presentationRevisionKey = Symbol.for('kite.native.browser.presentationRevision');
 // Sibling layout effects run in tree order. Retire a deselected page at the
@@ -681,31 +682,7 @@ export function NativeBrowserPane({
       }
       if (frame === undefined) frame = requestAnimationFrame(publish);
     };
-    const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(publish);
-    resize?.observe(node);
-    for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement)
-      resize?.observe(ancestor);
-    const mutations = new MutationObserver(schedule);
-    mutations.observe(originalDocument.body, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: [
-        'style',
-        'class',
-        'data-native-browser-layout',
-        'data-state',
-        'data-separator',
-        'hidden',
-      ],
-    });
-    mutations.observe(originalDocument.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme', 'class'],
-    });
-    window.addEventListener('resize', publish);
-    window.addEventListener('scroll', schedule, true);
-    originalDocument.addEventListener('visibilitychange', publish);
+    const unobserve = observeNativeContent(node, publish, schedule);
     // A layout effect precedes the passive state subscription, so ownership is
     // checked independently here; the node/owner remain the sole layout writer.
     const remeasure = () => {
@@ -731,12 +708,8 @@ export function NativeBrowserPane({
         if (placement.current === controller) placement.current = undefined;
         unwatchPresentation?.();
         inFlight = undefined;
-        resize?.disconnect();
-        mutations.disconnect();
+        unobserve();
         if (frame !== undefined) cancelAnimationFrame(frame);
-        window.removeEventListener('resize', publish);
-        window.removeEventListener('scroll', schedule, true);
-        originalDocument.removeEventListener('visibilitychange', publish);
       }
     };
   }, [id, host, owner, presentationScope, draft]);

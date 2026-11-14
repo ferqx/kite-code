@@ -530,6 +530,8 @@ export type NativeWorkspaceRemoval = {
   error?: string;
 };
 export type NativeState = {
+  /** Main-owned paired Service shares this computer; not a permission grant. */
+  readonly localFileReferences?: boolean;
   readonly workspaceRemovalSubmissions?: readonly NativeWorkspaceRemoval[];
   readonly workspaceRemovalUnavailable?: boolean;
   readonly environmentRevision?: number;

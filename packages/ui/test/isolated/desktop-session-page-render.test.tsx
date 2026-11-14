@@ -687,6 +687,7 @@ function retainedSidebarFixture(restored = true) {
       details?: boolean;
       scope?: string;
       covered?: boolean;
+      onOpen?: (id: string) => void;
     } = {},
   ) =>
     act(async () =>
@@ -708,7 +709,7 @@ function retainedSidebarFixture(restored = true) {
           browserTabRequest={
             options.request === undefined
               ? undefined
-              : { requestId: options.request, createIfMissing: true }
+              : { requestId: options.request, createIfMissing: true, onOpen: options.onOpen }
           }
           childTabRequest={
             options.child === undefined
@@ -1170,6 +1171,23 @@ test('automatic collapse preserves open intent and repeated positive Group notic
     await f.notify(true);
     expect(browser.dataset.visible).toBe('true'); // invalid hidden Group retains last valid result
     expect(f.closed).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('web link reveals one actual browser tab and navigation callback does not replay', async () => {
+  const f = retainedSidebarFixture(false);
+  const opened: string[] = [];
+  const onOpen = (id: string) => opened.push(id);
+  try {
+    await f.show({ request: 1, onOpen });
+    expect(opened).toHaveLength(1);
+    expect(f.host.querySelector(`[data-retained-page="${opened[0]}"]`)).not.toBeNull();
+    await f.show({ request: 1, onOpen });
+    expect(opened).toHaveLength(1);
+    await f.show({ request: 2, onOpen });
+    expect(opened).toEqual([opened[0]!, opened[0]!]);
   } finally {
     await f.close();
   }

@@ -160,7 +160,11 @@ const bridge: NativeBridge &
   },
   fileReferences(files) {
     if (!Array.isArray(files) || files.length > 128) throw Error('file_reference_unavailable');
-    return files.map((file) => inputFileReference(file.name, webUtils.getPathForFile(file)));
+    return files.map((file) => {
+      const path = webUtils.getPathForFile(file);
+      // Synthetic browser Files have bytes but no native path. Import those normally.
+      return path ? inputFileReference(file.name, path) : { name: file.name, uri: '' };
+    });
   },
   async showWindowMenu(request) {
     const reply = (await ipcRenderer.invoke(nativeWindowMenuChannel, request)) as NativeReply;

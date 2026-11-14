@@ -64,11 +64,15 @@ void (async () => {
       ['set', source, '/slide[2]', '--prop', 'notes=第二页的只读备注。原始文件保持不变。'],
     ];
     for (const a of args) {
-      const r = spawnSync(join(assetsRoot, 'officecli.exe'), a, {
-        env: { ...process.env, ...officeEnvironment() },
-        windowsHide: true,
-        encoding: 'utf8',
-      });
+      const r = spawnSync(
+        join(assetsRoot, process.platform === 'win32' ? 'officecli.exe' : 'officecli'),
+        a,
+        {
+          env: { ...process.env, ...officeEnvironment() },
+          windowsHide: true,
+          encoding: 'utf8',
+        },
+      );
       if (r.status !== 0) throw Error(r.stderr || r.stdout);
     }
   }
@@ -103,6 +107,8 @@ void (async () => {
   const preview = new NativeOutputPreview(assetsRoot);
   let stopping = false;
   let outcome: 'accepted' | 'failed' | 'unknown' = 'accepted';
+  const ackRace = process.argv.includes('--ack-race');
+  let retirementObserved: (() => void) | undefined;
   const events: Record<string, unknown>[] = [];
   const event = (v: Record<string, unknown>) => {
     events.push({ time: new Date().toISOString(), ...v });
@@ -136,15 +142,56 @@ void (async () => {
           event({ method: q.method, phase: 'ready', elapsedMs: performance.now() - started });
           return { kind: 'outputs.preview', status: 'ready' };
         }
-        case 'outputs.preview.interaction':
-          return {
-            kind: 'outputs.preview.interaction',
-            interaction: await preview.readInteraction(q.previewId, q.generation, q.consumeRequest),
-          };
-        case 'outputs.preview.request.result':
+        case 'outputs.preview.interaction': {
+          const interaction = await preview.readInteraction(
+            q.previewId,
+            q.generation,
+            q.consumeRequest,
+          );
+          if (retirementObserved && !interaction.requestOpen) {
+            event({ method: 'fixture.ack-race', phase: 'poll-retired-original' });
+            retirementObserved();
+            retirementObserved = undefined;
+          }
+          return { kind: 'outputs.preview.interaction', interaction };
+        }
+        case 'outputs.preview.request.result': {
+          // Explicit synthetic GUI fault injection only: retain the real accepted controller
+          // and form, but delay its return until the production renderer's poll retires it.
+          if (ackRace && q.outcome.status === 'accepted') {
+            const active = (
+              preview as unknown as {
+                active?: {
+                  request?: {
+                    view: {
+                      settle(
+                        serial: number,
+                        result: import('../src/output-files-bridge').OfficeRequestOutcome,
+                      ): Promise<void>;
+                    };
+                  };
+                };
+              }
+            ).active;
+            assert.ok(active?.request);
+            const view = active.request.view;
+            const originalSettle = view.settle.bind(view);
+            view.settle = async (serial, result) => {
+              await originalSettle(serial, result);
+              event({ method: 'fixture.ack-race', phase: 'accepted-controller-awaiting-poll' });
+              await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(() => reject(Error('fixture_ack_poll_timeout')), 5000);
+                retirementObserved = () => {
+                  clearTimeout(timer);
+                  resolve();
+                };
+              });
+            };
+          }
           await preview.settleRequest(q.previewId, q.generation, q.requestId, q.outcome);
           event({ method: q.method, requestId: q.requestId, outcome: q.outcome });
           return null;
+        }
         case 'outputs.preview.control':
           await preview.control(q.previewId, q.generation, q.control);
           event({ method: q.method, control: q.control });

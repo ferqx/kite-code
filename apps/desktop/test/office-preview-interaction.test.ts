@@ -150,7 +150,7 @@ test('Word reports exact block offsets and clears a collapsed selection', () => 
 test('PPT controls choose current slide, expose notes and clear old object selection', () => {
   const f = fixture(
     'powerpoint',
-    '<div class="main"><div class="slide-container"><div data-path="/slide[1]/shape[@id=2]">one</div></div><div class="slide-container"><div class="slide-notes-body">notes</div></div></div>',
+    '<div class="main"><div class="slide-container"><div data-path="/slide[1]/shape[@id=2]">one</div></div><div class="slide-container"><div class="slide-notes"><div class="slide-notes-label">Notes</div><div class="slide-notes-body">notes</div></div></div></div>',
   );
   f.click(f.win.document.querySelector('[data-path]')!);
   assert.equal(f.read().selection.slide, 1);
@@ -266,7 +266,8 @@ test('real slide thumbnails navigate only from trusted clicks and contain no sel
   assert.match(rail.textContent!, /Real second page/);
   assert.equal(rail.querySelector('[data-path],[id],[onclick]'), null);
   assert.equal((rail.querySelector('.kite-thumbnail-visual') as HTMLElement).inert, true);
-  assert.equal(rail.style.minWidth, '104px');
+  assert.equal(rail.style.minWidth, 'var(--kite-rail-width)');
+  assert.equal(rail.style.getPropertyValue('--kite-rail-width'), '104px');
   assert.equal(f.win.document.querySelector<HTMLElement>('.main')!.style.minWidth, '0px');
   const calls: Element[] = [];
   f.win.HTMLElement.prototype.scrollIntoView = function () {
@@ -2218,4 +2219,140 @@ test('Excel request button stays inside the grid client area above Sheet tabs an
   f.control({ kind: 'request-edit' });
   assert.equal(f.read().floatingSelection.range, 'B2');
   f.close();
+});
+
+test('Excel fit uses whole-grid width and refits viewport without changing authored cells or tab size', () => {
+  const f = fixture('excel', scopeSheetHtml, (win) => {
+    Object.defineProperty(win, 'innerWidth', { value: 240, configurable: true });
+    for (const table of win.document.querySelectorAll('table'))
+      table.getBoundingClientRect = () =>
+        ({ width: 1200 * (Number(win.document.documentElement.style.zoom) || 1) }) as DOMRect;
+  });
+  const doc = f.win.document;
+  const cell = doc.querySelector('td')!;
+  const authored = cell.outerHTML;
+  const tabs = doc.querySelector<HTMLElement>('.sheet-tabs')!;
+  assert.equal(Number(doc.documentElement.style.zoom), 238 / 1200);
+  assert.equal(Number(tabs.style.zoom) * Number(doc.documentElement.style.zoom), 1);
+  Object.defineProperty(f.win, 'innerWidth', { value: 600, configurable: true });
+  f.fireWindow('resize');
+  assert.equal(Number(doc.documentElement.style.zoom), 598 / 1200);
+  assert.equal(Number(tabs.style.zoom) * Number(doc.documentElement.style.zoom), 1);
+  f.control({ kind: 'zoom', value: 1 });
+  f.fireWindow('resize');
+  assert.equal(doc.documentElement.style.zoom, '1');
+  f.control({ kind: 'zoom', value: 'fit' });
+  assert.equal(Number(doc.documentElement.style.zoom), 598 / 1200);
+  assert.equal(cell.outerHTML, authored);
+  f.win.close();
+});
+
+test('PPT hides only converter notes chrome and keeps exact page-four notes available to the host', () => {
+  const note = '店长每天闭店前核对新品销量、试饮份数和复购券核销。';
+  const slides = Array.from(
+    { length: 5 },
+    (_, index) =>
+      `<div class="slide-container"><div class="slide"><div data-path="/slide[${index + 1}]/shape[@id=1]">Page ${index + 1}<div class="slide-notes"><div class="slide-notes-body">Authored slide content</div></div></div></div>${index === 3 ? `<div class="slide-notes"><div class="slide-notes-label">Notes</div><div class="slide-notes-body"><div>${note}</div></div></div>` : ''}</div>`,
+  ).join('');
+  const f = fixture('powerpoint', `<div class="main">${slides}</div>`);
+  const containers = f.win.document.querySelectorAll('.main > .slide-container');
+  const notes = containers[3]!.querySelector<HTMLElement>(':scope > .slide-notes')!;
+  const authored = containers[3]!.querySelector<HTMLElement>('.slide .slide-notes')!;
+  const authoredText = authored.outerHTML;
+  assert.equal(notes.style.getPropertyValue('display'), 'none');
+  assert.equal(notes.style.getPropertyPriority('display'), 'important');
+  assert.equal(notes.querySelector('.slide-notes-body')!.textContent, note);
+  assert.equal(authored.style.display, '');
+  assert.equal(authored.hasAttribute('aria-hidden'), false);
+  f.control({ kind: 'slide', value: 4 });
+  assert.equal(f.read().currentSlide, 4);
+  assert.equal(f.read().notes, note);
+  for (const value of [true, false]) {
+    f.control({ kind: 'presentation', value });
+    assert.equal(f.read().notes, note);
+    assert.equal(f.read().currentSlide, 4);
+    assert.equal(notes.style.display, 'none');
+    assert.equal(authored.outerHTML, authoredText);
+    assert.notEqual(f.win.getComputedStyle(authored).display, 'none');
+  }
+  f.control({ kind: 'slide', value: 5 });
+  assert.equal(f.read().notes, '');
+  assert.equal(f.win.document.querySelectorAll('.kite-thumbnail-button').length, 5);
+  f.win.close();
+});
+
+test('PPT navigation counter-scales at interface size and compact gutter never follows hover', () => {
+  const f = fixture(
+    'powerpoint',
+    '<div class="main"><div class="slide-container"><div class="slide">One</div></div></div>',
+  );
+  const rail = f.win.document.querySelector<HTMLElement>('.kite-page-rail')!;
+  for (const value of [1, 1.5, 2, 'fit'] as const) {
+    f.control({ kind: 'zoom', value });
+    const scale = value === 'fit' ? 1 : value;
+    assert.equal(Number(rail.style.zoom), 1 / scale);
+    assert.equal(parseFloat(f.win.document.body.style.paddingLeft), 112 / scale);
+  }
+  Object.defineProperty(f.win, 'innerWidth', { configurable: true, value: 400 });
+  f.fireWindow('resize');
+  assert.equal(rail.classList.contains('kite-rail-compact'), true);
+  assert.equal(rail.tabIndex, 0);
+  assert.equal(f.win.document.body.style.paddingLeft, '40px');
+  f.control({ kind: 'zoom', value: 2 });
+  assert.equal(rail.style.zoom, '0.5');
+  assert.equal(f.win.document.body.style.paddingLeft, '20px');
+  f.control({ kind: 'presentation', value: true });
+  assert.equal(f.win.document.body.style.paddingLeft, '0px');
+  f.win.close();
+});
+
+test('Word navigation survives geometry changes without accepting stale modification scope', () => {
+  const f = fixture('word', wordPagesHtml()),
+    d = f.win.document;
+  const page = d.querySelectorAll<HTMLElement>('.page')[1]!,
+    button = d.querySelectorAll('.kite-word-page-button')[1]!;
+  let navigated = 0;
+  page.scrollIntoView = () => {
+    navigated++;
+  };
+  page.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1200, height: 1600 }) as DOMRect;
+  f.control({ kind: 'zoom', value: 2 });
+  f.fire('click', button);
+  assert.equal(navigated, 1);
+  f.fire('contextmenu', button, { button: 2 });
+  f.fire('click', d.querySelector('[role=menuitem]')!);
+  assert.equal(f.read().floatingRequest, undefined);
+  d.documentElement.setAttribute('data-kite-word-pagination-generation', '2');
+  f.fire('click', button);
+  assert.equal(navigated, 1);
+  f.close();
+  const g = fixture('word', wordPagesHtml()),
+    doc = g.win.document;
+  const original = doc.querySelectorAll<HTMLElement>('.page')[1]!,
+    target = doc.querySelectorAll('.kite-word-page-button')[1]!;
+  let stale = 0;
+  original.scrollIntoView = () => {
+    stale++;
+  };
+  original.replaceWith(original.cloneNode(true));
+  g.fire('click', target);
+  assert.equal(stale, 0);
+  g.close();
+});
+
+test('read-only Word navigation becomes ready after pagination without interaction polling', async () => {
+  const f = fixture('word', wordPagesHtml().replace('state="settled"', 'state="pending"'));
+  const doc = f.win.document;
+  try {
+    assert.equal(doc.querySelectorAll('.kite-word-page-button').length, 0);
+    doc.documentElement.setAttribute('data-kite-word-pagination-state', 'settled');
+    await Promise.resolve();
+    assert.equal(doc.querySelectorAll('.kite-word-page-button').length, 2);
+    assert.equal((doc.querySelector('.kite-word-rail') as HTMLElement).style.display, 'block');
+    doc.documentElement.setAttribute('data-kite-word-pagination-state', 'pending');
+    await Promise.resolve();
+    assert.equal((doc.querySelector('.kite-word-rail') as HTMLElement).style.display, 'none');
+  } finally {
+    f.close();
+  }
 });

@@ -251,7 +251,11 @@ export interface SessionPageProps {
     onClose: () => void;
   };
   /** Reveal the ordinary browser, using a verified retained page when present. */
-  browserTabRequest?: { requestId: number; createIfMissing: boolean };
+  browserTabRequest?: {
+    requestId: number;
+    createIfMissing: boolean;
+    onOpen?: (id: string) => void;
+  };
   diagnosticView?: ReactNode;
   historyPanel?: { id: string; labelledBy: string };
   historyError?: { title: string; detail: string; retry: () => void };
@@ -269,6 +273,7 @@ export interface SessionPageProps {
   childTabRequest?: SessionChildTabRequest;
   fileTabRequest?: SessionFileTabRequest;
   renderFile?: (props: SessionFilePageProps) => ReactNode;
+  closeFile?: (target: SessionFilePageProps['target']) => void;
   trajectoryTabRequest?: { requestId: number };
   renderTrajectory?: (props: SessionTrajectoryPageProps) => ReactNode;
   renderChildSession?: (props: SessionChildPageProps) => ReactNode;
@@ -299,6 +304,7 @@ export function SessionPage(props: SessionPageProps) {
     hasTabs ? props.restoreBrowser : undefined,
     props.browserRestoreKey,
     props.browserPending,
+    props.closeFile,
   );
   return (
     <NativeScrollbars enabled={!props.workbench && !props.scheduledTasks}>
@@ -747,16 +753,22 @@ function SessionPageContent({
       tabModel.restoreIssue
     )
       return;
-    const key = JSON.stringify([tabsScopeKey, request.requestId]);
+    const key = JSON.stringify([
+      tabsScopeKey,
+      request.onOpen ? 'link' : 'reveal',
+      request.requestId,
+    ]);
     if (browserRequest.current === key) return;
     const page =
       tabModel.tabs.find(
         (tab) => tab.kind === 'browser' && tab.id === tabModel.restoredBrowserId,
       ) ?? tabModel.tabs.find((tab) => tab.kind === 'browser');
     if (!page && !request.createIfMissing) return;
+    const id = page?.id ?? tabModel.addBrowser();
+    if (!id) return;
     browserRequest.current = key;
     if (page) tabModel.select(page.id);
-    else tabModel.addBrowser();
+    request.onOpen?.(id);
     detailClose.current?.();
     changeTabsOpen(true);
   }, [
@@ -885,6 +897,8 @@ function SessionPageContent({
   ]);
   const fileOpener = useRef(tabModel.openFile);
   fileOpener.current = tabModel.openFile;
+  const fileCloser = useRef(props.closeFile);
+  fileCloser.current = props.closeFile;
   const handledFileRequest = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     const request = props.fileTabRequest;
@@ -894,6 +908,7 @@ function SessionPageContent({
       return;
     handledFileRequest.current = request.requestId;
     const opened = fileOpener.current(request.target, request.title);
+    if (!opened) fileCloser.current?.(request.target);
     setTabLimitKey(opened ? undefined : tabsScopeKey);
     detailClose.current?.();
     changeTabsOpen(true);

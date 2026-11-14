@@ -157,7 +157,7 @@ export async function createOfficeDocument(input: {
     const stat = await lstat(draft);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0 || stat.size > 256 * 1024 * 1024)
       throw Error('office_output_invalid');
-    await exportDocument(draft, input.out, signal, directory);
+    await exportDocument(draft, input.out, signal);
     return {
       success: true,
       name: basename(input.out),

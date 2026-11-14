@@ -36,7 +36,6 @@ const readOnlyBindings = [
   ['builtin.shell', 'shell.wait', '1'],
   ['builtin.shell', 'shell.stop', '1'],
   ['builtin.task', 'task.message', '1'],
-  ['builtin.execution-evidence', 'execution_evidence.read', '1'],
   ['builtin.web', 'web_fetch', '1'],
   ['builtin.shell', 'git.worktree', '1'],
   ['builtin.planning', 'planning.read', '1'],

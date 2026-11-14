@@ -73,6 +73,15 @@ test('Skill tools expose only knowledge selectors and original internal inputs r
       skills: [{ id: 'guide', path: 'skill' }],
     });
     const tools = assembly.extensions.flatMap((extension) => extension.tools ?? []);
+    for (const id of ['skills.load', 'skills.resource']) {
+      const tool = tools.find((candidate) => candidate.id === id)!;
+      expect(tool.version).toBe('1');
+      expect(tool.description).toContain(
+        'Wait for a successful result and read the returned guidance before planning dependent tool calls.',
+      );
+      expect(tool.description).toContain('Do not batch dependent commands with this call.');
+      expect(tool.description).toContain('never execute');
+    }
     const context = { signal: new AbortController().signal } as ToolContext;
     for (const [id, input] of [
       ['skills.load', { id: 'guide' }],
@@ -347,7 +356,12 @@ test('unselected local errors do not gate default assembly; explicit selectors s
       ],
     };
     assembly = await createWorkspaceAssembly(options);
-    expect(assembly.snapshotFacts.skills.map((s) => s.id)).toEqual(['good', 'other']);
+    // The built-in knowledge is available, but does not become a user configuration.
+    expect(assembly.snapshotFacts.skills.map((s) => s.id)).toEqual([
+      'good',
+      'office-documents',
+      'other',
+    ]);
     expect(assembly.skillConfigurations.map((s) => s.id)).toEqual(['good', 'other']);
     await assembly.dispose();
     assembly = undefined;

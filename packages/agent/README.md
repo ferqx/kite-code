@@ -103,7 +103,7 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 - [Agent Browser](src/tools/browser/README.md)：普通 Tool／Job／Query／Action、统一 `browser.execute` 与受 Job 监督的隔离持续环境；Native 新默认单入口按每次 API 沿原 Operations 权限执行，正式 PNG 复用工具图片合同。全局内置 `computer-use` 由 [Skills](src/skills/README.md)提供；固定后端、Linux／macOS 监督和旧显式配置保留，执行器当前仅 macOS 合格宿主可用，普通填写不适用于凭据。真实客户端资格归 Desktop owner。
 - [普通问题入口](src/tools/ask-user/README.md)：`@kite-ai/agent/ask-user` 的纯工厂通过原 `requestInput` 提供 1–3 题、原选项和自由回答，并将原答案解释为模型与历史文案；默认选择及 child 禁用归 Service。
 - [计划审阅与进度入口](src/business/planning/README.md)：真实用户计划审阅、来源绑定的步骤回执和唯一 Loop。专用验证工具、自动检查、checker 与 waiver 已退役。
-- [当前任务执行证据](src/business/execution-evidence/README.md)：`read_execution_evidence` 按真实 Session／Run 查询已有 Tool／Job、准确 receipt、已知目标与公开结果；固定水位分页，不读取私有模型正文、不把 Shell 或累计 diff 推导为本 Agent 的逐文件改动。
+- [宿主执行记录](src/business/execution-evidence/README.md)：保留 Runtime／Store scoped 历史查询，不再注册独立模型工具；缺失引用时不得重放效果。
 - [Store 端口](src/storage/port.ts)：宿主使用的具名查询和事务；[记录](src/storage/types.ts)保存业务事实，非完整内存 State。
 - [上下文选择与结果](src/storage/sqlite/context/README.md)：当前选择、完整历史和准确结果引用分开保存；双游标读取固定同一选择与顺序上界。
 - [Profile 入口](src/profile.ts)：`selectProfile({dataRoot, profile})` 只读确定规范 data-root、逻辑名称与稳定 `profileAccessKey`，供 launcher 在启动前固定目标；import 与选择均不创建目录、取得锁或打开数据库。

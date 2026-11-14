@@ -12,15 +12,17 @@ import {
 } from '@kite-ai/agent/documents';
 import type { OutputFileSummary, OutputFileTarget } from '@kite-ai/client';
 import { protocol, session, WebContentsView } from 'electron';
+import { filePreviewFormat } from '../src/file-preview-format';
 import type {
   OfficeEditContext,
   OfficeInlineRequest,
   OfficeRequestOutcome,
 } from '../src/output-files-bridge';
 import { officeSelectionLabel } from '../src/output-files-bridge';
+import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
 import { addNativeWindowView, focusNativeWindowContent } from './native-overlay-layer';
 import { NativeProcessOwner } from './native-processes';
-import type { NativeRootWindow } from './native-root-window';
+import { getNativeRootView, type NativeRootWindow } from './native-root-window';
 import {
   type OfficePreviewControl,
   officeInteractionControlScript,
@@ -32,6 +34,14 @@ import {
 } from './office-preview-interaction';
 import { type OfficePreviewKind, readOfficeDescription } from './office-preview-trust';
 import { NativeOfficeRequestView } from './office-request-view';
+import { createPdfPageCache } from './pdf-page-cache';
+import { pdfPreviewHtml, pdfPreviewInstallScript } from './pdf-preview';
+import {
+  escapePreviewText,
+  markdownPreview,
+  previewDocument,
+  previewUtf8,
+} from './static-file-preview';
 
 /** Registered before app.ready; never a general filesystem or network scheme. */
 export function registerOutputPreviewScheme() {
@@ -40,6 +50,7 @@ export function registerOutputPreviewScheme() {
   ]);
 }
 type Resource = {
+  load?: () => Promise<Buffer>;
   path: string;
   absolutePath: string;
   mimeType: string;
@@ -50,11 +61,6 @@ type Bounds = { x: number; y: number; width: number; height: number };
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const csp =
   "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; media-src 'none'; worker-src 'none'";
-const escapeHtml = (value: string) =>
-  value.replace(
-    /[&<>"']/g,
-    (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!,
-  );
 
 /** One isolated view per root. Converted resources are a closed manifest, never pathname joins. */
 export class NativeOutputPreview {
@@ -69,17 +75,22 @@ export class NativeOutputPreview {
   private active?: {
     id: string;
     generation: number;
-    target: OutputFileTarget;
+    target?: OutputFileTarget;
     bounds: Bounds;
+    nativeBounds?: Bounds;
     sourceHash?: string;
+    pdf?: boolean;
+    check?: () => void;
     officeKind?: OfficePreviewKind;
     abort: AbortController;
     view?: WebContentsView;
+    layout?: { sync: () => void; dispose: () => void };
     directory?: string;
     pending?: boolean;
     cached?: boolean;
     checkTimer?: ReturnType<typeof setInterval>;
     window: NativeRootWindow;
+    latestRequestId?: string;
     request?: {
       id: string;
       view: NativeOfficeRequestView;
@@ -95,12 +106,19 @@ export class NativeOutputPreview {
   async open(input: {
     id: string;
     generation: number;
-    target: OutputFileTarget;
+    target?: OutputFileTarget;
     bounds: Bounds;
     initialControls?: OfficePreviewControl[];
     window: NativeRootWindow;
     check: () => void;
-    materialize: (destination: string) => Promise<OutputFileSummary & { sourceHash?: string }>;
+    verifyAccess?: () => Promise<void>;
+    renderPdfPage?: (
+      page: number,
+      signal: AbortSignal,
+    ) => Promise<{ data: string; totalPages: number }>;
+    materialize: (
+      destination: string,
+    ) => Promise<Pick<OutputFileSummary, 'name' | 'mediaType' | 'size'> & { sourceHash?: string }>;
   }) {
     this.close();
     const active = {
@@ -111,6 +129,7 @@ export class NativeOutputPreview {
       abort: new AbortController(),
       window: input.window,
       pending: true,
+      check: input.check,
     } as NonNullable<NativeOutputPreview['active']>;
     this.active = active;
     const current = () => {
@@ -220,10 +239,53 @@ export class NativeOutputPreview {
             }
           }
         }
-      } else if (file.mediaType.startsWith('text/') || /\.(txt|md|json|csv)$/i.test(file.name)) {
+      } else if (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        if (!input.renderPdfPage) throw Error('preview_pdf_unavailable');
+        const render = input.renderPdfPage;
+        const first = await render(1, active.abort.signal);
+        current();
+        const html = Buffer.from(pdfPreviewHtml(first.totalPages));
+        active.pdf = true;
+        const path = join(active.directory, 'index.html');
+        await writeFile(path, html, { flag: 'wx' });
+        files = [
+          {
+            path: 'index.html',
+            absolutePath: path,
+            mimeType: 'text/html',
+            size: html.length,
+            sha256: digest(html),
+          },
+        ];
+        const loadPage = createPdfPageCache(first, render, active.abort.signal, current);
+        for (let page = 1; page <= first.totalPages; page++) {
+          files.push({
+            path: `page-${page}.png`,
+            absolutePath: '',
+            mimeType: 'image/png',
+            size: 0,
+            sha256: '',
+            load: () => loadPage(page),
+          });
+        }
+        entry = 'index.html';
+      } else if (
+        ['markdown', 'text', 'code', 'unknown'].includes(
+          filePreviewFormat(file.name, file.mediaType),
+        )
+      ) {
         if (BigInt(file.size) > 2n * 1024n * 1024n) throw Error('preview_text_budget');
+        const text = previewUtf8(await readFile(source));
+        if (text === undefined)
+          throw Error(
+            filePreviewFormat(file.name, file.mediaType) === 'unknown'
+              ? 'preview_format_unavailable'
+              : 'preview_text_encoding_unavailable',
+          );
         const html = Buffer.from(
-          `<!doctype html><meta charset="utf-8"><style>body{font:14px system-ui;padding:16px}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><pre>${escapeHtml(await readFile(source, 'utf8'))}</pre>`,
+          filePreviewFormat(file.name, file.mediaType) === 'markdown'
+            ? markdownPreview(text)
+            : previewDocument(`<pre>${escapePreviewText(text)}</pre>`),
         );
         const path = join(active.directory, 'index.html');
         await writeFile(path, html, { flag: 'wx' });
@@ -237,7 +299,7 @@ export class NativeOutputPreview {
           },
         ];
         entry = 'index.html';
-      } else if (/^image\/(png|jpeg|webp|gif)$/.test(file.mediaType)) {
+      } else if (filePreviewFormat(file.name, file.mediaType) === 'image') {
         if (BigInt(file.size) > 32n * 1024n * 1024n) throw Error('preview_image_budget');
         const bytes = await readFile(source);
         const html = Buffer.from(
@@ -256,7 +318,9 @@ export class NativeOutputPreview {
           {
             path: 'image',
             absolutePath: source,
-            mimeType: file.mediaType,
+            mimeType: /^image\/(png|jpeg|webp|gif)$/.test(file.mediaType)
+              ? file.mediaType
+              : `image/${/\.jpe?g$/i.test(file.name) ? 'jpeg' : file.name.split('.').pop()!.toLowerCase()}`,
             size: bytes.length,
             sha256: digest(bytes),
           },
@@ -286,11 +350,16 @@ export class NativeOutputPreview {
           return new Response(null, { status: 403 });
         try {
           current();
-          const bytes = await readFile(resource.absolutePath);
-          if (bytes.length !== resource.size || digest(bytes) !== resource.sha256)
+          const bytes = resource.load
+            ? await resource.load()
+            : await readFile(resource.absolutePath);
+          if (
+            !resource.load &&
+            (bytes.length !== resource.size || digest(bytes) !== resource.sha256)
+          )
             throw Error('preview_integrity_failed');
           current();
-          return new Response(bytes, {
+          return new Response(new Uint8Array(bytes).buffer, {
             headers: {
               'Content-Type': resource.mimeType,
               'Content-Security-Policy': csp,
@@ -316,11 +385,25 @@ export class NativeOutputPreview {
       });
       view.setVisible(false);
       active.view = view;
+      let verifying = false;
+      let lastVerified = 0;
       active.checkTimer = setInterval(() => {
         try {
           current();
+          if (input.verifyAccess && !verifying && Date.now() - lastVerified > 2000) {
+            verifying = true;
+            lastVerified = Date.now();
+            void input
+              .verifyAccess()
+              .catch(() => {
+                if (this.active === active) this.close(active.id);
+              })
+              .finally(() => {
+                verifying = false;
+              });
+          }
         } catch {
-          this.close(active.id);
+          if (this.active === active) this.close(active.id);
         }
       }, 250);
       // While the small request view is open, keep its original selection and page still.
@@ -335,16 +418,67 @@ export class NativeOutputPreview {
       view.webContents.on('will-frame-navigate', (event) => event.preventDefault());
       view.webContents.on('will-redirect', (event) => event.preventDefault());
       view.webContents.on('will-attach-webview', (event) => event.preventDefault());
-      view.setBounds(active.bounds);
+      let drawable = false;
+      const sync = () => {
+        if (
+          this.active !== active ||
+          active.abort.signal.aborted ||
+          input.window.isDestroyed() ||
+          view.webContents.isDestroyed()
+        )
+          return;
+        const [width = 0, height = 0] = input.window.getContentSize();
+        const next = nativeContentBounds(
+          active.bounds,
+          input.window.webContents.getZoomFactor(),
+          width,
+          height,
+        );
+        active.nativeBounds = next;
+        if (next) {
+          const previous = view.getBounds();
+          if (JSON.stringify(previous) !== JSON.stringify(next)) view.setBounds(next);
+          active.request?.view.bounds(next);
+        }
+        const visible =
+          !!next && drawable && input.window.isVisible() && !input.window.isMinimized();
+        view.setVisible(visible);
+        active.request?.view.visible(visible);
+      };
+      const hide = () => {
+        if (this.active !== active || active.abort.signal.aborted || view.webContents.isDestroyed())
+          return;
+        view.setVisible(false);
+        active.request?.view.visible(false);
+      };
+      const dispose = watchNativeContentWindow(input.window, getNativeRootView(input.window), {
+        resize: sync,
+        hide,
+        minimize: hide,
+        show: sync,
+        restore: sync,
+      });
+      active.layout = { sync, dispose };
+      sync();
       addNativeWindowView(input.window, view);
       await view.webContents.loadURL(`${origin}/${entry}`);
       current();
+      if (active.pdf)
+        await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
+          { code: pdfPreviewInstallScript() },
+        ]);
       const officeKind = active.officeKind;
       if (officeKind) {
         await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
           { code: officeInteractionInstallScript(officeKind) },
         ]);
         current();
+        if (officeKind && !active.target) {
+          await view.webContents.insertCSS(
+            '.kite-office-request-trigger { display:none !important }',
+          );
+          current();
+        }
         const initialControls = input.initialControls ?? [];
         if (initialControls.length > 4) throw Error('preview_control_invalid');
         for (const command of initialControls) {
@@ -355,7 +489,8 @@ export class NativeOutputPreview {
         }
       }
       current();
-      view.setVisible(true);
+      drawable = true;
+      sync();
       return { kind: 'outputs.preview' as const, status: 'ready' as const };
     } catch (error) {
       if (this.active === active) this.close(input.id);
@@ -407,6 +542,7 @@ export class NativeOutputPreview {
   }
   async readInteraction(id: string, generation: number, consumeRequest = true) {
     const active = this.active;
+    if (active && !active.target) throw Error('local_preview_readonly');
     if (
       !active ||
       active.id !== id ||
@@ -451,10 +587,12 @@ export class NativeOutputPreview {
           serial: 0,
         };
         active.request = request;
+        active.latestRequestId = request.id;
+        active.layout?.sync();
         const selection = request.context.selection!;
         const label = `请求修改 · ${officeSelectionLabel(selection)}`;
         try {
-          await view.open(active.bounds, label);
+          await view.open(active.nativeBounds ?? active.bounds, label);
           if (
             this.active !== active ||
             active.abort.signal.aborted ||
@@ -463,6 +601,7 @@ export class NativeOutputPreview {
           )
             throw Error('preview_replaced');
           request.ready = true;
+          active.layout?.sync();
         } catch (error) {
           await this.retireRequest(active, request);
           throw error;
@@ -472,7 +611,8 @@ export class NativeOutputPreview {
     const request = active.request;
     let inlineRequest: OfficeInlineRequest | undefined;
     if (request?.ready) {
-      if (result.requestAnchor) request.view.bounds(active.bounds, result.requestAnchor);
+      if (result.requestAnchor)
+        request.view.bounds(active.nativeBounds ?? active.bounds, result.requestAnchor);
       const input = await request.view.read();
       if (
         this.active !== active ||
@@ -534,7 +674,7 @@ export class NativeOutputPreview {
       previewId: active.id,
       generation: active.generation,
       sourceHash: active.sourceHash!,
-      target: structuredClone(active.target),
+      target: structuredClone(active.target!),
     };
   }
   async settleRequest(
@@ -554,6 +694,20 @@ export class NativeOutputPreview {
     const request = active.request;
     if (!request || request.requestId !== requestId) throw Error('preview_request_replaced');
     await request.view.settle(request.serial, outcome);
+    if (outcome.status === 'accepted' && request.retiring) {
+      // The accepted input marks itself cancelled before its JS acknowledgement
+      // returns. A concurrent read may already have retired this exact form.
+      // Join that retirement, not a new submission or an arbitrary closed view.
+      await request.retiring;
+      if (
+        this.active === active &&
+        !active.abort.signal.aborted &&
+        !active.request &&
+        active.latestRequestId === request.id
+      )
+        return;
+      throw Error('preview_request_replaced');
+    }
     if (
       this.active !== active ||
       active.abort.signal.aborted ||
@@ -562,6 +716,10 @@ export class NativeOutputPreview {
     )
       throw Error('preview_request_replaced');
     if (outcome.status === 'accepted') await this.retireRequest(active, request);
+  }
+  isLocal(id: string, generation: number) {
+    const active = this.active;
+    return !!active && active.id === id && active.generation === generation && !active.target;
   }
   async control(id: string, generation: number, command: OfficePreviewControl) {
     const code = officeInteractionControlScript(command);
@@ -574,6 +732,9 @@ export class NativeOutputPreview {
       active.pending
     )
       throw Error('preview_replaced');
+    active.check?.();
+    if (!active.target && command.kind !== 'zoom') throw Error('local_preview_readonly');
+    if (active.pdf && command.kind !== 'zoom') throw Error('preview_control_invalid');
     if (active.request) {
       if (command.kind === 'request-edit') return;
       throw Error('preview_request_active');
@@ -592,7 +753,13 @@ export class NativeOutputPreview {
         throw Error('preview_selection_replaced');
     }
     await active.view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
-      { code },
+      {
+        code: active.pdf
+          ? `globalThis.kitePdfPreview?.control(${JSON.stringify(command)})`
+          : !active.officeKind && command.kind === 'zoom'
+            ? `document.documentElement.style.zoom = ${JSON.stringify(command.value === 'fit' ? '1' : String(command.value))}`
+            : code,
+      },
     ]);
     if (this.active !== active || active.abort.signal.aborted) throw Error('preview_replaced');
   }
@@ -606,8 +773,7 @@ export class NativeOutputPreview {
     const active = this.active;
     if (active?.id !== id) return;
     active.bounds = { ...bounds };
-    active.view?.setBounds(active.bounds);
-    active.request?.view.bounds(active.bounds);
+    active.layout?.sync();
   }
   closeOwned(id: string, generation: number) {
     if (this.active?.generation === generation) this.close(id);
@@ -617,6 +783,7 @@ export class NativeOutputPreview {
     if (!active || (id && active.id !== id)) return;
     this.active = undefined;
     active.abort.abort(Error('preview_closed'));
+    active.layout?.dispose();
     active.request?.view.close();
     if (active.checkTimer) clearInterval(active.checkTimer);
     if (active.view) {

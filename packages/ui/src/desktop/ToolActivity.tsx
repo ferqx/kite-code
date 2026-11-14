@@ -679,6 +679,16 @@ function shellResultLabel(message: Message, diagnostics: boolean): string {
   )
     return '执行超时';
   const original = executionLabel(message, diagnostics);
+  const exitCode = message.shell?.exitCode ?? message.toolResult?.exitCode;
+  // A nonzero command can still return useful diagnostic output. Keep the
+  // failed receipt and its detail; describe the process fact, not task failure.
+  if (
+    original === '失败' &&
+    Number.isSafeInteger(exitCode) &&
+    exitCode !== 0 &&
+    message.shell?.jobStatus === 'failed'
+  )
+    return '已执行 · 非零退出';
   if (
     !original ||
     message.status === 'unknown' ||
@@ -807,7 +817,7 @@ function ShellOutput({
   const displayStatus =
     label === '成功'
       ? 'completed'
-      : ['失败', '执行超时', '结果未知'].includes(label)
+      : ['失败', '已执行 · 非零退出', '执行超时', '结果未知'].includes(label)
         ? 'failed'
         : executionUnconfirmed(message)
           ? undefined

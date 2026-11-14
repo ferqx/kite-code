@@ -532,7 +532,6 @@ export async function runPlanningBusinessCase(options: {
       modelId: 'business',
       toolIds: [
         ...nativeTools,
-        'execution_evidence.read',
         ...(entry.actor !== 'main' ? childTools : []),
         ...(entry.question ? ['ask_user'] : []),
       ],
@@ -716,7 +715,7 @@ export async function runPlanningBusinessCase(options: {
     await setMode(entry.mode);
     const task = entry.question
       ? `Before any effect ask me one Approve/Deny question with ask_user. Wait for my original answer. If approved execute exactly ${command} with ${entry.external ? 'full_access' : 'workspace_write'}/no-network. No other command or effect.`
-      : `This is one bounded tool/permission verification. Save a plan with one step effect; request_plan_review for the exact plan version/digest and wait for my answer. Do not choose or change permission mode. After approval ${entry.actor === 'main' ? `execute exactly ${command} with ${entry.external ? 'full_access' : 'workspace_write'}/no-network` : `spawn exactly one ${entry.actor} agent to execute only ${command}; it must ${entry.actor === 'explore' ? 'read only' : 'append exactly once'}, and cannot spawn. Wait for its actual terminal result`}. Complete the plan step using the actual successful original ${entry.actor === 'main' ? 'shell_execute' : 'spawn_agent'} execution receipt. The completion execution_id must be the real Execution UUID, never shell_id or an operation key. If the result does not expose that UUID, call read_execution_evidence to find the original receipt first; never re-execute the effect to obtain evidence. Do not repeat the effect. No other paths, network or effects. Tool/permission results matter; no special final response format is required.`;
+      : `This is one bounded tool/permission verification. Save a plan with one step effect; request_plan_review for the exact plan version/digest and wait for my answer. Do not choose or change permission mode. After approval ${entry.actor === 'main' ? `execute exactly ${command} with ${entry.external ? 'full_access' : 'workspace_write'}/no-network` : `spawn exactly one ${entry.actor} agent to execute only ${command}; it must ${entry.actor === 'explore' ? 'read only' : 'append exactly once'}, and cannot spawn. Wait for its actual terminal result`}. Complete the plan step using the actual successful original ${entry.actor === 'main' ? 'shell_execute' : 'spawn_agent'} execution receipt. The completion execution_id must be the real Execution UUID, never shell_id or an operation key. Use the original receipt visible in context. If its identity is unavailable, report the missing evidence rather than inventing an ID or re-executing the effect. Do not repeat the effect. No other paths, network or effects. Tool/permission results matter; no special final response format is required.`;
     await client.startRun('s', {
       expectedStoreId,
       commandId: 'work',

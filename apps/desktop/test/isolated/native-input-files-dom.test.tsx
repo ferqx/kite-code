@@ -50,8 +50,9 @@ test('ordinary Native file preparation aborts active reads and generation change
     watch: () => () => {},
   } as NativeBridge;
   let files!: ReturnType<typeof useNativeInputImages>;
+  let local = false;
   function Fixture({ generation }: { generation: number }) {
-    files = useNativeInputImages(bridge, generation, 'store');
+    files = useNativeInputImages(bridge, generation, 'store', local);
     return null;
   }
   const read = dom.window.FileReader.prototype.readAsArrayBuffer;
@@ -127,6 +128,50 @@ test('ordinary Native file preparation aborts active reads and generation change
       expect(() => main.finish(id)).toThrow('native_file_incomplete');
       expect(releases()).toHaveLength(1);
     }
+    local = true;
+    await act(async () => root.render(<Fixture generation={generation} />));
+    const before = calls.length;
+    const localFile = new dom.window.File(['first'], 'local.xlsx') as unknown as File;
+    const direct = await files.fileReferences([localFile]);
+    expect(direct[0]?.uri).toBe('file:///C:/local.xlsx');
+    expect(direct[0]?.prepared).toBeUndefined();
+    expect(calls.length).toBe(before); // No byte reads, imports or permission operations.
+    await act(async () => files.addFiles('local', direct));
+    const changed = await files.fileReferences([
+      new dom.window.File(['changed'], 'local.xlsx') as unknown as File,
+    ]);
+    expect(changed[0]?.uri).toBe(direct[0]?.uri); // A path is not a content snapshot.
+    await act(async () => files.addFiles('local', changed));
+    expect(files.files('local')).toHaveLength(1);
+    expect(calls.length).toBe(before);
+    await act(async () => root.render(<Fixture generation={++generation} />));
+    expect(files.files('local')).toEqual([]); // Reconnect never replays a stale draft.
+    const originalResolver = bridge.fileReferences!;
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await expect(files.fileReferences([localFile], cancelled.signal)).rejects.toThrow();
+    bridge.fileReferences = (selected) =>
+      selected.map((file, index) => ({
+        name: file.name,
+        uri: `file:///folder-${index}/same.xlsx`,
+      }));
+    const sameNames = await files.fileReferences([localFile, localFile]);
+    await act(async () => files.addFiles('same', sameNames));
+    expect(files.files('same')).toHaveLength(2);
+    expect(new Set(files.files('same').map((file) => file.uri)).size).toBe(2);
+
+    bridge.fileReferences = (selected) => selected.map((file) => ({ name: file.name, uri: '' }));
+    const fallback = await files.fileReferences([localFile]);
+    expect(fallback[0]?.prepared).toBe(true);
+    expect(fallback[0]?.uri).toContain('file:///kite-prepared/');
+    expect(() => main.finish(fallback[0]!.id)).not.toThrow();
+    await act(async () => files.removeIds([fallback[0]!.id]));
+    bridge.fileReferences = originalResolver;
+    local = false; // Unqualified/remote clients retain byte-import semantics.
+    await act(async () => root.render(<Fixture generation={generation} />));
+    const remote = await files.fileReferences([localFile]);
+    expect(remote[0]?.prepared).toBe(true);
+    expect(() => main.finish(remote[0]!.id)).not.toThrow();
     const output = {
       storeId: 'store',
       sessionId: 'session',

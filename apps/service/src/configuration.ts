@@ -10,7 +10,6 @@ import {
   ConfigurationPreparationCleanupError,
   type ContextCompressor,
   type ContextSource,
-  createExecutionEvidenceExtension,
   prepareOutputStaging,
   type RunConfiguration,
   type RuntimeOptions,
@@ -456,15 +455,7 @@ export function createDefaultProcessConfiguration(options: {
       readOnlyWorktreeBoundary(policyRuntime, shellForSession, execution, input),
   );
   const askUser = createAskUserExtension();
-  const executionEvidence = createExecutionEvidenceExtension({
-    read: (request) => {
-      if (!policyRuntime) throw new AgentError('execution_evidence_scope_denied');
-      return policyRuntime.readExecutionEvidence(request);
-    },
-  });
-  const builtinReadTools = new Map(
-    [...(askUser.tools ?? []), ...(executionEvidence.tools ?? [])].map((tool) => [tool.id, tool]),
-  );
+  const builtinReadTools = new Map((askUser.tools ?? []).map((tool) => [tool.id, tool]));
   const vault = createCredentialVault({
     backend:
       options.credentialBackend ??
@@ -549,7 +540,6 @@ export function createDefaultProcessConfiguration(options: {
   const fileTools = new Map(files.tools.map((tool) => [tool.id, tool]));
   const builtinExtensions = [
     askUser,
-    executionEvidence,
     planning.extension,
     files.extension,
     browser.extension,
@@ -1160,7 +1150,7 @@ export function createDefaultProcessConfiguration(options: {
         workspaceRoot: root,
         profile: options.profile,
         externallyRegisteredFileTools: files.tools,
-        externallyRegisteredExtensions: [askUser, executionEvidence, browser.extension],
+        externallyRegisteredExtensions: [askUser, browser.extension],
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,

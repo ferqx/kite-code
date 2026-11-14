@@ -539,11 +539,55 @@ export function outputCollectionOperation(
         !get(db, input.sessionId, input.beforeKey)
       )
         throw new AgentError('output_cursor_invalid');
+      // Only after the owning turn ends, collapse a proven serial successor. A later plan alone is not a version:
+      // overlapping producers remain independent, and collector completion order is irrelevant.
+      // Filter before pagination; immutable delivery targets still resolve their original bytes.
       const rows =
         legacyPage || legacyRunPage
           ? []
           : db.rows(
-              "SELECT key,json FROM extension_record WHERE extension_id=? AND scope_kind='session' AND scope_id=? AND key>=? AND key<? AND key<? ORDER BY key DESC LIMIT ?",
+              `WITH deliveries AS (
+                SELECT d.key,d.json,
+                  json_extract(d.json,'$.sourceRunId') AS run_id,
+                  json_extract(d.json,'$.relativePath') AS path,
+                  CASE WHEN c.fork_provenance_json IS NULL AND d.fork_provenance_json IS NULL
+                    AND json_extract(c.json,'$.state')='ready'
+                    AND owner_run.status IN ('completed','failed','cancelled') AND owner_run.is_active=0
+                    AND json_extract(c.json,'$.source.producerExecutionId')=e.id
+                    AND json_extract(c.json,'$.source.runId')=json_extract(d.json,'$.sourceRunId')
+                    AND e.state='succeeded' AND e.origin_store_id=d.origin_store_id
+                    AND c.origin_store_id=d.origin_store_id
+                    AND t.run_id=json_extract(d.json,'$.sourceRunId')
+                    AND CAST(json_extract(c.json,'$.source.producerResultRevision') AS TEXT)=CAST(e.result_revision AS TEXT)
+                    AND e.session_id=d.scope_id AND t.session_id=d.scope_id
+                    AND t.origin_store_id=d.origin_store_id
+                    THEN tp.cursor END AS tool_order,
+                  ep.cursor AS producer_order, e.completed_cursor AS completed_order
+                FROM extension_record d
+                LEFT JOIN extension_record c ON c.extension_id=d.extension_id
+                  AND c.scope_kind=d.scope_kind AND c.scope_id=d.scope_id
+                  AND c.key=json_extract(d.json,'$.collectionId')
+                LEFT JOIN run owner_run ON owner_run.id=json_extract(d.json,'$.sourceRunId')
+                  AND owner_run.session_id=d.scope_id AND owner_run.origin_store_id=d.origin_store_id
+                LEFT JOIN execution e ON e.id=json_extract(d.json,'$.sourceExecutionId')
+                LEFT JOIN execution t ON t.id=json_extract(c.json,'$.source.producerToolExecutionId')
+                LEFT JOIN change_event tp ON tp.object_id=t.id AND tp.type='execution.planned'
+                  AND tp.scope_session_id=d.scope_id
+                LEFT JOIN change_event ep ON ep.object_id=e.id AND ep.type='execution.planned'
+                  AND ep.scope_session_id=d.scope_id
+                WHERE d.extension_id=? AND d.scope_kind='session' AND d.scope_id=?
+                  AND d.key>=? AND d.key<?
+              )
+              SELECT old.key,old.json FROM deliveries old
+              WHERE old.key<? AND NOT EXISTS (
+                SELECT 1 FROM deliveries newer
+                WHERE old.tool_order IS NOT NULL AND old.producer_order IS NOT NULL
+                  AND newer.tool_order IS NOT NULL AND newer.producer_order IS NOT NULL
+                  AND newer.run_id=old.run_id AND newer.path=old.path
+                  AND old.completed_order IS NOT NULL AND newer.tool_order>old.completed_order
+                  AND (newer.tool_order>old.tool_order OR
+                    (newer.tool_order=old.tool_order AND newer.producer_order>old.producer_order))
+              ) ORDER BY old.key DESC LIMIT ?`,
               namespace,
               input.sessionId,
               prefix,

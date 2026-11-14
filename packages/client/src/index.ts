@@ -1767,6 +1767,42 @@ export class AgentClient {
       throw new ClientError('output_file_scope_mismatch');
     return result;
   }
+  /** Local UI snapshot only: never grants server-side filesystem access or publishes an Artifact. */
+  async renderLocalPdfSnapshot(
+    input: {
+      expectedStoreId: string;
+      sessionId: string;
+      sourceHash: string;
+      page: number;
+      data: string;
+    },
+    signal?: AbortSignal,
+  ) {
+    const endpoint = new URL(this.endpoint);
+    if (!['127.0.0.1', '[::1]'].includes(endpoint.hostname))
+      throw new ClientError('local_preview_service_required');
+    this.requireCapability('output_files');
+    if (input.expectedStoreId !== this.serverInfo?.storeId)
+      throw new ClientError('store_identity_mismatch');
+    if (
+      !input.sessionId ||
+      !/^[a-f0-9]{64}$/.test(input.sourceHash) ||
+      !Number.isSafeInteger(input.page) ||
+      input.page < 1 ||
+      input.data.length > Math.ceil((64 * 1024 * 1024) / 3) * 4
+    )
+      throw new ClientError('invalid_request');
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/preview/pdf-snapshot`,
+      'OutputPdfPage',
+      { method: 'POST', body: input, signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (result.page !== input.page || result.page > result.totalPages)
+      throw new ClientError('invalid_response');
+    return result;
+  }
   async renderOutputPdfPage(
     target: import('./generated/api').OutputFileTarget,
     options: { page: number; signal?: AbortSignal },

@@ -14,6 +14,7 @@ import {
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import { composeBrowserDraft, readBrowserAnnotations } from '../src/browser-annotation-content';
 import type { DesktopEditor } from '../src/file-changes-bridge';
+import { filePreviewFormat } from '../src/file-preview-format';
 import { inputImageCount } from '../src/input-images-bridge';
 import {
   type NativeReply,
@@ -49,6 +50,7 @@ import {
   isSkillMarketplaceSelection,
   isSkillMarketplaceUninstallSelection,
 } from '../src/skill-marketplace-contract';
+import { LocalFilePreview } from './local-file-preview';
 import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
 import type { nativeModelPreferences } from './model-preference';
 import type { NativeCaller } from './native-caller';
@@ -62,6 +64,9 @@ import { decodeNativeTraceOperation } from './trace-extensions';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'localPreview.open': ['handleId', 'previewId', 'bounds'],
+  'localPreview.release': ['handleId'],
+  'localPreview.check': ['handleId'],
   'outputs.office.preview': [
     'target',
     'editorId',
@@ -456,11 +461,14 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
   }
   if (
-    (method.startsWith('outputs.preview.') || method === 'outputs.office.preview') &&
+    (method.startsWith('outputs.preview.') ||
+      method === 'outputs.office.preview' ||
+      method === 'localPreview.open') &&
     (typeof input.previewId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.previewId))
   )
     throw Error('invalid_native_request');
   if (
+    method === 'localPreview.open' ||
     method === 'outputs.preview.open' ||
     method === 'outputs.preview.bounds' ||
     method === 'outputs.office.preview'
@@ -469,13 +477,16 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     exact(bounds, ['x', 'y', 'width', 'height']);
     if (
       !Object.values(bounds).every(
-        (v) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= 16384,
-      ) ||
-      !bounds.width ||
-      !bounds.height
+        (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 16384,
+      )
     )
       throw Error('invalid_native_request');
   }
+  if (
+    method.startsWith('localPreview.') &&
+    (typeof input.handleId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.handleId))
+  )
+    throw Error('invalid_native_request');
   if (
     method === 'settings.general.shell.save' &&
     input.preference !== 'auto' &&
@@ -1563,7 +1574,13 @@ export function registerNativeIpc(options: {
   ) => Promise<undefined | { workspaceId: string }>;
 }) {
   let preview: NativeOutputPreview | undefined;
+  const localFiles = new Map<string, LocalFilePreview>();
+  const releaseLocalFiles = () => {
+    for (const file of localFiles.values()) file.release();
+    localFiles.clear();
+  };
   const closePreview = () => {
+    releaseLocalFiles();
     preview?.dispose();
     preview = undefined;
   };
@@ -1580,9 +1597,61 @@ export function registerNativeIpc(options: {
       // Recheck sender after startup/admission awaits; a replaced frame cannot submit work.
       assertNativeSender(event, options.window(), options.rendererUrl);
       if (options.officeAssetsRoot) caller.configureOfficeRuntime(options.officeAssetsRoot);
-      if (request.method === 'select' || request.method === 'attach') preview?.close();
-      let value: NativeResult;
       if (
+        request.method === 'select' ||
+        request.method === 'attach' ||
+        request.method === 'detach'
+      ) {
+        preview?.close();
+        releaseLocalFiles();
+      }
+      let value: NativeResult;
+      if (request.method === 'localPreview.check') {
+        caller.checkOutputGeneration(request.generation);
+        const file = localFiles.get(request.handleId);
+        if (!file) throw Error('local_preview_released');
+        file.check();
+        value = null;
+      } else if (request.method === 'localPreview.release') {
+        caller.checkOutputGeneration(request.generation);
+        localFiles.get(request.handleId)?.release();
+        localFiles.delete(request.handleId);
+        value = null;
+      } else if (request.method === 'localPreview.open') {
+        const file = localFiles.get(request.handleId);
+        const window = options.window();
+        if (!file || !window) throw Error('local_preview_unavailable');
+        file.check();
+        if (!preview) {
+          preview = new (await import('./output-preview')).NativeOutputPreview(
+            options.officeAssetsRoot,
+          );
+          window.once('closed', closePreview);
+          window.webContents.once('render-process-gone', closePreview);
+          window.webContents.once('did-start-navigation', closePreview);
+        }
+        value = await preview.open({
+          id: request.previewId,
+          generation: request.generation,
+          bounds: request.bounds,
+          window,
+          check: () => {
+            assertNativeSender(event, options.window(), options.rendererUrl);
+            caller.checkOutputGeneration(request.generation);
+            file.check();
+          },
+          materialize: (path) => file.materialize(path),
+          renderPdfPage: (page, signal) =>
+            file.renderPdf(page, signal, (bytes, hash, page, signal) =>
+              caller.renderLocalPreviewPdf(request.generation, bytes, hash, page, signal),
+            ),
+          verifyAccess: () =>
+            file.verifyAccess().catch((error) => {
+              file.release();
+              throw error;
+            }),
+        });
+      } else if (
         request.method === 'outputs.preview.open' ||
         request.method === 'outputs.office.preview'
       ) {
@@ -1605,6 +1674,17 @@ export function registerNativeIpc(options: {
             ? await caller.officeRevision(request, options.officeAssetsRoot, check)
             : undefined;
         value = await preview.open({
+          renderPdfPage: async (page, signal) => {
+            check();
+            const result = await caller.renderPreviewPdf(
+              request.generation,
+              request.target,
+              page,
+              signal,
+            );
+            check();
+            return result;
+          },
           id: request.previewId,
           generation: request.generation,
           target: request.target,
@@ -1686,6 +1766,11 @@ export function registerNativeIpc(options: {
       } else if (request.method === 'outputs.preview.control') {
         caller.checkOutputGeneration(request.generation);
         if (!preview) throw Error('preview_replaced');
+        if (preview.isLocal(request.previewId, request.generation)) {
+          if (request.control.kind !== 'zoom') throw Error('local_preview_readonly');
+          await preview.control(request.previewId, request.generation, request.control);
+          return { ok: true, value: null };
+        }
         const interaction = await preview.readInteraction(
           request.previewId,
           request.generation,
@@ -1754,8 +1839,34 @@ export function registerNativeIpc(options: {
           }
         };
         if (request.method === 'fileChanges.open') await caller.openChangedFile(request, perform);
-        else await caller.openMessageFile(request, perform);
-        value = null;
+        else if (filePreviewFormat(request.path) === 'code')
+          await caller.openMessageFile(request, perform);
+        else {
+          const scope = caller.messagePreviewScope(request.generation);
+          const file = await LocalFilePreview.create(
+            (consume) => caller.openMessageFile(request, async (_editor, path) => consume(path)),
+            () => {
+              assertNativeSender(event, options.window(), options.rendererUrl);
+              const current = caller.messagePreviewScope(request.generation);
+              if (current.storeId !== scope.storeId || current.sessionId !== scope.sessionId)
+                throw Error('local_preview_replaced');
+            },
+          );
+          if (localFiles.size >= 32) {
+            const oldest = localFiles.keys().next().value!;
+            localFiles.get(oldest)?.release();
+            localFiles.delete(oldest);
+          }
+          localFiles.set(file.id, file);
+          value = {
+            kind: 'messageFile.preview',
+            handleId: file.id,
+            name: file.name,
+            mediaType: file.mediaType,
+            ...scope,
+          };
+        }
+        value ??= null;
       } else value = await caller.invoke(request);
       if (Buffer.byteLength(JSON.stringify(value)) > responseBytes)
         throw Error('native_response_too_large');

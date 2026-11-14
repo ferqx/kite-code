@@ -4,7 +4,7 @@ import { extname, join } from 'node:path';
 import { type OfficeRunner, verifyOfficeRuntimeAssets } from './office-runtime';
 export const officeRendererVersion = 'officecli-1.0.160';
 // Internal rendering/cache identity; not a tool or wire-protocol version.
-export const officePreviewRecipeVersion = 'offline-author-fonts';
+export const officePreviewRecipeVersion = 'offline-interactive-word';
 export const officePreviewFontCss =
   '@font-face{font-family:KiteDocument;src:url("font.ttf") format("truetype");font-display:swap}';
 export interface OfficePreviewManifest {
@@ -88,6 +88,12 @@ const wordPaginationRuntime = `
 /** Exact locked Word renderer anchors. Missing/ambiguous recipes keep preview, not page authority. */
 function wordPaginationHtml(html: string) {
   const replacements: [string, string][] = [
+    // This endpoint renders an interactive preview, not OfficeCLI's screenshot export.
+    // Automation must exercise the same pagination/fit path as a normal client.
+    [
+      "var SCREENSHOT=location.hash.indexOf('screenshot')>=0||navigator.webdriver||/HeadlessChrome/.test(navigator.userAgent);",
+      'var SCREENSHOT=false;',
+    ],
     [
       'function _wordInit(){',
       `function _wordInit(){var _kiteWordPagination=${wordPaginationRuntime};`,

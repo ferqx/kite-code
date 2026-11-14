@@ -8,7 +8,7 @@
 KITE_RUN_LIVE_PLANNING_BUSINESS=1 bun tests/e2e/live/model/planning-business-approval.live.ts --model=gpt-6-luna --reasoning-effort=medium --output=/absolute/repository/dist/acceptance/new-planning-business.json
 ```
 
-矩阵分别核三模式计划人答、pending 六向模式切换、实际 general/explore 子 Agent、内外工作区和普通 question 不授工具许可。原业务卡／accepted proof、当前真实权限、Tool 与自身 Job 的准确次数、唯一效果、原生全树停止与冷原行零重放均须保留。模型最终正文无格式要求；计划完成仍须真实执行回执，夹具启用原 `read_execution_evidence` 正式入口找回 Execution UUID，不能拿 `shell_id`、operation key 或测试私有 Store 数据代替。自动 reviewer 保留独立 low 与生产默认8秒，不能用业务 medium、固定 Provider 或人工等候混算审核时延。
+矩阵分别核三模式计划人答、pending 六向模式切换、实际 general/explore 子 Agent、内外工作区和普通 question 不授工具许可。原业务卡／accepted proof、当前真实权限、Tool 与自身 Job 的准确次数、唯一效果、原生全树停止与冷原行零重放均须保留。模型最终正文无格式要求；计划完成仍须真实执行回执，只使用上下文保留的原 Execution UUID，缺失时应报告证据不足，不得拿 `shell_id`、operation key、测试私有 Store 数据或重执行代替；没有通用回执检索工具。自动 reviewer 保留独立 low 与生产默认8秒，不能用业务 medium、固定 Provider 或人工等候混算审核时延。
 
 2026-11-08 整仓 apply 复核及远端整合后的新报告 `dist/acceptance/final-review-merged-luna-medium-20261108.json`：8场景全部通过，涵盖三模式、pending Auto↔Full、实际 general/explore、内外工作区和普通 question；源码 HEAD `a1da5b7f8` 前后稳定。66次实际HTTP200中，63次业务绑定 gpt-6-luna/medium，3次独立审核绑定同模型/low；10 Run、129 Execution、10张原交互，128成功及1次探针范围的准确读取拒绝，零 unknown。每例完整冷读原行／效果相同、零 Provider 重放、清理确认。3次审核均在8000ms预算内成功，queue均0、prepare最大39ms、Provider最大1785ms、total最大1824ms；125次dispatch RPC P50/P95/最大为3/5/11ms。后续只改计划窗口夹具的原文读取与文档，生产代码保持。此为本机有限样本，不覆盖早期模型失败、不证明99.99%生产正确率；三模式全工具和运行中切换仍按下方各自冻结报告的实际范围复用。
 
@@ -404,7 +404,7 @@ R2至R5逐一核了68条已结算失败Tool的后继实际模型输入，首例�
 KITE_RUN_LIVE_LOOP_CONTINUITY=1 bun tests/e2e/live/model/loop-continuity.live.ts /absolute/new-continuity-directory
 ```
 
-单例最多80次请求／600秒，保留完整原模型输入输出、实际摘要、Shell 输出、Git 初始状态和独立业务 oracle；原测试、README、用户 dirty、Git HEAD 及准确八个源码改动分别核实。没有自然调用 `read_execution_evidence` 时，只能证明该样本的摘要／原目标连续性，不能宣称历史回执恢复能力已经实测。
+单例最多80次请求／600秒，保留完整原模型输入输出、实际摘要、Shell 输出、Git 初始状态和独立业务 oracle；原测试、README、用户 dirty、Git HEAD 及准确八个源码改动分别核实。当前不再提供通用模型回执检索工具；样本只证明摘要／原目标连续性及单次效果。若原回执及引用同时离开窗口与摘要，不能据本测试宣称模型可恢复它们，必须报告证据不足而不重放效果。
 
 日志采证复用[审批执行夹具](approval-execution-fixture.ts)的 `readLiveSessionLogPages`，按原 `nextAfterCursor` 和固定 `upperCursor` 读到完成，校验游标递增、会话与快照水位，缺页或保留边界变化不能冒充完整日志。完整执行目录采证使用同一夹具的 `readLiveExecutionDirectory`，不再用有200条上限的 `listExecutions` 代替全量；最终执行归档与 Shell 输出选择共用同一目录。各观察点保各自固定成员水位及实际读取时的状态限定，不把多次读取声称为同一事务快照；[分页回归](approval-execution-fixture.test.ts)核后200条执行、晚建 Job 和超过200条原始输出不遗漏。连续性入口纳入根 TypeScript 检查。此修正未重跑真实模型，也未改写旧报告：下述最终连续性原件 `evidence/session-logs.json` 仍只有首200条、`complete:false`（原上界835），旧执行目录同样保留当时的采证范围，不能据新驱动追认完整资格。
 
@@ -684,7 +684,7 @@ $env:KITE_RUN_LIVE_MODEL_TOOLS = '1'
 bun tests/e2e/live/model/model-tools-all.live.ts --mode=auto --model=gpt-6-luna --reasoning-effort=medium --output=D:/absolute/new/report.json
 ```
 
-当前10组为`files-shell`、`question`、`planning`、`skills`、`mcp`、`web`、`agents`、`images`、`execution-evidence`、`worktree-list`；`--scenario=<组名>`只验证该组，省略才覆盖32个公开工具族及动态MCP。Worktree本组只核真实list，创建／移除及其单次确认由独立入口负责。不换模型、协议，不改写模型回复或外围自动重试；没有测试轮次上限不意味着忽略真实失败或unknown。问答和计划通过真实公开Interaction API回答，由测试operator选择首项／批准，不能当作真人或客户端视觉验收。原报告和历史有限预算资格保持各自事实。
+当前9组为`files-shell`、`question`、`planning`、`skills`、`mcp`、`web`、`agents`、`images`、`worktree-list`；`--scenario=<组名>`只验证该组，省略才覆盖31个公开工具族及动态MCP。Worktree本组只核真实list，创建／移除及其单次确认由独立入口负责。不换模型、协议，不改写模型回复或外围自动重试；没有测试轮次上限不意味着忽略真实失败或unknown。问答和计划通过真实公开Interaction API回答，由测试operator选择首项／批准，不能当作真人或客户端视觉验收。原报告和历史有限预算资格保持各自事实。
 
 最大200项过滤的Task游标回归为108字符，核完整scope改变及越界均拒绝；Shell／Browser沿相同scope摘要绑定，域读者继续核原位置。
 

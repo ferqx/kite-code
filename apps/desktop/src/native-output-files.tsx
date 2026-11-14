@@ -4,10 +4,12 @@ import {
   OutputFiles,
   OutputReferences,
   type SessionFileTabRequest,
+  type SessionFileTarget,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
 import { NativeFilePreview } from './native-file-preview';
+import { NativeLocalFilePreview } from './native-local-file-preview';
 import type { OfficeEditContext, OfficeRequestOutcome } from './output-files-bridge';
 
 function target(file: OutputFileTarget): OutputFileTarget {
@@ -69,6 +71,20 @@ export function useNativeOutputFiles(input: {
   const [error, setError] = useState('');
   const key = JSON.stringify([input.generation, input.storeId, input.sessionId]);
   return {
+    closeFile: (file: SessionFileTarget) => {
+      if ('handleId' in file)
+        void input.bridge
+          ?.request({
+            method: 'localPreview.release',
+            generation: input.generation,
+            handleId: file.handleId,
+          })
+          .catch(() => {});
+    },
+    openLocal: (file: Extract<SessionFileTarget, { kind: 'local-preview' }>) => {
+      if (file.storeId !== input.storeId || file.sessionId !== input.sessionId) return;
+      setRequest({ target: file, title: file.name, requestId: ++sequence.current });
+    },
     request:
       request &&
       request.target.storeId === input.storeId &&
@@ -87,16 +103,24 @@ export function useNativeOutputFiles(input: {
         <OutputFileReader key={`${key}/${turnId}`} {...input} runId={runId} actions={actions} />
       ) : null;
     },
-    renderFile: ({ target: source }: { target: OutputFileTarget }) => (
-      <NativeFilePreview
-        bridge={input.bridge}
-        generation={input.generation}
-        target={source}
-        onEdit={actions.onEdit}
-        onRequestEdit={input.onRequestEdit}
-        onSave={actions.onSave}
-      />
-    ),
+    renderFile: ({ target: source }: { target: SessionFileTarget }) =>
+      'handleId' in source ? (
+        <NativeLocalFilePreview
+          key={source.handleId}
+          bridge={input.bridge}
+          generation={input.generation}
+          target={source}
+        />
+      ) : (
+        <NativeFilePreview
+          bridge={input.bridge}
+          generation={input.generation}
+          target={source}
+          onEdit={actions.onEdit}
+          onRequestEdit={input.onRequestEdit}
+          onSave={actions.onSave}
+        />
+      ),
   };
 }
 function OutputFileReader(input: {
@@ -111,6 +135,8 @@ function OutputFileReader(input: {
     : never;
 }) {
   const [page, setPage] = useState<OutputFilesPage>();
+  const pageRef = useRef(page);
+  pageRef.current = page;
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [read, setRead] = useState<{ kind: 'files' | 'collections'; cursor?: string }>({
@@ -139,7 +165,7 @@ function OutputFileReader(input: {
           beforeKey: readCursor,
           collectionBeforeKey: collectionCursor,
         })
-        .then((result) => {
+        .then(async (result) => {
           if (cancelled) return;
           if (
             !result ||
@@ -150,36 +176,80 @@ function OutputFileReader(input: {
             result.page.scope.sessionId !== input.sessionId
           )
             throw Error('output_scope_changed');
-          setPage((previous) =>
-            previous
+          const previous = pageRef.current;
+          if (
+            (readCursor || collectionCursor) &&
+            previous &&
+            previous.revision !== result.page.revision
+          ) {
+            // Never merge a continuation from a different storage snapshot.
+            setRetryRevision((value) => value + 1);
+            return;
+          }
+          let incoming = result.page;
+          if (!readCursor && !collectionCursor) {
+            // Rebuild the loaded window atomically. Retaining an old tail can resurrect
+            // a superseded delivery that the authoritative head no longer contains.
+            const wanted = Math.max(50, previous?.items.length ?? 0);
+            const seen = new Set<string>();
+            while (incoming.nextCursor && incoming.items.length < wanted) {
+              if (cancelled) return;
+              const cursor = incoming.nextCursor;
+              if (seen.has(cursor)) throw Error('output_cursor_repeated');
+              seen.add(cursor);
+              const next = await input.bridge!.request({
+                method: 'outputs.query',
+                generation: input.generation,
+                scope: { storeId: input.storeId!, sessionId: input.sessionId! },
+                runId: input.runId,
+                limit: 50,
+                beforeKey: cursor,
+              });
+              if (cancelled) return;
+              if (
+                !next ||
+                !('kind' in next) ||
+                !('page' in next) ||
+                next.kind !== 'outputs.page' ||
+                next.page.scope.storeId !== input.storeId ||
+                next.page.scope.sessionId !== input.sessionId ||
+                next.page.revision !== incoming.revision
+              )
+                throw Error('output_snapshot_changed');
+              incoming = {
+                ...incoming,
+                nextCursor: next.page.nextCursor,
+                items: [
+                  ...incoming.items,
+                  ...next.page.items.filter(
+                    (item) => !incoming.items.some((old) => old.fileId === item.fileId),
+                  ),
+                ],
+              };
+            }
+          }
+          if (cancelled) return;
+          setPage(
+            previous && (readCursor || collectionCursor)
               ? {
-                  ...result.page,
-                  // A refreshed head may have an unseen gap before the retained tail.
-                  // Follow its cursor and deduplicate, never skip to the old tail cursor.
-                  nextCursor: collectionCursor ? previous.nextCursor : result.page.nextCursor,
+                  ...incoming,
+                  nextCursor: collectionCursor ? previous.nextCursor : incoming.nextCursor,
                   nextCollectionCursor: readCursor
                     ? previous.nextCollectionCursor
-                    : result.page.nextCollectionCursor,
+                    : incoming.nextCollectionCursor,
                   collections: collectionCursor
-                    ? mergeCollections(previous.collections, result.page.collections)
-                    : readCursor
-                      ? previous.collections
-                      : result.page.collections,
+                    ? mergeCollections(previous.collections, incoming.collections)
+                    : previous.collections,
                   items: readCursor
                     ? [
                         ...previous.items,
-                        ...result.page.items.filter(
+                        ...incoming.items.filter(
                           (item) => !previous.items.some((old) => old.fileId === item.fileId),
                         ),
                       ]
-                    : [
-                        ...result.page.items,
-                        ...previous.items.filter(
-                          (item) => !result.page.items.some((head) => head.fileId === item.fileId),
-                        ),
-                      ],
+                    : previous.items,
                 }
-              : result.page,
+              : incoming,
           );
           setError('');
         })

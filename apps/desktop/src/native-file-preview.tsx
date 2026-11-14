@@ -2,6 +2,7 @@ import type { OutputFileTarget } from '@kite-ai/client';
 import { Button, type OutputFileSummary } from '@kite-ai/ui/desktop';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
+import { observeNativeContent } from './native-content-observer';
 import { NativeExcelReadonlyBar, NativeOfficeToolbar } from './native-office-toolbar';
 import type {
   OfficeEditContext,
@@ -35,17 +36,15 @@ function FilePreview(props: Props) {
   const [status, setStatus] = useState('正在准备预览…');
   const [issue, setIssue] = useState('');
   const [retry, setRetry] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pdf, setPdf] = useState<{ data: string; totalPages: number }>();
+
   const [interaction, setInteraction] = useState<OfficePreviewInteraction>();
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const [presentation, setPresentation] = useState(false);
   const onRequestEdit = useRef(props.onRequestEdit);
   onRequestEdit.current = props.onRequestEdit;
+  const isPdf = !!file && (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name));
   const isPpt = !!file && /\.pptx$/i.test(file.name);
   const isOffice = !!file && /\.(pptx|docx|xlsx)$/i.test(file.name);
-  const slide = interaction?.currentSlide ?? 1;
-  const slideCount = interaction?.slideCount ?? 1;
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -82,42 +81,15 @@ function FilePreview(props: Props) {
     setStatus('正在准备预览…');
     setInteraction(undefined);
     setPresentation(false);
-    if (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name)) {
-      void bridge
-        .request({
-          method: 'outputs.pdf.page',
-          generation: props.generation,
-          target: props.target,
-          page,
-        })
-        .then((result) => {
-          if (
-            !cancelled &&
-            result &&
-            'kind' in result &&
-            result.kind === 'outputs.pdf.page' &&
-            'pdf' in result
-          ) {
-            setPdf({ data: result.pdf.data, totalPages: result.pdf.totalPages });
-            setStatus('');
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setStatus('文件已保存，暂时无法预览');
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
     const previewId = crypto.randomUUID();
     preview.current = previewId;
     const bounds = () => {
       const rect = viewport.current!.getBoundingClientRect();
       return {
-        x: Math.max(0, Math.round(rect.x)),
-        y: Math.max(0, Math.round(rect.y)),
-        width: Math.max(1, Math.round(rect.width)),
-        height: Math.max(1, Math.round(rect.height)),
+        x: Math.max(0, rect.x),
+        y: Math.max(0, rect.y),
+        width: Math.max(0, rect.width),
+        height: Math.max(0, rect.height),
       };
     };
     let ready = false;
@@ -240,7 +212,7 @@ function FilePreview(props: Props) {
           result.status === 'ready';
         if (ready) syncBounds(true);
         setStatus(ready ? '' : '文件已保存，暂时无法预览');
-        if (ready && isOffice) {
+        if (ready && (isOffice || isPdf)) {
           await bridge
             .request({
               method: 'outputs.preview.control',
@@ -252,8 +224,13 @@ function FilePreview(props: Props) {
           await read();
         }
       })
-      .catch(() => {
-        if (!cancelled) setStatus('文件已保存，暂时无法预览');
+      .catch((error) => {
+        if (!cancelled)
+          setStatus(
+            error instanceof Error && error.message === 'preview_format_unavailable'
+              ? '二进制文件无法打开'
+              : '文件已保存，暂时无法预览',
+          );
       });
     let lastBounds = '';
     const syncBounds = (force = false) => {
@@ -274,29 +251,25 @@ function FilePreview(props: Props) {
           // Do not turn a rejected geometry into a per-frame retry loop.
         });
     };
-    const resize = new ResizeObserver(() => syncBounds());
-    resize.observe(viewport.current!);
-    // ResizeObserver only tracks size. Pane transitions can move a same-sized viewport.
-    // Track this single active rect without React renders or unchanged IPC messages.
-    let frame = 0;
-    const trackPosition = () => {
-      if (cancelled) return;
-      syncBounds();
-      frame = window.requestAnimationFrame(trackPosition);
-    };
-    frame = window.requestAnimationFrame(trackPosition);
+    // Preview lacks browser sidebar projection metadata; track position-only transitions
+    // through the shared observer while still suppressing unchanged geometry IPC.
+    const unobserve = observeNativeContent(
+      viewport.current!,
+      () => syncBounds(),
+      () => syncBounds(),
+      true,
+    );
     const timer = setInterval(() => void read(), 200);
     return () => {
       cancelled = true;
       clearInterval(timer);
-      window.cancelAnimationFrame(frame);
-      resize.disconnect();
+      unobserve();
       if (preview.current === previewId) preview.current = undefined;
       void bridge
         .request({ method: 'outputs.preview.close', generation: props.generation, previewId })
         .catch(() => {});
     };
-  }, [props.bridge, props.generation, file, retry, page]);
+  }, [props.bridge, props.generation, file, retry]);
 
   async function control(command: OfficePreviewControl) {
     const id = preview.current;
@@ -368,7 +341,7 @@ function FilePreview(props: Props) {
       className="native-file-preview"
       style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
     >
-      {isOffice && file ? (
+      {(isOffice || isPdf) && file ? (
         <NativeOfficeToolbar
           name={file.name}
           source={`来源：Run ${file.ownerRunId}`}
@@ -392,6 +365,12 @@ function FilePreview(props: Props) {
           )}
         </header>
       )}
+      {isPpt && interaction?.notes?.trim() && !status && (
+        <details className="native-office-notes" key={interaction.currentSlide}>
+          <summary>演讲者备注</summary>
+          <p>{interaction.notes}</p>
+        </details>
+      )}
       {file && /\.xlsx$/i.test(file.name) && (
         <NativeExcelReadonlyBar
           selection={interaction?.selection ?? null}
@@ -407,57 +386,10 @@ function FilePreview(props: Props) {
           {issue}
         </div>
       )}
-      {pdf && (
-        <nav aria-label="PDF页码">
-          <Button disabled={page <= 1} onClick={() => setPage(page - 1)}>
-            上一页
-          </Button>
-          <span>
-            {page} / {pdf.totalPages}
-          </span>
-          <Button disabled={page >= pdf.totalPages} onClick={() => setPage(page + 1)}>
-            下一页
-          </Button>
-        </nav>
-      )}
       <div ref={viewport} style={{ flex: 1, minHeight: 80, overflow: 'auto' }}>
         {status && <p role="status">{status}</p>}
         {status.includes('暂时') && <Button onClick={() => setRetry(retry + 1)}>重试预览</Button>}
-        {pdf && !status && (
-          <img
-            style={{ maxWidth: '100%' }}
-            src={`data:image/png;base64,${pdf.data}`}
-            alt={`第 ${page} 页`}
-          />
-        )}
       </div>
-      {isPpt && (
-        <footer className="native-office-footer">
-          <div>
-            <button
-              type="button"
-              disabled={!!status || !!interaction?.requestOpen || slide <= 1}
-              onClick={() => void control({ kind: 'slide', value: slide - 1 })}
-            >
-              上一页
-            </button>
-            <span>
-              {slide} / {slideCount}
-            </span>
-            <button
-              type="button"
-              disabled={!!status || !!interaction?.requestOpen || slide >= slideCount}
-              onClick={() => void control({ kind: 'slide', value: slide + 1 })}
-            >
-              下一页
-            </button>
-          </div>
-          <details className="native-office-notes">
-            <summary>演讲者备注</summary>
-            <p>{interaction?.notes || '此页暂无备注。'}</p>
-          </details>
-        </footer>
-      )}
     </section>
   );
 }

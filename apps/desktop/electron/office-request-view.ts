@@ -17,6 +17,8 @@ export type OfficeRequestAnchor = { x: number; y: number; width: number; height:
 export class NativeOfficeRequestView {
   private view?: WebContentsView;
   private closed = false;
+  private shown = true;
+  private ready = false;
   private readonly window: NativeRootWindow;
   private anchor: OfficeRequestAnchor;
   constructor(window: NativeRootWindow, anchor: OfficeRequestAnchor) {
@@ -58,8 +60,15 @@ export class NativeOfficeRequestView {
       { code: officeRequestInstallScript(label) },
     ]);
     if (this.closed || this.view !== view) throw Error('preview_replaced');
-    view.setVisible(true);
-    if (this.window.isFocused()) focusNativeWindowContent(this.window, view.webContents);
+    this.ready = true;
+    this.visible(this.shown);
+    if (this.shown && this.window.isFocused())
+      focusNativeWindowContent(this.window, view.webContents);
+  }
+  visible(shown: boolean) {
+    this.shown = shown;
+    if (!this.closed && this.view && !this.view.webContents.isDestroyed())
+      this.view.setVisible(shown && this.ready);
   }
   bounds(bounds: Bounds, anchor?: OfficeRequestAnchor) {
     if (anchor) this.anchor = { ...anchor };

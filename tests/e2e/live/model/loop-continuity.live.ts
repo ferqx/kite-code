@@ -487,7 +487,6 @@ try {
         },
       ],
       tools: [
-        'execution_evidence.read',
         'files.read',
         'files.write',
         'files.edit',
@@ -699,13 +698,9 @@ try {
     messages
       .filter((message) => message.role === 'assistant' && message.status === 'complete')
       .at(-1)?.content ?? '';
-  const evidenceCalls = executions.filter(
-    (execution) => execution.definitionId === 'execution_evidence.read',
-  );
   const actualRequests = live.requests;
   const missingOriginals = executions.filter((execution) => {
-    if (execution.kind !== 'tool' || execution.definitionId === 'execution_evidence.read')
-      return false;
+    if (execution.kind !== 'tool') return false;
     const firstSeen = actualRequests.findIndex((request) =>
       request.messages.some(
         (message) => message.role === 'tool' && message.toolCallId === execution.callId,
@@ -724,19 +719,6 @@ try {
       })
     );
   });
-  const recoveredIds = new Set<string>();
-  for (const call of evidenceCalls.filter((call) => call.status === 'succeeded')) {
-    try {
-      const page = JSON.parse((call.result as { content: string }).content) as {
-        items?: { execution: { id: string } }[];
-      };
-      for (const item of page.items ?? [])
-        if (missingOriginals.some((row) => row.id === item.execution.id))
-          recoveredIds.add(item.execution.id);
-    } catch {
-      /* A preview is insufficient to claim complete recovery; keep original evidence for review. */
-    }
-  }
   result = {
     ...result,
     finalVerification,
@@ -769,17 +751,13 @@ try {
     ),
     finalMessage,
     finalMentionsAllPaths: expectedPaths.every((path) => finalMessage.includes(path)),
-    evidenceRecovery: {
-      observed: evidenceCalls.length > 0,
+    receiptWindow: {
       originalToolsOutsideLaterWindow: missingOriginals.map((execution) => ({
         executionId: execution.id,
         callId: execution.callId,
       })),
-      calls: evidenceCalls,
-      recoveredMissingExecutionIds: [...recoveredIds],
-      qualification: evidenceCalls.length
-        ? 'Inspect exact original results and post-compaction call windows; a tool call alone does not prove recovery of a missing receipt.'
-        : 'No natural execution-evidence call occurred; recovery use is not covered.',
+      qualification:
+        'The model has no generic execution-receipt retrieval tool. This run checks checkpoint continuity and once-only effects, not recovery of receipts omitted from both the window and checkpoint. Missing evidence must remain uncertain; never rerun an effect to recover it.',
     },
   };
   save('verification.json', result);

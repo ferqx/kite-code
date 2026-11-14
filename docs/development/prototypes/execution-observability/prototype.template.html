@@ -1496,18 +1496,6 @@
           path: 'packages/agent/src/extensions/task/README.md',
         },
         {
-          id: 'execution-evidence',
-          name: '执行证据读取',
-          entry: 'read_execution_evidence / execution_evidence.read',
-          kind: '当前任务只读 Tool',
-          safe: true,
-          policy: '绑定实际当前Session、Run和读取调用，核原Tool/Job及准确父链；不接受外来任务或私有Model。',
-          steps: ['列表按真实固定范围分页，next_cursor=null才读完', '按准确execution_id读取原公开结果、Shell ID与已记录checkpoint', '只恢复证据，不重跑操作，不产生新授权'],
-          proof: 'Files目标和checkpoint只证明记录过；Shell缺逐文件前后像，不能凭累计git diff断言改动归属。',
-          failure: '错误scope、游标或原身份以可读失败返回；没有原回执时保持未知，不换key重跑。',
-          path: 'packages/agent/src/business/execution-evidence/README.md',
-        },
-        {
           id: 'extension',
           name: '第三方扩展',
           entry: '当前实际注册的 Tool / Job / Action',
@@ -1520,7 +1508,6 @@
         },
       ];
       const operations = {
-        'execution-evidence': [{ id: 'read', name: 'read_execution_evidence', definition: 'execution_evidence.read', safe: true, steps: ['核当前任务与原执行身份', '真实分页或准确原结果详情', '返回原公开证据及完整性／未知状态'] }],
         files: [
           {
             id: 'read',
@@ -3782,7 +3769,7 @@
             '展示当前支持的路径；实际 Run 只公开当时启用且获准的目录，不代表每次都有全部工具。',
             `<span class="tag">${families.length} 类路径</span>`,
           ) +
-          `<div class="catalog">${families.map((f) => `<article class="card tool-card"><div class="row between"><h2>${esc(f.name)}</h2><span class="tag">${esc(f.kind)}</span></div><div class="names"><code>${esc(f.entry)}</code></div><p>${esc(f.policy)}</p><ul class="list">${f.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ul><div class="callout neutral" style="margin-top:12px">${esc(f.failure)}</div><footer><span class="hint">由当前配置选择 / 精确身份核验</span><button type="button" data-open-family="${f.id}" class="small">展开交互路径 →</button></footer></article>`).join('')}</div>`;
+          `<p class="hint">通用执行回执模型入口已退役；历史日志与 Runtime 执行记录保留，记录存在不等于模型可以重新检索。</p><div class="catalog">${families.map((f) => `<article class="card tool-card"><div class="row between"><h2>${esc(f.name)}</h2><span class="tag">${esc(f.kind)}</span></div><div class="names"><code>${esc(f.entry)}</code></div><p>${esc(f.policy)}</p><ul class="list">${f.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ul><div class="callout neutral" style="margin-top:12px">${esc(f.failure)}</div><footer><span class="hint">由当前配置选择 / 精确身份核验</span><button type="button" data-open-family="${f.id}" class="small">展开交互路径 →</button></footer></article>`).join('')}</div>`;
         document.querySelectorAll('[data-open-family]').forEach((b) => {
           b.onclick = () => {
             state.family = b.dataset.openFamily;

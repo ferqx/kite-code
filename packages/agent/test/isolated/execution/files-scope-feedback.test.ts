@@ -102,6 +102,8 @@ for (const entry of cases)
         request: {
           kind: 'run.start',
           content: 'Perform the original operation and report its result.',
+          // A selected local path is input data, never an authorization grant.
+          files: [{ name: 'selected.txt', uri: pathToFileURL(join(root, 'selected.txt')).href }],
         },
       });
       await runtime.waitForCommand('work', { timeoutMs: 4000 });

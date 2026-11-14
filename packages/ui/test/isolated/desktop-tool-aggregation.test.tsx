@@ -721,6 +721,25 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
   }[] = [
     { shell: { operation: 'launch', accepted: true }, label: '已受理' },
     {
+      shell: { operation: 'execute', jobStatus: 'failed', stdout: '{"errors":4}', exitCode: 1 },
+      status: 'failed',
+      label: '已执行 · 非零退出 · 退出码 1',
+      body: '{"errors":4}',
+    },
+    {
+      shell: { operation: 'execute', jobStatus: 'failed', exitCode: 1 },
+      status: 'failed',
+      text: 'independent failure diagnosis',
+      label: '已执行 · 非零退出 · 退出码 1',
+      body: 'independent failure diagnosis',
+    },
+    {
+      shell: { operation: 'execute', jobStatus: 'outcome_unknown', stdout: 'partial', exitCode: 1 },
+      status: 'unknown',
+      label: '结果未知 · 退出码 1',
+      body: 'partial',
+    },
+    {
       shell: {
         operation: 'read',
         jobStatus: 'running',
@@ -784,7 +803,7 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
       shell: { operation: 'execute', jobStatus: 'failed', stderr: 'process output', exitCode: 7 },
       status: 'failed',
       text: 'supervisorFailure: supervisorErrno=5',
-      label: '失败 · 退出码 7',
+      label: '已执行 · 非零退出 · 退出码 7',
       body: 'process output\n\nsupervisorFailure: supervisorErrno=5',
     },
     {
@@ -828,6 +847,8 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
     try {
       const root = dom.window.document;
       expect(root.querySelector('.shell-result')?.textContent).toBe(item.label);
+      if (item.label.startsWith('已执行 · 非零退出'))
+        expect(root.querySelector('.shell-output')?.getAttribute('data-status')).toBe('failed');
       expect(Boolean(root.querySelector('.shell-result-icon'))).toBe(!!item.success);
       if (item.body)
         expect(root.querySelector('.shell-console-output')?.textContent).toBe(item.body);

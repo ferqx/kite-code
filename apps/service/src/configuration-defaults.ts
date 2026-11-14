@@ -25,7 +25,6 @@ export function ordinaryHostConfigurationDefaults(
     tools: [
       ...defaultConfiguration.tools,
       ...[
-        'execution_evidence.read',
         'files.read',
         'files.view_images',
         'files.write',

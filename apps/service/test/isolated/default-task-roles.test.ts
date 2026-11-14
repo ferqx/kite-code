@@ -296,7 +296,7 @@ test('general is both the omitted default and an explicit preset while removed p
   expect(selected).toHaveLength(3);
 });
 
-test('explore retains parent-selected communication, cancellation, evidence and Web with exact builtin identities', async () => {
+test('explore retains parent-selected communication, cancellation and Web with exact builtin identities', async () => {
   const configured = createChildConfiguration({
     roles: defaultTaskRoles,
     async resolve(_input, selection) {
@@ -304,9 +304,10 @@ test('explore retains parent-selected communication, cancellation, evidence and 
       return { model, snapshot: null, modelId: selection.modelId, toolIds: selection.role.toolIds };
     },
   });
-  const retained = ['task.message', 'shell.stop', 'execution_evidence.read', 'web_fetch'];
+  const retained = ['task.message', 'shell.stop', 'web_fetch'];
   const request = input('explore', [
     ...retained,
+    'execution_evidence.read',
     'task.events',
     'task.spawn',
     'task.list',

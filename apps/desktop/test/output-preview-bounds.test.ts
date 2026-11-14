@@ -13,7 +13,12 @@ const emitted = ts
   .outputText.replace(/^import[\s\S]*?;\n/gm, '')
   .replace(/^export /gm, '');
 const Preview = new Function(`${emitted}\nreturn NativeOutputPreview;`)() as new () => {
-  active?: { id: string; bounds: Rect; view?: { setBounds(bounds: Rect): void } };
+  active?: {
+    id: string;
+    bounds: Rect;
+    view?: { setBounds(bounds: Rect): void };
+    layout?: { sync(): void };
+  };
   bounds(id: string, bounds: Rect): void;
 };
 type Rect = { x: number; y: number; width: number; height: number };
@@ -29,14 +34,10 @@ test('pending conversion retains latest bounds for the eventual native view', ()
   preview.bounds('old', initial);
   assert.equal(preview.active.bounds.x, 700);
   // Guard the exact initialization site that previously reused input.bounds.
-  assert.match(source, /view\.setBounds\(active\.bounds\)/);
+  assert.match(source, /nativeContentBounds\(\s*active\.bounds/);
   assert.doesNotMatch(source, /view\.setBounds\(input\.bounds\)/);
   const applied: Rect[] = [];
-  preview.active.view = {
-    setBounds: (bounds) => {
-      applied.push(bounds);
-    },
-  };
+  preview.active.layout = { sync: () => applied.push(preview.active!.bounds) };
   preview.bounds('current', { ...initial, x: 800 });
   assert.equal(preview.active.bounds.x, 800);
   assert.deepEqual(applied, [preview.active.bounds]);
@@ -51,12 +52,14 @@ test('native view remains hidden until load, interaction install and initial con
     'const initialControls = input.initialControls ?? []',
     'for (const command of initialControls)',
     'officeInteractionControlScript(command)',
-    'view.setVisible(true)',
+    'drawable = true;',
     "return { kind: 'outputs.preview' as const, status: 'ready' as const }",
   ].map((step) => source.indexOf(step));
   assert.ok(steps.every((position) => position >= 0));
   for (let i = 1; i < steps.length; i++) assert.ok(steps[i]! > steps[i - 1]!);
-  assert.match(source, /current\(\);\s*view\.setVisible\(true\)/);
-  assert.equal(source.match(/view\.setVisible\(true\)/g)?.length, 1);
+  assert.match(source, /current\(\);\s*drawable = true;\s*sync\(\)/);
+  assert.equal(source.match(/drawable = true;/g)?.length, 1);
+  assert.match(source, /this.active !== active \|\|/);
+  assert.match(source, /active\.layout\?\.dispose\(\)/);
   assert.match(source, /initialControls\.length > 4/);
 });

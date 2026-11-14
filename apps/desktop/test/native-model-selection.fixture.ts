@@ -4,6 +4,18 @@ import type { Page } from 'playwright';
 /** Make the same explicit model choice as the ordinary Native user. */
 export async function selectNativeFixtureModel(page: Page, name: string, id = name) {
   const trigger = page.locator('[data-model-picker] [data-model-trigger]');
+  await trigger.waitFor({ state: 'visible' });
+  await page.waitForFunction(() => {
+    const button = document.querySelector(
+      '[data-model-picker] [data-model-trigger]',
+    ) as HTMLButtonElement | null;
+    return (
+      button &&
+      !button.disabled &&
+      button.innerText.trim() &&
+      !button.closest('[data-session-loading="true"]')
+    );
+  });
   const modelName = async () => (await trigger.innerText()).trim().split('\n')[0];
   if ((await modelName()) === name) return;
   assert.equal(await modelName(), '选择模型');

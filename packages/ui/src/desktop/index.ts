@@ -95,7 +95,7 @@ export {
   FullPermissionConfirmationDialog,
 } from './FullPermissionConfirmationDialog';
 export { MessageAttachments } from './MessageAttachments';
-export { MessageContent } from './MessageContent';
+export { MessageContent, WebLinkContext } from './MessageContent';
 export { MessageCopyButton } from './MessageCopyButton';
 export {
   ModelEffortSelector,

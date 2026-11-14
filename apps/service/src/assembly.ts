@@ -249,8 +249,8 @@ export async function createWorkspaceAssembly(options: {
       },
       description:
         id === 'skills.load'
-          ? 'Load selected Skill knowledge on demand; never execute its resources'
-          : 'Read a declared Skill resource as knowledge; never execute code',
+          ? 'Load selected Skill knowledge on demand; never execute its resources. Wait for a successful result and read the returned guidance before planning dependent tool calls. Do not batch dependent commands with this call.'
+          : 'Read a declared Skill resource as knowledge; never execute code. Wait for a successful result and read the returned guidance before planning dependent tool calls. Do not batch dependent commands with this call.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,

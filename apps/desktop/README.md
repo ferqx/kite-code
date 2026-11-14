@@ -6,7 +6,7 @@
 
 办公基础预览与局部请求修改已按本节范围实现；保留转换器作者字体，Excel 只读栏位于客户端外壳，选区纯绘制与文档样式分离。当前开发交付及分平台实际验证见下文，不等同原生 Office 像素一致或安装发行资格。
 
-[Office 外壳](src/native-file-preview.tsx)与[只读工具栏](src/native-office-toolbar.tsx)由可信主 renderer 渲染，不把不可信 Office HTML 放入主页面。文件名与来源 Run 使用真实索引。预览直接读取原件，不请求本地editor open/apply，也不自动复制PPT；已移除新增页、文本、图片、插入菜单、各插入表单和本地写备注入口。保留缩略图、页码、缩放、放映、只读备注、下载与选区请求修改。转换期间保留最新bounds，ready再同步当前矩形，仅实际几何变化发送更新。
+[Office 外壳](src/native-file-preview.tsx)与[只读工具栏](src/native-office-toolbar.tsx)由可信主 renderer 渲染，不把不可信 Office HTML 放入主页面。文件名与来源 Run 使用真实索引。预览直接读取原件，不请求本地editor open/apply，也不自动复制PPT；已移除新增页、文本、图片、插入菜单、各插入表单和本地写备注入口。保留左侧缩略图页导航、缩放、放映、非空只读备注、下载与选区请求修改；PPT不再重复显示底部分页条。空备注不占位，非空备注在工具栏下按需展开。转换期间保留最新bounds，ready再同步当前矩形，仅实际几何变化发送更新。
 
 办公 chrome 沿现有客户端的中性色、Windows UI 字体栈、字级、8px 控件圆角及 hover／pressed／focus／disabled 状态；独立预览和输入 View 的固定样式与 `native-content-theme.css`／共享 UI tokens 配对，由原 `nativeTheme.themeSource` 驱动浅深主题，不增加主题 IPC、外部字体或网络能力。空闲输入不常驻解释与快捷键说明，键盘帮助保留在 title；来源 Run 收入文件名悬停提示，发送中、失败和结果未知仍明确显示。颜色与文本收敛不改变原请求或安全边界。固定转换器生成的 Excel 文件名绿条与 PPT `.main > h1.file-title` 隐藏，真实文件名由原可信工具栏显示；Excel 底部表签仅收敛为客户端中性色、字体及 hover／focus／active 状态，保留工作簿作者的 `--tab-color` 色标、原 DOM／role／tabindex 和工作表切换逻辑，单元格与幻灯片原文格式不改。首次实机深色检查发现全篇 color-scheme 会使白纸默认文字变白，该失败证据保留；现只给 chrome 控件设置主题，正文不继承其配色，缩略图根保留原幻灯片实际计算的文字色、scheme、字体及字距。
 
@@ -98,7 +98,7 @@ Windows helper 的受限 token stdio 兼容修复后，新的 `inline-edit-word-
 
 [输出入口](src/native-output-files.tsx) 沿原 SessionPage、Conversation、环境信息和 SessionTabs 挂载，读取持久交付索引而非从模型正文猜文件。Store／Session／generation 限定每次请求，晚回数据不跨会话；独立文件索引revision只随文件记录或重连失效，合并短时间事件并保留已加载分页，不随每个模型正文片段重读全部文件；文件目标保留准确 locator，同名不同交付不合并。来源使用固定Run标识的短标签，未从有界View数组下标伪造全会话轮次序号。另存使用系统对话框，原件从 Client 流式进入 [Main 临时目标](electron/output-files.ts)，完整 EOF、hash 与大小核对后 rename；renderer 不接整份办公原件，失败不改写既有目标。
 
-[预览宿主](electron/output-preview.ts) 独立内存 session、单个 sandbox WebContentsView，无 preload、Node 或 Native bridge；manifest 限定 `kite-preview` 资源，独立 CSP 和请求层禁外网／localhost／file、导航、新窗口、权限与下载，主 renderer CSP 不变。Office 转换使用现有 NativeProcessOwner、固定禁驻留／安装／更新配置和有界诊断；缓存按源hash／renderer／recipe区分，最多八项。正式制品从已验证Terminal根定位资产，开发构建注入编译期本地资产根。PDF 由Service的既有PDF worker分页，Native只接页图。转换失败仍保留另存与继续修改。
+[预览宿主](electron/output-preview.ts) 独立内存 session、单个 sandbox WebContentsView，无 preload、Node 或 Native bridge；manifest 限定 `kite-preview` 资源，独立 CSP 和请求层禁外网／localhost／file、导航、新窗口、权限与下载，主 renderer CSP 不变。Office 转换使用现有 NativeProcessOwner、固定禁驻留／安装／更新配置和有界诊断；缓存按源hash／renderer／recipe区分，最多八项。正式制品从已验证Terminal根定位资产，开发构建注入编译期本地资产根。PDF 由Service的既有PDF worker分页，Native只接页图。 Markdown预览复用固定Markdown parser，静态白名单呈现标题、列表、强调、代码及表格；原HTML转义、图片只显示alt、文档链接不激活，不赋予外联或文件资源权限。支持PNG/JPEG/WebP/GIF，SVG/XML/HTML沿文本／代码方式而不执行。未知后缀仅在有界严格UTF-8（或带BOM的UTF-16）且无二进制控制字符时显示文本，读取失败与文本大小限制不伪称二进制。转换失败仍保留另存与继续修改。
 
 “继续修改”只登记准确输出引用，不立即导入或启动模型。草稿 envelope 保存 chip ID、locator和来源轮次，沿原revision／proof消费；重载时Main解析原快照并重建 NativeInputFiles 引用来源。发送时稳定 import ID 调用 `prepareInputFromOutput`，再沿已有／新建会话工作副本准备；准备失败保留草稿，不绕过原 journal。普通上传仍用原分块路径。
 
@@ -326,7 +326,7 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 ## Markdown 与附件输入
 
-提示词输入使用UI的原生多行[PromptEditor](../../packages/ui/src/desktop/PromptEditor.tsx)，只编辑原始Markdown字符串，不预览或标准化源文。首次发送、已有会话投递占位、已保存用户消息和Agent正文复用[MessageContent](../../packages/ui/src/desktop/MessageContent.tsx)，[PromptMarkdown](../../packages/ui/src/desktop/PromptMarkdown.tsx)仅增加用户正文的高度与展开控制，内部复用同一renderer；表格对齐、CJK强调、公式、提示块、脚注和图表沿共同语义与Native内容主题。输入法、选区、撤销及scope隔离见[UI owner](../../packages/ui/README.md#markdown-提示词编辑)与[纯文本输入决定](../../.agents/notes/implemented/bug-fix/2026-11-07-plain-prompt-markdown-messages.md)。[Native展示](src/native.tsx)让普通inline用户正文在占位与历史之间保持同一组件位置；[正文reader](src/native-model-output-message.tsx)保留完整读取、复制与文件打开准入。外部HTTP(S)链接仍经Main校验交给系统浏览器，文件路径由原messageFile.open核验；草稿链接只是文本。正文首末及引用／列表／单元格边缘不叠加外边距，末尾一级／二级标题不显示分隔线和其留白，有后续内容时保留原排版。普通用户正文默认约360px上限，矮窗口收敛至约半屏；超出时通过泡内渐隐／内阴影的“展开”按钮阅读全文，可再次收起。附件、发送失败／未知提示及全文复制不被裁切，手动展开随同一节点跨接管／缓存保留，冷重开默认收起；具体生命周期沿UI owner。
+提示词输入使用UI的原生多行[PromptEditor](../../packages/ui/src/desktop/PromptEditor.tsx)，只编辑原始Markdown字符串，不预览或标准化源文。首次发送、已有会话投递占位、已保存用户消息和Agent正文复用[MessageContent](../../packages/ui/src/desktop/MessageContent.tsx)，[PromptMarkdown](../../packages/ui/src/desktop/PromptMarkdown.tsx)仅增加用户正文的高度与展开控制，内部复用同一renderer；表格对齐、CJK强调、公式、提示块、脚注和图表沿共同语义与Native内容主题。输入法、选区、撤销及scope隔离见[UI owner](../../packages/ui/README.md#markdown-提示词编辑)与[纯文本输入决定](../../.agents/notes/implemented/bug-fix/2026-11-07-plain-prompt-markdown-messages.md)。[Native展示](src/native.tsx)让普通inline用户正文在占位与历史之间保持同一组件位置；[正文reader](src/native-model-output-message.tsx)保留完整读取、复制与文件打开准入。Agent正文HTTP(S)链接由宿主显式拦截，在右侧现有浏览器标签打开，仍经Main地址、当前会话与页面控制权校验，不交系统浏览器；阅读暂停时不导航。文件路径由messageFile.open沿原message/run/workspace、保护根、实际路径和文件身份核验；代码沿原编辑器，其余返回绑定scope的只读随机handle，经独立NativeLocalFilePreview进入右侧。该handle不是OutputFileTarget、不产生交付记录，无save/edit权限；同一标签切换仅关闭原生view，显式关闭释放handle，满标签时释放未展示handle，scope变化由Main释放。活跃只读检查失败时关闭view并提示重新打开，不自动重试读取。草稿链接只是文本。正文首末及引用／列表／单元格边缘不叠加外边距，末尾一级／二级标题不显示分隔线和其留白，有后续内容时保留原排版。普通用户正文默认约360px上限，矮窗口收敛至约半屏；超出时通过泡内渐隐／内阴影的“展开”按钮阅读全文，可再次收起。附件、发送失败／未知提示及全文复制不被裁切，手动展开随同一节点跨接管／缓存保留，冷重开默认收起；具体生命周期沿UI owner。
 
 2026-11-07补修输入区闪烁，仍基于`556398400`加当前工作树、Windows x64／Bun1.4.4／Chrome156.0.8078.80：发送等待原本使原生textarea disabled、透明度降到0.55并丢焦，首发历史接管又因启用`synchronizePresentation`重建准备身份而隐藏footer一帧。Composer现只阻止重复提交，loading期间输入保持可编辑；SessionPage记住未启用屏障时已显示的准确scope，保存记录接管不重新隐藏，同scope资格不跨会话沿用。首发等待中的新编辑即时绑定原创建意图的目标Session，受理只消费原草稿；可见Session接管后才清理准备页副本，回执丢失也不覆盖新编辑或显式清空。[输入回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)、[页面回归](../../packages/ui/test/isolated/desktop-session-page-render.test.tsx)及[Native新对话回归](test/isolated/native-new-conversation-dom.test.tsx)按准确`./`路径逐文件`bun test --parallel=1 --max-concurrency=1`，共143项／2614断言通过，保留不同scope加载、页壳重用、未知恢复及附件断言；其余未变Markdown、复制、滚动和transcript结论沿前述证据。生产浏览器夹具补核深浅×1280／800px的新旧会话loading中编辑、重复Enter／form零重发、受理后新草稿保留、随后连续发送，以及逐帧原生节点、透明度、焦点、边框和光圈稳定；原四组Markdown、折叠、历史和冷重开同跑。最终报告见本机`.cache/prompt-send-browser-Ktx917`，最终源码资产在`.cache/prompt-send-browser-vOMug3/dist`；修前禁用变暗、首发隐藏帧及逐步观察材料在`.cache/prompt-input-flicker-20261107`。UI／Desktop类型、UI Desktop构建、格式、边界、测试归属及文档检查通过；仍仅为浏览器生产renderer与隔离桥，不扩展Electron安装、真实Service／Provider或其他平台资格。
 [transcript](src/native-transcript.ts)以已保存用户消息的`humanInput.publicCommandId`或`originCommandId`提供稳定`presentationKey`；旧记录仅有sourceIds时，[Native](src/native.tsx)只在当前Store／Session的原Run确认该来源后使用其原commandId。继承记录不能借用当前投递身份；相同正文不会用于关联，独立两次输入保留两条。稳定标识只负责展示，不替代物理消息ID、业务回执或操作权限。[首条消息回归](test/isolated/native-new-conversation-dom.test.tsx)核Markdown与附件在延迟选择／历史交接过程中的原节点；[transcript回归](test/isolated/native-transcript-dom.test.tsx)核当前输入、已保存消息、选区、两条同文与冷挂载。
@@ -363,13 +363,16 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 2026-10-23 主题色修正：用户指出流程图／时序图缺少主题色，确认原 adapter 将全部线条映射为正文色。现改为深浅主题各自的蓝色节点边框／箭头和青色生命线／辅助边框，继续透明底。`bun apps/desktop/test/markdown-content-browser-runner.fixture.ts` 在 Chrome155／1280与390px下通过；新增解码图像像素断言核对蓝色确实绘出、时序生命线有青色、背景主要透明及深浅切换，页面错误和外部请求为0。生命周期隔离回归1项／22断言、UI与Desktop typecheck、定向Biome通过。再用当前生产renderer、`testDiagnostics:false`、原独立Profile和真实Service构建Electron44.3.0窗口，冷读原消息并实际检查亮／暗流程图、时序图与主题切换：颜色更新，文字可读，阅读位置保持；切换后先保留旧图再异步替换，不承诺颜色与页面背景同帧变化。此增量只复验主题色，前述流式时序／冷读等证据按未变化范围复用，不据此扩大安装或平台资格。
 
-产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。[共享 Composer](../../packages/ui/src/desktop/Composer.tsx)按 MIME／图片扩展名分流。图片保留现有字节流程；普通 File 由 renderer 分块读取，每块至多 64 KiB，经闭合 IPC 交给 [Main 准备 owner](electron/input-files.ts)，不让 renderer 自报路径触发 Main 任意文件读取。每窗口最多 128 个准备项，单项及总量至多 256 MiB；显式取消、移除与换代终止所属准备并释放 Main 项，上传在途保留预算直到真实完成。
+产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。[共享 Composer](../../packages/ui/src/desktop/Composer.tsx)按 MIME／图片扩展名分流。图片保留现有字节流程。本机 Main 启动的 paired Service 显式启用本地文件引用：普通 File 有 Electron 实际路径时，只发送原路径，不读取或复制字节、不扩大权限；Agent 按现有权限读取当时版本，源文件移动或删除会按真实工具错误处理。未发送引用随窗口／连接换代释放，不自动重放；历史路径不是内容快照。无实际路径或非本机资格的普通 File 由 renderer 分块读取，每块至多 64 KiB，经闭合 IPC 交给 [Main 准备 owner](electron/input-files.ts)，不让 renderer 自报路径触发 Main 任意文件读取。每窗口最多 128 个准备项，单项及总量至多 256 MiB；显式取消、移除与换代终止所属准备并释放 Main 项，上传在途保留预算直到真实完成。
 
-新会话先创建准确 Session，再将冻结准备项通过 Service 流式发布为 Artifact；稳定导入 ID 绑定 Store／Session／draft ID。ACK 丢失先 GET 原导入，同 ID 不重复创建逻辑附件。调用 journal 保存已准备引用，原 command 接纳事务完成绑定；未知提交保留原意图而不盲目重新发送。历史附件和占位仍使用原文件名，普通附件从此不依赖源路径。未发送草稿仍仅保窗口生命周期。旧路径附件不静默转换。
+新会话先创建准确 Session，再将冻结准备项通过 Service 流式发布为 Artifact；稳定导入 ID 绑定 Store／Session／draft ID。ACK 丢失先 GET 原导入，同 ID 不重复创建逻辑附件。调用 journal 保存已准备引用，原 command 接纳事务完成绑定；未知提交保留原意图而不盲目重新发送。历史附件和占位仍使用原文件名，该导入回退路径不依赖源路径；本机直接引用仍依赖源路径。未发送草稿仍仅保窗口生命周期。旧路径附件不静默转换。
 
 2026-10-23，`ba34a2e6d` 加本次会话文件工作树、Windows x64／Bun1.4.3：[普通附件 IPC 回归](test/isolated/native-session-files-ipc.test.ts)实际构建生产 preload，在 VM 中接入真实 Main handler、NativeCaller、Service HTTP、SQLite 与 Artifact，31断言通过。准确 sender、未完成／已释放／换代准备项和传入字节复制均核对；在实际 Windows Artifact 临时文件写入边界注入一次 ENOSPC 后，确认临时文件关闭并删除、输入导入与绑定均未形成、无 command／caller journal／模型调用、原文本草稿保持。解除故障后直接复用原准备 ID 和原字节重试，随后分别丢弃成功上传与 command 的 ACK，确认 GET 查回原导入，只有一次成功上传和一次 command POST。重建 caller 后首次 GET 再丢回执，第二次只查回原 command，原消息绑定、完整 Artifact 字节与模型调用数保持。此为实际链路写失败注入，不是物理磁盘满额资格；Electron 传输和此例私有 UI 数据端口为替身，也不代证完整 Electron 进程冷恢复。
 
 [普通文件 DOM 回归](test/isolated/native-input-files-dom.test.tsx)接真实 Main 准备 owner，核活动 FileReader 上显式 AbortSignal 取消及 scope 换代均不 append／finish、不生成 ready 草稿，并释放准确准备项；重新选择随后成功。本例本轮1项34断言通过；[Main 字节回归](test/input-files.test.ts)的原预算与字节合同证据继续适用。取消后的用户全过程观察仍以上述浏览器证据为准。
+
+2026-11-13，Mac arm64／Bun 1.4.4、5b4f1de 加本地引用工作树：[独立 Electron 夹具](test/local-file-references-electron-runner.fixture.ts)以 Electron 44.3.0、真实 preload／Composer／附件 owner 验证附件菜单选择、同名不同目录、普通 PDF 路径、CDP 磁盘文件 drop、连接代次清理、无路径与非本机能力回退。本机路径零字节 IPC；回退在此夹具使用 Main 应答替身，不代证 Service，完整导入及丢失回执沿 [IPC 测试](test/isolated/native-session-files-ipc.test.ts)另验。新增路径引用随原 command 在真实 Node 冷恢复测试中保持，原 POST 只有一次。权限与 PDF 测试分别核现有门控和实际 PDF worker，不调用真实付费模型。完整产品启动、真实审批 UI 与 Office 原生应用仍非本夹具资格。
+
 
 [真实 Node 冷查](test/isolated/native-caller-journal-host.test.ts)使用 Node24.15.0、真实私有 SQLite journal 与 Profile 准入：原 `run.start` 携普通附件，在真实 HTTP 接纳后断开回执并强制退出 caller，冷进程首次 GET 再丢回执，后续只 GET 查回原 ID／摘要／scope，零重发；原附件绑定与字节仍可读。另两例核合法恢复活动 Run 后的 `input.steer` 原 ID 查回及已完成原公共 Run 的冷查，三例共102断言通过。冷重开本身不启动新模型或恢复业务效果。既有 `execution.cancel` 子进程夹具依赖 Unix Shell，在本机仍为 `shell_unavailable`；该独立平台限制不由附件或 command 查回测试取得资格。
 
@@ -3293,3 +3296,54 @@ Main现在将已解析但页面／展示owner已失效的菜单请求按原`null
 缓存提示的命中／输入数量同样复用按1024换算的大写K／M格式，小于1024保留原数量；该会话显示为“命中256／输入8.7K tokens”。累计统计、命中率及完整无障碍描述不变。缓存6项回归、UI类型及Biome通过，沿原隔离Composer浏览器核实两块格式（同目录256K.png已更新为当前画面）。
 
 用户后续截图指出上下文已用仍为旧1000进制小写k，与缓存1024进制K混用。现统一复用`formatTokenQuantity`，上下文正文标“估算”、缓存正文标“累计命中”；该原会话显示“估算8.8K／总量256K”和“累计命中256／输入8.7K”。9027是原实际输入8954加新增估算73，缓存分母则是累计已报告实际输入，两者本就不保证相等，不通过显示格式改写统计。当前源码隔离浏览器已核实上述两行并检查同目录更新后的256K.png，相关上下文3项、UI类型及Biome通过。
+
+
+## 可重复的办公客户端 E2E
+
+在已安装仓库依赖、原生构建工具和 Electron 的 macOS/Linux 可见桌面运行：
+
+```sh
+bun run apps/desktop/test/office-journey-runner.fixture.ts
+```
+
+该显式入口复用 [生产装配夹具](test/office-basics-product-electron.fixture.ts)，每次创建独立临时 HOME/profile、工作区和合成输入，不读取用户凭据，不接真实模型，不进入默认测试调度。通过生产 Main、Renderer、Service、Agent、受管 Shell 和 collector，使用真实 UI 发送、文件卡继续修改、文件选择对话框及预览内容断言；DOCX/XLSX/PPTX 各覆盖生成、提示词修改和选入本地文件处理。普通客户端诊断保持关闭，权限通过 UI 明确选择当前会话“工作区内修改”，没有 Full 或审批绕过。
+
+[UI 驱动](test/office-journey-driver.fixture.ts)按文件卡、模型请求和预览可见状态等待，不以固定睡眠视作成功；逐操作核唯一产物、无额外请求，处理选入文件时核原件 SHA 不变。固定模型严格识别本轮测试输入、准确附件 URI；任何工具回执（包括失败／未知）均终止该轮，不盲重派。相关拒绝／未知回归见 [单测](test/isolated/office-journey.test.ts)。
+
+生产装配夹具的 `--run --e2e --docx-only` 可定向验证 DOCX 生成、修改及原路径文件处理。独立测试启动入口另保留 `evidence/preview-events.jsonl`：仅记录相对时间、预览方法、消毒错误码及 WebContents 生命周期，不记录请求 payload、路径或文件内容；不改变产品诊断开关。定向轮同样使用固定 mock 模型，不计入真实模型成功率。
+
+入口打印准确证据目录，成功和失败均保留 `evidence/result.json`、Playwright trace、截图及合成模型请求；失败返回非零并关闭所属客户端，不清理用户目录。Renderer 截图不包含 WebContentsView，预览截图独立保存，不将其冒称为完整系统窗口截图。测试通过只证明固定模型客户端链路，不证明真实模型准确率、原生 Office 保真、批注全链路或其他平台资格；真实模型评测保持单独统计。若缺 Electron、显示服务或原生组件，按失败报告而非 skip/pass。
+
+### 统一预览工具栏与交互 Word 模式
+
+三格式工具栏只提供现有请求修改、缩放、另存为及 PPT 放映，文件名不在标签页下重复。300px 以下采用两行布局；480px 以下 Excel 只读公式栏换行，沿现有主题 token，不增加编辑或分享能力。`office-toolbar-layout.fixture.ts` 用实际 Electron 验证三格式五种宽度及键盘入口，但不等同真实模型/完整客户端测试。
+
+Excel 的“适应窗口”按当前工作表完整网格宽度（含行头）缩小显示，在视口变化及工作表切换后重算，不改列宽或工作簿样式；100% 仍保持原尺寸并允许横向滚动。Sheet tabs 和请求修改浮钮沿现有反向缩放保持界面尺寸，宿主工具栏不参与文档缩放。`office-excel-fit-layout.fixture.ts` 用合成表在240/400/600px实际 Chromium 验证整表宽度、行头对齐、固定控件尺寸及100%区别，并核PPT缩略栏响应宽度；该截图仅用于几何回归，不作为真实文件视觉验收或模型成功率证据。
+
+Word 锁定转换器根据 `navigator.webdriver` 自动走截图导出分支，导致自动化启动的客户端丢失分页缩放；普通 Electron 同文件未复现。仅交互 HTML recipe 把该精确锚点设为交互模式，不伪造浏览器属性、不改源文件或 CLI 截图命令；缺失/重复锚点仍保守降级。内部 recipe 升为 `offline-interactive-word` 防止复用旧缓存。`office-word-fit.fixture.ts` 比较普通与自动化 Electron 在 240/320/478/640/960px 的实际页边界和正文保留；这是合成文件几何回归，不是99%模型准确率证明。
+
+办公预览请求的本地 accepted 回执与轮询可能并发结束同一输入窗；仅当原预览仍有效、准确原请求已成功退役且没有后继请求时，Main 将该回执视为幂等完成。关闭或释放失败、替换预览/请求及 failed/unknown 均不转为成功；回执恢复不再次发送用户请求或调用模型。该边界由确定性并发回归验证，不作为历史真实运行回执错误已归因的证据。
+
+[ACK GUI 夹具](test/office-ack-gui-driver.fixture.ts)复用生产预览组件与可信请求表单，通过 `--ack-race` 仅在测试装配中延迟 accepted settle 返回，等待真实 renderer 轮询退役原请求；断言一次合成提交、一次成功回执、无错误提示及无重发，并分别保存表单、宿主和独立预览截图。可先用 `windows-office-visible-build.fixture.ts --out=<独立目录>/app` 构建，再向 driver 传入该独立目录（需沿用可视夹具的 repo 资源布局）。此夹具不启动 Service/Provider、不调用真实模型，不计入真实模型成功率；截图为组件验收，不代替完整客户端或安装包验收。
+
+PPT 的演讲者备注由可信宿主折叠区统一展示。交互层仅隐藏固定转换器在原幻灯片容器下生成的直接子备注块（准确 Notes 标签与正文结构），保留节点和全部备注文本供宿主按页读取，不删除或修改源 PPTX。作者幻灯片内同名节点不参与提取或隐藏，普通预览与演示模式均保留作者内容；不再重复展示窄栏中的黑色 NOTES 块。
+
+PPT 缩略栏根据预览视口收紧到 80px（≤480px）或64px（≤360px），缩略图同步缩放而页码保留字号；虚拟化按实际行高计算。这是原固定104px导致的普通产品窄栏占位，不是自动化独有。只识别并移除固定recipe自身的离线说明，由三格式可信宿主折叠说明替代，不搬运文档 HTML、不删除作者 details。`office-ppt-rail.fixture.ts` 在普通/自动化 Electron各五种宽度检查页边界、缩略栏、说明移除及作者说明保留；未替代完整客户端模型验证。
+
+Word/PPT 左侧预览导航保持界面尺寸，不随文档 100%/150%/200% 缩放。预览窗口窄于 600px 时收成居中短横线导航；悬停或键盘聚焦展开缩略图浮层，离开且失焦后收起，展开不重新挤压正文。宽窗口保留完整列表，放映隐藏导航。独立零模型几何夹具 `test/office-page-rail-layout.fixture.ts` 验证倍率、正文缩放、固定留白及 hover/focus；不计入真实模型成功率。
+
+Word 页导航与修改范围校验分离：原页身份、分页代际、顺序和按钮连接仍有效时，缩放后可定位页面；范围修改继续严格校验原布局几何，不能把已失效的页范围交给 Agent。重分页、替换页面或按钮不沿用旧导航身份。
+
+办公预览收敛重复说明行：Word/PPT/Excel 不再常驻“预览说明”区域，真实兼容性限制保留在可信工具栏悬停提示与无障碍描述中。错误、加载、未知结果和重试仍明确显示；PDF 独立分页导航不受此清理影响。
+
+产物区只承担交付与整理状态：未进入整理且无已发布输出的 producer_failed 不重复展示步骤级错误，原工具轨迹及会话终态失败保留。此职责分离不判断步骤已恢复，不因同轮或其他轮成功文件隐藏未知结果、真实整理失败或过期提示。
+
+浏览器与文件预览共用 `native-content-observer` 的宿主布局观察/清理和 `native-content-layout` 的 CSS→原生坐标投影、向内裁剪与窗口/root resize、zoom、隐藏/恢复监听。零尺寸只隐藏预览及请求输入窗，不结束 pending 请求；关闭后迟到事件不能复活视图。浏览器导航、paint/lease 与侧栏预测布局仍独立，预览未接入侧栏 projection metadata，使用共享观察器的位置跟踪。预览独立 session、manifest 资源和权限拒绝策略不变。
+
+PDF 文件预览沿受校验的输出页图接口按需读取，在独立 `kite-preview` WebContentsView 中显示；不用浏览器 PDF 插件。Word、PPT、PDF 共用受信页栏布局：宽屏常显、窄屏细线 hover/focus 浮层，正文缩放不改变页栏尺寸。PDF 无 Office 选区或备注修改上下文；页图请求串行、可取消，最多500页，单页8MiB、当前预览累计256MiB页图预算，失败保留页内错误而不伪造空白成功。
+
+消息中的本地文件链接沿原 message/run、工作区或受管理目录与保护根授权检查。非代码文件通过有界只读 handle 在右侧预览，不注册为输出产物，不附加另存/修改权限；代码仍走原编辑器。handle 绑定当前会话与代际及文件身份，每次读取、PDF 分页前后重新校验授权与源文件，关闭标签或切会话释放；当前显示另有周期权限复核。原文件替换、内容变更或权限撤销时失效，不静默转读新文件。PDF 使用安全快照和现有 PNG 渲染器，不启用浏览器 PDF 插件。
+
+本地 PDF 读取授权仍由 Main 持有，只把已校验的有限快照字节交给经过连接身份核验的回环 Service（拒绝远程 endpoint 与 HTTP 重定向）。PDF 页解析复用 Bun 的原有隔离 worker/严格缓存 IO，不在 Electron 中加载 Bun 原生运行依赖；Service 不接受源路径、不登记输出或 Artifact。返回页面前再次核原句柄授权及文件身份。Word 只读导航监听转换器分页状态/代际，不依赖编辑交互轮询后才显示缩略图。
+
+选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照并提示读取失败。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。

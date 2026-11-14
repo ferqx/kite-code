@@ -18,11 +18,13 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import { ownedUserConfiguration } from '../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../scripts/build-native';
+import { officeJourneyDecision, validateOfficeFixtureRoot } from './office-journey.fixture';
 import { officeFixtureDecision } from './office-model-decision.fixture';
 
 const root = process.env.KITE_OFFICE_PRODUCT_FIXTURE_DIRECTORY;
-if (!root?.startsWith('/workspace/shared/'))
-  throw Error('explicit_owned_fixture_directory_required');
+validateOfficeFixtureRoot(root);
+if (!root) throw Error('explicit_owned_fixture_directory_required');
+const e2e = process.argv.includes('--e2e');
 const repo = resolve(import.meta.dir, '../../..');
 const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'office-fixture' });
 const workspace = join(root, 'workspace');
@@ -42,14 +44,18 @@ if (process.argv.includes('--prepare') || process.argv.includes('--rebuild')) {
       name: 'Office fixture workspace',
       rootUri: pathToFileURL(workspace).href,
     });
-    for (const sessionId of ['office-session', 'other-session'])
+    for (const sessionId of e2e ? ['docx', 'xlsx', 'pptx'] : ['office-session', 'other-session'])
       await store.createSession({
         expectedStoreId: storeId,
         subjectId: 'local-user',
         commandId: `create-${sessionId}`,
         sessionId,
         workspaceId: 'office-workspace',
-        title: sessionId === 'office-session' ? '办公文件真实链路' : '切换验证会话',
+        title: e2e
+          ? `Office ${sessionId}`
+          : sessionId === 'office-session'
+            ? '办公文件真实链路'
+            : '切换验证会话',
       });
   }
   await store.close();
@@ -100,7 +106,7 @@ if (process.argv.includes('--prepare') || process.argv.includes('--rebuild')) {
       profile: { dataRoot: profile.dataRoot, profile: profile.profile },
     },
     outdir,
-    { testDiagnostics: true },
+    { testDiagnostics: !e2e },
   );
   writeFileSync(
     join(root, 'prepared.json'),
@@ -131,6 +137,19 @@ if (process.argv.includes('--prepare') || process.argv.includes('--rebuild')) {
     .map(([key, value]) => `${key}=${quote(value)}`)
     .join(' ');
   const cli = `${env} ${quote(binary)}`;
+  if (e2e) {
+    for (const format of ['docx', 'xlsx', 'pptx']) {
+      const target = quote(join(workspace, `input.${format}`));
+      const command = `${cli} create ${target}${format === 'pptx' ? ` && ${cli} add ${target} / --type slide` : ''}`;
+      const seed = Bun.spawn(['/bin/sh', '-c', command], {
+        env: { ...process.env, ...config.homeEnvironment },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [code, diagnostic] = await Promise.all([seed.exited, new Response(seed.stderr).text()]);
+      if (code) throw Error(`synthetic_input_failed: ${diagnostic}`);
+    }
+  }
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -160,10 +179,12 @@ if (process.argv.includes('--prepare') || process.argv.includes('--rebuild')) {
             typeof message.content === 'string' &&
             message.content.startsWith('Verify attached office revision.'),
         );
+      const journey = e2e ? officeJourneyDecision(body.messages, root, cli) : undefined;
       const decision =
-        verify >= 0
+        journey ??
+        (verify >= 0
           ? { toolId: 'office-verify', toolTurn: false, editing: false, workingPath: undefined }
-          : officeFixtureDecision(body.messages);
+          : officeFixtureDecision(body.messages));
       const { toolId, toolTurn, editing, workingPath } = decision;
       const pdfSpec = quote(
         JSON.stringify({
@@ -179,9 +200,11 @@ if (process.argv.includes('--prepare') || process.argv.includes('--rebuild')) {
           ],
         }),
       );
-      const command = !editing
-        ? `${cli} create "$KITE_OUTPUT_DIR/report.docx" && ${cli} add "$KITE_OUTPUT_DIR/report.docx" /body --type paragraph --prop 'text=第一轮原始报告：中文文件交付' && ${cli} create "$KITE_OUTPUT_DIR/budget.xlsx" && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Sheet1/A1 --prop 'value=原值A1' && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Sheet1/B1 --prop 'value=20' && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Sheet1/A2 --prop 'value=项目二' && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Sheet1/B2 --prop 'value=40' && ${cli} add "$KITE_OUTPUT_DIR/budget.xlsx" / --type sheet --prop name=Details && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Details/A1 --prop 'value=第二表原值' && ${cli} create "$KITE_OUTPUT_DIR/deck.pptx" && ${cli} add "$KITE_OUTPUT_DIR/deck.pptx" / --type slide && ${cli} add "$KITE_OUTPUT_DIR/deck.pptx" '/slide[1]' --type textbox --prop 'text=原始幻灯片' --prop x=2cm --prop y=2cm --prop width=18cm --prop height=3cm && printf '%s' ${pdfSpec} | "$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf --input - --out "$KITE_OUTPUT_DIR/preview.pdf" && printf '实际文本预览\\n原始内容' > "$KITE_OUTPUT_DIR/notes.txt"`
-        : `source=${quote(workingPath!)}; test -f "$source" && ${cli} add "$source" /body --type paragraph --prop 'text=第二轮基于工作副本新增内容' && cp "$source" "$KITE_OUTPUT_DIR/report.docx"`;
+      const command =
+        journey?.command ??
+        (!editing
+          ? `${cli} create "$KITE_OUTPUT_DIR/report.docx" && ${cli} add "$KITE_OUTPUT_DIR/report.docx" /body --type paragraph --prop 'text=第一轮原始报告：中文文件交付' && ${cli} create "$KITE_OUTPUT_DIR/budget.xlsx" && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Sheet1/A1 --prop 'value=原值A1' && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Sheet1/B1 --prop 'value=20' && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Sheet1/A2 --prop 'value=项目二' && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Sheet1/B2 --prop 'value=40' && ${cli} add "$KITE_OUTPUT_DIR/budget.xlsx" / --type sheet --prop name=Details && ${cli} set "$KITE_OUTPUT_DIR/budget.xlsx" /Details/A1 --prop 'value=第二表原值' && ${cli} create "$KITE_OUTPUT_DIR/deck.pptx" && ${cli} add "$KITE_OUTPUT_DIR/deck.pptx" / --type slide && ${cli} add "$KITE_OUTPUT_DIR/deck.pptx" '/slide[1]' --type textbox --prop 'text=原始幻灯片' --prop x=2cm --prop y=2cm --prop width=18cm --prop height=3cm && printf '%s' ${pdfSpec} | "$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf --input - --out "$KITE_OUTPUT_DIR/preview.pdf" && printf '实际文本预览\\n原始内容' > "$KITE_OUTPUT_DIR/notes.txt"`
+          : `source=${quote(workingPath!)}; test -f "$source" && ${cli} add "$source" /body --type paragraph --prop 'text=第二轮基于工作副本新增内容' && cp "$source" "$KITE_OUTPUT_DIR/report.docx"`);
       const delta = toolTurn
         ? {
             role: 'assistant',
@@ -196,7 +219,9 @@ if (process.argv.includes('--prepare') || process.argv.includes('--rebuild')) {
           }
         : {
             role: 'assistant',
-            content: '工具已返回；交付文件和实际错误以工具记录及文件卡片为准。',
+            content: e2e
+              ? '处理结果见文件卡。'
+              : '工具已返回；交付文件和实际错误以工具记录及文件卡片为准。',
           };
       const chunk = {
         id: `${toolId}-${toolTurn ? 'call' : 'final'}`,
@@ -228,18 +253,43 @@ if (process.argv.includes('--prepare') || process.argv.includes('--rebuild')) {
       ],
     }),
   );
-  const require = createRequire(import.meta.url);
-  const child = Bun.spawn(
-    [require('electron') as string, outdir, `--user-data-dir=${join(root, 'electron-profile')}`],
-    {
-      env: { ...process.env, ...config.homeEnvironment, ...loopbackModelEnvironment(provider.url) },
-      stdout: 'inherit',
-      stderr: 'inherit',
-      stdin: 'inherit',
-    },
-  );
-  console.log('Fixture launched with actual desktop DISPLAY:', process.env.DISPLAY);
-  const code = await child.exited;
-  provider.stop(true);
-  process.exitCode = code;
+  if (e2e) {
+    const { runOfficeJourney } = await import('./office-journey-driver.fixture');
+    try {
+      await runOfficeJourney({
+        root,
+        outdir,
+        workspace,
+        requestDirectory,
+        env: {
+          ...process.env,
+          ...config.homeEnvironment,
+          ...loopbackModelEnvironment(provider.url),
+        },
+        modelRequests: () => count,
+        formats: process.argv.includes('--docx-only') ? ['docx'] : undefined,
+      });
+    } finally {
+      provider.stop(true);
+    }
+  } else {
+    const require = createRequire(import.meta.url);
+    const child = Bun.spawn(
+      [require('electron') as string, outdir, `--user-data-dir=${join(root, 'electron-profile')}`],
+      {
+        env: {
+          ...process.env,
+          ...config.homeEnvironment,
+          ...loopbackModelEnvironment(provider.url),
+        },
+        stdout: 'inherit',
+        stderr: 'inherit',
+        stdin: 'inherit',
+      },
+    );
+    console.log('Fixture launched with actual desktop DISPLAY:', process.env.DISPLAY);
+    const code = await child.exited;
+    provider.stop(true);
+    process.exitCode = code;
+  }
 } else throw Error('choose_prepare_rebuild_or_run');

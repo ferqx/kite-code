@@ -59,6 +59,38 @@ test('packaged registry retains computer use and binds office resources to its i
   await source.dispose();
   await expect(source.list()).rejects.toThrow('knowledge_source_closed');
 });
+test('office skill scopes shell portability and recovery to confirmed delivery', async () => {
+  const source = createBuiltinOfficeSkillSource();
+  const entry = (await source.list()).entries[0]!;
+  const loaded = await source.load({ id: entry.id });
+  expect(loaded.body).toContain('Use POSIX-compatible shell syntax');
+  expect(loaded.body).toContain('node:crypto with the existing KITE_DOCUMENTS_BUN');
+  expect(loaded.body).toContain('Inspect added and removed package parts');
+  expect(loaded.body).toContain('matching content-type and relationship');
+  expect(loaded.body).toContain('Do not assume Bash process substitution');
+  expect(loaded.body).toContain('never hide them with || true');
+  expect(loaded.body).toContain('the whole producer Shell must finish successfully');
+  expect(loaded.body).toContain("After a nonzero exit, that attempt's files are not collected");
+  expect(loaded.body).toContain('inspect the existing execution status before retrying');
+  expect(loaded.body).toContain("not a previous Shell's temporary KITE_OUTPUT_DIR");
+  expect(loaded.body).toContain("new Shell's current KITE_OUTPUT_DIR");
+  expect(loaded.body).toContain('Do not repeat mutations blindly');
+  expect(loaded.body).toContain('If recovery or collection cannot be confirmed');
+  expect(loaded.body).toContain('no new tool is required');
+  for (const resource of loaded.resources) {
+    const { body } = await source.readResource({
+      skillId: entry.id,
+      version: entry.version,
+      path: resource.path,
+    });
+    for (const match of body.matchAll(/```sh\n([\s\S]*?)```/g)) {
+      // Parse examples without executing helpers, modifying files or using credentials.
+      const parsed = Bun.spawnSync(['/bin/sh', '-n'], { stdin: Buffer.from(match[1]!) });
+      expect(parsed.exitCode).toBe(0);
+    }
+  }
+  await source.dispose();
+});
 test('applied LaTeX warning is accepted only with explicit successful results', () => {
   const data = { results: [{ index: 0, success: true }] };
   expect(inspectOfficeBatch(result(data, 2, [{ code: 'unrecognized_latex_command' }]), 1)).toEqual([
@@ -220,5 +252,51 @@ test('offline preview preserves author fonts and separates old forced-font cache
   expect(officePreviewFontCss).not.toContain('!important');
   expect(officePreviewFontCss).not.toContain('https:');
   expect(officePreviewRecipeVersion).not.toBe('offline-1');
-  expect(officePreviewRecipeVersion).toBe('offline-author-fonts');
+  expect(officePreviewRecipeVersion).toBe('offline-interactive-word');
+});
+
+test('publication uses a private destination sibling and concurrent exports never overwrite', async () => {
+  const { exportDocument } = await import('../../../../src/tools/documents/document-export');
+  const { mkdir, readdir, symlink } = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'document-publication-'));
+  try {
+    const source = join(root, 'source.bin'),
+      destination = join(root, 'workspace');
+    await mkdir(destination);
+    await writeFile(source, 'stable original');
+    const out = join(destination, 'result.bin');
+    const controller = new AbortController();
+    let checks = 0;
+    const checkAbort = controller.signal.throwIfAborted.bind(controller.signal);
+    controller.signal.throwIfAborted = () => {
+      if (++checks === 2) controller.abort(Error('cancelled during publication'));
+      checkAbort();
+    };
+    await expect(exportDocument(source, out, controller.signal)).rejects.toThrow(
+      'cancelled during publication',
+    );
+    expect(await readdir(destination)).toEqual([]);
+    const attempts = await Promise.allSettled([
+      exportDocument(source, out),
+      exportDocument(source, out),
+    ]);
+    expect(attempts.filter((v) => v.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((v) => v.status === 'rejected')).toHaveLength(1);
+    expect(await readFile(out, 'utf8')).toBe('stable original');
+    expect(await readdir(destination)).toEqual(['result.bin']);
+    await writeFile(source, 'different bytes');
+    await expect(exportDocument(source, out)).rejects.toThrow();
+    expect(await readFile(out, 'utf8')).toBe('stable original');
+    await expect(exportDocument(source, join(root, 'missing', 'result.bin'))).rejects.toThrow();
+    if (process.platform !== 'win32') {
+      await symlink(source, join(destination, 'linked.bin'));
+      await expect(exportDocument(source, join(destination, 'linked.bin'))).rejects.toThrow();
+      expect(await readFile(source, 'utf8')).toBe('different bytes');
+    }
+    expect((await readdir(destination)).some((name) => name.startsWith('.kite-export-'))).toBe(
+      false,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
