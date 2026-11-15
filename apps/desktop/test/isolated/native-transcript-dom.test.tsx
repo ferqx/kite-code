@@ -1293,14 +1293,16 @@ test('durable child results stay visible between completed parent replies, retai
     }
     await act(async () => render('hot'));
     const result = () => f.host.querySelector('[data-agent-result-source="result-a"]')!;
-    expect(result().querySelector('strong')!.textContent).toBe('最新结果 A');
-    expect(result().querySelector('.message-label')!.textContent).toBe(
+    expect(result().querySelector('.user-message-body strong')!.textContent).toBe('最新结果 A');
+    expect(result().querySelector('.user-message-body .message-label')!.textContent).toBe(
       '协作者 result-a Agent 发送',
     );
     expect(result().getAttribute('aria-label')).toBe('协作者 result-a Agent 发送的消息');
     expect(result().closest('.agent-turn')).toBeNull();
     expect(f.host.querySelectorAll('.agent-result')).toHaveLength(2);
-    expect(f.host.textContent).toContain('消息正文未完整展示。');
+    expect(
+      f.host.querySelector('.agent-result .user-message-body [role="status"]')?.textContent,
+    ).toBe('消息正文未完整展示。');
     expect(
       [...f.host.querySelectorAll('.agent-turn-summary[aria-expanded]')].every(
         (entry) => entry.getAttribute('aria-expanded') === 'false',

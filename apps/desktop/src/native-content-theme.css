@@ -26,7 +26,7 @@
   color: var(--foreground);
 }
 
-.kite-client .client-main-panel .message.user .user-message-body {
+.kite-client .client-main-panel .message:is(.user, .agent-result) .user-message-body {
   --user-message-padding-block: 8px;
   --user-message-background: var(--composer-background);
   padding: var(--user-message-padding-block) 16px;

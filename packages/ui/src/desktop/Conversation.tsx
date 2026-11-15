@@ -393,7 +393,8 @@ const MessageItem = memo(function MessageItem({
     );
   const agentResult = message.systemKind === 'agent_result' ? message.agentResult : undefined;
   const agentMessage = message.systemKind === 'agent_message' ? message.agentMessage : undefined;
-  if (message.role === 'system' && !agentResult && !agentMessage)
+  const agentSource = agentResult ?? agentMessage;
+  if (message.role === 'system' && !agentSource)
     return (
       <article className={`message system ${message.status ?? ''}`}>
         <p>
@@ -423,39 +424,36 @@ const MessageItem = memo(function MessageItem({
       data-input-kind={message.inputKind}
       data-message-id={message.id}
       aria-label={
-        agentMessage
-          ? `${agentMessage.name} Agent 发送的消息`
-          : agentResult
-            ? `${agentResult.name} Agent 发送的消息`
-            : message.role === 'user'
-              ? '用户消息'
-              : '助手消息'
+        agentSource
+          ? `${agentSource.name} Agent 发送的消息`
+          : message.role === 'user'
+            ? '用户消息'
+            : '助手消息'
       }
     >
-      {agentResult && (
-        <p className="message-label">
-          {agentResult.name} Agent 发送
-          {agentResult.outcome !== 'succeeded' && (
-            <span className="message-status">
-              {
-                {
-                  failed: '失败',
-                  cancelled: '已取消',
-                  outcome_unknown: '结果未知',
-                }[agentResult.outcome]
-              }
-            </span>
-          )}
-        </p>
-      )}
-      {message.role === 'user' && !agentResult && !agentMessage && renderAttachments?.(message)}
+      {message.role === 'user' && !agentSource && renderAttachments?.(message)}
       <CodeCopyEligibilityContext.Provider value={Boolean(copyText)}>
-        {(message.role === 'user' && !agentResult) || agentMessage ? (
+        {message.role === 'user' || agentSource ? (
           <div className="user-message-body">
-            {agentMessage && <p className="message-label">{agentMessage.name} Agent 发送</p>}
+            {agentSource && (
+              <p className="message-label">
+                {agentSource.name} Agent 发送
+                {agentResult && agentResult.outcome !== 'succeeded' && (
+                  <span className="message-status">
+                    {
+                      {
+                        failed: '失败',
+                        cancelled: '已取消',
+                        outcome_unknown: '结果未知',
+                      }[agentResult.outcome]
+                    }
+                  </span>
+                )}
+              </p>
+            )}
             {renderContent ? (
               renderContent(message)
-            ) : agentMessage ? (
+            ) : agentSource ? (
               message.text && <MessageContent text={message.text} openFile={openFile} />
             ) : (
               <>
@@ -474,19 +472,17 @@ const MessageItem = memo(function MessageItem({
                 )}
               </>
             )}
-            {agentMessage && !agentMessage.contentComplete && (
-              <p role="status">消息正文暂不可完整读取。</p>
+            {agentSource && !agentSource.contentComplete && (
+              <p role="status">
+                {agentResult ? '消息正文未完整展示。' : '消息正文暂不可完整读取。'}
+              </p>
             )}
           </div>
         ) : renderContent ? (
           renderContent(message)
-        ) : message.role === 'assistant' || agentResult ? (
+        ) : message.role === 'assistant' ? (
           message.text && (
-            <MessageContent
-              text={message.text}
-              openFile={openFile}
-              streaming={message.role === 'assistant' ? !message.settled : undefined}
-            />
+            <MessageContent text={message.text} openFile={openFile} streaming={!message.settled} />
           )
         ) : (
           <>
@@ -506,7 +502,6 @@ const MessageItem = memo(function MessageItem({
           </>
         )}
       </CodeCopyEligibilityContext.Provider>
-      {agentResult && !agentResult.contentComplete && <p role="status">消息正文未完整展示。</p>}
       {responding && !showMetadata && (
         <small className="response-status" role="status">
           <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">

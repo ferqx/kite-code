@@ -120,7 +120,7 @@ Service 的[权限装配](../../../../apps/service/src/permission-configuration.
 
 Web 固定效果也由同一分类提供：仅准确 `builtin.web/web_fetch` Tool 版本1返回原 `network/unknown`、`safeRead:false`，宿主必须传实际注册版本；同名外部定义、不同 kind 和未知／缺失版本保持 unknown。Service 的 Web 工厂只组合可信网络 policy、原 revision 与 hardAllowed，默认权限登记使用这份 Agent 规则，不再各自覆盖或解释 Web 效果。Task 固定效果沿 `taskToolCapability`，Service 装配对象的无正式调用者 `describe` 转发已删除；原角色、选择、after-turn 与效果期望保持。
 
-[after-turn.ts](after-turn.ts) 的 `createDefaultAfterTurnPolicy` 提供可信宿主可显式采用的 Task／follow-up 通知轮策略。宿主提供冻结角色 id/version 与当前可信 policy/trust/controlReads，本模块核 request/apply 的原 Command／Run／Session／Execution／role／source／root work、取消／删除与当前信任，生成 revision 摘要。Core 激活、报告应用和 SQL 最终 CAS 独立核验。普通 Service 默认只排队，由后继活动父轮接收。[通知轮策略测试](../../../../apps/service/test/isolated/default-after-turn.test.ts)覆盖策略和默认接收两条路径。
+[after-turn.ts](after-turn.ts) 的 `createDefaultAfterTurnPolicy` 是默认 Service 装配的 Task／follow-up 通知轮策略。宿主提供冻结角色 id/version 与当前可信 policy/trust/controlReads，本模块核 request/apply 的原 Command／Run／Session／Execution／role／source／root work、取消／删除与当前信任，生成 revision 摘要。Core 激活、报告应用和 SQL 最终 CAS 独立核验。[通知轮策略测试](../../../../apps/service/test/isolated/default-after-turn.test.ts)覆盖默认续轮与权限变化后的结果保留。
 
 Planning 默认宿主调用 `createBusinessPermissionPolicy`，并由 Planning owner 的 `permissionGate` 与 Service 原状态 reader 提供真实业务条件。原 Service 转发工厂及旧 `createPlanningPermissionPolicy` 已退役。组合器先核当前权限，gate 不产生工具范围；普通未登记 required 的请求不读取计划正文，其余请求使用当前真实绑定，不缓存一次状态来替代派发复核。
 

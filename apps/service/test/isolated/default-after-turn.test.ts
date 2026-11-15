@@ -396,7 +396,6 @@ async function fixture(
       afterTurn: { allowed: true, revision: 'json-forgery' },
     }),
   );
-  // Preserve the default roles. Exercise notification turns only with a trusted opt-in.
   const host = createDefaultProcessConfiguration({
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
@@ -839,7 +838,7 @@ test('trusted denied idle completion authority preserves ordinary child work wit
   }
 }, 30000);
 
-test('default Service keeps an idle child result queued for the next ordinary parent turn', async () => {
+test('default Service delivers one late child result to an idle parent and starts its reply', async () => {
   const f = await fixture('default');
   try {
     await f.start();
@@ -847,36 +846,36 @@ test('default Service keeps an idle child result queued for the next ordinary pa
     await f.approve('agent/general');
     await until(async () => (f.childCalls === 1 ? true : undefined));
     await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
-    f.release();
-    const carrier = await until(async () =>
-      (await f.store.listExecutions('s')).find(
-        (execution) => execution.childSessionId && execution.status === 'succeeded',
-      ),
-    );
-    const queued = await until(async () => {
-      const command = await f.pendingResultReport(carrier.id);
-      return (command?.receipt as { reason?: string })?.reason === 'idle_authorization_required'
-        ? command
-        : undefined;
-    });
-    expect((await f.store.getView('s')).runs.map((run) => run.originCommandId)).toEqual(['work']);
+    const original = await f.client.getView('s');
+    expect(original.runs.map((run) => [run.originCommandId, run.status])).toEqual([
+      ['work', 'completed'],
+    ]);
+    expect(original.messages.filter((message) => message.agentResult)).toHaveLength(0);
     const calls = f.calls.length;
-    await f.client.getView('s');
-    expect(f.calls).toHaveLength(calls);
-    await f.client.startRun('s', {
-      expectedStoreId: f.expectedStoreId,
-      commandId: 'next-ordinary',
-      kind: 'run.start',
-      content: 'Continue after the child finishes',
+    f.release();
+    const report = await until(async () =>
+      (await f.client.getView('s')).runs.find((run) => run.originCommandId.startsWith('report-')),
+    );
+    await f.runtime.waitForCommand(report.originCommandId, { timeoutMs: 8000 });
+    const view = await f.client.getView('s');
+    expect(view.runs.map((run) => run.originCommandId)).toEqual(['work', report.originCommandId]);
+    const carrier = view.executions.find((execution) => execution.childSessionId)!;
+    expect(carrier.delivery).toBe('consumed');
+    expect((await f.store.getCommand(report.originCommandId))?.receipt).toMatchObject({
+      runId: report.id,
+      executionId: carrier.id,
+      mode: 'idle_new_turn',
     });
-    await f.runtime.waitForCommand('next-ordinary', { timeoutMs: 8000 });
-    const view = await f.store.getView('s');
-    expect(view.runs.map((run) => run.originCommandId)).toEqual(['work', 'next-ordinary']);
-    expect((await f.store.getCommand(queued.id))?.receipt).toMatchObject({
-      runId: view.runs.at(-1)!.id,
-      mode: 'active',
-      outcome: 'report_received',
+    const bubbles = view.messages.filter((message) => message.agentResult);
+    expect(bubbles).toHaveLength(1);
+    expect(bubbles[0]).toMatchObject({
+      role: 'system',
+      runId: report.id,
+      content: 'ORIGINAL_CHILD_RESULT complete tail',
+      agentResult: { executionId: carrier.id, childSessionId: carrier.childSessionId },
     });
+    expect(f.childCalls).toBe(1);
+    expect(f.reports).toBe(1);
     expect(f.calls.slice(calls)).toHaveLength(1);
     const messages = f.calls.at(-1)!.messages as { content: string | null }[];
     expect(
@@ -888,7 +887,7 @@ test('default Service keeps an idle child result queued for the next ordinary pa
 }, 25000);
 test('default current policy/trust drift after parent completion defers original report without child replay', async () => {
   for (const trusted of [true, false]) {
-    const f = await fixture(true);
+    const f = await fixture('default');
     try {
       await f.start();
       await f.approve('task.spawn');
@@ -933,7 +932,7 @@ test('default current policy/trust drift after parent completion defers original
 }, 30000);
 
 test('default report final source digest rejects changed original Tool intent while preserving the child result', async () => {
-  const f = await fixture(true);
+  const f = await fixture('default');
   try {
     await f.start();
     const tool = await f.approve('task.spawn');

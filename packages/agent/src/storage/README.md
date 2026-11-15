@@ -337,7 +337,7 @@ Runtime 从已提交的完整模型回复取得原调用，Store 在 `finishRun`
 
 邮箱以 `kind:message/result` 区分两种内容。普通消息只从成功 sender Tool 的原 Artifact 发布实体 Message；结果从可信 carrier 发布既有 `result_ref` Source，不额外写普通正文。结果的逻辑作者是原 child Session，`receivedSourceId` 与普通 `receivedMessageId` 分开保存，禁止把 Source ID 填入 Message 外键。`receivedSeq` 取两类发布在接收会话中的真实序号，列表、等待和 received 回执均不冒充实际 Model 已读。
 
-活动父轮从同一邮箱检查点接收结果。默认空闲父轮的普通消息和结果留在邮箱，后继活动轮按原 Store、主体、选择、父子关系和确认事实接收。通过稳定工具发送给父级的普通消息保留入队时的父轮和实际接收轮，原轮结束前未接收时可由后继轮接管。显式注册 after-turn 策略的宿主仍按原配置 lease、当前授权及资格决定是否创建通知轮。结果接收事务提交准确 Run／Source／consume／mail 回执。回执丢失只查回原身份，停止、Rewind、unknown 与冷缺绑定不取得新执行资格。
+活动父轮从同一邮箱检查点接收结果。后继活动轮按原 Store、主体、选择、父子关系和确认事实接收邮箱中待处理的内容。通过稳定工具发送给父级的普通消息保留入队时的父轮和实际接收轮，原轮结束前未接收时可由后继轮接管。装配 after-turn 策略的宿主按原配置 lease、当前授权及资格决定是否创建通知轮，缺少资格的结果继续留在邮箱。结果接收事务提交准确 Run／Source／consume／mail 回执。回执丢失只查回原身份，停止、Rewind、unknown 与冷缺绑定不取得新执行资格。
 
 原 `applyJobReport` 保留为结果发布事务及旧恢复适配；新 Runtime 接收和 idle 调度均通过邮箱入口进入它。结果气泡继续由真实 idle 续跑的原 Source／回执证明投影，active 接纳在结束和重开后不补气泡。取舍见[统一接收决定](../../../../.agents/notes/implemented/architecture/2026-10-23-unified-message-reception.md)。
 

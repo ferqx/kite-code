@@ -32,7 +32,7 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-test('source-free default collaboration queues the full child result until the next parent turn', async () => {
+test('source-free default collaboration delivers the full child result and wakes the idle parent exactly once', async () => {
   const root = realpathSync(temporaryDirectory('kite-packaged-task-'));
   const buildRoot = join(root, 'build');
   const workspace = join(root, 'workspace');
@@ -59,10 +59,10 @@ test('source-free default collaboration queues the full child result until the n
   ])
     expect(built.manifest.files.some((file) => file.path === path)).toBe(true);
   expect(built.manifest.entries.service.endsWith('.js')).toBe(true);
-  // Dependency archives may include source/type files; the launched entry and every Kite runtime leaf are compiled JS.
+  // Materialized third-party dependencies can include source and type files.
   expect(
     built.manifest.files
-      .filter((file) => file.path.startsWith('node_modules/@kite-ai/'))
+      .filter(({ path }) => /^node_modules\/@kite-ai\/[^/]+\/(?!node_modules\/)/.test(path))
       .some((file) => file.path.endsWith('.ts') && !file.path.endsWith('.d.ts')),
   ).toBe(false);
   const { selectProfile } = (await import(
@@ -227,7 +227,7 @@ test('source-free default collaboration queues the full child result until the n
       ).state,
     ).toBe('applied');
     {
-      const scenario = 'queued-result';
+      const scenario = 'late-result';
       gate = new Promise<void>((resolve) => {
         release = resolve;
       });
@@ -395,27 +395,10 @@ test('source-free default collaboration queues the full child result until the n
         async () => (await client.getView(sessionId)).runs.find((run) => run.id === heldParent.id)!,
         (run) => run.status === 'completed',
       );
-      release();
-      const reportId = await until(
-        'result queued while parent is idle',
-        async () =>
-          database!
-            .query<{ id: string }, [string]>(
-              "SELECT id FROM command WHERE session_id=? AND kind='job.report' AND status='accepted' AND json_extract(receipt_json,'$.reason')='idle_authorization_required'",
-            )
-            .get(sessionId)?.id,
-        (id) => !!id,
-      );
       expect((await client.getView(sessionId)).runs).toHaveLength(1);
       expect(parentCalls).toBe(2);
       expect(childCalls).toBe(1);
-      const nextWork = 'next-parent-input';
-      await client.startRun(sessionId, {
-        kind: 'run.start',
-        expectedStoreId,
-        commandId: nextWork,
-        content: 'Use the queued child result.',
-      });
+      release();
       const view = await until(
         `completed-${scenario}`,
         () => client.getView(sessionId),
@@ -455,14 +438,21 @@ test('source-free default collaboration queues the full child result until the n
       expect(childInput.request.modelId).toBe('fixed');
       expect(childInput.request.tools.map((tool) => tool.id)).toContain('send_agent_message');
       {
-        const reportRun = view.runs.find((run) => run.originCommandId === nextWork)!;
-        const reportCommand = await client.getCommand(reportId!);
+        const reportRun = view.runs.find((run) => run.id !== parent.id)!;
+        const reportCommand = await client.getCommand(reportRun.originCommandId);
         expect(reportCommand.status).toBe('applied');
+        const resultMessages = view.messages.filter((message) => message.agentResult);
+        expect(resultMessages).toHaveLength(1);
+        expect(resultMessages[0]).toMatchObject({
+          role: 'system',
+          runId: reportRun.id,
+          agentResult: { executionId: carrier.id, childSessionId: carrier.childSessionId },
+        });
         const model = view.executions.find(
           (execution) => execution.kind === 'model' && execution.runId === reportRun.id,
         )!;
         const input = await client.getModelInput(sessionId, model.id, { expectedStoreId });
-        expect(input.rootWorkCommandId).toBe(nextWork);
+        expect(input.rootWorkCommandId).toBe(work);
         expect(input.rootSessionId).toBe(sessionId);
         expect(input.request.messages.some((message) => message.content.includes(fullResult))).toBe(
           true,
@@ -485,8 +475,8 @@ test('source-free default collaboration queues the full child result until the n
         expect(reportCommand.receipt).toMatchObject({
           runId: reportRun.id,
           executionId: carrier.id,
-          mode: 'active',
-          outcome: 'report_received',
+          mode: 'idle_new_turn',
+          outcome: 'report_started',
         });
         const context = await client.getContext(sessionId, {
           storeId: expectedStoreId,
@@ -522,9 +512,7 @@ test('source-free default collaboration queues the full child result until the n
         const scopes = database
           .query('SELECT root_work_command_id FROM run WHERE id IN (?,?)')
           .all(reportRun.id, parent.id) as { root_work_command_id: string }[];
-        expect(scopes.map((row) => row.root_work_command_id).sort()).toEqual(
-          [nextWork, work].sort(),
-        );
+        expect(scopes.map((row) => row.root_work_command_id)).toEqual([work, work]);
       }
       const before = { parentCalls, childCalls, reviews, runs: view.runs.length };
       for (let n = 0; n < 3; n++) {

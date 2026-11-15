@@ -15,6 +15,7 @@ import {
   type CapabilityDescription,
   type CapabilityIdentity,
   createBusinessPermissionPolicy,
+  createDefaultAfterTurnPolicy,
   createPermissionCheckContextReader,
   createPermissionPolicy,
   intersectPermissionPolicies,
@@ -328,6 +329,49 @@ export function createDefaultPermissionConfiguration(options: {
     },
   });
   const globalPermissions = withInjectedCeiling(globalDefaultPolicy);
+  const afterTurn =
+    options.afterTurn ??
+    createDefaultAfterTurnPolicy({
+      roles: childRoles,
+      async readCurrent(input) {
+        input.signal.throwIfAborted();
+        if (authority.permissions && !authority.permissionPolicy)
+          return { workspaceTrust: false, revision: 'after-turn-current-policy-unavailable-1' };
+        const current = await currentPolicy(
+          {
+            kind: 'tool',
+            sessionId: input.session.id,
+            runId: input.run.id,
+            executionId: input.execution.id,
+            definitionId: input.execution.definitionId,
+            definitionVersion: input.execution.definitionVersion,
+            input: input.execution.input,
+            signal: input.signal,
+          },
+          [],
+          {
+            sessionId: input.session.id,
+            expectedStoreId: input.run.originStoreId,
+            subjectId: input.command.subjectId,
+          },
+        );
+        return {
+          workspaceTrust: current.workspaceTrust,
+          revision: createHash('sha256')
+            .update(
+              JSON.stringify({
+                mode: current.mode,
+                trust: current.workspaceTrust,
+                revision: current.revision,
+                allowed: current.allowed,
+                controlReads: current.controlReads ?? null,
+              }),
+            )
+            .digest('hex'),
+          controlReads: current.controlReads,
+        };
+      },
+    });
   function forRun(input: {
     command: ResolveInput['command'];
     modelId: string;
@@ -736,7 +780,7 @@ export function createDefaultPermissionConfiguration(options: {
 
   return {
     permissionManagement,
-    afterTurn: options.afterTurn,
+    afterTurn,
     forRun,
     forModelOnly(modelId: string): Permissions {
       return withInjectedCeiling(

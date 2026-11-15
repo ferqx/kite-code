@@ -323,7 +323,7 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 `executeRun` 的消息检查点与 idle pump 共用 `applyJobReport`。原 carrier/result revision/Store、目标 Session/selection、结果 Source、consume 和 ack 同事务核验；`agent_completion` 可接入同一父会话的后续活动 Run，不要求技术 rootWork 相同。实际 Source 保原执行出处并以低信任内容呈现。已有普通用户输入先于 idle 报告新建轮次；活动父 Run 仍接纳结果，避免等待 child 时被队列阻塞。历史 Tool results 按原 call 顺序配对，不因通知到达而使合法批次失效。
 
-提交后返回丢失只查回原已应用 Run/Source/resultAcceptance。普通 Service 让空闲父会话的子结果入队，由下次活动 Run 接收。缺少续轮授权和原配置租约时，无授权的结果仍可等待原邮箱接收。可信宿主显式启用自动续轮时核原配置、当前 after-turn 授权和期限。邮件携带问题只在准确 result 已被该 Run 消费且原 carrier/mail 来源成立时关联。
+提交后返回丢失只查回原已应用 Run/Source/resultAcceptance。默认 Service 装配受控 after-turn 策略，符合资格的子结果可开启空闲父会话的后续 Run。Runtime 核原配置租约、当前授权和期限。缺少资格的结果仍可等待后继活动轮接收。邮件携带问题只在准确 result 已被该 Run 消费且原 carrier/mail 来源成立时关联。
 
 旧 `human.input/decision`、呈现去重证明及已封存业务链仅供历史读取和准确回执兼容。旧 queued processing 在 pump 中拒绝为 `input_processing_removed`，旧活动 processing 的恢复在原 scope/恢复校验后、加载模型配置前拒绝；读取不调用模型。历史控制不自动重算，普通新输入不被旧 unresolved/selected-work 阻塞。取舍及旧决定的部分替代见[直接会话输入](../../.agents/notes/implemented/architecture/2026-10-22-direct-conversation-input.md)。
 

@@ -28,7 +28,7 @@ Native消息历史在完整基线之后，可按`message_changes`能力用持久
 
 支持 `session_state` 时，Native 从轻量快照取得历史观察水位，独立分批读取完整时间线和后继持久变更。Renderer 后台自动恢复同一会话的读取，当前权限、停止与提交仍由原准入读取决定。超大旧正文通过原消息的分块读取。Web／TUI 继续使用各自的读取路径。
 
-主 Agent 活动轮在原 inbox checkpoint 接纳子载体终态。普通 Service 将空闲父会话的结果持久排队，下一次活动轮接收。可信嵌入宿主可显式提供自动续轮策略。Runtime 提示模型以最终回复交付报告，普通协作消息承载需要对端处理的工作信息。Desktop 主／子会话共用消息组件，子详情证据读取绑定原载体、会话和持久消息身份。跨层取舍见[上下文与子结果决定](../../.agents/notes/implemented/architecture/2026-11-14-agent-context-and-completion-delivery.md)，桌面读口归 [Native owner](../../apps/desktop/README.md#内部模型调用与子-agent)。
+主 Agent 活动轮在原 inbox checkpoint 接纳子载体终态。默认 Service 为原委派装配有限 after-turn 策略，原父轮正常结束时按原配置租约、当前权限和准确来源决定是否开启唯一后续轮。缺少续轮资格的结果持久排队，由后继活动轮接收。Runtime 提示模型以最终回复交付报告，普通协作消息承载需要对端处理的工作信息。Desktop 共用消息组件展示开启后续轮的具名子结果，子详情读取绑定原载体、会话和持久消息身份。跨层取舍见[迟到子结果交付](../../.agents/notes/implemented/bug-fix/2026-11-16-late-agent-result-delivery.md)，桌面读口归 [Native owner](../../apps/desktop/README.md#内部模型调用与子-agent)。
 
 工具反馈不成为执行权威：[Shell leaf](../../packages/agent/src/tools/shell.README.md)仅在可确定的本地引用缺失预查返回 failed，Store 读取异常及派发后未知仍保守结算。`files.search@3` 的过滤、预览与当前页跳过范围归 [Files owner](../../packages/agent/src/tools/files/README.md)，其描述和结果不能放宽原路径、权限及恢复约束。公开预设说明来自实际注册目录，准确只读 definition/version 白名单与父能力交集保持；[行为合同](../../packages/agent/src/model-context.ts)只指导推进、取证和交付，不新增完成状态、自动重放或额外审批。Runtime 仍以原 Command/Run、真实派发和必要条件作为权威。
 

@@ -584,7 +584,7 @@ Model 必须有准确 kind 的允许项，不给同名 Tool 授权。所有非 M
 
 [默认配置测试](test/isolated/task-configuration.test.ts)使用真实 compatible SDK、SQLite、Workspace Files 与单 Model 槽，验证六工具目录、稳定 Agent 与职责来源、独立 carrier Ask、父策略拒绝零 child Provider、原 Command 重试零效果、角色版本与旧记录保持。默认三个槽位、三十分钟期限、unknown/fence 与取消最终门禁不因模型表面变化放宽。Mailbox completion 来自持久事实，等待不消费结果，真实人类输入直接通过原普通 Command 与 steer/follow-up 安全边界唤醒等待。
 
-普通 Service 默认将子任务终态持久排队，由当前或后续活动父轮采用结果 Source。只有可信嵌入宿主显式提供 `afterTurn.authorize` 才装配空闲通知轮授权，回调在装配时绑定冻结。结果保留原 carrier、期限、selection 和工作来源。[默认接收与显式续轮](test/isolated/default-after-turn.test.ts)与[可信 SDK 装配](test/isolated/after-turn-configuration.test.ts)验证各自的原任务、配置和 Run 身份。
+[默认权限装配](src/permission-configuration.ts)提供有限 `afterTurn` 策略，按原委派角色、当前 policy/trust 和持久控制读核对续轮资格。空闲父会话的合格终态可开启通知轮，暂不能续轮的结果由后继活动父轮接收。宿主显式提供的 `afterTurn.authorize` 优先，回调在装配时绑定冻结。结果保留原 carrier、期限、selection 和工作来源。[默认续轮](test/isolated/default-after-turn.test.ts)与[可信 SDK 装配](test/isolated/after-turn-configuration.test.ts)验证各自的原任务、配置和 Run 身份。
 
 [默认 completion 测试](test/isolated/default-after-turn.test.ts)保留实际 planning 条件、当前 policy/trust 与来源漂移检查。单槽父轮在子结果完成后直接采用完整 Source；idle 报告由当前可信授权决定。`planning-configuration.ts` 只沿已消费 report 的准确 carrier/source 或历史人类 public/raw/decision/business 收据及 `continuationRunId` 回到原 planning Run，不读取 latest；同 Store/Session/root work/config/selection/requirements 必须匹配，独立新工作无法借用旧规划。新普通输入不借旧分类收据自动恢复原规划。旧人类续轮证明的字段破坏、跨工作与配置/selection 漂移由[专用证明测试](test/isolated/planning-successor-proof.test.ts)拒绝。空 MCP 选择仍封存准确 scope/inheritance，`readSet:null` 保持无选中来源的冷恢复语义，不增加连接或工具能力。
 
@@ -866,7 +866,7 @@ Native 全局设置使用同一 source 的独立 `listUser(context)` 与 `user_s
 
 ## 默认 Task 的源码外资格
 
-[task-packaged-default](test/isolated/task-packaged-default.test.ts)通过公开 terminal builder 与实际默认 paired Service，在独立 HOME/profile/cwd 和源码树外制品中验证 `task.spawn` 默认协作。原 Tool 与 carrier 各自经过准确内部记录授权，child 效果保留普通门禁。测试断言空闲父会话只排队，然后由下一次普通输入的 Run 采用唯一结果 Source，核对完整 108042 UTF-8 字节和 bodyHash，并检查查询后 Run、Job 和 Provider 调用次数。两端正常关闭后检查所属 PID 和封存 manifest。模型已无 required/background/disposition 控制字段；旧内部合同由隔离 legacy 测试负责。
+[task-packaged-default](test/isolated/task-packaged-default.test.ts)通过公开 terminal builder 与实际默认 paired Service，在独立 HOME/profile/cwd 和源码树外制品中验证 `task.spawn` 默认协作。原 Tool 与 carrier 各自经过准确内部记录授权，child 效果保留普通门禁。测试断言父轮先结束时，子结果生成一条具名输入供客户端展示并开启唯一后续 Run，模型收到完整 108042 UTF-8 字节和准确 Source。测试同时核对 bodyHash、查询后的 Run／Job／Provider 调用次数、两端关闭后的所属 PID 与封存 manifest。
 
 这个实际默认制品证据补齐此前仅 SDK/配置夹具的范围；[默认后续轮](test/isolated/default-after-turn.test.ts)另核计划来源与单槽普通协作，[准确计划后继证明](test/isolated/planning-successor-proof.test.ts)核真实 public/raw/decision/business/report 链及伪造拒绝。事务丢响应与热冷 A/B 配置由 Agent Core 测试负责。以上为本机受控 compatible Provider/Runtime 与源码外默认制品证据，不等同真实付费 Provider、跨平台全部组合或整项目 V1.3 退出。
 
