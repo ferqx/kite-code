@@ -352,7 +352,14 @@ export function ensureAuthorizationCheck(
         ? { review: preparation == null ? null : ({ ...preparation } as unknown as Json) }
         : {}),
       ...(!usesBehavior && usesTaskAuthorizationInput(input.request)
-        ? { authorizationContext: authorizationTaskContext(db, target, input.operationKey) }
+        ? {
+            authorizationContext: authorizationTaskContext(
+              db,
+              target,
+              input.operationKey,
+              input.request,
+            ),
+          }
         : {}),
       instructions: preparation?.instructions ?? instructions,
       target: {
@@ -631,6 +638,7 @@ export function persistAuthorizationCheckPartial(
     }
     const result: Json = {
       content: input.content,
+      ...(input.reviewAttempts !== undefined ? { reviewAttempts: input.reviewAttempts } : {}),
       ...(input.usage === undefined ? {} : { usage: input.usage }),
       ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
       ...(input.firstOutput ? { firstOutput: input.firstOutput } : {}),
@@ -768,7 +776,14 @@ export function finishAuthorizationCheck(
         throw new AgentError('authorization_check_timeout_invalid');
       const prior = check.result_json ? object(JSON.parse(String(check.result_json))) : {};
       const partial: Record<string, Json> = {};
-      for (const field of ['content', 'reasoning', 'firstOutput', 'modelOutput', 'usage'])
+      for (const field of [
+        'content',
+        'reasoning',
+        'firstOutput',
+        'modelOutput',
+        'usage',
+        'reviewAttempts',
+      ])
         if (prior[field] !== undefined) partial[field] = prior[field]!;
       const suppliedTiming =
         result.timing && typeof result.timing === 'object' && !Array.isArray(result.timing)
@@ -802,6 +817,22 @@ export function finishAuthorizationCheck(
           totalMs: completeSample ? sampledTotal : elapsed,
         },
       };
+    }
+    if (input.status !== 'succeeded' && Array.isArray(result.reviewAttempts)) {
+      result.reviewAttempts = result.reviewAttempts.map((attempt) => {
+        if (
+          !attempt ||
+          typeof attempt !== 'object' ||
+          Array.isArray(attempt) ||
+          attempt.status !== 'running'
+        )
+          return attempt;
+        return {
+          ...attempt,
+          finishedAt: Date.now(),
+          status: result.code === 'authorization_check_timeout' ? 'timed_out' : input.status,
+        };
+      });
     }
     if (input.status === 'succeeded') {
       const { payload } = bound(db, check);

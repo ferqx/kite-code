@@ -38,11 +38,26 @@ function fixture() {
     input: { path },
     signal: new AbortController().signal,
   });
-  // Dispatch authorization belongs to Core; the ordinary reader needs no second proof envelope.
-  const execute = (
+  // The fixture supplies Core's final owned authorization for this exact input.
+  const execute = async (
     input: { path: string; offset?: number; limit?: number },
     extra: Partial<ToolContext> = {},
-  ) => read.execute(input, { signal: new AbortController().signal, ...extra } as ToolContext);
+  ) => {
+    const req = { ...request(input.path), input };
+    const capability = await api.describeRequest(req);
+    return read.execute(input, {
+      ...req,
+      dispatchAuthorization: {
+        revision: 'accepted',
+        snapshot: {
+          namespace: 'builtin.permissions',
+          version: '1',
+          data: { mode: 'full', workspaceTrust: true, capability },
+        },
+      },
+      ...extra,
+    } as unknown as ToolContext);
+  };
   return {
     root,
     workspace,

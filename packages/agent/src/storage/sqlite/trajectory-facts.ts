@@ -383,16 +383,31 @@ export function recordTrajectoryFact(
             outputPresence: presence,
           } as unknown as Json;
       }
-      const usage = object(result?.usage);
-      if (usage) {
-        const safe: Record<string, Json> = {};
-        for (const key of ['inputTokens', 'outputTokens', 'cachedInputTokens', 'totalTokens']) {
-          const value = usage[key];
-          if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
-            safe[key] = String(value);
+      // An approval's receipt binds only its successful response. Its usage display
+      // instead accounts for all observed attempts, without counting that response twice.
+      const usages =
+        row.run_id === null &&
+        command!.kind === 'authorization.check' &&
+        Array.isArray(result?.reviewAttempts)
+          ? result.reviewAttempts.map((attempt) => object(object(attempt)?.usage))
+          : [object(result?.usage)];
+      const safe: Record<string, Json> = {};
+      for (const key of ['inputTokens', 'outputTokens', 'cachedInputTokens', 'totalTokens']) {
+        let sum = 0n;
+        let complete = usages.length > 0;
+        for (const usage of usages) {
+          const value = usage?.[key];
+          if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+            complete = false;
+            break;
+          }
+          sum += BigInt(value);
         }
-        if (Object.keys(safe).length) attributes.usage = safe;
+        // A partial subtotal must not be displayed as the whole check's total.
+        // All per-attempt observations remain available in the private audit.
+        if (complete) safe[key] = String(sum);
       }
+      if (Object.keys(safe).length) attributes.usage = safe;
     } else {
       attributes.resultRevision = String(row.result_revision);
       const definition = kind === 'tool' ? trajectoryToolDefinition(db, row) : undefined;

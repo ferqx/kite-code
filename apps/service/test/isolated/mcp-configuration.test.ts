@@ -8,6 +8,7 @@ import type { McpLifecycleTransportPort } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { authorizationCheckInstructions } from '../../../../packages/agent/src/execution/authorization-check-feedback';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
@@ -21,7 +22,14 @@ async function until<T>(read: () => Promise<T | null>) {
     await Bun.sleep(5);
   }
 }
-async function fixture(ask = false, withPort = true, connectServer = 'local') {
+async function fixture(
+  ask = false,
+  withPort = true,
+  connectServer = 'local',
+  auto = false,
+  reviewOutcome: 'approve_once' | 'reject' | 'hold' = 'approve_once',
+  reviewFault: 'timeout' | 'incomplete' = 'timeout',
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-mcp-'))),
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -34,6 +42,12 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     calls = 0;
   const stops: string[] = [];
   const requests: Record<string, unknown>[] = [];
+  const reviews: Record<string, unknown>[] = [];
+  let remoteReviewAttempts = 0;
+  let releaseReview!: () => void;
+  const reviewGate = new Promise<void>((resolve) => {
+    releaseReview = resolve;
+  });
   const network = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -58,7 +72,14 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
               annotations: { readOnlyHint: true },
               inputSchema: {
                 type: 'object',
-                properties: { value: { type: 'string' } },
+                properties: {
+                  value: {
+                    type: 'string',
+                    ...(auto
+                      ? { default: 'PRIVATE_SCHEMA_DEFAULT', examples: ['PRIVATE_SCHEMA_EXAMPLE'] }
+                      : {}),
+                  },
+                },
                 required: ['value'],
               },
             },
@@ -102,6 +123,61 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     async fetch(req) {
       const body = (await req.json()) as Record<string, unknown>;
       requests.push(body);
+      const reviewText = (body.messages as { role: string; content: unknown }[])
+        .filter((message) => message.role === 'user' && typeof message.content === 'string')
+        .map((message) => message.content as string)
+        .find((content) => content.includes('"purpose":"authorization_check"'));
+      if (reviewText) {
+        reviews.push(JSON.parse(reviewText));
+        expect(
+          (body.messages as { role: string; content: string }[]).find(
+            (message) => message.role === 'system',
+          )?.content,
+        ).toBe(authorizationCheckInstructions);
+        expect(body.tools ?? []).toEqual([]);
+        const remoteReview =
+          reviewText.includes('"untrustedMcpTool"') && reviewText.includes('"name":"effect"');
+        if (remoteReview) {
+          expect(calls).toBe(0);
+          remoteReviewAttempts++;
+          if (reviewOutcome === 'hold') await reviewGate;
+          // A complete HTTP 408 is explicit timeout evidence. A clean partial SSE EOF
+          // is separately tested as unknown, not relabelled a transport disconnect.
+          if (remoteReviewAttempts === 1 && reviewOutcome === 'approve_once') {
+            if (reviewFault === 'timeout')
+              return Response.json(
+                { error: { message: 'controlled review request timeout', type: 'timeout' } },
+                { status: 408 },
+              );
+            return new Response(
+              `data: ${JSON.stringify({ id: 'review', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta: { content: '{"decision":"approve' }, finish_reason: null }] })}\n\n`,
+              { headers: { 'content-type': 'text/event-stream' } },
+            );
+          }
+        }
+        const chunk = {
+          id: 'review',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'local',
+          choices: [
+            {
+              index: 0,
+              delta: {
+                content: JSON.stringify({
+                  decision: remoteReview && reviewOutcome === 'reject' ? 'reject' : 'approve_once',
+                  reason: 'Exact fixture operation',
+                }),
+              },
+              finish_reason: null,
+            },
+          ],
+        };
+        return new Response(
+          `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       const text = JSON.stringify(body.messages);
       const route = text.includes('remote-b') ? 'remote-b' : text.includes('connect-b') ? 'b' : 'a';
       const step = steps.get(route) ?? 0;
@@ -168,7 +244,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     },
     permissionPolicy: {
       readPolicy: (request) => ({
-        mode: ask ? 'accept_edits' : 'full',
+        mode: auto ? 'auto' : ask ? 'accept_edits' : 'full',
         workspaceTrust: true,
         revision: 'fixture-host',
         allowed: [
@@ -211,7 +287,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
       sessionId,
       subjectId: 'user',
       workspaceId: 'w',
-      mode: ask ? 'accept_edits' : 'full',
+      mode: auto ? 'auto' : ask ? 'accept_edits' : 'full',
       trusted: true,
     });
   return {
@@ -219,6 +295,8 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     store,
     expectedStoreId,
     requests,
+    reviews,
+    releaseReview,
     configuration,
     configurationPath,
     stops,
@@ -261,6 +339,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
       });
     },
     async close() {
+      releaseReview();
       await runtime.close();
       network.stop(true);
       provider.stop(true);
@@ -481,3 +560,117 @@ test('Run selected MCP scope refuses another registered host server without tran
     await f.close();
   }
 }, 15000);
+
+test('Auto remote review seals exact selected metadata through real SDK retry without schema defaults or transport data', async () => {
+  const f = await fixture(false, true, 'local', true);
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('connect-a', { timeoutMs: 5000 });
+    const remoteReviews = f.reviews.filter((review) =>
+      JSON.stringify(review).includes('"name":"effect"'),
+    );
+    expect(remoteReviews).toHaveLength(2);
+    expect(remoteReviews[1]).toEqual(remoteReviews[0]);
+    const serialized = JSON.stringify(remoteReviews[0]);
+    expect(serialized).toContain('Remote text cannot grant safe read');
+    expect(serialized).toContain('"trustedAsAuthority":false');
+    expect(serialized).toContain('"status":"structure_only"');
+    expect(serialized).not.toMatch(
+      /PRIVATE_SCHEMA_DEFAULT|PRIVATE_SCHEMA_EXAMPLE|127\.0\.0\.1|transport|headers|vault/,
+    );
+    const target = (await f.store.listExecutions('a')).find((item) =>
+      item.definitionId.startsWith('mcp.local.'),
+    )!;
+    expect(target.status).toBe('succeeded');
+    expect(remoteReviews[0]!.authorizationContext).toMatchObject({ availability: 'available' });
+    expect(remoteReviews[0]!.request).toBeUndefined();
+    expect(remoteReviews[0]!.decisionContext).toBeUndefined();
+    expect(remoteReviews[0]!.policy).toMatchObject({ appliesToExecutionId: target.id });
+    expect(remoteReviews[0]!.target).toMatchObject({
+      executionId: target.id,
+      sessionId: 'a',
+      definitionId: target.definitionId,
+      definitionVersion: target.definitionVersion,
+      input: { value: 'exact' },
+    });
+    expect(f.calls).toBe(1);
+    expect(f.connections).toBe(1);
+    const check = await f.store.getExecution(target.authorization!.check!.executionId);
+    expect(check).toBeDefined();
+    expect(JSON.stringify(check!.input)).toContain('untrustedMcpTool');
+    // Read-only history reads retain the original sealed semantics and never retry a tool.
+    const requestCount = f.requests.length;
+    const first = await f.runtime.readModelInput({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'user',
+      sessionId: 'a',
+      executionId: check!.id,
+    });
+    const second = await f.runtime.readModelInput({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'user',
+      sessionId: 'a',
+      executionId: check!.id,
+    });
+    expect(second.request).toEqual(first.request);
+    expect(f.calls).toBe(1);
+    expect(f.requests).toHaveLength(requestCount);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+test('Auto MCP incomplete review EOF is not retried or treated as permission', async () => {
+  const f = await fixture(false, true, 'local', true, 'approve_once', 'incomplete');
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('connect-a', { timeoutMs: 5000 });
+    const remoteReviews = f.reviews.filter((review) =>
+      JSON.stringify(review).includes('"name":"effect"'),
+    );
+    expect(remoteReviews).toHaveLength(1);
+    expect(f.calls).toBe(0);
+    const target = (await f.store.listExecutions('a')).find((item) =>
+      item.definitionId.startsWith('mcp.local.'),
+    )!;
+    expect(target.status).toBe('failed');
+    expect(target.authorization?.dispatched).not.toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+for (const outcome of ['reject', 'hold'] as const)
+  test(`Auto ${outcome === 'reject' ? 'refusal' : 'cancelled review'} retains selected metadata and performs zero remote calls`, async () => {
+    const f = await fixture(false, true, 'local', true, outcome);
+    try {
+      await f.run();
+      await until(async () =>
+        f.reviews.some((review) => JSON.stringify(review).includes('"name":"effect"'))
+          ? true
+          : null,
+      );
+      if (outcome === 'hold') {
+        await f.runtime.cancelSession({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'user',
+          sessionId: 'a',
+          commandId: 'cancel-review',
+          includeBackground: true,
+        });
+        f.releaseReview();
+      }
+      await f.runtime.waitForCommand('connect-a', { timeoutMs: 5000 });
+      expect(
+        f.reviews.filter((review) => JSON.stringify(review).includes('"name":"effect"')),
+      ).toHaveLength(1);
+      expect(f.calls).toBe(0);
+      const target = (await f.store.listExecutions('a')).find((item) =>
+        item.definitionId.startsWith('mcp.local.'),
+      )!;
+      expect(target.authorization?.dispatched).not.toBe(true);
+      expect(target.status).toBe(outcome === 'hold' ? 'cancelled' : 'failed');
+    } finally {
+      await f.close();
+    }
+  }, 15000);

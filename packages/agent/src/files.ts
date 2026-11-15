@@ -48,4 +48,7 @@ export {
   isSessionOutputName,
   isSessionOutputPath,
 } from './tools/session-output-path';
-export { type SessionOutput, withSessionOutputs } from './tools/session-outputs';
+export {
+  type SessionOutput,
+  withSessionOutputHistory,
+} from './tools/session-outputs';

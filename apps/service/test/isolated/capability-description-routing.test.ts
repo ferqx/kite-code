@@ -114,8 +114,7 @@ async function scenario(kind: string) {
     },
   }));
   const fileModule = await import('@kite-ai/agent/files');
-  const { withSessionOutputs, withPlanFileTools, withInputFileReads, withExternalFileReads } =
-    fileModule;
+  const { withPlanFileTools, withInputFileReads, withExternalFileReads } = fileModule;
   function observeFileChain<
     T extends {
       describeRequest(request: AuthorizationRequest): Promise<CapabilityDescription | null>;
@@ -131,8 +130,6 @@ async function scenario(kind: string) {
   }
   mock.module('@kite-ai/agent/files', () => ({
     ...fileModule,
-    withSessionOutputs: (...args: Parameters<typeof withSessionOutputs>) =>
-      observeFileChain('outputs', withSessionOutputs(...args)),
     withPlanFileTools: (...args: Parameters<typeof withPlanFileTools>) =>
       observeFileChain('plan', withPlanFileTools(...args)),
     withInputFileReads: (...args: Parameters<typeof withInputFileReads>) =>
@@ -381,7 +378,7 @@ async function scenario(kind: string) {
             input: { path: 'local.txt' },
           })
         )?.autoReview,
-      ).toBe(enabled ? 'none' : undefined);
+      ).toBeUndefined();
       owner = 'none';
       expect((await ordinary!(request('routing.remote')))?.autoReview).toBeUndefined();
       expect(await ordinary!(request('shell.execute', 'tool', 'future'))).toBeNull();
@@ -529,15 +526,16 @@ async function scenario(kind: string) {
           }),
         ).toMatchObject({ safeRead: true, effects: ['read'] });
         expect(calls).toEqual(['files']);
-        expect(fileChain).toEqual(['outputs', 'plan', 'inputs', 'external']);
+        expect(fileChain).toEqual(['plan', 'inputs', 'external']);
         expect(
           await describe({
             ...request('files.read', 'tool', readVersion),
             input: { path: external },
           }),
         ).toMatchObject({
-          revision: 'builtin.files:external-read',
-          safeRead: true,
+          revision: expect.stringMatching(/^external-read:1:/),
+          safeRead: false,
+          autoTimeoutScope: 'stop',
           hardAllowed: true,
         });
         expect(
@@ -546,22 +544,27 @@ async function scenario(kind: string) {
             input: { path: join(root, 'missing.txt') },
           }),
         ).toMatchObject({
-          revision: 'builtin.files:external-read',
-          safeRead: true,
+          revision: expect.stringMatching(/^external-read:1:/),
+          safeRead: false,
+          autoTimeoutScope: 'stop',
           hardAllowed: true,
-          effects: ['read'],
+          effects: ['read', 'external'],
         });
         expect(calls).toEqual(['files', 'files', 'files']);
         owner = 'none';
         calls.length = 0;
         fallback.length = 0;
         expect(await describe(request('routing.source'))).toMatchObject({
-          revision: 'source-first',
+          revision: 'source-first:mcp-tool-review',
+          safeRead: false,
+          autoTimeoutScope: 'stop',
         });
         expect(fallback).toEqual(['sources']);
         fallback.length = 0;
         expect(await describe(request('routing.remote'))).toMatchObject({
-          revision: 'selected-remote',
+          revision: 'selected-remote:mcp-tool-review',
+          safeRead: false,
+          autoTimeoutScope: 'stop',
         });
         expect(fallback).toEqual(['sources', 'selected']);
         fallback.length = 0;

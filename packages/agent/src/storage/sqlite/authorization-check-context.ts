@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { authorizationCheckContexts } from '../../authorization-check-input';
 import { canonicalJson } from '../../json';
 import { AgentError, type Json } from '../types';
+import { authorizationRecordedMutations } from './authorization-check-mutations';
 import { authorizationRecordedReads } from './authorization-check-reads';
 import { executionAuthorizationObservation } from './authorization-review';
 import { continuationReportProof } from './job-report-continuation';
@@ -106,6 +107,7 @@ export function authorizationTaskContext(
   db: SqliteOperations,
   target: Row,
   operationKey?: string,
+  checkRequest?: Json,
 ): Json {
   const origin = db.row('SELECT * FROM command WHERE id=?', target.origin_command_id!);
   if (!origin) throw new AgentError('authorization_check_unverifiable');
@@ -386,6 +388,9 @@ export function authorizationTaskContext(
     ...(recordedReads.length ? { recordedReads } : {}),
     effectEvidenceScope: 'same_operation_only',
     priorEffects,
+    ...(checkRequest
+      ? authorizationRecordedMutations(db, target, checkRequest, workspaceRoot)
+      : {}),
     effectEvidenceNote:
       'Only exact semantic operation bindings are listed. Missing entries do not prove an effect never happened; this is not a task-wide effect equivalence index.',
   };

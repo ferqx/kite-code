@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -19,22 +21,46 @@ import type { FileCheckpointRecord } from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { authorizationCheckInstructions } from '../../../../packages/agent/src/execution/authorization-check-feedback';
 import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
+// Historical paths remain protected after retiring the Files delivery adapter.
+const retiredOutputDirectory = (profile: string, store: string, session: string) =>
+  join(
+    profile,
+    'files',
+    ...[store, session].map((value) => createHash('sha256').update(value).digest('hex')),
+    'outputs',
+  );
+
 type Body = {
   messages: { role: string; content: string }[];
   tools: { function: { name: string; description: string; parameters: unknown } }[];
 };
-type Paths = { root: string; workspace: string; target: string; privateTarget: string };
+type Paths = {
+  root: string;
+  workspace: string;
+  target: string;
+  privateTarget: string;
+  output: string;
+  foreignOutput: string;
+};
 type Call = { name: string; input: Json };
 type Program = (body: Body, step: number, actor: 'root' | 'child', paths: Paths) => Call | null;
 
 async function fixture(options: {
   mode?: 'full' | 'accept_edits' | 'auto';
   beforeDispatch?: 'demote' | 'untrust';
+  decision?: 'approve' | 'deny' | 'ask_user' | 'unavailable' | 'timeout' | 'cancel';
+  humanAnswer?: 'approve' | 'deny';
+  task?: (paths: Paths) => string;
+  beforeAnswer?: (paths: Paths) => void;
+  decisionTool?: string;
+  retryTimeouts?: number;
+  beforeReview?: (body: Body, paths: Paths) => void;
   program: Program;
 }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-full-external-files-')));
@@ -47,14 +73,56 @@ async function fixture(options: {
     workspace,
     target: join(root, 'external', 'missing-parent', 'report.txt'),
     privateTarget: join(profile.profilePath, 'must-not-create.txt'),
+    output: '',
+    foreignOutput: '',
   };
   const requests: Body[] = [];
+  const reviewInputs: Body[] = [];
+  let reviewing = false;
+  let reviewRequests = 0;
   const steps = new Map<string, number>();
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as Body;
+      if (!body.tools?.length) {
+        reviewInputs.push(body);
+        options.beforeReview?.(body, paths);
+        reviewing = true;
+        reviewRequests += 1;
+        if (reviewRequests <= (options.retryTimeouts ?? 0))
+          return new Response(JSON.stringify({ error: { message: 'controlled timeout' } }), {
+            status: 408,
+            headers: { 'content-type': 'application/json' },
+          });
+        const review = body.messages.flatMap((m) => {
+          try {
+            const value = JSON.parse(m.content);
+            return value?.target ? [value] : [];
+          } catch {
+            return [];
+          }
+        })[0];
+        const decision =
+          !options.decisionTool || review?.target?.definitionId === options.decisionTool
+            ? options.decision
+            : 'approve';
+        if (decision === 'timeout' || decision === 'cancel') await Bun.sleep(300);
+        if (decision === 'unavailable')
+          return new Response('controlled unavailable reviewer', { status: 503 });
+        const answer = JSON.stringify({
+          decision:
+            decision === 'deny' ? 'reject' : decision === 'ask_user' ? 'ask_user' : 'approve_once',
+          reason: 'Controlled fixture decision',
+        });
+        const frame = (delta: unknown, finish_reason: string | null) =>
+          `data: ${JSON.stringify({ id: 'check', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+        return new Response(
+          `${frame({ content: answer }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       requests.push(body);
       const actor = body.messages.some(
         (message) => message.role === 'user' && message.content.startsWith('CHILD_'),
@@ -90,6 +158,7 @@ async function fixture(options: {
   writeFileSync(
     configurationPath,
     JSON.stringify({
+      autoApproval: { timeoutMs: options.decision === 'timeout' ? 50 : 8000 },
       modelId: 'fixed',
       models: [
         {
@@ -117,6 +186,11 @@ async function fixture(options: {
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const storeId = (await store.getMetadata()).storeId;
+  paths.output = join(retiredOutputDirectory(profile.profilePath, storeId, 's'), 'report.txt');
+  paths.foreignOutput = join(
+    retiredOutputDirectory(profile.profilePath, storeId, 'foreign-session'),
+    'report.txt',
+  );
   const artifacts = createArtifactStore({ profile, store });
   const locks = createWorkspaceSerialLocks(profile);
   host.bindWorkspaceSerialLocks?.(locks);
@@ -211,6 +285,9 @@ async function fixture(options: {
     storeId,
     configurationPath,
     requests,
+    reviewInputs,
+    reviewing: () => reviewing,
+    reviewRequests: () => reviewRequests,
     changed: () => changedBeforeDispatch,
     async run() {
       await runtime.submitCommand({
@@ -220,10 +297,38 @@ async function fixture(options: {
         subjectId: 'owner',
         request: {
           kind: 'run.start',
-          content: 'FULL_FILE_JOURNEY: operate only owned test targets.',
+          content: options.task?.(paths) ?? 'FULL_FILE_JOURNEY: operate only owned test targets.',
         },
       });
-      await runtime.waitForCommand('work', { timeoutMs: 10000 });
+      let settled = false;
+      const completion = runtime.waitForCommand('work', { timeoutMs: 10000 }).finally(() => {
+        settled = true;
+      });
+      const end = Date.now() + 10000;
+      while (!settled && Date.now() < end) {
+        const { interactions } = await runtime.listInteractions({
+          expectedStoreId: storeId,
+          sessionId: 's',
+          state: 'pending',
+        });
+        for (const card of interactions) {
+          options.beforeAnswer?.(paths);
+          await runtime.answerInteraction({
+            expectedStoreId: storeId,
+            commandId: `answer-${card.id}`,
+            presentationSessionId: card.presentationSessionId,
+            interactionId: card.id,
+            expectedRevision: card.revision,
+            subjectId: 'owner',
+            answer:
+              (options.humanAnswer ?? options.decision) === 'deny'
+                ? { kind: 'approval', decision: 'deny' }
+                : { kind: 'approval', decision: 'approve', optionId: 'once' },
+          });
+        }
+        await Bun.sleep(10);
+      }
+      await completion;
     },
     async close() {
       await runtime.close();
@@ -258,8 +363,8 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const) {
         const path = index === 0 ? 'missing-workspace.txt' : f.target;
         expect(row.status).toBe('succeeded');
         expect(row.authorization?.dispatched).toBe(true);
-        expect(row.authorization?.check).toBeUndefined();
-        expect(row.authorization?.human).toBeUndefined();
+        if (mode === 'auto') expect(row.authorization?.check?.decision).toBe('approve_once');
+        if (mode === 'accept_edits' && index === 1) expect(row.authorization?.human).toBeDefined();
         expect(row.result).toEqual({
           outcome: 'succeeded',
           content: `File does not exist: ${JSON.stringify(path)}.`,
@@ -276,9 +381,9 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const) {
       for (const name of ['read_file', 'write_file', 'edit_file']) {
         const tool = f.requests[0]!.tools.find((value) => value.function.name === name)!.function;
         expect(tool.description).toContain(
-          'Only effective Full access supports direct ordinary external writes and edits',
+          'Files read_file/write_file/edit_file use the current permission mode',
         );
-        expect(tool.description).toContain('do not open an approval card');
+        expect(tool.description).toContain('requests user approval for ordinary external paths');
         expect(tool.description).not.toContain('external reads are read-only and have no baseline');
         const properties = (
           tool.parameters as { properties: Record<string, { description?: string }> }
@@ -395,91 +500,42 @@ test('Full actual Service writes and edits an external file with native baseline
   }
 }, 20000);
 
-for (const mode of ['accept_edits', 'auto'] as const) {
-  test(`${mode} keeps external Files writes outside the tool's scope without starting an approval`, async () => {
-    const f = await fixture({
-      mode,
-      program: (_body, step, _actor, paths) =>
-        step === 0
-          ? {
-              name: 'write_file',
-              input: { path: paths.target, content: 'must not publish' },
-            }
-          : null,
-    });
-    try {
-      await f.run();
-      expect(existsSync(f.target)).toBe(false);
-      const tool = (await f.store.listExecutions('s')).find(
-        (e) => e.definitionId === 'files.write',
-      )!;
-      expect(tool.status).toBe('failed');
-      expect(tool).toMatchObject({
-        sessionId: 's',
-        originStoreId: f.storeId,
-        definitionVersion: '3',
-        input: { path: f.target, content: 'must not publish' },
+for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+  for (const decision of ['approve', 'deny', 'unavailable'] as const) {
+    if (mode === 'full' && decision !== 'approve') continue;
+    if (mode === 'accept_edits' && decision === 'unavailable') continue;
+    test(`${mode} external Files write obeys ${decision} without unauthorized effects`, async () => {
+      const f = await fixture({
+        mode,
+        decision,
+        program: (_body, step, _actor, paths) =>
+          step === 0
+            ? { name: 'write_file', input: { path: paths.target, content: 'approved content' } }
+            : null,
       });
-      expect(tool.authorization?.dispatched).toBe(false);
-      expect(tool.result).toMatchObject({
-        details: {
-          code: 'permission_denied',
-          reason: 'file_full_access_required',
-          adapterAttempted: false,
-          dispatchCommitted: false,
-        },
-      });
-      const explanation = 'This is a limitation of this tool entry';
-      expect((tool.result as { content: string }).content).toContain(explanation);
-      expect((tool.result as { content: string }).content).toContain(
-        'not approval for another tool',
-      );
-      expect((tool.result as { content: string }).content).toContain(
-        'under its existing approval rules',
-      );
-      const nextFeedback = f.requests[1]!.messages.filter((message) => message.role === 'tool');
-      expect(nextFeedback).toHaveLength(1);
-      expect(nextFeedback[0]).toMatchObject({ tool_call_id: tool.callId });
-      const nextModel = (await f.store.listExecutions('s'))
-        .filter((execution) => execution.kind === 'model' && execution.runId === tool.runId)
-        .at(-1)!;
-      const canonical = await f.runtime.readModelInput({
-        expectedStoreId: f.storeId,
-        sessionId: 's',
-        subjectId: 'owner',
-        executionId: nextModel.id,
-      });
-      expect(
-        canonical.request.messages.find((message) => message.toolCallId === tool.callId),
-      ).toMatchObject({
-        toolCallId: tool.callId,
-        sourceIds: [tool.id],
-        content: nextFeedback[0]!.content,
-      });
-      expect(nextFeedback[0]!.content).toContain('requires Full mode');
-      expect(nextFeedback[0]!.content).toContain('This request did not change the file');
-      expect(nextFeedback[0]!.content).toContain('not a user rejection of the task');
-      expect(nextFeedback[0]!.content).toContain(
-        'A separately authorized request may use an available tool within its own permissions',
-      );
-      expect(nextFeedback[0]!.content).toContain(
-        'unless an earlier refusal or unknown result prevents it',
-      );
-      expect(tool.authorization?.check).toBeUndefined();
-      expect(tool.authorization?.human).toBeUndefined();
-      expect(
-        (
-          await f.runtime.listInteractions({
-            expectedStoreId: f.storeId,
-            sessionId: 's',
-            state: 'pending',
-          })
-        ).interactions,
-      ).toEqual([]);
-    } finally {
-      await f.close();
-    }
-  }, 20000);
+      try {
+        await f.run();
+        const tool = (await f.store.listExecutions('s')).find(
+          (row) => row.definitionId === 'files.write',
+        )!;
+        const approved = decision === 'approve';
+        expect(existsSync(f.target)).toBe(approved);
+        expect(tool.authorization?.dispatched).toBe(approved);
+        expect(tool.status).toBe(approved ? 'succeeded' : 'failed');
+        if (mode === 'auto')
+          expect(tool.authorization?.check?.decision).toBe(
+            decision === 'approve'
+              ? 'approve_once'
+              : decision === 'deny'
+                ? 'reject'
+                : 'unavailable',
+          );
+        if (approved) expect(readFileSync(f.target, 'utf8')).toBe('approved content');
+      } finally {
+        await f.close();
+      }
+    }, 30000);
+  }
 }
 
 test('Full external file support keeps the private Profile protected', async () => {
@@ -526,6 +582,7 @@ for (const change of ['demote', 'untrust'] as const) {
   test(`Full external file publication rechecks durable ${change} before dispatch`, async () => {
     const f = await fixture({
       beforeDispatch: change,
+      decision: 'deny',
       program: (_body, step, _actor, paths) =>
         step === 0
           ? {
@@ -558,68 +615,462 @@ for (const change of ['demote', 'untrust'] as const) {
   }, 20000);
 }
 
-for (const preset of ['general', 'explore'] as const) {
-  test(`Full child ${preset} preserves the selected file tool boundary`, async () => {
+for (const mode of ['full', 'auto', 'accept_edits'] as const) {
+  for (const preset of ['general', 'explore'] as const) {
+    test(`${mode} child ${preset} preserves the selected file tool boundary`, async () => {
+      const f = await fixture({
+        mode,
+        program: (_body, step, actor, paths): Call | null =>
+          actor === 'root'
+            ? step === 0
+              ? {
+                  name: 'spawn_agent',
+                  input: {
+                    preset,
+                    prompt: `CHILD_WRITE_ONLY: write ${paths.target} with the exact content child`,
+                  },
+                }
+              : null
+            : step === 0
+              ? { name: 'write_file', input: { path: paths.target, content: 'child' } }
+              : null,
+      });
+      try {
+        await f.run();
+        const deadline = Date.now() + 8000;
+        let carrier = (await f.store.listExecutions('s')).find(
+          (e) => e.kind === 'job' && e.childSessionId,
+        );
+        while (
+          !carrier ||
+          !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(carrier.status)
+        ) {
+          if (Date.now() > deadline) throw new Error('full_external_child_deadline');
+          const { interactions } = await f.runtime.listInteractions({
+            expectedStoreId: f.storeId,
+            sessionId: 's',
+            state: 'pending',
+          });
+          for (const card of interactions)
+            await f.runtime.answerInteraction({
+              expectedStoreId: f.storeId,
+              commandId: `child-answer-${card.id}`,
+              presentationSessionId: card.presentationSessionId,
+              interactionId: card.id,
+              expectedRevision: card.revision,
+              subjectId: 'owner',
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+            });
+          await Bun.sleep(5);
+          carrier = (await f.store.listExecutions('s')).find(
+            (e) => e.kind === 'job' && e.childSessionId,
+          );
+        }
+        const child = (await f.store.listExecutions(carrier.childSessionId!)).filter(
+          (e) => e.kind === 'tool',
+        );
+        const childRequests = f.requests.filter((body) =>
+          body.messages.some((m) => m.role === 'user' && m.content.startsWith('CHILD_')),
+        );
+        expect(childRequests.length).toBeGreaterThan(0);
+        expect(childRequests[0]!.tools.some((tool) => tool.function.name === 'write_file')).toBe(
+          preset === 'general',
+        );
+        if (preset === 'general') {
+          expect(readFileSync(f.target, 'utf8')).toBe('child');
+          expect(child.find((e) => e.definitionId === 'files.write')?.status).toBe('succeeded');
+        } else {
+          expect(existsSync(f.target)).toBe(false);
+          expect(child.every((e) => e.status !== 'succeeded')).toBe(true);
+        }
+        expect(
+          (
+            await f.runtime.listInteractions({
+              expectedStoreId: f.storeId,
+              sessionId: 's',
+              state: 'pending',
+            })
+          ).interactions,
+        ).toEqual([]);
+      } finally {
+        await f.close();
+      }
+    }, 20000);
+  }
+}
+
+for (const scope of ['workspace', 'external'] as const) {
+  for (const name of ['read_file', 'write_file'] as const) {
+    for (const decision of ['approve', 'deny', 'unavailable'] as const) {
+      test(`Auto ${scope} ${name} requires actual review: ${decision}`, async () => {
+        const f = await fixture({
+          mode: 'auto',
+          decision,
+          program: (_body, step, _actor, paths) =>
+            step === 0
+              ? {
+                  name,
+                  input: {
+                    path:
+                      scope === 'workspace' ? join(paths.workspace, 'review.txt') : paths.target,
+                    ...(name === 'write_file' ? { content: 'new' } : {}),
+                  },
+                }
+              : null,
+        });
+        const path = scope === 'workspace' ? join(f.workspace, 'review.txt') : f.target;
+        if (name === 'read_file') {
+          mkdirSync(join(path, '..'), { recursive: true });
+          writeFileSync(path, 'private fixture content');
+        }
+        try {
+          await f.run();
+          const row = (await f.store.listExecutions('s')).find(
+            (e) => e.definitionId === (name === 'read_file' ? 'files.read' : 'files.write'),
+          )!;
+          expect(row.authorization?.check?.decision).toBe(
+            decision === 'approve'
+              ? 'approve_once'
+              : decision === 'deny'
+                ? 'reject'
+                : 'unavailable',
+          );
+          expect(row.authorization?.dispatched).toBe(decision === 'approve');
+          if (name === 'write_file') expect(existsSync(path)).toBe(decision === 'approve');
+          else if (decision !== 'approve')
+            expect(JSON.stringify(row.result)).not.toContain('private fixture content');
+        } finally {
+          await f.close();
+        }
+      }, 30000);
+    }
+  }
+}
+
+for (const mode of ['auto', 'accept_edits', 'full'] as const) {
+  for (const decision of ['approve', 'deny'] as const) {
+    if (mode === 'full' && decision === 'deny') continue;
+    test(`${mode} retired session output stays protected even with ${decision}`, async () => {
+      const f = await fixture({
+        mode,
+        decision,
+        program: (_body, step, _actor, paths) =>
+          step === 0
+            ? { name: 'write_file', input: { path: paths.output, content: 'owned deliverable' } }
+            : step === 1
+              ? {
+                  name: 'write_file',
+                  input: { path: paths.foreignOutput, content: 'must not publish' },
+                }
+              : null,
+      });
+      try {
+        await f.run();
+        const writes = (await f.store.listExecutions('s')).filter(
+          (row) => row.definitionId === 'files.write',
+        );
+        expect(writes[0]?.authorization?.dispatched).toBe(false);
+        expect(existsSync(f.output)).toBe(false);
+        expect(existsSync(f.foreignOutput)).toBe(false);
+        expect(writes[1]?.authorization?.dispatched).toBe(false);
+        expect(f.reviewRequests()).toBe(0);
+      } finally {
+        await f.close();
+      }
+    }, 30000);
+  }
+}
+
+test('Auto reviewer timeout does not publish an external file or replay the write', async () => {
+  const f = await fixture({
+    mode: 'auto',
+    decision: 'timeout',
+    program: (_body, step, _actor, paths) =>
+      step === 0 ? { name: 'write_file', input: { path: paths.target, content: 'never' } } : null,
+  });
+  try {
+    await f.run();
+    const writes = (await f.store.listExecutions('s')).filter(
+      (row) => row.definitionId === 'files.write',
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.authorization?.dispatched).toBe(false);
+    expect(existsSync(f.target)).toBe(false);
+    expect(writes[0]?.authorization?.check?.decision).toBe('unavailable');
+    // The total deadline includes preparation and queueing; it may expire before attempt 3.
+    expect(f.reviewRequests()).toBeGreaterThan(1);
+    expect(f.reviewRequests()).toBeLessThanOrEqual(3);
+  } finally {
+    await f.close();
+  }
+}, 30000);
+
+for (const decision of ['approve', 'deny', 'timeout'] as const) {
+  test(`Auto external edit obeys ${decision} after an independently approved baseline read`, async () => {
     const f = await fixture({
-      program: (_body, step, actor, paths): Call | null =>
-        actor === 'root'
-          ? step === 0
-            ? {
-                name: 'spawn_agent',
-                input: {
-                  preset,
-                  prompt: `CHILD_WRITE_ONLY: write ${paths.target} with the exact content child`,
-                },
-              }
-            : null
-          : step === 0
-            ? { name: 'write_file', input: { path: paths.target, content: 'child' } }
+      mode: 'auto',
+      decision,
+      decisionTool: 'files.edit',
+      program: (body, step, _actor, paths): Call | null => {
+        if (step === 0) return { name: 'read_file', input: { path: paths.target } };
+        if (step !== 1) return null;
+        const feedback = body.messages.filter((m) => m.role === 'tool').at(-1)!;
+        const actual = taskQualityPresentedRead(
+          feedback.content.replace(
+            'External file; outside workspace checkpoints. The reference does not grant write permission.\n',
+            '',
+          ),
+        );
+        return {
+          name: 'edit_file',
+          input: {
+            path: paths.target,
+            base_ref: actual!.baseRef,
+            old_text: 'before',
+            new_text: 'after',
+            expected_matches: 1,
+          },
+        };
+      },
+    });
+    mkdirSync(join(f.target, '..'), { recursive: true });
+    writeFileSync(f.target, 'before');
+    try {
+      await f.run();
+      const row = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'files.edit')!;
+      expect(row.authorization?.dispatched).toBe(decision === 'approve');
+      expect(readFileSync(f.target, 'utf8')).toBe(decision === 'approve' ? 'after' : 'before');
+    } finally {
+      await f.close();
+    }
+  }, 30000);
+}
+
+test('cancelling a pending Auto reviewer cannot later dispatch its approved write', async () => {
+  const f = await fixture({
+    mode: 'auto',
+    decision: 'cancel',
+    program: (_body, step, _actor, paths) =>
+      step === 0 ? { name: 'write_file', input: { path: paths.target, content: 'never' } } : null,
+  });
+  try {
+    const running = f.run();
+    const end = Date.now() + 5000;
+    while (!f.reviewing()) {
+      if (Date.now() > end) throw Error('review_not_started');
+      await Bun.sleep(5);
+    }
+    await f.runtime.cancelCommand({
+      expectedStoreId: f.storeId,
+      sessionId: 's',
+      commandId: 'cancel',
+      subjectId: 'owner',
+      targetCommandId: 'work',
+    });
+    await running;
+    await Bun.sleep(350);
+    expect(existsSync(f.target)).toBe(false);
+    const row = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'files.write')!;
+    expect(row.authorization?.dispatched).not.toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 30000);
+
+for (const replaceDuringReview of [false, true])
+  test(`Auto read-back uses bounded mutation metadata; replacement=${replaceDuringReview}`, async () => {
+    let replaced = false;
+    const f = await fixture({
+      mode: 'auto',
+      decision: 'approve',
+      beforeReview(body, paths) {
+        if (!replaceDuringReview || replaced) return;
+        const payload = body.messages.flatMap((message) => {
+          try {
+            const value = JSON.parse(message.content);
+            return value?.target ? [value] : [];
+          } catch {
+            return [];
+          }
+        })[0];
+        if (
+          payload?.target?.definitionId !== 'files.read' ||
+          !payload.authorizationContext?.recordedFileMutations?.length
+        )
+          return;
+        writeFileSync(
+          join(paths.workspace, 'replacement.md'),
+          'replacement not authorized by the old identity',
+        );
+        renameSync(join(paths.workspace, 'replacement.md'), join(paths.workspace, 'notes.md'));
+        replaced = true;
+      },
+      program: (_body, step): Call | null =>
+        step === 0
+          ? {
+              name: 'write_file',
+              input: { path: 'notes.md', content: 'PRIVATE_TEST_BODY_NOT_IN_METADATA' },
+            }
+          : step === 1
+            ? { name: 'read_file', input: { path: 'notes.md' } }
             : null,
     });
     try {
       await f.run();
-      const deadline = Date.now() + 8000;
-      let carrier = (await f.store.listExecutions('s')).find(
-        (e) => e.kind === 'job' && e.childSessionId,
+      const payloads = f.reviewInputs.flatMap((body) =>
+        body.messages.flatMap((message) => {
+          try {
+            const value = JSON.parse(message.content);
+            return value?.target?.definitionId === 'files.read' ? [value] : [];
+          } catch {
+            return [];
+          }
+        }),
       );
-      while (
-        !carrier ||
-        !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(carrier.status)
-      ) {
-        if (Date.now() > deadline) throw new Error('full_external_child_deadline');
-        await Bun.sleep(5);
-        carrier = (await f.store.listExecutions('s')).find(
-          (e) => e.kind === 'job' && e.childSessionId,
-        );
-      }
-      const child = (await f.store.listExecutions(carrier.childSessionId!)).filter(
-        (e) => e.kind === 'tool',
-      );
-      const childRequests = f.requests.filter((body) =>
-        body.messages.some((m) => m.role === 'user' && m.content.startsWith('CHILD_')),
-      );
-      expect(childRequests.length).toBeGreaterThan(0);
-      expect(childRequests[0]!.tools.some((tool) => tool.function.name === 'write_file')).toBe(
-        preset === 'general',
-      );
-      if (preset === 'general') {
-        expect(readFileSync(f.target, 'utf8')).toBe('child');
-        expect(child.find((e) => e.definitionId === 'files.write')?.status).toBe('succeeded');
+      expect(payloads.length).toBeGreaterThan(0);
+      const facts = payloads[0].authorizationContext.recordedFileMutations;
+      expect(facts).toHaveLength(1);
+      expect(facts[0]).toMatchObject({
+        historical: true,
+        currentVersionVerified: false,
+        definitionId: 'files.write',
+        status: 'succeeded',
+        dispatched: true,
+      });
+      expect(JSON.stringify(facts)).not.toContain('PRIVATE_TEST_BODY');
+      const read = (await f.store.listExecutions('s')).find(
+        (entry) => entry.definitionId === 'files.read',
+      )!;
+      if (replaceDuringReview) {
+        expect(replaced).toBe(true);
+        expect(read.authorization?.dispatched).not.toBe(true);
+        expect(read.status).not.toBe('succeeded');
       } else {
-        expect(existsSync(f.target)).toBe(false);
-        expect(child.every((e) => e.status !== 'succeeded')).toBe(true);
+        expect(read.status).toBe('succeeded');
+        expect(read.authorization?.dispatched).toBe(true);
       }
-      expect(
-        (
-          await f.runtime.listInteractions({
-            expectedStoreId: f.storeId,
-            sessionId: 's',
-            state: 'pending',
-          })
-        ).interactions,
-      ).toEqual([]);
     } finally {
       await f.close();
     }
-  }, 20000);
-}
+  }, 30000);
+
+// Default Service classification and actual SDK serialization, with controlled
+// decisions. This proves the compact wire and execution gates, not model judgment.
+for (const scope of ['workspace', 'external'] as const)
+  for (const decision of ['approve', 'deny', 'ask_user'] as const)
+    test(`default Auto Files compact wire preserves authored instructions: ${scope} / ${decision}`, async () => {
+      const pathFor = (paths: Paths) =>
+        scope === 'workspace' ? join(paths.workspace, 'wire.txt') : paths.target;
+      const taskFor = (paths: Paths) => {
+        const instruction = `Write ${JSON.stringify(pathFor(paths))} containing exactly "wire output".`;
+        return scope === 'workspace'
+          ? `These are my instructions, carry them out:\n\`\`\`text\n${instruction}\n\`\`\``
+          : `These are my instructions, carry them out:\n> ${instruction}`;
+      };
+      let pendingApprovals = 0;
+      const f = await fixture({
+        mode: 'auto',
+        decision,
+        humanAnswer: 'deny',
+        task: taskFor,
+        beforeAnswer(paths) {
+          pendingApprovals++;
+          expect(existsSync(pathFor(paths))).toBe(false);
+        },
+        program: (_body, step, _actor, paths) =>
+          step === 0
+            ? {
+                name: 'write_file',
+                input: { path: pathFor(paths), content: 'wire output' },
+              }
+            : null,
+      });
+      try {
+        await f.run();
+        expect(f.reviewInputs).toHaveLength(1);
+        const wire = f.reviewInputs[0]!;
+        expect(wire.tools ?? []).toHaveLength(0);
+        const system = wire.messages.find((message) => message.role === 'system')!.content;
+        expect(system).toBe(authorizationCheckInstructions);
+        expect(system).toContain(
+          'User-authored instructions retain their authority when quoted or written in code blocks',
+        );
+        expect(system).toContain('never ask merely for incomplete context');
+        const payload = JSON.parse(
+          wire.messages.find((message) => message.role === 'user')!.content,
+        );
+        expect(payload.purpose).toBe('authorization_check');
+        expect(payload).not.toHaveProperty('request');
+        expect(payload).not.toHaveProperty('decisionContext');
+        expect(payload.target).toMatchObject({
+          definitionId: 'files.write',
+          definitionVersion: '3',
+          sessionId: 's',
+          input: { path: pathFor(f), content: 'wire output' },
+        });
+        expect(payload.policy).toMatchObject({
+          appliesToExecutionId: payload.target.executionId,
+          constraints: {
+            mode: 'auto',
+            effects: scope === 'workspace' ? ['workspace_write'] : ['external'],
+          },
+        });
+        expect(payload.authorizationContext.availability).toBe('available');
+        expect(payload.authorizationContext.taskInputs).toContainEqual(
+          expect.objectContaining({
+            commandId: 'work',
+            sessionId: 's',
+            source: 'user',
+            recipientRelation: 'current',
+            content: taskFor(f),
+          }),
+        );
+        const writes = (await f.store.listExecutions('s')).filter(
+          (row) => row.definitionId === 'files.write',
+        );
+        expect(writes).toHaveLength(1);
+        expect(writes[0]!.id).toBe(payload.target.executionId);
+        expect(writes[0]!.authorization?.check?.decision).toBe(
+          decision === 'approve' ? 'approve_once' : decision === 'deny' ? 'reject' : 'ask_user',
+        );
+        expect(writes[0]!.authorization?.dispatched).toBe(decision === 'approve');
+        expect(existsSync(pathFor(f))).toBe(decision === 'approve');
+        expect(pendingApprovals).toBe(decision === 'ask_user' ? 1 : 0);
+      } finally {
+        await f.close();
+      }
+    }, 30000);
+
+for (const retryTimeouts of [2, 3])
+  test(`Auto actual Files retries only the review request, not the write: ${retryTimeouts}`, async () => {
+    const f = await fixture({
+      mode: 'auto',
+      retryTimeouts,
+      program: (_body, step, _actor, paths) =>
+        step === 0
+          ? {
+              name: 'write_file',
+              input: { path: paths.target, content: 'exactly one approved write' },
+            }
+          : null,
+    });
+    try {
+      await f.run();
+      const writes = (await f.store.listExecutions('s')).filter(
+        (e) => e.definitionId === 'files.write',
+      );
+      expect(writes).toHaveLength(1);
+      expect(f.reviewRequests()).toBe(3);
+      expect(writes[0]?.authorization?.dispatched).toBe(retryTimeouts === 2);
+      expect(existsSync(f.target)).toBe(retryTimeouts === 2);
+      if (retryTimeouts === 2)
+        expect(readFileSync(f.target, 'utf8')).toBe('exactly one approved write');
+      const checks = (await f.store.listExecutions('s')).filter(
+        (e) => e.kind === 'model' && e.runId === null,
+      );
+      expect(checks).toHaveLength(1);
+      expect(checks[0]?.result).toHaveProperty('reviewAttempts');
+    } finally {
+      await f.close();
+    }
+  }, 30000);

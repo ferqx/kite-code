@@ -20,12 +20,11 @@ import {
   type EditablePlanFile,
   type FileCheckpoint,
   type FileCheckpointCaptureProof,
-  type SessionOutput,
   withExternalFileReads,
   withFullAccessFiles,
   withInputFileReads,
   withPlanFileTools,
-  withSessionOutputs,
+  withSessionOutputHistory,
 } from '@kite-ai/agent/files';
 import type { PermissionPolicySnapshot } from '@kite-ai/agent/permissions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
@@ -616,100 +615,9 @@ export function createDefaultFileCheckpointConfiguration(options: {
       return (views[0]?.payload as unknown as EditablePlanFile) ?? null;
     },
   });
-  const outputs = withSessionOutputs({
+  const outputs = withSessionOutputHistory({
     profilePath: options.profile.profilePath,
     extension: { ...extension, tools: planFiles.tools },
-    async storeId() {
-      return (await options.runtime().getMetadata()).storeId;
-    },
-    async readInherited(request, key) {
-      const runtime = options.runtime();
-      const actual = await runtime.getExecution(request.executionId);
-      const metadata = await runtime.getMetadata();
-      const command = actual && (await runtime.getCommand(actual.originCommandId));
-      if (
-        !actual ||
-        !command ||
-        actual.sessionId !== request.sessionId ||
-        actual.originStoreId !== metadata.storeId ||
-        command.originStoreId !== metadata.storeId
-      )
-        throw new AgentError('output_file_scope_denied');
-      const query = () =>
-        runtime.queryExtension({
-          expectedStoreId: metadata.storeId,
-          sessionId: request.sessionId,
-          subjectId: command.subjectId,
-          extensionId: extension.id,
-          queryId: 'files.output-source',
-          input: { key },
-        });
-      const views = await query();
-      const source = views[0]?.payload as
-        | {
-            executionId: string;
-            sessionId: string;
-            reference: import('@kite-ai/agent/extensions').ArtifactRef;
-          }
-        | undefined;
-      const original = source && (await runtime.getExecution(source.executionId));
-      const originCommand = original && (await runtime.getCommand(original.originCommandId));
-      if (
-        !source ||
-        !original ||
-        !originCommand ||
-        source.sessionId !== original.sessionId ||
-        originCommand.sessionId !== original.sessionId
-      )
-        throw new AgentError('output_file_source_unavailable');
-      const read = await runtime.readArtifact({
-        expectedStoreId: metadata.storeId,
-        sessionId: source.sessionId,
-        subjectId: originCommand.subjectId,
-        refId: source.reference.id,
-        scope: source.reference.scope!,
-        signal: request.signal,
-      });
-      if (
-        canonical(views as unknown as Json) !== canonical((await query()) as unknown as Json) ||
-        read.reference.size !== source.reference.size ||
-        read.reference.mediaType !== source.reference.mediaType
-      )
-        throw new AgentError('output_file_source_changed');
-      return read.content;
-    },
-    async scope(request, path) {
-      const runtime = options.runtime();
-      const actual = await runtime.getExecution(request.executionId);
-      const metadata = await runtime.getMetadata();
-      const command = actual && (await runtime.getCommand(actual.originCommandId));
-      if (
-        !actual ||
-        !command ||
-        actual.sessionId !== request.sessionId ||
-        actual.originStoreId !== metadata.storeId ||
-        command.originStoreId !== metadata.storeId ||
-        actual.kind !== 'tool' ||
-        !['files.read', 'files.write', 'files.edit'].includes(actual.definitionId)
-      )
-        throw new AgentError('output_file_scope_denied');
-      const views = await runtime.queryExtension({
-        expectedStoreId: metadata.storeId,
-        sessionId: request.sessionId,
-        subjectId: command.subjectId,
-        extensionId: extension.id,
-        queryId: 'files.outputs',
-        input: { path },
-      });
-      return {
-        storeId: metadata.storeId,
-        files: (views[0]?.payload ?? []) as unknown as {
-          key: string;
-          revision: string;
-          value: SessionOutput;
-        }[],
-      };
-    },
   });
   const images = createImageFileReads({
     profilePath: options.profile.profilePath,
@@ -771,21 +679,21 @@ export function createDefaultFileCheckpointConfiguration(options: {
     },
   });
   const fileScopeDescription =
-    'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. In Request Approval and Auto, ordinary external files are read-only through Files: external write_file/edit_file requests are unsupported and do not open an approval card. Only effective Full access supports direct ordinary external writes and edits. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files and host-provided session output paths follow their separate declared scope. External files are outside workspace checkpoints.';
+    'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. Files read_file/write_file/edit_file use the current permission mode. Auto requests automatic authorization; Request Approval allows workspace operations and requests user approval for ordinary external paths; Full allows ordinary paths subject to inherited policy. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files follow their separate declared scope. External files are outside workspace checkpoints.';
   const descriptions: Readonly<Record<string, string>> = {
     'files.read':
-      'Read UTF-8 file lines, at most 200 by default. start_line begins at 1; continue with next_line. Editable workspace reads return base_ref bound to the complete file even for a partial read. Ordinary external reads in Request Approval and Auto have no edit reference; effective Full returns base_ref only for targets supported by safe native editing. A reference never grants write permission. A known missing file returns exists:false, not empty contents or an edit reference. For workspace and non-PDF files, omit pages/mode and use start_line/max_lines. Saved PDF attachments use pages and mode=text|image, omit line parameters; default is page 1 text, at most 20 text pages or 4 images. Empty extracted text does not prove a blank page.',
+      'Read UTF-8 file lines, at most 200 by default. start_line begins at 1; continue with next_line. Editable workspace reads return base_ref bound to the complete file even for a partial read. Authorized ordinary external reads return base_ref only for targets supported by safe native editing. A reference never grants write permission. A known missing file returns exists:false, not empty contents or an edit reference. For workspace and non-PDF files, omit pages/mode and use start_line/max_lines. Saved PDF attachments use pages and mode=text|image, omit line parameters; default is page 1 text, at most 20 text pages or 4 images. Empty extracted text does not prove a blank page.',
     'files.write':
       'Create or replace a complete UTF-8 file. Omit base_ref entirely only to create a new file; never pass null or a baseline object. Existing targets reject create-only requests. Missing accepted parents can be created through the original native boundary. Replacement requires the exact base_ref returned by read_file or a successful mutation of this path. Supply exactly one of content or content_ref. Preserve the exact target and complete contents. Correct a reported cause before another separately authorized attempt; never repeat an unknown write.',
     'files.edit':
       'Replace exact non-overlapping literal text using the exact base_ref returned by read_file or a successful mutation of this path. expected_matches defaults to 1; multiple matches require the explicit exact positive count. Supply each of old_text/new_text or its corresponding immutable old_text_ref/new_text_ref, never both text and reference for the same field. Preserve the exact target and intended change. A conflict does not reveal current contents or roll back other operations; read the authorized current file and use its fresh base_ref before a separately authorized corrected edit.',
   };
-  const tools = [...outputs.extension.tools!, images.tool].map((tool) => {
+  const tools = [...planFiles.tools!, images.tool].map((tool) => {
     const description = descriptions[tool.id];
     if (!description) return tool;
     return {
       ...tool,
-      description: `${description} ${fileScopeDescription}`,
+      description: `${description} ${fileScopeDescription} Files read/write/edit operations do not collect attachments. Use Files for the requested working or saved file location; final attachments are collected only from a successful Shell execution’s current KITE_OUTPUT_DIR. Preserve user-specified locations and permissions; never redirect them merely to obtain an attachment. Shell/OfficeCLI final exports belong in the current Shell KITE_OUTPUT_DIR, within that same Shell call. Do not use Files to write a previous Shell staging path or reuse it in another Shell call.`,
       inputSchema: {
         ...tool.inputSchema,
         properties: {
@@ -793,21 +701,19 @@ export function createDefaultFileCheckpointConfiguration(options: {
           path: {
             ...((tool.inputSchema.properties as Record<string, Json>).path as Record<string, Json>),
             description:
-              'Workspace-relative or absolute file path, including ordinary external files. Ordinary external reads are supported in all modes; direct ordinary external writes/edits require effective Full access. Exact saved attachment, current Plan and host-provided session output paths retain their separate scope; other private/protected paths are denied.',
+              'Workspace-relative or absolute file path, including ordinary external files. Ordinary external read/write/edit requests use Auto review, Request Approval human approval, or effective Full authorization. Exact saved attachment, current Plan paths retain their separate scope; other private/protected paths are denied.',
           },
         },
       },
     };
   });
-  const restore = outputs.extension.actions?.find(
-    (action) => action.id === 'files.checkpoint.restore',
-  );
+  const restore = outputs.actions?.find((action) => action.id === 'files.checkpoint.restore');
   if (restore?.version !== '1') fail('file_restore_definition_unavailable');
   const restoreConfirmation: TrustedToolBehavior = {
     definition: restore,
     capability: {
       kind: 'job',
-      definitionId: `${outputs.extension.id}/${restore.id}`,
+      definitionId: `${outputs.id}/${restore.id}`,
       definitionVersion: restore.version,
     },
     contractRef: 'builtin.files.explicit-restore',
@@ -825,7 +731,14 @@ export function createDefaultFileCheckpointConfiguration(options: {
     },
   };
   return {
-    extension: { ...withOutputCollection(outputs.extension, options.runtime), tools },
+    // Keep registered historical output queries/records without enabling the retired
+    // Files delivery tools, authorization adapter or model context. New deliveries
+    // are produced exclusively by the Shell output collector.
+    extension: {
+      ...withOutputCollection(outputs, options.runtime),
+      tools,
+      context: extension.context,
+    },
     tools,
     toolBehaviors: [
       restoreConfirmation,
@@ -853,13 +766,60 @@ export function createDefaultFileCheckpointConfiguration(options: {
       }),
     ],
     isPlanFileEdit: planFiles.isPlanFileEdit,
+    async inspectReviewTarget(
+      request: import('@kite-ai/agent/extensions').AuthorizationRequest,
+    ): Promise<Json | null> {
+      if (
+        request.kind !== 'tool' ||
+        request.definitionId !== 'files.read' ||
+        request.definitionVersion !== '5'
+      )
+        return null;
+      const input = object(request.input);
+      if (typeof input?.path !== 'string') return null;
+      let native: ReturnType<typeof createWorkspaceFiles> | undefined;
+      try {
+        const runtime = options.runtime();
+        const session = await runtime.getSession(request.sessionId);
+        const workspace = session && (await runtime.getWorkspace(session.workspaceId));
+        if (!session || session.deletedAt !== null || !workspace) return null;
+        const path = fileURLToPath(workspace.rootUri);
+        const stat = await lstat(path);
+        if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+        const root = await realpath(path);
+        native = createWorkspaceFiles({
+          root,
+          protectReads: true,
+          protectedPaths: await protectedPaths(root, options.profile, options.runtimeAssets()),
+        });
+        const relativePath = native.relativePath(input.path);
+        const identity = await native.inspectIdentity(relativePath);
+        const rootIdentity = await native.inspectRootIdentity?.();
+        request.signal.throwIfAborted();
+        if (!identity.file || !rootIdentity) return null;
+        return {
+          kind: 'native_workspace_file_identity',
+          workspaceId: workspace.id,
+          workspaceRoot: root,
+          path: relativePath,
+          canonicalPath: resolve(root, relativePath),
+          rootIdentity: { ...rootIdentity },
+          parentIdentity: { ...identity.parent },
+          fileIdentity: { ...identity.file },
+        };
+      } catch {
+        request.signal.throwIfAborted();
+        return null;
+      } finally {
+        await native?.close();
+      }
+    },
     async describeRequest(
       request: import('@kite-ai/agent/extensions').AuthorizationRequest,
       policy?: Readonly<PermissionPolicySnapshot>,
     ) {
       return (
         (await images.describeRequest(request)) ??
-        (await outputs.describeRequest(request)) ??
         (await planFiles.describeRequest(request)) ??
         (await inputFiles.describeRequest(request)) ??
         (await fullAccessFiles.describeRequest(request, policy)) ??

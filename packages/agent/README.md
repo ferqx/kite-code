@@ -138,7 +138,7 @@ Windows 桌面 [Shell 偏好和会话绑定](src/storage/sqlite/desktop-shell.ts
 
 MCP强制重连的建立失败收尾由[MCP leaf](src/mcp/README.md#强制重连持久发布与原事实)沿原operation有界等待真实Job终态，再核完整停止证明。运行中新holder的发布失败继续隔离；超时或迟到结算不追改原unknown，通用Execution与Query合同保持。
 
-自动审核的总期限覆盖准备、队列与 Provider。默认8秒，可由宿主选定的 `autoApproval.timeoutMs` 配置；超时与连接／响应技术失败分别保存。超时默认放行语义审核，交给工具原有执行策略兜底；Shell 保留本次文件和网络请求，与父子／宿主硬上限取交集，不另加超时专属收窄。默认请求仍为 `workspace_write/none`；显式 `full_access/internet` 可按原策略执行，不由超时隐式新增。记录 `timeout_continue`，不伪造审核模型批准，也不进入批准缓存。无可兑现执行边界时返回明确超时失败，独立必需人工审批仍须真实卡与原回答。仅靠任务提示和语义审核表达的业务限制不因此取得沙箱保证。已批准结论复用和父 Tool→准确 Job 的一次语义审查保留原凭据，任务、参数、相关状态或策略变化须重新核验；具体身份、事务与反例归[权限 owner](src/permissions/README.md)。
+所有实际审批模型调用统一使用[有界重试](src/execution/authorization-retry.ts)，包含 Shell、Files 与 MCP，不改变业务模型或标题模型的重试策略。只有明确超时／断连证据可在同一持久检查内最多重试两次，总计至多三次；单次上限由 `autoApproval.timeoutMs` 配置，默认8秒，含准备、排队与 Provider 的检查总预算为其三倍。取消、明确拒绝、人工决定、非法输出及无法证明为传输故障的异常不重试。各次独立缓冲，只解释完整成功输出，`reviewAttempts` 保留脱敏类别和可得 usage。耗尽或其他技术失败均未派发结束，不产生 `timeout_continue`，也不重放原工具或冷检查。任务、参数、材料、当前策略和原批准证明仍须复核；准确父 Tool→自身 Job 的复用和独立人工上限保持。完整身份、期限及事务边界归[权限 owner](src/permissions/README.md#有界审批模型重试)。
 
 ## 生命周期扩展
 
@@ -228,7 +228,7 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 自动审核属于权限系统，宿主选择 `authorizationCheck` 模型绑定和[可信工具行为](src/tool-behavior.ts)。准确定义对象及 kind／id／version 共同登记，普通 Extension、MCP 或模型参数不能提供可信回调。权限策略返回通用 allowed／approval／check；`check.behavior` 明确所选解释器，AND 只保全体一致的行为。Shell owner 准备风险材料并解释 `risk/reason`，Files／worktree owner 计算有限范围；Loop 与 Interaction 不按工具名选择本次审批算法。原 Tool.execute/resume 与 Job 生命周期继续执行和恢复。
 
-Core 保存原 Session 的 `authorization.check` Command 和无 Run Model，复用原模型槽、取消与总预算。完整 EOF、stop、零 ToolCall 后调用原可信解释器，把原输出及通用 answer 封成[统一回执 v1](src/authorization-check-output.ts)；内联和 Artifact 使用同一绑定合同。Worker 只核原目标／attempt／inputDigest、Run 行为、封存请求、完整输出和私有 owner 来源，不装配回调或重新解析领域风险。新版冷读只读封存结果，缺回执、错绑定、输出不足、取消及迟到结果都不能批准。总预算涵盖等待、准备、排队与 Provider，超时沿原 timeout_continue，不伪造材料批准或会话 grant。准确父 Tool→自身 Job 的复用由 owner 提供通用 parent proof，SQL 核真实父链与两方输入摘要；独立调用、独立 checker 和人工上限保持。新版 grant、撤销与最终消费归[权限 owner](src/permissions/README.md)及[grant SQL](src/storage/sqlite/permission-grants.README.md)，完整行为／冷读证据归[非内置格式回归](test/isolated/execution/tool-behavior-review.test.ts)与[原审核回归](test/isolated/execution/authorization-check.test.ts)。
+Core 保存原 Session 的 `authorization.check` Command 和无 Run Model，复用原模型槽、取消与总预算。完整 EOF、stop、零 ToolCall 后调用原可信解释器，把原输出及通用 answer 封成[统一回执 v1](src/authorization-check-output.ts)；内联和 Artifact 使用同一绑定合同。Worker 只核原目标／attempt／inputDigest、Run 行为、封存请求、完整输出和私有 owner 来源，不装配回调或重新解析领域风险。新版冷读只读封存结果，缺回执、错绑定、输出不足、取消及迟到结果都不能批准。总预算涵盖等待、准备、排队与全部有界审批尝试，耗尽未派发结束，不产生超时继续、材料批准或会话 grant。准确父 Tool→自身 Job 的复用由 owner 提供通用 parent proof，SQL 核真实父链与两方输入摘要；独立调用、独立 checker 和人工上限保持。新版 grant、撤销与最终消费归[权限 owner](src/permissions/README.md)及[grant SQL](src/storage/sqlite/permission-grants.README.md)，完整行为／冷读证据归[非内置格式回归](test/isolated/execution/tool-behavior-review.test.ts)与[原审核回归](test/isolated/execution/authorization-check.test.ts)。
 
 [输入事务](src/storage/sqlite/inputs/README.md)区分准确活动 Run 的 `input.steer` 与独立 `input.follow_up`。Core 在安全检查点按持久顺序应用 steer，尚未派发的旧模型、工具和审批保存 `superseded_by_user_input` 与准确的工具响应配对；已派发调用保留原参数、来源和真实结果。最终派发与 Run 完成事务复查 pending 输入，完成附近到达的 steer 仍继续同一个 Run。follow-up 保留自己的命令和原 afterRun 关系，不因后来工作或原 Run 取消而换目标；单独取消未应用输入不会生成消息。公开 child 输入目前仍限制在宿主受控路径，完整业务追加消息继续按方案实施。
 

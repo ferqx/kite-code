@@ -231,7 +231,7 @@ async function fixture(
 }
 test('real Shell delivers two immutable files without another model call and cleans staging', async () => {
   const f = await fixture(
-    `printf hello > "$KITE_OUTPUT_DIR/report.txt"; printf '\\000\\001\\377' > "$KITE_OUTPUT_DIR/report.bin"`,
+    `printf working > "$KITE_OUTPUT_DIR/../working.txt"; printf hello > "$KITE_OUTPUT_DIR/report.txt"; printf '\\000\\001\\377' > "$KITE_OUTPUT_DIR/report.bin"`,
   );
   try {
     await f.run();
@@ -640,18 +640,35 @@ test('one turn pages modern delivery plus more than fifty exact legacy snapshots
       )
       .get(modern.sourceRunId)!;
     const columns = Object.keys(original);
-    for (let i = 0; i < 55; i++) {
+    for (let i = 0; i < 60; i++) {
       const id = `legacy-${String(i).padStart(3, '0')}`;
       const reference = {
         ...modern.reference,
         id: `legacy-ref-${id}`,
         scope: { kind: 'execution', id },
       };
+      // Production Files results use compact refs; older fixtures used full storage refs.
+      let snapshot =
+        i % 2 === 0
+          ? {
+              id: reference.id,
+              scope: reference.scope,
+              mediaType: reference.mediaType,
+              size: reference.size,
+            }
+          : reference;
+      // Matching result/registration is insufficient: authority and stored bytes must match.
+      if (i === 55) snapshot = { ...snapshot, size: '999999' };
+      if (i === 56) snapshot = { ...reference, storeId: 'foreign-store' };
+      if (i === 57) snapshot = { ...reference, subjectId: 'foreign-subject' };
+      if (i === 58)
+        snapshot = { ...snapshot, scope: { kind: 'execution', id: 'another-execution' } };
+      if (i === 59) snapshot = { ...snapshot, mediaType: 'application/pdf' };
       const result = {
         outcome: 'succeeded',
         content: 'saved',
-        artifactRefs: [reference],
-        details: { fileOutput: { snapshot: reference } },
+        artifactRefs: [snapshot],
+        details: { fileOutput: { snapshot } },
       };
       const execution = {
         ...original,
@@ -687,7 +704,7 @@ test('one turn pages modern delivery plus more than fifty exact legacy snapshots
           executionId: id,
           name: `${id}.txt`,
           path: `outputs/${id}.txt`,
-          snapshot: reference,
+          snapshot,
         }),
       );
     }
@@ -1096,3 +1113,115 @@ test('serial same-path deliveries project the latest complete successor without 
     await f.close();
   }
 }, 30000);
+
+test('serial identical Files and Shell deliveries fold only after the turn ends, in either direction', async () => {
+  for (const filesIndex of [0, 1]) {
+    const f = await fixture([
+      'printf identical > "$KITE_OUTPUT_DIR/report.txt"',
+      'printf identical > "$KITE_OUTPUT_DIR/report.txt"',
+    ]);
+    try {
+      await f.run();
+      await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+      await f.wait(
+        (p) => p.collections.length === 2 && p.collections.every((c) => c.state === 'ready'),
+      );
+      const db = new Database(join(f.profile.dataRoot, 'test/core.db'));
+      db.run('PRAGMA busy_timeout = 5000');
+      try {
+        const records = db
+          .query<{ key: string; json: string }, []>(
+            "SELECT key,json FROM extension_record WHERE key LIKE 'delivery/%'",
+          )
+          .all()
+          .map((r) => ({ ...JSON.parse(r.json), key: r.key }));
+        const completed = (id: string) =>
+          db
+            .query<{ completed_cursor: number }, [string]>(
+              'SELECT completed_cursor FROM execution WHERE id=?',
+            )
+            .get(id)!.completed_cursor;
+        records.sort((a, b) => completed(a.sourceExecutionId) - completed(b.sourceExecutionId));
+        const [old, latest] = records;
+        const files = records[filesIndex]!;
+        // Exercise the Files projection shape with real durable delivery/artifact records.
+        // Tool execution and saved output-operation replace only the Shell provenance fixture.
+        db.query(
+          "UPDATE execution SET kind='tool',adapter_id='files.write',run_id=? WHERE id=?",
+        ).run(files.sourceRunId, files.sourceExecutionId);
+        db.query(
+          "UPDATE extension_record SET json=json_set(json,'$.collectionId',NULL) WHERE key=?",
+        ).run(files.key);
+        db.query(
+          'INSERT INTO extension_record(extension_id,scope_kind,scope_id,key,revision,content_type,content_version,origin_store_id,json) SELECT extension_id,scope_kind,scope_id,?,revision,content_type,content_version,origin_store_id,? FROM extension_record WHERE key=?',
+        ).run(
+          `output-operation/${files.sourceExecutionId}`,
+          JSON.stringify({
+            executionId: files.sourceExecutionId,
+            state: 'saved',
+            name: 'report.txt',
+            snapshot: { id: files.reference.id },
+          }),
+          files.key,
+        );
+        const ids = async () => (await f.page()).items.map((i) => i.fileId);
+        expect(await ids()).toEqual([latest.fileId]);
+        expect(
+          (await f.runtime.queryOutputFiles({ ...f.base, limit: 1 })).items.map((i) => i.fileId),
+        ).toEqual([latest.fileId]);
+        // Immutable targets remain valid; this is not deletion or a permission change.
+        expect(
+          (
+            await f.runtime.resolveOutputFile({
+              ...f.base,
+              target: {
+                storeId: f.base.expectedStoreId,
+                sessionId: 's',
+                fileId: old.fileId,
+                locator: { kind: 'delivery', key: old.key },
+              },
+            })
+          ).reference.hash,
+        ).toBe(old.reference.hash);
+        db.query("UPDATE run SET status='running',is_active=1 WHERE id=?").run(old.sourceRunId);
+        expect((await ids()).length).toBe(2);
+        db.query("UPDATE run SET status='completed',is_active=0 WHERE id=?").run(old.sourceRunId);
+        // Same name is insufficient across entrypoints when bytes differ.
+        db.query(
+          "UPDATE extension_record SET json=json_set(json,'$.reference.hash',?) WHERE key=?",
+        ).run('f'.repeat(64), latest.key);
+        expect((await ids()).length).toBe(2);
+        db.query(
+          "UPDATE extension_record SET json=json_set(json,'$.reference.hash',?) WHERE key=?",
+        ).run(latest.reference.hash, latest.key);
+        // Unknown/concurrent order cannot be guessed from publication timestamps.
+        const oldCompleted = completed(old.sourceExecutionId);
+        db.query('UPDATE execution SET completed_cursor=? WHERE id=?').run(
+          completed(latest.sourceExecutionId) + 1,
+          old.sourceExecutionId,
+        );
+        expect((await ids()).length).toBe(2);
+        db.query('UPDATE execution SET completed_cursor=? WHERE id=?').run(
+          oldCompleted,
+          old.sourceExecutionId,
+        );
+        db.query(
+          "UPDATE extension_record SET json=json_set(json,'$.relativePath','other/report.txt') WHERE key=?",
+        ).run(latest.key);
+        expect((await ids()).length).toBe(2);
+        db.query(
+          "UPDATE extension_record SET json=json_set(json,'$.relativePath','report.txt') WHERE key=?",
+        ).run(latest.key);
+        // A mismatched saved Files origin is not evidence of a serial successor.
+        db.query("UPDATE extension_record SET origin_store_id='other' WHERE key=?").run(
+          `output-operation/${files.sourceExecutionId}`,
+        );
+        expect((await ids()).length).toBe(2);
+      } finally {
+        db.close();
+      }
+    } finally {
+      await f.close();
+    }
+  }
+});

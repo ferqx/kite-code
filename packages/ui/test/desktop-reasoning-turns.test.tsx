@@ -269,8 +269,7 @@ test('conversation trace keeps the first tool icon as the active title changes a
   const grouped = renderTrace([complete(thought), complete(read), complete(shell)], true);
   expectIcon(grouped.querySelector(summary)!, BookOpen01Icon);
   const reasoningLine = grouped.querySelector('.conversation-reasoning .conversation-trace-line')!;
-  expect(reasoningLine.textContent).toBe('已思考');
-  expectIcon(reasoningLine, BulbIcon);
+  expect(reasoningLine).toBeNull(); // The first reasoning retains its direct layout.
   expectIcon(
     grouped.querySelector('.conversation-trace-steps .tool-activity-step')!,
     BookOpen01Icon,
@@ -781,5 +780,243 @@ test('interleaved steers and child mail share input bubbles in one process throu
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);
     }
+  }
+});
+
+test('an active trace never falls back to completed statistics between model and tool events', () => {
+  const done: Message = {
+    id: 'read',
+    turnId: 'run',
+    role: 'tool',
+    toolName: 'read_file',
+    text: '',
+    status: 'completed',
+    settled: true,
+  };
+  for (const status of ['running', 'waiting', 'completed'] as const) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={[done]}
+          selected
+          connected
+          loading={false}
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'run', status }}
+          initialReading={{ top: 0, follow: false, expanded: { 'turn:run:complete': true } }}
+        />,
+      ),
+    );
+    const title = dom.window.document.querySelector('.conversation-trace > button')!.textContent;
+    expect(title).toBe(
+      status === 'running' ? '正在回复…' : status === 'waiting' ? '正在等待' : '已读取',
+    );
+    dom.window.close();
+  }
+});
+
+test('restored single reasoning stays mounted and expanded when tools arrive and update', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const keys = [
+    'window',
+    'document',
+    'IS_REACT_ACT_ENVIRONMENT',
+    'getComputedStyle',
+    'requestAnimationFrame',
+    'cancelAnimationFrame',
+  ] as const;
+  const originals = keys.map(
+    (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
+  );
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+  });
+  const host = dom.window.document.getElementById('root')!;
+  const root = createRoot(host);
+  const thought = { ...thinking('run'), settled: true, reasoningSource: 'source' };
+  const draw = (tools: Message[]) =>
+    root.render(
+      <Conversation
+        traceTurns
+        messages={[thought, ...tools]}
+        selected
+        connected
+        loading={false}
+        saveReading={() => {}}
+        turnActivity={{ turnId: 'run', status: 'running' }}
+        initialReading={{ top: 0, follow: false, expanded: { 'trace-turn:turn:run': true } }}
+        renderReasoning={() => <p data-thought-body>Existing reasoning</p>}
+      />,
+    );
+  try {
+    await act(async () => draw([]));
+    const body = host.querySelector('[data-thought-body]');
+    expect(body).not.toBeNull();
+    const tool: Message = {
+      id: 'shell',
+      turnId: 'run',
+      role: 'tool',
+      toolName: 'shell_execute',
+      text: '',
+      settled: false,
+      status: 'running',
+    };
+    await act(async () => draw([tool]));
+    expect(host.querySelector('[data-thought-body]')).toBe(body);
+    expect(host.querySelector('.conversation-reasoning')!.getAttribute('data-state')).toBe('open');
+    expect(host.querySelector('.conversation-reasoning .conversation-trace-line')).toBeNull();
+    await act(async () => draw([{ ...tool, status: 'completed', settled: true }]));
+    expect(host.querySelector('[data-thought-body]')).toBe(body);
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});
+
+test('running trace reports progress before the first model body arrives', () => {
+  for (const [phase, expected] of [
+    [undefined, '正在回复…'],
+    ['preparing', '正在准备回复…'],
+    ['thinking', '正在回复…'],
+  ] as const) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={[]}
+          selected
+          connected
+          loading={false}
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'run', status: 'running', responsePhase: phase }}
+        />,
+      ),
+    );
+    expect(dom.window.document.querySelector('[role="status"]')?.textContent).toBe(expected);
+    dom.window.close();
+  }
+  for (const unavailable of [true, false]) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={[]}
+          selected
+          connected
+          loading={false}
+          saveReading={() => {}}
+          turnActivity={{
+            turnId: 'run',
+            status: 'running',
+            unavailable,
+            executionUnconfirmed: !unavailable,
+          }}
+        />,
+      ),
+    );
+    expect(dom.window.document.querySelector('[role="status"]')).toBeNull();
+    dom.window.close();
+  }
+});
+
+test('connection notices and subsequent reasoning do not finalize an unfinished trace', () => {
+  const tool: Message = {
+    id: 'shell',
+    turnId: 'run',
+    role: 'tool',
+    toolName: 'shell_execute',
+    text: '',
+    settled: true,
+    status: 'completed',
+  };
+  const messages: Message[] = [
+    tool,
+    {
+      id: 'reconnect',
+      turnId: 'run',
+      role: 'system',
+      systemKind: 'model_connection',
+      text: '',
+      settled: false,
+    },
+    { ...thinking('run'), id: 'next-thought' },
+  ];
+  for (const executionUnconfirmed of [false, true]) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={messages}
+          selected
+          connected
+          loading={false}
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'run', status: 'running', executionUnconfirmed }}
+        />,
+      ),
+    );
+    const titles = [...dom.window.document.querySelectorAll('.conversation-trace > button')].map(
+      (node) => node.textContent,
+    );
+    expect(titles.length).toBeGreaterThan(0);
+    expect(
+      titles.every((title) => title === (executionUnconfirmed ? '执行状态待确认' : '正在思考…')),
+    ).toBe(true);
+    dom.window.close();
+  }
+});
+
+test('an empty reasoning placeholder cannot claim visible thinking', () => {
+  const html = renderToStaticMarkup(
+    <Conversation
+      traceTurns
+      messages={[{ ...thinking('run'), text: '' }]}
+      selected
+      connected
+      loading={false}
+      saveReading={() => {}}
+      turnActivity={{ turnId: 'run', status: 'running', responsePhase: 'thinking' }}
+    />,
+  );
+  expect(html).not.toContain('正在思考');
+  expect(html).toContain('正在回复');
+});
+
+test('streaming native reasoning uses its source even when the body is loaded separately', () => {
+  for (const [settled, executionUnconfirmed, expected] of [
+    [false, false, '正在思考…'],
+    [true, false, '正在回复…'],
+    [false, true, '执行状态待确认'],
+  ] as const) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={[
+            { ...thinking('run'), text: '', reasoningSource: 'native-model-message', settled },
+          ]}
+          selected
+          connected
+          loading={false}
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'run', status: 'running', executionUnconfirmed }}
+          renderReasoning={() => <span>Model reasoning loaded from its output source</span>}
+        />,
+      ),
+    );
+    expect(dom.window.document.querySelector('.conversation-trace > button')?.textContent).toBe(
+      expected,
+    );
+    dom.window.close();
   }
 });

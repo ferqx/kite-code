@@ -27,7 +27,7 @@ Shell 只读证明按固定 rg 的实际参数取值消费，执行 hooks、外�
 
 默认 Shell 风险行为与实际 Tool／Job 对象及准确 kind／id／version 在可信宿主登记，其他工具只能使用自身已登记行为；普通 Extension／MCP 元数据和配置文本不能注册。Run 冻结实际 reviewer preset、预算、checker 与行为 contractRef／configurationDigest。新版恢复缺失或无法重建时明确失败，不推断旧 Run 缺省；完整结果只读原封存回执，不调用当前解释器或 Provider。工具行为的 prepareReview／interpretReview 负责领域材料与映射，Core 不按工具名选择算法；check.behavior 由策略明确选择，混合独立检查不能借 Shell 解释器替代。
 
-默认 Shell 风险审核采用独立 low reasoning preset，不发送输出 token 上限。默认总期限 8000 毫秒，覆盖同操作等待、准备、队列与 Provider，由 `autoApproval.timeoutMs` 配置。超时保存 `authorization_check_timeout`，原 Shell 无派发、无人工卡，业务模型收到该次未执行的结果。任一参与策略要求停止时，组合策略也停止。SQLite 按原检查截止时间拒绝迟到的完整决定，也拒绝该检查签发、继承或通过人工消费超时执行依据。模型传输、空输出、无效答案和提供商截断仍各自保存准确原因。
+默认 Shell 风险审核采用独立 low reasoning preset，不发送输出 token 上限。`autoApproval.timeoutMs` 为单次请求期限，默认 8000 毫秒；总预算为其三倍，覆盖同操作等待、准备、队列与全部 Provider 尝试。超时保存 `authorization_check_timeout`，原 Shell 无派发、无人工卡，业务模型收到该次未执行的结果。任一参与策略要求停止时，组合策略也停止。SQLite 按原检查截止时间拒绝迟到的完整决定，也拒绝该检查签发、继承或通过人工消费超时执行依据。模型传输、空输出、无效答案和提供商截断仍各自保存准确原因。所有实际审批模型检查（含 Shell 风险审核、Files 与 MCP）仅在有明确超时／断连证据时最多重试两次，总计至多三次；裸 `stream_incomplete`、未知异常、协议／格式错误、拒绝、人工决定和取消不取得重试资格。技术失败与重试耗尽均停止，不产生 `timeout_continue`，不重放原工具、不恢复冷检查。各尝试独立缓冲并记录脱敏审计及可得 usage，只有完整成功尝试可形成回执，详细限制归[权限 owner](../../packages/agent/src/permissions/README.md#有界审批模型重试)。
 
 Windows 桌面选择 PowerShell 时，真实 AST 分析提供已知的写入、联网、委托和无法确认的效果。Auto 将准入通过且效果未明的调用交给同一 Shell 风险审核，只有 high 产生人工卡。请求批准和 Full 对这类调用继续要求准确的本次人工批准。审批绑定解释器与分析资产、命令、工作目录和独立文件／联网范围。已识别的系统委托在 Shell 准入时拒绝。派发复核当前身份及父子范围，实际监督和证据归 [Windows Shell 沙箱](windows-shell-sandbox.md)。
 
@@ -213,7 +213,9 @@ Shell invocation；Workspace 外 destructive、提权、关键系统删除、cre
 
 ## MCP Tool 策略边界
 
-MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive effect 变成无审批调用。只有 effective effects 全部为 `none|read` 且 `minimumApproval: none` 时，Approval Policy 才把它当作只读；`minimumApproval: user` 始终要求单次用户批准。远端 annotation 不直接进入该判断，project 配置也不能降低 minimum approval 或 effect 风险。Tool filter 只决定 catalog 可见性，不产生 authorization grant。
+通用 Service 的真实 MCP Tool 注册决定审批分类：工作区模式逐调用人批、Auto 走独立审核、有效 Full 直接执行，父子交集和硬拒绝保持。远端只读 annotation 或 description 不能获得免审、改变策略或登记可信行为；目录可见性不产生授权。
+
+当前准确动态 Tool 的 `untrustedMcpTool` 是闭合、有限且明确不可信的语义材料。Core 校验结构，将 canonical 字段显式纳入原 policy revision 并封存进 `check.request`，任务投影保留父子各贡献；重试、结果恢复与最终派发继续核同一输入、Session、工具版本和真实目录。描述有界并标完整性，schema 仅保结构且标不完整／省略，不能据此捏造未提供的实际效果或安全结论；名称与描述不是自动脱敏文本，连接配置与凭据不被附带。具体形状、数据边界及验证归[权限 owner](../../packages/agent/src/permissions/README.md)与[MCP owner](../../packages/agent/src/mcp/README.md)。
 
 ## Shell 逐项审批与重叠执行
 
@@ -348,7 +350,7 @@ bun test packages/runtime-host/test/policies/authorization-elevation.test.ts pac
 
 authorization.check 请求在 Runtime 封存前加入其合同的独立 system 指引；旧任务授权合同的原用户请求只作为范围证据，新默认风险合同不发送该业务材料。任务／参数／历史工具正文不能签发授权。checker 技术失败是无决定而非 reject；历史失败次数、缺少先前批准与不可用本身不能成为新调用的拒绝或转人工依据，后续调用继续按准确目标和当前策略独立判断，真实拒绝仍有效。不可用 Tool、Action 与 Job 结果保留未派发／零 adapter 事实，并以可读正文和 details.authorizationCheck 的原检查身份及有限 Core failureCode 解释已知原因；私有 adapter 消息与不完整输出不投影为拒绝理由。旧封存输入、输出和 proof 不改写，冷记录不重发；实现与受控回归范围见[权限 owner](../../packages/agent/src/permissions/README.md)。
 
-内部审核的模型失败处理保留真实 SDK 已去敏的服务不可用、连接失败和流不完整固定分类，与普通 Model 链一致；只对白名单原因生成可读 Tool 反馈，不透传任意异常 message／cause。原 Tool 正文以准确 call／source 完整进入下一模型；未取得审核决定仍零派发、无新增人工卡，不因此获得自动重试或放行。原生 Provider 请求、有限诊断与历史故障的可追溯范围归[真实验收入口](../../tests/e2e/live/model/README.md#审批策略与原生-shell-执行)。
+内部审核的模型失败处理保留真实 SDK 已去敏的服务不可用、连接失败和流不完整固定分类，与普通 Model 链一致；只对白名单原因生成可读 Tool 反馈，不透传任意异常 message／cause。原 Tool 正文以准确 call／source 完整进入下一模型；审批专用的有界重试还须有明确超时／断连证据，普通模型的宽泛重连分类不自动适用。未取得审核决定仍零派发、无新增人工卡，不因此获得工具重放或放行。原生 Provider 请求、有限诊断与历史故障的可追溯范围归[真实验收入口](../../tests/e2e/live/model/README.md#审批策略与原生-shell-执行)。
 
 通用失败可读性属于模型上下文呈现：只在核原 Tool／call／Session／Run／Store 后解释裸码、取消和 unknown，是否未派发取 Core 真实观察，原 receipt／outcome／批准和已封存 ModelInput 保持。完整公开拒绝原因不被通用说明覆盖，私有 details 不自动公开；后台 Source 保原完整 JSON 及既有投递／抑制边界，不因报错主动创建新模型。[呈现 owner](../../packages/agent/src/model-tools.README.md#结果呈现)与各工具 owner 负责具体安全原因、已完成动作和恢复说明，不在审批层重解释业务效果。
 

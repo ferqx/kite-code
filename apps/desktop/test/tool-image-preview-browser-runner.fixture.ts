@@ -123,7 +123,23 @@ try {
   await page.evaluate(() => window.toolImageFixture.release());
   await page.waitForFunction(() => !document.querySelector('.native-user-image img'));
   assert.equal((await checkpoint('cancelled-preview')).images, 0);
-  await page.locator('.tool-image-activity > .tool-activity-summary').click();
+  const expandFrames = await page.evaluate(async () => {
+    const heights: number[] = [];
+    const start = performance.now();
+    (
+      document.querySelector('.tool-image-activity > .tool-activity-summary') as HTMLElement
+    ).click();
+    while (performance.now() - start < 500) {
+      heights.push(
+        document.querySelector('.tool-activity-content')?.getBoundingClientRect().height ?? 0,
+      );
+      await new Promise(requestAnimationFrame);
+    }
+    return heights;
+  });
+  assert.ok(expandFrames.some((height) => height > 1 && height < 127));
+  assert.equal(expandFrames.at(-1), 128);
+  stages.push({ stage: 'expand-frames', heights: expandFrames });
   await page.waitForFunction(() => window.toolImageFixture.snapshot().pending === 1);
   await page.evaluate(() => window.toolImageFixture.release());
   await page.waitForSelector('.native-user-image img');
@@ -133,7 +149,29 @@ try {
   await page
     .locator('.tool-image-activity')
     .screenshot({ path: join(artifact, 'image-tool-message.png') });
-  await page.locator('.tool-image-activity > .tool-activity-summary').click();
+  // Observe intermediate frames, not only the final collapsed screenshot: clipping
+  // must not revoke an image while a non-zero portion is still being animated.
+  const collapseFrames = await page.evaluate(async () => {
+    const samples: { height: number; images: number }[] = [];
+    const start = performance.now();
+    (
+      document.querySelector('.tool-image-activity > .tool-activity-summary') as HTMLElement
+    ).click();
+    while (performance.now() - start < 500) {
+      samples.push({
+        height:
+          document.querySelector('.tool-activity-content')?.getBoundingClientRect().height ?? 0,
+        images: document.querySelectorAll('.native-user-image img').length,
+      });
+      await new Promise(requestAnimationFrame);
+    }
+    return samples;
+  });
+  assert.ok(collapseFrames.some((frame) => frame.height > 1 && frame.height < 127));
+  for (const frame of collapseFrames) if (frame.height > 1) assert.equal(frame.images, 1);
+  assert.equal(collapseFrames.at(-1)!.height, 0);
+  assert.equal(collapseFrames.at(-1)!.images, 0);
+  stages.push({ stage: 'collapse-frames', frames: collapseFrames });
   await page.waitForFunction(() => !document.querySelector('.native-user-image img'));
   assert.equal((await checkpoint('collapsed')).images, 0);
   await page.evaluate(() => window.toolImageFixture.show('other-session'));

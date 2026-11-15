@@ -1008,7 +1008,7 @@ test('isolated Native diagnostics also wait for complete tool metadata without p
   }
 });
 
-test('a permanently unverified mixed tool preserves its verified sibling file action and mounted delivery', async () => {
+test('a permanently unverified mixed tool preserves its verified sibling file action without a duplicate delivery viewer', async () => {
   const f = fixture('mixed');
   try {
     await f.render();
@@ -1024,27 +1024,11 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
       '.conversation-trace-steps button.file-link',
     )!;
     expect(file.textContent).toBe('delivered.txt');
-    const delivery = [...f.host.querySelectorAll<HTMLDetailsElement>('details')].find(
-      (element) => element.querySelector('summary')?.textContent === '查看本次交付的文件',
-    )!;
-    expect(delivery).toBeDefined();
-    await act(async () => {
-      delivery.open = true;
-      delivery.dispatchEvent(new f.host.ownerDocument.defaultView!.Event('toggle'));
-    });
-    expect(delivery.textContent).toContain('SAVED_DELIVERY_BYTES');
-    const body = delivery.querySelector('pre');
-    expect(body).not.toBeNull();
+    expect(f.host.textContent).not.toContain('查看本次交付的文件');
     await f.flush();
-    expect(f.host.querySelector('.conversation-trace-trigger') === aggregate).toBe(true);
-    expect(f.host.querySelector('.conversation-trace-steps button.file-link') === file).toBe(true);
-    expect(delivery.isConnected).toBe(true);
-    expect(delivery.querySelector('pre')).toBe(body);
-    expect(delivery.open).toBe(true);
-    const links = [...f.host.querySelectorAll('.conversation-trace-steps button.file-link')];
-    expect(links).toHaveLength(2);
-    expect(links.filter((link) => !delivery.contains(link))[0] === file).toBe(true);
-    expect(links.filter((link) => delivery.contains(link))).toHaveLength(1);
+    expect(f.host.querySelector('.conversation-trace-trigger')).toBe(aggregate);
+    expect(f.host.querySelector('.conversation-trace-steps button.file-link')).toBe(file);
+    expect(f.host.querySelectorAll('.conversation-trace-steps button.file-link')).toHaveLength(1);
     const failed = [...f.host.querySelectorAll('.conversation-trace-steps .tool-activity')].find(
       (node) => node.textContent?.includes('failed.txt'),
     );
@@ -1053,7 +1037,6 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
     expect(f.host.textContent).not.toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
     expect(f.host.querySelectorAll('.conversation-trace-steps > .tool-activity')).toHaveLength(2);
     expect(f.host.textContent).not.toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
-    expect(delivery.querySelector('pre')).toBe(body);
     await act(async () => file.click());
     expect(f.requests.filter((request) => request.method === 'fileChanges.open')).toEqual([
       { method: 'fileChanges.open', generation: 1, changeId: 'verified-output', editor: 'vscode' },
@@ -1095,19 +1078,7 @@ for (const mode of ['write-diff', 'edit-diff'] as const) {
       expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
       expect(!!f.host.querySelector('.file-diff[data-inline]')).toBe(mode === 'edit-diff');
       expect(f.host.textContent).not.toContain('SNAPSHOT_');
-      const disclosure = [...f.host.querySelectorAll('details')].find(
-        (node) => node.querySelector('summary')?.textContent === '查看本次交付的文件',
-      );
-      expect(disclosure).toBeDefined();
-      await act(async () => {
-        disclosure!.open = true;
-        disclosure!.dispatchEvent(new f.host.ownerDocument.defaultView!.Event('toggle'));
-      });
-      expect(bodies()).toHaveLength(2);
-      expect(bodies()[1]).toMatchObject({ changeId: 'change-receipt', view: 'snapshot' });
-      await f.flushBodies();
-      expect(disclosure!.textContent).toContain('SNAPSHOT_change-receipt');
-      expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
+      expect(f.host.textContent).not.toContain('查看本次交付的文件');
       for (let round = 0; round < 3; round++) {
         await f.toggle();
         expect(f.host.querySelector('.tool-diff-toggle')?.getAttribute('aria-expanded')).toBe(
@@ -1119,10 +1090,10 @@ for (const mode of ['write-diff', 'edit-diff'] as const) {
         );
         await f.flushBodies();
         expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
-        expect(disclosure!.textContent).toContain('SNAPSHOT_change-receipt');
+        expect(f.host.textContent).not.toContain('查看本次交付的文件');
       }
       expect(bodies().filter((request) => request.view === 'diff')).toHaveLength(1);
-      expect(bodies().filter((request) => request.view === 'snapshot')).toHaveLength(1);
+      expect(bodies().filter((request) => request.view === 'snapshot')).toHaveLength(0);
       expect(f.requests.some((request) => request.method === 'fileChanges.open')).toBe(false);
     } finally {
       await f.close();

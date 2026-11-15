@@ -11,13 +11,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Json } from '@kite-ai/agent/extensions';
 import {
-  collectProfileGarbage,
   createProfileBackup,
   inspectProfileBackup,
   restoreProfileBackup,
@@ -523,86 +522,6 @@ test('external Plan drift during review rejects late approval and blocks workspa
   }
 }, 15000);
 
-test('Fork materializes an independent output from the selected immutable delivery', async () => {
-  let branch = false,
-    sourcePath = '',
-    forkPath = '';
-  const f = await fixture(
-    {},
-    ['files.read', 'files.write'],
-    async (step, f): Promise<Call> => {
-      if (!branch) {
-        const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-        sourcePath = join(
-          f.profile.profilePath,
-          'files',
-          hash(f.base.expectedStoreId),
-          hash('s'),
-          'outputs',
-          '分支 方案.md',
-        );
-        return step === 0
-          ? {
-              name: 'write_file',
-              input: { path: sourcePath, content: 'Selected delivery' },
-            }
-          : null;
-      }
-      const views = await f.runtime.queryExtension({
-        ...f.base,
-        sessionId: 'fork',
-        extensionId: 'builtin.files',
-        queryId: 'files.outputs',
-        input: {},
-      });
-      const files = views[0]!.payload as { value: { path: string } }[];
-      forkPath = join(f.profile.profilePath, files[0]!.value.path);
-      if (step === 0) return { name: 'read_file', input: { path: forkPath } };
-      if (step === 1) {
-        const read = (await f.store.listExecutions('fork')).find(
-          (x) => x.definitionId === 'files.read',
-        )!;
-        expect({ status: read.status, result: read.result }).toMatchObject({ status: 'succeeded' });
-        const value = JSON.parse(String((read.result as Record<string, Json>).content));
-        expect(value.content).toBe('Selected delivery');
-        return {
-          name: 'write_file',
-          input: { path: forkPath, content: 'Branch edit', base_ref: value.base_ref },
-        };
-      }
-      return null;
-    },
-    { mode: 'full' },
-  );
-  try {
-    await f.submit();
-    expect((await f.done()).run?.status).toBe('completed');
-    // A subsequent external source edit is not the selected historical delivery.
-    writeFileSync(sourcePath, 'Later source bytes');
-    await f.runtime.forkSession({
-      expectedStoreId: f.base.expectedStoreId,
-      subjectId: 'user',
-      commandId: 'fork-files',
-      sourceSessionId: 's',
-      expectedContextSelectionId: (await f.store.getSession('s'))!.contextSelectionId,
-      newSessionId: 'fork',
-      title: 'Fork',
-    });
-    branch = true;
-    await f.submit('branch', 'fork');
-    expect((await f.done()).run?.status).toBe('completed');
-    expect(forkPath).not.toBe(sourcePath);
-    const write = (await f.store.listExecutions('fork')).find(
-      (x) => x.definitionId === 'files.write',
-    )!;
-    expect({ status: write.status, result: write.result }).toMatchObject({ status: 'succeeded' });
-    expect(readFileSync(forkPath, 'utf8')).toBe('Branch edit');
-    expect(readFileSync(sourcePath, 'utf8')).toBe('Later source bytes');
-  } finally {
-    await f.close();
-  }
-}, 20000);
-
 test('uploaded PDF pages flow through the exact file tool result to the next model input', async () => {
   let path = '';
   const f = await fixture(
@@ -656,52 +575,72 @@ test('uploaded PDF pages flow through the exact file tool result to the next mod
   }
 }, 20000);
 
-test.each([
-  'report.md',
-  '优化方案.md',
-  'é'.repeat(120),
-])('session outputs persist current edits and immutable delivery snapshots through ordinary file tools: %s', async (outputName) => {
-  let outputPath = '';
+test('final model input offers only same-call Shell delivery without Files outputDirectory', async () => {
+  const f = await fixture({}, ['files.write', 'files.edit'], async () => null, { mode: 'full' });
+  try {
+    await f.submit();
+    expect((await f.done()).run?.status).toBe('completed');
+    const request = f.requests[0]!;
+    const messages = request.messages as { content: string }[];
+    const session = messages
+      .flatMap((m) => {
+        try {
+          return [JSON.parse(m.content)];
+        } catch {
+          return [];
+        }
+      })
+      .find((m) => m.kind === 'session_files');
+    expect(session).toBeUndefined();
+    const tools = request.tools as {
+      function: {
+        name: string;
+        description: string;
+        parameters: { properties: Record<string, unknown> };
+      };
+    }[];
+    for (const name of ['write_file', 'edit_file']) {
+      const tool = tools.find((t) => t.function.name === name)!.function;
+      expect(tool.description).not.toContain('outputDirectory');
+      expect(tool.description).toContain(
+        'Files read/write/edit operations do not collect attachments',
+      );
+      expect(tool.description).toContain('Do not use Files to write a previous Shell staging path');
+      expect(tool.description).toContain('Preserve user-specified locations and permissions');
+      expect(tool.parameters.properties).not.toHaveProperty('outputDirectory');
+      expect(tool.parameters.properties).not.toHaveProperty('register_output');
+    }
+  } finally {
+    await f.close();
+  }
+}, 20000);
+
+test('ordinary workspace write and edit keep snapshots without becoming turn attachments', async () => {
   const f = await fixture(
     {},
-    ['files.read', 'files.write', 'files.edit'],
+    ['files.write', 'files.read', 'files.edit'],
     async (step, f): Promise<Call> => {
-      const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-      outputPath = join(
-        f.profile.profilePath,
-        'files',
-        hash(f.base.expectedStoreId),
-        hash('s'),
-        'outputs',
-        outputName,
-      );
       if (step === 0)
-        return {
-          name: 'write_file',
-          input: { path: outputPath, content: 'First report 中文' },
-        };
+        return { name: 'write_file', input: { path: 'working.md', content: 'Draft notes' } };
       if (step === 1) {
-        const write = (await f.store.listExecutions('s')).find(
-          (x) => x.definitionId === 'files.write',
-        )!;
-        expect({ status: write.status, result: write.result }).toMatchObject({
-          status: 'succeeded',
-        });
-        return { name: 'read_file', input: { path: outputPath } };
+        expect(
+          (await f.runtime.queryOutputFiles({ ...f.base, runId: await f.runId() })).items,
+        ).toEqual([]);
+        return { name: 'read_file', input: { path: 'working.md' } };
       }
       if (step === 2) {
         const read = (await f.store.listExecutions('s')).find(
-          (x) => x.definitionId === 'files.read',
+          (e) => e.definitionId === 'files.read',
         )!;
-        expect({ status: read.status, result: read.result }).toMatchObject({ status: 'succeeded' });
-        const result = JSON.parse(String((read.result as Record<string, Json>).content));
+        expect(read.status).toBe('succeeded');
+        const value = JSON.parse(String((read.result as Record<string, Json>).content));
         return {
           name: 'edit_file',
           input: {
-            path: outputPath,
-            base_ref: result.base_ref,
-            old_text: 'First',
-            new_text: 'Updated',
+            path: 'working.md',
+            base_ref: value.base_ref,
+            old_text: 'Draft',
+            new_text: 'Final',
             expected_matches: 1,
           },
         };
@@ -713,194 +652,29 @@ test.each([
   try {
     await f.submit();
     expect((await f.done()).run?.status).toBe('completed');
-    const executions = (await f.store.listExecutions('s')).filter((x) =>
-      ['files.write', 'files.edit'].includes(x.definitionId),
+    expect(readFileSync(join(f.workspace, 'working.md'), 'utf8')).toBe('Final notes');
+    const writes = (await f.store.listExecutions('s')).filter((e) =>
+      ['files.write', 'files.edit'].includes(e.definitionId),
     );
-    expect(executions.map((x) => x.status)).toEqual(['succeeded', 'succeeded']);
-    expect(readFileSync(outputPath, 'utf8')).toBe('Updated report 中文');
-    const first = executions[0]!.result as Record<string, Json>;
-    const second = executions[1]!.result as Record<string, Json>;
-    expect(first.artifactRefs).not.toEqual(second.artifactRefs);
-    const firstRef = (
-      first.artifactRefs as unknown as { id: string; scope: { kind: 'execution'; id: string } }[]
-    )[0]!;
-    const saved = await f.runtime.readArtifact({
-      expectedStoreId: f.base.expectedStoreId,
-      sessionId: 's',
-      subjectId: 'user',
-      refId: firstRef.id,
-      scope: firstRef.scope,
-    });
-    expect(Buffer.from(saved.content).toString('utf8')).toBe('First report 中文');
-    expect(first.details).toMatchObject({
-      fileOutput: { path: outputPath },
-      workspaceCheckpoint: false,
-    });
-    const views = await f.runtime.queryExtension({
-      expectedStoreId: f.base.expectedStoreId,
-      sessionId: 's',
-      subjectId: 'user',
-      extensionId: 'builtin.files',
-      queryId: 'files.outputs',
-      input: {},
-    });
-    expect(views[0]!.payload).toMatchObject([{ value: { state: 'saved', name: outputName } }]);
-    await f.runtime.close();
-    await f.workspaceSerialLocks.close();
-    const orphan = join(dirname(outputPath), 'orphan.md');
-    writeFileSync(orphan, 'unregistered abandoned file');
-    const cache = join(
-      f.profile.profilePath,
-      'cache/documents',
-      'a'.repeat(64),
-      'b'.repeat(64),
-      'c'.repeat(64),
+    expect(writes.map((e) => e.status)).toEqual(['succeeded', 'succeeded']);
+    for (const execution of writes)
+      expect((execution.result as Record<string, Json>).artifactRefs).not.toEqual([]);
+    expect((await f.runtime.queryOutputFiles({ ...f.base, runId: await f.runId() })).items).toEqual(
+      [],
     );
-    privateDirectory(cache);
-    writeFileSync(join(cache, 'result.json'), '{}');
-    const realNow = Date.now;
-    try {
-      const future = realNow() + 9 * 86400000;
-      Date.now = () => future;
-      const collected = await collectProfileGarbage({
-        profile: { dataRoot: f.profile.dataRoot, profile: f.profile.profile },
-        expectedStoreId: f.base.expectedStoreId,
-      });
-      expect(collected.removedFiles).toBe(2);
-    } finally {
-      Date.now = realNow;
-    }
-    expect(existsSync(orphan)).toBe(false);
-    expect(existsSync(join(cache, 'result.json'))).toBe(false);
-    expect(readFileSync(outputPath, 'utf8')).toBe('Updated report 中文');
-    const backup = await createProfileBackup({
-      profile: { dataRoot: f.profile.dataRoot, profile: f.profile.profile },
-      destinationRoot: join(f.root, 'backups'),
-    });
-    expect(backup.manifest.version).toBe(20);
-    await inspectProfileBackup({ directory: backup.directory });
-    const inventory = readFileSync(join(backup.directory, 'working-files.jsonl'));
-    expect([...inventory].every((byte) => (byte >= 32 && byte <= 126) || byte === 10)).toBe(true);
-    const inventoryLines = inventory.toString('ascii').trimEnd().split('\n');
-    expect(inventoryLines.every((line) => Buffer.byteLength(line) <= 1024)).toBe(true);
-    expect(inventoryLines.map((line) => JSON.parse(line).path)).toContain(
-      relative(f.profile.profilePath, outputPath).split('\\').join('/'),
-    );
-    const backedOutput = join(backup.directory, relative(f.profile.profilePath, outputPath));
-    const originalBackupBytes = readFileSync(backedOutput);
-    writeFileSync(backedOutput, 'tampered current output');
-    await expect(inspectProfileBackup({ directory: backup.directory })).rejects.toThrow(
-      'backup_working_files_invalid',
-    );
-    writeFileSync(backedOutput, originalBackupBytes);
-    const extra = join(dirname(backedOutput), 'not-registered.md');
-    writeFileSync(extra, 'extra');
-    await expect(inspectProfileBackup({ directory: backup.directory })).rejects.toThrow(
-      'backup_working_files_invalid',
-    );
-    rmSync(extra);
-    await inspectProfileBackup({ directory: backup.directory });
-    writeFileSync(outputPath, 'Later');
-    const restored = await restoreProfileBackup({
-      profile: { dataRoot: f.profile.dataRoot, profile: f.profile.profile },
-      expectedStoreId: f.base.expectedStoreId,
-      backup,
-      intent: 'replace_with_selected_backup',
-    });
-    expect(readFileSync(outputPath, 'utf8')).toBe('Updated report 中文');
-    // A deleted registered working file stays absent across backup/restore; old snapshots
-    // remain immutable evidence, never an implicit reconstruction of current bytes.
-    rmSync(outputPath);
-    const absent = await createProfileBackup({
-      profile: { dataRoot: f.profile.dataRoot, profile: f.profile.profile },
-      destinationRoot: join(f.root, 'backups'),
-    });
-    await inspectProfileBackup({ directory: absent.directory });
-    writeFileSync(outputPath, 'outside modification after missing-file backup', { mode: 0o600 });
-    await restoreProfileBackup({
-      profile: { dataRoot: f.profile.dataRoot, profile: f.profile.profile },
-      expectedStoreId: restored.storeId,
-      backup: absent,
-      intent: 'replace_with_selected_backup',
-    });
-    expect(existsSync(outputPath)).toBe(false);
-  } finally {
-    await f.close();
-  }
-}, 30000);
-
-test('Unicode session outputs do not authorize another Session path', async () => {
-  let outputPath = '';
-  const f = await fixture(
-    {},
-    ['files.write'],
-    async (step, f): Promise<Call> => {
-      const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-      outputPath = join(
-        f.profile.profilePath,
-        'files',
-        hash(f.base.expectedStoreId),
-        hash('s'),
-        'outputs',
-        '优化 方案.md',
-      );
-      return step === 0
-        ? {
-            name: 'write_file',
-            input: {
-              path: outputPath,
-              content: f.commandId === 'owner' ? 'original owner bytes' : 'foreign overwrite',
-            },
-          }
-        : null;
-    },
-    { mode: 'full' },
-  );
-  try {
-    await f.submit('owner');
-    expect((await f.done()).run?.status).toBe('completed');
-    expect(readFileSync(outputPath, 'utf8')).toBe('original owner bytes');
-    await f.runtime.createSession({
-      ...f.base,
-      sessionId: 'other',
-      commandId: 'create-other',
-      workspaceId: 'w',
-      title: 'other',
-    });
-    await initializeLivePermissionFixture({
-      runtime: f.runtime,
-      profile: f.profile,
-      ...f.base,
-      sessionId: 'other',
-      workspaceId: 'w',
-      mode: 'full',
-      trusted: true,
-    });
-    await f.submit('foreign', 'other');
-    expect((await f.done()).run?.status).toBe('completed');
-    const write = (await f.store.listExecutions('other')).find(
-      (execution) => execution.definitionId === 'files.write',
-    )!;
-    expect(write.status).toBe('failed');
-    expect(write.authorization?.dispatched).toBe(false);
-    expect(write.result).toMatchObject({
-      content: 'output_file_scope_denied',
-      details: { dispatchCommitted: false, adapterAttempted: false },
-    });
-    expect(readFileSync(outputPath, 'utf8')).toBe('original owner bytes');
     expect(
       (
         await f.store.listExtensionRecords({
-          sessionId: 'other',
+          sessionId: 's',
           extensionId: 'builtin.files',
           limit: 100,
         })
-      ).filter((record) => record.contentType === 'builtin.files.output'),
+      ).filter((r) => r.key.startsWith('output-operation/') || r.key.startsWith('delivery/')),
     ).toEqual([]);
   } finally {
     await f.close();
   }
-}, 15000);
+}, 20000);
 
 test('ordinary file tools edit the exact Plan before approval through its owner; backup restores the actual latest bytes', async () => {
   let path = '';
@@ -1313,193 +1087,6 @@ test('global exact Planning Action requests approval in Request Approval, allows
     await denied.close();
   }
 }, 15000);
-
-test('new Store restore projects registered files and fresh ordinary tools edit both output and Plan', async () => {
-  let restored = false;
-  let outputPath = '',
-    planPath = '';
-  const f = await fixture(
-    {},
-    ['planning.write', 'files.read', 'files.write', 'files.edit'],
-    async (step, f): Promise<Call> => {
-      if (!restored) {
-        if (step === 0) {
-          const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-          outputPath = join(
-            f.profile.profilePath,
-            'files',
-            hash(f.base.expectedStoreId),
-            hash('s'),
-            'outputs',
-            'restored.md',
-          );
-          return {
-            name: 'write_file',
-            input: { path: outputPath, content: 'Original delivered report' },
-          };
-        }
-        if (step === 1)
-          return {
-            name: 'write_plan',
-            input: {
-              plan_id: 'restored-plan',
-
-              title: 'Restorable plan',
-              body: 'Original editable plan',
-              steps: [{ id: 'a', title: 'Keep the real file' }],
-            },
-          };
-        return null;
-      }
-      if (step === 0) {
-        const sources = (f.requests.at(-1)!.messages as { role: string; content: string }[])
-          .filter((message) => message.role === 'user')
-          .flatMap((message) => {
-            try {
-              return [JSON.parse(message.content)];
-            } catch {
-              return [];
-            }
-          });
-        expect(sources.find((source) => source.kind === 'session_files')).toMatchObject({
-          files: [{ path: outputPath }],
-        });
-        expect(sources.find((source) => source.kind === 'current_plan')).toMatchObject({
-          filePath: planPath,
-          approval: null,
-          fileState: 'matches_record',
-        });
-        return { name: 'read_file', input: { path: outputPath } };
-      }
-      if (step === 1 || step === 3) {
-        const read = (await f.store.listExecutions('s'))
-          .filter((e) => e.definitionId === 'files.read')
-          .at(-1)!;
-        expect({ status: read.status, result: read.result }).toMatchObject({ status: 'succeeded' });
-        const value = JSON.parse(String((read.result as Record<string, Json>).content));
-        expect(value.content).toBe(
-          step === 1 ? 'Latest unsubmitted report' : 'Original editable plan',
-        );
-        return {
-          name: 'edit_file',
-          input: {
-            path: step === 1 ? outputPath : planPath,
-            base_ref: value.base_ref,
-            old_text: step === 1 ? 'Latest unsubmitted' : 'Original editable',
-            new_text: 'Edited after restore',
-            expected_matches: 1,
-          },
-        };
-      }
-      if (step === 2) return { name: 'read_file', input: { path: planPath } };
-      return null;
-    },
-    { mode: 'full' },
-  );
-  try {
-    await f.submit();
-    expect((await f.done()).run?.status).toBe('completed');
-    const originalStoreId = f.base.expectedStoreId;
-    const originalExecutions = (await f.store.listExecutions('s')).map((e) => ({
-      id: e.id,
-      status: e.status,
-      resultRevision: e.resultRevision,
-      originStoreId: e.originStoreId,
-    }));
-    const firstOutput = (await f.store.listExecutions('s')).find(
-      (e) => e.definitionId === 'files.write',
-    )!;
-    const firstRef = (
-      (firstOutput.result as Record<string, Json>).artifactRefs as unknown as {
-        id: string;
-        scope: { kind: 'execution'; id: string };
-      }[]
-    )[0]!;
-    const plan = (await f.record('plan/restored-plan/1'))!.value as Record<string, Json>;
-    planPath = join(f.profile.profilePath, String((plan.file as Record<string, Json>).path));
-    await f.runtime.close();
-    await f.workspaceSerialLocks.close();
-    writeFileSync(outputPath, 'Latest unsubmitted report');
-    const backup = await createProfileBackup({
-      profile: { dataRoot: f.profile.dataRoot, profile: f.profile.profile },
-      destinationRoot: join(f.root, 'backups'),
-    });
-    const replacement = await restoreProfileBackup({
-      profile: { dataRoot: f.profile.dataRoot, profile: f.profile.profile },
-      expectedStoreId: originalStoreId,
-      backup,
-      intent: 'replace_with_selected_backup',
-    });
-    expect(replacement.storeId).not.toBe(originalStoreId);
-    const callsBeforeReopen = f.requests.length;
-    await f.reopen();
-    expect(f.base.expectedStoreId).toBe(replacement.storeId);
-    expect(f.requests).toHaveLength(callsBeforeReopen);
-    restored = true;
-    await f.submit('after-restore');
-    expect((await f.done()).run?.status).toBe('completed');
-    expect(readFileSync(outputPath, 'utf8')).toBe('Edited after restore report');
-    expect(readFileSync(planPath, 'utf8')).toBe('Edited after restore plan');
-    expect((await f.record('plan.current'))!.value).toMatchObject({
-      planId: 'restored-plan',
-      version: 2,
-    });
-    expect((await f.record('plan/restored-plan/1'))!.value).toMatchObject({
-      body: 'Original editable plan',
-    });
-    const all = await f.store.listExecutions('s');
-    expect(
-      all
-        .filter((e) => !originalExecutions.some((old) => old.id === e.id))
-        .every((e) => e.originStoreId === replacement.storeId),
-    ).toBe(true);
-    for (const original of originalExecutions)
-      expect(all.find((e) => e.id === original.id)).toMatchObject(original);
-    const saved = await f.runtime.readArtifact({
-      ...f.base,
-      refId: firstRef.id,
-      scope: firstRef.scope,
-    });
-    expect(Buffer.from(saved.content).toString('utf8')).toBe('Original delivered report');
-    for (const [planId, expectedVersion, body] of [
-      ['other-restored-plan', 2, 'An intervening plan'],
-      ['restored-plan', 3, 'Reused after restore plan'],
-    ] as const) {
-      const commandId = `restore-switch-${expectedVersion}`;
-      await f.runtime.submitCommand({
-        ...f.base,
-        commandId,
-        request: {
-          kind: 'extension.invoke',
-          extensionId: planningExtensionId,
-          actionId: 'planning.write',
-          definitionVersion: '1',
-          input: {
-            planId,
-            expectedVersion,
-            title: planId,
-            body,
-            steps: [{ id: 'a', title: 'Keep the real file' }],
-          },
-        },
-      });
-      const command = await f.runtime.waitForCommand(commandId, { timeoutMs: 5000 });
-      const execution = await f.store.getExecution(
-        String((command.receipt as Record<string, Json>).executionId),
-      );
-      expect({ status: execution?.status, result: execution?.result }).toMatchObject({
-        status: 'succeeded',
-      });
-    }
-    expect(readFileSync(planPath, 'utf8')).toBe('Reused after restore plan');
-    expect((await f.record('plan/restored-plan/4'))!.value).toMatchObject({
-      file: { path: (plan.file as Record<string, Json>).path },
-      body: 'Reused after restore plan',
-    });
-  } finally {
-    await f.close();
-  }
-}, 30000);
 
 test('reusing an earlier Plan ID keeps old reviews historical and requires a new exact approval before effects', async () => {
   const f = await fixture(
@@ -1970,205 +1557,57 @@ test('Plan publication after physical write rejects pending approval and preserv
   }
 }, 45000);
 
-test('session output publication failures preserve the actual file and original unknown; cold queries never replay and new work requires recovery', async () => {
-  for (const fault of ['artifact', 'record'] as const) {
-    let outputPath = '';
-    let injected = 0;
-    const originalBody = `Actual bytes before ${fault} publication failure`;
-    const f = await fixture(
-      {},
-      ['files.read', 'files.write', 'files.edit'],
-      async (step, f): Promise<Call> => {
-        const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-        outputPath = join(
-          f.profile.profilePath,
-          'files',
-          hash(f.base.expectedStoreId),
-          hash('s'),
-          'outputs',
-          `${fault}-failure.md`,
-        );
-        if (f.commandId === 'work')
-          return step === 0
-            ? { name: 'write_file', input: { path: outputPath, content: originalBody } }
-            : null;
-        if (step === 0) return { name: 'read_file', input: { path: outputPath } };
-        return null;
-      },
-      { mode: 'full' },
+test.each([
+  'read_file',
+  'write_file',
+  'edit_file',
+])('retired Files output directory is not an authorized delivery target: %s', async (name) => {
+  let outputPath = '';
+  const f = await fixture(
+    {},
+    ['files.read', 'files.write', 'files.edit'],
+    async (step, f): Promise<Call> => {
+      const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+      outputPath = join(
+        f.profile.profilePath,
+        'files',
+        hash(f.base.expectedStoreId),
+        hash('s'),
+        'outputs',
+        'report.md',
+      );
+      if (step !== 0) return null;
+      return {
+        name,
+        input:
+          name === 'read_file'
+            ? { path: outputPath }
+            : name === 'write_file'
+              ? { path: outputPath, content: 'not a delivery' }
+              : { path: outputPath, base_ref: 'untrusted-reference', old_text: 'a', new_text: 'b' },
+      };
+    },
+    { mode: 'full' },
+  );
+  try {
+    await f.submit();
+    await f.done();
+    const executions = (await f.store.listExecutions('s')).filter((e) =>
+      ['files.read', 'files.write', 'files.edit'].includes(e.definitionId),
     );
-    const hookedStore = f.store;
-    const originalRegister = hookedStore.registerArtifact.bind(hookedStore);
-    const originalWrite = hookedStore.writeExtensionRecord.bind(hookedStore);
-    hookedStore.registerArtifact = async (input) => {
-      if (
-        fault === 'artifact' &&
-        injected === 0 &&
-        input.scope.kind === 'execution' &&
-        input.mediaType === 'text/plain' &&
-        input.hash === createHash('sha256').update(originalBody).digest('hex')
-      ) {
-        injected++;
-        expect(readFileSync(outputPath, 'utf8')).toBe(originalBody);
-        throw new Error('injected_output_artifact_registration_failure');
-      }
-      return originalRegister(input);
-    };
-    hookedStore.writeExtensionRecord = async (input) => {
-      const value = input.write.value as Record<string, Json>;
-      if (
-        fault === 'record' &&
-        injected === 0 &&
-        input.extensionId === 'builtin.files' &&
-        input.write.contentType === 'builtin.files.output' &&
-        input.write.key.startsWith('output/') &&
-        value.state === 'saved'
-      ) {
-        injected++;
-        expect(readFileSync(outputPath, 'utf8')).toBe(originalBody);
-        const reference = value.snapshot as unknown as {
-          id: string;
-          scope: { kind: 'execution'; id: string };
-        };
-        const published = await f.runtime.readArtifact({
-          ...f.base,
-          refId: reference.id,
-          scope: reference.scope,
-        });
-        expect(Buffer.from(published.content).toString('utf8')).toBe(originalBody);
-        throw new Error('injected_output_saved_record_failure');
-      }
-      return originalWrite(input);
-    };
-    async function currentOutput() {
-      const views = await f.runtime.queryExtension({
-        ...f.base,
-        extensionId: 'builtin.files',
-        queryId: 'files.outputs',
-        input: { path: outputPath },
-      });
-      return (
-        views[0]!.payload as unknown as {
-          key: string;
-          revision: string;
-          value: { state: string; executionId: string; snapshot: Json };
-        }[]
-      )[0]!;
-    }
-    try {
-      await f.submit();
-      await f.done();
-      const failed = (await f.store.listExecutions('s')).find(
-        (execution) => execution.definitionId === 'files.write',
-      )!;
-      expect(injected).toBe(1);
-      expect(failed.status).toBe('outcome_unknown');
-      expect(readFileSync(outputPath, 'utf8')).toBe(originalBody);
-      const failedResult = failed.result as Record<string, Json>;
-      expect(failedResult.artifactRefs).toBeUndefined();
-      expect(
-        (failedResult.details as Record<string, Json> | undefined)?.fileOutput,
-      ).toBeUndefined();
-      const pending = await currentOutput();
-      expect(pending.value).toMatchObject({
-        state: 'pending',
-        executionId: failed.id,
-        snapshot: null,
-      });
-      const operation = await f.store.getExtensionRecord({
-        sessionId: 's',
-        extensionId: 'builtin.files',
-        key: `output-operation/${failed.id}`,
-      });
-      expect(operation!.value).toMatchObject({ state: 'pending', executionId: failed.id });
-      const before = statSync(outputPath);
-      const calls = f.requests.length;
-      const executionCount = (await f.store.listExecutions('s')).length;
-      await f.submit();
-      await f.done();
-      expect(f.requests).toHaveLength(calls);
-      expect(await f.store.listExecutions('s')).toHaveLength(executionCount);
-      expect(await currentOutput()).toEqual(pending);
-      const afterDuplicate = statSync(outputPath);
-      expect({
-        ino: afterDuplicate.ino,
-        size: afterDuplicate.size,
-        mtimeMs: afterDuplicate.mtimeMs,
-      }).toEqual({ ino: before.ino, size: before.size, mtimeMs: before.mtimeMs });
-
-      hookedStore.registerArtifact = originalRegister;
-      hookedStore.writeExtensionRecord = originalWrite;
-      await f.reopen();
-      expect(f.requests).toHaveLength(calls);
-      expect(await currentOutput()).toEqual(pending);
-      await f.submit();
-      expect(await f.runtime.getCommand('work')).toMatchObject({
-        id: 'work',
-        status: 'applied',
-        receipt: { runId: failed.runId },
-      });
-      expect(f.requests).toHaveLength(calls);
-      expect(await f.store.listExecutions('s')).toHaveLength(executionCount);
-      expect(await f.store.getExecution(failed.id)).toMatchObject({
-        status: 'outcome_unknown',
-        resultRevision: failed.resultRevision,
-        result: failed.result,
-      });
-
-      await f.submit('explicit-fresh-read');
-      let denied: unknown;
-      try {
-        await f.done();
-      } catch (error) {
-        denied = error;
-      }
-      expect(denied).toMatchObject({ code: 'recovery_required' });
-      expect(f.requests).toHaveLength(calls);
-      expect(await f.store.listExecutions('s')).toHaveLength(executionCount);
-      expect(readFileSync(outputPath, 'utf8')).toBe(originalBody);
-      expect(await currentOutput()).toEqual(pending);
-      expect(
-        (await f.store.getExtensionRecord({
-          sessionId: 's',
-          extensionId: 'builtin.files',
-          key: `output-operation/${failed.id}`,
-        }))!.value,
-      ).toEqual(operation!.value);
-      expect(await f.store.getExecution(failed.id)).toMatchObject({
-        status: 'outcome_unknown',
-        resultRevision: failed.resultRevision,
-        result: failed.result,
-      });
-
-      const interrupted = await f.runtime.recoverSession({
-        ...f.base,
-        commandId: 'explicit-interrupt-unknown',
-        expectedOwnerGeneration: (await f.store.getSession('s'))!.ownerGeneration,
-        decision: 'interrupt',
-      });
-      expect(interrupted.unknownExecutionIds).toContain(failed.id);
-      expect(f.requests).toHaveLength(calls);
-      await f.submit('after-explicit-interrupt');
-      let stillDenied: unknown;
-      try {
-        await f.done();
-      } catch (error) {
-        stillDenied = error;
-      }
-      expect(stillDenied).toMatchObject({ code: 'recovery_required' });
-      expect(f.requests).toHaveLength(calls);
-      expect(await f.store.listExecutions('s')).toHaveLength(executionCount);
-      expect(await currentOutput()).toEqual(pending);
-      expect(readFileSync(outputPath, 'utf8')).toBe(originalBody);
-      expect(await f.store.getExecution(failed.id)).toMatchObject({
-        status: 'outcome_unknown',
-        resultRevision: failed.resultRevision,
-        result: failed.result,
-      });
-    } finally {
-      hookedStore.registerArtifact = originalRegister;
-      hookedStore.writeExtensionRecord = originalWrite;
-      await f.close();
-    }
+    expect(executions).toHaveLength(1);
+    expect(executions[0]!.status).not.toBe('succeeded');
+    expect(existsSync(outputPath)).toBe(false);
+    const outputs = await f.runtime.queryOutputFiles({ ...f.base, runId: await f.runId() });
+    expect(outputs.items).toEqual([]);
+    const views = await f.runtime.queryExtension({
+      ...f.base,
+      extensionId: 'builtin.files',
+      queryId: 'files.outputs',
+      input: {},
+    });
+    expect(views[0]!.payload).toEqual([]);
+  } finally {
+    await f.close();
   }
-}, 30000);
+}, 20000);

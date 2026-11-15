@@ -279,6 +279,7 @@ async function fixture(
   managed = false,
   planning = false,
   singleSlot = false,
+  injectedAuthority?: 'permissions' | 'both',
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-report-'))),
     workspace = join(root, 'workspace');
@@ -304,6 +305,8 @@ async function fixture(
     childCalls = 0,
     reports = 0;
   const calls: Record<string, unknown>[] = [];
+  const permissionRevisions: string[] = [];
+  let policyReads = 0;
   let currentReport = async () => false;
   let planningCall: (index: number) => Promise<{ name: string; input: Json } | null> = async () =>
     null;
@@ -399,6 +402,16 @@ async function fixture(
   const host = createDefaultProcessConfiguration({
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
+    ...(injectedAuthority
+      ? {
+          permissions: {
+            async authorize() {
+              permissionRevisions.push(currentRevision);
+              return { allowed: true, revision: currentRevision };
+            },
+          },
+        }
+      : {}),
     credentialBackend: {
       kind: 'temporary',
       async put() {},
@@ -420,31 +433,33 @@ async function fixture(
             }).authorize,
           },
         }),
-    permissionPolicy: managed
-      ? undefined
-      : {
-          async readPolicy() {
-            return {
-              mode: planning ? 'full' : 'accept_edits',
-              workspaceTrust: trusted,
-              revision: currentRevision,
-              allowed: [
-                { kind: 'model', definitionId: 'parent', definitionVersion: '1' },
-                { kind: 'tool', definitionId: 'task.spawn', definitionVersion: '1' },
-                { kind: 'job', definitionId: 'agent/general', definitionVersion: '1' },
-                ...(planning
-                  ? ['planning.write', 'planning.review', 'planning.update'].map(
-                      (definitionId) => ({
-                        kind: 'tool' as const,
-                        definitionId,
-                        definitionVersion: '1',
-                      }),
-                    )
-                  : []),
-              ],
-            };
+    permissionPolicy:
+      managed || injectedAuthority === 'permissions'
+        ? undefined
+        : {
+            async readPolicy() {
+              policyReads++;
+              return {
+                mode: planning ? 'full' : 'accept_edits',
+                workspaceTrust: trusted,
+                revision: currentRevision,
+                allowed: [
+                  { kind: 'model', definitionId: 'parent', definitionVersion: '1' },
+                  { kind: 'tool', definitionId: 'task.spawn', definitionVersion: '1' },
+                  { kind: 'job', definitionId: 'agent/general', definitionVersion: '1' },
+                  ...(planning
+                    ? ['planning.write', 'planning.review', 'planning.update'].map(
+                        (definitionId) => ({
+                          kind: 'tool' as const,
+                          definitionId,
+                          definitionVersion: '1',
+                        }),
+                      )
+                    : []),
+                ],
+              };
+            },
           },
-        },
   });
   const spawn = host.extensions
     ?.find((extension) => extension.id === 'builtin.task')
@@ -655,6 +670,10 @@ async function fixture(
     store,
     runtime,
     calls,
+    permissionRevisions,
+    get policyReads() {
+      return policyReads;
+    },
     expectedStoreId,
     profile,
     release,
@@ -885,6 +904,89 @@ test('default Service delivers one late child result to an idle parent and start
     await f.close();
   }
 }, 25000);
+for (const authority of ['permissions', 'both'] as const)
+  test(`opaque ${authority} authority keeps late reports queued across policy drift until an ordinary parent turn`, async () => {
+    const f = await fixture('default', false, false, false, false, authority);
+    try {
+      await f.start();
+      await f.approve('task.spawn');
+      await f.approve('agent/general');
+      await until(async () => (f.childCalls === 1 ? true : undefined));
+      await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
+      const calls = f.calls.length;
+      // The child is still live. A second policy reader must not turn this
+      // opaque ceiling into idle authority, even as that reader's trust changes.
+      f.drift(false);
+      f.release();
+      const carrier = await until(async () =>
+        (await f.store.listExecutions('s')).find(
+          (execution) => execution.childSessionId && execution.status === 'succeeded',
+        ),
+      );
+      expect(carrier.afterTurn).toMatchObject({ authorization: null });
+      const queued = await until(async () => {
+        const report = await f.pendingResultReport(carrier.id);
+        return (report?.receipt as { reason?: string })?.reason === 'idle_authorization_required'
+          ? report
+          : undefined;
+      });
+      expect(queued.status).toBe('accepted');
+      expect(carrier.delivery).toBe('pending');
+      expect(f.policyReads).toBe(0);
+      expect(f.calls).toHaveLength(calls);
+      expect((await f.client.getView('s')).runs).toHaveLength(1);
+      await until(async () => (!f.runtime.getLifecycleState().busy ? true : undefined));
+      await f.client.startRun('s', {
+        expectedStoreId: f.expectedStoreId,
+        commandId: 'ordinary-after-drift',
+        kind: 'run.start',
+        content: 'Use the pending child report.',
+      });
+      await f.runtime.waitForCommand('ordinary-after-drift', { timeoutMs: 8000 });
+      const view = await f.client.getView('s');
+      expect(view.runs.map((run) => run.originCommandId)).toEqual(['work', 'ordinary-after-drift']);
+      expect((await f.store.getCommand(queued.id))?.receipt).toMatchObject({
+        runId: view.runs.at(-1)!.id,
+        mode: 'active',
+        outcome: 'report_received',
+      });
+      expect(view.messages.filter((message) => message.agentResult)).toHaveLength(0);
+      expect(f.childCalls).toBe(1);
+      expect(f.reports).toBe(0);
+      expect(f.calls.slice(calls)).toHaveLength(1);
+      expect(f.permissionRevisions).toContain('changed');
+      expect(JSON.stringify(f.calls.at(-1)!.messages)).toContain(
+        'ORIGINAL_CHILD_RESULT complete tail',
+      );
+    } finally {
+      await f.close();
+    }
+  }, 25000);
+
+test('explicit idle authority still takes precedence over a dual injected permission host', async () => {
+  const f = await fixture(true, false, false, false, false, 'both');
+  try {
+    await f.start();
+    await f.approve('task.spawn');
+    await f.approve('agent/general');
+    await until(async () => (f.childCalls === 1 ? true : undefined));
+    await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
+    f.release();
+    const report = await until(async () =>
+      (await f.client.getView('s')).runs.find((run) => run.originCommandId.startsWith('report-')),
+    );
+    await f.runtime.waitForCommand(report.originCommandId, { timeoutMs: 8000 });
+    expect(f.policyReads).toBe(0);
+    expect(f.childCalls).toBe(1);
+    expect(f.reports).toBe(1);
+    expect(
+      (await f.client.getView('s')).messages.filter((message) => message.agentResult),
+    ).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+}, 25000);
+
 test('default current policy/trust drift after parent completion defers original report without child replay', async () => {
   for (const trusted of [true, false]) {
     const f = await fixture('default');

@@ -38,7 +38,6 @@ export function createFileToolBehaviors(options: {
       bindings: bindings as unknown as Json,
       scope: 'workspace-parent-slot-edit-write',
     }),
-    autoReview: 'none',
     async grantOffers(request): Promise<GrantCandidate[]> {
       if (
         !request.input ||

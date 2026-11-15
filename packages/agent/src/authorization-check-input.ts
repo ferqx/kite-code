@@ -52,6 +52,9 @@ function operationPolicy(value: Json): Json {
   return {
     ...(request.kind === undefined ? {} : { kind: request.kind }),
     ...(request.mode === undefined ? {} : { mode: request.mode }),
+    ...(request.untrustedMcpTool === undefined
+      ? {}
+      : { untrustedMcpTool: request.untrustedMcpTool }),
     ...(request.effects === undefined ? {} : { effects: request.effects }),
     ...(request.executionScope === undefined ? {} : { executionScope: request.executionScope }),
     ...(Array.isArray(request.policies)

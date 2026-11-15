@@ -6,7 +6,7 @@ import {
   type McpLifecycleOptions,
   mcpSourceConnectionJobId,
 } from '@kite-ai/agent/mcp';
-import type { CapabilityDescription } from '@kite-ai/agent/permissions';
+import { type CapabilityDescription, createUntrustedMcpTool } from '@kite-ai/agent/permissions';
 
 const key = (kind: string, id: string, version: string) => JSON.stringify([kind, id, version]);
 const object = (value: Json): Record<string, Json> =>
@@ -169,6 +169,14 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
           extension.id === 'builtin.mcp.discovery' ||
           selected.has(extension.id.slice('builtin.mcp.remote.'.length)),
       );
+      const toolMetadata = new Map(
+        extensions.flatMap((extension) =>
+          (extension.tools ?? []).flatMap((tool) => {
+            const metadata = lifecycle?.readToolReviewMetadata(tool);
+            return metadata ? [[key('tool', tool.id, tool.version), metadata] as const] : [];
+          }),
+        ),
+      );
       dynamic.clear();
       for (const extension of extensions) {
         for (const [kind, definitions] of [
@@ -180,6 +188,14 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
               key(kind, definition.id, definition.version),
               Object.freeze({
                 kind,
+                ...(kind === 'tool' &&
+                toolMetadata.has(key(kind, definition.id, definition.version))
+                  ? {
+                      untrustedMcpTool: createUntrustedMcpTool(
+                        toolMetadata.get(key(kind, definition.id, definition.version))!,
+                      ),
+                    }
+                  : {}),
                 definitionId: definition.id,
                 definitionVersion: definition.version,
                 revision: `${extension.id}:${extension.version}:${definition.version}`,

@@ -402,7 +402,7 @@ for (const actor of [
       if (actor === 'user stops child') expect(result[0]!.content).toBe(stopped);
       else
         expect(result[0]!.content).toMatch(
-          /^(?:execution_cancel_requested|child_cancel_requested|cancelled_before_dispatch)$/,
+          /^(?:execution_cancel_requested|child_cancel_requested|cancel_requested|cancelled_before_dispatch)$/,
         );
       expect(attempts).toBe(0);
       const work = (await store.getCommand('root-work'))!;

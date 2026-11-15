@@ -85,3 +85,5 @@ Desktop 右侧栏的“新标签页”在“工具”区提供“执行轨迹”
 可导出固定范围的轨迹文件，默认含事件及其中封存的有限公开展示摘要，不含完整消息、参数或结果材料；“导出含证据”另复制当次获准的公开材料。打开 `.kite-trajectory` 使用独立的离线只读窗口，不连接模型、启动 Runtime 或导入原 Store；包内缺少材料保持缺失。该能力当前面向 Electron Native，TUI／Web 不因此新增敏感读取或导出入口；本机过程、验收范围和安装／平台限制归 [Desktop owner](../../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)。
 
 [TUI 会话操作](../clients/tui/guides/sessions.md) · [Web 会话查看](../clients/web/guides/workspaces-and-sessions.md) · [CLI 继续任务](../cli/running-tasks.md)
+
+桌面对话中的思考／工具过程仍在进行时，不因暂时所有工具都有回执就展示最终完成统计。工具新增或更新不应收起用户已展开的思考内容；结束后的汇总与用户手动折叠仍保留。

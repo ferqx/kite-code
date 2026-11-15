@@ -212,6 +212,7 @@ const MessageItem = memo(function MessageItem({
   renderAttachments,
   showResponseStatus = true,
   showMetadata = true,
+  turnOutputs,
 }: {
   message: Message;
   expanded?: boolean;
@@ -230,6 +231,7 @@ const MessageItem = memo(function MessageItem({
   renderAttachments?: (message: Message) => ReactNode;
   showResponseStatus?: boolean;
   showMetadata?: boolean;
+  turnOutputs?: ReactNode;
 }) {
   const [metadataNow, setMetadataNow] = useState(() => Date.now());
   // Raw model reasoning is never part of the readable transcript.
@@ -509,6 +511,7 @@ const MessageItem = memo(function MessageItem({
           </span>
         </small>
       )}
+      {turnOutputs}
       {showMetadata && (
         <footer className={cn('message-meta', responding && 'message-meta-responding')}>
           {responding ? (
@@ -1066,11 +1069,13 @@ export function Conversation({
         showTraceReply = false,
         parentDisclosureOpen = true,
         onToolToggle,
+        turnOutputs,
       }: {
         directTraceDetails?: boolean;
         showTraceReply?: boolean;
         parentDisclosureOpen?: boolean;
         onToolToggle?: (open: boolean) => void;
+        turnOutputs?: ReactNode;
       } = {},
     ) => {
       const message = group[0]!;
@@ -1081,6 +1086,7 @@ export function Conversation({
           <div key={message.presentationKey ?? message.id} className="message-group">
             <article className={`message ${message.role}`} aria-label={`${message.role} 消息`}>
               {renderMessage(message)}
+              {turnOutputs}
             </article>
           </div>
         );
@@ -1161,6 +1167,7 @@ export function Conversation({
       ) : (
         <div key={message.presentationKey ?? message.id} className="message-group">
           <MessageItem
+            turnOutputs={turnOutputs}
             message={childWithUniqueSteps(message)}
             childDetail={childDetail(message)}
             childTools={
@@ -1325,15 +1332,19 @@ export function Conversation({
                           !activity.executionUnconfirmed &&
                           !messages.some((message) => message.role === 'tool' && !message.settled)
                         ? '正在等待'
-                        : activity?.responsePhase === 'preparing' && messages.length === 0
-                          ? '正在准备回复…'
+                        : messages.length === 0 &&
+                            activity?.status === 'running' &&
+                            !activity.executionUnconfirmed &&
+                            !activity.unavailable
+                          ? activity.responsePhase === 'preparing'
+                            ? '正在准备回复…'
+                            : '正在回复…'
                           : undefined
           : undefined;
         const turnKey = `turn:${entry.turnId}:complete`;
         const open = !showElapsed || (expanded[turnKey] ?? incompleteFailure);
         if (showElapsed && blocks.length > 0 && open) trackOpen(turnKey);
         const statusContent = <span className="agent-turn-status-label">{finishedLabel}</span>;
-        const lastBlock = blocks.at(-1);
         const turnActive =
           !ended &&
           lastTurnEntry &&
@@ -1346,6 +1357,7 @@ export function Conversation({
           >
             {renderGroup([message], showReply || message.finalReply ? 'result' : 'process', {
               showTraceReply: showReply && streaming,
+              turnOutputs: message.id === finalGroup?.[0]?.id ? turnOutputs : undefined,
             })}
           </div>
         );
@@ -1353,7 +1365,7 @@ export function Conversation({
           blocks.map((block, index) => {
             const first = block[0]!;
             if (!isConversationTraceStep(first)) return renderBody(first);
-            const phaseActive = turnActive && block === lastBlock && !reply;
+            const phaseActive = !ended && lastTurnEntry && !reply;
             const tool = turnActive ? latestRunningTraceTool(block) : undefined;
             const trailing = block.at(-1);
             const thinking =
@@ -1361,9 +1373,28 @@ export function Conversation({
               !tool &&
               (!activity || activity.status === 'running') &&
               trailing?.role === 'thinking' &&
+              (!!trailing.text.trim() || !!trailing.reasoningSource) &&
               !trailing.settled &&
               trailing.tracePending !== 'tool';
-            const working = tool ? toolTraceTitle(tool) : thinking ? '正在思考…' : undefined;
+            const working = tool
+              ? toolTraceTitle(tool)
+              : phaseActive
+                ? activity?.executionUnconfirmed
+                  ? '执行状态待确认'
+                  : activity?.status === 'cancelling'
+                    ? '正在停止'
+                    : activity?.status === 'recovery_required'
+                      ? '需要恢复'
+                      : activity?.status === 'queued'
+                        ? '等待处理'
+                        : trailing?.tracePending === 'tool'
+                          ? '等待工具执行'
+                          : thinking
+                            ? '正在思考…'
+                            : activity?.status === 'waiting'
+                              ? '正在等待'
+                              : '正在回复…'
+                : undefined;
             const steps = block.filter((item) => !item.tracePending);
             const singleTool =
               steps.length === 1 && steps[0]?.role === 'tool' ? steps[0] : undefined;
@@ -1463,7 +1494,7 @@ export function Conversation({
             }
           >
             {content}
-            {turnOutputs}
+            {!finalGroup && turnOutputs}
             {waitingLabel && (
               <small
                 className={cn('conversation-turn-notice', cancelled && 'conversation-turn-stopped')}
@@ -1597,9 +1628,11 @@ export function Conversation({
               </div>
             )}
           {finalGroup && (
-            <div className="agent-turn-final">{renderGroup(finalGroup, 'result')}</div>
+            <div className="agent-turn-final">
+              {renderGroup(finalGroup, 'result', { turnOutputs })}
+            </div>
           )}
-          {turnOutputs}
+          {!finalGroup && turnOutputs}
           {responding && (
             <small className="response-status" role="status">
               <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">

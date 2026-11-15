@@ -274,8 +274,12 @@ function NativeUserImage({
     [retention, clear],
   );
   useEffect(() => {
-    if (!nearby || !visible) clear();
-    else if (readAvailable) void open(readScope);
+    // Clipping during the tool disclosure's exit animation is not a scroll-away.
+    // Keep already verified pixels until Radix unmounts the closing body; pending
+    // reads still stop below, and window hiding / normal offscreen release stay intact.
+    const closing = card.current?.closest('.tool-activity-content[data-state="closed"]');
+    if (!visible || (!nearby && !closing)) clear();
+    else if (nearby && readAvailable) void open(readScope);
     // Scope changes and Activity deactivation stop pending bytes, retaining verified media.
     return stopRead;
   }, [nearby, visible, readAvailable, readScope, clear, open, stopRead]);

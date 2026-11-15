@@ -1,6 +1,6 @@
 import { ArrowDown01Icon, BulbIcon, Wrench01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { Fragment, type ReactNode, useId } from 'react';
+import { Fragment, type ReactNode, useEffect, useId } from 'react';
 import {
   Trace,
   TraceCollapsible,
@@ -84,6 +84,13 @@ export function ConversationTrace({
   const hasDetails = grouped || first?.role === 'tool' || !!first?.reasoningSource;
   const open = hasDetails && expanded[id] === true;
   const detailsOpen = processOpen && open;
+  // Restored single-step traces may only carry the parent disclosure. Preserve
+  // that detail state before an appended tool changes the trace into a group.
+  useEffect(() => {
+    if (grouped || !open || !firstKey) return;
+    const detailKey = first?.role === 'tool' ? `activity:${firstKey}` : firstKey;
+    if (expanded[detailKey] === undefined) onToggle(detailKey, true);
+  }, [grouped, open, firstKey, first?.role, expanded, onToggle]);
   function toggle(next: boolean) {
     onToggle(id, next);
     if (!grouped && firstKey) {
@@ -148,7 +155,7 @@ export function ConversationTrace({
             <Trace className="conversation-trace-steps" data-grouped={grouped || undefined}>
               {steps.map((step, index) => {
                 const stepKey = step.presentationKey ?? step.id;
-                const direct = !grouped && index === 0;
+                const direct = index === 0 && (!grouped || step.role === 'thinking');
                 if (step.role === 'tool')
                   return <Fragment key={stepKey}>{renderTool(step, direct, detailsOpen)}</Fragment>;
                 const canRead = !!step.reasoningSource && !!renderReasoning;
@@ -170,6 +177,7 @@ export function ConversationTrace({
                   <TraceCollapsible
                     key={stepKey}
                     className="conversation-reasoning"
+                    data-direct-reasoning={direct || undefined}
                     open={reasoningOpen}
                     onOpenChange={(next) => onToggle(stepKey, next)}
                   >

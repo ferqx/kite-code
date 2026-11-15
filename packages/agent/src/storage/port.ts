@@ -296,6 +296,8 @@ export interface DispatchAuthorizationCheckInput extends OwnedWrite {
   controlReads?: readonly PermissionControlRead[];
 }
 export interface PersistAuthorizationCheckPartialInput extends OwnedWrite {
+  /** Sanitized approval-model attempt audit, not authorization evidence. */
+  reviewAttempts?: Json;
   executionId: string;
   content: string;
   reasoning?: string;

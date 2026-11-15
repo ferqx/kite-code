@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { toolBehaviorBinding } from '../authorization-check-output';
 import type { AuthorizationRequest, PermissionDecision, Permissions } from '../extensions';
+import { canonicalJson } from '../json';
 import {
   approvalOptions,
   capabilityKey,
@@ -13,9 +14,11 @@ import {
 import type { Json } from '../storage';
 import type { ToolBehaviorBinding } from '../tool-behavior';
 import { isBuiltinBrowserApprovalExempt } from './capabilities';
+import { type UntrustedMcpTool, validUntrustedMcpTool } from './mcp-tool-context';
 import { sealWorktreeDecision } from './worktree-authorization';
 
 export { shellRiskReviewContractDigest } from '../shell-risk-review';
+export { createUntrustedMcpTool, type UntrustedMcpTool } from './mcp-tool-context';
 
 export type PermissionMode = 'accept_edits' | 'auto' | 'full';
 export type CapabilityEffect =
@@ -44,6 +47,8 @@ export interface PermissionPolicySnapshot {
 }
 /** Supplied by actual trusted host registration, never by a Tool description or remote text. */
 export interface CapabilityDescription extends CapabilityIdentity {
+  /** Selected remote semantics only; untrusted text cannot change host authority. */
+  readonly untrustedMcpTool?: UntrustedMcpTool;
   /** Trusted fixed worktree implementation, after canonical command and asset verification. */
   readonly worktreeAuthorization?: { readonly configurationIdentity: string };
   /** Trusted default-host review contract; absent preserves custom and historical policies. */
@@ -58,6 +63,7 @@ export interface CapabilityDescription extends CapabilityIdentity {
   readonly commandDigest?: string;
   readonly autoReviewKey?: string;
   readonly autoTimeoutScope?:
+    | 'stop'
     | 'governed'
     | {
         readonly filesystem: 'workspace_write' | 'full_access';
@@ -81,6 +87,8 @@ export interface CapabilityDescription extends CapabilityIdentity {
 export interface AuthorizationCheckContext {
   /** Host contract: Core may project verified task inputs instead of the business Model window. */
   readonly reviewInput?: 'task_authorization';
+  /** Trusted host native identity observation; evidence only, never an execution grant. */
+  readonly currentFileTarget?: Json;
   readonly task: Json;
   readonly plan: Json | null;
   readonly rejectionReasons: readonly string[];
@@ -153,6 +161,8 @@ function validDescription(description: CapabilityDescription) {
   return (
     identity(description) &&
     text(description.revision) &&
+    (description.untrustedMcpTool === undefined ||
+      (description.kind === 'tool' && validUntrustedMcpTool(description.untrustedMcpTool))) &&
     typeof description.hardAllowed === 'boolean' &&
     typeof description.safeRead === 'boolean' &&
     (description.worktreeAuthorization === undefined ||
@@ -233,6 +243,9 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
           description.grantBehavior ?? null,
           description.reviewBehavior ?? null,
           description.internalRecordOnly ?? null,
+          ...(description.untrustedMcpTool
+            ? [canonicalJson(description.untrustedMcpTool as unknown as Json)]
+            : []),
           ...(description.approvalExempt ? [description.approvalExempt] : []),
           ...(description.autoReview ? [description.autoReview] : []),
           ...(description.autoReview === 'check' && description.reviewBehavior
@@ -453,12 +466,21 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
             ...(description.autoReviewKey ? { operationKey: description.autoReviewKey } : {}),
             ...(behavior
               ? { behavior, stopOnTimeout: true }
-              : { timeoutScope: description.autoTimeoutScope ?? 'governed' }),
+              : description.autoTimeoutScope === 'stop'
+                ? { stopOnTimeout: true }
+                : { timeoutScope: description.autoTimeoutScope ?? 'governed' }),
             request: {
               mode: policy.mode,
               effects: [...description.effects],
               ...(description.executionScope ? { executionScope: description.executionScope } : {}),
               invocation: structuredClone(invocation),
+              ...(description.untrustedMcpTool
+                ? {
+                    untrustedMcpTool: structuredClone(
+                      description.untrustedMcpTool,
+                    ) as unknown as Json,
+                  }
+                : {}),
               ...(context ? { context: context as unknown as Json } : {}),
             },
           },

@@ -6,6 +6,7 @@ import { canonicalJson } from '../json';
 import type { CapabilityDescription, PermissionPolicySnapshot } from '../permissions';
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import { AgentError, type Json } from '../storage/types';
+import { withExternalFileReads } from './external-file-reads';
 import { createWorkspaceFiles, type FileSnapshot, type WorkspaceFiles } from './files';
 import {
   createFileReadResult,
@@ -58,7 +59,7 @@ async function canonicalTarget(path: string): Promise<string> {
   }
 }
 
-/** External text mutations use the existing native engine only under a final Full proof.
+/** External text mutations use the existing native engine only under a final owned authorization proof.
  * Workspace checkpoints and special Profile adapters retain their original scopes.
  */
 export function withFullAccessFiles(options: {
@@ -66,6 +67,7 @@ export function withFullAccessFiles(options: {
   workspaceRoot(request: Request): Promise<string>;
   protectedRoots(): readonly string[];
 }) {
+  const readScope = withExternalFileReads(options);
   async function outside(request: Request, input: Json) {
     if (
       !input ||
@@ -139,7 +141,7 @@ export function withFullAccessFiles(options: {
       await native.close();
     }
   }
-  function full(context: ToolContext, tool: ToolDefinition, revision?: string) {
+  function authorized(context: ToolContext, tool: ToolDefinition, revision?: string) {
     if (!context.dispatchAuthorization?.revision) return false;
     for (const leaf of dispatchScopeLeaves(
       context.dispatchAuthorization.snapshot,
@@ -148,7 +150,7 @@ export function withFullAccessFiles(options: {
       const capability = leaf.data.capability as Record<string, Json> | undefined;
       if (
         leaf.namespace !== 'builtin.permissions' ||
-        leaf.data.mode !== 'full' ||
+        !['full', 'auto', 'accept_edits'].includes(String(leaf.data.mode)) ||
         leaf.data.workspaceTrust !== true ||
         !capability ||
         capability.kind !== 'tool' ||
@@ -184,7 +186,7 @@ export function withFullAccessFiles(options: {
   return {
     async describeRequest(
       request: AuthorizationRequest,
-      policy?: Pick<PermissionPolicySnapshot, 'mode'>,
+      _policy?: Pick<PermissionPolicySnapshot, 'mode'>,
     ): Promise<CapabilityDescription | null> {
       if (
         request.kind !== 'tool' ||
@@ -200,13 +202,6 @@ export function withFullAccessFiles(options: {
         safeRead: false,
         effects: ['external'] as const,
       };
-      if (policy?.mode !== 'full')
-        return {
-          ...base,
-          revision: 'builtin.files:external-full-required',
-          hardAllowed: false,
-          denialReason: 'file_full_access_required',
-        };
       try {
         const selected = await prepare(request, request.input);
         return selected ? { ...base, revision: selected.revision, hardAllowed: true } : null;
@@ -226,7 +221,7 @@ export function withFullAccessFiles(options: {
           ? tool
           : {
               ...tool,
-              description: `${tool.description} Full access also supports ordinary external absolute file targets directly. External read results include an edit baseline when the target supports native safe mutation; other readable external targets retain read-only results. Protected resources and inherited restrictions still apply. External files are outside workspace checkpoints.`,
+              description: `${tool.description} Ordinary external absolute file targets use the current permission mode: Full allows, Auto reviews, Request Approval asks the user. External read results include an edit baseline when the target supports native safe mutation; other readable external targets retain read-only results. Protected resources and inherited restrictions still apply. External files are outside workspace checkpoints.`,
               inputSchema: {
                 ...tool.inputSchema,
                 properties: {
@@ -235,7 +230,7 @@ export function withFullAccessFiles(options: {
                     type: 'string',
                     maxLength: 4096,
                     description:
-                      'Workspace-relative or absolute path. Effective Full access allows external absolute write/edit targets; protected resources and native file checks remain.',
+                      'Workspace-relative or absolute path. External absolute write/edit targets require authorization under the current mode; protected resources and native file checks remain.',
                   },
                 },
               },
@@ -245,14 +240,24 @@ export function withFullAccessFiles(options: {
                 let result: ToolResult;
                 try {
                   if (!(await outside(context, input))) return await tool.execute(input, context);
-                  if (!full(context, tool)) {
-                    if (read) return await tool.execute(input, context);
-                    throw new AgentError('file_full_access_required');
+                  if (!authorized(context, tool)) {
+                    throw new AgentError('file_dispatch_scope_unavailable');
+                  }
+                  if (read) {
+                    const capability = await readScope.describeRequest({
+                      ...context,
+                      kind: 'tool',
+                      definitionId: tool.id,
+                      definitionVersion: tool.version,
+                      input,
+                    });
+                    if (!capability?.hardAllowed || !authorized(context, tool, capability.revision))
+                      throw new AgentError('file_dispatch_scope_changed');
                   }
                   context.signal.throwIfAborted();
                   const selected = await prepare(context, input);
                   if (!selected) return await tool.execute(input, context);
-                  if (!read && !full(context, tool, selected.revision))
+                  if (!read && !authorized(context, tool, selected.revision))
                     throw new AgentError('file_dispatch_scope_changed');
                   files = createWorkspaceFiles({ root: selected.anchor, strictReads: true });
                   const native = files;

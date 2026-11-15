@@ -100,7 +100,7 @@ HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core �
 
 Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短 Tool 结果并直接停止当前 root work，不再续答模型；revise 仍交模型按反馈修订，普通权限拒绝不改变语义。三模式和新输入恢复由[按 Run 配置回归](test/isolated/per-run-planning-configuration.test.ts)核验。默认装配提供准确原 Run 的计划批准要求与当前计划，不给 Agent 定义 planning/building 阶段；批准仍按原 Run、版本、digest 与 accepted Interaction，工具权限独立核验。步骤进度通过 `read_plan` 查询，不参与稳定计划来源摘要；不再注册独立执行回执检索工具。原记录由宿主保留，但存储历史不等于模型仍可查询。
 
-[审核模型装配](src/authorization-check-model.ts)复用当前选定模型的凭据和传输绑定，创建独立 low reasoning preset。普通 compatible 连接在模型已选用 reasoningEffort 时使用 low，已支持 reasoning 的登录 adapter 同样使用 low。默认 Shell 风险审核省略 `maxOutputTokens`。通用内置 checker 在接口支持时使用 `min(原设置,256)`。注入的自定义 checker 使用其自有设置。默认总期限 8000ms，显式配置优先。checker identity 按实际 checkOptions 与 Shell 风险合同摘要计算，`snapshot.authorizationCheckPreset` 封存真实设置与期限。活动旧 Run 如果无法重建原绑定，恢复明确失败。[Auto 回归](test/isolated/auto-configuration.test.ts)核通用设置与失败路径。[Windows Shell 回归](test/isolated/windows-shell-auto.test.ts)核默认审核省略输出上限、超时零派发和迟到结果。
+[审核模型装配](src/authorization-check-model.ts)复用当前选定模型的凭据和传输绑定，创建独立 low reasoning preset。普通 compatible 连接在模型已选用 reasoningEffort 时使用 low，已支持 reasoning 的登录 adapter 同样使用 low。默认 Shell 风险审核省略 `maxOutputTokens`。通用内置 checker 在接口支持时使用 `min(原设置,256)`。注入的自定义 checker 使用其自有设置。默认单次审核期限 8000ms，显式配置优先；实际审批检查总预算为其三倍，包含准备和排队，重试规则归[权限 owner](../../packages/agent/src/permissions/README.md#有界审批模型重试)。checker identity 按实际 checkOptions 与 Shell 风险合同摘要计算，`snapshot.authorizationCheckPreset` 封存真实设置与期限。活动旧 Run 如果无法重建原绑定，恢复明确失败。[Auto 回归](test/isolated/auto-configuration.test.ts)核通用设置与失败路径。[Windows Shell 回归](test/isolated/windows-shell-auto.test.ts)核默认审核省略输出上限、超时零派发和迟到结果。
 
 工具包导出实际定义及[可信行为工厂](../../packages/agent/src/tool-behavior.ts)，`forRun` 按实际定义对象、kind／id／version 静态登记；普通 Extension／MCP 元数据和配置文本不能自签行为。Shell／Files／worktree owner 提供范围与领域审核，Service 只选择当前产品默认和全局上限。默认策略明确绑定 `check.behavior`，AND 只有所有检查选择同一行为才保留；混合独立检查沿通用 checker，不借 Shell 风险解释器替代。Run 保存准确行为 contractRef／configurationDigest；CLI/TUI/Native 同步使用 `options/optionId`，公开路由保持 `/v1`，不保留旧答案解析。范围与最终事务归[grant owner](../../packages/agent/src/storage/sqlite/permission-grants.README.md)。
 
@@ -586,6 +586,8 @@ Model 必须有准确 kind 的允许项，不给同名 Tool 授权。所有非 M
 
 [默认权限装配](src/permission-configuration.ts)提供有限 `afterTurn` 策略，按原委派角色、当前 policy/trust 和持久控制读核对续轮资格。空闲父会话的合格终态可开启通知轮，暂不能续轮的结果由后继活动父轮接收。宿主显式提供的 `afterTurn.authorize` 优先，回调在装配时绑定冻结。结果保留原 carrier、期限、selection 和工作来源。[默认续轮](test/isolated/default-after-turn.test.ts)与[可信 SDK 装配](test/isolated/after-turn-configuration.test.ts)验证各自的原任务、配置和 Run 身份。
 
+宿主注入 opaque `permissions` 时，默认策略不能据此取得空闲续轮资格；同时存在但按既有优先级未被读取的 `permissionPolicy` 也不能改变这一点。结果保留原邮箱，由后继普通活动轮在当前派发权限下接收；宿主如需自动续轮，仍须显式提供可信 `afterTurn`。默认续轮测试覆盖两类注入、子任务在途时的策略漂移、后继活动轮准确接收和显式策略优先，不更改普通客户端的默认自动续轮行为。
+
 [默认 completion 测试](test/isolated/default-after-turn.test.ts)保留实际 planning 条件、当前 policy/trust 与来源漂移检查。单槽父轮在子结果完成后直接采用完整 Source；idle 报告由当前可信授权决定。`planning-configuration.ts` 只沿已消费 report 的准确 carrier/source 或历史人类 public/raw/decision/business 收据及 `continuationRunId` 回到原 planning Run，不读取 latest；同 Store/Session/root work/config/selection/requirements 必须匹配，独立新工作无法借用旧规划。新普通输入不借旧分类收据自动恢复原规划。旧人类续轮证明的字段破坏、跨工作与配置/selection 漂移由[专用证明测试](test/isolated/planning-successor-proof.test.ts)拒绝。空 MCP 选择仍封存准确 scope/inheritance，`readSet:null` 保持无选中来源的冷恢复语义，不增加连接或工具能力。
 
 自动报告的新 Run 在原 SQL 事务继承父 `requirements` 引用，不重新登记外 Run refs。[planning-configuration.ts](src/planning-configuration.ts) 的 `readBoundJobReportParent` 从实际 report Command/receipt、原 source Execution、carrier result revision/afterTurn、父 Run/config/root work 和原主体核绑定；权限沿该有限历史关系读取原批准，任意同 Session 新 Run 不获得例外。报告仍受原 refs 的最终 head/proof/CAS，初始化不生成新的 Plan/Workflow 意图。Planning 历史 receipt 按原实际 Execution 的批准 Run 重建来源 digest，inactive Run 的当前信息贡献继续 `approval:null`。原九文件 48/747 与 Planning 三文件 50/454 证据保留在[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)；当前源码外默认 Task、冷报告与客户端的实际范围另见[协作验证](../../tests/README.md#子-agent-协作-v11-验证)，不据本机证据推定其他平台资格。
@@ -600,7 +602,7 @@ Plan 文件编辑委派到 `planning.write` 后，FileCheckpoint 只从准确父
 
 `Execution.authorization.policy` 经单条 Execution、SessionView 和 BrowserView 的同源 schema 保留有限的复用／父级审核／超时继续原因、证据来源及 requested/effective scope。`authorization.policy` 日志同时保留原事件的闭合 `details.policy`，不把策略 Command 的 source ID 当作 Execution，也不回填旧封存缺失项。[实际 Runtime／HTTP／Native SDK／Cookie Browser 回归](test/isolated/authorization-policy-observation.test.ts)核复用与超时两条真实传递链、读取零业务写及私密内容不进入日志；不代表普通客户端窗口的交互验收。
 
-默认 Auto 的 `autoApproval.timeoutMs` 为10000毫秒，可在[配置手册](../../docs/handbook/features/models-and-configuration.md#生效与限制)规定范围内显式设置整数；配置和 Core 宿主绑定共享定时器上限校验，不接受会溢出并提前触发的期限。Core 从审核准备开始计入队列和 Provider，总期限不因重试或排队重置。技术错误、准确超时、真实拒绝与人工决定分别回执。超时默认放行语义审核，由工具原有执行策略兜底；Shell 文件和网络请求取原父子／宿主硬上限交集，不附加超时专属收窄。默认请求仍为 `workspace_write/none`，显式请求的外部写入及联网可按原策略执行。记录准确超时放行而非模型批准，原保护和独立人工要求保持，无可兑现边界则给模型明确超时失败。独立人工审批仍沿准确卡片。已批准结论与 Tool→原 Job 的语义审查复用由准确任务、参数、相关变更及策略绑定，变化即失效；Service 不另造审批缓存或放行逻辑。
+默认 `autoApproval.timeoutMs` 为8000毫秒的单次审批请求上限，可在[配置手册](../../docs/handbook/features/models-and-configuration.md#chatgpt--codex-本机自动接入)规定范围内显式设置整数；配置和 Core 宿主绑定拒绝越界值。Core 统一负责最多三次审批请求及三倍总预算，Service 不另加重试或放行逻辑。只有明确超时／断连可重试，其他技术失败、拒绝和取消均按各自原因结束，未取得有效批准不派发工具，也不因技术失败新增人工卡；独立必需人工审批仍沿准确卡片。已批准结论与 Tool→原 Job 的复用由准确任务、参数、审核材料和当前策略绑定，变化即失效；原父子／宿主硬上限和受保护资源保持。
 
 控制读取在既有安全检查点内共享同一观察，最终派发仍重核当前策略。隔离读取压测中同一场景的查询约由510次／秒降至74次／秒；这只说明该控制读取路径的压力下降，不表示整体工具吞吐或真实模型长任务加速，实际任务延迟仍受模型、审批队列与工具本身影响。
 
@@ -1138,3 +1140,12 @@ owned navigate沿原35秒默认／既有配置请求预算，不再被普通私�
 HTTP流的[传输owner](src/artifact-stream.ts)对正常EOF、客户端取消和异常next/return统一落定；清理未知保留原错误并使Service关闭失败，不把已closed generator的后续return成功当成首次清理成功。[故障回归](test/isolated/artifact-stream.test.ts)专门覆盖return和EOF-finally抛错、取消、背压及单次结算。
 
 本地文件只读预览使用内部 UI `POST /v1/sessions/:id/preview/pdf-snapshot`：Main 先授权并冻结原文件字节，Service 只接受受限 base64、SHA-256、Store/Session 与页码，不接收路径、不注册产物。请求体90MiB、解码64MiB、最多2个渲染、60秒取消；现有 Bun PDF owner 在单次私有临时缓存渲染，finally清理，返回既有页图DTO。原生预览按页缓存已验证图片，避免缩略图与正文重复渲染。
+
+MCP Agent 工具权限由 `permission-configuration.ts` 在准确宿主注册或所选动态目录解析之后，经 `mcp-tool-permissions.ts` 收束：不接受远端注解提供 safe-read 或默认 Auto 豁免；工作区写入需人工审批、Auto 需模型审批、有效 Full 直接执行。有明确证据的审批超时/断连最多重试两次（总计三次），耗尽或其他技术失败均未派发结束；拒绝、取消及非法输出不重试，重试只在原审批检查内，不重放 Tool；非 Tool 的连接 Job 与设置管理保原权限合同。
+
+
+## MCP 自动审核的选定工具语义
+
+[默认 MCP 装配](src/mcp-configuration.ts)从 lifecycle 的实际已选 ToolDefinition 对象读取原名称、描述和输入结构，只把本次工具的 `untrustedMcpTool` 交给[权限策略](../../packages/agent/src/permissions/README.md)，不扩展到同目录其他工具或连接配置。描述最多 2048 个 UTF-16 code units 并标明 complete/truncated/absent；结构最多 8 层、128 个节点、每层64个属性、8 KiB JSON，超过界限标 omitted，不裁成貌似完整的 schema。字面值及引用被省略的 structure_only 始终表示不完整语义，相关取舍和安全边界由权限 owner 维护。
+
+[实际 SDK 回归](test/isolated/mcp-configuration.test.ts)核默认 Auto 任务投影中的名称／描述／结构、准确 Tool id/version/参数、原系统提示、首次 HTTP 408 超时后的原输入重试和只执行一次远端效果，以及仅有不完整流 EOF 时不重试且零远端效果；重复读取原 Model input 不重新连接或重放工具。[生命周期回归](../../packages/agent/test/isolated/mcp/lifecycle.test.ts)核真实对象绑定、跨 Store／Session／未选 server 不发布、目录失效及冷历史不恢复。以上受控模型回答证明材料与执行链，不证明模型对任意远端语义的判断质量；实际客户端与真实模型资格分别验收。

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { act, type ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -499,7 +500,7 @@ test.each([
     await view.render({
       traceTurns,
       renderTurnOutputs: ({ turnId, finalMessageId }) => (
-        <aside data-output-turn={turnId} data-final={finalMessageId}>
+        <aside className="turn-output-files" data-output-turn={turnId} data-final={finalMessageId}>
           Saved attachment
         </aside>
       ),
@@ -508,9 +509,12 @@ test.each([
     expect(document.querySelector('[data-output-turn="run"]')?.getAttribute('data-final')).toBe(
       'last',
     );
-    expect(
-      document.querySelector('[data-output-turn="run"]')?.previousElementSibling?.className,
-    ).toContain('agent-turn-final');
+    const outputs = document.querySelector('[data-output-turn="run"]')!;
+    expect(outputs.closest('.agent-turn-final')).not.toBeNull();
+    expect(outputs.parentElement?.getAttribute('data-message-id')).toBe('last');
+    expect(outputs.previousElementSibling?.textContent).toContain('saved');
+    expect(outputs.nextElementSibling?.className).toContain('message-meta');
+    expect(outputs.nextElementSibling?.querySelector('.message-copy')).not.toBeNull();
     await view.render({
       messages: [
         { id: 'failed-user', role: 'user', text: 'create', settled: true },
@@ -569,5 +573,29 @@ test.each([
     expect(document.querySelectorAll('[data-output-turn]')).toHaveLength(0);
   } finally {
     await view.close();
+  }
+});
+
+test('final reply metadata stays in flow after output files', () => {
+  const css = readFileSync(new URL('../../src/desktop/style.css', import.meta.url), 'utf8');
+  const rule = css.match(
+    /\.kite-client \.agent-turn-final \.message\.assistant:has\(> \.turn-output-files\) > \.message-meta \{[^}]*\}/,
+  )?.[0];
+  expect(rule).toBeDefined();
+  const dom = new JSDOM(
+    `<!doctype html><style>.message-meta {position:absolute;top:100%} ${rule}</style><div class="kite-client"><div class="agent-turn-final"><article class="message assistant"><p>Done</p><section class="turn-output-files">Files</section><footer class="message-meta"><button>Copy</button></footer></article></div><article class="message user"><footer class="message-meta">User metadata</footer></article></div>`,
+  );
+  try {
+    const footer = dom.window.document.querySelector('.assistant > .message-meta')!;
+    expect(dom.window.getComputedStyle(footer).position).toBe('relative');
+    expect(dom.window.getComputedStyle(footer).top).toBe('auto');
+    expect(
+      dom.window.getComputedStyle(dom.window.document.querySelector('.user > .message-meta')!)
+        .position,
+    ).toBe('absolute');
+    dom.window.document.querySelector('.turn-output-files')!.remove();
+    expect(dom.window.getComputedStyle(footer).position).toBe('absolute');
+  } finally {
+    dom.window.close();
   }
 });

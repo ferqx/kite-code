@@ -3710,6 +3710,10 @@ body {
   position: relative;
   padding-inline-start: 21px;
 }
+/* Appending a tool must not indent the already visible first reasoning body. */
+.kite-client .conversation-trace-steps[data-grouped] > [data-direct-reasoning] {
+  margin-inline-start: -21px;
+}
 .kite-client .conversation-trace-steps[data-grouped] [data-trace-line] {
   padding-inline: 0;
   column-gap: 6px;
@@ -7934,8 +7938,12 @@ body {
   display: grid;
   gap: 8px;
 }
-.kite-client .agent-turn-final:has(+ .turn-output-files) .message.assistant {
-  margin-bottom: 0;
+.kite-client .agent-turn-final .message.assistant:has(> .turn-output-files) {
+  margin-bottom: 8px;
+}
+.kite-client .agent-turn-final .message.assistant:has(> .turn-output-files) > .message-meta {
+  position: relative;
+  top: auto;
 }
 .output-file-card {
   display: flex;

@@ -76,3 +76,5 @@ Files 的 `file_change` 读取已封存的 UTF-8 有界 text、原 before／afte
 同一工作树另执行 Agent owner 的429个原计划作业，复用已完成作业并补齐未执行部分；本次闭包与 reader 提取所需的测试夹具修正后，412作业通过，17个既有作业仍失败。未修改的 HEAD 源码独立副本使用相同外部依赖、原 workspace 映射和相同原生 Files 资产，对照也在这17个作业失败：包括旧 Task cursor／Files 参数或展示夹具、规划／Ask 参数、Model retry 预期、Windows专属准备、旧私库格式及 PTY 英文按钮预期。没有将这些用例计为通过，后半段未触达的断言仍未取得资格。原始 host／remaining／HEAD 对照日志保留于本机 `.cache/trajectory-agent-tests-*.log`；原模型／工具／业务语义未为其失败放宽。默认执行环境另直接拒绝既有 worker 的嵌套 macOS sandbox，宿主权限下原 browser execute 和 human-async 整文件分别83／67项通过；人工接管默认环境的瞬时状态漏采仍只记为时序敏感观察，不与该权限限制混为一谈。
 
 同环境另以真实 Runtime 创建大于 inline 阈值的 Model 输入／输出，保存原 event/ref 后关闭并通过公开 backup／restore 更换 Store，再由新 readonly Runtime 调用原 `readTrajectoryEvidence`：117702 字节输入视图与 126070 字节输出视图逐字节相同，原事件出处保持，当前 Store 使用新身份，读取前后 metadata 不变；Model 总调用仅原来的一次，冷读 Model／permission 端口均配置为调用即失败。此检查直接覆盖新 Evidence 接口的恢复接缝；17 MiB 容量和损坏边界仍由上述整文件回归承担。
+
+内部审批检查的用量由同一持久记录 `reviewAttempts` 汇总：仅在全部实际尝试均报告该 token 字段时相加，不重复计算成功回执的顶层 usage。缺失字段不显示为全检查总数，也不当作零消耗；逐次已观察值仍留在审计中。旧记录没有尝试审计时继续读取原顶层 usage；业务模型与标题模型不受影响。成功、耗尽和取消路径回归见 [审批执行测试](../../test/isolated/execution/authorization-check.test.ts)。

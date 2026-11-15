@@ -24,7 +24,11 @@ import {
   withFullAccessFiles,
 } from '../../../src/files';
 import { canonicalJson } from '../../../src/json';
-import type { CapabilityDescription, PermissionMode } from '../../../src/permissions';
+import {
+  type CapabilityDescription,
+  createPermissionPolicy,
+  type PermissionMode,
+} from '../../../src/permissions';
 import type { Json } from '../../../src/storage/types';
 
 function fixture() {
@@ -174,31 +178,38 @@ test('Full creates missing parent directories through the original native create
   }
 });
 
-test('non-Full external mutation is explicit denied while ordinary external reads keep their old contract', async () => {
+test('approved Auto and Request Approval external mutations retain native baselines', async () => {
   const f = fixture();
   try {
-    const path = join(f.external, 'outside.txt');
-    writeFileSync(path, 'original');
     for (const mode of ['accept_edits', 'auto'] as const) {
-      const req = f.request('files.write', { path, base: null, content: 'must not write' });
+      const path = join(f.external, `${mode}.txt`);
+      const req = f.request('files.write', { path, base: null, content: 'original' });
       expect(await f.api.describeRequest(req, { mode })).toMatchObject({
-        hardAllowed: false,
-        denialReason: 'file_full_access_required',
+        hardAllowed: true,
+        effects: ['external'],
       });
-      expect((await f.execute('files.write', req.input, {}, mode)).details).toMatchObject({
-        code: 'file_full_access_required',
-      });
+      expect((await f.execute('files.write', req.input, {}, mode)).outcome).toBe('succeeded');
       const read = JSON.parse((await f.execute('files.read', { path }, {}, mode)).content);
       expect(read.content).toBe('original');
-      expect(read.baseline).toBeUndefined();
+      expect(read.baseline.hash).toMatch(/^[a-f0-9]{64}$/);
+      expect(
+        (
+          await f.execute(
+            'files.edit',
+            { path, base: read.baseline, find: 'original', replace: 'updated', occurrences: 1 },
+            {},
+            mode,
+          )
+        ).outcome,
+      ).toBe('succeeded');
+      expect(readFileSync(path, 'utf8')).toBe('updated');
     }
-    expect(readFileSync(path, 'utf8')).toBe('original');
   } finally {
     await f.close();
   }
 });
 
-test('every accepted parent/child policy must be Full and match the original capability revision', async () => {
+test('every accepted parent/child policy must remain trusted and match the original capability revision', async () => {
   const f = fixture();
   try {
     const path = join(f.external, 'never.txt'),
@@ -206,7 +217,10 @@ test('every accepted parent/child policy must be Full and match the original cap
     const req = f.request('files.write', input),
       cap = await f.api.describeRequest(req, { mode: 'full' });
     const good = f.proof('full', cap),
-      restricted = f.proof('accept_edits', cap);
+      restricted = {
+        ...f.proof('accept_edits', cap),
+        data: { ...f.proof('accept_edits', cap).data, workspaceTrust: false },
+      };
     const context = await f.context(req);
     const snapshots: Json[] = [
       {
@@ -500,3 +514,75 @@ test.skipIf(process.platform === 'win32')(
     expect(cleanupMatched).toBe(true);
   },
 );
+
+for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+  for (const toolId of ['files.read', 'files.write', 'files.edit']) {
+    test(`${mode} ${toolId} external request selects the existing approval route without execution`, async () => {
+      const f = fixture();
+      try {
+        const path = join(f.external, 'approval.txt');
+        const req = f.request(toolId, { path, content: 'not executed' });
+        const permissions = createPermissionPolicy({
+          readPolicy: () => ({
+            mode,
+            workspaceTrust: true,
+            revision: 'policy',
+            allowed: [
+              {
+                kind: req.kind,
+                definitionId: req.definitionId,
+                definitionVersion: req.definitionVersion,
+              },
+            ],
+          }),
+          describeCapability: async () =>
+            (await f.api.describeRequest(req, { mode })) ?? (await f.reads.describeRequest(req)),
+        });
+        const decision = await permissions.authorize(req);
+        if (mode === 'full') expect(decision.allowed).toBe(true);
+        else {
+          expect(decision.allowed).toBe(false);
+          expect(decision.reason).toBe(
+            mode === 'auto' ? 'auto_check_required' : 'approval_required',
+          );
+          expect(!!decision.check).toBe(mode === 'auto');
+          expect(decision.approval).toBeDefined();
+        }
+        expect(existsSync(path)).toBe(false);
+        const denied = await f.execute(
+          toolId,
+          req.input,
+          { dispatchAuthorization: undefined },
+          mode,
+        );
+        expect(denied.outcome).toBe('failed');
+        expect(existsSync(path)).toBe(false);
+      } finally {
+        await f.close();
+      }
+    });
+  }
+}
+
+test('external read authorization cannot follow a different symlink target after approval', async () => {
+  const f = fixture();
+  try {
+    const first = join(f.external, 'first'),
+      second = join(f.external, 'second'),
+      link = join(f.external, 'link');
+    writeFileSync(first, 'approved');
+    writeFileSync(second, 'not approved');
+    symlinkSync(first, link);
+    const req = f.request('files.read', { path: link }),
+      context = await f.context(req, 'accept_edits');
+    unlinkSync(link);
+    symlinkSync(second, link);
+    const result = await f.api.tools
+      .find((t) => t.id === 'files.read')!
+      .execute(req.input, context);
+    expect(result.outcome).toBe('failed');
+    expect(result.content).not.toContain('not approved');
+  } finally {
+    await f.close();
+  }
+});

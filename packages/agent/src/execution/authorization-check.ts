@@ -16,6 +16,7 @@ import {
   type OwnerRef,
 } from '../storage/types';
 import type { ToolBehaviorBinding } from '../tool-behavior';
+import { approvalModelAttempts } from './authorization-retry';
 import { type AuthorizationTimingState, authorizationTimingSnapshot } from './authorization-timing';
 import type { ModelResponse } from './index';
 import type { ExecutionResources } from './resources';
@@ -40,6 +41,9 @@ export async function runInternalModelCall(options: {
   input: Json;
   modelMetadata: Json;
   timing?: AuthorizationTimingState;
+  transientRetryTimeoutMs?: number;
+  checkRetryFreshness?(): Promise<void>;
+  retainReviewCleanup?(pending: Promise<void>): void;
   controlReads?: readonly PermissionControlRead[];
   signal: AbortSignal;
   checkpoint(): Promise<void>;
@@ -56,6 +60,8 @@ export async function runInternalModelCall(options: {
     ? store.finishAuthorizationCheck.bind(store)
     : store.finishInternalModel.bind(store);
   const base = { expectedStoreId: execution.originStoreId, owner, executionId: execution.id };
+  const reviewAttempts: Json[] = [];
+  const reviewCleanups: Promise<void>[] = [];
   let content = '';
   let reasoning = '';
   let firstOutput: 'content' | 'reasoning' | undefined;
@@ -73,6 +79,7 @@ export async function runInternalModelCall(options: {
       reasoning: modelOutput ? '' : reasoning,
       ...(firstOutput ? { firstOutput } : {}),
       usage,
+      ...(reviewAttempts.length ? { reviewAttempts: structuredClone(reviewAttempts) } : {}),
       ...(modelOutput ? { modelOutput } : {}),
     });
   };
@@ -138,7 +145,29 @@ export async function runInternalModelCall(options: {
     const providerRequest = structuredClone(options.request);
     signal.throwIfAborted();
     if (options.timing) options.timing.providerStartedAt = Date.now();
-    for await (const event of options.model.stream(providerRequest, { signal })) {
+    const stream =
+      permissionCheck && options.transientRetryTimeoutMs !== undefined
+        ? approvalModelAttempts({
+            model: options.model,
+            request: providerRequest,
+            signal,
+            timeoutMs: options.transientRetryTimeoutMs,
+            retainCleanup: (pending) => {
+              reviewCleanups.push(pending);
+              options.retainReviewCleanup?.(pending);
+            },
+            checkpoint: async () => {
+              await options.checkpoint();
+              await options.checkRetryFreshness?.();
+            },
+            record: async (value) => {
+              const record = value as Record<string, Json>;
+              reviewAttempts[Number(record.attempt) - 1] = value;
+              await partial();
+            },
+          })
+        : options.model.stream(providerRequest, { signal });
+    for await (const event of stream) {
       if (finished) throw new AgentError('model_event_after_finish');
       if (event.type === 'usage') usage = structuredClone({ ...event.usage });
       signal.throwIfAborted();
@@ -250,6 +279,7 @@ export async function runInternalModelCall(options: {
         toolCalls: [],
         usage,
         finishReason: 'stop',
+        ...(reviewAttempts.length ? { reviewAttempts: structuredClone(reviewAttempts) } : {}),
         ...(timing() ? { timing: timing()! } : {}),
         ...(body ? { modelInputBodyHash: body.reference.hash } : {}),
         ...(descriptor ? { modelOutput: descriptor as unknown as Json } : {}),
@@ -283,6 +313,7 @@ export async function runInternalModelCall(options: {
               ? error.message
               : 'model_failed',
         incomplete: true,
+        ...(reviewAttempts.length ? { reviewAttempts: structuredClone(reviewAttempts) } : {}),
         ...(timedOut && options.timing
           ? { deadlineAt: options.timing.startedAt + options.timing.budgetMs }
           : {}),
@@ -303,6 +334,7 @@ export async function runInternalModelCall(options: {
     if (signal.aborted || timedOut || !permissionCheck) throw error;
     return null;
   } finally {
-    release?.();
+    if (reviewCleanups.length) void Promise.allSettled(reviewCleanups).then(() => release?.());
+    else release?.();
   }
 }

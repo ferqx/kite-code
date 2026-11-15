@@ -308,69 +308,87 @@ test('cancellation after internal dispatch ACK and before the original command r
   }
 });
 
-test('a cancelled checker that ignores abort retains its per-Run configuration and Store until the actual call exits', async () => {
-  let enter!: () => void, release!: () => void;
-  const entered = new Promise<void>((resolve) => {
-    enter = resolve;
-  });
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let disposed = 0;
-  let draining: Promise<void> | undefined;
-  const f = await fixture(
-    {
-      async *stream() {
-        enter();
-        yield { type: 'text_delta', text: '{"decision":' };
-        await held;
-        yield { type: 'text_delta', text: '"approve_once","reason":"late"}' };
-        yield finish;
-      },
-    },
-    {
-      perRunDispose: async () => {
-        disposed++;
-      },
-    },
-  );
-  try {
-    await entered;
-    await f.runtime.cancelCommand({
-      ...f.base,
-      commandId: 'cancel-held-check',
-      targetCommandId: 'work',
+for (const shape of ['generator', 'eager-return'] as const)
+  test(`a cancelled checker retains configuration and Store until its actual ${shape} call exits`, async () => {
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
     });
-    await f.runtime.waitForCommand('work');
-    expect(disposed).toBe(0);
-    expect(f.effects()).toBe(0);
-    let storeClosed = false,
-      drained = false;
-    const closeStore = f.store.close.bind(f.store);
-    f.store.close = async () => {
-      storeClosed = true;
-      await closeStore();
-    };
-    draining = f.runtime.close().then(() => {
-      drained = true;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    void draining.catch(() => {});
-    await Bun.sleep(100);
-    expect(disposed).toBe(0);
-    expect(storeClosed).toBe(false);
-    expect(drained).toBe(false);
-    expect((await f.store.getMetadata()).storeId).toBe(f.base.expectedStoreId);
-    release();
-    await draining;
-    expect(disposed).toBe(1);
-    expect(storeClosed).toBe(true);
-    expect(f.effects()).toBe(0);
-  } finally {
-    release();
-    await draining?.catch(() => {});
-    await f.close();
-  }
-});
+    let disposed = 0;
+    let draining: Promise<void> | undefined;
+    const f = await fixture(
+      {
+        stream() {
+          if (shape === 'eager-return')
+            return {
+              [Symbol.asyncIterator]() {
+                return {
+                  async next() {
+                    enter();
+                    await held;
+                    return { done: false as const, value: finish };
+                  },
+                  async return() {
+                    return { done: true as const, value: undefined };
+                  },
+                };
+              },
+            };
+          return (async function* () {
+            enter();
+            yield { type: 'text_delta' as const, text: '{"decision":' };
+            await held;
+            yield { type: 'text_delta' as const, text: '"approve_once","reason":"late"}' };
+            yield finish;
+          })();
+        },
+      },
+      {
+        perRunDispose: async () => {
+          disposed++;
+        },
+      },
+    );
+    try {
+      await entered;
+      await f.runtime.cancelCommand({
+        ...f.base,
+        commandId: 'cancel-held-check',
+        targetCommandId: 'work',
+      });
+      await f.runtime.waitForCommand('work');
+      expect(disposed).toBe(0);
+      expect(f.effects()).toBe(0);
+      let storeClosed = false,
+        drained = false;
+      const closeStore = f.store.close.bind(f.store);
+      f.store.close = async () => {
+        storeClosed = true;
+        await closeStore();
+      };
+      draining = f.runtime.close().then(() => {
+        drained = true;
+      });
+      void draining.catch(() => {});
+      await Bun.sleep(100);
+      expect(disposed).toBe(0);
+      expect(storeClosed).toBe(false);
+      expect(drained).toBe(false);
+      expect((await f.store.getMetadata()).storeId).toBe(f.base.expectedStoreId);
+      release();
+      await draining;
+      expect(disposed).toBe(1);
+      expect(storeClosed).toBe(true);
+      expect(f.effects()).toBe(0);
+    } finally {
+      release();
+      await draining?.catch(() => {});
+      await f.close();
+    }
+  });
 
 test('cancelling during the first planned check command read retains its configuration and Store until preparation settles', async () => {
   let enter!: () => void, release!: () => void;

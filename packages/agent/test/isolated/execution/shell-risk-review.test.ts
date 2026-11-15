@@ -1,14 +1,20 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import {
+  createFixedModel,
+  ModelAttemptError,
+  type ModelEvent,
+  type ModelRequest,
+} from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension } from '../../../src/extensions';
 import { createPermissionPolicy } from '../../../src/permissions';
+import { createShellRiskPreparer } from '../../../src/permissions/shell-risk-facts';
 import { openSqliteStore } from '../../../src/sqlite';
 import { fixtureReviewBinding, fixtureRiskBehavior } from '../../fixtures/review-behavior';
 
@@ -20,6 +26,10 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
 async function fixture(
   options: {
     risk?: 'ordinary' | 'high' | 'critical';
+    disconnects?: number;
+    changeDuringReview?: boolean;
+    replaceScriptAt?: 'retry' | 'complete';
+    hangReview?: boolean;
     invalid?: boolean;
     changed?: boolean;
     reusable?: boolean;
@@ -33,6 +43,26 @@ async function fixture(
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-shell-risk-loop-')));
   const profile = { dataRoot: root, profile: 'test' };
+  const script = join(root, 'script.sh');
+  if (options.replaceScriptAt) writeFileSync(script, '#!/bin/sh\nprintf before\n');
+  const replaceScript = () => {
+    writeFileSync(`${script}.new`, '#!/bin/sh\nprintf after\n');
+    renameSync(`${script}.new`, script);
+  };
+  const nativeReview = options.replaceScriptAt
+    ? createShellRiskPreparer({
+        workspaceRoot: root,
+        cwd: root,
+        env: { PATH: '/bin' },
+        rgPath: '/usr/bin/false',
+        interpreterPaths: ['/bin/sh'],
+        protectedPaths: [],
+        binding: { fixture: 'native' },
+        sanitizedEnvironment: true,
+        classify: async () => ({ plainCommands: [['./script.sh']] }),
+        rewritten: async () => false,
+      })
+    : undefined;
   const store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;
   if (options.delayedEnsure) {
@@ -48,6 +78,10 @@ async function fixture(
     revision = 0;
   const requests: ModelRequest[] = [];
   const reviewedExecutions: boolean[] = [];
+  let releaseReview!: () => void;
+  const reviewGate = new Promise<void>((resolve) => {
+    releaseReview = resolve;
+  });
   let releasePreparation!: () => void;
   const preparationGate = new Promise<void>((resolve) => {
     releasePreparation = resolve;
@@ -100,6 +134,14 @@ async function fixture(
     preparations++;
     if (options.hangPreparation) await preparationGate;
     if (options.preparationFails) throw new Error('private preparation body');
+    if (nativeReview) {
+      const { material, fingerprint, reusable } = await nativeReview.prepare(
+        './script.sh',
+        { filesystem: 'workspace_write', network: 'none' },
+        new AbortController().signal,
+      );
+      return { material, fingerprint, reusable };
+    }
     return {
       material: { command: 'bounded fixture', cwd: root, revision },
       fingerprint: createHash('sha256').update(String(revision)).digest('hex'),
@@ -141,13 +183,26 @@ async function fixture(
       timeoutMs:
         options.reviewBudgetMs ?? (options.hangPreparation || options.delayedEnsure ? 30 : 5000),
       model: {
-        async *stream(input) {
+        async *stream(input, { signal }) {
           requests.push(structuredClone(input));
+          if (requests.length <= (options.disconnects ?? 0)) {
+            if (options.changeDuringReview) revision++;
+            if (options.replaceScriptAt === 'retry') replaceScript();
+            throw new ModelAttemptError('connection_failed', 'connection_interrupted');
+          }
+          if (options.hangReview)
+            await Promise.race([
+              reviewGate,
+              new Promise<void>((resolve) => {
+                if (signal.aborted) resolve();
+                else signal.addEventListener('abort', () => resolve(), { once: true });
+              }),
+            ]);
           const user = input.messages.find((message) => message.role === 'user')!.content;
           const payload = JSON.parse(user);
           expect(payload.purpose).toBe('shell_risk');
           expect(payload.operation).toMatchObject({ kind: 'tool', definitionId: 'fixture.effect' });
-          expect(payload.material.command).toBe('bounded fixture');
+          expect(payload.material.command).toBe(nativeReview ? './script.sh' : 'bounded fixture');
           expect(user).not.toContain('PRIVATE-TASK');
           expect(user).not.toContain('PRIVATE-PLAN');
           expect(user).not.toContain('BUSINESS-SECRET');
@@ -161,6 +216,7 @@ async function fixture(
                 : { risk: options.risk ?? 'ordinary', reason: 'Exact bounded fixture effect.' },
             ),
           };
+          if (options.replaceScriptAt === 'complete') replaceScript();
           yield finish;
         },
       },
@@ -203,6 +259,7 @@ async function fixture(
     },
     async close() {
       releasePreparation();
+      releaseReview();
       await runtime.close();
       await store.close();
       rmSync(root, { recursive: true, force: true });
@@ -281,10 +338,10 @@ test('hung fact preparation times out without a model call or waiting for the re
   const f = await fixture({ hangPreparation: true, calls: 1 });
   try {
     expect((await f.run()).status).toBe('completed');
-    expect(f.counts()).toMatchObject({ effects: 1, reviews: 0, contexts: 0 });
+    expect(f.counts()).toMatchObject({ effects: 0, reviews: 0, contexts: 0 });
     const check = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'reviewer')!;
     expect(check.result).toMatchObject({ code: 'authorization_check_timeout' });
-    expect(f.reviewedExecutions).toEqual([false]);
+    expect(f.reviewedExecutions).toEqual([]);
   } finally {
     await f.close();
   }
@@ -388,3 +445,102 @@ test('Full bypasses the semantic reviewer and fact preparation under the origina
     await f.close();
   }
 });
+
+for (const disconnects of [2, 3])
+  test(`Shell risk reviewer retries disconnected approval only, count ${disconnects}`, async () => {
+    const f = await fixture({ disconnects, calls: 1 });
+    try {
+      await f.run();
+      expect(f.counts()).toMatchObject({ reviews: 3, effects: disconnects === 2 ? 1 : 0 });
+      const checks = (await f.store.listExecutions('s')).filter(
+        (e) => e.definitionId === 'reviewer',
+      );
+      expect(checks).toHaveLength(1);
+      expect((checks[0]!.result as { reviewAttempts: unknown[] }).reviewAttempts).toHaveLength(3);
+    } finally {
+      await f.close();
+    }
+  });
+test('Shell risk reviewed material change prevents the second model request and dispatch', async () => {
+  const f = await fixture({ disconnects: 1, changeDuringReview: true, calls: 1 });
+  try {
+    await f.run();
+    expect(f.counts()).toMatchObject({ reviews: 1, effects: 0 });
+    const check = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'reviewer')!;
+    expect(check.result).toMatchObject({ code: 'context_refresh_required' });
+  } finally {
+    await f.close();
+  }
+});
+test('Shell risk reviewer timeout budget exhausts closed without sandbox continuation', async () => {
+  const f = await fixture({ hangReview: true, reviewBudgetMs: 50, calls: 1 });
+  try {
+    await f.run();
+    expect(f.counts().reviews).toBeGreaterThan(1);
+    expect(f.counts().reviews).toBeLessThanOrEqual(3);
+    expect(f.counts().effects).toBe(0);
+    expect(f.reviewedExecutions).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const mode of ['auto', 'accept_edits', 'full'] as const)
+  test(`Shell review retries preserve the actual ${mode} policy`, async () => {
+    const f = await fixture({ mode, disconnects: 2, calls: 1 });
+    try {
+      const work = f.run();
+      void work.catch(() => {});
+      if (mode === 'accept_edits') {
+        let card:
+          | Awaited<ReturnType<typeof f.runtime.listInteractions>>['interactions'][number]
+          | undefined;
+        const deadline = Date.now() + 4000;
+        while (!card && Date.now() < deadline) {
+          card = (
+            await f.runtime.listInteractions({
+              expectedStoreId: f.expectedStoreId,
+              sessionId: 's',
+              state: 'pending',
+            })
+          ).interactions[0];
+          if (!card) await Bun.sleep(10);
+        }
+        expect(card).toBeDefined();
+        expect(f.counts()).toMatchObject({ effects: 0, reviews: 0 });
+        await f.runtime.answerInteraction({
+          expectedStoreId: f.expectedStoreId,
+          commandId: 'answer',
+          presentationSessionId: card!.presentationSessionId,
+          interactionId: card!.id,
+          expectedRevision: card!.revision,
+          subjectId: 'owner',
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+        });
+      }
+      await work;
+      expect(f.counts()).toMatchObject({ reviews: mode === 'auto' ? 3 : 0, effects: 1 });
+      if (mode !== 'auto') expect(f.counts().preparations).toBe(0);
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const replaceScriptAt of ['retry', 'complete'] as const)
+  test(`native script replacement at ${replaceScriptAt} invalidates the sealed Shell review before dispatch`, async () => {
+    const f = await fixture({
+      replaceScriptAt,
+      disconnects: replaceScriptAt === 'retry' ? 1 : 0,
+      calls: 1,
+    });
+    try {
+      await f.run();
+      const check = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'reviewer')!;
+      expect(f.counts()).toMatchObject({ reviews: 1, effects: 0 });
+      expect(check.status).toBe('failed');
+      expect(check.result).toMatchObject({ code: 'context_refresh_required' });
+      expect(check.result).not.toHaveProperty('authorizationCheckOutput');
+    } finally {
+      await f.close();
+    }
+  });

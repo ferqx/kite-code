@@ -54,10 +54,10 @@ test('actual default Service keeps native and compiler assets protected in Full 
         [find('read'), { path: ordinary }],
         [find('read'), { path: metadata }],
         [find('read'), { path: assets[0] }],
-        [find('write'), { path: deniedNew, content: 'must not publish', base: null }],
+        [find('write'), { path: deniedNew, content: 'must not publish' }],
         ...compilerAssets.flatMap((path) => [
           [find('read'), { path }],
-          [find('write'), { path, content: 'must not overwrite', base: null }],
+          [find('write'), { path, content: 'must not overwrite' }],
         ]),
       ];
       const delta =

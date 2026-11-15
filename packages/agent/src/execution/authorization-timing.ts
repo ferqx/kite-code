@@ -62,3 +62,25 @@ export function authorizationTimingSnapshot(
     totalMs,
   };
 }
+
+/** Total retry budgets may exceed the host timer range; retain the original deadline. */
+export function scheduleAuthorizationDeadline(deadlineAt: number, expired: () => void): () => void {
+  if (!Number.isSafeInteger(deadlineAt)) throw new AgentError('invalid_authorization_timing');
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout>;
+  const schedule = () => {
+    timer = setTimeout(
+      () => {
+        if (stopped) return;
+        if (Date.now() < deadlineAt) schedule();
+        else expired();
+      },
+      Math.min(maximumAuthorizationCheckTimeoutMs, Math.max(0, deadlineAt - Date.now())),
+    );
+  };
+  schedule();
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+}

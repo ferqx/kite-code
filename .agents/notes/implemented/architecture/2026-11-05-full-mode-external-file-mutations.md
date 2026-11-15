@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-15：用户明确将普通外部 Files 读写扩展为 Auto 自动审批、请求批准模式人工审批；本文的「仅 Full」限制由当前 [Files owner](../../../../packages/agent/src/tools/files/README.md) 的权限修正部分取代。原 native 原子基线、保护资源、未知结果与不纳入工作区 checkpoint 的决定仍保留。新范围尚待真实客户端验收，不沿用本文历史资格。
+
 ## Problem
 
 用户在真实模型测试中观察到 Full 模式写入工作区外目标仍被拒绝，并明确要求 Full 不再因 Files 固定工作区范围拒绝普通外部写入。此前的[工具退役决定](2026-11-02-tool-surface-retirement.md)将外部修改交给 Shell，统一文件工具只有外部只读能力；因此同一 Full 用户意图会因模型选用 `write_file` 还是 Shell 而得到不同结果。直接修改底层 Workspace 根约束又会影响检查点、恢复和原有文件身份校验，不能仅删除路径检查解决。

@@ -101,7 +101,7 @@ import { NativeDisplayCache } from './native-display-cache';
 import { useNativeEnvironment } from './native-environment';
 import { nativeExecutionObservation } from './native-execution-observation';
 import { NativeExtensions } from './native-extensions';
-import { NativeOperationDiff, NativeOutputFile } from './native-file-changes';
+import { NativeOperationDiff } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { useNativeFileTargets } from './native-file-targets';
 import { confirmNativeFullPermission } from './native-full-permission-confirmation';
@@ -5183,16 +5183,6 @@ function NativeDesktopContent({
             editor={editor}
             open={open}
             cache={operationDiffs.current}
-          />
-        ) : null,
-      renderDelivery: (entry) =>
-        state ? (
-          <NativeOutputFile
-            key={entry.changeId}
-            bridge={bridge}
-            generation={state.generation}
-            entry={entry}
-            editor={editor}
           />
         ) : null,
       openFileForTarget: (target) => {

@@ -10,6 +10,7 @@ import type {
   OperationRef,
   StopConfirmation,
   ToolContext,
+  ToolDefinition,
   ToolResult,
 } from '../extensions';
 import { AgentError } from '../storage/types';
@@ -248,6 +249,15 @@ const inputSchema = {
 
 /** Optional bounded host composition. No connection, discovery or history restoration at construction. */
 export function createMcpLifecycle(options: McpLifecycleOptions) {
+  // Object identity binds review text to the exact selected Tool, not a namesake or stale id.
+  const toolReviewMetadata = new WeakMap<
+    ToolDefinition,
+    {
+      name: string;
+      description?: string;
+      inputSchema: Json;
+    }
+  >();
   const port = options.transportPort;
   const timeout = options.readyTimeoutMs ?? 10000;
   if (
@@ -2852,6 +2862,10 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
   };
   return {
     extension,
+    readToolReviewMetadata(tool: ToolDefinition) {
+      const metadata = toolReviewMetadata.get(tool);
+      return metadata ? structuredClone(metadata) : null;
+    },
     async readStepCapabilities(input: {
       command: { originStoreId: string };
       session: { id: string };
@@ -2892,6 +2906,21 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         }
         const catalogue = entry.adapter.getCatalogue();
         const tools = entry.scope.getCachedTools();
+        for (const metadata of entry.adapter.getToolsMetadata().tools) {
+          const tool = tools.find(
+            (candidate) =>
+              candidate.id === metadata.definitionId &&
+              candidate.version === metadata.definitionVersion,
+          );
+          if (!tool) continue;
+          toolReviewMetadata.set(tool, {
+            name: metadata.descriptor.name,
+            ...(metadata.descriptor.description === undefined
+              ? {}
+              : { description: metadata.descriptor.description }),
+            inputSchema: structuredClone(metadata.descriptor.inputSchema) as Json,
+          });
+        }
         searchSources.push({
           names: new Map(
             entry.adapter

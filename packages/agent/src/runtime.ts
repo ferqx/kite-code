@@ -38,6 +38,7 @@ import {
   type AuthorizationTimingState,
   authorizationTimingSnapshot,
   maximumAuthorizationCheckTimeoutMs,
+  scheduleAuthorizationDeadline,
 } from './execution/authorization-timing';
 import { ChangeWaits } from './execution/change-waits';
 import { ChildSlots } from './execution/child-slots';
@@ -1430,8 +1431,7 @@ export class AgentRuntime {
   ): Promise<ReadAuthorizationCheckInput | AutoAuthorizationEvidence | null> {
     const checker = scope.bindings?.authorizationCheck ?? this.defaultChecker;
     if (!checker || !decision.check) return null;
-    const { stopOnTimeout } = decision.check;
-    const deadlineAt = startedAt + (checker.timeoutMs ?? 8000);
+    const deadlineAt = startedAt + (checker.timeoutMs ?? 8000) * 3;
     const timingState: AuthorizationTimingState = { startedAt, budgetMs: deadlineAt - startedAt };
     const identity = { id: checker.id, version: checker.version, modelId: checker.modelId };
     const behavior = this.reviewBehavior(scope, request, checker, decision);
@@ -1517,12 +1517,12 @@ export class AgentRuntime {
       release,
     );
     void task.catch(prepareFailed);
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let clearDeadline: (() => void) | undefined;
     let expire!: () => void;
     const elapsed = new Promise<void>((resolve) => {
       expire = resolve;
     });
-    timer = setTimeout(expire, Math.max(0, deadlineAt - Date.now()));
+    clearDeadline = scheduleAuthorizationDeadline(deadlineAt, expire);
     const timeout = async () => {
       await elapsed;
       scope.signal.throwIfAborted();
@@ -1551,12 +1551,7 @@ export class AgentRuntime {
       } catch (error) {
         if (!(error instanceof AgentError) || error.code !== 'terminal_conflict') throw error;
       }
-      if (stopOnTimeout) return reference;
-      const evidence = await this.options.store.resolveAutoAuthorization({
-        ...evidenceInput,
-        timedOutCheckId: reference.checkExecutionId,
-      });
-      return evidence ?? reference;
+      return reference;
     };
     let expired: Promise<ReadAuthorizationCheckInput | AutoAuthorizationEvidence> | undefined;
     const waiting = elapsed.then(() => {
@@ -1572,32 +1567,14 @@ export class AgentRuntime {
           !scope.signal.aborted &&
           ((controller.signal.reason instanceof AgentError &&
             controller.signal.reason.code === 'authorization_check_timeout') ||
-            (stopOnTimeout &&
-              error instanceof AgentError &&
-              error.code === 'authorization_check_timeout'))
+            (error instanceof AgentError && error.code === 'authorization_check_timeout'))
         )
           reviewed = await (expired ?? waiting);
         else throw error;
       }
-      if (!stopOnTimeout && reviewed && !('policyEvidenceId' in reviewed)) {
-        const saved = await this.options.store.getExecution(reviewed.checkExecutionId);
-        if (
-          saved?.status === 'failed' &&
-          saved.result &&
-          typeof saved.result === 'object' &&
-          !Array.isArray(saved.result) &&
-          saved.result.code === 'authorization_check_timeout'
-        )
-          return (
-            (await this.options.store.resolveAutoAuthorization({
-              ...evidenceInput,
-              timedOutCheckId: reviewed.checkExecutionId,
-            })) ?? reviewed
-          );
-      }
       return reviewed;
     } finally {
-      if (timer) clearTimeout(timer);
+      clearDeadline?.();
       scope.signal.removeEventListener('abort', abort);
       controller.abort();
     }
@@ -1612,7 +1589,7 @@ export class AgentRuntime {
     scope.signal.throwIfAborted();
     if (Date.now() >= deadlineAt) return { review: null };
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let clearDeadline: (() => void) | undefined;
     let cancel!: () => void;
     const cancelled = new Promise<never>((_resolve, reject) => {
       cancel = () => {
@@ -1623,13 +1600,10 @@ export class AgentRuntime {
       if (scope.signal.aborted) cancel();
     });
     const expired = new Promise<null>((resolve) => {
-      timer = setTimeout(
-        () => {
-          controller.abort(new AgentError('authorization_check_timeout'));
-          resolve(null);
-        },
-        Math.max(0, deadlineAt - Date.now()),
-      );
+      clearDeadline = scheduleAuthorizationDeadline(deadlineAt, () => {
+        controller.abort(new AgentError('authorization_check_timeout'));
+        resolve(null);
+      });
     });
     try {
       const preparing = this.trackInternalModelTask(
@@ -1676,7 +1650,7 @@ export class AgentRuntime {
         ? { review: null }
         : { review: null, failure: 'authorization_check_preparation_failed' };
     } finally {
-      if (timer) clearTimeout(timer);
+      clearDeadline?.();
       scope.signal.removeEventListener('abort', cancel);
       controller.abort();
     }
@@ -1723,7 +1697,7 @@ export class AgentRuntime {
       behavior: this.reviewBinding(timing.behavior),
       ...(usesBehavior ? { review: timing.review ?? null } : {}),
       ...(timing.parentProof ? { parentProof: timing.parentProof } : {}),
-      ...(decision.check.stopOnTimeout ? { stopOnTimeout: true as const } : {}),
+      stopOnTimeout: true,
       timeout: { startedAt: timing.startedAt, deadlineAt: timing.deadlineAt },
     });
     if (canonicalJson(fact.source) !== canonicalJson(source))
@@ -1865,7 +1839,40 @@ export class AgentRuntime {
                 }),
             },
             execution: fact.execution,
+            checkRetryFreshness: async () => {
+              scope.signal.throwIfAborted();
+              const policy = scope.bindings?.permissions ?? this.options.permissions;
+              const current = await policy?.authorize({ ...request, signal: scope.signal });
+              if (
+                !current ||
+                current.revision !== decision.revision ||
+                canonicalJson((current.check ?? null) as unknown as Json) !==
+                  canonicalJson(decision.check as unknown as Json)
+              )
+                throw new AgentError('context_refresh_required');
+              // Shell script bytes and other reviewed material are separately bound,
+              // not necessarily part of the policy's structural capability revision.
+              if (timing.behavior.prepareReview || timing.behavior.prepareParentProof) {
+                const fresh = await this.prepareToolReview(
+                  scope,
+                  request,
+                  timing.behavior,
+                  timing.deadlineAt,
+                );
+                if (
+                  fresh.failure ||
+                  fresh.review?.fingerprint !== timing.review?.fingerprint ||
+                  canonicalJson(fresh.parentProof ?? null) !==
+                    canonicalJson(timing.parentProof ?? null)
+                )
+                  throw new AgentError('context_refresh_required');
+              }
+            },
             timing: timing.state,
+            transientRetryTimeoutMs: checker.timeoutMs ?? 8000,
+            retainReviewCleanup: (pending) => {
+              void this.trackInternalModelTask(pending, scope.bindings?.retain()).catch(() => {});
+            },
             workspaceId: scope.workspaceId,
             model: checker.model,
             request: actual,

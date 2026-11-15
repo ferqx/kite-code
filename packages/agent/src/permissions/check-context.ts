@@ -29,6 +29,7 @@ export function createPermissionCheckContextReader(options: {
   readonly readRuntime: () => CheckRuntime | null;
   readonly subjectId: string;
   readonly originStoreId: string;
+  readonly inspectFileTarget?: (request: AuthorizationRequest) => Promise<Json | null>;
 }): (request: AuthorizationRequest) => Promise<AuthorizationCheckContext> {
   return async (request) => {
     const signal = request.signal;
@@ -201,8 +202,12 @@ export function createPermissionCheckContextReader(options: {
           : 'absent'
         : 'unknown';
     signal.throwIfAborted();
+    const currentFileTarget = options.inspectFileTarget
+      ? await read(() => options.inspectFileTarget!(request))
+      : null;
     return {
       reviewInput: 'task_authorization',
+      ...(currentFileTarget ? { currentFileTarget } : {}),
       task,
       plan,
       rejectionReasons: [...new Set(rejectionReasons)],

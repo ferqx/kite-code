@@ -6,6 +6,8 @@
 
 `createPermissionPolicy` 先读取并校验本次 policy，再将隔离副本作为可选第二参数传给 `describeCapability`；旧单参描述器兼容。描述器据此判断当前模式，不二次读取宿主偏好，修改副本也不能改变本次模式、能力集合、信任或 controlReads。Planning 审批前只做无模式的能力分类，该元数据读取不生成领域范围候选。业务条件由 Planning owner 提供，`createBusinessPermissionPolicy` 只组合 `current` 与 `gate`；批准不产生模式 ceiling。范围候选直接合成原真实权限参与方的全部稳定策略绑定，不另构造一份随后丢弃的完整权限决定；已经 allowed 的参与方和独立 checker 仍保留。接口与回归见[策略](index.ts)、[约束](constraints.ts)、[副本隔离测试](../../test/isolated/permissions/policy.test.ts)和[业务门禁组合测试](../../test/isolated/permissions/constraints.test.ts)。
 
+MCP 动态 Tool 的审批材料通过 [untrustedMcpTool](mcp-tool-context.ts) 携带当前准确注册对象的原名称、有界描述和参数结构。Core 严格校验闭合形状及大小，将 canonical 内容显式纳入策略 revision，并克隆进原 `check.request`；[任务投影](../authorization-check-input.ts)保留同一字段，包括父子约束贡献，重试／历史读取只用原封存材料。该字段只能提供语义证据，不能登记可信行为或授予权限；描述中的命令、只读声称和 schema 字符串均不是审核指令。描述完整性与 schema 的 `structure_only/omitted` 明确分开。结构投影省略 `enum/const/default/examples/$ref` 等字面数据和引用，因此可能缺失关键操作、默认目标或副作用；它不是验证 schema，也不是安全／脱敏证明。能够由真实参数、描述及任务判定的普通操作仍正常判断；证据无法建立实际效果的授权时不能把未知当批准，也不能仅因信息缺失转人工。工具的完整原 schema、定义版本和执行前校验不变。
+
 Shell 的模型启动入口统一为 `shell_execute`，顶层 filesystem/network 由[共享输入解析](../shell-input.ts)解释为独立请求，省略默认工作区写入／离线；原 Job 仍使用既有 command/permissions 合同。新 description 只用于展示，从风险模型输入移除，命令摘要与批准复用不使用它；完整原 Tool 输入及派发完整性摘要不删字段。前后台使用同一路径，background:true 纳入执行语义摘要，默认前台与旧 shell.launch 摘要保持原算法。运行时派生 key 不参与命令权限摘要，新调用仍有独立执行身份。工具集合、父子交集、最终范围、硬限制及超时规则保持。
 
 默认 `explore` 的只读要求由可信任务指导和收窄工具集合表达，允许原权限内必要的临时脚本和探索产物，保持业务源码、配置和数据不变。当前版本同身份续作和冷恢复仍核原冻结指导与工具。Shell 继承父会话当前模式、权限交集和普通沙箱，不增加角色专属命令表或 OS 禁写。有限 safeRead 只决定普通策略免审，不等于角色允许列表。新默认 Auto 只审 Shell 高危效果，不核任务合规；请求批准和 Full 沿各自普通策略，原 Planning 业务门禁、硬拒绝和最终派发证明保持。
@@ -30,7 +32,7 @@ Windows [Shell 权限装配](shell.ts)从实际 PowerShell AST 或 Bash 字面�
 
 Windows Auto 将未能静态确认效果的 PowerShell 交给同一 Shell 风险审核。单一字面量路径的 PowerShell 脚本调用可提供有界正文。原 Tool 与准确自身 Job 共用经核实的风险审核与高风险人答，派发时复核工作目录、范围和已审核文件。 [Windows 原生 Service 回归](../../../../apps/service/test/isolated/windows-shell-auto.test.ts)
 
-AND 合成后若领域解释器未被共同选择，沿独立 generic checker 的合同检查；注册工具原有领域材料限制仍保留，不能因此取得跨调用 `reused_approval` 资格。准确 Auto 父链与明确超时继续按各自原证明核验，不用风险解释器替代独立 checker。
+AND 合成后若领域解释器未被共同选择，沿独立 generic checker 的合同检查；注册工具原有领域材料限制仍保留，不能因此取得跨调用 `reused_approval` 资格。准确 Auto 父链与历史超时继续按各自原证明核验；新审批模型检查技术失败一律停止，不用风险解释器替代独立 checker。
 
 会话文件不放开整个 Profile。[输入文件适配器](../tools/input-files.ts)仅允许所选消息引用的准确原件读取；[输出适配器](../tools/session-outputs.ts)仅允许当前会话的登记文件或准确输出目录中的 create-only 新文件；[方案适配器](../tools/plan-files.ts)只接受 Planning 当前登记的准确目标。各适配器在原授权与派发链核全部父子 policy leaves、能力定义／版本、原输入及目标 revision，仍保真实工作区信任、取消和 native 身份核验。Plan 模式的草稿写例外仅限可信宿主识别的当前方案目的；普通项目／输出写入不享受例外，文件存在和 Markdown 中的“已批准”也不授执行权。
 
@@ -42,9 +44,9 @@ AND 合成后若领域解释器未被共同选择，沿独立 generic checker �
 
 已配置审核器的空／无效答案或传输失败保存为原 check 失败。InteractionGate 在准确绑定核对后将不可用结果结算为未派发的执行技术失败，Tool、Action 与 Job 均返回可读原因。默认 Shell 仅在有效 `ask_user` 时创建审批卡，缺少审核器时结束本次调用。
 
-默认 Shell 风险合同在可信策略选择实际审核行为时要求超时停止。父子和独立策略取交集时，任何一方要求停止即保留此要求。超时终止原调用，原检查保存失败，Tool、Job 或 Action 向调用者返回超时和未派发事实。SQLite 拒绝超过封存期限的审核结果及超时派发依据。其他授权策略的超时继续仍要求每个相关检查提供一致的 `timeoutScope`，已有 `timeout_continue` 记录可按原证明读回。
+默认 Shell 风险合同在可信策略选择实际审核行为时要求超时停止。父子和独立策略取交集时，任何一方要求停止即保留此要求。超时终止原调用，原检查保存失败，Tool、Job 或 Action 向调用者返回超时和未派发事实。SQLite 拒绝超过封存期限的审核结果及超时派发依据。所有新审批模型检查统一超时停止，技术失败不产生执行依据；已有 `timeout_continue` 记录仍按原证明读回，不重启审核请求。
 
-[交集选项](auto-check.ts)按有限范围字段比较超时继续能力，不按 JSON 属性顺序区分相同范围；任一策略缺省或范围不同仍不继承。配置和 Runtime 宿主绑定共用[审核期限上限](../execution/authorization-timing.ts)，在启动审核前拒绝定时器无法兑现的期限，实际范围见[配置手册](../../../../docs/handbook/features/models-and-configuration.md#生效与限制)。
+[交集选项](auto-check.ts)仍按有限范围字段核验历史超时继续能力，不按 JSON 属性顺序区分相同范围；任一策略缺省或范围不同仍不继承。配置和 Runtime 宿主绑定共用[审核期限上限](../execution/authorization-timing.ts)，在启动审核前拒绝单次定时器无法兑现的期限；三倍总预算按原期限分段调度，避免宿主 timer 溢出，实际范围见[配置手册](../../../../docs/handbook/features/models-and-configuration.md#生效与限制)。
 
 原调用的拒绝终态不能被迟到输出改写。新调用独立判断权限。缓存中的拒绝上下文用于使旧批准失效，跨工具的等效操作仍由业务模型遵守原任务限制及明确拒绝。
 
@@ -128,7 +130,7 @@ Planning 默认宿主调用 `createBusinessPermissionPolicy`，并由 Planning o
 
 [shell-search](shell-search.ts) 只为固定 rg 的已知参数形式提供只读证明，按长选项、短选项组和取值消费 argv，只有未作为参数值消费的 `--` 才终止选项。执行 hooks、外部解压 `-z/--search-zip`、未知／缩写参数均退出 safeRead，不新增普通 Shell hard deny；真正终止符后的内容仍按字面量处理。固定二进制和 no-config 重写保持，不能据命令名授予更大权限。该证明依赖有限参数识别，真实执行范围仍由原最终授权与平台后端决定。
 
-当前回归沿[解析](../../test/isolated/permissions/shell-command-policy.test.ts)核 bundled rg 的安全查询、选项值、hooks 与解压器副作用；[Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[检索集成](../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核只读任务的复合查询进入继承的三模式、普通平台保护及超时原范围继续。该组显式注入的自定义审核器仍按旧合同接收任务上下文并可拒绝实际写入，不代表新默认风险合同核任务授权；后者由上文 risk 回归与[真实模型入口](../../../../tests/e2e/live/model/README.md#审批策略与原生-shell-执行)分别验证。[同名模型](../../../../apps/service/test/isolated/shell-model-identity.test.ts)核能力身份隔离；[指导输入](../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核角色的实际模型 Source 与冻结。下段2026-11-03早先回归中的角色命令硬拒结果属于替换前行为，不能证明当前角色禁写。[前台](../../test/isolated/tools/shell/foreground.test.ts)的期限与取消语义保持。受控模型及本机效果不扩为真实模型判断、客户端界面或其他平台原生资格。
+当前回归沿[解析](../../test/isolated/permissions/shell-command-policy.test.ts)核 bundled rg 的安全查询、选项值、hooks 与解压器副作用；[Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[检索集成](../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核只读任务的复合查询进入继承的三模式、普通平台保护及新审核超时不派发。该组显式注入的自定义审核器仍按旧合同接收任务上下文并可拒绝实际写入，不代表新默认风险合同核任务授权；后者由上文 risk 回归与[真实模型入口](../../../../tests/e2e/live/model/README.md#审批策略与原生-shell-执行)分别验证。[同名模型](../../../../apps/service/test/isolated/shell-model-identity.test.ts)核能力身份隔离；[指导输入](../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核角色的实际模型 Source 与冻结。下段2026-11-03早先回归中的角色命令硬拒结果属于替换前行为，不能证明当前角色禁写。[前台](../../test/isolated/tools/shell/foreground.test.ts)的期限与取消语义保持。受控模型及本机效果不扩为真实模型判断、客户端界面或其他平台原生资格。
 
 Windows Git Bash 的字面 `ls` 查询使用当前文件授权范围选中的 Git Bash 副本内的绝对 `ls.exe` 路径。该副本及命令的摘要由运行时清单固定，并在派发前完整校验。相同查询规则仍通过 [shell-search](shell-search.ts) 在 Service 权限判定和 Job 派发中复用。
 
@@ -172,3 +174,26 @@ Worktree create省略path时，可信Host默认根为homedir()下`.kite-code/wor
 
 
 2026-11-06，macOS／Bun1.4.4 当前工作树：以 `bun test --parallel=1 --max-concurrency=1` 完整执行权限 policy、grant-policy、auto-check、constraints、Execution/Store grants、输入事务、完成边界及 child/bindings 九份文件，114项／1582断言通过；全仓 typecheck、文档结构与影响检查通过。新版回归核新正文和新完整 revision 的 edit→write 稳定绑定、第三定义拒绝、allowed 一方不支持时仅单次、独立 checker 继续且其拒绝零效果、未声明覆盖时仍保独立人工、解释器绑定必须全方一致、准确 Session 隔离和最终 epoch 竞争。精确入口及验证边界归[grant owner](../storage/sqlite/permission-grants.README.md)；固定模型、SQLite 与本机结果不代替真实模型性能、客户端全过程或其他平台资格。
+
+默认 Service 真实登记的 Files `read_file/write_file/edit_file` 在 Auto 下不免审，包含工作区内读写和原有特殊文件范围。Files 通过内部 capability 的 `autoTimeoutScope:stop` 选择已有 `stopOnTimeout` 派发合同；该值参与权限 revision，父子交集保留停止要求。未经审核批准、拒绝、取消或审核超时的调用均不执行；统一有界重试及技术失败停止规则见下节；不改变持久化协议或工具版本。具体路径范围与原生基线检查见 [Files owner](../tools/files/README.md)。
+
+
+### 有界审批模型重试
+
+所有实际调用审批模型的检查仅在有明确超时／断连证据时最多内部重试两次（总计最多三次 Provider 请求），包括普通工具审核与 Shell 独立风险审核；不再按 Files／MCP 能力 opt-in。此规则只作用审批请求，不改变业务模型、标题模型或工具重放策略。每次请求使用原封存输入，单次以原审核 timeout 为上限，整个检查（含准备、排队）以三倍 timeout 为上限。每次前后核取消、有效权限 revision 与审核材料 fingerprint；文件／工具执行不会随审核重试。耗尽必须停止，不产生 `timeout_continue`；旧 `governed` 超时继续路径不再用于新审批模型检查，显式拒绝和人工审批要求仍不可绕过。
+
+同一持久化检查保存 `reviewAttempts` 的开始、结束、脱敏失败类别及已观察 usage；Trajectory 仅对全部实际尝试均已报告的 token 字段求和，不重复加入成功末次的顶层 usage；缺失字段不展示为全检查总数，逐次已观察值仍留在审计中。只解释完整成功尝试的输出，失败半截文本不拼接到后次决定。显式拒绝、人工询问、非法输出、配置错误、限流、通用服务不可用以及裸 `stream_incomplete`／未分类异常不重试；未知结束原因和无 finish 不能自行解释为断连。取消和重试不等待旧请求返回，也不接收迟到决定；旧请求的 next/return 实际退出前仍保留配置、Store 和该检查模型许可，不能提前释放。冷恢复只观察原检查，不重新启动 Provider；结果未知不获得执行权。原执行最终仍受权限、输入、来源与目标身份检查。回归见 [模型重试](../../test/isolated/execution/authorization-retry.test.ts) 和 [持久审批检查](../../test/isolated/execution/authorization-check.test.ts)。
+
+任务授权审核的 `ask_user` 仅用于已有具体高风险效果且需要用户决定的情况；信息不足本身不触发人工确认。普通任务内同目标必要准备／读回校验按原任务和现行限制判断，不要求用户逐步重复授权，也不假设缺失的写入已发生。材料不足不能默认批准，明确越权／禁令仍拒绝，技术失败和耗尽重试继续未派发失败。原三态回执与人工高风险交互保持，不改变 Files/MCP 权限边界；提示合同回归不替代真实审核模型和客户端验收。
+
+Files 的任务授权审核明确区分 `effects` 操作效果标签和真实权限限制；`external` 只标本地工作区外路径，不代表联网外传或默认禁止。Auto 的内外目标均交模型审核，不能因 workspaceRoot 或未选 Full 臆造禁令；准确路径、受保护资源、父子权限和原生检查不变。针对真实外部读取误拒的修正仅澄清审核材料语义，不改 schema、存储或派发权限。
+
+Files 同轮读回的审核材料可附 `recordedFileMutations`：仅普通工作区 `files.read` 目标，由 Service 原生文件边界观察准确路径及文件身份；Core 再核同 Store／Session／Run／root work、准确 builtin Files 版本、已派发成功且完成早于当前调用创建的 write/edit 回执。仅在当前 native device/inode 与保存基线一致且路径匹配时提供最近一项历史元数据，不传文件正文、diff 或内容 hash，不把历史写入当授权或当前字节验证。路径身份进入原审核 request digest，审核中替换文件使旧批准失效；缺少身份、符号链接、保护路径或区外目标不补造事实，继续原权限审核。现有已封存检查不重写，超时／取消／未知和父子权限边界不变。受控 SQLite、native 与 Service/provider wire 回归覆盖范围与隐私；不替代最终真实模型和客户端验收。
+
+### 审核提示的单一决策流程
+
+通用[审批 system](../execution/authorization-check-feedback.ts)按可信来源、元数据含义、任务覆盖、三态决定和宿主执行边界五步组织。`effects` 是效果分类而非禁止表；同目标必要准备和读回的任务授权不依赖可选历史写入凭证。缺少上下文本身不升级人工，也不默认允许；只有具体高风险效果尚需用户决定，或 supplied current policy 明确绑定本次操作的独立人工要求，才走 `ask_user`。不得仅凭工具名称、路径、模式或风险类别臆造人审要求或绝对禁令；明确任务外效果、实际禁令和无法建立授权且不符合高风险确认条件的操作仍拒绝。已具体授权的高风险效果继续核当前 policy，不自动复问，也不越过独立人工要求。
+
+用户自己写的指令不因引用或代码块格式失去原授权地位，实际来源仍按可信上下文判断；转述的第三方内容不能仅凭其中的自称变成用户指令。计划、文件正文、工具输出以及 `untrustedMcpTool` 的名称、描述和 schema 均不能授予权限或覆写规则；MCP 裁剪或缺失字段是证据限制，不单独证明安全或构成人审／拒绝原因。宿主独立执行父子权限、保护路径、原生范围、取消、时效、目标身份与最终派发核验；模型批准不代表这些检查已通过。技术失败不产生批准或拒绝，重试和超时策略归宿主，未知业务副作用不得推为未发生或盲目重放。默认 Shell 仍用独立风险提示，通用指导不替代其合同。
+
+本次仅重构通用审核指导及[反馈契约](../../test/isolated/execution/authorization-check-feedback.test.ts)、[真实 SDK 受控 wire 回归](../../test/isolated/execution/authorization-check.test.ts)，不改输出 schema、执行权限或最终 gate。受控 wire 核完整 system 与三态、硬拒绝零派发；[默认 Service Files 回归](../../../../apps/service/test/isolated/full-external-files.test.ts)另核真实内外路径分类、原任务来源和 compact SDK wire，并非手工填入 `effects`。实际模型遵循程度和完整工具路由仍须最终 Mac 客户端真实流程验证，不能由提示字串或受控回答测试代替。

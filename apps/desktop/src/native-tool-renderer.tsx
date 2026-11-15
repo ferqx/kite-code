@@ -29,7 +29,6 @@ type Options = {
   renderImages?: (message: DesktopMessage, fact: NativeToolMessageFact | undefined) => ReactNode;
   renderFileChange?: (entry: NativeFileChange, open: boolean) => ReactNode;
   openFileForTarget?: (entry: NativeFileChange) => ((path: string) => void) | undefined;
-  renderDelivery?: (entry: NativeFileChange) => ReactNode;
 };
 
 export function renderNativeToolGroup(
@@ -259,10 +258,6 @@ export function renderNativeToolGroup(
           })
         }
       />
-      {options.renderDelivery &&
-        displayTargets
-          .filter((entry) => entry.snapshot && group.some((model) => model.id === entry.messageId))
-          .map(options.renderDelivery)}
       {group.map((model) => {
         const image = displayTools.find((entry) => entry.messageId === model.id);
         return image?.definitionId === 'files.view_images' && image.definitionVersion === '1'

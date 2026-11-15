@@ -171,7 +171,7 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
       expect(target.status).toBe('planned');
       expect(target.authorization).toMatchObject({
         dispatched: false,
-        check: { status: 'dispatching', decision: 'unavailable' },
+        check: { status: 'running', decision: 'unavailable' },
       });
       expect(target.runId).toBeNull();
       expect(effects).toBe(0);
@@ -836,7 +836,7 @@ for (const [reason, description] of [
       const { carrier, feedbackContent } = await verifyTechnicalCheckFailure(f, failure.message);
       expect(carrier.result).toMatchObject({ incomplete: true, content: '' });
       expect(feedbackContent).toContain(description);
-      expect(reviews).toBe(1);
+      expect(reviews).toBe(1); // Bare classifications do not prove timeout or disconnection.
     } finally {
       await f.close();
     }
@@ -944,7 +944,7 @@ test('failed actual checker is never replayed by duplicate original command and 
   });
   try {
     const { carrier } = await verifyTechnicalCheckFailure(f, 'model_failed');
-    expect(carrier.result).toMatchObject({ content: '{"decision":' });
+    expect(carrier.result).toMatchObject({ content: '' });
     expect(reviews).toBe(1);
     expect(f.effects()).toBe(0);
     const original = await f.store.getCommand('work');
@@ -1028,9 +1028,13 @@ for (const decision of ['approve_once', 'reject'] as const)
           checks++;
           expect(request.tools).toEqual([]);
           const instructions = request.messages.find((message) => message.role === 'system');
-          expect(instructions?.content).toContain('no approval or rejection decision was obtained');
-          expect(instructions?.content).toContain('Assess this operation independently');
-          expect(instructions?.content).toContain('Respect actual user or policy refusals');
+          expect(instructions?.content).toContain(
+            'no valid decision, not a user refusal and not permission',
+          );
+          expect(instructions?.content).toContain('A later independently reviewed operation');
+          expect(instructions?.content).toContain(
+            'Respect actual user or policy refusals of the same effect',
+          );
           if (checks === 1) throw new Error('PRIVATE_CHECKER_TRANSPORT_FAILURE');
           const payload = JSON.parse(
             request.messages.find((message) => message.role === 'user')!.content,
@@ -1670,11 +1674,11 @@ test('checker usage returned with cancellation is retained without granting the 
   const f = await fixture({
     async *stream(_request, { signal }) {
       calls++;
+      yield { type: 'usage', usage };
       entered = true;
       await gate;
       expect(signal.aborted).toBe(true);
-      // A usage event already returned by the adapter survives the cancellation race.
-      yield { type: 'usage', usage };
+      // Cancellation never waits for late provider text or grants its decision.
       yield { type: 'text_delta', text: '{"decision":"approve_once","reason":"late"}' };
       yield finish;
     },
@@ -1696,7 +1700,11 @@ test('checker usage returned with cancellation is retained without granting the 
       );
       return execution?.status === 'cancelled' ? execution : null;
     });
-    expect(check.result).toMatchObject({ incomplete: true, content: '', usage });
+    expect(check.result).toMatchObject({
+      incomplete: true,
+      content: '',
+      reviewAttempts: [expect.objectContaining({ status: 'cancelled', usage })],
+    });
     expect(check.result).not.toHaveProperty('authorizationCheckOutput');
     expect(f.effects()).toBe(0);
     expect(calls).toBe(1);
@@ -2265,6 +2273,562 @@ for (const compact of [false, true])
       expect(f.effects()).toBe(2);
       expect(reviews).toBe(2);
       expect((await f.store.getExecution(target.id))?.status).toBe('succeeded');
+    } finally {
+      release();
+      await f.close();
+    }
+  });
+
+for (const outcome of ['approve_once', 'deny', 'exhausted'] as const)
+  test(`scoped transport retry retains one durable check and never repeats the effect: ${outcome}`, async () => {
+    let reviews = 0;
+    const f = await fixture(
+      {
+        async *stream() {
+          reviews++;
+          if (reviews < 3 || outcome === 'exhausted') {
+            yield { type: 'text_delta', text: '{"decision":"approve' };
+            throw new ModelAttemptError('connection_failed', 'connection_interrupted');
+          }
+          yield {
+            type: 'text_delta',
+            text: JSON.stringify({ decision: outcome, reason: 'bounded review' }),
+          };
+          yield finish;
+        },
+      },
+      {
+        async authorize(request) {
+          return request.kind === 'model'
+            ? { allowed: true, revision: 'p-retry' }
+            : {
+                allowed: false,
+                revision: 'p-retry',
+                snapshot: permissionSnapshot,
+                check: {
+                  request: { task: 'exact effect', parameters: request.input },
+                  stopOnTimeout: true,
+                },
+              };
+        },
+      },
+    );
+    try {
+      await f.runtime.waitForCommand('work');
+      expect(reviews).toBe(3);
+      expect(f.effects()).toBe(outcome === 'approve_once' ? 1 : 0);
+      const checks = (await f.store.listExecutions('s')).filter(
+        (value) => value.kind === 'model' && value.runId === null,
+      );
+      expect(checks).toHaveLength(1);
+      expect(checks[0]?.result).toHaveProperty('reviewAttempts');
+      expect((checks[0]?.result as { reviewAttempts: unknown[] }).reviewAttempts).toHaveLength(3);
+      await f.runtime.submitCommand({
+        expectedStoreId: f.expectedStoreId,
+        commandId: 'work',
+        sessionId: 's',
+        subjectId: 'owner',
+        request: { kind: 'run.start', content: 'perform exact harmless effect' },
+      });
+      expect(reviews).toBe(3);
+      expect(f.effects()).toBe(outcome === 'approve_once' ? 1 : 0);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('retry rechecks actual permission revision before another provider call', async () => {
+  let reviews = 0;
+  let revision = 'p1';
+  const f = await fixture(
+    {
+      async *stream() {
+        reviews++;
+        revision = 'p2';
+        yield { type: 'usage', usage: { inputTokens: 0, outputTokens: 0 } };
+        throw new ModelAttemptError('connection_failed', 'connection_interrupted');
+      },
+    },
+    {
+      async authorize(request) {
+        return request.kind === 'model'
+          ? { allowed: true, revision }
+          : {
+              allowed: false,
+              revision,
+              check: {
+                request: { task: 'bound target' },
+                stopOnTimeout: true,
+              },
+            };
+      },
+    },
+  );
+  try {
+    await f.runtime.waitForCommand('work');
+    expect(reviews).toBe(1);
+    expect(f.effects()).toBe(0);
+    const check = (await f.store.listExecutions('s')).find(
+      (value) => value.kind === 'model' && value.runId === null,
+    )!;
+    expect(check.status).toBe('failed');
+    expect(check.result).toMatchObject({ code: 'context_refresh_required' });
+  } finally {
+    await f.close();
+  }
+});
+
+test('cancel while a retried approval waits prevents all later calls and effects', async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reviews = 0;
+  let usageRead = false;
+  const f = await fixture(
+    {
+      async *stream() {
+        reviews++;
+        if (reviews === 1)
+          throw new ModelAttemptError('connection_failed', 'connection_interrupted');
+        yield { type: 'usage', usage: { inputTokens: 17, outputTokens: 4 } };
+        usageRead = true;
+        await held;
+        yield finish;
+      },
+    },
+    {
+      async authorize(request) {
+        return request.kind === 'model'
+          ? { allowed: true, revision: 'p1' }
+          : {
+              allowed: false,
+              revision: 'p1',
+              check: {
+                request: { task: 'bound target' },
+                stopOnTimeout: true,
+              },
+            };
+      },
+    },
+  );
+  try {
+    await eventually(async () => (usageRead ? true : null));
+    await f.runtime.cancelCommand({
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'cancel',
+      sessionId: 's',
+      targetCommandId: 'work',
+      subjectId: 'owner',
+    });
+    await f.runtime.waitForCommand('work');
+    expect(reviews).toBe(2);
+    expect(f.effects()).toBe(0);
+    const check = (await f.store.listExecutions('s')).find(
+      (value) => value.kind === 'model' && value.runId === null,
+    )!;
+    expect((check.result as { reviewAttempts: unknown[] }).reviewAttempts.at(-1)).toMatchObject({
+      status: 'cancelled',
+      usage: { inputTokens: 17, outputTokens: 4 },
+    });
+  } finally {
+    release();
+    await f.close();
+  }
+});
+
+test('bounded approval timeouts stop without timeout continuation or file dispatch', async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reviews = 0;
+  const checker: ModelAdapter = {
+    async *stream(_request, { signal }) {
+      reviews++;
+      yield { type: 'usage', usage: { inputTokens: 13, outputTokens: 2 } };
+      await Promise.race([
+        held,
+        new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener('abort', () => resolve(), { once: true });
+        }),
+      ]);
+      yield finish;
+    },
+  };
+  const f = await fixture(
+    checker,
+    {
+      async authorize(request) {
+        return request.kind === 'model'
+          ? { allowed: true, revision: 'p1' }
+          : {
+              allowed: false,
+              revision: 'p1',
+              check: { request: { task: 'bound target' } },
+            };
+      },
+    },
+    {
+      authorizationCheck: {
+        id: 'checker',
+        version: '1',
+        modelId: 'check-model',
+        model: checker,
+        timeoutMs: 70,
+      },
+    },
+  );
+  try {
+    await f.runtime.waitForCommand('work');
+    expect(reviews).toBeGreaterThan(1);
+    expect(reviews).toBeLessThanOrEqual(3);
+    expect(f.effects()).toBe(0);
+    const check = (await f.store.listExecutions('s')).find(
+      (value) => value.kind === 'model' && value.runId === null,
+    )!;
+    expect(check.status).toBe('failed');
+    expect(check.result).toHaveProperty('reviewAttempts');
+    const attempts = (check.result as { reviewAttempts: { status: string; usage: unknown }[] })
+      .reviewAttempts;
+    expect(attempts.every((attempt) => attempt.status !== 'running')).toBe(true);
+    expect(attempts.at(-1)?.usage).toEqual({ inputTokens: 13, outputTokens: 2 });
+  } finally {
+    release();
+    await f.close();
+  }
+});
+
+// Real SDK serialization with controlled responses, not a live-model semantic assessment.
+for (const effects of [['read'], ['read', 'external']])
+  for (const decision of ['approve_once', 'reject', 'ask_user'] as const)
+    test(`Files scope guidance reaches provider wire: ${effects.join('+')} / ${decision}`, async () => {
+      const requests: unknown[] = [];
+      const reason =
+        decision === 'ask_user'
+          ? 'Concrete high-risk disclosure requires confirmation.'
+          : 'Controlled policy decision.';
+      const chunk = (delta: Record<string, unknown>, finishReason: string | null) =>
+        `data: ${JSON.stringify({ id: 'review', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
+      const body =
+        chunk({ role: 'assistant', content: JSON.stringify({ decision, reason }) }, null) +
+        chunk({}, 'stop') +
+        'data: [DONE]\n\n';
+      const checker = createSdkModelAdapter({
+        models: new Map([
+          [
+            'check-model',
+            createCompatibleModelBinding({
+              protocol: 'chat-completions',
+              name: 'openai',
+              modelId: 'fixture-model',
+              baseURL: 'https://owned-fixture.invalid/v1',
+              apiKey: 'fixture-only',
+              fetch: Object.assign(
+                async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+                  requests.push(JSON.parse(String(init?.body)));
+                  return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+                },
+                { preconnect: globalThis.fetch.preconnect },
+              ),
+            }),
+          ],
+        ]),
+      });
+      const f = await fixture(checker, {
+        async authorize(request) {
+          return request.kind === 'model'
+            ? { allowed: true, revision: 'p1' }
+            : {
+                allowed: false,
+                revision: 'p1',
+                snapshot: permissionSnapshot,
+                check: {
+                  request: {
+                    mode: 'auto',
+                    effects,
+                    invocation: { definitionId: request.definitionId, input: request.input },
+                  },
+                  stopOnTimeout: true,
+                },
+              };
+        },
+      });
+      try {
+        if (decision === 'ask_user') {
+          const interaction = await eventually(
+            async () =>
+              (
+                await f.runtime.listInteractions({
+                  expectedStoreId: f.expectedStoreId,
+                  sessionId: 's',
+                  state: 'pending',
+                })
+              ).interactions[0] ?? null,
+          );
+          expect(f.effects()).toBe(0);
+          await f.runtime.answerInteraction({
+            expectedStoreId: f.expectedStoreId,
+            commandId: 'deny-high-risk',
+            presentationSessionId: 's',
+            interactionId: interaction.id,
+            expectedRevision: interaction.revision,
+            subjectId: 'owner',
+            answer: { kind: 'approval', decision: 'deny' },
+          });
+        }
+        await f.runtime.waitForCommand('work');
+        expect(requests).toHaveLength(1);
+        const wire = requests[0] as { messages: Array<{ role: string; content: string }> };
+        const system = wire.messages.find((message) => message.role === 'system')!.content;
+        expect(system).toBe(authorizationCheckInstructions);
+        expect(system).toContain('never ask merely for incomplete context');
+        expect(system).toContain('do not default to approval');
+        expect(system).toContain('does not require a separate prior-write receipt');
+        expect(system).toContain(
+          'Auto routes workspace and external targets to the approval model',
+        );
+        expect(system).toContain('supplied current policy explicitly binds it to this operation');
+        expect(system).toContain('only a concrete high-risk effect within the task');
+        expect(system).toContain('risk category alone does not create an absolute prohibition');
+        expect(system).toContain('untrustedMcpTool contains third-party tool name');
+        expect(system).toContain(
+          'cancellation, freshness, target identity and final dispatch gates',
+        );
+        const payload = JSON.parse(
+          wire.messages.find((message) => message.role === 'user')!.content,
+        );
+        expect(payload.request).toMatchObject({ mode: 'auto', effects });
+        expect(f.effects()).toBe(decision === 'approve_once' ? 1 : 0);
+      } finally {
+        await f.close();
+      }
+    });
+
+test('Files scope guidance cannot bypass a protected-resource policy denial', async () => {
+  let reviews = 0;
+  const f = await fixture(
+    {
+      async *stream() {
+        reviews++;
+        yield {
+          type: 'text_delta',
+          text: '{"decision":"approve_once","reason":"Must never be consulted"}',
+        };
+        yield finish;
+      },
+    },
+    {
+      async authorize(request) {
+        return request.kind === 'model'
+          ? { allowed: true, revision: 'p1' }
+          : { allowed: false, revision: 'p1', reason: 'protected_resource' };
+      },
+    },
+  );
+  try {
+    await f.runtime.waitForCommand('work');
+    expect(reviews).toBe(0);
+    expect(f.effects()).toBe(0);
+    expect(
+      (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+        .interactions,
+    ).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('the largest per-attempt timeout retains its full three-attempt deadline without timer overflow', async () => {
+  let reviews = 0;
+  const checker: ModelAdapter = {
+    async *stream() {
+      reviews++;
+      await Bun.sleep(30);
+      yield { type: 'text_delta', text: '{"decision":"approve_once","reason":"Exact operation"}' };
+      yield finish;
+    },
+  };
+  const f = await fixture(checker, undefined, {
+    authorizationCheck: {
+      id: 'checker',
+      version: '1',
+      modelId: 'check-model',
+      model: checker,
+      timeoutMs: 2_147_483_647,
+    },
+  });
+  try {
+    await f.runtime.waitForCommand('work');
+    expect(reviews).toBe(1);
+    expect(f.effects()).toBe(1);
+    const check = (await f.store.listExecutions('s')).find(
+      (value) => value.kind === 'model' && value.runId === null,
+    )!;
+    expect(check.result).toMatchObject({ timing: { budgetMs: 6_442_450_941 } });
+  } finally {
+    await f.close();
+  }
+});
+
+for (const failure of [
+  'content_filter',
+  'unknown',
+  'eof',
+  'unknown_error',
+  'disconnect',
+  'http_timeout',
+] as const)
+  test(`actual SDK approval classification is bounded and fail-closed: ${failure}`, async () => {
+    let requests = 0;
+    const chunk = (delta: Record<string, unknown>, finishReason: string | null) =>
+      `data: ${JSON.stringify({ id: 'review', object: 'chat.completion.chunk', created: 1, model: 'fixture-model', choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
+    const prefix = chunk(
+      { role: 'assistant', content: '{"decision":"approve_once","reason":"Exact operation"}' },
+      null,
+    );
+    const checker = createSdkModelAdapter({
+      models: new Map([
+        [
+          'check-model',
+          createCompatibleModelBinding({
+            protocol: 'chat-completions',
+            name: 'openai',
+            modelId: 'fixture-model',
+            baseURL: 'https://owned-fixture.invalid/v1',
+            apiKey: 'fixture-only',
+            fetch: Object.assign(
+              async () => {
+                requests++;
+                if (failure === 'unknown_error') throw new Error('PRIVATE_UNKNOWN_FAILURE');
+                if (failure === 'disconnect' && requests < 3)
+                  throw Object.assign(new Error('PRIVATE_CONNECTION_FAILURE'), {
+                    code: 'ECONNRESET',
+                  });
+                if (failure === 'http_timeout' && requests < 3)
+                  return new Response(JSON.stringify({ error: { message: 'PRIVATE_TIMEOUT' } }), {
+                    status: 408,
+                    headers: { 'content-type': 'application/json' },
+                  });
+                const body =
+                  prefix +
+                  (failure === 'eof'
+                    ? ''
+                    : chunk(
+                        {},
+                        failure === 'content_filter' || failure === 'unknown' ? failure : 'stop',
+                      )) +
+                  'data: [DONE]\n\n';
+                return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+              },
+              { preconnect: globalThis.fetch.preconnect },
+            ),
+          }),
+        ],
+      ]),
+    });
+    const f = await fixture(checker);
+    try {
+      await f.runtime.waitForCommand('work');
+      const retryable = failure === 'disconnect' || failure === 'http_timeout';
+      expect(requests).toBe(retryable ? 3 : 1);
+      expect(f.effects()).toBe(retryable ? 1 : 0);
+      const check = (await f.store.listExecutions('s')).find(
+        (value) => value.kind === 'model' && value.runId === null,
+      )!;
+      expect(check.status).toBe(retryable ? 'succeeded' : 'failed');
+      expect(JSON.stringify(check.result)).not.toContain('PRIVATE_');
+      if (!retryable) expect(check.result).not.toHaveProperty('authorizationCheckOutput');
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const outcome of ['success', 'complete_usage', 'exhausted', 'cancelled'] as const)
+  test(`trajectory accounts only observed approval attempt usage without double counting: ${outcome}`, async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const successful = outcome === 'success' || outcome === 'complete_usage';
+    let reviews = 0;
+    let waiting = false;
+    const f = await fixture({
+      async *stream() {
+        reviews++;
+        yield {
+          type: 'usage',
+          usage: {
+            inputTokens: 10,
+            outputTokens: outcome === 'complete_usage' ? 2 : null,
+            cachedInputTokens: 2,
+            ...(outcome === 'complete_usage' ? { totalTokens: 12 } : {}),
+          },
+        };
+        if (reviews < 3) throw new ModelAttemptError('connection_failed', 'connection_interrupted');
+        if (outcome === 'exhausted')
+          throw new ModelAttemptError('connection_failed', 'connection_interrupted');
+        if (outcome === 'cancelled') {
+          waiting = true;
+          await held;
+        }
+        yield {
+          type: 'text_delta',
+          text: '{"decision":"approve_once","reason":"Exact operation"}',
+        };
+        yield {
+          type: 'finish',
+          reason: 'stop',
+          usage: { inputTokens: 12, outputTokens: 3, cachedInputTokens: 2, totalTokens: 15 },
+        };
+      },
+    });
+    try {
+      if (outcome === 'cancelled') {
+        await eventually(async () => (waiting ? true : null));
+        await f.runtime.cancelCommand({
+          expectedStoreId: f.expectedStoreId,
+          commandId: 'cancel',
+          sessionId: 's',
+          targetCommandId: 'work',
+          subjectId: 'owner',
+        });
+      }
+      await f.runtime.waitForCommand('work');
+      const check = await eventually(async () => {
+        const execution = (await f.store.listExecutions('s')).find(
+          (value) => value.kind === 'model' && value.runId === null,
+        );
+        return execution && ['succeeded', 'failed', 'cancelled'].includes(execution.status)
+          ? execution
+          : null;
+      });
+      const scope = { storeId: f.expectedStoreId, sessionId: 's', subjectId: 'owner' };
+      const snapshot = await f.store.openTrajectory(scope);
+      let afterCursor = '0';
+      let lastUsage: unknown;
+      for (;;) {
+        const page = await f.store.readTrajectoryEvents({
+          ...scope,
+          afterCursor,
+          upperCursor: snapshot.upperCursor,
+        });
+        for (const event of page.events)
+          if (event.kind === 'model' && event.executionId === check.id)
+            lastUsage = event.attributes.usage;
+        if (page.exhausted) break;
+        afterCursor = page.scannedThrough;
+      }
+      expect(reviews).toBe(3);
+      expect(lastUsage).toEqual(
+        outcome === 'complete_usage'
+          ? { inputTokens: '32', outputTokens: '7', cachedInputTokens: '6', totalTokens: '39' }
+          : { inputTokens: successful ? '32' : '30', cachedInputTokens: '6' },
+      );
+      expect(f.effects()).toBe(successful ? 1 : 0);
+      if (successful)
+        expect(check.result).toMatchObject({ usage: { inputTokens: 12, outputTokens: 3 } });
     } finally {
       release();
       await f.close();

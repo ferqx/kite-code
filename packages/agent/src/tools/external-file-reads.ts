@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { AuthorizationRequest, ToolDefinition, ToolResult } from '../extensions';
+import { canonicalJson } from '../json';
 import type { CapabilityDescription } from '../permissions';
+import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import { AgentError, type Json } from '../storage/types';
 import { createFileReadResult, createMissingFileReadResult } from './files-tools';
 
@@ -82,6 +85,10 @@ export function withExternalFileReads(options: {
     const workspace = await options.workspaceRoot(request);
     return externalReadTarget(input.path, workspace, options.protectedRoots(), request.signal);
   }
+  const revision = (selected: unknown, input: Json) =>
+    `external-read:1:${createHash('sha256')
+      .update(canonicalJson({ selected, input } as Json))
+      .digest('hex')}`;
   return {
     tools: options.tools.map(
       (tool): ToolDefinition =>
@@ -108,6 +115,27 @@ export function withExternalFileReads(options: {
                   context.signal.throwIfAborted();
                   const selected = await target(context, input);
                   if (!selected) return await tool.execute(input, context);
+                  const expected = revision(selected, input);
+                  if (!context.dispatchAuthorization?.revision)
+                    throw new AgentError('file_dispatch_scope_unavailable');
+                  for (const leaf of dispatchScopeLeaves(
+                    context.dispatchAuthorization.snapshot,
+                    'file_dispatch_scope_unavailable',
+                  )) {
+                    const cap = leaf.data.capability as Record<string, Json> | undefined;
+                    if (
+                      leaf.namespace !== 'builtin.permissions' ||
+                      leaf.data.workspaceTrust !== true ||
+                      !['auto', 'full', 'accept_edits'].includes(String(leaf.data.mode)) ||
+                      !cap ||
+                      cap.kind !== 'tool' ||
+                      cap.definitionId !== tool.id ||
+                      !['4', '5'].includes(String(cap.definitionVersion)) ||
+                      cap.hardAllowed !== true ||
+                      cap.revision !== expected
+                    )
+                      throw new AgentError('file_dispatch_scope_changed');
+                  }
                   const parameters = input as Record<string, Json>;
                   const offset = parameters.offset ?? 1,
                     limit = parameters.limit ?? 200;
@@ -176,12 +204,13 @@ export function withExternalFileReads(options: {
         definitionVersion: request.definitionVersion,
       };
       try {
-        if (!(await target(request, request.input))) return null;
+        const selected = await target(request, request.input);
+        if (!selected) return null;
         return {
           ...identity,
-          revision: 'builtin.files:external-read',
-          effects: ['read'],
-          safeRead: true,
+          revision: revision(selected, request.input),
+          effects: ['read', 'external'],
+          safeRead: false,
           hardAllowed: true,
         };
       } catch (error) {

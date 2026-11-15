@@ -35,6 +35,7 @@ import type { createDefaultFileCheckpointConfiguration } from './file-checkpoint
 import type { createMcpConfiguration } from './mcp-configuration';
 import type { createMcpManagement } from './mcp-management';
 import type { createMcpSourceConfiguration } from './mcp-source-configuration';
+import { mcpToolPermissionDescription } from './mcp-tool-permissions';
 import { isSupportedModelProvider } from './model-providers';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import { readBoundPlanningSuccessor, readPlanningPermissionState } from './planning-configuration';
@@ -335,7 +336,9 @@ export function createDefaultPermissionConfiguration(options: {
       roles: childRoles,
       async readCurrent(input) {
         input.signal.throwIfAborted();
-        if (authority.permissions && !authority.permissionPolicy)
+        // Opaque permissions take precedence over permissionPolicy in currentPolicy.
+        // An ignored reader cannot establish the current authority for an idle wake.
+        if (authority.permissions)
           return { workspaceTrust: false, revision: 'after-turn-current-policy-unavailable-1' };
         const current = await currentPolicy(
           {
@@ -454,7 +457,10 @@ export function createDefaultPermissionConfiguration(options: {
     ): Promise<CapabilityDescription | null> => {
       const entry = actual.get(key(request.kind, request.definitionId, request.definitionVersion));
       if (request.kind === 'model') return entry?.description ?? null;
-      if (!entry) return mcpSources.describe(request) ?? selectedMcp.describe(request);
+      if (!entry) {
+        const mcpDescription = mcpSources.describe(request) ?? selectedMcp.describe(request);
+        return mcpDescription ? mcpToolPermissionDescription(mcpDescription) : null;
+      }
       const refinement = await entry.refine?.(request, view, policy);
       const { kind, definitionId, definitionVersion, ...facts } = refinement ?? {};
       if (
@@ -464,7 +470,18 @@ export function createDefaultPermissionConfiguration(options: {
           definitionVersion !== entry.description.definitionVersion)
       )
         throw new AgentError('capability_metadata_invalid');
-      const description = { ...entry.description, ...facts };
+      const registeredDescription = { ...entry.description, ...facts };
+      const mcpOwned = runExtensions.some(
+        (extension) =>
+          (extension === mcp.extension || extension === mcpSources.extension) &&
+          extension.tools?.some(
+            (tool) =>
+              tool.id === request.definitionId && tool.version === request.definitionVersion,
+          ),
+      );
+      const description = mcpOwned
+        ? mcpToolPermissionDescription(registeredDescription)
+        : registeredDescription;
       const behavior = toolBehaviorRegistry.get(request);
       // Planning's metadata-only read has no candidate consumer. Real policy reads
       // retain candidates even when that policy already allows the operation.
@@ -534,8 +551,17 @@ export function createDefaultPermissionConfiguration(options: {
         kind: CapabilityIdentity['kind'],
         definitionId: string,
         definitionVersion: string,
-      ): Pick<CapabilityDescription, 'autoReview'> => {
-        if (!defaultAutoReview || !trusted) return {};
+      ): Pick<CapabilityDescription, 'autoReview' | 'autoTimeoutScope'> => {
+        if (!trusted) return {};
+        // Files reads and mutations must use the normal automatic reviewer, not
+        // the trusted-extension default exemption. Special scope checks stay intact.
+        if (
+          extension === files.extension &&
+          kind === 'tool' &&
+          ['files.read', 'files.write', 'files.edit'].includes(definitionId)
+        )
+          return { autoTimeoutScope: 'stop' };
+        if (!defaultAutoReview) return {};
         const behavior = toolBehaviorRegistry.get({ kind, definitionId, definitionVersion });
         if (behavior?.autoReview) return { autoReview: behavior.autoReview };
         return !shellOwned ? { autoReview: 'none' } : {};
@@ -543,7 +569,14 @@ export function createDefaultPermissionConfiguration(options: {
       const refine: RefineCapability | undefined = shellOwned
         ? refineShell
         : extension === files.extension
-          ? (request, _view, policy) => files.describeRequest(request, policy)
+          ? async (request, _view, policy) => {
+              const description = await files.describeRequest(request, policy);
+              return policy?.mode === 'auto' &&
+                request.kind === 'tool' &&
+                request.definitionId === 'files.read'
+                ? { ...description, safeRead: false }
+                : description;
+            }
           : extension === task.extension
             ? refineTask
             : undefined;
@@ -634,6 +667,7 @@ export function createDefaultPermissionConfiguration(options: {
           readRuntime: () => options.readRuntime() ?? null,
           subjectId: command.subjectId,
           originStoreId: command.originStoreId,
+          inspectFileTarget: files.inspectReviewTarget,
         }),
         readPolicy: (request) =>
           currentPolicy(

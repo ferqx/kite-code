@@ -309,6 +309,28 @@ test('durable connection Job precedes network; next actual compatible Model sees
     expect(command.status).toBe('applied');
     expect(f.connections).toBe(1);
     expect(f.calls).toBe(1);
+    const selected = await f.lifecycle.readStepCapabilities({
+      command: { originStoreId: f.expectedStoreId },
+      session: { id: 'a' },
+      selectedServerIds: ['local'],
+    });
+    const selectedTool = selected.extensions.flatMap((extension) => extension.tools ?? [])[0]!;
+    expect(f.lifecycle.readToolReviewMetadata(selectedTool)).toMatchObject({
+      name: 'effect',
+      description: 'Harmless local result',
+      inputSchema: { type: 'object' },
+    });
+    expect(f.lifecycle.readToolReviewMetadata({ ...selectedTool })).toBeNull();
+    for (const input of [
+      { command: { originStoreId: f.expectedStoreId }, session: { id: 'b' } },
+      { command: { originStoreId: 'foreign-store' }, session: { id: 'a' } },
+      {
+        command: { originStoreId: f.expectedStoreId },
+        session: { id: 'a' },
+        selectedServerIds: ['other'],
+      },
+    ])
+      expect((await f.lifecycle.readStepCapabilities(input)).extensions).toEqual([]);
     expect(f.modelRequests[0]!.tools as unknown[]).toHaveLength(1);
     expect(JSON.stringify(f.modelRequests[1]!.tools)).toContain('mcp_local_');
     const execution = (await f.store.listExecutions('a')).find((item) =>

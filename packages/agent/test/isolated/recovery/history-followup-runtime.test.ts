@@ -237,7 +237,7 @@ for (const scenario of [
       if (mixed) expect(readFileSync(join(directory, 'effects'), 'utf8')).toBe('m-done\n');
       else expect(existsSync(join(directory, 'effects'))).toBe(false);
     } finally {
-      if (child.exitCode === null) await forceChild(child);
+      if (child.exitCode === null && child.signalCode === null) await forceChild(child);
       if (runtime) await runtime.close();
       else await store?.close();
       server.stop(true);

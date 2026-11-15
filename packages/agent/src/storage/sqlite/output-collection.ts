@@ -550,6 +550,8 @@ export function outputCollectionOperation(
                 SELECT d.key,d.json,
                   json_extract(d.json,'$.sourceRunId') AS run_id,
                   json_extract(d.json,'$.relativePath') AS path,
+                  json_extract(d.json,'$.reference.hash') AS content_hash,
+                  CASE WHEN json_extract(d.json,'$.collectionId') IS NULL THEN 'files' ELSE 'shell' END AS producer_kind,
                   CASE WHEN c.fork_provenance_json IS NULL AND d.fork_provenance_json IS NULL
                     AND json_extract(c.json,'$.state')='ready'
                     AND owner_run.status IN ('completed','failed','cancelled') AND owner_run.is_active=0
@@ -561,12 +563,27 @@ export function outputCollectionOperation(
                     AND CAST(json_extract(c.json,'$.source.producerResultRevision') AS TEXT)=CAST(e.result_revision AS TEXT)
                     AND e.session_id=d.scope_id AND t.session_id=d.scope_id
                     AND t.origin_store_id=d.origin_store_id
-                    THEN tp.cursor END AS tool_order,
+                    THEN tp.cursor
+                    WHEN json_extract(d.json,'$.collectionId') IS NULL
+                    AND d.fork_provenance_json IS NULL AND op.fork_provenance_json IS NULL
+                    AND owner_run.status IN ('completed','failed','cancelled') AND owner_run.is_active=0
+                    AND e.kind='tool' AND e.adapter_id IN ('files.write','files.edit') AND e.state='succeeded'
+                    AND e.session_id=d.scope_id AND e.origin_store_id=d.origin_store_id
+                    AND e.run_id=json_extract(d.json,'$.sourceRunId')
+                    AND op.origin_store_id=d.origin_store_id
+                    AND json_extract(op.json,'$.state')='saved'
+                    AND json_extract(op.json,'$.executionId')=e.id
+                    AND json_extract(op.json,'$.snapshot.id')=json_extract(d.json,'$.reference.id')
+                    AND json_extract(op.json,'$.name')=json_extract(d.json,'$.relativePath')
+                    THEN ep.cursor END AS tool_order,
                   ep.cursor AS producer_order, e.completed_cursor AS completed_order
                 FROM extension_record d
                 LEFT JOIN extension_record c ON c.extension_id=d.extension_id
                   AND c.scope_kind=d.scope_kind AND c.scope_id=d.scope_id
                   AND c.key=json_extract(d.json,'$.collectionId')
+                LEFT JOIN extension_record op ON op.extension_id=d.extension_id
+                  AND op.scope_kind=d.scope_kind AND op.scope_id=d.scope_id
+                  AND op.key='output-operation/' || json_extract(d.json,'$.sourceExecutionId')
                 LEFT JOIN run owner_run ON owner_run.id=json_extract(d.json,'$.sourceRunId')
                   AND owner_run.session_id=d.scope_id AND owner_run.origin_store_id=d.origin_store_id
                 LEFT JOIN execution e ON e.id=json_extract(d.json,'$.sourceExecutionId')
@@ -584,6 +601,8 @@ export function outputCollectionOperation(
                 WHERE old.tool_order IS NOT NULL AND old.producer_order IS NOT NULL
                   AND newer.tool_order IS NOT NULL AND newer.producer_order IS NOT NULL
                   AND newer.run_id=old.run_id AND newer.path=old.path
+                  AND (newer.producer_kind=old.producer_kind OR
+                    (old.content_hash IS NOT NULL AND newer.content_hash=old.content_hash))
                   AND old.completed_order IS NOT NULL AND newer.tool_order>old.completed_order
                   AND (newer.tool_order>old.tool_order OR
                     (newer.tool_order=old.tool_order AND newer.producer_order>old.producer_order))
@@ -1121,7 +1140,15 @@ function legacyOutput(
   )
     return null;
   const actual = artifactReferenceInTransaction(db, { ...input, refId: ref.id, scope: ref.scope });
-  if (!actual || json(actual) !== json(ref)) return null;
+  // Tool results carry the compact ArtifactRef, not the storage-only identity/hash.
+  // Resolve that reference under the original scope and verify every supplied field.
+  if (
+    !actual ||
+    json({ id: actual.id, scope: actual.scope, mediaType: actual.mediaType, size: actual.size }) !==
+      json({ id: ref.id, scope: ref.scope, mediaType: ref.mediaType, size: ref.size }) ||
+    json({ ...actual, ...ref }) !== json(actual)
+  )
+    return null;
   const fileId = hash([input.expectedStoreId, input.sessionId, executionId, ref.id]);
   return {
     fileId,
@@ -1132,7 +1159,7 @@ function legacyOutput(
     relativePath: value.name,
     mediaType: ref.mediaType,
     size: ref.size,
-    reference: ref,
+    reference: actual,
     publishedAt: '',
   };
 }

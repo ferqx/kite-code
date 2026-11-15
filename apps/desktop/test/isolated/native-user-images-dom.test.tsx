@@ -384,3 +384,45 @@ test('pausing a still mounted image read aborts its lease and ignores late bytes
     await f.close();
   }
 });
+
+test('closing tool clipping retains verified pixels only until exit unmount and never restarts reads', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.intersect(true);
+    await f.release();
+    await f.until(() => f.host.querySelector('img') !== null);
+    const body = f.host.querySelector('.conversation-viewport')!;
+    body.classList.add('tool-activity-content');
+    body.setAttribute('data-state', 'closed');
+    const calls = f.calls.length;
+    await f.intersect(false);
+    expect(f.host.querySelector('img')).not.toBeNull();
+    expect(f.revoked).toHaveLength(0);
+    expect(f.calls).toHaveLength(calls);
+    await f.render(0);
+    expect(f.host.querySelector('img')).toBeNull();
+    expect(f.revoked).toEqual(f.urls);
+  } finally {
+    await f.close();
+  }
+});
+
+test('window hiding still releases a thumbnail retained during tool exit', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.intersect(true);
+    await f.release();
+    await f.until(() => f.host.querySelector('img') !== null);
+    const body = f.host.querySelector('.conversation-viewport')!;
+    body.classList.add('tool-activity-content');
+    body.setAttribute('data-state', 'closed');
+    await f.intersect(false);
+    await f.visibility(false);
+    expect(f.host.querySelector('img')).toBeNull();
+    expect(f.revoked).toEqual(f.urls);
+  } finally {
+    await f.close();
+  }
+});

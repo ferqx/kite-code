@@ -8,6 +8,8 @@
 
 仅原轮次 Run 已 completed／failed／cancelled 且不再 active 时，列表在分页前按原 Store／Session／Run 与完整相对路径投影当前产物，不按 basename、发布时间或 UUID 推断版本。只有两份产物均来自成功 producer、collection 完整 ready、producer result revision 匹配，且后续根 Tool 的 `execution.planned` cursor 晚于旧 producer 的 `completed_cursor`，才用后续产物替代旧卡。同一 Tool 内并发子任务、重叠执行、缺少原始顺序证明、不同 Run／目录以及 legacy／Fork 不据名称猜测替代。轮次运行中、等待、取消中或 interrupted 尚可恢复时保留全部产物；单次模型调用结束不等于轮次结束。失败、unknown 和未完整收集不能替代既有成功交付；旧 collector 迟到或重试不改变 producer 因果顺序。三产物偏序中只隐藏有明确成功后继的记录，仍保留互相并发的后继。
 
+历史 Files 会话输出目录已登记的交付也使用原成功工具的 planned／completed cursor 判断串行后继；须匹配原 Store／Session／Run、saved output-operation 与快照引用，普通工作区写入不参与。Files 与 Shell 两种入口之间，除完整相对交付路径相同及可证串行外，还须权威快照 hash 相同才折叠；跨入口同名不同内容不自动推断为修订。原 Shell 串行同路径修订规则不变。
+
 这是可重算的列表投影，不删除 delivery 或 Artifact。已有精确 `OutputFileTarget` 继续解析原字节，不暗中重定向到另一个版本；重新读取历史列表取得当前投影。客户端须按同一 revision 原子刷新已加载分页，不能把新的去重结果追加到旧列表而复活旧卡。
 
 ## 生命周期
@@ -53,3 +55,5 @@ ready后立即清理原身份目录；可重试 I/O 失败保留7天并显示ret
 `test/isolated/execution/output-collection.test.ts` 另核拒绝零 adapter 可见失败、无重试、保留已交付文件、冷收口零重放及到期清理保未知；使用真实 Bash subprocess、SQLite Worker、native Files和Artifact，覆盖双文件二进制、空输出、producer失败、链接拒绝、ref已发布但记录未提交、冻结集合缺项、Fork原快照和物理owner冷恢复/明确取消。`test/isolated/jobs/output-collection-preparation.test.ts` 和Linux preparation回归覆盖清理责任移交和持久base位于Workspace内。真实macOS/Windows未在Linux环境验收；修复前本工作树的Linux完整受管native smoke与既有普通Full测试均出现shell_owned_cleanup_unconfirmed；后者未配置outputCollection或Office资产，但不是旧revision独立制品的基线对照，不能据此排除本次调用配置变化。当时真实Desktop同样在namespace已接纳、root/G就绪未完成时返回unknown；固定错误标记无法唯一定位native失败步骤，当前PID消失也不改写原结果。这些历史失败保留。后续mount owner最小修复在Linux x64非root实测8项244断言通过，新隔离Desktop的真实Shell也已Exit0并确认监督树停止，具体范围归[Jobs owner](../jobs/README.md#linux-宿主与严格补偿源码)。不能由subprocess fixture或单次Shell通过推导完整办公UI、跨平台或安装发布资格。
 
 2026-11-11，Linux x64／Bun 1.4.4 以 `bun packages/agent/test/isolated/execution/output-collection.measure.ts /tmp/kite-output-measurement` 实测同一真实 subprocess fixture，逐例保存原始请求、单调时钟和RSS采样JSON。空命令 `true` 开关收集交替顺序各5次、每次新进程：宿主准备配对增量中位4.696ms；原Run完成配对增量中位3.641ms，范围−120.570至138.268ms，调度噪声较大，不据此承诺稳定总开销。producer终态事务返回至collection ready事务返回中位为空99.387ms、32MiB 978.450ms、64MiB 1952.935ms，后两者各3次。32／64MiB收集区间宿主RSS采样峰值中位161.168／163.766MiB，较终态时分别增加38.582／42.578MiB；2ms采样包括SQLite Worker和native，排除生产者子进程，不能视为内存硬上限。计时排除Runtime启动和事后完整Artifact流式回读核验。全部16例均为2次固定模型请求，空输出的请求正文仅归一化不稳定身份和夹具路径后完全相同，均无交付fileId或collector回执注入；用量计数是夹具常量，不是实测Provider token。该测量不取得受管平台或Desktop体验资格。
+
+默认 Service 已移除 Files 会话 `outputDirectory` 工具入口及模型指导。新交付只来自成功 Shell 的 `KITE_OUTPUT_DIR`；Files 普通写入不发布附件。历史 Files 输出记录与不可变引用保留，其查询和投影不代表仍可创建新的 Files 交付。

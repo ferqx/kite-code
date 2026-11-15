@@ -6,7 +6,7 @@ import type { NativeBridge } from './native-bridge';
 import { useNativeDiagnostics } from './native-diagnostics';
 import { NativeDisplayCache } from './native-display-cache';
 import { nativeChildActivity, type useNativeEnvironment } from './native-environment';
-import { NativeOperationDiff, NativeOutputFile } from './native-file-changes';
+import { NativeOperationDiff } from './native-file-changes';
 import type { NativeImagePreviews } from './native-image-previews';
 import { NativeMessageText } from './native-message-text';
 import { NativeModelOutputMessage } from './native-model-output-message';
@@ -287,18 +287,6 @@ export function NativeChildDetail({
               editor="vscode"
               open={open}
               cache={operationDiffs.current}
-              child
-            />
-          )
-        : undefined,
-      renderDelivery: bridge
-        ? (entry) => (
-            <NativeOutputFile
-              key={entry.changeId}
-              bridge={bridge}
-              generation={generation}
-              entry={entry}
-              editor="vscode"
               child
             />
           )

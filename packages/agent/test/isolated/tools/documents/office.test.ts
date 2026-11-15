@@ -64,6 +64,10 @@ test('office skill scopes shell portability and recovery to confirmed delivery',
   const entry = (await source.list()).entries[0]!;
   const loaded = await source.load({ id: entry.id });
   expect(loaded.body).toContain('Use POSIX-compatible shell syntax');
+  expect(loaded.body).toContain('use Files tools to write a previous Shell staging path');
+  expect(loaded.body).not.toContain('outputDirectory');
+  expect(loaded.body).toContain('Files tools do not collect attachments');
+  expect(loaded.body).toContain('Preserve user-specified locations and permissions');
   expect(loaded.body).toContain('node:crypto with the existing KITE_DOCUMENTS_BUN');
   expect(loaded.body).toContain('Inspect added and removed package parts');
   expect(loaded.body).toContain('matching content-type and relationship');
