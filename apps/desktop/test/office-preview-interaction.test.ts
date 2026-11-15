@@ -1,6 +1,6 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import {
   officeInteractionControlScript,
   officeInteractionInstallScript,
@@ -14,8 +14,24 @@ function fixture(
   html: string,
   beforeInstall?: (win: JSDOM['window']) => void,
 ) {
-  const dom = new JSDOM(html, { runScripts: 'outside-only', pretendToBeVisual: true });
+  const errors: Error[] = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.forwardTo(console);
+  virtualConsole.on('jsdomError', (error) => errors.push(error));
+  const dom = new JSDOM(html, {
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+    virtualConsole,
+  });
   const win = dom.window;
+  const observers = new Set<MutationObserver>();
+  const NativeMutationObserver = win.MutationObserver;
+  win.MutationObserver = class extends NativeMutationObserver {
+    constructor(callback: MutationCallback) {
+      super(callback);
+      observers.add(this);
+    }
+  };
   const callbacks = new Map<string, ((event: unknown) => void)[]>();
   const windowCallbacks = new Map<string, ((event: unknown) => void)[]>();
   const addWindow = win.addEventListener.bind(win);
@@ -31,6 +47,17 @@ function fixture(
   };
   win.cancelAnimationFrame = (id) => {
     frames.delete(id);
+  };
+  // JSDOM drops window.document on close but does not cancel queued observer delivery.
+  // Dispose harness-owned work before tearing down the simulated browsing context.
+  const closeWindow = win.close.bind(win);
+  win.close = () => {
+    for (const observer of observers) observer.disconnect();
+    observers.clear();
+    frames.clear();
+    callbacks.clear();
+    windowCallbacks.clear();
+    closeWindow();
   };
   Object.assign(win, { TextEncoder });
   win.HTMLElement.prototype.getBoundingClientRect = () =>
@@ -63,6 +90,7 @@ function fixture(
     });
   return {
     win,
+    errors,
     frame: () => {
       const pending = [...frames.values()];
       frames.clear();
@@ -2355,4 +2383,13 @@ test('read-only Word navigation becomes ready after pagination without interacti
   } finally {
     f.close();
   }
+});
+
+test('Word fixture closes safely with queued pagination changes', async () => {
+  const f = fixture('word', wordPagesHtml());
+  f.win.document.documentElement.setAttribute('data-kite-word-pagination-generation', '2');
+  f.close();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(f.errors, []);
+  assert.equal(f.frameCount(), 0);
 });
