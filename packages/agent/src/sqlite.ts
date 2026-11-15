@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson } from './json';
 import {
@@ -27,6 +29,35 @@ export interface OpenSqliteStoreOptions extends ProfileOptions {
   onTiming?: (observation: DbTiming) => void;
 }
 export type SqliteStorePreflight = import('./storage/sqlite/connection').StorePreflight;
+
+// All externally supplied IDs that can create a Command contend with a new Stop.
+const commandAdmissions = new Set<keyof Store>([
+  'acceptAgentInput',
+  'acceptCommand',
+  'acceptNestedAction',
+  'answerInteraction',
+  'applyAgentCommand',
+  'applyJobReport',
+  'beginJobReconciliation',
+  'beginRunResume',
+  'cancelCommand',
+  'cancelWork',
+  'consumeJobResult',
+  'createSession',
+  'deleteSession',
+  'forkSession',
+  'includeResult',
+  'interruptAgent',
+  'queueAgentMessage',
+  'reconcileSession',
+  'recoverSession',
+  'registerHumanCommand',
+  'registerHumanInput',
+  'renameSession',
+  'reorderPendingInputs',
+  'selectContext',
+  'withdrawPendingInput',
+]);
 
 // Failed startup has no returned Store to own native cleanup. Retain the exact
 // capability and attach its retry to the error; never recreate or re-send work.
@@ -260,7 +291,11 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         throw new AgentError('owner_changed');
     }
   };
-  const request = async (method: string, args: unknown[]): Promise<unknown> => {
+  const requestWorker = async (
+    method: string,
+    args: unknown[],
+    admitted = false,
+  ): Promise<unknown> => {
     if (
       method !== 'open' &&
       method !== 'getRecoveryReceipt' &&
@@ -268,7 +303,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       !storeMethods.includes(method as keyof Store)
     )
       throw new AgentError('unsupported_store_operation');
-    if (closing && method !== 'close') throw new AgentError('store_closed');
+    if (closing && method !== 'close' && !admitted) throw new AgentError('store_closed');
     validateIdentity(args);
     const id = ++sequence;
     const message = { id, method, args };
@@ -344,6 +379,80 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       if (--activeRequests === 0) drained?.();
     }
   };
+  const request = async (
+    method: string,
+    args: unknown[],
+    beforeCancellationWrite?: () => Promise<void>,
+  ): Promise<unknown> => {
+    const input = args[0] as { commandId?: string; decisionId?: string } | undefined;
+    const commandId =
+      method === 'decideHumanInput'
+        ? input?.decisionId
+        : commandAdmissions.has(method as keyof Store)
+          ? input?.commandId
+          : undefined;
+    if (typeof commandId !== 'string' || options.mode === 'readonly')
+      return requestWorker(method, args);
+
+    if (closing) throw new AgentError('store_closed');
+    const key = createHash('sha256').update(commandId).digest('hex');
+    const guardPath = join(access.coordinationPath, `command-admission-${key.slice(0, 2)}.lock`);
+    const path = join(access.coordinationPath, `command-${key}.lock`);
+    const acquire = (file: string) =>
+      acquireFileLock(file, 'exclusive', options.windowsPathSecurity);
+    // Only opening and retiring the exact lock need the shared directory guard.
+    let lock: FileLock | undefined;
+    activeRequests++;
+    try {
+      while (!lock) {
+        validateIdentity(args);
+        try {
+          const guard = acquire(guardPath);
+          try {
+            lock = acquire(path);
+          } finally {
+            guard.release();
+          }
+        } catch (error) {
+          if (!(error instanceof LockBusyError)) throw error;
+          await Bun.sleep(10);
+        }
+      }
+      if (beforeCancellationWrite) {
+        const vacant = await requestWorker('getCommand', [commandId], true).then(
+          (command) => command === null,
+          () => false,
+        );
+        if (vacant) await beforeCancellationWrite();
+      }
+      return await requestWorker(method, args, true);
+    } finally {
+      try {
+        if (lock) {
+          let guard: FileLock | undefined;
+          try {
+            guard = acquire(guardPath);
+          } catch {
+            // Keep the reusable file if its name cannot be retired under the guard.
+          }
+          try {
+            lock.release();
+            if (guard) {
+              try {
+                unlinkSync(path);
+              } catch {
+                // Reuse a file that the platform did not let us remove.
+              }
+            }
+          } finally {
+            guard?.release();
+          }
+        }
+      } finally {
+        if (--activeRequests === 0) drained?.();
+      }
+    }
+  };
   let migration: FileLock | undefined;
   try {
     if (options.mode !== 'readonly') {
@@ -408,6 +517,19 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
     }
   };
   const special = {
+    async cancelCommand(
+      input: Parameters<Store['cancelCommand']>[0],
+      beforeWrite?: () => Promise<void>,
+    ) {
+      return (await request('cancelCommand', [input], beforeWrite)) as Awaited<
+        ReturnType<Store['cancelCommand']>
+      >;
+    },
+    async cancelWork(input: Parameters<Store['cancelWork']>[0], beforeWrite?: () => Promise<void>) {
+      return (await request('cancelWork', [input], beforeWrite)) as Awaited<
+        ReturnType<Store['cancelWork']>
+      >;
+    },
     async beginRunResume(input: Parameters<Store['beginRunResume']>[0]) {
       if (options.mode === 'readonly') throw new AgentError('read_only');
       const state = (await request('verifyRunResume', [input])) as Awaited<

@@ -39,6 +39,7 @@ export interface BackgroundExecutionsProps {
   readonly stale?: boolean;
   readonly busy?: boolean;
   readonly currentOnly?: boolean;
+  readonly hasSnapshot?: boolean;
   readonly references?: ReactNode;
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
@@ -57,6 +58,7 @@ export function BackgroundExecutions({
   stale,
   busy = false,
   currentOnly,
+  hasSnapshot = executions.length > 0,
   references,
   stoppingExecutionId,
   onStop,
@@ -70,7 +72,13 @@ export function BackgroundExecutions({
         (execution.status === 'running' || execution.status === 'stopping'),
     );
     const subagents = executions.filter((execution) => execution.kind === 'subagent');
-    const emptyStatus = stale ? '状态未知' : subagentDetails?.loading ? '读取中…' : undefined;
+    const emptyStatus = hasSnapshot
+      ? undefined
+      : stale
+        ? '状态未知'
+        : subagentDetails?.loading
+          ? '读取中…'
+          : undefined;
     return (
       <section
         className="background-executions environment-information"
@@ -89,7 +97,8 @@ export function BackgroundExecutions({
           emptyLabel={emptyStatus ?? '空闲'}
           executions={shells}
           stoppingExecutionId={stoppingExecutionId}
-          onStop={stale ? undefined : onStop}
+          onStop={onStop}
+          stopReadOnly={stale || busy}
           busy={busy}
         />
         <ExecutionGroup
@@ -98,7 +107,8 @@ export function BackgroundExecutions({
           emptyLabel={emptyStatus ?? '暂无'}
           executions={subagents}
           stoppingExecutionId={stoppingExecutionId}
-          onStop={stale ? undefined : onStop}
+          onStop={onStop}
+          stopReadOnly={stale || busy}
           busy={busy}
           subagentDetails={subagentDetails}
         />
@@ -155,6 +165,7 @@ function ExecutionGroup({
   executions,
   stoppingExecutionId,
   onStop,
+  stopReadOnly,
   subagentDetails,
   busy,
 }: {
@@ -164,6 +175,7 @@ function ExecutionGroup({
   readonly executions: readonly BackgroundExecutionSummary[];
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
+  readonly stopReadOnly?: boolean;
   readonly subagentDetails?: BackgroundExecutionsProps['subagentDetails'];
   readonly busy: boolean;
 }) {
@@ -235,7 +247,8 @@ function ExecutionGroup({
                   <Button
                     className="background-execution-stop"
                     size="xs"
-                    disabled={busy || stoppingExecutionId === execution.executionId}
+                    readOnly={stopReadOnly}
+                    disabled={stoppingExecutionId === execution.executionId}
                     onClick={() => onStop(execution)}
                   >
                     {stoppingExecutionId === execution.executionId ? '停止中' : '停止'}

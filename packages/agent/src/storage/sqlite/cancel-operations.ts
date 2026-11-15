@@ -1,8 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { CancelCommandInput, CancelWorkInput } from '../port';
-import { AgentError, type Json } from '../types';
+import type { StoppedModelProof } from '../recovery-history';
+import { AgentError, type Json, USER_STOPPED_UNDISPATCHED_TOOL } from '../types';
 import { cancelHumanCommandBindings } from './human-work-control';
+import { savedApprovalDenial } from './interaction-operations';
+import { verifyModelOutput } from './model-output';
 import type { SqliteOperations } from './operations';
 import { cancelOutputCollectionCommand } from './output-collection';
 
@@ -60,6 +63,206 @@ function expand(db: SqliteOperations, rootId: string, seeds: string[]): string[]
 export function cancel(db: SqliteOperations, input: CancelCommandInput | CancelWorkInput) {
   return db.tx(() => cancelWorkBody(db, input));
 }
+
+export function userStopCommand(db: SqliteOperations, runId: string): string | undefined {
+  const row = db.row(
+    `SELECT stop.id FROM run r JOIN change_event e ON e.object_id=r.id AND e.scope_session_id=r.session_id
+     JOIN command stop ON stop.id=json_extract(e.payload_json,'$.payload.userStopCommandId')
+     JOIN command origin ON origin.id=r.origin_command_id
+     WHERE r.id=? AND r.cancel_requested=1 AND e.type='run.cancel_requested'
+       AND stop.status='applied' AND stop.origin_store_id=r.origin_store_id
+       AND stop.subject_id=origin.subject_id LIMIT 1`,
+    runId,
+  );
+  return row ? String(row.id) : undefined;
+}
+
+/** A confirmed refusal survives a later stop, whichever path closes the call. */
+export function undispatchedToolSettlement(
+  db: SqliteOperations,
+  stoppedContent: string,
+  execution?: ReturnType<SqliteOperations['rows']>[number],
+) {
+  const denied = execution !== undefined && savedApprovalDenial(db, execution);
+  return {
+    outcome: denied ? ('failed' as const) : ('cancelled' as const),
+    content: denied ? 'approval_denied' : stoppedContent,
+    details: {
+      code: denied ? 'approval_denied' : 'cancelled_before_dispatch',
+      dispatchCommitted: Boolean(execution?.dispatched),
+      adapterAttempted: false,
+    },
+  };
+}
+
+/** Close the exact stopped batch without reissuing a call or disturbing its saved results. */
+export function recordStoppedTools(
+  db: SqliteOperations,
+  expectedStoreId: string,
+  batch: StoppedModelProof,
+  recoveryCommandId?: string,
+) {
+  const callIds = new Set(batch.calls.map(({ id }) => id));
+  const model = db.row(
+    "SELECT e.*,r.config_json AS run_configuration FROM execution e JOIN run r ON r.id=e.run_id WHERE e.id=? AND r.id=? AND e.kind='model' AND e.state='succeeded' AND e.session_id=r.session_id AND e.origin_store_id=r.origin_store_id AND e.origin_command_id=r.origin_command_id",
+    batch.executionId,
+    batch.runId,
+  );
+  if (
+    !model ||
+    model.origin_store_id !== expectedStoreId ||
+    model.session_id !== batch.sessionId ||
+    callIds.size !== batch.calls.length
+  )
+    throw new AgentError('model_output_invalid');
+  const result = JSON.parse(String(model.result_json)) as {
+    toolCalls?: typeof batch.calls;
+    modelOutput?: unknown;
+  };
+  if (result.modelOutput !== undefined) {
+    // The Core obtained the exact pairs while committing or reading the immutable output.
+    const output = verifyModelOutput(db, result.modelOutput, model);
+    if (!output.complete || output.toolCallCount !== batch.calls.length)
+      throw new AgentError('model_output_invalid');
+  } else if (
+    canonicalJson(result.toolCalls?.map(({ id, name }) => ({ id, name })) ?? []) !==
+    canonicalJson(batch.calls)
+  )
+    throw new AgentError('model_output_invalid');
+
+  const executions = db.rows(
+    "SELECT * FROM execution WHERE run_id=? AND kind='tool' AND json_extract(decision_source_json,'$.modelExecutionId')=?",
+    batch.runId,
+    batch.executionId,
+  );
+  const existing = new Map(executions.map((row) => [String(row.call_id), row]));
+  if (existing.size !== executions.length || [...existing.keys()].some((id) => !callIds.has(id)))
+    throw new AgentError('recovery_tool_history_unverifiable');
+  const stoppedContent = userStopCommand(db, batch.runId)
+    ? USER_STOPPED_UNDISPATCHED_TOOL
+    : '上一轮已停止，此工具未执行';
+  const recoveredDenials: string[] = [];
+  const source = canonicalJson({ kind: 'model_decision', modelExecutionId: batch.executionId });
+  const { tools = [] } = JSON.parse(String(model.run_configuration)) as {
+    tools?: { id: string; version: string }[];
+  };
+  const versions = new Map(tools.map(({ id, version }) => [id, version]));
+  const stoppedAt = Date.now();
+  for (const call of batch.calls) {
+    const tool = existing.get(call.id);
+    const id = tool ? String(tool.id) : randomUUID();
+    if (tool) {
+      if (
+        tool.session_id !== model.session_id ||
+        tool.origin_store_id !== model.origin_store_id ||
+        tool.origin_command_id !== model.origin_command_id ||
+        tool.root_session_id !== model.root_session_id ||
+        tool.root_work_command_id !== model.root_work_command_id ||
+        tool.root_work_seq !== model.root_work_seq ||
+        tool.step_id !== model.step_id ||
+        JSON.parse(String(tool.decision_source_json)).kind !== 'model_decision' ||
+        tool.adapter_id !== call.name
+      )
+        throw new AgentError('recovery_tool_history_unverifiable');
+      const messages = db.rows(
+        `SELECT source_json FROM message WHERE session_id=? AND run_id=? AND role='tool'
+         AND json_extract(source_json,'$.sourceIds[0]')=? LIMIT 2`,
+        batch.sessionId,
+        batch.runId,
+        id,
+      );
+      if (messages.length) {
+        const message = JSON.parse(String(messages[0]!.source_json));
+        if (
+          messages.length !== 1 ||
+          message.toolCallId !== call.id ||
+          message.sourceIds?.length !== 1
+        )
+          throw new AgentError('recovery_tool_history_unverifiable');
+        continue;
+      }
+      const result = tool.result_json ? JSON.parse(String(tool.result_json)) : null;
+      const reconciled =
+        recoveryCommandId !== undefined &&
+        tool.state === 'cancelled' &&
+        ((result?.code === 'owner_lost_before_dispatch' &&
+          result.reconciliationCommandId === recoveryCommandId) ||
+          (result?.code === 'recovery_cancelled_unstarted' &&
+            result.recoveryCommandId === recoveryCommandId));
+      if (
+        recoveryCommandId !== undefined &&
+        tool.state === 'outcome_unknown' &&
+        result?.code === 'recovery_outcome_unknown' &&
+        result.recoveryCommandId === recoveryCommandId
+      ) {
+        db.appendMessage(
+          batch.sessionId,
+          batch.runId,
+          {
+            content: canonicalJson(result),
+            toolCallId: call.id,
+            sourceIds: [id],
+          },
+          'tool',
+        );
+        continue;
+      }
+      if (tool.dispatched !== 0n || (tool.state !== 'planned' && !reconciled))
+        throw new AgentError('recovery_tool_history_unverifiable');
+    }
+    const result = undispatchedToolSettlement(db, stoppedContent, tool);
+    if (tool) {
+      if (tool.state === 'cancelled' && result.outcome === 'failed') recoveredDenials.push(id);
+      if (tool.state !== 'cancelled' || result.outcome === 'failed') {
+        if (BigInt(tool.result_revision!) >= 9223372036854775807n)
+          throw new AgentError('sequence_exhausted');
+        db.run(
+          'UPDATE execution SET state=?,cancel_requested=1,cancel_requested_at=COALESCE(cancel_requested_at,?),result_json=?,result_revision=result_revision+1 WHERE id=?',
+          result.outcome,
+          stoppedAt,
+          canonicalJson(result),
+          id,
+        );
+      }
+    } else
+      db.run(
+        `INSERT INTO execution(id,session_id,run_id,kind,origin_command_id,origin_store_id,root_work_command_id,root_work_seq,root_session_id,step_id,call_id,attempt,adapter_id,definition_version,state,intent_json,decision_source_json,owner_generation,parent_execution_id,cancel_with_parent,cancel_requested,cancel_requested_at,result_json,result_revision)
+       VALUES(?,?,?,'tool',?,?,?,?,?,?,?,1,?,?,'cancelled','null',?,?,?,1,1,?,?,1)`,
+        id,
+        model.session_id!,
+        batch.runId,
+        model.origin_command_id!,
+        model.origin_store_id!,
+        model.root_work_command_id!,
+        model.root_work_seq!,
+        model.root_session_id!,
+        model.step_id!,
+        call.id,
+        call.name,
+        versions.get(call.name) ?? 'unavailable',
+        source,
+        model.owner_generation!,
+        model.parent_execution_id ?? null,
+        stoppedAt,
+        canonicalJson(result),
+      );
+    db.appendMessage(
+      batch.sessionId,
+      batch.runId,
+      { content: result.content, toolCallId: call.id, sourceIds: [id] },
+      'tool',
+    );
+    if (tool?.state !== 'cancelled' || result.outcome === 'failed') {
+      db.event(batch.sessionId, id, 'execution.finished');
+      db.run(
+        'UPDATE execution SET completed_cursor=(SELECT last_change_cursor FROM storage_meta WHERE singleton=1) WHERE id=?',
+        id,
+      );
+    }
+  }
+  return recoveredDenials;
+}
+
 /** Complete cancellation body; callers hold the same final transaction. */
 export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput | CancelWorkInput) {
   db.identity(input.expectedStoreId);
@@ -303,15 +506,19 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
       commandCancelled(db, String(pending.id), now);
       db.event(String(session.id), String(pending.id), 'input.cancel_requested');
     }
+    const run = db.row('SELECT session_id,is_active,cancel_requested FROM run WHERE id=?', id)!;
     db.run(
       'UPDATE run SET cancel_requested=1,cancel_requested_at=COALESCE(cancel_requested_at,?) WHERE id=?',
       now,
       id,
     );
     db.event(
-      String(db.row('SELECT session_id FROM run WHERE id=?', id)!.session_id),
+      String(run.session_id),
       id,
       'run.cancel_requested',
+      input.userInitiated && run.is_active && !run.cancel_requested
+        ? { userStopCommandId: input.commandId }
+        : null,
     );
   }
   const receipt: Json = {

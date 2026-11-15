@@ -6,6 +6,8 @@
 
 验证：`bun test packages/agent-kernel/test packages/runtime-host/test packages/runtime-storage-sqlite/test packages/builtin-runtime/test tests/runtime tests/tui-system`、`bun run typecheck`。
 
+当前统一 Runtime 的人工拒绝与停止入口分别见[授权](authorization.md)和[取消与恢复](../handbook/features/recovery.md)。异步 ToolContext 在最终持久派发前准备，适配器入口再核对本地取消。SQLite 在同一 Store 的命令 ID 准入后才通知 Runtime 停止本机目标，持久事务记录原 Command 和实际受影响的 Run。正常结算和冷恢复从已提交的完整模型回复补齐确认未执行的调用。已停批次按模型输出和调用身份验证，普通恢复继续核原参数。先保存的审批拒绝优先结算，已有回执和未知效果按原证据处理。[写锁回归](../../packages/agent/test/isolated/execution/cancel-writer-wait.test.ts)核同 ID 冲突及重复请求，[Responses 回归](../../apps/service/test/isolated/responses-loop.test.ts)核停止后立即提交和回执顺序，[强杀回归](../../packages/agent/test/isolated/recovery/history-followup-runtime.test.ts)核首个 SDK 请求中的原 ID、坏参数工具和两种审批先后顺序。下文的 Kernel、Runtime Host 与 SAQ 段落保留旧架构证据。
+
 App `RuntimeSessionCoordinator`、Kernel Runtime State 与同一 Host SQLite Store adapter 共享唯一 persistence/abort seam；
 Session、effect coordinator 与 turn coordinator 不按路径自行创建第二 Store。取消顺序、cleanup barrier、effect lease、
 unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持；SAQ queue/generation/revision 也必须沿同一 boundary。

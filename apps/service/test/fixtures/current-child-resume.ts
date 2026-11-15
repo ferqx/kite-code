@@ -58,19 +58,11 @@ export async function startCurrentChildResume(directory: string) {
         yield { type: 'text_delta', text: 'CURRENT_PARENT_COMPLETED' };
         yield finish;
       } else {
-        const last = request.messages.filter((message) => message.role === 'tool').at(-1);
-        let cursor: string | undefined;
-        try {
-          const body = JSON.parse(last?.content ?? '{}');
-          if (typeof body.next_cursor === 'string') cursor = body.next_cursor;
-        } catch {
-          // A spawn receipt does not supply an event cursor.
-        }
         yield {
           type: 'tool_call',
           id: crypto.randomUUID(),
           name: 'wait_agent_events',
-          arguments: JSON.stringify({ wait_ms: 5000, ...(cursor ? { cursor } : {}) }),
+          arguments: JSON.stringify({ wait_ms: 5000 }),
         };
         yield { ...finish, reason: 'tool_calls' };
       }

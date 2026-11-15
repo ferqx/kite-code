@@ -92,6 +92,9 @@ test('parallel Tools retain actual reverse completion and original Model call-re
         expect(slowEntered).toBe(1);
         expect(tools.find((row) => row.callId === 'slow-first')?.status).toBe('dispatching');
         expect(readFileSync(ledger, 'utf8')).toBe('fast\n');
+        const results = (await store.listMessages('s')).filter((row) => row.role === 'tool');
+        expect(results.map((row) => row.toolCallId)).toEqual(['fast-second']);
+        expect(model.requests).toHaveLength(1);
         break;
       }
       if (Date.now() > deadline) throw Error('parallel_fast_cannot_complete_while_slow_held');
@@ -307,10 +310,10 @@ test('a later parallel Tool terminal SQLite rejection survives the earlier unkno
   }
 });
 
-test('denying a parallel sibling waits for cleanup and delivers both results before the final explanation', async () => {
+test('denying one tool lets an already running sibling finish and sends both original results', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-parallel-denial-'));
   let release!: () => void;
-  const cleanup = new Promise<void>((resolve) => {
+  const running = new Promise<void>((resolve) => {
     release = resolve;
   });
   let entered = false,
@@ -332,7 +335,7 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
     [
       {
         type: 'text_delta',
-        text: 'The denied call did not execute; the attempted effect is unknown.',
+        text: 'The approved work completed. The other call was denied.',
       },
       finish,
     ],
@@ -345,21 +348,17 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
       {
         id: 'fixture.denial.attempted',
         version: '1',
-        description: 'Attempted sibling with held cleanup',
+        description: 'Authorized sibling with a held response',
         inputSchema: { type: 'object' },
         async execute(_input, context) {
           entered = true;
           effects.push('attempted');
-          if (!context.signal.aborted)
-            await new Promise<void>((resolve) =>
-              context.signal.addEventListener('abort', () => resolve(), { once: true }),
-            );
-          aborted = true;
-          await cleanup;
-          effects.push('cleanup completed');
+          await running;
+          aborted = context.signal.aborted;
+          effects.push('sibling completed');
           return {
-            outcome: 'outcome_unknown',
-            content: 'Attempted external effect remains unknown',
+            outcome: 'succeeded',
+            content: 'Authorized sibling completed',
           };
         },
       },
@@ -450,7 +449,11 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
       expectedRevision: interaction.revision,
       answer: { kind: 'approval', decision: 'deny' },
     });
-    await until(async () => (aborted ? true : undefined));
+    await until(async () =>
+      (await store.listExecutions('s')).find(
+        (row) => row.callId === 'denied' && row.status === 'failed',
+      ),
+    );
     expect((await store.getRun(interaction.runId!))?.isActive).toBe(true);
     expect(disposed).toBe(0);
     expect(model.requests).toHaveLength(1);
@@ -467,18 +470,17 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
       result: { content: 'approval_denied', details: { adapterAttempted: false } },
     });
     expect(executions.find((row) => row.callId === 'attempted')).toMatchObject({
-      status: 'outcome_unknown',
-      result: { content: 'Attempted external effect remains unknown' },
+      status: 'succeeded',
+      result: { content: 'Authorized sibling completed' },
     });
+    expect(aborted).toBe(false);
     await until(async () => (disposed === 1 ? true : undefined));
     expect(disposed).toBe(1);
     expect(deniedCalls).toBe(0);
     expect(model.requests).toHaveLength(2);
     const received = model.requests[1]!.messages.filter((row) => row.role === 'tool');
     expect(received.map((row) => row.toolCallId)).toEqual(['attempted', 'denied']);
-    expect(received[0]!.content).toContain('Attempted external effect remains unknown');
-    expect(received[0]!.content).toContain('Outcome unknown.');
-    expect(received[0]!.content).toContain('do not repeat');
+    expect(received[0]!.content).toBe('Authorized sibling completed');
     expect(received[1]!.content).toContain('The user denied this request');
     expect(received[1]!.content).toContain('Do not resubmit it or bypass the refusal');
     expect(received[1]!.content).toContain('It was not executed');
@@ -486,7 +488,7 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
       expect(row.sourceIds).toEqual([
         executions.find((execution) => execution.callId === row.toolCallId)!.id,
       ]);
-    expect(effects).toEqual(['attempted', 'cleanup completed']);
+    expect(effects).toEqual(['attempted', 'sibling completed']);
     const messages = await store.listMessages('s');
     const cursor = (await store.getMetadata()).lastChangeCursor;
     await runtime.close();
@@ -504,7 +506,7 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
     expect(disposed).toBe(1);
     expect(deniedCalls).toBe(0);
     expect(model.requests).toHaveLength(2);
-    expect(effects).toEqual(['attempted', 'cleanup completed']);
+    expect(effects).toEqual(['attempted', 'sibling completed']);
   } finally {
     release();
     if (!closed) await runtime.close();

@@ -32,7 +32,7 @@ async function until<T>(read: () => Promise<T | null>) {
 }
 async function fixture(initialMode: PermissionMode, scenario = 'closed') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-confirmation-')));
-  const profile = { dataRoot: root, profile: 'new' };
+  const profile = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;
   const base = { expectedStoreId, subjectId: 'user' };
@@ -433,6 +433,7 @@ async function fixture(initialMode: PermissionMode, scenario = 'closed') {
     store,
     base,
     root,
+    profile,
     stats: () => ({ effects, calls, reviews }),
     declarations: () => declarations,
     policyReads: () => policyReads,
@@ -718,7 +719,7 @@ for (const scenario of ['two-calls', 'new-run'] as const)
       const before = await f.store.listExecutions('s');
       await f.runtime.close();
       await f.store.close();
-      const cold = await openSqliteStore({ dataRoot: f.root, profile: 'new', mode: 'readonly' });
+      const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
       try {
         expect(await cold.listExecutions('s')).toEqual(before);
       } finally {

@@ -3,7 +3,7 @@ import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type AgentMessage, type ArtifactReference, type Json } from '../types';
 import { verifyFirstActivation } from './child-first-activation';
-import { getAgentSummary, stableAgentsBody } from './child-query-operations';
+import { directAgentOrdinal, getAgentSummary, stableAgentsBody } from './child-query-operations';
 import { verifyNamespace } from './extension-operations';
 import { applyJobReport, runnableCommandPredicate } from './job-report-operations';
 import type { SqliteOperations } from './operations';
@@ -1010,7 +1010,7 @@ export function getAgentMessage(
   input: Parameters<Store['getAgentMessage']>[0],
 ): AgentMessage | null {
   db.identity(input.expectedStoreId);
-  reader(db, input.sessionId, input.subjectId);
+  const session = reader(db, input.sessionId, input.subjectId);
   const row = query(db, input.messageId);
   if (
     !row ||
@@ -1020,7 +1020,30 @@ export function getAgentMessage(
       row.mail_target_session_id !== input.sessionId)
   )
     return null;
-  return project(row);
+  const message = project(row);
+  if (
+    !input.includeSender ||
+    message.kind !== 'message' ||
+    message.state !== 'received' ||
+    input.sessionId !== message.targetSessionId
+  )
+    return message;
+  const source = db.row(
+    'SELECT id, title, parent_id, root_id, workspace_id FROM session WHERE id=?',
+    message.sourceSessionId,
+  );
+  if (!source) throw new AgentError('agent_message_unverifiable');
+  relation(source, session);
+  const name = String(source.title);
+  if (session.parent_id === source.id) return { ...message, sender: { name, relation: 'parent' } };
+  const ordinal = directAgentOrdinal(
+    db,
+    message.targetSessionId,
+    input.subjectId,
+    message.sourceSessionId,
+  );
+  if (ordinal < 1) throw new AgentError('agent_message_unverifiable');
+  return { ...message, sender: { name, relation: 'child', ordinal } };
 }
 export function listAgentMessages(
   db: SqliteOperations,

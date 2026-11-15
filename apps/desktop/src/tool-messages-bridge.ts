@@ -6,6 +6,16 @@ export const nativeToolMessagePageBytes = 524288;
 /** Shell bodies are budgeted separately from commands and other tool facts. */
 export const nativeShellOutputPageBytes = 2 * 1024 * 1024;
 export const nativeShellCommandChunkBytes = 8192;
+export const nativeAgentWaitErrors = [
+  'invalid_cursor',
+  'cursor_expired',
+  'invalid_request',
+  'invalid_work_reference',
+  'agent_unavailable',
+  'permission_denied',
+  'operation_cancelled',
+  'receipt_unverifiable',
+] as const;
 /** Display-only failure facts from the exact registered Git worktree receipt. */
 export type NativeWorktreeFailure = {
   category:
@@ -51,7 +61,9 @@ export type NativeToolMessageFact = Pick<
   fileCreated?: true;
   /** Exact builtin Task queue acknowledgment; display only, never proof of receipt or execution. */
   agentMessageAccepted?: true;
-  agentWait?: { reason: 'events' | 'completed' | 'input' | 'timeout'; events: number };
+  agentWait?:
+    | { reason: 'events' | 'completed' | 'input' | 'timeout'; events: number; historyGap?: true }
+    | { reason: 'failed'; code: (typeof nativeAgentWaitErrors)[number] };
   /** Display only: verified original request fields, or its known version's directory default. */
   target?: string;
   /** Original request presentation is still being verified; never publish a partial tool row. */

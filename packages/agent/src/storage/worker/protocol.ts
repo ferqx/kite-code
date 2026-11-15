@@ -1,8 +1,12 @@
 import type { ProfileAccess } from '../../platform/profile';
 import type { SqliteEngineSelection } from '../../sqlite-engine';
 import type { Store } from '../port';
+
+type WorkerArgs<K extends keyof Store> = K extends 'cancelCommand' | 'cancelWork'
+  ? [Parameters<Store[K]>[0]]
+  : Parameters<Store[K]>;
 export type StoreCall = {
-  [K in Exclude<keyof Store, 'close'>]: { id: number; method: K; args: Parameters<Store[K]> };
+  [K in Exclude<keyof Store, 'close'>]: { id: number; method: K; args: WorkerArgs<K> };
 }[Exclude<keyof Store, 'close'>];
 export type WorkerRequest =
   | StoreCall
@@ -152,6 +156,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'recoverSession',
   'reconcileSession',
   'readRecoveryToolHistory',
+  'readStoppedModelHistory',
   'setRunResultWait',
   'finishRun',
   'cancelCommand',

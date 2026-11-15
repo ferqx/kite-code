@@ -8,7 +8,7 @@ import { openDatabase } from '../sqlite/connection';
 import { runnableCommandPredicate } from '../sqlite/job-report-operations';
 import { SqliteOperations } from '../sqlite/operations';
 import { closeAbandonedOwnerTitles, hasUnsettledOwnerGroup } from '../sqlite/owner-dispatch';
-import { readRecoveryToolHistory } from '../sqlite/recovery-history';
+import { readRecoveryToolHistory, readStoppedModelHistory } from '../sqlite/recovery-history';
 import { getRecoveryReceipt } from '../sqlite/recovery-operations';
 import { inspectSessionReconciliation } from '../sqlite/session-reconciliation';
 import { UnstartedSqliteWrite } from '../sqlite/write-lock';
@@ -159,6 +159,8 @@ function execute(request: WorkerRequest): void {
       result = inspectSessionReconciliation(operations, args[0]);
     else if (method === 'readRecoveryToolHistory')
       result = readRecoveryToolHistory(operations, args[0]);
+    else if (method === 'readStoppedModelHistory')
+      result = readStoppedModelHistory(operations, args[0]);
     else if (method === 'acquireSessionOwner')
       result = operations.tx(() => {
         const sessionId = String(args[0]);

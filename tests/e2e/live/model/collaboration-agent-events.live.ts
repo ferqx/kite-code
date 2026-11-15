@@ -304,16 +304,17 @@ export async function runLiveAgentEvents(options: {
       commandId: 'create',
       title: 'Live mailbox boundaries',
     });
+    const secondWaitMs = options.caseId === 'A03-timeout' ? 1200 : 180000;
     const second =
       options.caseId === 'A03-snapshot' || options.caseId === 'A03-finite-mailbox'
         ? 'After the zero snapshot, keep waiting for the actual child result and finish only after reporting its complete actual material.'
-        : `After the zero snapshot, call wait_agent_events exactly once with after_seq equal to that exact next_seq and wait_ms ${options.caseId === 'A03-timeout' ? '1200' : 'null'}. This is an explicit observation test; do not send, interrupt, follow up or spawn again. After it returns, keep receiving the real child result and report its complete actual material. A human may add a supplemental input or stop this root normally.`;
+        : `After the zero snapshot, call wait_agent_events exactly once with only wait_ms ${secondWaitMs}. This is an explicit observation test; do not send, interrupt, follow up or spawn again. After it returns, keep receiving the real child result and report its complete actual material. A human may add a supplemental input or stop this root normally.`;
     const assignment =
       options.caseId === 'A03-finite-mailbox'
         ? 'Call read_agent_events_material once with material child_material. Wait for the actual held read. After receiving the actual content, send_agent_message to target parent exactly once containing that complete actual content, then finish with the same complete actual content. Do not spawn, follow up or interrupt anyone.'
         : 'Call read_agent_events_material once with material child_material. Wait for the actual held read, then return its complete actual content. Do not spawn or send messages or interrupt anyone.';
     const content =
-      `New task: Spawn exactly one child named material-reader with this exact assignment: ${assignment} After spawning, call read_agent_events_material with material root_ready once. When root_ready returns, call wait_agent_events exactly once with after_seq "0" and wait_ms 0. It must be a zero snapshot even though the child is still reading. ` +
+      `New task: Spawn exactly one child named material-reader with this exact assignment: ${assignment} After spawning, call read_agent_events_material with material root_ready once. When root_ready returns, call wait_agent_events exactly once with only wait_ms 0. It must be a zero snapshot even though the child is still reading. ` +
       second;
     await client.startRun(
       'root',
@@ -331,15 +332,17 @@ export async function runLiveAgentEvents(options: {
     });
     const firstArgs = record(first.input),
       firstBody = record(JSON.parse(String(record(first.result).content)));
+    const firstPosition = record(record(record(first.result).details).agentEventObservation);
     assert(
-      firstArgs.waitMs === 0 && (firstArgs.afterSeq ?? '0') === '0',
+      firstArgs.waitMs === 0 && Object.keys(firstArgs).length === 1,
       'actual_model_zero_snapshot_arguments',
     );
     assert(
       firstBody.reason === 'timeout' &&
         Array.isArray(firstBody.events) &&
         firstBody.events.length === 0 &&
-        firstBody.next_seq === '0',
+        firstBody.next_cursor === undefined &&
+        firstPosition.nextSeq === '0',
       'zero_snapshot_empty_and_no_cursor_jump',
     );
     assert(childEntry?.runId, 'real_child_read_entered');
@@ -394,9 +397,8 @@ export async function runLiveAgentEvents(options: {
       });
       const args = record(secondWait.execution.input);
       assert(
-        args.afterSeq === firstBody.next_seq &&
-          args.waitMs === (options.caseId === 'A03-timeout' ? 1200 : null),
-        'actual_second_wait_exact_cursor_and_duration',
+        args.waitMs === secondWaitMs && Object.keys(args).length === 1,
+        'actual_second_wait_duration_only',
       );
       assert(
         secondWait.observed.emptyScans > scanBaseline && secondWait.observed.hostCaller,
@@ -526,11 +528,13 @@ export async function runLiveAgentEvents(options: {
           return item?.status === 'succeeded' && finalDeliveryHeld ? item : undefined;
         });
         const body = record(JSON.parse(String(record(settled.result).content)));
+        const position = record(record(record(settled.result).details).agentEventObservation);
         assert(
           body.reason === (options.caseId === 'A03-input' ? 'input' : 'timeout') &&
             Array.isArray(body.events) &&
             body.events.length === 0 &&
-            body.next_seq === firstBody.next_seq,
+            body.next_cursor === undefined &&
+            position.nextSeq === firstPosition.nextSeq,
           'exact_wait_reason_empty_events_and_unchanged_watermark',
         );
         if (options.caseId === 'A03-timeout')

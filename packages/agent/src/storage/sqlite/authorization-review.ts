@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { authorizationCheckFact } from './authorization-check';
 import { authorizationPolicyObservation } from './authorization-policy-evidence';
+import { savedApprovalDenial } from './interaction-operations';
 import { verifyModelBody } from './model-body';
 import type { SqliteOperations } from './operations';
 
@@ -208,9 +209,17 @@ export function executionAuthorizationObservation(
       human.input_digest === hash(JSON.parse(String(target.intent_json)))
     ) {
       const answer = human.answer_json ? object(JSON.parse(String(human.answer_json))) : undefined;
+      // Closing the wait does not erase the verified decision that settled this Tool.
+      const deniedBeforeStop =
+        human.state === 'cancelled' &&
+        target.state === 'failed' &&
+        answer?.decision === 'deny' &&
+        savedApprovalDenial(db, target);
       observed.human = {
         interactionId: String(human.id),
-        state: human.state as 'pending' | 'answered' | 'cancelled',
+        state: deniedBeforeStop
+          ? 'answered'
+          : (human.state as 'pending' | 'answered' | 'cancelled'),
         revision: String(human.revision),
         acceptedDecisionRevision:
           human.accepted_decision_revision === null

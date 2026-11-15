@@ -170,6 +170,21 @@ test('a single Agent wait shows one tool heading and opens directly to its resul
   expect(pending.querySelector('.conversation-trace [data-status="running"]')?.textContent).toBe(
     wait.title!,
   );
+  const failed: Message = {
+    ...wait,
+    text: '事件游标无效，子 Agent 可继续运行。',
+    status: 'failed',
+  };
+  for (const open of [false, true]) {
+    const document = renderWait(failed, open);
+    expect(document.querySelector('.conversation-trace [data-status="error"]')?.textContent).toBe(
+      wait.title!,
+    );
+    expect(document.querySelector('.tool-detail-status')?.textContent).toBe(
+      open ? failed.text : undefined,
+    );
+    expect(document.querySelector('.tool-detail-scroll')).toBeNull();
+  }
 });
 
 test('conversation trace keeps the first tool icon as the active title changes and uses a bulb for reasoning', () => {

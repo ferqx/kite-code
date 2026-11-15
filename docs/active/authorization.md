@@ -45,7 +45,7 @@ Auto 复用沿既有 Command／policy evidence，不新增授权账本。已有�
 
 原任务身份由[resolveExecutionRun](../../packages/agent/src/execution/task-origin.ts)在Core统一沿有界、同Store／Session／RootWork／主体父链解析；嵌套Operation的runId保持真实null，通用审核上下文也可读取已验证的原任务，不再把直接runId缺失当作任务必然不可用。权限读取的任务／计划仍是证据，不是grant。
 
-Tool 的失败、adapter 抛异常、人工／自动拒绝和 unknown 是原调用的结果，须先保存准确 Execution 与原 call ID 配对，再交给下一 Model 解释；Loop 不因这些结果或五次同参失败硬退出，不自动重试未知效果。人工 deny 保 `approval_denied` 并停止本批未开始后继，已开始调用须先清理；它不提交整 Run／Command 取消。明确用户取消仍停止，真实 Store／authority 故障和无法保存结果仍失败关闭。自动拒绝只作用于准确未派发目标的既有边界保持；[当前决定](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)部分替代旧人工拒绝终止工作语义，历史证据不改写。
+Tool 的失败、adapter 抛异常、人工／自动拒绝和 unknown 是原调用的结果，须先保存准确 Execution 与原 call ID 配对，再交给下一 Model 解释；Loop 不因这些结果或五次同参失败硬退出，不自动重试未知效果。人工 deny 保留原 `approval_denied`。停止与拒绝竞争时，正常结算和冷恢复按原审批绑定与持久答案的生效顺序判定，停止前已应用的拒绝仍交付给模型，迟到的拒绝保留原停止回执。同批已执行和待派发的调用按各自授权结算，按模型声明顺序交付配对回执。结果未知仍停止本批后续派发。明确用户取消仍停止，真实 Store／authority 故障和无法保存结果仍失败关闭。自动拒绝只作用于准确未派发目标的既有边界保持；具体取舍见[单项拒绝与整轮停止](../../.agents/notes/implemented/architecture/2026-11-15-tool-denial-and-run-stop-receipts.md)及[原工具结果决定](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)。
 
 工具入口范围限制不能被解释为用户已经拒绝整个业务效果。准确内置 Files 的 `file_full_access_required` gate 回执可补充入口不可用说明，原错误码、原因、未派发事实与权限映射保持；其他工具的独立请求仍完整经过原审批，已有明确拒绝、unknown、父子权限／Planning 业务门禁及保护资源继续生效。该说明不构成执行许可，具体身份检查与回归归[权限 owner](../../packages/agent/src/permissions/README.md)。
 

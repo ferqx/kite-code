@@ -326,10 +326,14 @@ export function useNativeEnvironment({
   latest.current = view;
   const readable = useRef(!unavailable && !paused && !awaitingFreshRead);
   readable.current = !unavailable && !paused && !awaitingFreshRead;
-  const control = useRef({ unavailable: unavailable || paused, controlUnavailable });
+  const controlBlocked = controlUnavailable || executionUnconfirmed;
+  const control = useRef({
+    unavailable: unavailable || paused,
+    controlUnavailable: controlBlocked,
+  });
   control.current = {
     unavailable: unavailable || paused || awaitingFreshRead,
-    controlUnavailable,
+    controlUnavailable: controlBlocked,
   };
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new authority epoch releases retained old data.
   useEffect(() => {
@@ -736,7 +740,7 @@ export function useNativeEnvironment({
       current?.display ??
       (cacheKey || previewKey ? cache.current.get(cacheKey ?? previewKey!) : undefined),
     stale = !!current?.error || (!paused && unavailable),
-    busy = !stale && (paused || !current?.facts || current.busy || controlUnavailable);
+    busy = !stale && (paused || !current?.facts || current.busy || controlBlocked);
   const blocked = new Set(
     submissions
       ?.filter(
@@ -942,15 +946,16 @@ export function useNativeEnvironment({
                       !visibleChild.error
                     ? { activity: nativeChildActivity(visibleChild.facts) }
                     : {}),
-                canStop: row.canStop && !executionUnconfirmed && !blocked.has(row.executionId),
+                canStop: row.canStop && !blocked.has(row.executionId),
               })) ?? []
             }
             references={references}
             currentOnly
+            hasSnapshot={!!display}
             stale={stale}
             busy={busy}
             stoppingExecutionId={stopping}
-            onStop={!stale ? (execution) => void stop(execution) : undefined}
+            onStop={(execution) => void stop(execution)}
             subagentDetails={{
               sessionIdsByExecutionId: display?.children ?? new Map(),
               loading: !display && (current?.busy ?? true),

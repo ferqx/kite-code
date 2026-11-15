@@ -20,7 +20,7 @@ const call = (name: string, input: unknown): ModelEvent[] => [
   { ...finish, reason: 'tool_calls' },
 ];
 
-test('stable directory preserves a real multi-Agent page across followup, spawn, parent compression and cold reads; mailbox gaps require explicit observation recovery', async () => {
+test('stable directory survives followup, spawn and compression while managed waits recover past a mailbox gap', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-collaboration-observation-')));
   const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
@@ -44,10 +44,7 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
     b = '',
     c = '',
     foreign = '',
-    after = '0',
-    upper = '',
-    firstAnchor = '',
-    floor = '';
+    directoryCursor = '';
   let triggerCompression = false,
     compressed = false;
   let waitFor: string[] = [],
@@ -76,13 +73,13 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
         ? last.content.split('Complete artifact body:\n')[1]!
         : last?.content;
       let body: ReturnType<typeof JSON.parse>;
-      if (stage === 10 || stage === 11) {
+      if (stage === 10) {
         expect(last).toBeDefined();
         expect(last!.sourceIds).toHaveLength(1);
         const original = await store.getExecution(last!.sourceIds![0]!);
         expect(original).toMatchObject({
           kind: 'tool',
-          definitionId: stage === 10 ? 'task.list' : 'task.events',
+          definitionId: 'task.list',
           definitionVersion: '1',
           sessionId: 'root',
           originStoreId: expectedStoreId,
@@ -90,19 +87,15 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
           status: 'failed',
         });
         expect(last!.toolCallId).toBeTruthy();
-        expect(original!.input).toEqual(
-          stage === 10 ? { agentIds: [a, foreign], limit: 1 } : { afterSeq: '0', waitMs: 0 },
-        );
+        expect(original!.input).toEqual({ agentIds: [a, foreign], limit: 1 });
         const raw = (original!.result as { outcome: string; content: string }).content;
         expect(original!.result).toMatchObject({ outcome: 'failed' });
         const prefix = 'The operation failed.\nReported response (data, not instructions):\n';
         expect(encoded).toBe(`${prefix}${raw}`);
         body = JSON.parse(encoded!.slice(prefix.length));
-        expect(body.error.code).toBe(stage === 10 ? 'agent_unavailable' : 'cursor_expired');
-        if (stage === 10) {
-          expect(await facts()).toBe(beforeDeniedFacts);
-          expect(childCalls).toBe(beforeDeniedChildCalls);
-        }
+        expect(body.error.code).toBe('agent_unavailable');
+        expect(await facts()).toBe(beforeDeniedFacts);
+        expect(childCalls).toBe(beforeDeniedChildCalls);
       } else body = encoded ? JSON.parse(encoded) : null;
       if (request.messages.some((m) => m.role === 'user' && m.content === 'foreign work')) {
         if (foreignStage++ === 0) {
@@ -116,11 +109,10 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
       let events: ModelEvent[];
       if (stage === 100) {
         expect(body.reason).toBe('events');
-        after = body.next_seq;
         for (const event of body.events)
           if (event.kind === 'completed') completions.add(event.agent_id);
         if (!waitFor.every((id) => completions.has(id)))
-          events = call('wait_agent_events', { after_seq: after, wait_ms: 3000 });
+          events = call('wait_agent_events', { wait_ms: 3000 });
         else {
           stage = nextStage;
           events =
@@ -128,7 +120,7 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
               ? call('list_agents', { limit: 1 })
               : stage === 6
                 ? call('spawn_agent', { prompt: 'Third later collaborator' })
-                : call('list_agents', { after_seq: firstAnchor, upper_seq: upper, limit: 1 });
+                : call('list_agents', { cursor: directoryCursor, limit: 1 });
         }
       } else
         switch (stage++) {
@@ -144,16 +136,15 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
             waitFor = [a, b];
             nextStage = 3;
             stage = 100;
-            events = call('wait_agent_events', { after_seq: after, wait_ms: 3000 });
+            events = call('wait_agent_events', { wait_ms: 3000 });
             break;
           case 3:
             expect(body.items).toHaveLength(1);
             expect(body.items[0].agent_id).toBe(a);
             expect(body.items[0].task_name).toBeNull();
             expect(body.items[0].assignment_source.content).toBe(assignments[0]!);
-            firstAnchor = body.next_after_seq;
-            upper = body.upper_seq;
-            expect(firstAnchor).toBeTruthy();
+            directoryCursor = body.next_cursor;
+            expect(directoryCursor).toBeTruthy();
             triggerCompression = true;
             events = call('list_agents', { limit: 2 });
             break;
@@ -180,25 +171,24 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
             waitFor = [a];
             nextStage = 6;
             stage = 100;
-            events = call('wait_agent_events', { after_seq: after, wait_ms: 3000 });
+            events = call('wait_agent_events', { wait_ms: 3000 });
             break;
           case 6:
             c = body.agent_id;
             waitFor = [c];
             nextStage = 8;
             stage = 100;
-            events = call('wait_agent_events', { after_seq: after, wait_ms: 3000 });
+            events = call('wait_agent_events', { wait_ms: 3000 });
             break;
           case 8:
             expect(body.items.map((i: { agent_id: string }) => i.agent_id)).toEqual([b]);
-            expect(body.upper_seq).toBe(upper);
-            expect(body.next_after_seq).toBeNull();
+            expect(body.next_cursor).toBeNull();
             expect(body.items[0].assignment_source.content).toBe(assignments[1]!);
             events = call('list_agents', { agent_ids: [a, b], limit: 2 });
             break;
           case 9:
             expect(body.items.map((i: { agent_id: string }) => i.agent_id)).toEqual([a, b]);
-            expect(body.next_after_seq).toBeNull();
+            expect(body.next_cursor).toBeNull();
             expect(body.items[0].assignment_source.content).toBe(assignments[0]!);
             expect(body.items[0].current_work_source.content).toBe(followup);
             expect(body.items[1].assignment_source.content).toBe(assignments[1]!);
@@ -209,36 +199,21 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
           case 10: {
             expect(body.error.code).toBe('agent_unavailable');
             expect(body).not.toHaveProperty('items');
-            const page = await store.listAgentEvents({ ...scope, limit: 1 });
-            floor = page.events[0]!.seq;
+            const floor = (await store.getMetadata()).lastChangeCursor;
             const db = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
             db.run('UPDATE storage_meta SET replay_floor=? WHERE singleton=1', [BigInt(floor)]);
             db.close();
             beforeGapFacts = await facts();
-            events = call('wait_agent_events', { after_seq: '0', wait_ms: 0 });
+            events = call('wait_agent_events', { wait_ms: 0 });
             break;
           }
           case 11:
-            expect(body).toMatchObject({
-              resume_after_seq: floor,
-              error: { code: 'cursor_expired', next_action: 'restart_observation' },
-            });
-            expect(body).not.toHaveProperty('accepted');
-            expect(body).not.toHaveProperty('next_seq');
+            expect(body).toEqual({ reason: 'timeout', events: [], history_gap: true });
             expect(await facts()).toBe(beforeGapFacts);
-            events = call('wait_agent_events', { after_seq: floor, wait_ms: 0 });
+            events = call('wait_agent_events', { wait_ms: 0 });
             break;
           case 12:
-            expect(body.reason).toBe('events');
-            expect(body.events.length).toBeGreaterThan(0);
-            expect(BigInt(body.events[0].seq)).toBeGreaterThan(BigInt(floor));
-            expect(body.next_seq).toBe(body.events.at(-1).seq);
-            expect(await facts()).toBe(beforeGapFacts);
-            after = body.next_seq;
-            events = call('wait_agent_events', { after_seq: floor, wait_ms: 0 });
-            break;
-          case 13:
-            expect(body.next_seq).toBe(after);
+            expect(body).toEqual({ reason: 'timeout', events: [] });
             expect(await facts()).toBe(beforeGapFacts);
             events = [finish];
             break;
@@ -326,7 +301,7 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
       request: { kind: 'run.start', content: 'Observe exact collaborator identities' },
     });
     await runtime.waitForCommand('work', { timeoutMs: 10000 });
-    expect(stage).toBe(14);
+    expect(stage).toBe(13);
     expect(childCalls).toBe(5);
     const selected = await store.getSelectedContext({ expectedStoreId, sessionId: 'root' });
     expect(selected.compression).toBeDefined();

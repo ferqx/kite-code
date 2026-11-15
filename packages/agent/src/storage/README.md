@@ -308,6 +308,10 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 [取消操作](sqlite/cancel-operations.ts)在首写前解析完整目标、attached 扩展、准确 child Run／Command 及待取消输入，并要求每个 effect 的 Execution／Run／source 属于当前 Store。新取消命令不能修改旧来源历史；范围混有旧来源时整项拒绝，零部分写入，期间新工作可按准确当前目标停止。既有原取消回执的相同请求仍只返回原记录，不重做效果。
 
+同一 Profile 的 SQLite Store 在投递命令写入前，以共享原生文件锁串行准入相同 Command ID。每个 ID 独立持锁，共享分片只保护锁文件的打开与回收。新停止命令持锁查无原回执后才能触发准确本地取消，并持锁到持久写入返回。已有回执沿原事务核验重放或冲突。取消事务记录实际受影响的 Run 和原 Command ID，回执的用户归因以持久停止记录为准。只取消一个 Tool 时，整轮的来源保持原有归属。[SQLite 写锁回归](../../test/isolated/execution/cancel-writer-wait.test.ts)覆盖写锁期间的本地停止、跨 Store 同 ID 竞争、重放及其他作用域。
+
+Runtime 从已提交的完整模型回复取得原调用，Store 在 `finishRun`、冷恢复后新输入准入和显式中断事务内复核 Run、模型输出和消息绑定。已停模型批次的未派发调用由该批次的原模型输出和调用 ID 验证，可为参数不可解析的调用补一条工具消息。普通恢复仍校验工具输入摘要。结算认原审批绑定及停止前已应用的 `interaction.answer` 回执，先保存的拒绝保留 `approval_denied`，停止后才保存的答复按停止结算。已有结果保留原证据，派发后丢失执行者按原恢复规则处理。模型按原有调用顺序取得配对回执。[Responses 请求回归](../../../../apps/service/test/isolated/responses-loop.test.ts)、[强杀历史回归](../../test/isolated/recovery/history-followup-runtime.test.ts)。
+
 ## 持久权限模式
 
 用户 MCP HostMutation 的 Add 声明与认证回执沿[共享有限语法](../config/mcp-entry.ts)验证：持久记录可保结构化 argv、非秘密环境值及环境引用名称，不能携已知敏感 literal 或任意环境对象；环境引用认证只保存 `environment` 分类和有限状态，不保存实际值。闭合范围、原请求摘要、冷查询与终态一致性继续由 [host-mutation-operations](sqlite/host-mutation-operations.ts)核实，不增加 SQL 迁移或协议版本。
@@ -325,6 +329,8 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 ## 统一消息接收
 
+[Agent 事件观察](sqlite/child-query-operations.ts)先核 Store、会话和主体，再按具体上下文选择及排序去重后的 carrier 集合查已提交的内置 `task.events@1` 回执。成功的 Execution 结果和原 `toolCallId` 对应的 Tool 消息在同一事务中提交，续读取该范围内已提交位置的最大值。邮箱观察只读，回执提交前可重新读到同一事件。较早位置超出保留窗口时，从保留边界读取并报告 `history_gap`。旧回执没有 Runtime 位置时，从当前可用记录开始。观察位置存于现有回执，随 SQLite 重开恢复。
+
 [Runtime](../runtime.ts)以 `receivePendingInputs` 串行汇合原用户输入与[Agent 邮箱](sqlite/agent-mail-operations.ts)。用户引导继续使用 `applyInput` 与原队列／前驱校验，普通 Agent 消息和最终结果共用 `listAgentMessages/receiveAgentMessages`；用户引导等待原前台 Tool 批次收尾，低信任 inbox 保留自身接收与来源语义，Agent 数据不能撤销尚未派发决定或产生工具批准。
 
 新的 `agent_completion` 在 carrier 终态事务中，将原唯一 `job.report` Command 封存 `mailboxVersion:1` 与原邮箱目标列。`job.report.continue` 继承同一协议。两者仍保原稳定 ID、父会话准入与 Run origin，由[结果邮件证明](sqlite/result-mail.ts)核准确 child／carrier／revision／订阅；新项不进入 `listPendingJobReports` 的旧扫描，没有第二条 accepted 命令或新增表。未标记旧报告与非 Agent Job 保留原读取、应用和恢复协议，读取不补迁移或重新排队。
@@ -336,6 +342,10 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 原 `applyJobReport` 保留为结果发布事务及旧恢复适配；新 Runtime 接收和 idle 调度均通过邮箱入口进入它。结果气泡继续由真实 idle 续跑的原 Source／回执证明投影，active 接纳在结束和重开后不补气泡。取舍见[统一接收决定](../../../../.agents/notes/implemented/architecture/2026-10-23-unified-message-reception.md)。
 
 普通邮件的物理 Message 继续保存原内部占位与 mail source ID；公开 [Runtime listMessages/getView](../runtime.ts)通过 `publicAgentMailMessage` 只读展开原 Artifact，交付 system 消息、完整 content 和 `agentMessage`（原 mail ID、发送 Session／Tool Execution、名称、完整性）。来源须核原 `agent.message`、真实 receivedMessage／Run／selection、成功 sender Tool、原主体／Store／工作身份与直接父子关系，以及原 Artifact 的引用、scope 和字节证明。来源损坏返回无推断作者的系统不可读事实；正文不可读保留已验证作者并标 `contentComplete:false`，不退成用户气泡。公开视图不修改物理消息或低信任模型输入，也不增加 Source、Run 或接收回执；Native 把邮件留在实际接收轮次的原过程。
+
+[普通邮件读取](sqlite/agent-mail-operations.ts)在模型装配取回已接收邮件时核实直接父子来源。子 Agent 序号按同一父会话中各直接子会话的最早委派命令顺序计算，从 1 开始。同名、重命名及续作沿用原序号，保留的已删除子会话仍占原位置。[模型输入](../model-context.ts)为父发子的邮件投影 `sender.relation` 和 `content`，源会话及执行用于内部核验。子发父同时投影名称、序号和来源字段。常规消息和 View 提供原正文及公开的来源投影。
+
+[双向邮箱回归](../../test/isolated/business/task/mailbox.test.ts)核真实 Runtime 接收及 SDK 发往本地测试端点的两次 HTTP 请求。请求体分别含父 Agent 的 `sender` 和同名第 2 个子 Agent 的 `sender`，引用的发送者字段留在原正文中。公开消息读取返回完整正文和已有的公开发送者信息。该测试使用隔离 SQLite 与受控 Provider 响应。
 
 [统一邮箱回归](../../test/isolated/business/task/unified-inbox.test.ts)核真实 active／idle 接收、用户引导、原消息与结果的来源区别、准确重收和冷读取；[报告事务](../../test/isolated/business/task/collaboration-report-transactions.test.ts)与[冷报告恢复](../../test/isolated/business/task/collaboration-cold-report.test.ts)通过实际邮箱收件故障验证整体回滚与提交后丢响应。普通邮件的 sender／Artifact 和 adopted 水位仍由[邮箱](../../test/isolated/business/task/mailbox.test.ts)、[后继采用](../../test/isolated/business/task/mail-adoption.test.ts)覆盖。
 

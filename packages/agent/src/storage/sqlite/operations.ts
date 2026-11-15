@@ -26,6 +26,7 @@ import {
   type RunRecord,
   type SessionRecord,
   type SessionStateExecution,
+  USER_STOPPED_UNDISPATCHED_TOOL,
 } from '../types';
 import { markStorageTransactionUnconfirmed } from '../worker/error';
 import { acceptAgentInput, applyAgentCommand, interruptAgent } from './agent-input-operations';
@@ -56,7 +57,13 @@ import {
 } from './authorization-policy-evidence';
 import { executionAuthorizationObservation } from './authorization-review';
 import { readBackgroundExecutions } from './background-directory';
-import { cancel, cancelWorkBody } from './cancel-operations';
+import {
+  cancel,
+  cancelWorkBody,
+  recordStoppedTools,
+  undispatchedToolSettlement,
+  userStopCommand,
+} from './cancel-operations';
 import { verifyFirstActivation } from './child-first-activation';
 import {
   activateChildRun,
@@ -167,6 +174,7 @@ import { getPendingInputQueue, mutatePendingInputQueue } from './pending-input-q
 import { callPermissionGrant, verifyPermissionGrantDispatch } from './permission-grants';
 import { closeReconciledHistory } from './reconciliation-admission';
 import { RecoveryAudit } from './recovery-audit';
+import { matchesStoppedModelProof, stoppedModelHistory } from './recovery-history';
 import { recoverSession } from './recovery-operations';
 import { initializeRunRecord } from './requirement-initialization';
 import { registerRunRequirements } from './requirement-operations';
@@ -2101,6 +2109,37 @@ export class SqliteOperations {
           }
           let status = input.status;
           let result = input.result;
+          let message = input.message;
+          if (
+            input.cancelledBeforeAdapter &&
+            execution.kind === 'tool' &&
+            execution.run_id !== null &&
+            message?.role === 'tool' &&
+            message.toolCallId === execution.call_id &&
+            (parse(execution.decision_source_json) as Record<string, Json>)?.kind ===
+              'model_decision' &&
+            (status === 'cancelled' || status === 'failed') &&
+            result &&
+            typeof result === 'object' &&
+            !Array.isArray(result) &&
+            userStopCommand(this, String(execution.run_id))
+          ) {
+            const settlement = undispatchedToolSettlement(
+              this,
+              USER_STOPPED_UNDISPATCHED_TOOL,
+              execution,
+            );
+            status = settlement.outcome;
+            result = {
+              ...result,
+              ...settlement,
+              details: {
+                ...(result.details as Record<string, Json>),
+                ...settlement.details,
+              },
+            };
+            message = { ...message, content: settlement.content };
+          }
           if (execution.child_session_id !== null && status !== 'outcome_unknown') {
             // The carrier cannot turn an attached unknown effect into a known Run failure.
             // Independent detached Jobs/children retain their separate supervision domain.
@@ -2177,12 +2216,12 @@ export class SqliteOperations {
             )
               throw new AgentError('model_output_conflict');
             if (
-              input.message &&
-              canonicalJson(input.message.modelOutput as unknown as Json) !==
+              message &&
+              canonicalJson(message.modelOutput as unknown as Json) !==
                 canonicalJson(output as unknown as Json)
             )
               throw new AgentError('model_output_invalid');
-          } else if (input.message?.modelOutput !== undefined)
+          } else if (message?.modelOutput !== undefined)
             throw new AgentError('model_output_invalid');
           if (execution.kind === 'model' && status === 'succeeded') {
             const intent = parse(execution.intent_json) as Record<string, Json>;
@@ -2259,7 +2298,7 @@ export class SqliteOperations {
             }
           }
           finishJobDelivery(this, execution);
-          if (input.message) {
+          if (message) {
             const partial =
               execution.kind === 'model' && status === 'succeeded'
                 ? this.row(
@@ -2271,9 +2310,9 @@ export class SqliteOperations {
                 : undefined;
             if (partial) {
               const previousSource = parse(partial.source_json) as Record<string, Json>;
-              const firstOutput = modelFirstOutput(previousSource, input.message.firstOutput);
+              const firstOutput = modelFirstOutput(previousSource, message.firstOutput);
               const body = canonicalJson({
-                ...input.message,
+                ...message,
                 ...(previousSource.createdAt === undefined
                   ? {}
                   : { createdAt: previousSource.createdAt }),
@@ -2294,8 +2333,8 @@ export class SqliteOperations {
               this.appendMessage(
                 String(execution.session_id),
                 execution.run_id === null ? null : String(execution.run_id),
-                input.message as unknown as Json,
-                input.message.role,
+                message as unknown as Json,
+                message.role,
               );
           }
           this.event(String(execution.session_id), input.executionId, 'execution.finished');
@@ -2792,6 +2831,15 @@ export class SqliteOperations {
       if (run.status !== status) throw new AgentError('terminal_conflict');
       return this.runRecord(run);
     }
+    const userStopped = status === 'cancelled' && userStopCommand(this, input.runId);
+    if (status === 'cancelled' && run.cancel_requested) {
+      const history = stoppedModelHistory(this, input.runId);
+      if (history) {
+        if (!matchesStoppedModelProof(history, input.stoppedModelOutput))
+          throw new AgentError('recovery_tool_history_changed');
+        recordStoppedTools(this, input.expectedStoreId, input.stoppedModelOutput);
+      }
+    }
     if (input.status === 'completed') {
       const handoffInputId = input.inputHandoffCommandId
         ? assertHumanRunHandoff(this, {
@@ -2823,7 +2871,7 @@ export class SqliteOperations {
       'UPDATE run SET status=?,is_active=0,finished_at=?,reason=? WHERE id=?',
       status,
       Date.now(),
-      input.reason ?? null,
+      userStopped ? 'cancel_requested' : (input.reason ?? null),
       input.runId,
     );
     this.event(String(run.session_id), String(input.runId), 'run.finished');

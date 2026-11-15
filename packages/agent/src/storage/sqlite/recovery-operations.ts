@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type Json, type RecoveryReport } from '../types';
+import { recordStoppedTools } from './cancel-operations';
 import type { SqliteOperations } from './operations';
-import { recoveryToolHistory } from './recovery-history';
+import { partitionRecoveryHistory, validateStoppedModelProofs } from './recovery-history';
 import { withReconciledFrontier } from './session-reconciliation';
 
 type Input = Parameters<Store['recoverSession']>[0];
@@ -85,9 +86,8 @@ export function recoverSession(db: SqliteOperations, input: Input): RecoveryRepo
       if (BigInt(execution.result_revision!) >= 9223372036854775807n)
         throw new AgentError('sequence_exhausted');
     }
-    const histories = executions
-      .map((execution) => recoveryToolHistory(db, execution))
-      .filter((history) => history !== null);
+    const { histories, stoppedBatches } = partitionRecoveryHistory(db, input.sessionId, executions);
+    const stoppedByModel = validateStoppedModelProofs(stoppedBatches, input.stoppedModelProofs);
     if (input.toolHistoryProofs !== undefined) {
       const proofs = input.toolHistoryProofs;
       if (
@@ -196,6 +196,14 @@ export function recoverSession(db: SqliteOperations, input: Input): RecoveryRepo
       );
       db.event(String(execution.session_id), String(execution.id), 'execution.recovered', result);
     }
+    const recoveredDenials = new Set<string>();
+    for (const batch of stoppedByModel.values())
+      for (const id of recordStoppedTools(db, input.expectedStoreId, batch, input.commandId))
+        recoveredDenials.add(id);
+    report.cancelledExecutionIds = report.cancelledExecutionIds.filter(
+      (id) => !recoveredDenials.has(id),
+    );
+    report.settledExecutionIds.push(...recoveredDenials);
     for (const run of runs) {
       db.run(
         "UPDATE run SET status='interrupted',is_active=0,finished_at=?,reason=? WHERE id=?",

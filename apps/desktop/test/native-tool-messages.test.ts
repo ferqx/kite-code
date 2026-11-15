@@ -420,6 +420,65 @@ test('the verified Task wait exposes a readable status without its cursor', asyn
     text: '等待期间暂无新事件',
     agentWait: true,
   });
+  const resumed = { reason: 'timeout', events: [], history_gap: true };
+  const resumedContent = JSON.stringify(resumed);
+  f.messages.get('wait')!.content = resumedContent;
+  f.executions.get('execution-wait')!.result = {
+    outcome: 'succeeded',
+    content: resumedContent,
+    details: { ...resumed, agentEventObservation: { scope: '[]', nextSeq: '71' } },
+  };
+  const [gap] = (await f.list(['wait'])).entries;
+  expect(gap?.agentWait).toEqual({ reason: 'timeout', events: 0, historyGap: true });
+  expect(desktopToolMessage(gap!, 'wait', resumedContent)).toMatchObject({
+    status: 'completed',
+    text: '较早的子 Agent 事件已过期，已从保留位置继续',
+    agentWait: true,
+  });
+});
+
+test('only the verified builtin Task wait envelope supplies a compact failure', async () => {
+  const f = fixture();
+  const error = {
+    code: 'invalid_cursor',
+    message: 'The observation cursor is invalid or ahead.',
+    next_action: 'restart_observation',
+  };
+  const content = JSON.stringify({ error });
+  f.add('wait', 'failed', 'wait-run', 'task.events');
+  f.messages.get('wait')!.content = content;
+  const execution = f.executions.get('execution-wait')!;
+  execution.result = {
+    outcome: 'failed',
+    content,
+    details: { error, diagnostic: { code: 'invalid_cursor' } },
+  };
+  let extensionId = 'builtin.task';
+  f.client.getRun = async () =>
+    ({
+      id: 'wait-run',
+      sessionId: 's',
+      originStoreId: 'store',
+      configuration: { tools: [{ id: 'task.events', version: '1', extensionId }] },
+    }) as unknown as Run;
+  const [fact] = (await f.list(['wait'])).entries;
+  expect(fact?.agentWait).toEqual({ reason: 'failed', code: 'invalid_cursor' });
+  expect(desktopToolMessage(fact!, 'wait', content)).toMatchObject({
+    status: 'failed',
+    text: '事件游标无效，子 Agent 可继续运行。',
+    agentWait: true,
+  });
+  extensionId = 'other.task';
+  expect((await f.list(['wait'])).entries[0]?.agentWait).toBeUndefined();
+  extensionId = 'builtin.task';
+  execution.result = {
+    outcome: 'failed',
+    content,
+    details: { error: { ...error, code: 'cursor_expired' } },
+  };
+  const [inconsistent] = (await f.list(['wait'])).entries;
+  expect(inconsistent?.agentWait).toBeUndefined();
+  expect(desktopToolMessage(inconsistent!, 'wait', content).text).toBe(content);
 });
 
 test('only an exact builtin Task message acknowledgment is hidden through the original Main reader', async () => {

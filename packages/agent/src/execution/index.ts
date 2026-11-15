@@ -75,6 +75,14 @@ export interface ToolExecutionResult {
   result: ToolResult;
   dispatched?: boolean;
 }
+/** Local stop takes effect immediately. Only the Store receipt identifies a durable user stop. */
+export class PendingUserCancellation extends AgentError {
+  readonly persisted: Promise<void>;
+  constructor(code: 'cancel_requested' | 'execution_cancel_requested', persisted: Promise<void>) {
+    super(code);
+    this.persisted = persisted;
+  }
+}
 /** Policy reasons are public; arbitrary adapter error messages are not. */
 function authorizationDeniedContent(
   kind: 'tool' | 'job' | 'action',
@@ -810,7 +818,7 @@ export class UnifiedExecution {
     });
   }
   /** Reacquire only before dispatch; completed/unknown effects never enter this loop. */
-  private async acquireDispatch(
+  private async acquireDispatch<Prepared = undefined>(
     scope: ToolScope,
     executionId: string,
     definitionId: string,
@@ -818,11 +826,15 @@ export class UnifiedExecution {
     input: Json,
     source: Json,
     resources: Parameters<ExecutionResources['acquire']>[0],
-    kind: AuthorizationRequest['kind'] = 'tool',
-    onStoreCancellation?: () => void,
-    admit?: (signal: AbortSignal) => Promise<(() => void) | undefined>,
-    hostAuthorization?: AcceptedAuthorization,
+    options: {
+      kind?: AuthorizationRequest['kind'];
+      onStoreCancellation?: () => void;
+      admit?: (signal: AbortSignal) => Promise<(() => void) | undefined>;
+      hostAuthorization?: AcceptedAuthorization;
+      prepare?: () => Promise<Prepared>;
+    } = {},
   ) {
+    const { kind = 'tool', onStoreCancellation, admit, hostAuthorization, prepare } = options;
     const work = identity(scope);
     for (;;) {
       const cursor = (await this.options.store.getMetadata()).lastChangeCursor;
@@ -888,6 +900,7 @@ export class UnifiedExecution {
           controller.abort();
           scope.signal.removeEventListener('abort', abort);
         }
+        const prepared = prepare ? await prepare() : undefined;
         const authorization = await this.dispatch(
           scope,
           executionId,
@@ -899,7 +912,7 @@ export class UnifiedExecution {
           onStoreCancellation,
           hostAuthorization,
         );
-        return { release, authorization };
+        return { release, authorization, prepared };
       } catch (error) {
         release();
         if (
@@ -1236,9 +1249,11 @@ export class UnifiedExecution {
         input,
         source,
         { slot: 'model' },
-        'model',
-        () => {
-          cancelledByStoreAdmission = true;
+        {
+          kind: 'model',
+          onStoreCancellation() {
+            cancelledByStoreAdmission = true;
+          },
         },
       );
       release = acquired.release;
@@ -1591,6 +1606,7 @@ export class UnifiedExecution {
     let release: (() => void) | undefined;
     let dispatched = Boolean(resuming);
     let attempted = false;
+    let cancelledBeforeAdapter = false;
     let result: ToolResult;
     const progress = createProgressWriter((content) =>
       this.options.store.appendExecutionOutput({
@@ -1634,14 +1650,22 @@ export class UnifiedExecution {
           });
         }
       }
+      const prepareContext = async () => {
+        scope.signal.throwIfAborted();
+        return this.options.toolContext
+          ? this.options.toolContext(scope, definition, executionId, source)
+          : this.unavailableContext(work.sessionId, executionId, scope.signal);
+      };
+      let context: ActionContext;
       let dispatchAuthorization: Awaited<ReturnType<UnifiedExecution['dispatch']>> | undefined;
-      if (resuming)
+      if (resuming) {
         release = await this.options.resources.acquire(
           definition.resources,
           { sessionId: work.sessionId, workspaceId: scope.workspaceId },
           scope.signal,
         );
-      else {
+        context = await prepareContext();
+      } else {
         const acquired = await this.acquireDispatch(
           scope,
           executionId,
@@ -1650,17 +1674,14 @@ export class UnifiedExecution {
           input,
           source,
           definition.resources,
+          { prepare: prepareContext },
         );
         release = acquired.release;
         dispatchAuthorization = acquired.authorization;
+        context = acquired.prepared!;
       }
       dispatched = true;
       if ('run' in scope) scope.toolAdmission?.dispatched();
-      scope.signal.throwIfAborted();
-      const context = this.options.toolContext
-        ? await this.options.toolContext(scope, definition, executionId, source)
-        : this.unavailableContext(work.sessionId, executionId, scope.signal);
-      attempted = true;
       const requestInteractionWithReceipt = this.interactionRequesterWithReceipt(
         scope,
         executionId,
@@ -1673,6 +1694,8 @@ export class UnifiedExecution {
         const { answer } = await requestInteractionWithReceipt(input);
         return answer.kind === 'question' ? answer.answers : (answer as unknown as Json);
       };
+      scope.signal.throwIfAborted();
+      attempted = true;
       result = toolResultSnapshot(
         await (resuming ? definition.resume! : definition.execute).call(definition, input, {
           ...context,
@@ -1710,6 +1733,23 @@ export class UnifiedExecution {
         await this.options.validateArtifacts(scope, result.artifactRefs);
       }
     } catch (error) {
+      cancelledBeforeAdapter =
+        !attempted &&
+        !resuming &&
+        'run' in scope &&
+        source !== null &&
+        typeof source === 'object' &&
+        !Array.isArray(source) &&
+        source.kind === 'model_decision' &&
+        !(error instanceof AgentError && error.code === 'approval_denied') &&
+        (scope.signal.aborted ||
+          (error instanceof AgentError &&
+            [
+              'cancelled_before_dispatch',
+              'run_not_active',
+              'execution_not_dispatchable',
+              'interaction_cancelled',
+            ].includes(error.code)));
       result = {
         outcome: attempted
           ? 'outcome_unknown'
@@ -1793,11 +1833,14 @@ export class UnifiedExecution {
             dispatched: stored.authorization?.dispatched,
           };
       }
-      await this.options.store.finishExecution({
+      if (cancelledBeforeAdapter && scope.signal.reason instanceof PendingUserCancellation)
+        await scope.signal.reason.persisted;
+      const finished = await this.options.store.finishExecution({
         expectedStoreId: work.originStoreId,
         owner: scope.owner,
         executionId,
         status: result.outcome,
+        ...(cancelledBeforeAdapter ? { cancelledBeforeAdapter: true } : {}),
         result: {
           ...result,
           ...(progressFailure
@@ -1832,7 +1875,10 @@ export class UnifiedExecution {
             }
           : {}),
       });
-      return { result, dispatched };
+      return {
+        result: cancelledBeforeAdapter ? (finished.result as unknown as ToolResult) : result,
+        dispatched,
+      };
     } finally {
       release?.();
     }
@@ -2065,10 +2111,12 @@ export class UnifiedExecution {
           input.request,
           input.source,
           definition.resources,
-          'job',
-          undefined,
-          (signal) =>
-            this.options.admitJob?.(definition, { ...scope, signal }) ?? Promise.resolve(undefined),
+          {
+            kind: 'job',
+            admit: (signal) =>
+              this.options.admitJob?.(definition, { ...scope, signal }) ??
+              Promise.resolve(undefined),
+          },
         );
         release = acquired.release;
         dispatchAuthorization = acquired.authorization;
@@ -2341,10 +2389,7 @@ export class UnifiedExecution {
         input.prepared,
         input.decisionSource,
         input.definition.resources,
-        'job',
-        undefined,
-        undefined,
-        hostAuthorization,
+        { kind: 'job', hostAuthorization },
       );
       release = acquired.release;
       scope.signal.throwIfAborted();

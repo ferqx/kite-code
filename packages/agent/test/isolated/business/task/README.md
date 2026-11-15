@@ -12,7 +12,7 @@
 | 统一邮箱 | [unified-inbox](unified-inbox.test.ts)：引导与 typed 邮件同轮汇合、active 结果唯一 Source、idle 通知权限及损坏 marker 拒绝 |
 | idle 接纳 | [mail-adoption](mail-adoption.test.ts)：51封邮件跨页、明确新轮与双水位、重试不扩集合、晚确认留队及根停止 |
 | 问题及追发 | [question-loop](question-loop.test.ts)：父普通完成后 child 只发送问题、零事件等待并如实待决，答复与 follow-up 进入原 Session，原邮件、压缩和取消保持 |
-| 观察 | [collaboration-observation](collaboration-observation.test.ts)：多 Agent 分页、压缩、完整来源、固定上界、游标缺口及冷读零重放 |
+| 观察 | [collaboration-surface](collaboration-surface.test.ts)核 B 先完成时依次等 A、B、目标集合顺序、提交前后的读取和 SQLite 重开续读。[collaboration-observation](collaboration-observation.test.ts)核目录分页、压缩、完整来源、固定上界、保留期缺口及冷读 |
 | 后台结算 | [attached-job-settlement](attached-job-settlement.test.ts)：attached 排队／运行 Job 等待、detached 独立、取消和 close drain |
 | 文件协作 | [collaboration-files](collaboration-files.test.ts)：兄弟冲突、fresh read、部分成功及未知发布不重放 |
 | 交付纠错 | [delivery-correction](delivery-correction.test.ts)：准确原委派、错误文件读回后同 child 明确续作、真实 baseline 修正原目标、原 GET 仅一次、idle 消息不激活、旧结果不冒充本轮完成；正常交付、权限拒绝及未知效果均可按事实正常停止 |

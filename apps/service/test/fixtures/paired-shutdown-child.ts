@@ -45,7 +45,7 @@ const running = runServiceProcess({
                     }),
                   ]
                 : actor === 'parent' && stage === 1
-                  ? call('wait_agent_events', { after_seq: '0', wait_ms: 180000 })
+                  ? call('wait_agent_events', { wait_ms: 180000 })
                   : actor === 'worker' && stage === 0
                     ? call('fixture.wait_agent_events', {})
                     : [finish];

@@ -70,10 +70,20 @@ export type ListAgentEventsInput = WriteContext &
     subjectId: string;
     afterSeq?: string;
     limit?: number;
+    observation?: {
+      contextSelectionId: string;
+      targets?: { executionId: string; childSessionId: string }[];
+    };
   };
+export interface AgentEventObservation {
+  scope: string;
+  nextSeq: string;
+}
 export interface AgentEventPage {
   events: AgentMailboxEvent[];
   nextSeq: string;
   highWaterSeq: string;
+  observation?: AgentEventObservation;
+  historyGap?: true;
 }
 export type CollaborationCommandResult = { receipt: AgentCommandReceipt; start: boolean };

@@ -84,6 +84,7 @@ export interface AcceptCommandInput extends WriteContext {
   reconciliationAdmission?: {
     expectedOwnerGeneration: string;
     toolHistoryProofs: import('./recovery-history').RecoveryToolHistoryProof[];
+    stoppedModelProofs?: import('./recovery-history').StoppedModelProof[];
   };
 }
 export type ApplyInputInput = OwnedWrite & { commandId: string } & (
@@ -141,17 +142,22 @@ export interface FinishExecutionInput extends OwnedWrite {
   result: Json;
   message?: MessageContent;
   requirements?: RequirementEvaluation[];
+  /** Core observed a cancellation before entering a new Tool adapter. */
+  cancelledBeforeAdapter?: true;
 }
 export interface CancelCommandInput extends WriteContext {
   commandId: string;
   sessionId: string;
   targetCommandId: string;
   subjectId: string;
+  /** Set by the authenticated Runtime control path. */
+  userInitiated?: true;
 }
 export interface CancelWorkBase extends WriteContext {
   commandId: string;
   sessionId: string;
   subjectId: string;
+  userInitiated?: true;
 }
 export type CancelWorkInput = CancelWorkBase &
   (
@@ -511,7 +517,12 @@ export interface Store {
     },
   ): Promise<string[]>;
   getAgentMessage(
-    input: WriteContext & { sessionId: string; subjectId: string; messageId: string },
+    input: WriteContext & {
+      sessionId: string;
+      subjectId: string;
+      messageId: string;
+      includeSender?: true;
+    },
   ): Promise<import('./types').AgentMessage | null>;
   listAgentMessages(
     input: WriteContext & {
@@ -878,6 +889,12 @@ export interface Store {
       reconciledOnly?: boolean;
     },
   ): Promise<import('./recovery-history').RecoveryToolHistory[]>;
+  readStoppedModelHistory(
+    input: WriteContext & { sessionId: string; subjectId: string } & (
+        | { runId: string }
+        | { expectedOwnerGeneration: string; reconciledOnly?: boolean }
+      ),
+  ): Promise<import('./recovery-history').StoppedModelHistory[]>;
   reconcileSession(
     input: WriteContext & {
       commandId: string;
@@ -894,6 +911,7 @@ export interface Store {
       expectedOwnerGeneration: string;
       decision: 'interrupt';
       toolHistoryProofs?: import('./recovery-history').RecoveryToolHistoryProof[];
+      stoppedModelProofs?: import('./recovery-history').StoppedModelProof[];
     },
   ): Promise<RecoveryReport>;
 
@@ -906,11 +924,16 @@ export interface Store {
       status: Extract<RunStatus, 'completed' | 'failed' | 'cancelled' | 'interrupted'>;
       reason?: string;
       inputHandoffCommandId?: string;
+      stoppedModelOutput?: import('./recovery-history').StoppedModelProof;
       requirements: RequirementEvaluation[];
     },
   ): Promise<RunRecord>;
-  cancelCommand(input: CancelCommandInput): Promise<CommandRecord>;
-  cancelWork(input: CancelWorkInput): Promise<CommandRecord>;
+  /** The local callback runs only during admission of a new cancellation ID. */
+  cancelCommand(
+    input: CancelCommandInput,
+    beforeWrite?: () => Promise<void>,
+  ): Promise<CommandRecord>;
+  cancelWork(input: CancelWorkInput, beforeWrite?: () => Promise<void>): Promise<CommandRecord>;
   getSessionLogs(input: {
     expectedStoreId: string;
     sessionId: string;

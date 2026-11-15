@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { WorkerRequest } from '../../../src/storage/worker/protocol';
 
@@ -67,9 +69,8 @@ class GatedWorker extends NativeWorker {
   }
 }
 
-async function fixture() {
-  const dataRoot = mkdtempSync(join(tmpdir(), 'kite-store-backpressure-'));
-  chmodSync(dataRoot, 0o700);
+async function fixture(childRoot?: string) {
+  const dataRoot = childRoot ?? temporaryDirectory('kite-store-backpressure-');
   let worker: GatedWorker | undefined;
   class SelectedWorker extends GatedWorker {
     constructor(...args: ConstructorParameters<typeof NativeWorker>) {
@@ -89,12 +90,12 @@ async function fixture() {
         worker!.releaseQueries();
         await store.close().catch(() => {});
         globalThis.Worker = NativeWorker;
-        rmSync(dataRoot, { recursive: true, force: true });
+        if (!childRoot) removeTemporaryDirectory(dataRoot);
       },
     };
   } catch (error) {
     globalThis.Worker = NativeWorker;
-    rmSync(dataRoot, { recursive: true, force: true });
+    if (!childRoot) removeTemporaryDirectory(dataRoot);
     throw error;
   }
 }
@@ -216,8 +217,36 @@ test('ordinary capacity waiters progress after bounded control priority while re
   }
 });
 
-test('Worker failure rejects both posted and capacity-waiting calls without replay or a stuck close', async () => {
-  const f = await fixture();
+const failureTest =
+  'Worker failure rejects both posted and capacity-waiting calls without replay or a stuck close';
+test(failureTest, async () => {
+  const childRoot = process.env.KITE_BACKPRESSURE_CHILD_ROOT;
+  if (process.platform === 'win32' && !childRoot) {
+    // Unconfirmed close deliberately retains the native profile lock until exit.
+    const root = temporaryDirectory('kite-store-backpressure-failure-');
+    try {
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          'test',
+          fileURLToPath(import.meta.url),
+          '--test-name-pattern',
+          failureTest,
+        ],
+        {
+          env: { ...process.env, KITE_BACKPRESSURE_CHILD_ROOT: root },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
+      const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+      if (code !== 0) throw new Error(stderr);
+    } finally {
+      removeTemporaryDirectory(root);
+    }
+    return;
+  }
+  const f = await fixture(childRoot);
   try {
     f.worker.holdQueries = true;
     const before = f.worker.posted.length;
@@ -238,4 +267,4 @@ test('Worker failure rejects both posted and capacity-waiting calls without repl
   } finally {
     await f.dispose();
   }
-});
+}, 15_000);

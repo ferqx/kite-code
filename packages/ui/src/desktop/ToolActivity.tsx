@@ -1075,6 +1075,7 @@ export function ToolActivity({
   );
   const childIssue = childProcess && issues.length > 0;
   const itemIssue = !grouped && (needsResultDetails(message) || childIssue);
+  const waitFailure = !grouped && message.agentWait && message.status === 'failed';
   const summaryOnly =
     !grouped &&
     !itemIssue &&
@@ -1418,7 +1419,7 @@ export function ToolActivity({
                   )}
                   {!grouped && !shell && !ask && status && status !== '成功' && (
                     <p className="tool-detail-status" role="status">
-                      {status}
+                      {waitFailure ? message.text : status}
                     </p>
                   )}
                   {managedShell && !shell && !executionUnconfirmed(message) && (
@@ -1461,6 +1462,7 @@ export function ToolActivity({
                     </div>
                   )}
                   {!grouped &&
+                    !waitFailure &&
                     (!ask || itemIssue) &&
                     !shell &&
                     (!edit || itemIssue) &&

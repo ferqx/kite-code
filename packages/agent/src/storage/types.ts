@@ -392,6 +392,8 @@ export interface ExecutionRecord {
   requirements: RequirementRef[];
   recoveryManifest?: Json | null;
 }
+export const USER_STOPPED_UNDISPATCHED_TOOL = '用户停止了上一轮，此工具未执行';
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -821,9 +823,12 @@ interface AgentMessageIdentity {
   receivedRunId: string | null;
   receivedContextSelectionId: string | null;
 }
+export type AgentMessageSender =
+  | { name: string; relation: 'parent' }
+  | { name: string; relation: 'child'; ordinal: number };
 export type AgentMessage = AgentMessageIdentity &
   (
-    | { kind: 'message'; body: ArtifactReference; result: null }
+    | { kind: 'message'; body: ArtifactReference; result: null; sender?: AgentMessageSender }
     | {
         kind: 'result';
         body: null;

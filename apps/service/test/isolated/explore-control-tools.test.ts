@@ -146,16 +146,12 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
     const parentRequests: ModelRequest[] = [];
     let parentStep = 0;
     let childStep = 0;
-    let parentCursor: string | undefined;
     const message = 'EXACT_EXPLORE_PARENT_MESSAGE';
     const parent: ModelAdapter = {
       async *stream(request) {
         parentRequests.push(request);
         const last = request.messages.filter((message) => message.role === 'tool').at(-1);
-        if (last) {
-          const feedback = JSON.parse(last.content) as { next_cursor?: string };
-          if (typeof feedback.next_cursor === 'string') parentCursor = feedback.next_cursor;
-        }
+        const waited = last && Array.isArray(JSON.parse(last.content).events);
         if (parentStep++ === 0)
           yield* call('spawn_agent', {
             preset: 'explore',
@@ -169,16 +165,12 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
               (execution) =>
                 execution.definitionId === 'task.spawn' && execution.status === 'failed',
             ) ||
-            (parentCursor &&
+            (waited &&
               child &&
               ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(child.status))
           )
             yield finish;
-          else
-            yield* call('wait_agent_events', {
-              wait_ms: 100,
-              ...(parentCursor === undefined ? {} : { cursor: parentCursor }),
-            });
+          else yield* call('wait_agent_events', { wait_ms: 100 });
         }
       },
     };

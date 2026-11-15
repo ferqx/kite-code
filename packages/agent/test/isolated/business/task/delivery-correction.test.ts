@@ -74,7 +74,6 @@ for (const scenario of ['correctable', 'complete', 'denied', 'unknown'] as const
     const parentRequests: ModelRequest[] = [],
       childRequests: ModelRequest[] = [];
     let childId = '',
-      cursor = '0',
       firstCarrierId = '',
       firstRun = '';
     let getCalls = 0,
@@ -188,7 +187,6 @@ for (const scenario of ['correctable', 'complete', 'denied', 'unknown'] as const
             events = call('wait_agent_events', { wait_ms: 10000 });
             break;
           case 2: {
-            cursor = body.next_seq;
             const first = (await store.listExecutions('root')).find(
               (e) => e.childSessionId === childId,
             )!;
@@ -248,7 +246,7 @@ for (const scenario of ['correctable', 'complete', 'denied', 'unknown'] as const
             // The earlier successful carrier is still an old result, not this pending correction.
             expect((await store.getExecution(firstCarrierId))?.status).toBe('succeeded');
             releaseCorrection();
-            events = call('wait_agent_events', { after_seq: cursor, wait_ms: 10000 });
+            events = call('wait_agent_events', { wait_ms: 10000 });
             break;
           case 7: {
             const carriers = (await store.listExecutions('root')).filter((e) => e.childSessionId);

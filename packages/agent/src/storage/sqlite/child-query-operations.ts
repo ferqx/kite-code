@@ -1,3 +1,4 @@
+import type { AgentEventPage, ListAgentEventsInput } from '../agent-collaboration';
 import type { Store } from '../port';
 import { AgentError, type AgentSummary, type AgentSummaryPage } from '../types';
 import type { SqliteOperations } from './operations';
@@ -11,6 +12,27 @@ const decimal = (value: string) => {
     throw new AgentError('invalid_cursor');
   return BigInt(value);
 };
+const directAgentSource = `FROM command c JOIN execution e ON e.origin_command_id=c.id
+  JOIN session s ON s.id=e.child_session_id
+  WHERE c.kind='operation.agent' AND c.session_id=? AND c.subject_id=?
+  AND e.origin_store_id=c.origin_store_id AND s.parent_id=c.session_id`;
+
+/** Rank distinct children by their first committed operation, including retained deleted children. */
+export function directAgentOrdinal(
+  db: SqliteOperations,
+  parentSessionId: string,
+  subjectId: string,
+  childSessionId: string,
+): number {
+  const row = db.row(
+    `WITH anchors AS (SELECT s.id,MIN(c.seq) AS anchor ${directAgentSource} GROUP BY s.id)
+     SELECT COUNT(*) AS ordinal FROM anchors WHERE anchor <= (SELECT anchor FROM anchors WHERE id=?)`,
+    parentSessionId,
+    subjectId,
+    childSessionId,
+  );
+  return Number(row?.ordinal ?? 0);
+}
 const columns = `SELECT c.id AS command_id,c.session_id,c.operation_key,c.extension_id,c.origin_store_id,c.seq,c.subject_id,c.root_work_command_id AS command_root_work,c.root_work_seq AS command_root_seq,
  (SELECT i.id FROM interaction i JOIN execution ie ON ie.id=i.execution_id JOIN command ic ON ic.id=ie.origin_command_id
  WHERE i.origin_store_id=c.origin_store_id AND ie.root_work_command_id=e.root_work_command_id AND ie.root_work_seq=e.root_work_seq
@@ -177,11 +199,8 @@ export function stableAgentsBody(
       new Set(input.agentIds).size !== input.agentIds.length)
   )
     throw new AgentError('invalid_request');
-  const base = `FROM command c JOIN execution e ON e.origin_command_id=c.id
-    JOIN session s ON s.id=e.child_session_id
-    WHERE c.kind='operation.agent' AND c.session_id=? AND c.extension_id=? AND c.subject_id=?
-    AND c.origin_store_id=? AND e.origin_store_id=c.origin_store_id AND s.parent_id=c.session_id`;
-  const args = [input.sessionId, input.extensionId, input.subjectId, input.expectedStoreId];
+  const base = `${directAgentSource} AND c.origin_store_id=? AND c.extension_id=?`;
+  const args = [input.sessionId, input.subjectId, input.expectedStoreId, input.extensionId];
   if (input.agentIds) {
     for (const id of input.agentIds) {
       if (!db.row(`SELECT s.id ${base} AND s.id=? LIMIT 1`, ...args, id))
@@ -332,11 +351,45 @@ export function stableAgentsBody(
   };
 }
 
-/** A bounded read of durable mailbox/completion facts; observing never acknowledges a result. */
-export function listAgentEvents(
+function committedAgentEventPosition(
   db: SqliteOperations,
-  input: import('../agent-collaboration').ListAgentEventsInput,
-): import('../agent-collaboration').AgentEventPage {
+  input: ListAgentEventsInput,
+  contextSelectionId: string,
+  scope: string,
+): bigint {
+  // The position is recorded in the same transaction as the corresponding Tool message.
+  // MAX also covers overlapping reads whose receipts commit out of order.
+  const row = db.row(
+    `SELECT COALESCE(MAX(CAST(json_extract(e.result_json,'$.details.agentEventObservation.nextSeq') AS INTEGER)),0) AS position
+     FROM execution e JOIN run r ON r.id=e.run_id
+     JOIN command c ON c.id=e.origin_command_id
+     JOIN execution model ON model.id=json_extract(e.decision_source_json,'$.modelExecutionId')
+     WHERE e.session_id=? AND e.origin_store_id=? AND c.subject_id=? AND r.context_selection_id=?
+       AND e.kind='tool' AND e.adapter_id='task.events' AND e.definition_version='1'
+       AND e.state='succeeded' AND e.dispatched=1 AND e.completed_cursor IS NOT NULL
+       AND json_extract(e.decision_source_json,'$.kind')='model_decision'
+       AND json_extract(e.result_json,'$.details.agentEventObservation.scope')=?
+       AND model.kind='model' AND model.state='succeeded' AND model.run_id=e.run_id
+       AND model.session_id=e.session_id AND model.origin_store_id=e.origin_store_id
+       AND EXISTS (SELECT 1 FROM json_each(model.decision_source_json,'$.toolBindings') binding
+         WHERE json_extract(binding.value,'$.id')=e.adapter_id
+           AND json_extract(binding.value,'$.version')=e.definition_version
+           AND json_extract(binding.value,'$.extensionId')='builtin.task')
+       AND EXISTS (SELECT 1 FROM message m WHERE m.session_id=e.session_id AND m.run_id=e.run_id
+         AND m.role='tool' AND m.status='complete'
+         AND json_extract(m.source_json,'$.sourceIds[0]')=e.id
+         AND json_extract(m.source_json,'$.toolCallId')=e.call_id)`,
+    input.sessionId,
+    input.expectedStoreId,
+    input.subjectId,
+    contextSelectionId,
+    scope,
+  );
+  return BigInt(row!.position!);
+}
+
+/** A bounded read of durable mailbox/completion facts; observing never acknowledges a result. */
+export function listAgentEvents(db: SqliteOperations, input: ListAgentEventsInput): AgentEventPage {
   db.db.run('BEGIN');
   try {
     db.identity(input.expectedStoreId);
@@ -350,10 +403,25 @@ export function listAgentEvents(
     const limit = input.limit ?? 100;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)
       throw new AgentError('invalid_request');
-    const after = decimal(input.afterSeq ?? '0');
+    const observation = input.observation;
+    const targets = observation?.targets ?? [];
+    const executionIds = [...new Set(targets.map((target) => target.executionId))].sort();
+    const scope = JSON.stringify(executionIds);
+    let after =
+      input.afterSeq === undefined && observation
+        ? committedAgentEventPosition(db, input, observation.contextSelectionId, scope)
+        : decimal(input.afterSeq ?? '0');
     const metadata = db.metadata();
-    if (after < BigInt(metadata.replayFloor))
-      throw new AgentError('cursor_expired', metadata.replayFloor);
+    const floor = BigInt(metadata.replayFloor);
+    const historyGap = after < floor;
+    if (historyGap) {
+      if (!observation) throw new AgentError('cursor_expired', metadata.replayFloor);
+      after = floor;
+    }
+    const targetFilter = targets.length
+      ? `AND ((v.type='execution.finished' AND e.id IN (SELECT value FROM json_each(?)))
+         OR (v.type='agent.message_ready' AND m.session_id IN (SELECT value FROM json_each(?))))`
+      : '';
     const predicate = `FROM change_event v LEFT JOIN execution e ON e.id=v.object_id
       LEFT JOIN command c ON c.id=e.origin_command_id
       LEFT JOIN command m ON m.id=v.object_id AND m.kind='agent.message'
@@ -361,7 +429,7 @@ export function listAgentEvents(
        (v.type='execution.finished' AND e.child_session_id IS NOT NULL AND c.kind='operation.agent'
         AND c.extension_id=? AND c.subject_id=? AND c.origin_store_id=? AND e.origin_store_id=c.origin_store_id)
        OR (v.type='agent.message_ready' AND m.mail_target_session_id=? AND m.subject_id=? AND m.origin_store_id=?
-        AND m.mail_confirmed=1 AND m.status='applied'))`;
+        AND m.mail_confirmed=1 AND m.status='applied')) ${targetFilter}`;
     const args = [
       input.sessionId,
       input.extensionId,
@@ -370,14 +438,19 @@ export function listAgentEvents(
       input.sessionId,
       input.subjectId,
       input.expectedStoreId,
+      ...(targets.length
+        ? [
+            JSON.stringify(executionIds),
+            JSON.stringify(targets.map((target) => target.childSessionId)),
+          ]
+        : []),
     ];
     const observedWater = BigInt(
       db.row(`SELECT COALESCE(MAX(v.cursor),0) AS water ${predicate}`, ...args)!.water!,
     );
-    const water = String(
-      observedWater > BigInt(metadata.replayFloor) ? observedWater : BigInt(metadata.replayFloor),
-    );
-    if (after > BigInt(water)) throw new AgentError('invalid_cursor');
+    const water = String(observedWater > floor ? observedWater : floor);
+    if (after > BigInt(observation ? metadata.lastChangeCursor : water))
+      throw new AgentError(observation ? 'receipt_unverifiable' : 'invalid_cursor');
     const rows = db.rows(
       `SELECT v.cursor,v.type,e.child_session_id,e.state,e.id AS carrier_id,c.id AS command_id,c.operation_key,m.session_id AS sender_session ${predicate} AND v.cursor>? ORDER BY v.cursor LIMIT ?`,
       ...args,
@@ -410,7 +483,14 @@ export function listAgentEvents(
           : 'A complete Agent message is available at the next safe checkpoint.',
     }));
     db.db.run('COMMIT');
-    return { events, nextSeq: events.at(-1)?.seq ?? String(after), highWaterSeq: water };
+    const nextSeq = events.at(-1)?.seq ?? String(after);
+    return {
+      events,
+      nextSeq,
+      highWaterSeq: water,
+      ...(observation ? { observation: { scope, nextSeq } } : {}),
+      ...(historyGap ? { historyGap: true } : {}),
+    };
   } catch (error) {
     return db.rollback(error);
   }

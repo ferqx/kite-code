@@ -11,6 +11,8 @@ export interface WireTurn {
   id: string;
   model?: string;
   calls?: WireCall[];
+  reverseCallAnnouncement?: boolean;
+  reverseCallCompletion?: boolean;
   text?: string[];
   encrypted?: string;
   inputTokens?: number;
@@ -96,7 +98,7 @@ export function responseFrames(
       status: 'completed',
     },
   }));
-  for (const { index, item } of calls)
+  for (const { index, item } of turn.reverseCallAnnouncement ? [...calls].reverse() : calls)
     emit('response.output_item.added', {
       output_index: index,
       item: { ...item, arguments: '', status: 'in_progress' },
@@ -128,15 +130,15 @@ export function responseFrames(
       return events;
     }
   }
-  for (const { index, item } of calls) {
+  for (const { index, item } of turn.reverseCallCompletion ? [...calls].reverse() : calls) {
     emit('response.function_call_arguments.done', {
       output_index: index,
       item_id: item.id,
       arguments: item.arguments,
     });
     emit('response.output_item.done', { output_index: index, item });
-    output.push(item);
   }
+  output.push(...calls.map(({ item }) => item));
   if (turn.text) {
     const index = output.length;
     const item = {

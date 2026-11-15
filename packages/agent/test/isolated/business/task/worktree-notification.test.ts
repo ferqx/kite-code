@@ -333,7 +333,9 @@ for (const fault of ['none', 'before_queue', 'after_queue', 'root'] as const)
           );
         expect(message).toHaveLength(1);
         expect(message[0]!.sourceIds).toEqual([entry.id]);
-        const envelope = JSON.parse(message[0]!.content.split('\n').slice(1).join('\n'));
+        const content = message[0]!.content;
+        const envelope = JSON.parse(content.slice(content.indexOf('\n') + 1));
+        expect(envelope.sender).toEqual({ relation: 'child', name: 'Child worker', ordinal: 1 });
         const notice = JSON.parse(envelope.content.split('\n').slice(1).join('\n'));
         expect(notice).toMatchObject({
           kind: 'git_worktree_created',

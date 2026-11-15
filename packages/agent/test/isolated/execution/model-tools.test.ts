@@ -264,7 +264,7 @@ test('Agent tools expose exactly the current six definitions and reject retired 
     );
   }
   const event = surface.tools.find((tool) => tool.id === 'wait_agent_events')!;
-  expect(Object.keys(event.inputSchema.properties!)).toEqual(['work_refs', 'cursor', 'wait_ms']);
+  expect(Object.keys(event.inputSchema.properties!)).toEqual(['work_refs', 'wait_ms']);
   expect(
     surface.decode({
       id: 'valid',
@@ -275,6 +275,7 @@ test('Agent tools expose exactly the current six definitions and reject retired 
   for (const [name, args] of [
     ['spawn_agent', { prompt: 'work', key: 'old', role: 'worker', result_disposition: 'required' }],
     ['wait_agent_events', { task_ids: ['old'] }],
+    ['wait_agent_events', { cursor: '12', wait_ms: 0 }],
     ['interrupt_agent', { task_id: 'old', target_run_id: 'old', command_id: 'old' }],
   ] as const) {
     expect(

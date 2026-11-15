@@ -174,6 +174,46 @@ function binding(
   )
     throw new AgentError('interaction_binding_changed');
 }
+
+/** A saved denial can precede cancellation even if the waiter never consumed it. */
+export function savedApprovalDenial(db: SqliteOperations, execution: Row): boolean {
+  if (execution.dispatched !== 0n || !execution.interaction_binding_json) return false;
+  const ref = decode<{ interactionId: string; decisionRevision: string | null }>(
+    execution.interaction_binding_json,
+  );
+  const row = db.row(
+    `SELECT i.* FROM interaction i
+     JOIN command origin ON origin.id=? AND origin.subject_id=i.subject_id
+       AND origin.origin_store_id=i.origin_store_id
+     JOIN command answer ON answer.session_id=i.presentation_session_id
+       AND answer.kind='interaction.answer' AND answer.status='applied'
+       AND answer.origin_store_id=i.origin_store_id AND answer.subject_id=i.subject_id
+       AND answer.root_work_command_id=? AND answer.root_work_seq=?
+     WHERE i.id=? AND i.kind='approval' AND i.state IN ('answered','cancelled')
+       AND i.origin_store_id=? AND i.session_id=? AND i.run_id IS ?
+       AND json_extract(i.answer_json,'$.kind')='approval'
+       AND json_extract(i.answer_json,'$.decision')='deny'
+       AND json_extract(answer.request_json,'$.interactionId')=i.id
+       AND json_extract(answer.request_json,'$.answer')=i.answer_json
+       AND json_extract(answer.request_json,'$.expectedRevision')=CAST(i.revision-1 AS TEXT)
+       AND json_extract(answer.receipt_json,'$.interactionId')=i.id
+       AND json_extract(answer.receipt_json,'$.decisionRevision')=CAST(i.revision AS TEXT)
+       AND json_extract(answer.receipt_json,'$.outcome')='answer_saved'
+       AND json_type(answer.receipt_json,'$.cancelled')='false' LIMIT 1`,
+    execution.origin_command_id!,
+    execution.root_work_command_id!,
+    execution.root_work_seq!,
+    ref.interactionId,
+    execution.origin_store_id!,
+    execution.session_id!,
+    execution.run_id ?? null,
+  );
+  if (!row || (ref.decisionRevision !== null && ref.decisionRevision !== String(row.revision)))
+    return false;
+  binding(execution, record(row));
+  return true;
+}
+
 function required(db: SqliteOperations, execution: Row): RequirementRef[] {
   const run =
     execution.run_id === null

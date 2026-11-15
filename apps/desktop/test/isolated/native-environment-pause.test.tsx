@@ -310,8 +310,11 @@ test('errors and unavailable observations remain non-authoritative through pause
   const f = await fixture();
   try {
     await f.render();
+    const buttons = stops(f.host);
+    expect(buttons).toHaveLength(2);
     await f.render({ revision: 1, nextRead: 'error' });
-    expect(stops(f.host)).toHaveLength(0);
+    expect(stops(f.host).every((button, index) => button === buttons[index])).toBe(true);
+    expect(buttons.every((button) => button.isConnected && button.disabled)).toBe(true);
     expect(f.environment.approvalOwners).toEqual([]);
     const display = f.host.textContent;
     const before = f.commits.length;
@@ -322,11 +325,11 @@ test('errors and unavailable observations remain non-authoritative through pause
     expect(stops(f.host).every((button) => !button.disabled)).toBe(true);
     await f.render({ unavailable: true });
     expect(f.environment.childReadAvailable).toBe(false);
-    expect(stops(f.host)).toHaveLength(0);
+    expect(buttons.every((button) => button.isConnected && button.disabled)).toBe(true);
     await f.render({ paused: true });
     await f.render({ paused: false });
     expect(f.environment.approvalOwners).toEqual([]);
-    expect(stops(f.host)).toHaveLength(0);
+    expect(buttons.every((button) => button.isConnected && button.disabled)).toBe(true);
     await f.render({ unavailable: false });
     expect(stops(f.host).every((button) => !button.disabled)).toBe(true);
   } finally {

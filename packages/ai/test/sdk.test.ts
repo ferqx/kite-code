@@ -723,6 +723,53 @@ test('a finished malformed Tool argument reaches Core unchanged for rejection; a
   }
 });
 
+for (const conflictingPosition of [false, true]) {
+  test(`Chat Completions ${conflictingPosition ? 'rejects conflicting indexes' : 'keeps index order when the first Tool name arrives late'}`, async () => {
+    const data = endpoint(() =>
+      sse(
+        chunk({
+          tool_calls: [{ index: 0, id: 'z-first', type: 'function', function: { arguments: '' } }],
+        }) +
+          chunk({
+            tool_calls: [
+              {
+                index: conflictingPosition ? 0 : 1,
+                id: 'a-second',
+                type: 'function',
+                function: { name: 'fixture_count', arguments: '{"value":"second"}' },
+              },
+            ],
+          }) +
+          chunk({
+            tool_calls: [
+              { index: 0, function: { name: 'fixture_count', arguments: '{"value":"first"}' } },
+            ],
+          }) +
+          chunk({}, 'tool_calls') +
+          'data: [DONE]\n\n',
+      ),
+    );
+    try {
+      const result = await collect(data.adapter);
+      const calls = result.events.filter((event) => event.type === 'tool_call');
+      if (conflictingPosition) {
+        expect(result.error).toMatchObject({ reason: 'stream_incomplete' });
+        expect(calls).toEqual([]);
+        expect(result.events.some((event) => event.type === 'finish')).toBe(false);
+      } else {
+        expect(result.error).toBeNull();
+        expect(calls.map(({ id, arguments: args }) => [id, args])).toEqual([
+          ['z-first', '{"value":"first"}'],
+          ['a-second', '{"value":"second"}'],
+        ]);
+      }
+      expect(data.calls).toBe(1);
+    } finally {
+      data.close();
+    }
+  });
+}
+
 test('actual HTTP stream closure preserves partial text, withholds calls, and classifies native connection code once', async () => {
   const data = endpoint(
     () =>

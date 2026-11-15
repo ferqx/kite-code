@@ -64,6 +64,7 @@ function fixture(options: { diagnostics?: boolean; childTitle?: string } = {}) {
     empty = false;
   let stopObservation: number | undefined;
   let stopUnknown = false;
+  let completed = false;
   let click!: () => void;
   const bridge: NativeBridge = {
     watch: () => () => {},
@@ -87,7 +88,17 @@ function fixture(options: { diagnostics?: boolean; childTitle?: string } = {}) {
           nextIndex: empty ? 0 : 1,
           total: empty ? 0 : 1,
           complete: true,
-          entries: empty ? [] : [{ ...item, rootSession: { ...item.rootSession, id: sessionId } }],
+          entries: empty
+            ? []
+            : [
+                {
+                  ...item,
+                  execution: completed
+                    ? { ...item.execution, status: 'succeeded' }
+                    : item.execution,
+                  rootSession: { ...item.rootSession, id: sessionId },
+                },
+              ],
         };
       }
       if (request.method === 'background.stop') {
@@ -179,6 +190,9 @@ function fixture(options: { diagnostics?: boolean; childTitle?: string } = {}) {
     emptyDirectory() {
       empty = true;
     },
+    complete() {
+      completed = true;
+    },
     async render(nextRoot = sessionId) {
       sessionId = nextRoot;
       revision++;
@@ -220,7 +234,9 @@ test('environment names hide internal IDs outside diagnostics and keep unconfirm
         f.unconfirmed(true);
         await f.render();
         expect(f.text?.includes('执行状态待核实')).toBe(diagnostics);
-        expect(f.host.querySelector('.background-execution-stop')).toBeNull();
+        expect(
+          f.host.querySelector<HTMLButtonElement>('.background-execution-stop')?.disabled,
+        ).toBe(true);
         expect(f.stops).toBe(0);
       } finally {
         await f.close();
@@ -263,13 +279,59 @@ test('routine environment refresh retains card text and controls while blocking 
     await f.render();
     expect(card.textContent).not.toContain('上次状态 · 待核实');
     expect(card.textContent).not.toContain('fixture_environment_unavailable');
-    expect(card.querySelector('.background-execution-stop')).toBeNull();
+    expect(card.querySelector('.background-execution-stop')).toBe(stop);
+    expect(stop.disabled).toBe(true);
     f.unavailable(true);
     await f.render();
     expect(card.textContent).not.toContain('environment_unavailable');
     expect(f.stops).toBe(0);
   } finally {
     held?.resolve();
+    await f.close();
+  }
+});
+
+test('a running child keeps its row and controls through repeated observation gaps and then shows completion', async () => {
+  const f = fixture({ childTitle: '项目只读检查' });
+  const stopSelector = '.background-execution-stop';
+  try {
+    await f.render();
+    const card = f.host.querySelector('[aria-label="环境信息"]')!;
+    const row = card.querySelector('[data-execution-id="job-1"]')!;
+    const stop = row.querySelector<HTMLButtonElement>(stopSelector)!;
+    const detail = row.querySelector('.background-execution-detail')!;
+    const text = card.textContent;
+    for (let index = 0; index < 3; index++) {
+      f.unconfirmed(true);
+      await f.render();
+      expect(row.querySelector(stopSelector)).toBe(stop);
+      expect(stop.disabled).toBe(true);
+      expect(card.textContent).toBe(text);
+
+      f.unavailable(true);
+      await f.render();
+      expect(row.querySelector(stopSelector)).toBe(stop);
+      expect(stop.disabled).toBe(true);
+      expect(card.textContent).toBe(text);
+      await act(async () => stop.click());
+
+      f.unavailable(false);
+      f.unconfirmed(false);
+      await f.render();
+      expect(card.querySelector('[data-execution-id="job-1"]')).toBe(row);
+      expect(row.querySelector('.background-execution-detail')).toBe(detail);
+      expect(row.querySelector(stopSelector)).toBe(stop);
+      expect(stop.disabled).toBe(false);
+      expect(card.textContent).toBe(text);
+    }
+    f.complete();
+    await f.render();
+    expect(card.querySelector('[data-execution-id="job-1"]')).toBe(row);
+    expect(row.querySelector('.background-execution-detail')).toBe(detail);
+    expect(row.querySelector(stopSelector)).toBeNull();
+    expect(row.textContent).toContain('已完成');
+    expect(f.stops).toBe(0);
+  } finally {
     await f.close();
   }
 });

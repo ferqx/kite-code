@@ -347,14 +347,30 @@ export function desktopToolMessage(
 ): DesktopMessage {
   const shell = desktopShell(fact, text);
   const worktreeIssue = desktopWorktreeFailure(fact);
+  const wait = fact.agentWait;
   const waitText =
-    fact.agentWait &&
-    {
-      events: `收到 ${fact.agentWait.events} 条子 Agent 事件`,
-      completed: '所等待的子 Agent 工作已结束',
-      input: '收到新输入，已结束等待',
-      timeout: '等待期间暂无新事件',
-    }[fact.agentWait.reason];
+    wait?.reason === 'failed'
+      ? {
+          invalid_cursor: '事件游标无效，子 Agent 可继续运行。',
+          cursor_expired: '事件游标已过期，需要重新观察。',
+          invalid_request: '等待参数无效。',
+          invalid_work_reference: '无法核实要等待的子 Agent 工作。',
+          agent_unavailable: '无法读取所选子 Agent 的状态。',
+          permission_denied: '当前权限无法查看子 Agent 事件。',
+          operation_cancelled: '本次事件观察已取消，子 Agent 可继续运行。',
+          receipt_unverifiable: '暂时无法核实子 Agent 事件。',
+        }[wait.code]
+      : wait?.historyGap
+        ? wait.events
+          ? `收到 ${wait.events} 条子 Agent 事件，较早事件已过期`
+          : '较早的子 Agent 事件已过期，已从保留位置继续'
+        : wait &&
+          {
+            events: `收到 ${wait.events} 条子 Agent 事件`,
+            completed: '所等待的子 Agent 工作已结束',
+            input: '收到新输入，已结束等待',
+            timeout: '等待期间暂无新事件',
+          }[wait.reason];
   return {
     id,
     role: 'tool',

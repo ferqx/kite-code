@@ -156,6 +156,7 @@ function binding(
   baseURL: string,
   modelId = 'gpt-5',
   protocol: 'responses' | 'chat-completions' = 'responses',
+  fetch?: typeof globalThis.fetch,
 ) {
   return createSdkModelAdapter({
     models: new Map([
@@ -166,6 +167,7 @@ function binding(
           name: 'openai',
           modelId,
           baseURL,
+          ...(fetch ? { fetch } : {}),
         }),
       ],
     ]),
@@ -535,6 +537,8 @@ test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented cal
         return {
           id: 'r1',
           encrypted: 'fixture-cipher-1',
+          reverseCallAnnouncement: true,
+          reverseCallCompletion: true,
           calls: [
             call('alpha', 'fixture.record', { label: 'alpha', value: 2 }),
             call('echo', 'fixture.echo', { text: 'parallel-B' }),
@@ -1295,6 +1299,281 @@ test('Responses physical socket loss stops after five reconnections without disp
     });
   }
 }, 15_000);
+
+for (const action of [
+  'deny',
+  'stop while waiting',
+  'stop before planning',
+  'deny before stop',
+  'stop before deny',
+] as const) {
+  test(`Responses tool history after ${action}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-responses-tool-cancel-'));
+    const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
+    const requests: Body[] = [];
+    const effects: string[] = [];
+    const planningEntered = barrier();
+    const allowPlanning = barrier();
+    const finishEntered = barrier();
+    const allowFinish = barrier();
+    const runningEntered = barrier();
+    const allowRunning = barrier();
+    const approvalRead = barrier();
+    const allowApprovalRead = barrier();
+    const approvalRace = action === 'deny before stop' || action === 'stop before deny';
+    const callIds = action === 'deny' ? ['running', 'gated', 'sibling'] : ['gated', 'sibling'];
+    const toolIds = callIds.map((id) => `fixture.${id}`);
+    const calls = callIds.map((id, index) => call(id, toolIds[index]));
+    const model = binding(
+      'https://responses.fixture.invalid/v1',
+      'gpt-5',
+      'responses',
+      Object.assign(
+        async (_input: string | URL | Request, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body)) as Body;
+          const turn: WireTurn = requests.length
+            ? { id: 'after-tool-control', text: ['Read the recorded tool results.'] }
+            : {
+                id: 'original-tool-batch',
+                calls,
+                reverseCallAnnouncement: true,
+                reverseCallCompletion: true,
+              };
+          requests.push(body);
+          return new Response(encodeFrames(responseFrames({ ...turn, model: body.model }, body)), {
+            headers: { 'content-type': 'text/event-stream' },
+          });
+        },
+        { preconnect: globalThis.fetch.preconnect },
+      ),
+    );
+    const tools: ToolDefinition[] = calls.map((item, index) => ({
+      id: toolIds[index]!,
+      description: 'A disposable in-memory test effect',
+      version: '1',
+      inputSchema: { type: 'object' },
+      async execute() {
+        if (item.id === 'running') {
+          runningEntered.release();
+          await allowRunning.promise;
+        }
+        effects.push(item.id);
+        return { outcome: 'succeeded', content: `Executed ${item.id}` };
+      },
+    }));
+    async function open(holdPlanning: boolean) {
+      const store = await openSqliteStore(profile);
+      const runStore = new Proxy(store, {
+        get(target, key, receiver) {
+          if (key === 'planExecution' && holdPlanning) {
+            return async (input: Parameters<typeof store.planExecution>[0]) => {
+              if (input.kind === 'tool' && input.originCommandId === 'work') {
+                planningEntered.release();
+                await allowPlanning.promise;
+              }
+              return target.planExecution(input);
+            };
+          }
+          if (key === 'getInteraction' && approvalRace)
+            return async (input: Parameters<typeof store.getInteraction>[0]) => {
+              approvalRead.release();
+              await allowApprovalRead.promise;
+              return target.getInteraction(input);
+            };
+          if (key === 'finishRun' && (approvalRace || action === 'stop while waiting')) {
+            return async (input: Parameters<typeof store.finishRun>[0]) => {
+              if (input.status === 'cancelled') {
+                finishEntered.release();
+                await allowFinish.promise;
+              }
+              return target.finishRun(input);
+            };
+          }
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      const runtime = createRuntime({
+        store: runStore,
+        artifacts: createArtifactStore({ profile, store: runStore }),
+        model,
+        modelId: 'bound',
+        permissions: {
+          toolDispatchOrder: 'model',
+          authorize: async (request) =>
+            request.definitionId === 'fixture.gated' ||
+            (action === 'deny' && request.definitionId === 'fixture.sibling')
+              ? { allowed: false, revision: 'owned', approval: { request: { title: 'Gated' } } }
+              : { allowed: true, revision: 'owned' },
+        },
+        extensions: [{ id: 'fixture', version: '1', apiMajor: 1, tools }],
+      });
+      return { store, runtime };
+    }
+    let f = await open(action === 'stop before planning');
+    try {
+      const expectedStoreId = (await f.store.getMetadata()).storeId;
+      const session = { expectedStoreId, subjectId: 'owner', sessionId: 's' };
+      await f.runtime.createWorkspace({
+        expectedStoreId,
+        id: 'w',
+        name: 'owned',
+        rootUri: pathToFileURL(root).href,
+      });
+      await f.runtime.createSession({
+        ...session,
+        commandId: 'create',
+        workspaceId: 'w',
+        title: 's',
+      });
+      await f.runtime.submitCommand({
+        ...session,
+        commandId: 'work',
+        request: { kind: 'run.start', content: 'Run the original fixture batch' },
+      });
+      let denyGated: (() => Promise<unknown>) | undefined;
+      if (action === 'stop before planning') {
+        await planningEntered.promise;
+        expect(
+          (await f.store.listMessages('s')).some(
+            (item) => item.role === 'assistant' && item.modelOutput?.toolCallCount === 2,
+          ),
+        ).toBe(true);
+        expect((await f.store.listExecutions('s')).filter((item) => item.kind === 'tool')).toEqual(
+          [],
+        );
+      } else {
+        if (action === 'deny') await runningEntered.promise;
+        const planned = await until(
+          () => f.store.listExecutions('s'),
+          (value) =>
+            value.some((item) => item.callId === 'gated') &&
+            value.some((item) => item.callId === 'sibling' && item.status === 'planned'),
+        );
+        const gatedId = planned.find((item) => item.callId === 'gated')?.id;
+        const siblingId = planned.find((item) => item.callId === 'sibling')!.id;
+        const waiting = await until(
+          () => f.runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' }),
+          (value) => value.interactions.some((item) => item.executionId === gatedId),
+        );
+        expect(effects).toEqual([]);
+        expect(requests).toHaveLength(1);
+        const approval = waiting.interactions.find((item) => item.executionId === gatedId)!;
+        const deny = async () =>
+          (
+            await f.runtime.answerInteraction({
+              ...session,
+              commandId: 'deny',
+              presentationSessionId: 's',
+              interactionId: approval.id,
+              expectedRevision: approval.revision,
+              answer: { kind: 'approval', decision: 'deny' },
+            })
+          ).receipt;
+        if (approvalRace) {
+          await approvalRead.promise;
+          denyGated = deny;
+        }
+        if (action === 'deny') {
+          await deny();
+          const next = await until(
+            () => f.runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' }),
+            (value) => value.interactions.some((item) => item.executionId === siblingId),
+          );
+          const siblingApproval = next.interactions.find((item) => item.executionId === siblingId)!;
+          await f.runtime.answerInteraction({
+            ...session,
+            commandId: 'approve-sibling',
+            presentationSessionId: 's',
+            interactionId: siblingApproval.id,
+            expectedRevision: siblingApproval.revision,
+            answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+          });
+          await until(
+            () => f.store.listMessages('s'),
+            (messages) => messages.some((message) => message.toolCallId === 'sibling'),
+          );
+          expect(effects).toEqual(['sibling']);
+          expect(requests).toHaveLength(1);
+          allowRunning.release();
+        }
+      }
+      const newMessage = {
+        ...session,
+        commandId: 'new-message',
+        request: { kind: 'run.start' as const, content: 'Use the stopped turn as context' },
+      };
+      if (action !== 'deny') {
+        if (action === 'deny before stop')
+          expect(await denyGated!()).toMatchObject({ cancelled: false });
+        await f.runtime.cancelCommand({ ...session, commandId: 'stop', targetCommandId: 'work' });
+        if (action === 'stop before deny')
+          expect(await denyGated!()).toMatchObject({ cancelled: true });
+        allowPlanning.release();
+        allowApprovalRead.release();
+        if (approvalRace || action === 'stop while waiting') {
+          await finishEntered.promise;
+          const original = await f.store.getCommand('work');
+          expect(
+            (await f.store.getRun((original?.receipt as { runId: string }).runId))?.isActive,
+          ).toBe(true);
+          expect(await f.runtime.submitCommand(newMessage)).toMatchObject({ status: 'accepted' });
+          expect(requests).toHaveLength(1);
+          allowFinish.release();
+        }
+      }
+      const original = await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      const originalRun = await f.store.getRun((original.receipt as { runId: string }).runId);
+      if (action !== 'deny') {
+        expect(originalRun?.status).toBe('cancelled');
+        expect(effects).toEqual([]);
+        const durableReceipts = (await f.store.listMessages('s')).filter(
+          (item) => item.role === 'tool',
+        );
+        expect(durableReceipts).toHaveLength(2);
+        if (action === 'stop before planning') {
+          await f.runtime.close();
+          f = await open(false);
+          await f.runtime.submitCommand(newMessage);
+        }
+        await f.runtime.waitForCommand('new-message', { timeoutMs: 5000 });
+      } else expect(originalRun?.status).toBe('completed');
+      expect(requests).toHaveLength(2);
+      const input = requests[1]!.input;
+      expect(
+        input.filter((item) => item.type === 'function_call').map((item) => item.call_id),
+      ).toEqual(callIds);
+      const outputs = input.filter((item) => item.type === 'function_call_output');
+      expect(outputs.map((item) => item.call_id)).toEqual(callIds);
+      if (action === 'deny') {
+        expect(effects).toEqual(['sibling', 'running']);
+        expect(
+          (await f.store.listMessages('s'))
+            .filter((item) => item.role === 'tool')
+            .map((item) => item.toolCallId),
+        ).toEqual(['gated', 'sibling', 'running']);
+        expect(outputs[0]!.output).toBe('Executed running');
+        expect(outputs[1]!.output).toContain('The user denied this request');
+        expect(outputs[2]!.output).toBe('Executed sibling');
+      } else {
+        expect(effects).toEqual([]);
+        expect(outputs.map((item) => item.output)).toEqual([
+          action === 'deny before stop'
+            ? 'The user denied this request. It was not executed. Do not resubmit it or bypass the refusal.'
+            : '用户停止了上一轮，此工具未执行',
+          '用户停止了上一轮，此工具未执行',
+        ]);
+        expect(JSON.stringify(input.at(-1))).toContain('Use the stopped turn as context');
+      }
+    } finally {
+      allowPlanning.release();
+      allowFinish.release();
+      allowRunning.release();
+      allowApprovalRead.release();
+      await f.runtime.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+}
 
 test('Responses permanently lost sockets stop retrying after explicit Run cancellation', async () => {
   const counter = { effects: 0 };

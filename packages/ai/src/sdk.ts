@@ -35,6 +35,43 @@ const compatibleSnapshots = new WeakMap<
 >();
 const responseBindings = new WeakMap<object, string>();
 
+function wireObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readToolPositions(
+  chunk: unknown,
+  protocol: Protocol,
+  record: (id: string, index: unknown) => void,
+): void {
+  const value = wireObject(chunk);
+  if (!value) return;
+  if (protocol === 'chat-completions') {
+    const choice = Array.isArray(value.choices) ? wireObject(value.choices[0]) : undefined;
+    const calls = wireObject(choice?.delta)?.tool_calls;
+    if (!Array.isArray(calls)) return;
+    for (const delta of calls) {
+      const call = wireObject(delta);
+      if (typeof call?.id === 'string' && call.id) record(call.id, call.index);
+    }
+    return;
+  }
+
+  const recordItem = (item: unknown, index: unknown) => {
+    const call = wireObject(item);
+    if (call?.type === 'function_call' && typeof call.call_id === 'string')
+      record(call.call_id, index);
+  };
+  if (value.type === 'response.output_item.added' || value.type === 'response.output_item.done')
+    recordItem(value.item, value.output_index);
+  if (value.type === 'response.completed' || value.type === 'response.incomplete') {
+    const output = wireObject(value.response)?.output;
+    if (Array.isArray(output)) output.forEach(recordItem);
+  }
+}
+
 /** Internal IDs can contain namespaces; the compatible wire only accepts short ASCII names. */
 function toolNames(request: ModelRequest) {
   const ids = new Set([
@@ -92,6 +129,23 @@ function messages(
       ) {
         // Only trusted output artifacts carry this field. SDK revalidates content;
         // text/tool calls remain the Core's authority for execution.
+        const parts = continuation.content.filter(
+          (part): part is Record<string, Json> =>
+            part !== null &&
+            typeof part === 'object' &&
+            !Array.isArray(part) &&
+            part.type === 'tool-call',
+        );
+        const byCallId = new Map(parts.map((part) => [part.toolCallId, part]));
+        const originalCalls = message.toolCalls ?? [];
+        if (byCallId.size !== parts.length || parts.length !== originalCalls.length)
+          throw new Error('invalid_tool_history');
+        const orderedCalls = originalCalls.map((call) => {
+          const part = byCallId.get(call.id);
+          if (!part) throw new Error('invalid_tool_history');
+          return { ...part, toolName: encodeTool(call.name) };
+        });
+        let callIndex = 0;
         return {
           role: 'assistant',
           content: continuation.content.map((part) => {
@@ -104,9 +158,7 @@ function messages(
               return part;
             // The opaque content records that attempt's wire names. Re-encode from
             // the Core call ID because this request can have a different collision set.
-            const original = message.toolCalls?.find((call) => call.id === part.toolCallId);
-            if (!original) throw new Error('invalid_tool_history');
-            return { ...part, toolName: encodeTool(original.name) };
+            return orderedCalls[callIndex++];
           }) as unknown as Extract<SdkMessage, { role: 'assistant' }>['content'],
         };
       }
@@ -280,6 +332,7 @@ export function createSdkModelAdapter(options: {
       signal.throwIfAborted();
       const model = models.get(request.modelId);
       if (!model) throw new Error('model_not_bound');
+      const provider = compatibleSnapshots.get(model as object);
       const rawBinding =
         typeof model === 'object' && model !== null ? responseBindings.get(model) : undefined;
       const binding =
@@ -307,9 +360,23 @@ export function createSdkModelAdapter(options: {
       let finished = false;
       let recordedUsage: ModelUsage | undefined;
       const argumentsById = new Map<string, string>();
-      const emittedCalls = new Set<string>();
       const startedCalls = new Set<string>();
-      const completedCalls: import('./index').ModelToolCall[] = [];
+      const completedCalls = new Map<string, import('./index').ModelToolCall>();
+      const positions = new Map<string, number>();
+      const idsByPosition = new Map<number, string>();
+      const recordPosition = (id: string, index: unknown) => {
+        if (
+          !id ||
+          typeof index !== 'number' ||
+          !Number.isSafeInteger(index) ||
+          index < 0 ||
+          (positions.has(id) && positions.get(id) !== index) ||
+          (idsByPosition.has(index) && idsByPosition.get(index) !== id)
+        )
+          throw new ModelAttemptError('stream_incomplete');
+        positions.set(id, index);
+        idsByPosition.set(index, id);
+      };
       // Validate local history before entering the Provider failure/reconnect boundary.
       const history = messages(request, names.encode, binding);
       try {
@@ -356,8 +423,8 @@ export function createSdkModelAdapter(options: {
           maxRetries: 0,
           stopWhen: stepCountIs(1),
           abortSignal: signal,
-          // Read only the usage leaf before Provider schemas discard extra token details.
-          include: { rawChunks: compatibleSnapshots.has(model as object) },
+          // The SDK bridges discard Provider position and extra usage fields.
+          include: { rawChunks: provider !== undefined },
           // SDK errors are consumed below and never logged with host credentials.
           onError() {},
         });
@@ -366,6 +433,7 @@ export function createSdkModelAdapter(options: {
           switch (part.type) {
             case 'raw': {
               const value = part.rawValue;
+              if (provider) readToolPositions(value, provider.protocol, recordPosition);
               if (
                 value !== null &&
                 typeof value === 'object' &&
@@ -395,13 +463,13 @@ export function createSdkModelAdapter(options: {
               argumentsById.set(part.id, (argumentsById.get(part.id) ?? '') + part.delta);
               break;
             case 'tool-call': {
-              if (part.providerExecuted || emittedCalls.has(part.toolCallId))
+              if (part.providerExecuted || completedCalls.has(part.toolCallId))
                 throw new Error('invalid_model_tool_call');
               const argumentsText =
                 argumentsById.get(part.toolCallId) ?? JSON.stringify(part.input);
               if (typeof argumentsText !== 'string') throw new Error('invalid_model_tool_call');
-              emittedCalls.add(part.toolCallId);
-              completedCalls.push({
+              startedCalls.add(part.toolCallId);
+              completedCalls.set(part.toolCallId, {
                 id: part.toolCallId,
                 name: names.decode(part.toolName),
                 arguments: argumentsText,
@@ -418,12 +486,19 @@ export function createSdkModelAdapter(options: {
                       ? 'length'
                       : null;
               if (!reason) throw new ModelAttemptError('stream_incomplete');
-              if ([...startedCalls].some((id) => !emittedCalls.has(id)))
+              const callIds = [...startedCalls];
+              if (
+                callIds.some((id) => !completedCalls.has(id)) ||
+                (provider &&
+                  (positions.size !== callIds.length || callIds.some((id) => !positions.has(id))))
+              )
                 throw new ModelAttemptError('stream_incomplete');
               if (finished) throw new Error('model_finish_unavailable');
               finished = true;
               const usage = recordedUsage ?? sdkModelUsage(part.totalUsage);
-              for (const call of completedCalls) yield { type: 'tool_call', ...call };
+              if (provider)
+                callIds.sort((left, right) => positions.get(left)! - positions.get(right)!);
+              for (const id of callIds) yield { type: 'tool_call', ...completedCalls.get(id)! };
               yield {
                 type: 'finish',
                 reason,
@@ -439,7 +514,7 @@ export function createSdkModelAdapter(options: {
             case 'tool-error':
               // SDK schema rejection is not a Tool execution. Preserve the original
               // completed call for Core's own rejected-call/result transaction.
-              if (!emittedCalls.has(part.toolCallId)) throw new Error('invalid_model_tool_call');
+              if (!completedCalls.has(part.toolCallId)) throw new Error('invalid_model_tool_call');
               break;
             case 'tool-input-start':
               startedCalls.add(part.id);

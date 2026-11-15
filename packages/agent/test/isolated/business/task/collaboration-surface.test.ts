@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
+import { agentContractSource } from '../../../../src/model-context';
 import { modelIdentifier } from '../../../../src/model-identifier';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
@@ -22,10 +23,213 @@ function openFaultDatabase(path: string) {
   database.run('PRAGMA busy_timeout=1000');
   return database;
 }
-const call = (name: string, input: unknown): ModelEvent[] => [
-  { type: 'tool_call', id: crypto.randomUUID(), name, arguments: JSON.stringify(input) },
+const call = (name: string, input: unknown, id: string = crypto.randomUUID()): ModelEvent[] => [
+  { type: 'tool_call', id, name, arguments: JSON.stringify(input) },
   { ...finish, reason: 'tool_calls' },
 ];
+
+test('managed Agent waits isolate target sets and resume committed receipts after reopening SQLite', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-agent-wait-resume-')));
+  const profile = { dataRoot: join(root, 'data'), profile: 'test' };
+  let store = await openSqliteStore(profile);
+  const expectedStoreId = (await store.getMetadata()).storeId;
+  const identity = { expectedStoreId, sessionId: 'root', subjectId: 'owner' };
+  const mailbox = { ...identity, extensionId: 'builtin.task' };
+  const childAGate = Promise.withResolvers<void>();
+  let childA = { id: '', work: '' };
+  let childB = { id: '', work: '' };
+  let checkedBeforeCommit = false;
+  let initialStage = 0;
+  let resumedStage = 0;
+
+  const child: ModelAdapter = {
+    async *stream(request) {
+      if (
+        request.messages.some((message) => message.role === 'user' && message.content === 'Child A')
+      )
+        await childAGate.promise;
+      yield { type: 'text_delta', text: 'Completed the assigned work.' };
+      yield finish;
+    },
+  };
+  const startRuntime = (model: ModelAdapter) =>
+    createRuntime({
+      store,
+      artifacts: createArtifactStore({ profile, store }),
+      model,
+      modelId: 'parent',
+      modelConcurrency: 4,
+      sources: { capture: async () => [agentContractSource(root)] },
+      extensions: [
+        createTaskExtension({
+          roles: [{ id: 'worker', configurationId: 'worker', description: 'Worker' }],
+        }),
+      ],
+      permissions: { authorize: async () => ({ allowed: true, revision: 'actual' }) },
+      childConfigurations: [
+        { id: 'worker', version: '1', model: child, modelId: 'child', toolIds: [], snapshot: {} },
+      ],
+    });
+  const readCompletions = async (count: number) => {
+    const deadline = Date.now() + 4000;
+    do {
+      const { events } = await store.listAgentEvents(mailbox);
+      const completed = events.filter((event) => event.kind === 'completed');
+      if (completed.length >= count) return completed;
+      await Bun.sleep(10);
+    } while (Date.now() < deadline);
+    throw Error(`Expected ${count} persisted child completions`);
+  };
+  const wait = (workRefs?: string[], id?: string) =>
+    call('wait_agent_events', { ...(workRefs ? { work_refs: workRefs } : {}), wait_ms: 0 }, id);
+  const receipt = (request: Parameters<ModelAdapter['stream']>[0]) => {
+    const tool = request.messages.filter((message) => message.role === 'tool').at(-1);
+    return tool ? JSON.parse(tool.content) : undefined;
+  };
+  const expectWait = (body: ReturnType<typeof JSON.parse>, work: string[]) => {
+    expect(body).not.toHaveProperty('next_cursor');
+    expect(body).not.toHaveProperty('agentEventObservation');
+    expect(body.events.map((event: { work_ref: string }) => event.work_ref)).toEqual(work);
+  };
+  const finishExecution = store.finishExecution.bind(store);
+  store.finishExecution = async (input) => {
+    if (input.message?.toolCallId === 'observe-a' && input.status === 'succeeded') {
+      const session = (await store.getSession('root'))!;
+      const completed = (await readCompletions(2)).find((event) => event.agentId === childA.id)!;
+      const page = await store.listAgentEvents({
+        ...mailbox,
+        observation: {
+          contextSelectionId: session.contextSelectionId,
+          targets: [{ executionId: completed.workRef!.executionId!, childSessionId: childA.id }],
+        },
+      });
+      expect(page.events.map((event) => event.agentId)).toEqual([childA.id]);
+      expect(input.result).toMatchObject({
+        details: { agentEventObservation: { nextSeq: completed.seq } },
+      });
+      checkedBeforeCommit = true;
+    }
+    return finishExecution(input);
+  };
+  let runtime = startRuntime({
+    async *stream(request) {
+      const body = receipt(request);
+      switch (initialStage++) {
+        case 0: {
+          const definition = request.tools.find((tool) => tool.id === 'wait_agent_events')!;
+          expect(Object.keys(definition.inputSchema.properties!)).toEqual(['work_refs', 'wait_ms']);
+          const instructions = request.messages
+            .filter((message) => message.role === 'system')
+            .map((message) => message.content)
+            .join('\n');
+          expect(instructions).toContain('As a parent waiting on a child, use the exact work_refs');
+          expect(instructions).not.toContain('next_cursor');
+          yield* call('spawn_agent', { prompt: 'Child A' });
+          break;
+        }
+        case 1:
+          childA = { id: body.agent_id, work: body.work_ref };
+          yield* call('spawn_agent', { prompt: 'Child B' });
+          break;
+        case 2:
+          childB = { id: body.agent_id, work: body.work_ref };
+          expect((await readCompletions(1)).map((event) => event.agentId)).toEqual([childB.id]);
+          childAGate.resolve();
+          expect((await readCompletions(2)).map((event) => event.agentId)).toEqual([
+            childB.id,
+            childA.id,
+          ]);
+          yield* wait([childA.work], 'observe-a');
+          break;
+        case 3:
+          expectWait(body, [childA.work]);
+          yield* wait([childB.work]);
+          break;
+        case 4:
+          expectWait(body, [childB.work]);
+          yield* wait([childA.work, childB.work]);
+          break;
+        case 5:
+          expectWait(body, [childB.work, childA.work]);
+          yield* wait([childB.work, childA.work]);
+          break;
+        case 6:
+          expect(body).toEqual({ reason: 'completed', events: [] });
+          yield* wait();
+          break;
+        case 7:
+          expectWait(body, [childB.work, childA.work]);
+          yield finish;
+          break;
+        default:
+          throw Error('Unexpected initial model request');
+      }
+    },
+  });
+  const run = async (commandId: string) => {
+    await runtime.submitCommand({
+      ...identity,
+      commandId,
+      request: { kind: 'run.start', content: commandId },
+    });
+    const completed = await runtime.waitForCommand(commandId, { timeoutMs: 12000 });
+    expect(await store.getRun((completed.receipt as { runId: string }).runId)).toMatchObject({
+      status: 'completed',
+    });
+  };
+  try {
+    await runtime.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      rootUri: pathToFileURL(root).href,
+      name: 'test',
+    });
+    await runtime.createSession({
+      ...identity,
+      commandId: 'create',
+      workspaceId: 'w',
+      title: 'Waits',
+    });
+    await run('Observe A then B');
+    expect(initialStage).toBe(8);
+    expect(checkedBeforeCommit).toBe(true);
+    await runtime.close();
+
+    store = await openSqliteStore(profile);
+    let childCWork = '';
+    runtime = startRuntime({
+      async *stream(request) {
+        const body = receipt(request);
+        switch (resumedStage++) {
+          case 0:
+            yield* wait([childA.work]);
+            break;
+          case 1:
+            expect(body).toEqual({ reason: 'completed', events: [] });
+            yield* call('spawn_agent', { prompt: 'Child C' });
+            break;
+          case 2:
+            childCWork = body.work_ref;
+            await readCompletions(3);
+            yield* wait();
+            break;
+          case 3:
+            expectWait(body, [childCWork]);
+            yield finish;
+            break;
+          default:
+            throw Error('Unexpected resumed model request');
+        }
+      },
+    });
+    await run('Continue observations after restart');
+    expect(resumedStage).toBe(4);
+  } finally {
+    childAGate.resolve();
+    await runtime.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 25000);
 
 test('exact work references keep old completion separate and cannot interrupt a new active turn', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-exact-agent-work-')));
@@ -37,7 +241,6 @@ test('exact work references keep old completion separate and cannot interrupt a 
     agentId = '',
     oldWork = '',
     newWork = '',
-    cursor = '',
     interrupted = false;
   let active!: () => void;
   const childActive = new Promise<void>((resolve) => {
@@ -53,7 +256,6 @@ test('exact work references keep old completion separate and cannot interrupt a 
       let body: {
         agent_id: string;
         work_ref: string;
-        next_cursor: string;
         items: { work_ref: string; last_result_work_ref: string }[];
         accepted: boolean;
         reason: string;
@@ -77,7 +279,6 @@ test('exact work references keep old completion separate and cannot interrupt a 
           events = call('wait_agent_events', { work_refs: [oldWork], wait_ms: 10000 });
           break;
         case 2:
-          cursor = body.next_cursor;
           events = call('follow_up_agent', {
             agent_id: agentId,
             content: 'Wait until interrupted',
@@ -109,7 +310,7 @@ test('exact work references keep old completion separate and cannot interrupt a 
           expect(body).toMatchObject({ accepted: false, error: { code: 'target_changed' } });
           expect(interrupted).toBe(false);
           snapshotStarted = Date.now();
-          events = call('wait_agent_events', { work_refs: [oldWork], cursor, wait_ms: 30000 });
+          events = call('wait_agent_events', { work_refs: [oldWork], wait_ms: 30000 });
           break;
         case 7:
           expect(Date.now() - snapshotStarted).toBeLessThan(1500);
@@ -119,7 +320,7 @@ test('exact work references keep old completion separate and cannot interrupt a 
           break;
         case 8:
           expect(body.accepted).toBe(true);
-          events = call('wait_agent_events', { work_refs: [newWork], cursor, wait_ms: 10000 });
+          events = call('wait_agent_events', { work_refs: [newWork], wait_ms: 10000 });
           break;
         default:
           expect(interrupted).toBe(true);
@@ -230,7 +431,7 @@ test('six public tools reuse one child Session, preserve responsibility and obse
   let stage = 0,
     childCalls = 0,
     childId = '',
-    after = '0';
+    firstWaitSeq = '0';
   const expectedNames = [
     'follow_up_agent',
     'interrupt_agent',
@@ -274,7 +475,9 @@ test('six public tools reuse one child Session, preserve responsibility and obse
           expect(body.events).toContainEqual(
             expect.objectContaining({ kind: 'completed', agent_id: childId }),
           );
-          after = body.next_cursor;
+          expect(body).not.toHaveProperty('next_cursor');
+          firstWaitSeq = body.events.at(-1).seq;
+          expect(firstWaitSeq).toMatch(/^[1-9][0-9]*$/);
           events = call('list_agents', { limit: 1 });
           break;
         case 3:
@@ -297,10 +500,13 @@ test('six public tools reuse one child Session, preserve responsibility and obse
             mode: 'new_turn',
             state: 'queued',
           });
-          events = call('wait_agent_events', { cursor: after, wait_ms: 10000 });
+          events = call('wait_agent_events', { wait_ms: 10000 });
           break;
         case 5:
           expect(body.reason).toBe('events');
+          expect(
+            body.events.every((event: { seq: string }) => BigInt(event.seq) > BigInt(firstWaitSeq)),
+          ).toBe(true);
           events = call('list_agents', { agent_ids: [childId], limit: 1 });
           break;
         case 6: {
@@ -399,6 +605,22 @@ test('six public tools reuse one child Session, preserve responsibility and obse
     expect((await store.getRun((result.receipt as { runId: string }).runId))?.status).toBe(
       'completed',
     );
+    const mailbox = {
+      expectedStoreId: storeId,
+      sessionId: 'root',
+      subjectId: 'owner',
+      extensionId: 'builtin.task',
+    };
+    expect(
+      await store
+        .listAgentEvents({ ...mailbox, afterSeq: '9223372036854775807' })
+        .catch((error: unknown) => error),
+    ).toMatchObject({ code: 'invalid_cursor' });
+    expect(
+      await store
+        .listAgentEvents({ ...mailbox, subjectId: 'foreign', afterSeq: firstWaitSeq })
+        .catch((error: unknown) => error),
+    ).toMatchObject({ code: 'permission_denied' });
     expect(childCalls).toBe(2);
     const directoryTools = (await store.listExecutions('root')).filter(
       (execution) => execution.definitionId === 'task.list',
@@ -1055,7 +1277,7 @@ test('public schema is exactly six closed prompt tools, with optional registered
   ).not.toHaveProperty('task_ids');
 });
 
-test('mailbox wait wakes for a durable raw human input before business application and preserves its event cursor', async () => {
+test('mailbox wait wakes for a durable raw human input before business application', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-collaboration-human-wait-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -1171,7 +1393,6 @@ test('mailbox wait wakes for a durable raw human input before business applicati
     expect(JSON.parse((settled.result as { content: string }).content)).toEqual({
       reason: 'input',
       events: [],
-      next_cursor: expect.any(String),
     });
     expect((await store.getCommand('public-input'))!.receipt).toMatchObject({
       outcome: 'human_input_pending',
@@ -1374,8 +1595,7 @@ test('stable idle child mail queues without activation and is adopted once by th
   const followUp = 'Continue the same assignment using the queued instruction';
   const childRequests: import('@kite-ai/ai').ModelRequest[] = [];
   let stage = 0,
-    agentId = '',
-    cursor = '0';
+    agentId = '';
   let firstCarrier: Awaited<ReturnType<typeof store.getExecution>> = null;
   let firstRunId: string | null = null;
   let queuedMailId = '';
@@ -1409,7 +1629,6 @@ test('stable idle child mail queues without activation and is adopted once by th
                   event.agent_id === agentId && event.kind === 'completed',
               ),
           ).toBe(true);
-          cursor = body.next_cursor;
           events = call('list_agents', { agent_ids: [agentId], limit: 1 });
           break;
         case 3: {
@@ -1465,7 +1684,7 @@ test('stable idle child mail queues without activation and is adopted once by th
         }
         case 5:
           expect(body).toMatchObject({ accepted: true, agent_id: agentId, mode: 'new_turn' });
-          events = call('wait_agent_events', { cursor: cursor, wait_ms: 10000 });
+          events = call('wait_agent_events', { work_refs: [body.work_ref], wait_ms: 10000 });
           break;
         case 6:
           expect(body.events).toContainEqual(

@@ -1011,17 +1011,29 @@ export async function runGitWorktreeLive(
       for (const candidate of candidates) {
         const body = String(object(candidate.input).content);
         if (candidate.definitionId === 'task.message') {
-          const mail = deliveredAgentMessages(readModel!).find(
-            (value) =>
-              value.sourceSessionId === 's' &&
-              value.sourceExecutionId === candidate.id &&
-              value.content === body,
-          );
-          if (mail) {
-            forwarded = candidate;
-            forwardDelivery = { kind: 'message', mail };
-            break;
+          for (const mail of deliveredAgentMessages(readModel!)) {
+            if (object(mail.sender).relation !== 'parent' || mail.content !== body) continue;
+            const ids = mail.sourceIds;
+            if (!Array.isArray(ids) || ids.length !== 1 || typeof ids[0] !== 'string') continue;
+            const source = await store.getAgentMessage({
+              expectedStoreId,
+              sessionId: consumerId,
+              subjectId: 'owner',
+              messageId: ids[0],
+            });
+            if (
+              source?.kind === 'message' &&
+              source.state === 'received' &&
+              source.sourceSessionId === 's' &&
+              source.sourceExecutionId === candidate.id &&
+              source.targetSessionId === consumerId
+            ) {
+              forwarded = candidate;
+              forwardDelivery = { kind: 'message', mail };
+              break;
+            }
           }
+          if (forwarded) break;
         } else {
           const control = controls.find(
             (command) =>

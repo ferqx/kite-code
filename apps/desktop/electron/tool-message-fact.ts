@@ -6,6 +6,7 @@ import { desktopShell, desktopShellFailure } from '../src/native-shell-receipt';
 import {
   type NativeShellInput,
   type NativeToolMessageFact,
+  nativeAgentWaitErrors,
   nativeShellCommandChunkBytes,
 } from '../src/tool-messages-bridge';
 import { nativeToolRequestTarget } from '../src/tool-request-target';
@@ -468,21 +469,42 @@ export function nativeToolMessageFact({
     isDeepStrictEqual(details, { accepted: true, delivery: 'queued' }) &&
     Object.keys(result).every((key) => ['outcome', 'content', 'details'].includes(key)) &&
     result.content === '{"accepted":true,"delivery":"queued"}';
-  const reason = details?.reason;
-  const agentWait: NativeToolMessageFact['agentWait'] =
+  const registeredAgentWait =
     execution.definitionId === 'task.events' &&
     execution.definitionVersion === '1' &&
-    execution.status === 'succeeded' &&
     run?.id === execution.runId &&
     run.sessionId === execution.sessionId &&
     run.originStoreId === execution.originStoreId &&
     registered.length === 1 &&
-    registered[0]?.extensionId === 'builtin.task' &&
-    (reason === 'events' || reason === 'completed' || reason === 'input' || reason === 'timeout') &&
-    Array.isArray(details?.events) &&
-    details.events.length <= 200
-      ? { reason, events: details.events.length }
-      : undefined;
+    registered[0]?.extensionId === 'builtin.task';
+  let agentWait: NativeToolMessageFact['agentWait'];
+  if (registeredAgentWait && execution.status === 'succeeded') {
+    const reason = details?.reason;
+    if (
+      (reason === 'events' ||
+        reason === 'completed' ||
+        reason === 'input' ||
+        reason === 'timeout') &&
+      Array.isArray(details?.events) &&
+      details.events.length <= 200
+    )
+      agentWait = {
+        reason,
+        events: details.events.length,
+        ...(details.history_gap === true ? { historyGap: true } : {}),
+      };
+  } else if (registeredAgentWait && execution.status === 'failed') {
+    const error = object(details?.error);
+    const code = nativeAgentWaitErrors.find((candidate) => candidate === error?.code);
+    if (code && typeof error?.message === 'string' && typeof error.next_action === 'string') {
+      try {
+        if (isDeepStrictEqual(object(JSON.parse(result.content))?.error, error))
+          agentWait = { reason: 'failed', code };
+      } catch {
+        // Keep the original result when the receipt does not have the recognized envelope.
+      }
+    }
+  }
   let shell = shellInput(execution, call, commandOffset);
   let shellResultVerified = false;
   let shellOutputReceipt: NativeToolMessageFact['shellOutputReceipt'];

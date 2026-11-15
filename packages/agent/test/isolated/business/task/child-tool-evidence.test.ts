@@ -185,7 +185,6 @@ test('child result Sources attribute actual read windows and isolate a same-Sess
   ]);
   const parentRequests: ModelRequest[] = [];
   let childId = '',
-    cursor = '0',
     firstRun = '',
     firstEvidenceExecution = '',
     firstSource = '';
@@ -210,7 +209,6 @@ test('child result Sources attribute actual read windows and isolate a same-Sess
           break;
         case 2: {
           expect(body.reason).toBe('events');
-          cursor = body.next_cursor;
           const sources = await sourceResults(request, store);
           expect(sources).toHaveLength(1);
           const { message, payload } = sources[0]!;
@@ -290,7 +288,7 @@ test('child result Sources attribute actual read windows and isolate a same-Sess
           break;
         case 5:
           expect(body).toMatchObject({ agent_id: childId, accepted: true, mode: 'new_turn' });
-          events = call('wait_agent_events', { ...(cursor ? { cursor } : {}), wait_ms: 10000 });
+          events = call('wait_agent_events', { wait_ms: 10000 });
           break;
         case 6: {
           expect(body.reason).toBe('events');

@@ -300,6 +300,8 @@ Trace 设置的最终生产 Native 经真实 Main／Client／候选 Service 完�
 
 Git 工作树错误沿[Main 工具事实](electron/tool-message-fact.ts)核原内容、原 Execution 和 Run 的准确 `builtin.shell/git.worktree@1` 注册，再向[Native 工具消息](src/native-tool-messages.tsx)投影有限 `worktreeFailure`。详情用中文区分进程启动、权限拒绝、Git 命令及核验失败，保留原消息正文和部分／未知效果、清理未确认说明。旧 generic 不从 stderr 或 EPERM 猜审批；可选 Run 读取失败回退原文，不阻塞消息。私有 IPC 不传完整 Run 配置，不增加重试入口、公开调试开关或工具版本。
 
+「等待 Agent 事件」从准确 `builtin.task/task.events@1` 回执取得事件条数和保留期缺口。Runtime 自动从可用位置续读，详情显示简短中文状态，内部位置保存在原执行回执中。[Native 投影回归](test/native-tool-messages.test.ts)
+
 2026-11-06，`8364d9e40`加错误分类差量／Windows x64／Bun1.4.4／Electron44.3.0：八 workspace 构建后重启普通 `desktop:dev`，沿真实窗口观察选择来源会话→加载→完整历史→展开已结束轮次→工具组→权限拒绝详情。原 `permission_denied` 显示“策略未批准，未记录用户明确拒绝”、未开始与不自动重试说明，原英文原因只保一份；展开后全部可读，无工作树重试按钮，侧栏原创建历史图标保持。没有提交新模型任务或审批动作；旧模型错误结论保留原文，不追溯改写。此窗口验收仅覆盖已有策略拒绝历史，三类错误的完整执行回归归[Windows tests](../../packages/agent/test/isolated/tools/git-worktree/README.md)，不授完整安装或真实模型重试资格。
 
 同轮 [Main 工具事实](test/native-tool-messages.test.ts)35项／1407断言及[实际 Native DOM](test/isolated/native-tool-receipt-render-dom.test.tsx)17项／272断言通过，另核原消息／Run 注册不符回原文、可选读取失败、畸形 JSON 安全回退和权限拒绝不覆盖显式 partial／unknown／completed。[原聚合浏览器 runner](test/native-live-tool-aggregation-browser-runner.fixture.ts)新增隔离 `worktree-errors` 场景，用真实 Main 投影和生产 Native／样式逐层展开7种回执，浅色1280与深色780通过；1151帧及阶段图观察加载、折叠、分组／错误展开、原文接管、普通刷新和会话往返。三类提示、旧记录未分类及 partial／unknown／清理说明均可读，原回执各一份，无重试／扩权按钮；刷新保原详情节点和 scrollTop90，切B无旧错误，回A保展开及阅读位置，页面错误与横向溢出均为0。本机材料在 `.cache/native-live-tool-aggregation-Vrntsc/`；先前 driver 遗漏正常三层展开的失败材料保留于 `QHy3id`、`wKtVy1`，不改产品默认折叠规则。该隔离受控回执验收不代替完整 Electron／模型／发行资格；类型、47份本任务代码 Biome及文档／边界检查通过。
@@ -1632,6 +1634,10 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 [环境 hook](src/native-environment.tsx) 复用原完整目录和有界展示缓存，不增加网络读取；缓存成本包含子 Agent 展示事实，同 scope 校准先保留最新已读 display，即使完整展示超过缓存预算也不闪回旧行。普通刷新保留名称、原操作和详情目标；当前任务生命周期仍用于原环境卡、停止门禁和子详情，不投影为父历史工具行状态。图标按原 Store／child Session 稳定身份与审批卡共用。
 
+[等待事件回执](electron/tool-message-fact.ts)由 Main 核对原工具、版本、注册来源和消息正文。已识别的内置等待失败与原成功摘要走同一展示事实通道；展开时用一条中文原因替代通用失败占位和原始 JSON，工具行仍按该次调用标记失败。原持久回执及给模型的结构化错误继续保留，无法核实或未识别的回执走原结果详情。回归覆盖同名非内置工具和结构化错误与原正文不一致的情况。[Main 投影测试](test/native-tool-messages.test.ts)
+
+2026-11-15 Windows x64，Chrome 隔离夹具使用正式工具行、会话布局和样式，以相同失败正文对照原详情与中文摘要。810px 窗宽下，展开的工具行从约 161px 降至 50px。运行到失败的 20 个采样帧均保留单标题，未出现 JSON。关闭并重新展开后保留原行，后续等待单独显示收到的事件数，输入草稿保持。此验证使用受控回执，未覆盖 Electron 窗口或外部模型。
+
 [关联回归](test/native-agent-activity.test.ts)核生命周期变化后静态投影不变、同 Agent 多任务和活动指导、准确来源与恢复历史；[目录到消息 DOM 回归](test/isolated/native-agent-activity-dom.test.tsx)核真实环境 hook、精确投影、静态原操作和 DOM／选择区保持、超缓存预算刷新与准确 child reader 请求。此范围不代替完整 NativeDesktop、真实模型或安装发行验收。下述较早窗口记录仍保留其当时的验证范围，其中父消息动态跟踪子任务状态的行为已按用户明确要求改为静态历史操作。
 
 2026-10-23，macOS arm64／Bun 1.4.2，`8a8458800` 加静态操作修复：共享消息、Native 投影／目录 DOM、原工具聚合、侧栏标签和导航六整文件 52 项／2581 断言通过；八 workspace typecheck、同源 API、架构边界、测试归属、Biome 和文档检查通过。普通关闭诊断的真实模型窗口 `dist/acceptance/static-agent-tool-history-live-window-20261023-5a16bc24.json` 通过，`deepseek-v4-flash`／chat-completions／medium／4096，15 次 HTTP 200、36 张阶段截图及276帧。既有 `parent-compaction-only` profile 覆盖原子任务创建、完成、父轮接收、两引导与父压缩、完成和冷开；不声称该 profile 触发子压缩。逐帧／DOM 监视从原创建行就绪持续至子完成及父压缩后继，原节点、静态“创建子 Agent”和32px高度保持，无生命周期运行／失败状态；冷开仍保原创建操作且零新增请求或业务记录。`05-parent-running.png`、`07-active-received-in-process.png`、`22-cold-original-agent-creation.png` 分别保存执行中、子完成接纳后及冷开事实。此范围不代替实际取消窗口，具体取消沿原源码外协作场景独立验证。
@@ -1645,6 +1651,10 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 [目录适配](src/native-presentation.ts)在没有全局 activity 而消费当前会话观察时，将 `viewLoading` 与实际读取失败区分：同 Store／同 Session 的正常校准保留原运行展示；目录不可用或 `permissionUnavailable` 且不在校准中仍显示上次确认状态，foreign Store 不消费该观察。仅保留展示，不改变操作准入。[环境适配](src/native-environment.tsx)同样把校准 `busy` 与真实 `stale` 分开，普通刷新沿原展示缓存保持文字、行数和停止按钮，按钮在新 facts 完成前禁用；首次读取仅标记忙碌，真实错误仍明确提示。Main 尚未确认目标选择时，环境 hook 的 `paused` 立即停止旧范围读取并隔离 child／stop，保留当前卡片的文字与按钮为 busy；这类已知切换等待不转换成真实 stale 错误，切换前已存在的真实错误仍保留。旧 observation 不恢复写资格，已受理停止等待最新完整目录及原 Main 准入，scope 替换和未知零重放保持。
 
 2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 加本轮工作区改动：[目录](test/native-directory.test.tsx)新增同会话校准保运行标记及真实失败／foreign Store 反例，[停止竞态](test/isolated/native-environment-stop-dom.test.tsx)新增普通刷新保节点、空列表不插加载段、禁用零写及真实失败。原实现分别复现运行标记被撤下、环境卡加“上次状态”并移除停止按钮，以及空列表插加载段；修复后相关整文件通过。Chrome 155 隔离夹具使用实际目录适配、共享 SessionPage／Composer 与环境 hook，亮暗主题、1240／800／500px、空／非空目录下原环境卡高度变化为4／48px，修复后文字、按钮数、可见侧栏运行标记和所有受测几何／滚动保持；每次选择一次、后台读取继续、零停止写入。500px 原侧栏未挂载，不将该场景计作侧栏视觉证据。完整安装窗口、其他平台及全量默认测试未运行；原嵌套 `@keyframes` 编译提示保留。
+
+[环境适配](src/native-environment.tsx)保留上次完整目录中的停止按钮和空分组文案。执行权待核实、目录正在更新或暂时失效时，原按钮保持禁用；停止仍要求原范围的新鲜完整观察与 Main 的准入复核。重新取得资格后复用原按钮，目录确认终态后撤除。[停止竞态回归](test/isolated/native-environment-stop-dom.test.tsx)核同一运行中子 Agent 多次失联恢复间的原行、详情和停止节点、禁用零写及随后完成。
+
+2026-11-15 Windows x64，基于 `65ce50cec` 对照本次修复。Chrome 隔离夹具使用正式 SessionPage、样式与环境 hook，在打开子详情后模拟三轮执行权待核实、目录失联、挂起重读和恢复，最后发布任务完成。修复前停止按钮消失、运行状态右移 58 CSS px，失联时 Shell「空闲」改为「状态未知」。修复后 126 个渲染帧采样中，终态发布前卡片、行、按钮、参考区及草稿几何稳定，父阅读滚动位置保持，子详情保留原节点。阶段截图核对了文案和最终「已完成」。该范围使用受控观察数据和 Chrome 渲染，未覆盖真实模型或 Electron 窗口合成。
 
 正式 [页面](src/native.tsx)将现有后台目录接到原 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx)环境卡和 SessionPage 的 `environmentInformation` slot，保留原 300px 卡、宽窄窗口停靠／浮层与开关行为。[适配器](src/native-environment.tsx)仅将来源为 `shell.launch@1` 且父工具身份匹配的 `shell.command` 展示为后台 Shell，子 Agent 仍按准确 child Session 展示，名称取公开 child title；自动命名扩展的 `agent/session-title` 按公开 `definitionId` 从环境卡的行与 child 入口映射中排除，不按可变名称判断，同名普通委派任务仍显示。原后台目录、执行历史、取消和 unknown 事实保留；回归见[环境展示测试](test/native-background-panel.test.tsx)。Shell 沿原 currentOnly 契约只列运行／停止中，按原准入提供准确停止。环境卡的子列表保留全部记录及 queued／starting／unknown／restored 状态和只读详情入口；共享展示层接收原 `stoppingExecutionId/onStop`，仅对当前新鲜完整目录中已核实的准确可停止 carrier 提供操作。旧状态、unknown、恢复历史或缺少资格时禁用停止，不凭稳定 child Session 转向后来一轮；原 task／Run 范围及 Main 的准入前后复核保持。不把终态或受理回执当作进程清理证明。
 

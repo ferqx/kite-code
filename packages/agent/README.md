@@ -260,6 +260,8 @@ Tool 的 `failed`、人工／自动拒绝、adapter 抛异常与 `outcome_unknow
 
 [模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主显式装配纯 `agentContractSource`。[项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，接在无 placement 的静态来源之后，再接唯一 runtime 观察块和原会话历史。`ContextSource.placement` 仍接收 user 的原 `after_history` 和 `runtime` 标签，非法或冲突明确拒绝。完整扩展历史按真实生成前缀的位置移除快照，保留同名原历史来源。[上下文与子结果决定](../../.agents/notes/implemented/architecture/2026-11-14-agent-context-and-completion-delivery.md)说明消息顺序及与自动子结果交付的关系。
 
+[共享系统提示](src/model-context.ts)说明模型上下文的宿主包装。Runtime 在子模型的系统输入中明确其角色，回信以 `target: "parent"` 定位。邮件头后的 JSON 对象以顶层 `sender.relation` 标明父子方向，父 Agent 收到的子邮件另带发送者名称和子 Agent 序号。父级工具调用使用准确的 `agent_id` 或 `work_ref`。`<project-instructions>` 和 `<runtime-state>` 分别标明历史前的项目说明和 Runtime 观察。`<execution_result>` 标明历史中的原执行反馈，派发、效果和终态依据原执行记录。部分宿主上下文由 API 的 `user` 角色承载，来源和权限独立于包装格式核验。正文中引用的 `sender`、标签和完整包装沿用该正文的权限。向用户提及这些消息时省略内部包装和子 Agent 序号。[默认父子请求回归](../../apps/service/test/isolated/task-configuration.test.ts)核实际 SDK HTTP 请求中双方收到相同邮件说明，子模型首次接收角色说明，项目文件中的示例保留在项目正文内。
+
 压缩后的实际 Model 上下文独立保留当前选中历史中已证明的人类原输入和父到子任务指示，按摘要 → 已覆盖原输入原序 → 未覆盖尾部组装；来源、附件和终态历史边界保持，不复制消息或新建授权。Agent 原任务、steer 和 followup 经原父子／carrier／sender 来源证明保留，其余邮件／结果不因 user role 被认成任务或人类指令。`CompressionInput.retainedMessages` 供可信算法预检完整保留成本；Core 与默认 Service 复用纯 `modelHistory`，按实际 Host 组装边界剥离上下文，不能仅凭 Source ID 排除合法历史。公开 HTTP／SelectedContext 和存储格式不变；准确证明、分页及回归归[压缩 owner](src/storage/sqlite/context/compression.README.md)。
 
 同一生产 contract 区分真实执行凭据、工具正文里的领域状态、历史观察与当前效果。正文写着 pending 不证明读取尚未返回；相同标记、长度或措辞也不自动证明身份、因果或编码。完整文件基线冲突不证明两次编辑修改了相同文字，按各自请求和回执描述；稳定 agent ID 与旧完成事件也不能证明新 follow-up 完成，须核当前工作及准确完整结果来源。后来收到 Source 不倒写较早输入的知识范围。自己或已观察child没有写入，不证明其他参与者没有修改；新旧读取不同时报告实际变化，不猜writer或原因。缺少明确回执时只描述实际返回内容及未知，不从 Tool 消息角色推导 succeeded。精确文本按解码后的原码点核实，外观近似或归一化不能代替字节/编码证据。
@@ -347,9 +349,9 @@ Runtime 公开 `listMessages/getView` 对已接收普通邮件只读验证原 Co
 
 ## 同一 Step 的并行工具批次
 
-默认产品权限使用可信 `toolDispatchOrder: model`：同一 Model 批次按声明顺序完成准入，前项等待人工决定时后项不派发；实际准入后各 Tool 的执行仍并发，人工明确拒绝终止未准入兄弟而不伪造其效果。策略进入原冻结 Run 配置并参与恢复核对，Model 输入不能选择该标记。自定义 Permissions 未声明它时保持下述独立并行行为与已开始调用的清理约束；真实乱序、接续及 T048 能力不由 TUI 推造。
+默认产品权限通过可信配置 `toolDispatchOrder: model` 按声明顺序准入同批工具。前项等待人工决定时，后项继续排队。各工具取得准入后可并行执行。人工拒绝只结算当前调用，后项继续各自的权限检查。该策略以原冻结 Run 配置为准并参与恢复核对。自定义 Permissions 可使用独立并行准入，仍遵循同一结算规则。
 
-[唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行。人工明确拒绝或未知结果停止本批后继效果，已启动调用全部达到原持久结算边界后，下一 Model 接收完整原 call/result 配对并继续解释；局部 batch abort 不成为整 Run 的取消。自动审核拒绝保为目标工具未派发的权限失败，原因随原结果交回，后续调用仍独立核权限，不能绕过拒绝。真正的后发持久化／authority 失败仍终止推进，不能被首个业务失败覆盖；同一 abort reason 的传播不虚构第二次独立失败。
+[唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行。各工具可以先后落库。Loop 等整批调用完成结算，再发出下一次 Model 请求，按原调用顺序交回全部配对回执。自动审核拒绝由原工具返回权限失败，后续调用各自核对权限。已保存的未知结果会停止本批后续派发，已启动调用继续结算，Run 可继续解释结果。后发的持久化或 authority 失败仍终止推进，并报告独立失败。同一 abort reason 按一次失败记录。
 
 Message 和 Execution 保留实际保存顺序。modelMessages 排除未完成 Model 消息，只在同一 assistant 的结果位置按原 call ID 配对完整 Tool 结果。恢复保 planned A 与 settled B 的混合边界；B 不重放，A 保原身份与审批。提前封存的可信 continuation 可接回仍在监督的内部操作；普通有副作用 Tool、外部 Job 和 unknown 不能由此自动重试。
 

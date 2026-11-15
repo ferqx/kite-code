@@ -340,7 +340,6 @@ test('evidence recovery preserves the complete unknown child evidence instead of
   const requests: ModelRequest[] = [];
   let spawned = false;
   let requestedDetail = false;
-  let cursor: string | undefined;
   let originalId = '';
   const evidence = createExecutionEvidenceExtension({
     async read(request) {
@@ -389,14 +388,11 @@ test('evidence recovery preserves the complete unknown child evidence instead of
           arguments: JSON.stringify({ execution_id: carrier.id }),
         };
       } else {
-        const observed = request.messages.filter((message) => message.role === 'tool').at(-1);
-        if (observed?.toolCallId?.startsWith('wait-'))
-          cursor = JSON.parse(observed.content).next_cursor;
         yield {
           type: 'tool_call',
           id: `wait-${requests.length}`,
           name: 'wait_agent_events',
-          arguments: JSON.stringify({ ...(cursor ? { cursor } : {}), wait_ms: 10000 }),
+          arguments: JSON.stringify({ wait_ms: 10000 }),
         };
       }
       yield { ...finish, reason: 'tool_calls' };

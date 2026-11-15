@@ -3,7 +3,74 @@ import type { ToolScope } from '../../../src/execution';
 import type { ToolContext } from '../../../src/extensions';
 import { ExtensionHost, type ExtensionHostOptions } from '../../../src/extensions/host';
 import { createTaskExtension } from '../../../src/extensions/task';
+import { modelCursor } from '../../../src/model-cursor';
 import type { Store } from '../../../src/storage/port';
+import { AgentError } from '../../../src/storage/types';
+
+test('Agent waits keep managed positions private and accept explicit positions from old calls', async () => {
+  const extension = createTaskExtension({
+    roles: [{ id: 'worker', configurationId: 'worker', description: 'Worker' }],
+  });
+  const definition = extension.tools!.find((tool) => tool.id === 'task.events')!;
+  const reads: (string | undefined)[] = [];
+  const context = {
+    sessionId: 'root',
+    operations: {
+      async waitAgentEvents(options: { afterSeq?: string }) {
+        reads.push(options.afterSeq);
+        if (options.afterSeq === '0') throw new AgentError('cursor_expired', '41');
+        return {
+          reason: 'timeout',
+          nextSeq: options.afterSeq === '9007199254740993' ? options.afterSeq : '42',
+          events: [],
+          ...(options.afterSeq === undefined
+            ? { observation: { scope: '[]', nextSeq: '42' }, historyGap: true }
+            : {}),
+        };
+      },
+    },
+  } as unknown as ToolContext;
+  const initial = await definition.execute({}, context);
+  expect(JSON.parse(initial.content)).toEqual({ reason: 'timeout', events: [], history_gap: true });
+  expect(initial.details).toMatchObject({ agentEventObservation: { scope: '[]', nextSeq: '42' } });
+  const legacy = modelCursor({ kind: 'agent_events', sessionId: 'root' }, '42');
+  for (const cursor of [
+    legacy.slice(0, -1),
+    '042',
+    '-1',
+    modelCursor({ kind: 'agent_events', sessionId: 'other' }, '42'),
+  ]) {
+    const rejected = await definition.execute({ cursor }, context);
+    expect(rejected.outcome).toBe('failed');
+    expect(JSON.parse(rejected.content).error).toMatchObject({
+      code: 'invalid_cursor',
+      message: expect.stringContaining('Reuse the last valid next_cursor'),
+      next_action: 'restart_observation',
+    });
+  }
+  expect(reads).toEqual([undefined]);
+  const expired = await definition.execute({ cursor: '0' }, context);
+  expect(expired.outcome).toBe('failed');
+  const recovery = JSON.parse(expired.content);
+  expect(recovery).toMatchObject({
+    resume_after_seq: '41',
+    error: {
+      code: 'cursor_expired',
+      message: expect.stringContaining('resume_after_seq as cursor'),
+    },
+  });
+  for (const cursor of ['42', legacy, recovery.resume_after_seq]) {
+    const resumed = await definition.execute({ cursor }, context);
+    expect(resumed.outcome).toBe('succeeded');
+    expect(JSON.parse(resumed.content).next_cursor).toBe('42');
+  }
+  expect(reads).toEqual([undefined, '0', '42', '42', '41']);
+  const large = '9007199254740993';
+  expect(
+    JSON.parse((await definition.execute({ cursor: large }, context)).content).next_cursor,
+  ).toBe(large);
+  expect(reads.at(-1)).toBe(large);
+});
 
 for (const active of [true, false])
   test(`mailbox wait reads beyond 100 idle collaborators when the last child is ${active ? 'running' : 'idle'}`, async () => {

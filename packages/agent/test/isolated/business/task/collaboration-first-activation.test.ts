@@ -40,6 +40,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
 type Scenario = 'same-work' | 'cross-work' | 'frozen-mail' | 'twice-cancelled';
 type ToolBody = {
   agent_id?: string;
+  work_ref?: string;
   reason?: string;
   events?: unknown[];
   items?: Record<string, unknown>[];
@@ -67,7 +68,7 @@ async function exerciseFirstActivation(scenario: Scenario) {
     stage = 0,
     earlyMailId = '',
     laterMailId = '',
-    completionCursor = '0',
+    completionWorkRef = '',
     lostResponse = false;
   let originalCarrier: Awaited<ReturnType<typeof store.getExecution>> = null;
   let intermediateCarrier: Awaited<ReturnType<typeof store.getExecution>> = null;
@@ -145,8 +146,6 @@ async function exerciseFirstActivation(scenario: Scenario) {
       expect((await store.getView(targetId)).runs).toHaveLength(0);
       expect(requests).toHaveLength(0);
       expect(await carriers()).toHaveLength(1);
-      completionCursor = (await store.listAgentEvents({ ...identity, extensionId: 'builtin.task' }))
-        .highWaterSeq;
       if (scenario === 'same-work' || scenario === 'twice-cancelled')
         return call('follow_up_agent', {
           agent_id: targetId,
@@ -211,7 +210,7 @@ async function exerciseFirstActivation(scenario: Scenario) {
   const waitForCompletion = async () => {
     release();
     await until(async () => ((await carriers()).at(-1)?.status === 'succeeded' ? true : null));
-    return call('wait_agent_events', { after_seq: completionCursor, wait_ms: 0 });
+    return call('wait_agent_events', { work_refs: [completionWorkRef], wait_ms: 0 });
   };
   steps.push(async (body) => {
     expect(body).toMatchObject({
@@ -220,6 +219,8 @@ async function exerciseFirstActivation(scenario: Scenario) {
       mode: 'new_turn',
       state: 'queued',
     });
+    expect(typeof body.work_ref).toBe('string');
+    completionWorkRef = body.work_ref!;
     expect(followUpResult?.receipt.ref.childSessionId).toBe(targetId);
     expect(await carriers()).toHaveLength(scenario === 'twice-cancelled' ? 3 : 2);
     if (scenario !== 'cross-work') expect((await store.getView(targetId)).runs).toHaveLength(0);

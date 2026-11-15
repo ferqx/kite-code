@@ -1,10 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import type { OperationRef } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -18,7 +18,7 @@ function gate() {
 }
 type Kind = 'command' | 'run' | 'execution' | 'session';
 async function fixture(mode: 'model' | 'tool') {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cancel-writer-')));
+  const root = temporaryDirectory('kite-cancel-writer-');
   const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
   const peer = new Database(join(root, 'test', 'core.db'));
   let held = false;
@@ -109,6 +109,7 @@ async function fixture(mode: 'model' | 'tool') {
   let executionId = '';
   let commandId = '';
   return {
+    root,
     store,
     peer,
     runtime,
@@ -209,6 +210,81 @@ async function fixture(mode: 'model' | 'tool') {
     },
   };
 }
+
+test('one Stop ID cannot abort two Runs across Stores while SQLite is blocked', async () => {
+  const f = await fixture('model');
+  const otherStore = await openSqliteStore({ dataRoot: f.root, profile: 'test' });
+  const started = Promise.withResolvers<AbortSignal>();
+  const release = gate();
+  const other = createRuntime({
+    store: otherStore,
+    modelId: 'fixed',
+    permissions: { authorize: async () => ({ allowed: true, revision: '1' }) },
+    model: {
+      async *stream(_request, { signal }) {
+        started.resolve(signal);
+        await release.promise;
+        signal.throwIfAborted();
+        yield { type: 'text_delta', text: 'Other Run completed' };
+        yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    },
+  });
+  const identity = { expectedStoreId: f.expectedStoreId, sessionId: 'other', subjectId: 'owner' };
+  let admission: Promise<PromiseSettledResult<unknown>[]> | undefined;
+  let first: ReturnType<typeof f.cancel> | undefined;
+  try {
+    await f.start('first-run');
+    await other.submitCommand({
+      ...identity,
+      commandId: 'other-run',
+      request: { kind: 'run.start', content: 'Keep working' },
+    });
+    const signal = await started.promise;
+    const original = (await otherStore.getCommand('other-run'))!;
+    const runId = (original.receipt as { runId: string }).runId;
+    const session = (await otherStore.getSession('other'))!;
+    f.lock();
+    first = f.cancel('session', 'shared-stop');
+    void first.catch(() => {});
+    expect(await f.waitAbort(1000)).toBe(true);
+    admission = Promise.allSettled([
+      other.cancelRun({ ...identity, runId, commandId: 'shared-stop' }),
+      other.renameSession({
+        ...identity,
+        commandId: 'shared-stop',
+        ifRevision: session.controlRevision,
+        title: 'Conflicting rename',
+      }),
+      f.cancel('session', 'shared-stop'),
+    ]);
+    expect(await otherStore.getCommand('shared-stop')).toBeNull();
+    expect(signal.aborted).toBe(false);
+    f.unlock();
+    const saved = await first;
+    expect(saved).toMatchObject({ kind: 'session.cancel', status: 'applied', sessionId: 's' });
+    expect(await admission).toEqual([
+      { status: 'rejected', reason: expect.objectContaining({ code: 'command_conflict' }) },
+      { status: 'rejected', reason: expect.objectContaining({ code: 'command_conflict' }) },
+      { status: 'fulfilled', value: saved },
+    ]);
+    await f.runtime.waitForCommand('first-run', { timeoutMs: 5000 });
+    expect(await f.store.getRun(f.runId)).toMatchObject({ status: 'cancelled' });
+    expect(signal.aborted).toBe(false);
+    expect(await otherStore.getCommand('other-run')).toMatchObject({ cancelRequestedAt: null });
+    expect(await otherStore.getSession('other')).toMatchObject({ title: 'other' });
+    release.release();
+    await other.waitForCommand('other-run', { timeoutMs: 5000 });
+    expect(await otherStore.getRun(runId)).toMatchObject({ status: 'completed' });
+  } finally {
+    f.unlock();
+    release.release();
+    await first?.catch(() => {});
+    await admission;
+    await other.close();
+    await f.close();
+  }
+}, 15_000);
 
 for (const kind of ['command', 'run', 'execution', 'session'] as const) {
   for (const mode of ['model', 'tool'] as const) {
@@ -350,7 +426,7 @@ test('replaying a committed session.cancel command while a writer is held cannot
 
 for (const readFault of [false, true]) {
   test(`background subtree cancellation ${readFault ? 'skips one failed ancestry observation but still commits durable cancellation' : 'stops its activated child before writer ACK'} without stopping a same-subject foreign root`, async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cancel-child-writer-')));
+    const root = temporaryDirectory('kite-cancel-child-writer-');
     const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
     const peer = new Database(join(root, 'test', 'core.db'));
     const signals = new Map<string, AbortSignal>();
@@ -519,10 +595,11 @@ for (const readFault of [false, true]) {
           }
           return getSession(id);
         };
-      store.cancelWork = async (input) => {
-        if (input.commandId === 'cancel-subtree') cancelWrites++;
-        return cancelWork(input);
-      };
+      store.cancelWork = (input, beforeWrite) =>
+        cancelWork(input, async () => {
+          await beforeWrite?.();
+          if (input.commandId === 'cancel-subtree') cancelWrites++;
+        });
       let settled = false;
       cancellation = runtime
         .cancelSession({

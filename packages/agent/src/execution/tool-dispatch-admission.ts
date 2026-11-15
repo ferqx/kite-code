@@ -58,11 +58,7 @@ export function createToolDispatchBatch(
           dispatched === false &&
           result?.outcome === 'cancelled' &&
           ['superseded_by_user_input', 'cancelled_before_dispatch'].includes(result.content);
-        if (
-          !error &&
-          !signal.aborted &&
-          (retired || (result?.outcome === 'failed' && result.content !== 'approval_denied'))
-        ) {
+        if (!error && !signal.aborted && (retired || result?.outcome === 'failed')) {
           // A rejection or retired decision can settle before an earlier interactive
           // Tool. It cannot let the next call jump that unresolved admission.
           void predecessor.then(() => {

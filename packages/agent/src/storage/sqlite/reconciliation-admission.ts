@@ -1,8 +1,9 @@
 import { canonicalJson } from '../../json';
 import type { AcceptCommandInput } from '../port';
 import { AgentError } from '../types';
+import { recordStoppedTools } from './cancel-operations';
 import type { SqliteOperations } from './operations';
-import { recoveryToolHistory } from './recovery-history';
+import { readUnstartedModelHistory, validateStoppedModelProofs } from './recovery-history';
 import { withReconciledFrontier } from './session-reconciliation';
 
 /** A newly accepted ordinary task retires only a proven, effect-free old frontier. */
@@ -24,19 +25,11 @@ export function closeReconciledHistory(db: SqliteOperations, input: AcceptComman
     )
   )
     throw new AgentError('session_recovery_required');
-  const histories = withReconciledFrontier(
+  const { histories, stoppedBatches } = withReconciledFrontier(
     db,
     { ...input, expectedOwnerGeneration: admission.expectedOwnerGeneration },
-    () =>
-      db
-        .rows(
-          "SELECT * FROM execution WHERE root_session_id=? AND kind='tool' AND state='planned' AND dispatched=0 ORDER BY id LIMIT 4097",
-          input.sessionId,
-        )
-        .map((tool) => recoveryToolHistory(db, tool))
-        .filter((history) => history !== null),
+    () => readUnstartedModelHistory(db, input),
   );
-  if (histories.length > 4096) throw new AgentError('recovery_too_large');
   const proofs = admission.toolHistoryProofs;
   if (
     !Array.isArray(proofs) ||
@@ -52,6 +45,7 @@ export function closeReconciledHistory(db: SqliteOperations, input: AcceptComman
     )
   )
     throw new AgentError('recovery_tool_history_changed');
+  const stoppedByModel = validateStoppedModelProofs(stoppedBatches, admission.stoppedModelProofs);
   for (const history of histories) {
     const tool = db.row('SELECT * FROM execution WHERE id=?', history.executionId);
     if (tool?.state !== 'cancelled') throw new AgentError('session_recovery_required');
@@ -72,5 +66,7 @@ export function closeReconciledHistory(db: SqliteOperations, input: AcceptComman
       'tool',
     );
   }
+  for (const batch of stoppedByModel.values())
+    recordStoppedTools(db, input.expectedStoreId, batch, String(saved.command_id));
   db.run('DELETE FROM session_reconciliation WHERE root_session_id=?', input.sessionId);
 }

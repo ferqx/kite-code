@@ -2564,13 +2564,12 @@ export class ExtensionHost {
           }
         },
         waitAgentEvents: async (options = {}) => {
-          if (
-            isRootAgentObservationTaskTool({
-              extensionId: extension.id,
-              id: definition.id,
-              version: definition.version,
-            })
-          ) {
+          const builtinWait = isRootAgentObservationTaskTool({
+            extensionId: extension.id,
+            id: definition.id,
+            version: definition.version,
+          });
+          if (builtinWait) {
             const session = await this.options.store.getSession(scope.command.sessionId);
             if (!session || session.parentSessionId !== null)
               throw new AgentError('permission_denied');
@@ -2585,6 +2584,17 @@ export class ExtensionHost {
             throw new AgentError('invalid_wait_timeout');
           const current = await this.options.store.getExecution(executionId);
           const run = current?.runId ? await this.options.store.getRun(current.runId) : null;
+          const observation =
+            builtinWait && options.afterSeq === undefined && run
+              ? {
+                  contextSelectionId: run.contextSelectionId,
+                  targets: options.workRefs?.map((ref) => {
+                    if (!ref.executionId || !ref.childSessionId)
+                      throw new AgentError('invalid_agent_work_reference');
+                    return { executionId: ref.executionId, childSessionId: ref.childSessionId };
+                  }),
+                }
+              : undefined;
           const observationEnd =
             duration === null ||
             duration === undefined ||
@@ -2605,7 +2615,9 @@ export class ExtensionHost {
           const initialHuman = humanScope
             ? await this.options.store.readHumanWorkState(humanScope)
             : null;
-          let afterSeq = options.afterSeq ?? '0';
+          let afterSeq = options.afterSeq;
+          let historyGap = false;
+          let workEnded = false;
           for (;;) {
             scope.signal.throwIfAborted();
             const page = await this.options.store.listAgentEvents({
@@ -2613,29 +2625,38 @@ export class ExtensionHost {
               sessionId: scope.command.sessionId,
               extensionId: extension.id,
               subjectId: scope.command.subjectId,
-              afterSeq,
+              ...(afterSeq === undefined ? {} : { afterSeq }),
+              ...(observation ? { observation } : {}),
             });
             afterSeq = page.nextSeq;
-            const events = options.workRefs
-              ? page.events.filter((event) =>
-                  options.workRefs!.some((ref) =>
-                    event.kind === 'completed'
-                      ? event.workRef?.executionId === ref.executionId
-                      : event.agentId === ref.childSessionId,
-                  ),
-                )
-              : page.events;
-            if (events.length) return { reason: 'events' as const, events, nextSeq: page.nextSeq };
-            if (options.workRefs) {
-              const targets = await Promise.all(options.workRefs.map((ref) => readAgent(ref)));
-              if (
-                targets.every((target) =>
-                  ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
-                    target.execution.status,
-                  ),
-                )
-              )
-                return { reason: 'completed' as const, events: [], nextSeq: page.nextSeq };
+            historyGap ||= page.historyGap === true;
+            const targets = options.workRefs;
+            const events =
+              targets && !observation
+                ? page.events.filter((event) =>
+                    targets.some((ref) =>
+                      event.kind === 'completed'
+                        ? event.workRef?.executionId === ref.executionId
+                        : event.agentId === ref.childSessionId,
+                    ),
+                  )
+                : page.events;
+            const finishObservation = (reason: 'events' | 'completed' | 'input' | 'timeout') => ({
+              reason,
+              events,
+              nextSeq: page.nextSeq,
+              ...(page.observation ? { observation: page.observation } : {}),
+              ...(historyGap ? { historyGap: true as const } : {}),
+            });
+            if (events.length) return finishObservation('events');
+            if (workEnded) return finishObservation('completed');
+            if (targets) {
+              const selected = await Promise.all(targets.map((ref) => readAgent(ref)));
+              workEnded = selected.every((target) =>
+                ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+                  target.execution.status,
+                ),
+              );
             } else if (duration !== 0) {
               let directoryAfter: string | undefined;
               let directoryUpper: string | undefined;
@@ -2654,8 +2675,12 @@ export class ExtensionHost {
                 active = directory.items.some((item) => item.state !== 'idle');
                 directoryAfter = directory.nextAfterSeq ?? undefined;
               } while (!active && directoryAfter !== undefined);
-              if (!active)
-                return { reason: 'completed' as const, events: [], nextSeq: page.nextSeq };
+              workEnded = !active;
+            }
+            if (workEnded) {
+              if (!observation) return finishObservation('completed');
+              // A completion can commit between the event read and the status check.
+              continue;
             }
             if (run) {
               const [inputs, human] = await Promise.all([
@@ -2683,10 +2708,9 @@ export class ExtensionHost {
                   (human.latestInputCommandId !== initialHuman.latestInputCommandId ||
                     human.controlRevision !== initialHuman.controlRevision))
               )
-                return { reason: 'input' as const, events: [], nextSeq: page.nextSeq };
+                return finishObservation('input');
             }
-            if (Date.now() >= deadline)
-              return { reason: 'timeout' as const, events: [], nextSeq: page.nextSeq };
+            if (Date.now() >= deadline) return finishObservation('timeout');
             if (page.events.length) continue;
             const updates = await this.options.waitForChange(
               cursor,
@@ -2696,8 +2720,7 @@ export class ExtensionHost {
             if (updates.length) cursor = updates.at(-1)!.cursor;
             for (const event of updates) {
               if (event.sessionId !== scope.command.sessionId) continue;
-              if (event.type === 'human.input_registered')
-                return { reason: 'input' as const, events: [], nextSeq: page.nextSeq };
+              if (event.type === 'human.input_registered') return finishObservation('input');
               if (event.type !== 'command.accepted') continue;
               const command = await this.options.store.getCommand(event.objectId);
               const body = command?.request as Record<string, Json> | undefined;
@@ -2706,7 +2729,7 @@ export class ExtensionHost {
                 (body.kind === 'input.steer' || body.kind === 'result.include') &&
                 body.targetRunId === run?.id
               )
-                return { reason: 'input' as const, events: [], nextSeq: page.nextSeq };
+                return finishObservation('input');
             }
           }
         },

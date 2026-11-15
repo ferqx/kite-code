@@ -28,6 +28,7 @@ export interface TaskOptions {
   readonly presets?: readonly string[];
 }
 const extensionId = 'builtin.task';
+const decimalPosition = /^(0|[1-9][0-9]*)$/;
 const object = (properties: Record<string, Json>, required: string[]) => ({
   type: 'object',
   properties,
@@ -110,9 +111,9 @@ export function createTaskExtension(options: TaskOptions): Extension {
     invalid_work_reference:
       'The work_ref could not be verified in this parent scope. Copy the exact returned work_ref from spawn_agent, follow_up_agent or list_agents. This reference check did not change existing Agent work; it may still be running.',
     invalid_cursor:
-      'The observation cursor is invalid or ahead of the current mailbox or directory. Restart observation from a valid returned cursor; this does not cancel existing Agent work.',
+      'The observation cursor is invalid or ahead of the current mailbox or directory. Reuse the last valid next_cursor from the same tool and observation scope. This failure does not cancel existing Agent work.',
     cursor_expired:
-      'The observation cursor is no longer retained. Resume from resume_after_seq when provided, or restart observation. Do not infer that existing Agent work was lost or stopped.',
+      'The observation cursor is no longer retained. Pass resume_after_seq as cursor when provided, or restart observation. Existing Agent work may still be running.',
     agent_unavailable:
       'The requested Agent is unavailable in this parent scope. Check its exact agent_id against list_agents; do not invent an ID or create a replacement to recover an unknown result.',
     target_changed:
@@ -174,7 +175,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
           ...(code === 'cursor_expired'
             ? {
                 resume_after_seq:
-                  error instanceof AgentError && /^(0|[1-9][0-9]*)$/.test(error.message)
+                  error instanceof AgentError && decimalPosition.test(error.message)
                     ? error.message
                     : null,
               }
@@ -207,7 +208,11 @@ export function createTaskExtension(options: TaskOptions): Extension {
     return {
       id,
       version: '1',
-      model: { name, snakeCase: true },
+      model: {
+        name,
+        snakeCase: true,
+        ...(id === 'task.events' ? { omitParameters: ['cursor'] } : {}),
+      },
       description,
       inputSchema: schema,
       ...(command ? { recovery: { version: '1' }, resume: guarded } : {}),
@@ -333,7 +338,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.events',
         'wait_agent_events',
-        'Observe this mailbox or the exact work_refs returned at admission. Pass next_cursor to continue. Without targets or an explicit wait_ms, return a snapshot immediately. Active targets default to at most 30000ms; finished targets or no active work return immediately. wait_ms:0 always takes a snapshot. Observation never cancels children or acknowledges results; acceptance and older results do not prove the selected work completed.',
+        'Observe this mailbox or the exact work_refs returned at admission. The runtime resumes each target set automatically. history_gap means older events are unavailable. Without targets or an explicit wait_ms, return a snapshot immediately. Active targets default to at most 30000ms; finished targets or no active work return immediately. wait_ms:0 always takes a snapshot. Observation never cancels children or acknowledges results; acceptance and older results do not prove the selected work completed.',
         object(
           {
             workRefs: {
@@ -355,12 +360,16 @@ export function createTaskExtension(options: TaskOptions): Extension {
           const refs = Array.isArray(args.workRefs)
             ? await Promise.all(args.workRefs.map((ref) => readAgentWorkReference(ref, context)))
             : undefined;
-          const scope = { kind: 'agent_events', sessionId: context.sessionId };
-          const afterSeq =
-            args.cursor === undefined ? undefined : readModelCursor(args.cursor, scope);
+          let afterSeq = args.cursor;
+          if (typeof afterSeq === 'string' && !decimalPosition.test(afterSeq))
+            // Older saved receipts used a scoped token. Decode it only for the original mailbox.
+            afterSeq = readModelCursor(afterSeq, {
+              kind: 'agent_events',
+              sessionId: context.sessionId,
+            });
           if (
             afterSeq !== undefined &&
-            (typeof afterSeq !== 'string' || !/^(0|[1-9][0-9]*)$/.test(afterSeq))
+            (typeof afterSeq !== 'string' || !decimalPosition.test(afterSeq))
           )
             throw new AgentError('invalid_cursor');
           const waited = await context.operations.waitAgentEvents({
@@ -368,9 +377,10 @@ export function createTaskExtension(options: TaskOptions): Extension {
             ...(refs ? { workRefs: refs } : {}),
             waitMs: typeof args.waitMs === 'number' ? args.waitMs : refs ? 30000 : 0,
           });
-          return result({
+          const visible = {
             reason: waited.reason,
-            next_cursor: modelCursor(scope, waited.nextSeq),
+            ...(afterSeq === undefined ? {} : { next_cursor: waited.nextSeq }),
+            ...(waited.historyGap ? { history_gap: true } : {}),
             events: waited.events.map((event) => ({
               seq: event.seq,
               agent_id: event.agentId,
@@ -379,7 +389,14 @@ export function createTaskExtension(options: TaskOptions): Extension {
               ...(event.outcome ? { outcome: event.outcome } : {}),
               summary: event.summary,
             })),
-          });
+          };
+          const response = result(visible);
+          return waited.observation
+            ? {
+                ...response,
+                details: { ...visible, agentEventObservation: { ...waited.observation } },
+              }
+            : response;
         },
       ),
       make(

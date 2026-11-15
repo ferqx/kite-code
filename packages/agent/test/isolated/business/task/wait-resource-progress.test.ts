@@ -136,7 +136,7 @@ test('parent and direct child waits release the Model slot while a controlled Jo
         : stage === 0
           ? call('spawn_agent', { prompt: 'Original worker responsibility' })
           : stage === 1
-            ? call('wait_agent_events', { after_seq: '0', wait_ms: 180000 })
+            ? call('wait_agent_events', { wait_ms: 180000 })
             : [finish])
         yield event;
     },

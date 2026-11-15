@@ -374,6 +374,8 @@ export interface Operations {
     reason: 'events' | 'input' | 'timeout' | 'completed';
     events: import('../storage/agent-collaboration').AgentMailboxEvent[];
     nextSeq: string;
+    observation?: import('../storage/agent-collaboration').AgentEventObservation;
+    historyGap?: true;
   }>;
 
   readAgentMessageTarget?(

@@ -1,8 +1,13 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
-import type { RecoveryToolHistory } from '../recovery-history';
+import type {
+  RecoveryToolHistory,
+  StoppedModelHistory,
+  StoppedModelProof,
+} from '../recovery-history';
 import { AgentError, type Json, type ToolCall } from '../types';
+import { userStopCommand } from './cancel-operations';
 import { verifyModelOutput } from './model-output';
 import type { SqliteOperations } from './operations';
 import { withReconciledFrontier } from './session-reconciliation';
@@ -14,7 +19,7 @@ function unavailable(): never {
   throw new AgentError('recovery_tool_history_unverifiable');
 }
 
-export function recoveryToolHistory(db: SqliteOperations, tool: Row): RecoveryToolHistory | null {
+function recoveryToolHistory(db: SqliteOperations, tool: Row): RecoveryToolHistory | null {
   if (
     tool.kind !== 'tool' ||
     tool.run_id === null ||
@@ -137,6 +142,47 @@ export function recoveryToolHistory(db: SqliteOperations, tool: Row): RecoveryTo
   };
 }
 
+/** Route undispatched calls in a stopped model batch to that batch's identity proof. */
+export function partitionRecoveryHistory(
+  db: SqliteOperations,
+  rootSessionId: string,
+  executions: Row[],
+) {
+  const stoppedBatches = reconciledStoppedModelHistories(db, rootSessionId);
+  const stoppedByRun = new Map(stoppedBatches.map((batch) => [batch.runId, batch]));
+  const histories: RecoveryToolHistory[] = [];
+  for (const tool of executions) {
+    const batch = stoppedByRun.get(String(tool.run_id));
+    if (
+      batch &&
+      tool.kind === 'tool' &&
+      tool.state === 'planned' &&
+      tool.dispatched === 0n &&
+      tool.session_id === batch.sessionId
+    ) {
+      const source = parse(tool.decision_source_json);
+      if (source.kind === 'model_decision' && source.modelExecutionId === batch.executionId)
+        continue;
+    }
+    const history = recoveryToolHistory(db, tool);
+    if (history) histories.push(history);
+  }
+  return { histories, stoppedBatches };
+}
+
+export function readUnstartedModelHistory(
+  db: SqliteOperations,
+  input: { sessionId: string; expectedStoreId: string },
+) {
+  const tools = db.rows(
+    "SELECT * FROM execution WHERE root_session_id=? AND kind='tool' AND run_id IS NOT NULL AND state='planned' AND dispatched=0 AND origin_store_id=? ORDER BY id LIMIT 4097",
+    input.sessionId,
+    input.expectedStoreId,
+  );
+  if (tools.length > 4096) throw new AgentError('recovery_too_large');
+  return partitionRecoveryHistory(db, input.sessionId, tools);
+}
+
 export function readRecoveryToolHistory(
   db: SqliteOperations,
   input: Parameters<Store['readRecoveryToolHistory']>[0],
@@ -166,19 +212,151 @@ export function readRecoveryToolHistory(
       throw new AgentError('permission_denied');
     if (String(root.owner_generation) !== input.expectedOwnerGeneration)
       throw new AgentError('owner_changed');
-    const result = withReconciledFrontier(db, input, () => {
-      const tools = db.rows(
-        "SELECT * FROM execution WHERE root_session_id=? AND kind='tool' AND run_id IS NOT NULL AND state='planned' AND dispatched=0 AND origin_store_id=? ORDER BY id LIMIT 4097",
-        input.sessionId,
-        input.expectedStoreId,
-      );
-      if (tools.length > 4096) throw new AgentError('recovery_too_large');
-      return tools
-        .map((tool) => recoveryToolHistory(db, tool))
-        .filter((value): value is RecoveryToolHistory => value !== null);
-    });
+    const result = withReconciledFrontier(db, input, () => readUnstartedModelHistory(db, input));
     db.db.run('COMMIT');
-    return result;
+    return result.histories;
+  } catch (error) {
+    return db.rollback(error);
+  }
+}
+
+export function stoppedModelHistory(
+  db: SqliteOperations,
+  runId: string,
+): StoppedModelHistory | null {
+  if (!db.row('SELECT id FROM run WHERE id=? AND cancel_requested=1', runId)) return null;
+  const stop = userStopCommand(db, runId) ?? null;
+  const assistant = db.row(
+    `SELECT m.id,m.seq,m.source_json,e.id AS model_id,e.result_json,e.result_revision,e.session_id
+     FROM execution e JOIN run r ON r.id=e.run_id JOIN message m ON m.run_id=r.id
+       AND m.session_id=e.session_id AND m.role='assistant' AND m.status='complete'
+       AND json_array_length(json_extract(m.source_json,'$.sourceIds'))=1
+       AND json_extract(m.source_json,'$.sourceIds[0]')=e.id
+     WHERE r.id=? AND e.kind='model' AND e.state='succeeded' AND e.session_id=r.session_id
+       AND e.origin_command_id=r.origin_command_id AND e.origin_store_id=r.origin_store_id
+     ORDER BY m.seq DESC LIMIT 1`,
+    runId,
+  );
+  if (!assistant) return null;
+  const result = parse(assistant.result_json);
+  const message = parse(assistant.source_json);
+  if (
+    result.content !== message.content ||
+    canonicalJson(result.toolCalls ?? []) !== canonicalJson(message.toolCalls ?? []) ||
+    canonicalJson(result.modelOutput ?? null) !== canonicalJson(message.modelOutput ?? null)
+  )
+    return unavailable();
+  const count =
+    result.modelOutput === undefined
+      ? Array.isArray(result.toolCalls)
+        ? result.toolCalls.length
+        : 0
+      : verifyModelOutput(
+          db,
+          result.modelOutput,
+          db.row('SELECT * FROM execution WHERE id=?', assistant.model_id!)!,
+        ).toolCallCount;
+  if (!count) return null;
+  return {
+    executionId: String(assistant.model_id),
+    sessionId: String(assistant.session_id),
+    runId,
+    bindingDigest: hash({
+      stop,
+      model: String(assistant.model_id),
+      revision: String(assistant.result_revision),
+      result,
+      assistant: String(assistant.id),
+      seq: String(assistant.seq),
+      message,
+    }),
+  };
+}
+
+function reconciledStoppedModelHistories(db: SqliteOperations, rootSessionId: string) {
+  const runs = db.rows(
+    'SELECT r.id FROM run r JOIN session s ON s.id=r.session_id WHERE s.root_id=? AND r.is_active=1 AND r.cancel_requested=1 ORDER BY r.id LIMIT 4097',
+    rootSessionId,
+  );
+  if (runs.length > 4096) throw new AgentError('recovery_too_large');
+  return runs
+    .map((run) => stoppedModelHistory(db, String(run.id)))
+    .filter((history) => history !== null);
+}
+
+export function matchesStoppedModelProof(
+  history: StoppedModelHistory,
+  proof: StoppedModelProof | undefined,
+): proof is StoppedModelProof {
+  return (
+    proof?.executionId === history.executionId &&
+    proof.runId === history.runId &&
+    proof.sessionId === history.sessionId &&
+    proof.bindingDigest === history.bindingDigest
+  );
+}
+
+export function validateStoppedModelProofs(
+  histories: StoppedModelHistory[],
+  proofs: StoppedModelProof[] = [],
+) {
+  const byModel = new Map(proofs.map((proof) => [proof.executionId, proof]));
+  if (
+    proofs.length !== histories.length ||
+    histories.some(
+      (history) => !matchesStoppedModelProof(history, byModel.get(history.executionId)),
+    )
+  )
+    throw new AgentError('recovery_tool_history_changed');
+  return byModel;
+}
+
+export function readStoppedModelHistory(
+  db: SqliteOperations,
+  input: Parameters<Store['readStoppedModelHistory']>[0],
+): StoppedModelHistory[] {
+  db.db.run('BEGIN');
+  try {
+    db.identity(input.expectedStoreId);
+    let histories: StoppedModelHistory[] = [];
+    if ('runId' in input) {
+      if (
+        !db.row(
+          'SELECT r.id FROM run r JOIN command c ON r.origin_command_id=c.id WHERE r.id=? AND r.session_id=? AND r.origin_store_id=? AND c.subject_id=?',
+          input.runId,
+          input.sessionId,
+          input.expectedStoreId,
+          input.subjectId,
+        )
+      )
+        throw new AgentError('operation_unverifiable');
+      const history = stoppedModelHistory(db, input.runId);
+      if (history) histories = [history];
+    } else if (
+      !input.reconciledOnly ||
+      db.row(
+        'SELECT root_session_id FROM session_reconciliation WHERE root_session_id=?',
+        input.sessionId,
+      )
+    ) {
+      const root = db.row('SELECT * FROM session WHERE id=?', input.sessionId);
+      if (!root || root.delete_requested) throw new AgentError('session_not_found');
+      if (root.parent_id !== null) throw new AgentError('group_root_required');
+      if (
+        db.row(
+          "SELECT subject_id FROM command WHERE session_id=? AND kind='session.create'",
+          input.sessionId,
+        )?.subject_id !== input.subjectId
+      )
+        throw new AgentError('permission_denied');
+      if (String(root.owner_generation) !== input.expectedOwnerGeneration)
+        throw new AgentError('owner_changed');
+      histories = withReconciledFrontier(db, input, () =>
+        reconciledStoppedModelHistories(db, input.sessionId),
+      );
+    }
+    db.db.run('COMMIT');
+    return histories;
   } catch (error) {
     return db.rollback(error);
   }

@@ -143,7 +143,7 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
     const results = new Map<string, ToolExecutionResult>();
     try {
       // executeTool returns only after the original result and message are durable.
-      // Denied/unknown results stop this batch's successors, not the next Model.
+      // Unknown effects stop this batch's successors before the next Model.
       // A rejection is a Core/Store failure whose missing result cannot be fabricated here.
       outcomes = await Promise.allSettled(
         response.toolCalls.map(async (call) => {
@@ -159,10 +159,7 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
             results.set(call.id, outcome);
             if (settled) await context.restoreToolCall?.(call);
             if (settled) admission?.settled(call.id, result, settled.dispatched);
-            if (
-              result.outcome === 'outcome_unknown' ||
-              (result.outcome === 'failed' && result.content === 'approval_denied')
-            )
+            if (result.outcome === 'outcome_unknown')
               batch.abort(new AgentError('tool_batch_stopped'));
           } catch (error) {
             if (!failed) {

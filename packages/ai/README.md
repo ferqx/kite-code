@@ -22,7 +22,9 @@
 
 `createCompatibleModelBinding` 是接受显式 endpoint、模型和私有凭据的宿主工厂，直到流请求开始才建立连接。兼容用量转换保留缺失测量：未知输入/输出 token 数为 `null`，缺失的可选计数不输出。遇到过滤或未知终态原因、不完整调用、传输错误或缺少 Provider finish 的流时，适配器明确失败；不伪造 stop、不重试，也不执行工具。它抑制 SDK 错误日志，只返回公开错误码，不携带可能包含敏感请求详情的 Provider 原因。真实 AbortSignal 传递到 HTTP 传输。
 
-[用量转换](src/usage.ts)接收非负安全整数，缓存优先取 `prompt_tokens_details.cached_tokens`，缺失时兼容 `prompt_cache_hit_tokens`；明确的 0 不被别名覆盖。`totalTokens` 保留服务端 `total_tokens`，不取 SDK 重新求和的替代值；完整原 `usage` 存于 `raw`，包含缓存写入、cache miss、多模态等额外字段。SDK raw chunk 仅提取这一叶子，避免 SDK 的嵌套 schema 丢字段；请求、headers、凭据和其他响应字段不进入该统计。任意外部 SDK Model 只沿 SDK 明确提供的 normalized usage／raw，不猜其协议。
+适配器用 Chat Completions 的 `tool_calls[].index` 和 Responses 的 `output_index` 确定模型调用顺序。SDK 即使先收到后项的工具名称或完成事件，也在完整批次验证后按原索引交给 Agent Loop。索引冲突或缺少配对时，整批以不完整模型响应结束。重送 Responses 历史时，适配器按原 `toolCalls` 映射已保存的工具片段并保留 Provider 标识。Agent 同顺序交回配对回执。[Chat Completions 请求回归](test/sdk.test.ts)覆盖延迟名称与索引冲突，[Responses 请求回归](../../apps/service/test/isolated/responses-loop.test.ts)核乱序到达、工具实际结算和请求里的调用／回执顺序。
+
+[用量转换](src/usage.ts)接收非负安全整数，缓存优先取 `prompt_tokens_details.cached_tokens`，缺失时兼容 `prompt_cache_hit_tokens`；明确的 0 不被别名覆盖。`totalTokens` 保留服务端 `total_tokens`，不取 SDK 重新求和的替代值；完整原 `usage` 存于 `raw`，包含缓存写入、cache miss、多模态等额外字段。用量统计仅从 SDK raw chunk 提取 `usage`，避免 SDK 的嵌套 schema 丢字段。任意外部 SDK Model 沿 SDK 明确提供的工具流与用量字段处理。
 
 中立 `usage` 事件是单次请求的最新统计快照，与 `finish` 独立。Agent 可在失败／取消时保留已经收到的快照；重复快照不累计为多次请求，工具仍须完整合法 `finish` 才能进入原授权流程。未收到的最终统计无法补造，也不承诺账单完整性。[SDK 本机 HTTP](test/sdk.test.ts)、[数值反例](test/usage.test.ts)及[真实 SQLite／冷读取](../agent/test/isolated/execution/model-usage.test.ts)分别核末尾空 choices、原始明细／总数、旧别名、未知与 0、取消／失败后的已收用量及零额外派发。持久取舍见[用量记录决定](../../.agents/notes/implemented/bug-fix/2026-10-16-provider-token-accounting.md)。
 

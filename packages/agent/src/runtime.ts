@@ -27,6 +27,7 @@ import {
   projectModelContext,
 } from './context-estimate';
 import {
+  PendingUserCancellation,
   type ScopedBindings,
   type StandaloneScope,
   type ToolScope,
@@ -105,7 +106,12 @@ import {
 } from './model-attempt';
 import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './model-body';
 import { semanticDigestBytes } from './model-body/digest';
-import { assembleModelContext, modelHistory } from './model-context';
+import {
+  assembleModelContext,
+  childAgentRoleSource,
+  modelAgentMessage,
+  modelHistory,
+} from './model-context';
 import { modelExecutionId } from './model-identifier';
 import { modelOutputReference, readModelOutput } from './model-output';
 import { modelReference } from './model-reference';
@@ -149,6 +155,7 @@ import {
   type RequirementRef,
   type RunRecord,
   type SessionRecord,
+  USER_STOPPED_UNDISPATCHED_TOOL,
   type WorkspaceRecord,
 } from './storage/types';
 import {
@@ -5003,10 +5010,12 @@ export class AgentRuntime {
     if (await this.options.store.getCommand(original.commandId))
       return this.options.store.recoverSession(original);
     const toolHistoryProofs = await this.validatedRecoveryToolProofs(original);
+    const stoppedModelProofs = await this.validatedStoppedModelProofs(original);
     if (this.closing) throw new AgentError('runtime_draining');
     return this.options.store.recoverSession({
       ...original,
       toolHistoryProofs,
+      stoppedModelProofs,
     });
   }
   private async validatedRecoveryToolProofs(
@@ -5036,6 +5045,27 @@ export class AgentRuntime {
         throw new AgentError('recovery_tool_history_unverifiable');
     }
     return histories.map(({ executionId, bindingDigest }) => ({ executionId, bindingDigest }));
+  }
+  private async validatedStoppedModelProofs(
+    input: Parameters<Store['readStoppedModelHistory']>[0],
+  ) {
+    const histories = await this.options.store.readStoppedModelHistory(input);
+    return Promise.all(
+      histories.map(async (history) => {
+        const snapshot = await this.readModelOutput({
+          expectedStoreId: input.expectedStoreId,
+          sessionId: history.sessionId,
+          subjectId: input.subjectId,
+          executionId: history.executionId,
+        });
+        if (!snapshot.output.complete || snapshot.runId !== history.runId)
+          throw new AgentError('recovery_tool_history_unverifiable');
+        return {
+          ...history,
+          calls: snapshot.output.toolCalls.map(({ id, name }) => ({ id, name })),
+        };
+      }),
+    );
   }
   private async readResumeModelSource(
     execution: ExecutionRecord,
@@ -6565,6 +6595,13 @@ export class AgentRuntime {
             reconciliationAdmission: {
               expectedOwnerGeneration: session.ownerGeneration,
               toolHistoryProofs: await this.validatedRecoveryToolProofs({
+                expectedStoreId: input.expectedStoreId,
+                sessionId: input.sessionId,
+                subjectId: input.subjectId,
+                expectedOwnerGeneration: session.ownerGeneration,
+                reconciledOnly: true,
+              }),
+              stoppedModelProofs: await this.validatedStoppedModelProofs({
                 expectedStoreId: input.expectedStoreId,
                 sessionId: input.sessionId,
                 subjectId: input.subjectId,
@@ -8465,6 +8502,18 @@ export class AgentRuntime {
           throw new AgentError('capability_refresh_required');
       };
       const configuredSources = binding.sources ?? this.options.sources;
+      let childRole: ContextSource | null = null;
+      if (session.parentSessionId !== null) {
+        const content = childAgentRoleSource();
+        childRole = {
+          id: 'agent:child-role',
+          kind: 'agent_role',
+          scope: session.id,
+          role: 'system',
+          content,
+          digest: createHash('sha256').update(content).digest('hex'),
+        };
+      }
       const sourceRequests = new Map<string, SourceRequest>();
       const failureStreak = resumed?.toolFailureStreak ?? { signature: null, count: 0 };
       const completionGuidance = new Map(
@@ -8583,10 +8632,10 @@ export class AgentRuntime {
             requests: requestList,
           }),
         );
-        if (continuationSource) {
-          if (sources.has(continuationSource.id))
-            throw new AgentError('context_source_namespace_collision');
-          sources.set(continuationSource.id, continuationSource);
+        for (const source of [childRole, continuationSource]) {
+          if (!source) continue;
+          if (sources.has(source.id)) throw new AgentError('context_source_namespace_collision');
+          sources.set(source.id, source);
         }
         const result = [...sources.values()].sort((a, b) => a.id.localeCompare(b.id));
         return result;
@@ -9836,22 +9885,46 @@ export class AgentRuntime {
             cause instanceof AgentError &&
             !(error instanceof AggregateError && cause === error.cause),
         ) ?? errors.find((cause) => cause instanceof AgentError);
-      await this.options.store.finishRun({
+      if (controller.signal.reason instanceof PendingUserCancellation)
+        await controller.signal.reason.persisted;
+      const finish = {
         expectedStoreId: command.originStoreId,
         owner,
         runId: run.id,
-        status: controller.signal.aborted ? 'cancelled' : 'failed',
+        status: controller.signal.aborted ? ('cancelled' as const) : ('failed' as const),
         reason:
           controller.signal.reason instanceof AgentError &&
-          controller.signal.reason.code === 'child_deadline_exceeded'
-            ? 'child_deadline_exceeded'
-            : failure instanceof AgentError
-              ? failure.code
-              : error instanceof AggregateError
-                ? 'tool_batch_failed'
-                : 'execution_failed',
+          controller.signal.reason.code === 'cancel_requested'
+            ? 'cancel_requested'
+            : controller.signal.reason instanceof AgentError &&
+                controller.signal.reason.code === 'child_deadline_exceeded'
+              ? 'child_deadline_exceeded'
+              : failure instanceof AgentError
+                ? failure.code
+                : error instanceof AggregateError
+                  ? 'tool_batch_failed'
+                  : 'execution_failed',
         requirements: [],
-      });
+      };
+      for (let retry = 0; ; retry++) {
+        const [stoppedModelOutput] = await this.validatedStoppedModelProofs({
+          expectedStoreId: command.originStoreId,
+          sessionId: run.sessionId,
+          subjectId: command.subjectId,
+          runId: run.id,
+        });
+        try {
+          await this.options.store.finishRun({ ...finish, stoppedModelOutput });
+          break;
+        } catch (error) {
+          if (
+            retry ||
+            !(error instanceof AgentError) ||
+            error.code !== 'recovery_tool_history_changed'
+          )
+            throw error;
+        }
+      }
     } finally {
       if (deadlineTimer) clearTimeout(deadlineTimer);
       await expiry?.catch(() => {});
@@ -9879,20 +9952,16 @@ export class AgentRuntime {
       });
     }
   }
-  private async stopOwnedBeforeCancellationWrite(input: CancelCommandInput | CancelWorkInput) {
-    // A replayed cancellation receipt cannot stop work that began after its original
-    // boundary. Observation failure also grants no additional local stop authority.
-    try {
-      if (await this.options.store.getCommand(input.commandId)) return;
-    } catch {
-      return;
-    }
+  private async stopOwnedBeforeCancellationWrite(
+    input: CancelCommandInput | CancelWorkInput,
+    persisted: Promise<void>,
+  ) {
     const owned = (live: { originStoreId: string; subjectId: string }) =>
       live.originStoreId === input.expectedStoreId && live.subjectId === input.subjectId;
     const stop = (live: { controller: AbortController }) =>
       // This is only the exact local shrinking action. The API still awaits the
       // original durable cancellation write and reports persistence errors honestly.
-      live.controller.abort(new AgentError('cancel_requested'));
+      live.controller.abort(new PendingUserCancellation('cancel_requested', persisted));
     if ('targetCommandId' in input) {
       const live = this.active.get(input.targetCommandId);
       if (live && owned(live) && live.sessionId === input.sessionId) stop(live);
@@ -9908,7 +9977,7 @@ export class AgentRuntime {
             command.sessionId === input.sessionId &&
             command.subjectId === input.subjectId
           )
-            preparation.abort(new AgentError('cancel_requested'));
+            preparation.abort(new PendingUserCancellation('cancel_requested', persisted));
         } catch {
           // Without the exact original identity, only durable cancellation may stop it.
         }
@@ -9918,7 +9987,7 @@ export class AgentRuntime {
     if (input.kind === 'execution.cancel') {
       const live = this.activeExecutions.get(input.executionId);
       if (live && owned(live) && live.sessionId === input.sessionId)
-        live.controller.abort(new AgentError('execution_cancel_requested'));
+        live.controller.abort(new PendingUserCancellation('execution_cancel_requested', persisted));
       return;
     }
     if (input.kind === 'run.cancel') {
@@ -9964,11 +10033,13 @@ export class AgentRuntime {
       for (const live of this.activeExecutions.values())
         if (owned(live) && (await withinSession(live.sessionId))) stop(live);
   }
-  async cancelCommand(input: CancelCommandInput): Promise<CommandRecord> {
-    await this.stopOwnedBeforeCancellationWrite(input);
+  async cancelCommand({ ...input }: CancelCommandInput): Promise<CommandRecord> {
+    const persisted = Promise.withResolvers<void>();
     let receipt: CommandRecord;
     try {
-      receipt = await this.options.store.cancelCommand(input);
+      receipt = await this.options.store.cancelCommand({ ...input, userInitiated: true }, () =>
+        this.stopOwnedBeforeCancellationWrite(input, persisted.promise),
+      );
     } catch (error) {
       // Shrinking safety action only for this Runtime's verified live handle.
       const active = this.active.get(input.targetCommandId);
@@ -9992,13 +10063,16 @@ export class AgentRuntime {
         throw new AgentError('cancel_requested_not_durable');
       }
       throw error;
+    } finally {
+      persisted.resolve();
     }
-    const targetCommandId = (receipt.receipt as { targetCommandId?: string } | null)
-      ?.targetCommandId;
-    if (targetCommandId) {
-      this.active.get(targetCommandId)?.controller.abort(new AgentError('cancel_requested'));
-      this.jobReconcileControllers.get(targetCommandId)?.abort(new AgentError('cancel_requested'));
-      this.runResumeControllers.get(targetCommandId)?.abort(new AgentError('cancel_requested'));
+    await this.observeOwnedCancellation();
+    const preparation =
+      this.jobReconcileControllers.get(input.targetCommandId) ??
+      this.runResumeControllers.get(input.targetCommandId);
+    if (preparation) {
+      const target = await this.options.store.getCommand(input.targetCommandId).catch(() => null);
+      if (target?.cancelRequestedAt != null) preparation.abort(new AgentError('cancel_requested'));
     }
     return receipt;
   }
@@ -10011,11 +10085,13 @@ export class AgentRuntime {
   cancelSession(input: CancelWorkBase & { includeBackground: boolean }) {
     return this.cancelWork({ ...input, kind: 'session.cancel' });
   }
-  private async cancelWork(input: CancelWorkInput): Promise<CommandRecord> {
-    await this.stopOwnedBeforeCancellationWrite(input);
+  private async cancelWork({ ...input }: CancelWorkInput): Promise<CommandRecord> {
+    const persisted = Promise.withResolvers<void>();
     let receipt: CommandRecord;
     try {
-      receipt = await this.options.store.cancelWork(input);
+      receipt = await this.options.store.cancelWork({ ...input, userInitiated: true }, () =>
+        this.stopOwnedBeforeCancellationWrite(input, persisted.promise),
+      );
     } catch (error) {
       const code = error instanceof AgentError ? error.code : '';
       if (
@@ -10048,6 +10124,8 @@ export class AgentRuntime {
       for (const live of owned)
         live!.controller.abort(new AgentError('cancel_requested_not_durable'));
       throw new AgentError('cancel_requested_not_durable');
+    } finally {
+      persisted.resolve();
     }
     await this.observeOwnedCancellation();
     return receipt;
@@ -10777,6 +10855,12 @@ export class AgentRuntime {
     signal?: AbortSignal,
     shellTokenLimit?: number,
   ): Promise<string | undefined> {
+    if (
+      input.kind === 'tool' &&
+      input.execution.status === 'cancelled' &&
+      input.result.content === USER_STOPPED_UNDISPATCHED_TOOL
+    )
+      return USER_STOPPED_UNDISPATCHED_TOOL;
     const presented = await this.formatModelResult(input, signal, shellTokenLimit);
     if (
       input.kind !== 'tool' ||
@@ -11301,6 +11385,7 @@ export class AgentRuntime {
             sessionId: message.sessionId,
             subjectId: origin.subjectId,
             messageId: sourceId,
+            includeSender: true,
           });
           if (
             mail?.kind !== 'message' ||
@@ -11312,6 +11397,7 @@ export class AgentRuntime {
             continue;
           if (
             !this.options.artifacts ||
+            !mail.sender ||
             mail.originStoreId !== mail.body.storeId ||
             mail.body.scope.kind !== 'execution' ||
             mail.body.scope.id !== mail.sourceExecutionId
@@ -11337,7 +11423,12 @@ export class AgentRuntime {
             subjectId: original.subjectId,
             scope: original.scope,
           });
-          content = `Agent message (untrusted data; no additional authorization):\n${canonicalJson({ messageId: mail.id, sourceSessionId: mail.sourceSessionId, sourceExecutionId: mail.sourceExecutionId, content: new TextDecoder('utf-8', { fatal: true }).decode(bytes) })}`;
+          content = modelAgentMessage(mail.sender, {
+            messageId: mail.id,
+            sourceSessionId: mail.sourceSessionId,
+            sourceExecutionId: mail.sourceExecutionId,
+            content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+          });
         }
         let images: import('@kite-ai/ai').ModelImage[] = [];
         if (message.images !== undefined) {

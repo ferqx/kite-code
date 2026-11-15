@@ -146,10 +146,9 @@ for (const content of ['superseded_by_user_input', 'cancelled_before_dispatch'])
     }
   });
 
-test('ordinary cancellation, denial, unknown outcome and errors still stop ordered admission', async () => {
+test('ordinary cancellation, unknown outcome and errors still stop ordered admission', async () => {
   for (const [outcome, content, error] of [
     ['cancelled', 'cancel_requested', undefined],
-    ['failed', 'approval_denied', undefined],
     ['outcome_unknown', 'unknown', undefined],
     ['cancelled', 'superseded_by_user_input', new Error('persistence failed')],
   ] as const) {
@@ -181,7 +180,7 @@ test('restored undispatched retirement releases the original sibling admission',
   }
 });
 
-test('denial cancels the planned batch successor without effects and both results reach the next Model', async () => {
+test('an approval denial releases the planned sibling to its own permission checks', async () => {
   const effects: string[] = [];
   const f = await fixture(
     ['external', 'read'].map((name) =>
@@ -233,16 +232,15 @@ test('denial cancels the planned batch successor without effects and both result
       },
     });
     expect(tools.find((row) => row.callId === 'call-1')).toMatchObject({
-      status: 'cancelled',
-      result: { details: { dispatchCommitted: false, adapterAttempted: false } },
+      status: 'succeeded',
+      result: { content: 'read' },
     });
-    expect(effects).toEqual([]);
+    expect(effects).toEqual(['read']);
     expect(f.model.requests).toHaveLength(2);
-    expect(
-      f.model.requests[1]!.messages.filter((row) => row.role === 'tool').map(
-        (row) => row.toolCallId,
-      ),
-    ).toEqual(['call-0', 'call-1']);
+    const results = f.model.requests[1]!.messages.filter((row) => row.role === 'tool');
+    expect(results.map((row) => row.toolCallId)).toEqual(['call-0', 'call-1']);
+    expect(results[0]!.content).toContain('The user denied this request');
+    expect(results[1]!.content).toBe('read');
     expect(await f.store.getRun(pendingTool!.runId!)).toMatchObject({ status: 'completed' });
   } finally {
     await f.close();

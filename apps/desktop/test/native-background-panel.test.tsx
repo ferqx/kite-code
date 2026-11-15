@@ -475,9 +475,13 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect(host.textContent).toContain('上次状态 · 待核实');
       expect(host.textContent).toContain('原子智能体');
       expect(host.textContent).toContain('directory_changed');
-      expect(
-        [...host.querySelectorAll('button')].some((button) => button.textContent === '停止'),
-      ).toBe(false);
+      const stop = host.querySelector<HTMLButtonElement>(
+        '[aria-label="子智能体"] .background-execution-stop',
+      )!;
+      expect(stop.textContent).toBe('停止');
+      expect(stop.disabled).toBe(true);
+      await act(async () => stop.click());
+      expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(1);
       failed = false;
       await click(host, '重试');
       expect(host.querySelector('.background-execution-error')).toBeNull();
