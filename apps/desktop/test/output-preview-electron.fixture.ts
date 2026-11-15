@@ -200,12 +200,12 @@ void app.whenReady().then(async () => {
         window,
         check() {},
         async materialize(path) {
-          await writeFile(path, 'unpreviewable');
+          await writeFile(path, Buffer.from([0xff, 0xfe, 0x00]));
           return {
             ...target,
             name: 'data.bin',
             mediaType: 'application/octet-stream',
-            size: '13',
+            size: '3',
             ownerRunId: 'run',
             publishedAt: new Date().toISOString(),
           };
