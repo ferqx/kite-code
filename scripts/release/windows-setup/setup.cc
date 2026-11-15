@@ -344,6 +344,8 @@ struct LocationUnavailable {
   std::wstring detail;
 };
 
+struct SetupScratchInUse {};
+
 struct ScriptResult {
   DWORD code;
   std::wstring output;
@@ -508,6 +510,7 @@ Installed install(const std::wstring& location, SetupProgress& progress,
   else if (line == receipt + L" desktop-update") prefix = location + L"\\resources\\app-update";
   if (result.code != 0 || prefix.empty()) {
     const auto code = scriptFailureCode(result.output);
+    if (code == L"native_windows_scratch_in_use") throw SetupScratchInUse{};
     if (setupFilesInUse(code))
       throw std::wstring(L"安装未完成。应用文件仍在使用。\n\n") + filesInUseHint(code);
     throw std::wstring(L"安装未完成。\n\n错误代码：") + code;
@@ -828,9 +831,22 @@ int runSetup(std::wstring location, bool quiet, bool requestedShortcut, bool fix
       if (!rootDesktopHostAvailable(selection.location + L"\\Kite Desktop.exe",
             previous, resource(104)))
         throw LocationUnavailable{L"目录中已有同名文件或无法访问此位置。"};
-      installed = install(selection.location, progress,
-        previous && _wcsicmp(previous->location.c_str(), selection.location.c_str()) == 0
-          ? previous->prefix : L"");
+      for (;;) {
+        try {
+          installed = install(selection.location, progress,
+            previous && _wcsicmp(previous->location.c_str(), selection.location.c_str()) == 0
+              ? previous->prefix : L"");
+          break;
+        } catch (const SetupScratchInUse&) {
+          constexpr auto message = L"安装暂存文件仍被占用。请关闭正在访问安装目录的程序，"
+            L"稍等片刻后重试。";
+          if (quiet) throw std::wstring(message);
+          if (!progress.choose(L"安装暂存文件仍被占用",
+              L"请关闭正在访问安装目录的程序，稍等片刻后单击「重试」。",
+              L"重试", L"取消"))
+            return ERROR_CANCELLED;
+        }
+      }
     } catch (const LocationUnavailable& error) {
       const std::wstring message = L"无法使用所选安装目录。\n\n" + error.detail + L"\n\n" +
         (upgrade ? L"请检查原安装目录的访问权限和文件占用，然后重新运行安装程序。"

@@ -132,7 +132,7 @@ Windows managed Native 安装／切换／撤销源码现已接入同一正式 re
 
 Windows x64 Native 与内含 Terminal 共享一次编译的校验器制品。Windows 安装 marker 和已安装映像名继续沿原契约，资产来源与旧候选兼容见 [Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
-Windows x64 离线 EXE 消费桌面专用 Native 归档，装配一个 Bun、本地服务和桌面窗口。安装器支持选择目录及原目录更新，登记当前用户的 Windows 应用和卸载入口。新版准备和旧版移除沿 managed Native 的排他使用权及候选核验。卸载保留独立 Profile。构建与验证范围归 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装)。
+Windows x64 离线 EXE 消费桌面专用 Native 归档，装配一个 Bun、本地服务和桌面窗口。安装器支持选择目录及原目录更新，登记当前用户的 Windows 应用和卸载入口。新版准备和旧版移除沿 managed Native 的排他使用权及候选核验。受管安装暂存目录仅在原删除句柄获取因共享冲突而已确认回收时，持安装选择锁限时重试获取。登记仍在安装进程交付成功回执后进行。卸载保留独立 Profile。构建与验证范围归 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装)。
 
 正常卸载独立 Terminal 不阻止 Native 自带入口及后续升级。隐式历史登记目标已不存在时，升级仅锁 Native，并保留历史反向登记；不重建前门或自动重新登记。显式目标与仍存在的隐式目标保持原完整验证、双 prefix 锁和 nonce CAS。
 

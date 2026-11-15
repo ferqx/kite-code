@@ -53,6 +53,48 @@ test('Windows Native completed publication with unknown original HANDLE close re
   subprocess(installerScript('move'));
 });
 
+test('Windows Native scratch cleanup retries sharing conflicts and stops on unknown acquisition', () => {
+  const removalModule = modulePath('packages/agent/src/platform/windows-installation-removal.ts');
+  subprocess(`
+import { mock } from 'bun:test';
+import assert from 'node:assert/strict';
+const { WindowsInstallationFilesInUseError, WindowsInstallationRemovalAcquireUnknownError } =
+  await import(${JSON.stringify(removalModule)});
+const busy = new WindowsInstallationFilesInUseError('windows_installation_files_in_use');
+const unknown = new WindowsInstallationRemovalAcquireUnknownError(busy, Error('close failed'));
+const input = { root: '/owned-scratch', inventory: [] };
+const owner = {};
+let failures = [], calls = 0, clock = 0;
+mock.module(${JSON.stringify(removalModule)}, () => ({
+  WindowsInstallationFilesInUseError,
+  retainWindowsInstallationRemoval(request) {
+    assert.equal(request, input);
+    calls++;
+    if (failures.length) throw failures.shift();
+    return owner;
+  },
+}));
+Object.defineProperty(performance, 'now', { value: () => clock });
+Bun.sleepSync = (duration) => { clock += duration; };
+const { retainWindowsNativeScratchRemoval } =
+  await import(${JSON.stringify(modulePath('scripts/release/windows-native-scratch.ts'))});
+failures = [busy, busy];
+assert.equal(retainWindowsNativeScratchRemoval(input), owner);
+assert.equal(calls, 3);
+assert.equal(clock, 700);
+calls = 0; clock = 0; failures = Array(30).fill(busy);
+assert.throws(() => retainWindowsNativeScratchRemoval(input), error =>
+  error.message === 'native_windows_scratch_in_use' && error.cause === busy);
+assert.equal(clock, 5500);
+assert.equal(calls, 17);
+calls = 0; clock = 0; failures = [unknown];
+assert.throws(() => retainWindowsNativeScratchRemoval(input), error => error === unknown);
+assert.equal(calls, 1);
+assert.equal(clock, 0);
+console.log('owned-close-confirmed');
+`);
+});
+
 function installerScript(scenario: 'selection' | 'removal' | 'registration' | 'move' | 'busy') {
   return `
 import { mock } from 'bun:test';

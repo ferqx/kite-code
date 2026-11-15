@@ -45,6 +45,10 @@ import { createWindowsNativeArchiveScratch, unpackNativeBundle } from './native-
 import type { InstalledNativeBundle } from './native-install';
 import { rejectBundleOutput } from './terminal-paths';
 import { copyWindowsCandidate } from './windows-candidate-copy';
+import {
+  retainWindowsNativeScratchRemoval,
+  WindowsNativeScratchInUseError,
+} from './windows-native-scratch';
 import { sharedWindowsNativeVerifier } from './windows-verifier-assets';
 
 const pattern = /^[a-f0-9]{64}$/;
@@ -122,6 +126,7 @@ function underSelection<T>(
       }
       pendingOwners.delete(resources);
     } catch (cleanup) {
+      if (!failed && cleanup instanceof WindowsNativeScratchInUseError) throw cleanup;
       throw new AggregateError(
         failed ? [failure, cleanup] : [cleanup],
         'native_windows_close_unknown',
@@ -156,7 +161,7 @@ function scratch(owner: InstallationOwner) {
   owner.retain({
     release() {
       if (!removal && !existsSync(root)) return;
-      removal ??= retainWindowsInstallationRemoval({
+      removal ??= retainWindowsNativeScratchRemoval({
         root,
         inventory: [...entries]
           .filter(([path]) => existsSync(join(root, path)))

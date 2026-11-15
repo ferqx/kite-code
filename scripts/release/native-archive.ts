@@ -39,6 +39,7 @@ import { retainWindowsPrivateFileRemoval } from '../../packages/agent/src/platfo
 import { releaseArchiveBytes } from './archive-compression';
 import { readCandidateArchiveFiles } from './terminal-archive';
 import { rejectBundleOutput } from './terminal-paths';
+import { retainWindowsNativeScratchRemoval } from './windows-native-scratch';
 
 const pendingWindowsArchiveOwners = new Set<object>();
 function closedWindowsTree(
@@ -108,7 +109,11 @@ export function createWindowsNativeArchiveScratch(prefix: string) {
     release() {
       if (released) return;
       if (!inventory && readdirSync(root).length) throw Error('native_archive_scratch_unknown');
-      removal ??= retainWindowsInstallationRemoval({ root, inventory: inventory ?? [] });
+      // Only a completed move leaves an empty, accepted staging directory.
+      removal ??=
+        inventory?.length === 0
+          ? retainWindowsNativeScratchRemoval({ root, inventory })
+          : retainWindowsInstallationRemoval({ root, inventory: inventory ?? [] });
       removal.remove();
       removal.release();
       coordination.release();
