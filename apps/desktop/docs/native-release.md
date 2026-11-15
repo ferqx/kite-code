@@ -24,6 +24,8 @@ Windows Main 保初始完整内容／语义验证，再由 [Node-API owner](../n
 
 macOS arm64 和 Windows x64 执行 `bun run release:build --product native` 可独立构建桌面候选。Windows 使用已准备的 x64 MSVC 和满足现有 ACL 准入的 Bun、Electron 与输出目录，离线安装包构建见下文。macOS 用 `bun run desktop` 启动默认候选，Windows 使用已安装的桌面前门。Linux 先执行 `bun run release:build` 准备 `dist/unified-terminal`，再构建 Native 并启动。启动核对两层完整性和使用权。日常开发使用 `bun run build` 后 `bun run desktop:dev`，并使用独立 development profile。
 
+Native 的内嵌运行时随包携带 OfficeCLI、中文字体、KaTeX 和文档 helper。Main 按[已准入的 Service 入口](../electron/native-assets.ts)定位同级 Agent 包中的预览资产，适用于桌面专用 `terminal/code` 和完整 Terminal 的 `terminal/node_modules` 两种布局。资产的构建与校验见 [Office owner](../../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)。
+
 CLI/TUI 由 `bun run release:build` 构建的独立 Terminal 提供。下面的组合包示例用 `--terminal` 显式选择完整 Terminal，供组合安装和 `register-cli` 使用。
 
 macOS arm64 的 Electron 仍固定44.3.0；[构建准备](../scripts/macos-electron-runtime.ts)只接受完整原始Framework SHA与封闭分发，在新候选的独立 `electron` 副本内应用[resize补丁](../patches/electron-44.3.0-macos-resize.patch)，重新进行 ad-hoc 签名及校验，再执行SQLite探针、Main构建和完整manifest。两处指令及签名以外的payload、源分发与副本独立性均复核；重新签名产生的CodeResources与最终Framework字节进入原清单，不跳过任何文件。开发入口也准备每次专属副本；不修改 `node_modules` 或已存在的不可变候选。

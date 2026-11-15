@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   chmod,
   copyFile,
@@ -7,6 +7,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  rename,
   rm,
   writeFile,
 } from 'node:fs/promises';
@@ -21,13 +22,53 @@ import {
 } from './office-assets-lock';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-/** Build-time only. Runtime never downloads, installs or updates dependencies. */
-export async function prepareOfficeAssets(destination: string) {
-  const binary = officeBinaryAssets[`${process.platform}-${process.arch}`];
+const cache = resolve(import.meta.dir, '../../../../../.cache/office-assets');
+const binary = officeBinaryAssets[`${process.platform}-${process.arch}`];
+
+async function readFixedAsset(url: string, sha256: string) {
+  const cached = join(cache, sha256);
+  let bytes: Uint8Array;
+  try {
+    bytes = await readFile(cached);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const response = await fetch(url, { signal: AbortSignal.timeout(120000) });
+    if (!response.ok) throw Error(`office_asset_download_failed:${response.status}`);
+    bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length > 64 * 1024 * 1024 || digest(bytes) !== sha256)
+      throw Error('office_asset_checksum_mismatch');
+    const temporary = join(cache, `${sha256}-${randomUUID()}.tmp`);
+    try {
+      await writeFile(temporary, bytes, { mode: 0o600, flag: 'wx' });
+      await rename(temporary, cached);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+    return bytes;
+  }
+  if (digest(bytes) !== sha256) throw Error('office_asset_checksum_mismatch');
+  return bytes;
+}
+
+/** Shared by source installation and packaging. Runtime never downloads assets. */
+async function loadOfficeAssets() {
   if (!binary || (process.platform === 'win32' && process.arch !== 'x64'))
     throw Error('office_platform_not_qualified');
-  const cache = resolve(import.meta.dir, '../../../../../.cache/office-assets');
   await mkdir(cache, { recursive: true });
+  return {
+    officecli: await readFixedAsset(officeReleaseBase + binary.name, binary.sha256),
+    font: await readFixedAsset(officeFontAsset.url, officeFontAsset.sha256),
+  };
+}
+
+if (import.meta.main && binary && (process.platform !== 'win32' || process.arch === 'x64')) {
+  console.log('[office-assets] Preparing OfficeCLI and Noto Sans SC...');
+  await loadOfficeAssets();
+  console.log('[office-assets] Verified OfficeCLI and Noto Sans SC.');
+}
+
+export async function prepareOfficeAssets(destination: string) {
+  const { officecli, font } = await loadOfficeAssets();
   try {
     const stat = await lstat(destination);
     if (!stat.isDirectory() || stat.isSymbolicLink())
@@ -37,31 +78,12 @@ export async function prepareOfficeAssets(destination: string) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   await mkdir(destination, { recursive: true });
-  async function fixed(url: string, sha256: string, name: string) {
-    const cached = join(cache, sha256);
-    let bytes: Uint8Array;
-    try {
-      bytes = await readFile(cached);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      const response = await fetch(url, { signal: AbortSignal.timeout(120000) });
-      if (!response.ok) throw Error(`office_asset_download_failed:${response.status}`);
-      bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.length > 64 * 1024 * 1024 || digest(bytes) !== sha256)
-        throw Error('office_asset_checksum_mismatch');
-      await writeFile(cached, bytes, { mode: 0o600 });
-    }
-    if (digest(bytes) !== sha256) throw Error('office_asset_checksum_mismatch');
-    await writeFile(join(destination, name), bytes, {
-      mode: name.startsWith('officecli') ? 0o755 : 0o644,
-    });
-  }
-  await fixed(
-    officeReleaseBase + binary.name,
-    binary.sha256,
+  const executable = join(
+    destination,
     process.platform === 'win32' ? 'officecli.exe' : 'officecli',
   );
-  await fixed(officeFontAsset.url, officeFontAsset.sha256, 'font.ttf');
+  await writeFile(executable, officecli, { mode: 0o755 });
+  await writeFile(join(destination, 'font.ttf'), font, { mode: 0o644 });
   await copyFile(
     join(import.meta.dir, 'office-license.txt'),
     join(destination, 'OfficeCLI-LICENSE.txt'),
@@ -106,8 +128,5 @@ export async function prepareOfficeAssets(destination: string) {
       files: files.sort((a, b) => a.path.localeCompare(b.path)),
     }),
   );
-  await chmod(
-    join(destination, process.platform === 'win32' ? 'officecli.exe' : 'officecli'),
-    0o755,
-  );
+  await chmod(executable, 0o755);
 }

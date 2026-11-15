@@ -4,7 +4,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { officeBinaryAssets, officeFontAsset, officeVersion } from './office-assets-lock';
+import {
+  officeBinaryAssets,
+  officeCommit,
+  officeFontAsset,
+  officeVersion,
+} from './office-assets-lock';
 import { runWindowsOfficeProcess } from './windows-process';
 
 export const officeEnvironment = () => ({
@@ -44,13 +49,22 @@ export async function verifyOfficeRuntimeAssets(trustedRoot?: string) {
   const binary = officeBinaryAssets[`${process.platform}-${process.arch}`];
   if (!binary || (process.platform === 'win32' && process.arch !== 'x64'))
     throw Error('office_platform_not_qualified');
+  const manifest = JSON.parse(readFileSync(join(assets.root, 'manifest.json'), 'utf8'));
+  if (manifest.officeVersion !== officeVersion) throw Error('office_asset_version_mismatch');
+  const signedMacOSBinary =
+    process.platform === 'darwin' &&
+    process.arch === 'arm64' &&
+    /\/(code|node_modules)\/@kite-ai\/agent\/tools\/documents\/office-assets$/.test(assets.root) &&
+    manifest.officeCommit === officeCommit &&
+    manifest.target === 'darwin-arm64' &&
+    typeof manifest.signedOfficeSha256 === 'string' &&
+    /^[a-f0-9]{64}$/.test(manifest.signedOfficeSha256);
   if (
-    digest(await readFile(assets.officecli)) !== binary.sha256 ||
+    digest(await readFile(assets.officecli)) !==
+      (signedMacOSBinary ? manifest.signedOfficeSha256 : binary.sha256) ||
     digest(await readFile(assets.font)) !== officeFontAsset.sha256
   )
     throw Error('office_asset_checksum_mismatch');
-  const manifest = JSON.parse(readFileSync(join(assets.root, 'manifest.json'), 'utf8'));
-  if (manifest.officeVersion !== officeVersion) throw Error('office_asset_version_mismatch');
   return assets;
 }
 export interface OfficeProcessResult {

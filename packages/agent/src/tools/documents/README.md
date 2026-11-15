@@ -18,9 +18,11 @@ Skill 默认要求 POSIX Shell 兼容语法，额外比对先在工作区副本�
 
 ## 固定资产与执行边界
 
-[构建准备](prepare-office-assets.ts)仅在构建时获取[固定锁](office-assets-lock.ts)中的官方平台二进制和中文字体，核 SHA-256 后复制到 `tools/documents/office-assets`。OfficeCLI 固定1.0.160、commit c56512c8c7b76fe284f09940e4cd492470099d3e；它是 self-contained .NET 单文件，用户无须另装 .NET。字体为 noto-cjk Sans2.004 的 NotoSansSC-VF.ttf，OFL全文随包；OfficeCLI Apache许可、NOTICE和上游第三方许可全文、KaTeX MIT许可及固定0.16.11的 JS/CSS/全部字体同入资产 manifest。helper JS由现有Bun执行，不打第二份Bun。原 documents build-assets入口随 Agent构建纳入Terminal库存和Native复制闭包。
+[资产准备](prepare-office-assets.ts)由源码安装的 postinstall 和 Agent 的 [documents 构建入口](build-assets.ts)共用。支持的平台在 `bun install` 时把[固定锁](office-assets-lock.ts)中的官方平台二进制和中文字体写入按 SHA-256 寻址的本地缓存。下载完整并校验后才发布缓存文件。构建和打包重新核对 SHA-256，缓存缺失时从固定地址获取，再写入各自的 `tools/documents/office-assets`。OfficeCLI 固定 1.0.160、commit c56512c8c7b76fe284f09940e4cd492470099d3e。它是 self-contained .NET 单文件，用户无须另装 .NET。字体为 noto-cjk Sans2.004 的 NotoSansSC-VF.ttf；OFL 全文、OfficeCLI Apache 许可、NOTICE、上游第三方许可、KaTeX MIT 许可及固定 0.16.11 的 JS/CSS/全部字体同入资产 manifest。helper JS 由现有 Bun 执行，随 Terminal 库存和 Native 复制闭包交付。
 
 [运行时解析](office-runtime.ts)不下载、安装或升级。每次固定子进程覆盖 `OFFICECLI_NO_AUTO_RESIDENT/ SKIP_UPDATE/ NO_AUTO_INSTALL=1`，直接传 argv，避免Windows节点路径被Git Bash改写。Service须注入helper路径/现有Bun路径，并把确切二进制纳入平台执行身份，不授予安装目录写权限、不解除temp noexec。Windows ARM64即使上游有资产也拒绝，本次不据资产存在宣称平台资格。
+
+macOS arm64 签名构建先核对上游 OfficeCLI 的固定 SHA-256，再签署并将实际产物的摘要和大小写入办公资产清单。签名后的文件与清单一起纳入外层候选完整性校验。运行时仅在 macOS arm64 的内嵌制品布局中读取签名摘要，开发资源及其他平台继续核对上游锁定摘要，字体始终核对原摘要。[签名实现](../../../../../scripts/release/macos-dmg/terminal-signing.ts)
 
 `runOfficeCLI`仅供已受管Shell中的helper直接子进程；输出上限2MiB、最长120秒、取消后等待实际close，未知close保留工作目录并报exit_unconfirmed。它不是跨平台进程树所有权证明。宿主预览必须注入已有owner的runner，不以普通spawn替代宿主监督。
 

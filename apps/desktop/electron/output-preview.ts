@@ -539,7 +539,12 @@ export class NativeOutputPreview {
         void (async () => {
           try {
             const children = input.window.contentView.children;
-            addNativeWindowView(input.window, view, children.indexOf(root));
+            const rootIndex = children.indexOf(root);
+            const viewIndex = children.indexOf(view);
+            // A cancelled paint can leave the view below Root. Reinserting at
+            // Root's old index moves it above Root before its new frame is ready.
+            if (rootIndex >= 0 && (viewIndex < 0 || viewIndex >= rootIndex))
+              addNativeWindowView(input.window, view, rootIndex);
             if (!currentPaint()) throw Error('preview_paint_cancelled');
             if (process.platform === 'win32') {
               const before = contents.getBackgroundThrottling();

@@ -100,6 +100,10 @@ Windows helper 的受限 token stdio 兼容修复后，新的 `inline-edit-word-
 
 [预览宿主](electron/output-preview.ts) 独立内存 session、单个 sandbox WebContentsView，无 preload、Node 或 Native bridge；manifest 限定 `kite-preview` 资源，独立 CSP 和请求层禁外网／localhost／file、导航、新窗口、权限与下载，主 renderer CSP 不变。Office 转换使用现有 NativeProcessOwner、固定禁驻留／安装／更新配置和有界诊断；缓存按源hash／renderer／recipe区分，最多八项。正式制品从已验证Terminal根定位资产，开发构建注入编译期本地资产根。PDF 由Service的既有PDF worker分页，Native只接页图。 Markdown预览复用固定Markdown parser，静态白名单呈现标题、列表、强调、代码及表格；原HTML转义、图片只显示alt、文档链接不激活，不赋予外联或文件资源权限。支持PNG/JPEG/WebP/GIF，SVG/XML/HTML沿文本／代码方式而不执行。未知后缀仅在有界严格UTF-8（或带BOM的UTF-16）且无二进制控制字符时显示文本，读取失败与文本大小限制不伪称二进制。转换失败仍保留另存与继续修改。
 
+预览工具栏在转换就绪后可能改变正文区域尺寸。首帧等待遇到尺寸变化会撤销旧订阅，并让仍位于主界面下方的预览层继续在原层级准备新帧。只有新尺寸的首帧通过校验才将预览层移到前面。[首帧回归](test/preview-frame-owner.test.ts)覆盖第一次绘制尚未完成时的尺寸更新、迟到旧帧及新帧交接。
+
+2026-11-15 Windows x64／Electron 44.3.0，新离线安装包候选 `466621de24697f39` 通过真实安装入口冷启动。在正常网络环境打开已保存会话中的三份本地合成文件，实际窗口显示 Word 正文、Excel 网格与两张工作表、PPT 两页内容。拖宽 Word 预览以及关闭并重开 PPT 后文档仍可见，退出由应用菜单完成。此次验收范围为工作区本地文件预览。
+
 “继续修改”只登记准确输出引用，不立即导入或启动模型。草稿 envelope 保存 chip ID、locator和来源轮次，沿原revision／proof消费；重载时Main解析原快照并重建 NativeInputFiles 引用来源。发送时稳定 import ID 调用 `prepareInputFromOutput`，再沿已有／新建会话工作副本准备；准备失败保留草稿，不绕过原 journal。普通上传仍用原分块路径。
 
 2026-11-11，Linux／Bun1.4.4，当前实施工作树：[输出IPC／流式保存／引用准备](test/isolated/native-output-files.test.ts)3项23断言、[原上传DOM](test/isolated/native-input-files-dom.test.tsx)1项34断言、[真实Service与preload分块输入](test/isolated/native-session-files-ipc.test.ts)1项20断言通过；[Node私库冷启动](test/isolated/private-data.test.ts)新增引用chip与proof／unknown保留／成功消费，完整文件1项10个外层断言通过。[参考项／准确Run解码／重试与迟到结果](test/isolated/native-output-files-dom.test.tsx)1项24断言通过；Desktop类型检查1491文件通过。新增覆盖100条集中晚到后继续跨页、同游标重复加载、无文件时独立“更多整理状态”分页及重复collection保留较新revision；文件head刷新保留已显示文件但沿新head游标补齐缺口；状态head使用当前页替换，成功空输出退出可见状态后不残留旧失败，只有状态续页按ID／revision合并，不自动遍历全部状态。暂存过期（期限已过或明确output_staging_expired）不提供无效重试，提示重新生成且保留已交付文件。上述单元替身仅证明相应合同，不作为真实产品体验验收。

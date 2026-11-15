@@ -6,6 +6,8 @@ Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当
 
 源码安装的 postinstall 会构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，期间显示三个构建阶段及实时 Cargo 诊断，完成后显示资产路径。需要 rustup／固定 Rust1.97.1 和本机 linker；Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C 工具链。使用 `--ignore-scripts` 安装后，先显式运行 `bun run build:files-native` 再执行文件工具测试。正式 Agent build 会把同一原生模块、ABI/hash manifest 和许可证放进制品；用户机器不需要 Rust。运行期缺失资产明确失败，不能依靠源码或即时编译回退。
 
+在支持 Office 运行时的构建平台上，`bun install` 的 postinstall 也会下载并校验固定的 OfficeCLI 和 Noto Sans SC。随后 `bun run build` 从本地缓存生成开发 Service 所需的 `dist` 资产。跳过安装脚本时，构建会准备缺少的下载资产。Terminal 和 Native 打包也使用同一套资产准备逻辑，详见 [Office owner](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)。
+
 Required 的纯静态 `quality` 作业使用 `bun install --frozen-lockfile --ignore-scripts`，不需要 Rust，也不准备 Files 原生资产。安装后以 Actions 的 `working-directory: apps/web` 执行 `bun run build`，生成公开 `./assets` 的实际默认导出 `apps/web/dist/assets.js`，再执行原全部质量门禁；缺少该导出仍由工作区守卫拒绝。该准备只构建 Web，不执行整个 workspace build。其他运行时测试、qualification、发布和普通源码安装继续执行原 postinstall，不能照搬 quality 的安装方式后直接运行文件工具。
 
 quality 仅缓存 `BUN_INSTALL_CACHE_DIR` 指定的下载目录，位于 runner 临时目录。quality 的下载目录和 unit 的浏览器目录均由首个准备步骤从 `RUNNER_TEMP` 写入 `GITHUB_ENV`，供后续步骤使用；job 级 `env` 不引用尚不可用的 `runner` context。不缓存 `node_modules`、workspace 构建或原生资产。不可变 cache action 的 key 包含 OS、架构、Bun1.4.4、lock、根及精确十 workspace manifest、registry 配置和 patches；不使用较宽 restore key。命中和未命中都执行原 frozen install、Web 准备与全部检查，不能把 cache hit 当作依赖或边界验证通过。

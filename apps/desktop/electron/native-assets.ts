@@ -30,6 +30,7 @@ export function resolveNativeCandidate(appPath: string): NativeAssets & {
   runtimeProtection: NativeRuntimeProtection;
   candidateRoot: string;
   terminalRoot: string;
+  officeAssetsRoot: string;
   artifactHelper: { path: string; sha256: string };
   sqlite: SqliteReleaseIdentity;
   windowsAsset?: { path: string; sha256: string };
@@ -83,6 +84,10 @@ export function resolveNativeCandidate(appPath: string): NativeAssets & {
     }),
     candidateRoot: bundle.root,
     terminalRoot: terminal.root,
+    officeAssetsRoot: join(
+      dirname(dirname(serviceEntrypoint)),
+      'agent/tools/documents/office-assets',
+    ),
     sqlite: bundle.manifest.sqlite,
     artifactHelper: {
       path: join(bundle.root, bundle.manifest.entries.artifactHelper),

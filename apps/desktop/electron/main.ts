@@ -871,14 +871,11 @@ void app
       },
     });
     registerNativeIpc({
-      officeAssetsRoot: formalAssets
-        ? join(
-            formalAssets.terminalRoot,
-            'node_modules/@kite-ai/agent/tools/documents/office-assets',
-          )
-        : typeof __KITE_OFFICE_ASSETS_ROOT__ === 'undefined'
+      officeAssetsRoot:
+        formalAssets?.officeAssetsRoot ??
+        (typeof __KITE_OFFICE_ASSETS_ROOT__ === 'undefined'
           ? undefined
-          : (__KITE_OFFICE_ASSETS_ROOT__ ?? undefined),
+          : (__KITE_OFFICE_ASSETS_ROOT__ ?? undefined)),
       ipcMain,
       window: () => window,
       rendererUrl,

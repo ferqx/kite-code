@@ -34,6 +34,8 @@ function fixture(fail = false) {
   const contents = Object.assign(new EventEmitter(), {
     mainFrame: {},
     isDestroyed: () => false,
+    getBackgroundThrottling: () => true,
+    setBackgroundThrottling: () => {},
     beginFrameSubscription: (_dirty: boolean, callback: typeof frame) => {
       started++;
       if (fail) throw Error('compositor_broken');
@@ -138,6 +140,29 @@ test('preview first frame draws below Root and only promotes matching frame; res
     expect(f.visible()).toBe(false);
     expect(f.wakes).toEqual([true]);
     expect(f.active.presentation).toBeUndefined();
+  } finally {
+    f.adapter.dispose();
+  }
+});
+test('a toolbar resize before the first frame keeps the replacement draw covered', async () => {
+  const f = fixture();
+  try {
+    f.adapter.ready();
+    const firstFrame = f.frame();
+    f.active.presentation.bounds = { x: 500, y: 60, width: 500, height: 640, radius: 8 };
+    f.adapter.sync();
+
+    expect(f.started()).toBe(2);
+    expect(f.ended()).toBe(1);
+    expect(f.children.indexOf(f.view)).toBeLessThan(f.children.indexOf(f.root));
+    firstFrame?.({ isEmpty: () => false, getSize: () => ({ width: 500, height: 660 }) });
+    await tick();
+    expect(f.children.indexOf(f.view)).toBeLessThan(f.children.indexOf(f.root));
+    f.frame()?.({ isEmpty: () => false, getSize: () => ({ width: 500, height: 640 }) });
+    await tick();
+    expect(f.children.indexOf(f.view)).toBeGreaterThan(f.children.indexOf(f.root));
+    expect(f.visible()).toBe(true);
+    expect(f.ended()).toBe(2);
   } finally {
     f.adapter.dispose();
   }
