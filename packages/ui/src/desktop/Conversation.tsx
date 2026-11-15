@@ -42,7 +42,7 @@ import { DeferredProcessContent } from './DeferredProcessContent';
 import { useDesktopDiagnostics } from './diagnostics';
 import { cn } from './lib/utils';
 import { MessageContent } from './MessageContent';
-import { MessageCopyButton } from './MessageCopyButton';
+import { MessageCopyButton, type MessageCopyRole } from './MessageCopyButton';
 import { ModelConnection } from './ModelConnection';
 import { formatMessageTime } from './message-time';
 import { PromptMarkdown } from './PromptMarkdown';
@@ -223,7 +223,7 @@ const MessageItem = memo(function MessageItem({
   onToggle: (id: string, open: boolean) => void;
   openFile?: (path: string) => void;
   copyText?: string;
-  copyRole?: 'user' | 'assistant';
+  copyRole?: MessageCopyRole;
   writeClipboardText?: (text: string) => Promise<void>;
   childDetail?: { readonly label: string; readonly onOpen: () => void };
   renderContent?: (message: Message) => ReactNode;
@@ -1075,6 +1075,7 @@ export function Conversation({
     ) => {
       const message = group[0]!;
       if (structural(message)) return null;
+      const agentResult = message.systemKind === 'agent_result' ? message.agentResult : undefined;
       if (renderMessage)
         return (
           <div key={message.presentationKey ?? message.id} className="message-group">
@@ -1176,13 +1177,15 @@ export function Conversation({
             showResponseStatus={traceTurns ? showTraceReply : placement === 'standalone'}
             showMetadata={placement !== 'process' || message.role === 'user'}
             copyText={
-              message.role === 'user' && message.settled && !message.delivery && message.text
-                ? message.copyText === null
-                  ? undefined
-                  : (message.copyText ?? message.text)
-                : assistantTurnCopies.get(message.id)
+              agentResult?.contentComplete && placement === 'standalone'
+                ? (message.copyText ?? undefined)
+                : message.role === 'user' && message.settled && !message.delivery && message.text
+                  ? message.copyText === null
+                    ? undefined
+                    : (message.copyText ?? message.text)
+                  : assistantTurnCopies.get(message.id)
             }
-            copyRole={message.role === 'user' ? 'user' : 'assistant'}
+            copyRole={agentResult ? 'agent_result' : message.role === 'user' ? 'user' : 'assistant'}
           />
         </div>
       );

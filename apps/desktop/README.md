@@ -1409,6 +1409,8 @@ Renderer按generation、Store和history epoch清空有界显示缓存，按会�
 
 进入定时任务页时丢弃本次导航的模型预读交接，返回会话时重新核对模型目录；原历史校准与未发送草稿保持。[定时任务 DOM](test/isolated/native-scheduled-tasks-dom.test.tsx)核往返读取、原草稿和零额外创建／发送。
 
+成功读取模型目录后，原路由缺失、禁用或不再适用时，输入区仅呈现“选择模型”。选中可用模型前，新轮次发送保持禁用。
+
 [模型 DOM](test/isolated/native-model-picker-dom.test.tsx)、[缓存率 DOM](test/isolated/native-cache-metrics-dom.test.tsx)和[完整会话页 DOM](test/isolated/native-new-conversation-dom.test.tsx)分别核模型与比例不串会话、原节点保留、延迟响应、epoch 失效、容量限制、无选择交接时禁止写入及首条自动进入。
 
 2026-10-19 Windows x64／Bun 1.4.3／Chrome 155，基于 `f734245a` 加本轮工作区改动：原实现用新增冷会话断言复现模型尚未就绪就发布目标页；修复后 `bun test --parallel=1 --max-concurrency=1 ./apps/desktop/test/isolated/native-session-shell-dom.test.tsx ./apps/desktop/test/isolated/native-model-picker-dom.test.tsx` 的18项／238断言通过，覆盖同模型新范围 ready、无重复 GET、后台状态通知、迟到准备、真实错误与准备中的观察撤回。合并后的19个相关整文件共139项／3208断言通过，Desktop typecheck、定向 Biome、文档和边界检查通过。增强的 `bun apps/desktop/test/session-shell-browser-runner.fixture.ts` 在浅／深主题完成冷页长模型名首帧、192帧等待采样和200次暖切换，模型按钮保持原 DOM，模型名／档位与同帧标题一致，无占位带来的中间宽度，业务写入为0。该夹具使用实际 NativeDesktop／CSS 与模拟 Main，浏览器沙箱开启；完整 Electron 安装窗口与真实 IPC 未复验，原嵌套 `@keyframes` 及既有 ToolActivity key 测试提示保留。
@@ -1596,7 +1598,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 [引导交接组合回归](test/isolated/native-new-conversation-dom.test.tsx)通过真实 Composer、DesktopInput、回环 HTTP、SQLite 和 Runtime／固定 Adapter，核引导 POST 已落库但回执丢失后，切到另一会话编辑草稿，再重连仅查询原 Command；原输入只出现一次、下一模型请求原文和来源各一次，另一草稿保持。另核提交与原 Turn 完成的两个顺序：受理归原 Run，目标先结束则保留草稿，不自动改成后续输入。[阅读回归](../../packages/ui/test/isolated/desktop-conversation-scroll.test.tsx)在受控 DOM 几何下核离底选区、sending→saved、增量回复、终态折叠和回会话的锚点／展开状态；这类确定性证据不冒称完整 Electron 视口资格。
 
-[子结果消息](src/native-presentation.ts)直接消费公开 `Message.agentResult`，由 [transcript](src/native-transcript.ts)保留原 Source ID／顺序并交给共享 Conversation 的独立消息边界。Store 只为原父 Turn 已结束、准确 report 实际创建后续 Run 的子结果投影该 DTO；active 原轮接纳继续沿普通工具和处理过程，终态和冷读都不补气泡。客户端不根据当前 Run 是否活动猜接纳时机，因此刚由结果唤起、仍执行中的续 Run 已能显示对应消息。消息复用普通输入气泡和同一个 MessageItem，头部为“〔名称〕Agent 发送”，正文使用原 Markdown。失败／取消／未知保真实结果，大正文按 `contentComplete:false` 明示尚未完整展示。[Native 入口](src/native.tsx)按准确 child Session／carrier 打开已有详情 reader，不从后来最新任务猜目标。冷历史重新投影不新增结果或模型调用，内部 Model 无该 DTO。来源证明和模型只接收一次结果归 [Store owner](../../packages/agent/src/storage/README.md#人类工作与完成报告事务)，分组回归归 [transcript DOM](test/isolated/native-transcript-dom.test.tsx)，实际窗口沿[协作夹具](test/isolated/native-collaboration-bundle.test.ts)。
+[子结果消息](src/native-presentation.ts)直接消费公开 `Message.agentResult`，由 [transcript](src/native-transcript.ts)保留原 Source ID／顺序并交给共享 Conversation 的独立消息边界。Store 只为原父 Turn 已结束、准确 report 实际创建后续 Run 的子结果投影该 DTO；active 原轮接纳继续沿普通工具和处理过程，终态和冷读都不补气泡。客户端不根据当前 Run 是否活动猜接纳时机，因此刚由结果唤起、仍执行中的续 Run 已能显示对应消息。消息复用普通输入气泡和右下角信息栏，显示原投递时间。复制采用已核实的完整 Markdown 原文。失败／取消／未知保真实结果，大正文按 `contentComplete:false` 明示尚未完整展示。子详情从原委派行进入，绑定准确 child Session／carrier。冷历史重新投影不新增结果或模型调用，内部 Model 无该 DTO。来源证明和模型只接收一次结果归 [Store owner](../../packages/agent/src/storage/README.md#人类工作与完成报告事务)，信息栏和复制回归归 [transcript DOM](test/isolated/native-transcript-dom.test.tsx)，实际窗口沿[协作夹具](test/isolated/native-collaboration-bundle.test.ts)。
 
 2026-11-16，Windows x64／Electron 44.3.0／Bun 1.4.4，当前源码构建了诊断关闭的生产 Renderer、Main、preload 和配套 Service。用普通输入框启动项目检查，以隔离回环 Provider 控制父先结束和子后完成。父会话在报告后继模型首字前显示一次具名气泡，底色、圆角与内边距实测和用户输入相同。报告入队时保留离底阅读位置和未发送草稿。流式回复和持久接管时气泡节点保持，重开后顺序仍为原输入、原回复、子报告、后续回复。原父会话只提交一次用户输入，续轮模型收到一份低信任报告。两次退出均为 0，冷读的 Run、报告与 Provider 请求数一致。五个阶段截图和 DOM／持久事实记录见本机 `dist/acceptance/late-agent-result-20261116-5eb5e70d`。验证覆盖本机生产展示链和受控模型，安装包与真实远端模型资格另按原范围维护。
 
@@ -3420,7 +3422,7 @@ PDF 文件预览沿受校验的逐页接口按需读取，在独立 `kite-previe
 
 本地 PDF 读取授权仍由 Main 持有，只把已校验的有限快照字节交给经过连接身份核验的回环 Service（拒绝远程 endpoint 与 HTTP 重定向）。PDF 页解析复用 Bun 的原有隔离 worker/严格缓存 IO，不在 Electron 中加载 Bun 原生运行依赖；Service 不接受源路径、不登记输出或 Artifact。返回页面前再次核原句柄授权及文件身份。Word 只读导航监听转换器分页状态/代际，不依赖编辑交互轮询后才显示缩略图。
 
-选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照并提示读取失败。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。
+选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照。每轮产物查询失败不插入提示，空列表不挂载占位；主动整理操作的实际失败仍在原位置反馈。环境信息的“参考”在原区域提示列表读取失败。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。
 
 Office journey 的单次预览等待只在精确目标工具栏下观察到本次“正在准备预览”后，才将明确失败立即归类为 preview_host_failed；其他目标或未证实属于本次的旧错误不触发提前失败。未观察到短暂 loading 时仍保留原有界超时，不猜测请求身份。DOCX 内容出现后还须现有 pagination marker settled 才截图；unavailable 与60秒未稳定分别报告，不把 IPC ready 当分页完成。安全 preview-observation.json 只存固定阶段／分类与布尔观察，不存路径、内容或凭据；既有 IPC／生命周期诊断继续保留。此为测试诊断改进，不新增产品重试，也不证明历史 processed.docx 失败已修复。
 

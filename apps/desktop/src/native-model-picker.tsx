@@ -7,7 +7,6 @@ import type {
   NativeRecommendedModel,
   NativeSelection,
 } from './native-bridge';
-import { useNativeDiagnostics } from './native-diagnostics';
 import { NativeDisplayCache } from './native-display-cache';
 import {
   readNativeRecommendedModel,
@@ -265,7 +264,6 @@ export function NativeModelPicker({
   prepared?: NativePreparedModels;
   preview?: NativeModelDisplay;
 }) {
-  const diagnostics = useNativeDiagnostics();
   const localSnapshots = useRef(new NativeModelSnapshots());
   const snapshots = sharedSnapshots ?? localSnapshots.current;
   const scope = nativeModelScope(generation, selection, preparing, revision);
@@ -486,11 +484,6 @@ export function NativeModelPicker({
       {error && <p role="alert">模型目录不可用：{error}</p>}
       {!preview && saveError === readKey && (
         <p role="alert">未能记住推荐模型与思考程度，请重新选择。</p>
-      )}
-      {!reading && !error && !selected && (requestedId || diagnostics) && (
-        <p role="alert">
-          {requestedId ? `所选模型 ${requestedId} 当前不可用，请重新选择。` : '请选择模型。'}
-        </p>
       )}
       {!preview && selected && !allowedEffort && (
         <p role="alert">原临时思考档位当前不可用，请重新选择。</p>

@@ -311,6 +311,12 @@ export function desktopMessages(
         agentResult,
         text: message.content,
         settled: true,
+        ...(agentResult.contentComplete &&
+        message.status === 'complete' &&
+        message.contentFormat !== 'unsupported' &&
+        !message.deferredText
+          ? { copyText: message.content }
+          : {}),
       };
     // firstOutput identifies the first channel, not the current phase. A
     // reasoning-first response starts rendering as soon as it has actual text.

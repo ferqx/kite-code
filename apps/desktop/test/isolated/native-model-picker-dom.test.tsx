@@ -862,8 +862,10 @@ test('explicit missing selection after configuration refresh stays unavailable w
     expect(ready.at(-1)).toBe(true);
     await act(async () => render('two'));
     expect(ready.at(-1)).toBe(false);
-    expect(f.element.textContent).toContain('所选模型 a 当前不可用');
-    expect(f.element.textContent).not.toContain('模型：remote-b');
+    const picker = f.element.querySelector<HTMLButtonElement>('[data-model-trigger]')!;
+    expect(picker.textContent).toBe('选择模型');
+    expect(picker.disabled).toBe(false);
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
     expect(changes).toHaveLength(0);
     expect(reads).toBe(2);
   } finally {
@@ -1132,7 +1134,10 @@ test('picker honors durable Session route before global default and does not rep
     expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-b');
     expect(ready.at(-1)).toBe(true);
     await act(async () => render('two'));
-    expect(f.element.textContent).toContain('所选模型 missing 当前不可用');
+    const picker = f.element.querySelector<HTMLButtonElement>('[data-model-trigger]')!;
+    expect(picker.textContent).toBe('选择模型');
+    expect(picker.disabled).toBe(false);
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
     expect(ready.at(-1)).toBe(false);
   } finally {
     await f.close();
@@ -1552,7 +1557,7 @@ test('an existing selected route of the other protocol stays unavailable without
     await act(async () => f.root.render(<Host />));
     expect(ready).toBe(false);
     expect(resolved).toBeUndefined();
-    expect(f.element.textContent).toContain('所选模型 b 当前不可用');
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
     await f.click('模型：选择模型');
     await f.click('选择模型，当前 未选择');
     expect(f.element.querySelector('[aria-label="选择模型 b"]')).toBeNull();

@@ -1034,7 +1034,7 @@ body {
     left: 0;
     height: 2px;
   }
-  .message.user .message-meta {
+  .message:is(.user, .agent-result) .message-meta {
     right: 0;
     left: auto;
     flex-direction: row-reverse;

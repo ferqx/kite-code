@@ -25,7 +25,7 @@ function publicMessagePositions(
     "CASE WHEN json_valid(report.receipt_json) THEN report.receipt_json ELSE '{}' END";
   return [
     `WITH accepted AS (
-      SELECT DISTINCT s.id,s.seq
+      SELECT DISTINCT s.id,s.seq,target.started_at AS result_created_at
       FROM context_snapshot s
       JOIN execution e ON e.id=s.execution_id AND e.kind='job'
         AND e.session_id=s.session_id AND e.origin_store_id=s.origin_store_id
@@ -73,9 +73,9 @@ function publicMessagePositions(
         AND COALESCE(json_extract(${sourceRequest},'$.diagnostic'),0)=0
         AND json_type(${executionResult},'$.content')='text'
         AND json_extract(${executionResult},'$.outcome')=e.state
-    ) SELECT id,seq,run_id,'message' AS display_kind FROM message
+    ) SELECT id,seq,run_id,'message' AS display_kind,NULL AS result_created_at FROM message
       WHERE session_id=? AND seq>? AND seq<=?${ids ? ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})` : ''}
-    UNION ALL SELECT id,seq,NULL AS run_id,'agent_result' AS display_kind FROM accepted WHERE seq>? AND seq<=?${ids ? ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})` : ''}
+    UNION ALL SELECT id,seq,NULL AS run_id,'agent_result' AS display_kind,result_created_at FROM accepted WHERE seq>? AND seq<=?${ids ? ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})` : ''}
     ORDER BY seq ${newestFirst ? 'DESC' : 'ASC'} LIMIT ?`,
     sessionId,
     sessionId,
@@ -173,6 +173,9 @@ export function readPublicMessages(
         if (carrier?.id === execution.id) childRunId = String(childRun!.id);
       } catch {}
     }
+    // The result Source and its continuation Run are published in one transaction.
+    const recordedTime = String(row.result_created_at ?? '');
+    const createdAt = /^\d+$/.test(recordedTime) ? Number(recordedTime) : NaN;
     return {
       id: String(source.id),
       seq: String(source.seq),
@@ -181,6 +184,7 @@ export function readPublicMessages(
       role: 'system',
       status: 'complete',
       content: result.content,
+      ...(Number.isSafeInteger(createdAt) ? { createdAt } : {}),
       sourceIds: [String(source.id)],
       agentResult: {
         sourceId: String(source.id),

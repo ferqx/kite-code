@@ -1253,9 +1253,15 @@ const agentResultMessage = (
 
 test('durable child results stay visible between completed parent replies, retain source identity and render the actual Markdown on cold history', async () => {
   const f = fixture();
+  const resultText = '**最新结果 A**\n\n真实内容 雪🙂';
+  const deliveredAt = Date.UTC(2026, 10, 16, 2, 3, 4);
+  const copied: string[] = [];
+  const writeClipboardText = async (text: string) => {
+    copied.push(text);
+  };
   const messages = [
     message('old-final', 'assistant', '1', '原父回复'),
-    agentResultMessage('result-a', '2', '**最新结果 A**\n\n真实内容 雪🙂'),
+    { ...agentResultMessage('result-a', '2', resultText), createdAt: deliveredAt },
     { ...message('continued-final', 'assistant', '3', '继续父回复'), runId: 'continued' },
     agentResultMessage('result-b', '4', '第二子结果', { contentComplete: false }),
   ];
@@ -1275,6 +1281,7 @@ test('durable child results stay visible between completed parent replies, retai
         selected
         connected
         saveReading={() => {}}
+        writeClipboardText={writeClipboardText}
         renderMessageContent={content}
       />,
     );
@@ -1282,15 +1289,17 @@ test('durable child results stay visible between completed parent replies, retai
     expect(transcript.messages.find((model) => model.id === 'result-a')).toMatchObject({
       role: 'system',
       systemKind: 'agent_result',
-      text: '**最新结果 A**\n\n真实内容 雪🙂',
+      text: resultText,
+      createdAtMs: deliveredAt,
+      copyText: resultText,
       agentResult: agentResultMessage('result-a', '2', '').agentResult,
     });
     for (const id of ['result-a', 'result-b']) {
       const model = transcript.messages.find((entry) => entry.id === id)!;
       expect(model.turnId).toBeUndefined();
       expect(model.finalReply).toBeUndefined();
-      expect(model.copyText).toBeUndefined();
     }
+    expect(transcript.messages.find((entry) => entry.id === 'result-b')?.copyText).toBeUndefined();
     await act(async () => render('hot'));
     const result = () => f.host.querySelector('[data-agent-result-source="result-a"]')!;
     expect(result().querySelector('.user-message-body strong')!.textContent).toBe('最新结果 A');
@@ -1310,8 +1319,16 @@ test('durable child results stay visible between completed parent replies, retai
     ).toBe(true);
     const readableOrder = () =>
       [...f.host.querySelectorAll('.agent-turn-final, .agent-result')].map(messageBodyText);
-    for (const entry of f.host.querySelectorAll('.agent-turn-final, .agent-result'))
-      expect(entry.querySelector('.message-time')?.textContent).toBe('时间未知');
+    const time = () => result().querySelector('.message-meta time');
+    expect(time()?.getAttribute('datetime')).toBe(new Date(deliveredAt).toISOString());
+    const partial = f.host.querySelector('[data-agent-result-source="result-b"]')!;
+    expect(partial.querySelector('.message-time')?.textContent).toBe('时间未知');
+    expect(partial.querySelector('.message-copy')).toBeNull();
+    const copy = result().querySelector<HTMLButtonElement>('.message-meta .message-copy')!;
+    expect(copy.getAttribute('aria-label')).toBe('复制子 Agent 报告');
+    await act(async () => copy.click());
+    expect(copied).toEqual([resultText]);
+    expect(copy.getAttribute('aria-label')).toBe('已复制消息');
     expect(readableOrder()).toEqual([
       '原父回复',
       '协作者 result-a Agent 发送最新结果 A\n真实内容 雪🙂',
@@ -1321,9 +1338,14 @@ test('durable child results stay visible between completed parent replies, retai
     const originalNode = result();
     await act(async () => render('hot'));
     expect(result()).toBe(originalNode);
+    expect(result().querySelector('.message-copy')).toBe(copy);
     expect(f.host.querySelectorAll('.agent-result')).toHaveLength(2);
     await act(async () => render('cold'));
     expect(result().closest('.agent-turn')).toBeNull();
+    expect(time()?.getAttribute('datetime')).toBe(new Date(deliveredAt).toISOString());
+    expect(result().querySelector('.message-copy')?.getAttribute('aria-label')).toBe(
+      '复制子 Agent 报告',
+    );
     expect(f.host.querySelectorAll('.agent-result')).toHaveLength(2);
     expect(readableOrder()[0]).toBe('原父回复');
     expect(readableOrder()[2]).toBe('继续父回复');

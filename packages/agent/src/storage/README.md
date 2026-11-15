@@ -339,7 +339,7 @@ Runtime 从已提交的完整模型回复取得原调用，Store 在 `finishRun`
 
 活动父轮从同一邮箱检查点接收结果。后继活动轮按原 Store、主体、选择、父子关系和确认事实接收邮箱中待处理的内容。通过稳定工具发送给父级的普通消息保留入队时的父轮和实际接收轮，原轮结束前未接收时可由后继轮接管。装配 after-turn 策略的宿主按原配置 lease、当前授权及资格决定是否创建通知轮，缺少资格的结果继续留在邮箱。结果接收事务提交准确 Run／Source／consume／mail 回执。回执丢失只查回原身份，停止、Rewind、unknown 与冷缺绑定不取得新执行资格。
 
-原 `applyJobReport` 保留为结果发布事务及旧恢复适配；新 Runtime 接收和 idle 调度均通过邮箱入口进入它。结果气泡继续由真实 idle 续跑的原 Source／回执证明投影，active 接纳在结束和重开后不补气泡。取舍见[统一接收决定](../../../../.agents/notes/implemented/architecture/2026-10-23-unified-message-reception.md)。
+原 `applyJobReport` 保留为结果发布事务及旧恢复适配；新 Runtime 接收和 idle 调度均通过邮箱入口进入它。结果气泡由真实 idle 续跑的原 Source／回执证明投影。其 `Message.createdAt` 取自同一发布事务中写入的续轮 `started_at`，刷新和冷读复用原值。active 接纳在结束和重开后不补气泡。取舍见[统一接收决定](../../../../.agents/notes/implemented/architecture/2026-10-23-unified-message-reception.md)。
 
 普通邮件的物理 Message 继续保存原内部占位与 mail source ID；公开 [Runtime listMessages/getView](../runtime.ts)通过 `publicAgentMailMessage` 只读展开原 Artifact，交付 system 消息、完整 content 和 `agentMessage`（原 mail ID、发送 Session／Tool Execution、名称、完整性）。来源须核原 `agent.message`、真实 receivedMessage／Run／selection、成功 sender Tool、原主体／Store／工作身份与直接父子关系，以及原 Artifact 的引用、scope 和字节证明。来源损坏返回无推断作者的系统不可读事实；正文不可读保留已验证作者并标 `contentComplete:false`，不退成用户气泡。公开视图不修改物理消息或低信任模型输入，也不增加 Source、Run 或接收回执；Native 把邮件留在实际接收轮次的原过程。
 

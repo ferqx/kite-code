@@ -4,6 +4,8 @@ import { memo, useMemo } from 'react';
 import { useTextCopy } from './clipboard';
 import { Button } from './ui';
 
+export type MessageCopyRole = 'user' | 'assistant' | 'agent_result';
+
 /** The host supplies exact text; this control never reconstructs a message or Turn. */
 export function MessageCopyButton({
   text,
@@ -12,7 +14,7 @@ export function MessageCopyButton({
   disabled = false,
 }: {
   text: string;
-  copyRole?: 'user' | 'assistant';
+  copyRole?: MessageCopyRole;
   writeClipboardText?: (text: string) => Promise<void>;
   disabled?: boolean;
 }) {
@@ -39,7 +41,7 @@ const CopyButtonView = memo(function CopyButtonView({
   disabled,
 }: {
   copyState: ReturnType<typeof useTextCopy>['copyState'];
-  copyRole?: 'user' | 'assistant';
+  copyRole?: MessageCopyRole;
   copyMessage: () => Promise<void>;
   readActive: boolean;
   disabled: boolean;
@@ -51,7 +53,9 @@ const CopyButtonView = memo(function CopyButtonView({
         ? '复制失败，请重试'
         : copyRole === 'user'
           ? '复制本轮用户消息'
-          : '复制本轮Agent回复';
+          : copyRole === 'agent_result'
+            ? '复制子 Agent 报告'
+            : '复制本轮Agent回复';
   return (
     <Button
       type="button"

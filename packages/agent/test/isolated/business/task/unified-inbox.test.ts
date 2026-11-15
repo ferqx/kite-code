@@ -344,6 +344,7 @@ for (const active of [true, false])
             runId: received.receivedRunId,
             role: 'system',
             content: resultBody,
+            createdAt: receivingRun.createdAt,
             sourceIds: [sourceId],
             agentResult: {
               sourceId,

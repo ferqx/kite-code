@@ -267,7 +267,7 @@ function OutputFileReader(input: {
           setError('');
         })
         .catch(() => {
-          if (!cancelled) setError('读取文件失败');
+          if (!cancelled && !input.runId) setError('读取文件失败');
         })
         .finally(() => {
           if (!cancelled) setLoading(false);

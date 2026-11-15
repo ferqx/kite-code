@@ -113,9 +113,11 @@ test('file references are bounded, retries use collection revision, and stale sc
           {output.request && 'fileId' in output.request.target ? output.request.target.fileId : ''}
         </output>
         {output.references}
-        {output.renderTurnOutputs({
-          turnId: JSON.stringify(['native-run', 'store', sessionId, 'run']),
-        })}
+        <div data-testid="turn-outputs">
+          {output.renderTurnOutputs({
+            turnId: JSON.stringify(['native-run', 'store', sessionId, 'run']),
+          })}
+        </div>
       </>
     );
   }
@@ -173,6 +175,16 @@ test('file references are bounded, retries use collection revision, and stale sc
       await act(() => button!.click());
       await settle();
     };
+    const turnOutputs = () => document.querySelector('[data-testid="turn-outputs"]')!;
+    queryPage = (request) => {
+      if (request.runId) throw Error('output_query_failed');
+      return { scope: request.scope, revision: '1', items: [], collections: [] };
+    };
+    await act(() => root.render(<Harness sessionId="no-outputs" />));
+    expect(turnOutputs().childNodes).toHaveLength(0);
+    await settle();
+    expect(turnOutputs().childNodes).toHaveLength(0);
+
     let lateBatch = false;
     queryPage = (request) => {
       const all = Array.from({ length: lateBatch ? 200 : 100 }, (_, i) =>
@@ -225,7 +237,8 @@ test('file references are bounded, retries use collection revision, and stale sc
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       150,
     );
-    expect(document.body.textContent).toContain('读取文件失败');
+    expect(turnOutputs().querySelector('[role="alert"]')).toBeNull();
+    expect(turnOutputs().textContent).not.toContain('读取文件失败');
     queryPage = (request) => ({
       ...page,
       scope: request.scope,
@@ -292,7 +305,7 @@ test('file references are bounded, retries use collection revision, and stale sc
     ).toMatchObject({ expectedRevision: '8' });
     queryPage = (request) => ({ ...page, scope: request.scope, items: [], collections: [] });
     await settle();
-    expect(document.querySelectorAll('[aria-label="本次产出"] [role="alert"]')).toHaveLength(0);
+    expect(turnOutputs().childNodes).toHaveLength(0);
     queryPage = (request) => ({
       ...page,
       scope: request.scope,

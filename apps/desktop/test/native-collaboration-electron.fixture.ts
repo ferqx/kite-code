@@ -386,8 +386,19 @@ try {
   assert.equal(await firstResultCard.count(), 1);
   assert.equal(await page.getByText('NATIVE_COLLAB_START_DONE_2', { exact: true }).count(), 0);
   await assertCreationHistory();
+  await firstResultCard.hover();
+  assert.equal(await firstResultCard.locator('.user-message-body button').count(), 0);
+  const firstResultTime = await firstResultCard
+    .locator('footer.message-meta time')
+    .getAttribute('datetime');
+  assert.ok(firstResultTime);
+  await firstResultCard.getByRole('button', { name: '复制子 Agent 报告', exact: true }).waitFor();
   await page.screenshot({ path: join(home, '03a-child-result-parent-continuing.png') });
-  await firstResultCard.getByRole('button', { name: '查看子 Agent', exact: true }).click();
+  await page
+    .locator('.agent-turn:not(.session-tab-child *)')
+    .first()
+    .getByRole('button', { name: '查看子 Agent 详情：CHILD_A', exact: true })
+    .click();
   await page.locator('.session-tab-child').getByText('CHILD_A_DONE_1', { exact: true }).waitFor();
   await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
   log('child_result_visible_before_parent_reply', {
@@ -637,6 +648,10 @@ try {
     assert.equal(await card.count(), 1);
     assert.equal(await card.getByText(message.content, { exact: true }).isVisible(), true);
   }
+  assert.equal(
+    await firstResultCard.locator('footer.message-meta time').getAttribute('datetime'),
+    firstResultTime,
+  );
   await page.screenshot({ path: join(home, '03b-child-result-followup.png') });
   assert.equal(final.selection!.executions.find((row) => row.id === a.id)!.cancelRequestedAt, null);
   assert.equal(
@@ -791,6 +806,11 @@ try {
     assert.equal(await card.count(), 1);
     assert.equal(await card.getByText(message.content, { exact: true }).isVisible(), true);
   }
+  const coldFirstResult = page.locator(`article[data-agent-result-source="${firstResultId}"]`);
+  assert.equal(
+    await coldFirstResult.locator('footer.message-meta time').getAttribute('datetime'),
+    firstResultTime,
+  );
   const coldTasks = cold.selection!.executions.filter(
     (row) =>
       row.childSessionId &&
