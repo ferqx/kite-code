@@ -519,13 +519,39 @@ export function toolTextFailed(message: Message): boolean {
   return traceStatus(message) === 'error' || message.shell?.jobStatus === 'failed';
 }
 
+/** Summary categories never replace the original per-tool title or target. */
+function traceCategoryAction(message: Message): string | undefined {
+  if (message.toolSummaryCategory === 'mcp') return '运行 MCP 工具';
+  if (message.toolSummaryCategory === 'skill') return '加载技能';
+  switch (message.toolName) {
+    case 'mcp_tool':
+    case 'list_mcp_tools':
+    case 'list_mcp_resources':
+    case 'read_mcp_resource':
+    case 'mcp.tools.search':
+    case 'mcp.resources.list':
+    case 'mcp.resources.read':
+      return '运行 MCP 工具';
+    case 'load_skill':
+      return '加载技能';
+    default:
+      return undefined;
+  }
+}
+
+export function completedToolCategory(message: Message): string | undefined {
+  if (message.status !== 'completed' || message.dispatchCommitted === false) return undefined;
+  const action = traceCategoryAction(message);
+  return action ? `已${action}` : undefined;
+}
+
 export function completedToolActions(messages: readonly Message[]): string {
   const actions = new Set<string>();
   for (const message of messages) {
     // A finite Shell process can exit unsuccessfully and still have run.
     const ran = isShellExecution(message) && message.shell?.jobStatus === 'failed';
     if ((message.status === 'completed' || ran) && message.dispatchCommitted !== false)
-      actions.add(`已${activityAction(message, true)}`);
+      actions.add(`已${traceCategoryAction(message) ?? activityAction(message, true)}`);
   }
   return [...actions].join(' · ');
 }

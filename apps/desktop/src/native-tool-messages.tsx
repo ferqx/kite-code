@@ -68,16 +68,33 @@ const exploration = new Set([
   'files.search',
   'files.list',
 ]);
+const mcpSummaryTools = new Set([
+  'mcp.sources.list',
+  'mcp.connect',
+  'mcp.catalogue.refresh',
+  'mcp.tools.search',
+  'mcp.resources.list',
+  'mcp.resources.read',
+  'mcp.prompts.list',
+  'mcp.prompts.get',
+]);
 
 /** Names follow stable IDs; structured presentation still requires a supported version. */
 export function desktopToolPresentation(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion'> &
     Pick<Partial<NativeToolMessageFact>, 'label'>,
-): Pick<DesktopMessage, 'toolName' | 'title' | 'presentation' | 'shell'> {
+): Pick<DesktopMessage, 'toolName' | 'toolSummaryCategory' | 'title' | 'presentation' | 'shell'> {
   const label = labels[fact.definitionId];
   const known = label?.[0].includes(fact.definitionVersion);
   const mcp = /^mcp\.([A-Za-z0-9_-]{1,128})\.[a-f0-9]{32}$/.test(fact.definitionId);
   return {
+    // Classification follows the original definition, not a remote display name.
+    // It changes only completed Trace summaries, not versioned result rendering.
+    ...(mcp || mcpSummaryTools.has(fact.definitionId)
+      ? { toolSummaryCategory: 'mcp' as const }
+      : fact.definitionId === 'skills.load'
+        ? { toolSummaryCategory: 'skill' as const }
+        : {}),
     toolName: known
       ? ((
           {

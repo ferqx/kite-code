@@ -48,7 +48,13 @@ import { formatMessageTime } from './message-time';
 import { PromptMarkdown } from './PromptMarkdown';
 import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
-import { completedToolActions, ToolActivity, toolTextFailed, toolTraceTitle } from './ToolActivity';
+import {
+  completedToolActions,
+  completedToolCategory,
+  ToolActivity,
+  toolTextFailed,
+  toolTraceTitle,
+} from './ToolActivity';
 import { TurnFailure } from './TurnFailure';
 import type { Message, TurnActivity } from './types';
 import { Button } from './ui';
@@ -1414,7 +1420,7 @@ export function Conversation({
             const summary =
               working ??
               ((singleTool
-                ? toolTraceTitle(singleTool)
+                ? (completedToolCategory(singleTool) ?? toolTraceTitle(singleTool))
                 : editedFiles
                   ? '已编辑的文件'
                   : completedToolActions(steps.filter((step) => step.role === 'tool'))) ||

@@ -24,7 +24,9 @@ Object.defineProperty(globalThis, 'document', {
 });
 const { Conversation } = await import('../../src/desktop/Conversation');
 const { DesktopDiagnosticsProvider } = await import('../../src/desktop/diagnostics');
-const { ToolActivity, ToolRow } = await import('../../src/desktop/ToolActivity');
+const { completedToolActions, completedToolCategory, ToolActivity, ToolRow } = await import(
+  '../../src/desktop/ToolActivity'
+);
 for (const [key, descriptor] of bootstrapGlobals) {
   if (descriptor) Object.defineProperty(globalThis, key, descriptor);
   else Reflect.deleteProperty(globalThis, key);
@@ -1575,4 +1577,93 @@ test('only explicit diagnostics show missing observation labels while actual too
     expect(content).toContain('ORIGINAL TOOL RESULT');
     expect(content).not.toContain('执行状态待核实');
   }
+});
+
+test('completed Trace categories deduplicate in first-action order without borrowing success or remote labels', () => {
+  const mcp: Message = {
+    ...tool('remote', 'completed'),
+    toolName: undefined,
+    toolSummaryCategory: 'mcp',
+    title: 'MCP · private provider · secret_tool',
+    target: 'private target',
+  };
+  const skill: Message = {
+    ...tool('skill', 'completed'),
+    toolName: 'load_skill',
+    toolSummaryCategory: 'skill',
+    title: '加载技能',
+    target: 'private_skill',
+  };
+  expect(
+    completedToolActions([
+      mcp,
+      tool('read', 'completed'),
+      { ...mcp, id: 'connect', title: 'mcp.connect' },
+      skill,
+      { ...skill, id: 'skill-2' },
+    ]),
+  ).toBe('已运行 MCP 工具 · 已读取文件 · 已加载技能');
+  expect(completedToolActions([skill, mcp, skill])).toBe('已加载技能 · 已运行 MCP 工具');
+  for (const category of [mcp, skill]) {
+    for (const status of [
+      'failed',
+      'cancelled',
+      'unknown',
+      'not_executed',
+      'queued',
+      'running',
+      'waiting',
+      'rejected',
+      'interrupted',
+      'recovery_required',
+    ] as const) {
+      const message = { ...category, status };
+      expect(completedToolActions([message])).toBe('');
+      expect(completedToolCategory(message)).toBeUndefined();
+    }
+    expect(completedToolActions([{ ...category, dispatchCommitted: false }])).toBe('');
+    expect(completedToolCategory({ ...category, dispatchCommitted: false })).toBeUndefined();
+  }
+  for (const toolName of [
+    'mcp_tool',
+    'list_mcp_tools',
+    'list_mcp_resources',
+    'read_mcp_resource',
+    'mcp.tools.search',
+    'mcp.resources.list',
+    'mcp.resources.read',
+  ])
+    expect(completedToolActions([{ ...mcp, toolSummaryCategory: undefined, toolName }])).toBe(
+      '已运行 MCP 工具',
+    );
+  expect(completedToolActions([{ ...skill, toolSummaryCategory: undefined }])).toBe('已加载技能');
+  expect(
+    completedToolActions([
+      {
+        ...skill,
+        toolSummaryCategory: undefined,
+        toolName: 'read_skill_resource',
+        title: '读取技能资料',
+      },
+    ]),
+  ).toBe('已读取技能资料');
+  expect(
+    completedToolActions([
+      {
+        ...mcp,
+        toolSummaryCategory: undefined,
+        toolName: 'ordinary',
+        title: 'MCP spoofed title',
+      },
+    ]),
+  ).toBe('已MCP spoofed title');
+  expect(
+    completedToolActions([
+      {
+        ...tool('shell', 'failed'),
+        toolName: 'shell_execute',
+        shell: { operation: 'execute', jobStatus: 'failed' },
+      },
+    ]),
+  ).toBe('已运行命令');
 });

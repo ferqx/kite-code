@@ -165,6 +165,8 @@ export interface Message {
     readonly cancelRequested?: boolean;
   };
   readonly toolName?: string;
+  /** Host-confirmed category for completed Trace summaries only; never inferred from a title. */
+  readonly toolSummaryCategory?: 'mcp' | 'skill';
   /** A verified write receipt establishes creation of a new file. */
   readonly fileCreated?: true;
   readonly toolStopping?: boolean;

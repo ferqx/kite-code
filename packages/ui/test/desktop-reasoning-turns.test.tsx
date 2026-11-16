@@ -1364,3 +1364,183 @@ test('cold and completed traces restore explicit reasoning choices without recla
     }
   }
 });
+
+test('single MCP and Skill traces summarize only after completion and keep the original tool heading when opened or reopened', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const keys = [
+    'window',
+    'document',
+    'IS_REACT_ACT_ENVIRONMENT',
+    'getComputedStyle',
+    'requestAnimationFrame',
+    'cancelAnimationFrame',
+  ] as const;
+  const originals = keys.map(
+    (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
+  );
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+  });
+  const host = dom.window.document.getElementById('root')!;
+  const root = createRoot(host);
+  try {
+    for (const [category, title, target, expected] of [
+      ['mcp', 'MCP · qa-names-7e · add', undefined, '已运行 MCP 工具'],
+      ['skill', '加载技能', 'private-skill-name', '已加载技能'],
+    ] as const) {
+      const tool: Message = {
+        id: category,
+        turnId: 'run',
+        role: 'tool',
+        text: 'Original result',
+        toolName: category === 'skill' ? 'load_skill' : undefined,
+        toolSummaryCategory: category,
+        title,
+        target,
+        status: 'running',
+        settled: false,
+      };
+      const draw = (
+        status: NonNullable<Message['status']>,
+        turnStatus: 'running' | 'completed',
+        cold = false,
+      ) =>
+        root.render(
+          <Conversation
+            key={`${category}:${cold}`}
+            traceTurns
+            selected
+            connected
+            loading={false}
+            messages={[{ ...tool, status, settled: status !== 'running' }]}
+            turnActivity={{ turnId: 'run', status: turnStatus }}
+            saveReading={() => {}}
+            initialReading={{ top: 0, follow: false, expanded: { 'turn:run:complete': true } }}
+          />,
+        );
+      const heading = () => host.querySelector<HTMLButtonElement>('.conversation-trace > button')!;
+      await act(async () => draw('running', 'running'));
+      expect(heading().textContent).toContain(title);
+      expect(heading().textContent).not.toBe(expected);
+      await act(async () => heading().click());
+      expect(host.querySelector('.conversation-trace-steps .tool-activity-title')).toBeNull();
+      await act(async () => draw('completed', 'running'));
+      expect(heading().textContent).toBe('正在回复…');
+      expect(host.querySelector('.conversation-trace-steps .tool-activity-title')).toBeNull();
+      await act(async () => heading().click());
+      await act(async () => draw('completed', 'completed'));
+      const turn = host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+      if (turn.getAttribute('aria-expanded') === 'false') await act(async () => turn.click());
+      expect(heading().textContent).toBe(expected);
+      expect(heading().querySelector('[title]')?.getAttribute('title')).toBe(expected);
+      expect(heading().getAttribute('aria-expanded')).toBe('false');
+      await act(async () => heading().click());
+      expect(host.querySelector('.conversation-trace-steps')?.textContent).toContain(title);
+      if (target)
+        expect(host.querySelector('.conversation-trace-steps')?.textContent).toContain(target);
+      expect(host.querySelector('.conversation-trace-steps .tool-activity-title')).not.toBeNull();
+      const inner = host
+        .querySelector('.conversation-trace-steps .tool-activity-title')!
+        .closest<HTMLButtonElement>('button')!;
+      expect(inner.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => inner.click());
+      expect(inner.getAttribute('aria-expanded')).toBe('true');
+      await act(async () => inner.click());
+      expect(inner.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => heading().click());
+      await act(async () => heading().click());
+      expect(
+        host
+          .querySelector('.conversation-trace-steps .tool-activity-title')
+          ?.closest('button')
+          ?.getAttribute('aria-expanded'),
+      ).toBe('false');
+      expect(heading().textContent).toBe(expected);
+      expect(host.querySelector('.conversation-trace-steps')?.textContent).toContain(title);
+      await act(async () => draw('completed', 'completed', true));
+      expect(heading().textContent).toBe(expected);
+      await act(async () => heading().click());
+      expect(host.querySelector('.conversation-trace-steps')?.textContent).toContain(title);
+      for (const status of ['failed', 'cancelled', 'unknown', 'not_executed', 'queued'] as const) {
+        await act(async () => draw(status, 'completed', true));
+        expect(heading().textContent).not.toBe(expected);
+      }
+    }
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});
+
+test('separate completed traces keep category order, ordinary summaries and original expanded tool identities', () => {
+  const tool = (id: string, category?: 'mcp' | 'skill'): Message => ({
+    id,
+    turnId: 'run',
+    role: 'tool',
+    text: '',
+    settled: true,
+    status: 'completed',
+    toolSummaryCategory: category,
+    title: category === 'mcp' ? `MCP · provider · ${id}` : '加载技能',
+  });
+  const boundary: Message = {
+    id: 'boundary',
+    turnId: 'run',
+    role: 'assistant',
+    text: 'Between traces',
+    settled: true,
+  };
+  const dom = new JSDOM(
+    renderToStaticMarkup(
+      <Conversation
+        traceTurns
+        selected
+        connected
+        loading={false}
+        saveReading={() => {}}
+        turnActivity={{ turnId: 'run', status: 'completed' }}
+        initialReading={{
+          top: 0,
+          follow: false,
+          expanded: {
+            'turn:run:complete': true,
+            'trace-turn:turn:run': true,
+            'trace-after:boundary': true,
+          },
+        }}
+        messages={[
+          { ...thinking('run'), settled: true },
+          tool('sources', 'mcp'),
+          tool('connect', 'mcp'),
+          tool('remote', 'mcp'),
+          { ...tool('read'), title: '读取', toolName: 'read_file' },
+          boundary,
+          { ...thinking('run'), id: 'second-thought', settled: true },
+          tool('skill-one', 'skill'),
+          tool('skill-two', 'skill'),
+          tool('second-remote', 'mcp'),
+        ]}
+      />,
+    ),
+  );
+  const summaries = [...dom.window.document.querySelectorAll('.conversation-trace > button')];
+  expect(summaries.map((node) => node.textContent)).toEqual([
+    '已运行 MCP 工具 · 已读取文件',
+    '已加载技能 · 已运行 MCP 工具',
+  ]);
+  expect(summaries.every((node) => !node.textContent?.includes('provider'))).toBe(true);
+  const details = dom.window.document.querySelectorAll('.conversation-trace-steps');
+  expect(details[0]?.textContent).toContain('MCP · provider · sources');
+  expect(details[1]?.textContent).toContain('MCP · provider · second-remote');
+  expect(dom.window.document.body.textContent).not.toContain('PRIVATE REASONING');
+  dom.window.close();
+});

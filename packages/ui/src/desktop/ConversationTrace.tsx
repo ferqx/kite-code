@@ -11,7 +11,7 @@ import {
   TraceTitle,
 } from './components/ui/trace';
 import { DeferredProcessContent } from './DeferredProcessContent';
-import { toolIcon } from './ToolActivity';
+import { completedToolCategory, toolIcon } from './ToolActivity';
 import type { Message } from './types';
 
 export const traceKey = (boundary: Message) =>
@@ -77,7 +77,8 @@ export function ConversationTrace({
   const first = steps[0];
   const grouped = steps.length > 1;
   const firstReasoning = first?.role === 'thinking';
-  const nested = grouped || firstReasoning;
+  const summarizedTool = first?.role === 'tool' && label === completedToolCategory(first);
+  const nested = grouped || firstReasoning || summarizedTool;
   const firstTool = steps.find((step) => step.role === 'tool');
   const summaryIcon = firstTool ? toolIcon(firstTool) : waitingForTool ? Wrench01Icon : BulbIcon;
   const panelId = useId();
@@ -95,7 +96,7 @@ export function ConversationTrace({
   }, [grouped, firstReasoning, open, firstKey, first?.role, expanded, onToggle]);
   function toggle(next: boolean) {
     onToggle(id, next);
-    if (!grouped && first?.role === 'tool' && firstKey) {
+    if (!grouped && !summarizedTool && first?.role === 'tool' && firstKey) {
       onToggle(`activity:${firstKey}`, next);
     }
   }
@@ -157,7 +158,7 @@ export function ConversationTrace({
             <Trace className="conversation-trace-steps" data-grouped={nested || undefined}>
               {steps.map((step, index) => {
                 const stepKey = step.presentationKey ?? step.id;
-                const direct = index === 0 && !grouped;
+                const direct = index === 0 && !grouped && !summarizedTool;
                 if (step.role === 'tool')
                   return <Fragment key={stepKey}>{renderTool(step, direct, detailsOpen)}</Fragment>;
                 const canRead = !!step.reasoningSource && !!renderReasoning;

@@ -3008,3 +3008,63 @@ test('verified full MCP names have bounded Unicode-safe plain text without termi
     ),
   ).toBe('search');
 });
+
+test('Trace categories follow exact tool definitions without changing individual names or interpreting external labels', () => {
+  for (const definitionId of [
+    'mcp.sources.list',
+    'mcp.connect',
+    'mcp.catalogue.refresh',
+    'mcp.tools.search',
+    'mcp.resources.list',
+    'mcp.resources.read',
+    'mcp.prompts.list',
+    'mcp.prompts.get',
+    `mcp.docs.${'a'.repeat(32)}`,
+    `mcp.mcp-${'b'.repeat(64)}.${'c'.repeat(32)}`,
+  ]) {
+    for (const definitionVersion of ['1', 'future']) {
+      const source = { definitionId, definitionVersion, label: 'MCP · qa-names-7e · add' };
+      const presentation = desktopToolPresentation(source);
+      expect(presentation.toolSummaryCategory).toBe('mcp');
+      for (const status of [
+        'planned',
+        'running',
+        'succeeded',
+        'failed',
+        'cancelled',
+        'outcome_unknown',
+      ] as const) {
+        const message = desktopToolMessage({ ...source, status }, 'original', 'original output');
+        expect(message.toolSummaryCategory).toBe('mcp');
+        expect(message.title).toBe(presentation.title);
+        expect(message.text).toBe('original output');
+        expect(message.status === 'completed').toBe(status === 'succeeded');
+      }
+    }
+  }
+  for (const definitionVersion of ['1', 'future'])
+    expect(
+      desktopToolPresentation({ definitionId: 'skills.load', definitionVersion }),
+    ).toMatchObject({
+      toolSummaryCategory: 'skill',
+      title: '加载技能',
+    });
+  for (const definitionId of [
+    'skills.resource',
+    'skills.activate',
+    'mcp.source.connection',
+    'mcp.connection',
+    'mcp.tools.snapshots',
+    'mcp.tools',
+    'mcp.not-a-tool',
+    'ordinary.tool',
+    'mcp.docs.not-a-hash',
+  ])
+    expect(
+      desktopToolPresentation({
+        definitionId,
+        definitionVersion: '1',
+        label: 'MCP · secret tool · load_skill',
+      }).toolSummaryCategory,
+    ).toBeUndefined();
+});
