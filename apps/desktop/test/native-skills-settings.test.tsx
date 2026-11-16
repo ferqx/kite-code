@@ -1165,15 +1165,15 @@ test('initial read failure is distinct from an empty catalogue and hides unsafe 
     expect(host.textContent).toContain('尚未配置用户 Skill。');
   }));
 
-test('office documents appears as an installed builtin rather than a missing source', async () => {
+test('the workbook skill appears as an installed builtin', async () => {
   await fixture(async (host, _root, render) => {
     await render(
       bridgeOf(async (request) =>
         result(request, [
           {
-            id: 'office-documents',
-            name: 'office-documents',
-            description: 'Office documents',
+            id: 'office.xlsx',
+            name: 'xlsx',
+            description: 'Excel workbooks',
             source: null,
             version: 'c'.repeat(64),
             enabled: true,
@@ -1185,7 +1185,7 @@ test('office documents appears as an installed builtin rather than a missing sou
         ]),
       ),
     );
-    expect(host.textContent).toContain('office-documents');
+    expect(host.textContent).toContain('xlsx');
     expect(host.textContent).toContain('内置技能');
     expect(host.textContent).not.toContain('未提供来源信息');
   });

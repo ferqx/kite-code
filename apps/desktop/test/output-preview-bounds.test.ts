@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
 // Evaluate the actual class without Electron/Office imports. Only bounds() is invoked;
-// conversion and native-view creation remain covered by the real Electron fixture.
+// Renderer initialization and native-view creation remain covered by the real Electron fixture.
 const source = readFileSync(new URL('../electron/output-preview.ts', import.meta.url), 'utf8');
 const emitted = ts
   .transpileModule(source, {
@@ -23,7 +23,7 @@ const Preview = new Function(`${emitted}\nreturn NativeOutputPreview;`)() as new
 };
 type Rect = { x: number; y: number; width: number; height: number };
 
-test('pending conversion retains latest bounds for the eventual native view', () => {
+test('pending preview retains latest bounds for the eventual native view', () => {
   const preview = new Preview();
   const initial = { x: 0, y: 0, width: 400, height: 600 };
   preview.active = { id: 'current', bounds: initial };
@@ -49,7 +49,7 @@ test('native view remains hidden until load, interaction install and initial con
     'view.setVisible(false)',
     'addNativeWindowView(input.window, view)',
     'await view.webContents.loadURL',
-    'officeInteractionInstallScript(officeKind)',
+    'globalThis.kiteOfficePreviewReady',
     'const initialControls = input.initialControls ?? []',
     'for (const command of initialControls)',
     'officeInteractionControlScript(command)',

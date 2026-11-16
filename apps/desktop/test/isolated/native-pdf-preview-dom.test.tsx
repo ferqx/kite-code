@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import type { NativeBridge, NativeRequest } from '../../src/native-bridge';
+import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
 
-test('PDF page loading and failure never label the previous image as the requested page', async () => {
+test('the output preview shows one loading icon, then an error or the ready toolbar', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -30,39 +30,41 @@ test('PDF page loading and failure never label the previous image as the request
     fileId: 'pdf',
     locator: { kind: 'delivery' as const, key: 'delivery/pdf' },
   };
-  let fail: ((error: Error) => void) | undefined;
-  let saves = 0,
-    edits = 0;
+  let finishInfo: ((result: NativeResult) => void) | undefined;
+  let finishPreview: ((result: NativeResult) => void) | undefined;
+  let failPreview: ((error: Error) => void) | undefined;
+  let opens = 0;
+  let saves = 0;
+  const info = {
+    kind: 'outputs.info' as const,
+    file: {
+      ...target,
+      name: 'two.pdf',
+      mediaType: 'application/pdf',
+      size: '10',
+      publishedAt: '2026-11-11T00:00:00Z',
+      ownerRunId: 'run',
+    },
+  };
   const bridge = {
-    watch: () => () => {},
-    async request(request: NativeRequest) {
+    async request(request: NativeRequest): Promise<NativeResult> {
       if (request.method === 'outputs.info')
-        return {
-          kind: 'outputs.info',
-          file: {
-            ...target,
-            name: 'two.pdf',
-            mediaType: 'application/pdf',
-            size: '10',
-            publishedAt: '2026-11-11T00:00:00Z',
-            ownerRunId: 'run',
-          },
-        };
-      if (request.method === 'outputs.pdf.page') {
-        if (request.page === 2)
-          return await new Promise((_, reject) => {
-            fail = reject;
-          });
-        return {
-          kind: 'outputs.pdf.page',
-          pdf: { page: 1, totalPages: 2, mediaType: 'image/png', data: 'first-page' },
-        };
+        return new Promise((resolve) => {
+          finishInfo = resolve;
+        });
+      if (request.method === 'outputs.preview.open') {
+        opens++;
+        return new Promise((resolve, reject) => {
+          finishPreview = resolve;
+          failPreview = reject;
+        });
       }
-      throw Error('unexpected_request');
+      return null;
     },
   } as NativeBridge;
-  const button = (label: string) =>
-    [...document.querySelectorAll('button')].find((item) => item.textContent === label)!;
+  const loader = () => document.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]');
+  const zoom = () => document.querySelector<HTMLSelectElement>('select[aria-label="预览缩放"]')!;
+  const save = () => document.querySelector<HTMLButtonElement>('button[aria-label="另存为"]')!;
   try {
     await act(async () =>
       root.render(
@@ -71,24 +73,34 @@ test('PDF page loading and failure never label the previous image as the request
           generation={1}
           target={target}
           onSave={() => saves++}
-          onEdit={() => edits++}
+          onEdit={() => {}}
         />,
       ),
     );
-    expect(document.querySelector('img')?.alt).toBe('第 1 页');
-    await act(async () => button('下一页').click());
-    expect(document.querySelector('img')).toBeNull();
-    expect(document.body.textContent).toContain('正在准备预览');
-    await act(async () => fail!(Error('render_failed')));
-    expect(document.querySelector('img')).toBeNull();
-    expect(document.body.textContent).toContain('暂时无法预览');
-    await act(() => {
-      button('另存为').click();
-      button('继续修改').click();
-    });
-    expect([saves, edits]).toEqual([1, 1]);
-    await act(async () => button('上一页').click());
-    expect(document.querySelector('img')?.alt).toBe('第 1 页');
+    expect(loader()).toHaveLength(1);
+    expect(document.body.textContent).not.toContain('正在准备预览');
+    await act(async () => finishInfo!(info));
+    expect(loader()).toHaveLength(1);
+    expect(opens).toBe(1);
+    expect(zoom().disabled).toBe(true);
+    await act(async () => failPreview!(Error('render_failed')));
+    expect(loader()).toHaveLength(0);
+    expect(document.querySelector('.native-file-preview-error p')?.textContent).toBe('预览失败');
+    await act(() => save().click());
+    expect(saves).toBe(1);
+    await act(() =>
+      [...document.querySelectorAll('button')]
+        .find((button) => button.textContent === '重试')!
+        .click(),
+    );
+    expect(loader()).toHaveLength(1);
+    expect(opens).toBe(1);
+    await act(async () => finishInfo!(info));
+    await act(async () => finishPreview!({ kind: 'outputs.preview', status: 'ready' }));
+    expect(loader()).toHaveLength(0);
+    expect(opens).toBe(2);
+    expect(document.querySelector('.native-file-preview-error')).toBeNull();
+    expect(zoom().disabled).toBe(false);
   } finally {
     await act(() => root.unmount());
     dom.window.close();

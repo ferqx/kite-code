@@ -24,7 +24,7 @@ Windows Main 保初始完整内容／语义验证，再由 [Node-API owner](../n
 
 macOS arm64 和 Windows x64 执行 `bun run release:build --product native` 可独立构建桌面候选。Windows 使用已准备的 x64 MSVC 和满足现有 ACL 准入的 Bun、Electron 与输出目录，离线安装包构建见下文。macOS 用 `bun run desktop` 启动默认候选，Windows 使用已安装的桌面前门。Linux 先执行 `bun run release:build` 准备 `dist/unified-terminal`，再构建 Native 并启动。启动核对两层完整性和使用权。日常开发使用 `bun run build` 后 `bun run desktop:dev`，并使用独立 development profile。
 
-Native 的内嵌运行时随包携带 OfficeCLI、中文字体、KaTeX 和文档 helper。Main 按[已准入的 Service 入口](../electron/native-assets.ts)定位同级 Agent 包中的预览资产，适用于桌面专用 `terminal/code` 和完整 Terminal 的 `terminal/node_modules` 两种布局。资产的构建与校验见 [Office owner](../../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)。
+Native 构建将 Word、Excel、PPT 原件预览脚本放入桌面应用目录，并随制品记录 Word、PPT 渲染器的许可与上游声明。默认运行时提供四个 Office Skill、PDF helper 与独立字体。运行时以已准入的 Service 入口定位同级 Agent 包，支持桌面专用 `terminal/code` 和完整 Terminal 的 `terminal/node_modules` 布局。 [已准入的 Service 入口](../electron/native-assets.ts) · [文档资产的构建与校验](../../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
 
 CLI/TUI 由 `bun run release:build` 构建的独立 Terminal 提供。下面的组合包示例用 `--terminal` 显式选择完整 Terminal，供组合安装和 `register-cli` 使用。
 

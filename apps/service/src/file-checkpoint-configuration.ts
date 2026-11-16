@@ -795,7 +795,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
     if (!description) return tool;
     return {
       ...tool,
-      description: `${description} ${fileScopeDescription} Files read/write/edit operations do not collect attachments. Use Files for the requested working or saved file location; final attachments are collected only from a successful Shell execution’s current KITE_OUTPUT_DIR. Preserve user-specified locations and permissions; never redirect them merely to obtain an attachment. Shell/OfficeCLI final exports belong in the current Shell KITE_OUTPUT_DIR, within that same Shell call. Do not use Files to write a previous Shell staging path or reuse it in another Shell call.`,
+      description: `${description} ${fileScopeDescription} Files read/write/edit operations do not collect attachments. Use Files for the requested working or saved file location; final attachments are collected only from a successful Shell execution’s current KITE_OUTPUT_DIR. Preserve user-specified locations and permissions; never redirect them merely to obtain an attachment. Do not use Files to write a previous Shell staging path or reuse it in another Shell call.`,
       inputSchema: {
         ...tool.inputSchema,
         properties: {

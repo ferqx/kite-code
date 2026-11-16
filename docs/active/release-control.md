@@ -54,7 +54,7 @@ Windows 桌面专用安装包的配套服务通过同一制品内的模块启动
 
 `bun run release:windows-setup` 串联同一 Windows 桌面专用构建、归档校验和离线安装器生成。参数和产物见 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。
 
-办公运行时资产进入 Terminal 与 Native 的完整库存。macOS arm64 在签名前校验锁定的 OfficeCLI 原始字节，并将签名后的字节与更新后的摘要一同纳入候选身份。见 [Office 资产边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)。
+Native 的 Word、Excel、PPT 浏览器渲染脚本进入完整制品库存。标准 Terminal 与 Native 均包含四个固定 Office Skill、PDF helper 和独立字体。 [文档资产边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
 
 `bun run release:macos-dmg` 将 arm64 桌面专用 Native 候选放入可拖拽的 `Kite Desktop.app`，并在只读映像中提供指向 `/Applications` 的快捷方式。制品保留桌面服务和本平台运行资源，构建核验排除 `node_modules`、CLI/TUI 和独立 Terminal Web 入口。Finder 管理复制、替换和移到废纸篓，应用启动继续验证包内候选。指定 Developer ID 身份和公证 profile 时，从源码构建并在计算清单摘要前签署内部程序。外层 DMG 完成公证、附票和校验后生成最终摘要。Developer ID 实机证据及正式发布仍走原门禁。构建参数和实机证据归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#macos-dmg)。
 

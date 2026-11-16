@@ -1680,7 +1680,6 @@ export function registerNativeIpc(options: {
   ipcMain: IpcMain;
   window: () => BrowserWindow | undefined;
   rendererUrl: string;
-  officeAssetsRoot?: string;
   caller: () => Promise<NativeCaller>;
   confirmWorkspaceRemoval?: (label: string) => Promise<boolean>;
   confirmProviderRemoval?: (summary: { label: string; modelCount: number }) => Promise<boolean>;
@@ -1742,7 +1741,6 @@ export function registerNativeIpc(options: {
       const caller = await options.caller();
       // Recheck sender after startup/admission awaits; a replaced frame cannot submit work.
       assertNativeSender(event, options.window(), options.rendererUrl);
-      if (options.officeAssetsRoot) caller.configureOfficeRuntime(options.officeAssetsRoot);
       if (
         request.method === 'select' ||
         request.method === 'attach' ||
@@ -1769,9 +1767,7 @@ export function registerNativeIpc(options: {
         if (!file || !window) throw Error('local_preview_unavailable');
         file.check();
         if (!preview) {
-          preview = new (await import('./output-preview')).NativeOutputPreview(
-            options.officeAssetsRoot,
-          );
+          preview = new (await import('./output-preview')).NativeOutputPreview();
           window.once('closed', closePreview);
           window.webContents.once('render-process-gone', closePreview);
           window.webContents.once('did-start-navigation', closePreview);
@@ -1805,9 +1801,7 @@ export function registerNativeIpc(options: {
         const window = options.window();
         if (!window) throw Error('native_window_unavailable');
         if (!preview) {
-          preview = new (await import('./output-preview')).NativeOutputPreview(
-            options.officeAssetsRoot,
-          );
+          preview = new (await import('./output-preview')).NativeOutputPreview();
           window.once('closed', closePreview);
           window.webContents.once('render-process-gone', closePreview);
           window.webContents.once('did-start-navigation', closePreview);
@@ -1820,7 +1814,7 @@ export function registerNativeIpc(options: {
         };
         const edited =
           request.method === 'outputs.office.preview'
-            ? await caller.officeRevision(request, options.officeAssetsRoot, check)
+            ? await caller.officeRevision(request, check)
             : undefined;
         value = await preview.open({
           renderPdfPage: async (page, signal) => {
@@ -1882,7 +1876,6 @@ export function registerNativeIpc(options: {
             });
             return result.canceled ? undefined : result.filePath;
           },
-          options.officeAssetsRoot,
           () => assertNativeSender(event, options.window(), options.rendererUrl),
         );
       } else if (

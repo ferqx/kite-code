@@ -2,13 +2,10 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync } from 'node:fs';
 import { copyFile, lstat, readFile, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
-import { officeEnvironment, verifyOfficeRuntimeAssets } from '@kite-ai/agent/documents';
 import type { OfficeEditorSnapshot } from '../src/office-editor-bridge';
-import { NativeProcessOwner } from './native-processes';
 import type { WindowsOfficeGuard, WindowsOfficeStorage } from './windows-access';
 
-type Node = { type: string; format?: Record<string, unknown>; children?: Node[] };
-type Revision = { snapshot: OfficeEditorSnapshot; path: string; nodes: Node[]; size: number };
+type Revision = { snapshot: OfficeEditorSnapshot; path: string; size: number };
 type Session = {
   sourceKey: string;
   current: Revision;
@@ -27,7 +24,6 @@ async function hashFile(path: string) {
 }
 /** Read-only retained Office history. Never initializes, edits or repairs stored copies. */
 export class NativeOfficeEditor {
-  private readonly owner = new NativeProcessOwner();
   private readonly sessions = new Map<string, Session>();
   private readonly opening = new Map<string, Promise<OfficeEditorSnapshot>>();
   private readonly active = new Set<Promise<unknown>>();
@@ -35,8 +31,8 @@ export class NativeOfficeEditor {
   private readonly closeFailures: unknown[] = [];
   private closing = false;
   private closePromise?: Promise<void>;
-  private readonly options: { root: string; assetsRoot?: string; storage?: WindowsOfficeStorage };
-  constructor(options: { root: string; assetsRoot?: string; storage?: WindowsOfficeStorage }) {
+  private readonly options: { root: string; storage?: WindowsOfficeStorage };
+  constructor(options: { root: string; storage?: WindowsOfficeStorage }) {
     this.options = options;
   }
   private track<T>(work: () => Promise<T>): Promise<T> {
@@ -127,66 +123,7 @@ export class NativeOfficeEditor {
       )
     );
   }
-  private async query(path: string) {
-    const assets = await verifyOfficeRuntimeAssets(this.options.assetsRoot);
-    const operation = this.owner.start(
-      assets.officecli,
-      ['query', path, 'slide', '--json'],
-      {
-        env: { ...process.env, ...officeEnvironment() },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      },
-      {
-        timeoutMs: 60000,
-        timeoutError: 'office_editor_timeout',
-        launchError: 'office_editor_launch_failed',
-      },
-    );
-    const collect = async (stream: AsyncIterable<Uint8Array>) => {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      for await (const chunk of stream) {
-        size += chunk.length;
-        if (size > 2 * 1024 * 1024) {
-          operation.stop(Error('office_editor_output_limit'));
-          throw Error('office_editor_output_limit');
-        }
-        chunks.push(Buffer.from(chunk));
-      }
-      return Buffer.concat(chunks).toString('utf8');
-    };
-    let result: [number | null, string, string];
-    try {
-      result = await Promise.all([
-        operation.result,
-        collect(operation.child.stdout!),
-        collect(operation.child.stderr!),
-      ]);
-    } catch (error) {
-      operation.stop(error instanceof Error ? error : Error('office_editor_operation_failed'));
-      await operation.result.catch(() => {});
-      throw error;
-    }
-    const [code, stdout] = result;
-    if (code !== 0) throw Error('office_editor_operation_failed');
-    const parsed = JSON.parse(stdout);
-    if (parsed?.success !== true) throw Error('office_editor_operation_failed');
-    return parsed.data;
-  }
-  private async inspect(path: string): Promise<Node[]> {
-    const data = await this.query(path);
-    const nodes = data?.results;
-    if (!Array.isArray(nodes) || nodes.length > 500 || nodes.some((n: Node) => n.type !== 'slide'))
-      throw Error('office_editor_document_invalid');
-    return nodes;
-  }
-  private async revision(
-    path: string,
-    editorId: string,
-    revision: number,
-    name: string,
-  ): Promise<Revision> {
+  private async revision(path: string, snapshot: OfficeEditorSnapshot): Promise<Revision> {
     return this.withAccess(path, async () => {
       const stat = await lstat(path);
       if (
@@ -199,18 +136,9 @@ export class NativeOfficeEditor {
         stat.size > 256 * 1024 * 1024
       )
         throw Error('office_editor_document_invalid');
-      const sourceHash = await hashFile(path);
-      const nodes = await this.inspect(path);
-      if ((await hashFile(path)) !== sourceHash) throw Error('office_editor_recovery_invalid');
-      const snapshot = {
-        editorId,
-        revision,
-        name,
-        slideCount: nodes.length,
-        notes: nodes.map((n) => String(n.format?.notes ?? '')),
-        sourceHash,
-      };
-      return { path, snapshot, nodes, size: stat.size };
+      if ((await hashFile(path)) !== snapshot.sourceHash)
+        throw Error('office_editor_recovery_invalid');
+      return { path, snapshot, size: stat.size };
     });
   }
   open(input: { sourceKey: string; name: string; check(): void }): Promise<OfficeEditorSnapshot> {
@@ -233,12 +161,26 @@ export class NativeOfficeEditor {
   }
   private async historical(dir: string, id: string, revision: number, name: string) {
     const metadataPath = join(dir, `${String(revision)}.json`);
-    // Archive metadata and immutable bytes stay pinned together through query and hashing.
+    // Read the sealed index and verify the retained bytes while both paths are pinned.
     return this.withAccess(metadataPath, async () => {
       const metadata = await this.metadata(metadataPath);
-      const value = await this.revision(join(dir, `${String(revision)}.pptx`), id, revision, name);
-      if (!this.matches(metadata, value.snapshot)) throw Error('office_editor_recovery_invalid');
-      return value;
+      if (
+        !metadata ||
+        Object.keys(metadata).length !== 6 ||
+        metadata.editorId !== id ||
+        metadata.revision !== revision ||
+        metadata.name !== name ||
+        !Number.isSafeInteger(metadata.slideCount) ||
+        metadata.slideCount < 0 ||
+        metadata.slideCount > 500 ||
+        !Array.isArray(metadata.notes) ||
+        metadata.notes.length !== metadata.slideCount ||
+        metadata.notes.some((note: unknown) => typeof note !== 'string') ||
+        typeof metadata.sourceHash !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(metadata.sourceHash)
+      )
+        throw Error('office_editor_recovery_invalid');
+      return this.revision(join(dir, `${String(revision)}.pptx`), metadata);
     });
   }
   private async openHistory(
@@ -404,11 +346,9 @@ export class NativeOfficeEditor {
     this.closing = true;
     for (const stream of this.streams) stream.destroy(Error('office_editor_closed'));
     this.closePromise = (async () => {
-      const stopped = await Promise.allSettled([this.owner.close()]);
       while (this.active.size) await Promise.allSettled([...this.active]);
       if (this.closeFailures.length)
         throw new AggregateError(this.closeFailures, 'office_editor_close_unknown');
-      if (stopped[0]?.status === 'rejected') throw stopped[0].reason;
     })();
     return this.closePromise;
   }

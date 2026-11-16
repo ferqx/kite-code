@@ -19,4 +19,4 @@ Status: implemented
 
 ## Consequences
 
-Agent OfficeCLI、输出Artifact和原Profile维护权限不变。旧草稿只可消费已存在、摘要匹配的历史版本；损坏明确失败。用户若以后恢复本地编辑，须重新确认范围并验证，不能自动重新启用此次保留的未提交实验。平台证据与限制归[Desktop owner](../../../../apps/desktop/README.md#办公输出文件)。
+输出 Artifact 与 Profile 维护沿用原权限。旧草稿只可消费已存在、摘要匹配的历史版本；损坏明确失败。用户若以后恢复本地编辑，须重新确认范围并验证，不能自动重新启用此次保留的未提交实验。平台证据与限制归[Desktop owner](../../../../apps/desktop/README.md#办公输出文件)。

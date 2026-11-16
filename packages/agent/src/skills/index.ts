@@ -250,5 +250,5 @@ export function createSkillSource(options: SkillSourceOptions) {
 
 export { builtinComputerUseSkillId, createBuiltinComputerUseSkillSource } from './builtin';
 
-export { builtinOfficeSkillId, createBuiltinOfficeSkillSource } from './office';
+export { bundledOfficeSkillDirectory } from './office-source';
 export { createBuiltinSkillSources } from './registry';

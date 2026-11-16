@@ -62,20 +62,6 @@ test('default selection covers current public safety and formal lifecycle files 
   expect(UNIFIED_TEST_SUITES).not.toContain('tests/isolated');
 });
 
-test('keeps the local Office contract in one exclusive default job after relocation', () => {
-  const file = 'packages/agent/test/isolated/exclusive/office-skill-contract.test.ts';
-  const previous = 'packages/agent/test/integration/office-skill-contract.test.ts';
-  const files = unifiedTestInventory(root);
-  expect(files.filter((path) => path === file)).toEqual([file]);
-  expect(files).not.toContain(previous);
-  const plan = unifiedTestPlan(root, 4);
-  const absolute = join(root, file);
-  expect(plan.concurrent.some((job) => job.files.includes(absolute))).toBe(false);
-  expect(plan.exclusive.filter((job) => job.files.includes(absolute))).toEqual([
-    { label: `exclusive:${file}`, files: [absolute], maxConcurrency: 1 },
-  ]);
-});
-
 test('selection uses owned paths, preserving negative legacy strings without discovering old writers', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'kite-unified-plan-'));
   try {

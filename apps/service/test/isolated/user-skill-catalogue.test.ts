@@ -244,7 +244,11 @@ test('global Skills reads only merged user configuration and trusted user/Profil
   const projectRoot = join(f.root, 'project');
   f.skill(join(projectRoot, 'private'), 'PROJECT_METADATA_MUST_NOT_APPEAR');
   writeFileSync(join(projectRoot, 'kite-agent.jsonc'), '{ malformed project configuration');
-  symlinkSync(projectRoot, join(f.userRoot, 'project-link'), 'dir');
+  symlinkSync(
+    projectRoot,
+    join(f.userRoot, 'project-link'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   f.defaults({
     modelId: null,
     models: [],
@@ -277,10 +281,17 @@ test('global Skills reads only merged user configuration and trusted user/Profil
       });
       all.push(...page.entries);
     }
-    expect(all).toHaveLength(308);
-    expect(
-      all.filter((row) => !['computer-use', 'office-documents'].includes(row.id)),
-    ).toHaveLength(306);
+    const builtinIds = new Set([
+      'computer-use',
+      'office.docx',
+      'office.pdf',
+      'office.pptx',
+      'office.xlsx',
+    ]);
+    expect(all.filter((row) => builtinIds.has(row.id)).map((row) => row.id)).toEqual([
+      ...builtinIds,
+    ]);
+    expect(all.filter((row) => !builtinIds.has(row.id))).toHaveLength(306);
     expect(all.find((row) => row.id === 'computer-use')).toMatchObject({
       name: 'computer-use',
       source: null,
@@ -339,7 +350,7 @@ test('global Skills reads only merged user configuration and trusted user/Profil
   }
 });
 
-test('global user source lists the installed builtin without creating a missing configuration directory', async () => {
+test('global user source lists builtins without creating a missing configuration directory', async () => {
   const f = fixture();
   rmSync(f.userRoot, { recursive: true });
   const source = f.source();
@@ -358,14 +369,15 @@ test('global user source lists the installed builtin without creating a missing 
           requiredCapabilities: ['browser.execute'],
           missingCapabilities: ['browser.execute'],
         },
-        {
-          id: 'office-documents',
-          name: 'office-documents',
+        ...['docx', 'pdf', 'pptx', 'xlsx'].map((name) => ({
+          id: `office.${name}`,
+          name,
+          source: null,
           state: 'available',
           reason: null,
           requiredCapabilities: [],
           missingCapabilities: [],
-        },
+        })),
       ],
       complete: true,
       nextAfterId: null,
@@ -390,6 +402,12 @@ test('global user source lists the installed builtin without creating a missing 
     await expect(source.listUser!({ ...f.context, afterId: 'unknown' })).rejects.toMatchObject({
       code: 'invalid_skill_catalogue_query',
     });
+    f.skill(join(f.userRoot, 'skills', 'docx'), 'docx');
+    const withUserDocx = await source.listUser!(f.context);
+    expect(withUserDocx.entries.filter((entry) => entry.name === 'docx')).toMatchObject([
+      { id: 'office.docx', source: null, state: 'available' },
+      { id: 'user-skill.docx', source: { scope: 'user' }, state: 'available' },
+    ]);
     await source.dispose!();
     await expect(source.listUser!(f.context)).rejects.toMatchObject({
       code: 'knowledge_source_closed',

@@ -16,7 +16,6 @@ import {
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { acquireArtifactAccess, retainWindowsCandidateFiles } from '@kite-ai/agent/artifact-access';
-import { resolveOfficeRuntimeAssets } from '@kite-ai/agent/documents';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 import {
   type NativeBundleManifest,
@@ -38,6 +37,7 @@ import { build as buildRenderer } from 'vite';
 import { type DesktopDevelopment, parseDesktopDevelopment } from '../electron/development';
 import type { MacosElectronResize } from '../electron/macos-electron-resize';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
+import { buildOfficePreviews } from './build-office-previews';
 import { buildWindowsAccess } from './build-windows-access';
 import {
   fingerprintPatchedMacosElectron,
@@ -92,6 +92,7 @@ async function buildNativeApp(
   if (process.platform === 'win32') privateDirectory(outdir);
   else await mkdir(outdir, { recursive: true });
   const root = resolve(import.meta.dir, '..');
+  await buildOfficePreviews(outdir);
   await writeFile(join(outdir, 'app-icon.ico'), await readFile(join(root, 'app-icon.ico')));
   const windowsAccessAsset = process.platform === 'win32' ? await buildWindowsAccess(outdir) : null;
   const helper = await Bun.build({
@@ -129,9 +130,6 @@ async function buildNativeApp(
       naming: `${entry}.cjs`,
       define: {
         __KITE_DESKTOP_NATIVE_ASSETS__: JSON.stringify(assets),
-        __KITE_OFFICE_ASSETS_ROOT__: JSON.stringify(
-          assets.kind === 'candidate' ? null : resolveOfficeRuntimeAssets().root,
-        ),
         __KITE_DESKTOP_DEVELOPMENT__: JSON.stringify(development),
         __KITE_DESKTOP_PROFILE_ACCESS__: JSON.stringify(profileAccessAsset),
         __KITE_DESKTOP_WINDOWS_ACCESS__: JSON.stringify(windowsAccessAsset),

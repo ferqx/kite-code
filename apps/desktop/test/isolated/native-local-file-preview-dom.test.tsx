@@ -93,14 +93,27 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     await show();
     expect(document.body.textContent).toContain('暂不支持此文本编码');
     expect(document.body.textContent).not.toContain('二进制');
+    expect(document.querySelector('.native-file-preview-error button')).toBeNull();
+    await act(async () => root.render(null));
+    failure = 'preview_office_source_budget';
+    await show();
+    expect(document.querySelector('.native-file-preview-error p')?.textContent).toBe(
+      '文件超出预览大小限制',
+    );
+    expect(document.querySelector('.native-file-preview-error button')).toBeNull();
     await act(async () => root.render(null));
     failure = 'file_read_failed';
     await show();
-    expect(document.body.textContent).toContain('文件读取或预览失败');
+    expect(document.querySelector('.native-file-preview-error p')?.textContent).toBe('预览失败');
+    expect(document.querySelector('.native-file-preview-error button')?.textContent).toBe('重试');
     await act(async () => root.render(null));
     failure = undefined;
     hold = true;
     await show();
+    expect(
+      document.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]'),
+    ).toHaveLength(1);
+    expect(document.body.textContent).not.toContain('正在读取文件');
     await act(async () => root.render(null));
     await act(async () => resolve?.({ kind: 'outputs.preview', status: 'ready' }));
     expect(document.body.textContent).toBe('');

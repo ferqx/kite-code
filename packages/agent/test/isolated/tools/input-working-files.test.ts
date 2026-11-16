@@ -214,3 +214,35 @@ test('production protected roots cannot be used as an input preparation workspac
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('materialization admits an unrelated protected absolute path and denies a protected descendant', async () => {
+  const owned = await mkdtemp(join(tmpdir(), 'kite-input-protection-projection-'));
+  try {
+    const root = join(owned, 'workspace');
+    const other = join(owned, 'profile');
+    await mkdir(root);
+    await mkdir(other);
+    const relativePath = workingInputPath(scope, 'budget.xlsx');
+    const input = {
+      rootUri: pathToFileURL(root).href,
+      relativePath,
+      reference,
+      existing: null,
+      content,
+    };
+    const protectedDescendant = join(root, '.kite-inputs');
+    expect(
+      await rejected(() =>
+        createWorkingInputFiles({ protectedPaths: [other, protectedDescendant] }).materialize(
+          input,
+        ),
+      ),
+    ).toBeDefined();
+    expect(await readdir(root)).toEqual([]);
+    await createWorkingInputFiles({ protectedPaths: [other] }).materialize(input);
+    expect(await readFile(join(root, relativePath))).toEqual(Buffer.from(bytes));
+    expect(await readdir(other)).toEqual([]);
+  } finally {
+    await rm(owned, { recursive: true, force: true });
+  }
+});

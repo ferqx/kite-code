@@ -98,7 +98,6 @@ configureMacosElectronResize(
   app,
   typeof __KITE_DESKTOP_MACOS_RESIZE__ === 'undefined' ? null : __KITE_DESKTOP_MACOS_RESIZE__,
 );
-declare const __KITE_OFFICE_ASSETS_ROOT__: string | null;
 const inputAssets = __KITE_DESKTOP_NATIVE_ASSETS__;
 const candidate =
   !!inputAssets &&
@@ -871,11 +870,6 @@ void app
       },
     });
     registerNativeIpc({
-      officeAssetsRoot:
-        formalAssets?.officeAssetsRoot ??
-        (typeof __KITE_OFFICE_ASSETS_ROOT__ === 'undefined'
-          ? undefined
-          : (__KITE_OFFICE_ASSETS_ROOT__ ?? undefined)),
       ipcMain,
       window: () => window,
       rendererUrl,

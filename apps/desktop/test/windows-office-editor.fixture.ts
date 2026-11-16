@@ -10,6 +10,7 @@ import {
   windowsOfficeStorage,
 } from '../electron/profile-access';
 import { loadWindowsAccess, type WindowsOfficeStorage } from '../electron/windows-access';
+import type { OfficeEditorSnapshot } from '../src/office-editor-bridge';
 
 const input = JSON.parse(process.argv[2]!);
 const api = loadWindowsAccess(input.addon);
@@ -18,7 +19,7 @@ assert.throws(() => profile.officeAccess('root'), /windows_access_unavailable/);
 profile.preparePrivateUi();
 const storage: WindowsOfficeStorage = { access: (path) => profile.officeAccess(path) };
 const root = join(input.root, 'data/office/desktop-private/office-editor');
-const options = { root, assetsRoot: input.assetsRoot, storage };
+const options = { root, storage };
 const editors = new Set<NativeOfficeEditor>();
 const createReader = () => {
   const reader = new NativeOfficeEditor(options);
@@ -180,6 +181,13 @@ try {
   await assert.rejects(corrupt.open(open), /office_editor_recovery_invalid/);
   await corrupt.close();
   await writeFile(archive, archiveBytes);
+  const malformed = JSON.stringify({ ...expected, notes: ['unexpected note'] });
+  await writeFile(archive, malformed);
+  await writeFile(current, malformed);
+  const malformedIndex = createReader();
+  await assert.rejects(malformedIndex.open(open), /office_editor_recovery_invalid/);
+  await malformedIndex.close();
+  await writeFile(archive, archiveBytes);
   await writeFile(current, JSON.stringify({ ...expected, editorId: 'f'.repeat(64) }));
   const mismatched = createReader();
   await assert.rejects(mismatched.open(open), /office_editor_recovery_invalid/);
@@ -202,17 +210,20 @@ try {
   await assert.rejects(streamReader.open(open), /office_editor_closed/);
 
   const delayed = createReader();
-  const internals = delayed as unknown as { inspect(path: string): Promise<[]> };
+  const internals = delayed as unknown as {
+    revision(path: string, snapshot: OfficeEditorSnapshot): Promise<unknown>;
+  };
+  const readRevision = internals.revision.bind(delayed);
   let release!: () => void, entered!: () => void;
   const ready = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  internals.inspect = async () => {
+  internals.revision = async (path, snapshot) => {
     entered();
     await new Promise<void>((resolve) => {
       release = resolve;
     });
-    return [];
+    return readRevision(path, snapshot);
   };
   const opening = delayed.open(open);
   await ready;

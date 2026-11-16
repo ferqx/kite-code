@@ -18,7 +18,7 @@
 
 ## 当前办公交付与编辑边界
 
-Native Office预览不创建或修改本地PPT副本。旧desktop-private/office-editor仅保留宿主私有不可变历史的读取路径，绑定原授权target、revision和SHA；缺失或损坏不可用原件替代。Windows从原attached Profile派生固定只读命名空间与独立使用权，核真实ACL和原对象HANDLE，不提供创建目录/新版本、写锁、flush或修权限入口。旧副本发送仍经 InputFile 稳定 import 与工作副本流程。局部请求引用原输出，Main 冻结选区与原 SHA，并核注册引用和独立提交正文后复用原 journal；不消费普通聊天草稿。独立可信 sandbox 输入 View 与不可信预览 DOM 分离，预览仅接 manifest 与固定 isolated-world 交互，两者均无 Native bridge；选区描述本身不是授权。平台证据归[Desktop owner](../../apps/desktop/README.md#办公输出文件)；Agent OfficeCLI、原输出收集、私有Blob权限和GC边界不变。
+Native Office预览不创建或修改本地PPT副本。旧 `desktop-private/office-editor` 保留宿主私有不可变历史的读取路径，绑定原授权 target、revision 和 SHA。Main 校验历史索引、当前指针和副本摘要后读取确切版本，预览从该份 PPTX 渲染；缺失或损坏不可用原件替代。Windows 从原 attached Profile 派生固定只读命名空间与独立使用权，核真实 ACL 和原对象 HANDLE，不提供创建目录或新版本、写锁、flush 或修权限入口。旧副本发送仍经 InputFile 稳定 import 与工作副本流程。局部请求引用原输出，Main 冻结选区与原 SHA，并核注册引用和独立提交正文后复用原 journal；不消费普通聊天草稿。独立可信 sandbox 输入 View 与不可信预览 DOM 分离，预览仅接 manifest 与固定 isolated-world 交互，两者均无 Native bridge；选区描述本身不是授权。平台证据归 [Desktop owner](../../apps/desktop/README.md#办公输出文件)。
 
 Shell 自动产物沿[输出 owner](../../packages/agent/src/business/output-collection.README.md)登记现有不可变 Artifact，文件身份独立于正文消息；绑定精确生产者与原 Run，不把交付清单注入模型上下文。Fork只继承可验证原引用，不复制执行中的收集权。用户保存先从原引用流式写临时文件，完整SHA/size核实后发布；中断、陈旧引用或校验失败不产生完成文件。
 

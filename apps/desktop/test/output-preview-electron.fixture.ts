@@ -23,7 +23,7 @@ void app.whenReady().then(async () => {
   );
   const window = root as NativeRootWindow;
   Object.defineProperty(window, 'webContents', { value: primary.webContents });
-  const preview = new NativeOutputPreview(process.env.KITE_PREVIEW_FIXTURE_ASSETS);
+  const preview = new NativeOutputPreview();
   async function observe(stage: string, view: WebContentsView) {
     await view.webContents.executeJavaScript(
       'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',

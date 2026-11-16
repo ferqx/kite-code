@@ -265,9 +265,10 @@ test('configuration cannot invent Tool IDs or trusted Skill roots, and disabled 
       toolIds: [],
       skills: [{ id: 'disabled', enabled: false, path: outside }],
     });
-    expect(assembly.snapshotFacts.skills).toEqual([]);
+    expect(assembly.snapshotFacts.skills.map(({ id }) => id)).not.toContain('disabled');
     expect(await assembly.sources.capture(request)).toEqual([
       agentContractSource(realpathSync(f.workspace)),
+      expect.objectContaining({ id: 'skills.catalogue', kind: 'skill_catalogue' }),
     ]);
   } finally {
     await assembly?.dispose();
@@ -359,7 +360,10 @@ test('unselected local errors do not gate default assembly; explicit selectors s
     // The built-in knowledge is available, but does not become a user configuration.
     expect(assembly.snapshotFacts.skills.map((s) => s.id)).toEqual([
       'good',
-      'office-documents',
+      'office.docx',
+      'office.pdf',
+      'office.pptx',
+      'office.xlsx',
       'other',
     ]);
     expect(assembly.skillConfigurations.map((s) => s.id)).toEqual(['good', 'other']);

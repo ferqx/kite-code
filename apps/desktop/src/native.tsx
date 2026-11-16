@@ -1875,7 +1875,7 @@ function NativeDesktopContent({
         await refresh().catch(() => {});
       }
     },
-    onRequestEdit: async (file, context, prompt) => {
+    onRequestEdit: async (file, context, prompt, skillId) => {
       if (
         !bridge ||
         !selection ||
@@ -1902,6 +1902,7 @@ function NativeDesktopContent({
           file,
           context,
           prompt,
+          skillId,
           isCurrent: () =>
             current === generation.current &&
             nonce === viewIntent.current &&

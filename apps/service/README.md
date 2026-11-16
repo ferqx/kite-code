@@ -850,6 +850,10 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 配置 Skill 继续沿原真实配置解析。禁用项不读文件；缺文件、路径越界、重复物理位置、digest 变化、不支持 options 与缺能力按配置 ID 标记局部不可用。默认 Run 只绑定实际可用项并保存相同配置子集，显式名称/ID选择基于全部已知条目消歧，不能因坏项而悄悄改选同名可用项。child 只在父快照准确 ID 范围内选择；父 `requested:null` 的默认项，在子目录明确标记 `skill_capability_missing` 时可省略，不给子角色补工具。显式选择、空数组、未知／禁用／损坏项和绑定后的 canonical 文件目标变化继续按准确原选择处理，冻结恢复不以新目录改写旧事实。单命令 requested 最多256项保持公开契约，默认解析出的 resolvedIds 不套此请求数量限制。[能力继承回归](test/isolated/child-skill-capability-inheritance.test.ts)核真实默认浏览器知识、分析角色的能力交集、普通 worker 保留、显式缺依赖与坏项拒绝；持久理由归[子配置修正](../../.agents/notes/implemented/bug-fix/2026-11-05-child-preparation-acceptance.md)。
 
+四个内置 Office Skill 的配置 ID 使用 `office.docx`、`office.xlsx`、`office.pptx` 和 `office.pdf`，可与用户同名 Skill 共存。目录和运行快照按配置 ID 绑定，`load_skill` 解析到 `builtin:office.<格式>`。默认受管 Shell 从[进程装配](src/process-service.ts)获得指向内置资源根的 `KITE_OFFICE_SKILLS_DIR` 及对应只读范围。Skill 读操作沿原知识接口，Shell 对脚本、依赖和编辑请求继续执行当前审核及约束。参见 [Office 资源](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
+
+Service 校验 PDF helper 的摘要，并通过 `KITE_DOCUMENTS_HELPER` 和 `KITE_DOCUMENTS_BUN` 将路径交给受管 Shell。四个内置 Office Skill 的随包资源经 `KITE_OFFICE_SKILLS_DIR` 只读提供。 [固定资产与执行边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
+
 每次发现仍重新读取全部启用位置及内容版本；独立位置的 I/O 每批最多四项并发，结果按原配置顺序汇总后才发布绑定。完成顺序不决定重复物理位置的配置身份，原首项即使 digest 不匹配也保留其 ID，并将双方标为重复不可用。分页不缓存发现结果，后续页仍核当前字节与完整 revision。[目录测试](test/isolated/skill-catalogue.test.ts)覆盖同批别名、跨批重复、禁用项及新版本拒绝旧绑定；[Run 选择测试](test/isolated/skill-selection.test.ts)核准确 root/child 继承。
 
 配置源使用同一[Agent 知识读取作用域](../../packages/agent/src/platform/knowledge-reads.ts)，资源 owner 独立于重建的 metadata Map。Run 的项目指令、Skill 正文／资源读取沿原 assembly disposer 结算，准备失败沿现有 `ConfigurationPreparationCleanupError` 移交实际资源和两原错误。正文、目录、编译和取消 catch 先透传关闭未知；普通坏文件、缺能力和版本拒绝仍局部处理。Service 只组合原接口与错误，不执行知识文件 I/O 或建立第二份资源策略。
@@ -1135,7 +1139,7 @@ owned navigate沿原35秒默认／既有配置请求预算，不再被普通私�
 
 ## 办公文件交付与工作副本
 
-默认生产装配从现有 Shell 执行环境提供固定办公[运行时资产](../../packages/agent/src/tools/documents/README.md)，确切 OfficeCLI executable 进入平台身份，helper/字体/预览资源只读；`OFFICECLI_NO_AUTO_RESIDENT/SKIP_UPDATE/NO_AUTO_INSTALL=1` 禁止运行时驻留、更新和安装。真实 Shell Job 在私有持久 staging 分配后才启动，`KITE_OUTPUT_DIR` 由宿主派生。输出收集属于[现有 Files/Job owner](../../packages/agent/src/business/output-collection.README.md)，不新增模型工具或下一轮模型提示。
+默认生产装配独立准备通用 Shell，并只读提供已核验的 PDF helper、字体和内置 Skill 资源。用户选定的 Skill 经通用权限和 Shell 路径使用自身依赖。真实 Shell Job 在私有持久 staging 分配后才启动，`KITE_OUTPUT_DIR` 由宿主派生。交付归[现有 Files/Job owner](../../packages/agent/src/business/output-collection.README.md)。
 
 默认权限装配只接纳宿主实际 Files collector Job，并用 Store 的原 Action/operation/producer/allocation 完整链及当前 attempt/startCommand/intent 请求证明动态描述。其已绑定自有暂存到私有 Artifact 的归档属于 `read`＋`record_write` 内部持久化，不是 safeRead 或用户任意外部文件写；三种模式沿原 policy 自动归档，当前 trust 与注入 ceiling 不放宽。模型 Run 不增加此 Job 能力。adapter 前权限拒绝以可见失败收口，禁普通重试、冷 owner 不重放，原执行事实保留；私有暂存独立保留7天后才可清理，未知执行仍保留。对应[默认权限回归](test/isolated/output-collection.test.ts)覆盖三种模式、伪造来源/attempt、trust 撤销和注入拒绝。
 

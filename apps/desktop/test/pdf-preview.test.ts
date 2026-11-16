@@ -7,12 +7,18 @@ test('PDF navigation is isolated read-only chrome, lazy and counter-scaled', () 
     w = dom.window;
   w.eval(pdfPreviewInstallScript());
   const rail = w.document.querySelector('nav')!,
-    img = w.document.querySelector('main img') as HTMLImageElement;
+    img = w.document.querySelector('main img') as HTMLImageElement,
+    loader = w.document.querySelector('.pdf-preview-loading')!;
   expect(rail.querySelectorAll('button').length).toBe(3);
   expect(rail.querySelectorAll('img[loading=lazy]').length).toBe(3);
   expect(img.getAttribute('src')).toBe('page-1.png');
+  expect(loader.hasAttribute('hidden')).toBe(false);
+  img.dispatchEvent(new w.Event('load'));
+  expect(loader.hasAttribute('hidden')).toBe(true);
   (rail.querySelectorAll('button')[2] as HTMLButtonElement).click();
   expect(img.getAttribute('src')).toBe('page-3.png');
+  expect(img.style.visibility).toBe('hidden');
+  expect(loader.hasAttribute('hidden')).toBe(false);
   expect(rail.querySelector('[aria-current=true]')?.getAttribute('data-page')).toBe('3');
   Object.defineProperty(img, 'naturalWidth', { value: 800 });
   w.eval('kitePdfPreview.control({kind:"zoom",value:2})');
@@ -23,6 +29,7 @@ test('PDF navigation is isolated read-only chrome, lazy and counter-scaled', () 
   expect(rail.classList.contains('kite-rail-compact')).toBe(true);
   expect(w.document.body.style.paddingLeft).toBe('40px');
   img.dispatchEvent(new w.Event('error'));
+  expect(loader.hasAttribute('hidden')).toBe(true);
   expect(w.document.querySelector('[role=status]')?.textContent).toContain('读取失败');
   expect(w.eval('kiteOfficeInteraction.read().selection')).toBeNull();
   dom.window.close();

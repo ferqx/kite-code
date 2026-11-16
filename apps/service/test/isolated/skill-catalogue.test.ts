@@ -13,6 +13,8 @@ import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createConfiguredSkillSource } from '../../src/skill-source';
 
+const officeSkillIds = ['office.docx', 'office.pdf', 'office.pptx', 'office.xlsx'];
+
 test('default scoped Skill HTTP catalogue is complete, locally unavailable and strictly read only', async () => {
   const started = Date.now();
   const timing = (phase: string, detail = {}) =>
@@ -185,10 +187,9 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       all.push(...page.entries);
     }
     timing('paging_complete', { entries: all.length });
-    expect(all).toHaveLength(skills.length + 2);
-    expect(
-      all.filter((entry) => !['computer-use', 'office-documents'].includes(entry.id)),
-    ).toHaveLength(skills.length);
+    expect(all.map((entry) => entry.id).sort()).toEqual(
+      [...skills.map((skill) => skill.id), 'computer-use', ...officeSkillIds].sort(),
+    );
     expect(all.find((entry) => entry.id === 'computer-use')).toMatchObject({
       name: 'computer-use',
       source: null,
@@ -198,7 +199,6 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       requiredCapabilities: ['browser.execute'],
       missingCapabilities: ['browser.execute'],
     });
-    expect(new Set(all.map((e) => e.id)).size).toBe(skills.length + 2);
     expect(all.every((entry) => Object.hasOwn(entry, 'source'))).toBe(true);
     expect(all.find((entry) => entry.id === 'skill-000')?.source).toEqual({
       scope: 'project',
@@ -387,8 +387,10 @@ test('configured aliases keep the first configured identity and reject both bind
         version: shared.version,
       });
     expect(source.configuredId(shared)).toBe('first-pinned');
-    expect(listed.entries).toHaveLength(2);
-    expect(source.configuredId(listed.entries[0]!)).toBe('independent');
+    expect(listed.entries.map((entry) => source.configuredId(entry))).toEqual([
+      'independent',
+      ...officeSkillIds,
+    ]);
     expect(listed.states.find((entry) => entry.id === 'disabled')).toMatchObject({
       state: 'disabled',
       reason: null,
@@ -403,7 +405,7 @@ test('configured aliases keep the first configured identity and reject both bind
       'skill_version_changed',
     );
     const fresh = await source.list();
-    expect(fresh.entries).toHaveLength(2);
+    expect(fresh.entries).toHaveLength(1 + officeSkillIds.length);
     expect(fresh.entries[0]!.version).not.toBe(independent.version);
     expect(source.configuredId(fresh.entries[0]!)).toBe('independent');
   } finally {
@@ -502,7 +504,7 @@ test('configured Skill source reports bounded location facts and never reads dis
       state: 'unavailable',
       source: { scope: 'project', origin: 'configured' },
     });
-    expect(listed.entries).toHaveLength(5);
+    expect(listed.entries).toHaveLength(4 + officeSkillIds.length);
     expect(JSON.stringify(listed.states)).not.toContain(root);
     expect(JSON.stringify(listed.states)).not.toContain('private-body');
   } finally {

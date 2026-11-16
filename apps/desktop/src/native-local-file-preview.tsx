@@ -2,6 +2,11 @@ import type { SessionFileTarget } from '@kite-ai/ui/desktop';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { filePreviewFormat } from './file-preview-format';
 import type { NativeBridge } from './native-bridge';
+import {
+  type FilePreviewState,
+  filePreviewFailure,
+  NativeFilePreviewStatus,
+} from './native-file-preview-status';
 import { NativeOfficeToolbar } from './native-office-toolbar';
 import { presentNativePreview } from './native-preview-presentation';
 import type { LocalOfficeRequest, OfficeRequestOutcome } from './output-files-bridge';
@@ -27,7 +32,7 @@ export function NativeLocalFilePreview({
   const [issue, setIssue] = useState('');
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const paged = ['office', 'pdf'].includes(filePreviewFormat(target.name, target.mediaType));
-  const [status, setStatus] = useState('正在读取文件…');
+  const [status, setStatus] = useState<FilePreviewState>('loading');
   const [retry, setRetry] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Retry explicitly reopens the same scoped read handle.
   useLayoutEffect(() => {
@@ -60,7 +65,7 @@ export function NativeLocalFilePreview({
       previewId,
       setIssue,
     );
-    setStatus('正在读取文件…');
+    setStatus('loading');
     setIssue('');
     void bridge
       .request({
@@ -78,30 +83,14 @@ export function NativeLocalFilePreview({
           result.kind === 'outputs.preview' &&
           result.status === 'ready'
         ) {
-          setStatus('');
+          setStatus('ready');
           ready = true;
           presentation.ready();
-        } else setStatus('文件暂时无法预览');
+        } else setStatus(filePreviewFailure());
       })
       .catch((error: unknown) => {
         if (cancelled || revoked) return;
-        const code =
-          error && typeof error === 'object' && 'code' in error
-            ? error.code
-            : error instanceof Error
-              ? error.message
-              : undefined;
-        setStatus(
-          code === 'preview_format_unavailable'
-            ? '二进制文件无法打开'
-            : code === 'preview_text_budget'
-              ? '文本过大，无法预览'
-              : code === 'preview_text_encoding_unavailable'
-                ? '暂不支持此文本编码'
-                : typeof code === 'string' && code.startsWith('local_preview_')
-                  ? '文件或访问权限已变化，请关闭后重新打开'
-                  : '文件读取或预览失败，请重试',
-        );
+        setStatus(filePreviewFailure(error));
       });
     const settle = async (requestId: string) => {
       const value = outcomes.get(requestId);
@@ -194,7 +183,7 @@ export function NativeLocalFilePreview({
         .catch(() => {
           if (cancelled || revoked) return;
           revoked = true;
-          setStatus('文件或访问权限已变化，请关闭后重新打开');
+          setStatus({ message: '文件或访问权限已变化，请关闭后重新打开' });
           void bridge
             .request({ method: 'outputs.preview.close', generation, previewId })
             .catch(() => {});
@@ -226,7 +215,7 @@ export function NativeLocalFilePreview({
           name={target.name}
           source={pdf && onRequestEdit ? '本地文件，原路径引用' : '本地文件，只读预览'}
           powerpoint={false}
-          ready={!status}
+          ready={status === 'ready'}
           zoom={zoom}
           presentation={false}
           onPresentation={() => {}}
@@ -257,30 +246,25 @@ export function NativeLocalFilePreview({
                 control: { kind: 'zoom', value },
               })
               .then(() => {
-                if (preview.current === id) setZoom(value);
+                if (preview.current === id) {
+                  setZoom(value);
+                  setIssue('');
+                }
               })
               .catch(() => {
-                if (preview.current === id) setStatus('预览缩放失败，请重试');
+                if (preview.current === id) setIssue('预览缩放失败，请重试');
               });
           }}
         />
       )}
       {issue && <div role="status">{issue}</div>}
-      {status && (
-        <div role="status">
-          {status}
-          {status.includes('失败') && (
-            <button type="button" onClick={() => setRetry((value) => value + 1)}>
-              重试
-            </button>
-          )}
-        </div>
-      )}
       <div
         ref={viewport}
         className="native-file-preview-viewport"
         style={{ flex: 1, minHeight: 0 }}
-      />
+      >
+        <NativeFilePreviewStatus state={status} onRetry={() => setRetry((value) => value + 1)} />
+      </div>
     </section>
   );
 }

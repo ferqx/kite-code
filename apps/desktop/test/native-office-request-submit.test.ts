@@ -63,6 +63,18 @@ test('inline request imports only the original selected file and actually submit
   expect(sent.draft).toBeUndefined();
   expect(requests[2]).toEqual({ method: 'input.files.release', generation: 7, id: prepared.id });
 });
+test('the chosen Skill is bound only to the exact inline run intent', async () => {
+  const { requests, options } = fixture();
+  expect(await submitOfficeRequest({ ...options, skillId: 'user-skill.xlsx' })).toEqual({
+    status: 'accepted',
+  });
+  const sent = requests[1];
+  if (sent?.method !== 'submit' || sent.intent.kind !== 'run.start')
+    throw Error('missing inline run intent');
+  expect(sent.intent.selectedSkills).toEqual(['user-skill.xlsx']);
+  expect(sent.officeDocument?.outputFiles?.[0]?.context).toEqual(options.context);
+  expect(requests.filter((request) => request.method === 'submit')).toHaveLength(1);
+});
 test('transport ambiguity never retries', async () => {
   const { requests, options } = fixture('throw');
   expect((await submitOfficeRequest(options)).status).toBe('unknown');

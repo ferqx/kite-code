@@ -9,7 +9,7 @@ import {
 } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
-import { officeShellEnvironment, verifyOfficeRuntimeAssets } from '@kite-ai/agent/documents';
+import { verifyDocumentHelper } from '@kite-ai/agent/documents';
 import { createWorkingInputFiles } from '@kite-ai/agent/files';
 import {
   linuxShellInitAsset,
@@ -20,6 +20,7 @@ import {
 import { McpStdioPortError, mcpStdioGuardianAsset, mcpStdioLinuxAssets } from '@kite-ai/agent/mcp';
 import { type ProfileSelection, selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
+import { bundledOfficeSkillDirectory } from '@kite-ai/agent/skills';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { DesktopShellPreference } from '@kite-ai/agent/storage';
 import { readSessionLogs } from '@kite-ai/agent/storage';
@@ -475,11 +476,18 @@ async function packagedShellAssets(
   }
   const bubblewrap = process.platform === 'linux' ? Bun.which('bwrap') : undefined;
   if (process.platform === 'linux' && !bubblewrap) return;
-  const office = await verifyOfficeRuntimeAssets();
+  const helper = await verifyDocumentHelper().catch(() => undefined);
+  const officeSkills = bundledOfficeSkillDirectory();
+  const ownedKeys = new Set([
+    'KITE_DOCUMENTS_BUN',
+    'KITE_DOCUMENTS_HELPER',
+    'KITE_OFFICE_SKILLS_DIR',
+  ]);
   const ripgrep = withBundledRipgrep(
     Object.fromEntries(
       Object.entries(process.env).filter(
-        (entry): entry is [string, string] => typeof entry[1] === 'string',
+        (entry): entry is [string, string] =>
+          typeof entry[1] === 'string' && !ownedKeys.has(entry[0].toUpperCase()),
       ),
     ),
   );
@@ -492,7 +500,11 @@ async function packagedShellAssets(
       : process.platform === 'linux'
         ? 'default.linux-host-shell-v1'
         : 'default.macos-host-shell-v1',
-    env: { ...ripgrep.env, ...officeShellEnvironment() },
+    env: {
+      ...ripgrep.env,
+      ...(helper ? { KITE_DOCUMENTS_BUN: process.execPath, KITE_DOCUMENTS_HELPER: helper } : {}),
+      ...(officeSkills ? { KITE_OFFICE_SKILLS_DIR: officeSkills } : {}),
+    },
     supervisorPath,
     bunExecutable: process.execPath,
     shellExecutable: windows?.shell ?? '/bin/sh',
@@ -501,10 +513,13 @@ async function packagedShellAssets(
     host: {
       controlBase: profile.coordinationPath,
       temporaryRoot: prepareOutputStaging(join(profile.coordinationPath, 'shell-staging')),
-      trustedExecutables: [office.officecli],
+      trustedExecutables: [],
       protectedRoots: [],
       readonlyAssets: [],
-      runtimeReadOnlyRoots: [dirname(office.helper)],
+      runtimeReadOnlyRoots: [
+        ...(helper ? [dirname(helper)] : []),
+        ...(officeSkills ? [officeSkills] : []),
+      ],
     },
   };
 }

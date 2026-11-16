@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
+import type { NativePreviewLayoutRequest } from '../../src/native-preview-layout-bridge';
 import type {
   OfficeEditContext,
   OfficePreviewControl,
@@ -60,6 +61,7 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     locator: { kind: 'delivery' as const, key: 'delivery/ppt' },
   };
   const requests: NativeRequest[] = [];
+  const layouts: NativePreviewLayoutRequest[] = [];
   const edits: Array<OfficeEditContext | undefined> = [];
   const saves: string[] = [];
   let inlineRequest: OfficePreviewInteraction['inlineRequest'];
@@ -106,8 +108,14 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
       return {};
     },
   });
+  const present = (layout: NativePreviewLayoutRequest) => {
+    layouts.push(layout);
+    return { previewId: layout.previewId, generation: layout.generation };
+  };
   const bridge = {
     watch: () => () => {},
+    presentPreviewLayout: present,
+    presentPreviewLayoutAsync: async (layout: NativePreviewLayoutRequest) => present(layout),
     async request(request: NativeRequest) {
       requests.push(request);
       if (request.method.startsWith('outputs.office.')) throw Error('removed_local_edit_IPC');
@@ -210,18 +218,18 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     expect(requests.find((r) => r.method === 'outputs.preview.open')).toMatchObject({
       bounds: { x: 10 },
     });
-    expect(requests.filter((r) => r.method === 'outputs.preview.bounds').at(-1)).toMatchObject({
+    expect(layouts.at(-1)).toMatchObject({
       bounds: { x: 120 },
     });
-    const count = requests.filter((r) => r.method === 'outputs.preview.bounds').length;
+    const count = layouts.length;
     viewportX = 160;
     await act(async () => {
       await new Promise((r) => setTimeout(r, 60));
     });
-    expect(requests.filter((r) => r.method === 'outputs.preview.bounds').at(-1)).toMatchObject({
+    expect(layouts.at(-1)).toMatchObject({
       bounds: { x: 160 },
     });
-    expect(requests.filter((r) => r.method === 'outputs.preview.bounds')).toHaveLength(count + 1);
+    expect(layouts).toHaveLength(count + 1);
     await expectControl({ kind: 'request-edit' }, () => click('请求修改'));
     expect(edits).toHaveLength(0);
     inlineRequest = {

@@ -231,7 +231,6 @@ export class NativeCaller {
   private readonly emit: (event: NativeEvent) => void;
   private readonly privateData: PrivateData | undefined;
   private officeEditor?: NativeOfficeEditor;
-  private officeAssetsRoot?: string;
   private initialAdmission: (() => boolean) | undefined;
   private readonly processes: NativeProcessOwner;
   private readonly nextGeneration: () => number;
@@ -3708,21 +3707,11 @@ export class NativeCaller {
     check();
     return result;
   }
-  configureOfficeRuntime(assetsRoot?: string) {
-    if (
-      this.officeAssetsRoot !== undefined &&
-      assetsRoot !== undefined &&
-      this.officeAssetsRoot !== assetsRoot
-    )
-      throw Error('office_assets_changed');
-    this.officeAssetsRoot ??= assetsRoot;
-  }
   private officeSourceKey(target: OutputFileTarget) {
     return callerCanonical([target.storeId, target.sessionId, target.fileId, target.locator]);
   }
   private async openOfficeEditor(
     request: { generation: number; target: OutputFileTarget },
-    assetsRoot?: string,
     checkSender: () => void = () => {},
   ) {
     const resolved = await this.admitOutputTarget(request.generation, request.target);
@@ -3735,10 +3724,8 @@ export class NativeCaller {
     if (!this.officeEditor) {
       const root = this.requirePrivateData().officeEditorRoot?.();
       if (!root) throw new ClientError('office_editor_storage_unavailable');
-      this.officeAssetsRoot = assetsRoot ?? this.officeAssetsRoot;
       this.officeEditor = new NativeOfficeEditor({
         root,
-        assetsRoot: this.officeAssetsRoot,
         storage: this.requirePrivateData().officeEditorStorage?.(),
       });
     }
@@ -3758,10 +3745,9 @@ export class NativeCaller {
       editorId: string;
       revision: number;
     },
-    assetsRoot?: string,
     checkSender: () => void = () => {},
   ) {
-    const state = await this.openOfficeEditor(request, assetsRoot, checkSender);
+    const state = await this.openOfficeEditor(request, checkSender);
     state.editor.assertSource(request.editorId, this.officeSourceKey(request.target));
     const revision = await state.editor.resolve(request.editorId, request.revision);
     state.check();
@@ -3844,10 +3830,9 @@ export class NativeCaller {
       revision: number;
     },
     pick: (name: string) => Promise<string | undefined>,
-    assetsRoot?: string,
     checkSender: () => void = () => {},
   ) {
-    const state = await this.officeRevision(request, assetsRoot, checkSender);
+    const state = await this.officeRevision(request, checkSender);
     const destination = await pick(state.summary.name);
     state.check();
     if (!destination) return { kind: 'outputs.saved' as const, cancelled: true };

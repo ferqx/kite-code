@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import fontkit, { type Font } from '@pdf-lib/fontkit';
 import {
@@ -11,7 +11,7 @@ import {
   PDFTextField,
 } from 'pdf-lib';
 import { documentTemporaryRoot, exportDocument, readBoundedDocument } from './document-export';
-import { verifyOfficeRuntimeAssets } from './office-runtime';
+import { readDocumentFont } from './document-runtime';
 
 // The locked variable TTF needs a concrete instance before subsetting: fontkit
 // 1.1.0 otherwise truncates odd glyph offsets when choosing short loca entries.
@@ -85,14 +85,13 @@ export async function createPdfDocument(input: {
     fail();
   const spec = input.spec as Record<string, unknown>,
     signal = input.signal ?? new AbortController().signal;
-  const assets = await verifyOfficeRuntimeAssets();
   let document = await PDFDocument.create();
   if (spec.operation === 'edit')
     document = await PDFDocument.load(await bytes(spec.source), { updateMetadata: false });
   document.registerFontkit(pdfFontkit);
   let embedded: PDFFont | undefined;
   const font = async () =>
-    (embedded ??= await document.embedFont(await readFile(assets.font), { subset: true }));
+    (embedded ??= await document.embedFont(await readDocumentFont(), { subset: true }));
   if (spec.operation === 'create') {
     const pages = array(spec.pages, 200);
     if (!pages.length) fail();

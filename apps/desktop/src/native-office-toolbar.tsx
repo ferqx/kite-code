@@ -13,6 +13,11 @@ export function NativeOfficeToolbar(props: {
   onPresentation: () => void;
   onEdit?: () => void;
   onSave?: () => void;
+  skill?: {
+    id: string;
+    options: { id: string; name: string }[];
+    select: (id: string) => void;
+  };
 }) {
   return (
     <fieldset
@@ -43,6 +48,22 @@ export function NativeOfficeToolbar(props: {
             </svg>
             <span className="native-office-button-label">请求修改</span>
           </button>
+          {props.skill && (
+            <select
+              aria-label="修改 Skill"
+              title="修改 Skill"
+              disabled={!props.ready}
+              value={props.skill.id}
+              onChange={(event) => props.skill?.select(event.target.value)}
+            >
+              <option value="">自动选择</option>
+              {props.skill.options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       )}
       <div className="native-office-pill native-office-view-actions">

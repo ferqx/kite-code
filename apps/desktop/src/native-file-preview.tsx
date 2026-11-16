@@ -2,8 +2,14 @@ import type { OutputFileTarget } from '@kite-ai/client';
 import { Button, type OutputFileSummary } from '@kite-ai/ui/desktop';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
+import {
+  type FilePreviewState,
+  filePreviewFailure,
+  NativeFilePreviewStatus,
+} from './native-file-preview-status';
 import { NativeExcelReadonlyBar, NativeOfficeToolbar } from './native-office-toolbar';
 import { presentNativePreview } from './native-preview-presentation';
+import { readNativeSkillCatalogue } from './native-skills';
 import type {
   OfficeEditContext,
   OfficePreviewControl,
@@ -21,6 +27,7 @@ type Props = {
     file: OutputFileSummary,
     context: OfficeEditContext,
     prompt: string,
+    skillId?: string,
   ) => Promise<OfficeRequestOutcome>;
 };
 export function NativeFilePreview(props: Props) {
@@ -32,19 +39,52 @@ function FilePreview(props: Props) {
   const alive = useRef(true);
   const preview = useRef<string | undefined>(undefined);
   const editPending = useRef(false);
-  const [file, setFile] = useState<OutputFileSummary>();
-  const [status, setStatus] = useState('正在准备预览…');
+  const [fileRead, setFileRead] = useState<{ file: OutputFileSummary; retry: number }>();
+  const file = fileRead?.file;
+  const [status, setStatus] = useState<FilePreviewState>('loading');
   const [issue, setIssue] = useState('');
   const [retry, setRetry] = useState(0);
 
   const [interaction, setInteraction] = useState<OfficePreviewInteraction>();
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const [presentation, setPresentation] = useState(false);
+  const [skills, setSkills] = useState<{ id: string; name: string }[]>([]);
+  const [skillId, setSkillId] = useState('');
+  const selectedSkill = useRef('');
   const onRequestEdit = useRef(props.onRequestEdit);
   onRequestEdit.current = props.onRequestEdit;
   const isPdf = !!file && (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name));
   const isPpt = !!file && /\.pptx$/i.test(file.name);
-  const isOffice = !!file && /\.(pptx|docx|xlsx|pdf)$/i.test(file.name);
+  const isOffice = isPdf || (!!file && /\.(pptx|docx|xlsx)$/i.test(file.name));
+  useEffect(() => {
+    const bridge = props.bridge;
+    if (!isOffice || !bridge) return;
+    const abort = new AbortController();
+    void readNativeSkillCatalogue({
+      bridge,
+      scope: { generation: props.generation, storeId: props.target.storeId },
+      signal: abort.signal,
+      isCurrent: () => !abort.signal.aborted,
+    })
+      .then((catalogue) => {
+        if (abort.signal.aborted) return;
+        const options = catalogue.entries.flatMap(({ id, name, state }) =>
+          state === 'available' && name && id.length <= 128 ? [{ id, name }] : [],
+        );
+        const counts = new Map<string, number>();
+        for (const { name } of options) counts.set(name, (counts.get(name) ?? 0) + 1);
+        setSkills(
+          options.map(({ id, name }) => ({
+            id,
+            name: counts.get(name)! > 1 ? `${name} (${id})` : name,
+          })),
+        );
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) setSkills([]);
+      });
+    return () => abort.abort();
+  }, [isOffice, props.bridge, props.generation, props.target.storeId]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -57,17 +97,13 @@ function FilePreview(props: Props) {
     void props.bridge
       ?.request({ method: 'outputs.info', generation: props.generation, target: props.target })
       .then((result) => {
-        if (
-          !cancelled &&
-          result &&
-          'kind' in result &&
-          result.kind === 'outputs.info' &&
-          'file' in result
-        )
-          setFile(result.file);
+        if (cancelled) return;
+        if (result && 'kind' in result && result.kind === 'outputs.info' && 'file' in result)
+          setFileRead({ file: result.file, retry });
+        else setStatus({ message: '无法读取文件信息', retry: true });
       })
       .catch(() => {
-        if (!cancelled) setStatus('文件信息暂时不可用，请重试');
+        if (!cancelled) setStatus({ message: '无法读取文件信息', retry: true });
       });
     return () => {
       cancelled = true;
@@ -76,9 +112,10 @@ function FilePreview(props: Props) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: The immutable keyed target owns the isolated preview lifetime.
   useLayoutEffect(() => {
     const bridge = props.bridge;
-    if (!bridge || !file) return;
+    if (!bridge || !fileRead || fileRead.retry !== retry) return;
+    const { file } = fileRead;
     let cancelled = false;
-    setStatus('正在准备预览…');
+    setStatus('loading');
     setInteraction(undefined);
     setPresentation(false);
     const previewId = crypto.randomUUID();
@@ -94,6 +131,7 @@ function FilePreview(props: Props) {
     };
     let ready = false;
     let reading = false;
+    let requestSkill: string | undefined;
     const submitted = new Set<string>();
     const outcomes = new Map<
       string,
@@ -149,6 +187,8 @@ function FilePreview(props: Props) {
           if (result.interaction.presentation !== undefined)
             setPresentation(result.interaction.presentation);
           if (result.interaction.zoom !== undefined) setZoom(result.interaction.zoom);
+          if (result.interaction.requestOpen) requestSkill ??= selectedSkill.current;
+          else requestSkill = undefined;
           const request = result.interaction.inlineRequest;
           if (request && !submitted.has(request.requestId)) {
             submitted.add(request.requestId);
@@ -164,11 +204,12 @@ function FilePreview(props: Props) {
             )
               return;
             // Sending can outlive the local form. Keep polling so Escape closes it promptly.
+            const skill = requestSkill || undefined;
             void (async () => {
               let outcome: OfficeRequestOutcome;
               try {
                 outcome = onRequestEdit.current
-                  ? await onRequestEdit.current(file, request.context, request.prompt)
+                  ? await onRequestEdit.current(file, request.context, request.prompt, skill)
                   : { status: 'failed', message: '当前会话尚未就绪，请稍后重试。' };
               } catch {
                 outcome = {
@@ -200,7 +241,7 @@ function FilePreview(props: Props) {
       bridge,
       props.generation,
       previewId,
-      setStatus,
+      (message) => setStatus(message ? { message } : 'ready'),
     );
     void bridge
       .request({
@@ -217,9 +258,9 @@ function FilePreview(props: Props) {
           'kind' in result &&
           result.kind === 'outputs.preview' &&
           result.status === 'ready';
-        setStatus(ready ? '' : '文件已保存，暂时无法预览');
+        setStatus(ready ? 'ready' : filePreviewFailure());
         if (ready) presentation.ready();
-        if (ready && (isOffice || isPdf)) {
+        if (ready && isOffice) {
           await bridge
             .request({
               method: 'outputs.preview.control',
@@ -232,12 +273,7 @@ function FilePreview(props: Props) {
         }
       })
       .catch((error) => {
-        if (!cancelled)
-          setStatus(
-            error instanceof Error && error.message === 'preview_format_unavailable'
-              ? '二进制文件无法打开'
-              : '文件已保存，暂时无法预览',
-          );
+        if (!cancelled) setStatus(filePreviewFailure(error));
       });
     const timer = setInterval(() => void read(), 200);
     return () => {
@@ -249,7 +285,7 @@ function FilePreview(props: Props) {
         .request({ method: 'outputs.preview.close', generation: props.generation, previewId })
         .catch(() => {});
     };
-  }, [props.bridge, props.generation, file, retry]);
+  }, [props.bridge, props.generation, fileRead, retry]);
 
   async function control(command: OfficePreviewControl) {
     const id = preview.current;
@@ -282,7 +318,7 @@ function FilePreview(props: Props) {
     try {
       let current: OfficePreviewInteraction | undefined;
       const id = preview.current;
-      if (id && !status) {
+      if (id && status === 'ready') {
         try {
           const result = await props.bridge?.request({
             method: 'outputs.preview.interaction',
@@ -321,18 +357,30 @@ function FilePreview(props: Props) {
       className="native-file-preview"
       style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
     >
-      {(isOffice || isPdf) && file ? (
+      {isOffice && file ? (
         <NativeOfficeToolbar
           name={file.name}
           source={`来源：Run ${file.ownerRunId}`}
           powerpoint={isPpt}
-          ready={!status && !interaction?.requestOpen}
+          ready={status === 'ready' && !interaction?.requestOpen}
           zoom={zoom}
           presentation={presentation}
           onZoom={(value) => void control({ kind: 'zoom', value })}
           onPresentation={() => void control({ kind: 'presentation', value: !presentation })}
           onEdit={() => void requestEdit()}
           onSave={() => props.onSave(file)}
+          skill={
+            skills.length
+              ? {
+                  id: skillId,
+                  options: skills,
+                  select: (id) => {
+                    selectedSkill.current = id;
+                    setSkillId(id);
+                  },
+                }
+              : undefined
+          }
         />
       ) : (
         <header>
@@ -345,7 +393,7 @@ function FilePreview(props: Props) {
           )}
         </header>
       )}
-      {isPpt && interaction?.notes?.trim() && !status && (
+      {isPpt && interaction?.notes?.trim() && status === 'ready' && (
         <details className="native-office-notes" key={interaction.currentSlide}>
           <summary>演讲者备注</summary>
           <p>{interaction.notes}</p>
@@ -355,7 +403,7 @@ function FilePreview(props: Props) {
         <NativeExcelReadonlyBar
           selection={interaction?.selection ?? null}
           view={interaction?.excelSelection}
-          ready={!status && !interaction?.requestOpen}
+          ready={status === 'ready' && !interaction?.requestOpen}
           onLocate={(selectionSerial) =>
             void control({ kind: 'locate-selection', selectionSerial })
           }
@@ -367,8 +415,13 @@ function FilePreview(props: Props) {
         </div>
       )}
       <div ref={viewport} style={{ flex: 1, minHeight: 80, overflow: 'auto' }}>
-        {status && <p role="status">{status}</p>}
-        {status.includes('暂时') && <Button onClick={() => setRetry(retry + 1)}>重试预览</Button>}
+        <NativeFilePreviewStatus
+          state={status}
+          onRetry={() => {
+            setStatus('loading');
+            setRetry((value) => value + 1);
+          }}
+        />
       </div>
     </section>
   );

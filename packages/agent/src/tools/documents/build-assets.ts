@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { desktopModulePlugin } from '../../../scripts/desktop-bundling';
-import { prepareOfficeAssets } from './prepare-office-assets';
+import officeSkills from '../../skills/office-manifest.json';
+import { prepareDocumentFont } from './prepare-document-font';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'tools/documents');
 const desktop = process.argv[3] === '--desktop';
@@ -39,4 +40,20 @@ writeFileSync(
     .update(readFileSync(resolve(destination, 'kite-documents.js')))
     .digest('hex') + '\n',
 );
-await prepareOfficeAssets(resolve(destination, 'office-assets'));
+await prepareDocumentFont(destination);
+
+const skillsSource = resolve(import.meta.dir, '../../../assets/office');
+const skillsDestination = resolve(destination, '../../skills/office');
+for (const [name, skill] of Object.entries(officeSkills.skills)) {
+  for (const file of skill.files) {
+    const bytes = readFileSync(resolve(skillsSource, name, file.path));
+    if (
+      bytes.length !== file.bytes ||
+      createHash('sha256').update(bytes).digest('hex') !== file.sha256
+    )
+      throw Error(`office_skill_asset_mismatch:${name}/${file.path}`);
+    const output = resolve(skillsDestination, name, file.path);
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, bytes);
+  }
+}

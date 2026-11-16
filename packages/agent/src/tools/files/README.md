@@ -128,6 +128,8 @@ Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存
 
 该固定 parser 会把部分字体错误降为警告；Worker 只识别已核对的字体诊断前缀并返回 `pdf_font_invalid`，其他格式错误警告返回 `pdf_processing_failed`，不发布降级的文本或页图，也不传播命中的原始诊断。记录只存在于单次解析 Worker，结束恢复原警告处理；版本变化必须重新核对。未嵌入字体的 `missingFile` 也可能合法，不能据此拒绝无故障的 CMap 文本读取。此处理拒绝已识别的解析失败，不修复字体，也不承诺任意字体或排版都可读取。
 
+[工作副本物化](../input-working-files.ts)把宿主给定的绝对保护路径与工作区的规范路径比较。工作区落在受保护目录时拒绝物化。只将工作区内的保护子路径投影成 native 文件引擎所需的相对路径，工作区之外的保护路径由宿主权限继续管理。Windows Excel 修改联验曾发现直接传绝对保护路径会令此入口返回 `file_path_invalid`，未进入修改 Run。修后相邻保护根不影响正常副本生成，保护子目录仍被拒绝，已补[回归](../../../test/isolated/tools/input-working-files.test.ts)。
+
 历史[输出文件](../session-outputs.ts)只保留 `builtin.files` typed records、查询与 Fork 来源投影，不再包装 Files 工具、赋予写入权限或注入输出目录。已有 `<profile>/files/<SHA256 Store>/<SHA256 Session>/outputs/` 工作副本不删除；[共享名称／路径合同](../session-output-path.ts)继续供历史记录、维护与 Native 准确入口校验。历史 Artifact 仍按原 Store／Session／主体／Execution 校验，原精确链接不因新交付入口移除而改变字节。
 
 `files.outputs`／`files.output-source` 只查询已登记历史，不新增模型缓存工具或重建工作副本。Fork 保留只读来源锚点；模型读取既有附件沿已授权的输入文件／Artifact 链路，不能凭历史路径恢复已移除的 Files 写入特例。工作区源码与检查点、Plan 文件和批准保持各自原链路。

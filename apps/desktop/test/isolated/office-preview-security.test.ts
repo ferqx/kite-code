@@ -7,6 +7,7 @@ import {
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../../../../tests/fixtures/test-filesystem';
+import { buildOfficePreviews } from '../../scripts/build-office-previews';
 
 /** Real Windows Chromium, without CUA, no-sandbox, user profile or document conversion. */
 test.skipIf(process.platform !== 'win32')(
@@ -25,6 +26,7 @@ test.skipIf(process.platform !== 'win32')(
         'temp',
       ])
         mkdirSync(join(root, name));
+      await buildOfficePreviews(root);
       const built = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../office-preview-security.fixture.ts')],
         target: 'node',

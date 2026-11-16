@@ -1,12 +1,43 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../../../../tests/fixtures/test-filesystem';
+import { buildOfficePreviews } from '../../scripts/build-office-previews';
+
+async function wordWithFootnote() {
+  const zip = new JSZip();
+  const w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const rel = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const relationships = 'http://schemas.openxmlformats.org/package/2006/relationships';
+  zip.file(
+    '_rels/.rels',
+    `<Relationships xmlns="${relationships}"><Relationship Id="rId1" Type="${rel}/officeDocument" Target="word/document.xml"/></Relationships>`,
+  );
+  zip.file(
+    'word/_rels/document.xml.rels',
+    `<Relationships xmlns="${relationships}"><Relationship Id="rId1" Type="${rel}/footnotes" Target="footnotes.xml"/></Relationships>`,
+  );
+  zip.file(
+    '[Content_Types].xml',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>',
+  );
+  zip.file(
+    'word/document.xml',
+    `<w:document xmlns:w="${w}"><w:body><w:p><w:r><w:t>AB</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r><w:r><w:t>CD</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="12240" w:h="15840"/></w:sectPr></w:body></w:document>`,
+  );
+  zip.file(
+    'word/footnotes.xml',
+    `<w:footnotes xmlns:w="${w}"><w:footnote w:id="1"><w:p><w:r><w:t>Footnote content</w:t></w:r></w:p></w:footnote></w:footnotes>`,
+  );
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
 
 /** Real Windows Chromium, without CUA, no-sandbox, user profile or document conversion. */
 test.skipIf(process.platform !== 'win32')(
@@ -25,6 +56,22 @@ test.skipIf(process.platform !== 'win32')(
         'temp',
       ])
         mkdirSync(join(root, name));
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('S');
+      for (let row = 1; row <= 30; row++)
+        for (let col = 1; col <= 8; col++) {
+          const cell = sheet.getCell(row, col);
+          cell.value = cell.address;
+        }
+      sheet.getCell('D4').value = { formula: 'SUM(B2:C3)', result: 0 };
+      sheet.getCell('B2').fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFFFFFAA' },
+      };
+      writeFileSync(join(root, 'fixture.xlsx'), Buffer.from(await workbook.xlsx.writeBuffer()));
+      writeFileSync(join(root, 'fixture.docx'), await wordWithFootnote());
+      await buildOfficePreviews(root);
       const built = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../office-readonly-host.fixture.ts')],
         target: 'node',
@@ -56,7 +103,6 @@ test.skipIf(process.platform !== 'win32')(
         'electron',
       ) as string;
       const child = spawn(electron, [join(root, 'fixture.cjs'), root], {
-        windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           SystemRoot: process.env.SystemRoot,
@@ -130,8 +176,8 @@ test.skipIf(process.platform !== 'win32')(
       expect(receipt.passed).toBe(true);
       expect(receipt.viewsDestroyed).toBe(true);
       expect(receipt.normalSandbox).toBe(true);
-      expect(receipt.windowWasHidden).toBe(true);
-      expect(receipt.checks).toHaveLength(6);
+      expect(receipt.previewWasVisible).toBe(true);
+      expect(receipt.checks).toHaveLength(8);
       passed = true;
     } finally {
       // Only an owned, canonical tree after actual child close and successful view teardown.

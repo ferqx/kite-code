@@ -1,18 +1,13 @@
 import { createReadStream } from 'node:fs';
-import { createOfficeDocument } from './office-command';
 import { createPdfDocument } from './pdf-command';
 
-const command = process.argv[2];
 const options = new Map<string, string>();
 try {
+  if (process.argv[2] !== 'pdf') throw Error('documents_command_invalid');
   for (let i = 3; i < process.argv.length; i += 2) {
     const key = process.argv[i]!,
       value = process.argv[i + 1];
-    if (
-      !['--format', '--source', '--input', '--out'].includes(key) ||
-      value === undefined ||
-      options.has(key)
-    )
+    if (!['--input', '--out'].includes(key) || value === undefined || options.has(key))
       throw Error('documents_arguments_invalid');
     options.set(key, value);
   }
@@ -32,26 +27,13 @@ try {
   const stop = () => controller.abort(Error('documents_cancelled'));
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
-  let result:
-    | Awaited<ReturnType<typeof createOfficeDocument>>
-    | Awaited<ReturnType<typeof createPdfDocument>>;
   try {
-    if (command === 'office')
-      result = await createOfficeDocument({
-        format: options.get('--format'),
-        source: options.get('--source'),
-        operations: data,
-        out,
-        signal: controller.signal,
-      });
-    else if (command === 'pdf')
-      result = await createPdfDocument({ spec: data, out, signal: controller.signal });
-    else throw Error('documents_command_invalid');
+    const result = await createPdfDocument({ spec: data, out, signal: controller.signal });
+    console.log(JSON.stringify(result));
   } finally {
     process.removeListener('SIGTERM', stop);
     process.removeListener('SIGINT', stop);
   }
-  console.log(JSON.stringify(result));
 } catch (error) {
   console.error(
     JSON.stringify({

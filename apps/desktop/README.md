@@ -2,6 +2,22 @@
 
 ## 办公输出文件
 
+三个 OOXML 格式在[隔离预览 View](electron/output-preview.ts)直接读取当前清单中的已校验原文件快照。Word 用 [docx-preview](electron/docx-preview.ts)渲染，将可定位段落和表格文字对到源 XML。PPT 用 [PPTX Renderer](electron/pptx-preview.ts)保留渲染页与原部件关系，按演示顺序绑定页码，并用原幻灯片的 `cNvPr` ID 定位对象。Excel 的[虚拟网格](electron/xlsx-preview.tsx)用 ExcelJS、SSF 和 TanStack Virtual 解析数据与公式缓存，按工作表和源单元格生成选区。PDF 使用现有 PDF.js worker。
+
+Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)从当前用户 Skills 目录读取“修改 Skill”选项。同名可用项带各自的 ID。显式选择通过现有 `selectedSkills` 随原修改申请提交，Main 继续复核原版本和选区。OOXML 预览在独立 sandbox 中执行构建期脚本，页面自身禁止执行脚本，`kite-preview` 清单仅提供当前原件和固定空页面。Word 禁止加载嵌入 HTML，PPT 禁止外部媒体。用户安装的 Skill 可通过受管 Shell 使用所需编辑工具。原文件的读取、选区定位和请求表单均由 Desktop 负责。内置 Skill 的资源边界见 [Office owner](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
+
+2026-11-16 在 Windows x64 隔离 Native 与真实 Service 中验证。Anthropic 的 docx、pptx、pdf、xlsx Skill 取自同一提交 `1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064`，由受控本地模型经 `load_skill` 读取。真实文件卡打开后，鼠标框选 `预算!B2:C3`，可信输入显示同一范围，持久请求绑定 `user-skill.xlsx`。受管 Windows Shell 运行 openpyxl 修改工作副本并归档新版，重启后从原会话打开新版。独立读取原件与新版，确认这四格为 1700、25、2700、39，其余工作表、值、边框、数值格式、合并格和冻结位置一致。原件与导入工作副本摘要一致。同一制品也打开了 PDF。真实预览 View 与交互分阶段采样，验证范围为本机隔离制品和受控模型。
+
+窄窗 224 CSS px 的实际网格复验了适应窗口、100% 横向滚动、恢复适应、拖选及 Esc 取消未发送请求，取消期间模型请求数保持不变。大表在适应窗口模式保留 50% 最小比例与横向滚动，限制缩小后同时渲染的单元格数量。
+
+同日第二阶段在独立 Windows x64 Native 和 paired Service 中运行。Anthropic `docx` 与 `pptx` Skill 同样取上述提交，由受控本地模型通过 `load_skill` 读取。Word 实际拖选 `/body/p[2]` 的 `11月20日`，持久请求绑定 `user-skill.docx`，新版预览显示 `11月27日`。PPT 样本调换了演示顺序，实际选中预览第 1 页的“试点范围：华东区”，其来源是 `ppt/slides/slide2.xml` 的对象 ID `4`。持久请求绑定 `user-skill.pptx`，新版预览显示“试点范围：华北区”。Windows Shell 在原文件工作副本基础上更新精确部件并交付。首次尝试调用 Skill 校验器的临时目录受 Windows Job 权限拒绝且未收集成果，后续在 Shell 内校验 ZIP 和精确差异，Skill 校验器在已重开的确切交付字节上独立运行并通过。
+
+冷启动后从原会话重新打开两份新版，原件、附加工作副本与请求 SHA-256 一致。ZIP 对比确认 Word 只改 `word/document.xml` 中的日期，PPT 只改 `ppt/slides/slide2.xml` 中的目标文字，同包其他部件逐字节一致。另观察了 Word 第 2 预览页的正文请求、PPT 切页、备注、放映和非当前页请求、两个未发送表单的取消及 Excel 和 PDF 回归打开。Word 分页基于原件的显式或已保存分页信息，PPT 为静态渲染。此轮资格覆盖本机隔离 Windows、真实 Shell、原文件与选区，以及受控模型的完整过程。
+
+同日第三阶段在 Windows x64 隔离制品，用真实 paired Service 和 `gpt-6-luna`、思考程度 `high` 验证 Office 内置 Skill。四份实际格式的合成原件从聊天文件卡打开，经 Word 文字拖选、PPT 对象点击、Excel 矩形拖选和 PDF 区域拖选发起修改。逐段观察了原件、选区、输入、发送回执、消息接管、交付及冷启动重开。持久请求保存了各自的 `office.<格式>` 及原件摘要。Word 只改选中的日期，PPT 只改选中的形状文字，Excel 只改 `预算!B2:C3`。PDF 首次运行缺少 `reportlab`，超时关闭验收端时取消。补齐隔离 Python 依赖后重新提交同一选区，模型请求保留此前已读取的 PDF Skill 正文，交付了包含 `Reviewed by Kite` 的两页新版。四份原件摘要不变；从冷起制品重开全部四份新版并切到 PDF 第 2 页。结果、模型回执、部分阶段截图及交付文件保存在本机 `.cache/office-luna-20261116/`。此验收覆盖本机 Windows x64，正式安装和其他平台的资格沿发布验证另行核对。
+
+审查修复后，在 Windows x64 的[真实窗口回归](test/isolated/office-readonly-host.test.ts)观察了居中加载图标、「预览失败」和「重试」以及原件显示。一次点击重试只发起一次预览请求。没有保存视图设置的 XLSX 使用默认视图，反向拖选仍显示起选格的公式，窄窗缩放和切换原件后选区归属正确。布尔公式缓存保留 `TRUE`、`FALSE`。Word 将渲染文本映射到原文，对显示为 `AB1CD` 的脚注样本实际选中 `CD`，源偏移为 2 到 4。OOXML 在交给渲染器前流式验证展开长度并执行累计预算。[旧 PPT 版本只读回归](test/isolated/windows-office-editor.test.ts)通过真实 ACL、索引、摘要、冷开和导出验证。上轮真实模型交付的四份文件也从当前实现冷启动重开。此轮覆盖 Windows x64 本机与标准候选构建、校验和冒烟，窗口阶段截图保存在本机 `.cache/office-preview-status-20261116/visual/`。
+
 ### 子 Agent 文件归属与父会话呈现
 
 [Main 产物来源](electron/output-sources.ts)从原授权后台目录核实 carrier、父 Run、child Session／Run 与根关系，将子 Agent 明确导出的 Shell 文件投影到原父轮末尾和会话“参考项”；[子详情](src/native-child-detail.tsx)显示相同历史产物。仍以原 child `OutputFileTarget` 查询、预览和另存，不复制为父产物，不扫描 Workspace，不根据结果邮件接收时间、同名或最新 child 工作猜归属。相同 child 的后继工作分别关联原父轮；历史多层来源仅在完整原 Run 链可证时投影。单来源查询与分页保留原 Service 合同，既有串行修订规则不扩展为跨 Session 去重。
@@ -12,126 +28,6 @@
 
 2026-11-16，macOS arm64／Bun 1.4.4，基于 `44a698326` 及当前 r3 在途补丁的独立工作树：[来源权限回归](test/native-output-sources.test.ts)、[Main 调用者回归](test/native-caller.test.ts)、[输入准备](test/input-files.test.ts)和[输出 IPC／字节保存](test/isolated/native-output-files.test.ts)共87项／842断言通过，覆盖兄弟根拒绝、相同 child 多轮、同名独立文件、冷读、目录倒序、选择ABA、准确重试和原 child→父编辑。Renderer的[父子产物 DOM](test/isolated/native-child-output-files-dom.test.tsx)另核原轮分组、晚到、暂停保留、分页、同 scope 目录／文件页恢复与切换丢弃迟到结果。该证据为受控 SDK／Main／DOM，不代替整合后真实受管 Shell→collector→普通客户端全过程验收；收集调度与真实平台资格仍由[输出 owner](../../packages/agent/src/business/output-collection.README.md)维护。
 
-
-> 恢复与集成说明（2026-11-13）：本节既有实机、测试数字和临时路径记录对应此前独立 Office 工作树，不代表合入最新 `el-refactor` 后已重新取得同等运行资格。云端旧运行目录当前不可用；源码已从完整 Git 备份与办公补丁恢复，集成验证须另核实际结果。历史路径仅用于定位原证据，不表示当前仍可访问。
-
-办公基础预览与局部请求修改已按本节范围实现；保留转换器作者字体，Excel 只读栏位于客户端外壳，选区纯绘制与文档样式分离。当前开发交付及分平台实际验证见下文，不等同原生 Office 像素一致或安装发行资格。
-
-[Office 外壳](src/native-file-preview.tsx)与[只读工具栏](src/native-office-toolbar.tsx)由可信主 renderer 渲染，不把不可信 Office HTML 放入主页面。文件名与来源 Run 使用真实索引。预览直接读取原件，不请求本地editor open/apply，也不自动复制PPT；已移除新增页、文本、图片、插入菜单、各插入表单和本地写备注入口。保留左侧缩略图页导航、缩放、放映、非空只读备注、下载与选区请求修改；PPT不再重复显示底部分页条。空备注不占位，非空备注在工具栏下按需展开。转换期间保留最新bounds，ready再同步当前矩形，仅实际几何变化发送更新。
-
-办公 chrome 沿现有客户端的中性色、Windows UI 字体栈、字级、8px 控件圆角及 hover／pressed／focus／disabled 状态；独立预览和输入 View 的固定样式与 `native-content-theme.css`／共享 UI tokens 配对，由原 `nativeTheme.themeSource` 驱动浅深主题，不增加主题 IPC、外部字体或网络能力。空闲输入不常驻解释与快捷键说明，键盘帮助保留在 title；来源 Run 收入文件名悬停提示，发送中、失败和结果未知仍明确显示。颜色与文本收敛不改变原请求或安全边界。固定转换器生成的 Excel 文件名绿条与 PPT `.main > h1.file-title` 隐藏，真实文件名由原可信工具栏显示；Excel 底部表签仅收敛为客户端中性色、字体及 hover／focus／active 状态，保留工作簿作者的 `--tab-color` 色标、原 DOM／role／tabindex 和工作表切换逻辑，单元格与幻灯片原文格式不改。首次实机深色检查发现全篇 color-scheme 会使白纸默认文字变白，该失败证据保留；现只给 chrome 控件设置主题，正文不继承其配色，缩略图根保留原幻灯片实际计算的文字色、scheme、字体及字距。
-
-[预览选区](electron/office-preview-interaction.ts)在独立 world 安装固定交互，只有真实指针／键盘事件可建立选区；冻结有界路径与原文，读取时验证节点未被替换。Word 返回渲染块偏移和 quote，Excel 返回表名、范围与原值（仅有 data-formula 时含公式），PPT 返回当前页／对象描述。Excel 连续拖选沿固定表／坐标索引，以 rAF 合并 pointermove；支持反向、同格及 Shift 扩选，Escape／blur／pointercancel／外部松开／跨表取消。请求必须是完整矩形，至多256格和32KiB；地址唯一、位于范围内、表名及路径一致，缺格、重复、越界或超预算拒绝，不把未渲染格补成空值。PPT 缩略图和 Excel 表签右键使用安装时 Element 到固定目标的映射，菜单只打开原可信输入，不能直接提交；Excel 整表以独立 scope 描述，不伪造全表范围。
-
-Excel 名称框与只读值／公式栏由可信主 renderer 承载，放在 native viewport 之外，展开和窄宽换行由原 ResizeObserver 更新预览矩形，不用覆盖整页的透明 View 或转发合成输入。名称框只定位当前完整选区，显示规范范围与行列数；值／公式绑定实际起选格，反向拖选不改绑左上格。显示材料沿既有严格 selection 校验，额外只接精确 `selectionSerial`／`activeAddress`，地址必须属于该范围；值和公式不另设可信来源，只有原单元格提供 `data-formula` 才显示公式。只读 textarea 使用浏览器原生选择／全选，不接管 Ctrl+C、不读写剪贴板，不改 Excel scope。定位命令仅含 serial，Main 和文档控制器分别核同一预览、有效原节点／表、serial、pending／request 锁；跨文件或旧选区不能定位后继页面。显示元数据不进入草稿或发送上下文。固定“预览说明”使用应用自己的文本，不把转换页 innerHTML 搬入主 renderer；仅隐藏识别准确的原固定说明，普通作者 details 保留。栏不提供地址编辑、填充柄、单元格写入或业务发送能力；修改要求仍只在独立可信输入 View 中。
-
-选区改为按可见表体裁剪的一圈外框与淡色覆盖，实际起选格留空以保作者底色；外框居中覆盖 collapsed 共享边，按选中格及相邻原格的边宽扩展，包括未选邻格的粗线，内部作者边保留，取消恢复原像素。不向每格写 outline 或改作者 inline 样式。滚动／缩放沿 rAF 更新原有有界选区，冻结行列的可见交集参与裁剪。固定转换器原 th 真实边框与 td 默认 inset 阴影在分数缩放时采用不同绘制位置，现仅让表头默认竖线采用同类 inset 绘制，并去掉首行重复的默认上边线；保留列宽、行高和作者显式边框／填色。选框与淡色覆盖位于专用 ShadowRoot 纯绘制层，PPT 对象也不再以全局选择样式改变背景／outline，Word 保留原生文字选区。ShadowRoot 仅提供样式隔离，不提供授权；页面背景、表签与固定网格兼容仍有适配，不能称完全零文档样式修改。
-冻结格绘制只适配固定转换器可确认的静态纸面：一次性分组安装原节点的非交互纸面，复杂背景不猜色；原 collapsed 作者边仅在实际移位时按原样覆盖，回位交还浏览器原边。可见边框候选至多512个，rAF 合并滚动，超预算清空辅助层，不逐帧扫描全表；横向滚动时另遮住行头内旧 collapsed 残线并保原灰分隔。合并本体拒绝选区并清除旧范围，只允许前方没有跨度、原路径列与实际索引一致的普通格绘制，不能推断合并后的缺格。节点／样式或布局映射变化退役辅助层；不改 td 内联样式、文字、公式、OOXML 或发送范围。共享边取宽依赖固定转换器每表单一 table 的原索引，不宣称任意多 table／恶意 DOM 的物理邻边支持。
-
-离线资源适配现[仅保本地字体声明](../../packages/agent/src/tools/documents/office-preview.ts)，不再给 body 与后代强制 `KiteDocument !important`，保留作者 CSS／内联字体及系统回退；字体缺失时不保证原生 Office 一致性。内部缓存 recipe 为 `offline-author-fonts`，不复用旧 `offline-1` 缓存，不改变工具／公开协议版本或网络策略。同一合成 XLSX 的真实 CLI 原字节 A、离线适配 B、B 加交互 C 与 B 仅去强制字体 D，在 Electron44.3.0／DPR1.5 的 11 个状态比较中，A／D 取样几何、作者样式和边线相同；B／C 的实际字体及部分行高改变，造成下方位置累计变化。原始 A 的冻结／网格缺陷仍存在，C 的必要兼容不能一并删除。过去称“raw”的部分对照其实已过离线适配，不是 CLI 原字节，本次证据明确区分；转换页独立 View 不会继承主应用 CSS，但 isolated world 共用页面 DOM／CSS。新字体 27 项／111 断言和 Agent 类型已通过，真实受管转换源 SHA 不变并确认 Job 关闭；新宿主／绘制层联合与可见资格见下文独立证据。
-迁栏／绘制迁移阶段交互 SHA 为 `ba74959749577073a6b8a7066450df6f9c1438d56db474a175637c8d1b591f47`、只读栏 CSS 为 `360eeeefd58ae2494de82d861f1cf39c47cd5386807953f64f7a51a3c4e6ad11`。14文件组合回归215通过／1 POSIX跳过／1203断言；随后只读栏 DOM 与新[真实宿主组合夹具](test/isolated/office-readonly-host.test.ts)另4通过／73断言，Desktop1528文件类型通过。宿主夹具冷构建生产 NativeFilePreview／NativeOutputPreview，正常 sandbox、隐藏窗口、程序输入，无 Service／业务发送／CUA；核反向 D4 起选、Shadow 样式隔离、请求锁、文件替换和真实 bounds。完整客户端样式曾使收起框继承68px最小高度，现仅该栏收敛为28px、展开100px；实际 viewport 顶部130→202、窄窗宽1086→686，缩放后仍与宿主DOM的round矩形相等。浅深主 renderer 原图已人工查看；子 View 并非每次有可截图表面，失败和唯一成功图均保留，不能把分层 capturePage 当 OS 合成／可见窗口验收。最终 child exit0、Views销毁；标准测试仅成功且确认关闭后清自有临时目录，失败／unknown保留。原图与完整收据在本任务 `office-readonly-host-compact-evidence-20261112`。
-
-随后可见 Excel6 在200%发现非当前表签菜单有可访问节点却位于视口外；未点击不可见菜单或发业务。菜单／Word与PPT胶囊／范围状态的固定坐标现先按真实 client 视口限位，再仅在写 CSS 时除 root zoom 一次；selectionRect 与 Main 输入 anchor 仍为 viewport 坐标。原先只用 innerHeight 的阶段虽通过隐藏断言，人工查看发现窄窗PPT胶囊被原生滚动条遮住，旧通过不作最终资格。定位修复阶段交互 SHA `92811f7486f9174dc0218d4ca8dd5c3c5ba61a40dfc1fa9589d273886799ea23` 使用排除滚动条的 clientWidth／clientHeight，通过57条选区单测、Desktop1528类型及24个正常 sandbox 隐藏状态，含125／200%、宽窄窗口、四边限位、实际按钮命中、正确页／表目标与取消；24张均证当前帧，child exit0／Views销毁，窄窗原图已人工复核。证据在 `office-popup-client-final-20261112`；可见新版验收仍在进行，不以程序输入代替真人。
-
-同源性能首轮在新转换目录／进程／profile分段：1000+3行大表的受管转换2.209秒（CLI runner1.658秒）、loadURL321ms、首张已证当前帧1404ms、原样控制器安装4736ms、首次真实选格36ms；保留前20行原XML／公式／样式的小副本依次1598ms（CLI1131ms）、112ms、342ms、16.6ms、10.8ms。主要规模相关成本在安装，本轮未复现固定9秒。每类仅1次、未清OS缓存、隐藏窗口且安装前截图使布局先稳定，不能相加为生产可见打开时延或直接比较此前9120ms。未连接调试域，两个实际Job及Electron均正常结束；原件与生产源码未改。`office-preview-performance-20261112-1/summary.json` 保精确时间和限制。随后无装前capture的分段原样诊断安装4674.7ms，其中1012次纸面测量4602.1ms；仅把1001个paper标记延到本次同步测量之后，私有候选安装120.5ms、测量56.8ms。8004格原数据、全矩形、paper映射／规则、C3上下文相同，取消6113个作者色像素逐点恢复，200%冻结滚动原图已直接查看；7张当前帧、实际child0／Views销毁。此对照支持读写交错为该样本主要成本，未开trace，不把style recalculation与layout再细分。
-
-生产仅将paper属性移到同一次安装的records第二遍写入，保measure、CSS规则、索引、observer／退役与请求语义；同步返回前完成，不延至rAF／Promise。该性能窄修交互SHA `2cff9da819d726b870f353b0f0674ab1062af1c46cb6510d69df1bb3192e32cf`。58单测含确定性的跨两表“全部读完再写”回归，Desktop1528类型、Biome及完整Windows网格正式入口111.29秒通过；163条横线严格相等。仍保留原已记录的合成200%冻结A1、横移80后仅纵向回位边界未获像素资格：行头Y134–136，正文另含Y137；alignmentQualified=false，未放宽容差，也不以入口成功宣称此项通过。popup helper字节未变，复用92811的24状态而不宣称重跑。另以同HTML、新profile、无插桩生产脚本与首轮相同装前capture口径，大表安装110.2ms／roundtrip113.4ms、首次真实C3选择17.8ms，2张当前帧、child0／Views销毁。各仅一次，结果是安装阶段，不是可见端到端时延或普遍性能保证；原失败和全部诊断保留于 `office-init-diagnostic-20261112-1`，未触原件或Excel7现场。 最终生产精确diff、时间和当前原图在 `office-paper-production-20261112-1/summary.json`，正式网格日志为 `office-paper-batch-layout-20261112.log`。
-
-2026-11-13，用户要求只放大表体、不放大工作表标签。当前交互 SHA `e082efc66f15405a752e1b1738c7879021e46b372ccd77189a6216c8d695dcf2` 对原 direct-body 表签使用 root zoom 的倒数，保原节点、事件、作者色标和固定表身份；不是只缩字的 transform，实际布局与命中区域一起保持界面尺寸。固定 CLI 的 body 100vh 下限在放大后会把滚动区撑到 sticky 标签后，现只对已识别的原纵向 flex shell 按真实视口除 zoom 保留标签占位，核原 body／slider／表签父属和有效有限高度；不改 table／cell 样式或 Word／PPT 布局。61 单测、Desktop1528类型、4文件 Biome、真实 CLI 宽窄窗口×100／125／200%／fit 共8态通过：表签44×28 CSS px、字号12px，滚动区底与标签顶一致，末行命中、横向标签溢出、键盘切表、非当前表右键和请求锁通过；8张当前帧，actual child exit0／Views销毁。完整网格正式入口另通过，沿用上段明确未获资格边界，不放宽容差。证据在 `office-sheet-tabs-actual-20261113-2/summary.json`。人工查看发现的粘性表头上沿1–2物理像素露字，同一HTML／200%／scrollLeft40／scrollTop22860.333984375下旧2cff与新e082的顶部4800像素完全相同；新视口高度改变最大滚动位置，未新增或修复此既有绘制限制。对照在 `office-sheet-tabs-top-edge-control-20261113-common`，不是原生Office像素一致资格。后续可见验收和备份状态见下文，不将隐藏程序输入测试当真人业务或物理IME。
-
-2026-11-13 后续按用户明确要求停止 Windows 操作并转云端。Windows e082 的隐藏真实 CLI／Chromium证据保留，可见窗口只完成此前2cff的Excel8，未冒称新字节三格式可见验收。云端从同一 Library v7 和完整 bundle 独立重下载，精确618f064基线干净恢复71文件，补丁SHA与Windows备份一致；原云依赖目录消失后使用官方 Bun1.4.4 和冻结锁重新独立安装852依赖。61交互测试加6文件51项非图形回归去重112通过，后组422断言，含三格式上下文、可信输入IME逻辑、唯一提交／unknown不重试、草稿隔离／旧草稿恢复、scope失效与只读栏DOM；真实Node／SQLite草稿夹具通过。Desktop1528文件类型、文档／影响、API、边界和测试归属均通过，锁与生产源码不变。证据位于云端 `office-cloud-v7-linux-evidence`。现成 Chromium 的正常沙箱最小启动虽经正式工具授权，仍在创建profile singleton socket时被环境拒绝（Operation not permitted），child实际SIGABRT，父进程exit1，尚未渲染页面，无新截图；没有改系统设置、关沙箱或转回Windows。上述失败只覆盖受限 exec 启动路径，不能推导云端桌面不可用。随后按用户要求核对23c3fde历史记录与当前完整 CUA 指引，确认正式 Linux 桌面／cdp 路径；实际打开云端浏览器，并经桌面 Terminal 在正常沙箱中启动官方 Electron44.3。第一窗口为生产预览组件加合成 HTML 的隔离外壳，第二窗口经真实 OfficeCLI 转换文件但仍非完整客户端；前者仅观察范围及取消，后者仅观察 Excel 200%标签、末行与非当前表右键。两者正常退出，不将组件截图作为完整客户端体验，Word／PPT与物理IME资格仍缺。之后云端执行目录再次消失，已从最新v9与完整bundle恢复精确基线、71文件及e082字节；旧路径仅是历史证据位置，不声称当前仍可读取。新隔离环境已实际完成冻结依赖、Rust1.97.1及正式Agent build，native Files清单匹配且Node加载成功。完整客户端首次Renderer构建exit137被杀，原因未确证；随后单独Node进程按正式build-native.ts同一Vite配置完成production Renderer，诊断关闭，复用原正式Service／Main／preload字节。真实runtime／collector／Artifact已将三份固定合成Office原件落为历史文件卡；播种是本地固定模型和受控copy Job，不是受管Shell或远端Provider资格。首次播种脚本查询遗漏subjectId而失败，旧历史保留，补准确参数后使用新会话／新Command完成三输出并正常close，没有放宽生产校验。完整客户端随后在正式云桌面通过实际历史文件卡加载三格式，观察准备占位→转换ready→选择／请求输入→取消及文件切换，四张完整窗口原图保留；不是组件壳或原生Office应用。Excel在100／200%中表体缩放而原Sheet标签维持界面尺寸，B2:C3准确2×2／起选B2值2；顶部→中部约57–66行→回顶未见明显累计错位，但不扩为严格1px或复杂作者边框资格；非当前对照表请求标题正确且可取消。Word实际3个预览页，文字选区和非当前第2预览页正文请求均打开原可信输入；PPT实际2页，对象及非当前第2页请求也正确打开并取消。普通未发送草稿在切换与取消后仍可见保持，本轮不按Enter、不修改文档、不复验业务发送或物理IME。200%图亦显示文档内请求浮钮仍随文档放大，不把Sheet标签修复说成全部chrome固定尺寸。三同源文件另用LibreOfficeDev26.8.0.0.alpha0私有profile转换为3页Word／2页PPT／6页Excel打印参考，不是Microsoft Office对照；原始和离线Excel HTML均保留单格Calibri声明，云端缺该字体，不能由字体回退外观推定Kite又强制改了字体。本次关闭按钮只触发跨平台hide，未开始退出；源码既有SIGTERM优雅退出入口会等待直接paired Service退出0，不能据此推定全部子孙树。退出脚本先因桌面node不在PATH、再因实际cmdline是完整单字符串而非三参数形态停止，两次均未发信号；只读核完整Main／父launcher身份后，新脚本执行仍因缺该次退出的直接用户授权被拒，命令已键入但未按Return；该拒绝未被换路径绕过。用户随后明确允许正常退出，重新核现场后仅一次Return执行完整身份校验并发送一次SIGTERM，实际Main退出0，按同一冻结源码可证直接paired Service退出0，不能扩为全部子孙树。三原件SHA保持，正式历史仍只有两次seed run，caller intent为空；本地拦截服务器累计12次请求混含代理流量，不能算模型调用。普通QA文字在全部可见操作中保持，但退出后drafts表为空；[当前产品合同](../../docs/handbook/clients/desktop/README.md#配置编辑交互)不保证尚未持久保存的输入跨退出恢复，rememberDraft只写内存cache，本次未授予草稿冷恢复资格，也不另改全局自动保存。四张完整窗口截图已独立保存，后续只修用户确认的Excel浮钮固定尺寸。以上不改变旧失败／未知结果，也不授予新OfficeCLI业务链或安装发行资格。
-
-2026-11-13 浮钮增量收尾：交互源码 `c56358eb8b13be92e4fdc47cf8d2c535994cf43f19e8282d9f4ea6118ab2ce16` 只对原 Excel “请求修改”按钮反向 CSS zoom，布局外框与命中区域保持界面尺寸；沿已有冻结格可见交集定位，并复用表体 client 裁剪区避开表头、行号、滚动条及 Sheet 标签。有效区域不足时隐藏浮钮并清旧位置，原选区和顶栏请求仍可用；不改变 Word／PPT、菜单、作者样式、请求范围、serial、可信输入或发送协议。64交互单测、Desktop1530文件类型、4文件Biome通过。[真实几何夹具](test/isolated/office-excel-request-zoom.test.ts)在正常 sandbox Electron44.3／真实CLI HTML上完成两实际视口1180×784与360×560、各75／100／125／200%及fit共10态；同一B6按钮100.140625×32.1875 CSS px、字号13px保持，各态末端可见格按钮距内容底边4px，5点原生命中、滚动／冻结遮挡、准确一次请求消费、合成点击拒绝及取消通过，原HTML与作者单元格属性／文本不变，实际child exit0、自有窗口销毁。首组请求720宽被窗口管理器放为1180，按真实viewport记录，不称720资格；程序输入不等于真人／业务／物理IME。旧root1在200%冻结列下把原始B6左边当作可见锚点而失败，19px来自实际冻结遮挡；保留旧失败，修正夹具采用独立可见交集与真实底层命中证明，未放宽0.05容差。随后完整生产客户端Main3虽证实浮钮尺寸固定，底部B57却侵入Sheet带；该实际失败促成本次内容区限位，不以夹具成功覆盖。Main3经新的具体退出授权后一次正常SIGTERM退出0，三原件SHA及两条seed命令不变、caller intent为空，5次阻断流量均为代理CONNECT而非模型请求。
-修后Main4按正式生产Main配置冷构建，Main SHA `ce13ac31d698d2666ee58a4ff1d73773707a9399c5009a29f11bbb7cc2128392`，169项非Main资产与正式Service逐项复用校验、诊断关闭，无新播种。在完整客户端实际历史XLSX文件卡中观察100／200%同范围按钮尺寸保持；200%底部B57浮钮位于水平滚条及Sheet栏上方，横滚后被冻列完全遮住的B57不显示浮钮，可见C57按钮仍在内容区并实际打开准确“预算!C57”可信输入；可见取消后分别纵向／横向回位，顶部B2:C3重新拖选正常。新普通QA草稿在本窗口全过程保持，无Enter或新业务；修后完整原图已直接检查并交付。该实例留在无输入框／菜单的安全现场供协调，未将上次具体退出授权用于新实例，不声称Main4已退出；只读核对三个源文件及Artifact blob SHA一致、仍仅两条seed run.start且无caller intent。Word／PPT及七条历史业务链的相关源码未变，按其原字节和已记录范围复用，不冒称本轮重跑远端模型、Windows新字节、物理IME、复杂作者边框像素或完整发行验收。当前开发交付完成，不扩大为全局草稿自动保存或文件统计面板；文件输出仍指自动收集与原文件卡。
-
-同一合成文件另以签名有效的 Microsoft Excel16.0.20527.20150独立只读实例观察：200%预算表C3显示3600／SUM(B2:B3)、Calibri11和冻结滚动，100%对照表C3显示1600；未编辑或保存，原件SHA不变，正常X关闭后正式权限核实例已退出。125%自定义缩放对话框不能经当前CUA可靠定位，已取消，未取得该项对照。实际原生窗口与Excel6窗口照片保留，不能把不同DPR／缩放口径直接当像素等价；Excel6源／草稿不变、submit与Provider为0、UI和Service正常关闭。
-
-迁移后的合成 HTML 正常 sandbox 布局矩阵有64网格、24选区、6迁栏定位、2冻结、12外围与15行状态，134次当前帧采集通过，actual child exit0／Views销毁；保留既有一个 synthetic 200%角落未取得像素资格，不扩大容差。另使用真正新 recipe 转换的同一1000×8合成工作簿，125／200%共10个实际滚动状态、167条默认横线的绝对物理Y与厚度相等；8范围外围27081像素作者彩边残留为0，取消后31817作者彩边像素逐点恢复，字体与直接 CLI 基线一致。42张原图及实际 scroll／视口保存于 `excel-author-fonts-E-2-20261112`；125%无横向溢出、200%请求80实际28，不虚报80。普通行顶部／底部与滚动后原图已直接查看。该样本交互安装观察为9120ms，首轮8秒探针预算失败独立保留，不改生产预算或声称性能基准。作者复杂共享边和原生 sticky 的固定坐标位移仍需按具体样本判断，不把有限范围对照推广为所有像素一致。
-
-新 recipe 的 Word 冷转换与最终 consumer 另核三页样本第2页原 p3／p4、长文晚图7→8页、字体／图片／resize使旧serial失效、静置不循环；PPT 新冷转换保原两页及对象ID／路径／文本。三格式再以中英数字、明确不存在的family及Calibri对照验证实际平台字体：Word／Excel缺失family回退系统Noto Sans SC，PPT回退系统Microsoft YaHei，均非自定义字体；Calibri中英混排实际按字形回退。受控Word样本3行／对照2行且仍3预览页，Excel包裹文本7行／对照1行且定位预算!A2，PPT3行／对照2行且定位slide1 shape100000；截图已查看无方框。该字体专项位于 `office-font-probes-1`，只证明此Windows的中文／Latin／数字和所测字体，不保证所有Unicode或其他OS。实际转换Job均闭合／进程树停止／清理确认，最终隐藏Electron退出0，原件哈希不变。此前七条可见业务链的原成果保留，但不自动取得新版组合界面／物理IME的完整可见资格。
-Word 左侧缩略图来自固定 recipe 已 settled 的真实 HTML `.page` 顺序，标为“预览”页，不承诺 Microsoft Word 分页一致。页级 scope 固定 html-preview 基准、页序、layoutGeneration 及 `.page-body` 完整原文本块，输入标题明确“预览第 N 页正文”；仅该页正文可唯一映射时开放，不涵盖页眉／页脚、页码、水印与背景。图片、缺项、重复／拆分路径、正文变化或超预算使该页请求不可用，不妨碍文本选区与普通预览。缩略图有视口／节点预算，去掉原 class、id、data-path 和交互；图片克隆转为背景，保原纸面与文字，不污染 `.page`、`document.images` 或分页观察。
-
-浮动请求冻结当时选区，状态读取不会消费请求；宿主补原 target／sourceHash／generation。PPT 窄面板仍显示独立缩略图，克隆实际页面但不参与选区索引；仅可见邻近最多12页、单页1500节点和总8000节点，离屏与放映释放，复杂页明确提示查看原页。当前页优先显式选择，按实际幻灯片可见比例及1%容差跟随滚动；长备注不参与页定位，仅隐藏原转换器顶层重复页码。它只是上下文，不能成为 host 文件路径、命令或写入授权；view 仍无 preload、Node 或 Native bridge，原 manifest/CSP/网络拒绝不变。
-
-[历史PPT副本reader](electron/office-editor.ts)仅为旧草稿的immutable revision引用保留：不创建目录、初始化副本、执行batch或发布新版本；open/resolve核current、revision元数据与完整内容摘要。缺项、损坏或权限不安全明确拒绝，不能回退原件。Windows从原attached Profile派生有限只读能力，保真实ACL、普通单链接文件、祖先和文件HANDLE；不提供Office写锁、flush或修权限接口。Main历史上传和下载都使用reader的受保护流，close等待实际child关闭和流drain。
-
-[局部修改输入](electron/office-request-view.ts)由第二个独立、可信、无 preload／Node／Native bridge 的 sandbox WebContentsView 承载，固定 HTML 不运行文档脚本，独立 session 拒绝网络、导航、权限和下载。预览只给有界选区矩形；Main 冻结原 target、sourceHash、选区与请求身份，不把提示文字放入不可信 Office DOM。输入期间冻结预览导航与选区，关闭后恢复；主窗口布局变化重定位同一选区。真实事件门控 Enter、IME、重复按键与 Esc。Windows 实测 isolated world 的 compositionend 有时标为非 trusted；控制器只在同一输入框后继可信、非 composing 的 keyup 清除旧 composing 状态，keyup 本身从不发送，候选确认键仍被 Enter／229／repeat 门控拒绝。未知结果保留并锁定，不自动重发。
-
-[宿主可信投影](electron/office-preview-trust.ts)仅白名单复制有界描述，核实际文件类型和精确有限矩形，丢弃页面夹带的 target／sourceHash／prompt／inlineRequest 等字段；仅可信输入 View 可提供提交。文档 HTML 仍允许其受限 inline 脚本，DOM／data-path／分页 marker 与真实点击本身均不授予文件身份或修改权限。Main 绑定原 document request serial；分页失效仅关闭匹配输入，读取输入后发送前再 peek，并重核原 owner、session 与 retiring 状态。取消／接收按原 serial 精确释放；失败／unknown 不解锁重发，已投递请求只关闭 UI、不撤销 journal。迟到结果不能关闭后继输入或改绑另一文件。
-
-[精确修改上下文](src/output-files-bridge.ts)仍支持原草稿 CAS/proof 和旧 immutable 引用。[局部发送](src/native-office-request-submit.ts)则将用户输入与单个原输出／选区构成独立提交材料，经 Main 核原注册引用、名称、来源与完整上下文、稳定 InputFile import 和工作副本准备后，复用原 caller journal 发送一次。它不保存或消费普通 composer 草稿，不继承其文字、附件或 Plan 状态；已有执行时沿原 follow-up 规则排队。主会话切换或读取权失效不重定向，原未决命令跨 caller 重建仍阻止第二次发送。预览、选择和打开输入本身不启动模型；Enter 的 accepted 只表示请求已接收，不表示文件已改完。Agent 的 OfficeCLI 文档创建／修改能力未改。
-
-历史草稿恢复与新提交校验分离：`allowLegacyExcelRanges` 只用于有界旧 Excel 草稿的读取、显式保存、proof 和 CAS，不迁移或自动写回原行。普通文字和其他合法附件一并恢复，旧范围显示“范围需重选”，receipt 不因旧范围匹配而消费草稿；新 compose、fromOutput 与局部 officeDocument 提交仍执行严格范围规则，不剥除 context 后降级整文件。原 Word／PPT 草稿保字符预算，新范围与 Word 页级材料保32KiB字节预算。[真实冷恢复测试](test/isolated/native-prompt-draft-store.test.ts)核 Node／ACL／SQLite 原行、原附件及后续 CAS，不只用内存替身。
-
-2026-11-12，当前区域／页／表与安全实现的15文件联合 Windows 回归199项通过、1项POSIX专属跳过、0失败、1236个 expect。除原选区、输入、caller、历史 reader，还覆盖上述草稿冷恢复、[宿主投影与竞态](test/isolated/office-preview-trust.test.ts)、[真实隐藏 Electron 攻击](test/isolated/office-preview-security.test.ts)、Word 分页、Office adapter、Windows FD 生命周期及 collector 完整身份。日志在本任务隔离目录 `office-scopes-final-combined-tests-20261112.log`。攻击夹具使用私有预置合成 HTML、正常 sandbox、独立 session／View，核主世界伪控制器与合成输入不能发送，文件／UNC／网络／非 manifest／POST／iframe／popup 拒绝，A→B 后旧输入和资源失效；不是转换器或真人交互资格。该组测试不包含新区域与页／表菜单的可见全链路资格；后续实际范围分别记于下文，不以该组测试冒充完成。随后 Word 页栏字体及竖滚动条宽度的窄视觉修复另通过73项定向测试，源正文样式和 scope 不变；该次尚未覆盖新字节的可见视觉，后续冷构建与实际场景见下文。
-
-迁移前 Excel chrome 阶段源码 SHA 为0276049b007e9fb716a191de835a3cf42b82085e79299fd8502326b7c2e4364c；6文件联合回归102项／393断言通过，覆盖选区、Word／PPT 既有交互、原可信输入、范围解码、宿主竞态及只读工具栏，Desktop 1524文件类型通过。[真实 Excel 布局夹具](test/office-excel-layout.fixture.ts)与[独立入口](test/isolated/office-excel-layout.test.ts)在正常 sandbox、隐藏窗口、DPR1.5 下通过64组网格（75／100／125／150%，浅深／冻结／作者边／滚动）、24组选区、6组说明命中、2组原始／修后冻结对照、12组外围／合并旁绘制状态，实际153.92秒。130次 capture 中1张旧绘制被拒绝后重采；冻结透字像素733→0，完整外框残色0，A8／A9各10920像素对照无差异。实际 child close exit0、viewsDestroyed=true；日志 excel-layout-final-complete-20261112.log。该组是合成 HTML 隐藏绘制断言，不冒充真人或转换器资格。初版平坦像素最小值比较可虚过，该对齐资格已作废；旧77次 capture 拒绝3张旧帧的原收据仍保留，不能仅凭两次 rAF 宣称新截图。此前45／90秒超时的当次完整关闭证据未定位，本次实际 child 关闭不追认旧样本或全进程树退出。
-
-另独立合成 XLSX 经固定 OfficeCLI 实际 validate／HTML 成功，确认 `=SUM(B2:B3)`、显示3600、长文本、冻结和作者颜色／边框均存在，受管 Job 清理确认、原源 SHA 不变；没有用合成 DOM 代证真实公式属性。可见新 UI 的范围单独核实，不混入旧业务成功。
-固定 recipe 与最终 consumer 的隐藏真实 Electron 联合检查另核三页样本的第2页准确 p3／p4，长文实际7→8页、晚字体／图片／resize 使旧 serial 失效、静置不循环、空映射页不可请求，原件哈希不变；真实原图确认白纸缩略图与正文清晰。证据在 `word-pagination-real-9MTuFV` 的最终 v2 proof／PNG；该范围不是可见窗口编辑后新产物重开验收。
-
-2026-11-11，Windows x64／Bun1.4.4／Electron44.3.0，该阶段局部输入和发送实现的10文件组合回归101项通过、1项POSIX专属跳过、0失败，853个 expect；命令范围是 `office-preview-interaction`、`office-inline-request`、`native-office-toolbar-dom`、`native-office-request-submit`、`native-caller`、`native-output-files`、`native-pdf-preview-dom`、`office-editor`、`office-selection-draft`、`windows-office-editor`。其中新发送测试经过生产 NativeCaller／journal 和内存私库／受控 Client 端口，核单个原件、伪造元数据拒绝、原 composer 不变、140次临时引用回收及 caller 重建后 unknown 不重发；不据此宣称真实 Service／Provider 或磁盘崩溃恢复。DOM 回归另核取消按钮键盘不会误发、IME／重复 Enter、慢提交期间仍可关闭、移动后原选区定位、局部回执重试不重发业务。实机中文直接输入不等同 Windows 输入法候选确认资格。
-
-Windows 实际程序集成另使用[真实 Service 准备夹具](test/windows-office-inline-service.fixture.ts)与[生产 Main／IPC／preload 装配](test/windows-office-inline-main.fixture.ts)、[同一发送 helper 的 renderer](test/windows-office-inline-renderer.fixture.tsx)：真实 collector／Artifact 入库、磁盘私库／caller journal、工作附件和真实 Service 配合本机固定 SSE Provider，唯一一次 submit 的 Command 为 applied、Run 为 completed，Provider 仅收到1次准确修改要求、sourceHash、页码、对象路径、保留末尾换行的原文及工作附件路径，固定回复已持久保存。原件与工作附件 SHA 相同，普通聊天草稿内容／ID／revision 不变，`outputs.office.open/apply` 请求为0。事实在任务隔离目录 `inline-service-5/proof.json`、`integration-contract.json` 和各 View 原图；预览与主 renderer 分别 capturePage，未拼接，不代表最终 OS 合成画面。模型为本机受控服务，不代表远端模型、安装制品或 Agent 已完成文档修改。
-
-同一实际 Electron 装配另直接构造生产输入 View 核安全合同：输入和预览均为独立 sandbox／contextIsolation、无 Node／preload／主 world bridge，两者外网与 loopback fetch 均拒绝，输入页内脚本被 CSP 拒绝，输入控制器仅在 isolated world 可见，Office DOM 没有 textarea。检查没有产生提交，Provider 仍只有原1次，原件 SHA 不变；`inline-service-5/security-proof.json` 记录该程序安全合同，不是键盘验收。
-
-该程序集成未伪造 trusted 事件：调用与真实回调相同的生产发送 helper，明确不代替键盘验收。此前首版可视夹具实际观察了对象选中→邻近输入自动聚焦→中文直接输入→Enter→发送中→单次回调→关闭；后来 CUA 只读截图持续返回 helper active-request 错误，无未结束请求或待授权卡，当时停止重试。此历史限制与原图保留，后续恢复的实际范围如下，不以首版或程序集成截图追认未观察流程。
-
-2026-11-12 恢复后的真实 Windows 输入事件在 `inline-edit-word-2` 复现 compositionend 非 trusted 导致后续 Enter 被旧 composing 状态拦住；上述可信 keyup 修复后，候选态 Return 只确认拼音且零发送，数字选词确认“请”也零发送，随后明确 Enter 仅提交一次，普通草稿不变。未更改输入法设置，不把该 IME 的 Return 说成中文选词。输入修复与工具栏测试修正后，原12文件组合回归118项通过、1项POSIX专属跳过、0失败、955断言；新测试另核合成／其他目标／仍 composing 的 keyup 无法清除保护。工具栏原测试混合后台轮询与业务读取计数的失败保留，现按准确请求类型、同一挂起 Promise 及每次业务控件唯一性核验，主动让后台轮询穿过挂起期，不放宽生产防重。
-
-同日 `inline-edit-word-4` 真实选区、原位输入和唯一 Enter 接收已观察；真实默认 Auto 授权之后，受管 helper 因 Bun 子进程 stdio pipe 的 EPERM 未启动 OfficeCLI，未得到编辑产物，原件与工作附件 SHA 不变。该 Run completed 不是编辑成功，原失败和三个 Provider 请求（业务、风险分类、失败收尾）保留，不能算三次用户提交。`inline-edit-excel-3` 和 `inline-edit-ppt-3` 各自真实选区、对应位置输入、数字候选确认与候选态 Return 零误发、浅深主题及普通草稿保护已核；尚未最终发送或重开新产物。截图均为真实应用各 View 原图，不拼接或伪装 OS 候选栏；未知其他窗口遮挡时未用其画面补验。三个自有 UI／Service 均正常关闭，后续修复须在新隔离现场继续完整修改验收。
-
-Windows helper 的受限 token stdio 兼容修复后，新的 `inline-edit-word-5` 完成真实选中文字→邻近输入→唯一 Enter→原 Auto 审核／受管 Shell→新产物卡→点击重开。输出第一段为“Windows 文档编辑验证完成”，第二段预算1200、数量24及日期保留，原件／工作附件 SHA 与普通聊天草稿不变；一个 Command／Run、三个 Provider 请求（业务、风险分类、收尾），Job 停止、关闭和清理均确认，UI／Service 正常退出。新 `inline-edit-excel-4` 同链完成 B2=1500，B3=2400不变、原件与草稿不变；真实候选确认零发送，后继 Enter 只提交一次，新卡重开已实际观察。其业务 Job 完成及 UI 正常退出已确认，但 Service 后续 PID 消失且端口关闭、缺少正常关闭回执，退出原因未知，不能计正常 Service drain。两份完整证据、未拼接的各 View 原图在相应隔离根；固定本机 Provider 不代表远端模型或安装发布资格。它们只证明原单选／文本功能，不覆盖后来新增的区域及页／表右键。
-
-2026-11-12 新 `inline-range-excel-1` 已在真实 Windows 窗口完成1000×8合成大表的连续 B2:B3 选择、反向 B2:D4、跨表清空、超256格拒绝、IME 候选确认零发送及 Esc 取消。唯一一次修改请求进入原 Service／审核／受管 Shell，实际点击新产物卡后 B2=1500、B3=2700；独立比较8006个单元格只这两格变化，原件／工作附件及普通草稿 ID／revision／content 不变。用户 submit=1，固定 Provider 请求共3。局部拖选期间2400帧／15.02秒的 RAF 间隔 p95=6.5ms、max=24.7ms，仅说明该样本观察，不外推大表整体性能。带 Shift 的实际点击因当前 CUA 接口不支持未获实机资格，相关逻辑仍有定向测试。该现场在授权暂停前已完成业务和新卡重开；恢复后只读核唯一 Job 回执为 succeeded／exit0、treeStopped／cleanupConfirmed／closed=true、activeProcesses=0且没有 terminationRequested，再沿原 close 协议关闭，Service exit0／closed.json及准确两个自有 PID 消失均确认，没有杀进程或重发 Command。暂停时的未确认事实仍保留；截图与过程证据在原隔离根。此 build 不含后续纯 chrome 收敛，后续窗口须冷构建复核视觉。
-
-同日 `inline-sheet-excel-1` 从仍显示“预算”的页面右键非当前“对照”表签，准确发送独立 sheet scope；真实新卡重开后切到对照，B2=800、B3=900，8006格仅对照!B2变化。`inline-page-ppt-1` 从第1页右键第2页缩略图，绑定无 objectPath 的 slide=2，唯一修改第2页指定文本；第1页 XML 和全部演讲备注逐字保持。`inline-edit-ppt-5` 另完成第1页准确组件 `/slide[1]/shape[@id=100000]` 的选区、邻近输入、唯一发送及新卡实际重开，显示“Windows 演示编辑验证完成”，第2页与全部备注保持。三次均沿真实生产 Main／Service／受管 Shell／collector，不复用或重放旧成功 Command。
-
-`inline-page-word-1` 实际渲染3个 HTML 预览页，在第1页右键第2页缩略图，输入标题为“预览第2页正文”，绑定原 p[3]／p[4] 和实际 settled generation。可见取消按钮与真实 resize 各自使旧输入关闭且零发送，布局代次从4到5再到6；重选后唯一发送，新产物卡实际重开并点击第2页，显示“Windows 预览页修改验证完成”。另5段、分节 XML、p3／p5 的 pageBreakBefore 均保持，不将该预览页称为原生 Word 页码。该实例复用已冻结 v4 的8份通用 app 字节，逐项核 SHA 及不含旧目标绑定，仅由自身 bootstrap 生成正式 fixture-info；未带入同时实施的 Excel 新栏代码，证据在其 `static-asset-reuse-proof.json`。
-
-上述四个新现场各 user submit=1、固定 Provider 请求=3，原件／工作附件和普通草稿完整快照均保持；实际 Job 均 exit0、treeStopped／cleanupConfirmed、activeProcesses=0。各 UI／Service 之后沿原协议正常关闭，closed.json、Service exit0及准确自有 PID 消失交叉确认，没有 kill、清理失败现场或重发业务。PPT 页现场曾因明确暂停拒绝关闭，恢复后只核原状态并重试已知未执行的 close，不把暂停时未知抹成当时已完成。Word／PPT 真实 q→2 候选确认均零发送；PPT 候选态 Return 负例被拒且未执行，Word 未补该负例，不能以 Excel 的 Return 实测代证。原始过程、输入／预览各 View 原图与 proof 分别保留在上述隔离根；并非 OS 合成截图、真实远端 Provider 或安装发行资格。用户后来要求的 Excel 新名称／公式栏、整体选区与边框修复另行验收，不由这些 v4 业务成功自动取得新视觉资格。
-新 Excel 可见场景 `inline-style-excel-1` 发现固定“离线预览说明”挡住展开按钮，实际点击打开说明而非内容；该失败现场零提交并正常关闭。修后 `inline-style-excel-2` 已实际验证 C3 公式、长值展开、独立说明、正反 B2:D4、实际 D4 起选值4、名称定位、跨表清空及对照 C3=1600，浅深各75／100／125／150%网格可读；准确“预算!B2:D4”请求输入经可见取消关闭。当前窗口这些缩放没有横向溢出，不能把静态观察说成横滚通过。点击只读值后 Ctrl+A 曾按浏览器默认全选预览，未复制或读取剪贴板；一次 AX 读取不可用随后由新截图定位的收起动作恢复，原因未确证，不声称键盘窄修解决该工具状态。
-
-同一场景在200%实际产生横向溢出后，观察到冻结 A 列被后方文字穿透，冻结 A1 作者红蓝边框随滚动消失；原图与动作保留，未虚构缺失的 DOM scroll 数值。该两项在原固定转换 HTML 与已注入版本的隐藏对照均复现，源 td 样式完整：无底色的冻结格透明，collapsed 边框未随冻结位置绘制。正常关闭该现场后 UI／Service 均退出、closed=true、Provider／submit／caller intent均0，原件和普通草稿完整保持；冻结绘制的修复与新可见资格另行核实，不能由其余成功或旧隐藏矩阵代替。
-`inline-style-excel-3` 在真实 Windows 中核聚焦栏的 Ctrl+A 及再按两次，原生 Selection 精确为1200／4字符、两端均在只读值栏，B2:C3范围不变；没有读写剪贴板。200%横滚及滚轮／拖滚动条快跳到约345行后，冻结首列不再透字，作者四边跟随；但该版本选区灰框与作者红蓝线仍并行，且保持横滚再单独回到顶部时行号区漏出原作者线，所以该次未取得完整边框资格，双轴回零才恢复原图。全部原图与有界只读快照保留；UI／Service 正常关闭、零提交／Provider／caller intent、原件和草稿未变，不热改旧窗口或重放请求。
-
-用户随后强调选框与单元格自身边框的覆盖关系。新独立合成边框变体由固定 OfficeCLI validate／HTML 证实1／2／3px双色实线／虚线及真实 colspan=3、rowspan=2合并格；原合成源不变、受管 Job 清理确认。它用于验证外围单一选框、取消还原和合并格拒选，不扩大完整矩形范围协议。转换器把原 mediumDashDot 映为 CSS dashed，不能借该样本宣称原生 Office 虚线图案逐像素一致。
-最终新现场 `inline-style-excel-4` 精确冷构建上述0276049字节，真实125%浅色下2／3px实线、1／2px虚线及未选邻格粗共享边均为单一灰外框，内部作者边保留，取消后原红蓝／绿紫边恢复；点击真实 D8 合并格清空旧框与 scope 并拒绝请求。200%深色下核厚边、横滚80与纵滚261.6667，再仅纵向回顶，A8／A9无透字、行头无红蓝残线，双轴回零原边恢复。各阶段原图01–11和有界只读快照保留在原根；这是该有限场景实际观察，不扩大到所有缩放／所有帧。UI与Service沿原协议均exit0，closed=true、准确自有PID消失，源ab498 SHA、草稿完整内容／身份／revision保持，submit／Provider／caller intent均0，没有重跑业务、IME或读写剪贴板。此前可见失败不被覆盖，最终原图为各View真实capturePage，不是拼接OS画面。
-
-用户随后从已交实机图指出放大后的左侧行号与正文水平边线不齐。上述外围／透字通过不覆盖该绘制对齐，最终定稿因此暂停；原 th collapsed 横边与 td 默认 inset 横线需要另核真实像素并补必要修复，不能以行高或选框断言代证。
-
-真实 collector 首次加载资产后暴露 Windows Bun 窄 volume 与 native 完整身份混比，`inline-service-4` 的 output_root_changed 失败现场保留；[collector owner](../../packages/agent/src/business/output-collection.README.md)已按同一完整 native 身份采集／核对修复，未截短、绕校验或迁移旧记录。Windows2文件10测试30断言、Agent1,240文件类型通过；新现场5证明完整输出入库和输入准备成功。早期阶段 patch 的 Service 夹具并行编辑曾产生5个类型错误，该确切阶段包不获类型资格，最终冻结后单独复验。
-
-2026-11-11用户将本轮范围改为移除所有本地插入。此前本地Git基线618f0649337f225e8ef8c9a5b2a50b569f22d676及完整恢复bundle保留；该基线的Linux插入、九图表和本地版本验证属于历史能力，不再代表当前界面。尚未提交的Windows插入实现与实机测试也已隔离保留，不作为当前可用功能或正式发布资格。本轮Windows x64/Bun1.4.4/Electron44.3.0的7文件组合回归28项通过、1项POSIX专属跳过、0失败，119个Bun expect；真实Electron子夹具另用assert核12类历史/ACL/关闭与导出失败边界。Desktop类型1508文件通过。[只读UI测试](test/isolated/native-office-toolbar-dom.test.tsx)证明零本地Office写RPC、无新增/插入入口、只读备注、Word/Excel准确选区、重复请求/晚结果与viewport移动；[历史测试](test/isolated/windows-office-editor.test.ts)重新编译正式native后端，使用独立合成ZIP历史，不执行CLI写命令，核原内容和目录完整不变、缺失/损坏拒绝、实时ACL/硬链接、并发恢复、EXCL目标保护、导出失败清理及close未知。相同只读阶段patch另在Linux x64/Bun1.4.4/Node24.22.1独立执行7文件，14项通过、2项Windows专属跳过、153断言，Desktop类型1508文件通过；该证据只覆盖历史reader及只读界面，不覆盖后续原位置输入发送链。 原Node-API权限、长路径、ABI和闭合清单定向回归另4项33断言通过，其余8项未纳入本轮定向范围。
-
-[Windows可视夹具](test/windows-office-visible.fixture.ts)实际运行生产NativeFilePreview/Toolbar与NativeOutputPreview，真实指针操作观察无新增/插入/本地编辑入口、第2页与缩略图导航、只读备注、125%缩放、放映/退出和对象选区请求。选区绑定原件SHA、slide2及对象路径/原文，无editor字段，全程零outputs.office请求；下载入口的夹具导出与原件SHA相同。可信工具栏和独立预览分别由各自capturePage保存原图，不拼接。草稿/下载回调是隔离夹具，不能据此声称完整Main/Service/Provider或安装制品验收。测试进程正常关闭，未测得可比较时延，不声称加速。原图与证据在本任务Windows隔离目录visible-readonly-1，旧插入版本与旧失败现场未清理。
-
-[输出入口](src/native-output-files.tsx) 沿原 SessionPage、Conversation、环境信息和 SessionTabs 挂载，读取持久交付索引而非从模型正文猜文件。Store／Session／generation 限定每次请求，晚回数据不跨会话；独立文件索引revision只随文件记录或重连失效，合并短时间事件并保留已加载分页，不随每个模型正文片段重读全部文件；文件目标保留准确 locator，同名不同交付不合并。来源使用固定Run标识的短标签，未从有界View数组下标伪造全会话轮次序号。另存使用系统对话框，原件从 Client 流式进入 [Main 临时目标](electron/output-files.ts)，完整 EOF、hash 与大小核对后 rename；renderer 不接整份办公原件，失败不改写既有目标。
-
-[预览宿主](electron/output-preview.ts) 独立内存 session、单个 sandbox WebContentsView，无 preload、Node 或 Native bridge；manifest 限定 `kite-preview` 资源，独立 CSP 和请求层禁外网／localhost／file、导航、新窗口、权限与下载，主 renderer CSP 不变。Office 转换使用现有 NativeProcessOwner、固定禁驻留／安装／更新配置和有界诊断；缓存按源hash／renderer／recipe区分，最多八项。正式制品从已验证Terminal根定位资产，开发构建注入编译期本地资产根。PDF 由Service的既有PDF worker分页，Native只接页图。 Markdown预览复用固定Markdown parser，静态白名单呈现标题、列表、强调、代码及表格；原HTML转义、图片只显示alt、文档链接不激活，不赋予外联或文件资源权限。支持PNG/JPEG/WebP/GIF，SVG/XML/HTML沿文本／代码方式而不执行。未知后缀仅在有界严格UTF-8（或带BOM的UTF-16）且无二进制控制字符时显示文本，读取失败与文本大小限制不伪称二进制。转换失败仍保留另存与继续修改。
-
-预览工具栏在转换就绪后可能改变正文区域尺寸。首帧等待遇到尺寸变化会撤销旧订阅，并让仍位于主界面下方的预览层继续在原层级准备新帧。只有新尺寸的首帧通过校验才将预览层移到前面。[首帧回归](test/preview-frame-owner.test.ts)覆盖第一次绘制尚未完成时的尺寸更新、迟到旧帧及新帧交接。
-
-2026-11-15 Windows x64／Electron 44.3.0，新离线安装包候选 `466621de24697f39` 通过真实安装入口冷启动。在正常网络环境打开已保存会话中的三份本地合成文件，实际窗口显示 Word 正文、Excel 网格与两张工作表、PPT 两页内容。拖宽 Word 预览以及关闭并重开 PPT 后文档仍可见，退出由应用菜单完成。此次验收范围为工作区本地文件预览。
-
-“继续修改”只登记准确输出引用，不立即导入或启动模型。草稿 envelope 保存 chip ID、locator和来源轮次，沿原revision／proof消费；重载时Main解析原快照并重建 NativeInputFiles 引用来源。发送时稳定 import ID 调用 `prepareInputFromOutput`，再沿已有／新建会话工作副本准备；准备失败保留草稿，不绕过原 journal。普通上传仍用原分块路径。
-
-2026-11-11，Linux／Bun1.4.4，当前实施工作树：[输出IPC／流式保存／引用准备](test/isolated/native-output-files.test.ts)3项23断言、[原上传DOM](test/isolated/native-input-files-dom.test.tsx)1项34断言、[真实Service与preload分块输入](test/isolated/native-session-files-ipc.test.ts)1项20断言通过；[Node私库冷启动](test/isolated/private-data.test.ts)新增引用chip与proof／unknown保留／成功消费，完整文件1项10个外层断言通过。[参考项／准确Run解码／重试与迟到结果](test/isolated/native-output-files-dom.test.tsx)1项24断言通过；Desktop类型检查1491文件通过。新增覆盖100条集中晚到后继续跨页、同游标重复加载、无文件时独立“更多整理状态”分页及重复collection保留较新revision；文件head刷新保留已显示文件但沿新head游标补齐缺口；状态head使用当前页替换，成功空输出退出可见状态后不残留旧失败，只有状态续页按ID／revision合并，不自动遍历全部状态。暂存过期（期限已过或明确output_staging_expired）不提供无效重试，提示重新生成且保留已交付文件。上述单元替身仅证明相应合同，不作为真实产品体验验收。
-
-实际Electron44.3.0已从官方包安装并验证版本；[隔离实际预览夹具](test/output-preview-electron.fixture.ts)已加入。最初exec入口未设置DISPLAY且限制本地／Unix监听socket；该入口headless BaseWindow启动segfault，独立Xorg dummy也因监听socket限制退出。此证据仅说明这些启动路径失败，不代表独立真实云桌面不可用；尚未从这些尝试获得原生窗口过程或截图。随后从真实云桌面终端保留DISPLAY=:0、正常Chromium沙箱启动同一Electron：TXT、DOCX中文／滚动、XLSX两表往返、PPTX键盘翻页及F全屏／Escape退出、外网／localhost／file与导航／新窗口拒绝、关闭和不支持格式失败后原草稿保留均实际验证。初次PPTX提示div挤窄body flex的失败证据保留，修后改fixed可折叠details并复测页宽恢复；证据位于本机/workspace/shared/kite-electron-diagnostic-20261111/observed-preview-2和observed-preview-3。另以真实含分式／根号／求和的DOCX和PPTX在可见桌面验证离线KaTeX，9项隔离检查保持通过；同样本preview.open首次／同hash缓存重开耗时分别1482／166ms、1590／356ms（单次观察，排除人工驻留与截图等待，不是总体性能）。原始结果在observed-math/result.json；曾遇一次窗口合成花屏，关闭准确旧隔离实例并正常冷启后恢复，未改GPU或沙箱设置。[隔离生产装配](test/office-product-electron.fixture.ts)另保留真实尝试：第一份Service误解到Agent源码.ts而未发布Shell，已改成真正dist包/.js资产；第二份在默认Auto遇固定审批Provider不可用且明确未执行，再通过当前隔离会话正式accept_edits模式（不设全局默认，不启Full）进入受管Shell，却返回kite_linux_shell_close_unknown。旧固定模型把runtime追加的user-role未知事实误计成新轮，自动重复共五个Shell，其中四个outcome_unknown、最后一个cancelled；观察者只发一次生成并及时按停止，不能归咎用户或算成功。该次尝试随即停止全部生成；GUI只读process-identity-observation.json核8个准确wrapper/init PID均不存在、全/proc无4个原namespace，owner进程仍存在；没有kill、清理或重跑，持久unknown不被观察结果改写。原始请求、私库、execution-observation.json在office-product-2。夹具现只识别两条精确测试输入，任何当前轮office工具回执（含unknown）即结束，2项12断言与全部五份原始请求重放均证明首份才call、后四份不再call；没有重启验证掩盖未知。完整文件卡、原生另存、PDF实际分页、继续修改的真实UI持久化／发送及两份同名快照重开在product-2尝试中均未获得资格，不能用独立preview或DOM替代；该次无terminal→文件卡时延结论。后续全新office-product-3使用已审查Linux mount修复（init SHA d7bcc845facad6906e524fe5c32dc5af118e1116d8ac485dcd9530e3ac1cc8ea），在当前会话RequestApproval下真实Shell生成DOCX／PDF／文本并exit0、监督树停止，只用2个模型请求；但内部collector因capability_not_allowed在adapter执行前拒绝，collection停pending，无delivery或文件卡，该次保留现场／暂存数据且没有重跑。这与旧unknown是独立新尝试，不能把生产者成功当完整交付通过。固定SSE仅验证装配，不代表真实Provider质量或跨平台安装资格。
-
-2026-11-11，全新隔离office-product-4首次真实受管Shell完成并发布TXT、DOCX、双页PDF三个文件卡，后台无运行／未知。DOCX另存5246字节，SHA-256 `7b0b4f06e27cd32629b9c182bca6905d6c2ff69e6d04f3bc5ef2871e6a9380da`与首轮Artifact一致；DOCX原始中文和TXT可读，PDF实际1/2→2/2→1/2成功。该旧PDF中文缺字经独立Poppler复现，不能计中文PDF质量通过。producer终态11:08:30.805Z到索引ready11:08:31.204Z为399ms；人工首次确认文件卡11:08:35.432Z，只能得终态至可见≤4.627秒，非首帧精测。预览、保存与草稿操作后模型请求仍2个固定Provider请求，未使用真实Provider。
-
-同profile正式SIGTERM退出Main／Service并确认退出，再冷启动，准确来源chip及Modify文本持久恢复。首次且唯一Modify在IPC校验拒绝：Renderer误把prepared输出占位URI传入canonical intent，尚未导入、无第二命令／Run；旧现场保留，未重送。修复以[统一附件意图](src/native-input-file-intent.ts)使所有prepared文件只走host fileIds，Main发布后补合法输入引用，未prepared链接保持原语义；文件名在来源标签前防单行截断。[精确IPC拒绝与新选／恢复／上传准备](test/isolated/native-input-file-intent.test.ts)及输出／真实上传IPC合计5测试62断言通过。另[PDF翻页失败](test/isolated/native-pdf-preview-dom.test.tsx)1测试7断言证明等待／失败隐藏旧页图，仍可保存／继续修改；此错误分支仅定向DOM验证，未热改冻结的product-4。混合旧链接与prepared附件时，两条Main提交路径均保留原合法链接并追加已发布引用，工作副本准备只处理后者；Main会话组装18测试151断言、新会话Renderer DOM112测试2425断言通过。product-4当时只取得首轮和冷恢复资格，未将其等同全链路通过；最终独立闭环见下述product-6。
-
-
-全新office-product-5首轮实际生成修正字体PDF，中文标题／中英正文完整，实际1/2→2/2→1/2往返通过；DOCX另存5246字节，SHA-256 `302fc0844ee07a39b0a988a867ae3dcf022e81ebfccfb5120d702041b0beb3ea`等于准确首轮Artifact，预览／另存操作模型请求仍2。终态11:36:42.303Z→索引ready42.695Z为392ms，人工首见卡45.710Z仅给≤3.407秒上界。chip和文字经正常退出冷恢复，唯一Modify成功导入、绑定原输入并将准确`.kite-inputs`工作稿送达模型；但隔离固定Provider未识别正文后的正式附件封套，误沿旧回执直接final，未派第二Shell，故该次仍不算编辑完成。现场与只读输入观察在office-product-5，未重发原命令。夹具改为严格识别两条测试指令及单项正式附件结构，直接使用当前URI解码后的精确工作副本路径，不扫描历史目录；4测试19断言及原请求／四类回执离线重放证明稳定身份、准确路径、未知不重派。此为测试模型修复，不是修改产品权限或Provider行为。
-
-
-最终office-product-6在Linux真实桌面／Electron44.3.0正常沙箱、真实生产Renderer／Main／Service／受管Shell及固定测试Provider下完成单次Generate→准确首轮卡→继续修改chip→切会话与正常退出冷恢复→单次Modify→第二轮卡→两份同名文件独立预览及原生另存。首次无业务实例因发现fixture扫描工作稿不够准确而正常关闭；修后直接使用当前附件URI，不重发任何旧profile命令。首轮Run `c182ab65-e496-4caf-8696-6ab80ba17ade`的report.docx为5247字节、fileId `d4089f9abc5f421dd6d692c1faa7e165fb497dde5969f69525fb4a1fc3cc8647`、hash `04b91f4ca23f877295a4a9d8c53bbfcc682bc39ea33ebb4e3ecc8207d70e412b`；第二轮Run `8e74cfd8-0047-450f-85e1-9e6e466c5d93`为5296字节、fileId `b96b262dd2869c874a46a7ce72b39683ca1ac6dd55b3d6c5f1373468f895c95b`、hash `8b2e917dfbb5e05e2cf8af08e3e4ebed542fa0a9327fa8c02d5adde8d232d605`。实际旧页仅第一轮原文，新页保原文并追加第二轮段落，往返两独立同名标签仍准确；另存的saved-old／saved-new分别匹配上述原件hash。
-
-真实输入import `f181b3eace03cc1d51ae33ff4d81640f8df8d526c45061895938d0d1dfaeed11`绑定Modify命令 `9c018acf-5418-4620-87bb-2d71f3a8cd33`，保首轮源hash。模型附件URI、准备记录和实际Shell source均指向`.kite-inputs/7d11a94fb673b0c95e6470e868a0e1ce14a59ceaa88a5297983f637f3bb36f95/input-report.docx`；修改后工作稿hash等于第二原件，第一原件字节及内容未变。全部模型请求合计4（两个明确用户动作各2），最终预览／另存不新增模型请求，最终0运行／0未知。原始请求、只读索引／caller／字节核验与GUI过程记录在本机`/workspace/shared/kite-electron-diagnostic-20261111/office-product-6`，可见截图留于CUA会话原图，没有虚构导出PNG路径；product-5的中文PDF分页及SaveAs视觉与未改变的生产路径共同构成本轮资格。两次Renderer构建被系统Killed的原因未确证，未运行业务；准确旧隔离实例正常退出后，以Bun `--smol`增加构建GC完成重建，不改变产品编译配置或安全设置。上述实际Linux范围不代证真实Provider、Windows／macOS安装态或未执行的压力条件，历史失败现场完整保留。
 
 ## 执行观察与操作准入
 
@@ -677,7 +573,7 @@ Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)�
 
 [启动 DOM](test/isolated/native-startup-dom.test.tsx)沿实际 NativeDesktop 核首次等待、未核目录、空项目／无模型、两类失败、重复重试、旧响应隔离和进入后草稿保持；同轮原新对话／草稿／定时任务测试保业务断言。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)核编译启动样式及首次／冷启动完成后进入原页面，保原任务、审批、冷读与退出；实际窗口不代证初始化失败矩阵。代码输入、执行结果及剩余迁移归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)，完整 PC、安装恢复及阶段退出仍按原方案核对。
 
-错误反馈遵循[仓库工程规则](../../AGENTS.md#工程约束)：除表单校验异常外，只通过现有 Toast 组件反馈错误，不用 Toast 表示进行中。进行中由对应操作按钮或界面内已有状态表达；真实业务消息、审批卡和持久工具结果保持原语义；Agent loop 网络异常和任务／工具执行错误仍留在对应过程记录，不迁移为临时 Toast。审批提交的具体应用见[原审批面板](#原审批面板与授权观察)。
+表单校验和右侧文件预览失败在所属界面反馈。没有对应内容区的操作错误使用 Toast，进行中由对应按钮或界面反馈。会话执行循环的异常留在会话消息区，实际工具执行结果留在对应过程记录。见[客户端状态反馈规范](../../docs/development/subsystems/clients.md#状态反馈规范)及[审批提交反馈](#原审批面板与授权观察)。
 
 旧读取的失败与成功使用同一展示归属：refresh 的 state 和 select/draft.read 捕获 generation、viewIntent 与 Main 退出生命周期 epoch，迟到拒绝不影响后来的页面；全局目录绑定 generation 与生命周期。读取、会话和草稿失败沿原局部状态、提交记录与后台恢复核实；诊断开关不再开启这些错误的全局Toast。只有普通客户端独立业务入口可提交临时消息，后台读取不会清除或继承它。原全局“操作未完成” AlertDialog 已移除；[NativeToast](src/native-message.tsx)通过 Portal 脱离会话正文与滚动布局，通常挂到 `document.body`，按会话区域的 CSS anchor 固定位置与宽度，避开标题栏和右侧网页。原 `beforeConversation` 渲染入口保留标题栏布局判断。设置中的错误 Toast 挂在当前设置 Dialog，仍只临时显示一条；同一呈现内更换挂载点保留原剩余时间，失去原挂载点的 hover／focus 不留下暂停。设置表单仅在字段校验处保留局部异常提示，业务提交错误使用 Toast，不复制为设置行内错误。消息停留6秒，hover或焦点在消息内时暂停，可以明确关闭；准确 occurrence ID 使旧定时器、关闭动作和未提交渲染不能清除继任消息。
 
@@ -3417,37 +3313,16 @@ Main现在将已解析但页面／展示owner已失效的菜单请求按原`null
 用户后续截图指出上下文已用仍为旧1000进制小写k，与缓存1024进制K混用。现统一复用`formatTokenQuantity`，上下文正文标“估算”、缓存正文标“累计命中”；该原会话显示“估算8.8K／总量256K”和“累计命中256／输入8.7K”。9027是原实际输入8954加新增估算73，缓存分母则是累计已报告实际输入，两者本就不保证相等，不通过显示格式改写统计。当前源码隔离浏览器已核实上述两行并检查同目录更新后的256K.png，相关上下文3项、UI类型及Biome通过。
 
 
-## 可重复的办公客户端 E2E
+## 办公预览界面与回归
 
-在已安装仓库依赖、原生构建工具和 Electron 的 macOS/Linux 可见桌面运行：
-
-```sh
-bun run apps/desktop/test/office-journey-runner.fixture.ts
-```
-
-该显式入口复用 [生产装配夹具](test/office-basics-product-electron.fixture.ts)，每次创建独立临时 HOME/profile、工作区和合成输入，不读取用户凭据，不接真实模型，不进入默认测试调度。通过生产 Main、Renderer、Service、Agent、受管 Shell 和 collector，使用真实 UI 发送、文件卡继续修改、文件选择对话框及预览内容断言；DOCX/XLSX/PPTX 各覆盖生成、提示词修改和选入本地文件处理。普通客户端诊断保持关闭，权限通过 UI 明确选择当前会话“工作区内修改”，没有 Full 或审批绕过。
-
-[UI 驱动](test/office-journey-driver.fixture.ts)按文件卡、模型请求和预览可见状态等待，不以固定睡眠视作成功；逐操作核唯一产物、无额外请求，处理选入文件时核原件 SHA 不变。固定模型严格识别本轮测试输入、准确附件 URI；任何工具回执（包括失败／未知）均终止该轮，不盲重派。相关拒绝／未知回归见 [单测](test/isolated/office-journey.test.ts)。
-
-生产装配夹具的 `--run --e2e --docx-only` 可定向验证 DOCX 生成、修改及原路径文件处理。独立测试启动入口另保留 `evidence/preview-events.jsonl`：仅记录相对时间、预览方法、消毒错误码及 WebContents 生命周期，不记录请求 payload、路径或文件内容；不改变产品诊断开关。定向轮同样使用固定 mock 模型，不计入真实模型成功率。
-
-入口打印准确证据目录，成功和失败均保留 `evidence/result.json`、Playwright trace、截图及合成模型请求；失败返回非零并关闭所属客户端，不清理用户目录。Renderer 截图不包含 WebContentsView，预览截图独立保存，不将其冒称为完整系统窗口截图。测试通过只证明固定模型客户端链路，不证明真实模型准确率、原生 Office 保真、批注全链路或其他平台资格；真实模型评测保持单独统计。若缺 Electron、显示服务或原生组件，按失败报告而非 skip/pass。
-
-### 统一预览工具栏与交互 Word 模式
+### 预览工具栏与修改请求
 
 三格式工具栏只提供现有请求修改、缩放、另存为及 PPT 放映，文件名不在标签页下重复。300px 以下采用两行布局；480px 以下 Excel 只读公式栏换行，沿现有主题 token，不增加编辑或分享能力。`office-toolbar-layout.fixture.ts` 用实际 Electron 验证三格式五种宽度及键盘入口，但不等同真实模型/完整客户端测试。
 
-Excel 的“适应窗口”按当前工作表完整网格宽度（含行头）缩小显示，在视口变化及工作表切换后重算，不改列宽或工作簿样式；100% 仍保持原尺寸并允许横向滚动。Sheet tabs 和请求修改浮钮沿现有反向缩放保持界面尺寸，宿主工具栏不参与文档缩放。`office-excel-fit-layout.fixture.ts` 用合成表在240/400/600px实际 Chromium 验证整表宽度、行头对齐、固定控件尺寸及100%区别，并核PPT缩略栏响应宽度；该截图仅用于几何回归，不作为真实文件视觉验收或模型成功率证据。
-
-Word 锁定转换器根据 `navigator.webdriver` 自动走截图导出分支，导致自动化启动的客户端丢失分页缩放；普通 Electron 同文件未复现。仅交互 HTML recipe 把该精确锚点设为交互模式，不伪造浏览器属性、不改源文件或 CLI 截图命令；缺失/重复锚点仍保守降级。内部 recipe 升为 `offline-interactive-word` 防止复用旧缓存。`office-word-fit.fixture.ts` 比较普通与自动化 Electron 在 240/320/478/640/960px 的实际页边界和正文保留；这是合成文件几何回归，不是99%模型准确率证明。
-
 办公预览请求的本地 accepted 回执与轮询可能并发结束同一输入窗；仅当原预览仍有效、准确原请求已成功退役且没有后继请求时，Main 将该回执视为幂等完成。关闭或释放失败、替换预览/请求及 failed/unknown 均不转为成功；回执恢复不再次发送用户请求或调用模型。该边界由确定性并发回归验证，不作为历史真实运行回执错误已归因的证据。
 
-[ACK GUI 夹具](test/office-ack-gui-driver.fixture.ts)复用生产预览组件与可信请求表单，通过 `--ack-race` 仅在测试装配中延迟 accepted settle 返回，等待真实 renderer 轮询退役原请求；断言一次合成提交、一次成功回执、无错误提示及无重发，并分别保存表单、宿主和独立预览截图。可先用 `windows-office-visible-build.fixture.ts --out=<独立目录>/app` 构建，再向 driver 传入该独立目录（需沿用可视夹具的 repo 资源布局）。此夹具不启动 Service/Provider、不调用真实模型，不计入真实模型成功率；截图为组件验收，不代替完整客户端或安装包验收。
 
-PPT 的演讲者备注由可信宿主折叠区统一展示。交互层仅隐藏固定转换器在原幻灯片容器下生成的直接子备注块（准确 Notes 标签与正文结构），保留节点和全部备注文本供宿主按页读取，不删除或修改源 PPTX。作者幻灯片内同名节点不参与提取或隐藏，普通预览与演示模式均保留作者内容；不再重复展示窄栏中的黑色 NOTES 块。
-
-PPT 缩略栏根据预览视口收紧到 80px（≤480px）或64px（≤360px），缩略图同步缩放而页码保留字号；虚拟化按实际行高计算。这是原固定104px导致的普通产品窄栏占位，不是自动化独有。只识别并移除固定recipe自身的离线说明，由三格式可信宿主折叠说明替代，不搬运文档 HTML、不删除作者 details。`office-ppt-rail.fixture.ts` 在普通/自动化 Electron各五种宽度检查页边界、缩略栏、说明移除及作者说明保留；未替代完整客户端模型验证。
+PPT 预览读取原幻灯片关系中关联的演讲者备注。可信宿主在工具栏下按当前页展示备注折叠区，原幻灯片内容保持可读。
 
 Word/PPT 左侧预览导航保持界面尺寸，不随文档 100%/150%/200% 缩放。预览窗口窄于 600px 时收成居中短横线导航；悬停或键盘聚焦展开缩略图浮层，离开且失焦后收起，展开不重新挤压正文。宽窗口保留完整列表，放映隐藏导航。独立零模型几何夹具 `test/office-page-rail-layout.fixture.ts` 验证倍率、正文缩放、固定留白及 hover/focus；不计入真实模型成功率。
 
@@ -3463,13 +3338,9 @@ PDF 文件预览沿受校验的逐页接口按需读取，在独立 `kite-previe
 
 消息中的本地文件链接沿原 message/run、工作区或受管理目录与保护根授权检查。非代码文件通过有界只读 handle 在右侧预览，不注册为输出产物，不附加另存或原文件写入权限；代码仍走原编辑器。本地 PDF 可以提交标注要求，Main 从原 handle 构造原路径及准确选区上下文，而不是伪造产物 target。handle 绑定当前会话与代际及文件身份，每次读取、PDF 分页前后重新校验授权与源文件，关闭标签或切会话释放；当前显示另有周期权限复核。原文件替换、内容变更或权限撤销时失效，不静默转读新文件。PDF 使用安全快照和现有 PNG 渲染器，不启用浏览器 PDF 插件。
 
-本地 PDF 读取授权仍由 Main 持有，只把已校验的有限快照字节交给经过连接身份核验的回环 Service（拒绝远程 endpoint 与 HTTP 重定向）。PDF 页解析复用 Bun 的原有隔离 worker/严格缓存 IO，不在 Electron 中加载 Bun 原生运行依赖；Service 不接受源路径、不登记输出或 Artifact。返回页面前再次核原句柄授权及文件身份。Word 只读导航监听转换器分页状态/代际，不依赖编辑交互轮询后才显示缩略图。
+本地 PDF 读取授权仍由 Main 持有，只把已校验的有限快照字节交给经过连接身份核验的回环 Service（拒绝远程 endpoint 与 HTTP 重定向）。PDF 页解析复用 Bun 的原有隔离 worker/严格缓存 IO，不在 Electron 中加载 Bun 原生运行依赖；Service 不接受源路径、不登记输出或 Artifact。返回页面前再次核原句柄授权及文件身份。Word 只读导航监听渲染器分页状态与代次，不依赖编辑交互轮询后才显示缩略图。
 
 选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照。每轮产物查询失败不插入提示，空列表不挂载占位；主动整理操作的实际失败仍在原位置反馈。环境信息的“参考”在原区域提示列表读取失败。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。
-
-Office journey 的单次预览等待只在精确目标工具栏下观察到本次“正在准备预览”后，才将明确失败立即归类为 preview_host_failed；其他目标或未证实属于本次的旧错误不触发提前失败。未观察到短暂 loading 时仍保留原有界超时，不猜测请求身份。DOCX 内容出现后还须现有 pagination marker settled 才截图；unavailable 与60秒未稳定分别报告，不把 IPC ready 当分页完成。安全 preview-observation.json 只存固定阶段／分类与布尔观察，不存路径、内容或凭据；既有 IPC／生命周期诊断继续保留。此为测试诊断改进，不新增产品重试，也不证明历史 processed.docx 失败已修复。
-
-该等待逻辑另用独立 Electron 合成 DOM 实测同一 `readOfficePreviewHost` selector：其他目标和本次loading前的旧错误不触发失败；当前目标loading后失败约4ms内分类；Word marker pending保持等待、settled才ready。此为无Provider、零模型的DOM绑定验证，不是完整生产预览、真实分页计算或旧DOCX间歇故障复现；脚本及安全结果保留在该阶段证据中。
 
 办公预览工具栏共用小型居中胶囊：请求修改改图标并保留aria-label/title，缩放、PPT放映及另存回调和安全校验不变。主renderer不跨WebContentsView伪装overlay；胶囊正常流只占必需顶部空间，正文bounds继续由原observer测量，无全宽分隔线或新增footer。窄栏紧凑／必要换行，hover和focus反馈保持。独立冷构建Electron组件布局回归覆盖DOCX/XLSX/PPTX/PDF各240、280、320、480、640像素，核边界、内容无覆盖、缩放不改变按钮几何、键盘保存及PPT放映；此合成组件证据不代替全客户端正文预览。
 

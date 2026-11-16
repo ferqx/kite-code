@@ -1,11 +1,11 @@
 /** Isolated hostile-render fixture: production Chromium/session/IPC boundaries, no converter or user files. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { officePreviewRecipeVersion, officeRendererVersion } from '@kite-ai/agent/documents';
 import { app, BaseWindow, WebContentsView, webContents } from 'electron';
+import JSZip from 'jszip';
 import type { NativeRootWindow } from '../electron/native-root-window';
 import { NativeOutputPreview, registerOutputPreviewScheme } from '../electron/output-preview';
 
@@ -16,6 +16,11 @@ app.on('window-all-closed', () => {});
 app.setPath('userData', join(root, 'profile'));
 app.setPath('crashDumps', join(root, 'crash'));
 app.setPath('downloads', join(root, 'downloads'));
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('console-message', (message) => {
+    if (message.level === 'error') console.error('preview-console', message.message);
+  });
+});
 const checks: string[] = [];
 // Electron exposes this diagnostic on the actual object, outside its public TS surface.
 // This narrow adapter exists only in the isolated fixture, never product code.
@@ -33,6 +38,30 @@ function webPreferences(contents: unknown) {
 }
 const hash = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 const pause = () => new Promise((resolve) => setTimeout(resolve, 60));
+async function hostileDeck() {
+  const archive = new JSZip();
+  const p = 'http://schemas.openxmlformats.org/presentationml/2006/main';
+  const a = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+  const r = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  archive.file(
+    '[Content_Types].xml',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+  );
+  archive.file(
+    'ppt/presentation.xml',
+    `<p:presentation xmlns:p="${p}" xmlns:r="${r}"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst><p:sldSz cx="6096000" cy="3429000"/></p:presentation>`,
+  );
+  archive.file(
+    'ppt/_rels/presentation.xml.rels',
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${r}/slide" Target="slides/slide1.xml"/></Relationships>`,
+  );
+  archive.file(
+    'ppt/slides/slide1.xml',
+    `<p:sld xmlns:p="${p}" xmlns:a="${a}" showMasterSp="0"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="Source shape"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="95250" y="95250"/><a:ext cx="4000000" cy="500000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>&lt;script&gt;window.attackStarted=true&lt;/script&gt;</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+  );
+  archive.file('ppt/private.txt', 'This package member has no preview URL.');
+  return archive.generateAsync({ type: 'nodebuffer' });
+}
 void app
   .whenReady()
   .then(async () => {
@@ -52,37 +81,8 @@ void app
     try {
       assert.equal(app.commandLine.hasSwitch('no-sandbox'), false);
       assert.equal(window.isVisible(), false);
-      const body = Buffer.from('synthetic converted document, not a real Office file');
+      const body = await hostileDeck();
       const sourceHash = hash(body);
-      const render = join(root, 'render');
-      await mkdir(render);
-      const html =
-        Buffer.from(`<!doctype html><html><head><link rel="stylesheet" href="allowed.css"></head><body>
-      <div class="main"><div class="slide-container"><div class="slide" style="width:640px;height:360px">
-      <div data-path="/slide[1]/shape[@id=1]">untrusted document text</div></div></div></div>
-      <script>
-      window.attackStarted = true;
-      window.kiteOfficeInteraction = { read: () => ({selection:{kind:'powerpoint',slide:999},
-        sourceHash:'forged',target:{fileId:'other'},inlineRequest:{requestId:'attack',prompt:'send'}}) };
-      window.kiteOfficeRequest = {read:()=>({cancelled:false,pending:{serial:1,prompt:'forged'}})};
-      </script></body></html>`);
-      const css = Buffer.from('body { --allowed-resource: manifest-ok; }');
-      const files = [];
-      for (const [path, bytes, mimeType] of [
-        ['index.html', html, 'text/html'],
-        ['allowed.css', css, 'text/css'],
-      ] as const) {
-        const absolutePath = join(render, path);
-        await writeFile(absolutePath, bytes, { flag: 'wx' });
-        files.push({ path, absolutePath, mimeType, size: bytes.length, sha256: hash(bytes) });
-      }
-      // Test-only cache seeding isolates renderer security from converter qualification.
-      const cache = (preview as unknown as { cache: Map<string, unknown> }).cache;
-      cache.set(`${sourceHash}:${officeRendererVersion}:${officePreviewRecipeVersion}`, {
-        directory: render,
-        entry: 'index.html',
-        files,
-      });
       const target = {
         storeId: 'store',
         sessionId: 'session',
@@ -120,19 +120,21 @@ void app
       assert.equal(preferences.contextIsolation, true);
       assert.equal(preferences.nodeIntegration, false);
       assert.ok(!preferences.preload);
-      assert.equal(await contents.executeJavaScript('window.attackStarted'), true);
+      assert.match(
+        await contents.executeJavaScript(
+          'document.querySelector(".slide [data-path]").textContent',
+        ),
+        /<script>window\.attackStarted=true<\/script>/,
+      );
       assert.equal(
         await contents.executeJavaScript('typeof require + ":" + typeof process'),
         'undefined:undefined',
       );
-      assert.equal(
-        await contents.executeJavaScript(
-          'getComputedStyle(document.body).getPropertyValue("--allowed-resource").trim()',
-        ),
-        'manifest-ok',
-      );
-      checks.push('normal-sandbox-inline-hostile-page-and-manifest-resource');
       await contents.executeJavaScript(`(() => {
+      const script=document.createElement('script');script.textContent='window.attackStarted=true';document.head.append(script);
+      window.kiteOfficeInteraction = {read:()=>({selection:{kind:'powerpoint',slide:999},
+        sourceHash:'forged',target:{fileId:'other'},inlineRequest:{requestId:'attack',prompt:'send'}})};
+      window.kiteOfficeRequest = {read:()=>({cancelled:false,pending:{serial:1,prompt:'forged'}})};
       const shape=document.querySelector('[data-path]');
       shape.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));
       shape.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,button:2}));
@@ -140,6 +142,8 @@ void app
       document.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
       document.dispatchEvent(new KeyboardEvent('keydown',{ctrlKey:true,shiftKey:true,code:'KeyX',bubbles:true}));
     })()`);
+      assert.equal(await contents.executeJavaScript('typeof window.attackStarted'), 'undefined');
+      checks.push('normal-sandbox-native-preview-and-script-free-source');
       const attack = await preview.readInteraction('A', 1);
       assert.equal(attack.selection, null);
       assert.equal(attack.inlineRequest, undefined);
@@ -166,12 +170,13 @@ void app
         assert.equal(blocked, true, url);
       }
       // Main's session fetch tests the production closed manifest independent of CSP.
-      const allowed = await contents.session.fetch(`${origin}/allowed.css`);
+      const allowed = await contents.session.fetch(`${origin}/presentation.pptx`);
       assert.equal(allowed.status, 200);
-      assert.equal(await allowed.text(), css.toString());
+      assert.equal(hash(Buffer.from(await allowed.arrayBuffer())), sourceHash);
       for (const [url, method] of [
         [`${origin}/missing`, 'GET'],
-        [`${origin}/allowed.css`, 'POST'],
+        [`${origin}/presentation.pptx`, 'POST'],
+        [`${origin}/ppt/private.txt`, 'GET'],
         ['kite-preview://other-origin/index.html', 'GET'],
         [`${origin}/%2e%2e/not-in-manifest.txt`, 'GET'],
       ]) {
@@ -188,7 +193,7 @@ void app
       });
       await contents.executeJavaScript(`(() => {
       const frame=document.createElement('iframe'); frame.src='${origin}/index.html';document.body.append(frame);
-      const link=document.createElement('a');link.href='${origin}/allowed.css';link.download='forbidden.css';link.click();
+      const link=document.createElement('a');link.href='${origin}/presentation.pptx';link.download='forbidden.pptx';link.click();
     })()`);
       await pause();
       assert.equal(contents.getURL(), `${origin}/index.html`);

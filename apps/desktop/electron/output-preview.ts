@@ -1,17 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { extname, join } from 'node:path';
-import {
-  officeEnvironment,
-  officePreviewRecipeVersion,
-  officeRendererVersion,
-  renderOfficePreview,
-  verifyOfficeRuntimeAssets,
-} from '@kite-ai/agent/documents';
+import { join } from 'node:path';
 import type { OutputFileSummary, OutputFileTarget } from '@kite-ai/client';
-import { protocol, session, WebContentsView } from 'electron';
+import { app, protocol, session, WebContentsView } from 'electron';
 import { filePreviewFormat } from '../src/file-preview-format';
 import {
   assertPanelMeasurement,
@@ -32,12 +25,10 @@ import { officeSelectionLabel } from '../src/output-files-bridge';
 import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
 import { waitForNativeFrame } from './native-frame-readiness';
 import { addNativeWindowView, focusNativeWindowContent } from './native-overlay-layer';
-import { NativeProcessOwner } from './native-processes';
 import { getNativeRootView, type NativeRootWindow } from './native-root-window';
 import {
   type OfficePreviewControl,
   officeInteractionControlScript,
-  officeInteractionInstallScript,
   officeInteractionPeekScript,
   officeInteractionReadScript,
   officeInteractionReleaseScript,
@@ -72,17 +63,17 @@ type Bounds = { x: number; y: number; width: number; height: number };
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const csp =
   "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; media-src 'none'; worker-src 'none'";
+const officeCsp = csp
+  .replace("script-src 'self' 'unsafe-inline'", "script-src 'none'")
+  .replace("connect-src 'none'", "connect-src 'self'");
+const officePreviews = {
+  word: { source: 'document.docx', script: 'docx-preview.js' },
+  excel: { source: 'workbook.xlsx', script: 'xlsx-preview.js' },
+  powerpoint: { source: 'presentation.pptx', script: 'pptx-preview.js' },
+};
 
-/** One isolated view per root. Converted resources are a closed manifest, never pathname joins. */
+/** One isolated view per root. Preview resources come only from its closed manifest. */
 export class NativeOutputPreview {
-  private readonly assetsRoot?: string;
-  constructor(assetsRoot?: string) {
-    this.assetsRoot = assetsRoot;
-  }
-  private readonly cache = new Map<
-    string,
-    { directory: string; files: Resource[]; entry: string }
-  >();
   private active?: {
     id: string;
     generation: number;
@@ -105,7 +96,6 @@ export class NativeOutputPreview {
     layout?: { sync: () => void; dispose: () => void };
     directory?: string;
     pending?: boolean;
-    cached?: boolean;
     checkTimer?: ReturnType<typeof setInterval>;
     window: NativeRootWindow;
     latestRequestId?: string;
@@ -158,7 +148,6 @@ export class NativeOutputPreview {
       active.abort.signal.throwIfAborted();
       if (this.active !== active) throw Error('preview_replaced');
     };
-    const owner = new NativeProcessOwner();
     try {
       active.directory = await mkdtemp(join(tmpdir(), 'kite-output-preview-'));
       current();
@@ -174,92 +163,40 @@ export class NativeOutputPreview {
         active.sourceHash = hash.digest('hex');
       }
       current();
-      active.officeKind = /\.docx$/i.test(file.name)
+      const kind = /\.docx$/i.test(file.name)
         ? 'word'
         : /\.xlsx$/i.test(file.name)
           ? 'excel'
           : /\.pptx$/i.test(file.name)
             ? 'powerpoint'
             : undefined;
+      active.officeKind = kind;
+      const office = kind ? officePreviews[kind] : undefined;
       let files: Resource[], entry: string;
-      if (/\.(docx|xlsx|pptx)$/i.test(file.name)) {
-        const cacheKey = file.sourceHash
-          ? `${file.sourceHash}:${officeRendererVersion}:${officePreviewRecipeVersion}`
-          : undefined;
-        const cached = cacheKey ? this.cache.get(cacheKey) : undefined;
-        if (cached) {
-          await rm(active.directory, { recursive: true, force: true });
-          active.directory = cached.directory;
-          active.cached = true;
-          files = cached.files;
-          entry = cached.entry;
-        } else {
-          await rename(source, source + extname(file.name).toLowerCase());
-          const assets = await verifyOfficeRuntimeAssets(this.assetsRoot);
-          current();
-          const converted = await renderOfficePreview({
-            assetsRoot: this.assetsRoot,
-            sourcePath: source + extname(file.name).toLowerCase(),
-            outputDirectory: join(active.directory, 'render'),
-            signal: active.abort.signal,
-            run: async (args, signal) => {
-              const operation = owner.start(
-                assets.officecli,
-                args,
-                {
-                  env: { ...process.env, ...officeEnvironment() },
-                  stdio: ['ignore', 'pipe', 'pipe'],
-                  windowsHide: true,
-                },
-                {
-                  timeoutMs: 60000,
-                  timeoutError: 'preview_timeout',
-                  launchError: 'preview_launch_failed',
-                },
-              );
-              const abort = () => operation.stop(Error('preview_cancelled'));
-              signal.addEventListener('abort', abort, { once: true });
-              if (signal.aborted) abort();
-              async function collect(stream: AsyncIterable<Uint8Array>) {
-                const chunks: Buffer[] = [];
-                let size = 0;
-                for await (const chunk of stream) {
-                  size += chunk.length;
-                  if (size > 2 * 1024 * 1024) {
-                    operation.stop(Error('preview_diagnostic_limit'));
-                    throw Error('preview_diagnostic_limit');
-                  }
-                  chunks.push(Buffer.from(chunk));
-                }
-                return Buffer.concat(chunks).toString('utf8');
-              }
-              try {
-                const [code, stdout, stderr] = await Promise.all([
-                  operation.result,
-                  collect(operation.child.stdout!),
-                  collect(operation.child.stderr!),
-                ]);
-                if (code === null) throw Error('preview_process_failed');
-                return { code, stdout, stderr };
-              } finally {
-                signal.removeEventListener('abort', abort);
-              }
-            },
-          });
-          current();
-          files = converted.files;
-          entry = converted.entry;
-          if (cacheKey) {
-            active.cached = true;
-            this.cache.set(cacheKey, { directory: active.directory, files, entry });
-            while (this.cache.size > 8) {
-              const first = this.cache.keys().next().value!;
-              const old = this.cache.get(first)!;
-              this.cache.delete(first);
-              void rm(old.directory, { recursive: true, force: true }).catch(() => {});
-            }
-          }
-        }
+      if (office) {
+        if (BigInt(file.size) > 128n * 1024n * 1024n) throw Error('preview_office_source_budget');
+        const html = Buffer.from(
+          `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><div id="office-preview" data-editable="${Boolean(active.target)}"></div></body></html>`,
+        );
+        const path = join(active.directory, 'index.html');
+        await writeFile(path, html, { flag: 'wx' });
+        files = [
+          {
+            path: 'index.html',
+            absolutePath: path,
+            mimeType: 'text/html',
+            size: html.length,
+            sha256: digest(html),
+          },
+          {
+            path: office.source,
+            absolutePath: source,
+            mimeType: 'application/octet-stream',
+            size: Number(file.size),
+            sha256: active.sourceHash!,
+          },
+        ];
+        entry = 'index.html';
       } else if (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name)) {
         if (!input.renderPdfPage) throw Error('preview_pdf_unavailable');
         const render = input.renderPdfPage;
@@ -408,7 +345,7 @@ export class NativeOutputPreview {
           return new Response(new Uint8Array(bytes).buffer, {
             headers: {
               'Content-Type': resource.mimeType,
-              'Content-Security-Policy': csp,
+              'Content-Security-Policy': office ? officeCsp : csp,
               'X-Content-Type-Options': 'nosniff',
               'Cache-Control': 'no-store',
             },
@@ -677,13 +614,42 @@ export class NativeOutputPreview {
         await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
           { code: pdfPreviewInstallScript() },
         ]);
-      const officeKind = active.officeKind;
-      if (officeKind && officeKind !== 'pdf') {
-        await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
-          { code: officeInteractionInstallScript(officeKind) },
-        ]);
+      if (office) {
+        const script = await readFile(join(app.getAppPath(), office.script), 'utf8');
         current();
-        if (officeKind && !active.target) {
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            (async () => {
+              await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
+                { code: script },
+              ]);
+              const result = await view.webContents.executeJavaScriptInIsolatedWorld(
+                officeInteractionWorld,
+                [
+                  {
+                    code: `Promise.resolve(globalThis.kiteOfficePreviewReady).catch(error =>
+                    ['preview_office_archive_invalid', 'preview_office_archive_budget'].includes(error?.message)
+                      ? error.message : false)`,
+                  },
+                ],
+              );
+              if (
+                result === 'preview_office_archive_invalid' ||
+                result === 'preview_office_archive_budget'
+              )
+                throw Error(result);
+              if (result !== true) throw Error('preview_office_not_ready');
+            })(),
+            new Promise<never>((_, reject) => {
+              timeout = setTimeout(() => reject(Error('preview_office_timeout')), 60000);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timeout);
+        }
+        current();
+        if (!active.target) {
           await view.webContents.insertCSS(
             '.kite-office-request-trigger { display:none !important }',
           );
@@ -706,9 +672,8 @@ export class NativeOutputPreview {
       if (this.active === active) this.close(input.id);
       throw error;
     } finally {
-      await owner.close();
       active.pending = false;
-      if (this.active !== active && !active.cached && active.directory)
+      if (this.active !== active && active.directory)
         await rm(active.directory, { recursive: true, force: true }).catch(() => {});
     }
   }
@@ -1041,9 +1006,6 @@ export class NativeOutputPreview {
   }
   dispose() {
     this.close();
-    for (const cached of this.cache.values())
-      void rm(cached.directory, { recursive: true, force: true }).catch(() => {});
-    this.cache.clear();
   }
   /** Trusted Root geometry commits, ordered independently of async conversion or page reads. */
   present(request: NativePreviewLayoutRequest) {
@@ -1098,7 +1060,7 @@ export class NativeOutputPreview {
       if (!active.window.isDestroyed()) active.window.contentView.removeChildView(active.view);
       active.view.webContents.close();
     }
-    if (active.directory && !active.pending && !active.cached)
+    if (active.directory && !active.pending)
       void rm(active.directory, { recursive: true, force: true }).catch(() => {});
   }
 }

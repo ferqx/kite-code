@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { setImmediate as yieldIo } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import type { WorkingInputFilesPort } from '../input-working-files';
@@ -31,6 +31,9 @@ export function createWorkingInputFiles(
         throw new AgentError('input_preparation_invalid');
       const root = fileURLToPath(input.rootUri);
       const canonicalRoot = realpathSync.native(root);
+      const protectedWithinRoot: string[] = [];
+      const within = (path: string) =>
+        !isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`);
       for (const protectedPath of options.protectedPaths ?? []) {
         let canonicalProtected: string;
         try {
@@ -40,15 +43,12 @@ export function createWorkingInputFiles(
           canonicalProtected = resolve(protectedPath);
         }
         const below = relative(canonicalProtected, canonicalRoot);
-        if (
-          !below ||
-          (!isAbsolute(below) &&
-            below !== '..' &&
-            !below.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`))
-        )
-          throw new AgentError('input_preparation_scope_denied');
+        if (within(below)) throw new AgentError('input_preparation_scope_denied');
+        const protectedRelative = relative(canonicalRoot, canonicalProtected);
+        if (within(protectedRelative))
+          protectedWithinRoot.push(protectedRelative.split(sep).join('/'));
       }
-      const io = createWorkspaceFileIo(root, options.protectedPaths ?? [], true);
+      const io = createWorkspaceFileIo(root, protectedWithinRoot, true);
       const handles: number[] = [];
       let temp: string | undefined,
         parent = io.root;

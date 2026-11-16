@@ -8,6 +8,24 @@
   font-family: var(--font-ui);
   font-size: 13px;
 }
+.native-file-preview-state {
+  display: grid;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 16px;
+  place-items: center;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+.native-file-preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.native-file-preview-error p {
+  margin: 0;
+}
 .native-office-toolbar {
   align-self: center;
   width: fit-content;
@@ -37,6 +55,12 @@
 }
 .native-office-edit-actions {
   flex-shrink: 0;
+  max-width: 100%;
+  min-width: 0;
+}
+.native-office-edit-actions select {
+  max-width: min(120px, calc(100cqw - 56px));
+  min-width: 0;
 }
 .native-office-view-actions {
   margin-left: 0;

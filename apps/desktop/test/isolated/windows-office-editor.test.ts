@@ -5,7 +5,6 @@ import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { verifyOfficeRuntimeAssets } from '@kite-ai/agent/documents';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { initializeDesktopBuildEnvironment } from '../../../../scripts/development/windows-desktop-environment';
 import { buildWindowsAccess } from '../../scripts/build-windows-access';
@@ -27,7 +26,6 @@ test.skipIf(process.platform !== 'win32')(
       const history = historyFixture(join(root, 'data/office/desktop-private/office-editor'));
       privateDirectory(join(root, 'data/facade/desktop-private/office-editor'));
       const addon = await buildWindowsAccess(native);
-      const assets = await verifyOfficeRuntimeAssets();
       const helper = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
         target: 'bun',
@@ -65,7 +63,6 @@ test.skipIf(process.platform !== 'win32')(
               helperPath,
               helperSha256: sha(helperPath),
             },
-            assetsRoot: assets.root,
             addon: { path: join(native, addon.relativePath), sha256: addon.sha256 },
           }),
         ],

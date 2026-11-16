@@ -517,7 +517,7 @@ test('persistent staging inside Workspace allocates an exact child without grant
 
 test('exact trusted helper executable is identity-bound without making its directory writable', () =>
   fixture((options, shell) => {
-    const helper = join(options.runtimeReadOnlyRoots![0]!, 'officecli');
+    const helper = join(options.runtimeReadOnlyRoots![0]!, 'bundled-helper');
     writeFileSync(helper, 'fixed office executable');
     const prepare = captureLinuxLaunch(options, [shell, helper]);
     const launch = prepare('unused', shell, context);
