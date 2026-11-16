@@ -2212,6 +2212,36 @@ export class AgentClient {
       options,
     );
   }
+  /** Observe the current physical execution directory without changing Session membership. */
+  async getSessionExecutionRoot(
+    sessionId: string,
+    options: { storeId: string; workspaceId: string; signal?: AbortSignal },
+  ) {
+    this.requireConnection();
+    const { signal, ...input } = options;
+    const query = structuredClone(input);
+    validateRequest('SessionExecutionRootQuery', query);
+    if (this.lastServer!.storeId !== query.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/execution-root?${new URLSearchParams(query)}`,
+      'SessionExecutionRoot',
+      { signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      result.storeId !== query.storeId ||
+      result.sessionId !== sessionId ||
+      result.workspaceId !== query.workspaceId
+    )
+      throw new ClientError('execution_root_scope_mismatch');
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return result;
+  }
   getSessionState(sessionId: string, options: { signal?: AbortSignal } = {}) {
     this.requireConnection();
     if (!this.serverInfo?.capabilities.includes('session_state'))

@@ -3894,6 +3894,14 @@ export type ExtensionCommandRequest = {
   definitionVersion: string;
   input: ExtensionCommandRequest___schema0;
 };
+export type SessionExecutionRootQuery = { storeId: string; workspaceId: string };
+export type SessionExecutionRoot = {
+  storeId: string;
+  sessionId: string;
+  workspaceId: string;
+  rootUri: string;
+  revision: string;
+};
 export type BackgroundExecutionQuery = {
   storeId: string;
   afterSeq?: string;

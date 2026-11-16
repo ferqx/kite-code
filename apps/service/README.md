@@ -14,6 +14,8 @@
 
 [默认装配](src/configuration.ts)按根 epoch 缓存整套 binding；每个历史 assembly 活到原 Run 和已派发 Job lease 都释放，不在切根时销毁。权限用实际请求的 Session／Execution 根分类，包括父策略约束子请求；原模型恢复只读其封存根。配置与工具上限仍取原 Run，新的工作区指令不授新工具。删除占用读取还核当前执行根、待提交使用目标及未终态 Job 历史根；任何读取不完整／身份变化拒绝删除。检查点按物理根隔离，具体恢复合同归 [Files owner](../../packages/agent/src/business/file-checkpoints/README.md)。集成断言见[同轮显式切换测试](test/isolated/session-execution-root.test.ts)，不从受控模型推定真实客户端全过程或其他平台资格。
 
+Native 只读 `GET /v1/sessions/:id/execution-root` 复用同一解析器，核调用者固定的 Store／Session／原 Workspace 后返回当前物理目录和含 epoch／目录身份的 revision。它不采用历史工具消息或 renderer 路径，不改变会话归属；拒绝 Origin，不进入 Cookie Browser facade。目录被替换或根发生漂移时明确失败，不回退原项目。读取不写 Store，响应禁止缓存；[HTTP／SQLite 回归](test/isolated/session-execution-root-http.test.ts)覆盖已提交 use／exit、同路径新 epoch、归属不变及失效目录拒绝。
+
 ## Trajectory 与独立 Trace 消费
 
 [Trajectory source](src/trajectory/index.ts)将原 Store 的短事务 Reader 与 Runtime typed Evidence 交给同源 HTTP／生成 Client，事件分页固定 upper、逐页准入，无跨页 lease；只有材料读取持有有界分片 lease。旧 Session Logs 与通知 floor 的语义保持。原事实、材料、恢复与 GC 归 [Agent trajectory owner](../../packages/agent/src/trajectory/README.md)。

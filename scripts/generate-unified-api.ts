@@ -152,6 +152,7 @@ const responseNames = [
   'MessageChangesPage',
   'MessageTextChunk',
   'SessionHistoryEntries',
+  'SessionExecutionRoot',
 ];
 const requestNames = [
   'OutputPdfPageRequest',
@@ -255,6 +256,7 @@ const requestNames = [
   'MessageChangesQuery',
   'MessageTextQuery',
   'SessionHistoryEntriesQuery',
+  'SessionExecutionRootQuery',
 ];
 function allowFutureFields(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(allowFutureFields);

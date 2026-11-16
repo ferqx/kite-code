@@ -59,7 +59,10 @@ test('workspace invalidation events are scoped and reject malformed or extra pay
     },
   } as const;
   expect(decodeNativeEvent(event)).toEqual(event);
+  expect(decodeNativeEvent({ ...event, reset: true })).toEqual({ ...event, reset: true });
   for (const invalid of [
+    { ...event, reset: false },
+    { ...event, reset: 'true' },
     { ...event, readId: '../file' },
     { ...event, root: '/private' },
     { ...event, generation: 2 },

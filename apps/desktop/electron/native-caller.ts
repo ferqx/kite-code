@@ -573,6 +573,13 @@ export class NativeCaller {
       (event) => {
         if (!this.closed) this.emit(event);
       },
+      {},
+      (scope, signal) =>
+        client.getSessionExecutionRoot(scope.sessionId, {
+          storeId: scope.storeId,
+          workspaceId: scope.workspaceId,
+          signal,
+        }),
     );
     this.fileChanges = new NativeFileChanges(
       client,
@@ -1336,6 +1343,11 @@ export class NativeCaller {
             },
             onChange: (change) => {
               this.environmentRevision++;
+              if (
+                change.sessionId === this.selected &&
+                change.type === 'session.execution_root.changed'
+              )
+                this.workspaceChanges.invalidateExecutionRoot();
               if (this.outputDisplayVersions.changed(change)) this.changed();
               if (
                 (change.sessionId === this.selected ||

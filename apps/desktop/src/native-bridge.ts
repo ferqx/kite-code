@@ -602,12 +602,14 @@ export function decodeNativeEvent(value: unknown): NativeEvent | undefined {
           typeof scope[key as keyof typeof scope] === 'string' &&
           (scope[key as keyof typeof scope] as string).length > 0,
       ) ||
-      Object.keys(event).length !== 4 ||
+      (event.reset !== undefined && event.reset !== true) ||
+      Object.keys(event).length !== (event.reset === true ? 5 : 4) ||
       Object.keys(scope).length !== 5
     )
       return;
     return {
       kind: 'workspaceChanges.changed',
+      ...(event.reset ? { reset: true } : {}),
       generation: event.generation!,
       readId: event.readId,
       scope: {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import { Hono } from 'hono';
 import type { z } from 'zod';
@@ -48,6 +49,7 @@ import {
   supportsFileRecovery,
 } from './native-file-checkpoint-response';
 import type { PermissionManagementPort } from './permission-management';
+import { resolveSessionExecutionRoot } from './session-execution-root';
 import type { SessionLogsSource } from './session-logs';
 import {
   type SkillCatalogueSource,
@@ -416,7 +418,7 @@ export async function startService(options: ServiceOptions) {
   };
   app.use('*', async (context, next) => {
     if (
-      /^\/v1\/(?:sessions\/[^/]+\/(?:logs|file-checkpoints(?:\/[^/]+(?:\/recovery-boundary|\/restores\/[^/]+)?)?|permission-(?:mode|grants)|export\/(?:manifest|records|text|verify))|workspaces\/[^/]+\/trust|permissions\/mutations\/[^/]+)$/.test(
+      /^\/v1\/(?:sessions\/[^/]+\/(?:execution-root|logs|file-checkpoints(?:\/[^/]+(?:\/recovery-boundary|\/restores\/[^/]+)?)?|permission-(?:mode|grants)|export\/(?:manifest|records|text|verify))|workspaces\/[^/]+\/trust|permissions\/mutations\/[^/]+)$/.test(
         context.req.path,
       )
     ) {
@@ -595,6 +597,7 @@ export async function startService(options: ServiceOptions) {
                             'host_mutation_conflict',
                             'host_control_conflict',
                             'permission_control_changed',
+                            'execution_root_changed',
                             'workspace_identity_changed',
                             'workspace_scope_changed',
                             'host_mutation_terminal_conflict',
@@ -2106,6 +2109,38 @@ export async function startService(options: ServiceOptions) {
         ...view,
         messages: await messageResponses(runtime, view.messages, view.storeId, subjectId),
         executions: view.executions.map(executionResponse),
+      }),
+    );
+  });
+  app.get('/v1/sessions/:id/execution-root', async (context) => {
+    if (context.req.header('origin') !== undefined) throw new HttpFailure('invalid_origin', 403);
+    const sessionId = context.req.param('id');
+    if (!schemas.Session.shape.id.safeParse(sessionId).success)
+      throw new HttpFailure('invalid_request', 400);
+    const query = sessionExportQuery(context.req.queries(), schemas.SessionExecutionRootQuery);
+    if ((await runtime.getMetadata()).storeId !== query.storeId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    const session = await runtime.getSession(sessionId);
+    if (!session) throw new HttpFailure('session_not_found', 404);
+    if (session.deletedAt !== null) throw new HttpFailure('session_deleted', 409);
+    if (session.workspaceId !== query.workspaceId)
+      throw new HttpFailure('execution_root_scope_mismatch', 409);
+    context.req.raw.signal.throwIfAborted();
+    const selected = await resolveSessionExecutionRoot(runtime, { sessionId });
+    if (
+      selected.binding.sessionId !== sessionId ||
+      selected.binding.workspaceId !== query.workspaceId ||
+      (await runtime.getMetadata()).storeId !== query.storeId
+    )
+      throw new HttpFailure('execution_root_scope_mismatch', 409);
+    context.req.raw.signal.throwIfAborted();
+    return context.json(
+      schemas.SessionExecutionRoot.parse({
+        storeId: query.storeId,
+        sessionId,
+        workspaceId: query.workspaceId,
+        rootUri: pathToFileURL(selected.root).href,
+        revision: selected.revision,
       }),
     );
   });

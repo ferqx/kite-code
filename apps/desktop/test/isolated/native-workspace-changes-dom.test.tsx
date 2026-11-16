@@ -469,6 +469,34 @@ test('failed, unsupported, truncated, binary and empty reads keep their true sta
   }
 });
 
+test('selecting another file after a failed list refresh reports the unavailable read and recovers on refresh', async () => {
+  const f = await fixture([change(0), change(1)]);
+  try {
+    await f.render();
+    await f.select(0);
+    const original = f.host.querySelector('.file-diff');
+    expect(original?.textContent).toContain('current-change-0');
+    f.state.listMode = 'failure';
+    await f.clickButton('刷新变更');
+    expect(f.host.querySelector('.file-diff')).toBe(original);
+    expect(f.host.textContent).toContain('当前显示上次读取的结果');
+    const reads = requestCount(f.requests, 'workspaceChanges.detail');
+    await f.select(1);
+    const preview = f.host.querySelector('.workspace-change-preview');
+    expect(preview?.querySelector('[role="alert"]')?.textContent).toContain('请刷新变更列表后重试');
+    expect(preview?.querySelector('[aria-label="正在读取当前差异"]')).toBeNull();
+    expect(preview?.querySelector('.file-diff')).toBeNull();
+    expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(reads);
+    f.state.listMode = 'normal';
+    await f.clickButton('刷新变更');
+    expect(f.host.querySelector('.workspace-change-preview [role="alert"]')).toBeNull();
+    expect(f.host.querySelector('.file-diff')?.textContent).toContain('current-change-1');
+    expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(reads + 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('huge metadata and long/deep paths keep a bounded tree and original detail request identity', async () => {
   const long = `${'deep/'.repeat(80)}${'long'.repeat(1_500)}.tsx`;
   const f = await fixture([
@@ -666,6 +694,63 @@ test('workspace invalidations synchronize selected content without remounting th
       expect(scroll.scrollTop).toBe(64);
       expect(scroll.scrollLeft).toBe(21);
     }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('successive execution-root resets clear old content and reject late lists and details', async () => {
+  const f = await fixture([change(0, 'src/shared.ts')]);
+  try {
+    await f.render();
+    await f.select(0);
+    expect(f.host.textContent).toContain('current-change-0');
+    f.state.detailMode = 'held';
+    await f.clickButton('刷新变更');
+    expect(f.heldDetails).toHaveLength(1);
+    const oldDetail = f.heldDetails.shift()!;
+    f.state.listMode = 'held';
+    await f.clickButton('刷新变更');
+    expect(f.heldLists).toHaveLength(1);
+    const oldList = f.heldLists.shift()!;
+    const oldRead = [...f.requests]
+      .reverse()
+      .find((input) => input.method === 'workspaceChanges.list')!;
+    f.state.entries = [change(1, 'src/shared.ts')];
+    f.state.detailVersion = '-worktree';
+    await f.invalidate({ reset: true });
+    expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
+    expect(f.host.querySelector('[role="tree"]') === null).toBe(true);
+    expect(f.host.textContent).not.toContain('current-change-0');
+    await f.settle();
+    expect(f.heldLists).toHaveLength(1);
+    const intermediateList = f.heldLists.shift()!;
+    expect(
+      f.requests.some(
+        (input) => input.method === 'workspaceChanges.close' && input.readId === oldRead.readId,
+      ),
+    ).toBe(true);
+    f.state.entries = [change(2, 'src/shared.ts')];
+    await f.invalidate({ reset: true });
+    await f.settle();
+    expect(f.heldLists).toHaveLength(1);
+    await act(async () => {
+      oldDetail.release();
+      oldList();
+      intermediateList();
+    });
+    expect(f.host.querySelector('[role="tree"]') === null).toBe(true);
+    expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
+    expect(f.host.textContent).not.toContain('current-change-0');
+    await act(async () => f.heldLists.shift()!());
+    expect(f.host.querySelector('[data-change-id="change-0"]') === null).toBe(true);
+    expect(f.host.querySelector('[data-change-id="change-1"]') === null).toBe(true);
+    expect(f.host.querySelector('[data-change-id="change-2"]') !== null).toBe(true);
+    expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
+    f.state.detailMode = 'normal';
+    await f.select(2);
+    expect(f.host.textContent).toContain('current-change-2-worktree');
+    expect(f.host.textContent).not.toContain('current-change-0');
   } finally {
     await f.cleanup();
   }

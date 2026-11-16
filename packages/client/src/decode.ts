@@ -79,6 +79,7 @@ export interface Responses {
   Workspace: API.Workspace;
   Session: API.Session;
   SessionView: API.SessionView;
+  SessionExecutionRoot: API.SessionExecutionRoot;
   Command: API.Command;
   ResumeJobReportResponse: API.ResumeJobReportResponse;
   JobReconcileCommand: API.JobReconcileCommand;
@@ -135,6 +136,7 @@ export function validateRequest(
     | 'MessageTextQuery'
     | 'SessionHistoryEntriesQuery'
     | 'FileCheckpointListQuery'
+    | 'SessionExecutionRootQuery'
     | 'SessionLogQuery'
     | 'BrowserSessionLogQuery'
     | 'SkillCatalogueQuery'

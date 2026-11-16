@@ -39,4 +39,5 @@ export type NativeWorkspaceChangeEvent = {
   generation: number;
   readId: string;
   scope: NativeWorkspaceChangeScope;
+  reset?: true;
 };

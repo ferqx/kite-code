@@ -38,6 +38,7 @@ type Lease = {
   index?: string;
   head?: string;
   rootUri?: string;
+  rootRevision?: string;
   identity?: string;
   entries: Map<string, NativeWorkspaceChange>;
 };
@@ -49,10 +50,19 @@ type WatchOptions = {
   maxWaitMs?: number;
   fallbackMs?: number;
 };
+type ExecutionRootReader = (
+  scope: NativeWorkspaceChangeScope,
+  signal: AbortSignal,
+) => Promise<{ rootUri: string; revision: string }>;
 
 /** Read-only, main-owned repository observations. No renderer supplied paths. */
 export class NativeWorkspaceChanges {
   private lease?: { readId: string; value: Lease };
+  private observedExecutionRoot?: {
+    scope: NativeWorkspaceChangeScope;
+    rootUri: string;
+    revision: string;
+  };
   private readonly protectedRoots: string[];
   private readonly details = new Map<string, Lease>();
   private readonly current: () => NativeWorkspaceChangeScope | undefined;
@@ -60,6 +70,7 @@ export class NativeWorkspaceChanges {
   private readonly processes: NativeProcessOwner;
   private readonly changed?: (event: NativeWorkspaceChangeEvent) => void;
   private readonly watchOptions: WatchOptions;
+  private readonly executionRoot?: ExecutionRootReader;
   constructor(
     current: () => NativeWorkspaceChangeScope | undefined,
     workspace: (id: string) => Workspace | undefined,
@@ -67,9 +78,11 @@ export class NativeWorkspaceChanges {
     processes = new NativeProcessOwner(),
     changed?: (event: NativeWorkspaceChangeEvent) => void,
     watchOptions: WatchOptions = {},
+    executionRoot?: ExecutionRootReader,
   ) {
     this.changed = changed;
     this.watchOptions = watchOptions;
+    this.executionRoot = executionRoot;
     this.current = current;
     this.workspace = workspace;
     this.processes = processes;
@@ -82,6 +95,20 @@ export class NativeWorkspaceChanges {
     this.lease = undefined;
     for (const detail of this.details.values()) detail.abort.abort();
     this.details.clear();
+  }
+  /** A durable session root change retires bytes and IDs from the preceding root. */
+  invalidateExecutionRoot() {
+    const previous = this.lease;
+    if (previous) this.observedExecutionRoot = undefined;
+    this.release();
+    if (previous)
+      this.changed?.({
+        kind: 'workspaceChanges.changed',
+        generation: previous.value.scope.generation,
+        readId: previous.readId,
+        scope: { ...previous.value.scope },
+        reset: true,
+      });
   }
   close(readId: string) {
     if (this.lease?.readId === readId) this.release();
@@ -182,7 +209,8 @@ export class NativeWorkspaceChanges {
     if (
       lease.abort.signal.aborted ||
       !now ||
-      (lease.rootUri !== undefined &&
+      (!this.executionRoot &&
+        lease.rootUri !== undefined &&
         this.workspace(lease.scope.workspaceId)?.rootUri !== lease.rootUri) ||
       Object.keys(lease.scope).some(
         (key) =>
@@ -191,6 +219,25 @@ export class NativeWorkspaceChanges {
       )
     )
       throw Error('workspace_changes_stale');
+  }
+  private rememberExecutionRoot(lease: Lease) {
+    if (lease.rootUri && lease.rootRevision)
+      this.observedExecutionRoot = {
+        scope: { ...lease.scope },
+        rootUri: lease.rootUri,
+        revision: lease.rootRevision,
+      };
+  }
+  private async checkExecutionRoot(lease: Lease) {
+    this.check(lease);
+    if (!this.executionRoot) return;
+    const root = await this.executionRoot(lease.scope, lease.abort.signal);
+    this.check(lease);
+    if (root.rootUri !== lease.rootUri || root.revision !== lease.rootRevision) {
+      if (this.lease?.value === lease || [...this.details.values()].includes(lease))
+        this.invalidateExecutionRoot();
+      throw Error('workspace_changes_stale');
+    }
   }
   private async git(
     lease: Lease,
@@ -512,8 +559,28 @@ export class NativeWorkspaceChanges {
     try {
       const workspace = this.workspace(scope.workspaceId);
       if (!workspace) throw Error('workspace_changes_unavailable');
-      lease.rootUri = workspace.rootUri;
-      const uri = new URL(workspace.rootUri);
+      const selected = this.executionRoot
+        ? await this.executionRoot(scope, lease.abort.signal)
+        : workspace;
+      this.check(lease);
+      lease.rootUri = selected.rootUri;
+      if ('revision' in selected) {
+        lease.rootRevision = selected.revision;
+        const previous = this.observedExecutionRoot;
+        if (
+          previous &&
+          Object.keys(previous.scope).every(
+            (key) =>
+              previous.scope[key as keyof NativeWorkspaceChangeScope] ===
+              scope[key as keyof NativeWorkspaceChangeScope],
+          ) &&
+          (previous.rootUri !== selected.rootUri || previous.revision !== selected.revision)
+        ) {
+          this.invalidateExecutionRoot();
+          throw Error('workspace_changes_stale');
+        }
+      }
+      const uri = new URL(selected.rootUri);
       if (uri.protocol !== 'file:' || (uri.hostname && uri.hostname !== 'localhost'))
         throw Error('workspace_changes_unavailable');
       const path = fileURLToPath(uri);
@@ -538,7 +605,11 @@ export class NativeWorkspaceChanges {
         truncated: false,
       };
       this.check(lease);
-      if (!marker) return page;
+      if (!marker) {
+        await this.checkExecutionRoot(lease);
+        this.rememberExecutionRoot(lease);
+        return page;
+      }
       // Refuse broad roots containing private data, even when a selected project is a subdirectory.
       if (this.protectedRoots.some((p) => inside(marker!, p) || inside(p, marker!)))
         throw Error('workspace_changes_protected_root');
@@ -639,7 +710,8 @@ export class NativeWorkspaceChanges {
       await this.checkAttributes(lease, root);
       page.repository = true;
       page.truncated ||= status.truncated || records.length > 1000;
-      this.check(lease);
+      await this.checkExecutionRoot(lease);
+      this.rememberExecutionRoot(lease);
       lease.observationReady?.();
       return page;
     } catch (error) {
@@ -657,8 +729,9 @@ export class NativeWorkspaceChanges {
     const lease: Lease = { ...source, abort: new AbortController() };
     this.details.set(readId, lease);
     try {
+      await this.checkExecutionRoot(lease);
       const result = await this.readDetail(lease, readId, changeId);
-      this.check(lease);
+      await this.checkExecutionRoot(lease);
       return result;
     } finally {
       if (this.details.get(readId) === lease) this.details.delete(readId);

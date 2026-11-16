@@ -60,6 +60,8 @@ V1 bundle 保留新 `tool_input` 引用、有限压缩字段及缺少新字段�
 
 `SessionView.session` 的可选 `ownerInstanceId`／`ownerGeneration` 是同一公开视图的只读事实，普通 Session DTO 不扩。客户端与已认证 ServerInfo 比较时仍绑定原 Store／Session／Workspace；不匹配只能说明当前连接无法核实活动，不能推断死亡或完成，也不是恢复／派发许可。缺字段保旧消费者的观察合同，不能补造 owner。
 
+Native `getSessionExecutionRoot(sessionId,{storeId,workspaceId,signal?})` 读取 Service 核实的当前执行目录与 revision；请求前固定原范围，前后核连接身份，并核响应的 Store／Session／Workspace，拒绝迟到或错绑结果。revision 包含执行根 epoch，同路径退出／重新进入也不能沿用旧读取。SDK 不从原 Workspace 或历史工具消息回退推断，BrowserClient 不提供此方法；[SDK 回归](test/isolated/session-execution-root.test.ts)覆盖错范围、坏响应、取消连接与请求别名变化。
+
 ## 只读授权观察
 
 生成 `Execution.authorization.policy` 保留 `evidenceId/reason/sourceExecutionId/checkExecutionId/requestedScope/effectiveScope`，Native 和 Browser 读取不将 `timeout_continue` 解释为批准。会话日志的 `details.policy` 保留原事件闭合 source；其中 `kind=policy` 的 ID 是策略证据，不是 Execution。缺失的历史字段不补造。字段与私密边界由[有限 DTO 回归](test/isolated/session-logs.test.ts)核验，真实 HTTP 与 Cookie Browser 传递见[Service 回归](../../apps/service/test/isolated/authorization-policy-observation.test.ts)；这些测试不代表普通客户端窗口的交互验收。

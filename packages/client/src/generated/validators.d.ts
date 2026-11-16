@@ -97,6 +97,7 @@ export declare function response_QueryResponse(value: unknown): boolean;
 export declare function response_MessageChangesPage(value: unknown): boolean;
 export declare function response_MessageTextChunk(value: unknown): boolean;
 export declare function response_SessionHistoryEntries(value: unknown): boolean;
+export declare function response_SessionExecutionRoot(value: unknown): boolean;
 export declare function request_OutputPdfPageRequest(value: unknown): boolean;
 export declare function request_OutputFilesQuery(value: unknown): boolean;
 export declare function request_OutputFileResolveRequest(value: unknown): boolean;
@@ -201,6 +202,7 @@ export declare function request_ExtensionCommandRequest(value: unknown): boolean
 export declare function request_MessageChangesQuery(value: unknown): boolean;
 export declare function request_MessageTextQuery(value: unknown): boolean;
 export declare function request_SessionHistoryEntriesQuery(value: unknown): boolean;
+export declare function request_SessionExecutionRootQuery(value: unknown): boolean;
 export declare function queryInput(value: unknown): boolean;
 export declare const responseValidators: {
   TraceRemoteDeliveryStatus: (value: unknown) => boolean;
@@ -301,6 +303,7 @@ export declare const responseValidators: {
   MessageChangesPage: (value: unknown) => boolean;
   MessageTextChunk: (value: unknown) => boolean;
   SessionHistoryEntries: (value: unknown) => boolean;
+  SessionExecutionRoot: (value: unknown) => boolean;
 };
 export declare const requestValidators: {
   OutputPdfPageRequest: (value: unknown) => boolean;
@@ -407,4 +410,5 @@ export declare const requestValidators: {
   MessageChangesQuery: (value: unknown) => boolean;
   MessageTextQuery: (value: unknown) => boolean;
   SessionHistoryEntriesQuery: (value: unknown) => boolean;
+  SessionExecutionRootQuery: (value: unknown) => boolean;
 };

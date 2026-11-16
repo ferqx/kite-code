@@ -54,6 +54,7 @@ function WorkspaceChangeDetail({
   onLayoutChange,
   observationId,
   refreshing,
+  listFailed,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -62,6 +63,7 @@ function WorkspaceChangeDetail({
   onLayoutChange: (layout: 'split' | 'unified') => void;
   observationId: string;
   refreshing: boolean;
+  listFailed: boolean;
 }) {
   const [body, setBody] = useState<NativeWorkspaceChangeDetail>();
   const [error, setError] = useState('');
@@ -69,7 +71,7 @@ function WorkspaceChangeDetail({
   useEffect(() => {
     // A replaced list lease cancels an in-flight read, but the last verified body
     // remains readable until the successor is available. It is never another path.
-    if (refreshing) return;
+    if (refreshing || listFailed) return;
     const readId = `${observationId}-${crypto.randomUUID()}`;
     let active = true;
     setLoading(true);
@@ -108,7 +110,13 @@ function WorkspaceChangeDetail({
       active = false;
       void bridge.request({ method: 'workspaceChanges.close', generation, readId }).catch(() => {});
     };
-  }, [bridge, generation, entry.changeId, observationId, refreshing]);
+  }, [bridge, generation, entry.changeId, observationId, refreshing, listFailed]);
+  if (listFailed && !body)
+    return (
+      <p className="workspace-change-notice" role="alert">
+        无法读取当前差异，请刷新变更列表后重试。
+      </p>
+    );
   if (error && !body)
     return (
       <p className="workspace-change-notice" role="alert">
@@ -139,7 +147,10 @@ function WorkspaceChangeDetail({
           {error} 当前显示上次读取的内容。
         </p>
       )}
-      <div className="workspace-change-live-body" aria-busy={refreshing || loading || undefined}>
+      <div
+        className="workspace-change-live-body"
+        aria-busy={(!listFailed && (refreshing || loading)) || undefined}
+      >
         {!body.text && (
           <div className="workspace-change-path" title={workspacePathLabel(entry.path, 1_024)}>
             {workspacePathLabel(entry.path)}
@@ -192,6 +203,7 @@ function WorkspaceChangeBrowser({
   layout,
   onLayoutChange,
   refreshing,
+  listFailed,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -203,6 +215,7 @@ function WorkspaceChangeBrowser({
   layout: 'split' | 'unified';
   onLayoutChange: (layout: 'split' | 'unified') => void;
   refreshing: boolean;
+  listFailed: boolean;
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [focusedId, setFocusedId] = useState<string>();
@@ -333,6 +346,7 @@ function WorkspaceChangeBrowser({
                 onLayoutChange={onLayoutChange}
                 observationId={page.readId}
                 refreshing={refreshing}
+                listFailed={listFailed}
               />
             </div>
           </>
@@ -666,6 +680,15 @@ function WorkspaceChangesView({
         event.scope.workspaceId !== workspaceId
       )
         return;
+      if (event.reset) {
+        ++epoch;
+        pending = false;
+        close();
+        setSelectedPath(undefined);
+        setState({ bridge, loading: true });
+        schedule(0);
+        return;
+      }
       schedule();
     });
     refreshRequest.current = schedule;
@@ -747,7 +770,8 @@ function WorkspaceChangesView({
           onSelectPath={setSelectedPath}
           layout={layout}
           onLayoutChange={setLayout}
-          refreshing={current.loading || !!current.error}
+          refreshing={current.loading}
+          listFailed={!!current.error}
         />
       )}
     </div>

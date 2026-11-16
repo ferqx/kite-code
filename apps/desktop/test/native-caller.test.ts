@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -25,6 +26,7 @@ import type {
 } from '../src/background-bridge';
 import { composeBrowserDraft } from '../src/browser-annotation-content';
 import {
+  type NativeEvent,
   type NativeRequest,
   type NativeShellPreference,
   type NativeState,
@@ -5154,5 +5156,92 @@ test('parent output IPC preserves child identity, refreshes late files and rejec
     expect(caller.state().outputFilesDisplay).toBeUndefined();
   } finally {
     await caller.close();
+  }
+});
+
+test('workspace changes resolve the selected session root and reset only its root-change event', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'kite-caller-root-')));
+  const connection = client();
+  let observe!: Parameters<AgentClient['observe']>[0];
+  let revision = '0';
+  const requests: unknown[] = [];
+  Object.assign(connection, {
+    async listAllWorkspaces() {
+      return [{ id: 'w', rootUri: pathToFileURL(join(root, 'unavailable-source')).href }];
+    },
+    async getSessionExecutionRoot(
+      sessionId: string,
+      options: { storeId: string; workspaceId: string; signal: AbortSignal },
+    ) {
+      requests.push({ sessionId, storeId: options.storeId, workspaceId: options.workspaceId });
+      options.signal.throwIfAborted();
+      return {
+        storeId: 'store',
+        sessionId,
+        workspaceId: 'w',
+        rootUri: pathToFileURL(root).href,
+        revision,
+      };
+    },
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      observe = options;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+  });
+  const events: NativeEvent[] = [];
+  const caller = new NativeCaller(connection, (event) => events.push(event));
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    await caller.invoke({ method: 'directory', generation: 1 });
+    const selection = caller.state().selection!;
+    const viewSelection = selection.viewSelection;
+    if (viewSelection === undefined) throw Error('fixture_selection_unavailable');
+    const list = await caller.invoke({
+      method: 'workspaceChanges.list',
+      generation: 1,
+      viewSelection,
+      readId: 'root-list',
+    });
+    expect(list).toMatchObject({
+      kind: 'workspaceChanges.page',
+      repository: false,
+      scope: { sessionId: 's', workspaceId: 'w' },
+    });
+    expect(requests).toEqual([
+      { sessionId: 's', storeId: 'store', workspaceId: 'w' },
+      { sessionId: 's', storeId: 'store', workspaceId: 'w' },
+    ]);
+    await observe.onChange?.({
+      ...sessionChange('other', '1'),
+      type: 'session.execution_root.changed',
+    });
+    expect(events.filter((event) => event.kind === 'workspaceChanges.changed')).toHaveLength(0);
+    revision = '1';
+    await observe.onChange?.({
+      ...sessionChange('s', '2'),
+      type: 'session.execution_root.changed',
+    });
+    expect(events.filter((event) => event.kind === 'workspaceChanges.changed')).toEqual([
+      {
+        kind: 'workspaceChanges.changed',
+        generation: 1,
+        readId: 'root-list',
+        reset: true,
+        scope: {
+          generation: 1,
+          viewSelection,
+          storeId: 'store',
+          sessionId: 's',
+          workspaceId: 'w',
+        },
+      },
+    ]);
+    expect(caller.state().selection?.session.workspaceId).toBe('w');
+  } finally {
+    await caller.close();
+    await rm(root, { recursive: true, force: true });
   }
 });

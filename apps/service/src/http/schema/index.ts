@@ -1447,6 +1447,14 @@ export const schemas = {
     definitionVersion: z.string().max(256),
     input: json,
   }),
+  SessionExecutionRootQuery: z.strictObject({ storeId: id, workspaceId: id }),
+  SessionExecutionRoot: z.strictObject({
+    storeId: id,
+    sessionId: id,
+    workspaceId: id,
+    rootUri: z.string().min(1).max(8192).startsWith('file://'),
+    revision: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
 };
 export const PublicViewSchema = z.object({
   extensionId: definitionId,
@@ -2616,6 +2624,12 @@ export const apiRoutes = [
   },
   { method: 'get', path: '/v1/sessions/{id}/view', response: 'SessionView' },
   { method: 'get', path: '/v1/sessions/{id}/state', response: 'SessionView' },
+  {
+    method: 'get',
+    path: '/v1/sessions/{id}/execution-root',
+    query: 'SessionExecutionRootQuery',
+    response: 'SessionExecutionRoot',
+  },
   {
     method: 'get',
     path: '/v1/sessions/{id}/history-entries',

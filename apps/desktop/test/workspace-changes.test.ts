@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, type watch } from 'node:fs';
-import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -19,7 +19,7 @@ async function setup(
   repository = true,
   watchOptions?: ConstructorParameters<typeof NativeWorkspaceChanges>[5],
 ) {
-  const root = await mkdtemp(join(tmpdir(), 'kite-workspace-changes-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'kite-workspace-changes-')));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const git = (...args: string[]) =>
     execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString();
@@ -455,6 +455,52 @@ test('watch invalidates worktree creation, rename, deletion and Git index with c
   await writeFile(join(f.root, 'closed'), 'closed');
   await new Promise((resolve) => setTimeout(resolve, 350));
   expect(f.events.length).toBe(count);
+});
+test('linked worktree reads its own HEAD, index and current content', async () => {
+  const f = await setup();
+  await writeFile(join(f.root, 'file'), 'source base\n');
+  f.git('add', '.');
+  f.git('commit', '-m', 'base');
+  const linked = join(f.root, 'linked');
+  f.git('worktree', 'add', '-b', 'linked-detail', linked);
+  const linkedGit = (...args: string[]) =>
+    execFileSync('git', args, { cwd: linked, stdio: 'pipe' }).toString();
+  await writeFile(join(linked, 'file'), 'linked base\n');
+  linkedGit('add', 'file');
+  linkedGit('commit', '-m', 'linked base');
+  await writeFile(join(f.root, 'file'), 'source current\n');
+  await writeFile(join(linked, 'file'), 'linked staged\n');
+  linkedGit('add', 'file');
+  await writeFile(join(linked, 'file'), 'linked current\n');
+  await writeFile(join(linked, 'untracked'), 'linked untracked\n');
+  const scope = {
+    generation: 1,
+    viewSelection: 1,
+    storeId: 'store',
+    sessionId: 'session',
+    workspaceId: 'workspace',
+  };
+  const owner = new NativeWorkspaceChanges(
+    () => scope,
+    () => ({ rootUri: pathToFileURL(linked).href }) as Workspace,
+    [],
+  );
+  cleanup.push(async () => owner.release());
+  const page = await owner.list({ generation: 1, viewSelection: 1, readId: 'linked' });
+  const entry = page.entries.find((value) => value.path === 'file')!;
+  expect(entry.indexStatus + entry.worktreeStatus).toBe('MM');
+  const detail = await owner.detail('linked-detail', entry.changeId);
+  expect(detail.text).toContain('-linked base');
+  expect(detail.text).toContain('+linked current');
+  expect(detail.text).not.toContain('source');
+  expect(detail.text).not.toContain('linked staged');
+  const untracked = page.entries.find((value) => value.path === 'untracked')!;
+  expect(untracked.untracked).toBe(true);
+  expect((await owner.detail('linked-untracked', untracked.changeId)).text).toContain(
+    '+linked untracked',
+  );
+  expect(linkedGit('show', ':file')).toBe('linked staged\n');
+  expect(f.git('show', ':file')).toBe('source base\n');
 });
 test('linked worktree observes its own index and common HEAD refs', async () => {
   const f = await setup();
