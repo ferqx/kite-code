@@ -617,14 +617,18 @@ export class NativeOutputPreview {
       if (office) {
         const script = await readFile(join(app.getAppPath(), office.script), 'utf8');
         current();
+        const contents = view.webContents;
+        // PPT text layout can await animation frames before this hidden view is ready to show.
+        const resumeThrottling = kind === 'powerpoint' && contents.getBackgroundThrottling();
         let timeout: ReturnType<typeof setTimeout> | undefined;
         try {
+          if (resumeThrottling) contents.setBackgroundThrottling(false);
           await Promise.race([
             (async () => {
-              await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
+              await contents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
                 { code: script },
               ]);
-              const result = await view.webContents.executeJavaScriptInIsolatedWorld(
+              const result = await contents.executeJavaScriptInIsolatedWorld(
                 officeInteractionWorld,
                 [
                   {
@@ -647,6 +651,7 @@ export class NativeOutputPreview {
           ]);
         } finally {
           clearTimeout(timeout);
+          if (resumeThrottling && !contents.isDestroyed()) contents.setBackgroundThrottling(true);
         }
         current();
         if (!active.target) {

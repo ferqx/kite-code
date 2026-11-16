@@ -55,9 +55,11 @@ async function hostileDeck() {
     'ppt/_rels/presentation.xml.rels',
     `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${r}/slide" Target="slides/slide1.xml"/></Relationships>`,
   );
+  // Hanging punctuation waits for animation frames before the actual slide is ready.
+  const punctuation = '<a:p><a:pPr hangingPunct="1"/><a:r><a:t>示例（中文标点）</a:t></a:r></a:p>';
   archive.file(
     'ppt/slides/slide1.xml',
-    `<p:sld xmlns:p="${p}" xmlns:a="${a}" showMasterSp="0"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="Source shape"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="95250" y="95250"/><a:ext cx="4000000" cy="500000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>&lt;script&gt;window.attackStarted=true&lt;/script&gt;</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+    `<p:sld xmlns:p="${p}" xmlns:a="${a}" showMasterSp="0"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="Source shape"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="95250" y="95250"/><a:ext cx="4000000" cy="500000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>&lt;script&gt;window.attackStarted=true&lt;/script&gt;</a:t></a:r></a:p>${punctuation}</p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
   );
   archive.file('ppt/private.txt', 'This package member has no preview URL.');
   return archive.generateAsync({ type: 'nodebuffer' });
@@ -115,6 +117,12 @@ void app
       const document = window.contentView.children.at(-1) as WebContentsView;
       const contents = document.webContents,
         origin = `kite-preview://${new URL(contents.getURL()).host}`;
+      assert.equal(document.getVisible(), false);
+      assert.equal(contents.getBackgroundThrottling(), true);
+      assert.match(
+        await contents.executeJavaScript('document.body.textContent'),
+        /示例（中文标点）/,
+      );
       const preferences = webPreferences(contents);
       assert.equal(preferences.sandbox, true);
       assert.equal(preferences.contextIsolation, true);

@@ -4,6 +4,8 @@
 
 三个 OOXML 格式在[隔离预览 View](electron/output-preview.ts)直接读取当前清单中的已校验原文件快照。Word 用 [docx-preview](electron/docx-preview.ts)渲染，将可定位段落和表格文字对到源 XML。PPT 用 [PPTX Renderer](electron/pptx-preview.ts)保留渲染页与原部件关系，按演示顺序绑定页码，并用原幻灯片的 `cNvPr` ID 定位对象。Excel 的[虚拟网格](electron/xlsx-preview.tsx)用 ExcelJS、SSF 和 TanStack Virtual 解析数据与公式缓存，按工作表和源单元格生成选区。PDF 使用现有 PDF.js worker。
 
+PPT 排版在隐藏视图里也可能等待动画帧。[Main](electron/output-preview.ts)在等待 PPT 渲染就绪期间暂停该视图的后台节流，结束时恢复。预览仍由当前窗口几何和有效原生首帧准入显示。Windows x64／Electron 44.3.0 的[真实窗口回归](test/isolated/office-preview-security.test.ts)用悬挂标点触发该排版路径，修前超时，修后取得就绪结果时视图仍隐藏，节流已恢复。原故障附件在隔离窗口从文件卡打开后呈现五页，实测切到第 4 页、关闭重开、一次读取失败后重试，以及在加载中关闭后晚到的结果未重新显示。
+
 Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)从当前用户 Skills 目录读取“修改 Skill”选项。同名可用项带各自的 ID。显式选择通过现有 `selectedSkills` 随原修改申请提交，Main 继续复核原版本和选区。OOXML 预览在独立 sandbox 中执行构建期脚本，页面自身禁止执行脚本，`kite-preview` 清单仅提供当前原件和固定空页面。Word 禁止加载嵌入 HTML，PPT 禁止外部媒体。用户安装的 Skill 可通过受管 Shell 使用所需编辑工具。原文件的读取、选区定位和请求表单均由 Desktop 负责。内置 Skill 的资源边界见 [Office owner](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
 
 2026-11-16 在 Windows x64 隔离 Native 与真实 Service 中验证。Anthropic 的 docx、pptx、pdf、xlsx Skill 取自同一提交 `1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064`，由受控本地模型经 `load_skill` 读取。真实文件卡打开后，鼠标框选 `预算!B2:C3`，可信输入显示同一范围，持久请求绑定 `user-skill.xlsx`。受管 Windows Shell 运行 openpyxl 修改工作副本并归档新版，重启后从原会话打开新版。独立读取原件与新版，确认这四格为 1700、25、2700、39，其余工作表、值、边框、数值格式、合并格和冻结位置一致。原件与导入工作副本摘要一致。同一制品也打开了 PDF。真实预览 View 与交互分阶段采样，验证范围为本机隔离制品和受控模型。
