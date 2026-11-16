@@ -3,7 +3,7 @@ name: Required
 on:
   pull_request:
   push:
-    branches: [main, compact, man]
+    branches: [main, compact, man, el-refactor]
 
 permissions:
   contents: read

@@ -25,8 +25,10 @@ CI 将默认 scenario 清单稳定分到四个相互独立的 runner，并由同
 当前版本不包含 evaluation、record/replay baseline 或真实 Provider smoke job。后续重新建立 evaluation 时必须
 以新的计划、数据边界和独立门禁重新准入，不能恢复已删除脚本或把产品 replay/restore 语义当作评测框架。
 
-Required workflow 同时覆盖 `main`、`compact` 与 `man`；其中 `man` 的单父直接推送会失败，只接受通过
-Pull Request 产生的合并提交。本地 pre-commit 守卫提供更早的反馈，远端分支保护仍是最终写入控制面。
+Required workflow 的 `push` 精确覆盖 `main`、`compact`、`man` 与 `el-refactor`，`pull_request` 不限定分支。
+并发取消仅作用于同一 PR 或 ref 的过期运行；已打开 PR 的上述分支推送仍可分别触发 push 与 PR 检查，二者不互相取消。
+其中 `man` 的单父直接推送会失败，只接受通过 Pull Request 产生的合并提交；该守卫不扩展到 `el-refactor`。
+本地 pre-commit 守卫提供更早的反馈，远端分支保护仍是最终写入控制面；workflow 触发范围不修改远端分支保护。
 
 `G1` 只判断普通发布可用性：GitHub-hosted macOS、Ubuntu、Windows 原生构建、安装、启动和
 TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。

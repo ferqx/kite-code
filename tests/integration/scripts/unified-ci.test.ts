@@ -1079,13 +1079,24 @@ test('native stdio schedules the real host logged-shell tests before the complet
   }
 });
 
-test('required workflow prepares runner paths inside steps without expanding triggers', () => {
+test('required workflow limits push branches and preserves PR checks and isolation', () => {
   const root = resolve(import.meta.dir, '../../..');
   const workflow = parse(readFileSync(join(root, '.github/workflows/required.yml'), 'utf8'));
   expect(workflow.on).toEqual({
     pull_request: null,
-    push: { branches: ['main', 'compact', 'man'] },
+    push: { branches: ['main', 'compact', 'man', 'el-refactor'] },
   });
+  expect(workflow.permissions).toEqual({ contents: 'read' });
+  expect(workflow.concurrency).toEqual({
+    group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}',
+    'cancel-in-progress': true,
+  });
+  expect(workflow.jobs['protected-branch'].if).toBe("github.ref == 'refs/heads/man'");
+});
+
+test('required workflow prepares runner paths inside steps', () => {
+  const root = resolve(import.meta.dir, '../../..');
+  const workflow = parse(readFileSync(join(root, '.github/workflows/required.yml'), 'utf8'));
   for (const job of Object.values(workflow.jobs) as { env?: Record<string, string> }[]) {
     for (const value of Object.values(job.env ?? {}))
       expect(value).not.toMatch(/\$\{\{[^}]*\brunner\./u);
