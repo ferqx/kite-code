@@ -369,7 +369,7 @@ export function withOutputCollection(extension: Extension, runtime: () => AgentR
     ...extension,
     records: [
       ...(extension.records ?? []),
-      ...['allocation', 'collection'].map((kind) => ({
+      ...['allocation', 'collection', 'output-index'].map((kind) => ({
         contentType: `builtin.files.${kind}`,
         contentVersion: 1,
         schema: { type: 'object' },

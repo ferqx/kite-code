@@ -7,12 +7,21 @@ import {
   type SessionFileTarget,
   useConversationReadActive,
 } from '@kite-ai/ui/desktop';
-import { useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { NativeBridge } from './native-bridge';
 import { NativeFilePreview } from './native-file-preview';
 import { NativeLocalFilePreview } from './native-local-file-preview';
+import { NativeOutputReadCache } from './native-output-read-cache';
 import type {
   LocalOfficeRequest,
+  NativeOutputDisplayState,
   NativeOutputSource,
   OfficeEditContext,
   OfficeRequestOutcome,
@@ -51,6 +60,8 @@ export function useNativeOutputFiles(input: {
   storeId?: string;
   sessionId?: string;
   revision: number;
+  display?: NativeOutputDisplayState;
+  available?: boolean;
   onEdit: (file: OutputFileSummary, context?: OfficeEditContext) => Promise<void>;
   onRequestEdit?: (
     file: OutputFileSummary,
@@ -69,17 +80,99 @@ export function useNativeOutputFiles(input: {
     value: SessionFileTabRequest;
     ownerRunId?: string;
   }>();
-  const key = JSON.stringify([input.generation, input.storeId, input.sessionId]);
+  const scopeKey = JSON.stringify([input.generation, input.storeId, input.sessionId]);
+  const display = input.display?.storeId === input.storeId ? input.display : undefined;
+  const displayRevision = display?.roots.find(
+    (root) => root.sessionId === input.sessionId,
+  )?.revision;
+  const authority = JSON.stringify([
+    input.generation,
+    input.storeId,
+    display?.subjectId,
+    display?.epoch,
+    // Without Main's live invalidation coverage, sharing is limited to this selection.
+    displayRevision === undefined ? scopeKey : undefined,
+    input.available === false,
+  ]);
+  const key = JSON.stringify([scopeKey, authority]);
+  const retained = useRef<
+    | {
+        bridge?: NativeBridge;
+        authority: string;
+        cache: NativeOutputReadCache;
+      }
+    | undefined
+  >(undefined);
+  const retired = useRef<NativeOutputReadCache[]>([]);
+  if (retained.current?.bridge !== input.bridge || retained.current?.authority !== authority) {
+    if (retained.current) {
+      retained.current.cache.cover([]);
+      retired.current.push(retained.current.cache);
+    }
+    retained.current = { bridge: input.bridge, authority, cache: new NativeOutputReadCache() };
+  }
+  const cache = retained.current.cache;
+  const activation = cache.select(key);
+  const sourceRevision = displayRevision ?? input.revision;
+  const rootKey = JSON.stringify([key, sourceRevision]);
+  cache.cover(
+    input.available === false
+      ? []
+      : displayRevision === undefined
+        ? [rootKey]
+        : display!.roots.map((root) =>
+            JSON.stringify([
+              JSON.stringify([
+                JSON.stringify([input.generation, input.storeId, root.sessionId]),
+                authority,
+              ]),
+              root.revision,
+            ]),
+          ),
+  );
+  useLayoutEffect(() => {
+    for (const previous of retired.current.splice(0)) previous.publish();
+    cache.publish();
+  });
+  const reader = {
+    cache,
+    rootKey,
+    available: input.available,
+    strict: displayRevision !== undefined,
+  };
+  const currentKey = useRef(key);
+  currentKey.current = key;
   const [sourceState, setSourceState] = useState<{
     key: string;
     sources: NativeOutputSource[];
     revision: number;
+    activation: number;
     error?: string;
   }>();
-  const sources = sourceState?.key === key ? sourceState.sources : [];
-  const sourceError = sourceState?.key === key ? sourceState.error : undefined;
+  const sources =
+    input.available === false
+      ? []
+      : sourceState?.key === key &&
+          sourceState.activation === activation &&
+          (displayRevision === undefined || sourceState.revision === displayRevision)
+        ? sourceState.sources
+        : (cache.get<NativeOutputSource[]>(`sources/${rootKey}`) ?? []);
+  const sourceError =
+    sourceState?.key === key && sourceState.activation === activation
+      ? sourceState.error
+      : undefined;
   useEffect(() => {
-    if (!input.bridge || !input.storeId || !input.sessionId) return;
+    if (input.available === false || !input.bridge || !input.storeId || !input.sessionId) return;
+    const cached = cache.get<NativeOutputSource[]>(`sources/${rootKey}`);
+    if (cached) {
+      setSourceState({
+        key,
+        sources: cached,
+        revision: sourceRevision,
+        activation,
+      });
+      return;
+    }
     let cancelled = false;
     let failures = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -101,13 +194,25 @@ export function useNativeOutputFiles(input: {
           result.scope.sessionId !== input.sessionId
         )
           throw Error('output_sources_scope_changed');
-        setSourceState({ key, sources: result.sources, revision: input.revision });
+        cache.set(`sources/${rootKey}`, result.sources);
+        setSourceState({
+          key,
+          sources: result.sources,
+          revision: sourceRevision,
+          activation,
+        });
       } catch {
         if (cancelled) return;
         setSourceState((previous) => ({
           key,
-          revision: input.revision,
-          sources: previous?.key === key ? previous.sources : [],
+          revision: sourceRevision,
+          activation,
+          sources:
+            previous?.key === key &&
+            previous.activation === activation &&
+            (displayRevision === undefined || previous.revision === displayRevision)
+              ? previous.sources
+              : [],
           error: '子 Agent 文件暂时无法更新',
         }));
         retry = setTimeout(
@@ -123,24 +228,40 @@ export function useNativeOutputFiles(input: {
       cancelled = true;
       clearTimeout(retry);
     };
-  }, [input.bridge, input.generation, input.storeId, input.sessionId, input.revision, key]);
+  }, [
+    input.bridge,
+    input.generation,
+    input.storeId,
+    input.sessionId,
+    rootKey,
+    key,
+    cache,
+    input.available,
+    activation,
+    displayRevision,
+    sourceRevision,
+  ]);
   useEffect(() => {
     setRequest((previous) => (previous?.scope === key ? previous : undefined));
   }, [key]);
   const sequence = useRef(0);
   const actions = {
-    onOpen: (file: OutputFileSummary) =>
+    onOpen: (file: OutputFileSummary) => {
+      if (currentKey.current !== key || !cache.valid(rootKey)) return;
       setRequest({
         scope: key,
         ownerRunId: file.ownerRunId,
         value: { target: target(file), title: file.name, requestId: ++sequence.current },
-      }),
+      });
+    },
     onSave: (file: OutputFileSummary) => {
+      if (currentKey.current !== key || !cache.valid(rootKey)) return;
       void input.bridge
         ?.request({ method: 'outputs.save', generation: input.generation, target: target(file) })
         .catch(() => setError('另存失败，请重试'));
     },
     onEdit: (file: OutputFileSummary, context?: OfficeEditContext) => {
+      if (currentKey.current !== key || !cache.valid(rootKey)) return;
       void input.onEdit(file, context).catch(() => setError('无法附加文件，请重试'));
     },
     turnLabel: input.turnLabel,
@@ -182,6 +303,7 @@ export function useNativeOutputFiles(input: {
         <OutputReferenceReaders
           key={key}
           {...input}
+          {...reader}
           sources={sources}
           sourceError={sourceError}
           actions={actions}
@@ -193,13 +315,20 @@ export function useNativeOutputFiles(input: {
       const runId = nativeOutputRunId(turnId, input.storeId, input.sessionId);
       return runId ? (
         <>
-          <OutputFileReader key={`${key}/${turnId}`} {...input} runId={runId} actions={actions} />
+          <OutputFileReader
+            key={`${key}/${turnId}`}
+            {...input}
+            {...reader}
+            runId={runId}
+            actions={actions}
+          />
           {sources
             .filter((source) => source.parentRunId === runId)
             .map((source) => (
               <OutputFileReader
                 key={`${key}/${source.sessionId}/${source.runId}`}
                 {...input}
+                {...reader}
                 sessionId={source.sessionId}
                 runId={source.runId}
                 sourceLabel={`来自子 Agent · ${source.name} · ${input.turnLabel(source.runId)}`}
@@ -216,6 +345,7 @@ export function useNativeOutputFiles(input: {
         <OutputFileReader
           key={`${key}/${sessionId}/${runId}`}
           {...input}
+          {...reader}
           sessionId={sessionId}
           runId={runId}
           actions={actions}
@@ -254,6 +384,10 @@ type OutputReadState = {
   more: () => void;
 };
 type OutputReaderInput = {
+  cache: NativeOutputReadCache;
+  rootKey: string;
+  available?: boolean;
+  strict?: boolean;
   bridge?: NativeBridge;
   generation: number;
   storeId?: string;
@@ -269,7 +403,31 @@ type OutputReaderInput = {
 };
 function OutputFileReader(input: OutputReaderInput) {
   const readActive = useConversationReadActive();
-  const [page, setPage] = useState<OutputFilesPage>();
+  useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
+  const scopeValid = input.cache.valid(input.rootKey);
+  const windowKey = JSON.stringify([input.rootKey, input.sessionId, input.runId]);
+  const [saved, savePage] = useState(() => ({
+    key: windowKey,
+    cache: input.cache,
+    page:
+      input.available === false
+        ? undefined
+        : input.cache.get<OutputFilesPage>(`window/${windowKey}`),
+  }));
+  const page =
+    !scopeValid ||
+    input.available === false ||
+    saved.cache !== input.cache ||
+    (input.strict && saved.key !== windowKey)
+      ? undefined
+      : saved.page;
+  // Revalidation replaces bytes atomically, but does not forget the reader's loaded window.
+  const loadedCount = useRef(saved.page?.items.length ?? 50);
+  if (saved.page) loadedCount.current = Math.max(50, saved.page.items.length);
+  const setPage = useCallback(
+    (page: OutputFilesPage) => savePage({ key: windowKey, cache: input.cache, page }),
+    [windowKey, input.cache],
+  );
   const pageRef = useRef(page);
   pageRef.current = page;
   const [error, setError] = useState('');
@@ -282,26 +440,64 @@ function OutputFileReader(input: OutputReaderInput) {
   const readFailures = useRef(0);
   const lastRevision = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!readActive || !input.bridge || !input.storeId || !input.sessionId) return;
+    if (
+      input.available === false ||
+      !scopeValid ||
+      !readActive ||
+      !input.bridge ||
+      !input.storeId ||
+      !input.sessionId
+    )
+      return;
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
-    const revision = `${input.revision}/${retryRevision}`;
+    const revision = `${windowKey}/${retryRevision}`;
     const continuation = lastRevision.current === revision;
     const readCursor = continuation && read.kind === 'files' ? read.cursor : undefined;
     const collectionCursor = continuation && read.kind === 'collections' ? read.cursor : undefined;
     lastRevision.current = revision;
+    if (!readCursor && !collectionCursor && retryRevision === 0) {
+      const cached = input.cache.get<OutputFilesPage>(`window/${windowKey}`);
+      if (cached) {
+        setPage(cached);
+        setError('');
+        setLoading(false);
+        return;
+      }
+    }
     setLoading(true);
     const timer = setTimeout(() => {
-      void input
-        .bridge!.request({
-          method: 'outputs.query',
-          generation: input.generation,
-          scope: { storeId: input.storeId!, sessionId: input.sessionId! },
-          runId: input.runId,
-          limit: 50,
-          beforeKey: readCursor,
-          collectionBeforeKey: collectionCursor,
-        })
+      const query = (beforeKey?: string, collectionBeforeKey?: string) =>
+        input.cache.read(
+          JSON.stringify(['page', windowKey, retryRevision, beforeKey, collectionBeforeKey]),
+          async () => {
+            const result = await input.bridge!.request({
+              method: 'outputs.query',
+              generation: input.generation,
+              scope: { storeId: input.storeId!, sessionId: input.sessionId! },
+              runId: input.runId,
+              limit: 50,
+              beforeKey,
+              collectionBeforeKey,
+            });
+            if (
+              !result ||
+              !('kind' in result) ||
+              !('page' in result) ||
+              result.kind !== 'outputs.page' ||
+              result.page.scope.storeId !== input.storeId ||
+              result.page.scope.sessionId !== input.sessionId ||
+              !outputPageMatches(result.page, {
+                storeId: input.storeId,
+                sessionId: input.sessionId,
+                runId: input.runId,
+              })
+            )
+              throw Error('output_scope_changed');
+            return result;
+          },
+        );
+      void query(readCursor, collectionCursor)
         .then(async (result) => {
           if (cancelled) return;
           if (
@@ -332,21 +528,14 @@ function OutputFileReader(input: OutputReaderInput) {
           if (!readCursor && !collectionCursor) {
             // Rebuild the loaded window atomically. Retaining an old tail can resurrect
             // a superseded delivery that the authoritative head no longer contains.
-            const wanted = Math.max(50, previous?.items.length ?? 0);
+            const wanted = Math.max(50, previous?.items.length ?? 0, loadedCount.current);
             const seen = new Set<string>();
             while (incoming.nextCursor && incoming.items.length < wanted) {
               if (cancelled) return;
               const cursor = incoming.nextCursor;
               if (seen.has(cursor)) throw Error('output_cursor_repeated');
               seen.add(cursor);
-              const next = await input.bridge!.request({
-                method: 'outputs.query',
-                generation: input.generation,
-                scope: { storeId: input.storeId!, sessionId: input.sessionId! },
-                runId: input.runId,
-                limit: 50,
-                beforeKey: cursor,
-              });
+              const next = await query(cursor);
               if (cancelled) return;
               if (
                 !next ||
@@ -377,7 +566,7 @@ function OutputFileReader(input: OutputReaderInput) {
             }
           }
           if (cancelled) return;
-          setPage(
+          const updated =
             previous && (readCursor || collectionCursor)
               ? {
                   ...incoming,
@@ -400,8 +589,9 @@ function OutputFileReader(input: OutputReaderInput) {
                       ]
                     : previous.items,
                 }
-              : incoming,
-          );
+              : incoming;
+          input.cache.set(`window/${windowKey}`, updated);
+          setPage(updated);
           readFailures.current = 0;
           setError('');
         })
@@ -429,23 +619,27 @@ function OutputFileReader(input: OutputReaderInput) {
     input.sessionId,
     input.runId,
     input.collect,
-    input.revision,
+    windowKey,
+    input.cache,
+    input.available,
     readActive,
     retryRevision,
     read,
+    setPage,
+    scopeValid,
   ]);
   const onState = useRef(input.onState);
   onState.current = input.onState;
-  useEffect(() => {
+  useLayoutEffect(() => {
     onState.current?.({
-      page,
+      page: input.available === false ? undefined : page,
       error,
       loading,
       more: () => setRead({ kind: 'files', cursor: page?.nextCursor }),
     });
-  }, [page, error, loading]);
+  }, [page, error, loading, input.available]);
   if (input.collect) return null;
-  const items = (page?.items ?? []).map((file) =>
+  const items = (input.available === false ? [] : (page?.items ?? [])).map((file) =>
     input.sourceLabel ? { ...file, sourceLabel: input.sourceLabel } : file,
   );
   return input.runId ? (
@@ -453,7 +647,7 @@ function OutputFileReader(input: OutputReaderInput) {
       <OutputFiles
         {...input.actions}
         items={items}
-        collections={page?.collections}
+        collections={input.available === false ? undefined : page?.collections}
         onRetry={(collectionId) => {
           const collection = page?.collections.find((item) => item.collectionId === collectionId);
           if (
@@ -557,6 +751,8 @@ function OutputReferenceReaders(
     sourceError?: string;
   },
 ) {
+  useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
+  const scopeValid = input.cache.valid(input.rootKey);
   const [states, setStates] = useState(new Map<string, OutputReadState>());
   const readers = [
     { sessionId: input.sessionId, runId: undefined, sourceLabel: undefined },
@@ -608,7 +804,7 @@ function OutputReferenceReaders(
       ))}
       <OutputReferences
         {...input.actions}
-        items={items}
+        items={scopeValid ? items : []}
         hasMore={!!next}
         onMore={() => next?.state.more()}
         loading={active.length < unique.length || active.some(({ state }) => state.loading)}

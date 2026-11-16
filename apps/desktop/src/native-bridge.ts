@@ -547,6 +547,7 @@ export type NativeState = {
   /** Invalidations within the selected root, independent of unrelated background sessions. */
   readonly selectedEnvironmentRevision?: number;
   readonly outputFilesRevision?: number;
+  readonly outputFilesDisplay?: import('./output-files-bridge').NativeOutputDisplayState;
   /** Read admission remains available while same-selection metadata is merely refreshing. */
   readonly environmentReadUnavailable?: boolean;
   readonly directory?: NativeDirectory;

@@ -31,7 +31,16 @@ const targetKey = (target: OutputFileTarget) =>
 export class NativeOutputSources {
   private catalog?: { scope: string; sources: Map<string, Source> };
   private targets = new Map<string, { scope: string; source: string; identity: string }>();
-  private collections = new Map<string, { scope: string; source: string; revision: string }>();
+  private collections = new Map<
+    string,
+    {
+      scope: string;
+      source: string;
+      revision: string;
+      runId: string;
+      identity: string;
+    }
+  >();
   private epoch = 0;
   private readSequence = 0;
   private readonly client: AgentClient;
@@ -231,10 +240,15 @@ export class NativeOutputSources {
           (input.runId && input.runId !== collection.ownerRunId)
         )
           throw new ClientError('output_source_unavailable');
-        this.collections.set(JSON.stringify([input.scope.sessionId, collection.collectionId]), {
+        const collectionKey = JSON.stringify([input.scope.sessionId, collection.collectionId]);
+        // A freshly admitted collection is newest even if it was already retained.
+        this.collections.delete(collectionKey);
+        this.collections.set(collectionKey, {
           scope: JSON.stringify(scope),
           source: key,
           revision: collection.revision,
+          runId: collection.ownerRunId,
+          identity: backgroundIdentity(this.catalog!.sources.get(key)!.item),
         });
       }
     while (this.collections.size > 8192)
@@ -257,6 +271,49 @@ export class NativeOutputSources {
     const scope = this.scope(generation);
     if (scope.storeId !== input.scope.storeId) throw new ClientError('output_scope_unavailable');
     if (input.scope.sessionId !== scope.sessionId) {
+      const key = JSON.stringify([input.scope.sessionId, input.collectionId]);
+      const retained = this.collections.get(key);
+      if (retained && retained.scope !== JSON.stringify(scope)) {
+        // A warm display can retain an original collection across selection ABA, not
+        // its mutation lease. Use the old record only to locate fresh source/page proof.
+        const original = JSON.parse(retained.scope) as AdmissionScope;
+        if (
+          original.generation !== scope.generation ||
+          original.subjectId !== scope.subjectId ||
+          original.storeId !== scope.storeId ||
+          original.sessionId !== scope.sessionId ||
+          original.outputEpoch !== scope.outputEpoch ||
+          retained.revision !== input.expectedRevision
+        )
+          throw new ClientError('output_scope_unavailable');
+        const source = await this.source(scope, input.scope.sessionId, retained.runId);
+        if (!source || backgroundIdentity(source.item) !== retained.identity)
+          throw new ClientError('output_source_unavailable');
+        const seen = new Set<string>();
+        let before: string | undefined;
+        let revision: string | undefined;
+        // The Service returns 50 collection statuses/page. Cover the existing
+        // 8192-collection admission window without trusting an unbounded cursor chain.
+        const maxPages = Math.ceil(8192 / 50);
+        for (;;) {
+          const page = await this.query(generation, {
+            scope: input.scope,
+            runId: retained.runId,
+            collectionBeforeKey: before,
+            limit: 50,
+          });
+          if (revision !== undefined && revision !== page.revision)
+            throw new ClientError('output_source_observation_changed');
+          revision = page.revision;
+          if (page.collections.some((collection) => collection.collectionId === input.collectionId))
+            break;
+          const next = page.nextCollectionCursor;
+          if (!next || seen.has(next) || seen.size + 1 >= maxPages)
+            throw new ClientError('output_scope_unavailable');
+          seen.add(next);
+          before = next;
+        }
+      }
       const lease = this.collections.get(
         JSON.stringify([input.scope.sessionId, input.collectionId]),
       );

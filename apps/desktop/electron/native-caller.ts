@@ -63,6 +63,7 @@ import { NativeModelOutputReads } from './model-output-reads';
 import { NativeInputQueue } from './native-input-queue';
 import { NativeProcessOwner } from './native-processes';
 import { NativeOfficeEditor } from './office-editor';
+import { NativeOutputDisplayVersions } from './output-display-versions';
 import { saveOutputFile } from './output-files';
 import { NativeOutputSources } from './output-sources';
 import { NativePermissionGrants } from './permission-grants';
@@ -184,6 +185,7 @@ export class NativeCaller {
   private environmentRevision = 0;
   private selectedEnvironmentRevision = 0;
   private outputFilesRevision = 0;
+  private readonly outputDisplayVersions = new NativeOutputDisplayVersions();
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
   private historyHead?: {
@@ -1170,6 +1172,7 @@ export class NativeCaller {
       this.background.release();
       this.environment.release();
       this.outputSources.reset();
+      this.outputDisplayVersions.reset();
       this.observationUnavailable = true;
       this.controller.resetObservation();
       this.permissionUnavailable = true;
@@ -1256,6 +1259,7 @@ export class NativeCaller {
               this.selectedEnvironmentRevision++;
               this.outputFilesRevision++;
               this.outputSources.reset();
+              this.outputDisplayVersions.reset();
               this.observationUnavailable = false;
               this.permissionUnavailable = false;
               this.changed();
@@ -1332,6 +1336,7 @@ export class NativeCaller {
             },
             onChange: (change) => {
               this.environmentRevision++;
+              if (this.outputDisplayVersions.changed(change)) this.changed();
               if (
                 (change.sessionId === this.selected ||
                   (!!change.sessionId &&
@@ -1588,6 +1593,18 @@ export class NativeCaller {
       environmentRevision: this.environmentRevision,
       selectedEnvironmentRevision: this.selectedEnvironmentRevision,
       outputFilesRevision: this.outputFilesRevision,
+      outputFilesDisplay:
+        !this.closed &&
+        !this.observationUnavailable &&
+        !this.permissionUnavailable &&
+        this.client.serverInfo?.storeId &&
+        this.client.serverInfo.subjectId
+          ? this.outputDisplayVersions.snapshot(
+              this.client.serverInfo.storeId,
+              this.client.serverInfo.subjectId,
+              this.selected,
+            )
+          : undefined,
       environmentReadUnavailable:
         this.observationUnavailable || this.permissionUnavailable || !this.environmentSnapshot(),
       directory: this.directoryState(),
@@ -2021,6 +2038,7 @@ export class NativeCaller {
         break;
       case 'outputs.sources':
         result = await this.outputSources.read(generation, request.scope);
+        this.outputDisplayVersions.sources(request.scope.sessionId, result.sources);
         break;
       case 'outputs.retry': {
         await this.outputSources.retry(generation, {

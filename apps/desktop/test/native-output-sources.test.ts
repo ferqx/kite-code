@@ -284,6 +284,98 @@ test('collection retries retain exact child scope/revision and cannot be granted
   ).toThrow();
 });
 
+test('warm child retry reacquires its exact paginated collection after selection ABA without reusing a mutation lease', async () => {
+  for (const outcome of ['current', 'revised', 'deleted', 'foreign-subject'] as const) {
+    const f = fixture();
+    const scope = { storeId: 'store', sessionId: 'a' };
+    const page = await f.owner.query(1, { scope, runId: 'child-run-1' });
+    const collection = page.collections[0]!;
+    f.setCurrent({ ...f.getCurrent()!, sessionId: 'other', selection: 2 });
+    f.setCurrent({
+      ...f.getCurrent()!,
+      sessionId: 'root',
+      selection: 3,
+      ...(outcome === 'foreign-subject' ? { subjectId: 'other-user' } : {}),
+    });
+    if (outcome === 'deleted') f.items[0]!.childSession!.deletedAt = 42;
+    const pages: (string | undefined)[] = [];
+    f.client.queryOutputFiles = async (input) => {
+      pages.push(input.collectionBeforeKey);
+      expect(input.scope).toEqual(scope);
+      expect(input.runId).toBe('child-run-1');
+      return {
+        ...page,
+        collections: input.collectionBeforeKey
+          ? [{ ...collection, revision: outcome === 'revised' ? '8' : '7' }]
+          : [{ ...collection, collectionId: 'collection/00000000000000000001/newer' }],
+        ...(input.collectionBeforeKey
+          ? {}
+          : { nextCollectionCursor: 'collection/00000000000000000001/newer' }),
+      };
+    };
+    const retry = f.owner.retry(1, {
+      scope,
+      collectionId: collection.collectionId,
+      expectedRevision: '7',
+    });
+    if (outcome === 'current') {
+      await retry;
+      expect(pages).toEqual([undefined, 'collection/00000000000000000001/newer']);
+      expect(f.calls.filter((call) => call.startsWith('retry:'))).toEqual([
+        `retry:a/${collection.collectionId}`,
+      ]);
+    } else {
+      await expect(retry).rejects.toThrow(/output_(?:scope|source)_unavailable/);
+      expect(f.calls.some((call) => call.startsWith('retry:'))).toBe(false);
+      if (outcome !== 'revised') expect(pages).toEqual([]);
+    }
+  }
+});
+
+test('warm retry covers all 8192 retained collections and rejects cyclic, changing or overlong pages', async () => {
+  for (const outcome of ['deep', 'cycle', 'changing', 'overlong']) {
+    const f = fixture();
+    const scope = { storeId: 'store', sessionId: 'a' };
+    const page = await f.owner.query(1, { scope, runId: 'child-run-1' });
+    const collection = page.collections[0]!;
+    f.setCurrent({ ...f.getCurrent()!, selection: 3 });
+    let reads = 0;
+    f.client.queryOutputFiles = async (input) => {
+      reads++;
+      expect(input.limit).toBe(50);
+      const offset = Number(input.collectionBeforeKey ?? 0);
+      return {
+        ...page,
+        revision: outcome === 'changing' ? String(reads) : page.revision,
+        collections: Array.from({ length: 50 }, (_, i) => ({
+          ...collection,
+          collectionId:
+            outcome === 'deep' && offset + i === 8191
+              ? collection.collectionId
+              : `other-${offset + i}`,
+        })),
+        nextCollectionCursor: String(outcome === 'cycle' ? 50 : offset + 50),
+      };
+    };
+    const retry = f.owner.retry(1, {
+      scope,
+      collectionId: collection.collectionId,
+      expectedRevision: '7',
+    });
+    if (outcome === 'deep') {
+      await retry;
+      expect(reads).toBe(164);
+      expect(f.calls.filter((call) => call.startsWith('retry:'))).toHaveLength(1);
+    } else {
+      await expect(retry).rejects.toThrow(
+        /output_(?:scope_unavailable|source_observation_changed)/,
+      );
+      expect(reads).toBe(outcome === 'overlong' ? 164 : 2);
+      expect(f.calls.some((call) => call.startsWith('retry:'))).toBe(false);
+    }
+  }
+});
+
 test('a mismatched single-source page is never relabeled as a parent delivery', async () => {
   const f = fixture();
   f.alterPage((page) => ({

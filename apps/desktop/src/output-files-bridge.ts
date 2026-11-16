@@ -1,5 +1,12 @@
 import type { OutputFileSummary, OutputFilesPage, OutputFileTarget } from '@kite-ai/client';
 import type { InputRequest } from './input';
+/** Live observation versions for display reuse only, never a read or operation grant. */
+export type NativeOutputDisplayState = {
+  storeId: string;
+  subjectId: string;
+  epoch: number;
+  roots: readonly { sessionId: string; revision: number }[];
+};
 export type PdfSelection = {
   kind: 'pdf';
   page: number;

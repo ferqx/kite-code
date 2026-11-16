@@ -13,11 +13,12 @@ import {
   prepareOutputDirectory,
   withOutputCollection,
 } from '../../../src/business/output-collection';
-import type { JobDefinition, JobEvent, JobHandle } from '../../../src/extensions';
+import type { Extension, JobDefinition, JobEvent, JobHandle } from '../../../src/extensions';
 import { launchIdentityAsync } from '../../../src/jobs/launch-identity';
 import { collectOutputStaging } from '../../../src/maintenance/output-staging';
 import { type AgentRuntime, createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
+import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import { createShellExtension } from '../../../src/tools/shell';
 
 const finish = {
@@ -34,6 +35,7 @@ async function fixture(
     cancelStart?: boolean;
     denyCollector?: boolean;
     denyAfterAttempt?: number;
+    child?: boolean;
   },
   producer: 'bash' | 'bun' = 'bash',
 ) {
@@ -104,6 +106,38 @@ async function fixture(
     [{ type: 'text_delta', text: 'Done' }, finish],
   ];
   const model = createFixedModel([...responses, ...responses]);
+  const parentModel = createFixedModel([
+    [
+      { type: 'tool_call', id: 'delegate', name: 'fixture.delegate', arguments: '{}' },
+      { ...finish, reason: 'tool_calls' },
+    ],
+    [finish],
+  ]);
+  const delegation: Extension = {
+    id: 'fixture',
+    version: '1',
+    apiMajor: 1,
+    tools: [
+      {
+        id: 'fixture.delegate',
+        version: '1',
+        description: 'Owned child output fixture',
+        inputSchema: { type: 'object' },
+        async execute(_input, context) {
+          const child = await context.operations.ensure({
+            key: 'child',
+            request: {
+              kind: 'agent',
+              configurationId: 'output-child',
+              input: { content: 'Create deliverables' },
+            },
+          });
+          await context.operations.wait(child, { signal: context.signal, timeoutMs: 10000 });
+          return { outcome: 'succeeded', content: 'Child completed' };
+        },
+      },
+    ],
+  };
   const artifacts = createArtifactStore({ store, profile });
   let publications = 0;
   const collector = withOutputCollection(
@@ -158,9 +192,25 @@ async function fixture(
         return reference;
       },
     },
-    model,
+    model: fault?.child ? parentModel : model,
     modelId: 'fixed',
-    extensions: [createShellExtension({ job }), { ...collector, actions }],
+    childConfigurations: fault?.child
+      ? [
+          {
+            id: 'output-child',
+            version: '1',
+            model,
+            modelId: 'child-fixed',
+            toolIds: ['shell.execute'],
+            snapshot: { fixture: true },
+          },
+        ]
+      : [],
+    extensions: [
+      createShellExtension({ job }),
+      { ...collector, actions },
+      ...(fault?.child ? [delegation] : []),
+    ],
     permissions: {
       async authorize(request) {
         if (
@@ -194,6 +244,7 @@ async function fixture(
     base,
     roots,
     model,
+    parentModel,
     get starts() {
       return starts;
     },
@@ -1001,7 +1052,13 @@ test('serial same-path deliveries project the latest complete successor without 
           .get(id)!.completed_cursor;
       plain.sort((a, b) => order(a.sourceExecutionId) - order(b.sourceExecutionId));
       const [old, middle, latest] = plain;
-      const ids = async () => (await f.page()).items.map((i) => i.fileId);
+      const ids = async () => {
+        // These historical counterexamples inject SQL without the production writer.
+        // Remove only its derived qualification; the unchanged public read must safely
+        // project unindexed facts, not accept a deliberately stale saved result.
+        db.run("DELETE FROM extension_record WHERE key='output-index/state'");
+        return (await f.page()).items.map((i) => i.fileId);
+      };
       expect(await ids()).toContain(latest.fileId);
       expect(await ids()).not.toContain(old.fileId);
       expect((await ids()).length).toBe(2); // Same basename in another directory stays independent.
@@ -1164,7 +1221,13 @@ test('serial identical Files and Shell deliveries fold only after the turn ends,
           }),
           files.key,
         );
-        const ids = async () => (await f.page()).items.map((i) => i.fileId);
+        const ids = async () => {
+          // These historical counterexamples inject SQL without the production writer.
+          // Remove only its derived qualification; the unchanged public read must safely
+          // project unindexed facts, not accept a deliberately stale saved result.
+          db.run("DELETE FROM extension_record WHERE key='output-index/state'");
+          return (await f.page()).items.map((i) => i.fileId);
+        };
         expect(await ids()).toEqual([latest.fileId]);
         expect(
           (await f.runtime.queryOutputFiles({ ...f.base, limit: 1 })).items.map((i) => i.fileId),
@@ -1225,3 +1288,438 @@ test('serial identical Files and Shell deliveries fold only after the turn ends,
     }
   }
 });
+
+function outputIndexRows(db: Database) {
+  return db
+    .query<{ key: string; revision: number; json: string }, []>(
+      "SELECT key,revision,json FROM extension_record WHERE key LIKE 'output-index/%' ORDER BY key",
+    )
+    .all();
+}
+function countProjectionReads(operations: SqliteOperations) {
+  const rows = operations.rows.bind(operations);
+  let count = 0;
+  operations.rows = (sql, ...args) => {
+    if (sql.includes('WITH deliveries AS')) count++;
+    return rows(sql, ...args);
+  };
+  return () => count;
+}
+
+test('settled output list is persisted before any read and cold readonly pages never re-project it', async () => {
+  const f = await fixture([
+    'printf first > "$KITE_OUTPUT_DIR/report.txt"',
+    'printf final > "$KITE_OUTPUT_DIR/report.txt"',
+  ]);
+  let db: Database | undefined;
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+    // Observe collector facts, not the list endpoint that this test is qualifying.
+    for (let i = 0; i < 300; i++) {
+      const executions = await f.store.listExecutions('s');
+      if (
+        executions.filter(
+          (e) => e.definitionId === 'builtin.files/collect' && e.status === 'succeeded',
+        ).length === 2
+      )
+        break;
+      await Bun.sleep(10);
+    }
+    await f.runtime.close();
+    db = new Database(join(f.profile.dataRoot, 'test/core.db'), { readonly: true });
+    const persisted = outputIndexRows(db);
+    expect(persisted).toHaveLength(2); // One visible file plus the scope head.
+    expect(
+      db.query("SELECT key FROM extension_record WHERE key LIKE 'delivery/%'").all(),
+    ).toHaveLength(2);
+    const operations = new SqliteOperations(db, true);
+    const projections = countProjectionReads(operations);
+    const before = operations.metadata();
+    const read = () =>
+      operations.call('queryOutputFiles', [f.base]) as Awaited<
+        ReturnType<AgentRuntime['queryOutputFiles']>
+      >;
+    const first = read();
+    expect(first.items).toHaveLength(1);
+    for (let i = 0; i < 5; i++) {
+      expect(read()).toEqual(first); // Environment references: recent, no Run filter.
+      const turn = operations.call('queryOutputFiles', [
+        { ...f.base, runId: first.items[0]!.ownerRunId },
+      ]) as typeof first;
+      expect(turn.items).toEqual(first.items); // Turn cards use the same saved membership.
+    }
+    expect(() =>
+      operations.call('queryOutputFiles', [{ ...f.base, runId: 'foreign-run' }]),
+    ).toThrow('output_run_invalid');
+    expect(projections()).toBe(0);
+    expect(operations.metadata()).toEqual(before);
+    expect(outputIndexRows(db)).toEqual(persisted);
+    expect(() =>
+      operations.call('queryOutputFiles', [{ ...f.base, subjectId: 'stranger' }]),
+    ).toThrow('output_scope_denied');
+    expect(f.starts).toBe(2);
+    expect(f.model.requests).toHaveLength(3);
+    operations.releaseStatements();
+  } finally {
+    db?.close();
+    await f.close();
+  }
+}, 20000);
+
+test('legacy and older-writer facts never use a stale index; writable startup repairs metadata once', async () => {
+  const f = await fixture([
+    'printf first > "$KITE_OUTPUT_DIR/report.txt"',
+    'printf final > "$KITE_OUTPUT_DIR/report.txt"',
+  ]);
+  let db: Database | undefined;
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+    await f.wait(
+      (p) => p.collections.length === 2 && p.collections.every((c) => c.state === 'ready'),
+    );
+    await f.runtime.close();
+    db = new Database(join(f.profile.dataRoot, 'test/core.db'));
+    db.run("DELETE FROM extension_record WHERE key LIKE 'output-index/%'");
+    const reader = new SqliteOperations(db, true);
+    const before = reader.metadata();
+    const read = () =>
+      reader.call('queryOutputFiles', [f.base]) as Awaited<
+        ReturnType<AgentRuntime['queryOutputFiles']>
+      >;
+    expect(read().items).toHaveLength(1);
+    expect(outputIndexRows(db)).toEqual([]);
+    expect(reader.metadata()).toEqual(before);
+    reader.releaseStatements();
+    const writer = new SqliteOperations(db, false);
+    const initial = outputIndexRows(db);
+    expect(initial).toHaveLength(2);
+    // A previous binary emits the original source event but has no new index hook.
+    const latest = db
+      .query<{ key: string }, []>(
+        "SELECT c.key FROM extension_record c JOIN execution e ON e.id=json_extract(c.json,'$.source.producerExecutionId') WHERE c.content_type='builtin.files.collection' ORDER BY e.completed_cursor DESC LIMIT 1",
+      )
+      .get()!;
+    writer.tx(() => {
+      writer.run(
+        "UPDATE extension_record SET json=json_set(json,'$.state','failed') WHERE key=?",
+        latest.key,
+      );
+      writer.event('s', `builtin.files/${latest.key}`, 'extension.record_updated');
+      writer.outputFileIndex.discard();
+    });
+    expect(outputIndexRows(db)).toEqual(initial);
+    const projections = countProjectionReads(reader);
+    expect(read().items).toHaveLength(2);
+    expect(projections()).toBe(1);
+    expect(outputIndexRows(db)).toEqual(initial); // A read never backfills.
+    writer.releaseStatements();
+    reader.releaseStatements();
+    const reopened = new SqliteOperations(db, false);
+    const repaired = outputIndexRows(db);
+    expect(repaired).toHaveLength(3);
+    const reads = countProjectionReads(reopened);
+    expect(
+      (reopened.call('queryOutputFiles', [f.base]) as { items: unknown[] }).items,
+    ).toHaveLength(2);
+    expect(reads()).toBe(0);
+    reopened.releaseStatements();
+    const again = new SqliteOperations(db, false);
+    expect(outputIndexRows(db)).toEqual(repaired);
+    // Unsupported private index encoding is derived, not permission to rewrite source data.
+    db.run("UPDATE extension_record SET content_version=99 WHERE key='output-index/state'");
+    const incompatible = countProjectionReads(again);
+    expect((again.call('queryOutputFiles', [f.base]) as { items: unknown[] }).items).toHaveLength(
+      2,
+    );
+    expect(incompatible()).toBe(1);
+    again.outputFileIndex.initialize();
+    expect((again.call('queryOutputFiles', [f.base]) as { items: unknown[] }).items).toHaveLength(
+      2,
+    );
+    expect(incompatible()).toBe(2); // Only the writer's repair evaluates the selector again.
+    expect(
+      db.query("SELECT content_version FROM extension_record WHERE key='output-index/state'").get(),
+    ).toEqual({ content_version: 1 });
+    again.releaseStatements();
+    expect(f.starts).toBe(2);
+    expect(f.model.requests).toHaveLength(3);
+  } finally {
+    db?.close();
+    await f.close();
+  }
+}, 20000);
+
+test('source and output-index writes roll back together, and failed bootstrap can resume without losing deliveries', async () => {
+  const f = await fixture([
+    'printf first > "$KITE_OUTPUT_DIR/report.txt"',
+    'printf final > "$KITE_OUTPUT_DIR/report.txt"',
+  ]);
+  let db: Database | undefined;
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+    await f.wait(
+      (p) => p.collections.length === 2 && p.collections.every((c) => c.state === 'ready'),
+    );
+    await f.runtime.close();
+    db = new Database(join(f.profile.dataRoot, 'test/core.db'));
+    const writer = new SqliteOperations(db, false);
+    const source = db
+      .query<{ key: string; json: string }, []>(
+        "SELECT c.key,c.json FROM extension_record c JOIN execution e ON e.id=json_extract(c.json,'$.source.producerExecutionId') WHERE c.content_type='builtin.files.collection' ORDER BY e.completed_cursor DESC LIMIT 1",
+      )
+      .get()!;
+    const before = outputIndexRows(db);
+    const metadata = writer.metadata();
+    const run = writer.run.bind(writer);
+    writer.run = (sql, ...args) => {
+      if (
+        sql.includes('INSERT INTO extension_record') &&
+        args.some((v) => typeof v === 'string' && v.startsWith('output-index/delivery/'))
+      )
+        throw new Error('fixture_index_write_failed');
+      return run(sql, ...args);
+    };
+    expect(() =>
+      writer.tx(() => {
+        writer.run(
+          "UPDATE extension_record SET json=json_set(json,'$.state','failed') WHERE key=?",
+          source.key,
+        );
+        writer.event('s', `builtin.files/${source.key}`, 'extension.record_updated');
+      }),
+    ).toThrow('fixture_index_write_failed');
+    writer.run = run;
+    expect(
+      db
+        .query<{ json: string }, [string]>('SELECT json FROM extension_record WHERE key=?')
+        .get(source.key)!.json,
+    ).toBe(source.json);
+    expect(writer.metadata()).toEqual(metadata);
+    expect(outputIndexRows(db)).toEqual(before);
+    // A failed initialization transaction can lose only derived rows, never source facts.
+    db.run("DELETE FROM extension_record WHERE key LIKE 'output-index/%'");
+    writer.run = (sql, ...args) => {
+      if (args.includes('output-index/state')) throw new Error('fixture_index_head_failed');
+      return run(sql, ...args);
+    };
+    expect(() => writer.outputFileIndex.initialize()).toThrow('fixture_index_head_failed');
+    writer.run = run;
+    expect(outputIndexRows(db)).toEqual([]);
+    expect(
+      db.query("SELECT key FROM extension_record WHERE key LIKE 'delivery/%'").all(),
+    ).toHaveLength(2);
+    writer.outputFileIndex.initialize();
+    // Recreated derived rows start their own private revision. Original bytes and
+    // public source cursor remain unchanged; this is not a new delivery version.
+    const values = (rows: ReturnType<typeof outputIndexRows>) =>
+      rows.map(({ key, json }) => ({ key, json }));
+    expect(values(outputIndexRows(db))).toEqual(values(before));
+    const projections = countProjectionReads(writer);
+    expect((writer.call('queryOutputFiles', [f.base]) as { items: unknown[] }).items).toHaveLength(
+      1,
+    );
+    expect(projections()).toBe(0);
+    writer.releaseStatements();
+  } finally {
+    db?.close();
+    await f.close();
+  }
+}, 20000);
+
+test('historical output bootstrap rechecks a peer source commit inside its writer transaction', async () => {
+  const f = await fixture([
+    'printf first > "$KITE_OUTPUT_DIR/report.txt"',
+    'printf final > "$KITE_OUTPUT_DIR/report.txt"',
+  ]);
+  let db: Database | undefined;
+  let peerDb: Database | undefined;
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+    await f.wait(
+      (p) => p.collections.length === 2 && p.collections.every((c) => c.state === 'ready'),
+    );
+    await f.runtime.close();
+    const path = join(f.profile.dataRoot, 'test/core.db');
+    db = new Database(path);
+    peerDb = new Database(path);
+    const writer = new SqliteOperations(db, false);
+    const peer = new SqliteOperations(peerDb, false);
+    const source = db
+      .query<{ key: string }, []>(
+        "SELECT c.key FROM extension_record c JOIN execution e ON e.id=json_extract(c.json,'$.source.producerExecutionId') WHERE c.content_type='builtin.files.collection' ORDER BY e.completed_cursor DESC LIMIT 1",
+      )
+      .get()!;
+    db.run("DELETE FROM extension_record WHERE key LIKE 'output-index/%'");
+    const rows = writer.rows.bind(writer);
+    let injected = false;
+    writer.rows = (sql, ...args) => {
+      if (!injected && sql.includes('SELECT id FROM session s')) {
+        injected = true;
+        peer.tx(() => {
+          peer.run(
+            "UPDATE extension_record SET json=json_set(json,'$.state','failed') WHERE key=?",
+            source.key,
+          );
+          peer.event('s', `builtin.files/${source.key}`, 'extension.record_updated');
+          peer.outputFileIndex.discard(); // Previous producer without the new hook.
+        });
+      }
+      return rows(sql, ...args);
+    };
+    writer.outputFileIndex.initialize();
+    writer.rows = rows;
+    expect(injected).toBe(true);
+    const projections = countProjectionReads(writer);
+    expect((writer.call('queryOutputFiles', [f.base]) as { items: unknown[] }).items).toHaveLength(
+      2,
+    );
+    expect(projections()).toBe(0);
+    expect(outputIndexRows(db)).toHaveLength(3);
+    writer.releaseStatements();
+    peer.releaseStatements();
+  } finally {
+    peerDb?.close();
+    db?.close();
+    await f.close();
+  }
+}, 20000);
+
+test('a current writer cannot certify a different Run index left stale by an older writer', async () => {
+  const f = await fixture([
+    'printf first > "$KITE_OUTPUT_DIR/report.txt"',
+    'printf final > "$KITE_OUTPUT_DIR/report.txt"',
+  ]);
+  let db: Database | undefined;
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+    const first = await f.wait(
+      (p) => p.collections.length === 2 && p.collections.every((c) => c.state === 'ready'),
+    );
+    await f.run('work-next');
+    await f.runtime.waitForCommand('work-next', { timeoutMs: 10000 });
+    await f.wait(
+      (p) => p.collections.length === 4 && p.collections.every((c) => c.state === 'ready'),
+    );
+    await f.runtime.close();
+    db = new Database(join(f.profile.dataRoot, 'test/core.db'));
+    const writer = new SqliteOperations(db, false);
+    const collections = db
+      .query<{ key: string; runId: string }, []>(
+        "SELECT c.key,json_extract(c.json,'$.source.runId') AS runId FROM extension_record c JOIN execution e ON e.id=json_extract(c.json,'$.source.producerExecutionId') WHERE c.content_type='builtin.files.collection' ORDER BY e.completed_cursor DESC",
+      )
+      .all();
+    const oldRun = collections.find((c) => c.runId === first.items[0]!.ownerRunId)!;
+    const newRun = collections.find((c) => c.runId !== oldRun.runId)!;
+    expect(outputIndexRows(db)).toHaveLength(3);
+    writer.tx(() => {
+      writer.run(
+        "UPDATE extension_record SET json=json_set(json,'$.state','failed') WHERE key=?",
+        oldRun.key,
+      );
+      writer.event('s', `builtin.files/${oldRun.key}`, 'extension.record_updated');
+      writer.outputFileIndex.discard();
+    });
+    writer.tx(() => {
+      writer.run('UPDATE extension_record SET revision=revision+1 WHERE key=?', newRun.key);
+      writer.event('s', `builtin.files/${newRun.key}`, 'extension.record_updated');
+    });
+    const projections = countProjectionReads(writer);
+    const page = writer.call('queryOutputFiles', [f.base]) as Awaited<
+      ReturnType<AgentRuntime['queryOutputFiles']>
+    >;
+    expect(page.items).toHaveLength(3);
+    expect(page.items.filter((item) => item.ownerRunId === oldRun.runId)).toHaveLength(2);
+    expect(page.items.filter((item) => item.ownerRunId === newRun.runId)).toHaveLength(1);
+    for (const runId of [oldRun.runId, newRun.runId]) {
+      const turn = writer.call('queryOutputFiles', [{ ...f.base, runId }]) as typeof page;
+      expect(turn.items).toEqual(page.items.filter((item) => item.ownerRunId === runId));
+    }
+    expect(projections()).toBe(0);
+    expect(outputIndexRows(db)).toHaveLength(4);
+    // Dependencies of the causal selector include Run status, not just new deliveries.
+    writer.tx(() => {
+      writer.run("UPDATE run SET status='running',is_active=1 WHERE id=?", newRun.runId);
+      writer.event('s', newRun.runId, 'run.started');
+    });
+    expect((writer.call('queryOutputFiles', [f.base]) as { items: unknown[] }).items).toHaveLength(
+      4,
+    );
+    writer.tx(() => {
+      writer.run("UPDATE run SET status='completed',is_active=0 WHERE id=?", newRun.runId);
+      writer.event('s', newRun.runId, 'run.finished');
+    });
+    expect((writer.call('queryOutputFiles', [f.base]) as { items: unknown[] }).items).toHaveLength(
+      3,
+    );
+    writer.releaseStatements();
+  } finally {
+    db?.close();
+    await f.close();
+  }
+}, 20000);
+
+test('a real child persists its own recent and turn cards without granting the parent a new scope', async () => {
+  const f = await fixture(
+    [
+      'printf first > "$KITE_OUTPUT_DIR/report.txt"',
+      'printf final > "$KITE_OUTPUT_DIR/report.txt"',
+    ],
+    { child: true },
+  );
+  let db: Database | undefined;
+  try {
+    await f.run();
+    await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+    const carrier = (await f.store.listExecutions('s')).find((e) => e.childSessionId)!;
+    expect(carrier.status).toBe('succeeded');
+    const sessionId = carrier.childSessionId!;
+    for (let i = 0; i < 300; i++) {
+      const executions = await f.store.listExecutions(sessionId);
+      if (
+        executions.filter(
+          (e) => e.definitionId === 'builtin.files/collect' && e.status === 'succeeded',
+        ).length === 2
+      )
+        break;
+      await Bun.sleep(10);
+    }
+    await f.runtime.close();
+    db = new Database(join(f.profile.dataRoot, 'test/core.db'), { readonly: true });
+    const operations = new SqliteOperations(db, true);
+    const projections = countProjectionReads(operations);
+    const scope = { ...f.base, sessionId };
+    const page = operations.call('queryOutputFiles', [scope]) as Awaited<
+      ReturnType<AgentRuntime['queryOutputFiles']>
+    >;
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]!.sessionId).toBe(sessionId);
+    expect(outputIndexRows(db)).toHaveLength(2);
+    expect(
+      (
+        operations.call('queryOutputFiles', [
+          { ...scope, runId: page.items[0]!.ownerRunId },
+        ]) as typeof page
+      ).items,
+    ).toEqual(page.items);
+    expect((operations.call('queryOutputFiles', [f.base]) as typeof page).items).toEqual([]);
+    expect(() =>
+      operations.call('resolveOutputFile', [{ ...f.base, target: page.items[0]! }]),
+    ).toThrow('output_target_invalid');
+    expect(() =>
+      operations.call('queryOutputFiles', [{ ...scope, subjectId: 'stranger' }]),
+    ).toThrow('output_scope_denied');
+    expect(projections()).toBe(0);
+    expect(f.starts).toBe(2);
+    expect(f.model.requests).toHaveLength(3);
+    expect(f.parentModel.requests).toHaveLength(2);
+    operations.releaseStatements();
+  } finally {
+    db?.close();
+    await f.close();
+  }
+}, 20000);

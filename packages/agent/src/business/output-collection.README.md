@@ -10,7 +10,7 @@
 
 历史 Files 会话输出目录已登记的交付也使用原成功工具的 planned／completed cursor 判断串行后继；须匹配原 Store／Session／Run、saved output-operation 与快照引用，普通工作区写入不参与。Files 与 Shell 两种入口之间，除完整相对交付路径相同及可证串行外，还须权威快照 hash 相同才折叠；跨入口同名不同内容不自动推断为修订。原 Shell 串行同路径修订规则不变。
 
-这是可重算的列表投影，不删除 delivery 或 Artifact。已有精确 `OutputFileTarget` 继续解析原字节，不暗中重定向到另一个版本；重新读取历史列表取得当前投影。客户端须按同一 revision 原子刷新已加载分页，不能把新的去重结果追加到旧列表而复活旧卡。
+列表可见集合现由 Store 在原 delivery／collection 变化及 Run 终态的同一写事务内持久维护，使用原 extension_record 的私有 output-index 逐项记录；不在每次打开会话时重新计算串行替代关系，不删除 delivery 或 Artifact。已有精确 `OutputFileTarget` 继续解析原字节，不暗中重定向到另一个版本；重新读取历史列表取得当前投影。客户端须按同一 revision 原子刷新已加载分页，不能把新的去重结果追加到旧列表而复活旧卡。
 
 ## 生命周期
 
@@ -36,6 +36,10 @@
 
 [SQLite owner](../storage/sqlite/output-collection.ts)只使用原 extension_record，按 `collection/<seq20>/<producer>` 与 `delivery/<seq20>/<producer>/<fileId>` 键范围查询。`OutputFileTarget` 持久保留 locator；resolve 为准确点查，不靠文件名、后缀扫描或内存映射授权。公开 summary 不含路径、hash或ArtifactReference，读取事务 revision 为原 lastChangeCursor。
 
+可见集合的 output-index 只保存原 delivery locator，不复制文件正文、不改变 OutputFileTarget、公开分页／revision 或工具版本。delivery、collection 和 Run 状态事实的事务提交前按受影响原 Run 更新索引；collection 晚于 Run 结束、部分交付及明确重试仍更新原轮，不把“轮次结束”当成永久冻结。原文件名、媒体类型、大小及 scope 继续从准确 delivery 读取，权限门禁在索引读取之前执行。派生索引不产生新的业务事件，原事件与索引同时可见。
+
+读写 Store 启动仅从已保存元数据补建缺失或过时索引，不取得 Session 执行 owner，也不运行 collector、模型或 Shell。每个 Session 的索引与完成标记在同一事务提交；补建中断不留下半成品有效标记，后继写实例可继续。旧二进制写入的原 source event 会使水位不匹配，读取退回原只读投影而不使用陈旧结果；下一读写启动按当前事实修复。当前 writer 只有在原索引水位等于本事务前 source 水位时才增量更新，否则重建整个 Session，避免旧 writer 改 Run A 后新 writer 只改 Run B 而认证陈旧 A。未补建的 readonly 历史同样可读，但不在 GET 内写入或恢复。正常已建索引读取只核事实水位并分页读取持久集合；环境参考区的最近列表与单轮附件共用同一集合，child 仍在自己的原 Session scope 读取；早期未登记 delivery 的 Files legacy 路径仍沿原只读查询。索引记录在 Fork 中 omit，由目标已重建的 delivery 重新建立；Profile 恢复按新 Store 身份重建，删除／GC 沿原 Session 记录生命周期。
+
 最近交付按来源轮次倒序，单轮按原 command seq限定范围。旧文本操作在成功 Tool终态投影为 delivery；旧数据按准确 operation核成功状态、snapshot及artifactRefs，最近旧 heads使用独立 `legacy/` keyset继续，单页最多50项。collectionBeforeKey/nextCollectionCursor为可见收集状态提供独立范围续页，空记录在SQL限额前排除。历史旧时间未知时 publishedAt为空，不编造生成时间。旧 `files.outputs` 工具保持原合同；context capture不再列出整个会话文件路径。
 
 Fork只 rebuild已交付记录，保原 readonlySources，省略allocation/collection。Shell的session ref仅在可验证原delivery、producer、allocation一致时准入既有只读Fork证明；不是任意session ref读取豁免。继承文件返回原ref，调用方在验证target后按原reference.sessionId读取。
@@ -51,6 +55,10 @@ ready后立即清理原身份目录；可重试 I/O 失败保留7天并显示ret
 旧 allocation 不自动迁移或从当前路径补造缺失身份：只有原持久 device/inode 与完整 native 身份相同才可收集；Windows 旧窄身份不匹配时继续 `output_root_changed`，保留原失败事实与暂存保留规则。POSIX 旧身份若与 native 相同则仍可读取。此修复复用现有字段，不改变公共 LaunchIdentity、记录格式或协议版本；GC与成功清理仍只使用 producer 的原身份。
 
 ## 验证
+
+2026-11-16，macOS arm64／Bun 1.4.4，`test/isolated/execution/output-collection.test.ts` 整文件30项／328断言通过。新增持久读模型回归核首次列表读取前已存可见集合、环境 recent／turn 两种查询冷读零因果重投影、真实 same-Loop child 独立 scope、原主体与 locator 拒绝、源事实和索引原子回滚、补建中断／并发 source commit、旧新 writer 跨 Run 交错、Run 状态依赖与私有格式失效修复。真实 Bash subprocess、SQLite／Files native／Artifact 夹具保留原模型与 Shell 调用次数；不代替完整 Native UI 的开关会话、参考区稳定性验收。Agent typecheck通过。只读旧库或旧 writer 已写但未修复时仍明确退回原元数据投影，不把未完成补建声称为持久索引命中。
+
+历史首次补建成本随既有 source metadata 与 delivery 数量增长，每个 Session 原子落盘并以50个 Session 分页；每次读写 Store 启动仍核历史 source frontier，正常 GET 仍核当前权限、事实水位及分页，不承诺零数据库读取或固定时延。这里不扫描 Workspace、不启动 collector，也不重新调用模型或 Shell。
 
 `test/isolated/execution/output-collection-identity.test.ts` 以真实 Files native 核完整身份持久化/重开、volume高32位与FileID高64位篡改拒绝、替换目录与directory link拒绝、旧lstat身份不回填，以及真实字节流收集和原producer清理。2026-11-11 Windows x64／Bun1.4.4，该文件7项／21断言及既有preparation文件3项／9断言通过，Agent typecheck通过。此定向夹具的Runtime/持久化port为受控替身，JSON往返不代替SQLite或完整Service验收；本轮未执行POSIX回归，也不取得受管Shell或办公UI资格。原Windows Service失败现场不因新allocation修复而被改写。
 

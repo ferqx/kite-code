@@ -5127,6 +5127,31 @@ test('parent output IPC preserves child identity, refreshes late files and rejec
     await caller.invoke({ method: 'outputs.info', generation, target });
     finish(undefined);
     await expect(saving).rejects.toThrow('output_scope_unavailable');
+    const displayRevision = (sessionId: string) =>
+      caller.state().outputFilesDisplay!.roots.find((root) => root.sessionId === sessionId)!
+        .revision;
+    const beforeBackground = displayRevision('root');
+    await caller.invoke({ method: 'select', generation, sessionId: 'other-root' });
+    const otherRevision = displayRevision('other-root');
+    await observe.onChange?.({
+      ...sessionChange('child', '3'),
+      type: 'extension.record_updated',
+      objectId: 'builtin.files/delivery/late',
+    });
+    expect(displayRevision('root')).toBeGreaterThan(beforeBackground);
+    expect(displayRevision('other-root')).toBe(otherRevision);
+    const beforeDeleted = displayRevision('root');
+    await observe.onChange?.({ ...sessionChange('child', '4'), type: 'session.delete_requested' });
+    expect(displayRevision('root')).toBeGreaterThan(beforeDeleted);
+    const beforeRevoked = displayRevision('root');
+    await observe.onChange?.({ ...sessionChange('root', '5'), type: 'permission.grants.cleared' });
+    expect(displayRevision('root')).toBeGreaterThan(beforeRevoked);
+    expect(caller.state().outputFilesDisplay).toMatchObject({
+      storeId: 'store',
+      subjectId: 'local-user',
+    });
+    await observe.onReset?.({ reason: 'replay_expired' } as never);
+    expect(caller.state().outputFilesDisplay).toBeUndefined();
   } finally {
     await caller.close();
   }

@@ -1835,6 +1835,10 @@ function NativeDesktopContent({
     storeId: selection?.storeId,
     sessionId: selection?.session.id,
     revision: state?.outputFilesRevision ?? state?.historyEpoch ?? 0,
+    display: state?.outputFilesDisplay,
+    available:
+      !state?.backgroundUnavailable &&
+      !(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
     turnLabel: (runId) => `来源轮次 ${runId.slice(0, 8)}`,
     onRequestLocalEdit: async (file, request) => {
       if (

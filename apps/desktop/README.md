@@ -22,7 +22,11 @@ Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)�
 
 [Main 产物来源](electron/output-sources.ts)从原授权后台目录核实 carrier、父 Run、child Session／Run 与根关系，将子 Agent 明确导出的 Shell 文件投影到原父轮末尾和会话“参考项”；[子详情](src/native-child-detail.tsx)显示相同历史产物。仍以原 child `OutputFileTarget` 查询、预览和另存，不复制为父产物，不扫描 Workspace，不根据结果邮件接收时间、同名或最新 child 工作猜归属。相同 child 的后继工作分别关联原父轮；历史多层来源仅在完整原 Run 链可证时投影。单来源查询与分页保留原 Service 合同，既有串行修订规则不扩展为跨 Session 去重。
 
-[Native 调用者](electron/native-caller.ts)和 [IPC](electron/native-ipc.ts)使用准确父选中代次、Store、主体、原 child 来源及不可变 target 的读取准入。来源目录只读且有界，同 scope 倒序响应不能覆盖新目录；目录或单来源文件页失败保留原列表并按有界退避重读，不自动重试收集。连接／删除／选择变化撤销旧准入，预览与保存捕获原选择，往返同一会话也不接纳旧操作。child 产物事件刷新原父列表，首次 child Run 尚不在目录时也重新核来源。重试整理必须使用原 child collection 与观察到的 revision，沿 Store 原期限、权限及 unknown 规则，不重跑 Shell。准确 collection 路径通过 IPC，普通路径或伪造来源不取得资格。
+[Native 调用者](electron/native-caller.ts)和 [IPC](electron/native-ipc.ts)使用准确父选中代次、Store、主体、原 child 来源及不可变 target 的读取准入。来源目录只读且有界，同 scope 倒序响应不能覆盖新目录；目录或单来源文件页失败只在当前准入与来源修订仍有效时保留原列表，并按有界退避重读，不自动重试收集。连接／删除／选择变化撤销旧准入，预览与保存捕获原选择，往返同一会话也不接纳旧操作。child 产物事件刷新原父列表，首次 child Run 尚不在目录时也重新核来源。重试整理必须使用原 child collection 与观察到的 revision，沿 Store 原期限、权限及 unknown 规则，不重跑 Shell。准确 collection 路径通过 IPC，普通路径或伪造来源不取得资格。
+
+[产物展示版本](electron/output-display-versions.ts)按主体、Store、连接 epoch 和已核来源维护有界失效范围；[共享读取缓存](src/native-output-read-cache.ts)由[轮次文件卡与参考项](src/native-output-files.tsx)共同消费。相同有效来源修订下，热返回恢复已读列表并共享进行中的同键读取，不重新整理产物。存储层的[持久列表索引](../../packages/agent/src/business/output-collection.README.md#同任务同路径的当前产物)在原写事务内更新，冷开仍重新核实来源准入后读取。后台及 child 变更只更新已核实归属的原父轮；尚无准确来源关系的创建事件先使可能受影响的展示失效，再读取来源，不猜父轮。
+
+这些缓存只保留展示数据，不保留操作授权。主体、Store、连接、权限或来源失效时撤销旧展示；选择 ABA 丢弃旧在途读取，不能让迟到响应接管后来选择。打开、另存和继续修改仍走当前 Main 准入；显式整理重试重新取得准确 child collection 与 revision 的当前准入，不复用展示缓存中的操作资格。相关静态及受控回归入口为[共享缓存测试](test/native-output-read-cache.test.ts)、[来源权限测试](test/native-output-sources.test.ts)和[热返回与撤销 DOM 测试](test/isolated/native-output-cache-dom.test.tsx)；其通过不自动代表真实客户端或跨平台验收。
 
 “继续修改”保留 child 来源引用，加入当前父输入草稿；发送前后重新核来源，明确提交后才通过原 InputFile import／工作副本链交给父轮，不覆盖子快照或自动续作 child。参考项合并仍默认五项，重复名称保留，来源标签使用子名称和原轮次，所有打开操作沿准确 target。
 

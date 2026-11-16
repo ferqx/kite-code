@@ -172,6 +172,7 @@ import {
   registerOutputCollectionAtTerminal,
   registerTextOutputAtTerminal,
 } from './output-collection';
+import { OutputFileIndex } from './output-file-index';
 import { getPendingInputQueue, mutatePendingInputQueue } from './pending-input-queue';
 import { callPermissionGrant, verifyPermissionGrantDispatch } from './permission-grants';
 import { closeReconciledHistory } from './reconciliation-admission';
@@ -247,11 +248,14 @@ export class SqliteOperations {
   readonly readonly: boolean;
   private readonly statements = new Set<Statement>();
   readonly recoveryAudit: RecoveryAudit;
+  readonly outputFileIndex: OutputFileIndex;
   constructor(db: Database, readOnly: boolean) {
     this.db = this.timedDatabase(db);
     this.readonly = readOnly;
     this.recoveryAudit = new RecoveryAudit(this);
+    this.outputFileIndex = new OutputFileIndex(this);
     if (!readOnly && this.recoveryAudit.available) this.tx(() => {});
+    this.outputFileIndex.initialize();
   }
   private sqlDurationMs = 0;
   private commitMs: number | undefined;
@@ -281,6 +285,7 @@ export class SqliteOperations {
     }
   }
   rollback(error: unknown): never {
+    this.outputFileIndex.discard();
     try {
       this.db.run('ROLLBACK');
     } catch (cleanup) {
@@ -424,6 +429,7 @@ export class SqliteOperations {
     this.mayWaitForWriter = false;
     try {
       const value = work();
+      this.outputFileIndex.flush();
       this.recoveryAudit.flush();
       this.db.run('COMMIT');
       return value;
@@ -664,6 +670,7 @@ export class SqliteOperations {
       canonicalJson(envelope),
       recordTrajectoryFact(this, session, object, type, occurredAt, verification),
     );
+    this.outputFileIndex.note(session, object, type);
   }
   metadata() {
     const selected = drizzle(this.db)
