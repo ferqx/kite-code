@@ -5236,13 +5236,14 @@ function NativeDesktopContent({
           />
         ) : null;
       },
-      renderFileChange: (entry, open) =>
+      renderFileChange: (entry, open, openFile) =>
         state ? (
           <NativeOperationDiff
             key={entry.changeId}
             bridge={bridge}
             generation={state.generation}
             entry={entry}
+            openFile={openFile}
             editor={editor}
             open={open}
             cache={operationDiffs.current}

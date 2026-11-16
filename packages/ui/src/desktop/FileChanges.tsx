@@ -105,6 +105,7 @@ export function FileDiff({
   layout,
   onLayoutChange,
   inline = false,
+  openFile,
 }: {
   message: Message;
   path?: string;
@@ -112,6 +113,7 @@ export function FileDiff({
   layout?: 'split' | 'unified';
   onLayoutChange?: (layout: 'split' | 'unified') => void;
   inline?: boolean;
+  openFile?: (path: string) => void;
 }) {
   const source =
     message.toolResult?.stdout || message.toolResult?.stderr || '工具没有返回可读差异。';
@@ -125,6 +127,7 @@ export function FileDiff({
       layout={layout}
       onLayoutChange={onLayoutChange}
       copyText={inline ? source : undefined}
+      openFile={openFile}
     />
   );
 }
@@ -189,6 +192,7 @@ function DiffReader({
   layout: controlledLayout,
   onLayoutChange,
   copyText,
+  openFile,
 }: {
   model: DiffModel;
   path?: string;
@@ -196,6 +200,7 @@ function DiffReader({
   layout?: 'split' | 'unified';
   onLayoutChange?: (layout: 'split' | 'unified') => void;
   copyText?: string;
+  openFile?: (path: string) => void;
 }) {
   const inline = copyText !== undefined;
   const [localLayout, setLayout] = useState<'split' | 'unified'>('split');
@@ -209,9 +214,16 @@ function DiffReader({
   const expanded = folds.model === model ? folds.expanded : new Set<number>();
   const rows = useMemo(() => {
     const result = fileDiffRows(model[layout], expanded);
-    return inline && model.format !== 'plain'
-      ? result.filter((row) => row.kind !== 'meta' || row.text === '\\ No newline at end of file')
-      : result;
+    if (!inline || model.format === 'plain') return result;
+    let seenHunk = false;
+    return result.filter((row) => {
+      if (row.kind !== 'meta') return true;
+      if (row.text === '\\ No newline at end of file') return true;
+      if (!row.text.startsWith('@@ ')) return false;
+      if (seenHunk) return true;
+      seenHunk = true;
+      return false;
+    });
   }, [model, layout, expanded, inline]);
   const viewport = useRef<HTMLDivElement>(null);
   const bodyId = useId();
@@ -267,13 +279,19 @@ function DiffReader({
       data-inline={inline || undefined}
     >
       <div className="file-diff-toolbar">
-        <span className="file-diff-path" title={path ? clipDiffLine(path) : undefined}>
-          {path
-            ? clipDiffLine(inline ? diffFileName(path) : path)
-            : scope === 'workspace'
-              ? '文件差异'
-              : '本次操作差异'}
-        </span>
+        {inline && path && openFile ? (
+          <Button className="file-diff-path file-link" title={path} onClick={() => openFile(path)}>
+            {clipDiffLine(diffFileName(path))}
+          </Button>
+        ) : (
+          <span className="file-diff-path" title={path ? clipDiffLine(path) : undefined}>
+            {path
+              ? clipDiffLine(inline ? diffFileName(path) : path)
+              : scope === 'workspace'
+                ? '文件差异'
+                : '本次操作差异'}
+          </span>
+        )}
         {model.format !== 'plain' && (
           <FileDiffCounts added={model.added} removed={model.removed} preview={!inline} />
         )}
@@ -377,6 +395,14 @@ function DiffReader({
                 >
                   <span aria-hidden="true">⌄</span> {row.count} 行未变更 · 展开保留的上下文
                 </button>
+              );
+            if (inline && row.kind === 'meta' && row.text.startsWith('@@ '))
+              return <div key={index} className="file-diff-hunk-separator" aria-hidden="true" />;
+            if (inline && row.kind === 'omitted')
+              return (
+                <div key={index} className="file-diff-hunk-separator" title={row.text}>
+                  <span className="sr-only">{row.text}</span>
+                </div>
               );
             if (row.kind !== 'context' && row.kind !== 'change')
               return (

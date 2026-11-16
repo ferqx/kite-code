@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ClipboardWriteContext } from '../../src/desktop/clipboard';
 import { NativeScrollbars, ScrollArea } from '../../src/desktop/components/ui/scroll-area';
 import { FileChanges, FileDiff } from '../../src/desktop/FileChanges';
 import type { Message } from '../../src/desktop/types';
@@ -236,6 +237,31 @@ test('tool diff keeps complete lines in a named focusable shared viewport with v
     expect(host.querySelectorAll('[role="region"]')).toHaveLength(1);
     expect(host.querySelectorAll('.diff-output')).toHaveLength(1);
     expect(host.querySelector('.tool-diff-scroll')?.contains(viewport)).toBe(true);
+  });
+});
+
+test('inline raw output stays unnumbered and copies the exact saved text even when preview is bounded', async () => {
+  await withDom(async ({ host, render, click }) => {
+    const original = `snapshot, not a diff\n${'unclassified line\n'.repeat(401)}tail 漢🙂`;
+    const copied: string[] = [];
+    await render(
+      <ClipboardWriteContext.Provider value={async (text) => void copied.push(text)}>
+        <FileDiff message={message('raw', original)} inline />
+      </ClipboardWriteContext.Provider>,
+    );
+    expect(host.querySelector('.file-diff')?.getAttribute('data-format')).toBe('plain');
+    expect(host.querySelector('.file-diff-counts')).toBeNull();
+    expect(host.querySelector('.file-diff-number')).toBeNull();
+    expect(host.querySelector('.diff-added, .diff-removed')).toBeNull();
+    expect(host.querySelector('.file-diff-notice')?.textContent).toContain('400 行');
+    expect(host.querySelector('.diff-output')!.children.length).toBeLessThanOrEqual(400);
+    const viewport = host.querySelector<HTMLElement>('[aria-label="文件差异"]')!;
+    viewport.focus();
+    expect(host.ownerDocument.activeElement).toBe(viewport);
+    const copy = host.querySelector<HTMLButtonElement>('[aria-label="复制差异"]')!;
+    expect(copy).not.toBeNull();
+    await click(copy);
+    expect(copied).toEqual([original]);
   });
 });
 

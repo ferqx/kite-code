@@ -7,7 +7,7 @@ const LINE_TOKEN_LIMIT = 48;
 
 export type DiffToken = {
   text: string;
-  kind?: 'comment' | 'string' | 'keyword' | 'number' | 'type';
+  kind?: 'comment' | 'string' | 'keyword' | 'number' | 'type' | 'identifier';
 };
 export type DiffLine = { text: string; number?: number; tokens: readonly DiffToken[] };
 export type DiffRow =
@@ -98,6 +98,7 @@ function tokenize(text: string, enabled: boolean, budget: { remaining: number })
       const word = text.slice(start, at);
       if (KEYWORDS.has(word)) kind = 'keyword';
       else if (/^[A-Z][A-Za-z0-9_]*$/.test(word)) kind = 'type';
+      else if (/^\s*(?:\(|=(?!=|>))/.test(text.slice(at))) kind = 'identifier';
     } else if (/\d/.test(char) && (at === 0 || !/[\w$]/.test(text[at - 1]!))) {
       at++;
       while (at < text.length && /[\w.]/.test(text[at]!)) at++;

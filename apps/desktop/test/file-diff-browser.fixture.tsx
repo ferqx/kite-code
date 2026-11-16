@@ -180,7 +180,7 @@ function App() {
                 events.push(`editor:${path}`);
               }}
               renderChildren={() => null}
-              renderFileChange={(_message, open) => (
+              renderFileChange={(_message, open, openFile) => (
                 <NativeOperationDiff
                   key={`${selection}-${operationRevision}`}
                   bridge={bridge}
@@ -188,6 +188,7 @@ function App() {
                   entry={{ ...entry, changeId: `operation-${selection}-${operationRevision}` }}
                   editor="vscode"
                   open={open}
+                  openFile={openFile}
                   cache={operationDiffs.current}
                 />
               )}

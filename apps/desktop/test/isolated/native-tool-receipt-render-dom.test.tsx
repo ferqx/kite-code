@@ -39,6 +39,10 @@ const original = JSON.stringify({
 });
 type Mode =
   | 'write-diff'
+  | 'write-error-diff'
+  | 'write-unavailable-diff'
+  | 'write-readonly-error-diff'
+  | 'write-readonly-unavailable-diff'
   | 'edit-diff'
   | 'group-diff'
   | 'failed-diff'
@@ -136,6 +140,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
   let selected = 'root',
     revision = 1,
     published = false;
+  let fileOpenable = !mode.includes('readonly');
   let shellOutputUnavailable = false;
   let shellFailure: { output: string; reason: string } | undefined;
   const listeners = new Set<(event: NativeEvent) => void>();
@@ -393,8 +398,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
                         messageId,
                         changeId: `change-${messageId}`,
                         path: 'same.txt',
-                        preview: 'available',
-                        openable: true,
+                        preview: mode.includes('unavailable') ? 'unavailable' : 'available',
+                        openable: fileOpenable,
                         operation: groupedDiff || mode === 'edit-diff' ? 'edit' : 'write',
                         snapshot: true,
                         diff: true,
@@ -550,8 +555,12 @@ function fixture(mode: Mode, testDiagnostics = false) {
           };
         case 'fileChanges.detail':
           if (isDiff)
-            return new Promise<NativeResult>((resolve) =>
-              pendingBodies.push(() =>
+            return new Promise<NativeResult>((resolve, reject) =>
+              pendingBodies.push(() => {
+                if (mode.includes('error') && request.view === 'diff') {
+                  reject(Error('file_change_read_failed'));
+                  return;
+                }
                 resolve({
                   kind: 'fileChanges.detail',
                   changeId: request.changeId,
@@ -561,8 +570,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
                       : `SNAPSHOT_${request.changeId}`,
                   snapshot: request.view === 'snapshot',
                   nextOffset: null,
-                }),
-              ),
+                });
+              }),
             );
           return {
             kind: 'fileChanges.detail',
@@ -591,6 +600,9 @@ function fixture(mode: Mode, testDiagnostics = false) {
     until,
     requests,
     expectedShellOutput,
+    setFileOpenable: (openable: boolean) => {
+      fileOpenable = openable;
+    },
     setShellOutputUnavailable: (unavailable: boolean) => {
       shellOutputUnavailable = unavailable;
     },
@@ -645,7 +657,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
     toggle: () =>
       act(async () => {
         const button = host.querySelector<HTMLButtonElement>(
-          'button.tool-activity-summary, .tool-diff-toggle',
+          'button.tool-activity-summary, button.tool-file-disclosure',
         );
         expect(!!button).toBe(true);
         button!.click();
@@ -1060,13 +1072,13 @@ for (const mode of ['write-diff', 'edit-diff'] as const) {
         await act(async () => elapsed!.click());
         expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
       }
-      expect(f.host.textContent).toContain('same.txt');
-      if (mode === 'edit-diff') {
-        expect(f.host.querySelector('.tool-edit-heading .tool-label')?.textContent).toBe('已编辑');
-        expect(f.host.querySelector('.tool-edit-heading .file-diff-counts')?.textContent).toBe(
-          '+1 -1',
-        );
-      }
+      expect(f.host.querySelector('.tool-edit-heading .tool-label')?.textContent).toBe(
+        '已编辑的文件',
+      );
+      expect(f.host.querySelector('.tool-file-disclosure')?.getAttribute('aria-expanded')).toBe(
+        'false',
+      );
+      expect(f.host.querySelector('.file-diff')).toBeNull();
       expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
       expect(bodies()).toHaveLength(0);
       await f.toggle();
@@ -1076,16 +1088,23 @@ for (const mode of ['write-diff', 'edit-diff'] as const) {
       expect(f.host.textContent).not.toContain('new-change-receipt');
       await f.flushBodies();
       expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
-      expect(!!f.host.querySelector('.file-diff[data-inline]')).toBe(mode === 'edit-diff');
+      const card = f.host.querySelector('.file-diff[data-inline]');
+      expect(card).not.toBeNull();
+      expect(card?.querySelector('.file-diff-path')?.textContent).toBe('same.txt');
+      expect(card?.querySelector('.file-diff-counts')?.textContent).toContain('+1');
+      expect(card?.querySelector('.file-diff-counts')?.textContent).toContain('-1');
+      expect(card?.querySelector('.diff-removed .file-diff-number')?.textContent).toBe('1');
+      expect(card?.querySelector('.diff-added .file-diff-number')?.textContent).toBe('1');
+      expect(card?.querySelector('[aria-label="复制差异"]')).not.toBeNull();
       expect(f.host.textContent).not.toContain('SNAPSHOT_');
       expect(f.host.textContent).not.toContain('查看本次交付的文件');
       for (let round = 0; round < 3; round++) {
         await f.toggle();
-        expect(f.host.querySelector('.tool-diff-toggle')?.getAttribute('aria-expanded')).toBe(
+        expect(f.host.querySelector('.tool-file-disclosure')?.getAttribute('aria-expanded')).toBe(
           'false',
         );
         await f.toggle();
-        expect(f.host.querySelector('.tool-diff-toggle')?.getAttribute('aria-expanded')).toBe(
+        expect(f.host.querySelector('.tool-file-disclosure')?.getAttribute('aria-expanded')).toBe(
           'true',
         );
         await f.flushBodies();
@@ -1100,6 +1119,79 @@ for (const mode of ['write-diff', 'edit-diff'] as const) {
     }
   });
 }
+
+for (const unavailable of [false, true]) {
+  for (const openable of [false, true]) {
+    const mode =
+      `write-${openable ? '' : 'readonly-'}${unavailable ? 'unavailable' : 'error'}-diff` as const;
+    test(`Native ${mode} keeps the path scoped while the saved diff is unavailable`, async () => {
+      const f = fixture(mode);
+      try {
+        await f.render();
+        await f.flush();
+        await f.toggle();
+        if (!unavailable) await f.flushBodies();
+        const card = f.host.querySelector('.file-diff[data-inline]')!;
+        expect(card).not.toBeNull();
+        expect(card.querySelector('.file-diff-path')?.textContent).toBe('same.txt');
+        expect(card.querySelector('[aria-label="复制差异"]')).toBeNull();
+        expect(f.host.textContent).toContain(
+          unavailable ? '历史记录未保存可读差异' : '文件操作的原记录目前不可读',
+        );
+        const path = card.querySelector<HTMLButtonElement>('button.file-link');
+        expect(!!path).toBe(openable);
+        if (path) {
+          await act(async () => path.click());
+          expect(f.requests.filter((request) => request.method === 'fileChanges.open')).toEqual([
+            {
+              method: 'fileChanges.open',
+              generation: 1,
+              changeId: 'change-receipt',
+              editor: 'vscode',
+            },
+          ]);
+        } else {
+          expect(f.requests.some((request) => request.method === 'fileChanges.open')).toBe(false);
+        }
+        expect(
+          f.requests.filter((request) => request.method === 'fileChanges.detail'),
+        ).toHaveLength(unavailable ? 0 : 1);
+      } finally {
+        await f.close();
+      }
+    });
+  }
+}
+
+test('Native rechecks file opening eligibility after returning to the session', async () => {
+  const f = fixture('write-error-diff');
+  try {
+    await f.render();
+    await f.flush();
+    await f.toggle();
+    await f.flushBodies();
+    expect(f.host.querySelector('.file-diff button.file-link')).not.toBeNull();
+    await f.selectOther();
+    f.setFileOpenable(false);
+    const original = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Original',
+    )!;
+    await act(async () => original.click());
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await f.flush();
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    }
+    if (!f.host.querySelector('.file-diff')) {
+      await f.toggle();
+      await f.flushBodies();
+    }
+    expect(f.host.querySelector('.file-diff button.file-link')).toBeNull();
+    expect(f.host.querySelector('.file-diff-path')?.textContent).toBe('same.txt');
+    expect(f.requests.some((request) => request.method === 'fileChanges.open')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
 
 test('actual NativeDesktop grouped operations on the same path read distinct receipt diffs only when each item opens', async () => {
   const f = fixture('group-diff');
@@ -1117,7 +1209,9 @@ test('actual NativeDesktop grouped operations on the same path read distinct rec
     await act(async () => trace.click());
     expect(bodies()).toHaveLength(0);
     const items = [
-      ...f.host.querySelectorAll<HTMLButtonElement>('.conversation-trace-steps .tool-diff-toggle'),
+      ...f.host.querySelectorAll<HTMLButtonElement>(
+        '.conversation-trace-steps .tool-file-disclosure',
+      ),
     ];
     expect(items).toHaveLength(2);
     await act(async () => items[0]!.click());

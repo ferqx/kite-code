@@ -147,12 +147,8 @@ try {
   await checkpoint('initial-lazy');
   assert.deepEqual((await page.evaluate(() => window.fileDiffFixture.snapshot())).events, []);
   const edited = operation.locator('.tool-edit-heading');
-  assert.equal(await edited.locator('.tool-label').textContent(), '已编辑');
-  assert.match((await edited.locator('.file-diff-counts').textContent()) ?? '', /^\+396\s*-1$/);
-  await edited.getByRole('button', { name: 'example.ts', exact: true }).click();
-  assert.deepEqual((await page.evaluate(() => window.fileDiffFixture.snapshot())).events, [
-    'editor:src/example.ts',
-  ]);
+  assert.equal(await edited.locator('.tool-label').textContent(), '已编辑的文件');
+  assert.equal(await edited.locator('.file-diff-counts').count(), 0);
   assert.equal(await operation.locator('.tool-diff-toggle').getAttribute('aria-expanded'), 'false');
 
   await operation.locator('.tool-diff-toggle').click();
@@ -164,6 +160,7 @@ try {
     window.fileDiffFixture.snapshot().events.includes('fileChanges.close'),
   );
   await release('fileChanges.detail');
+  await operation.locator('.file-diff').waitFor({ state: 'detached' });
   assert.equal(await operation.locator('.file-diff').count(), 0);
   await operation.locator('.tool-diff-toggle').click();
   await pending('fileChanges.detail');
@@ -190,6 +187,12 @@ try {
   );
   assert.equal(await card.locator('.file-diff-path').textContent(), 'example.ts');
   assert.match((await card.locator('.file-diff-counts').textContent()) ?? '', /^\+396\s*-1$/);
+  await card.getByRole('button', { name: 'example.ts', exact: true }).click();
+  assert.ok(
+    (await page.evaluate(() => window.fileDiffFixture.snapshot())).events.includes(
+      'editor:src/example.ts',
+    ),
+  );
   assert.equal(await card.getByRole('group', { name: '差异布局' }).count(), 0);
   assert.equal(await card.locator('.diff-removed .file-diff-number').textContent(), '1263');
   assert.equal(await card.locator('.diff-added .file-diff-number').first().textContent(), '1263');

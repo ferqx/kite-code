@@ -280,12 +280,13 @@ export function NativeChildDetail({
       tools: facts?.presentation?.tools ?? [],
       targets: facts?.presentation?.fileTargets,
       renderFileChange: bridge
-        ? (entry, open) => (
+        ? (entry, open, openFile) => (
             <NativeOperationDiff
               key={entry.changeId}
               bridge={bridge}
               generation={generation}
               entry={entry}
+              openFile={openFile}
               editor="vscode"
               open={open}
               cache={operationDiffs.current}

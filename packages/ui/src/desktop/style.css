@@ -4356,6 +4356,23 @@ body {
   color: inherit;
   background: transparent;
 }
+.kite-client .tool-file-disclosure.tool-diff-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: auto;
+  min-height: 24px;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  opacity: 1;
+}
+.kite-client .tool-file-disclosure .tool-file-chevron {
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
+  color: var(--muted-foreground);
+}
 .kite-client .tool-activity-children:empty {
   display: none;
 }

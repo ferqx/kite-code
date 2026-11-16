@@ -44,7 +44,7 @@ import {
 } from './components/ui/trace';
 import { DeferredProcessContent } from './DeferredProcessContent';
 import { useDesktopDiagnostics } from './diagnostics';
-import { diffFileName, FileDiff, FileDiffCounts } from './FileChanges';
+import { FileDiff } from './FileChanges';
 import { cn } from './lib/utils';
 import { statusLabel } from './status';
 import type { Message } from './types';
@@ -1119,7 +1119,11 @@ export function ToolActivity({
   /** Verified image receipts use the host's existing scoped image reader. */
   renderImages?: (message: Message) => ReactNode;
   /** A confirmed receipt can disclose a scoped, lazy diff without preloading its body. */
-  renderFileChange?: (message: Message, open: boolean) => ReactNode;
+  renderFileChange?: (
+    message: Message,
+    open: boolean,
+    openFile?: (path: string) => void,
+  ) => ReactNode;
   suppressGenericFailure?: boolean;
   childProcess?: boolean;
   activityId?: string;
@@ -1225,8 +1229,14 @@ export function ToolActivity({
           ? 'pending'
           : undefined;
   const hasDiff =
-    edit && message.changeConfirmed && !itemIssue && (!!renderFileChange || !!message.toolResult);
-  const inlineEdit = hasDiff && message.toolName === 'edit_file';
+    edit &&
+    message.status === 'completed' &&
+    message.dispatchCommitted !== false &&
+    message.changeConfirmed &&
+    !unverified &&
+    !itemIssue &&
+    (!!renderFileChange || !!message.toolResult);
+  const inlineEdit = hasDiff;
   const canExpand =
     !agent &&
     !summaryOnly &&
@@ -1274,7 +1284,6 @@ export function ToolActivity({
             message.shell?.commandPreview ??
             message.shell?.shellId)
           : toolTarget(message);
-  const displayedFile = target && inlineEdit ? diffFileName(target) : target;
   const status = grouped
     ? undefined
     : ask?.cancelled
@@ -1405,6 +1414,30 @@ export function ToolActivity({
           </div>
         ) : read && !itemIssue ? (
           <ToolRow message={message} openFile={messageOpenFile} />
+        ) : edit && !itemIssue && inlineEdit ? (
+          <TraceLine
+            asChild
+            status={traceStatus(message)}
+            className="tool-activity-summary tool-edit-heading"
+          >
+            <div>
+              <Button
+                variant="ghost"
+                className="tool-file-disclosure tool-diff-toggle"
+                aria-expanded={open}
+                aria-label={`${open ? '收起' : '展开'}已编辑的文件${target ? `：${target}` : ''}`}
+                title={target}
+                onClick={() => onToggle(!open)}
+              >
+                <TraceIcon className="tool-activity-marker-icon">
+                  <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
+                </TraceIcon>
+                <span className="tool-label">已编辑的文件</span>
+                <HugeiconsIcon className="tool-file-chevron" icon={ArrowDown01Icon} />
+              </Button>
+              {approval && <ToolApproval message={message} label={approval} />}
+            </div>
+          </TraceLine>
         ) : edit && !itemIssue ? (
           <TraceLine
             asChild
@@ -1421,32 +1454,17 @@ export function ToolActivity({
                   (messageOpenFile ? (
                     <Button
                       className="file-link"
-                      data-short-file={inlineEdit || undefined}
                       title={target}
                       onClick={() => messageOpenFile(target)}
                     >
-                      {displayedFile}
+                      {target}
                     </Button>
                   ) : (
                     <span className="tool-step-target" title={target}>
-                      {displayedFile}
+                      {target}
                     </span>
                   ))}
-                {inlineEdit && message.fileDiffCounts && (
-                  <FileDiffCounts {...message.fileDiffCounts} />
-                )}
               </TraceTitle>
-              {hasDiff && (
-                <Button
-                  variant="ghost"
-                  className="tool-diff-toggle"
-                  aria-label={`${open ? '收起' : '展开'} ${target ?? '文件'} 的差异`}
-                  aria-expanded={open}
-                  onClick={() => onToggle(!open)}
-                >
-                  <HugeiconsIcon icon={ArrowDown01Icon} />
-                </Button>
-              )}
               {approval && <ToolApproval message={message} label={approval} />}
             </div>
           </TraceLine>
@@ -1546,9 +1564,14 @@ export function ToolActivity({
                   )}
                   {hasDiff &&
                     (renderFileChange ? (
-                      renderFileChange(message, open && parentDisclosureOpen)
+                      renderFileChange(message, open && parentDisclosureOpen, messageOpenFile)
                     ) : (
-                      <FileDiff message={message} inline={inlineEdit} />
+                      <FileDiff
+                        message={message}
+                        path={target}
+                        inline={inlineEdit}
+                        openFile={messageOpenFile}
+                      />
                     ))}
                   {ask && (
                     <div className="tool-ask-answers">

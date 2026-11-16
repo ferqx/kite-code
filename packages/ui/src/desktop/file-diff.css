@@ -272,6 +272,16 @@
   border-radius: var(--radius);
   --file-diff-card-header: color-mix(in oklch, var(--foreground) 5%, var(--background));
 }
+[data-theme="dark"] .kite-client .file-diff[data-inline],
+.kite-client.dark .file-diff[data-inline],
+.dark .kite-client .file-diff[data-inline],
+.kite-client[data-theme="dark"] .file-diff[data-inline] {
+  --file-diff-add: #2fca74;
+  --file-diff-remove: #ff3e3e;
+  --file-diff-keyword: #ff6b6b;
+  --file-diff-string: #88df72;
+  --file-diff-type: #bc70ff;
+}
 .kite-client .file-diff[data-inline] .file-diff-toolbar {
   flex-wrap: nowrap;
   gap: 8px;
@@ -279,10 +289,40 @@
   background: var(--file-diff-card-header);
   color: var(--muted-foreground);
   font-size: var(--conversation-text-size);
+  font-weight: 400;
+}
+[data-theme="dark"] .kite-client .file-diff[data-inline] .diff-output,
+.kite-client.dark .file-diff[data-inline] .diff-output,
+.dark .kite-client .file-diff[data-inline] .diff-output,
+.kite-client[data-theme="dark"] .file-diff[data-inline] .diff-output,
+[data-theme="dark"] .kite-client .file-diff[data-inline] :is(.diff-added, .diff-removed),
+.kite-client.dark .file-diff[data-inline] :is(.diff-added, .diff-removed),
+.dark .kite-client .file-diff[data-inline] :is(.diff-added, .diff-removed),
+.kite-client[data-theme="dark"] .file-diff[data-inline] :is(.diff-added, .diff-removed) {
+  color: #999;
 }
 .kite-client .file-diff[data-inline] .file-diff-path {
   flex: 0 1 auto;
   min-width: 0;
+}
+.kite-client .file-diff[data-inline] button.file-diff-path {
+  display: block;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+.kite-client .file-diff[data-inline] .file-diff-hunk-separator {
+  height: 4px;
+  background: var(--border);
+}
+.kite-client .file-diff[data-inline] .file-diff-omitted {
+  background: color-mix(in oklch, var(--foreground) 10%, var(--background));
+  font-style: normal;
 }
 .kite-client .file-diff[data-inline] [data-slot="code-block-copy-button"] {
   flex: none;
@@ -290,6 +330,16 @@
 }
 .kite-client .file-diff[data-inline] .diff-output {
   font-size: 13px;
+  font-weight: 400;
+}
+.kite-client .file-diff[data-inline] .file-diff-token-identifier {
+  color: #a94d00;
+}
+[data-theme="dark"] .kite-client .file-diff[data-inline] .file-diff-token-identifier,
+.kite-client.dark .file-diff[data-inline] .file-diff-token-identifier,
+.dark .kite-client .file-diff[data-inline] .file-diff-token-identifier,
+.kite-client[data-theme="dark"] .file-diff[data-inline] .file-diff-token-identifier {
+  color: #ff9632;
 }
 .kite-client .file-diff[data-inline] .file-diff-number {
   flex: 0 0 calc(var(--file-diff-gutter, 6) * 1ch);
@@ -305,6 +355,18 @@
   }
   .kite-client .file-diff[data-inline] .diff-removed {
     background: color-mix(in oklch, var(--file-diff-remove) 20%, var(--background));
+  }
+  [data-theme="dark"] .kite-client .file-diff[data-inline] .diff-added,
+  .kite-client.dark .file-diff[data-inline] .diff-added,
+  .dark .kite-client .file-diff[data-inline] .diff-added,
+  .kite-client[data-theme="dark"] .file-diff[data-inline] .diff-added {
+    background: #1d3324;
+  }
+  [data-theme="dark"] .kite-client .file-diff[data-inline] .diff-removed,
+  .kite-client.dark .file-diff[data-inline] .diff-removed,
+  .dark .kite-client .file-diff[data-inline] .diff-removed,
+  .kite-client[data-theme="dark"] .file-diff[data-inline] .diff-removed {
+    background: #3c201c;
   }
 }
 .kite-client .tool-edit-heading .file-link[data-short-file] {

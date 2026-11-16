@@ -27,7 +27,11 @@ type Options = {
     fact: NativeToolMessageFact | undefined,
   ) => Pick<ComponentProps<typeof ToolActivity>, 'childAgent' | 'childDetail'>;
   renderImages?: (message: DesktopMessage, fact: NativeToolMessageFact | undefined) => ReactNode;
-  renderFileChange?: (entry: NativeFileChange, open: boolean) => ReactNode;
+  renderFileChange?: (
+    entry: NativeFileChange,
+    open: boolean,
+    openFile?: (path: string) => void,
+  ) => ReactNode;
   openFileForTarget?: (entry: NativeFileChange) => ((path: string) => void) | undefined;
 };
 
@@ -246,9 +250,9 @@ export function renderNativeToolGroup(
         renderImages={renderToolImages}
         renderFileChange={
           options.renderFileChange &&
-          ((model, open) => {
+          ((model, open, openFile) => {
             const target = displayTargets.find((entry) => entry.messageId === model.id);
-            return target && options.renderFileChange?.(target, open);
+            return target && options.renderFileChange?.(target, open, openFile);
           })
         }
         openFileForMessage={

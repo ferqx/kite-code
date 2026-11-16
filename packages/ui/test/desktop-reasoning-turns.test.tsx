@@ -1612,7 +1612,7 @@ test('completed Trace summary entry points use past-tense actions while data and
         changeConfirmed: true,
         toolResult: { ok: true, stdout: '+new' },
       }),
-      '编辑了文件',
+      '已编辑的文件',
     ],
     [completed('wait', 'wait_agent_events', { title: '等待 Agent 事件' }), '查看了 Agent 进展'],
   ] as const) {
@@ -1625,8 +1625,12 @@ test('completed Trace summary entry points use past-tense actions while data and
         dom.window.document.querySelector('.conversation-trace .tool-activity-summary .tool-label')
           ?.textContent,
       ).toBe(expected);
-      if (message.target)
+      if (message.target && open)
         expect(dom.window.document.querySelector('.conversation-trace')?.textContent).toContain(
+          message.target,
+        );
+      if (message.target && !open)
+        expect(dom.window.document.querySelector('.conversation-trace')?.textContent).not.toContain(
           message.target,
         );
       expect(dom.window.document.querySelector('.conversation-trace-steps')).toBeNull();

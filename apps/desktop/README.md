@@ -857,11 +857,13 @@ Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密�
 
 共享diff以双栏／统一方式呈现真实保留内容及原行号，操作记录与HEAD工作区的列标题明确不同。已保留上下文可以折叠，后端省略内容不可展开；计数仅是预览，仓库树没有未经读取的完整增删总数。语法色使用有限同步词法标记，不加载语法库或网络资源；具体字节、行、单行与token上限归[UI owner](../../packages/ui/README.md#文件差异的按需与有界显示)。详情切换不从当前文件重建历史，不改文件工具、审批、Git写入或编辑器授权。
 
-[NativeOperationDiff](src/native-file-changes.tsx)通过共享 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 `renderFileChange` 懒读槽接到会话中已核实成功的 write/edit 工具行；独立箭头展开本次操作，文件名仍打开当前文件。元数据由原32项扫描取得，不为折叠的历史预读正文。Main `fileChanges.detail` 的 `view:diff` 只返回原 `fileChange`，`view:snapshot` 单独读取历史全文；两者同在时不再由 snapshot 盖过 diff。旧调用未传 view 仍保留原读取顺序。完整 Artifact 超过1 MiB时不整份读取，只返回明确不可展示原因；原完整快照与写入不变。关闭／换scope只释放阅读，失败／unknown不取得成功差异。共享 [FileDiff](../../packages/ui/src/desktop/FileChanges.tsx)另限制旧结果的正文字符数、400个DOM行和每行2048个UTF-16单元，保原ScrollArea、键盘与红绿语义。
+[NativeOperationDiff](src/native-file-changes.tsx)通过共享 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 `renderFileChange` 懒读槽接到会话中已核实成功的 write/edit 工具行；两类工具共用「已编辑的文件」折叠标题及行内单栏卡片，卡片文件名沿原获准回调打开当前文件。元数据由原32项扫描取得，不为折叠的历史预读正文。Main `fileChanges.detail` 的 `view:diff` 只返回原 `fileChange`，`view:snapshot` 单独读取历史全文；两者同在时不再由 snapshot 盖过 diff。旧调用未传 view 仍保留原读取顺序。完整 Artifact 超过1 MiB时不整份读取，只返回明确不可展示原因；原完整快照与写入不变。关闭／换scope只释放阅读，失败／unknown不取得成功差异。共享 [FileDiff](../../packages/ui/src/desktop/FileChanges.tsx)另限制旧结果的正文字符数、400个DOM行和每行2048个UTF-16单元，保原ScrollArea、键盘与红绿语义。
 
-会话差异读取时保持折叠区高度，正文或失败反馈就绪后交给共享展开动画。收起工具或其上级过程即释放本次读取，忽略迟到响应。已核实的差异按 Main 签发的 `changeId` 和 generation 进入有界展示缓存，可供原工具再次展开。历史全文和右栏工作区差异沿各自读取流程。
+会话差异读取时保留文件卡头及原获准的打开入口，正文或失败反馈就绪后交给共享展开动画。收起工具或其上级过程即释放本次读取，忽略迟到响应。已核实的差异按 Main 签发的 `changeId` 和 generation 进入有界展示缓存，可供原工具再次展开。历史全文和右栏工作区差异沿各自读取流程。
 
-对于成功的 `files.edit`／`files.edit_path`，Main 从已验证的有界预览提取 `diffCounts` 随文件元数据发送。折叠行可显示文件名及增删数，差异正文仍由展开按需读取。单栏卡片复用共享差异模型和复制控件。统计范围仅为原回执留存的行，旧记录缺少可识别预览时省略数字。
+对于成功的 `files.edit`／`files.edit_path`，Main 从已验证的有界预览提取 `diffCounts` 随文件元数据发送。文件名及增删数位于展开后的卡片头部，差异正文仍由展开按需读取。单栏卡片复用共享差异模型和复制控件。统计范围仅为原回执留存的行，旧记录缺少可识别预览时省略数字。
+
+2026-11-16，macOS arm64／Bun1.4.4：在远端 `d3fb53db4` 上验证本次文件工具展示改动。[隔离 Electron 夹具](test/file-ui-electron-runner.fixture.ts)使用生产组件与编译 CSS、模拟 Bridge，在实际 BrowserWindow 中逐步检查 write/edit 的运行、完成、失败、懒读、复制、文件打开回调、双向滚动、折叠缓存、不可读预览与重试、窄窗口；截图与过程记录在本机 `.cache/file-ui-electron-D5kY0y/`，最终配色短内容对照在 `.cache/file-ui-electron-FbvoRU/short-reference.png`。原浏览器夹具的读取取消、缓存、历史版本和工作区切换回归通过，证据在 `.cache/file-diff-ICtAj8/`。真实文件预览集成6项通过；这不是完整安装版或真实模型端到端验收。Native receipt DOM 中三项缓存图标和两项历史汇总文案失败在独立干净 `d3fb53db4` 基线复现，本次保留这些原断言，未将其计为通过。
 
 Windows Chrome 157 的[隔离浏览器夹具](test/file-diff-browser-runner.fixture.ts)用生产组件验证了 21 个检查点。展开前已有 `+396 -1`，差异到达后高度由 0 增至约 384 px。验证还覆盖单栏原行号、复制原预览、收起后复用、失败重试和右栏双栏／统一切换。真实编辑器进程和原用户会话未在本次夹具中打开。
 

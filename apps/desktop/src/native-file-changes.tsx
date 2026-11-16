@@ -26,6 +26,7 @@ function ChangeDetail({
   view = 'diff',
   disclosure,
   child = false,
+  openFile,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -34,11 +35,12 @@ function ChangeDetail({
   view?: 'diff' | 'snapshot';
   disclosure?: { open: boolean; cache: NativeDisplayCache<NativeFileChangeDetail> };
   child?: boolean;
+  openFile?: (path: string) => void;
 }) {
   const conversationReadActive = useConversationReadActive();
   const readActive = !disclosure || (disclosure.open && conversationReadActive);
   const diffCache = disclosure?.cache;
-  const inlineEdit = !!disclosure && entry.operation === 'edit';
+  const inlineEdit = !!disclosure && (entry.operation === 'edit' || entry.operation === 'write');
   // Main issues a fresh change ID whenever it verifies a file target for a new scope.
   const cacheKey = JSON.stringify([generation, entry.changeId]);
   const [body, setBody] = useState<NativeFileChangeDetail | undefined>(() =>
@@ -152,6 +154,45 @@ function ChangeDetail({
       ? { toolResult: { ok: true, stdout: body.text, status: 'success' } as const }
       : {}),
   };
+  if (inlineEdit && body?.text === undefined) {
+    return (
+      <div className="file-diff" data-inline="true">
+        <div className="file-diff-toolbar">
+          {entry.path && openFile ? (
+            <Button
+              className="file-diff-path file-link"
+              title={entry.path}
+              onClick={() => openFile(entry.path!)}
+            >
+              {entry.path.split(/[/\\]/).at(-1) || entry.path}
+            </Button>
+          ) : (
+            <span className="file-diff-path" title={entry.path}>
+              {entry.path?.split(/[/\\]/).at(-1) || entry.path || '本次操作'}
+            </span>
+          )}
+        </div>
+        {error && (
+          <p className="file-diff-notice" role="alert">
+            {error}
+          </p>
+        )}
+        {error && entry.preview === 'available' && (
+          <Button
+            onClick={() => {
+              diffCache?.delete(cacheKey);
+              setRevision((value) => value + 1);
+            }}
+          >
+            重新读取历史内容
+          </Button>
+        )}
+        {!error && (entry.preview === 'unavailable' || body) && (
+          <p className="file-diff-notice">历史记录未保存可读差异，不会从当前文件内容重建。</p>
+        )}
+      </div>
+    );
+  }
   if (disclosure && entry.preview === 'available' && !body && !error) return null;
   return (
     <>
@@ -204,7 +245,13 @@ function ChangeDetail({
               )}
             </>
           ) : (
-            <FileDiff message={message} path={entry.path} scope="operation" inline={inlineEdit} />
+            <FileDiff
+              message={message}
+              path={entry.path}
+              scope="operation"
+              inline={inlineEdit}
+              openFile={openFile}
+            />
           )}
         </>
       ) : !disclosure && !error ? (
@@ -244,6 +291,7 @@ export function NativeOperationDiff({
   open: boolean;
   cache: NativeDisplayCache<NativeFileChangeDetail>;
   child?: boolean;
+  openFile?: (path: string) => void;
 }) {
   return <ChangeDetail {...props} view="diff" disclosure={{ open, cache }} />;
 }

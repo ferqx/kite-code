@@ -1193,22 +1193,155 @@ test('successful file readers and confirmed file diffs retain their existing fil
       ]);
       await click(summary(host));
       const region = host.querySelector('.tool-activity-steps')!;
-      const paths = [...region.querySelectorAll('.file-link')];
-      expect(paths.map((node) => node.textContent)).toEqual([
-        'success-read.ts',
-        'success-write.ts',
-      ]);
-      await click(paths[0]!);
-      await click(paths[1]!);
-      expect(opened).toEqual(['success-read.ts', 'success-write.ts']);
-      const diff = region.querySelector('.tool-diff-toggle')!;
+      const readPath = region.querySelector('.file-link')!;
+      expect(readPath.textContent).toBe('success-read.ts');
+      await click(readPath);
+      const diff = region.querySelector('.tool-file-disclosure')!;
       expect(region.querySelector('.diff-output')).toBeNull();
       await click(diff);
-      expect(region.querySelector('.diff-output')?.textContent).toContain('1 +new');
+      const writePath = region.querySelector('.file-diff .file-link')!;
+      expect(writePath.textContent).toBe('success-write.ts');
+      await click(writePath);
+      expect(opened).toEqual(['success-read.ts', 'success-write.ts']);
+      expect(region.querySelector('.diff-output')?.textContent).toContain('new');
       expect(region.querySelector('.tool-detail')).toBeNull();
     },
     { renderToolActivity: undefined, openFile: (path) => opened.push(path) },
   );
+});
+
+for (const toolName of ['write_file', 'edit_file'] as const) {
+  test(`${toolName} keeps one reading choice through running, confirmed completion and later activity`, async () => {
+    const copied: string[] = [];
+    const opened: string[] = [];
+    const path = `src/${toolName}.ts`;
+    const body =
+      'Line diff (bounded alignment; unchanged gaps omitted)\n3 -const old = 1;\n3 +const next = 2;';
+    const running: Message = {
+      ...tool('file-transition', 'running'),
+      toolName,
+      target: path,
+      changedFile: path,
+      presentation: 'standalone',
+    };
+    await withConversation(
+      async ({ host, render, click }) => {
+        await render([running]);
+        await click(summary(host));
+        const activity = host.querySelector('.tool-activity-steps > .tool-activity')!;
+        expect(activity.textContent).not.toContain('已编辑的文件');
+        expect(activity.querySelector('.tool-diff-toggle')).toBeNull();
+        expect(activity.querySelector('.file-diff')).toBeNull();
+
+        const completed: Message = {
+          ...running,
+          status: 'completed',
+          settled: true,
+          changeConfirmed: true,
+          toolResult: { ok: true, status: 'success', stdout: body },
+        };
+        await render([completed]);
+        expect(host.querySelector('.tool-activity-steps > .tool-activity')).toBe(activity);
+        expect(activity.textContent).toContain('已编辑的文件');
+        const toggle = activity.querySelector<HTMLButtonElement>('.tool-file-disclosure')!;
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        expect(activity.querySelector('.file-diff')).toBeNull();
+        toggle.focus();
+        expect(host.ownerDocument.activeElement).toBe(toggle);
+        await click(toggle);
+        expect(toggle.getAttribute('aria-expanded')).toBe('true');
+        const card = activity.querySelector<HTMLElement>('.file-diff[data-inline]')!;
+        expect(card).not.toBeNull();
+        expect(card.querySelector('.file-diff-path')?.textContent).toBe(`${toolName}.ts`);
+        expect(card.querySelector('.file-diff-counts')?.textContent).toContain('+1');
+        expect(card.querySelector('.file-diff-counts')?.textContent).toContain('-1');
+        expect(card.querySelector('.diff-removed .file-diff-number')?.textContent).toBe('3');
+        expect(card.querySelector('.diff-added .file-diff-number')?.textContent).toBe('3');
+        expect(card.querySelectorAll('[aria-label="文件差异"]')).toHaveLength(1);
+        await click(card.querySelector('[aria-label="复制差异"]')!);
+        expect(copied).toEqual([body]);
+        await click(card.querySelector('button.file-link')!);
+        expect(opened).toEqual([path]);
+
+        await render([
+          completed,
+          { ...tool('later', 'running'), presentationGroupId: running.presentationGroupId },
+        ]);
+        expect(summary(host).getAttribute('aria-expanded')).toBe('true');
+        expect(host.querySelector('.tool-file-disclosure')?.getAttribute('aria-expanded')).toBe(
+          'true',
+        );
+        expect(host.querySelector('.file-diff[data-inline]')).toBe(card);
+        await click(toggle);
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        expect(activity.querySelector('.file-diff')).toBeNull();
+      },
+      {
+        renderToolActivity: undefined,
+        openFile: (value) => opened.push(value),
+        writeClipboardText: async (value) => void copied.push(value),
+      },
+    );
+  });
+
+  test(`${toolName} running to failed exposes the error without claiming a confirmed change`, async () => {
+    const running: Message = { ...tool('file-failure', 'running'), toolName, target: 'failed.ts' };
+    await withConversation(
+      async ({ host, render, click }) => {
+        await render([running]);
+        await click(summary(host));
+        const activity = host.querySelector('.tool-activity-steps > .tool-activity')!;
+        expect(activity.textContent).not.toContain('已编辑的文件');
+        await render([
+          {
+            ...running,
+            status: 'failed',
+            settled: true,
+            toolResult: { ok: false, status: 'error', stderr: 'ORIGINAL_FILE_FAILURE' },
+          },
+        ]);
+        expect(host.querySelector('.tool-activity-steps > .tool-activity')).toBe(activity);
+        expect(activity.getAttribute('aria-label')).toContain('失败');
+        expect(activity.textContent).not.toContain('已编辑的文件');
+        expect(activity.querySelector('.tool-diff-toggle, .file-diff')).toBeNull();
+        await click(activity.querySelector('.tool-activity-summary')!);
+        expect(activity.textContent).toContain('ORIGINAL_FILE_FAILURE');
+      },
+      { renderToolActivity: undefined },
+    );
+  });
+}
+
+test('conflicting file-change metadata never turns an unfinished or uncommitted call into a success card', () => {
+  for (const toolName of ['write_file', 'edit_file'] as const) {
+    for (const [status, dispatchCommitted] of [
+      ['running', true],
+      ['failed', true],
+      ['completed', false],
+      [undefined, true],
+    ] as const) {
+      const message: Message = {
+        ...tool('conflicting', status ?? 'queued'),
+        status,
+        toolName,
+        target: 'target.ts',
+        changeConfirmed: true,
+        dispatchCommitted,
+        toolResult: { ok: true, status: 'success', stdout: '1 +private' },
+      };
+      const dom = new JSDOM(
+        renderToStaticMarkup(
+          <ToolActivity messages={[message]} onToggle={() => {}} renderChildren={() => null} />,
+        ),
+      );
+      try {
+        expect(dom.window.document.body.textContent).not.toContain('已编辑的文件');
+        expect(dom.window.document.querySelector('.tool-file-disclosure, .file-diff')).toBeNull();
+      } finally {
+        dom.window.close();
+      }
+    }
+  }
 });
 
 test('public lightweight ToolRow never publishes exception or approval reason previews', () => {

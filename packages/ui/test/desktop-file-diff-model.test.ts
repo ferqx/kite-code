@@ -209,3 +209,22 @@ test('a full 2048-unit code line is not reported as omitted just because its gut
   }
   expect(parseFileDiff(`123 +${text}x`).truncated).toBe(true);
 });
+
+test('identifier coloring preserves source text and remains inside the token budget', () => {
+  const line = 'const renderWait = (message: Message) => call(message); // 漢🙂';
+  const body = Array.from({ length: 350 }, (_, index) => `${index + 1} +${line}`).join('\n');
+  const model = parseFileDiff(body, 'sample.ts');
+  const lines = model.unified.flatMap((row) =>
+    row.kind === 'change' && row.after ? [row.after] : [],
+  );
+  expect(lines).toHaveLength(350);
+  expect(
+    lines[0]?.tokens.filter((token) => token.kind === 'identifier').map((token) => token.text),
+  ).toEqual(['renderWait', 'call']);
+  expect(lines.every((entry) => entry.tokens.map((token) => token.text).join('') === line)).toBe(
+    true,
+  );
+  expect(
+    lines.flatMap((entry) => entry.tokens).filter((token) => token.kind).length,
+  ).toBeLessThanOrEqual(1024);
+});
