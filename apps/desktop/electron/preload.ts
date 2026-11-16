@@ -39,6 +39,16 @@ import {
 } from '../src/native-browser-bridge';
 import { nativeGlobalDialogActiveChannel } from '../src/native-global-dialog-bridge';
 import {
+  isNativeImageGalleryAction,
+  isNativeImageGalleryPresentation,
+  type NativeImageGalleryBridge,
+  nativeImageGalleryActionChannel,
+  nativeImageGalleryActiveChannel,
+  nativeImageGalleryCloseChannel,
+  nativeImageGalleryPresentChannel,
+  nativeImageGallerySessionId,
+} from '../src/native-image-gallery-bridge';
+import {
   isNativeWindowMenuAction,
   type NativeWindowMenuBridge,
   nativeWindowMenuActionChannel,
@@ -64,8 +74,12 @@ import {
 type BrowserLayoutReply = NativeBrowserReply;
 let modalRoot: HTMLElement | undefined;
 let rootWasInert = false;
-ipcRenderer.on(nativeGlobalDialogActiveChannel, (_event, active: unknown) => {
+const activeModals = new Set<string>();
+const setModalActive = (owner: string, active: unknown) => {
   if (typeof active !== 'boolean') return;
+  if (active) activeModals.add(owner);
+  else activeModals.delete(owner);
+  active = activeModals.size > 0;
   if (active) {
     const root = document.getElementById('root');
     if (!root) return;
@@ -78,7 +92,31 @@ ipcRenderer.on(nativeGlobalDialogActiveChannel, (_event, active: unknown) => {
     modalRoot.inert = rootWasInert;
     modalRoot = undefined;
   }
-});
+};
+ipcRenderer.on(nativeGlobalDialogActiveChannel, (_event, active: unknown) =>
+  setModalActive('confirmation', active),
+);
+ipcRenderer.on(nativeImageGalleryActiveChannel, (_event, active: unknown) =>
+  setModalActive('image-gallery', active),
+);
+const imageGallery: NativeImageGalleryBridge = {
+  present(state) {
+    if (!isNativeImageGalleryPresentation(state)) throw Error('invalid_image_gallery_state');
+    ipcRenderer.send(nativeImageGalleryPresentChannel, state);
+  },
+  close(sessionId) {
+    if (!nativeImageGallerySessionId(sessionId)) throw Error('invalid_image_gallery_session');
+    ipcRenderer.send(nativeImageGalleryCloseChannel, sessionId);
+  },
+  watchActions(listener) {
+    const receive = (_event: Electron.IpcRendererEvent, action: unknown) => {
+      if (isNativeImageGalleryAction(action)) listener(action);
+    };
+    ipcRenderer.on(nativeImageGalleryActionChannel, receive);
+    return () => ipcRenderer.off(nativeImageGalleryActionChannel, receive);
+  },
+};
+contextBridge.exposeInMainWorld('kiteNativeImageGallery', imageGallery);
 function readBrowserLayoutReply(reply: BrowserLayoutReply) {
   if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
   if (reply.value !== null && !isNativeBrowserState(reply.value))

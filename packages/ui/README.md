@@ -157,6 +157,8 @@ Native 提供 `retainedPresentation` 时，输入区的模型或审核标签可�
 
 模型或工具消息的 `settled` 不结束轮次提示；queued、running、waiting、cancelling 与 recovery_required 保持，真实 terminal 优先移除，同 Turn 分裂条目仅末条目显示一次。暂时 `unavailable` 保留已有活动展示，不显示新的思考判断或“上次确认状态”标签；不扩大当前读取或操作资格。宿主通过独立 `TurnActivity.executionUnconfirmed` 表明原执行权已释放或不能核实时，未结束轮次停止回复／思考及 busy 展示；普通界面不追加“执行状态待核实”，这两类标签仅在显式测试诊断中显示。原 status 和真实终态保持，诊断标签不能覆盖失败、取消或中断终态；撤除标记后重新按原事实展示。无 Turn 身份的旧独立流式消息保留原局部提示。[生命周期回归](test/isolated/desktop-turn-response.test.tsx)核空正文、思考／回复节点切换、工具、普通观察失败、执行权待核实、折叠及真实终态。
 
+图片切换使用当前图与隐藏候选的双缓冲，最多两个img；候选decode及当前请求token通过后，同次渲染提交图片、alt、名称和序号，再通知宿主释放旧展示资源。等待及目标失败时旧图仍绑定旧标签，另列目标，下载／缩放暂停；来源组id／名称／load／src任一变化关闭原会话，隐藏／读资格撤销不保留旧帧。Native有界原图与展示URL缓存及重新准入由[Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)负责，UI不把缓存变成读取权限。
+
 Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺寸URL并提示异步解码；等待URL时显示准备占位，可选 `previewError` 只显示预览失败，不改变原 `loading/error` 的发送门禁。图片转换、缓存与原字节校验归 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)，UI不读取或转换原图。Native登记给ConversationCache的图片成本现包含缩略图编码字节与RGBA像素估算，继续使用原媒体／DOM预算、停用和释放协议；派生Blob的独立有界缓存由原窗口owner管理，不能恢复旧读取资格。
 
 ## Markdown 消息内容
@@ -231,6 +233,8 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 2026-10-20，Windows x64／Bun1.4.3，`5dba8a6b`工作树加本次左右分组修改：对上述上下文、缓存回归及[共享页面](test/desktop-page.test.tsx)执行 `bun test --parallel=1 --max-concurrency=1`，22项／214断言通过；UI／Desktop的 `tsc --noEmit`、两个源码文件的Biome及文档检查通过。Chrome155以实际Composer和生产样式检查深浅主题、320–1100px输入区、中英文、长模型名与思考档位，并沿隔离Main夹具检查实际NativeDesktop的会话切换及缩窄，共23组通过；核分组边界、模型省略、菜单、上下文浮层、无指标、DOM身份和停止按钮。未运行安装版窗口或其他平台。
 
 `Composer` 的 `+` 菜单以输入框等宽的“添加”列表向上展开，只有“添加文件”一行，使用图标、12px 文字与整行高亮；菜单沿原 Radix 键盘／焦点合同，按 form 和 trigger 的实际边界定位，`ResizeObserver` 在输入框尺寸变化时更新宽度和顶边间距，切换 scope 时关闭。一个无类型过滤的多选 file input 交付实际 File 对象；同次选择、粘贴或拖入先按 MIME／已知图片扩展名分流，图片交给 `onImageFiles`，普通文件由宿主 `onFileReferences(files, signal)` 准备独立字节，再由 `onFilesSelected` 交给原 scope。准备期间显示“正在保存附件…”和“取消添加”；取消、切换 scope 或卸载都会终止所属 signal，保留草稿且丢弃迟到结果，失败可重新选择。准备 signal 保持到宿主接纳原附件；输入随后 disabled／隐藏或未进入 onFilesSelected 的结果会释放，已经接纳的附件不随准备作用域结束而删除。默认每条消息 10 张图片，宿主通过 `imageLimit` 表达同一准入值；已有与新增合计超限时不调用任何附件 port。文件拖入在捕获阶段接管，避免 Lexical 再处理同一份附件。迟到或取消的选择不进入后来 scope。两类附件以受控 `images/files` 在正文上方横向展示并独立移除，不改写 Markdown 草稿；准备中或错误的图片阻止发送，两类附件均可单独发送。UI 不读取本地路径、上传图片或拥有 Artifact 读取权限。[编辑器测试](test/isolated/prompt-editor.test.tsx)核 Markdown、IME、混选、取消、切换、10／11 张边界及粘贴／拖入累计，实际图片 owner 见 [Native](../../apps/desktop/README.md#markdown-与附件输入)。
+
+[ImageGallery](src/desktop/ImageGallery.tsx)统一待发送附件、用户消息和工具图片组的原图预览。列表按宿主提供的稳定 ID 与原顺序切换，不按名字或内容去重；同组保留失败项的位置。每次只准备当前图片，切换、关闭、scope 改变或读取暂停会取消旧准备并释放所属 URL。共享层只接受四种已准入图片的本地 URL 或宿主 Blob loader，不读取路径或网络图片；缩略图与原图源分开。`ImageGallerySurface`复用 Dialog 的模态、焦点和键盘行为，提供左右切换、缩放、关闭与原位置失败重试；`ImageGalleryHostContext`允许 Native 将同一展示交给受限原生浮层，不让 UI 获得文件读取能力。
 
 `Composer.context`允许宿主展示独立上下文卡片；`contextHasInput`只表达宿主已有待提交上下文，让空正文也能明确发送，并在活动Run时与停止按钮正确区分。它不准备附件、不构成授权，也不改变草稿文本；宿主仍以sendDisabled核准备、未知提交和准确版本。Native网页注释的元数据／图片与Main证明由[Desktop owner](../../apps/desktop/README.md#agent-浏览器观察与人工操作)负责。
 

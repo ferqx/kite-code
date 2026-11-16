@@ -59,6 +59,21 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     await act(async () => images.add('a', [file]));
     const draft = images.get('a')[0]!;
     expect(draft.loading).toBe(false);
+    const source = draft.previewSource;
+    expect(source && 'load' in source).toBe(true);
+    if (!source?.load) throw Error('original_source_missing');
+    const original = await source.load(new AbortController().signal);
+    const originalBytes = await new Promise<ArrayBuffer>((resolve) => {
+      const reader = new dom.window.FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.readAsArrayBuffer(original as unknown as Blob);
+    });
+    expect([...new Uint8Array(originalBytes)]).toEqual([1, 2, 3]);
+    expect(original.type).toBe('image/png');
+    expect(await source.load(new AbortController().signal)).toBe(original);
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(source.load(aborted.signal)).rejects.toThrow();
     expect(images.get('b')).toEqual([]);
     expect(calls.find((request) => request.method === 'input.images.begin')).toMatchObject({
       name: 'original.png',
@@ -94,7 +109,13 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
         (request) => request.method === 'input.images.append' && request.id === failedPreview.id,
       ),
     ).toMatchObject({ data: 'BAUG' });
+    const failedPreviewSource = failedPreview.previewSource;
+    if (!failedPreviewSource?.load) throw Error('preview_failure_lost_original');
+    expect((await failedPreviewSource.load(new AbortController().signal)).size).toBe(3);
     await act(async () => images.removeIds([failedPreview.id]));
+    await expect(failedPreviewSource.load(new AbortController().signal)).rejects.toThrow(
+      'input_image_draft_inactive',
+    );
     Object.defineProperty(globalThis, 'Worker', {
       configurable: true,
       writable: true,
@@ -108,12 +129,21 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     await act(async () => images.move('a', 'moved'));
     expect(images.files('a')).toEqual([]);
     expect(images.get('moved')[0]?.id).toBe(draft.id);
+    await expect(source.load(new AbortController().signal)).rejects.toThrow(
+      'input_image_draft_inactive',
+    );
+    const movedSource = images.get('moved')[0]!.previewSource;
+    if (!movedSource?.load) throw Error('moved_original_source_missing');
+    expect(await movedSource.load(new AbortController().signal)).toBe(original);
     expect(images.files('moved')[0]?.id).toBe(fileId);
     await act(async () => images.removeIds([fileId]));
     expect(images.files('moved')).toEqual([]);
     expect(images.get('moved')).toHaveLength(1);
     await act(async () => root.render(<Fixture generation={2} />));
     expect(images.get('a')).toEqual([]);
+    await expect(movedSource.load(new AbortController().signal)).rejects.toThrow(
+      'input_image_draft_inactive',
+    );
     expect(document.getElementById('root')!.textContent).toBe('0');
     expect(calls).toContainEqual({ method: 'input.images.release', generation: 1, id: draft.id });
     const prepared = await images.fileReferences([file]);

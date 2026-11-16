@@ -3,45 +3,59 @@ import type { NativeRootWindow } from './native-root-window';
 
 type Overlay = {
   view: WebContentsView;
+  priority?: number;
   active: () => boolean;
   protect: (view: View) => void;
 };
-const overlays = new WeakMap<NativeRootWindow, Overlay>();
+const overlays = new WeakMap<NativeRootWindow, Overlay[]>();
+const ordered = (window: NativeRootWindow) => overlays.get(window) ?? [];
+const topActive = (window: NativeRootWindow) =>
+  [...ordered(window)].reverse().find((overlay) => overlay.active());
 
 export function keepNativeOverlayOnTop(window: NativeRootWindow) {
-  const overlay = overlays.get(window);
-  if (!overlay || window.isDestroyed()) return;
+  if (window.isDestroyed()) return;
+  const stack = ordered(window);
   const children = window.contentView.children;
-  if (children[children.length - 1] !== overlay.view) window.contentView.addChildView(overlay.view);
+  if (
+    stack.every(
+      (overlay, index) => children[children.length - stack.length + index] === overlay.view,
+    )
+  )
+    return;
+  for (const overlay of stack) window.contentView.addChildView(overlay.view);
 }
 
 export function isNativeViewAboveContent(window: NativeRootWindow, view: View) {
   const children = window.contentView.children;
-  const overlay = overlays.get(window);
-  return children[children.length - (overlay ? 2 : 1)] === view;
+  return children[children.length - ordered(window).length - 1] === view;
 }
 
-/** All browser/shield insertions preserve the reserved application overlay above them. */
+/** Browser, Office and shield insertions remain below every reserved native modal. */
 export function addNativeWindowView(window: NativeRootWindow, view: View, index?: number) {
   if (index === undefined) window.contentView.addChildView(view);
   else window.contentView.addChildView(view, index);
-  const overlay = overlays.get(window);
-  if (view !== overlay?.view) overlay?.protect(view);
+  for (const overlay of ordered(window)) if (view !== overlay.view) overlay.protect(view);
   keepNativeOverlayOnTop(window);
 }
 
 export function reserveNativeOverlay(window: NativeRootWindow, overlay: Overlay) {
-  if (overlays.has(window)) throw Error('native_global_dialog_owner_exists');
-  overlays.set(window, overlay);
+  const stack = ordered(window);
+  if (stack.some((current) => current.view === overlay.view))
+    throw Error('native_modal_owner_exists');
+  stack.push(overlay);
+  stack.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+  overlays.set(window, stack);
   for (const child of window.contentView.children) overlay.protect(child);
   addNativeWindowView(window, overlay.view);
   return () => {
-    if (overlays.get(window) === overlay) overlays.delete(window);
+    const current = ordered(window);
+    const next = current.filter((value) => value !== overlay);
+    if (next.length) overlays.set(window, next);
+    else overlays.delete(window);
   };
 }
 
 export function focusNativeWindowContent(window: NativeRootWindow, fallback: WebContents) {
-  const overlay = overlays.get(window);
-  const target = overlay?.active() ? overlay.view.webContents : fallback;
+  const target = topActive(window)?.view.webContents ?? fallback;
   if (!window.isDestroyed() && !target.isDestroyed()) target.focus();
 }

@@ -5,13 +5,15 @@ import {
   AttachmentMedia,
   AttachmentTitle,
   Button,
+  ImageGallery,
+  type ImageGalleryItem,
   MessageAttachments,
   useConversationReadActive,
   useConversationResourceRetention,
 } from '@kite-ai/ui/desktop';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
-import type { NativeImagePreviews } from './native-image-previews';
+import type { NativeImageOriginalScope, NativeImagePreviews } from './native-image-previews';
 
 type Props = {
   bridge: NativeBridge;
@@ -23,12 +25,53 @@ type Props = {
   previews: NativeImagePreviews;
   images?: readonly ImageDescriptor[];
   childHandle?: string;
+  originalScope?: () => NativeImageOriginalScope | undefined;
+  onOriginalScopeRejected?: (scope: NativeImageOriginalScope | undefined) => void;
 };
 type ImageDescriptor = {
   name: string;
   reference: { hash?: string; mediaType: string; size: string };
 };
-async function readImage(props: Props, index: number, image: ImageDescriptor, signal: AbortSignal) {
+// These exact bridge codes prove that the admitted identity/authority was retired.
+// Busy, transport and generic read failures remain retryable, not inferred revocations.
+const rejectedImageScopes = new Set([
+  'input_image_view_changed',
+  'tool_images_invalid',
+  'native_generation_changed',
+  'native_selection_changed',
+  'store_identity_mismatch',
+  'artifact_scope_denied',
+  'permission_denied',
+  'artifact_reference_not_found',
+  'artifact_reference_mismatch',
+  'artifact_metadata_mismatch',
+  'background_observation_changed',
+  'background_identity_mismatch',
+  'background_child_binding_changed',
+  'background_child_history_mismatch',
+]);
+async function readImage(
+  props: Props,
+  index: number,
+  image: ImageDescriptor,
+  signal: AbortSignal,
+  admitted: () => boolean = () => true,
+) {
+  let rejected = false;
+  const check = () => {
+    signal.throwIfAborted();
+    if (rejected || !admitted() || (originalScope && props.originalScope?.() !== originalScope))
+      throw Error('input_image_read_inactive');
+  };
+  const originalScope = props.originalScope?.();
+  const rejectScope = (error: unknown) => {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    if (typeof code === 'string' && rejectedImageScopes.has(code)) {
+      rejected = true;
+      props.previews.retireOriginalScope(originalScope);
+      props.onOriginalScopeRejected?.(originalScope);
+    }
+  };
   const readId = crypto.randomUUID(),
     { bridge, generation } = props;
   const close = () =>
@@ -43,10 +86,10 @@ async function readImage(props: Props, index: number, image: ImageDescriptor, si
             }
           : { method: 'input.image.close', generation, readId },
       )
-      .catch(() => {});
+      .catch(rejectScope);
   signal.addEventListener('abort', close, { once: true });
   try {
-    signal.throwIfAborted();
+    check();
     const opened = await bridge.request(
       props.childHandle
         ? {
@@ -67,7 +110,7 @@ async function readImage(props: Props, index: number, image: ImageDescriptor, si
             historyEpoch: props.historyEpoch,
           },
     );
-    signal.throwIfAborted();
+    check();
     if (
       !opened ||
       typeof opened !== 'object' ||
@@ -83,9 +126,21 @@ async function readImage(props: Props, index: number, image: ImageDescriptor, si
       opened.size > 16 * 1024 * 1024
     )
       throw Error('input_image_metadata_invalid');
+    const identity = {
+      key: JSON.stringify([props.message.id, index, image.reference]),
+      hash: opened.hash,
+      mediaType: opened.mediaType,
+      size: opened.size,
+    };
+    const cached = props.previews.getOriginal(originalScope, identity);
+    if (cached) {
+      check();
+      return { blob: cached, hash: opened.hash };
+    }
     const bytes = new Uint8Array(opened.size);
     let offset = 0;
     while (offset < bytes.length) {
+      check();
       const chunk = await bridge.request(
         props.childHandle
           ? {
@@ -102,7 +157,7 @@ async function readImage(props: Props, index: number, image: ImageDescriptor, si
               offset,
             },
       );
-      signal.throwIfAborted();
+      check();
       if (
         !chunk ||
         typeof chunk !== 'object' ||
@@ -129,45 +184,59 @@ async function readImage(props: Props, index: number, image: ImageDescriptor, si
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
       .map((value) => value.toString(16).padStart(2, '0'))
       .join('');
-    signal.throwIfAborted();
+    check();
     if (hash !== opened.hash) throw Error('input_image_hash_mismatch');
-    return { bytes, hash };
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: image.reference.mediaType });
+    check();
+    props.previews.rememberOriginal(originalScope, identity, blob);
+    return { blob, hash };
+  } catch (error) {
+    rejectScope(error);
+    throw error;
   } finally {
     signal.removeEventListener('abort', close);
     await close();
+    check();
   }
 }
 
-// One visible preview at a time per window bridge; do not overrun Main's read leases
-// when several historical messages enter the viewport together.
+// Thumbnails and the selected original share Main's existing per-window lease queue.
+// Close acknowledgement finishes before the next original or thumbnail may open.
 const previewReads = new WeakMap<NativeBridge, Promise<void>>();
-function queueImage(props: Props, index: number, image: ImageDescriptor, signal: AbortSignal) {
-  const pending = (previewReads.get(props.bridge) ?? Promise.resolve()).then(async () => {
-    signal.throwIfAborted();
-    const { bytes, hash } = await readImage(props, index, image, signal);
-    signal.throwIfAborted();
-    return props.previews.prepare(
-      new Blob([bytes.buffer as ArrayBuffer], { type: image.reference.mediaType }),
-      hash,
-      signal,
-    );
-  });
+function queueRead<T>(bridge: NativeBridge, run: () => Promise<T>) {
+  const pending = (previewReads.get(bridge) ?? Promise.resolve()).then(run);
   const tail = pending.then(
     () => {},
     () => {},
   );
-  previewReads.set(props.bridge, tail);
+  previewReads.set(bridge, tail);
   void tail.then(() => {
-    if (previewReads.get(props.bridge) === tail) previewReads.delete(props.bridge);
+    if (previewReads.get(bridge) === tail) previewReads.delete(bridge);
   });
   return pending;
+}
+function queueImage(
+  props: Props,
+  index: number,
+  image: ImageDescriptor,
+  signal: AbortSignal,
+  admitted: () => boolean,
+) {
+  return queueRead(props.bridge, async () => {
+    signal.throwIfAborted();
+    const { blob, hash } = await readImage(props, index, image, signal, admitted);
+    signal.throwIfAborted();
+    if (!admitted()) throw Error('input_image_read_inactive');
+    return props.previews.prepare(blob, hash, signal);
+  });
 }
 
 function NativeUserImage({
   image,
   index,
+  onPreview,
   ...props
-}: Props & { image: ImageDescriptor; index: number }) {
+}: Props & { image: ImageDescriptor; index: number; onPreview: () => void }) {
   const readActive = useConversationReadActive();
   const retention = useConversationResourceRetention();
   const readAvailable = props.readAvailable && readActive;
@@ -252,7 +321,16 @@ function NativeUserImage({
       setError('');
       try {
         const { props, image, index } = current.current;
-        const preview = await queueImage(props, index, image, abort.signal);
+        const preview = await queueImage(
+          props,
+          index,
+          image,
+          abort.signal,
+          () =>
+            current.current.readAvailable &&
+            current.current.readScope === scope &&
+            !card.current?.ownerDocument.hidden,
+        );
         if (read.current !== abort || abort.signal.aborted) return;
         const next = URL.createObjectURL(preview.blob);
         ownedUrl.current = next;
@@ -291,7 +369,15 @@ function NativeUserImage({
         aria-busy={loading || undefined}
       >
         {url ? (
-          <img src={url} alt={image.name} decoding="async" />
+          <button
+            type="button"
+            className="image-gallery-trigger"
+            disabled={!readAvailable}
+            aria-label={`预览图片：${image.name}`}
+            onClick={onPreview}
+          >
+            <img src={url} alt={image.name} decoding="async" />
+          </button>
         ) : error ? (
           <Button
             variant="ghost"
@@ -312,29 +398,124 @@ function NativeUserImage({
 }
 export function NativeUserImages(props: Props) {
   const images = props.images ?? props.message.images;
+  const readActive = useConversationReadActive();
+  const readAvailable = props.readAvailable && readActive;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Displayed thumbnails may survive a read recalibration. Full originals may not.
+  const scopeKey = JSON.stringify([
+    props.generation,
+    props.viewSelection,
+    props.historyEpoch,
+    props.childHandle,
+    props.message.sessionId,
+    props.message.id,
+    images,
+  ]);
+  const original = useRef<{ key: string; scope: NativeImageOriginalScope } | undefined>(undefined);
+  const originalScope = useCallback(
+    () => (original.current?.key === scopeKey ? original.current.scope : undefined),
+    [scopeKey],
+  );
+  const onOriginalScopeRejected = useCallback((scope: NativeImageOriginalScope | undefined) => {
+    if (!scope || original.current?.scope !== scope) return;
+    // Keep the retired identity for a later fresh-open refusal in this same
+    // observation; it stays ineligible for both cache lookup and refill.
+    setSelectedId(null);
+  }, []);
+  useLayoutEffect(() => {
+    const owner = document;
+    const retire = () => {
+      const previous = original.current;
+      original.current = undefined;
+      props.previews.retireOriginalScope(previous?.scope);
+    };
+    const activate = () => {
+      retire();
+      if (readAvailable && !owner.hidden)
+        original.current = { key: scopeKey, scope: props.previews.createOriginalScope(scopeKey) };
+    };
+    const visibility = () => {
+      if (owner.hidden) retire();
+      else activate();
+    };
+    activate();
+    owner.addEventListener('visibilitychange', visibility);
+    return () => {
+      owner.removeEventListener('visibilitychange', visibility);
+      retire();
+    };
+  }, [props.previews, scopeKey, readAvailable]);
+  const current = useRef({ scopeKey, readAvailable });
+  useLayoutEffect(() => {
+    current.current = { scopeKey, readAvailable };
+  });
+  // scopeKey contains every read identity and the exact image references.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Repainting a message must not restart the active original.
+  const galleryImages = useMemo<readonly ImageGalleryItem[]>(
+    () =>
+      images?.map((image, index) => ({
+        id: String(index),
+        name: image.name,
+        source: {
+          load: (signal: AbortSignal) => {
+            const admitted = () =>
+              current.current.readAvailable &&
+              current.current.scopeKey === scopeKey &&
+              !document.hidden;
+            return queueRead(props.bridge, async () => {
+              signal.throwIfAborted();
+              if (!admitted()) throw Error('input_image_read_inactive');
+              const { blob } = await readImage(
+                { ...props, originalScope, onOriginalScopeRejected },
+                index,
+                image,
+                signal,
+                admitted,
+              );
+              signal.throwIfAborted();
+              if (!admitted()) throw Error('input_image_read_inactive');
+              return blob;
+            });
+          },
+        },
+      })) ?? [],
+    [props.bridge, props.previews, scopeKey, originalScope, onOriginalScopeRejected],
+  );
   return (
-    <MessageAttachments
-      count={(props.message.files?.length ?? 0) + (images?.length ?? 0)}
-      className="native-user-images"
-    >
-      {props.message.files?.map((file, index) => (
-        <AttachmentFileCard name={file.name} key={`${index}/${file.uri}`} />
-      ))}
-      {images?.map((image, index) => (
-        <NativeUserImage
-          {...props}
-          image={image}
-          index={index}
-          key={JSON.stringify([
-            props.generation,
-            props.message.sessionId,
-            index,
-            props.message.id,
-            image.reference,
-          ])}
-        />
-      ))}
-    </MessageAttachments>
+    <>
+      <MessageAttachments
+        count={(props.message.files?.length ?? 0) + (images?.length ?? 0)}
+        className="native-user-images"
+      >
+        {props.message.files?.map((file, index) => (
+          <AttachmentFileCard name={file.name} key={`${index}/${file.uri}`} />
+        ))}
+        {images?.map((image, index) => (
+          <NativeUserImage
+            {...props}
+            originalScope={originalScope}
+            onOriginalScopeRejected={onOriginalScopeRejected}
+            image={image}
+            index={index}
+            onPreview={() => setSelectedId(String(index))}
+            key={JSON.stringify([
+              props.generation,
+              props.message.sessionId,
+              index,
+              props.message.id,
+              image.reference,
+            ])}
+          />
+        ))}
+      </MessageAttachments>
+      <ImageGallery
+        images={galleryImages}
+        selectedId={selectedId}
+        onSelectedIdChange={setSelectedId}
+        scopeKey={scopeKey}
+        disabled={!readAvailable}
+      />
+    </>
   );
 }
 

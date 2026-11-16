@@ -40,7 +40,12 @@ test('native builds retain fixed renderer entries while development uses only Vi
     ]) {
       const output = join(temporary, development ? 'development' : 'ordinary');
       await buildNativeDesktop(assets, output, { development });
-      for (const file of ['main.cjs', 'preload.cjs', 'global-dialog-preload.cjs'])
+      for (const file of [
+        'main.cjs',
+        'preload.cjs',
+        'global-dialog-preload.cjs',
+        'image-gallery-preload.cjs',
+      ])
         expect(existsSync(join(output, file))).toBe(true);
       const preload = readFileSync(join(output, 'global-dialog-preload.cjs'), 'utf8');
       expect(preload).toContain('kiteGlobalDialog');
@@ -52,10 +57,22 @@ test('native builds retain fixed renderer entries while development uses only Vi
           'renderer.js',
           'global-dialog.html',
           'global-dialog-renderer.js',
+          'image-gallery.html',
+          'image-gallery-renderer.js',
         ])
           expect(existsSync(join(output, file))).toBe(false);
         continue;
       }
+      const galleryHtml = readFileSync(join(output, 'image-gallery.html'), 'utf8');
+      expect(galleryHtml).toContain('./image-gallery-renderer.js');
+      const galleryPreload = readFileSync(join(output, 'image-gallery-preload.cjs'), 'utf8');
+      expect(galleryPreload).toContain('kiteImageGalleryViewer');
+      expect(galleryPreload).not.toContain('kiteNative');
+      expect(galleryPreload).not.toContain('kiteGlobalDialog');
+      const gallery = readFileSync(join(output, 'image-gallery-renderer.js'), 'utf8');
+      expect(Buffer.byteLength(gallery)).toBeLessThan(500_000);
+      expect(gallery).not.toContain('katex');
+      expect(gallery).not.toContain('mermaid');
       const html = readFileSync(join(output, 'global-dialog.html'), 'utf8');
       expect(html).toContain('./global-dialog-renderer.js');
       expect(html).not.toContain('src/native-global-dialog-main.tsx');

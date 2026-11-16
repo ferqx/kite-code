@@ -62,7 +62,8 @@ class Surface {
     this.background = value;
   }
 }
-function fixture() {
+function fixture(failFirstCreate = false) {
+  let attempts = 0;
   const root = new Surface(),
     page = new Surface(),
     ipc = new EventEmitter();
@@ -110,6 +111,7 @@ function fixture() {
     url,
     theme: () => theme,
     createView() {
+      if (++attempts === 1 && failFirstCreate) throw Error('fixture_create_failed');
       const view = new Surface();
       views.push(view);
       return view as unknown as WebContentsView;
@@ -455,5 +457,26 @@ test('closed disposal releases captured owners after native window accessors bec
     expect(f.ipc.listenerCount(nativeGlobalDialogEventChannel)).toBe(0);
     for (const overlay of f.views) expect(overlay.webContents.destroyed).toBe(true);
     expect(() => f.host.dispose()).not.toThrow();
+  }
+});
+
+test('a failed cold view creation does not permanently poison later fixed confirmations', async () => {
+  const f = fixture(true);
+  try {
+    const failed = f.host
+      .confirm({ kind: 'full-permission', language: 'zh' }, new AbortController().signal)
+      .catch((error: Error) => error);
+    expect(await failed).toBeInstanceOf(Error);
+    expect(f.host.active()).toBe(false);
+    const result = f.host.confirm(
+      { kind: 'full-permission', language: 'zh' },
+      new AbortController().signal,
+    );
+    await f.ready();
+    f.present();
+    f.send({ type: 'decision', requestId: f.current().requestId, confirmed: true });
+    expect(await result).toBe(true);
+  } finally {
+    f.host.dispose();
   }
 });

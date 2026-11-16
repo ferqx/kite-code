@@ -5,6 +5,16 @@ export type ImagePreview = {
   /** Encoded data plus an RGBA estimate; this is not a browser heap limit. */
   readonly cost: number;
 };
+/** One exact message/group admission period, not reusable content authority. */
+export type NativeImageOriginalScope = { readonly key: string; readonly serial: number };
+export type NativeImageOriginalIdentity = {
+  /** Includes the original message/index and full image reference. */
+  key: string;
+  hash: string;
+  mediaType: string;
+  size: number;
+};
+type OriginalEntry = { scope: NativeImageOriginalScope; blob: Blob };
 export type ImagePreviewWorker = Pick<
   Worker,
   'postMessage' | 'terminate' | 'onmessage' | 'onerror'
@@ -19,10 +29,17 @@ type Job = { id: number; key: string; source: Blob; subscribers: Set<Subscriber>
 const MAX_ENTRIES = 128;
 const MAX_COST = 32 * 1024 * 1024;
 const MAX_PENDING_BYTES = 32 * 1024 * 1024;
+const MAX_ORIGINAL_ENTRIES = 32;
+const MAX_ORIGINAL_BYTES = 64 * 1024 * 1024;
+const originalMediaTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
-/** Window/connection-owned derived data. Callers must independently admit and verify originals. */
+/** Window/connection image resources. Cache hits never admit a new original read. */
 export class NativeImagePreviews {
   private readonly entries = new Map<string, ImagePreview>();
+  private readonly originals = new Map<string, OriginalEntry>();
+  private originalScopes = new WeakSet<NativeImageOriginalScope>();
+  private originalSerial = 0;
+  private originalBytes = 0;
   private readonly jobs = new Map<string, Job>();
   private readonly queue: Job[] = [];
   private active?: Job;
@@ -37,6 +54,80 @@ export class NativeImagePreviews {
       new Worker(new URL('./native-image-preview-worker.ts', import.meta.url), { type: 'module' }),
   ) {
     this.create = create;
+  }
+
+  createOriginalScope(key: string): NativeImageOriginalScope {
+    const scope = Object.freeze({ key, serial: ++this.originalSerial });
+    this.originalScopes.add(scope);
+    return scope;
+  }
+
+  private originalKey(scope: NativeImageOriginalScope, identity: NativeImageOriginalIdentity) {
+    return JSON.stringify([
+      scope.serial,
+      scope.key,
+      identity.key,
+      identity.hash,
+      identity.mediaType,
+      identity.size,
+    ]);
+  }
+
+  /** Call only after Main has admitted this exact read and returned matching metadata. */
+  getOriginal(
+    scope: NativeImageOriginalScope | undefined,
+    identity: NativeImageOriginalIdentity,
+  ): Blob | undefined {
+    if (!scope || !this.originalScopes.has(scope)) return undefined;
+    const key = this.originalKey(scope, identity);
+    const entry = this.originals.get(key);
+    if (!entry) return undefined;
+    this.originals.delete(key);
+    this.originals.set(key, entry);
+    return entry.blob;
+  }
+
+  /** Call only after complete EOF/SHA verification and the caller's final admission check. */
+  rememberOriginal(
+    scope: NativeImageOriginalScope | undefined,
+    identity: NativeImageOriginalIdentity,
+    blob: Blob,
+  ): boolean {
+    if (
+      !scope ||
+      !this.originalScopes.has(scope) ||
+      !/^[a-f0-9]{64}$/.test(identity.hash) ||
+      !originalMediaTypes.has(identity.mediaType) ||
+      !Number.isSafeInteger(identity.size) ||
+      identity.size < 1 ||
+      identity.size > 16 * 1024 * 1024 ||
+      blob.type !== identity.mediaType ||
+      blob.size !== identity.size
+    )
+      return false;
+    const key = this.originalKey(scope, identity);
+    const previous = this.originals.get(key);
+    if (previous) this.originalBytes -= previous.blob.size;
+    this.originals.delete(key);
+    this.originals.set(key, { scope, blob });
+    this.originalBytes += blob.size;
+    while (this.originals.size > MAX_ORIGINAL_ENTRIES || this.originalBytes > MAX_ORIGINAL_BYTES) {
+      const oldest = this.originals.keys().next().value!;
+      this.originalBytes -= this.originals.get(oldest)!.blob.size;
+      this.originals.delete(oldest);
+    }
+    return true;
+  }
+
+  /** Retirement is irreversible, including for reads that complete after cleanup. */
+  retireOriginalScope(scope: NativeImageOriginalScope | undefined) {
+    if (!scope) return;
+    this.originalScopes.delete(scope);
+    for (const [key, entry] of this.originals)
+      if (entry.scope === scope) {
+        this.originalBytes -= entry.blob.size;
+        this.originals.delete(key);
+      }
   }
 
   prepare(source: Blob, hash: string, signal: AbortSignal): Promise<ImagePreview> {
@@ -89,6 +180,9 @@ export class NativeImagePreviews {
   }
 
   clear() {
+    this.originalScopes = new WeakSet();
+    this.originals.clear();
+    this.originalBytes = 0;
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
     this.stopWorker();

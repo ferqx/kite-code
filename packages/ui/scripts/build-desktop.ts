@@ -72,6 +72,7 @@ const result = await Bun.build({
   entrypoints: [
     join(source, 'index.ts'),
     join(source, 'confirmation.ts'),
+    join(source, 'ImageGallery.tsx'),
     join(source, 'markdown-parser.ts'),
   ],
   target: 'browser',

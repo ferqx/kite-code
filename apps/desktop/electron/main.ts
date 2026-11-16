@@ -44,6 +44,7 @@ import { registerNativeBrowserIpc } from './native-browser';
 import { createNativeCallerGenerationOwner, NativeCaller } from './native-caller';
 import { registerNativeFullPermissionDialogIpc } from './native-full-permission-dialog';
 import { createNativeGlobalDialogHost } from './native-global-dialog-host';
+import { createNativeImageGalleryHost } from './native-image-gallery-host';
 import {
   registerNativeIpc,
   registerNativeModelPreferenceIpc,
@@ -136,6 +137,7 @@ const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
     : 'none';
 let window: NativeRootWindow | undefined, caller: NativeCaller | undefined;
 let globalDialogOwner: ReturnType<typeof createNativeGlobalDialogHost> | undefined;
+let imageGalleryOwner: ReturnType<typeof createNativeImageGalleryHost> | undefined;
 let tray: Tray | undefined;
 let opening: Promise<NativeCaller> | undefined;
 let closingNativeResources: Promise<void> | undefined;
@@ -471,6 +473,7 @@ function stopNativeProcess(code = 0): void {
     }
   };
   retire(() => globalDialogOwner?.dismiss());
+  retire(() => imageGalleryOwner?.dismiss());
   retire(() => closingTray?.destroy());
   retire(() => {
     if (closingWindow && !closingWindow.isDestroyed()) closingWindow.hide();
@@ -629,56 +632,69 @@ void app
       },
     };
     window = createNativeRootWindow(windowOptions);
+    const createModalView = (kind: 'global-dialog' | 'image-gallery') => {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: join(app.getAppPath(), `${kind}-preload.cjs`),
+          partition: `kite-${kind}-${randomUUID()}`,
+          contextIsolation: true,
+          sandbox: true,
+          nodeIntegration: false,
+          nodeIntegrationInSubFrames: false,
+          webSecurity: true,
+          webviewTag: false,
+          devTools: false,
+          navigateOnDragDrop: false,
+          disableDialogs: true,
+        },
+      });
+      const session = view.webContents.session;
+      session.on('will-download', (event) => event.preventDefault());
+      session.setPermissionCheckHandler(() => false);
+      session.setPermissionRequestHandler((_contents, _permission, complete) => complete(false));
+      session.webRequest.onHeadersReceived((details, complete) =>
+        complete({
+          responseHeaders: {
+            ...details.responseHeaders,
+            'Content-Security-Policy': [desktopContentSecurityPolicy(development)],
+          },
+        }),
+      );
+      const base = new URL('.', rendererUrl);
+      session.webRequest.onBeforeRequest((details, complete) => {
+        let allowed = false;
+        try {
+          const target = new URL(details.url);
+          allowed =
+            (kind === 'image-gallery' && target.protocol === 'blob:') ||
+            (base.protocol === 'file:'
+              ? target.protocol === 'file:' && target.href.startsWith(base.href)
+              : target.origin === base.origin ||
+                (target.protocol === 'ws:' && target.host === base.host));
+        } catch {}
+        complete({ cancel: !allowed });
+      });
+      return view;
+    };
     const globalDialog = createNativeGlobalDialogHost({
       window,
       ipcMain,
       url: new URL('global-dialog.html', rendererUrl).href,
       theme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
-      createView() {
-        const view = new WebContentsView({
-          webPreferences: {
-            preload: join(app.getAppPath(), 'global-dialog-preload.cjs'),
-            partition: `kite-global-dialog-${randomUUID()}`,
-            contextIsolation: true,
-            sandbox: true,
-            nodeIntegration: false,
-            nodeIntegrationInSubFrames: false,
-            webSecurity: true,
-            webviewTag: false,
-            devTools: false,
-            navigateOnDragDrop: false,
-            disableDialogs: true,
-          },
-        });
-        const session = view.webContents.session;
-        session.setPermissionCheckHandler(() => false);
-        session.setPermissionRequestHandler((_contents, _permission, complete) => complete(false));
-        session.webRequest.onHeadersReceived((details, complete) =>
-          complete({
-            responseHeaders: {
-              ...details.responseHeaders,
-              'Content-Security-Policy': [desktopContentSecurityPolicy(development)],
-            },
-          }),
-        );
-        const base = new URL('.', rendererUrl);
-        session.webRequest.onBeforeRequest((details, complete) => {
-          let allowed = false;
-          try {
-            const target = new URL(details.url);
-            allowed =
-              base.protocol === 'file:'
-                ? target.protocol === 'file:' && target.href.startsWith(base.href)
-                : target.origin === base.origin ||
-                  (target.protocol === 'ws:' && target.host === base.host);
-          } catch {}
-          complete({ cancel: !allowed });
-        });
-        return view;
-      },
+      createView: () => createModalView('global-dialog'),
     });
     globalDialogOwner = globalDialog;
     globalDialog.prewarm();
+    const imageGallery = createNativeImageGalleryHost({
+      window,
+      ipcMain,
+      rootUrl: rendererUrl,
+      url: new URL('image-gallery.html', rendererUrl).href,
+      theme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+      createView: () => createModalView('image-gallery'),
+    });
+    imageGalleryOwner = imageGallery;
+    imageGallery.prewarm();
     if (process.platform === 'darwin')
       Menu.setApplicationMenu(Menu.buildFromTemplate(nativeRootWindowMenu(window)));
     if (process.platform === 'win32') {
@@ -699,6 +715,7 @@ void app
           if (
             !quitting &&
             !globalDialog.active() &&
+            !imageGallery.active() &&
             window &&
             !window.isDestroyed() &&
             window.webContents.mainFrame.url.split('#')[0] === rendererUrl
@@ -727,7 +744,11 @@ void app
           const menu = Menu.buildFromTemplate(
             nativeWindowMenuTemplate({
               ...menuOptions,
-              applicationEnabled: request.applicationEnabled && !quitting && !globalDialog.active(),
+              applicationEnabled:
+                request.applicationEnabled &&
+                !quitting &&
+                !globalDialog.active() &&
+                !imageGallery.active(),
             }),
           ).getMenuItemById(request.menu)!.submenu!;
           return new Promise<void>((resolve) =>
@@ -743,6 +764,7 @@ void app
     } else if (process.platform !== 'darwin') window.removeMenu();
     const updateSystemBackground = () => {
       globalDialog.syncTheme();
+      imageGallery.syncTheme();
       if (window && !window.isDestroyed()) {
         window.setBackgroundColor(
           windowMaterial !== 'none'

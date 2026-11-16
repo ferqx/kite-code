@@ -120,7 +120,13 @@ async function buildNativeApp(
       .update(await readFile(join(outdir, 'profile-access.js')))
       .digest('hex'),
   };
-  for (const entry of ['main', 'preload', 'global-dialog-preload', 'trajectory-preload']) {
+  for (const entry of [
+    'main',
+    'preload',
+    'global-dialog-preload',
+    'image-gallery-preload',
+    'trajectory-preload',
+  ]) {
     const result = await Bun.build({
       entrypoints: [join(root, 'electron', `${entry}.ts`)],
       target: 'node',
@@ -138,7 +144,7 @@ async function buildNativeApp(
     });
     if (!result.success) throw new AggregateError(result.logs, 'native_build_failed');
   }
-  // Development loads both Root and global-dialog.html from its Vite server.
+  // Development loads Root and the fixed modal renderers from its Vite server.
   // Only fixed renderers need production HTML, CSS/fonts and JavaScript here.
   if (process.platform === 'win32') privateDirectory(join(outdir, 'assets'));
   if (!development)
@@ -165,15 +171,18 @@ async function buildNativeApp(
           input: {
             main: join(root, 'index.html'),
             'global-dialog': join(root, 'global-dialog.html'),
+            'image-gallery': join(root, 'image-gallery.html'),
             trajectory: join(root, 'trajectory.html'),
           },
           output: {
             entryFileNames: (chunk) =>
               chunk.name === 'global-dialog'
                 ? 'global-dialog-renderer.js'
-                : chunk.name === 'trajectory'
-                  ? 'trajectory-renderer.js'
-                  : 'renderer.js',
+                : chunk.name === 'image-gallery'
+                  ? 'image-gallery-renderer.js'
+                  : chunk.name === 'trajectory'
+                    ? 'trajectory-renderer.js'
+                    : 'renderer.js',
           },
         },
       },

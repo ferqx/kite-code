@@ -1,3 +1,4 @@
+import type { ImagePreviewSource } from '@kite-ai/ui/desktop';
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react';
 import {
   encodeInputImageChunk,
@@ -23,6 +24,7 @@ type ImageDraft = {
   error?: string;
   errorKind?: 'system';
   previewError?: string;
+  previewSource?: ImagePreviewSource;
 };
 const mediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
 type FileDraft = {
@@ -48,6 +50,9 @@ export function useNativeInputImages(
   // biome-ignore lint/correctness/useExhaustiveDependencies: Derived content cannot cross a connection, generation or Store boundary.
   const previews = useMemo(() => new NativeImagePreviews(), [bridge, generation, storeId]);
   const drafts = useRef(new Map<string, (ImageDraft | FileDraft)[]>());
+  // Retain original Files under the existing draft budgets, never original URLs.
+  // Stale UI callbacks only hold the item, not the removed File's bytes.
+  const originals = useRef(new Map<ImageDraft, { file: File; mediaType: string; blob?: Blob }>());
   const preparation = useRef(Promise.resolve());
   const preparingFiles = useRef(new Set<AbortController>());
   const preparedFiles = useRef(new Set<string>());
@@ -76,11 +81,31 @@ export function useNativeInputImages(
               .request({ method: 'input.images.release', generation, id: image.id })
               .catch(() => {});
         }
+      originals.current.clear();
       drafts.current.clear();
     };
   }, [bridge, generation, storeId, previews]);
   function all(key: string) {
     return drafts.current.get(key)?.filter((image) => image.generation === generation) ?? [];
+  }
+  function originalSource(key: string, item: ImageDraft): ImagePreviewSource {
+    return {
+      load: async (signal) => {
+        signal.throwIfAborted();
+        const original = originals.current.get(item);
+        if (
+          !original ||
+          item.abort.signal.aborted ||
+          current.current.bridge !== bridge ||
+          current.current.generation !== item.generation ||
+          current.current.storeId !== storeId ||
+          !drafts.current.get(key)?.includes(item)
+        )
+          throw Error('input_image_draft_inactive');
+        original.blob ??= original.file.slice(0, original.file.size, original.mediaType);
+        return original.blob;
+      },
+    };
   }
   function get(key: string) {
     return all(key).filter((item): item is ImageDraft => 'url' in item);
@@ -145,6 +170,8 @@ export function useNativeInputImages(
           continue;
         }
         image.abort.abort();
+        originals.current.delete(image);
+        image.previewSource = undefined;
         if (image.url) URL.revokeObjectURL(image.url);
         if (bridge && generation)
           void bridge
@@ -160,7 +187,11 @@ export function useNativeInputImages(
   }
   function move(from: string, to: string) {
     if (from === to || !drafts.current.has(from)) return;
-    drafts.current.set(to, [...all(to), ...all(from)]);
+    const moved = all(from);
+    for (const item of moved)
+      if ('url' in item && originals.current.has(item))
+        item.previewSource = originalSource(to, item);
+    drafts.current.set(to, [...all(to), ...moved]);
     drafts.current.delete(from);
     redraw();
   }
@@ -226,6 +257,8 @@ export function useNativeInputImages(
         continue;
       }
       item.size = file.size;
+      originals.current.set(item, { file, mediaType });
+      item.previewSource = originalSource(key, item);
       reserved += file.size;
       const alive = () =>
         !item.abort.signal.aborted &&
@@ -281,6 +314,8 @@ export function useNativeInputImages(
           if (item.url) URL.revokeObjectURL(item.url);
           item.url = '';
           item.size = 0;
+          originals.current.delete(item);
+          item.previewSource = undefined;
           item.errorKind = 'system';
           item.error = attachmentHostOutdated(error)
             ? '图片附件功能尚未加载，请完全退出并重新打开应用。'

@@ -39,6 +39,7 @@ import {
   FullPermissionConfirmationDialog,
   fullPermissionConfirmationCopy,
 } from './FullPermissionConfirmationDialog';
+import { ImageGallery, type ImagePreviewSource } from './ImageGallery';
 import { cn } from './lib/utils';
 import { ModelEffortSelector, type ModelOption, type ThinkingEffort } from './ModelEffortSelector';
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
@@ -147,6 +148,8 @@ export interface ComposerProps {
     error?: string;
     errorKind?: 'system';
     previewError?: string;
+    /** Original admitted by the host; url remains the inexpensive draft thumbnail. */
+    previewSource?: ImagePreviewSource;
   }[];
   onRemoveImage?: (id: string) => void;
   imageError?: string;
@@ -275,6 +278,7 @@ export function Composer(props: ComposerProps) {
   const [pickingFiles, setPickingFiles] = useState(false);
   const [preparingFiles, setPreparingFiles] = useState(false);
   const [fileError, setFileError] = useState<string>();
+  const [previewImageId, setPreviewImageId] = useState<string | null>(null);
   useLayoutEffect(() => {
     if (current.current.scopeKey !== props.scopeKey) {
       fileDialog.current = null;
@@ -686,6 +690,17 @@ export function Composer(props: ComposerProps) {
   return (
     <ReadGate blocked={props.readOnly}>
       {props.context}
+      <ImageGallery
+        images={(props.images ?? []).map((image) => ({
+          id: image.id,
+          name: image.name,
+          source: image.previewSource ?? (image.url ? { src: image.url } : undefined),
+        }))}
+        selectedId={previewImageId}
+        onSelectedIdChange={setPreviewImageId}
+        scopeKey={props.scopeKey}
+        disabled={props.disabled || props.readOnly || props.promptHidden}
+      />
       <form
         ref={form}
         className="composer"
@@ -765,16 +780,20 @@ export function Composer(props: ComposerProps) {
             ))}
             {props.images?.map((image) => (
               <div className="composer-attachment" key={image.id}>
-                <div
-                  className="composer-attachment-preview"
+                <button
+                  type="button"
+                  className="composer-attachment-preview composer-image-preview-trigger"
+                  aria-label={`预览图片 ${image.name}`}
                   aria-busy={(!image.url && !image.previewError && !image.error) || undefined}
+                  disabled={props.disabled || props.readOnly}
+                  onClick={() => setPreviewImageId(image.id)}
                 >
                   {image.url ? (
                     <img src={image.url} alt={image.name} decoding="async" />
                   ) : image.previewError || image.error ? (
                     !onError && <span>{image.previewError ?? '预览不可用'}</span>
                   ) : null}
-                </div>
+                </button>
                 <span
                   className="composer-attachment-name"
                   title={

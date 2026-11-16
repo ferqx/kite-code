@@ -111,6 +111,7 @@ import { useNativeFileTargets } from './native-file-targets';
 import { confirmNativeFullPermission } from './native-full-permission-confirmation';
 import { NativeGeneralSettings } from './native-general-settings';
 import { type HistoryState, NativeHistory } from './native-history';
+import { NativeImageGalleryProvider } from './native-image-gallery';
 import {
   nativeAskUserAwaitingAnswer,
   nativeInputErrorText,
@@ -253,7 +254,9 @@ export function NativeDesktop({
   const bridge = window.kiteNative;
   return bridge ? (
     <NativeDiagnosticsProvider enabled={testDiagnostics}>
-      <NativeDesktopContent bridge={bridge} nativeWindow={nativeWindow} />
+      <NativeImageGalleryProvider nativeWindow={nativeWindow}>
+        <NativeDesktopContent bridge={bridge} nativeWindow={nativeWindow} />
+      </NativeImageGalleryProvider>
     </NativeDiagnosticsProvider>
   ) : nativeWindow ? (
     <NativeWindowFrame showHeader={false}>

@@ -177,3 +177,102 @@ test('pending original payloads and queue count have bounded admission and cance
     f.previews.clear();
   }
 });
+
+test('original blobs are shared only within one exact admission period and every identity dimension remains distinct', () => {
+  const f = fixture();
+  try {
+    const scope = f.previews.createOriginalScope('generation/selection/epoch/child/message');
+    const identity = {
+      key: 'message/index/full-reference',
+      hash: hash(1),
+      mediaType: source.type,
+      size: source.size,
+    };
+    expect(f.previews.rememberOriginal(scope, identity, source)).toBe(true);
+    expect(f.previews.getOriginal(scope, identity)).toBe(source);
+    for (const changed of [
+      { ...identity, key: 'different-message/index/reference' },
+      { ...identity, hash: hash(2) },
+      { ...identity, mediaType: 'image/jpeg' },
+      { ...identity, size: identity.size + 1 },
+    ])
+      expect(f.previews.getOriginal(scope, changed)).toBeUndefined();
+    const parallel = f.previews.createOriginalScope(scope.key);
+    expect(f.previews.getOriginal(parallel, identity)).toBeUndefined();
+    f.previews.retireOriginalScope(scope);
+    expect(f.previews.getOriginal(scope, identity)).toBeUndefined();
+    expect(f.previews.rememberOriginal(scope, identity, source)).toBe(false);
+    expect(f.previews.rememberOriginal(parallel, identity, source)).toBe(true);
+    expect(f.previews.getOriginal(parallel, identity)).toBe(source);
+    f.previews.clear();
+    expect(f.previews.getOriginal(parallel, identity)).toBeUndefined();
+    expect(f.previews.rememberOriginal(parallel, identity, source)).toBe(false);
+  } finally {
+    f.previews.clear();
+  }
+});
+
+test('original LRU has one window-wide 64 MiB and 32-entry budget across scopes, separate from thumbnails', async () => {
+  const f = fixture();
+  try {
+    const scopes = [f.previews.createOriginalScope('a'), f.previews.createOriginalScope('b')];
+    const large = new Blob([new Uint8Array(16 * 1024 * 1024)], { type: 'image/png' });
+    const identity = (index: number) => ({
+      key: String(index),
+      hash: hash(index),
+      mediaType: large.type,
+      size: large.size,
+    });
+    for (let index = 0; index < 4; index++)
+      expect(f.previews.rememberOriginal(scopes[index % 2], identity(index), large)).toBe(true);
+    expect(f.previews.getOriginal(scopes[0], identity(0))).toBe(large);
+    f.previews.rememberOriginal(scopes[0], identity(4), large);
+    expect(f.previews.getOriginal(scopes[1], identity(1))).toBeUndefined();
+    expect(f.previews.getOriginal(scopes[0], identity(0))).toBe(large);
+    f.previews.clear();
+    const scope = f.previews.createOriginalScope('small');
+    const smallIdentity = (index: number) => ({
+      key: String(index),
+      hash: hash(index),
+      mediaType: source.type,
+      size: source.size,
+    });
+    for (let index = 0; index < 32; index++)
+      f.previews.rememberOriginal(scope, smallIdentity(index), source);
+    f.previews.getOriginal(scope, smallIdentity(0));
+    f.previews.rememberOriginal(scope, smallIdentity(32), source);
+    expect(f.previews.getOriginal(scope, smallIdentity(1))).toBeUndefined();
+    expect(f.previews.getOriginal(scope, smallIdentity(0))).toBe(source);
+    const thumbnail = f.previews.prepare(source, hash(0), signal());
+    f.workers[0]!.complete();
+    expect((await thumbnail).blob).not.toBe(source);
+    f.previews.retireOriginalScope(scope);
+    expect((await f.previews.prepare(source, hash(0), signal())).blob).not.toBe(source);
+    expect(f.workers[0]!.messages).toHaveLength(1);
+  } finally {
+    f.previews.clear();
+  }
+});
+
+test('invalid original metadata and foreign scope tokens never enter the original bucket', () => {
+  const f = fixture();
+  const other = fixture();
+  try {
+    const scope = f.previews.createOriginalScope('exact');
+    const identity = { key: 'image', hash: hash(1), mediaType: source.type, size: source.size };
+    expect(
+      f.previews.rememberOriginal(other.previews.createOriginalScope('exact'), identity, source),
+    ).toBe(false);
+    expect(f.previews.rememberOriginal(scope, { ...identity, hash: 'bad' }, source)).toBe(false);
+    expect(f.previews.rememberOriginal(scope, { ...identity, size: source.size + 1 }, source)).toBe(
+      false,
+    );
+    expect(
+      f.previews.rememberOriginal(scope, { ...identity, mediaType: 'image/jpeg' }, source),
+    ).toBe(false);
+    expect(f.previews.getOriginal(scope, identity)).toBeUndefined();
+  } finally {
+    f.previews.clear();
+    other.previews.clear();
+  }
+});

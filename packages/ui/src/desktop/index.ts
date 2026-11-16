@@ -95,6 +95,15 @@ export {
   type ApplicationConfirmationDialogProps,
   FullPermissionConfirmationDialog,
 } from './FullPermissionConfirmationDialog';
+export {
+  ImageGallery,
+  ImageGalleryHostContext,
+  type ImageGalleryItem,
+  type ImageGalleryPresentationProps,
+  type ImageGalleryProps,
+  ImageGallerySurface,
+  type ImagePreviewSource,
+} from './ImageGallery';
 export { MessageAttachments } from './MessageAttachments';
 export { MessageContent, WebLinkContext } from './MessageContent';
 export { MessageCopyButton } from './MessageCopyButton';

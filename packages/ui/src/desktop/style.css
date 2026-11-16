@@ -8068,3 +8068,255 @@ body {
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+/* Uses the same Radix dialog layer and dimming as application confirmations. */
+.image-gallery-dialog {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  transform: none;
+  translate: none;
+  background: transparent;
+  color: #fff;
+  box-shadow: none;
+  font-family: var(--font-sans, sans-serif);
+  overscroll-behavior: contain;
+}
+.image-gallery-toolbar {
+  position: absolute;
+  z-index: 2;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  left: max(24px, env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.image-gallery-caption {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  margin-right: 16px;
+  color: #c9c9c9;
+  font-size: 12px;
+}
+.image-gallery-caption > :where(:first-child) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-gallery-caption > :where(:last-child) {
+  flex: none;
+}
+.image-gallery-control,
+.image-gallery-zoom-reset,
+.image-gallery-retry {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid transparent;
+  color: #fff;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-app-region: no-drag;
+}
+.image-gallery-control {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #2b2b2b;
+}
+.image-gallery-control > :where(svg) {
+  width: 16px;
+  height: 16px;
+}
+.image-gallery-control:hover:not(:disabled),
+.image-gallery-zoom-reset:hover:not(:disabled),
+.image-gallery-retry:hover {
+  background: #484848;
+}
+.image-gallery-control:focus-visible,
+.image-gallery-zoom-reset:focus-visible,
+.image-gallery-retry:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+.image-gallery-control:disabled,
+.image-gallery-zoom-reset:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.image-gallery-previous,
+.image-gallery-next {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.image-gallery-previous {
+  left: max(16px, env(safe-area-inset-left));
+}
+.image-gallery-next {
+  right: max(16px, env(safe-area-inset-right));
+}
+.image-gallery-viewport {
+  position: absolute;
+  inset: 80px 76px;
+  display: flex;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.image-gallery-stage {
+  flex: none;
+  width: 100%;
+  height: 100%;
+  margin: auto;
+}
+.image-gallery-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.image-gallery-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  color: #dedede;
+  font-size: 14px;
+}
+.image-gallery-status > :where(svg) {
+  width: 24px;
+  height: 24px;
+}
+.image-gallery-retry {
+  min-height: 32px;
+  padding: 4px 16px;
+  border-color: #666;
+  border-radius: 8px;
+  background: #2b2b2b;
+}
+.image-gallery-zoom {
+  min-width: 0;
+  margin: 0;
+  position: absolute;
+  z-index: 2;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #4d4d4d;
+  border-radius: 24px;
+  background: #2b2b2b;
+  transform: translateX(-50%);
+}
+.image-gallery-zoom > .image-gallery-control {
+  width: 30px;
+  height: 30px;
+  background: #424242;
+}
+.image-gallery-zoom-reset {
+  min-width: 48px;
+  height: 30px;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.kite-client .composer-image-preview-trigger {
+  padding: 0;
+  border: 0;
+  cursor: zoom-in;
+}
+.kite-client .composer-image-preview-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.kite-client .composer-image-preview-trigger:disabled {
+  cursor: default;
+}
+@media (max-width: 480px) {
+  .image-gallery-viewport {
+    inset: 76px 52px;
+  }
+  .image-gallery-previous {
+    left: 8px;
+  }
+  .image-gallery-next {
+    right: 8px;
+  }
+}
+
+.kite-client .image-gallery-trigger {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+}
+.kite-client .image-gallery-trigger > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.kite-client .image-gallery-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.kite-client .image-gallery-trigger:disabled {
+  cursor: default;
+}
+
+/* A candidate decodes without replacing the displayed image or its caption. */
+.image-gallery-candidate {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.image-gallery-transition-status {
+  inset: auto auto 12px 50%;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgb(20 20 20 / 90%);
+  transform: translateX(-50%);
+  gap: 8px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.image-gallery-transition-status > :where(svg) {
+  width: 16px;
+  height: 16px;
+}
