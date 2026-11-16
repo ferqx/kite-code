@@ -784,6 +784,144 @@ test('interleaved steers and child mail share input bubbles in one process throu
   }
 });
 
+test('separate trace segments keep their own lifecycle while only the tail carries turn progress', () => {
+  const old: Message = {
+    ...thinking('run'),
+    id: 'old-thought',
+    reasoningSource: 'old-model',
+    settled: true,
+  };
+  const done: Message = {
+    id: 'read',
+    turnId: 'run',
+    role: 'tool',
+    toolName: 'read_file',
+    text: '',
+    status: 'completed',
+    settled: true,
+  };
+  const next: Message = { ...thinking('run'), id: 'next-thought', reasoningSource: 'next-model' };
+  const boundaries: Message[] = [
+    { id: 'prose', turnId: 'run', role: 'assistant', text: 'Real stage prose', settled: true },
+    {
+      id: 'steer',
+      turnId: 'run',
+      inputKind: 'input.steer',
+      role: 'user',
+      text: 'Original guidance',
+      settled: true,
+    },
+    {
+      id: 'mail',
+      turnId: 'run',
+      role: 'system',
+      systemKind: 'agent_message',
+      text: 'Original agent mail',
+      settled: true,
+    },
+    {
+      id: 'connection',
+      turnId: 'run',
+      role: 'system',
+      systemKind: 'model_connection',
+      text: 'Reconnecting',
+      status: 'running',
+      settled: false,
+    },
+    {
+      id: 'result',
+      turnId: 'run',
+      role: 'system',
+      systemKind: 'agent_result',
+      text: 'Original child result',
+      settled: true,
+    },
+  ];
+  for (const boundary of boundaries) {
+    for (const [status, executionUnconfirmed, expected] of [
+      ['running', false, '正在思考…'],
+      ['running', true, '执行状态待确认'],
+      ['waiting', false, '正在等待'],
+      ['cancelling', false, '正在停止'],
+      ['recovery_required', false, '需要恢复'],
+      ['completed', false, '思考'],
+      ['cancelled', false, '思考'],
+      ['failed', false, '思考'],
+    ] as const) {
+      const dom = new JSDOM(
+        renderToStaticMarkup(
+          <Conversation
+            traceTurns
+            selected
+            connected
+            loading={false}
+            saveReading={() => {}}
+            messages={[old, done, boundary, next]}
+            turnActivity={{ turnId: 'run', status, executionUnconfirmed }}
+            initialReading={{ top: 0, follow: false, expanded: { 'turn:run:complete': true } }}
+          />,
+        ),
+      );
+      const headings = [...dom.window.document.querySelectorAll('.conversation-trace > button')];
+      expect(headings).toHaveLength(2);
+      expect(headings.map((heading) => heading.textContent)).toEqual(['已读取文件', expected]);
+      expect(headings[0]!.querySelector('[data-status="running"]')).toBeNull();
+      expect(dom.window.document.body.textContent).not.toContain('PRIVATE REASONING');
+      dom.window.close();
+    }
+  }
+});
+
+test('a non-tail trace preserves its own active tool without lending activity to settled siblings', () => {
+  const pending: Message = {
+    id: 'read',
+    turnId: 'run',
+    role: 'tool',
+    toolName: 'read_file',
+    text: '',
+    status: 'running',
+    settled: false,
+  };
+  for (const splitEntry of [false, true]) {
+    for (const status of ['running', 'completed', 'cancelled', 'unknown'] as const) {
+      const tool = { ...pending, status, settled: status !== 'running' };
+      const boundary: Message = splitEntry
+        ? {
+            id: 'result',
+            turnId: 'run',
+            role: 'system',
+            systemKind: 'agent_result',
+            text: 'Child result',
+            settled: true,
+          }
+        : { id: 'stage', turnId: 'run', role: 'assistant', text: 'Stage prose', settled: true };
+      for (const executionUnconfirmed of [false, true]) {
+        const dom = new JSDOM(
+          renderToStaticMarkup(
+            <Conversation
+              traceTurns
+              selected
+              connected
+              loading={false}
+              saveReading={() => {}}
+              messages={[tool, boundary, { ...thinking('run'), id: 'next-thought' }]}
+              turnActivity={{ turnId: 'run', status: 'running', executionUnconfirmed }}
+            />,
+          ),
+        );
+        const headings = [...dom.window.document.querySelectorAll('.conversation-trace > button')];
+        expect(headings).toHaveLength(2);
+        expect(!!headings[0]!.querySelector('[data-status="running"]')).toBe(
+          status === 'running' && !executionUnconfirmed,
+        );
+        expect(headings[0]!.textContent).not.toMatch(/正在回复|正在思考/);
+        if (status !== 'completed') expect(headings[0]!.textContent).not.toContain('已读取');
+        dom.window.close();
+      }
+    }
+  }
+});
+
 test('an active trace never falls back to completed statistics between model and tool events', () => {
   const done: Message = {
     id: 'read',

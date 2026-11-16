@@ -576,6 +576,8 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 Native 主会话启用 [ConversationTrace](src/desktop/ConversationTrace.tsx)，共享 Trace 的折叠根、标题和内容。宿主提供准确的轮次、流式正文、公开思考来源和工具事实。相邻的思考和工具复用同一标题与阅读 key，首条工具可以直接展开其结果，后来加入的步骤保持各自的阅读状态。工具标题复用 `ToolActivity` 的图标映射，思考行始终使用思考图标，多步工具摘要使用流程图标。展开后的 `TraceLine` 共用行内缩进、图标宽度和图文间距。多步列表与各项展开详情分别绘制左侧竖线，详情竖线位于原折叠内容内，随原展开与收起过渡裁切。首次展开前不构造步骤内容；整条思维链与思考正文随会话滚动，单项工具沿各自输出组件处理溢出。[Native 工具回归](../../apps/desktop/test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖并行顺序、元数据延迟和回执接管。
 
+[Conversation](src/desktop/Conversation.tsx)把轮次交接与每段 Trace 的生命周期分开：仅最后一个轮次片段的末尾 Trace、且没有流式回复接管时承接正在回复／等待／停止／待确认提示。旧段沿本段原事实总结，不借整轮活动；确实仍在运行的原工具即使隔着正文或独立子结果也保留活动，原 Run 终态与执行权待核实优先停止活动。没有段终态的思考保持中性“思考”，不因整轮结束补造已完成；待确认标题不绘制运行动画。原消息与阅读 key、不对外展示思考正文的默认折叠边界保持。[分段回归](test/desktop-reasoning-turns.test.tsx)覆盖正文、引导、来信、重连与子结果的边界、跨段真实工具和终态。
+
 Native 主会话最后一个轮次片段复用「用时」折叠控件与 `turn:<id>:complete` 阅读状态。折叠时延迟构造过程，过程中各段思维链仍沿原阅读 key 开合；独立消息保留原先顺序。流式末段和同一消息的最终回复复用正文节点。没有可展开过程时显示静态耗时。[Native 历史回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核对冷打开、展开及缓存恢复。
 
 单条 `wait_agent_events` 沿 `ToolActivity` 直接打开结果，多个相邻步骤仍由 `ConversationTrace` 聚合。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核对单条等待在折叠、展开和运行时只呈现一个工具标题。单条思考、单条工具和组内步骤的详情共同使用折叠内容内的竖线样式，和思维链外层竖线一样按 `--ui-icon-size` 对准各自图标中心。Native 准备回复和流式回复状态与同层工具行共用 `--conversation-line-height`，文字与正文共用 `--conversation-text-size`。

@@ -199,14 +199,25 @@ try {
         probe.violations.push(`${kind}:${probe.phase}:premature_final`);
       if (probe.phase === 'settled' && visible.includes('正在思考'))
         probe.violations.push(`${kind}:settled:thinking_after_final`);
+      const segments = [...conversation.querySelectorAll('.conversation-trace > button')].map(
+        (button) => ({
+          text: button.textContent,
+          running: !!button.querySelector('[data-status="running"]'),
+        }),
+      );
+      if (visible.includes('PUBLIC_STAGE_PROSE') && segments.length > 1) {
+        if (segments[0]?.running || /正在|待确认/.test(segments[0]?.text ?? ''))
+          probe.violations.push(`${kind}:${probe.phase}:settled_segment_borrowed_turn_activity`);
+      }
       const value = {
         phase: probe.phase,
         assistants,
         thinking: visible.includes('正在思考'),
         final,
+        segments,
         at: performance.now(),
       };
-      const signature = JSON.stringify([value.phase, assistants, value.thinking, final]);
+      const signature = JSON.stringify([value.phase, assistants, value.thinking, final, segments]);
       if (signature !== last) {
         probe.samples.push(value);
         last = signature;
@@ -467,6 +478,11 @@ try {
   await until(content, (value) => value.includes('正在思考'), 'third Model thinking indicator');
   await page.waitForTimeout(300);
   await checkReasoning('second-reasoning', 1);
+  assert.deepEqual(
+    await page.locator('.conversation-trace > button').allTextContents(),
+    ['已思考', '正在思考…'],
+    'the completed first segment never inherits the current Model phase',
+  );
   const toolTrace = page
     .locator('.conversation-trace')
     .filter({ hasText: /正在思考|已读取文件/ })

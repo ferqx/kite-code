@@ -220,6 +220,136 @@ const tool = (id: string): NativeToolMessageFact => ({
   target: `${id}.txt`,
 });
 
+test('Native model segments retain exact reasoning identity through prose, observation loss and cold terminal history', async () => {
+  const f = fixture();
+  const first: Message = {
+    ...message('first-model-message', 'assistant', '2', 'Original stage prose'),
+    sourceIds: ['first-model'],
+    firstOutput: 'reasoning',
+    toolCalls: [{ id: 'read-call', name: 'read_file', arguments: '{}' }],
+  };
+  const next: Message = {
+    ...message('second-model-message', 'assistant', '3', ''),
+    status: 'incomplete',
+    sourceIds: ['second-model'],
+    firstOutput: 'reasoning',
+  };
+  const execution = (id: string, status: NativeToolExecution['status']): NativeToolExecution => ({
+    id,
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'r',
+    kind: 'model',
+    definitionId: 'model',
+    definitionVersion: '1',
+    status,
+    resultRevision: '1',
+    cancelRequestedAt: null,
+  });
+  const turnId = JSON.stringify(['native-run', 'store', 's', 'r']);
+  let reading: import('../../../../packages/ui/src/desktop/Conversation').ReadingState | undefined;
+  const draw = async (
+    status: NativeRunFact['status'] = 'running',
+    unconfirmed = false,
+    cold = false,
+  ) => {
+    const active = status === 'running';
+    const transcript = desktopTranscript({
+      storeId: 'store',
+      sessionId: 's',
+      tools: [],
+      traceTurns: true,
+      messages: [first, { ...next, status: active ? 'incomplete' : 'complete' }],
+      runs: [{ ...run(), status, isActive: active, finishedAt: active ? null : 3000 }],
+      executions: cold
+        ? []
+        : [
+            execution('first-model', 'succeeded'),
+            execution('second-model', active ? 'running' : 'succeeded'),
+          ],
+    });
+    const thoughts = transcript.messages.filter((entry) => entry.role === 'thinking');
+    expect(thoughts.map((entry) => entry.reasoningSource)).toEqual([first.id, next.id]);
+    expect(thoughts.map((entry) => entry.settled)).toEqual([true, !active]);
+    expect(thoughts.map((entry) => entry.presentationKey)).toEqual([
+      JSON.stringify(['native-reasoning', turnId, 'first-model']),
+      JSON.stringify(['native-reasoning', turnId, 'second-model']),
+    ]);
+    if (cold) await act(async () => f.root.render(null));
+    await act(async () =>
+      f.root.render(
+        <Conversation
+          {...transcript}
+          traceTurns
+          selected
+          connected
+          loading={false}
+          saveReading={(value) => {
+            reading = value;
+          }}
+          initialReading={reading}
+          turnActivity={
+            transcript.turnActivity && {
+              ...transcript.turnActivity,
+              executionUnconfirmed: unconfirmed,
+            }
+          }
+          renderReasoning={(model, open) =>
+            open ? (
+              <p data-source={model.reasoningSource}>
+                Public reasoning from {model.reasoningSource}
+              </p>
+            ) : null
+          }
+        />,
+      ),
+    );
+  };
+  try {
+    await draw();
+    const headings = () => [
+      ...f.host.querySelectorAll<HTMLButtonElement>('.conversation-trace > button'),
+    ];
+    expect(headings().map((entry) => entry.textContent)).toEqual(['已思考', '正在思考…']);
+    const firstHeading = headings()[0]!;
+    await act(async () => firstHeading.click());
+    const body = f.host.querySelector('[data-source="first-model-message"]')!;
+    expect(body.closest('.conversation-reasoning-body')).not.toBeNull();
+    for (const unconfirmed of [true, false, true, false]) {
+      await draw('running', unconfirmed);
+      expect(headings()[0]).toBe(firstHeading);
+      expect(f.host.querySelector('[data-source="first-model-message"]')).toBe(body);
+      expect(headings().map((entry) => entry.textContent)).toEqual([
+        '已思考',
+        unconfirmed ? '执行状态待确认' : '正在思考…',
+      ]);
+      expect(headings()[0]!.querySelector('[data-status="running"]')).toBeNull();
+      if (unconfirmed) expect(headings()[1]!.querySelector('[data-status="running"]')).toBeNull();
+    }
+    for (const status of ['completed', 'cancelled', 'failed', 'interrupted'] as const) {
+      for (const cold of [false, true]) {
+        await draw(status, false, cold);
+        const summary = f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+        if (summary.getAttribute('aria-expanded') === 'false')
+          await act(async () => summary.click());
+        expect(headings().map((entry) => entry.textContent)).toEqual(['已思考', '已思考']);
+        expect(
+          f.host.querySelector('.conversation-trace > button [data-status="running"]'),
+        ).toBeNull();
+        expect(f.host.querySelectorAll('.message.assistant')).toHaveLength(1);
+        expect(f.host.querySelector('.message.assistant')!.textContent).toContain(
+          'Original stage prose',
+        );
+        expect(f.host.querySelector('.message.assistant')!.textContent).not.toContain(
+          'Public reasoning',
+        );
+      }
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test('a saved prompt takes over its submission DOM without changing Markdown, selection or independent identical inputs', async () => {
   const f = fixture();
   const text = '# 提示词\n\n**说明：**后文\n\n- 列表\n\n```ts\nconst x = 1;\n```';

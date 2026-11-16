@@ -1348,7 +1348,6 @@ export function Conversation({
         const statusContent = <span className="agent-turn-status-label">{finishedLabel}</span>;
         const turnActive =
           !ended &&
-          lastTurnEntry &&
           !activity?.executionUnconfirmed &&
           (!activity || activity.status === 'running' || activity.status === 'waiting');
         const renderBody = (message: Message, showReply = false) => (
@@ -1366,7 +1365,10 @@ export function Conversation({
           blocks.map((block, index) => {
             const first = block[0]!;
             if (!isConversationTraceStep(first)) return renderBody(first);
-            const phaseActive = !ended && lastTurnEntry && !reply;
+            // Turn-level handoff progress belongs only to the trailing segment.
+            // Earlier segments retain their own facts, including a still-running
+            // tool across prose, guidance or a standalone child result.
+            const phaseActive = !ended && lastTurnEntry && !reply && index === blocks.length - 1;
             const tool = turnActive ? latestRunningTraceTool(block) : undefined;
             const trailing = block.at(-1);
             const thinking =
@@ -1420,7 +1422,9 @@ export function Conversation({
                   ? '等待工具执行'
                   : block.some((item) => item.role === 'tool')
                     ? '工具执行'
-                    : '已思考'));
+                    : steps.some((item) => item.role === 'thinking' && !item.settled)
+                      ? '思考'
+                      : '已思考'));
             const boundary = blocks[index - 1]?.[0];
             const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
             if (open && expanded[id] === true) trackOpen(id);
@@ -1431,7 +1435,7 @@ export function Conversation({
                 steps={steps}
                 waitingForTool={!steps.length && trailing?.tracePending === 'tool'}
                 label={summary}
-                running={!!working}
+                running={!!working && !activity?.executionUnconfirmed}
                 failed={!!singleTool && toolTextFailed(singleTool)}
                 processOpen={open}
                 notice={
