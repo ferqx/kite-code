@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import ExcelJS from 'exceljs';
@@ -72,6 +72,13 @@ test.skipIf(process.platform !== 'win32')(
       writeFileSync(join(root, 'fixture.xlsx'), Buffer.from(await workbook.xlsx.writeBuffer()));
       writeFileSync(join(root, 'fixture.docx'), await wordWithFootnote());
       await buildOfficePreviews(root);
+      // Require one real Chromium frame before the renderer can report readiness.
+      for (const format of ['docx', 'xlsx'])
+        appendFileSync(
+          join(root, `${format}-preview.js`),
+          '\n;globalThis.kiteOfficePreviewReady = globalThis.kiteOfficePreviewReady.then(' +
+            '(ready) => new Promise(resolve => requestAnimationFrame(() => resolve(ready))));\n',
+        );
       const built = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../office-readonly-host.fixture.ts')],
         target: 'node',

@@ -45,7 +45,6 @@ void app
         contextIsolation: true,
         nodeIntegration: false,
         preload: join(root, 'preload.cjs'),
-        backgroundThrottling: false,
       },
     });
     const primary = { webContents: window.webContents };
@@ -129,7 +128,7 @@ void app
               return null;
             case 'outputs.info':
               return { kind: 'outputs.info', file: info(request.target.fileId) };
-            case 'outputs.preview.open':
+            case 'outputs.preview.open': {
               if (request.target.fileId === 'A' && ++initialAttempts <= 2) {
                 const success = await new Promise<boolean>((resolve) => {
                   releaseOpen = resolve;
@@ -150,7 +149,11 @@ void app
                   return info(request.target.fileId);
                 },
               });
+              const view = doc();
+              assert.equal(view.getVisible(), false);
+              assert.equal(view.webContents.getBackgroundThrottling(), true);
               return { kind: 'outputs.preview', status: 'ready' };
+            }
             case 'outputs.preview.interaction':
               return {
                 kind: 'outputs.preview.interaction',

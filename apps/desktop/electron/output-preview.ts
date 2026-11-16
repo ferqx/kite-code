@@ -618,8 +618,8 @@ export class NativeOutputPreview {
         const script = await readFile(join(app.getAppPath(), office.script), 'utf8');
         current();
         const contents = view.webContents;
-        // PPT text layout can await animation frames before this hidden view is ready to show.
-        const resumeThrottling = kind === 'powerpoint' && contents.getBackgroundThrottling();
+        // Office renderers can need animation frames and timers while this view is still hidden.
+        const resumeThrottling = contents.getBackgroundThrottling();
         let timeout: ReturnType<typeof setTimeout> | undefined;
         try {
           if (resumeThrottling) contents.setBackgroundThrottling(false);
