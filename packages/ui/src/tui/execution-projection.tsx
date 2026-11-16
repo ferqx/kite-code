@@ -1,4 +1,4 @@
-import type { Execution, Message, ModelOutputSnapshot, SessionView } from '@kite-ai/client';
+import type { Execution, Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { Box } from 'ink';
 import { type TuiSnapshot, terminalText } from './controller';
 import ConcurrentSubAgentBlock from './ink/ConcurrentSubAgentBlock';
@@ -11,6 +11,8 @@ import { buildToolSummaryLine } from './ink/tool-summary-line';
 import type { AgentPlan, ConsolidatedToolEntry, OutputBlock, ToolDisplayStatus } from './ink/types';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 
+const mcpProxy = (definitionId: string) =>
+  /^mcp\.([A-Za-z0-9_-]{1,128})\.([a-f0-9]{32})$/.test(definitionId);
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -128,28 +130,27 @@ export function inkToolName(
   if (execution && snapshot && mcpResourceReceipt(execution, snapshot))
     return definitionId.endsWith('.list') ? 'list_mcp_resources' : 'read_mcp_resource';
   if (execution && snapshot) {
-    const labels = (
-      snapshot as TuiSnapshot & {
-        toolLabels?: readonly {
-          executionId: string;
-          originStoreId: string;
-          sessionId: string;
-          definitionId: string;
-          definitionVersion: string;
-          label: string;
-        }[];
-      }
-    ).toolLabels;
+    const labels = inkExecutionScope(execution, snapshot) ? snapshot.toolLabels : undefined;
     const matches =
       labels?.filter(
         (label) =>
           label.executionId === execution.id &&
           label.originStoreId === execution.originStoreId &&
           label.sessionId === execution.sessionId &&
+          label.runId === execution.runId &&
           label.definitionId === execution.definitionId &&
           label.definitionVersion === execution.definitionVersion,
       ) ?? [];
-    if (matches.length === 1) return terminalText(matches[0]!.label);
+    if (matches.length === 1)
+      return terminalText(matches[0]!.label).replace(
+        /[\p{Cc}\p{Cf}\u2028\u2029]/gu,
+        (character) => {
+          const code = character.codePointAt(0)!;
+          return code <= 0xffff
+            ? `\\u${code.toString(16).padStart(4, '0')}`
+            : `\\u{${code.toString(16)}}`;
+        },
+      );
   }
   const names: Readonly<Record<string, string>> = {
     'builtin.files/files.read': 'read_file',
@@ -578,49 +579,11 @@ export function projectInkTool(
   const shellArgs = shellParent
     ? inkToolArguments(shellParent, snapshot, loadedOutputs)
     : undefined;
-  const proxy = /^mcp\.([A-Za-z0-9_-]{1,128})\.([a-f0-9]{32})$/.exec(execution.definitionId);
-  const labels = snapshot.toolLabels?.filter(
-    (label) =>
-      label.executionId === execution.id &&
-      label.originStoreId === execution.originStoreId &&
-      label.sessionId === execution.sessionId &&
-      label.definitionId === execution.definitionId &&
-      label.definitionVersion === execution.definitionVersion,
-  );
-  let discoveredName: string | undefined;
-  if (proxy && inkExecutionScope(execution, snapshot))
-    for (const source of snapshot.view.executions) {
-      if (
-        source.kind !== 'tool' ||
-        source.definitionId !== 'mcp.tools.search' ||
-        source.definitionVersion !== '1' ||
-        source.status !== 'succeeded' ||
-        !inkExecutionScope(source, snapshot)
-      )
-        continue;
-      const result = record(source.result),
-        body = typeof result?.content === 'string' ? parsed(result.content) : undefined;
-      if (body?.source !== 'frozen_selected_mcp_catalogue' || !Array.isArray(body.items)) continue;
-      const rows = body.items
-        .map(record)
-        .filter(
-          (row) =>
-            !!row &&
-            row.serverId === proxy[1] &&
-            row.definitionId === execution.definitionId &&
-            row.definitionVersion === execution.definitionVersion &&
-            typeof row.remoteName === 'string',
-        );
-      if (rows.length === 1) discoveredName = terminalText(String(rows[0]!.remoteName));
-    }
+  const proxy = mcpProxy(execution.definitionId);
   const name =
-    proxy && labels?.length === 1
-      ? discoveredName
-        ? 'mcp:dynamic_tool'
-        : 'mcp_tool'
-      : shellParent && shellArgs
-        ? 'shell_execute'
-        : terminalText(inkToolName(execution.definitionId, execution, snapshot));
+    shellParent && shellArgs
+      ? 'shell_execute'
+      : terminalText(inkToolName(execution.definitionId, execution, snapshot));
   const args = displayArguments(
     proxy ? {} : (shellArgs ?? inkToolArguments(execution, snapshot, loadedOutputs) ?? {}),
   );
@@ -715,14 +678,14 @@ export function projectInkTool(
           ...(tail.totalLines === undefined ? {} : { liveTotalLines: tail.totalLines }),
         }
       : {}),
-    preview: proxy ? discoveredName : getToolPreview(name, args),
+    preview: proxy ? undefined : getToolPreview(name, args),
     detail:
       name === 'shell_execute' && execution.status === 'cancelled'
         ? getToolPreview(name, args)
         : fileMissing
           ? terminalText(String(args.path ?? ''))
           : proxy
-            ? discoveredName
+            ? undefined
             : getToolDetail(name, args),
     expanded,
     ...(confirmed
@@ -761,9 +724,7 @@ export function projectInkChild(
   if (!parent) return undefined;
   const args = inkToolArguments(parent, snapshot, loadedOutputs);
   if (!args) return undefined;
-  const childViews = (
-    snapshot as TuiSnapshot & { childViews?: readonly { executionId: string; view: SessionView }[] }
-  ).childViews;
+  const childViews = snapshot.childViews;
   const matches =
     childViews?.filter(
       (child) =>
@@ -811,38 +772,50 @@ export function projectInkChild(
     item.rootWorkCommandId === execution.rootWorkCommandId &&
     item.rootWorkSeq === execution.rootWorkSeq;
   const childSnapshot = child
-    ? { ...snapshot, view: child, messages: child.messages, executionTimings: undefined }
+    ? {
+        ...snapshot,
+        view: child,
+        messages: child.messages,
+        executionTimings: undefined,
+        toolLabels: matches[0]!.toolLabels,
+      }
     : undefined;
   const steps = childSnapshot
-    ? childSnapshot.view.executions.filter(exactChildExecution).map((item) => ({
-        stepId: item.id,
-        toolCallId: item.toolCallId ?? item.id,
-        toolName: terminalText(inkToolName(item.definitionId, item, childSnapshot)),
-        toolArgs: displayArguments(
-          frozenBuiltin(item, childSnapshot, 'builtin.files', 'files.search') &&
-            (inkToolArguments(item, childSnapshot)?.path === undefined ||
-              inkToolArguments(item, childSnapshot)?.path === '')
-            ? { ...inkToolArguments(item, childSnapshot), path: '.' }
-            : (inkToolArguments(item, childSnapshot) ?? {}),
-        ),
-        status:
-          item.status === 'succeeded'
-            ? ('success' as const)
-            : item.status === 'failed' || item.status === 'outcome_unknown'
-              ? ('error' as const)
-              : item.status === 'cancelled'
-                ? ('cancelled' as const)
-                : ('pending' as const),
-        summary: inkMissingFileRead(item, childSnapshot)
-          ? '文件不存在'
-          : inkResultSummary(item.result),
-        ...(inkMissingFileRead(item, childSnapshot) ? { fileMissing: true as const } : {}),
-        fileNotice: inkFileChangeSummary(
-          item,
-          childSnapshot,
-          inkToolArguments(item, childSnapshot) ?? {},
-        ),
-      }))
+    ? childSnapshot.view.executions.filter(exactChildExecution).map((item) => {
+        const proxy = mcpProxy(item.definitionId);
+        const card = proxy ? projectInkTool(item, childSnapshot) : undefined;
+        return {
+          stepId: item.id,
+          toolCallId: item.toolCallId ?? item.id,
+          toolName: card?.name ?? terminalText(inkToolName(item.definitionId, item, childSnapshot)),
+          toolArgs: displayArguments(
+            frozenBuiltin(item, childSnapshot, 'builtin.files', 'files.search') &&
+              (inkToolArguments(item, childSnapshot)?.path === undefined ||
+                inkToolArguments(item, childSnapshot)?.path === '')
+              ? { ...inkToolArguments(item, childSnapshot), path: '.' }
+              : (card?.args ?? inkToolArguments(item, childSnapshot) ?? {}),
+          ),
+          status:
+            item.status === 'succeeded'
+              ? ('success' as const)
+              : item.status === 'failed' || item.status === 'outcome_unknown'
+                ? ('error' as const)
+                : item.status === 'cancelled'
+                  ? ('cancelled' as const)
+                  : ('pending' as const),
+          summary:
+            card?.summary ??
+            (inkMissingFileRead(item, childSnapshot)
+              ? '文件不存在'
+              : inkResultSummary(item.result)),
+          ...(inkMissingFileRead(item, childSnapshot) ? { fileMissing: true as const } : {}),
+          fileNotice: inkFileChangeSummary(
+            item,
+            childSnapshot,
+            inkToolArguments(item, childSnapshot) ?? {},
+          ),
+        };
+      })
     : [];
   const pendingChild =
     ['planned', 'dispatching', 'running'].includes(execution.status) &&
@@ -949,7 +922,7 @@ export function InkExecution({
     }
   ).jobTails?.find((item) => item.executionId === execution.id);
   const tool = projectInkTool(execution, snapshot, loadedOutputs, expanded);
-  if (!child && tool.name === execution.definitionId) {
+  if (!child && !mcpProxy(execution.definitionId) && tool.name === execution.definitionId) {
     const args = inkToolArguments(execution, snapshot, loadedOutputs);
     if (args && Object.keys(args).length) {
       tool.preview = terminalText(JSON.stringify(args));
@@ -993,12 +966,22 @@ export function projectInkThought(
         item.toolCallId === call.id,
     );
     const source = matches.length === 1 ? matches[0] : undefined;
+    // Before its exact Execution arrives, a public MCP call name is not identity
+    // proof, but it is enough to keep its pending body private.
+    const proxy = source
+      ? mcpProxy(source.definitionId)
+      : mcpProxy(call.name) ||
+        /^mcp_[a-z0-9_]{1,20}_[a-z0-9_]{1,29}_[a-f0-9]{8}$/.test(call.name) ||
+        call.name.startsWith('mcp__');
+    const card = proxy && source ? projectInkTool(source, snapshot, loadedOutputs) : undefined;
     return {
       callId: call.id,
-      name: terminalText(inkToolName(source?.definitionId ?? call.name, source, snapshot)),
-      args: displayArguments(parsed(call.arguments) ?? {}),
+      name:
+        card?.name ??
+        terminalText(inkToolName(source?.definitionId ?? call.name, source, snapshot)),
+      args: proxy ? {} : displayArguments(parsed(call.arguments) ?? {}),
       ok: source?.status === 'succeeded',
-      summary: source ? inkResultSummary(source.result) : '',
+      summary: proxy ? (card?.summary ?? '') : source ? inkResultSummary(source.result) : '',
       ...(source && inkMissingFileRead(source, snapshot) ? { fileMissing: true as const } : {}),
       status: source ? inkExecutionStatus(source) : ('queued' as const),
     };

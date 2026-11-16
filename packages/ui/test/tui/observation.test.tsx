@@ -468,3 +468,70 @@ test('event mapping uses exact root/workspace controls and keeps fallback execut
   ).toEqual(['admission']);
   expect(tuiChangeDomains(change('execution.finished', '2', 'foreign'), base, true)).toEqual([]);
 });
+
+test('late exact MCP labels rebuild sealed history, while ambiguous labels and stale-session results cannot relabel it', async () => {
+  const f = fixture();
+  const current = snapshot('a', '1', false);
+  const tool = {
+    id: 'proxy',
+    originStoreId: 'store',
+    sessionId: 'a',
+    runId: 'run-a',
+    kind: 'tool' as const,
+    definitionId: `mcp.original.${'b'.repeat(32)}`,
+    definitionVersion: '1',
+    status: 'succeeded' as const,
+    result: { content: 'private output' },
+    resultRevision: '1',
+    toolInput: { message: 'private input' },
+    cancelRequestedAt: null,
+  };
+  current.view.executions = [tool];
+  const label = {
+    executionId: tool.id,
+    originStoreId: 'store',
+    sessionId: 'a',
+    runId: 'run-a',
+    definitionId: tool.definitionId,
+    definitionVersion: '1',
+    label: 'Frozen server · remote_tool',
+  };
+  f.port.readSession = async (id) => (id === 'a' ? current : snapshot(id, '1', false));
+  let labels: TuiSnapshot['toolLabels'] = [];
+  f.port.readSessionDomain = async (domain, source, cursor, signal) =>
+    domain === 'labels'
+      ? { domain, facts: { toolLabels: labels } }
+      : f.read(domain, source, cursor, signal);
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await Bun.sleep(20);
+    expect(app.frames.join('\n')).not.toContain('private input');
+    labels = [label];
+    await f.controller.refresh(['labels']);
+    await until(() => app.lastFrame()?.includes(label.label) === true);
+    labels = [label, { ...label, label: 'Ambiguous server · remote_tool' }];
+    await f.controller.refresh(['labels']);
+    await until(() => app.lastFrame()?.includes('mcp.original.') === true);
+    expect(app.lastFrame()).not.toContain(label.label);
+    expect(app.frames.join('\n')).not.toContain('private output');
+    const pending = deferred<void>();
+    f.port.readSessionDomain = async (domain, source, cursor, signal) => {
+      if (domain === 'labels') {
+        await pending.promise;
+        return { domain, facts: { toolLabels: [label] } };
+      }
+      return f.read(domain, source, cursor, signal);
+    };
+    const reading = f.controller.refresh(['labels']);
+    await f.controller.select('b');
+    pending.resolve();
+    await reading;
+    expect(f.controller.state.snapshot?.view.session.id).toBe('b');
+    expect(f.controller.state.snapshot?.toolLabels).toBeUndefined();
+    expect(f.counts.writes).toBe(0);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});

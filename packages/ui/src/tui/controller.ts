@@ -162,11 +162,16 @@ export interface TuiSnapshot {
     >
   >;
   /** Public child views bound to the exact original Job, never a cached name match. */
-  readonly childViews?: readonly { executionId: string; view: SessionView }[];
+  readonly childViews?: readonly {
+    executionId: string;
+    view: SessionView;
+    toolLabels?: TuiSnapshot['toolLabels'];
+  }[];
   readonly toolLabels?: readonly {
     executionId: string;
     originStoreId: string;
     sessionId: string;
+    runId: string | null;
     definitionId: string;
     definitionVersion: string;
     label: string;

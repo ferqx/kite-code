@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import type { AgentClient, Message, SessionView } from '@kite-ai/client';
+import type { AgentClient, Execution, Message, SessionView } from '@kite-ai/client';
 import { createTuiHistoryReader } from '../host/tui-history';
 import { createTuiSessionReader } from '../host/tui-session';
+import type { createTuiToolLabelsReader, TuiToolLabel } from '../host/tui-tool-labels';
 
-function fixture(changes = true) {
+function fixture(changes = true, labels?: ReturnType<typeof createTuiToolLabelsReader>) {
   const calls: string[] = [];
   let view = {
     storeId: 'store',
@@ -82,7 +83,7 @@ function fixture(changes = true) {
       },
       clear() {},
     },
-    labels: () => undefined,
+    labels: () => labels,
   });
   return {
     client,
@@ -167,4 +168,128 @@ test('wrong selected Workspace never supplies execution or metadata even if all 
   await expect(f.reader.readSessionDomain!('metadata', base, '2', signal())).rejects.toThrow(
     'workspace_identity_mismatch',
   );
+});
+
+test('child label sidecars use the admitted child view, isolate metadata failure, and honor cancellation', async () => {
+  let reads = 0,
+    fail = false;
+  const label: TuiToolLabel = {
+    executionId: 'tool',
+    originStoreId: 'store',
+    sessionId: 'child',
+    runId: 'child-run',
+    definitionId: `mcp.server.${'b'.repeat(32)}`,
+    definitionVersion: '1',
+    label: 'Server · tool',
+  };
+  const labels = {
+    clear() {},
+    read: async () => [],
+    readChild: async (view: SessionView, signal: AbortSignal) => {
+      reads++;
+      expect(view.session.id).toBe('child');
+      signal.throwIfAborted();
+      if (fail) throw Error('metadata_unavailable');
+      return [label];
+    },
+  };
+  const f = fixture(true, labels);
+  const base = await f.reader.readSession('session', signal());
+  const carrier = {
+    id: 'carrier',
+    kind: 'job',
+    originStoreId: 'store',
+    sessionId: 'session',
+    childSessionId: 'child',
+  } as Execution;
+  base.view.executions = [carrier];
+  const child = {
+    ...f.view,
+    session: { ...f.view.session, id: 'child', parentSessionId: 'session' },
+  };
+  f.client.getView = async () => child;
+  const update = await f.reader.readSessionDomain!('jobs', base, undefined, signal());
+  expect(update).toMatchObject({
+    domain: 'jobs',
+    facts: { childViews: [{ executionId: carrier.id, view: child, toolLabels: [label] }] },
+  });
+  fail = true;
+  expect(await f.reader.readSessionDomain!('jobs', base, undefined, signal())).toMatchObject({
+    domain: 'jobs',
+    facts: { childViews: [{ executionId: carrier.id, view: child, toolLabels: undefined }] },
+  });
+  const abort = new AbortController();
+  labels.readChild = async () => {
+    abort.abort();
+    throw Error('aborted');
+  };
+  await expect(
+    f.reader.readSessionDomain!('jobs', base, undefined, abort.signal),
+  ).rejects.toThrow();
+  f.client.getView = async () => ({
+    ...child,
+    session: { ...child.session, parentSessionId: 'foreign' },
+  });
+  await expect(f.reader.readSessionDomain!('jobs', base, undefined, signal())).rejects.toThrow(
+    'child_view_identity_mismatch',
+  );
+  expect(reads).toBe(2);
+});
+
+test('held optional child metadata cannot block original jobs facts or cancel the jobs owner', async () => {
+  let release!: (value: TuiToolLabel[]) => void;
+  let childSignal: AbortSignal | undefined;
+  const held = new Promise<TuiToolLabel[]>((resolve) => {
+    release = resolve;
+  });
+  const labels = {
+    clear() {},
+    read: async () => [],
+    readChild: async (_view: SessionView, signal: AbortSignal) => {
+      childSignal = signal;
+      return held;
+    },
+  };
+  const f = fixture(true, labels);
+  const base = await f.reader.readSession('session', signal());
+  const carrier = {
+    id: 'carrier',
+    kind: 'job',
+    originStoreId: 'store',
+    sessionId: 'session',
+    childSessionId: 'child',
+  } as Execution;
+  base.view.executions = [carrier];
+  const child = {
+    ...f.view,
+    session: { ...f.view.session, id: 'child', parentSessionId: 'session' },
+  };
+  f.client.getView = async () => child;
+  const owner = new AbortController();
+  const update = await f.reader.readSessionDomain!('jobs', base, undefined, owner.signal);
+  expect(update).toMatchObject({
+    domain: 'jobs',
+    facts: {
+      jobTails: [],
+      childViews: [{ executionId: carrier.id, view: child, toolLabels: undefined }],
+    },
+  });
+  expect(childSignal?.aborted).toBe(true);
+  expect(owner.signal.aborted).toBe(false);
+  release([
+    {
+      executionId: 'late',
+      originStoreId: 'store',
+      sessionId: 'child',
+      runId: 'child-run',
+      definitionId: 'mcp.tool',
+      definitionVersion: '1',
+      label: 'Late name',
+    },
+  ]);
+  await Bun.sleep(0);
+  expect(update).toMatchObject({
+    domain: 'jobs',
+    facts: { childViews: [{ toolLabels: undefined }] },
+  });
 });

@@ -50,6 +50,9 @@ function parseMcpResourceList(summary: string): McpResourceListDisplayResult | u
 }
 
 function mcpToolDisplayName(name: string): string {
+  // A composed display label may itself contain legacy-looking server names.
+  // Preserve it literally instead of interpreting its text as a model identifier.
+  if (name.includes(' · ')) return name;
   if (!name.startsWith('mcp__')) return ACTION_NAMES[name] ?? name;
   const parts = name.slice('mcp__'.length).split('__');
   if (parts.length < 2) return name;

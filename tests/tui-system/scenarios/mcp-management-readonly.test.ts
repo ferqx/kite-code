@@ -566,7 +566,8 @@ describe('TUI PTY System — MCP Select management', () => {
       // to the generic `● Tool` card that hides which lifecycle is running. Use
       // the captured frame history because a final Ink redraw may legitimately
       // move an earlier card out of the terminal's current scrollback snapshot.
-      expect(clientConversation).toContain('● mcp:dynamic_tool');
+      expect(clientConversation).toContain(`● docs · ${remoteToolName}`);
+      expect(clientConversation).not.toContain('mcp:dynamic_tool');
       expect(clientConversation).not.toContain('● Tool');
       expect(clientConversation).toContain(remoteToolName);
       expect(clientConversation).not.toContain(`mcp__docs__${remoteToolName}`);

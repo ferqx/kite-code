@@ -36,6 +36,35 @@ export function createTuiSessionReader(input: {
       throw Error('workspace_identity_mismatch');
     return view;
   };
+  const readChildLabels = async (view: SessionView, signal: AbortSignal) => {
+    const labels = input.labels();
+    if (!labels) return undefined;
+    signal.throwIfAborted();
+    const reading = new AbortController();
+    let wake!: () => void;
+    const interrupted = new Promise<undefined>((resolve) => {
+      wake = () => {
+        reading.abort();
+        resolve(undefined);
+      };
+    });
+    // Names are optional presentation. A slow metadata reader must not hold
+    // original child status and Shell tails hostage, nor cancel their owner.
+    const timeout = setTimeout(wake, 250);
+    signal.addEventListener('abort', wake, { once: true });
+    try {
+      const result = await Promise.race([labels.readChild(view, reading.signal), interrupted]);
+      signal.throwIfAborted();
+      return result;
+    } catch {
+      signal.throwIfAborted();
+      return undefined;
+    } finally {
+      clearTimeout(timeout);
+      signal.removeEventListener('abort', wake);
+      reading.abort();
+    }
+  };
   const execution = (view: SessionView) => ({
     view,
     connectionInstanceId: client.serverInfo!.instanceId,
@@ -174,7 +203,8 @@ export function createTuiSessionReader(input: {
                 view.session.rootSessionId !== base.view.session.rootSessionId
               )
                 throw Error('child_view_identity_mismatch');
-              return { executionId: carrier.id, view };
+              const toolLabels = await readChildLabels(view, signal);
+              return { executionId: carrier.id, view, toolLabels };
             }),
           ),
         ]);

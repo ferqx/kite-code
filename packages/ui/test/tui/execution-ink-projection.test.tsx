@@ -1091,6 +1091,7 @@ test('MCP friendly names require all original Execution label identities; missin
           executionId: 'mcp',
           originStoreId: 'store',
           sessionId: 'parent',
+          runId: 'run',
           definitionId: 'mcp.server.hash',
           definitionVersion: 'version',
           label: 'Actual server · Actual tool',
@@ -1105,28 +1106,110 @@ test('MCP friendly names require all original Execution label identities; missin
     }).name,
   ).toBe(source.definitionId);
 });
-test('actual MCP proxy cards keep call bodies private and use only scoped catalogue discovery for names', () => {
+test('actual MCP proxy cards retain verified provider and tool names through live, settled and cold views without exposing call bodies', () => {
   const id = `mcp.mcp-${'a'.repeat(64)}.${'b'.repeat(32)}`;
   const tool = execution('proxy', {
     definitionId: id,
+    toolCallId: 'call',
     toolInput: { message: 'private input' },
     result: { content: 'private remote body' },
   });
-  const facts = {
-    ...snapshot([tool]),
-    toolLabels: [
-      {
-        executionId: tool.id,
-        originStoreId: 'store',
-        sessionId: 'parent',
-        definitionId: id,
-        definitionVersion: '1',
-        label: 'private source label',
-      },
+  const label = {
+    executionId: tool.id,
+    originStoreId: 'store',
+    sessionId: 'parent',
+    runId: 'run',
+    definitionId: id,
+    definitionVersion: '1',
+    label: 'Actual server · search documentation',
+  };
+  const facts = { ...snapshot([tool]), toolLabels: [label] };
+  const app = render(
+    <InkExecution
+      execution={{ ...tool, status: 'running', result: null }}
+      snapshot={facts}
+      expanded
+      columns={100}
+    />,
+  );
+  for (const status of [
+    'running',
+    'succeeded',
+    'failed',
+    'cancelled',
+    'outcome_unknown',
+  ] as const) {
+    const current = { ...tool, status };
+    expect(projectInkTool(current, facts)).toMatchObject({
+      name: label.label,
+      args: {},
+      summary:
+        status === 'failed'
+          ? 'MCP call failed.'
+          : status === 'outcome_unknown'
+            ? 'Outcome unknown; original work remains unverified.'
+            : '',
+    });
+    app.rerender(<InkExecution execution={current} snapshot={facts} expanded columns={100} />);
+    expect(app.lastFrame()).toContain(label.label);
+    expect(app.lastFrame()).not.toContain('private input');
+    expect(app.lastFrame()).not.toContain('private remote body');
+  }
+  app.unmount();
+  const cold = render(
+    <InkExecution execution={tool} snapshot={structuredClone(facts)} expanded columns={100} />,
+  );
+  expect(cold.lastFrame()).toContain(label.label);
+  cold.unmount();
+  const legacyLookingLabel = { ...label, label: 'mcp__docs__prod · search' };
+  for (const status of ['planned', 'running', 'succeeded', 'failed'] as const) {
+    const literal = render(
+      <InkExecution
+        execution={{ ...tool, status }}
+        snapshot={{ ...facts, toolLabels: [legacyLookingLabel] }}
+        expanded
+        columns={100}
+      />,
+    );
+    expect(literal.lastFrame()).toContain(legacyLookingLabel.label);
+    expect(literal.lastFrame()).not.toContain('docs · prod · search');
+    literal.unmount();
+  }
+  const owner = message('owner', '1', {
+    toolCalls: [{ id: 'call', name: id, arguments: JSON.stringify(tool.toolInput) }],
+  });
+  expect(projectInkThought(owner, facts).tools).toMatchObject([
+    { name: label.label, args: {}, summary: '' },
+  ]);
+  const pendingName = 'mcp_docs_search_12345678';
+  const pending = {
+    ...owner,
+    toolCalls: [
+      { id: 'pending-call', name: pendingName, arguments: JSON.stringify(tool.toolInput) },
     ],
   };
-  expect(projectInkTool(tool, facts)).toMatchObject({ name: 'mcp_tool', args: {}, summary: '' });
-  const search = execution('search', {
+  expect(projectInkThought(pending, snapshot([])).tools).toMatchObject([
+    { name: pendingName, args: {}, summary: '', status: 'queued' },
+  ]);
+  for (const name of ['mcp__docs__search', `mcp.mcp-${'a'.repeat(64)}.${'b'.repeat(32)}`])
+    expect(
+      projectInkThought(
+        { ...pending, toolCalls: [{ ...pending.toolCalls[0]!, name }] },
+        snapshot([]),
+      ).tools[0]?.args,
+    ).toEqual({});
+  for (const name of ['ordinary_tool', 'mcp_status'])
+    expect(
+      projectInkThought(
+        { ...pending, toolCalls: [{ ...pending.toolCalls[0]!, name }] },
+        snapshot([]),
+      ).tools[0]?.args,
+    ).toEqual({ message: 'private input' });
+  const formatControls = { ...label, label: 'server\u200f\u061c · tool\u200e\u200d\u{e0001}' };
+  expect(projectInkTool(tool, { ...facts, toolLabels: [formatControls] }).name).toBe(
+    'server\\u200f\\u061c · tool\\u200e\\u200d\\u{e0001}',
+  );
+  const discovery = execution('search', {
     definitionId: 'mcp.tools.search',
     result: {
       content: JSON.stringify({
@@ -1136,40 +1219,88 @@ test('actual MCP proxy cards keep call bodies private and use only scoped catalo
             serverId: `mcp-${'a'.repeat(64)}`,
             definitionId: id,
             definitionVersion: '1',
-            remoteName: 'search documentation / latest',
+            remoteName: 'unrelated discovery',
           },
         ],
       }),
     },
   });
-  const discovered = { ...facts, view: { ...facts.view, executions: [search, tool] } };
-  expect(projectInkTool(tool, discovered)).toMatchObject({
-    name: 'mcp:dynamic_tool',
-    preview: 'search documentation / latest',
-    detail: 'search documentation / latest',
-    args: {},
-    summary: '',
-  });
-  const app = render(
-    <InkExecution execution={tool} snapshot={discovered} expanded columns={100} />,
+  expect(
+    projectInkTool(tool, { ...facts, view: { ...facts.view, executions: [discovery, tool] } }),
+  ).toMatchObject({ name: label.label, preview: undefined, detail: undefined });
+  for (const invalid of [
+    { ...label, originStoreId: 'foreign' },
+    { ...label, sessionId: 'foreign' },
+    { ...label, runId: 'other' },
+    { ...label, definitionVersion: '2' },
+    { ...label, executionId: 'other' },
+  ])
+    expect(projectInkTool(tool, { ...facts, toolLabels: [invalid] }).name).toBe(id);
+  expect(projectInkTool(tool, { ...facts, storeId: 'foreign' }).name).toBe(id);
+  expect(projectInkTool(tool, { ...facts, toolLabels: [label, label] }).name).toBe(id);
+  const unsafe = { ...label, label: 'Provider\n\t\x1b[31m\u202e · tool\r\u2028\u2066' };
+  expect(projectInkTool(tool, { ...facts, toolLabels: [unsafe] }).name).toBe(
+    'Provider\\u000a\\u0009\\u001b[31m\\u202e · tool\\u000d\\u2028\\u2066',
   );
-  expect(app.lastFrame()).toContain('mcp:dynamic_tool');
-  expect(app.lastFrame()).toContain('search documentation / latest');
-  expect(app.lastFrame()).not.toContain('private input');
-  expect(app.lastFrame()).not.toContain('private remote body');
+});
+
+test('child MCP steps use only their own verified labels and preserve call-body privacy', () => {
+  const parent = execution('task', {
+    definitionId: 'builtin.task/task.spawn',
+    toolInput: { preset: 'explore', prompt: 'Investigate original' },
+  });
+  const carrier = execution('carrier', {
+    kind: 'job',
+    runId: null,
+    definitionId: 'agent/explore',
+    parentExecutionId: parent.id,
+    childSessionId: 'child',
+    status: 'running',
+  });
+  const tool = execution('child-tool', {
+    sessionId: 'child',
+    definitionId: `mcp.original.${'b'.repeat(32)}`,
+    toolInput: { message: 'private child input' },
+    result: { content: 'private child output' },
+  });
+  const child = view('child', {
+    executions: [tool],
+    runs: [{ ...view().runs[0]!, sessionId: 'child', originCommandId: 'child-start-carrier' }],
+  });
+  const label = {
+    executionId: tool.id,
+    originStoreId: 'store',
+    sessionId: 'child',
+    runId: 'run',
+    definitionId: tool.definitionId,
+    definitionVersion: '1',
+    label: 'Child server · child_tool',
+  };
+  const facts = {
+    ...snapshot([parent, carrier]),
+    toolLabels: [{ ...label, label: 'Wrong parent label' }],
+    childViews: [{ executionId: carrier.id, view: child, toolLabels: [label] }],
+  };
+  expect(projectInkChild(carrier, facts)?.steps).toMatchObject([
+    { toolName: label.label, toolArgs: {}, summary: '' },
+  ]);
+  expect(projectInkChild(carrier, structuredClone(facts))?.steps).toMatchObject([
+    { toolName: label.label, toolArgs: {}, summary: '' },
+  ]);
+  const absent = { ...facts, childViews: [{ executionId: carrier.id, view: child }] };
+  expect(projectInkChild(carrier, absent)?.steps[0]?.toolName).toBe(tool.definitionId);
+  const wrong = {
+    ...facts,
+    childViews: [
+      { executionId: carrier.id, view: child, toolLabels: [{ ...label, runId: 'other' }] },
+    ],
+  };
+  expect(projectInkChild(carrier, wrong)?.steps[0]?.toolName).toBe(tool.definitionId);
+  const app = render(<InkExecution execution={carrier} snapshot={facts} expanded columns={100} />);
+  expect(app.lastFrame()).toContain(label.label);
+  expect(app.lastFrame()).not.toContain('private child input');
+  expect(app.lastFrame()).not.toContain('private child output');
   app.unmount();
-  expect(
-    projectInkTool(tool, {
-      ...discovered,
-      view: { ...facts.view, executions: [{ ...search, sessionId: 'foreign' }, tool] },
-    }).preview,
-  ).toBeUndefined();
-  expect(
-    projectInkTool(tool, {
-      ...discovered,
-      view: { ...facts.view, executions: [{ ...search, sessionId: 'foreign' }, tool] },
-    }).detail,
-  ).toBeUndefined();
 });
 test('MCP resource references require the exact source receipt while resource contents remain private', () => {
   const binding = {

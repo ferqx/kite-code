@@ -602,7 +602,7 @@ function TuiHistory({
         collapsed.has(executionDisplayKey(execution)),
         snapshot?.executionTimings?.[execution.id],
         snapshot?.childViews?.find((child) => child.executionId === execution.id),
-        snapshot?.toolLabels?.find((label) => label.executionId === execution.id),
+        snapshot?.toolLabels?.filter((label) => label.executionId === execution.id),
         snapshot?.jobTails?.find((tail) => tail.executionId === execution.id),
       ]),
       mutable: historyMutable(execution),
@@ -842,6 +842,9 @@ function TuiHistory({
                     verifyingOutput,
                     outputReadFailed,
                     related,
+                    snapshot?.toolLabels?.filter((label) =>
+                      related.some((execution) => execution.id === label.executionId),
+                    ),
                     timing,
                     model?.status,
                     model?.modelRetry,

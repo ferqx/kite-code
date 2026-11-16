@@ -4,13 +4,13 @@ import type { TuiPort } from '@kite-ai/ui/tui';
 
 type Port = Pick<
   NonNullable<TuiPort['mcp']>,
-  'read' | 'readToolsSnapshots' | 'readToolsPage' | 'readToolDescriptor'
+  'readToolsSnapshots' | 'readToolsPage' | 'readToolDescriptor'
 >;
-type Facts = Awaited<ReturnType<Port['read']>>;
 export interface TuiToolLabel {
   readonly executionId: string;
   readonly originStoreId: string;
   readonly sessionId: string;
+  readonly runId: string | null;
   readonly definitionId: string;
   readonly definitionVersion: string;
   readonly label: string;
@@ -21,6 +21,7 @@ const key = (execution: Execution) =>
     execution.id,
     execution.originStoreId,
     execution.sessionId,
+    execution.runId,
     execution.definitionId,
     execution.definitionVersion,
   ]);
@@ -38,6 +39,105 @@ const original = (
   page.toolCount === snapshot.toolCount &&
   Object.entries(snapshot.origin).every(([key, value]) => page.binding[key] === value) &&
   page.binding.indexDigest === (snapshot.index?.hash ?? null);
+const record = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+/** Use only this execution's frozen source, never today's mutable directory. */
+function frozenServerName(
+  view: SessionView,
+  target: Execution,
+  cached: Cached,
+): string | undefined {
+  const runs = view.runs.filter(
+    (run) =>
+      run.id === target.runId &&
+      run.originStoreId === target.originStoreId &&
+      run.sessionId === target.sessionId,
+  );
+  if (runs.length !== 1) return undefined;
+  const run = runs[0]!;
+  const snapshot = record(record(run.configuration)?.snapshot);
+  if (!snapshot) return undefined;
+  const wrapped = ['roleId', 'roleVersion', 'roleModelId', 'roleToolIds'].some((key) =>
+    Object.hasOwn(snapshot, key),
+  );
+  if (
+    wrapped &&
+    (Object.keys(snapshot).some(
+      (key) =>
+        ![
+          'skillSelection',
+          'roleId',
+          'roleVersion',
+          'roleModelId',
+          'roleToolIds',
+          'configuration',
+        ].includes(key),
+    ) ||
+      typeof snapshot.roleId !== 'string' ||
+      !snapshot.roleId ||
+      typeof snapshot.roleVersion !== 'string' ||
+      !snapshot.roleVersion ||
+      (snapshot.roleModelId !== null && typeof snapshot.roleModelId !== 'string') ||
+      (snapshot.roleToolIds !== null &&
+        (!Array.isArray(snapshot.roleToolIds) ||
+          snapshot.roleToolIds.some((id) => typeof id !== 'string'))))
+  )
+    return undefined;
+  const mcp = record((wrapped ? record(snapshot.configuration) : snapshot)?.mcp);
+  // Static programmatic registrations have no friendly source row. Their exact
+  // frozen selected ID is their name; never expose a source-generated hash as one.
+  if (!/^mcp-[a-f0-9]{64}$/.test(cached.serverId)) {
+    const selected = Array.isArray(mcp?.servers)
+      ? mcp.servers.map(record).filter((server) => server?.id === cached.serverId)
+      : [];
+    return selected.length === 1 && selected[0]?.configDigest === cached.configDigest
+      ? cached.serverId
+      : undefined;
+  }
+  const sources = record(mcp?.sources);
+  const scope = record(sources?.scope);
+  if (
+    sources?.version !== 1 ||
+    !scope ||
+    scope.storeId !== target.originStoreId ||
+    scope.workspaceId !== view.session.workspaceId ||
+    !Array.isArray(sources.servers) ||
+    !Array.isArray(record(sources.selection)?.serverIds) ||
+    (record(sources.selection)!.serverIds as unknown[]).filter((id) => id === cached.serverId)
+      .length !== 1
+  )
+    return undefined;
+  if (wrapped) {
+    const inheritance = record(sources.inheritance);
+    if (
+      !view.session.parentSessionId ||
+      scope.sessionId !== view.session.parentSessionId ||
+      inheritance?.version !== 1 ||
+      inheritance.parentSessionId !== view.session.parentSessionId ||
+      inheritance.rootSessionId !== view.session.rootSessionId ||
+      inheritance.rootWorkCommandId !== run.rootWorkCommandId ||
+      inheritance.rootWorkSeq !== run.rootWorkSeq ||
+      typeof inheritance.parentExecutionId !== 'string' ||
+      !inheritance.parentExecutionId ||
+      (run.carrierExecutionId !== inheritance.parentExecutionId &&
+        !(
+          run.carrierExecutionId === undefined &&
+          run.originCommandId === `child-start-${inheritance.parentExecutionId}`
+        ))
+    )
+      return undefined;
+  } else if (scope.sessionId !== target.sessionId || sources.inheritance !== undefined)
+    return undefined;
+  const servers = sources.servers.map(record).filter((server) => server?.id === cached.serverId);
+  const server = servers.length === 1 ? servers[0] : undefined;
+  return server?.configDigest === cached.configDigest &&
+    typeof server.name === 'string' &&
+    server.name.trim()
+    ? server.name
+    : undefined;
+}
 /** Display metadata only: no connect, authorize, Tool RPC or command invocation. */
 export function createTuiToolLabelsReader(port: Port, storeId: string) {
   const cache = new Map<string, Cached>();
@@ -47,11 +147,11 @@ export function createTuiToolLabelsReader(port: Port, storeId: string) {
       revision++;
       cache.clear();
     },
-    async read(
-      view: SessionView,
-      signal: AbortSignal,
-      suppliedFacts?: Facts,
-    ): Promise<readonly TuiToolLabel[]> {
+    /** Child observations cannot supersede the parent label domain's in-flight read. */
+    readChild(view: SessionView, signal: AbortSignal): Promise<readonly TuiToolLabel[]> {
+      return createTuiToolLabelsReader(port, storeId).read(view, signal);
+    },
+    async read(view: SessionView, signal: AbortSignal): Promise<readonly TuiToolLabel[]> {
       signal.throwIfAborted();
       const readId = ++revision;
       if (view.storeId !== storeId) throw Error('tui_tool_label_store_mismatch');
@@ -143,6 +243,7 @@ export function createTuiToolLabelsReader(port: Port, storeId: string) {
                         executionId: target.id,
                         originStoreId: target.originStoreId!,
                         sessionId: target.sessionId,
+                        runId: target.runId,
                         definitionId: target.definitionId,
                         definitionVersion: target.definitionVersion,
                         label: '',
@@ -179,25 +280,10 @@ export function createTuiToolLabelsReader(port: Port, storeId: string) {
           } while (afterKey !== undefined);
         }
       }
-      let facts = suppliedFacts;
-      if (!facts) {
-        try {
-          facts = await port.read(view.session.id, signal);
-        } catch {
-          check();
-        }
-        check();
-      }
       return targets.flatMap((target) => {
         const cached = cache.get(key(target));
         if (!cached) return [];
-        const current =
-          facts?.storeId === storeId &&
-          facts.sessionId === target.sessionId &&
-          facts.items.some(
-            (item) => item.id === cached.serverId && item.configDigest === cached.configDigest,
-          );
-        const serverName = current ? facts?.labels?.[cached.serverId] : undefined;
+        const serverName = frozenServerName(view, target, cached);
         return [{ ...cached.target, label: `${serverName || 'MCP'} · ${cached.name}` }];
       });
     },
