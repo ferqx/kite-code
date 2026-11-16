@@ -54,6 +54,13 @@ const notSubmitted = new Set([
   'workspace_identity_unavailable',
   'native_selection_changed',
 ]);
+export type NativeApprovalNotice = {
+  key: string;
+  phase: 'unknown' | 'failed';
+  commandId?: string;
+  retryable: boolean;
+};
+
 type Attempt = { card: Interaction; phase: 'submitting' | 'unknown' | 'failed' | 'accepted' };
 
 export function useNativeApprovalPresentation(state: NativeState | undefined) {
@@ -81,10 +88,7 @@ export function useNativeApprovalPresentation(state: NativeState | undefined) {
     }
     publish();
   }
-  const notices = new Map<
-    string,
-    { key: string; phase: 'unknown' | 'failed'; commandId?: string; retryable: boolean }
-  >();
+  const notices = new Map<string, NativeApprovalNotice>();
   const selection = state?.selection;
   if (selection) {
     const add = (card: Interaction, submission?: InteractionSubmission, attempt?: Attempt) => {

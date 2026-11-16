@@ -58,6 +58,7 @@ import type { DesktopEditor, NativeFileChangeDetail } from './file-changes-bridg
 import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
 import { NativeApproval } from './native-approval';
+import { NativeApprovalFeedback } from './native-approval-feedback';
 import { isOrdinaryNativeApproval, NativeApprovalGroup } from './native-approval-group';
 import { useNativeApprovalPresentation } from './native-approval-presentation';
 import { NativeBackgroundPanel } from './native-background-panel';
@@ -3467,6 +3468,8 @@ function NativeDesktopContent({
       }
     });
   }
+  const approvalReadIntent = viewIntent.current,
+    approvalReadEpoch = readLifecycle.current.epoch;
   const visibleInteractions = selection?.interactions.filter(
     (card) => !approvalPresentation.hidden(card),
   );
@@ -5514,37 +5517,45 @@ function NativeDesktopContent({
             message={operationMessage}
             onDismiss={dismissOperationMessage}
           />
-          {!preparing &&
-            !selectionHandoff &&
-            state?.generation === generation.current &&
-            selection?.session.id === selected.current &&
-            approvalPresentation.notices.map((notice) => (
-              <p key={notice.key} role="status" aria-label="审批答复核对">
-                {notice.retryable
-                  ? '审批回答未提交，请核对当前请求后重试。'
-                  : notice.phase === 'unknown'
-                    ? '审批提交结果尚未确认，不会重复提交。'
-                    : '审批提交失败，未确认获得批准。'}
-                <DesktopButton
-                  onClick={() =>
-                    void report(async () => {
-                      try {
-                        if (notice.commandId)
-                          await bridge.request({
-                            method: 'lookupInteraction',
-                            generation: generation.current,
-                            commandId: notice.commandId,
-                          });
-                      } finally {
-                        await refresh();
-                      }
-                    })
-                  }
-                >
-                  核对原答复
-                </DesktopButton>
-              </p>
-            ))}
+          <NativeApprovalFeedback
+            scope={
+              !preparing &&
+              !selectionHandoff &&
+              state?.generation === generation.current &&
+              selection?.session.id === selected.current
+                ? JSON.stringify([state?.generation, selection?.storeId, selection?.session.id])
+                : undefined
+            }
+            notices={approvalPresentation.notices}
+            paused={!!operationMessage || settingsOpen}
+            container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
+            onLookup={async (notice) => {
+              if (
+                !state ||
+                !isCurrentRead(state.generation, approvalReadEpoch, approvalReadIntent) ||
+                selection?.session.id !== selected.current ||
+                preparing ||
+                selectionHandoff
+              )
+                return;
+              const current = state.generation;
+              const sessionId = selection?.session.id;
+              try {
+                if (notice.commandId)
+                  await bridge.request({
+                    method: 'lookupInteraction',
+                    generation: current,
+                    commandId: notice.commandId,
+                  });
+              } finally {
+                if (
+                  isCurrentRead(current, approvalReadEpoch, approvalReadIntent) &&
+                  sessionId === selected.current
+                )
+                  await refresh();
+              }
+            }}
+          />
         </>
       }
       loading={

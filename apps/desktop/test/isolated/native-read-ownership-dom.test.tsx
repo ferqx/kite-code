@@ -1753,7 +1753,7 @@ test('ordinary permission menu omits the grant directory; the isolated diagnosti
   }
 });
 
-test('an original approval recovery notice never follows a pending reading handoff into another session', async () => {
+test('an original approval recovery Toast never follows a pending reading handoff into another session', async () => {
   const held = deferred<NativeResult>();
   let f!: ReturnType<typeof fixture>;
   const original = (): NativeState => ({
@@ -1782,7 +1782,7 @@ test('an original approval recovery notice never follows a pending reading hando
     if (request.method === 'lookupInteraction') return null;
     return undefined;
   });
-  const notices = () => f.dom.window.document.querySelectorAll('[aria-label="审批答复核对"]');
+  const notices = () => f.dom.window.document.querySelectorAll('.native-toast-card');
   const hasTitle = (title: string) =>
     [...f.dom.window.document.querySelectorAll('.session-header strong')].some(
       (node) => node.textContent === title,
@@ -1791,8 +1791,39 @@ test('an original approval recovery notice never follows a pending reading hando
     await f.render();
     await f.click('Original A');
     await until(() => notices().length === 1);
-    expect(notices()[0]!.textContent).toContain('审批提交结果尚未确认');
-    await f.click('Other B');
+    expect(notices()[0]!.textContent).toContain('未能确认审批答复结果');
+    expect(notices()[0]!.closest('.native-toast')!.parentElement).toBe(f.dom.window.document.body);
+    expect(f.dom.window.document.querySelector('[aria-label="审批答复核对"]')).toBeNull();
+    const oldQuery = [...f.dom.window.document.querySelectorAll('button')].find(
+      (node) => node.textContent === '核对原答复',
+    )!;
+    const reactProps = Object.keys(oldQuery).find((key) => key.startsWith('__reactProps$'))!;
+    const queuedClick = (oldQuery as unknown as Record<string, { onClick: () => void }>)[
+      reactProps
+    ]!.onClick;
+    const fiberKey = Object.keys(oldQuery).find((key) => key.startsWith('__reactFiber$'))!;
+    type LookupFiber = {
+      return?: LookupFiber;
+      memoizedProps?: { onLookup?: (notice: { commandId: string }) => Promise<void> };
+    };
+    let fiber = (oldQuery as unknown as Record<string, LookupFiber>)[fiberKey];
+    while (fiber && !fiber.memoizedProps?.onLookup) fiber = fiber.return;
+    const queuedLookup = fiber?.memoizedProps?.onLookup;
+    expect(queuedLookup).toBeDefined();
+    const previousLookups = f.calls.filter(
+      (request) => request.method === 'lookupInteraction',
+    ).length;
+    await act(async () => {
+      [...f.dom.window.document.querySelectorAll('button')]
+        .find((node) => node.textContent === 'Other B')!
+        .click();
+      queuedClick(); // Selection refs have changed, before React commits the new reading page.
+      await queuedLookup!({ commandId: 'original-answer' }); // Already captured owner callback also rechecks admission.
+      await nextDesktopPresentation(f.dom);
+    });
+    expect(f.calls.filter((request) => request.method === 'lookupInteraction')).toHaveLength(
+      previousLookups,
+    );
     await until(() => hasTitle('Other B'));
     expect(notices()).toHaveLength(0);
     await f.notify(); // Late A metadata must not install A's notice on B's reading page.
