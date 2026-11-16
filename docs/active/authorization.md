@@ -17,7 +17,7 @@
 
 能力身份以真实注册的 kind／定义／版本为准，Service 在同一注册项绑定所属描述器；普通权限和 Planning 共用路由，Model 使用静态描述，不向 Shell／Files／Task 广播请求。动态事实若改写身份则失败关闭，不能通过合并顺序覆盖另一能力的效果或硬限制。注册描述只提供事实，审批决定、工具交集与最终派发证明保持独立；具体装配及分支回归归[Service owner](../../apps/service/README.md#默认装配与业务规则归属)。
 
-能力描述可接收本次已经读取、校验的 policy 隔离副本，不能修改原授权判定，也不凭宿主根偏好重新推断模式。有效 Full 允许原 Files 工具直接写入／编辑普通外部绝对文件，但执行仍须核最终证明中所有实际父子权限叶与独立 Planning 业务门禁、准确能力与目标 revision；Full 不覆盖 trust、工具集合、硬限制或 Profile／运行资产保护。会话 Output／Plan／Input 的准确私有边界优先于通用外部适配，普通外部文件不纳入 Workspace checkpoint。原生 CAS、取消、发布未知与禁止重放合同保持，具体能力和验证范围归[权限 owner](../../packages/agent/src/permissions/README.md)与[Service 装配](../../apps/service/README.md#默认装配与业务规则归属)。
+能力描述可接收本次已经读取、校验的 policy 隔离副本，不能修改原授权判定，也不凭宿主根偏好重新推断模式。原 Files 工具对普通外部绝对文件按当前模式授权：请求批准先人批、Auto 先自动审核、有效 Full 直接执行；执行仍须核最终证明中所有实际父子权限叶与独立 Planning 业务门禁、准确能力与目标 revision；Full 不覆盖 trust、工具集合、硬限制或 Profile／运行资产保护。会话 Output／Plan／Input 的准确私有边界优先于通用外部适配，普通外部文件不纳入 Workspace checkpoint。原生 CAS、取消、发布未知与禁止重放合同保持，具体能力和验证范围归[权限 owner](../../packages/agent/src/permissions/README.md)与[Service 装配](../../apps/service/README.md#默认装配与业务规则归属)。
 
 Shell 只读证明按固定 rg 的实际参数取值消费，执行 hooks、外部解压及未知参数不能借 safeRead 绕过普通审核。该分类不再充当只读子角色的调用门禁。当前默认 explore 的只读要求作为冻结的可信任务指导传给子模型；Shell 继承父会话当前审批策略、权限交集和普通 OS 范围，不增加专属逐项语义审核或 OS 禁写／禁网上限。Full 下角色只读是任务约束，不是后端禁写保证；主会话 Planning 业务门禁仍独立。准确命令授权区分无截止时限与显式期限，同名 Model 不参与 Shell 描述。源码与回归归[权限 owner](../../packages/agent/src/permissions/README.md)。
 

@@ -10,7 +10,7 @@ MCP 动态 Tool 的审批材料通过 [untrustedMcpTool](mcp-tool-context.ts) �
 
 Shell 的模型启动入口统一为 `shell_execute`，顶层 filesystem/network 由[共享输入解析](../shell-input.ts)解释为独立请求，省略默认工作区写入／离线；原 Job 仍使用既有 command/permissions 合同。新 description 只用于展示，从风险模型输入移除，命令摘要与批准复用不使用它；完整原 Tool 输入及派发完整性摘要不删字段。前后台使用同一路径，background:true 纳入执行语义摘要，默认前台与旧 shell.launch 摘要保持原算法。运行时派生 key 不参与命令权限摘要，新调用仍有独立执行身份。工具集合、父子交集、最终范围、硬限制及超时规则保持。
 
-默认 `explore` 的只读要求由可信任务指导和收窄工具集合表达，允许原权限内必要的临时脚本和探索产物，保持业务源码、配置和数据不变。当前版本同身份续作和冷恢复仍核原冻结指导与工具。Shell 继承父会话当前模式、权限交集和普通沙箱，不增加角色专属命令表或 OS 禁写。有限 safeRead 只决定普通策略免审，不等于角色允许列表。新默认 Auto 只审 Shell 高危效果，不核任务合规；请求批准和 Full 沿各自普通策略，原 Planning 业务门禁、硬拒绝和最终派发证明保持。
+默认 `explore` 的只读要求由可信任务指导和收窄工具集合表达，允许原权限内必要的临时脚本和探索产物，保持业务源码、配置和数据不变。当前版本同身份续作和冷恢复仍核原冻结指导与工具。Shell 继承父会话当前模式、权限交集和普通沙箱，不增加角色专属命令表或 OS 禁写。有限 safeRead 只决定普通策略免审，不等于角色允许列表。默认 Shell 的 Auto 合同只审操作风险、不核任务合规；Files 和 MCP 仍按自身任务授权合同审核，请求批准和 Full 沿各自普通策略，原 Planning 业务门禁、硬拒绝和最终派发证明保持。
 
 [Task 分类](task-request.ts)只细化当前准确可信角色，默认目录为 `general／explore`；不为升级前旧角色或退役 carrier 提供后备分类。Service 的[权限装配](../../../../apps/service/src/permission-configuration.ts)使用当前注册定义，完整父子 Tool／Job 身份、当前 mode／trust／allowlist 与最终派发证明保持独立核验。当前版本续作和冷恢复仍核真实 carrier 与冻结配置，历史记录或同名角色不授予执行资格；默认装配与验证范围归 [Service owner](../../../../apps/service/README.md)。
 
@@ -36,7 +36,7 @@ AND 合成后若领域解释器未被共同选择，沿独立 generic checker �
 
 会话文件不放开整个 Profile。[输入文件适配器](../tools/input-files.ts)仅允许所选消息引用的准确原件读取；[输出适配器](../tools/session-outputs.ts)仅允许当前会话的登记文件或准确输出目录中的 create-only 新文件；[方案适配器](../tools/plan-files.ts)只接受 Planning 当前登记的准确目标。各适配器在原授权与派发链核全部父子 policy leaves、能力定义／版本、原输入及目标 revision，仍保真实工作区信任、取消和 native 身份核验。Plan 模式的草稿写例外仅限可信宿主识别的当前方案目的；普通项目／输出写入不享受例外，文件存在和 Markdown 中的“已批准”也不授执行权。
 
-有效 Full 下，原 `write_file`／`edit_file` 可直接操作普通外部绝对目标。[Full 文件适配器](../tools/full-access-files.ts)将其描述为 external 效果，并在执行时核最终接纳证明的全部权限叶：Full、Workspace 信任、准确 Tool 能力和本次目标 revision 缺一不可。父子权限／Planning 业务门禁、实际工具集合、Profile／运行资产保护及原生 no-follow、owner、CAS 检查保持；准备后目标绑定变化拒绝，发布后无法确认仍为 unknown，不重放。Full 对可安全编辑的外部读取返回完整 baseline，其他可读目标继续只读；baseline 不签发写权限，外部文件不纳入 Workspace checkpoint。适配与故障回归见[外部 Files 测试](../../test/isolated/files/full-access-files.test.ts)。
+原 `write_file`／`edit_file` 对普通外部绝对目标按当前模式授权：请求批准先人批，Auto 先自动审核，有效 Full 直接执行。[外部文件适配器](../tools/full-access-files.ts)将其描述为 external 效果，并在执行时核最终接纳证明的全部权限叶：有效模式授权、Workspace 信任、准确 Tool 能力和本次目标 revision 缺一不可。父子权限／Planning 业务门禁、实际工具集合、Profile／运行资产保护及原生 no-follow、owner、CAS 检查保持；准备后目标绑定变化拒绝，发布后无法确认仍为 unknown，不重放。按当前模式获准且可安全编辑的外部读取返回完整 baseline，其他可读目标继续只读；baseline 不签发写权限，外部文件不纳入 Workspace checkpoint。适配与故障回归见[外部 Files 测试](../../test/isolated/files/full-access-files.test.ts)。
 
 默认产品策略声明可信 `toolDispatchOrder: model`，由 Agent 冻结为 Run 的批次准入顺序；审批等待不能让后续免审工具提前派发，人工明确拒绝取消真实未开始兄弟。实际 dispatch 后仍可并发执行；子权限与 planning 包装保该标记，Service 只透传装配，自定义 Permissions 未声明时保通用独立并行能力。拒绝、未知结果和已知参数／策略失败各保准确终态，在原批次结算后交回下一 Model，不能把局部止效当成用户取消 Run。
 
@@ -114,7 +114,7 @@ Service 的[权限装配](../../../../apps/service/src/permission-configuration.
 
 同一整文件另在主 Agent 与第三层 child 的原 active Run 中先持有已经派发的首工具，再收紧模式并核下一工具仍 planned、零新效果，准确批准后仅派发一次；同时覆盖三层 child 的资源等待双向切换与 Auto 迟到批准。审核场景沿原 generator 关闭与 check Command 终态同步，不用固定等待代替旧审核结算。已派发工具不因模式变化被取消，下一工具必须绑定新根控制 revision。
 
-[external-file-reads](../tools/external-file-reads.ts) 将统一 `read_file` 的外部目标交给现有 capability／policy 判定，仍检查请求与实际路径的保护范围；执行层不再重复验证父子授权证明、绑定 inode 或强制单链接。该普通外部只读分支不生成编辑基线。有效 Full 的普通外部写入、编辑及可安全编辑的读取由上层 [Full Files 适配器](../tools/full-access-files.ts)处理；其他模式的外部修改须沿可用工具各自的权限链申请。保存的私有 input／plan／output 引用保留原会话范围。
+[external-file-reads](../tools/external-file-reads.ts) 将统一 `read_file` 的外部目标交给现有 capability／policy 判定，仍检查请求与实际路径的保护范围；执行层不再重复验证父子授权证明、绑定 inode 或强制单链接。该普通外部只读分支不生成编辑基线。普通外部写入、编辑及可安全编辑的读取由上层 [外部 Files 适配器](../tools/full-access-files.ts)处理，三种模式均须取得各自准确授权。保存的私有 input／plan／output 引用保留原会话范围。
 
 本次 macOS 当前工作树复用 [policy](../../test/isolated/permissions/policy.test.ts)、[Task 分类](../../test/isolated/permissions/task-request.test.ts) 和 [只读审阅上下文](../../test/isolated/permissions/check-context.test.ts) 的实际叶证据；另运行 [Task 整文件](https://github.com/ferqx/kite-code/blob/0dc1e3b7b8a316dc9226cc4e841186cc6486d34e/packages/agent/test/isolated/business/task/task.test.ts)，11 项、74 断言通过，其中真实父人工／子自动组合证明审核后零效果、实际批准后效果一次且不重放 checker。原 [subagent 终端整文件](../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 9 项、120 断言通过，证明自动审核实际外部写入与人类拒绝／取消。局部证据不代替全体客户端或发布门禁。
 
