@@ -1,4 +1,4 @@
-import { Button, Input, RightSidebar } from '@kite-ai/ui/desktop';
+import { Button, Input, RightSidebar, useErrorFeedback } from '@kite-ai/ui/desktop';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NativeBridge } from './native-bridge';
@@ -79,6 +79,7 @@ export function NativeSkillMarketplace({
   uninstalling,
   onClose,
   onInstalled,
+  onError: errorHandler,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -88,9 +89,22 @@ export function NativeSkillMarketplace({
   uninstalling?: boolean;
   onClose: () => void;
   onInstalled: () => void;
+  onError?: (message: string) => void;
 }) {
+  const onError = useErrorFeedback(errorHandler);
   const [installations, setInstallations] = useState<ReadonlyMap<string, Installation>>(new Map());
   const pending = useRef(false);
+  const feedback = useRef({ bridge, generation, panelHost, epoch: 0 });
+  const changed =
+    feedback.current.bridge !== bridge ||
+    feedback.current.generation !== generation ||
+    feedback.current.panelHost !== panelHost;
+  feedback.current = {
+    bridge,
+    generation,
+    panelHost,
+    epoch: feedback.current.epoch + Number(changed),
+  };
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -122,6 +136,8 @@ export function NativeSkillMarketplace({
     )
       return;
     pending.current = true;
+    const feedbackEpoch = feedback.current.epoch;
+    const report = onError;
     const update = (state: Installation) => {
       if (mounted.current) setInstallations((old) => new Map(old).set(key, state));
     };
@@ -144,7 +160,10 @@ export function NativeSkillMarketplace({
       update({ status: reply.result.status });
       onInstalled();
     } catch (cause) {
-      update({ status: 'failed', error: installError(cause) });
+      const message = installError(cause);
+      update({ status: 'failed', error: message });
+      if (mounted.current && feedback.current.epoch === feedbackEpoch && panelHost)
+        report?.(message);
     } finally {
       pending.current = false;
     }
@@ -160,6 +179,7 @@ export function NativeSkillMarketplace({
           uninstalling={uninstalling}
           install={install}
           onClose={onClose}
+          onError={onError}
         />,
         panelHost,
       )
@@ -174,6 +194,7 @@ function SearchPanel({
   uninstalling,
   install,
   onClose,
+  onError,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -182,9 +203,12 @@ function SearchPanel({
   uninstalling?: boolean;
   install: (selection: SkillMarketplaceSelection) => Promise<void>;
   onClose: () => void;
+  onError?: (message: string) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const latestSearch = useRef(0);
+  const feedback = useRef({ bridge, generation });
+  feedback.current = { bridge, generation };
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState<Search>();
   useEffect(() => {
@@ -204,6 +228,7 @@ function SearchPanel({
     event.preventDefault();
     if (!validKeyword || pendingKeyword) return;
     const current = ++latestSearch.current;
+    const report = onError;
     setSearch({ status: 'searching', query: keyword });
     try {
       const reply = await bridge.request({
@@ -222,8 +247,15 @@ function SearchPanel({
       if (current === latestSearch.current)
         setSearch({ status: 'complete', results: reply.results });
     } catch (cause) {
-      if (current === latestSearch.current)
-        setSearch({ status: 'failed', error: searchError(cause) });
+      if (
+        current === latestSearch.current &&
+        feedback.current.bridge === bridge &&
+        feedback.current.generation === generation
+      ) {
+        const message = searchError(cause);
+        setSearch({ status: 'failed', error: message });
+        report?.(message);
+      }
     }
   }
 
@@ -259,7 +291,7 @@ function SearchPanel({
                 正在搜索 Skills.sh…
               </p>
             )}
-            {search?.status === 'failed' && (
+            {search?.status === 'failed' && !onError && (
               <p className="provider-notice provider-notice-error" role="alert">
                 {search.error}
               </p>
@@ -290,7 +322,7 @@ function SearchPanel({
                         >
                           {action}
                         </Button>
-                        {state?.status === 'failed' && (
+                        {state?.status === 'failed' && !onError && (
                           <p className="skill-marketplace-install-error" role="alert">
                             {state.error}
                           </p>

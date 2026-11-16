@@ -173,6 +173,9 @@ test('actual Native page retains window actions and connects Windows menus to th
     ]);
     await act(async () => menuAction!('settings'));
     expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    // A failure from the previous presentation cannot follow navigation into settings.
+    expect(dom.window.document.querySelector('.native-toast')).toBeNull();
+    await down(header, 2);
     const settingsToast = dom.window.document.querySelector<HTMLElement>('.native-toast')!;
     expect(settingsToast.closest('.desktop-settings-dialog') !== null).toBe(true);
     expect(settingsToast.hidden).toBe(false);

@@ -18,6 +18,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  ErrorFeedbackContext,
   MessageContent,
   NAVIGATION_MIN_WIDTH,
   PromptMarkdown,
@@ -101,6 +102,7 @@ import {
 } from './native-directory-session-dialog';
 import { NativeDisplayCache } from './native-display-cache';
 import { useNativeEnvironment } from './native-environment';
+import { useNativeErrorFeedback } from './native-error-feedback';
 import { nativeExecutionObservation } from './native-execution-observation';
 import { NativeExtensions } from './native-extensions';
 import { NativeOperationDiff } from './native-file-changes';
@@ -122,7 +124,7 @@ import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 import { submitLocalOfficeRequest } from './native-local-request-submit';
 import { NativeMcpSettings } from './native-mcp-settings';
-import { humanReadableOperationError, NativeToast, type NativeToastProps } from './native-message';
+import { humanReadableOperationError, NativeToast } from './native-message';
 import { NativeMessageText } from './native-message-text';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput, readNativeReasoning } from './native-model-output';
@@ -585,11 +587,32 @@ function NativeDesktopContent({
     settled: boolean;
   }>();
   const planModes = useRef(new Map<string, boolean>());
-  const errorSequence = useRef(0);
-  const [operationMessage, setOperationMessage] = useState<NativeToastProps['message']>();
-  const showOperationMessage = useCallback((text?: string) => {
-    setOperationMessage(text ? { id: ++errorSequence.current, text } : undefined);
-  }, []);
+  const generation = useRef(0),
+    historyEpoch = useRef<number | undefined>(undefined),
+    viewIntent = useRef(0),
+    pageIntent = useRef(0),
+    firstOpenPage = useRef<number | undefined>(undefined),
+    draftRevision = useRef(0),
+    writing = useRef(false);
+  const errorPresentationScope = JSON.stringify([
+    state?.generation ?? generation.current,
+    directory?.storeId,
+    state?.selection?.session.id,
+    viewIntent.current,
+    pageIntent.current,
+    settingsOpen
+      ? ['settings', settingsPage]
+      : scheduledTasksView
+        ? 'scheduled'
+        : preparing
+          ? 'new'
+          : 'conversation',
+  ]);
+  const {
+    message: operationMessage,
+    report: showOperationMessage,
+    dismiss: dismissOperationMessage,
+  } = useNativeErrorFeedback(errorPresentationScope);
   const setError = useCallback(
     (message: string | undefined, operation?: string) =>
       showOperationMessage(
@@ -597,9 +620,6 @@ function NativeDesktopContent({
       ),
     [showOperationMessage],
   );
-  const dismissOperationMessage = useCallback((id: number) => {
-    setOperationMessage((current) => (current?.id === id ? undefined : current));
-  }, []);
   const workspaceRemovalUnavailable = state?.workspaceRemovalUnavailable;
   const removalUnavailableReported = useRef(false);
   useEffect(() => {
@@ -663,13 +683,6 @@ function NativeDesktopContent({
     identity: string;
     ids: Set<string>;
   }>({ identity: '', ids: new Set() });
-  const generation = useRef(0),
-    historyEpoch = useRef<number | undefined>(undefined),
-    viewIntent = useRef(0),
-    pageIntent = useRef(0),
-    firstOpenPage = useRef<number | undefined>(undefined),
-    draftRevision = useRef(0),
-    writing = useRef(false);
   const readLifecycle = useRef({ epoch: 0, quitting: false });
   const selectionRead = useRef<
     | {
@@ -2762,9 +2775,7 @@ function NativeDesktopContent({
   }
 
   function showSessionMutationResult(submission: NativeSessionSubmission) {
-    if (submission.phase === 'applied' && submission.kind === 'delete')
-      showOperationMessage('已请求删除会话。');
-    else if (submission.phase === 'unknown')
+    if (submission.phase === 'unknown')
       showOperationMessage('会话操作结果待确认。请从空间栏查询结果。');
     else if (submission.phase === 'failed')
       showOperationMessage(directorySessionError(submission.error));
@@ -6627,7 +6638,7 @@ function NativeDesktopContent({
     />
   );
   return windowFrame(
-    <>
+    <ErrorFeedbackContext.Provider value={showOperationMessage}>
       {sessionPage}
       {sessionDialog && (
         <NativeDirectorySessionDialog
@@ -6650,6 +6661,6 @@ function NativeDesktopContent({
           onSubmit={(title) => void submitDirectorySession(title)}
         />
       )}
-    </>,
+    </ErrorFeedbackContext.Provider>,
   );
 }

@@ -5,6 +5,7 @@ import { act, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConversationActivityContext } from '../../src/conversation-activity';
 import { useTextCopy } from '../../src/desktop/clipboard';
+import { ErrorFeedbackContext } from '../../src/desktop/error-feedback';
 import { MessageCopyButton } from '../../src/desktop/MessageCopyButton';
 
 type Copy = ReturnType<typeof useTextCopy>;
@@ -24,6 +25,7 @@ async function fixture(count = 40, hook = false) {
   const root = createRoot(host);
   const writes: string[] = [];
   const props = {
+    onError: undefined as ((message: string) => void) | undefined,
     prefix: 'saved',
     writer: async (text: string) => {
       writes.push(text);
@@ -51,20 +53,22 @@ async function fixture(count = 40, hook = false) {
       Object.assign(props, update);
       await act(async () =>
         root.render(
-          <ConversationActivityContext
-            value={{ readActive: props.readActive, resume: props.resume }}
-          >
-            {Array.from({ length: count }, (_, index) => (
-              <MessageCopyButton
-                key={index}
-                text={`${props.prefix} ${index}`}
-                writeClipboardText={props.writer}
-                disabled={props.disabled}
-                copyRole={props.copyRole}
-              />
-            ))}
-            {hook && <HookProbe />}
-          </ConversationActivityContext>,
+          <ErrorFeedbackContext value={props.onError}>
+            <ConversationActivityContext
+              value={{ readActive: props.readActive, resume: props.resume }}
+            >
+              {Array.from({ length: count }, (_, index) => (
+                <MessageCopyButton
+                  key={index}
+                  text={`${props.prefix} ${index}`}
+                  writeClipboardText={props.writer}
+                  disabled={props.disabled}
+                  copyRole={props.copyRole}
+                />
+              ))}
+              {hook && <HookProbe />}
+            </ConversationActivityContext>
+          </ErrorFeedbackContext>,
         ),
       );
     },
@@ -187,6 +191,56 @@ test('a pending old clipboard completion cannot publish copied feedback after it
     await act(async () => f.hook.copyMessage());
     expect(newWrites).toEqual(['exact body']);
     expect(f.hook.copyState).toBe('copied');
+  } finally {
+    await f.close();
+  }
+});
+
+test('copy failure uses the host once per attempt, with no local error and no late feedback after hide or host replacement', async () => {
+  const f = await fixture(0, true);
+  const errors: string[] = [];
+  const onError = (message: string) => {
+    errors.push(message);
+  };
+  try {
+    await f.render({
+      readActive: true,
+      onError,
+      writer: async () => {
+        throw Error('private clipboard detail');
+      },
+    });
+    await act(async () => f.hook.copyMessage());
+    await act(async () => f.hook.copyMessage());
+    expect(errors).toEqual(['复制失败，请重试', '复制失败，请重试']);
+    expect(f.hook.copyState).toBe('idle');
+    let fail!: (reason: Error) => void;
+    const writer = () =>
+      new Promise<void>((_resolve, reject) => {
+        fail = reject;
+      });
+    await f.render({ writer });
+    const hidden = f.hook.copyMessage();
+    await f.render({ readActive: false });
+    await act(async () => {
+      fail(Error('late hidden failure'));
+      await hidden;
+    });
+    expect(errors).toHaveLength(2);
+    await f.render({ readActive: true });
+    const oldHost = f.hook.copyMessage();
+    const other: string[] = [];
+    await f.render({
+      onError: (message) => {
+        other.push(message);
+      },
+    });
+    await act(async () => {
+      fail(Error('late prior host failure'));
+      await oldHost;
+    });
+    expect(errors).toHaveLength(2);
+    expect(other).toEqual([]);
   } finally {
     await f.close();
   }

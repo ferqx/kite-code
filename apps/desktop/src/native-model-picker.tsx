@@ -1,4 +1,9 @@
-import { ModelEffortSelector, ReadGate, resolveThinkingEffort } from '@kite-ai/ui/desktop';
+import {
+  ModelEffortSelector,
+  ReadGate,
+  resolveThinkingEffort,
+  useErrorFeedback,
+} from '@kite-ai/ui/desktop';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   NativeBridge,
@@ -246,6 +251,7 @@ export function NativeModelPicker({
   snapshots: sharedSnapshots,
   prepared,
   preview,
+  onError,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -263,7 +269,11 @@ export function NativeModelPicker({
   snapshots?: NativeModelSnapshots;
   prepared?: NativePreparedModels;
   preview?: NativeModelDisplay;
+  onError?: (message: string) => void;
 }) {
+  const reportError = useErrorFeedback(onError);
+  const reportErrorRef = useRef(reportError);
+  reportErrorRef.current = reportError;
   const localSnapshots = useRef(new NativeModelSnapshots());
   const snapshots = sharedSnapshots ?? localSnapshots.current;
   const scope = nativeModelScope(generation, selection, preparing, revision);
@@ -290,6 +300,20 @@ export function NativeModelPicker({
     readyCallback = useRef(onReady);
   readyCallback.current = onReady;
   const protocol = preparing ? { unavailable: false } : sessionProtocol(selection);
+  const errorScope = JSON.stringify([
+    generation,
+    scope.storeId,
+    selection?.session.id,
+    selection?.viewSelection,
+  ]);
+  const reported = useRef({ scope: errorScope, messages: new Set<string>() });
+  if (reported.current.scope !== errorScope)
+    reported.current = { scope: errorScope, messages: new Set() };
+  const reportFailure = (message: string) => {
+    if (reportErrorRef.current !== reportError || reported.current.messages.has(message)) return;
+    reportError?.(message);
+    reported.current.messages.add(message);
+  };
   const models =
     facts?.models.filter(
       (model) =>
@@ -355,22 +379,31 @@ export function NativeModelPicker({
   useEffect(() => {
     const original = readKey,
       request = ++sequence.current;
-    if (preview) return;
+    if (preview) {
+      reported.current.messages.clear();
+      return;
+    }
     const retained = snapshots.get(scope);
     // A retained footer can be mounted before Main has selected its target.
     // It may display cached facts, but must not start or settle that target's IO.
     if (disabled) {
+      reported.current.messages.clear();
       setState({ key: readKey, facts: retained, error: '', reading: true });
       return;
     }
+    if (protocol.unavailable) reportFailure('无法确认此会话首次运行的模型协议，暂时无法发送。');
     if (preparedState) {
       if (preparedState.facts) snapshots.set(scope, preparedState.facts);
+      if (preparedState.error) reportFailure('暂时无法读取模型列表，请稍后再试。');
+      else if (!protocol.unavailable) reported.current.messages.clear();
       return;
     }
     setState({ key: readKey, facts: retained, error: '', reading: true });
     void snapshots.prepare(bridge, generation, selection, preparing, revision).then((result) => {
       if (current.current !== original || sequence.current !== request) return;
       if (result.facts) snapshots.set(scope, result.facts);
+      if (result.error) reportFailure('暂时无法读取模型列表，请稍后再试。');
+      else if (!protocol.unavailable) reported.current.messages.clear();
       setState({
         key: readKey,
         facts: result.facts ?? retained,
@@ -383,6 +416,14 @@ export function NativeModelPicker({
     };
   }, [readKey, bridge, prepared, disabled, preview]);
   const preferenceSequence = useRef(0);
+  // Retire an in-flight preference write when its page is closed or changes scope.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Exact read scope owns the preference attempt.
+  useLayoutEffect(
+    () => () => {
+      preferenceSequence.current++;
+    },
+    [readKey, disabled, preview, reportError],
+  );
   async function remember(
     choice: NativeModelChoice,
     effectiveEffort?: NativeReasoningEffort | null,
@@ -402,7 +443,8 @@ export function NativeModelPicker({
       setSaveError(undefined);
     } catch {
       if (current.current !== original || preferenceSequence.current !== request) return;
-      setSaveError(readKey);
+      if (reportErrorRef.current) reportErrorRef.current('未能记住推荐设置，本次选择仍可使用。');
+      else setSaveError(readKey);
     }
   }
   function choose(modelId: string) {
@@ -478,11 +520,11 @@ export function NativeModelPicker({
           modelSelectionHint={protocol.protocol ? '仅显示当前对话可用的模型' : undefined}
         />
       </ReadGate>
-      {!preview && protocol.unavailable && (
+      {!reportError && !preview && protocol.unavailable && (
         <p role="alert">无法确认此会话首次运行的模型协议，暂时无法发送。</p>
       )}
-      {error && <p role="alert">模型目录不可用：{error}</p>}
-      {!preview && saveError === readKey && (
+      {!reportError && error && <p role="alert">模型目录不可用：{error}</p>}
+      {!reportError && !preview && saveError === readKey && (
         <p role="alert">未能记住推荐模型与思考程度，请重新选择。</p>
       )}
       {!preview && selected && !allowedEffort && (

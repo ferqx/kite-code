@@ -57,7 +57,13 @@ async function fixture(
   run: (value: {
     host: HTMLElement;
     calls: NativeTraceOperation[];
-    render(sessionId?: string): Promise<void>;
+    errors: string[];
+    bridge: NativeBridge;
+    render(
+      sessionId?: string,
+      generation?: number,
+      reporter?: ((message: string) => void) | null,
+    ): Promise<void>;
   }) => Promise<void>,
 ) {
   const dom = new JSDOM('<main id="root"></main>', { pretendToBeVisual: true });
@@ -77,7 +83,8 @@ async function fixture(
   });
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host),
-    calls: NativeTraceOperation[] = [];
+    calls: NativeTraceOperation[] = [],
+    errors: string[] = [];
   const saved = structuredClone(installation);
   let uninstalled = false;
   const bridge = {
@@ -118,12 +125,17 @@ async function fixture(
       return { kind: 'trace.action', value: { completed: true } };
     },
   } as unknown as NativeBridge;
-  async function render(sessionId = 'session-a') {
+  async function render(
+    sessionId = 'session-a',
+    generation = 1,
+    reporter: ((message: string) => void) | null = (message) => errors.push(message),
+  ) {
     await act(async () =>
       root.render(
         <NativeTraceSettings
           bridge={bridge}
-          generation={1}
+          generation={generation}
+          onError={reporter ?? undefined}
           storeId="store"
           selection={{ storeId: 'store', session: { id: sessionId } } as NativeSelection}
         />,
@@ -131,7 +143,7 @@ async function fixture(
     );
   }
   try {
-    await run({ host, calls, render });
+    await run({ host, calls, render, errors, bridge });
   } finally {
     await act(async () => root.unmount());
     restore();
@@ -141,8 +153,9 @@ async function fixture(
 }
 
 test('Trace settings keeps installation, grant and enable separate; unknown mutation refreshes without retry', async () =>
-  fixture(async ({ host, calls, render }) => {
+  fixture(async ({ host, calls, render, errors }) => {
     await render();
+    expect(errors).toEqual([]);
     expect(host.textContent).toContain('安装后仍需单独授权和启用');
     await act(async () => button(host, 'Example Trace').click());
     expect(
@@ -155,7 +168,13 @@ test('Trace settings keeps installation, grant and enable separate; unknown muta
     expect(calls.filter((call) => call.kind === 'enable')).toHaveLength(1);
     expect(calls.filter((call) => call.kind === 'grant')).toHaveLength(0);
     expect(calls.filter((call) => call.kind === 'list').length).toBeGreaterThan(1);
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('trace_result_unknown');
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('结果尚未确认');
+    expect(errors[0]).not.toContain('trace_result_unknown');
+    await act(async () => button(host, '启用').click());
+    expect(errors).toHaveLength(2);
+    expect(calls.filter((call) => call.kind === 'enable')).toHaveLength(2);
     await act(async () => toggle(host, '当前会话：session-a').click());
     await act(async () => toggle(host, '模型').click());
     await act(async () => toggle(host, '真实时间').click());
@@ -213,7 +232,7 @@ test('Trace credential form clears secret after binding and leaves credential us
   }));
 
 test('history export requires independent history grant and preserves exact Decimal64 range', async () =>
-  fixture(async ({ host, calls, render }) => {
+  fixture(async ({ host, calls, render, errors }) => {
     await render();
     await act(async () => button(host, 'Example Trace').click());
     expect(button(host, '创建历史导出').disabled).toBe(true);
@@ -252,7 +271,10 @@ test('history export requires independent history grant and preserves exact Deci
     await fill('结束序号（含；留空固定为当前上界）', '9223372036854775808');
     await act(async () => button(host, '创建历史导出').click());
     expect(calls.filter((call) => call.kind === 'history')).toHaveLength(1);
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe('trace_history_range_invalid');
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      '请填写有效的历史序号，且起始序号不能大于结束序号。',
+    );
+    expect(errors).toEqual([]);
   }));
 
 test('confirmed uninstall clears the selected installation and never inspects its retired id', async () =>
@@ -290,4 +312,191 @@ test('confirmed uninstall clears the selected installation and never inspects it
     expect(calls.filter((call) => call.kind === 'inspect')).toHaveLength(inspected);
     expect(calls.filter((call) => call.kind === 'uninstall')).toHaveLength(1);
     expect(host.querySelector('[role="alert"]')).toBeNull();
+  }));
+
+test('Trace read and mutation errors are scoped, with no success feedback and no automatic mutation retry', async () =>
+  fixture(async ({ host, bridge, render, errors }) => {
+    const original = bridge.request.bind(bridge);
+    let rejectRead!: (cause: Error) => void;
+    let rejectWrite!: (cause: Error) => void;
+    let holdInspect = true;
+    let enables = 0;
+    bridge.request = async (request) => {
+      if (request.method === 'trace.manage') {
+        if (request.operation.kind === 'inspect' && holdInspect)
+          return new Promise((_resolve, reject) => {
+            rejectRead = reject;
+          });
+        if (request.operation.kind === 'enable') {
+          enables++;
+          return new Promise((_resolve, reject) => {
+            rejectWrite = reject;
+          });
+        }
+      }
+      return original(request);
+    };
+    await render();
+    await act(async () => button(host, 'Example Trace').click());
+    await render('session-a', 2);
+    await act(async () => rejectRead(Error('old_scope_read_failed')));
+    expect(errors).toEqual([]);
+    holdInspect = false;
+    await act(async () => button(host, 'Example Trace').click());
+    await act(async () => button(host, '启用').click());
+    expect(errors).toEqual([]);
+    await render('session-b', 2);
+    await act(async () => rejectWrite(Error('trace_result_unknown')));
+    expect(enables).toBe(1);
+    expect(errors).toEqual([]);
+    await act(async () => button(host, '刷新状态').click());
+    expect(errors).toEqual([]);
+    bridge.request = async () => {
+      throw Error('/private/unsafe-error');
+    };
+    await act(async () => button(host, '刷新状态').click());
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('暂时无法完成 Trace 读取');
+    expect(errors[0]).not.toContain('/private/');
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  }));
+
+test('Trace delivery history remains inspectable and unavailable inspection uses error feedback only', async () =>
+  fixture(async ({ host, bridge, render, errors }) => {
+    const original = bridge.request.bind(bridge);
+    let unavailable = false;
+    bridge.request = async (request) => {
+      if (request.method === 'trace.manage' && request.operation.kind === 'delivery')
+        return {
+          kind: 'trace.delivery',
+          value: unavailable
+            ? {
+                kind: 'opentelemetry',
+                status: 'unavailable',
+                code: 'inspection_unavailable',
+                inspection: null,
+              }
+            : {
+                kind: 'opentelemetry',
+                status: 'available',
+                inspection: {
+                  grant: { revision: '1', epoch: '1', active: true },
+                  openSpans: 0,
+                  acceptedEvents: 2,
+                  unmappedEvents: {
+                    notSpan: 0,
+                    identityUnavailable: 0,
+                    timingUnavailable: 0,
+                    incompletePrefix: 0,
+                  },
+                  outgoingTotal: 1,
+                  outgoingStates: [{ status: 'partial_unknown', count: 1 }],
+                  outgoing: [
+                    {
+                      key: 'opaque-key',
+                      taskId: 'live:1',
+                      status: 'partial_unknown',
+                      code: null,
+                      attempts: 1,
+                      rejectedCount: 1,
+                      possibleDuplicate: 1,
+                    },
+                  ],
+                },
+              },
+        };
+      return original(request);
+    };
+    await render();
+    await act(async () => button(host, 'Example Trace').click());
+    await act(async () => button(host, '检查远端状态').click());
+    expect(host.textContent).toContain('部分接收，逐项结果未知');
+    expect(host.textContent).toContain('可能重复');
+    expect(errors).toEqual([]);
+    unavailable = true;
+    await act(async () => button(host, '检查远端状态').click());
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('暂时无法读取远端投递状态');
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.textContent).toContain('部分接收，逐项结果未知');
+    expect(host.textContent).not.toContain('inspection_unavailable');
+  }));
+
+test.each([
+  'list',
+  'inspect',
+  'enable',
+  'delivery',
+] as const)('Trace %s failure keeps its issuing reporter without rereading on presentation changes', async (kind) =>
+  fixture(async ({ host, bridge, render }) => {
+    const original = bridge.request.bind(bridge);
+    let pendingCalls = 0;
+    let reject!: (cause: Error) => void;
+    bridge.request = async (request) => {
+      if (request.method === 'trace.manage' && request.operation.kind === kind) {
+        if (++pendingCalls === 1)
+          return new Promise((_resolve, fail) => {
+            reject = fail;
+          });
+        throw Error('request_failed');
+      }
+      return original(request);
+    };
+    let oldActive = true;
+    let oldCalls = 0;
+    const delivered: string[] = [];
+    const oldReporter = (message: string) => {
+      oldCalls++;
+      if (oldActive) delivered.push(message);
+    };
+    const newReporter = (message: string) => delivered.push(message);
+    const action = () =>
+      button(
+        host,
+        { list: '刷新状态', inspect: 'Example Trace', enable: '启用', delivery: '检查远端状态' }[
+          kind
+        ],
+      );
+    await render('session-a', 1, oldReporter);
+    if (kind !== 'list') {
+      await act(async () => button(host, 'Example Trace').click());
+      if (kind !== 'inspect') await act(async () => action().click());
+    }
+    expect(pendingCalls).toBe(1);
+    oldActive = false;
+    await render('session-a', 1, newReporter);
+    expect(pendingCalls).toBe(1);
+    await act(async () => reject(Error('old_presentation_failure')));
+    expect(oldCalls).toBe(1);
+    expect(delivered).toEqual([]);
+    await act(async () => action().click());
+    expect(pendingCalls).toBeGreaterThanOrEqual(2);
+    expect(oldCalls).toBe(1);
+    expect(delivered).toHaveLength(1);
+  }));
+
+test('Trace fallback distinguishes a completed mutation from its failed refresh without an error host', async () =>
+  fixture(async ({ host, bridge, render }) => {
+    const original = bridge.request.bind(bridge);
+    let completed = false;
+    let writes = 0;
+    bridge.request = async (request) => {
+      if (request.method === 'trace.manage') {
+        if (request.operation.kind === 'disable') {
+          writes++;
+          completed = true;
+        }
+        if (request.operation.kind === 'list' && completed) throw Error('trace_refresh_failed');
+      }
+      return original(request);
+    };
+    await render('session-a', 1, null);
+    await act(async () => button(host, 'Example Trace').click());
+    await act(async () => button(host, '停用').click());
+    expect(writes).toBe(1);
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      '操作已完成，但暂时无法读取最新状态。请刷新状态。',
+    );
+    expect(host.querySelector('[role="alert"]')?.textContent).not.toContain('尚未确认');
+    expect(host.querySelector('[aria-label="所选 Trace"]')).not.toBeNull();
   }));

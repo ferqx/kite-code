@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
+import { useErrorFeedback } from './error-feedback';
 import {
   FullPermissionConfirmationDialog,
   fullPermissionConfirmationCopy,
@@ -119,6 +120,7 @@ const permissionCopy = {
 } as const;
 
 export interface ComposerProps {
+  onError?: (message: string) => void;
   queue?: QueuedMessagesProps;
   /** Changed by the host after a queue withdrawal has filled the controlled draft. */
   queueFocusKey?: string | number;
@@ -132,7 +134,10 @@ export interface ComposerProps {
   onFilesSelected?: (files: readonly { name: string; uri: string }[]) => void;
   files?: readonly { id: string; name: string; uri: string }[];
   onRemoveFile?: (id: string) => void;
-  onImageFiles?: (files: readonly File[]) => void;
+  /** Async hosts may return one scoped system error; ordinary callbacks remain supported. */
+  onImageFiles?:
+    | ((files: readonly File[]) => void)
+    | ((files: readonly File[]) => Promise<{ error?: string } | undefined>);
   imageLimit?: number;
   images?: readonly {
     id: string;
@@ -140,6 +145,7 @@ export interface ComposerProps {
     url: string;
     loading?: boolean;
     error?: string;
+    errorKind?: 'system';
     previewError?: string;
   }[];
   onRemoveImage?: (id: string) => void;
@@ -225,6 +231,17 @@ function currentFullPermission(original: ComposerProps, latest: ComposerProps) {
   return canConfirmFull(latest) && samePermissionContext(original, latest);
 }
 export function Composer(props: ComposerProps) {
+  const onError = useErrorFeedback(props.onError);
+  const errorCallback = useRef(onError);
+  errorCallback.current = onError;
+  const presentation = useRef<object | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Feedback belongs to this exact visible, usable host presentation.
+  useLayoutEffect(() => {
+    presentation.current = {};
+    return () => {
+      presentation.current = null;
+    };
+  }, [props.scopeKey, props.disabled, props.readOnly, props.promptHidden, onError]);
   const editor = useRef<PromptEditorHandle>(null);
   const queueFocus = useRef({ scope: props.scopeKey, key: props.queueFocusKey });
   useLayoutEffect(() => {
@@ -354,9 +371,19 @@ export function Composer(props: ComposerProps) {
       !selected.length ||
       original.disabled ||
       original.readOnly ||
+      original.promptHidden ||
       current.current.scopeKey !== original.scopeKey
     )
       return;
+    const owner = presentation.current;
+    const active = () =>
+      owner !== null &&
+      presentation.current === owner &&
+      current.current.scopeKey === original.scopeKey &&
+      !current.current.disabled &&
+      !current.current.readOnly &&
+      !current.current.promptHidden &&
+      errorCallback.current === onError;
     filePick.current?.abort();
     const token = new AbortController();
     filePick.current = token;
@@ -375,14 +402,7 @@ export function Composer(props: ComposerProps) {
       setPreparingFiles(ordinary.length > 0);
       const files = ordinary.length ? await original.onFileReferences!(ordinary, token.signal) : [];
       const latest = current.current;
-      if (
-        filePick.current !== token ||
-        latest.scopeKey !== original.scopeKey ||
-        latest.disabled ||
-        latest.readOnly ||
-        latest.promptHidden
-      )
-        return;
+      if (filePick.current !== token || !active()) return;
       setPreparingFiles(false);
       if (
         new Set([...(latest.files ?? []).map((file) => file.uri), ...files.map((file) => file.uri)])
@@ -394,19 +414,36 @@ export function Composer(props: ComposerProps) {
       if (images.length) {
         const preparing = original.onImageFiles!(images);
         if (files.length) original.onFilesSelected?.(files);
-        await preparing;
+        const result = await preparing;
+        // Images are already owned by the draft. A later picker cannot retire their
+        // result; the host returns errors only for images still retained in this batch.
+        if (result?.error && active()) {
+          onError?.(result.error);
+          // Without a host, per-image feedback remains visible beside the retained draft.
+        }
       } else if (files.length) original.onFilesSelected?.(files);
     } catch (error) {
-      if (filePick.current === token && current.current.scopeKey === original.scopeKey)
-        setFileError(
-          (error as { code?: string })?.code === 'input_image_count_limit'
+      if (filePick.current === token && active()) {
+        const code = (error as { code?: string })?.code ?? (error as Error)?.message;
+        const validation =
+          code === 'input_image_count_limit'
             ? `每条消息最多添加 ${original.imageLimit ?? 10} 张图片，请减少数量后重试。`
-            : (error as { code?: string })?.code === 'input_image_window_count_limit'
+            : code === 'input_image_window_count_limit'
               ? '当前窗口待发送图片过多，请移除其他会话中的部分图片后重试。'
-              : (error as { code?: string })?.code === 'file_picker_restart_required'
-                ? '文件选择功能尚未加载，请完全退出并重新打开应用。'
-                : '无法添加文件，请重试。',
-        );
+              : code === 'input_file_too_large'
+                ? '文件超过 256 MiB，请缩小后重试。'
+                : undefined;
+        if (validation) setFileError(validation);
+        else {
+          const message =
+            code === 'file_picker_restart_required'
+              ? '文件选择功能尚未加载，请完全退出并重新打开应用。'
+              : '无法添加文件，请重试。';
+          if (onError) {
+            if (errorCallback.current === onError) onError(message);
+          } else setFileError(message);
+        }
+      }
     } finally {
       // The host releases prepared files that were never handed to onFilesSelected.
       // Successfully adopted attachments have already left this preparation scope.
@@ -735,11 +772,20 @@ export function Composer(props: ComposerProps) {
                   {image.url ? (
                     <img src={image.url} alt={image.name} decoding="async" />
                   ) : image.previewError || image.error ? (
-                    <span>{image.previewError ?? '预览不可用'}</span>
+                    !onError && <span>{image.previewError ?? '预览不可用'}</span>
                   ) : null}
                 </div>
-                <span className="composer-attachment-name" title={image.error ?? image.name}>
-                  {image.error ?? image.name}
+                <span
+                  className="composer-attachment-name"
+                  title={
+                    image.errorKind === 'system' && onError
+                      ? image.name
+                      : (image.error ?? image.name)
+                  }
+                >
+                  {image.errorKind === 'system' && onError
+                    ? image.name
+                    : (image.error ?? image.name)}
                 </span>
                 {props.onRemoveImage && (
                   <Button

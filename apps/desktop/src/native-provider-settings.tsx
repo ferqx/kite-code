@@ -10,7 +10,7 @@ import type {
   NativeSelection,
 } from './native-bridge';
 import { NativeConnectionModels } from './native-connection-models';
-import { NativeToast, type NativeToastProps } from './native-message';
+import { NativeToast } from './native-message';
 import {
   NativeModelSettingsFeedback,
   type NativeModelSettingsState,
@@ -19,6 +19,7 @@ import {
   type CompatibleProviderPreset,
   compatibleProviderPresets,
 } from './native-provider-presets';
+import { useNativeSettingsFeedback } from './native-settings-feedback';
 import { NativeSettingsSelect } from './native-settings-select';
 
 export type NativeProviderSettingsActivity = {
@@ -201,7 +202,7 @@ function directoryError(code: string) {
     case 'configuration_observation_changed':
       return '配置已变化，请重新打开设置后再试。';
     default:
-      return `无法获取模型目录（${code}），可重试或手动填写模型 ID。`;
+      return '暂时无法获取模型目录，可重试或手动填写模型 ID。';
   }
 }
 
@@ -214,6 +215,7 @@ export function NativeProviderSettings({
   onRecovered,
   panelHost,
   toastHost,
+  onError,
   editorControl,
   refreshControl,
   models,
@@ -229,6 +231,7 @@ export function NativeProviderSettings({
   onRecovered?: () => void;
   panelHost: HTMLElement | null;
   toastHost?: HTMLElement | null;
+  onError?: (message: string) => void;
   editorControl?: RefObject<{ close: () => void } | null>;
   refreshControl?: RefObject<(() => Promise<boolean>) | null>;
   models?: NativeModelSettingsState;
@@ -267,7 +270,7 @@ export function NativeProviderSettings({
     field: 'name' | 'url' | 'key' | 'models';
     message: string;
   }>();
-  const [error, setError] = useState(''),
+  const [error, setErrorState] = useState(''),
     [reading, setReading] = useState(false),
     [writing, setWriting] = useState(false);
   const [dismissedError, setDismissedError] = useState<string>();
@@ -277,6 +280,11 @@ export function NativeProviderSettings({
   const [local, setLocal] = useState<NativeProviderSubmission[]>([]);
   const [lookupCompletion, setLookupCompletion] = useState(0);
   const identity = `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
+  const feedback = useNativeSettingsFeedback(identity, onError);
+  function setError(message: string) {
+    setErrorState(message);
+    if (message) feedback.report('operation', message);
+  }
   const awaitingOriginal = useRef<SentProviderChange | undefined>(
     sentProviderChanges.get(bridge)?.get(identity),
   );
@@ -560,16 +568,23 @@ export function NativeProviderSettings({
           else if (state.notify) recoveredCallback.current?.();
           state.notify = false;
           setError('');
-        } else if (!valid) requireRecovery(response.errors[0] ?? 'configuration_unavailable');
+          feedback.reset('read');
+        } else if (!valid) {
+          requireRecovery(response.errors[0] ?? 'configuration_unavailable');
+          feedback.report('read', '提供商配置不可用，请检查配置后重新打开设置。');
+        }
         return valid;
       } catch (cause) {
         if (mounted.current && current.current === original && sequence.current === request) {
           requireRecovery(safeError(cause));
           setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
-          if (!afterSave || editing === editorVersion.current)
-            setError(
-              `${persistentFailure(safeError(cause)) ? (afterSave ? '已保存，当前配置不可读：' : '提供商配置不可用：') : afterSave === 'remove' ? '已删除，正在后台同步配置，无需重复删除。' : afterSave ? '已保存，正在后台同步配置，无需重复保存。' : '提供商配置正在后台同步：'}${safeError(cause)}`,
-            );
+          if (!afterSave || editing === editorVersion.current) {
+            const message = afterSave
+              ? `${afterSave === 'remove' ? '已删除' : '已保存'}，但无法刷新配置。请查看当前状态，不要重复提交。`
+              : '暂时无法读取提供商配置，请稍后重新打开设置。';
+            setErrorState(message);
+            feedback.report('read', message);
+          }
         }
         return false;
       } finally {
@@ -679,7 +694,11 @@ export function NativeProviderSettings({
       if (entry.phase === 'applied') {
         notifyApplied(entry);
         recovery.current.pendingSaved = entry;
-      }
+      } else
+        feedback.report(
+          `terminal/${entry.commandId}`,
+          '提供商更改未能完成，请查看当前配置后重试。',
+        );
       requireRecovery();
       settled = true;
     }
@@ -756,6 +775,7 @@ export function NativeProviderSettings({
       models?.pending
     )
       return;
+    feedback.reset('operation');
     choose(entry, item, 'remove', button);
     const editing = editorVersion.current;
     const original = sequence.current;
@@ -857,6 +877,7 @@ export function NativeProviderSettings({
   async function discover() {
     if (!facts || !provider || !writable || directoryRead.current || flight.current) return;
     if (!validConnectionDraft()) return;
+    feedback.reset('directory');
     const readId = crypto.randomUUID();
     const original = identity;
     const currentRead = () =>
@@ -888,11 +909,11 @@ export function NativeProviderSettings({
       if (!response.modelNames.length) throw Error('provider_discovery_empty');
       setDirectory({ names: response.modelNames });
     } catch (cause) {
-      if (currentRead())
-        setDirectory((previous) => ({
-          names: previous.names,
-          error: directoryError(safeError(cause)),
-        }));
+      if (currentRead()) {
+        const message = directoryError(safeError(cause));
+        setDirectory((previous) => ({ names: previous.names, error: message }));
+        feedback.report('directory', message);
+      }
     } finally {
       if (currentRead()) directoryRead.current = undefined;
     }
@@ -929,6 +950,7 @@ export function NativeProviderSettings({
     const original = identity,
       request = ++sequence.current,
       editing = editorVersion.current;
+    feedback.reset('operation');
     const action = operation.kind === 'remove' ? '删除' : '保存';
     const sent: SentProviderChange = {
       storeId: facts.storeId,
@@ -975,14 +997,15 @@ export function NativeProviderSettings({
         if (editorVersion.current !== editing || panelCurrent.current !== operation.provider)
           return;
         await refreshApplied(operation, editing);
-      } else if (response.phase !== 'unknown') {
+      } else if (response.phase === 'unknown') {
+        setError(`${action}结果未确认，请查看原操作结果，不要重复提交。`);
+      } else {
         requireRecovery(response.error ?? 'configuration_unavailable');
         setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
-        if (response.error)
-          setError(
-            (operation.kind === 'remove' && removalBlockedMessage(response.error)) ||
-              `${action}失败：${response.error}`,
-          );
+        setError(
+          (operation.kind === 'remove' && removalBlockedMessage(response.error ?? '')) ||
+            `${action}未能完成，请检查当前配置后重试。`,
+        );
       }
     } catch (cause) {
       const code = safeError(cause);
@@ -998,9 +1021,10 @@ export function NativeProviderSettings({
         requireRecovery(code);
         if (editorVersion.current === editing)
           setError(
-            rejected && operation.kind === 'remove'
-              ? (removalBlockedMessage(code) ?? `删除失败：${code}`)
-              : `${action}结果未确认，正在后台核对。`,
+            rejected
+              ? (operation.kind === 'remove' && removalBlockedMessage(code)) ||
+                  `${action}未能完成，请检查当前配置后重试。`
+              : `${action}结果未确认，请查看原操作结果，不要重复提交。`,
           );
       }
     } finally {
@@ -1026,6 +1050,7 @@ export function NativeProviderSettings({
   }
   async function lookup(submission: NativeProviderSubmission) {
     if (flight.current) return;
+    feedback.reset('operation');
     const original = identity,
       editing = editorVersion.current;
     flight.current = true;
@@ -1047,11 +1072,7 @@ export function NativeProviderSettings({
       remember(response);
       if (response.phase === 'applied' && current.current === original) notifyApplied(response);
       if (current.current === original && editing === editorVersion.current) {
-        setError(
-          response.phase === 'failed'
-            ? `更改失败：${response.error ?? 'configuration_unavailable'}`
-            : '',
-        );
+        setError(response.phase === 'failed' ? '提供商更改未能完成，请检查当前配置后重试。' : '');
         if (response.phase === 'failed') {
           requireRecovery(response.error ?? 'configuration_unavailable');
           setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
@@ -1068,7 +1089,7 @@ export function NativeProviderSettings({
     } catch {
       if (mounted.current && current.current === original && editing === editorVersion.current) {
         recovery.current.cause = 'network_outcome_unknown';
-        setError('暂时无法核对结果，正在后台重试。');
+        setError('暂时无法核对结果，请保留原操作并稍后查看。');
       }
     } finally {
       if (mounted.current && current.current === original) {
@@ -1113,6 +1134,11 @@ export function NativeProviderSettings({
         remember(submission);
         if (['applied', 'failed'].includes(submission.phase)) {
           if (submission.phase === 'applied') recovery.current.pendingSaved = submission;
+          else
+            feedback.report(
+              `terminal/${submission.commandId}`,
+              '提供商更改未能完成，请查看当前配置后重试。',
+            );
           requireRecovery();
           await read();
           return;
@@ -1120,7 +1146,7 @@ export function NativeProviderSettings({
       } catch (cause) {
         if (mounted.current && current.current === original) {
           recovery.current.cause = safeError(cause);
-          setError(`提供商更改正在后台核对：${safeError(cause)}`);
+          setError('暂时无法核对提供商更改，请保留原操作并稍后查看。');
         }
         return;
       }
@@ -1150,6 +1176,11 @@ export function NativeProviderSettings({
           setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
           requireRecovery();
           if (response.phase === 'applied') recovery.current.pendingSaved = response;
+          else
+            feedback.report(
+              `terminal/${response.commandId}`,
+              '提供商更改未能完成，请查看当前配置后重试。',
+            );
         }
         remember(response);
         recovery.current.cause = '';
@@ -1157,7 +1188,7 @@ export function NativeProviderSettings({
       } catch (cause) {
         if (mounted.current && current.current === original) {
           recovery.current.cause = safeError(cause);
-          setError(`提供商更改正在后台核对：${safeError(cause)}`);
+          setError('暂时无法核对提供商更改，请保留原操作并稍后查看。');
         }
       } finally {
         if (mounted.current && current.current === original) {
@@ -1172,40 +1203,10 @@ export function NativeProviderSettings({
   const unresolvedSubmissions = originals.filter((submission) => submission.phase === 'unknown');
   const visibleError = error !== dismissedError ? error : '';
   const configurationReadOnly = facts && !facts.canWrite && !pending && !reading;
-  let toast: NativeToastProps['message'];
-  if (unresolvedSubmissions.length) {
-    const actionName = (submission: NativeProviderSubmission) =>
-      submission.operation.kind === 'remove' ? '删除' : '保存';
-    const label = (submission: NativeProviderSubmission) =>
-      submission.operation.name ||
-      facts?.providers.find((entry) => entry.id === submission.operation.provider)?.label ||
-      submission.operation.provider;
-    const [first] = unresolvedSubmissions;
-    const multiple = unresolvedSubmissions.length > 1;
-    toast = {
-      id: 1,
-      text: [
-        multiple
-          ? '有提供商更改结果待确认。'
-          : `${label(first!)}：${actionName(first!)}结果待确认。`,
-        !multiple && facts && first!.storeId !== facts.storeId && '此更改来自先前的数据源。',
-        visibleError,
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      actions: unresolvedSubmissions.map((submission) => ({
-        label: multiple ? `查看 ${label(submission)} 的${actionName(submission)}结果` : '查看结果',
-        disabled: reading || writing,
-        onClick: () => void lookup(submission),
-      })),
-    };
-  } else if (visibleError) {
-    toast = { id: 0, role: 'alert', text: visibleError };
-  } else if (pending && !writing) {
-    toast = { id: 2, text: '有提供商更改尚未确认，暂时无法保存。' };
-  } else if (panelMode && configurationReadOnly && !error) {
-    toast = { id: 3, text: '当前配置不可写，请检查配置诊断。' };
-  }
+  const toast =
+    !feedback.handled && visibleError
+      ? { id: 0, role: 'alert' as const, text: visibleError }
+      : undefined;
   return (
     <section
       aria-label={models ? '提供商与模型设置' : '提供商设置'}
@@ -1226,7 +1227,10 @@ export function NativeProviderSettings({
               type="button"
               aria-label="刷新提供商配置"
               disabled={reading || writing}
-              onClick={() => void read()}
+              onClick={() => {
+                feedback.reset('read');
+                void read();
+              }}
             >
               <ProviderIcon name="refresh" />
               <span>刷新配置</span>
@@ -1246,12 +1250,40 @@ export function NativeProviderSettings({
           </Button>
         </div>
       </header>
-      <NativeToast
-        key={toast?.id === 0 ? visibleError : undefined}
-        container={toastHost ?? undefined}
-        message={toast}
-        onDismiss={toast?.id === 0 ? () => setDismissedError(error) : undefined}
-      />
+      {!feedback.handled && (
+        <NativeToast
+          key={visibleError}
+          container={toastHost ?? undefined}
+          message={toast}
+          onDismiss={() => setDismissedError(error)}
+        />
+      )}
+      {!!unresolvedSubmissions.length && (
+        <section aria-label="待确认的提供商更改">
+          {unresolvedSubmissions.map((submission) => (
+            <div key={submission.commandId}>
+              <span>
+                {submission.operation.name ||
+                  facts?.providers.find((entry) => entry.id === submission.operation.provider)
+                    ?.label ||
+                  submission.operation.provider}
+                ：{submission.operation.kind === 'remove' ? '删除' : '保存'}结果待确认。
+              </span>
+              {facts && submission.storeId !== facts.storeId && (
+                <span>此更改来自先前的数据源。</span>
+              )}
+              <Button
+                type="button"
+                disabled={reading || writing}
+                onClick={() => void lookup(submission)}
+              >
+                查看结果
+              </Button>
+            </div>
+          ))}
+        </section>
+      )}
+      {panelMode && configurationReadOnly && !error && <p role="status">当前配置只读。</p>}
       {models && (
         <div className="settings-models provider-model-feedback">
           <NativeModelSettingsFeedback state={models} />
@@ -1699,7 +1731,7 @@ export function NativeProviderSettings({
                                 : '每行一个准确模型名称；留空时保存会查询该连接的模型目录。'}
                           </p>
                         )}
-                        {directory.error && (
+                        {!feedback.handled && directory.error && (
                           <p className="provider-field-error" role="alert">
                             {directory.error}
                           </p>
@@ -1762,11 +1794,12 @@ export function NativeProviderSettings({
             panelHost,
           )}
       </div>
-      {facts?.errors.map((code) => (
-        <p className="provider-notice provider-notice-error" role="alert" key={code}>
-          {code}
-        </p>
-      ))}
+      {!feedback.handled &&
+        facts?.errors.map((code) => (
+          <p className="provider-notice provider-notice-error" role="alert" key={code}>
+            {code}
+          </p>
+        ))}
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import type { UserSkillCataloguePage } from '@kite-ai/client';
-import { Button, MessageContent, RightSidebar } from '@kite-ai/ui/desktop';
+import { Button, MessageContent, RightSidebar, useErrorFeedback } from '@kite-ai/ui/desktop';
 import { ApplicationConfirmationDialog } from '@kite-ai/ui/desktop/confirmation';
 import { type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -104,6 +104,7 @@ export function NativeSkillsSettings({
   canRead: available = true,
   panelHost,
   editorControl,
+  onError: errorHandler,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -111,8 +112,12 @@ export function NativeSkillsSettings({
   canRead?: boolean;
   panelHost: HTMLElement | null;
   editorControl?: RefObject<{ close: () => void } | null>;
+  onError?: (message: string) => void;
 }) {
+  const onError = useErrorFeedback(errorHandler);
   const panelId = useId();
+  const reportError = useRef(onError);
+  reportError.current = onError;
   const scope: NativeSkillsScope | undefined = useMemo(
     () => (storeId ? { generation, storeId } : undefined),
     [generation, storeId],
@@ -148,13 +153,15 @@ export function NativeSkillsSettings({
   const facts = view.identity === identity ? view.facts : undefined;
   const error = view.identity === identity ? view.error : undefined;
   const busy = view.identity === identity && view.busy;
+  const factsSnapshot = useRef(facts);
+  factsSnapshot.current = facts;
   const canRead = !!scope && available;
   const selectedPanel = canRead && panel?.identity === identity ? panel : undefined;
   const detail = selectedPanel?.kind === 'detail' ? selectedPanel : undefined;
   const detailId = detail?.id;
   const searchOpen = selectedPanel?.kind === 'search';
-  const active = useRef({ scope: canRead ? scope : undefined, panel: selectedPanel });
-  active.current = { scope: canRead ? scope : undefined, panel: selectedPanel };
+  const active = useRef({ bridge, scope: canRead ? scope : undefined, panel: selectedPanel });
+  active.current = { bridge, scope: canRead ? scope : undefined, panel: selectedPanel };
   useEffect(() => {
     if (!canRead || !scope) return;
     return watchNativeSkillMutations(bridge, scope, () => {
@@ -219,6 +226,7 @@ export function NativeSkillsSettings({
     )
       return;
     const abort = new AbortController();
+    const report = reportError.current;
     setDocument({ key: documentKey, busy: true });
     void readNativeSkillDocument({
       bridge,
@@ -235,8 +243,11 @@ export function NativeSkillsSettings({
         if (!abort.signal.aborted) setDocument({ key: documentKey, body: value.body, busy: false });
       })
       .catch((cause) => {
-        if (!abort.signal.aborted)
-          setDocument({ key: documentKey, error: documentError(safeError(cause)), busy: false });
+        if (!abort.signal.aborted && active.current.scope === scope) {
+          const message = documentError(safeError(cause));
+          setDocument({ key: documentKey, error: message, busy: false });
+          report?.(message);
+        }
       });
     return () => abort.abort();
   }, [bridge, documentIdentity, documentKey, scope, refresh]);
@@ -247,6 +258,7 @@ export function NativeSkillsSettings({
       return;
     }
     const abort = new AbortController();
+    const report = reportError.current;
     setView((old) => ({
       identity,
       facts: old.identity === identity ? old.facts : undefined,
@@ -259,7 +271,9 @@ export function NativeSkillsSettings({
       isCurrent: () => current.current === readIdentity,
     })
       .then((value) => {
-        if (!abort.signal.aborted && current.current === readIdentity)
+        if (!abort.signal.aborted && current.current === readIdentity) {
+          if (value.availability === 'unavailable')
+            report?.('暂时无法读取 Skills 目录，请检查技能配置后刷新。');
           setView((old) =>
             value.availability === 'unavailable' &&
             old.identity === identity &&
@@ -272,15 +286,22 @@ export function NativeSkillsSettings({
                 }
               : { identity, facts: value, busy: false },
           );
+        }
       })
       .catch((cause) => {
-        if (!abort.signal.aborted && current.current === readIdentity)
+        if (!abort.signal.aborted && current.current === readIdentity) {
+          report?.(
+            factsSnapshot.current
+              ? 'Skills 目录读取失败。已保留上次完整目录，请刷新后重试。'
+              : 'Skills 目录读取失败，尚未取得完整目录。请刷新后重试。',
+          );
           setView((old) => ({
             identity,
             facts: old.identity === identity ? old.facts : undefined,
             busy: false,
             error: safeError(cause),
           }));
+        }
       });
     return () => abort.abort();
   }, [bridge, identity, readIdentity, canRead, scope]);
@@ -300,6 +321,7 @@ export function NativeSkillsSettings({
 
   async function uninstallSkill() {
     if (!scope || !confirmation || pendingUninstall.current || busy || error) return;
+    const report = reportError.current;
     const submitted: SkillUninstall = { ...confirmation, busy: true, error: undefined };
     const opener = origin.current;
     pendingUninstall.current = true;
@@ -320,7 +342,8 @@ export function NativeSkillsSettings({
       )
         throw Error('skill_marketplace_uninstall_failed');
       notifyNativeSkillMutation(bridge, scope);
-      if (!mounted.current || active.current.scope !== scope) return;
+      if (!mounted.current || active.current.scope !== scope || active.current.bridge !== bridge)
+        return;
       setUninstall((old) => (old === submitted ? undefined : old));
       setUninstalled({
         identity,
@@ -333,7 +356,10 @@ export function NativeSkillsSettings({
         searchButton.current?.focus();
       }
     } catch (cause) {
-      if (!mounted.current) return;
+      if (!mounted.current || active.current.scope !== scope || active.current.bridge !== bridge)
+        return;
+      // Closing or replacing the detail retires its feedback, not the Main mutation.
+      if (active.current.panel === submitted.panel) report?.(uninstallError(safeError(cause)));
       setUninstall((old) =>
         old === submitted ? { ...submitted, busy: false, error: safeError(cause) } : old,
       );
@@ -400,7 +426,7 @@ export function NativeSkillsSettings({
         </p>
       ) : (
         <>
-          {error && (
+          {error && !onError && (
             <p className="provider-notice provider-notice-error" role="alert">
               Skills 目录读取失败：{error}。
               {facts ? '保留上次完整目录，尚未确认最新状态。' : '尚未取得完整目录。'}
@@ -410,9 +436,11 @@ export function NativeSkillsSettings({
             <div className="provider-workspace">
               <div className="provider-directory">
                 {facts.availability === 'unavailable' ? (
-                  <p className="provider-notice" role="status">
-                    Skills 目录当前不可用：{facts.reason}。
-                  </p>
+                  onError ? null : (
+                    <p className="provider-notice" role="status">
+                      Skills 目录当前不可用：{facts.reason}。
+                    </p>
+                  )
                 ) : (
                   <>
                     <div className="provider-directory-heading">
@@ -461,6 +489,7 @@ export function NativeSkillsSettings({
           uninstalled={uninstalled?.identity === identity ? uninstalled : undefined}
           uninstalling={uninstall?.busy}
           onClose={close}
+          onError={onError}
           onInstalled={() => notifyNativeSkillMutation(bridge, scope)}
         />
       )}
@@ -488,7 +517,7 @@ export function NativeSkillsSettings({
                   {entry && <SkillStatus entry={entry} />}
                 </header>
                 <div className="provider-editor-body right-sidebar-editor-body">
-                  {error && (
+                  {error && !onError && (
                     <p className="provider-notice provider-notice-error" role="alert">
                       详情尚未确认最新状态：{error}。保留上次完整目录。
                     </p>
@@ -509,7 +538,9 @@ export function NativeSkillsSettings({
                         {currentDocument?.body !== undefined ? (
                           <MessageContent text={markdownBody(currentDocument.body)} />
                         ) : currentDocument?.error ? (
-                          <p role="status">{currentDocument.error}</p>
+                          onError ? null : (
+                            <p role="status">{currentDocument.error}</p>
+                          )
                         ) : !currentDocument?.busy ? (
                           <p>此技能的正文当前不可读取。</p>
                         ) : null}
@@ -530,7 +561,7 @@ export function NativeSkillsSettings({
                   )}
                 </div>
                 <footer className="provider-editor-footer right-sidebar-editor-footer">
-                  {detailUninstall?.error && (
+                  {detailUninstall?.error && !onError && (
                     <p
                       className="provider-notice provider-notice-error skill-uninstall-error"
                       role="alert"

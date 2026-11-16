@@ -513,7 +513,7 @@ for (const owner of ['provider', 'model'] as const) {
       expect(f.button('保存提供商配置').disabled).toBe(true);
       const pendingNotice = () =>
         owner === 'provider'
-          ? f.dom.window.document.querySelector('.native-toast-card')
+          ? f.element.querySelector('[aria-label="待确认的提供商更改"]')
           : f.element.querySelector('[aria-label="待确认的模型更改"]');
       const notice = pendingNotice()!;
       expect(notice).not.toBeNull();
@@ -950,7 +950,7 @@ test('failed provider flush preserves applied model results and lets the accepte
     expect(state.models.models.find((model) => model.id === 'b')!.enabled).toBe(true);
     expect(f.saved).toBe(2);
     expect(f.dom.window.document.querySelector('.native-toast-card')?.textContent).toContain(
-      'peer_model_read_unavailable',
+      '暂时无法读取提供商配置',
     );
   } finally {
     flush.resolve();
@@ -1047,14 +1047,14 @@ test('a model publication forces a newer Provider GET instead of borrowing an ol
     expect(row.disabled).toBe(false);
     expect(reads).toBe(2);
     expect(f.dom.window.document.querySelector('.native-toast-card')?.textContent).toContain(
-      'peer_model_read_unavailable',
+      '暂时无法读取提供商配置',
     );
     expect(clock.pending).toBe(1);
     await clock.fire();
     expect(reads).toBe(3);
     expect(clock.pending).toBe(0);
     expect(f.dom.window.document.querySelector('.native-toast-card')?.textContent).toContain(
-      'peer_model_read_unavailable',
+      '暂时无法读取提供商配置',
     );
     expect(row.disabled).toBe(false);
     await act(async () => row.click());

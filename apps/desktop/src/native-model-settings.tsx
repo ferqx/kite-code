@@ -10,6 +10,7 @@ import {
   Input,
   ScrollArea,
   Switch,
+  useErrorFeedback,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
@@ -28,6 +29,7 @@ export type NativeModelSettingsProps = {
   submissions: readonly NativeModelSettingsSubmission[];
   onSaved?: () => void | Promise<void>;
   onRecovered?: () => void;
+  onError?: (message: string) => void;
   revision?: number;
   blocked?: boolean;
   hardBlocked?: boolean;
@@ -42,11 +44,13 @@ export function useNativeModelSettings({
   submissions,
   onSaved,
   onRecovered,
+  onError,
   revision = 0,
   blocked = false,
   hardBlocked = false,
   acquireWrite,
 }: NativeModelSettingsProps) {
+  const errorFeedback = useErrorFeedback(onError);
   const identity = `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
   const current = useRef(identity);
   current.current = identity;
@@ -124,6 +128,11 @@ export function useNativeModelSettings({
     acquireWrite,
     onSaved,
     onRecovered,
+    onError:
+      errorFeedback &&
+      ((message) => {
+        if (current.current === identity) errorFeedback(message);
+      }),
   });
   const canWrite =
     !!facts?.canWrite && !pending && !reading && !writing && !blocked && !hardBlocked;
@@ -147,6 +156,7 @@ export function useNativeModelSettings({
     reading,
     writing,
     pending,
+    errorFeedback,
     error,
     canWrite,
     canToggle,
@@ -335,12 +345,13 @@ export function NativeModelSettingsFeedback({ state }: { state: NativeModelSetti
   const { generation, facts, reading, writing, error, write, unresolvedSubmissions } = state;
   return (
     <>
-      {error && <p role="alert">模型配置不可用：{error}</p>}
-      {facts?.errors.map((code) => (
-        <p role="alert" key={code}>
-          配置诊断：{code}
-        </p>
-      ))}
+      {!state.errorFeedback && error && <p role="alert">模型配置不可用：{error}</p>}
+      {!state.errorFeedback &&
+        facts?.errors.map((code) => (
+          <p role="alert" key={code}>
+            配置诊断：{code}
+          </p>
+        ))}
       {facts &&
         !facts.canWrite &&
         !state.pending &&

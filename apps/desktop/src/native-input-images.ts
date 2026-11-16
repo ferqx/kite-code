@@ -21,6 +21,7 @@ type ImageDraft = {
   abort: AbortController;
   loading?: boolean;
   error?: string;
+  errorKind?: 'system';
   previewError?: string;
 };
 const mediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
@@ -163,7 +164,7 @@ export function useNativeInputImages(
     drafts.current.delete(from);
     redraw();
   }
-  async function add(key: string, files: readonly File[]) {
+  async function add(key: string, files: readonly File[]): Promise<{ error: string } | undefined> {
     if (!bridge || !generation || !storeId) return;
     if (get(key).length + files.length > inputImageCount)
       throw Object.assign(Error('input_image_count_limit'), { code: 'input_image_count_limit' });
@@ -177,6 +178,7 @@ export function useNativeInputImages(
       });
     const original = { bridge, generation, storeId };
     const pending: Promise<void>[] = [];
+    const failures = new Map<ImageDraft, string>();
     let reserved = [...drafts.current.values()]
       .flat()
       .filter((image): image is ImageDraft => image.generation === generation && 'url' in image)
@@ -248,6 +250,7 @@ export function useNativeInputImages(
             if (!alive()) return;
             // Preview failure does not change or prevent the original image submission.
             item.previewError = '预览不可用';
+            failures.set(item, '图片预览不可用，仍可发送原图。');
           }
           redraw();
           await bridge.request({
@@ -278,9 +281,11 @@ export function useNativeInputImages(
           if (item.url) URL.revokeObjectURL(item.url);
           item.url = '';
           item.size = 0;
+          item.errorKind = 'system';
           item.error = attachmentHostOutdated(error)
             ? '图片附件功能尚未加载，请完全退出并重新打开应用。'
             : '图片准备失败，请移除后重新添加。';
+          failures.set(item, item.error);
         }
         if (alive()) redraw();
       };
@@ -290,6 +295,21 @@ export function useNativeInputImages(
     }
     redraw();
     await Promise.all(pending);
+    if (
+      current.current.bridge === original.bridge &&
+      current.current.generation === generation &&
+      current.current.storeId === storeId
+    ) {
+      const messages = [
+        ...new Set(
+          [...failures]
+            .filter(([item]) => !item.abort.signal.aborted && get(key).includes(item))
+            .map(([, message]) => message),
+        ),
+      ];
+      if (messages.length) return { error: messages.join('\n') };
+    }
+    return undefined;
   }
   async function fileReferences(selected: readonly File[], signal?: AbortSignal) {
     if (!bridge?.fileReferences)

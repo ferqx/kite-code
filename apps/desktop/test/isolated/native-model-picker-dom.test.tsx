@@ -976,7 +976,8 @@ test('an inactive picker retains display without reading and discards both late 
   for (const failed of [true, false]) {
     const f = fixture(),
       snapshots = new NativeModelSnapshots(),
-      ready: boolean[] = [];
+      ready: boolean[] = [],
+      errors: string[] = [];
     const selection = selected('s');
     snapshots.set(nativeModelScope(1, selection), { ...facts, selectedModelId: 'a' });
     let reads = 0,
@@ -1004,6 +1005,9 @@ test('an inactive picker retains display without reading and discards both late 
             value={{}}
             onChange={() => {}}
             onReady={(value) => ready.push(value)}
+            onError={(message) => {
+              errors.push(message);
+            }}
           />,
         ),
       );
@@ -1020,6 +1024,7 @@ test('an inactive picker retains display without reading and discards both late 
         else resolve({ ...facts, selectedModelId: 'b' });
       });
       expect(f.element.textContent).not.toContain('模型目录不可用');
+      expect(errors).toEqual([]);
       expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-a');
       expect(ready.at(-1)).toBe(false);
       await render(false);
@@ -1032,7 +1037,8 @@ test('an inactive picker retains display without reading and discards both late 
       expect(reads).toBe(3);
       expect(ready.at(-1)).toBe(false);
       await act(async () => reject(Error('model_catalogue_unavailable')));
-      expect(f.element.textContent).toContain('模型目录不可用：model_catalogue_unavailable');
+      expect(f.element.textContent).not.toContain('模型目录不可用');
+      expect(errors).toEqual(['暂时无法读取模型列表，请稍后再试。']);
       expect(ready.at(-1)).toBe(false);
       await render(true);
       await render(false);
@@ -2058,6 +2064,163 @@ test('restored legacy effort remains usable and an unavailable saved level requi
     expect(ready).toBe(true);
     expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'high' });
     expect(f.element.querySelector('.effort-value')?.textContent).toBe('高');
+  } finally {
+    await f.close();
+  }
+});
+
+test('model read failures report one error episode and preserve readiness across profile changes without inline errors', async () => {
+  const f = fixture();
+  const errors: string[] = [];
+  const onError = (message: string) => {
+    errors.push(message);
+  };
+  const bridge: NativeBridge = { watch: () => () => {}, request: async () => facts };
+  let ready = true;
+  const render = async (generation: number, error: string, revision = 'one') => {
+    const scope = nativeModelScope(generation, undefined, { storeId: 'store' }, revision);
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={generation}
+          preparing={{ storeId: 'store' }}
+          revision={revision}
+          value={{}}
+          onChange={() => {}}
+          onReady={(value) => {
+            ready = value;
+          }}
+          onError={onError}
+          prepared={{
+            key: scope.readKey,
+            error,
+            ...(error ? {} : { facts: { ...facts, selectedModelId: 'a' } }),
+          }}
+        />,
+      ),
+    );
+  };
+  try {
+    await render(1, 'catalogue_failed');
+    await render(1, 'catalogue_failed', 'two');
+    expect(errors).toEqual(['暂时无法读取模型列表，请稍后再试。']);
+    expect(ready).toBe(false);
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
+    await render(1, '', 'three');
+    await render(1, 'catalogue_failed', 'four');
+    expect(errors).toHaveLength(2);
+    await render(2, 'catalogue_failed');
+    expect(errors).toHaveLength(3);
+  } finally {
+    await f.close();
+  }
+});
+
+test('recommendation save failures use the host while preserving the choice and retire pending feedback on profile change', async () => {
+  const f = fixture();
+  const errors: string[] = [];
+  const pending: ((reason: Error) => void)[] = [];
+  const report = (message: string) => {
+    errors.push(message);
+  };
+  Object.defineProperty(f.dom.window, 'kiteNative', {
+    value: {
+      rememberRecommendedModel: () =>
+        new Promise<void>((_resolve, reject) => {
+          pending.push(reject);
+        }),
+    },
+  });
+  const bridge: NativeBridge = { watch: () => () => {}, request: async () => facts };
+  function Host({ generation }: { generation: number }) {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    const scope = nativeModelScope(generation, undefined, { storeId: 'store' });
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={generation}
+        preparing={{ storeId: 'store' }}
+        value={value}
+        onChange={setValue}
+        onReady={() => {}}
+        onError={report}
+        prepared={{ key: scope.readKey, facts, error: '' }}
+      />
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Host generation={1} />));
+    await f.click('模型：选择模型');
+    await f.click('选择模型，当前 未选择');
+    await f.click('选择模型 a');
+    expect(pending).toHaveLength(1);
+    await act(async () => pending[0]!(Error('private save failure')));
+    expect(errors).toEqual(['未能记住推荐设置，本次选择仍可使用。']);
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-a');
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
+    const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
+    await act(async () =>
+      slider.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }),
+      ),
+    );
+    expect(pending).toHaveLength(2);
+    await act(async () => f.root.render(<Host generation={2} />));
+    await act(async () => pending[1]!(Error('late original profile save')));
+    expect(errors).toHaveLength(1);
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('model read failure deduplication ends on session revisit but not a background revision', async () => {
+  const f = fixture();
+  const errors: string[] = [];
+  const onError = (message: string) => {
+    errors.push(message);
+  };
+  const bridge: NativeBridge = { watch: () => () => {}, request: async () => facts };
+  const render = async (
+    sessionId: string,
+    viewSelection: number,
+    revision: string,
+    disabled = false,
+  ) => {
+    const selection = selected(sessionId, viewSelection);
+    const scope = nativeModelScope(1, selection, undefined, revision);
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={selection}
+          revision={revision}
+          disabled={disabled}
+          value={{}}
+          onChange={() => {}}
+          onReady={() => {}}
+          onError={onError}
+          prepared={{ key: scope.readKey, error: 'catalogue_failed' }}
+        />,
+      ),
+    );
+  };
+  try {
+    await render('a', 1, 'one');
+    await render('a', 1, 'two');
+    expect(errors).toHaveLength(1);
+    await render('b', 2, 'one');
+    expect(errors).toHaveLength(2);
+    await render('a', 3, 'one');
+    expect(errors).toHaveLength(3);
+    await render('a', 3, 'two');
+    expect(errors).toHaveLength(3);
+    await render('a', 3, 'two', true);
+    await render('a', 3, 'two');
+    expect(errors).toHaveLength(4);
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
   } finally {
     await f.close();
   }

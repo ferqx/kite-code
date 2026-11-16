@@ -7,8 +7,15 @@ import type {
   TraceRemoteDeliveryStatus,
 } from '@kite-ai/client';
 import { decimal64Schema } from '@kite-ai/trajectory';
-import { Button, Input, SelectField, Switch, Textarea } from '@kite-ai/ui/desktop';
-import { useEffect, useId, useRef, useState } from 'react';
+import {
+  Button,
+  Input,
+  SelectField,
+  Switch,
+  Textarea,
+  useErrorFeedback,
+} from '@kite-ai/ui/desktop';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import type { NativeTraceOperation, NativeTraceResult } from './native-trace-bridge';
 
@@ -173,17 +180,21 @@ export function NativeTraceSettings({
   generation,
   storeId,
   selection,
+  onError: errorHandler,
 }: {
   bridge: NativeBridge;
   generation: number;
   storeId: string;
   selection?: NativeSelection;
+  onError?: (message: string) => void;
 }) {
+  const onError = useErrorFeedback(errorHandler);
   const [list, setList] = useState<TraceInstallationList['installations']>([]),
     [installation, setInstallation] = useState<TraceInstallation | null>(null),
     [selected, setSelected] = useState('');
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
+    [operationError, setOperationError] = useState(''),
     [notice, setNotice] = useState('');
   const [packageText, setPackageText] = useState(''),
     [endpoint, setEndpoint] = useState(''),
@@ -200,9 +211,25 @@ export function NativeTraceSettings({
   const alive = useRef(true),
     scopeEpoch = useRef(0),
     choice = useRef(''),
+    choiceEpoch = useRef(0),
     inFlight = useRef(false);
   const packageId = useId();
   const currentSession = selection?.storeId === storeId ? selection.session.id : undefined;
+  const scope = useMemo(
+    () => ({ bridge, generation, storeId, currentSession }),
+    [bridge, generation, storeId, currentSession],
+  );
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const reportError = useRef(onError);
+  reportError.current = onError;
+  const fail = useCallback(
+    (report: ((message: string) => void) | undefined, message: string, legacy: string) => {
+      setOperationError(legacy);
+      report?.(message);
+    },
+    [],
+  );
   async function request(operation: NativeTraceOperation): Promise<NativeTraceResult> {
     const result = await bridge.request({ method: 'trace.manage', generation, operation });
     if (!result || !('kind' in result) || !result.kind.startsWith('trace.'))
@@ -211,16 +238,20 @@ export function NativeTraceSettings({
   }
   async function readList(epoch = scopeEpoch.current) {
     const result = await request({ kind: 'list' });
-    if (alive.current && epoch === scopeEpoch.current && result.kind === 'trace.installations')
+    if (result.kind !== 'trace.installations') throw Error('trace_response_invalid');
+    if (alive.current && epoch === scopeEpoch.current && currentScope.current === scope)
       setList(result.value.installations);
   }
   async function readInstallation(id: string, epoch = scopeEpoch.current, resetForm = false) {
+    const selectedEpoch = choiceEpoch.current;
     const result = await request({ kind: 'inspect', installationId: id });
+    if (result.kind !== 'trace.installation') throw Error('trace_response_invalid');
     if (
       !alive.current ||
       epoch !== scopeEpoch.current ||
-      choice.current !== id ||
-      result.kind !== 'trace.installation'
+      currentScope.current !== scope ||
+      selectedEpoch !== choiceEpoch.current ||
+      choice.current !== id
     )
       return;
     setInstallation(result.value);
@@ -234,6 +265,7 @@ export function NativeTraceSettings({
     }
   }
   function clearInstallation() {
+    choiceEpoch.current++;
     choice.current = '';
     setSelected('');
     setInstallation(null);
@@ -250,19 +282,37 @@ export function NativeTraceSettings({
   async function act(operation: NativeTraceOperation, label: string) {
     if (inFlight.current) return;
     inFlight.current = true;
+    const report = onError;
     setBusy(true);
     setError('');
+    setOperationError('');
     setNotice('');
+    let completed = false;
+    const selectedEpoch = choiceEpoch.current;
     const epoch = scopeEpoch.current,
       id = 'installationId' in operation ? operation.installationId : choice.current;
     try {
       const result = await request(operation);
-      if (!alive.current || epoch !== scopeEpoch.current) return;
+      if (
+        !alive.current ||
+        epoch !== scopeEpoch.current ||
+        currentScope.current !== scope ||
+        selectedEpoch !== choiceEpoch.current
+      )
+        return;
+      completed = true;
       if (result.kind === 'trace.validated') setNotice(`包校验通过：${result.value.digest}`);
       else if (result.kind === 'trace.deadLetters' && 'partitionId' in operation)
         setDeadLetters((value) => ({ ...value, [operation.partitionId]: result.value }));
-      else if (result.kind === 'trace.delivery') setRemote(result.value);
-      else setNotice(`${label}已完成。`);
+      else if (result.kind === 'trace.delivery') {
+        if (result.value.status === 'unavailable')
+          fail(
+            report,
+            '暂时无法读取远端投递状态，请重新检查远端状态。',
+            `远端状态暂不可用：${result.value.code}`,
+          );
+        else setRemote(result.value);
+      } else setNotice(`${label}已完成。`);
       if (operation.kind === 'uninstall' && result.kind === 'trace.action') {
         clearInstallation();
         setList((previous) =>
@@ -272,7 +322,12 @@ export function NativeTraceSettings({
       await readList(epoch);
       if (id && choice.current === id) await readInstallation(id, epoch);
     } catch (cause) {
-      if (alive.current && epoch === scopeEpoch.current) {
+      if (
+        alive.current &&
+        epoch === scopeEpoch.current &&
+        currentScope.current === scope &&
+        (selectedEpoch === choiceEpoch.current || operation.kind === 'uninstall')
+      ) {
         const readOnly = [
           'list',
           'inspect',
@@ -281,8 +336,16 @@ export function NativeTraceSettings({
           'partition',
           'deadLetters',
         ].includes(operation.kind);
-        setError(
-          `${errorCode(cause)}。${readOnly ? '读取未完成，请刷新状态。' : '写入结果可能尚未确认，请刷新状态后再决定下一次操作。'}`,
+        fail(
+          report,
+          completed
+            ? '操作已完成，但暂时无法读取最新状态。请刷新状态。'
+            : readOnly
+              ? '暂时无法完成 Trace 读取，请刷新状态后重试。'
+              : 'Trace 操作结果尚未确认，请刷新状态后再决定下一次操作，不要重复提交。',
+          completed
+            ? '操作已完成，但暂时无法读取最新状态。请刷新状态。'
+            : `${errorCode(cause)}。${readOnly ? '读取未完成，请刷新状态。' : '写入结果可能尚未确认，请刷新状态后再决定下一次操作。'}`,
         );
         try {
           await readList(epoch);
@@ -301,17 +364,23 @@ export function NativeTraceSettings({
     scopeEpoch.current++;
     setSelected('');
     choice.current = '';
+    choiceEpoch.current++;
+    setBusy(false);
     setInstallation(null);
     setList([]);
     setSecret('');
     setGrant(emptyGrant());
     setRemote(null);
     setError('');
+    setOperationError('');
     const epoch = scopeEpoch.current;
+    const report = reportError.current;
     if (storeId)
       void bridge
         .request({ method: 'trace.manage', generation, operation: { kind: 'list' } })
         .then((result) => {
+          if (!result || !('kind' in result) || result.kind !== 'trace.installations')
+            throw Error('trace_response_invalid');
           if (
             alive.current &&
             scopeEpoch.current === epoch &&
@@ -323,16 +392,24 @@ export function NativeTraceSettings({
             setList(result.value.installations);
         })
         .catch((cause) => {
-          if (alive.current && scopeEpoch.current === epoch) setError(errorCode(cause));
+          if (
+            alive.current &&
+            scopeEpoch.current === epoch &&
+            currentScope.current.bridge === bridge &&
+            currentScope.current.generation === generation &&
+            currentScope.current.storeId === storeId
+          )
+            fail(report, '暂时无法读取 Trace 安装列表，请刷新状态后重试。', errorCode(cause));
         });
     return () => {
       alive.current = false;
       scopeEpoch.current++;
     };
-  }, [bridge, generation, storeId]);
+  }, [bridge, generation, storeId, fail]);
   useEffect(() => {
     setGrant(emptyGrant());
     setSecret('');
+    setOperationError('');
     setNotice(
       currentSession
         ? '授权表单仅作用于当前会话，请明确选择范围和能力。'
@@ -340,12 +417,23 @@ export function NativeTraceSettings({
     );
   }, [currentSession]);
   function choose(id: string) {
+    const report = onError;
     choice.current = id;
+    const selectedEpoch = ++choiceEpoch.current;
+    const epoch = scopeEpoch.current;
     setSelected(id);
     setInstallation(null);
     setError('');
-    void readInstallation(id, scopeEpoch.current, true).catch((cause) => {
-      if (alive.current && choice.current === id) setError(errorCode(cause));
+    setOperationError('');
+    void readInstallation(id, epoch, true).catch((cause) => {
+      if (
+        alive.current &&
+        epoch === scopeEpoch.current &&
+        currentScope.current === scope &&
+        selectedEpoch === choiceEpoch.current &&
+        choice.current === id
+      )
+        fail(report, '暂时无法读取此 Trace 安装，请重新选择后重试。', errorCode(cause));
     });
   }
   function parsePackage(): TraceInstallRequest {
@@ -361,8 +449,8 @@ export function NativeTraceSettings({
         kind === 'update' ? { kind, installationId: selected, input } : { kind, input },
         kind === 'validate' ? '校验包' : kind === 'update' ? '更新安装' : '安装',
       );
-    } catch (cause) {
-      setError(errorCode(cause));
+    } catch {
+      setError('请填写包含 manifest 和 bundle 的有效 JSON 扩展包。');
     }
   }
   function toggleArray<
@@ -386,6 +474,7 @@ export function NativeTraceSettings({
         <p>安装、配置、授权和启用分别操作。只向明确授权的目标发送执行事实与材料。</p>
       </header>
       {error && <p role="alert">{error}</p>}
+      {!onError && operationError && <p role="alert">{operationError}</p>}
       {notice && <p role="status">{notice}</p>}
       <section style={block} aria-label="安装 Trace">
         <h3>安装</h3>
@@ -425,7 +514,7 @@ export function NativeTraceSettings({
           onClick={() => {
             const rate = Number(sampleRate);
             if (!sampleRate.trim() || !Number.isFinite(rate) || rate < 0 || rate > 1) {
-              setError('trace_sample_rate_invalid');
+              setError('采样率应为 0 到 1 之间的数字。');
               return;
             }
             void act(
@@ -837,7 +926,7 @@ export function NativeTraceSettings({
                       (through && !decimal64Schema.safeParse(through).success) ||
                       (through && BigInt(from) > BigInt(through))
                     ) {
-                      setError('trace_history_range_invalid');
+                      setError('请填写有效的历史序号，且起始序号不能大于结束序号。');
                       return;
                     }
                     void act(

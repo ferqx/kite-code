@@ -88,6 +88,7 @@ export {
   TooltipTrigger,
 } from './components/ui/tooltip';
 export { DesktopDiagnosticsProvider, useDesktopDiagnostics } from './diagnostics';
+export { ErrorFeedbackContext, useErrorFeedback } from './error-feedback';
 export { FileChanges, FileDiff } from './FileChanges';
 export {
   ApplicationConfirmationDialog,

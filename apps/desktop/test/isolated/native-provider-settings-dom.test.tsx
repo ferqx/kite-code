@@ -130,6 +130,7 @@ function fixture() {
     edit,
     optionLabels,
     toast: () => dom.window.document.querySelector<HTMLElement>('.native-toast-card'),
+    pending: () => main.querySelector<HTMLElement>('[aria-label="待确认的提供商更改"]'),
     requestRemoval: () => {
       if (removal) throw Error('duplicate confirmation');
       removal = Promise.withResolvers<NativeResult>();
@@ -389,7 +390,7 @@ test('Provider form validates inline with focus, clears switched drafts and send
     await f.click('刷新提供商配置');
     expect(f.button('保存提供商配置').disabled).toBe(true);
     expect(calls.filter((input) => input.method === 'settings.providers.lookup')).toHaveLength(0);
-    expect(f.toast()?.textContent).toContain('OpenAI：保存结果待确认。');
+    expect(f.pending()?.textContent).toContain('OpenAI：保存结果待确认。');
     expect(f.element.textContent).not.toContain('save-one');
     expect(f.element.textContent).not.toContain('API key 保存结果待核实');
     expect(f.element.textContent).not.toContain('模型配置未保存；凭证保存结果单独显示');
@@ -468,8 +469,8 @@ test('Provider keeps distinct endpoint connection intent, discovery uses empty n
         },
       },
     ]);
-    expect(f.toast()?.textContent).toContain('已保存，正在后台同步配置');
-    expect(f.toast()?.textContent).toContain('无需重复保存');
+    expect(f.toast()?.textContent).toContain('已保存，但无法刷新配置');
+    expect(f.toast()?.textContent).toContain('不要重复提交');
     expect(f.element.textContent).not.toContain('applied');
   } finally {
     await f.close();
@@ -537,12 +538,12 @@ test('late Provider reads cannot replace the selected Store and only its unknown
     await f.addPreset('Ollama');
     expect(f.button('保存提供商配置').disabled).toBe(false);
     expect(f.panelHost.textContent).not.toContain('原提交 old');
-    expect(f.toast()?.textContent).toContain('OpenAI：保存结果待确认。');
-    expect(f.toast()?.textContent).toContain('此更改来自先前的数据源。');
+    expect(f.pending()?.textContent).toContain('OpenAI：保存结果待确认。');
+    expect(f.pending()?.textContent).toContain('此更改来自先前的数据源。');
     expect(f.button('查看结果').disabled).toBe(false);
     await f.click('关闭');
     expect(f.element.textContent).not.toContain('原提交 old');
-    expect(f.toast()?.textContent).toContain('OpenAI：保存结果待确认。');
+    expect(f.pending()?.textContent).toContain('OpenAI：保存结果待确认。');
   } finally {
     await f.close();
   }
@@ -826,7 +827,7 @@ test('Provider save failure stays in the rail with its non-secret draft and acti
     const form = f.panelHost.querySelector('form');
     await f.click('保存提供商配置');
     expect(f.panelHost.querySelector('form')).toBe(form);
-    expect(f.toast()?.textContent).toContain('保存失败：configuration_conflict');
+    expect(f.toast()?.textContent).toContain('保存未能完成，请检查当前配置后重试。');
     expect(f.main.querySelector('[role="alert"]')).toBeNull();
     expect(f.field('服务地址').value).toBe('https://failed.invalid/v1');
     expect(f.field('模型名称').value).toBe('draft-model');
@@ -1127,7 +1128,8 @@ test('Provider closing an active refresh cannot restore the old write observatio
     expect(reads).toBe(2);
     expect(f.button('刷新提供商配置').disabled).toBe(false);
     expect(f.button('保存提供商配置').disabled).toBe(true);
-    expect(f.toast()?.textContent).toContain('当前配置不可写，请检查配置诊断。');
+    expect(f.toast()).toBeNull();
+    expect(f.main.textContent).toContain('当前配置只读。');
     await f.click('保存提供商配置');
     expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
     await act(async () => release(structuredClone(facts)));
@@ -1224,7 +1226,8 @@ test('Provider hides submission history and technical identities, but unknown st
     expect(f.button('返回列表查看未决提交')).toBeUndefined();
   };
   const assertUnknown = () => {
-    const notice = f.toast()!;
+    const notice = f.pending()!;
+    expect(f.toast()).toBeNull();
     expect(notice).not.toBeNull();
     expect(notice.textContent).toContain('Pending OpenAI service：保存结果待确认。');
     expect(notice.querySelectorAll('button')).toHaveLength(1);
@@ -1809,7 +1812,7 @@ for (const outcome of ['failed', 'unknown'] as const) {
       await f.decideRemoval(true);
       expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(2);
       expect(f.toast()?.textContent).toContain(
-        outcome === 'failed' ? '删除失败：configuration_conflict' : '删除结果待确认',
+        outcome === 'failed' ? '删除未能完成，请检查当前配置后重试。' : '删除结果未确认',
       );
       expect(calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
       expect(calls.every((call) => call.method.startsWith('settings.providers.'))).toBe(true);
@@ -2029,7 +2032,7 @@ test('Repeated Add submission is synchronously blocked while its original reques
     expect(f.panelHost.querySelectorAll('.provider-notice')).toHaveLength(0);
     expect(f.toast()?.textContent).toBeUndefined();
     await act(async () => release());
-    expect(f.toast()?.textContent).toContain('保存失败：configuration_conflict');
+    expect(f.toast()?.textContent).toContain('保存未能完成，请检查当前配置后重试。');
     expect(f.button('保存提供商配置').disabled).toBe(true);
     expect(f.field('模型名称').value).toBe('fixture-model');
   } finally {
@@ -2425,7 +2428,9 @@ test('Confirmed unknown deletion keeps a refresh failure read-only and allows an
     await f.remove();
     await f.click('查看结果');
     expect(f.manager.submissions[0]!.phase).toBe('applied');
-    expect(f.toast()?.textContent).toContain('已删除，正在后台同步配置，无需重复删除。');
+    expect(f.toast()?.textContent).toContain(
+      '已删除，但无法刷新配置。请查看当前状态，不要重复提交。',
+    );
     expect(f.button('删除 Deleted connection').getAttribute('aria-disabled')).toBe('true');
     await f.click('删除 Deleted connection');
     fail = false;
@@ -2573,6 +2578,7 @@ function providerRecoveryClock() {
 function recoveryProvider(
   request: NativeBridge['request'],
   initial: NativeProviderSubmission[] = [],
+  onError?: (message: string) => void,
 ) {
   const f = fixture();
   const calls: NativeRequest[] = [];
@@ -2610,6 +2616,7 @@ function recoveryProvider(
             panelHost={f.panelHost}
             onSaved={() => saved++}
             onRecovered={() => recovered++}
+            onError={onError}
           />,
         ),
       ),
@@ -2632,7 +2639,7 @@ test('Provider recovery backs off one GET at a time, preserves the visible error
   try {
     await f.render();
     expect(clock.delays).toEqual([250]);
-    expect(f.toast()?.textContent).toContain('network_unavailable');
+    expect(f.toast()?.textContent).toContain('暂时无法读取提供商配置');
     const error = f.toast()!.textContent;
     await clock.fire();
     expect(clock.delays).toEqual([]);
@@ -2817,7 +2824,8 @@ test('a rejected Provider save recovers fresh facts without replay, changing its
     await f.edit('提供商名称', 'Keep failed draft');
     await f.click('保存提供商配置');
     expect(f.button('保存提供商配置').disabled).toBe(true);
-    expect(f.toast()?.textContent).toContain('configuration_conflict');
+    expect(f.toast()?.textContent).toContain('保存未能完成，请检查当前配置后重试。');
+    expect(f.toast()?.textContent).not.toContain('configuration_conflict');
     await clock.fire();
     expect(f.saved).toBe(0);
     expect(f.recovered).toBe(1);
@@ -3111,3 +3119,195 @@ for (const closeBeforeReply of [false, true]) {
     }
   });
 }
+
+test('Provider delegates one failure per read episode and explicit retries without a second Toast host', async () => {
+  const clock = providerRecoveryClock();
+  const messages: string[] = [];
+  let unavailable = true;
+  const f = recoveryProvider(
+    async (input) => {
+      if (input.method !== 'settings.providers.read') return null;
+      if (unavailable) throw Error('network_unavailable');
+      return structuredClone(facts);
+    },
+    [],
+    (message) => messages.push(message),
+  );
+  try {
+    await f.render();
+    expect(messages).toEqual(['暂时无法读取提供商配置，请稍后重新打开设置。']);
+    expect(f.toast()).toBeNull();
+    expect(f.main.querySelector('[role="alert"]')).toBeNull();
+    await clock.fire();
+    await clock.fire();
+    expect(messages).toHaveLength(1);
+    await f.click('刷新提供商配置');
+    expect(messages).toHaveLength(2);
+    unavailable = false;
+    await clock.fire();
+    expect(clock.delays).toEqual([]);
+    expect(messages).toHaveLength(2);
+    unavailable = true;
+    await f.click('刷新提供商配置');
+    expect(messages).toHaveLength(3);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});
+
+test('Provider field validation stays inline, directory RPC errors use the parent and late closed reads stay silent', async () => {
+  const f = fixture();
+  const messages: string[] = [];
+  let reject!: (cause: unknown) => void;
+  let held = false;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      if (input.method === 'settings.providers.read') return structuredClone(facts);
+      if (input.method === 'settings.providers.discover') {
+        if (held)
+          return new Promise((_resolve, fail) => {
+            reject = fail;
+          });
+        throw Error('provider_authentication_failed');
+      }
+      return null;
+    },
+  };
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeProviderSettings
+          bridge={bridge}
+          generation={1}
+          submissions={[]}
+          panelHost={f.panelHost}
+          onError={(message) => messages.push(message)}
+        />,
+      ),
+    );
+    await f.addPreset('OpenAI');
+    await f.edit('服务地址', 'invalid');
+    await f.click('获取模型目录');
+    expect(messages).toEqual([]);
+    expect(f.field('服务地址').getAttribute('aria-invalid')).toBe('true');
+    expect(f.panelHost.querySelector('[role="alert"]')).not.toBeNull();
+    await f.edit('服务地址', 'https://provider.example/v1');
+    await f.edit('API key', 'fixture-secret');
+    await f.click('获取模型目录');
+    expect(messages).toHaveLength(1);
+    expect(f.panelHost.querySelector('[role="alert"]')).toBeNull();
+    expect(f.toast()).toBeNull();
+    await f.click('获取模型目录');
+    expect(messages).toHaveLength(2);
+    held = true;
+    await f.click('获取模型目录');
+    await f.click('关闭');
+    await act(async () => reject(Error('provider_authentication_failed')));
+    expect(messages).toHaveLength(2);
+    expect(f.panelHost.childElementCount).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Provider cold pending retains its query without a Toast and a newly confirmed failure reports once', async () => {
+  const clock = providerRecoveryClock();
+  const messages: string[] = [];
+  const original: NativeProviderSubmission = {
+    kind: 'settings.providers.submission',
+    commandId: 'pending-feedback',
+    storeId: 'store',
+    observationId: facts.observationId,
+    phase: 'unknown',
+    operation: {
+      provider: 'openai',
+      name: 'Pending service',
+      connectionId: null,
+      baseURL: 'https://provider.example/v1',
+      modelNames: ['model'],
+      credential: 'none',
+    },
+  };
+  const f = recoveryProvider(
+    async (input) => {
+      if (input.method === 'settings.providers.read') return structuredClone(facts);
+      if (input.method === 'settings.providers.lookup')
+        return { ...original, phase: 'failed', error: 'configuration_conflict' };
+      return null;
+    },
+    [original],
+    (message) => messages.push(message),
+  );
+  try {
+    await f.render();
+    expect(messages).toEqual([]);
+    expect(f.toast()).toBeNull();
+    expect(f.pending()?.textContent).toContain('Pending service：保存结果待确认。');
+    expect(f.button('查看结果').disabled).toBe(false);
+    await clock.fire();
+    expect(messages).toEqual(['提供商更改未能完成，请查看当前配置后重试。']);
+    await f.render();
+    expect(messages).toHaveLength(1);
+    expect(f.calls.filter((input) => input.method === 'settings.providers.save')).toHaveLength(0);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});
+
+test('Provider in-flight read keeps its originating reporter when only presentation scope changes', async () => {
+  const clock = providerRecoveryClock();
+  const f = fixture();
+  let presentation = 1,
+    reads = 0,
+    rejected = 0;
+  let reject!: (cause: unknown) => void;
+  const messages: string[] = [];
+  const reporter = (origin: number) => (message: string) => {
+    if (presentation === origin) messages.push(message);
+    else rejected++;
+  };
+  const first = reporter(1),
+    second = reporter(2);
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      if (input.method !== 'settings.providers.read') return null;
+      if (++reads === 1)
+        return new Promise((_resolve, fail) => {
+          reject = fail;
+        });
+      throw Error('technical_error_should_not_be_shown');
+    },
+  };
+  const render = (onError: (message: string) => void) =>
+    act(async () =>
+      f.root.render(
+        <NativeProviderSettings
+          bridge={bridge}
+          generation={1}
+          submissions={[]}
+          panelHost={f.panelHost}
+          onError={onError}
+        />,
+      ),
+    );
+  try {
+    await render(first);
+    presentation = 2;
+    await render(second);
+    expect(reads).toBe(1);
+    await act(async () => reject(Error('technical_error_should_not_be_shown')));
+    expect(messages).toEqual([]);
+    expect(rejected).toBe(1);
+    await f.click('刷新提供商配置');
+    expect(reads).toBe(2);
+    expect(messages).toEqual(['暂时无法读取提供商配置，请稍后重新打开设置。']);
+    expect(messages.join()).not.toContain('technical_error');
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});

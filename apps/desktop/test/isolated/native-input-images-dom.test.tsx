@@ -141,8 +141,13 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     }
     expect((failedPicker as Error).message).toBe('temporary_picker_failure');
     failure = 'invalid_native_request';
-    await act(async () => images.add('a', [file]));
+    await act(async () => {
+      expect(await images.add('a', [file])).toEqual({
+        error: '图片附件功能尚未加载，请完全退出并重新打开应用。',
+      });
+    });
     expect(images.get('a')[0]?.error).toBe('图片附件功能尚未加载，请完全退出并重新打开应用。');
+    expect(images.get('a')[0]?.errorKind).toBe('system');
     failure = undefined;
     let release!: () => void;
     beginWait = new Promise<void>((resolve) => {
@@ -157,7 +162,7 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
       reads++;
       return readBuffer.call(this, blob);
     };
-    let preparing!: Promise<void>;
+    let preparing!: ReturnType<typeof images.add>;
     await act(async () => {
       preparing = images.add('batch', [large, large, large, large]);
       await images.add('other-scope', [file]);
@@ -190,7 +195,7 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     beginWait = new Promise<void>((resolve) => {
       resumeCount = resolve;
     });
-    let nine!: Promise<void>;
+    let nine!: ReturnType<typeof images.add>;
     await act(async () => {
       nine = images.add('count', Array<File>(9).fill(file));
     });
@@ -198,7 +203,7 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     await expect(images.add('count', [file, file])).rejects.toThrow('input_image_count_limit');
     expect(images.get('count')).toHaveLength(9);
     expect(reads).toBe(beforeRejected);
-    let tenth!: Promise<void>, replacement!: Promise<void>;
+    let tenth!: ReturnType<typeof images.add>, replacement!: ReturnType<typeof images.add>;
     await act(async () => {
       tenth = images.add('count', [file]);
     });
@@ -303,7 +308,7 @@ test('real Composer switches scopes during image encoding and removes only the s
       expect(button).toBeDefined();
       button.click();
     });
-  let pending: Promise<void> | undefined;
+  let pending: ReturnType<typeof attachments.add> | undefined;
   try {
     await act(async () => root.render(<Fixture />));
     await act(async () => {
@@ -349,6 +354,140 @@ test('real Composer switches scopes during image encoding and removes only the s
   } finally {
     release();
     await pending;
+    await act(async () => root.unmount());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    restoreLayout();
+    const { createObjectURL, revokeObjectURL, ...globals } = previous;
+    Object.assign(globalThis, globals);
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    dom.window.close();
+    restoreWorker();
+  }
+});
+
+test.each([
+  'retained',
+  'removed',
+  'scope',
+  'hidden',
+  'disabled',
+  'readOnly',
+  'unmounted',
+  'reporter',
+] as const)('already adopted image batches survive a newer picker but retire feedback when %s', async (mode) => {
+  const restoreWorker = installImagePreviewWorker();
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const restoreLayout = prepareDesktopDom(dom);
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+    FileReader: globalThis.FileReader,
+    createObjectURL: URL.createObjectURL,
+    revokeObjectURL: URL.revokeObjectURL,
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    FileReader: dom.window.FileReader,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  URL.createObjectURL = () => 'blob:batch';
+  URL.revokeObjectURL = () => {};
+  const { createRoot } = await import('react-dom/client');
+  const { Composer } = await import('../../../../packages/ui/src/desktop/Composer');
+  const root = createRoot(document.getElementById('root')!);
+  const errors: string[] = [],
+    calls: NativeRequest[] = [];
+  let fail!: (error: Error) => void, entered!: () => void;
+  const begin = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const waiting = new Promise<void>((_resolve, reject) => {
+    fail = reject;
+  });
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      calls.push(request);
+      if (request.method === 'input.images.begin' && request.name === 'first.png') {
+        entered();
+        await waiting;
+      }
+      return null;
+    },
+  };
+  let attachments!: ReturnType<typeof useNativeInputImages>;
+  const tasks: ReturnType<ReturnType<typeof useNativeInputImages>['add']>[] = [];
+  const report = (message: string) => {
+    errors.push(message);
+  };
+  const replacement = (message: string) => {
+    errors.push(`replacement:${message}`);
+  };
+  function Fixture({ changed = false }: { changed?: boolean }) {
+    const scope = changed && mode === 'scope' ? 'b' : 'a';
+    attachments = useNativeInputImages(bridge, 1, 'store');
+    return changed && mode === 'unmounted' ? null : (
+      <Composer
+        scopeKey={scope}
+        draft="保留草稿"
+        active={false}
+        stopping={false}
+        disabled={changed && mode === 'disabled'}
+        readOnly={changed && mode === 'readOnly'}
+        promptHidden={changed && mode === 'hidden'}
+        onChange={() => {}}
+        onError={changed && mode === 'reporter' ? replacement : report}
+        images={attachments.get(scope)}
+        onImageFiles={(files) => {
+          const task = attachments.add(scope, files);
+          tasks.push(task);
+          return task;
+        }}
+      />
+    );
+  }
+  const drop = async (name: string) => {
+    const event = new dom.window.Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', {
+      value: {
+        files: [new dom.window.File([new Uint8Array([1, 2, 3])], name, { type: 'image/png' })],
+        types: ['Files'],
+      },
+    });
+    await act(async () => document.querySelector('[role="textbox"]')!.dispatchEvent(event));
+  };
+  try {
+    await act(async () => root.render(<Fixture />));
+    await drop('first.png');
+    await act(async () => begin);
+    await drop('second.png');
+    expect(attachments.get('a')).toHaveLength(2);
+    if (mode === 'removed')
+      await act(async () => attachments.removeIds([attachments.get('a')[0]!.id]));
+    else if (mode !== 'retained') await act(async () => root.render(<Fixture changed />));
+    await act(async () => {
+      fail(Error('image_read_failed'));
+      await Promise.all(tasks);
+    });
+    expect(errors).toEqual(mode === 'retained' ? ['图片准备失败，请移除后重新添加。'] : []);
+    const first = attachments.get('a').find((image) => image.name === 'first.png');
+    if (mode === 'removed') expect(first).toBeUndefined();
+    else expect(first?.errorKind).toBe('system');
+    expect(attachments.get('a').find((image) => image.name === 'second.png')?.loading).toBe(false);
+    expect(calls.filter((request) => request.method === 'input.images.finish')).toHaveLength(1);
+    if (mode === 'retained') {
+      expect(document.querySelector('[role="alert"]')).toBeNull();
+      expect(document.querySelector<HTMLButtonElement>('[aria-label="发送消息"]')?.disabled).toBe(
+        true,
+      );
+    }
+  } finally {
+    fail(Error('cleanup'));
+    await Promise.all(tasks);
     await act(async () => root.unmount());
     await new Promise((resolve) => setTimeout(resolve, 0));
     restoreLayout();

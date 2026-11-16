@@ -599,7 +599,7 @@ test('a saved default with failed refresh can be read again without repeating th
     await f.render();
     await f.openMenu();
     await f.choose('b');
-    expect(f.element.textContent).toContain('已保存模型配置，正在后台恢复');
+    expect(f.element.textContent).toContain('已保存模型配置，但无法刷新当前状态');
     expect(f.button('默认模型').disabled).toBe(true);
     await act(async () => f.button('刷新配置').click());
     expect(f.button('默认模型').textContent).toContain('remote-b');
@@ -742,7 +742,7 @@ test('new model writes synchronously acquire a shared lease and release it after
     );
     expect(released).toBe(1);
     expect(f.saved).toBe(1);
-    expect(f.element.textContent).toContain('已保存模型配置，正在后台恢复');
+    expect(f.element.textContent).toContain('已保存模型配置，但无法刷新当前状态');
     expect(f.toggle('c').disabled).toBe(true);
     await act(async () => f.button('刷新配置').click());
     expect(reads).toBe(3);
@@ -2662,6 +2662,273 @@ test('an unknown default-disable keeps its original intent, discards the queued 
     expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     expect(current.defaultModelId).toBe('a');
     expect(f.saved).toBe(1);
+  } finally {
+    jest.useRealTimers();
+    await f.close();
+  }
+});
+
+test('model read failure reports once per episode, never for loading or success, and keeps no inline error with a host', async () => {
+  jest.useFakeTimers();
+  const messages: string[] = [];
+  let unavailable = true;
+  const f = fixture(async (input) => {
+    if (input.method !== 'settings.models.read') return null;
+    if (unavailable) throw Error('network_unavailable');
+    return structuredClone(facts);
+  });
+  try {
+    await f.render(undefined, [], { onError: (message) => messages.push(message) });
+    expect(messages).toHaveLength(1);
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
+    await advanceRecovery(250);
+    await advanceRecovery(1000);
+    expect(messages).toHaveLength(1);
+    await act(async () => f.button('刷新配置').click());
+    expect(messages).toHaveLength(2);
+    unavailable = false;
+    await advanceRecovery(3000);
+    expect(messages).toHaveLength(2);
+    expect(f.toggle('c').disabled).toBe(false);
+    unavailable = true;
+    await act(async () => f.button('刷新配置').click());
+    expect(messages).toHaveLength(3);
+  } finally {
+    jest.useRealTimers();
+    await f.close();
+  }
+});
+
+test('a model reader retired by selection changes cannot report its late error into the new view', async () => {
+  let reject!: (cause: unknown) => void;
+  let reads = 0;
+  const messages: string[] = [];
+  const f = fixture(async (input) => {
+    if (input.method !== 'settings.models.read') return null;
+    if (++reads === 1)
+      return new Promise((_resolve, fail) => {
+        reject = fail;
+      });
+    if (reads > 2) throw Error('network_unavailable');
+    return structuredClone(facts);
+  });
+  try {
+    await f.render(selected('old'), [], { onError: (message) => messages.push(message) });
+    await f.render(selected('new'), [], { onError: (message) => messages.push(message) });
+    await act(async () => reject(Error('network_unavailable')));
+    expect(messages).toEqual([]);
+    expect(f.toggle('c').disabled).toBe(false);
+    await f.render(selected('old'), [], { onError: (message) => messages.push(message) });
+    expect(messages).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('model cold unknown is not a Toast and its newly confirmed failure reports once without replay', async () => {
+  jest.useFakeTimers();
+  const messages: string[] = [];
+  const original: NativeModelSettingsSubmission = {
+    kind: 'settings.models.submission',
+    commandId: 'cold-model-feedback',
+    storeId: 'store',
+    scope: 'user',
+    observationId: 7,
+    operation: { kind: 'enabled', modelId: 'c', enabled: true },
+    phase: 'unknown',
+  };
+  const f = fixture(async (input) => {
+    if (input.method === 'settings.models.read') return structuredClone(facts);
+    if (input.method === 'settings.models.lookup')
+      return { ...original, phase: 'failed', error: 'configuration_conflict' };
+    return null;
+  });
+  try {
+    await f.render(undefined, [original], { onError: (message) => messages.push(message) });
+    expect(messages).toEqual([]);
+    expect(f.button('查看结果').disabled).toBe(false);
+    await advanceRecovery(250);
+    expect(messages).toEqual(['模型更改未能完成，请查看当前配置后重试。']);
+    await advanceRecovery(10000);
+    expect(messages).toHaveLength(1);
+    expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(0);
+  } finally {
+    jest.useRealTimers();
+    await f.close();
+  }
+});
+
+test('a confirmed model save followed by failed refresh reports only the read failure and never replays', async () => {
+  const messages: string[] = [];
+  let reads = 0;
+  const f = fixture(async (input) => {
+    if (input.method === 'settings.models.read') {
+      if (++reads > 1) throw Error('configuration_continuation_changed');
+      return structuredClone(facts);
+    }
+    if (input.method === 'settings.models.enabled')
+      return {
+        kind: 'settings.models.submission',
+        commandId: 'saved-feedback',
+        storeId: 'store',
+        scope: 'user',
+        observationId: input.observationId,
+        operation: { kind: 'enabled', modelId: input.modelId, enabled: input.enabled },
+        phase: 'applied',
+      };
+    return null;
+  });
+  try {
+    await f.render(undefined, [], { onError: (message) => messages.push(message) });
+    await act(async () => f.toggle('c').click());
+    expect(messages).toEqual(['已保存模型配置，但无法刷新当前状态。请勿重复提交。']);
+    expect(f.saved).toBe(1);
+    expect(f.toggle('c').getAttribute('aria-checked')).toBe('true');
+    expect(f.toggle('c').disabled).toBe(true);
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
+    expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('closing model settings retires an outstanding read error callback', async () => {
+  const messages: string[] = [];
+  let reject!: (cause: unknown) => void;
+  const f = fixture(async (input) => {
+    if (input.method === 'settings.models.read')
+      return new Promise((_resolve, fail) => {
+        reject = fail;
+      });
+    return null;
+  });
+  try {
+    await f.render(undefined, [], { onError: (message) => messages.push(message) });
+    await f.hide();
+    await act(async () => reject(Error('network_unavailable')));
+    expect(messages).toEqual([]);
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('model in-flight reads keep the originating presentation reporter without callback-driven rereads', async () => {
+  jest.useFakeTimers();
+  let presentation = 1,
+    reads = 0,
+    rejected = 0;
+  let reject!: (cause: unknown) => void;
+  const messages: string[] = [];
+  const reporter = (origin: number) => (message: string) => {
+    if (presentation === origin) messages.push(message);
+    else rejected++;
+  };
+  const first = reporter(1),
+    second = reporter(2);
+  const f = fixture(async (input) => {
+    if (input.method !== 'settings.models.read') return null;
+    if (++reads === 1)
+      return new Promise((_resolve, fail) => {
+        reject = fail;
+      });
+    throw Error('technical_error_should_not_be_shown');
+  });
+  try {
+    await f.render(undefined, [], { onError: first });
+    presentation = 2;
+    await f.render(undefined, [], { onError: second });
+    expect(reads).toBe(1);
+    await act(async () => reject(Error('technical_error_should_not_be_shown')));
+    expect(messages).toEqual([]);
+    expect(rejected).toBe(1);
+    await act(async () => f.button('刷新配置').click());
+    expect(reads).toBe(2);
+    expect(messages).toEqual(['暂时无法读取或更新模型配置，请稍后重新打开设置。']);
+  } finally {
+    jest.useRealTimers();
+    await f.close();
+  }
+});
+
+test('model unknown settled by the watcher reports the newly failed original once without lookup or mutation replay', async () => {
+  jest.useFakeTimers();
+  const messages: string[] = [];
+  const original: NativeModelSettingsSubmission = {
+    kind: 'settings.models.submission',
+    commandId: 'watcher-feedback',
+    storeId: 'store',
+    scope: 'user',
+    observationId: 7,
+    operation: { kind: 'enabled', modelId: 'c', enabled: true },
+    phase: 'unknown',
+  };
+  const f = fixture(async (input) =>
+    input.method === 'settings.models.read' ? structuredClone(facts) : null,
+  );
+  const onError = (message: string) => messages.push(message);
+  try {
+    await f.render(undefined, [original], { onError });
+    expect(messages).toEqual([]);
+    const failed = { ...original, phase: 'failed' as const, error: 'configuration_conflict' };
+    await f.render(undefined, [failed], { onError });
+    expect(messages).toEqual(['模型更改未能完成，请查看当前配置后重试。']);
+    await advanceRecovery(350);
+    await f.render(undefined, [failed], { onError });
+    expect(messages).toHaveLength(1);
+    expect(f.element.querySelector('[aria-label="待确认的模型更改"]')).toBeNull();
+    expect(
+      f.calls.filter((input) =>
+        ['settings.models.enabled', 'settings.models.lookup'].includes(input.method),
+      ),
+    ).toHaveLength(0);
+  } finally {
+    jest.useRealTimers();
+    await f.close();
+  }
+});
+
+test('model lost response discovers a failed original in state and reports it once without resubmitting', async () => {
+  jest.useFakeTimers();
+  const messages: string[] = [];
+  const original: NativeModelSettingsSubmission = {
+    kind: 'settings.models.submission',
+    commandId: 'state-feedback',
+    storeId: 'store',
+    scope: 'user',
+    observationId: 7,
+    operation: { kind: 'enabled', modelId: 'c', enabled: true },
+    phase: 'failed',
+    error: 'configuration_conflict',
+  };
+  const f = fixture(async (input) => {
+    if (input.method === 'settings.models.read') return structuredClone(facts);
+    if (input.method === 'settings.models.enabled') throw Error('network_outcome_unknown');
+    if (input.method === 'state')
+      return {
+        generation: 1,
+        directory: { storeId: 'store', workspaces: [], sessions: [] },
+        creationSubmissions: [],
+        inputSubmissions: [],
+        permissionSubmissions: [],
+        interactionSubmissions: [],
+        modelSettingsSubmissions: [original],
+      };
+    return null;
+  });
+  try {
+    await f.render(undefined, [], { onError: (message) => messages.push(message) });
+    await act(async () => f.toggle('c').click());
+    expect(messages).toEqual(['模型更改结果未确认，请查看原操作结果，不要重复提交。']);
+    await advanceRecovery(250);
+    expect(messages).toEqual([
+      '模型更改结果未确认，请查看原操作结果，不要重复提交。',
+      '模型更改未能完成，请查看当前配置后重试。',
+    ]);
+    await advanceRecovery(10000);
+    expect(messages).toHaveLength(2);
+    expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
+    expect(f.calls.filter((input) => input.method === 'settings.models.lookup')).toHaveLength(0);
   } finally {
     jest.useRealTimers();
     await f.close();

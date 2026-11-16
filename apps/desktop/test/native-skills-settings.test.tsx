@@ -11,7 +11,12 @@ import type {
   NativeSkillsRequest,
 } from '../src/native-bridge';
 
-type GlobalView = { storeId?: string; canRead?: boolean; generation?: number };
+type GlobalView = {
+  storeId?: string;
+  canRead?: boolean;
+  generation?: number;
+  onError?: (message: string) => void;
+};
 const entries: UserSkillCataloguePage['entries'] = Array.from({ length: 303 }, (_, index) => ({
   id: `skill-${String(index).padStart(3, '0')}`,
   name: `Skill ${index}`,
@@ -98,6 +103,7 @@ async function fixture(
               canRead={view.canRead}
               panelHost={panelHost}
               editorControl={editorControl}
+              onError={view.onError}
             />,
           ),
         );
@@ -107,6 +113,8 @@ async function fixture(
     );
   } finally {
     await act(async () => root.unmount());
+    // Radix restores focus in a timer. Finish it before replacing the DOM globals.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     dom.window.close();
     for (const [key, descriptor] of prior) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -317,6 +325,7 @@ test('Skills.sh installation retries an explicit failure, refreshes on success a
 
 test('only an installed Skill can be confirmed for uninstall, and closing its detail keeps removal and reinstall in sync', async () =>
   fixture(async (host, _root, render, panel, editorControl) => {
+    const errors: string[] = [];
     const document = host.ownerDocument;
     const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
     const remote = { source: 'owner/repo', skillId: 'example', name: 'Example', installs: 1 };
@@ -366,7 +375,7 @@ test('only an installed Skill can be confirmed for uninstall, and closing its de
       },
       watch: () => () => undefined,
     };
-    await render(bridge);
+    await render(bridge, { onError: (message) => errors.push(message) });
     for (const name of ['computer-use', 'Custom']) {
       await openDetail(host, name);
       expect(button(panel, '卸载')).toBeUndefined();
@@ -411,7 +420,8 @@ test('only an installed Skill can be confirmed for uninstall, and closing its de
       generation: 1,
       selection: { skillId: managed.id, skillVersion: 'a'.repeat(64) },
     });
-    expect(panel.querySelector('[role="alert"]')?.textContent).toContain('请刷新目录');
+    expect(errors.at(-1)).toContain('请刷新目录');
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
     expect(dialog()).toBeNull();
     await act(async () => button(panel, '刷新目录').click());
     expect(refreshes).toBe(3);
@@ -460,6 +470,8 @@ test.each([
     'failure',
   ] as const) {
     await fixture(async (host, root, render, panel) => {
+      const errors: string[] = [];
+      const onError = (message: string) => errors.push(message);
       const remote = { source: 'owner/repo', skillId: 'example', name: 'Example', installs: 1 };
       const managed: UserSkillCataloguePage['entries'][number] = {
         ...entries[0]!,
@@ -507,7 +519,7 @@ test.each([
         },
         watch: () => () => undefined,
       };
-      await render(bridge);
+      await render(bridge, { onError });
       if (operation === 'install') {
         await act(async () => button(host, '搜索 Skills').click());
         await enterKeyword(panel, 'example');
@@ -526,6 +538,7 @@ test.each([
       const nextBridge = replacement === 'bridge' ? { ...bridge } : bridge;
       if (replacement !== 'unmounted')
         await render(nextBridge, {
+          onError,
           storeId,
           generation: replacement === 'generation' ? 2 : 1,
           canRead: replacement !== 'unavailable',
@@ -533,7 +546,9 @@ test.each([
       const before = reads;
       const focus = replacement === 'same' ? button(host, '搜索 Skills') : null;
       await act(async () => focus?.focus());
+      const previousErrors = errors.length;
       await act(async () => finish());
+      expect(errors).toHaveLength(previousErrors);
       expect(mutations).toBe(1);
       expect(reads).toBe(before + (replacement === 'same' ? 1 : 0));
       if (replacement === 'same') {
@@ -542,7 +557,7 @@ test.each([
         expect(host.ownerDocument.activeElement).toBe(focus);
       }
       if (replacement === 'unmounted') {
-        await render(bridge);
+        await render(bridge, { onError });
         expect(reads).toBe(before + 1);
         expect(host.querySelectorAll('li')).toHaveLength(operation === 'install' ? 1 : 0);
       }
@@ -1175,3 +1190,173 @@ test('office documents appears as an installed builtin rather than a missing sou
     expect(host.textContent).not.toContain('未提供来源信息');
   });
 });
+
+test('Skills routes current operation failures only to the shared error callback and retries remain actionable', async () =>
+  fixture(async (host, _root, render, panel, editorControl) => {
+    const errors: string[] = [];
+    const view = { onError: (message: string) => errors.push(message) };
+    let failCatalogue = false;
+    let installs = 0;
+    let rejectSearch!: (cause: Error) => void;
+    let rejectInstall!: (cause: Error) => void;
+    const bridge: NativeBridge = {
+      request: async (request) => {
+        if (request.method === 'settings.skills.open') {
+          if (failCatalogue) throw Error('/private/unsafe-source');
+          return result(request, entries.slice(0, 1));
+        }
+        if (request.method === 'settings.skills.document') throw Error('skill_text_limit');
+        if (request.method === 'settings.skills.search') {
+          if (request.query === 'late')
+            return new Promise((_resolve, reject) => {
+              rejectSearch = reject;
+            });
+          if (request.query === 'fail') throw Error('skill_marketplace_rate_limited');
+          return {
+            kind: 'settings.skills.search',
+            results: [{ source: 'owner/repo', skillId: 'example', name: 'Example', installs: 1 }],
+          };
+        }
+        if (request.method === 'settings.skills.install') {
+          if (++installs === 1) throw Error('skill_marketplace_snapshot_unavailable');
+          return new Promise((_resolve, reject) => {
+            rejectInstall = reject;
+          });
+        }
+        return null;
+      },
+      watch: () => () => undefined,
+    };
+    await render(bridge, view);
+    expect(errors).toEqual([]);
+    await openDetail(host, 'Skill 0');
+    expect(errors.at(-1)).toContain('正文较大');
+    expect(panel.textContent).not.toContain('正文较大');
+    failCatalogue = true;
+    await refresh(host);
+    expect(errors.some((message) => message.includes('已保留上次完整目录'))).toBe(true);
+    expect(host.querySelectorAll('li')).toHaveLength(1);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
+    expect(errors.join(' ')).not.toContain('/private/');
+    await act(async () => button(host, '搜索 Skills').click());
+    await enterKeyword(panel, 'fail');
+    await act(async () => button(panel, '搜索').click());
+    expect(errors.at(-1)).toContain('请求过于频繁');
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
+    const beforeRetry = errors.length;
+    await act(async () => button(panel, '搜索').click());
+    expect(errors).toHaveLength(beforeRetry + 1);
+    await enterKeyword(panel, 'okay');
+    await act(async () => button(panel, '搜索').click());
+    expect(errors).toHaveLength(beforeRetry + 1);
+    await act(async () => button(panel, '安装 Example（owner/repo）').click());
+    expect(errors.at(-1)).toContain('暂时无法下载');
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => button(panel, '重试安装 Example（owner/repo）').click());
+    const beforeDismiss = errors.length;
+    await act(async () => editorControl.current!.close());
+    await act(async () => button(host, '搜索 Skills').click());
+    await act(async () => rejectInstall(Error('late_install_failure')));
+    expect(errors).toHaveLength(beforeDismiss);
+    await enterKeyword(panel, 'late');
+    await act(async () => button(panel, '搜索').click());
+    await act(async () => editorControl.current!.close());
+    await act(async () => rejectSearch(Error('late_search_failure')));
+    expect(errors).toHaveLength(beforeDismiss);
+  }));
+
+test.each([
+  'catalogue',
+  'document',
+  'search',
+  'install',
+  'uninstall',
+] as const)('Skills %s failure keeps its issuing reporter when only presentation scope changes', async (operation) =>
+  fixture(async (host, _root, render, panel) => {
+    const target = {
+      catalogue: 'settings.skills.open',
+      document: 'settings.skills.document',
+      search: 'settings.skills.search',
+      install: 'settings.skills.install',
+      uninstall: 'settings.skills.uninstall',
+    }[operation];
+    const managed = {
+      ...entries[0]!,
+      id: 'user-skill.example',
+      name: 'Example',
+      source: { scope: 'user' as const, origin: '.kite-code' as const },
+    };
+    let pendingCalls = 0;
+    let reject!: (cause: Error) => void;
+    const bridge: NativeBridge = {
+      request: async (request) => {
+        if (request.method === target) {
+          if (++pendingCalls === 1)
+            return new Promise((_resolve, fail) => {
+              reject = fail;
+            });
+          throw Error('request_failed');
+        }
+        if (request.method === 'settings.skills.open') return result(request, [managed]);
+        if (request.method === 'settings.skills.search')
+          return {
+            kind: 'settings.skills.search',
+            results: [{ source: 'owner/repo', skillId: 'example', name: 'Example', installs: 1 }],
+          };
+        if (request.method === 'settings.skills.document')
+          return {
+            kind: 'settings.skills.document',
+            readId: request.readId,
+            scope: { generation: 1, storeId: 'store' },
+            document: {
+              storeId: 'store',
+              skillId: request.skillId,
+              skillVersion: request.skillVersion,
+              revision: request.revision,
+              body: '# Skill',
+            },
+          };
+        return null;
+      },
+      watch: () => () => undefined,
+    };
+    let oldActive = true;
+    let oldCalls = 0;
+    const delivered: string[] = [];
+    const oldReporter = (message: string) => {
+      oldCalls++;
+      if (oldActive) delivered.push(message);
+    };
+    const newReporter = (message: string) => delivered.push(message);
+    const uninstall = async () => {
+      await act(async () => button(panel, '卸载').click());
+      const dialog = host.ownerDocument.querySelector<HTMLElement>('[role="alertdialog"]')!;
+      await act(async () => button(dialog, '确认卸载').click());
+    };
+    await render(bridge, { onError: oldReporter });
+    if (operation === 'document' || operation === 'uninstall') await openDetail(host, 'Example');
+    if (operation === 'uninstall') await uninstall();
+    if (operation === 'search' || operation === 'install') {
+      await act(async () => button(host, '搜索 Skills').click());
+      await enterKeyword(panel, 'example');
+      await act(async () => button(panel, '搜索').click());
+      if (operation === 'install')
+        await act(async () => button(panel, '安装 Example（owner/repo）').click());
+    }
+    expect(pendingCalls).toBe(1);
+    oldActive = false;
+    await render(bridge, { onError: newReporter });
+    expect(pendingCalls).toBe(1);
+    await act(async () => reject(Error('old_presentation_failure')));
+    expect(oldCalls).toBe(1);
+    expect(delivered).toEqual([]);
+    if (operation === 'catalogue' || operation === 'document') await refresh(host);
+    else if (operation === 'search') await act(async () => button(panel, '搜索').click());
+    else if (operation === 'install')
+      await act(async () => button(panel, '重试安装 Example（owner/repo）').click());
+    else await uninstall();
+    expect(pendingCalls).toBe(2);
+    expect(delivered).toHaveLength(1);
+    expect(oldCalls).toBe(1);
+  }));

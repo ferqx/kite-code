@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { useConversationReadActive } from '../conversation-activity';
+import { useErrorFeedback } from './error-feedback';
 
 export const ClipboardWriteContext = createContext<((text: string) => Promise<void>) | undefined>(
   undefined,
@@ -14,6 +15,9 @@ export function useTextCopy(
   writeClipboardText?: (text: string) => Promise<void>,
   disabled = false,
 ) {
+  const onError = useErrorFeedback();
+  const errorCallback = useRef(onError);
+  errorCallback.current = onError;
   const conversationReadActive = useConversationReadActive();
   const copyEligible = useContext(CodeCopyEligibilityContext);
   const readActive = conversationReadActive && copyEligible;
@@ -55,7 +59,7 @@ export function useTextCopy(
       if (copyResetTimer.current !== undefined) clearTimeout(copyResetTimer.current);
       copyResetTimer.current = undefined;
     };
-  }, [text, disabled, readActive, writer, scheduleReset]);
+  }, [text, disabled, readActive, writer, onError, scheduleReset]);
   const copyMessage = useCallback(async () => {
     if (
       !mounted.current ||
@@ -83,7 +87,11 @@ export function useTextCopy(
       resetAt.current = Date.now() + 2000;
       scheduleReset();
     } catch {
-      if (active()) setCopyState('failed');
+      if (!active()) return;
+      if (errorCallback.current) {
+        setCopyState('idle');
+        errorCallback.current('复制失败，请重试');
+      } else setCopyState('failed');
     }
   }, [text, writer, scheduleReset]);
   return { copyState, copyMessage, readActive };

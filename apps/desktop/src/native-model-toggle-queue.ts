@@ -19,6 +19,7 @@ type Options = {
   acquireWrite?: () => (() => void) | undefined;
   onSaved?: () => void | Promise<void>;
   onRecovered?: () => void;
+  onError?: (message: string) => void;
 };
 type Snapshot = {
   facts?: NativeModelSettingsFacts;
@@ -74,6 +75,8 @@ export class NativeModelToggleQueue {
     hardBlocked: false,
   };
   private release?: () => void;
+  private failureReported = false;
+  private reportedFailures = new Set<string>();
   private started = false;
   private detached = false;
   private invalid = false;
@@ -202,9 +205,10 @@ export class NativeModelToggleQueue {
       if (this.invalid || this.recoveryStopped || this.busy || this.snapshot.reading) return;
       this.recoveryRunning = true;
       this.recoveryAttempt++;
+      const onError = this.options.onError;
       void (async () => {
         try {
-          if (this.awaitingUnknown) await this.discoverOriginal();
+          if (this.awaitingUnknown) await this.discoverOriginal(onError);
           if (this.detached && this.needsSaved) await this.saved();
           const target = [...this.unknowns.values()].find(
             (entry) => !this.detached || this.hotCommands.has(entry.commandId),
@@ -220,7 +224,7 @@ export class NativeModelToggleQueue {
             );
           else if (!this.detached && !this.awaitingUnknown) await this.refresh(true);
         } catch (cause) {
-          this.publish({ error: this.recoveryError(cause) });
+          this.publish({ error: this.recoveryError(cause) }, onError);
         } finally {
           this.recoveryRunning = false;
           this.scheduleRecovery();
@@ -229,7 +233,7 @@ export class NativeModelToggleQueue {
       })();
     }, delay);
   }
-  private async discoverOriginal() {
+  private async discoverOriginal(onError: Options['onError']) {
     const input = this.awaitingUnknown;
     if (!input || this.invalid) return;
     const state = await this.bridge.request({ method: 'state', generation: this.generation });
@@ -253,7 +257,7 @@ export class NativeModelToggleQueue {
       if (original.phase === 'applied') {
         this.apply(input);
         this.needsSaved = true;
-      }
+      } else this.notifyTerminalFailure(original, onError);
       this.awaitingUnknown = undefined;
       this.unconfirmed = undefined;
       this.needsReadRecovery = true;
@@ -305,6 +309,7 @@ export class NativeModelToggleQueue {
         this.needsReadRecovery = true;
         if (this.confirmed) this.confirmed = { ...this.confirmed, canWrite: false };
         if (entry.phase === 'applied') this.needsSaved = true;
+        else this.notifyTerminalFailure(entry, this.options.onError);
         if (this.matches(this.awaitingUnknown, entry)) this.awaitingUnknown = undefined;
         this.publish();
       }
@@ -385,7 +390,31 @@ export class NativeModelToggleQueue {
       .request({ method: 'settings.models.close', generation: this.generation })
       .catch(() => {});
   }
-  private publish(change: Partial<Snapshot> = {}) {
+  private notifyFailure(
+    message = '暂时无法读取或更新模型配置，请稍后重新打开设置。',
+    onError: Options['onError'],
+  ) {
+    if (this.invalid || this.detached || this.failureReported || !onError) return;
+    this.failureReported = true;
+    onError(message);
+  }
+  private notifyTerminalFailure(entry: NativeModelSettingsSubmission, onError: Options['onError']) {
+    if (this.invalid || this.detached || !onError || this.reportedFailures.has(entry.commandId))
+      return;
+    this.reportedFailures.add(entry.commandId);
+    this.failureReported = true;
+    onError('模型更改未能完成，请查看当前配置后重试。');
+  }
+  private publish(change: Partial<Snapshot> = {}, onError?: Options['onError']) {
+    if (change.error)
+      this.notifyFailure(
+        change.error.startsWith('已保存模型配置')
+          ? '已保存模型配置，但无法刷新当前状态。请勿重复提交。'
+          : this.awaitingUnknown || this.unknowns.size
+            ? '模型更改结果未确认，请查看原操作结果，不要重复提交。'
+            : undefined,
+        onError,
+      );
     let facts = this.confirmed;
     if (facts) {
       const head = this.head ?? this.unconfirmed?.input;
@@ -425,7 +454,7 @@ export class NativeModelToggleQueue {
     this.storeId ??= value.storeId;
     return value;
   }
-  private async readContinuation(commandId: string) {
+  private async readContinuation(commandId: string, onError: Options['onError']) {
     let attempt = 0;
     while (!this.invalid) {
       try {
@@ -449,7 +478,7 @@ export class NativeModelToggleQueue {
           ].includes(code)
         )
           throw cause;
-        this.publish({ error: code });
+        this.publish({ error: code }, onError);
         const delay = [250, 1000, 3000, 10000][Math.min(attempt++, 3)]!;
         await new Promise<void>((resolve) => {
           this.continuationWake = resolve;
@@ -465,6 +494,8 @@ export class NativeModelToggleQueue {
   }
   async refresh(automatic = false) {
     if (this.busy) return;
+    if (!automatic) this.failureReported = false;
+    const onError = this.options.onError;
     if (this.unknowns.size) {
       this.scheduleRecovery();
       return;
@@ -480,9 +511,12 @@ export class NativeModelToggleQueue {
       this.needsReadRecovery = facts.errors.length > 0 || !!this.awaitingUnknown;
       if (this.awaitingUnknown) this.confirmed = { ...facts, canWrite: false };
       if (!this.needsReadRecovery) {
+        this.failureReported = false;
         this.recoveryAttempt = 0;
         this.cancelRecovery();
       }
+      if (facts.errors.length)
+        this.notifyFailure('模型配置不可用，请检查配置后重新打开设置。', onError);
       this.publish(this.awaitingUnknown ? {} : { error: '' });
       const saved = this.needsSaved;
       if (saved) await this.saved();
@@ -500,7 +534,7 @@ export class NativeModelToggleQueue {
       if (!this.invalid && sequence === this.readSequence) {
         if (this.confirmed) this.confirmed = { ...this.confirmed, canWrite: false };
         this.needsReadRecovery = true;
-        this.publish({ error: this.recoveryError(cause) });
+        this.publish({ error: this.recoveryError(cause) }, onError);
       }
     } finally {
       if (sequence === this.readSequence) this.publish({ reading: false });
@@ -582,6 +616,7 @@ export class NativeModelToggleQueue {
     this.release = release;
     this.cancelRecovery();
     this.busy = true;
+    this.failureReported = false;
     this.publish({ writing: true, healthy: true, error: '' });
     return true;
   }
@@ -597,12 +632,12 @@ export class NativeModelToggleQueue {
       ),
     };
   }
-  private stop(error: string, readonly = true) {
+  private stop(error: string, readonly = true, onError?: Options['onError']) {
     this.queued.clear();
     this.head = undefined;
     if (readonly && this.confirmed) this.confirmed = { ...this.confirmed, canWrite: false };
     this.needsReadRecovery = readonly;
-    this.publish({ healthy: false, error });
+    this.publish({ healthy: false, error }, onError);
   }
   private async saved() {
     if (!this.needsSaved) return;
@@ -613,6 +648,7 @@ export class NativeModelToggleQueue {
     // Only the original head starts a worker; later toggles update the pending Map.
     if (this.draining) return;
     this.draining = true;
+    const onError = this.options.onError;
     let next = first;
     try {
       while (true) {
@@ -652,7 +688,8 @@ export class NativeModelToggleQueue {
           // Unknown retains the immutable original head's visible intent, never its tail.
           if (result.phase === 'unknown')
             this.unconfirmed = { commandId: result.commandId, input: next };
-          this.stop(result.error ?? '', result.phase !== 'unknown');
+          else this.notifyTerminalFailure(result, onError);
+          this.stop(result.error ?? '', result.phase !== 'unknown', onError);
           break;
         }
         this.apply(next);
@@ -665,10 +702,14 @@ export class NativeModelToggleQueue {
         }
         this.publish({ reading: true });
         try {
-          const continued = await this.readContinuation(result.commandId);
+          const continued = await this.readContinuation(result.commandId, onError);
           if (!this.invalid) this.confirmed = continued;
         } catch (cause) {
-          this.stop(`已保存模型配置，正在后台恢复。${this.recoveryError(cause)}`);
+          this.stop(
+            `已保存模型配置，但无法刷新当前状态。请勿重复提交。${this.recoveryError(cause)}`,
+            true,
+            onError,
+          );
           break;
         } finally {
           this.publish({ reading: false });
@@ -681,13 +722,17 @@ export class NativeModelToggleQueue {
       const code = this.recoveryError(cause);
       if (this.head && /unknown|network|connection|timeout/.test(code))
         this.awaitingUnknown = this.head;
-      this.stop(code);
+      this.stop(code, true, onError);
     } finally {
       if (this.needsSaved)
         try {
           await this.saved();
         } catch (cause) {
-          this.stop(`已保存模型配置，正在后台恢复。${this.recoveryError(cause)}`);
+          this.stop(
+            `已保存模型配置，但无法刷新当前状态。请勿重复提交。${this.recoveryError(cause)}`,
+            true,
+            onError,
+          );
         }
       this.head = undefined;
       this.draining = false;
@@ -711,6 +756,8 @@ export class NativeModelToggleQueue {
   }
   private async lookup(input: Lookup, automatic = false) {
     if (this.busy || this.invalid) return;
+    const onError = this.options.onError;
+    if (!automatic) this.failureReported = false;
     this.cancelRecovery();
     this.busy = true;
     this.lookupHot = this.hotCommands.has(input.commandId);
@@ -725,6 +772,7 @@ export class NativeModelToggleQueue {
       )
         return;
       if (result.phase === 'applied' || result.phase === 'failed') {
+        if (result.phase === 'failed') this.notifyTerminalFailure(result, onError);
         if (this.confirmed) this.confirmed = { ...this.confirmed, canWrite: false };
         if (result.phase === 'applied') {
           if (this.unconfirmed?.commandId === result.commandId) this.apply(this.unconfirmed.input);
@@ -749,16 +797,17 @@ export class NativeModelToggleQueue {
           this.confirmed.canWrite
         )
           this.options.onRecovered?.();
-      } else if (result.error) this.publish({ error: result.error });
+      } else if (result.error) this.publish({ error: result.error }, onError);
     } catch (cause) {
       const code = this.recoveryError(cause);
-      if (applied) this.stop(`已保存模型配置，正在后台恢复。${code}`);
-      else this.publish({ error: code });
+      if (applied)
+        this.stop(`已保存模型配置，但无法刷新当前状态。请勿重复提交。${code}`, true, onError);
+      else this.publish({ error: code }, onError);
     } finally {
       try {
         await this.saved();
       } catch (cause) {
-        this.stop(this.recoveryError(cause));
+        this.stop(this.recoveryError(cause), true, onError);
       }
       this.busy = false;
       this.lookupHot = false;

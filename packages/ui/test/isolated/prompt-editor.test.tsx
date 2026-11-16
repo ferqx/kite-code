@@ -70,6 +70,7 @@ const { MessageContent } = await import('../../src/desktop/MessageContent');
 const { ConversationActivityContext } = await import('../../src/conversation-activity');
 const { Composer } = await import('../../src/desktop/Composer');
 const { ReadGate } = await import('../../src/desktop/ReadGate');
+const { ErrorFeedbackContext } = await import('../../src/desktop/error-feedback');
 const { Button } = await import('../../src/desktop/components/ui/button');
 let root: ReturnType<typeof createRoot> | undefined;
 afterEach(async () => {
@@ -733,4 +734,126 @@ test('the unified entry limits image counts before dispatch, including mixed sel
   await act(async () => editor.dispatchEvent(new Clipboard('', [image])));
   expect(batches).toBe(2);
   expect(editor.value).toBe('原文');
+});
+
+test('attachment system failures go only to the chosen host while size validation and draft remain local', async () => {
+  const inherited: string[] = [],
+    explicit: string[] = [];
+  let code = 'file_picker_restart_required';
+  const props = {
+    scopeKey: 'a',
+    disabled: false,
+    draft: '原草稿',
+    active: false,
+    stopping: false,
+    onChange: () => {},
+    onError: (message: string) => {
+      explicit.push(message);
+    },
+    onFileReferences: async () => {
+      throw Object.assign(Error('private details'), { code });
+    },
+  };
+  const sink = (message: string) => {
+    inherited.push(message);
+  };
+  await render(
+    <ErrorFeedbackContext value={sink}>
+      <Composer {...props} />
+    </ErrorFeedbackContext>,
+  );
+  const file = new dom.window.File(['text'], 'file.txt') as unknown as File;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await chooseAttachment('添加文件');
+    await selectFiles([file]);
+  }
+  expect(explicit).toEqual(Array(2).fill('文件选择功能尚未加载，请完全退出并重新打开应用。'));
+  expect(inherited).toEqual([]);
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+  code = 'input_file_too_large';
+  await chooseAttachment('添加文件');
+  await selectFiles([file]);
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe(
+    '文件超过 256 MiB，请缩小后重试。',
+  );
+  expect(explicit).toHaveLength(2);
+  expect(document.querySelector<HTMLTextAreaElement>('[role="textbox"]')?.value).toBe('原草稿');
+});
+
+test('image preparation errors preserve failed drafts and send gating, but retired selection results cannot report to another scope', async () => {
+  const errors: string[] = [];
+  let resolve!: (value: { error: string }) => void;
+  const props = {
+    scopeKey: 'a',
+    disabled: false,
+    draft: '原草稿',
+    active: false,
+    stopping: false,
+    onChange: () => {},
+    onError: (message: string) => {
+      errors.push(message);
+    },
+    onImageFiles: () =>
+      new Promise<{ error: string }>((done) => {
+        resolve = done;
+      }),
+  };
+  const image = new dom.window.File(['png'], 'image.png', { type: 'image/png' }) as unknown as File;
+  await render(<Composer {...props} />);
+  await chooseAttachment('添加文件');
+  await selectFiles([image]);
+  await render(<Composer {...props} scopeKey="b" />);
+  await act(async () => resolve({ error: '图片准备失败，请移除后重新添加。' }));
+  expect(errors).toEqual([]);
+  await render(<Composer {...props} />);
+  await chooseAttachment('添加文件');
+  await selectFiles([image]);
+  const images = [
+    {
+      id: 'failed',
+      name: 'image.png',
+      url: '',
+      error: '图片准备失败，请移除后重新添加。',
+      errorKind: 'system' as const,
+    },
+  ];
+  await render(<Composer {...props} images={images} />);
+  await act(async () => resolve({ error: images[0]!.error }));
+  expect(errors).toEqual([images[0]!.error]);
+  expect(document.querySelector('[aria-label="待发送附件"]')?.textContent).toBe('image.png');
+  expect(document.querySelector<HTMLButtonElement>('[aria-label="发送消息"]')?.disabled).toBe(true);
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+});
+
+test.each([
+  'promptHidden',
+  'disabled',
+  'readOnly',
+] as const)('late attachment rejection cannot publish after the same composer becomes %s', async (blocked) => {
+  const errors: string[] = [];
+  let reject!: (reason: Error) => void;
+  const props = {
+    scopeKey: 'a',
+    draft: '保留草稿',
+    disabled: false,
+    active: false,
+    stopping: false,
+    onChange: () => {},
+    onError: (message: string) => {
+      errors.push(message);
+    },
+    onFileReferences: () =>
+      new Promise<readonly { name: string; uri: string }[]>((_resolve, fail) => {
+        reject = fail;
+      }),
+  };
+  await render(<Composer {...props} />);
+  await chooseAttachment('添加文件');
+  await selectFiles([new dom.window.File(['text'], 'file.txt') as unknown as File]);
+  await render(<Composer {...props} {...{ [blocked]: true }} />);
+  await act(async () => reject(Error('late private file error')));
+  expect(errors).toEqual([]);
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+  await render(<Composer {...props} />);
+  expect(document.querySelector<HTMLTextAreaElement>('[role="textbox"]')?.value).toBe('保留草稿');
 });
