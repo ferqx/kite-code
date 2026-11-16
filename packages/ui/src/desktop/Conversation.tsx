@@ -50,7 +50,7 @@ import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
 import {
   completedToolActions,
-  completedToolCategory,
+  completedToolSummary,
   ToolActivity,
   toolTextFailed,
   toolTraceTitle,
@@ -70,6 +70,7 @@ export interface ToolActivityState {
   aggregate?: boolean;
   inTrace?: boolean;
   directTraceDetails?: boolean;
+  traceSummaryTitle?: string;
   parentDisclosureOpen?: boolean;
   expanded?: boolean;
   activityId: string;
@@ -1072,12 +1073,14 @@ export function Conversation({
       placement: 'standalone' | 'process' | 'result' | 'trace' = 'standalone',
       {
         directTraceDetails = false,
+        traceSummaryTitle,
         showTraceReply = false,
         parentDisclosureOpen = true,
         onToolToggle,
         turnOutputs,
       }: {
         directTraceDetails?: boolean;
+        traceSummaryTitle?: string;
         showTraceReply?: boolean;
         parentDisclosureOpen?: boolean;
         onToolToggle?: (open: boolean) => void;
@@ -1114,6 +1117,7 @@ export function Conversation({
               expanded: expanded[activityKey],
               inTrace,
               directTraceDetails,
+              traceSummaryTitle,
               parentDisclosureOpen,
               activityId: activityKey,
               restoredExpanded: restoredExpanded.current,
@@ -1130,6 +1134,7 @@ export function Conversation({
           aggregate={aggregate}
           inTrace={inTrace}
           directTraceDetails={directTraceDetails}
+          traceSummaryTitle={traceSummaryTitle}
           parentDisclosureOpen={parentDisclosureOpen}
           suppressGenericFailure={
             message.toolName === 'task' &&
@@ -1420,9 +1425,9 @@ export function Conversation({
             const summary =
               working ??
               ((singleTool
-                ? (completedToolCategory(singleTool) ?? toolTraceTitle(singleTool))
+                ? (completedToolSummary(singleTool) ?? toolTraceTitle(singleTool))
                 : editedFiles
-                  ? '已编辑的文件'
+                  ? '编辑了文件'
                   : completedToolActions(steps.filter((step) => step.role === 'tool'))) ||
                 (phaseActive && trailing?.tracePending === 'tool'
                   ? '等待工具执行'
@@ -1430,7 +1435,7 @@ export function Conversation({
                     ? '工具执行'
                     : steps.some((item) => item.role === 'thinking' && !item.settled)
                       ? '思考'
-                      : '已思考'));
+                      : '思考了'));
             const boundary = blocks[index - 1]?.[0];
             const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
             if (open && expanded[id] === true) trackOpen(id);
@@ -1455,9 +1460,10 @@ export function Conversation({
                 expanded={expanded}
                 restoredExpanded={restoredExpanded.current}
                 onToggle={onTraceToggle}
-                renderTool={(item, direct, traceOpen, onToolToggle) =>
+                renderTool={(item, direct, traceOpen, onToolToggle, traceSummaryTitle) =>
                   renderGroup([item], 'trace', {
                     directTraceDetails: direct,
+                    traceSummaryTitle,
                     parentDisclosureOpen: traceOpen,
                     onToolToggle,
                   })

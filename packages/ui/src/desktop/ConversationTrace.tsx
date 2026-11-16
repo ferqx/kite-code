@@ -11,7 +11,7 @@ import {
   TraceTitle,
 } from './components/ui/trace';
 import { DeferredProcessContent } from './DeferredProcessContent';
-import { completedToolCategory, toolIcon } from './ToolActivity';
+import { completedToolActions, completedToolCategory, toolIcon } from './ToolActivity';
 import type { Message } from './types';
 
 export const traceKey = (boundary: Message) =>
@@ -71,6 +71,7 @@ export function ConversationTrace({
     direct: boolean,
     traceOpen: boolean,
     onToggle?: (open: boolean) => void,
+    summaryTitle?: string,
   ) => ReactNode;
   renderReasoning?: (message: Message, open: boolean) => ReactNode;
 }) {
@@ -107,7 +108,7 @@ export function ConversationTrace({
   )
     return (
       <div className="conversation-trace">
-        {renderTool(first, false, processOpen, toggle)}
+        {renderTool(first, false, processOpen, toggle, completedToolActions([first]) || undefined)}
         {notice}
       </div>
     );

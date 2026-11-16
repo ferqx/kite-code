@@ -159,7 +159,7 @@ test('a single Agent wait shows one tool heading and opens directly to its resul
     const document = renderWait(wait, open);
     const headings = document.querySelectorAll('.conversation-trace [data-trace-line]');
     expect(headings).toHaveLength(1);
-    expect(headings[0]?.textContent).toBe(wait.title!);
+    expect(headings[0]?.textContent).toBe('查看了 Agent 进展');
     expect(headings[0]?.getAttribute('aria-expanded')).toBe(String(open));
     expect(document.querySelector('.conversation-trace-steps')).toBeNull();
     expect(document.querySelector('.tool-detail')?.textContent).toBe(open ? wait.text : undefined);
@@ -254,7 +254,7 @@ test('conversation trace keeps the first tool icon as the active title changes a
 
   expectIcon(renderTrace([thought]).querySelector(summary)!, BulbIcon);
   const completedThought = renderTrace([complete(thought)]).querySelector(summary)!;
-  expect(completedThought.textContent).toBe('已思考');
+  expect(completedThought.textContent).toBe('思考了');
   expectIcon(completedThought, BulbIcon);
   expectIcon(renderTrace([complete(read)]).querySelector(summary)!, BookOpen01Icon);
   const running = renderTrace([complete(thought), read, shell]).querySelector(summary)!;
@@ -864,7 +864,7 @@ test('separate trace segments keep their own lifecycle while only the tail carri
       );
       const headings = [...dom.window.document.querySelectorAll('.conversation-trace > button')];
       expect(headings).toHaveLength(2);
-      expect(headings.map((heading) => heading.textContent)).toEqual(['已读取文件', expected]);
+      expect(headings.map((heading) => heading.textContent)).toEqual(['读取了文件', expected]);
       expect(headings[0]!.querySelector('[data-status="running"]')).toBeNull();
       expect(dom.window.document.body.textContent).not.toContain('PRIVATE REASONING');
       dom.window.close();
@@ -915,7 +915,7 @@ test('a non-tail trace preserves its own active tool without lending activity to
           status === 'running' && !executionUnconfirmed,
         );
         expect(headings[0]!.textContent).not.toMatch(/正在回复|正在思考/);
-        if (status !== 'completed') expect(headings[0]!.textContent).not.toContain('已读取');
+        if (status !== 'completed') expect(headings[0]!.textContent).not.toContain('读取了');
         dom.window.close();
       }
     }
@@ -949,7 +949,7 @@ test('an active trace never falls back to completed statistics between model and
     );
     const title = dom.window.document.querySelector('.conversation-trace > button')!.textContent;
     expect(title).toBe(
-      status === 'running' ? '正在回复…' : status === 'waiting' ? '正在等待' : '已读取',
+      status === 'running' ? '正在回复…' : status === 'waiting' ? '正在等待' : '读取了文件',
     );
     dom.window.close();
   }
@@ -1365,7 +1365,7 @@ test('cold and completed traces restore explicit reasoning choices without recla
   }
 });
 
-test('single MCP and Skill traces summarize only after completion and keep the original tool heading when opened or reopened', async () => {
+test('single MCP, Skill and unknown traces summarize only after completion and keep the original tool heading when opened or reopened', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -1390,16 +1390,18 @@ test('single MCP and Skill traces summarize only after completion and keep the o
   const root = createRoot(host);
   try {
     for (const [category, title, target, expected] of [
-      ['mcp', 'MCP · qa-names-7e · add', undefined, '已运行 MCP 工具'],
-      ['skill', '加载技能', 'private-skill-name', '已加载技能'],
+      ['mcp', 'MCP · qa-names-7e · add', undefined, '运行了 MCP 工具'],
+      ['skill', '加载技能', 'private-skill-name', '加载了技能'],
+      ['unknown', '已保存工具', undefined, '运行了工具'],
     ] as const) {
       const tool: Message = {
         id: category,
         turnId: 'run',
         role: 'tool',
         text: 'Original result',
-        toolName: category === 'skill' ? 'load_skill' : undefined,
-        toolSummaryCategory: category,
+        toolName:
+          category === 'skill' ? 'load_skill' : category === 'unknown' ? 'toString' : undefined,
+        toolSummaryCategory: category === 'unknown' ? undefined : category,
         title,
         target,
         status: 'running',
@@ -1534,8 +1536,8 @@ test('separate completed traces keep category order, ordinary summaries and orig
   );
   const summaries = [...dom.window.document.querySelectorAll('.conversation-trace > button')];
   expect(summaries.map((node) => node.textContent)).toEqual([
-    '已运行 MCP 工具 · 已读取文件',
-    '已加载技能 · 已运行 MCP 工具',
+    '运行了 MCP 工具 · 读取了文件',
+    '加载了技能 · 运行了 MCP 工具',
   ]);
   expect(summaries.every((node) => !node.textContent?.includes('provider'))).toBe(true);
   const details = dom.window.document.querySelectorAll('.conversation-trace-steps');
@@ -1543,4 +1545,123 @@ test('separate completed traces keep category order, ordinary summaries and orig
   expect(details[1]?.textContent).toContain('MCP · provider · second-remote');
   expect(dom.window.document.body.textContent).not.toContain('PRIVATE REASONING');
   dom.window.close();
+});
+
+test('completed Trace summary entry points use past-tense actions while data and independent detail headings stay original', () => {
+  const completed = (id: string, toolName?: string, extra: Partial<Message> = {}): Message => ({
+    id,
+    turnId: 'run',
+    role: 'tool',
+    text: 'Original result',
+    status: 'completed',
+    settled: true,
+    toolName,
+    ...extra,
+  });
+  const renderSummary = (messages: Message[], open = false) =>
+    new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          selected
+          connected
+          loading={false}
+          messages={messages}
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'run', status: 'completed' }}
+          initialReading={{
+            top: 0,
+            follow: false,
+            expanded: {
+              'turn:run:complete': true,
+              'trace-turn:turn:run': open,
+              'activity:edit': open,
+              'activity:wait': open,
+            },
+          }}
+        />,
+      ),
+    );
+  for (const [message, expected] of [
+    [completed('read', 'read_file', { target: '已完成.txt' }), '读取了文件 已完成.txt'],
+    [completed('write', 'write_file', { target: '已完成.txt' }), '写入了文件 已完成.txt'],
+    [
+      completed('create', 'write_file', { fileCreated: true, target: '已完成.txt' }),
+      '创建了文件 已完成.txt',
+    ],
+    [completed('images', 'view_images', { toolImageCount: 2 }), '查看了图像'],
+    [completed('shell', 'shell_execute', { target: 'echo 已完成' }), '运行了命令 echo 已完成'],
+    [completed('unknown', undefined, { title: '已保存工具' }), '运行了工具'],
+  ] as const) {
+    const dom = renderSummary([message], true);
+    expect(dom.window.document.querySelector('.conversation-trace > button')?.textContent).toBe(
+      expected,
+    );
+    if (message.id === 'unknown')
+      expect(
+        dom.window.document.querySelector('.conversation-trace-steps .tool-activity-title')
+          ?.textContent,
+      ).toBe('已保存工具');
+    dom.window.close();
+  }
+  for (const [message, expected] of [
+    [
+      completed('edit', 'edit_file', {
+        title: '修改',
+        target: '已完成.txt',
+        changeConfirmed: true,
+        toolResult: { ok: true, stdout: '+new' },
+      }),
+      '编辑了文件',
+    ],
+    [completed('wait', 'wait_agent_events', { title: '等待 Agent 事件' }), '查看了 Agent 进展'],
+  ] as const) {
+    for (const open of [false, true]) {
+      const dom = renderSummary([message], open);
+      expect(
+        dom.window.document.querySelectorAll('.conversation-trace [data-trace-line]'),
+      ).toHaveLength(1);
+      expect(
+        dom.window.document.querySelector('.conversation-trace .tool-activity-summary .tool-label')
+          ?.textContent,
+      ).toBe(expected);
+      if (message.target)
+        expect(dom.window.document.querySelector('.conversation-trace')?.textContent).toContain(
+          message.target,
+        );
+      expect(dom.window.document.querySelector('.conversation-trace-steps')).toBeNull();
+      dom.window.close();
+    }
+  }
+  const edits = renderSummary([completed('one', 'edit_file'), completed('two', 'edit_file')]);
+  expect(edits.window.document.querySelector('.conversation-trace > button')?.textContent).toBe(
+    '编辑了文件',
+  );
+  edits.window.close();
+  const mixed = renderSummary(
+    [
+      { ...thinking('run'), settled: true },
+      completed('edit', 'edit_file', { title: '修改', changeConfirmed: true }),
+      completed('read', 'read_file'),
+      completed('images', 'view_images', { toolImageCount: 2 }),
+    ],
+    true,
+  );
+  expect(mixed.window.document.querySelector('.conversation-trace > button')?.textContent).toBe(
+    '编辑了文件 · 读取了文件 · 查看了图像',
+  );
+  const details = mixed.window.document.querySelector('.conversation-trace-steps');
+  expect(details?.textContent).toContain('已编辑');
+  expect(details?.textContent).toContain('已查看 2 张图像');
+  mixed.window.close();
+  for (const status of ['failed', 'cancelled', 'unknown', 'not_executed'] as const) {
+    const dom = renderSummary([
+      { ...thinking('run'), settled: true },
+      completed('unknown', undefined, { status, title: 'Original tool' }),
+    ]);
+    expect(dom.window.document.querySelector('.conversation-trace > button')?.textContent).toBe(
+      '工具执行',
+    );
+    dom.window.close();
+  }
 });

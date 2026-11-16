@@ -167,6 +167,7 @@ export function renderNativeToolGroup(
       aggregate={false}
       inTrace={controls.inTrace}
       directTraceDetails={controls.directTraceDetails}
+      traceSummaryTitle={controls.traceSummaryTitle}
       parentDisclosureOpen={controls.parentDisclosureOpen}
       unverified
       metadataPending={options.metadataPending?.has(model.id)}

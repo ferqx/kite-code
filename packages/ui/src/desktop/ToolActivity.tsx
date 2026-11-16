@@ -519,10 +519,53 @@ export function toolTextFailed(message: Message): boolean {
   return traceStatus(message) === 'error' || message.shell?.jobStatus === 'failed';
 }
 
+/** Owned action copy only. Never rewrite a remote title, target or result. */
+const COMPLETED_TRACE_ACTIONS: ReadonlyMap<string, string> = new Map(
+  Object.entries({
+    read_file: '读取了文件',
+    read_skill_resource: '读取了技能资料',
+    view_images: '查看了图像',
+    write_file: '写入了文件',
+    'files.write_path': '写入了文件',
+    edit_file: '编辑了文件',
+    'files.edit_path': '编辑了文件',
+    search_content: '搜索了内容',
+    search_files: '查找了文件',
+    glob: '查找了文件',
+    'files.glob': '查找了文件',
+    'files.list': '浏览了目录',
+    web_fetch: '读取了网页',
+    browser_execute: '完成了浏览器操作',
+    tool_search: '查找了工具',
+    skill: '使用了技能',
+    task: '运行了子 Agent 任务',
+    spawn_agent: '创建了子 Agent',
+    follow_up_agent: '继续了子 Agent 任务',
+    send_agent_message: '发送了 Agent 消息',
+    wait_agent_events: '查看了 Agent 进展',
+    list_agents: '查看了 Agent 进展',
+    interrupt_agent: '请求了中断 Agent',
+    ask_user: '询问了用户',
+    write_plan: '更新了计划',
+    update_plan: '更新了计划',
+    request_plan_review: '请求了计划审阅',
+    'planning.read': '读取了计划',
+    'planning.write': '编写了计划',
+    'planning.review': '请求了计划审阅',
+    'planning.update': '更新了计划',
+    'validation.define': '定义了验证检查',
+    'validation.check': '运行了验证',
+    'validation.rebind': '关联了修复结果',
+    'validation.request_waiver': '请求了验证豁免',
+    'validation.auto_check': '检查了文件变更',
+    'git.worktree': '操作了 Git 工作树',
+  }),
+);
+
 /** Summary categories never replace the original per-tool title or target. */
 function traceCategoryAction(message: Message): string | undefined {
-  if (message.toolSummaryCategory === 'mcp') return '运行 MCP 工具';
-  if (message.toolSummaryCategory === 'skill') return '加载技能';
+  if (message.toolSummaryCategory === 'mcp') return '运行了 MCP 工具';
+  if (message.toolSummaryCategory === 'skill') return '加载了技能';
   switch (message.toolName) {
     case 'mcp_tool':
     case 'list_mcp_tools':
@@ -531,28 +574,67 @@ function traceCategoryAction(message: Message): string | undefined {
     case 'mcp.tools.search':
     case 'mcp.resources.list':
     case 'mcp.resources.read':
-      return '运行 MCP 工具';
+      return '运行了 MCP 工具';
     case 'load_skill':
-      return '加载技能';
+      return '加载了技能';
     default:
       return undefined;
   }
 }
 
+function completedTraceAction(message: Message): string {
+  const category = traceCategoryAction(message);
+  if (category) return category;
+  if (isShellMessage(message))
+    return {
+      execute: '运行了命令',
+      launch: '请求了启动后台 Shell',
+      read: '查看了命令输出',
+      wait: '等待了命令',
+      stop: '请求了停止命令',
+    }[shellOperation(message)];
+  if (message.fileCreated) return '创建了文件';
+  return COMPLETED_TRACE_ACTIONS.get(message.toolName ?? '') ?? '运行了工具';
+}
+
+function hasCompletedTraceAction(message: Message): boolean {
+  // A finite Shell process can exit unsuccessfully and still have run.
+  const ran = isShellExecution(message) && message.shell?.jobStatus === 'failed';
+  return (message.status === 'completed' || ran) && message.dispatchCommitted !== false;
+}
+
+/** Generic summaries hide identity only at the outer level; opening keeps the original title. */
 export function completedToolCategory(message: Message): string | undefined {
   if (message.status !== 'completed' || message.dispatchCommitted === false) return undefined;
-  const action = traceCategoryAction(message);
-  return action ? `已${action}` : undefined;
+  return (
+    traceCategoryAction(message) ??
+    (!isShellMessage(message) &&
+    !message.fileCreated &&
+    !COMPLETED_TRACE_ACTIONS.get(message.toolName ?? '')
+      ? '运行了工具'
+      : undefined)
+  );
+}
+
+export function completedToolSummary(message: Message): string | undefined {
+  if (!hasCompletedTraceAction(message)) return undefined;
+  const category = completedToolCategory(message);
+  if (category) return category;
+  // A completed wrapper with missing or unknown Shell evidence keeps its neutral title.
+  if (isShellMessage(message) && !shellTitle(message).startsWith('已')) return undefined;
+  const target =
+    message.toolName === 'view_images'
+      ? undefined
+      : (toolTarget(message) ?? (isShellMessage(message) ? shellCommand(message) : undefined));
+  return [completedTraceAction(message), target?.replace(/\s+/g, ' ').trim().slice(0, 512)]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export function completedToolActions(messages: readonly Message[]): string {
   const actions = new Set<string>();
-  for (const message of messages) {
-    // A finite Shell process can exit unsuccessfully and still have run.
-    const ran = isShellExecution(message) && message.shell?.jobStatus === 'failed';
-    if ((message.status === 'completed' || ran) && message.dispatchCommitted !== false)
-      actions.add(`已${traceCategoryAction(message) ?? activityAction(message, true)}`);
-  }
+  for (const message of messages)
+    if (hasCompletedTraceAction(message)) actions.add(completedTraceAction(message));
   return [...actions].join(' · ');
 }
 
@@ -1013,6 +1095,7 @@ export function ToolActivity({
   aggregate = false,
   inTrace = false,
   directTraceDetails = false,
+  traceSummaryTitle,
   parentDisclosureOpen = true,
 }: {
   /** Stable outer activity, including its first tool before more calls arrive. */
@@ -1020,6 +1103,8 @@ export function ToolActivity({
   /** The conversation Trace owns grouping and disclosure defaults. */
   inTrace?: boolean;
   directTraceDetails?: boolean;
+  /** Completed action copy for a single row that also owns the outer Trace summary. */
+  traceSummaryTitle?: string;
   parentDisclosureOpen?: boolean;
   expandedItems?: Readonly<Record<string, boolean>>;
   onToggleItem?: (id: string, open: boolean) => void;
@@ -1158,21 +1243,23 @@ export function ToolActivity({
       !!message.text ||
       (imageOnly && !!renderImages) ||
       getChildren().some(Boolean));
-  const label = imageOnly
-    ? imageCount && !issues.length && !running
-      ? `已查看 ${imageCount} 张图像`
-      : '查看图像'
-    : grouped
-      ? activityLabel(messages)
-      : ask
-        ? askMultiple
-          ? `询问用户 · ${ask.questions.length} 项`
-          : '询问用户'
-        : inTrace
-          ? toolTraceLabel(message)
-          : shell
-            ? shellTitle(message)
-            : toolTitle(message);
+  const label =
+    traceSummaryTitle ??
+    (imageOnly
+      ? imageCount && !issues.length && !running
+        ? `已查看 ${imageCount} 张图像`
+        : '查看图像'
+      : grouped
+        ? activityLabel(messages)
+        : ask
+          ? askMultiple
+            ? `询问用户 · ${ask.questions.length} 项`
+            : '询问用户'
+          : inTrace
+            ? toolTraceLabel(message)
+            : shell
+              ? shellTitle(message)
+              : toolTitle(message));
   const target = imageOnly
     ? undefined
     : ask

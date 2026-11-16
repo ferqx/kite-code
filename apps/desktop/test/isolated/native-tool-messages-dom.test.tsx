@@ -24,7 +24,7 @@ Object.assign(globalThis, {
   navigator: bootstrap.window.navigator,
 });
 const { createRoot } = await import('react-dom/client');
-const { DesktopDiagnosticsProvider, SessionPage, ToolActivity } = await import(
+const { Conversation, DesktopDiagnosticsProvider, SessionPage, ToolActivity } = await import(
   '@kite-ai/ui/desktop'
 );
 const {
@@ -38,6 +38,7 @@ const {
   useNativeToolMessages,
 } = await import('../../src/native-tool-messages');
 const { desktopTranscript } = await import('../../src/native-transcript');
+const { renderNativeToolGroup } = await import('../../src/native-tool-renderer');
 Object.assign(globalThis, originalGlobals);
 bootstrap.window.close();
 
@@ -2309,6 +2310,80 @@ test('MCP live metadata, original receipt and cold history keep one named row wi
     expect(f.host.querySelectorAll('.tool-activity-summary').length).toBe(1);
   } finally {
     release();
+    await f.close();
+  }
+});
+
+test('Native verified and original-reader single Trace rows receive only the completed summary copy and retain results', async () => {
+  const f = fixture();
+  try {
+    for (const [definitionId, completedTitle, originalTitle] of [
+      ['files.edit', '编辑了文件', '修改'],
+      ['task.events', '查看了 Agent 进展', '等待 Agent 事件'],
+    ] as const) {
+      for (const verified of [false, true]) {
+        for (const status of ['succeeded', 'running', 'failed'] as const) {
+          const fact: NativeToolMessageFact = {
+            messageId: 'single',
+            executionId: 'execution',
+            definitionId,
+            definitionVersion: definitionId === 'files.edit' ? '2' : '1',
+            status,
+            resultRevision: '1',
+            target: definitionId === 'files.edit' ? '已完成.txt' : undefined,
+          };
+          const model = {
+            ...desktopToolMessage(fact, fact.messageId, 'Original result'),
+            turnId: 'run',
+          };
+          await act(async () =>
+            f.root.render(
+              <Conversation
+                key={`${definitionId}:${verified}:${status}`}
+                traceTurns
+                selected
+                connected
+                loading={false}
+                messages={[model]}
+                saveReading={() => {}}
+                turnActivity={{
+                  turnId: 'run',
+                  status: status === 'running' ? 'running' : 'completed',
+                }}
+                initialReading={{
+                  top: 0,
+                  follow: false,
+                  expanded: { 'turn:run:complete': true, 'activity:single': true },
+                }}
+                renderToolActivity={(group, controls) =>
+                  renderNativeToolGroup(group, controls, {
+                    tools: verified ? [fact] : [],
+                    retainedFact: () => undefined,
+                    liveTools: [],
+                    executionUnconfirmed: false,
+                    observationUnavailable: false,
+                    diagnostics: false,
+                    renderOriginal: () => <p key="original">Original result</p>,
+                    hasDeferredText: () => true,
+                  })
+                }
+              />,
+            ),
+          );
+          const label = f.host.querySelector(
+            '.conversation-trace .tool-activity-summary .tool-label',
+          );
+          expect(label?.textContent).toBe(status === 'succeeded' ? completedTitle : originalTitle);
+          expect(f.host.querySelector('.conversation-trace-steps')).toBeNull();
+          if (fact.target) expect(f.host.textContent).toContain(fact.target);
+          if (!verified || definitionId === 'task.events')
+            expect(f.host.textContent).toContain('Original result');
+          if (status === 'failed')
+            expect(f.host.querySelector('[data-status="error"]')).not.toBeNull();
+        }
+      }
+    }
+  } finally {
     await f.close();
   }
 });
