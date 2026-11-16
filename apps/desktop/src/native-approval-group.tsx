@@ -55,7 +55,9 @@ export function NativeApprovalGroup({
   owners?: readonly NativeApprovalOwner[];
   renderInteraction: (interaction: Interaction, embedded: boolean) => ReactNode;
 }) {
-  const approvals = interactions.filter(isOrdinaryNativeApproval);
+  const approvals = interactions.filter(
+    (interaction) => interaction.state === 'pending' && isOrdinaryNativeApproval(interaction),
+  );
   const key = (interaction: Interaction) =>
     JSON.stringify([interaction.originStoreId, interaction.id]);
   const scope = JSON.stringify([storeId, rootSessionId]);
@@ -84,7 +86,23 @@ export function NativeApprovalGroup({
   return (
     <>
       {current && (
-        <section className="native-approval-group" aria-label="需要人工审批">
+        <section
+          className="native-approval-group"
+          aria-label="需要人工审批"
+          onClickCapture={(event) => {
+            // A double click must not answer the next card occupying the same button position.
+            if (event.detail > 1) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
+          onKeyDownCapture={(event) => {
+            if (event.repeat && (event.key === 'Enter' || event.key === ' ')) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
+        >
           <ApprovalHeader
             child={
               current.originStoreId === storeId && current.sessionId === rootSessionId

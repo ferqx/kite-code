@@ -75,11 +75,9 @@ export function NativeApproval({
           submission
             ? submission.phase === 'unknown'
               ? '审批提交结果未知，请核对原提交。'
-              : submission.phase === 'accepted'
-                ? '审批回答已保存，等待执行。'
-                : submission.phase === 'failed'
-                  ? '审批提交失败，请核对原提交。'
-                  : '正在提交审批回答。'
+              : submission.phase === 'failed'
+                ? '审批提交失败，请核对原提交。'
+                : undefined
             : undefined
         }
         options={options}

@@ -58,7 +58,8 @@ import type { DesktopEditor, NativeFileChangeDetail } from './file-changes-bridg
 import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
 import { NativeApproval } from './native-approval';
-import { NativeApprovalGroup } from './native-approval-group';
+import { isOrdinaryNativeApproval, NativeApprovalGroup } from './native-approval-group';
+import { useNativeApprovalPresentation } from './native-approval-presentation';
 import { NativeBackgroundPanel } from './native-background-panel';
 import type {
   NativeBranchFacts,
@@ -376,6 +377,7 @@ function NativeDesktopContent({
     preview?: CachedComposer;
   }>({ draft: '', preparation: false });
   const { state, draft, models: preparedModels } = frame;
+  const approvalPresentation = useNativeApprovalPresentation(state);
   function setPreparing(value: boolean) {
     setPreparingIntent(value);
     if (value)
@@ -3465,7 +3467,10 @@ function NativeDesktopContent({
       }
     });
   }
-  const hasPendingInteraction = selection?.interactions.some(
+  const visibleInteractions = selection?.interactions.filter(
+    (card) => !approvalPresentation.hidden(card),
+  );
+  const hasPendingInteraction = visibleInteractions?.some(
     (card) =>
       ['approval', 'question', 'plan_review'].includes(card.kind) && card.state === 'pending',
   );
@@ -4082,7 +4087,7 @@ function NativeDesktopContent({
   const interactionCards =
     selection && state ? (
       <NativeApprovalGroup
-        interactions={selection.interactions}
+        interactions={visibleInteractions ?? []}
         storeId={selection.storeId}
         rootSessionId={
           selection.session.rootSessionId ??
@@ -4132,7 +4137,11 @@ function NativeDesktopContent({
                   onAnswer={
                     props.onAnswer
                       ? async (card, answer) => {
-                          await report(() => Promise.resolve(props.onAnswer!(card, answer)));
+                          if (isOrdinaryNativeApproval(card))
+                            await approvalPresentation.submit(card, () =>
+                              props.onAnswer!(card, answer),
+                            );
+                          else await report(() => Promise.resolve(props.onAnswer!(card, answer)));
                         }
                       : undefined
                   }
@@ -4175,14 +4184,19 @@ function NativeDesktopContent({
                 selection.workspaceUnavailable
                   ? undefined
                   : async (_card, answer) => {
-                      await bridge.request({
-                        method: 'interaction.answer',
-                        generation: generation.current,
-                        interactionId: interaction.id,
-                        revision: interaction.revision,
-                        answer,
-                      });
-                      await refresh();
+                      try {
+                        await bridge.request({
+                          method: 'interaction.answer',
+                          generation: generation.current,
+                          interactionId: interaction.id,
+                          revision: interaction.revision,
+                          answer,
+                        });
+                      } finally {
+                        // Observation failure cannot turn a saved answer into a retryable failure.
+                        if (isOrdinaryNativeApproval(interaction)) void refresh().catch(() => {});
+                      }
+                      if (!isOrdinaryNativeApproval(interaction)) await refresh();
                     }
               }
             />
@@ -5494,11 +5508,44 @@ function NativeDesktopContent({
         </>
       }
       beforeConversation={
-        <NativeToast
-          container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
-          message={operationMessage}
-          onDismiss={dismissOperationMessage}
-        />
+        <>
+          <NativeToast
+            container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
+            message={operationMessage}
+            onDismiss={dismissOperationMessage}
+          />
+          {!preparing &&
+            !selectionHandoff &&
+            state?.generation === generation.current &&
+            selection?.session.id === selected.current &&
+            approvalPresentation.notices.map((notice) => (
+              <p key={notice.key} role="status" aria-label="审批答复核对">
+                {notice.retryable
+                  ? '审批回答未提交，请核对当前请求后重试。'
+                  : notice.phase === 'unknown'
+                    ? '审批提交结果尚未确认，不会重复提交。'
+                    : '审批提交失败，未确认获得批准。'}
+                <DesktopButton
+                  onClick={() =>
+                    void report(async () => {
+                      try {
+                        if (notice.commandId)
+                          await bridge.request({
+                            method: 'lookupInteraction',
+                            generation: generation.current,
+                            commandId: notice.commandId,
+                          });
+                      } finally {
+                        await refresh();
+                      }
+                    })
+                  }
+                >
+                  核对原答复
+                </DesktopButton>
+              </p>
+            ))}
+        </>
       }
       loading={
         !preparing &&

@@ -1147,7 +1147,12 @@ test('a cached unavailable selection rereads the same activation and retires an 
     const activation = f.calls.find((request) => request.method === 'select')!;
     unavailable = true;
     await f.notify();
-    expect(f.dom.window.document.body.textContent).toContain('审批回答已保存，等待执行。');
+    // A saved answer closes the approval immediately, even while the original
+    // selection is unavailable and still carries its stale pending card.
+    expect(f.dom.window.document.body.textContent).not.toContain('审批回答已保存，等待执行。');
+    expect(
+      f.dom.window.document.querySelector('[aria-label="approval original-approval"]'),
+    ).toBeNull();
     await until(
       () =>
         recovered &&
@@ -1744,6 +1749,67 @@ test('ordinary permission menu omits the grant directory; the isolated diagnosti
       ),
     ).toBe(false);
   } finally {
+    await f.close();
+  }
+});
+
+test('an original approval recovery notice never follows a pending reading handoff into another session', async () => {
+  const held = deferred<NativeResult>();
+  let f!: ReturnType<typeof fixture>;
+  const original = (): NativeState => ({
+    ...f.snapshot(),
+    answerSubmissions: [
+      {
+        scope: {
+          storeId: 'store',
+          sessionId: 'a',
+          workspaceId: 'w',
+          contextSelectionId: 'context-a',
+        },
+        subjectId: 'user',
+        interaction: { id: 'original-approval', revision: '1', kind: 'approval' },
+        request: { expectedStoreId: 'store', commandId: 'original-answer', expectedRevision: '1' },
+        bodyDigest: 'body',
+        requestDigest: 'request',
+        phase: 'unknown',
+        association: 'current',
+      },
+    ],
+  });
+  f = fixture((request) => {
+    if (request.method === 'select') return request.sessionId === 'b' ? held.promise : original();
+    if (request.method === 'state') return original();
+    if (request.method === 'lookupInteraction') return null;
+    return undefined;
+  });
+  const notices = () => f.dom.window.document.querySelectorAll('[aria-label="审批答复核对"]');
+  const hasTitle = (title: string) =>
+    [...f.dom.window.document.querySelectorAll('.session-header strong')].some(
+      (node) => node.textContent === title,
+    );
+  try {
+    await f.render();
+    await f.click('Original A');
+    await until(() => notices().length === 1);
+    expect(notices()[0]!.textContent).toContain('审批提交结果尚未确认');
+    await f.click('Other B');
+    await until(() => hasTitle('Other B'));
+    expect(notices()).toHaveLength(0);
+    await f.notify(); // Late A metadata must not install A's notice on B's reading page.
+    expect(notices()).toHaveLength(0);
+    await f.click('Original A');
+    await until(() => hasTitle('Original A') && notices().length === 1);
+    await act(async () =>
+      held.resolve({
+        ...original(),
+        selection: { ...original().selection!, session: sessions[1]!, viewGeneration: 2 },
+      }),
+    );
+    expect(hasTitle('Original A')).toBe(true);
+    expect(notices()).toHaveLength(1);
+    expect(f.calls.filter((request) => request.method === 'interaction.answer')).toHaveLength(0);
+  } finally {
+    held.resolve(original());
     await f.close();
   }
 });
