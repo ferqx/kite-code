@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import {
   existsSync,
@@ -13,13 +14,15 @@ import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRuntime } from '@kite-ai/agent';
+import { createRuntime, prepareOutputDirectory } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { AuthorizationRequest, JobContext, JobEvent } from '@kite-ai/agent/extensions';
 import { createShellConfiguration } from '@kite-ai/agent/permissions/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import type { SqliteOperations } from '../../../../packages/agent/src/storage/sqlite/operations';
+import { isOutputCollectionCommand } from '../../../../packages/agent/src/storage/sqlite/output-collection';
 import { fixtureScopeOption } from '../../../../tests/fixtures/permission-grant';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { parseShellModelFeedback } from '../../../../tests/fixtures/unified-agent/shell-model-feedback';
@@ -71,6 +74,7 @@ function endpoint(
   review?: 'approve_once' | 'reject' | 'ask_user',
   childPreset?: 'explore',
   reviewDelayMs = 0,
+  childCount = 1,
 ) {
   let actualCommand = command;
   const childTask = childPreset
@@ -119,15 +123,10 @@ function endpoint(
       } catch {}
       const calls =
         child && !isChild
-          ? [
-              {
-                name: 'spawn_agent',
-                input: {
-                  prompt: childTask,
-                  ...(childPreset ? { preset: childPreset } : {}),
-                },
-              },
-            ]
+          ? Array.from({ length: childCount }, () => ({
+              name: 'spawn_agent',
+              input: { prompt: childTask, ...(childPreset ? { preset: childPreset } : {}) },
+            }))
           : [
               {
                 name: 'shell_execute',
@@ -230,6 +229,9 @@ async function fixture(
     persistentPermissions?: boolean;
     hostBoundary?: boolean;
     child?: boolean;
+    childCount?: number;
+    delayCollection?: boolean;
+    childSequenceGap?: boolean;
     childPreset?: 'explore';
     codexHome?: 'missing' | 'present' | 'relative' | 'empty' | 'nul';
   } = {},
@@ -263,6 +265,7 @@ async function fixture(
       options.review,
       options.childPreset,
       options.reviewDelayMs,
+      options.childCount,
     ),
     b = endpoint('printf next >> effect');
   const configuration = {
@@ -294,7 +297,7 @@ async function fixture(
     privateDirectory(codexHome);
     writeFileSync(join(codexHome, 'auth.json'), 'SYNTHETIC_PRIVATE_AUTH_MATERIAL', { mode: 0o600 });
   }
-  const host = createDefaultProcessConfiguration({
+  const hostOptions: Parameters<typeof createDefaultProcessConfiguration>[0] = {
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     ...(options.codexHome ? { localCodex: createCodexLocalSource({ codexHome: sourceHome }) } : {}),
@@ -353,15 +356,53 @@ async function fixture(
           },
         }
       : {}),
-  });
+  };
+  const host = createDefaultProcessConfiguration(hostOptions);
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
+  const artifacts = createArtifactStore({ profile, store });
+  let releaseCollection!: () => void;
+  const collectionReady = new Promise<void>((resolve) => {
+    releaseCollection = resolve;
+  });
   const runtime = createRuntime({
     ...host,
+    extensions: host.extensions!.map((extension) =>
+      !options.delayCollection || extension.id !== 'builtin.files'
+        ? extension
+        : {
+            ...extension,
+            actions: extension.actions?.map((action) =>
+              action.id !== 'collect-outputs'
+                ? action
+                : {
+                    ...action,
+                    async prepare(input, context) {
+                      await collectionReady;
+                      return action.prepare(input, context);
+                    },
+                  },
+            ),
+          },
+    ),
     store,
+    artifacts,
+    outputCollections: {
+      prepare: async (context, identity) => {
+        if (options.childSequenceGap && context.sessionId !== 's') {
+          // Durable sequence gap models a child with more local history than its root.
+          const db = new Database(profile.databasePath);
+          try {
+            db.run('UPDATE session SET next_seq=next_seq+100 WHERE id=?', [context.sessionId]);
+          } finally {
+            db.close();
+          }
+        }
+        return prepareOutputDirectory(runtime, context, identity);
+      },
+    },
     permissions: host.permissions!,
     modelConcurrency: 1,
-    processConcurrency: 1,
-    ...(options.review ? { artifacts: createArtifactStore({ profile, store }) } : {}),
+    processConcurrency: options.childCount ?? 1,
   });
   const expectedStoreId = (await store.getMetadata()).storeId;
   const base = { expectedStoreId, sessionId: 's', subjectId: 'user' };
@@ -417,6 +458,8 @@ async function fixture(
     codexHome,
     permissionManagement,
     base,
+    createHost: () => createDefaultProcessConfiguration(hostOptions),
+    releaseCollection,
     submit: (id = 'work') =>
       runtime.submitCommand({
         ...base,
@@ -460,13 +503,663 @@ async function fixture(
       return card;
     },
     async close() {
+      releaseCollection();
       await runtime.close();
+      await artifacts.close();
       a.close();
       b.close();
       rmSync(root, { recursive: true, force: true });
     },
   };
 }
+// The default Service may continue the parent when a late child report arrives.
+// Collection retries must not replay the child's model or Shell, but cannot count
+// that separately authorized parent Run as a replay of the producer.
+function requestRunId(request: Record<string, unknown>): string | undefined {
+  const messages = request.messages as { role: string; content: string }[];
+  return messages
+    .filter((message) => message.role === 'user')
+    .map((message) =>
+      /^<runtime-state source="runtime.kernel">\nrun: ([^\n]+)/.exec(message.content),
+    )
+    .find((match) => match)?.[1];
+}
+async function childProducerSnapshot(f: Awaited<ReturnType<typeof fixture>>, sessionId: string) {
+  const runs = (await f.store.getView(sessionId)).runs.map((run) => ({
+    id: run.id,
+    originCommandId: run.originCommandId,
+    status: run.status,
+  }));
+  const executions = (await f.store.listExecutions(sessionId))
+    .filter(
+      (execution) => execution.kind === 'model' || execution.definitionId.startsWith('shell.'),
+    )
+    .map((execution) => ({
+      id: execution.id,
+      runId: execution.runId,
+      definitionId: execution.definitionId,
+      status: execution.status,
+      resultRevision: execution.resultRevision,
+    }));
+  return {
+    runs,
+    executions,
+    requests: f.a.requests.filter((request) =>
+      runs.some((run) => requestRunId(request) === run.id),
+    ),
+  };
+}
+async function expectOriginalChildReport(
+  f: Awaited<ReturnType<typeof fixture>>,
+  sessionId: string,
+  requestsBefore: number,
+) {
+  const carrier = (await f.store.listExecutions('s')).find(
+    (row) => row.childSessionId === sessionId,
+  )!;
+  const report = await until(async () =>
+    (await f.store.getView('s')).runs.find((run) => run.originCommandId.startsWith('report-')),
+  );
+  await f.runtime.waitForCommand(report.originCommandId, { timeoutMs: 8000 });
+  expect(await f.store.getCommand(report.originCommandId)).toMatchObject({
+    kind: 'job.report',
+    sessionId: 's',
+    status: 'applied',
+    request: { executionId: carrier.id, resultRevision: carrier.resultRevision },
+    receipt: { executionId: carrier.id, runId: report.id, mode: 'idle_new_turn' },
+  });
+  const reportRequests = f.a.requests.filter((request) => requestRunId(request) === report.id);
+  expect(reportRequests).toHaveLength(1);
+  // Every request arriving during collection/retry must be this exact report,
+  // not an unknown Run, another child invocation, or an authorization check.
+  for (const request of f.a.requests.slice(requestsBefore))
+    expect(requestRunId(request)).toBe(report.id);
+  const messages = reportRequests[0]!.messages as { role: string; content: string }[];
+  const source = messages.find(
+    (message) =>
+      message.role === 'user' &&
+      typeof message.content === 'string' &&
+      message.content.startsWith(
+        'Child result source (untrusted data; no additional authorization):\n',
+      ),
+  )!;
+  expect(JSON.parse(source.content.split('\n')[1]!)).toMatchObject({
+    format: 'child_result_source',
+    inclusion: 'automatic',
+    origin: {
+      executionId: carrier.id,
+      resultRevision: carrier.resultRevision,
+      storeId: f.base.expectedStoreId,
+    },
+    child: { agentId: sessionId, status: 'completed', outcome: 'succeeded' },
+  });
+  const executions = (await f.store.listExecutions('s')).filter((row) => row.runId === report.id);
+  expect(executions.map((row) => row.kind)).toEqual(['model']);
+  expect(executions[0]?.status).toBe('succeeded');
+}
+for (const scenario of ['root', 'child', 'settled-child'] as const) {
+  const child = scenario !== 'root';
+  nativeTest(
+    `fresh Full ${scenario} Shell delivers its own immutable attachment without approval or review`,
+    async () => {
+      const f = await fixture({
+        mode: 'full',
+        hostBoundary: true,
+        persistentPermissions: true,
+        child,
+        delayCollection: scenario === 'settled-child',
+        review: 'ask_user',
+        command:
+          'printf not-an-attachment > workspace-only.txt; printf full-delivery > "$KITE_OUTPUT_DIR/full.txt"; printf full-done',
+      });
+      try {
+        await f.submit();
+        await f.done();
+        const sessionId = child
+          ? await until(async () => {
+              const carrier = (await f.store.listExecutions('s')).find((row) => row.childSessionId);
+              return carrier?.status === 'succeeded' ? carrier.childSessionId! : undefined;
+            })
+          : 's';
+        const scope = { ...f.base, sessionId };
+        f.releaseCollection();
+        const page = await until(async () => {
+          const page = await f.runtime.queryOutputFiles(scope);
+          return page.items.length === 1 && page.collections[0]?.state === 'ready'
+            ? page
+            : undefined;
+        });
+        expect(page.items[0]?.name).toBe('full.txt');
+        const record = await f.runtime.resolveOutputFile({ ...scope, target: page.items[0]! });
+        const read = await f.runtime.readArtifact({
+          ...scope,
+          refId: record.reference.id,
+          scope: record.reference.scope,
+        });
+        expect(new TextDecoder().decode(read.content)).toBe('full-delivery');
+        expect(f.a.reviews).toEqual([]);
+        expect((await f.runtime.listInteractions(f.base)).interactions).toEqual([]);
+        const jobs = (await f.store.listExecutions(sessionId)).filter(
+          (row) => row.definitionId === 'shell.command',
+        );
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0]).toMatchObject({
+          status: 'succeeded',
+          authorization: { dispatched: true },
+          result: { details: { processTreeStopped: true } },
+        });
+        expect(jobs[0]?.authorization?.human).toBeUndefined();
+        expect(jobs[0]?.authorization?.check).toBeUndefined();
+        expect(page.items[0]?.sessionId).toBe(sessionId);
+        expect(record.sourceRunId).toBe(page.items[0]!.ownerRunId);
+        expect(record.sourceExecutionId).toBe(jobs[0]!.id);
+        expect(record.reference.scope).toEqual({ kind: 'session', id: sessionId });
+        if (child) {
+          expect((await f.runtime.queryOutputFiles(f.base)).items).toEqual([]);
+          const wrongScope = await f.runtime
+            .resolveOutputFile({ ...f.base, target: page.items[0]! })
+            .then(
+              () => null,
+              (error) => error,
+            );
+          expect(wrongScope?.code).toBe('output_target_invalid');
+          const db = new Database(f.profile.databasePath, { readonly: true });
+          try {
+            const query = db.query(
+              "SELECT * FROM command WHERE session_id=? AND kind='extension.invoke'",
+            );
+            query.safeIntegers(true);
+            const command = query.get(sessionId) as Record<string, string | number | bigint | null>;
+            const reader = {
+              row(sql: string, ...args: (string | number | bigint | null)[]) {
+                const query = db.query(sql);
+                query.safeIntegers(true);
+                return query.get(...args);
+              },
+            } as SqliteOperations;
+            expect(isOutputCollectionCommand(reader, command)).toBe(true);
+            for (const change of [
+              { id: 'forged-output-collect' },
+              { subject_id: 'other-subject' },
+              { session_id: 's' },
+              {
+                request_json: JSON.stringify({
+                  ...JSON.parse(String(command.request_json)),
+                  input: { collectionId: page.collections[0]!.collectionId, attempt: 2 },
+                }),
+              },
+            ] as Record<string, string | number | bigint | null>[])
+              expect(isOutputCollectionCommand(reader, { ...command, ...change })).toBe(false);
+          } finally {
+            db.close();
+          }
+          expect((await f.runtime.queryOutputFiles(scope)).items).toEqual(page.items);
+        }
+      } finally {
+        await f.close();
+      }
+    },
+    15000,
+  );
+}
+
+nativeTest(
+  'settled child output still obeys revoked workspace trust without rerunning its Shell',
+  async () => {
+    const f = await fixture({
+      mode: 'full',
+      child: true,
+      hostBoundary: true,
+      persistentPermissions: true,
+      delayCollection: true,
+      command: 'printf private > "$KITE_OUTPUT_DIR/report.txt"',
+      review: 'ask_user',
+    });
+    try {
+      await f.submit();
+      await f.done();
+      const sessionId = await until(async () => {
+        const carrier = (await f.store.listExecutions('s')).find((row) => row.childSessionId);
+        return carrier?.status === 'succeeded' ? carrier.childSessionId! : undefined;
+      });
+      const trust = await f.permissionManagement.readTrust({ ...f.base, workspaceId: 'w' });
+      await f.permissionManagement.setTrust({
+        ...f.base,
+        workspaceId: 'w',
+        commandId: 'revoke-output-trust',
+        trusted: false,
+        canonicalIdentity: trust.canonicalIdentity,
+        externalReadScopeDigest: trust.externalReadScopeDigest,
+        ifRevision: trust.revision,
+      });
+      f.releaseCollection();
+      const page = await until(async () => {
+        const page = await f.runtime.queryOutputFiles({ ...f.base, sessionId });
+        return page.collections[0]?.state === 'failed' ? page : undefined;
+      });
+      expect(page.items).toEqual([]);
+      expect(page.collections[0]).toMatchObject({
+        state: 'failed',
+        errorCode: 'output_collection_permission_denied',
+        publishedCount: 0,
+      });
+      const executions = await f.store.listExecutions(sessionId);
+      expect(executions.filter((row) => row.definitionId === 'shell.command')).toHaveLength(1);
+      expect(page.collections[0]?.retryUntil).toBeUndefined();
+      expect(
+        executions.find((row) => row.definitionId === 'builtin.files/collect'),
+      ).toBeUndefined();
+      const action = executions.find((row) => row.definitionId === 'builtin.files/collect-outputs');
+      expect(action).toMatchObject({
+        status: 'failed',
+        result: {
+          outcome: 'failed',
+          details: { adapterAttempted: false, code: 'permission_denied' },
+        },
+      });
+      expect((action?.result as { content?: string })?.content).toContain('workspace_untrusted');
+      expect(f.a.reviews).toEqual([]);
+      // Recreate the historical crash window: a durable denied Action whose
+      // collection had not yet been closed. Cold recovery must preserve denial.
+      const original = {
+        result: action!.result,
+        resultRevision: action!.resultRevision,
+        status: action!.status,
+      };
+      await f.runtime.close();
+      const db = new Database(f.profile.databasePath);
+      try {
+        const row = db
+          .query<{ json: string }, [string]>('SELECT json FROM extension_record WHERE key=?')
+          .get(page.collections[0]!.collectionId)!;
+        const c = JSON.parse(row.json);
+        c.state = 'pending';
+        c.errorCode = null;
+        c.retryUntil = null;
+        db.run('UPDATE extension_record SET json=? WHERE key=?', JSON.stringify(c), c.id);
+      } finally {
+        db.close();
+      }
+      const reopened = await openSqliteStore({
+        dataRoot: f.profile.dataRoot,
+        profile: f.profile.profile,
+      });
+      try {
+        const owner = await reopened.acquireSessionOwner('s', 'cold-child-output');
+        expect(owner).not.toBeNull();
+        const after = await reopened.getExecution(action!.id);
+        expect({
+          result: after!.result,
+          resultRevision: after!.resultRevision,
+          status: after!.status,
+        }).toEqual(original);
+        const collection = await reopened.getOutputCollection({
+          ...f.base,
+          sessionId,
+          collectionId: page.collections[0]!.collectionId,
+        });
+        expect(collection).toMatchObject({
+          state: 'failed',
+          errorCode: 'output_collection_permission_denied',
+          retryUntil: null,
+          attempt: 1,
+        });
+        expect(
+          (await reopened.listExecutions(sessionId)).filter(
+            (e) => e.definitionId === 'shell.command',
+          ),
+        ).toHaveLength(1);
+      } finally {
+        await reopened.close();
+      }
+    } finally {
+      await f.close();
+    }
+  },
+  15000,
+);
+
+for (const stopChild of [false, true])
+  nativeTest(
+    `${stopChild ? 'child' : 'root'} Stop includes high-sequence child output; explicit retry archives only the original staging`,
+    async () => {
+      const f = await fixture({
+        mode: 'full',
+        child: true,
+        hostBoundary: true,
+        persistentPermissions: true,
+        delayCollection: true,
+        childSequenceGap: true,
+        command: 'printf stopped > "$KITE_OUTPUT_DIR/report.txt"',
+      });
+      try {
+        await f.submit();
+        await f.done();
+        const sessionId = await until(async () => {
+          const e = (await f.store.listExecutions('s')).find((e) => e.childSessionId);
+          return e?.status === 'succeeded' ? e.childSessionId! : undefined;
+        });
+        const scope = { ...f.base, sessionId };
+        const db = new Database(f.profile.databasePath, { readonly: true });
+        try {
+          const child = db
+            .query<{ seq: number }, [string]>(
+              "SELECT seq FROM command WHERE session_id=? AND kind='extension.invoke'",
+            )
+            .get(sessionId)!;
+          const root = db
+            .query<{ next_seq: number }, []>("SELECT next_seq FROM session WHERE id='s'")
+            .get()!;
+          expect(child.seq).toBeGreaterThan(root.next_seq);
+        } finally {
+          db.close();
+        }
+        const requests = f.a.requests.length;
+        const producer = await childProducerSnapshot(f, sessionId);
+        await f.runtime.cancelSession({
+          ...(stopChild ? scope : f.base),
+          commandId: 'stop-child-output',
+          includeBackground: true,
+        });
+        f.releaseCollection();
+        const page = await until(async () => {
+          const p = await f.runtime.queryOutputFiles(scope);
+          return p.collections[0]?.state === 'failed' ? p : undefined;
+        });
+        expect(page.items).toEqual([]);
+        expect(page.collections[0]?.errorCode).toBe('output_collection_cancelled');
+        expect(
+          (await f.store.listExecutions(sessionId)).some(
+            (e) => e.definitionId === 'builtin.files/collect' && e.authorization?.dispatched,
+          ),
+        ).toBe(false);
+        expect(await childProducerSnapshot(f, sessionId)).toEqual(producer);
+        if (!stopChild) expect(f.a.requests).toHaveLength(requests);
+        await f.runtime.retryOutputCollection({
+          ...scope,
+          collectionId: page.collections[0]!.collectionId,
+          expectedRevision: page.collections[0]!.revision,
+        });
+        const ready = await until(async () => {
+          const p = await f.runtime.queryOutputFiles(scope);
+          return p.collections[0]?.state === 'ready' ? p : undefined;
+        });
+        expect(ready.items).toHaveLength(1);
+        if (stopChild) await expectOriginalChildReport(f, sessionId, requests);
+        else expect(f.a.requests).toHaveLength(requests);
+        expect(await childProducerSnapshot(f, sessionId)).toEqual(producer);
+        expect(
+          (await f.store.listExecutions(sessionId)).filter(
+            (e) => e.definitionId === 'shell.command',
+          ),
+        ).toHaveLength(1);
+      } finally {
+        await f.close();
+      }
+    },
+    15000,
+  );
+
+nativeTest(
+  'two live children keep same-named Shell deliveries in distinct source sessions',
+  async () => {
+    const f = await fixture({
+      mode: 'full',
+      child: true,
+      childCount: 2,
+      hostBoundary: true,
+      persistentPermissions: true,
+      review: 'ask_user',
+      command: 'sleep 0.1; printf "%s" "$$" > "$KITE_OUTPUT_DIR/report.txt"',
+    });
+    try {
+      await f.submit();
+      await f.done();
+      const carriers = await until(async () => {
+        const rows = (await f.store.listExecutions('s')).filter((e) => e.childSessionId);
+        return rows.length === 2 && rows.every((e) => e.status === 'succeeded') ? rows : undefined;
+      });
+      const targets = [],
+        values = [];
+      for (const carrier of carriers) {
+        const scope = { ...f.base, sessionId: carrier.childSessionId! };
+        const page = await until(async () => {
+          const page = await f.runtime.queryOutputFiles(scope);
+          return page.items.length === 1 && page.collections[0]?.state === 'ready'
+            ? page
+            : undefined;
+        });
+        const target = page.items[0]!;
+        targets.push(target);
+        const record = await f.runtime.resolveOutputFile({ ...scope, target });
+        const bytes = await f.runtime.readArtifact({
+          ...scope,
+          refId: record.reference.id,
+          scope: record.reference.scope,
+        });
+        values.push(new TextDecoder().decode(bytes.content));
+        expect(target.name).toBe('report.txt');
+        expect(
+          (await f.store.listExecutions(scope.sessionId)).filter(
+            (e) => e.definitionId === 'shell.command',
+          ),
+        ).toHaveLength(1);
+      }
+      expect(targets[0]!.fileId).not.toBe(targets[1]!.fileId);
+      expect(targets[0]!.sessionId).not.toBe(targets[1]!.sessionId);
+      expect(values[0]).not.toBe(values[1]);
+      expect((await f.runtime.queryOutputFiles(f.base)).items).toEqual([]);
+      expect(f.a.reviews).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  15000,
+);
+
+nativeTest(
+  'failed child collection retries its exact staging after child completion without rerunning Shell',
+  async () => {
+    const f = await fixture({
+      mode: 'full',
+      child: true,
+      hostBoundary: true,
+      persistentPermissions: true,
+      command: 'ln -s "$PWD/source.txt" "$KITE_OUTPUT_DIR/report.txt"',
+    });
+    try {
+      writeFileSync(join(f.workspace, 'source.txt'), 'outside-not-collected');
+      await f.submit();
+      await f.done();
+      const sessionId = await until(async () => {
+        const e = (await f.store.listExecutions('s')).find((e) => e.childSessionId);
+        return e?.status === 'succeeded' ? e.childSessionId! : undefined;
+      });
+      const scope = { ...f.base, sessionId };
+      const failed = await until(async () => {
+        const p = await f.runtime.queryOutputFiles(scope);
+        return p.collections[0]?.state === 'failed' ? p : undefined;
+      });
+      expect(failed.items).toEqual([]);
+      expect(failed.collections[0]?.errorCode).toBe('output_file_unsafe');
+      const c = await f.store.getOutputCollection({
+        ...scope,
+        collectionId: failed.collections[0]!.collectionId,
+      });
+      const path = join(c!.allocation.outputIdentity.canonical, 'report.txt');
+      rmSync(path);
+      writeFileSync(path, 'recovered-exact-staging');
+      const requests = f.a.requests.length;
+      const producer = await childProducerSnapshot(f, sessionId);
+      await f.runtime.retryOutputCollection({
+        ...scope,
+        collectionId: c!.id,
+        expectedRevision: failed.collections[0]!.revision,
+      });
+      const ready = await until(async () => {
+        const p = await f.runtime.queryOutputFiles(scope);
+        return p.collections[0]?.state === 'ready' ? p : undefined;
+      });
+      const record = await f.runtime.resolveOutputFile({ ...scope, target: ready.items[0]! });
+      const bytes = await f.runtime.readArtifact({
+        ...scope,
+        refId: record.reference.id,
+        scope: record.reference.scope,
+      });
+      expect(new TextDecoder().decode(bytes.content)).toBe('recovered-exact-staging');
+      await expectOriginalChildReport(f, sessionId, requests);
+      expect(await childProducerSnapshot(f, sessionId)).toEqual(producer);
+      expect(
+        (await f.store.listExecutions(sessionId)).filter((e) => e.definitionId === 'shell.command'),
+      ).toHaveLength(1);
+      expect((await f.store.getOutputCollection({ ...scope, collectionId: c!.id }))?.attempt).toBe(
+        2,
+      );
+    } finally {
+      await f.close();
+    }
+  },
+  15000,
+);
+
+for (const cancelled of [false, true])
+  nativeTest(
+    `cold root owner ${cancelled ? 'preserves cancelled' : 'dispatches pending'} child collection without model or Shell replay`,
+    async () => {
+      const f = await fixture({
+        mode: 'full',
+        child: true,
+        hostBoundary: true,
+        persistentPermissions: true,
+        command: 'ln -s "$PWD/source.txt" "$KITE_OUTPUT_DIR/report.txt"',
+      });
+      let reopened: ReturnType<typeof createRuntime> | undefined;
+      let artifacts: ReturnType<typeof createArtifactStore> | undefined;
+      try {
+        writeFileSync(join(f.workspace, 'source.txt'), 'not-collected');
+        await f.submit();
+        await f.done();
+        const sessionId = await until(async () => {
+          const e = (await f.store.listExecutions('s')).find((e) => e.childSessionId);
+          return e?.status === 'succeeded' ? e.childSessionId! : undefined;
+        });
+        const scope = { ...f.base, sessionId };
+        const failed = await until(async () => {
+          const p = await f.runtime.queryOutputFiles(scope);
+          return p.collections[0]?.state === 'failed' ? p : undefined;
+        });
+        const c = await f.store.getOutputCollection({
+          ...scope,
+          collectionId: failed.collections[0]!.collectionId,
+        });
+        const path = join(c!.allocation.outputIdentity.canonical, 'report.txt');
+        rmSync(path);
+        writeFileSync(path, 'cold-exact-staging');
+        const requests = f.a.requests.length;
+        await f.runtime.close();
+        const db = new Database(f.profile.databasePath);
+        try {
+          const pending = { ...c!, state: 'pending', errorCode: null, retryUntil: null };
+          db.run('UPDATE extension_record SET json=? WHERE key=?', [
+            JSON.stringify(pending),
+            c!.id,
+          ]);
+          db.run("UPDATE execution SET state='running',cancel_requested=? WHERE id=?", [
+            cancelled ? 1 : 0,
+            c!.collectorExecutionId!,
+          ]);
+        } finally {
+          db.close();
+        }
+        const reader = await openSqliteStore({
+          dataRoot: f.profile.dataRoot,
+          profile: f.profile.profile,
+          mode: 'readonly',
+        });
+        try {
+          const before = await reader.getMetadata();
+          expect(
+            (await reader.getOutputCollection({ ...scope, collectionId: c!.id }))?.attempt,
+          ).toBe(1);
+          await reader.queryOutputFiles(scope);
+          expect(await reader.getMetadata()).toEqual(before);
+        } finally {
+          await reader.close();
+        }
+        const store = await openSqliteStore({
+          dataRoot: f.profile.dataRoot,
+          profile: f.profile.profile,
+        });
+        artifacts = createArtifactStore({ profile: f.profile, store });
+        const host = f.createHost();
+        reopened = createRuntime({
+          ...host,
+          store,
+          artifacts,
+          permissions: host.permissions!,
+          extensions: [
+            ...host.extensions!,
+            {
+              id: 'fixture.cold-trigger',
+              version: '1',
+              apiMajor: 1,
+              actions: [
+                {
+                  id: 'wake',
+                  version: '1',
+                  description: 'No-effect owned dispatch fixture',
+                  inputSchema: { type: 'object' },
+                  async prepare(input) {
+                    return input;
+                  },
+                  async execute() {
+                    return { outcome: 'succeeded' as const, content: 'no effect' };
+                  },
+                },
+              ],
+            },
+          ],
+        });
+        host.permissionManagement!(reopened);
+        // An explicit root dispatch acquires the physical owner. This deliberately
+        // unknown Action is rejected; it cannot run a model or act as a collector.
+        await reopened.submitCommand({
+          ...f.base,
+          commandId: 'cold-root-dispatch',
+          request: {
+            kind: 'extension.invoke',
+            extensionId: 'fixture.cold-trigger',
+            actionId: 'wake',
+            definitionVersion: '1',
+            input: {},
+          },
+        });
+        await reopened.waitForCommand('cold-root-dispatch', { timeoutMs: 5000 });
+        const page = await until(async () => {
+          const p = await reopened!.queryOutputFiles(scope);
+          return p.collections[0]?.state === (cancelled ? 'failed' : 'ready') ? p : undefined;
+        });
+        expect(page.items).toHaveLength(cancelled ? 0 : 1);
+        expect((await store.getOutputCollection({ ...scope, collectionId: c!.id }))?.attempt).toBe(
+          cancelled ? 1 : 2,
+        );
+        expect(
+          (await store.listExecutions(sessionId)).filter((e) => e.definitionId === 'shell.command'),
+        ).toHaveLength(1);
+        expect(f.a.requests).toHaveLength(requests);
+        await until(async () => (reopened!.getLifecycleState().busy ? undefined : true));
+        const owner = await store.acquireSessionOwner('s', 'post-cold-probe');
+        expect(owner).not.toBeNull();
+        if (owner) expect(await store.releaseSessionOwner(owner)).toBe(true);
+      } finally {
+        await reopened?.close();
+        await artifacts?.close();
+        await f.close();
+      }
+    },
+    15000,
+  );
+
 for (const mode of ['full', 'accept_edits', 'auto'] as const)
   nativeTest(
     `explicit workdir selects the actual supervised process directory and leaves Session cwd fixed: ${mode}`,
@@ -743,18 +1436,12 @@ nativeTest(
         );
         if (carrier?.status !== 'succeeded' || view.runs.some((run) => run.isActive))
           return undefined;
-        for (const run of view.runs) {
-          const command = await f.store.getCommand(run.originCommandId);
-          if (
-            command?.kind === 'job.report' &&
-            (command.request as { executionId?: string }).executionId === carrier.id &&
-            (command.receipt as { runId?: string }).runId === run.id &&
-            command.status === 'applied' &&
-            !run.isActive
-          )
-            return true;
-        }
-        return undefined;
+        // Child result-mail adoption is caller-driven; no synthetic report Run
+        // is required merely to verify the original Shell dispatch snapshot.
+        const childRows = await f.store.listExecutions(carrier.childSessionId!);
+        return childRows.some((row) => ['planned', 'dispatching', 'running'].includes(row.status))
+          ? undefined
+          : true;
       });
       const requests = f.a.requests.length;
       const cursor = (await f.store.getMetadata()).lastChangeCursor;
@@ -774,6 +1461,7 @@ nativeTest(
   async () => {
     const f = await fixture({ hostBoundary: true });
     const outside = join(f.root, 'nested-outside-effect');
+    let acceptedCommandDigest: string | undefined;
     const leaf = (mode: 'full' | 'accept_edits') => ({
       namespace: 'builtin.permissions',
       version: '1',
@@ -785,6 +1473,7 @@ nativeTest(
           definitionId: 'shell.command',
           definitionVersion: '1',
           hardAllowed: true,
+          ...(acceptedCommandDigest ? { commandDigest: acceptedCommandDigest } : {}),
         },
       },
     });
@@ -822,6 +1511,17 @@ nativeTest(
           },
         },
       });
+      const command = `printf denied > '${outside}'; printf workspace > effect`;
+      acceptedCommandDigest = await configuration.commandDigest({
+        kind: 'job',
+        sessionId: 'adapter-test',
+        runId: null,
+        executionId: 'owned-nested',
+        definitionId: 'shell.command',
+        definitionVersion: '1',
+        input: { command },
+        signal: new AbortController().signal,
+      });
       const job = configuration.extensions[0]!.jobs![0]!;
       const context: JobContext = {
         sessionId: 'adapter-test',
@@ -832,10 +1532,7 @@ nativeTest(
           snapshot: intersect([intersect([leaf('full')]), leaf('accept_edits')]),
         },
       };
-      const handle = await job.start(
-        { command: `printf denied > '${outside}'; printf workspace > effect` },
-        context,
-      );
+      const handle = await job.start({ command }, context);
       const events: JobEvent[] = [];
       try {
         for await (const event of job.observe(handle)) events.push(event);
@@ -864,7 +1561,7 @@ nativeTest(
               },
             },
           ),
-        ).rejects.toMatchObject({ code: 'shell_dispatch_scope_unavailable' });
+        ).rejects.toThrow('shell_dispatch_scope_unavailable');
       }
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('workspace');
     } finally {
@@ -1000,8 +1697,14 @@ nativeTest(
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('once');
       const read = executions.find((row) => row.definitionId === 'shell.read')!;
       expect(read.result).toMatchObject({
-        details: { output: { highWaterSeq: output.highWaterSeq } },
+        details: {
+          caught_up: true,
+          terminal: true,
+          ref: { executionId: job.id },
+          execution: { id: job.id, status: 'succeeded' },
+        },
       });
+      await until(async () => (f.runtime.getLifecycleState().busy ? undefined : true));
       const before = (await f.store.getMetadata()).lastChangeCursor;
       const requests = f.a.requests.length;
       expect(await f.submit()).toEqual(command);
@@ -1302,7 +2005,8 @@ nativeTest(
 nativeTest(
   'Request Approval launch approval precedes a separate exact Shell Job approval and any process effect',
   async () => {
-    const f = await fixture({ mode: 'accept_edits' });
+    const f = await fixture({ mode: 'accept_edits', hostBoundary: true });
+    f.a.permissions({ filesystem: 'full_access', network: 'none' });
     try {
       await f.submit();
       const tool = await f.card('shell.execute');
@@ -1331,7 +2035,8 @@ nativeTest(
 nativeTest(
   'real Shell same_command accepts new executions and changed descriptions, keeps independent Tool/Job grants and clears once after a lost HTTP receipt',
   async () => {
-    const f = await fixture({ persistentPermissions: true });
+    const f = await fixture({ persistentPermissions: true, hostBoundary: true });
+    f.a.permissions({ filesystem: 'full_access', network: 'none' });
     const serverProfile = {
       dataRoot: f.profile.dataRoot,
       name: f.profile.profile,
@@ -1420,6 +2125,7 @@ nativeTest(
       });
       expect((await f.done('grant-first')).status).toBe('applied');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('once');
+      await until(async () => (f.runtime.getLifecycleState().busy ? undefined : true));
       const beforeRead = (await f.store.getMetadata()).lastChangeCursor;
       const beforeProvider = f.a.requests.length;
       const first = await client.listPermissionGrants('s', {
@@ -2090,7 +2796,28 @@ for (const expanded of [false, true])
             },
           },
         });
-        expect(f.a.reviews).toHaveLength(1);
+        expect(f.a.reviews).toHaveLength(3);
+        expect(f.a.reviews[1]).toEqual(f.a.reviews[0]);
+        expect(f.a.reviews[2]).toEqual(f.a.reviews[0]);
+        const checks = rows.filter(
+          (row) => row.kind === 'model' && row.parentExecutionId === launch.id,
+        );
+        expect(checks).toHaveLength(1);
+        expect(checks[0]).toMatchObject({
+          status: 'failed',
+          result: { code: 'authorization_check_timeout' },
+        });
+        const attempts = (
+          checks[0]!.result as {
+            reviewAttempts: { attempt: number; status: string; detail?: string }[];
+          }
+        ).reviewAttempts;
+        expect(attempts.map((attempt) => attempt.attempt)).toEqual([1, 2, 3]);
+        for (const attempt of attempts)
+          expect(
+            attempt.status === 'timed_out' ||
+              (attempt.status === 'failed' && attempt.detail === 'request_timeout'),
+          ).toBe(true);
         expect(existsSync(join(f.workspace, 'timeout-local.txt'))).toBe(false);
         expect(existsSync(outside)).toBe(false);
         expect(existsSync(join(f.profile.profilePath, 'timeout-protected.txt'))).toBe(false);

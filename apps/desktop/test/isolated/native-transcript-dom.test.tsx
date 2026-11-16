@@ -1998,7 +1998,9 @@ test('original ask receipts show human answers and cancellation of information w
     const aggregate = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
     expect(aggregate.textContent).toContain('询问用户');
     await act(async () => aggregate.click());
-    expect(f.host.textContent).toContain('已取消回答');
+    expect(
+      f.host.querySelector('article[aria-label="询问用户 · 2 项 · 已取消回答"]'),
+    ).not.toBeNull();
     const receipts = [
       ...f.host.querySelectorAll<HTMLButtonElement>(
         '.tool-activity-steps button.tool-activity-summary',

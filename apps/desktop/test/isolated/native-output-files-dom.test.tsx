@@ -67,6 +67,8 @@ test('file references are bounded, retries use collection revision, and stale sc
     watch: () => () => {},
     async request(request: NativeRequest) {
       calls.push(request);
+      if (request.method === 'outputs.sources')
+        return { kind: 'outputs.sources', scope: request.scope, sources: [] };
       if (request.method === 'outputs.query') {
         if (queryPage) return { kind: 'outputs.page', page: queryPage(request) };
         if (hold && request.scope.sessionId === 'old')
@@ -198,24 +200,31 @@ test('file references are bounded, retries use collection revision, and stale sc
         nextCursor: offset + 50 < all.length ? String(offset + 50) : undefined,
       };
     };
-    await act(() => root.render(<Harness sessionId="pages" revision={2} />));
+    await act(async () => root.render(<Harness sessionId="pages" revision={2} />));
     // Return the exact selected scope, as the host does.
     const filePages = queryPage;
-    queryPage = (request) => ({ ...filePages(request), scope: request.scope });
+    queryPage = (request) => {
+      const next = filePages(request);
+      return {
+        ...next,
+        scope: request.scope,
+        items: next.items.map((item) => ({ ...item, sessionId: request.scope.sessionId })),
+      };
+    };
     await settle();
     await click('加载更多文件');
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       100,
     );
     // A status-only head refresh must allow the same cursor to be requested again.
-    await act(() => root.render(<Harness sessionId="pages" revision={3} />));
+    await act(async () => root.render(<Harness sessionId="pages" revision={3} />));
     await settle();
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       100,
     );
     // A burst larger than one page must bridge the new head to retained old files.
     lateBatch = true;
-    await act(() => root.render(<Harness sessionId="pages" revision={4} />));
+    await act(async () => root.render(<Harness sessionId="pages" revision={4} />));
     await settle();
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       100,
@@ -228,11 +237,11 @@ test('file references are bounded, retries use collection revision, and stale sc
       ...page,
       scope: request.scope,
       revision: request.beforeKey ? '1001' : '1000',
-      items: Array.from({ length: 50 }, (_, i) => file(500 + i)),
+      items: Array.from({ length: 50 }, (_, i) => file(500 + i, request.scope.sessionId)),
       collections: [],
       nextCursor: request.beforeKey ? undefined : 'mixed',
     });
-    await act(() => root.render(<Harness sessionId="pages" revision={40} />));
+    await act(async () => root.render(<Harness sessionId="pages" revision={40} />));
     await settle();
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       150,
@@ -246,7 +255,7 @@ test('file references are bounded, retries use collection revision, and stale sc
       items: [{ ...file(999, request.scope.sessionId), name: '替换后的文件.xlsx' }],
       collections: [],
     });
-    await act(() => root.render(<Harness sessionId="pages" revision={41} />));
+    await act(async () => root.render(<Harness sessionId="pages" revision={41} />));
     await settle();
     const output = document.querySelector('[aria-label="本次产出"]')!;
     expect(output.querySelectorAll('li')).toHaveLength(1);
@@ -267,7 +276,7 @@ test('file references are bounded, retries use collection revision, and stale sc
       ],
       collections: [],
     });
-    await act(() => root.render(<Harness sessionId="pages" revision={42} />));
+    await act(async () => root.render(<Harness sessionId="pages" revision={42} />));
     await settle();
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       2,
@@ -286,7 +295,7 @@ test('file references are bounded, retries use collection revision, and stale sc
         nextCollectionCursor: offset ? undefined : '50',
       };
     };
-    await act(() => root.render(<Harness sessionId="statuses" revision={5} />));
+    await act(async () => root.render(<Harness sessionId="statuses" revision={5} />));
     await settle();
     expect(document.querySelectorAll('[aria-label="本次产出"] [role="alert"]')).toHaveLength(50);
     await click('更多整理状态');
@@ -312,7 +321,7 @@ test('file references are bounded, retries use collection revision, and stale sc
       items: [],
       collections: [{ ...page.collections[0]!, retryUntil: '2000-01-01T00:00:00Z' }],
     });
-    await act(() => root.render(<Harness sessionId="expired" revision={6} />));
+    await act(async () => root.render(<Harness sessionId="expired" revision={6} />));
     await settle();
     expect(document.body.textContent).toContain('暂存文件已过期，请重新生成');
     expect(

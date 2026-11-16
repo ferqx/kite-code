@@ -697,7 +697,12 @@ export interface Store {
     input: AcceptCommandInput & { owner: OwnerRef; parentExecutionId: string },
   ): Promise<CommandRecord>;
   getCommand(id: string): Promise<CommandRecord | null>;
-  listAcceptedCommands(sessionId: string, limit?: number): Promise<CommandRecord[]>;
+  /** Held root owners may also discover proven internal child output collectors. */
+  listAcceptedCommands(
+    sessionId: string,
+    limit?: number,
+    outputCollectionOwner?: OwnerRef,
+  ): Promise<CommandRecord[]>;
   rejectCommand(
     input: OwnedWrite & { commandId: string; reason: string; needsReview?: boolean },
   ): Promise<CommandRecord>;

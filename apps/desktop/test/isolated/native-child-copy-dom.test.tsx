@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { NativeBackgroundChild } from '../../src/background-bridge';
-import { NativeChildDetail } from '../../src/native-child-detail';
+import { NativeChildDetail, type NativeChildDetailProps } from '../../src/native-child-detail';
 import { backgroundItem } from '../background-item.fixture';
 
 const code = 'const complete = true;\nconst second = "雪🙂";\n';
@@ -93,6 +93,7 @@ async function fixture(
         storeId?: string;
         readActive?: boolean;
         loading?: boolean;
+        renderTurnOutputs?: NativeChildDetailProps['renderTurnOutputs'];
       },
     ) => Promise<void>;
     click: (label: string) => Promise<void>;
@@ -144,6 +145,7 @@ async function fixture(
               readActive={options.readActive ?? true}
               onTitleChange={() => {}}
               writeClipboardText={writer}
+              renderTurnOutputs={options.renderTurnOutputs}
             />,
           ),
         ),
@@ -280,4 +282,30 @@ test('valid child, store, generation and execution replacements retire old contr
       await f.click('复制本轮Agent回复');
       expect(f.writes.at(-1)).toBe(replacementContent);
     }
+  }));
+
+test('child output slot uses the original child turn and preserves the shown card while reading pauses', async () =>
+  fixture(async (f) => {
+    const facts = childFacts();
+    const renderTurnOutputs: NonNullable<NativeChildDetailProps['renderTurnOutputs']> = ({
+      turnId,
+    }) => <span data-output-turn={turnId}>原子产物</span>;
+    await f.render(facts, { renderTurnOutputs });
+    const card = f.host.querySelector('[data-output-turn]')!;
+    expect(card).not.toBeNull();
+    expect(JSON.parse(card.getAttribute('data-output-turn')!)).toEqual([
+      'native-run',
+      'store',
+      'child',
+      'run',
+    ]);
+    await f.render(facts, { renderTurnOutputs, readActive: false });
+    expect(f.host.querySelector('[data-output-turn]')).toBe(card);
+    await f.render(facts, { renderTurnOutputs, loading: true });
+    expect(f.host.querySelector('[data-output-turn]')).toBe(card);
+    await f.render(childFacts('other-child'), { renderTurnOutputs });
+    expect(
+      JSON.parse(f.host.querySelector('[data-output-turn]')!.getAttribute('data-output-turn')!),
+    ).toEqual(['native-run', 'store', 'other-child', 'run']);
+    expect(f.host.querySelector('[data-output-turn]')).not.toBe(card);
   }));

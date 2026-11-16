@@ -19,12 +19,7 @@ export async function submitOfficeRequest(options: {
   plan?: boolean;
 }): Promise<OfficeRequestOutcome> {
   const { bridge, generation, selection, file, isCurrent } = options;
-  if (
-    !options.prompt.trim() ||
-    !isCurrent() ||
-    file.storeId !== selection.storeId ||
-    file.sessionId !== selection.session.id
-  )
+  if (!options.prompt.trim() || !isCurrent() || file.storeId !== selection.storeId)
     return { status: 'failed', message: '会话已变化或请求为空，请重新选择。' };
   const id = crypto.randomUUID();
   const commandId = crypto.randomUUID();
@@ -58,6 +53,8 @@ export async function submitOfficeRequest(options: {
     );
     if (intent.kind !== 'input.steer' && !options.modelReady)
       throw Error('model_selection_unavailable');
+    // Main verifies the original output belongs to the selected parent's authorized
+    // tree. The source stays unchanged; submission targets the selected parent.
     preparationAttempted = true;
     await bridge.request({
       method: 'input.files.fromOutput',

@@ -22,6 +22,8 @@ Native Office预览不创建或修改本地PPT副本。旧desktop-private/office
 
 Shell 自动产物沿[输出 owner](../../packages/agent/src/business/output-collection.README.md)登记现有不可变 Artifact，文件身份独立于正文消息；绑定精确生产者与原 Run，不把交付清单注入模型上下文。Fork只继承可验证原引用，不复制执行中的收集权。用户保存先从原引用流式写临时文件，完整SHA/size核实后发布；中断、陈旧引用或校验失败不产生完成文件。
 
+Native父会话展示子 Agent 导出时，只从原授权后台目录的 carrier／Run 链派生显示关系，不创建父 delivery、不改原 child Artifact 或读取 scope。Main把子文件读取准入绑定当前父选择、主体、Store、原 child Session／Run和准确target，不能以相同主体、名字、路径、结果邮件或缓存成员集合代替子树授权。目录更新与连接／选择变化撤销旧准入；保存、预览、整理重试和明确输入导入分别核原来源，不把只读展示等同于执行权限。实现及受控验证归[Desktop产物来源](../../apps/desktop/README.md#子-agent-文件归属与父会话呈现)。
+
 继续修改必须经合法 input import 与[工作副本端口](../../packages/agent/src/tools/input-working-files.ts)，持久映射绑定原 command/import，命令受理后不覆盖用户编辑；不能直接写历史Blob或把私有Blob目录加入普通Shell写范围。Preview只消费原不可变快照，外部HTML/脚本不进入主Renderer。桌面隔离、导航和缓存限制归[Desktop owner](../../apps/desktop/README.md)。这不改变既有私有模型正文的下载禁令或Artifact GC授权。
 
 ## 当前存储模型

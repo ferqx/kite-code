@@ -46,8 +46,8 @@ DOCX recipe 仅在固定渲染器的精确函数锚点匹配时补布局就绪�
 
 预览字体不再给 body 或所有后代强制套用随包字体；font.css 仅声明本地 KiteDocument @font-face，保留作者 CSS／inline 字体及系统回退。缺少作者字体时仍可能发生替代与排版差异，不下载外部字体，也不承诺各平台原字体存在。内部渲染缓存身份改为 offline-author-fonts，沿原 sourceHash／renderer／recipe 键隔离旧 offline-1 强制字体产物；不改变工具或公开协议版本。Word 字体 loading／loadingdone／loadingerror 继续使布局代次失效并重新分页，标记不授予文件权限。
 
-技能的能力发现使用固定二进制 `--help` 与已发现子命令的 `--help`，不猜 mode/属性，也不把上游参数交给 helper。修改验收分别核原件字节完整、另存目标变更和相关内容语义不变；ZIP 包装或 XML 序列化差异本身不判内容回归，结构合法不代替任务验收。手动固定资产回归：`bun test packages/agent/test/integration/office-skill-contract.test.ts`；要求本地已准备且校验通过的资产，不安装或下载，覆盖真实帮助、helper 修改、原件保护及独立读取的目标／邻格／公式和归档元数据差异，不代表真实模型或任意格式保真。
+技能的能力发现使用固定二进制 `--help` 与已发现子命令的 `--help`，不猜 mode/属性，也不把上游参数交给 helper。修改验收分别核原件字节完整、另存目标变更和相关内容语义不变；ZIP 包装或 XML 序列化差异本身不判内容回归，结构合法不代替任务验收。[固定资产回归](../../../test/isolated/exclusive/office-skill-contract.test.ts)由默认测试按独占进程执行，也可定向运行：`bun test packages/agent/test/isolated/exclusive/office-skill-contract.test.ts`；要求本地已准备且校验通过的资产，不安装或下载，覆盖真实帮助、helper 修改、原件保护及独立读取的目标／邻格／公式和归档元数据差异，不代表真实模型或任意格式保真。
 
-编辑产生的元数据仅按已解释的准确 part／节点／命名空间／字段建立窄例外，并核字段身份、类型和新值合法性；不忽略整个 metadata，邻段、正文、样式、表格和关系仍严格核验。上述手动固定资产回归另用本机 Python 3 标准库独立读取真实两段 DOCX：只允许目标段 w14:textId 与准确 OfficeCLI.LastModified 时间值变化，核原件 hash，并注入13种邻段、内容、样式、表格、关系及字段身份／类型／非法值变化确认拒绝。测试专用 oracle 不进入产品、不提供通用 Office 比较引擎；缺本机 Python 或固定资产按失败报告，不下载替代。
+编辑产生的元数据仅按已解释的准确 part／节点／命名空间／字段建立窄例外，并核字段身份、类型和新值合法性；不忽略整个 metadata，邻段、正文、样式、表格和关系仍严格核验。上述固定资产回归另用本机 Python 3 标准库独立读取真实两段 DOCX：只允许目标段 w14:textId 与准确 OfficeCLI.LastModified 时间值变化，核原件 hash，并注入13种邻段、内容、样式、表格、关系及字段身份／类型／非法值变化确认拒绝。测试专用 oracle 不进入产品、不提供通用 Office 比较引擎；缺本机 Python 或固定资产按失败报告，不下载替代。
 
 原件 hash 指导使用已有 KITE_DOCUMENTS_BUN 的 node:crypto，不假设 macOS 存在 sha256sum。包集合先枚举差异：首次编辑新增的已知编辑器属性 part 也须逐字段解释，并核唯一配套 ContentType 和 relationship；未知新增／删除仍拒绝，不降低正文、样式和关系检查。固定资产回归补无 custom 属性的外来 DOCX 副本，真实 helper 编辑后精确核 OfficeCLI.Version／LastModified、新增 part 及关联，并注入未知 part、属性、关系、类型、正文和样式变化确认拒绝。失败 Shell 临时输出不能跨调用恢复的现有指导保持，不以本回归声称模型总能遵循。

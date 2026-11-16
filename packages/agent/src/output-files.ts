@@ -86,6 +86,8 @@ export interface OutputCollection {
   };
   state: 'allocated' | 'pending' | 'ready' | 'failed';
   attempt: number;
+  /** Private root Stop boundary; only explicit collector retry may advance it. */
+  dispatchRootWorkSeq?: string;
   startCommandId: string | null;
   collectorExecutionId: string | null;
   expectedFiles: ExpectedOutputFile[] | null;

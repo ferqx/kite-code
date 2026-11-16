@@ -177,10 +177,17 @@ export function memoryPrivateData(): PrivateData {
       return structuredClone(value);
     },
     read,
-    save(scope, revision, content) {
+    save(scope, revision, content, browserAnnotations, annotationImageOffset, outputFiles) {
       const previous = read(scope);
       if (revision !== previous.revision) throw Error('draft_revision_conflict');
-      const value = { ...previous, revision: revision + 1, content };
+      const value = {
+        ...previous,
+        revision: revision + 1,
+        content,
+        ...(browserAnnotations ? { browserAnnotations: structuredClone(browserAnnotations) } : {}),
+        ...(annotationImageOffset !== undefined ? { annotationImageOffset } : {}),
+        ...(outputFiles ? { outputFiles: structuredClone(outputFiles) } : {}),
+      };
       drafts.set(JSON.stringify(scope), value);
       return value;
     },

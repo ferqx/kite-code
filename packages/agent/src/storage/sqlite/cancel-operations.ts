@@ -7,7 +7,7 @@ import { cancelHumanCommandBindings } from './human-work-control';
 import { savedApprovalDenial } from './interaction-operations';
 import { verifyModelOutput } from './model-output';
 import type { SqliteOperations } from './operations';
-import { cancelOutputCollectionCommand } from './output-collection';
+import { cancelOutputCollectionCommand, outputCollectionWorkSequence } from './output-collection';
 
 /** Page a complete effect set inside the caller's single cancellation transaction. */
 function* rows(db: SqliteOperations, sql: string, ...args: (string | number | bigint | null)[]) {
@@ -390,6 +390,33 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
           root.next_seq!,
         ))
           seedIds.push(String(execution.id));
+        // Internal output commands have their own child-local sequence. Select
+        // only proven collectors whose original producer is inside this root stop.
+        for (const command of rows(
+          db,
+          "SELECT * FROM command WHERE session_id=? AND root_work_seq>? AND status='accepted' AND kind='extension.invoke'",
+          current.id!,
+          root.next_seq!,
+        )) {
+          const sequence = outputCollectionWorkSequence(db, command);
+          if (sequence !== null && BigInt(sequence) <= BigInt(root.next_seq!))
+            commandIds.add(String(command.id));
+        }
+        for (const execution of rows(
+          db,
+          "SELECT * FROM execution WHERE session_id=? AND root_work_seq>? AND state IN ('planned','dispatching','running','outcome_unknown') AND kind='job' AND adapter_id IN ('builtin.files/collect-outputs','builtin.files/collect')",
+          current.id!,
+          root.next_seq!,
+        )) {
+          const command = db.row('SELECT * FROM command WHERE id=?', execution.origin_command_id!);
+          const sequence = command && outputCollectionWorkSequence(db, command);
+          if (
+            sequence !== null &&
+            sequence !== undefined &&
+            BigInt(sequence) <= BigInt(root.next_seq!)
+          )
+            seedIds.push(String(execution.id));
+        }
         for (const run of rows(
           db,
           'SELECT id FROM run WHERE session_id=? AND is_active=1',

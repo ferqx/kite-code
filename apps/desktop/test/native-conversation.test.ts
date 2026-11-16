@@ -293,6 +293,7 @@ function fixture(protectMissingUserDirectory = false, savedText = text) {
     request,
     port,
     counts: () => ({ creates, starts, modes, trusts, gets }),
+    effectiveMode: () => mode,
     loseCreate: () => {
       loseCreation = true;
     },
@@ -328,6 +329,36 @@ function fixture(protectMissingUserDirectory = false, savedText = text) {
     },
   };
 }
+
+test('fresh Full conversation applies its exact mode before the first Run and never relies on the default display', async () => {
+  const f = fixture();
+  try {
+    await f.ready();
+    expect(f.effectiveMode()).toBe('auto');
+    const startRun = f.port.startRun.bind(f.port);
+    f.port.startRun = async (sessionId, input) => {
+      expect(sessionId).toBe('new-session');
+      expect(f.effectiveMode()).toBe('full');
+      return startRun(sessionId, input);
+    };
+    const request = { ...f.request, permissionMode: 'full' as const };
+    const result = await f.caller.invoke(request);
+    expect(result).toMatchObject({ phase: 'accepted', stage: 'input' });
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 1, modes: 1 });
+    const mode = f.caller
+      .state()
+      .permissionSubmissions.find((entry) => entry.kind === 'permission.mode');
+    expect(mode).toMatchObject({
+      sessionId: 'new-session',
+      phase: 'applied',
+      intent: { mode: 'full', makeDefault: false },
+    });
+    expect(await f.caller.invoke(request)).toEqual(result);
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 1, modes: 1 });
+  } finally {
+    await f.close();
+  }
+});
 
 test('first send saves original text, reuses creation/permission/input callers and never changes the reading selection', async () => {
   const f = fixture();
@@ -577,8 +608,12 @@ test('unknown original creation/input is GET-only; cold creation cannot gain per
   }
 });
 
-test('permission failure retains created Session and draft; unknown mode must be checked before explicit continuation', async () => {
+test.each([
+  'accept_edits',
+  'full',
+] as const)('%s permission failure retains created Session and draft; unknown mode must be checked before explicit continuation', async (permissionMode) => {
   const f = fixture();
+  f.request.permissionMode = permissionMode;
   try {
     await f.ready();
     f.failPermission(true);

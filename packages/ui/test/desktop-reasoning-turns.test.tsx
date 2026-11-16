@@ -929,6 +929,65 @@ test('running trace reports progress before the first model body arrives', () =>
   }
 });
 
+test('first reply preparation respects execution observation and real waiting states', () => {
+  for (const [status, expected] of [
+    ['preparing', '正在准备回复…'],
+    ['queued', '等待处理'],
+    ['waiting', '正在等待'],
+    ['recovery_required', '需要恢复'],
+    ['cancelling', '正在停止'],
+    ['cancelled', '你已停止'],
+    ['completed', undefined],
+  ] as const) {
+    for (const responsePhase of [undefined, 'preparing'] as const) {
+      const dom = new JSDOM(
+        renderToStaticMarkup(
+          <Conversation
+            traceTurns
+            messages={[]}
+            selected
+            connected
+            loading={false}
+            saveReading={() => {}}
+            turnActivity={{ turnId: 'first-submission', status, responsePhase }}
+          />,
+        ),
+      );
+      expect(dom.window.document.querySelector('.conversation-turn-notice')?.textContent).toBe(
+        expected,
+      );
+      expect(dom.window.document.querySelector('.response-status')).toBeNull();
+      dom.window.close();
+    }
+  }
+  for (const status of ['preparing', 'running'] as const) {
+    for (const unavailable of [false, true]) {
+      const dom = new JSDOM(
+        renderToStaticMarkup(
+          <Conversation
+            traceTurns
+            messages={[]}
+            selected
+            connected
+            loading={false}
+            saveReading={() => {}}
+            turnActivity={{
+              turnId: 'first-submission',
+              status,
+              responsePhase: 'preparing',
+              unavailable,
+              executionUnconfirmed: !unavailable,
+            }}
+          />,
+        ),
+      );
+      expect(dom.window.document.querySelector('.conversation-turn-notice')).toBeNull();
+      expect(dom.window.document.querySelector('.response-status')).toBeNull();
+      dom.window.close();
+    }
+  }
+});
+
 test('connection notices and subsequent reasoning do not finalize an unfinished trace', () => {
   const tool: Message = {
     id: 'shell',

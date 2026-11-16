@@ -11,7 +11,10 @@ import {
 import { assertOperationResultDelivery, ensureAgent } from './child-operations';
 import { actualRoot, assertNoExecutionGroupFence, executionGuard } from './execution-group-safety';
 import type { SqliteOperations } from './operations';
-import { registerOutputCollectionAtTerminal } from './output-collection';
+import {
+  outputCollectionCommandEffect,
+  registerOutputCollectionAtTerminal,
+} from './output-collection';
 
 type Method =
   | 'getExtensionRecord'
@@ -626,7 +629,9 @@ export function callExtension(db: SqliteOperations, method: Method, args: unknow
         executionGuard(db, db.row('SELECT * FROM execution WHERE id=?', input.executionId)!);
         const carrier = input.parentExecutionId
           ? { id: input.parentExecutionId }
-          : db.childCarrier(command);
+          : outputCollectionCommandEffect(db, command)
+            ? null
+            : db.childCarrier(command);
         if (carrier)
           db.run(
             'UPDATE execution SET parent_execution_id=? WHERE id=?',

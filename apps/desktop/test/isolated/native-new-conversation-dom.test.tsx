@@ -3999,6 +3999,15 @@ test('original global/project preparation and page navigation retain independent
         ['createSession', 'conversation.send', 'submit'].includes(call.method),
       ),
     ).toHaveLength(0);
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    const firstSend = f.calls.find((call) => call.method === 'conversation.send');
+    expect(firstSend).toMatchObject({
+      permissionMode: 'full',
+      intent: { content: 'prepare draft' },
+    });
+    await f.resolve('accepted');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
   } finally {
     await f.close();
   }
@@ -4271,19 +4280,39 @@ test('the first reply status follows the original submission into the dispatched
     });
     await f.refreshFacts();
     const thinking = f.host.querySelector('.conversation-trace-line');
-    expect(thinking?.textContent).toBe('正在思考…');
+    // Dispatch alone is not evidence of public reasoning content.
+    expect(thinking?.textContent).toBe('正在回复…');
+    expect(f.host.body.textContent).not.toContain('正在思考…');
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant')).toBeNull();
-    const reply: Message = {
+    const reasoning: Message = {
       id: 'first-reply',
       sessionId: run.sessionId,
       runId: run.id,
       seq: '2',
       role: 'assistant',
       status: 'incomplete',
-      content: '首段正文',
+      content: '',
       firstOutput: 'reasoning',
       sourceIds: ['first-model'],
+      outputBody: {
+        kind: 'model_output',
+        executionId: 'first-model',
+        complete: false,
+        contentBytes: '0',
+        reasoningBytes: '18',
+        toolCallCount: 0,
+      },
+    };
+    await f.publishMessages([input, reasoning], [run]);
+    expect(f.host.querySelector('.conversation-trace-line')).toBe(thinking);
+    expect(thinking?.textContent).toBe('正在思考…');
+    expect(statuses()).toHaveLength(0);
+    expect(f.host.querySelector('.message.assistant')).toBeNull();
+    const reply: Message = {
+      ...reasoning,
+      content: '首段正文',
+      outputBody: { ...reasoning.outputBody!, contentBytes: '12' },
     };
     await f.publishMessages([input, reply], [run]);
     expect(statuses().map((entry) => entry.textContent)).toEqual(['正在回复…']);
@@ -4300,7 +4329,13 @@ test('the first reply status follows the original submission into the dispatched
     expect(f.host.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
-    await f.publishMessages([input, { ...reply, status: 'complete' }], [terminal]);
+    await f.publishMessages(
+      [
+        input,
+        { ...reply, status: 'complete', outputBody: { ...reply.outputBody!, complete: true } },
+      ],
+      [terminal],
+    );
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.agent-turn .message.assistant .message-meta')).toBe(info);
     expect(f.host.querySelectorAll('.agent-turn-final .message.assistant')).toHaveLength(1);

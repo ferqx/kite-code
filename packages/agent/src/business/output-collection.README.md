@@ -18,6 +18,12 @@
 
 目录身份区分两个 owner：producer 的 `allocation.identity` 保持原 LaunchIdentity，供平台启动与清理；`allocation.outputIdentity` 的 device/inode 在准备时从正式 Files native 持有的 root 采集，后续收集使用同一 native 身份域完整比较。Windows 保留全部64位 volume 与128位 FileID，不把 Bun lstat 的较窄设备号当成相同格式，不截断或仅比较低位。原 path/canonical、目录类型、无链接检查和 native root/逐组件句柄验证仍分别执行；身份不依赖内存缓存，句柄不进入持久记录。
 
+主、子 Agent 共用 Profile coordination 的 staging 基目录，但每条真实 Shell Job 各自持有私有目录与 `out`，物理路径不嵌套于父会话缓存。归属由原 Store／Session／Run／producer 和目录身份登记；不能据同一父目录合并产物或扫描普通 Workspace 文件。
+
+内部 Job 结束后沿原 owner 根会话唤醒。仅已持真实根 owner 的 pump 通过原 Store 私有 accepted-command 查询分页补取同根下、完整来源证明成立的 child 收集短 Action；每条命令仍在自己的 Session 做 dispatch 检查与执行，不派发任意 child 业务命令。显式 child 收集重试也唤醒同一根 pump，避免两个 pump 并发接纳同一命令。已成功 producer 的准确宿主收集命令及其 detached collector 以持久 allocation、原主体、确定性 command、当前 attempt 和原成功 result revision 为来源证明，不再借业务 child carrier 的存活或期限；短 Action 不自动挂业务 carrier。普通同名 Action／Job、任意 runless 命令和其他 child 操作均无此例外。原物理 owner／Store 身份、取消／删除／execution fence 和 collector 当前权限（含 workspace trust、注入拒绝）继续核验；不扩大子 Agent 工具能力或绕过 Full 的独立审批约束。
+
+取消采用准确 collection 当前 attempt 的私有 `dispatchRootWorkSeq`，初次来自原 producer 的根 work；不能拿 child 局部 command seq 与根 Stop 水位比较。`includeBackground` 按完整来源证明补收高局部序号的维护命令／Job，最终派发也核同一根水位。只有明确的 `retryOutputCollection` 在原 revision CAS 事务内为实际根 Session 分配新序号并提升该水位；自动 cold 恢复不提升，旧记录缺字段时回退原 producer。这样 Stop 阻断旧归档，而 Stop 后明确重试可只整理原 staging、不恢复业务 child、不重跑 Shell。短 Action 已知权限拒绝与 collector 拒绝均保原 Execution／result revision，补收口无普通重试；冷恢复不能把既有拒绝改写为 owner_lost 或重新开放重试。
+
 成功 producer 的 `finishExecution` 事务原子登记 pending 与确定性 `extension.invoke` command。失败或未知 producer 不交付残留文件。短 Action 只 ensure detached `builtin.files/collect`，collector 使用 runtime serial key，不声明 model/process slot、不设置 after-turn。准确来源的收集 Job 不投递业务邮箱，也不进入后台业务目录；名称相同不能取得例外。
 
 默认 Service 只把宿主实际创建的 collector Job 注册到 runless 全局能力，不把它加入模型 Run 能力。每次授权通过同一只读 Store 事务核原短 Action、operation request/receipt、主体、Store/Session/rootWork、成功 producer 与 allocation，再核当前 attempt/startCommand 与请求和持久 intent 完全一致；描述 revision 绑定该证明。准确来源成立后才给 `effects: ['read','record_write']`、`safeRead: false`、`internalRecordOnly: true`：读取已绑定的自有 staging、将 payload 存为原 Store 私有 Artifact/业务记录，以及清理原自有暂存都属于内部归档。它不授权用户任意目标、普通 Files 编辑、另存或继续修改，不授予网络、进程或新的模型能力。`auto`、`accept_edits` 和 `full` 均沿既有 policy 完成归档，仍受当前 Workspace trust 和注入权限 ceiling 约束；不按名称通用豁免。
@@ -57,3 +63,6 @@ ready后立即清理原身份目录；可重试 I/O 失败保留7天并显示ret
 2026-11-11，Linux x64／Bun 1.4.4 以 `bun packages/agent/test/isolated/execution/output-collection.measure.ts /tmp/kite-output-measurement` 实测同一真实 subprocess fixture，逐例保存原始请求、单调时钟和RSS采样JSON。空命令 `true` 开关收集交替顺序各5次、每次新进程：宿主准备配对增量中位4.696ms；原Run完成配对增量中位3.641ms，范围−120.570至138.268ms，调度噪声较大，不据此承诺稳定总开销。producer终态事务返回至collection ready事务返回中位为空99.387ms、32MiB 978.450ms、64MiB 1952.935ms，后两者各3次。32／64MiB收集区间宿主RSS采样峰值中位161.168／163.766MiB，较终态时分别增加38.582／42.578MiB；2ms采样包括SQLite Worker和native，排除生产者子进程，不能视为内存硬上限。计时排除Runtime启动和事后完整Artifact流式回读核验。全部16例均为2次固定模型请求，空输出的请求正文仅归一化不稳定身份和夹具路径后完全相同，均无交付fileId或collector回执注入；用量计数是夹具常量，不是实测Provider token。该测量不取得受管平台或Desktop体验资格。
 
 默认 Service 已移除 Files 会话 `outputDirectory` 工具入口及模型指导。新交付只来自成功 Shell 的 `KITE_OUTPUT_DIR`；Files 普通写入不发布附件。历史 Files 输出记录与不可变引用保留，其查询和投影不代表仍可创建新的 Files 交付。
+
+
+2026-11-15 macOS／Bun 1.4.4，新增默认 Service 持久权限、受控 Provider 与真实受监督 Shell 回归核主／子 Full 无审批交付、子任务结束后归档、两个子任务同名隔离、普通 Workspace 文件不采集、unsafe link 失败后仅重试原 staging、根／子高局部序号 Stop 后明确重试，以及短 Action 权限拒绝的真实 Store 冷收口保真。Core 已有 output collector／native identity／物理 owner 恢复回归保持。此证据不等于另一台电脑现场复现、Windows/Linux执行或完整 Native UI 验收。真实 Store 冷 owner 回归另核：readonly 查询零恢复／零写，合法根派发取得物理 owner 后自动处理 child pending collector，已取消者不重启，不重跑模型／Shell，结束后根物理 owner 可交给另一实例。归档不会仅因打开只读列表而开始。

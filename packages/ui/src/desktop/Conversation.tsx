@@ -1333,10 +1333,11 @@ export function Conversation({
                           !messages.some((message) => message.role === 'tool' && !message.settled)
                         ? '正在等待'
                         : messages.length === 0 &&
-                            activity?.status === 'running' &&
+                            (activity?.status === 'preparing' || activity?.status === 'running') &&
                             !activity.executionUnconfirmed &&
                             !activity.unavailable
-                          ? activity.responsePhase === 'preparing'
+                          ? activity.status === 'preparing' ||
+                            activity.responsePhase === 'preparing'
                             ? '正在准备回复…'
                             : '正在回复…'
                           : undefined

@@ -23,8 +23,13 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     await Bun.sleep(5);
   }
 }
-for (const settlement of ['cancel', 'ordinary-input'] as const) {
-  test(`deferred report binding is ${settlement === 'cancel' ? 'released by cancellation' : `retained until the next ordinary input consumes its exact result`}`, async () => {
+for (const [retainedPolicy, settlement] of [
+  [false, 'cancel'],
+  [false, 'ordinary-input'],
+  [true, 'cancel'],
+  [true, 'ordinary-input'],
+] as const) {
+  test(`${retainedPolicy ? 'retained-policy' : 'queue-only'} deferred report preserves resource ownership through ${settlement}`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-deferred-report-cleanup-')));
     const profile = { dataRoot: join(root, 'data'), profile: 'test' };
     const store = await openSqliteStore(profile);
@@ -35,10 +40,14 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
       release = resolve;
     });
     let parentCalls = 0,
+      childCalls = 0,
+      policyApplies = 0,
       configurations = 0,
       disposed = 0;
+    const parentInputs: string[] = [];
     const parent: ModelAdapter = {
-      async *stream() {
+      async *stream(request) {
+        parentInputs.push(JSON.stringify(request.messages));
         if (parentCalls++ === 0) {
           yield {
             type: 'tool_call',
@@ -55,6 +64,7 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
     };
     const child: ModelAdapter = {
       async *stream() {
+        childCalls++;
         await childGate;
         yield { type: 'text_delta', text: 'Child result' };
         yield finish;
@@ -69,6 +79,14 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
       model: parent,
       modelId: 'parent',
       modelConcurrency: 3,
+      afterTurn: retainedPolicy
+        ? {
+            async authorize(input) {
+              if (input.phase === 'apply') policyApplies++;
+              return { allowed: input.phase === 'request', revision: 'original-policy' };
+            },
+          }
+        : undefined,
       permissions: {
         async authorize() {
           return { allowed: true, revision: '1' };
@@ -110,6 +128,9 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
         request: { kind: 'run.start', content: 'coordinate' },
       });
       await runtime.waitForCommand('work', { timeoutMs: 8000 });
+      // The live child retains its original resources even after the parent finishes.
+      expect(disposed).toBe(0);
+      expect(parentCalls).toBe(2);
       release();
       const report = await until(async () => {
         const mail = (await store.listAgentMessages(identity)).items.find(
@@ -120,7 +141,17 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
           ? command!
           : null;
       });
-      expect(disposed).toBe(0);
+      expect(report.receipt).toMatchObject({
+        outcome: 'report_deferred',
+        reason: 'idle_authorization_required',
+      });
+      if (retainedPolicy) await until(async () => (policyApplies > 0 ? true : null));
+      else await until(async () => (disposed === 1 ? true : null));
+      // A deferred policy lease is idle; queue-only mail needs no old configuration.
+      await until(async () => (!runtime.getLifecycleState().busy ? true : null));
+      expect(disposed).toBe(retainedPolicy ? 0 : 1);
+      expect(policyApplies).toBe(retainedPolicy ? 1 : 0);
+      expect(parentCalls).toBe(2);
       if (settlement === 'cancel') {
         await runtime.cancelSession({
           ...identity,
@@ -128,6 +159,7 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
           includeBackground: true,
         });
         expect((await store.getCommand(report.id))?.status).toBe('rejected');
+        expect(parentInputs.some((input) => input.includes('Child result'))).toBe(false);
       } else {
         await runtime.submitCommand({
           ...identity,
@@ -136,6 +168,7 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
         });
         const next = await runtime.waitForCommand('next', { timeoutMs: 8000 });
         const nextRun = (next.receipt as { runId: string }).runId;
+        expect(parentInputs.filter((input) => input.includes('Child result'))).toHaveLength(1);
         expect(await store.getCommand(report.id)).toMatchObject({
           status: 'applied',
           receipt: { mode: 'active', runId: nextRun },
@@ -156,5 +189,8 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
       await store.close();
       rmSync(root, { recursive: true, force: true });
     }
+    expect(parentCalls).toBe(settlement === 'cancel' ? 2 : 3);
+    expect(childCalls).toBe(1);
+    expect(disposed).toBe(1);
   }, 20000);
 }

@@ -41,7 +41,7 @@ async function fixture(
   afterFinalToolAuthorization?: () => Promise<void>,
   injectedToolDecision?: PermissionDecision,
   scenario?: 'readonly-auto-reject',
-  options: { customTaskReview?: true } = {},
+  options: { customTaskReview?: true; reviewDecision?: 'approve_once' | 'ask_user' } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-permission-')));
   const workspace = join(root, 'workspace');
@@ -73,6 +73,7 @@ async function fixture(
       const body = (await request.json()) as Record<string, unknown>;
       const messages = body.messages as { role: string; content: string }[];
       let reviewing = false;
+      let reviewedDefinition: string | undefined;
       try {
         const input = JSON.parse(
           messages
@@ -81,6 +82,7 @@ async function fixture(
             .find((message) => message.role === 'user')?.content ?? '',
         );
         reviewing = ['authorization_check', 'shell_risk'].includes(input.purpose);
+        reviewedDefinition = input.target?.definitionId;
       } catch {}
       if (reviewing) authReviews.push(body);
       else requests.push(body);
@@ -107,7 +109,11 @@ async function fixture(
               : {
                   content: reviewing
                     ? JSON.stringify({
-                        decision: scenario ? 'reject' : 'ask_user',
+                        decision: scenario
+                          ? reviewedDefinition === 'files.read'
+                            ? 'approve_once'
+                            : 'reject'
+                          : (options.reviewDecision ?? 'ask_user'),
                         reason: scenario
                           ? rejectionReason
                           : 'Human confirmation required for this exact file edit',
@@ -384,7 +390,7 @@ test('custom task-review keeps a rejected project placeholder write undispatched
       tools.filter((row) => row.definitionId === 'files.read').map((row) => row.status),
     ).toEqual(['succeeded', 'succeeded']);
     expect(readFileSync(join(f.workspace, f.projectFile), 'utf8')).toBe(f.projectBytes);
-    expect(f.authReviews).toHaveLength(1);
+    expect(f.authReviews).toHaveLength(3);
     expect(f.requests).toHaveLength(4);
     const recovery = f.requests[2]!.messages as {
       role: string;
@@ -417,7 +423,7 @@ test('custom task-review keeps a rejected project placeholder write undispatched
   }
 });
 
-test('default risk-only Files calls skip review in trusted modes while Full/default untrusted cannot pass trust', async () => {
+test('default Files follows Auto review while trusted Full/workspace bypass and untrusted scopes stay blocked', async () => {
   for (const [mode, trusted] of [
     ['auto', true],
     ['accept_edits', true],
@@ -426,7 +432,10 @@ test('default risk-only Files calls skip review in trusted modes while Full/defa
     [null, true],
     [null, false],
   ] as const) {
-    const f = await fixture(mode, trusted);
+    const f = await fixture(mode, trusted, false, undefined, undefined, undefined, {
+      reviewDecision: 'approve_once',
+    });
+    const expectedReviews = trusted && (mode === 'auto' || mode === null) ? 1 : 0;
     try {
       if (mode === null && trusted) await setManaged(f, 'auto');
       await f.run();
@@ -443,7 +452,7 @@ test('default risk-only Files calls skip review in trusted modes while Full/defa
         expect(execution.result).toMatchObject({
           details: { adapterAttempted: false, dispatchCommitted: false },
         });
-      expect(f.authReviews).toHaveLength(0);
+      expect(f.authReviews).toHaveLength(expectedReviews);
       expect(f.requests).toHaveLength(2);
       expect(
         (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
@@ -451,7 +460,7 @@ test('default risk-only Files calls skip review in trusted modes while Full/defa
       const original = await f.client.getCommand('work');
       expect(await f.run()).toEqual(original);
       expect(f.requests).toHaveLength(2);
-      expect(f.authReviews).toHaveLength(0);
+      expect(f.authReviews).toHaveLength(expectedReviews);
     } finally {
       await f.close();
     }
@@ -883,7 +892,7 @@ test('default and injected hosts apply HTTP tightening before final dispatch in 
       await until(async () => (entered ? true : null));
       await setModeViaHttp(f, 'auto', 'tighten-root');
       release();
-      if (explicit) {
+      {
         const card = await f.pending();
         expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
         const original = await f.store.getCommand('work');
@@ -893,7 +902,7 @@ test('default and injected hosts apply HTTP tightening before final dispatch in 
       }
       await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
       expect(readFileSync(join(f.workspace, 'output.txt'), 'utf8')).toBe('exact first');
-      expect(f.authReviews).toHaveLength(explicit ? 1 : 0);
+      expect(f.authReviews).toHaveLength(1);
       expect(
         (
           await f.management.readMode({

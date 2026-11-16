@@ -121,13 +121,22 @@ export class NativeInputFiles {
       throw new ClientError('native_file_incomplete');
     draft.hash ??= draft.digest.digest('hex');
   }
-  async publish(client: AgentClient, storeId: string, sessionId: string, ids: readonly string[]) {
+  async publish(
+    client: AgentClient,
+    storeId: string,
+    sessionId: string,
+    ids: readonly string[],
+    verifyOutput?: (target: OutputFileTarget) => Promise<unknown>,
+  ) {
     if (this.closed || ids.length > 128 || new Set(ids).size !== ids.length)
       throw new ClientError('native_file_invalid');
     const result: InputFileReference[] = [];
     for (const id of ids) {
       const output = this.outputs.get(id);
       if (output) {
+        await verifyOutput?.(output.target);
+        if (this.closed || this.outputs.get(id) !== output)
+          throw new ClientError('native_file_missing');
         const key = JSON.stringify([storeId, sessionId]);
         let pending = output.publications.get(key);
         if (!pending) {
@@ -153,7 +162,11 @@ export class NativeInputFiles {
             },
           );
         }
-        result.push(await pending);
+        const reference = await pending;
+        await verifyOutput?.(output.target);
+        if (this.closed || this.outputs.get(id) !== output)
+          throw new ClientError('native_file_missing');
+        result.push(reference);
         continue;
       }
       const draft = this.drafts.get(id);

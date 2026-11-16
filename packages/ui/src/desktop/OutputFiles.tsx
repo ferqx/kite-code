@@ -28,6 +28,8 @@ export interface OutputFileSummary extends SessionOutputFileTarget {
   readonly mediaType: string;
   readonly size: string;
   readonly publishedAt: string;
+  /** Presentation only; immutable file targets retain their original source scope. */
+  readonly sourceLabel?: string;
 }
 export interface OutputCollectionSummary {
   collectionId: string;
@@ -116,6 +118,15 @@ function referenceIcon(file: OutputFileSummary) {
     return FileTextIcon;
   return FileQuestionMarkIcon;
 }
+function fileIdentity(file: OutputFileSummary) {
+  return JSON.stringify([
+    file.storeId,
+    file.sessionId,
+    file.fileId,
+    file.locator.kind,
+    file.locator.kind === 'legacy-operation' ? file.locator.executionId : file.locator.key,
+  ]);
+}
 function duplicateNames(items: readonly OutputFileSummary[]) {
   const counts = new Map<string, number>();
   for (const file of items) counts.set(file.name, (counts.get(file.name) ?? 0) + 1);
@@ -134,12 +145,12 @@ function FileRow({
 }: Omit<OutputFilesProps, 'items'> & { file: OutputFileSummary; distinguish?: boolean }) {
   const titleId = useId();
   const detailId = useId();
+  const sourceId = useId();
+  const description =
+    [file.sourceLabel ? sourceId : '', distinguish ? detailId : ''].filter(Boolean).join(' ') ||
+    undefined;
   return (
-    <li
-      className="output-file-card"
-      aria-labelledby={titleId}
-      aria-describedby={distinguish ? detailId : undefined}
-    >
+    <li className="output-file-card" aria-labelledby={titleId} aria-describedby={description}>
       <span className="output-file-icon" aria-hidden="true">
         <HugeiconsIcon icon={File01Icon} />
       </span>
@@ -148,6 +159,7 @@ function FileRow({
           {file.name}
         </span>
         <small>{fileType(file)}</small>
+        {file.sourceLabel && <small id={sourceId}>{file.sourceLabel}</small>}
         {distinguish && (
           <small id={detailId} className="output-file-distinction">
             {collectionTime(file.publishedAt)} · {file.size} 字节
@@ -158,7 +170,7 @@ function FileRow({
         className="output-file-open"
         onClick={() => props.onOpen(file)}
         aria-label={`打开 ${file.name}`}
-        aria-describedby={distinguish ? detailId : undefined}
+        aria-describedby={description}
       >
         打开
       </Button>
@@ -198,7 +210,7 @@ export function OutputFiles(props: OutputFilesProps) {
           {props.items.map((file) => (
             <FileRow
               {...props}
-              key={JSON.stringify([file.storeId, file.sessionId, file.fileId])}
+              key={fileIdentity(file)}
               file={file}
               distinguish={repeated.has(file.name)}
             />
@@ -258,16 +270,19 @@ export function OutputReferences(
       )}
       <ul>
         {items.map((file) => (
-          <li key={JSON.stringify([file.storeId, file.sessionId, file.fileId])}>
+          <li key={fileIdentity(file)}>
             <button
               type="button"
               className="output-reference-link"
-              title={file.name}
-              aria-label={`打开 ${file.name}${repeated.has(file.name) ? `，${collectionTime(file.publishedAt)}，${file.size} 字节` : ''}`}
+              title={[file.name, file.sourceLabel].filter(Boolean).join(' · ')}
+              aria-label={`打开 ${file.name}${file.sourceLabel ? `，${file.sourceLabel}` : ''}${repeated.has(file.name) ? `，${collectionTime(file.publishedAt)}，${file.size} 字节` : ''}`}
               onClick={() => props.onOpen(file)}
             >
               <HugeiconsIcon icon={referenceIcon(file)} aria-hidden="true" />
-              <span>{file.name}</span>
+              <span>
+                {file.name}
+                {file.sourceLabel ? ` · ${file.sourceLabel}` : ''}
+              </span>
             </button>
           </li>
         ))}

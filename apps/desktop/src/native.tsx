@@ -1903,6 +1903,10 @@ function NativeDesktopContent({
     },
     onEdit: async (file, context) => {
       if (!bridge || !selection) throw Error('output_scope_unavailable');
+      const destination = selection.session.id;
+      const storeId = selection.storeId;
+      const current = state!.generation;
+      const nonce = viewIntent.current;
       const id = crypto.randomUUID();
       await bridge.request({
         method: 'input.files.fromOutput',
@@ -1916,7 +1920,17 @@ function NativeDesktopContent({
           locator: file.locator,
         },
       });
-      imageDrafts.addFiles(imageScope(file.storeId, file.sessionId), [
+      if (
+        current !== generation.current ||
+        nonce !== viewIntent.current ||
+        selected.current !== destination
+      ) {
+        await bridge
+          .request({ method: 'input.files.release', generation: current, id })
+          .catch(() => {});
+        throw Error('output_scope_unavailable');
+      }
+      imageDrafts.addFiles(imageScope(storeId, destination), [
         {
           id,
           name: outputDraftLabel({
@@ -1940,8 +1954,8 @@ function NativeDesktopContent({
           },
         },
       ]);
-      const key = imageScope(file.storeId, file.sessionId);
-      await saveBrowserDraft(key, file.sessionId, {
+      const key = imageScope(storeId, destination);
+      await saveBrowserDraft(key, destination, {
         content: draftCache.current.get(key)?.content ?? draft,
         browserAnnotations: browserNotes.document(key),
         annotationImageOffset: imageDrafts.get(key).length,
@@ -5634,6 +5648,7 @@ function NativeDesktopContent({
           }
           onTitleChange={onTitleChange}
           readingCache={childReadings.current}
+          renderTurnOutputs={(turn) => outputFiles.renderChildTurnOutputs(sessionId, turn)}
           writeClipboardText={window.kiteNative?.writeClipboardText}
         />
       )}

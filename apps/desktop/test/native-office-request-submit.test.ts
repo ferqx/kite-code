@@ -109,3 +109,40 @@ test('uncertain preparation still releases only its temporary staging id', async
     throw Error('unexpected Office cleanup sequence');
   expect(released.id).toBe(prepared.id);
 });
+
+test('child output keeps its exact source while an authorized inline edit submits to the parent', async () => {
+  const { requests, options } = fixture();
+  options.file = { ...options.file, sessionId: 'child', ownerRunId: 'child-run' };
+  expect(await submitOfficeRequest(options)).toEqual({ status: 'accepted' });
+  expect(requests[0]).toMatchObject({
+    method: 'input.files.fromOutput',
+    target: {
+      sessionId: 'child',
+      fileId: 'file',
+      locator: options.file.locator,
+    },
+  });
+  expect(requests[1]).toMatchObject({
+    method: 'submit',
+    sessionId: 'session',
+    officeDocument: {
+      outputFiles: [{ ownerRunId: 'child-run', target: { sessionId: 'child' } }],
+    },
+  });
+});
+
+test('a denied child source cannot submit or turn its target into a parent output', async () => {
+  const { requests, options } = fixture();
+  options.file = { ...options.file, sessionId: 'unrelated' };
+  options.bridge.request = async (request) => {
+    requests.push(request);
+    if (request.method === 'input.files.fromOutput') throw Error('output_scope_unavailable');
+    return null;
+  };
+  expect((await submitOfficeRequest(options)).status).toBe('failed');
+  expect(requests.map((request) => request.method)).toEqual([
+    'input.files.fromOutput',
+    'input.files.release',
+  ]);
+  expect(requests[0]).toMatchObject({ target: { sessionId: 'unrelated' } });
+});

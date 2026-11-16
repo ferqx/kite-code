@@ -91,6 +91,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'outputs.preview.request.result': ['previewId', 'requestId', 'outcome'],
   'outputs.pdf.page': ['target', 'page'],
   'outputs.retry': ['scope', 'collectionId', 'expectedRevision'],
+  'outputs.sources': ['scope'],
   'outputs.query': ['scope', 'runId', 'beforeKey', 'collectionBeforeKey', 'limit'],
   'outputs.save': ['target'],
   'outputs.info': ['target'],
@@ -461,15 +462,18 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     const scope = record(input.scope);
     exact(scope, ['storeId', 'sessionId']);
     if (
-      ![scope.storeId, scope.sessionId, input.collectionId].every(
+      ![scope.storeId, scope.sessionId].every(
         (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v),
       ) ||
+      typeof input.collectionId !== 'string' ||
+      !/^collection\/[0-9]{20}\/[A-Za-z0-9_.:-]+$/.test(input.collectionId) ||
+      input.collectionId.length > 1024 ||
       typeof input.expectedRevision !== 'string' ||
       !/^(0|[1-9][0-9]*)$/.test(input.expectedRevision)
     )
       throw Error('invalid_native_request');
   }
-  if (method === 'outputs.query') {
+  if (method === 'outputs.query' || method === 'outputs.sources') {
     const scope = record(input.scope);
     exact(scope, ['storeId', 'sessionId']);
     if (
@@ -1808,9 +1812,11 @@ export function registerNativeIpc(options: {
           window.webContents.once('render-process-gone', closePreview);
           window.webContents.once('did-start-navigation', closePreview);
         }
+        await caller.admitOutputTarget(request.generation, request.target);
+        const access = caller.outputTargetCheck(request.generation, request.target);
         const check = () => {
           assertNativeSender(event, options.window(), options.rendererUrl);
-          caller.checkOutputScope(request.generation, request.target);
+          access();
         };
         const edited =
           request.method === 'outputs.office.preview'

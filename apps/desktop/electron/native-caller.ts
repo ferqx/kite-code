@@ -64,6 +64,7 @@ import { NativeInputQueue } from './native-input-queue';
 import { NativeProcessOwner } from './native-processes';
 import { NativeOfficeEditor } from './office-editor';
 import { saveOutputFile } from './output-files';
+import { NativeOutputSources } from './output-sources';
 import { NativePermissionGrants } from './permission-grants';
 import type { PrivateData } from './private-data';
 import { NativeProviderSettings } from './provider-settings';
@@ -87,6 +88,7 @@ export function createNativeCallerGenerationOwner(): () => number {
 
 export class NativeCaller {
   private readonly localFileReferences: boolean;
+  private readonly outputSources: NativeOutputSources;
   private generation = 0;
   private selection = 0;
   private activation: { id: number; sessionId: string; selection: number } | undefined;
@@ -363,6 +365,22 @@ export class NativeCaller {
         submit: (commandId) => this.requireCaller().submit(commandId),
       },
     );
+    this.outputSources = new NativeOutputSources(client, () => {
+      const info = this.client.serverInfo;
+      return !this.closed &&
+        !this.observationUnavailable &&
+        this.selected &&
+        info?.storeId &&
+        info.subjectId
+        ? {
+            generation: this.generation,
+            selection: this.selection,
+            storeId: info.storeId,
+            sessionId: this.selected,
+            subjectId: info.subjectId,
+          }
+        : undefined;
+    });
     this.input = new DesktopInput({
       admittedClient: client,
       onSubmission: () => this.changed(),
@@ -410,7 +428,13 @@ export class NativeCaller {
       (sessionId, ids) =>
         this.images.publish(this.client, this.client.serverInfo!.storeId!, sessionId, ids),
       (sessionId, ids) =>
-        this.inputFiles.publish(this.client, this.client.serverInfo!.storeId!, sessionId, ids),
+        this.inputFiles.publish(
+          this.client,
+          this.client.serverInfo!.storeId!,
+          sessionId,
+          ids,
+          (target) => this.admitOutputTarget(this.generation, target),
+        ),
     );
     const current = () =>
       !this.closed && this.selected
@@ -1146,6 +1170,7 @@ export class NativeCaller {
       this.invalidateDirectory();
       this.background.release();
       this.environment.release();
+      this.outputSources.reset();
       this.observationUnavailable = true;
       this.controller.resetObservation();
       this.permissionUnavailable = true;
@@ -1231,6 +1256,7 @@ export class NativeCaller {
               this.environmentRevision++;
               this.selectedEnvironmentRevision++;
               this.outputFilesRevision++;
+              this.outputSources.reset();
               this.observationUnavailable = false;
               this.permissionUnavailable = false;
               this.changed();
@@ -1308,13 +1334,29 @@ export class NativeCaller {
             onChange: (change) => {
               this.environmentRevision++;
               if (
-                change.sessionId === this.selected &&
+                (change.sessionId === this.selected ||
+                  (!!change.sessionId &&
+                    (this.outputSources.includesSession(change.sessionId) ||
+                      this.environment.includesSession(change.sessionId)))) &&
                 ((change.type === 'extension.record_updated' &&
                   /^builtin\.files\/(delivery|collection|output)\//.test(change.objectId)) ||
                   change.type === 'run.finished' ||
                   change.type === 'run.started')
               )
                 this.outputFilesRevision++;
+              if (
+                change.type === 'session.created' ||
+                (change.type === 'run.started' &&
+                  change.sessionId !== this.selected &&
+                  !!change.sessionId &&
+                  !this.outputSources.includesSession(change.sessionId) &&
+                  !this.environment.includesSession(change.sessionId))
+              )
+                this.outputFilesRevision++;
+              if (change.type === 'session.delete_requested') {
+                this.outputSources.reset();
+                this.outputFilesRevision++;
+              }
               const historyOnly =
                 !!this.selected &&
                 this.client.serverInfo?.capabilities.includes('message_changes') &&
@@ -1978,58 +2020,42 @@ export class NativeCaller {
         this.images.begin(request);
         result = null;
         break;
+      case 'outputs.sources':
+        result = await this.outputSources.read(generation, request.scope);
+        break;
       case 'outputs.retry': {
-        if (
-          request.scope.storeId !== this.client.serverInfo?.storeId ||
-          request.scope.sessionId !== this.selected
-        )
-          throw new ClientError('output_scope_unavailable');
-        await this.client.retryOutputCollection({
+        await this.outputSources.retry(generation, {
           scope: request.scope,
           collectionId: request.collectionId,
           expectedRevision: request.expectedRevision,
         });
-        if (request.scope.sessionId !== this.selected)
-          throw new ClientError('output_scope_unavailable');
         result = null;
         break;
       }
       case 'outputs.query': {
-        if (
-          request.scope.storeId !== this.client.serverInfo?.storeId ||
-          request.scope.sessionId !== this.selected
-        )
-          throw new ClientError('output_scope_unavailable');
-        const page = await this.client.queryOutputFiles({
+        const page = await this.outputSources.query(generation, {
           scope: request.scope,
           runId: request.runId,
           beforeKey: request.beforeKey,
           collectionBeforeKey: request.collectionBeforeKey,
           limit: request.limit,
         });
-        if (request.scope.sessionId !== this.selected)
-          throw new ClientError('output_scope_unavailable');
         result = { kind: 'outputs.page', page };
         break;
       }
       case 'outputs.pdf.page': {
-        this.checkOutputScope(generation, request.target);
+        await this.admitOutputTarget(generation, request.target);
+        const check = this.outputTargetCheck(generation, request.target);
+        check();
         const page = await this.client.renderOutputPdfPage(request.target, {
           page: request.page,
         });
-        this.checkOutputScope(generation, request.target);
+        check();
         result = { kind: 'outputs.pdf.page', pdf: page };
         break;
       }
       case 'outputs.info': {
-        if (
-          request.target.storeId !== this.client.serverInfo?.storeId ||
-          request.target.sessionId !== this.selected
-        )
-          throw new ClientError('output_scope_unavailable');
-        const resolved = await this.client.resolveOutputFile(request.target);
-        if (request.target.sessionId !== this.selected)
-          throw new ClientError('output_scope_unavailable');
+        const resolved = await this.admitOutputTarget(generation, request.target);
         result = { kind: 'outputs.info', file: resolved.summary };
         break;
       }
@@ -2050,19 +2076,14 @@ export class NativeCaller {
       case 'outputs.preview.bounds':
         throw new ClientError('native_host_operation_unavailable');
       case 'input.files.fromOutput': {
+        const originalSelection = this.selection;
         if (this.pendingInlineOfficeFiles.has(request.id))
           throw new ClientError('native_file_invalid');
         const preparation = { released: false };
         this.pendingInlineOfficeFiles.set(request.id, preparation);
         try {
-          if (
-            request.target.storeId !== this.client.serverInfo?.storeId ||
-            request.target.sessionId !== this.selected
-          )
-            throw new ClientError('output_scope_unavailable');
-          const resolved = await this.client.resolveOutputFile(request.target);
-          this.assertGeneration(generation);
-          if (request.target.sessionId !== this.selected)
+          const resolved = await this.admitOutputTarget(generation, request.target);
+          if (this.selection !== originalSelection)
             throw new ClientError('output_scope_unavailable');
           await this.prepareOfficeDraft(
             {
@@ -2075,6 +2096,8 @@ export class NativeCaller {
           );
           try {
             this.checkOutputScope(generation, request.target);
+            if (this.selection !== originalSelection)
+              throw new ClientError('output_scope_unavailable');
             if (preparation.released) throw new ClientError('native_file_missing');
           } catch (error) {
             this.inputFiles.release(request.id);
@@ -3350,6 +3373,7 @@ export class NativeCaller {
             snapshot.view.storeId,
             request.sessionId,
             request.fileIds,
+            (target) => this.admitOutputTarget(generation, target),
           );
           this.assertGeneration(generation);
           if (originalSelection !== this.selection || this.selected !== request.sessionId)
@@ -3563,6 +3587,7 @@ export class NativeCaller {
       }
       case 'draft.read':
       case 'draft.write': {
+        const originalSelection = this.selection;
         const snapshot = this.writableScope(request.sessionId);
         if (snapshot.view.session.deletedAt !== null)
           throw new ClientError('draft_association_unavailable');
@@ -3573,9 +3598,7 @@ export class NativeCaller {
         };
         if (request.method === 'draft.write') {
           for (const file of request.outputFiles ?? []) {
-            this.checkOutputScope(generation, file.target);
-            const resolved = await this.client.resolveOutputFile(file.target);
-            this.checkOutputScope(generation, file.target);
+            const resolved = await this.admitOutputTarget(generation, file.target);
             if (
               resolved.summary.name !== file.name ||
               (file.ownerRunId !== undefined && file.ownerRunId !== resolved.summary.ownerRunId)
@@ -3584,6 +3607,7 @@ export class NativeCaller {
             await this.prepareOfficeDraft(file, generation);
           }
         }
+        if (this.selection !== originalSelection) throw new ClientError('output_scope_unavailable');
         result =
           request.method === 'draft.read'
             ? this.requirePrivateData().read(scope)
@@ -3597,15 +3621,14 @@ export class NativeCaller {
               );
         if (result && 'outputFiles' in result) {
           for (const file of result.outputFiles ?? []) {
-            if (
-              file.target.storeId !== snapshot.view.storeId ||
-              file.target.sessionId !== request.sessionId
-            )
+            if (file.target.storeId !== snapshot.view.storeId)
               throw new ClientError('output_scope_unavailable');
             this.assertGeneration(generation);
-            if (this.selected !== request.sessionId)
+            if (this.selected !== request.sessionId || this.selection !== originalSelection)
               throw new ClientError('output_scope_unavailable');
             await this.prepareOfficeDraft(file, generation);
+            if (this.selection !== originalSelection)
+              throw new ClientError('output_scope_unavailable');
           }
         }
         break;
@@ -3638,8 +3661,17 @@ export class NativeCaller {
   }
   checkOutputScope(generation: number, target: OutputFileTarget) {
     this.assertGeneration(generation);
-    if (this.client.serverInfo?.storeId !== target.storeId || this.selected !== target.sessionId)
-      throw new ClientError('output_scope_unavailable');
+    this.outputSources.checkTarget(generation, target);
+  }
+  outputTargetCheck(generation: number, target: OutputFileTarget) {
+    this.assertGeneration(generation);
+    return this.outputSources.targetCheck(generation, target);
+  }
+  async admitOutputTarget(generation: number, target: OutputFileTarget) {
+    this.assertGeneration(generation);
+    const resolved = await this.outputSources.resolve(generation, target);
+    this.checkOutputScope(generation, target);
+    return resolved;
   }
   async renderLocalPreviewPdf(
     generation: number,
@@ -3670,9 +3702,10 @@ export class NativeCaller {
     page: number,
     signal: AbortSignal,
   ) {
-    this.checkOutputScope(generation, target);
+    const check = this.outputTargetCheck(generation, target);
+    check();
     const result = await this.client.renderOutputPdfPage(target, { page, signal });
-    this.checkOutputScope(generation, target);
+    check();
     return result;
   }
   configureOfficeRuntime(assetsRoot?: string) {
@@ -3692,12 +3725,12 @@ export class NativeCaller {
     assetsRoot?: string,
     checkSender: () => void = () => {},
   ) {
+    const resolved = await this.admitOutputTarget(request.generation, request.target);
+    const access = this.outputTargetCheck(request.generation, request.target);
     const check = () => {
-      this.checkOutputScope(request.generation, request.target);
+      access();
       checkSender();
     };
-    check();
-    const resolved = await this.client.resolveOutputFile(request.target);
     check();
     if (!this.officeEditor) {
       const root = this.requirePrivateData().officeEditorRoot?.();
@@ -3735,9 +3768,7 @@ export class NativeCaller {
     return { ...state, revision };
   }
   private async prepareOfficeDraft(file: OutputDraftFile, generation: number) {
-    this.checkOutputScope(generation, file.target);
-    const resolved = await this.client.resolveOutputFile(file.target);
-    this.checkOutputScope(generation, file.target);
+    const resolved = await this.admitOutputTarget(generation, file.target);
     if (
       resolved.summary.name !== file.name ||
       (file.ownerRunId && file.ownerRunId !== resolved.summary.ownerRunId)
@@ -3859,11 +3890,12 @@ export class NativeCaller {
     path: string,
     check: () => void,
   ) {
-    this.checkOutputScope(generation, target);
+    const resolved = await this.admitOutputTarget(generation, target);
+    const access = this.outputTargetCheck(generation, target);
+    access();
     check();
-    const resolved = await this.client.resolveOutputFile(target);
     await saveOutputFile(this.client, target, path, () => {
-      this.checkOutputScope(generation, target);
+      access();
       check();
     });
     return { ...resolved.summary, sourceHash: resolved.reference.hash };
@@ -3873,17 +3905,12 @@ export class NativeCaller {
     pick: (name: string) => Promise<string | undefined>,
     checkSender: () => void,
   ) {
+    const resolved = await this.admitOutputTarget(request.generation, request.target);
+    const access = this.outputTargetCheck(request.generation, request.target);
     const current = () => {
-      this.assertGeneration(request.generation);
+      access();
       checkSender();
-      if (
-        this.client.serverInfo?.storeId !== request.target.storeId ||
-        this.selected !== request.target.sessionId
-      )
-        throw new ClientError('output_scope_unavailable');
     };
-    current();
-    const resolved = await this.client.resolveOutputFile(request.target);
     current();
     const destination = await pick(resolved.summary.name);
     current();

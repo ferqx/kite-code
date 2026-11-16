@@ -3015,8 +3015,10 @@ export class AgentRuntime {
     return this.options.store.resolveOutputFile(input);
   }
   async retryOutputCollection(input: Parameters<Store['retryOutputCollection']>[0]) {
+    const session = await this.options.store.getSession(input.sessionId);
+    if (!session) throw new AgentError('session_not_found');
     const result = await this.options.store.retryOutputCollection(input);
-    this.schedule(input.sessionId);
+    this.schedule(session.rootSessionId);
     this.controlObservation.markDirty();
     return result;
   }
@@ -7201,7 +7203,13 @@ export class AgentRuntime {
     while (!this.closing) {
       if (this.hasUnconfirmedCleanup()) throw new AgentError('shutdown_cleanup_unconfirmed');
       // Recovery query receipts never become ordinary model work, including accepted unknowns.
-      const commands = (await this.options.store.listAcceptedCommands(sessionId, 32)).filter(
+      const commands = (
+        await this.options.store.listAcceptedCommands(
+          sessionId,
+          32,
+          sessionId === owner.sessionId ? owner : undefined,
+        )
+      ).filter(
         (command) => command.kind !== 'job.reconcile' && !this.liveControlCommands.has(command.id),
       );
       for (const command of commands) {
@@ -7211,7 +7219,7 @@ export class AgentRuntime {
         const dispatch = await this.options.store.inspectOwnerDispatch({
           expectedStoreId: command.originStoreId,
           owner,
-          sessionId,
+          sessionId: command.sessionId,
         });
         if (this.hasUnconfirmedCleanup()) throw new AgentError('shutdown_cleanup_unconfirmed');
         if (dispatch.hasUncommittedAction) throw new AgentError('session_recovery_required');

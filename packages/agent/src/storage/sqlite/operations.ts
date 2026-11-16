@@ -166,7 +166,9 @@ import {
   settleMutation,
 } from './mutation-operations';
 import {
+  outputCollectionCommandEffect,
   outputCollectionOperation,
+  outputCollectionWorkSequence,
   registerOutputCollectionAtTerminal,
   registerTextOutputAtTerminal,
 } from './output-collection';
@@ -525,7 +527,8 @@ export class SqliteOperations {
     if (!command) throw new AgentError('cancelled_before_dispatch');
     const session = this.owner(owner, String(command.session_id));
     if (command.cancelled) throw new AgentError('cancelled_before_dispatch');
-    if (session.parent_id !== null) {
+    const collectionWorkSeq = !runId ? outputCollectionWorkSequence(this, command) : null;
+    if (session.parent_id !== null && collectionWorkSeq === null) {
       const carrier = this.childCarrier(command, runId);
       const deadline = carrier?.report_command_id
         ? { deadline_at: carrier.report_deadline_at }
@@ -562,7 +565,7 @@ export class SqliteOperations {
       visited.add(String(current.id));
       if (
         current.delete_requested ||
-        BigInt(command.root_work_seq!) <= BigInt(current.stop_boundary!)
+        BigInt(collectionWorkSeq ?? command.root_work_seq!) <= BigInt(current.stop_boundary!)
       )
         throw new AgentError('cancelled_before_dispatch');
       current =
@@ -1619,12 +1622,40 @@ export class SqliteOperations {
         const row = this.row('SELECT * FROM command WHERE id=?', String(args[0]));
         return row ? this.command(row) : null;
       }
-      case 'listAcceptedCommands':
-        return this.rows(
+      case 'listAcceptedCommands': {
+        const sessionId = String(args[0]),
+          maximum = limit(args[1]);
+        const owner = args[2] as OwnerRef | undefined;
+        if (owner) {
+          if (owner.sessionId !== sessionId) throw new AgentError('owner_changed');
+          this.owner(owner, sessionId);
+        }
+        const accepted = this.rows(
           `SELECT * FROM command WHERE session_id=? AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') AND ${runnableCommandPredicate()} ORDER BY COALESCE(pending_order,seq),seq LIMIT ?`,
-          String(args[0]),
-          limit(args[1]),
-        ).map((row) => this.command(row));
+          sessionId,
+          maximum,
+        );
+        if (owner && accepted.length < maximum) {
+          // Owner recovery can register child-local commands. Do not leave the
+          // root lock held forever while only the root's ordinary queue is read.
+          let after = '';
+          for (;;) {
+            const page = this.rows(
+              "SELECT c.* FROM command c JOIN session s ON s.id=c.session_id WHERE s.root_id=? AND s.id<>? AND c.id>? AND c.status='accepted' AND c.kind='extension.invoke' ORDER BY c.id LIMIT 256",
+              sessionId,
+              sessionId,
+              after,
+            );
+            for (const command of page) {
+              if (outputCollectionCommandEffect(this, command)) accepted.push(command);
+              if (accepted.length === maximum) break;
+            }
+            if (accepted.length === maximum || page.length < 256) break;
+            after = String(page.at(-1)!.id);
+          }
+        }
+        return accepted.map((row) => this.command(row));
+      }
       case 'rejectCommand':
         return this.tx(() => {
           this.identity(input.expectedStoreId);

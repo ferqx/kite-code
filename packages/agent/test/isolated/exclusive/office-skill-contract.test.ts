@@ -3,10 +3,13 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createOfficeDocument } from '../../src/tools/documents/office-command';
-import { runOfficeCLI, verifyOfficeRuntimeAssets } from '../../src/tools/documents/office-runtime';
+import { createOfficeDocument } from '../../../src/tools/documents/office-command';
+import {
+  runOfficeCLI,
+  verifyOfficeRuntimeAssets,
+} from '../../../src/tools/documents/office-runtime';
 
-// Explicit integration suite: local pinned assets are required; never install/download.
+// Process-exclusive integration suite: local pinned assets are required; never install/download.
 test('pinned CLI exposes the discovery and read commands documented by the skill', async () => {
   await verifyOfficeRuntimeAssets();
   for (const [args, required] of [

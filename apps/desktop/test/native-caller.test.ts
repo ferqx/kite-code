@@ -4670,7 +4670,14 @@ test('isolated Office submit rejects forged metadata, preserves composer and jou
   let sends = 0;
   Object.assign(port, {
     resolveOutputFile: async () => ({
-      summary: { name: output.name, ownerRunId: output.ownerRunId },
+      summary: {
+        ...target,
+        name: output.name,
+        ownerRunId: output.ownerRunId,
+        mediaType: reference.mediaType,
+        size: reference.size,
+        publishedAt: '2026-11-16T00:00:00Z',
+      },
       reference,
     }),
     prepareInputFromOutput: async () => ({
@@ -4983,4 +4990,144 @@ test('dedicated preview geometry channel rejects foreign frames and cannot ackno
     stop();
   }
   expect(handlers.size).toBe(0);
+});
+
+test('parent output IPC preserves child identity, refreshes late files and rejects foreign sources and stale save dialogs', async () => {
+  const port = client();
+  let observe!: Parameters<AgentClient['observe']>[0];
+  port.observe = async (input) => {
+    observe = input;
+    await new Promise<void>((resolve) =>
+      input.signal!.addEventListener('abort', () => resolve(), { once: true }),
+    );
+  };
+  const child = backgroundItem(1, true);
+  port.listAllBackgroundExecutions = async () => [structuredClone(child)];
+  port.listBackgroundExecutions = async () => ({ items: [structuredClone(child)] }) as never;
+  const file = {
+    storeId: 'store',
+    sessionId: 'child',
+    fileId: 'file',
+    locator: { kind: 'delivery' as const, key: 'delivery/00000000000000000001/producer/file' },
+    ownerRunId: 'original-child-run',
+    name: 'report.txt',
+    mediaType: 'text/plain',
+    size: '4',
+    publishedAt: '2026-11-16T00:00:00Z',
+  };
+  const target = {
+    storeId: file.storeId,
+    sessionId: file.sessionId,
+    fileId: file.fileId,
+    locator: file.locator,
+  };
+  let queries = 0;
+  port.queryOutputFiles = async (input) => {
+    queries++;
+    return { scope: input.scope, revision: '1', items: [file], collections: [] };
+  };
+  port.resolveOutputFile = async () =>
+    ({ summary: file, reference: { hash: 'a'.repeat(64), size: '4' } }) as never;
+  const caller = new NativeCaller(port, () => {}, memoryPrivateData());
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 'root' });
+    expect(
+      await caller.invoke({
+        method: 'outputs.sources',
+        generation,
+        scope: { storeId: 'store', sessionId: 'root' },
+      }),
+    ).toMatchObject({
+      kind: 'outputs.sources',
+      sources: [{ sessionId: 'child', runId: 'original-child-run', parentRunId: 'parent-run' }],
+    });
+    expect(
+      await caller.invoke({
+        method: 'outputs.query',
+        generation,
+        scope: { storeId: 'store', sessionId: 'child' },
+        runId: 'original-child-run',
+      }),
+    ).toMatchObject({ page: { items: [file] } });
+    expect(await caller.invoke({ method: 'outputs.info', generation, target })).toMatchObject({
+      file,
+    });
+    const revision = caller.state().outputFilesRevision!;
+    await observe.onChange?.({
+      ...sessionChange('child', '1'),
+      type: 'extension.record_updated',
+      objectId: 'builtin.files/delivery/exact',
+    });
+    expect(caller.state().outputFilesRevision).toBe(revision + 1);
+    await observe.onChange?.({
+      ...sessionChange('foreign', '2'),
+      type: 'extension.record_updated',
+      objectId: 'builtin.files/delivery/exact',
+    });
+    expect(caller.state().outputFilesRevision).toBe(revision + 1);
+    await caller.invoke({
+      method: 'draft.write',
+      generation,
+      sessionId: 'root',
+      revision: 0,
+      content: 'Modify this original',
+      outputFiles: [{ id: 'chip', name: file.name, target, ownerRunId: file.ownerRunId }],
+    });
+    expect(
+      await caller.invoke({ method: 'draft.read', generation, sessionId: 'root' }),
+    ).toMatchObject({ outputFiles: [{ target }] });
+    await expect(
+      caller.invoke({
+        method: 'outputs.query',
+        generation,
+        scope: { storeId: 'store', sessionId: 'unrelated-root' },
+      }),
+    ).rejects.toThrow('output_scope_unavailable');
+    expect(queries).toBe(1);
+    let finishPdf!: () => void, enteredPdf!: () => void;
+    const pdfReady = new Promise<void>((resolve) => {
+      enteredPdf = resolve;
+    });
+    const pdfGate = new Promise<void>((resolve) => {
+      finishPdf = resolve;
+    });
+    port.renderOutputPdfPage = async () => {
+      enteredPdf();
+      await pdfGate;
+      return { page: 1, totalPages: 1, mediaType: 'image/png', data: 'old-page' };
+    };
+    const pdfReading = caller.invoke({ method: 'outputs.pdf.page', generation, target, page: 1 });
+    await pdfReady;
+    await caller.invoke({ method: 'select', generation, sessionId: 'other-root' });
+    await caller.invoke({ method: 'select', generation, sessionId: 'root' });
+    await caller.invoke({ method: 'outputs.info', generation, target });
+    finishPdf();
+    await expect(pdfReading).rejects.toThrow('output_scope_unavailable');
+    let finish!: (value: string | undefined) => void, opened!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      opened = resolve;
+    });
+    const saving = caller.saveOutput(
+      { generation, target },
+      () => {
+        opened();
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      },
+      () => {},
+    );
+    await ready;
+    await caller.invoke({ method: 'select', generation, sessionId: 'other-root' });
+    await expect(caller.invoke({ method: 'outputs.info', generation, target })).rejects.toThrow(
+      'output_source_unavailable',
+    );
+    await caller.invoke({ method: 'select', generation, sessionId: 'root' });
+    await caller.invoke({ method: 'outputs.info', generation, target });
+    finish(undefined);
+    await expect(saving).rejects.toThrow('output_scope_unavailable');
+  } finally {
+    await caller.close();
+  }
 });

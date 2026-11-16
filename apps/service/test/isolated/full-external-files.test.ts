@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
@@ -16,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
-import type { Json } from '@kite-ai/agent/extensions';
+import type { AuthorizationRequest, Json } from '@kite-ai/agent/extensions';
 import type { FileCheckpointRecord } from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
@@ -53,6 +54,8 @@ type Program = (body: Body, step: number, actor: 'root' | 'child', paths: Paths)
 
 async function fixture(options: {
   mode?: 'full' | 'accept_edits' | 'auto';
+  forbidHumanApproval?: boolean;
+  childFileCeiling?: 'approval' | 'deny';
   beforeDispatch?: 'demote' | 'untrust';
   decision?: 'approve' | 'deny' | 'ask_user' | 'unavailable' | 'timeout' | 'cancel';
   humanAnswer?: 'approve' | 'deny';
@@ -183,6 +186,24 @@ async function fixture(options: {
     userConfigurationPath: configurationPath,
     localCodex: false,
     credentialBackend: createTemporaryCredentialBackend(),
+    ...(options.childFileCeiling
+      ? {
+          permissions: {
+            async authorize(request: AuthorizationRequest) {
+              const limited = request.sessionId !== 's' && request.definitionId === 'files.write';
+              return {
+                allowed: !limited,
+                revision: 'independent-child-file-ceiling',
+                ...(limited && options.childFileCeiling === 'approval'
+                  ? { approval: { request: { reason: 'independent_child_confirmation' } } }
+                  : limited
+                    ? { reason: 'independent_child_denial' }
+                    : {}),
+              };
+            },
+          },
+        }
+      : {}),
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const storeId = (await store.getMetadata()).storeId;
@@ -284,6 +305,7 @@ async function fixture(options: {
     store,
     storeId,
     configurationPath,
+    databasePath: profile.databasePath,
     requests,
     reviewInputs,
     reviewing: () => reviewing,
@@ -311,6 +333,7 @@ async function fixture(options: {
           sessionId: 's',
           state: 'pending',
         });
+        if (options.forbidHumanApproval) expect(interactions).toEqual([]);
         for (const card of interactions) {
           options.beforeAnswer?.(paths);
           await runtime.answerInteraction({
@@ -615,11 +638,75 @@ for (const change of ['demote', 'untrust'] as const) {
   }, 20000);
 }
 
+for (const childFileCeiling of ['approval', 'deny'] as const) {
+  test(`Full child retains an independent ${childFileCeiling} ceiling without widening the parent`, async () => {
+    const f = await fixture({
+      mode: 'full',
+      childFileCeiling,
+      program: (_body, step, actor, paths): Call | null =>
+        actor === 'root'
+          ? step === 0
+            ? { name: 'spawn_agent', input: { prompt: 'CHILD_LIMITED: write the owned file' } }
+            : null
+          : step === 0
+            ? { name: 'write_file', input: { path: paths.target, content: 'explicitly approved' } }
+            : null,
+    });
+    try {
+      await f.run();
+      const deadline = Date.now() + 8000;
+      let carrier: Awaited<ReturnType<typeof f.store.listExecutions>>[number] | undefined;
+      for (;;) {
+        carrier = (await f.store.listExecutions('s')).find((row) => row.childSessionId);
+        if (carrier && ['succeeded', 'failed', 'cancelled'].includes(carrier.status)) break;
+        if (Date.now() > deadline) throw Error('full_child_ceiling_deadline');
+        const { interactions } = await f.runtime.listInteractions({
+          expectedStoreId: f.storeId,
+          sessionId: 's',
+          state: 'pending',
+        });
+        for (const card of interactions) {
+          expect(childFileCeiling).toBe('approval');
+          expect(existsSync(f.target)).toBe(false);
+          await f.runtime.answerInteraction({
+            expectedStoreId: f.storeId,
+            commandId: `explicit-ceiling-${card.id}`,
+            presentationSessionId: card.presentationSessionId,
+            interactionId: card.id,
+            expectedRevision: card.revision,
+            subjectId: 'owner',
+            answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+          });
+        }
+        await Bun.sleep(5);
+      }
+      const executions = await f.store.listExecutions(carrier.childSessionId!);
+      const write = executions.find((row) => row.definitionId === 'files.write')!;
+      expect(write).toBeDefined();
+      expect(f.reviewRequests()).toBe(0);
+      if (childFileCeiling === 'approval') {
+        expect(readFileSync(f.target, 'utf8')).toBe('explicitly approved');
+        expect(write.authorization?.human).toMatchObject({ accepted: true, decision: 'approve' });
+      } else {
+        expect(existsSync(f.target)).toBe(false);
+        expect(write.authorization?.dispatched).toBe(false);
+        expect(write.result).toMatchObject({
+          outcome: 'failed',
+          details: { reason: 'independent_child_denial', dispatchCommitted: false },
+        });
+      }
+    } finally {
+      await f.close();
+    }
+  }, 20000);
+}
+
 for (const mode of ['full', 'auto', 'accept_edits'] as const) {
   for (const preset of ['general', 'explore'] as const) {
     test(`${mode} child ${preset} preserves the selected file tool boundary`, async () => {
       const f = await fixture({
         mode,
+        forbidHumanApproval: mode === 'full',
         program: (_body, step, actor, paths): Call | null =>
           actor === 'root'
             ? step === 0
@@ -651,6 +738,7 @@ for (const mode of ['full', 'auto', 'accept_edits'] as const) {
             sessionId: 's',
             state: 'pending',
           });
+          if (mode === 'full') expect(interactions).toEqual([]);
           for (const card of interactions)
             await f.runtime.answerInteraction({
               expectedStoreId: f.storeId,
@@ -669,6 +757,37 @@ for (const mode of ['full', 'auto', 'accept_edits'] as const) {
         const child = (await f.store.listExecutions(carrier.childSessionId!)).filter(
           (e) => e.kind === 'tool',
         );
+        if (mode === 'full') {
+          expect(f.reviewRequests()).toBe(0);
+          const history = await f.runtime.listInteractions({
+            expectedStoreId: f.storeId,
+            sessionId: 's',
+          });
+          expect(history.interactions).toEqual([]);
+          const rootMode = await f.store.readHostControl({
+            expectedStoreId: f.storeId,
+            subjectId: 'owner',
+            kind: 'permission.mode',
+            scope: 'session:s',
+          });
+          for (const execution of child.filter((row) => row.authorization?.dispatched)) {
+            expect(execution.authorization?.human).toBeUndefined();
+            expect(execution.authorization?.check).toBeUndefined();
+            const db = new Database(f.databasePath, { readonly: true });
+            try {
+              const saved = db
+                .query('SELECT dispatch_authorization_json AS proof FROM execution WHERE id=?')
+                .get(execution.id) as { proof: string };
+              expect(JSON.parse(saved.proof).controlReads).toContainEqual({
+                kind: 'permission.mode',
+                scope: 'session:s',
+                revision: rootMode.revision,
+              });
+            } finally {
+              db.close();
+            }
+          }
+        }
         const childRequests = f.requests.filter((body) =>
           body.messages.some((m) => m.role === 'user' && m.content.startsWith('CHILD_')),
         );

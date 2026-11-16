@@ -5,6 +5,7 @@ import {
   OutputReferences,
   type SessionFileTabRequest,
   type SessionFileTarget,
+  useConversationReadActive,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
@@ -12,6 +13,7 @@ import { NativeFilePreview } from './native-file-preview';
 import { NativeLocalFilePreview } from './native-local-file-preview';
 import type {
   LocalOfficeRequest,
+  NativeOutputSource,
   OfficeEditContext,
   OfficeRequestOutcome,
 } from './output-files-bridge';
@@ -61,11 +63,77 @@ export function useNativeOutputFiles(input: {
   ) => Promise<OfficeRequestOutcome>;
   turnLabel: (runId: string) => string;
 }) {
-  const [request, setRequest] = useState<SessionFileTabRequest>();
+  const [request, setRequest] = useState<{
+    scope: string;
+    value: SessionFileTabRequest;
+    ownerRunId?: string;
+  }>();
+  const key = JSON.stringify([input.generation, input.storeId, input.sessionId]);
+  const [sourceState, setSourceState] = useState<{
+    key: string;
+    sources: NativeOutputSource[];
+    revision: number;
+    error?: string;
+  }>();
+  const sources = sourceState?.key === key ? sourceState.sources : [];
+  const sourceError = sourceState?.key === key ? sourceState.error : undefined;
+  useEffect(() => {
+    if (!input.bridge || !input.storeId || !input.sessionId) return;
+    let cancelled = false;
+    let failures = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const read = async () => {
+      try {
+        const result = await input.bridge!.request({
+          method: 'outputs.sources',
+          generation: input.generation,
+          scope: { storeId: input.storeId!, sessionId: input.sessionId! },
+        });
+        if (cancelled) return;
+        if (
+          !result ||
+          !('kind' in result) ||
+          !('scope' in result) ||
+          !('sources' in result) ||
+          result.kind !== 'outputs.sources' ||
+          result.scope.storeId !== input.storeId ||
+          result.scope.sessionId !== input.sessionId
+        )
+          throw Error('output_sources_scope_changed');
+        setSourceState({ key, sources: result.sources, revision: input.revision });
+      } catch {
+        if (cancelled) return;
+        setSourceState((previous) => ({
+          key,
+          revision: input.revision,
+          sources: previous?.key === key ? previous.sources : [],
+          error: '子 Agent 文件暂时无法更新',
+        }));
+        retry = setTimeout(
+          () => {
+            void read();
+          },
+          500 * 2 ** Math.min(failures++, 4),
+        );
+      }
+    };
+    void read();
+    return () => {
+      cancelled = true;
+      clearTimeout(retry);
+    };
+  }, [input.bridge, input.generation, input.storeId, input.sessionId, input.revision, key]);
+  useEffect(() => {
+    setRequest((previous) => (previous?.scope === key ? previous : undefined));
+  }, [key]);
   const sequence = useRef(0);
   const actions = {
     onOpen: (file: OutputFileSummary) =>
-      setRequest({ target: target(file), title: file.name, requestId: ++sequence.current }),
+      setRequest({
+        scope: key,
+        ownerRunId: file.ownerRunId,
+        value: { target: target(file), title: file.name, requestId: ++sequence.current },
+      }),
     onSave: (file: OutputFileSummary) => {
       void input.bridge
         ?.request({ method: 'outputs.save', generation: input.generation, target: target(file) })
@@ -77,7 +145,6 @@ export function useNativeOutputFiles(input: {
     turnLabel: input.turnLabel,
   };
   const [error, setError] = useState('');
-  const key = JSON.stringify([input.generation, input.storeId, input.sessionId]);
   return {
     closeFile: (file: SessionFileTarget) => {
       if ('handleId' in file)
@@ -91,24 +158,67 @@ export function useNativeOutputFiles(input: {
     },
     openLocal: (file: Extract<SessionFileTarget, { kind: 'local-preview' }>) => {
       if (file.storeId !== input.storeId || file.sessionId !== input.sessionId) return;
-      setRequest({ target: file, title: file.name, requestId: ++sequence.current });
+      setRequest({
+        scope: key,
+        value: { target: file, title: file.name, requestId: ++sequence.current },
+      });
     },
     request:
       request &&
-      request.target.storeId === input.storeId &&
-      request.target.sessionId === input.sessionId
-        ? request
+      request.scope === key &&
+      request.value.target.storeId === input.storeId &&
+      (request.value.target.sessionId === input.sessionId ||
+        (!('handleId' in request.value.target) &&
+          sources.some(
+            (source) =>
+              source.sessionId === request.value.target.sessionId &&
+              source.runId === request.ownerRunId,
+          )))
+        ? request.value
         : undefined,
     references: (
       <>
-        <OutputFileReader key={key} {...input} actions={actions} />
+        <OutputReferenceReaders
+          key={key}
+          {...input}
+          sources={sources}
+          sourceError={sourceError}
+          actions={actions}
+        />
         {error && <p role="alert">{error}</p>}
       </>
     ),
     renderTurnOutputs: ({ turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, input.sessionId);
       return runId ? (
-        <OutputFileReader key={`${key}/${turnId}`} {...input} runId={runId} actions={actions} />
+        <>
+          <OutputFileReader key={`${key}/${turnId}`} {...input} runId={runId} actions={actions} />
+          {sources
+            .filter((source) => source.parentRunId === runId)
+            .map((source) => (
+              <OutputFileReader
+                key={`${key}/${source.sessionId}/${source.runId}`}
+                {...input}
+                sessionId={source.sessionId}
+                runId={source.runId}
+                sourceLabel={`来自子 Agent · ${source.name} · ${input.turnLabel(source.runId)}`}
+                actions={actions}
+              />
+            ))}
+        </>
+      ) : null;
+    },
+    renderChildTurnOutputs: (sessionId: string, { turnId }: { turnId: string }) => {
+      const runId = nativeOutputRunId(turnId, input.storeId, sessionId);
+      return runId &&
+        sources.some((source) => source.sessionId === sessionId && source.runId === runId) ? (
+        <OutputFileReader
+          key={`${key}/${sessionId}/${runId}`}
+          {...input}
+          sessionId={sessionId}
+          runId={runId}
+          actions={actions}
+        />
       ) : null;
     },
     renderFile: ({ target: source }: { target: SessionFileTarget }) =>
@@ -136,17 +246,28 @@ export function useNativeOutputFiles(input: {
       ),
   };
 }
-function OutputFileReader(input: {
+type OutputReadState = {
+  page?: OutputFilesPage;
+  error: string;
+  loading: boolean;
+  more: () => void;
+};
+type OutputReaderInput = {
   bridge?: NativeBridge;
   generation: number;
   storeId?: string;
   sessionId?: string;
   revision: number;
   runId?: string;
+  sourceLabel?: string;
+  collect?: boolean;
+  onState?: (state: OutputReadState) => void;
   actions: React.ComponentProps<typeof OutputFiles> extends infer P
     ? Omit<Extract<P, object>, 'items' | 'collections'>
     : never;
-}) {
+};
+function OutputFileReader(input: OutputReaderInput) {
+  const readActive = useConversationReadActive();
   const [page, setPage] = useState<OutputFilesPage>();
   const pageRef = useRef(page);
   pageRef.current = page;
@@ -157,10 +278,12 @@ function OutputFileReader(input: {
   });
   const [retryRevision, setRetryRevision] = useState(0);
   const retryPending = useRef(false);
+  const readFailures = useRef(0);
   const lastRevision = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!input.bridge || !input.storeId || !input.sessionId) return;
+    if (!readActive || !input.bridge || !input.storeId || !input.sessionId) return;
     let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const revision = `${input.revision}/${retryRevision}`;
     const continuation = lastRevision.current === revision;
     const readCursor = continuation && read.kind === 'files' ? read.cursor : undefined;
@@ -186,7 +309,12 @@ function OutputFileReader(input: {
             !('kind' in result) ||
             result.kind !== 'outputs.page' ||
             result.page.scope.storeId !== input.storeId ||
-            result.page.scope.sessionId !== input.sessionId
+            result.page.scope.sessionId !== input.sessionId ||
+            !outputPageMatches(result.page, {
+              storeId: input.storeId,
+              sessionId: input.sessionId,
+              runId: input.runId,
+            })
           )
             throw Error('output_scope_changed');
           const previous = pageRef.current;
@@ -226,7 +354,12 @@ function OutputFileReader(input: {
                 next.kind !== 'outputs.page' ||
                 next.page.scope.storeId !== input.storeId ||
                 next.page.scope.sessionId !== input.sessionId ||
-                next.page.revision !== incoming.revision
+                next.page.revision !== incoming.revision ||
+                !outputPageMatches(next.page, {
+                  storeId: input.storeId,
+                  sessionId: input.sessionId,
+                  runId: input.runId,
+                })
               )
                 throw Error('output_snapshot_changed');
               incoming = {
@@ -235,7 +368,8 @@ function OutputFileReader(input: {
                 items: [
                   ...incoming.items,
                   ...next.page.items.filter(
-                    (item) => !incoming.items.some((old) => old.fileId === item.fileId),
+                    (item) =>
+                      !incoming.items.some((old) => outputTargetKey(old) === outputTargetKey(item)),
                   ),
                 ],
               };
@@ -257,17 +391,26 @@ function OutputFileReader(input: {
                     ? [
                         ...previous.items,
                         ...incoming.items.filter(
-                          (item) => !previous.items.some((old) => old.fileId === item.fileId),
+                          (item) =>
+                            !previous.items.some(
+                              (old) => outputTargetKey(old) === outputTargetKey(item),
+                            ),
                         ),
                       ]
                     : previous.items,
                 }
               : incoming,
           );
+          readFailures.current = 0;
           setError('');
         })
         .catch(() => {
-          if (!cancelled && !input.runId) setError('读取文件失败');
+          if (cancelled) return;
+          if (!input.runId || input.collect) setError('读取文件失败');
+          retry = setTimeout(
+            () => setRetryRevision((value) => value + 1),
+            500 * 2 ** Math.min(readFailures.current++, 4),
+          );
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -275,6 +418,7 @@ function OutputFileReader(input: {
     }, 100);
     return () => {
       clearTimeout(timer);
+      clearTimeout(retry);
       cancelled = true;
     };
   }, [
@@ -283,15 +427,31 @@ function OutputFileReader(input: {
     input.storeId,
     input.sessionId,
     input.runId,
+    input.collect,
     input.revision,
+    readActive,
     retryRevision,
     read,
   ]);
+  const onState = useRef(input.onState);
+  onState.current = input.onState;
+  useEffect(() => {
+    onState.current?.({
+      page,
+      error,
+      loading,
+      more: () => setRead({ kind: 'files', cursor: page?.nextCursor }),
+    });
+  }, [page, error, loading]);
+  if (input.collect) return null;
+  const items = (page?.items ?? []).map((file) =>
+    input.sourceLabel ? { ...file, sourceLabel: input.sourceLabel } : file,
+  );
   return input.runId ? (
     <>
       <OutputFiles
         {...input.actions}
-        items={page?.items ?? []}
+        items={items}
         collections={page?.collections}
         onRetry={(collectionId) => {
           const collection = page?.collections.find((item) => item.collectionId === collectionId);
@@ -345,7 +505,7 @@ function OutputFileReader(input: {
   ) : (
     <OutputReferences
       {...input.actions}
-      items={page?.items ?? []}
+      items={items}
       hasMore={!!page?.nextCursor}
       onMore={() => setRead({ kind: 'files', cursor: page?.nextCursor })}
       loading={loading}
@@ -364,4 +524,95 @@ function mergeCollections(
     if (!old || BigInt(item.revision) >= BigInt(old.revision)) merged.set(item.collectionId, item);
   }
   return [...merged.values()];
+}
+
+function outputTargetKey(file: OutputFileTarget) {
+  return JSON.stringify([
+    file.storeId,
+    file.sessionId,
+    file.fileId,
+    file.locator.kind,
+    file.locator.kind === 'legacy-operation' ? file.locator.executionId : file.locator.key,
+  ]);
+}
+function outputPageMatches(
+  page: OutputFilesPage,
+  input: Pick<OutputReaderInput, 'storeId' | 'sessionId' | 'runId'>,
+) {
+  return (
+    page.items.every(
+      (file) =>
+        file.storeId === input.storeId &&
+        file.sessionId === input.sessionId &&
+        (!input.runId || file.ownerRunId === input.runId),
+    ) &&
+    page.collections.every((collection) => !input.runId || collection.ownerRunId === input.runId)
+  );
+}
+/** Each source retains its own cursor/revision; combining references never changes ownership. */
+function OutputReferenceReaders(
+  input: OutputReaderInput & {
+    sources: readonly NativeOutputSource[];
+    sourceError?: string;
+  },
+) {
+  const [states, setStates] = useState(new Map<string, OutputReadState>());
+  const readers = [
+    { sessionId: input.sessionId, runId: undefined, sourceLabel: undefined },
+    ...input.sources.map((source) => ({
+      sessionId: source.sessionId,
+      runId: source.runId,
+      sourceLabel: `来自子 Agent · ${source.name} · ${input.actions.turnLabel?.(source.runId) ?? source.runId}`,
+    })),
+  ].map((source) => ({ ...source, key: JSON.stringify([source.sessionId, source.runId]) }));
+  const unique = [...new Map(readers.map((source) => [source.key, source])).values()];
+  const membership = JSON.stringify(unique.map((source) => source.key));
+  useEffect(() => {
+    const retained = new Set<string>(JSON.parse(membership));
+    setStates((previous) =>
+      [...previous.keys()].every((key) => retained.has(key))
+        ? previous
+        : new Map([...previous].filter(([key]) => retained.has(key))),
+    );
+  }, [membership]);
+  const active = unique.flatMap((source) => {
+    const state = states.get(source.key);
+    return state ? [{ source, state }] : [];
+  });
+  const items = [
+    ...new Map(
+      active.flatMap(({ source, state }) =>
+        (state.page?.items ?? []).map(
+          (file) =>
+            [
+              outputTargetKey(file),
+              source.sourceLabel ? { ...file, sourceLabel: source.sourceLabel } : file,
+            ] as const,
+        ),
+      ),
+    ).values(),
+  ];
+  const next = active.find(({ state }) => state.page?.nextCursor);
+  return (
+    <>
+      {unique.map((source) => (
+        <OutputFileReader
+          key={source.key}
+          {...input}
+          sessionId={source.sessionId}
+          runId={source.runId}
+          collect
+          onState={(state) => setStates((previous) => new Map(previous).set(source.key, state))}
+        />
+      ))}
+      <OutputReferences
+        {...input.actions}
+        items={items}
+        hasMore={!!next}
+        onMore={() => next?.state.more()}
+        loading={active.length < unique.length || active.some(({ state }) => state.loading)}
+        error={input.sourceError || active.find(({ state }) => state.error)?.state.error}
+      />
+    </>
+  );
 }

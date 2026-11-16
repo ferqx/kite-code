@@ -2,6 +2,17 @@
 
 ## 办公输出文件
 
+### 子 Agent 文件归属与父会话呈现
+
+[Main 产物来源](electron/output-sources.ts)从原授权后台目录核实 carrier、父 Run、child Session／Run 与根关系，将子 Agent 明确导出的 Shell 文件投影到原父轮末尾和会话“参考项”；[子详情](src/native-child-detail.tsx)显示相同历史产物。仍以原 child `OutputFileTarget` 查询、预览和另存，不复制为父产物，不扫描 Workspace，不根据结果邮件接收时间、同名或最新 child 工作猜归属。相同 child 的后继工作分别关联原父轮；历史多层来源仅在完整原 Run 链可证时投影。单来源查询与分页保留原 Service 合同，既有串行修订规则不扩展为跨 Session 去重。
+
+[Native 调用者](electron/native-caller.ts)和 [IPC](electron/native-ipc.ts)使用准确父选中代次、Store、主体、原 child 来源及不可变 target 的读取准入。来源目录只读且有界，同 scope 倒序响应不能覆盖新目录；目录或单来源文件页失败保留原列表并按有界退避重读，不自动重试收集。连接／删除／选择变化撤销旧准入，预览与保存捕获原选择，往返同一会话也不接纳旧操作。child 产物事件刷新原父列表，首次 child Run 尚不在目录时也重新核来源。重试整理必须使用原 child collection 与观察到的 revision，沿 Store 原期限、权限及 unknown 规则，不重跑 Shell。准确 collection 路径通过 IPC，普通路径或伪造来源不取得资格。
+
+“继续修改”保留 child 来源引用，加入当前父输入草稿；发送前后重新核来源，明确提交后才通过原 InputFile import／工作副本链交给父轮，不覆盖子快照或自动续作 child。参考项合并仍默认五项，重复名称保留，来源标签使用子名称和原轮次，所有打开操作沿准确 target。
+
+2026-11-16，macOS arm64／Bun 1.4.4，基于 `44a698326` 及当前 r3 在途补丁的独立工作树：[来源权限回归](test/native-output-sources.test.ts)、[Main 调用者回归](test/native-caller.test.ts)、[输入准备](test/input-files.test.ts)和[输出 IPC／字节保存](test/isolated/native-output-files.test.ts)共87项／842断言通过，覆盖兄弟根拒绝、相同 child 多轮、同名独立文件、冷读、目录倒序、选择ABA、准确重试和原 child→父编辑。Renderer的[父子产物 DOM](test/isolated/native-child-output-files-dom.test.tsx)另核原轮分组、晚到、暂停保留、分页、同 scope 目录／文件页恢复与切换丢弃迟到结果。该证据为受控 SDK／Main／DOM，不代替整合后真实受管 Shell→collector→普通客户端全过程验收；收集调度与真实平台资格仍由[输出 owner](../../packages/agent/src/business/output-collection.README.md)维护。
+
+
 > 恢复与集成说明（2026-11-13）：本节既有实机、测试数字和临时路径记录对应此前独立 Office 工作树，不代表合入最新 `el-refactor` 后已重新取得同等运行资格。云端旧运行目录当前不可用；源码已从完整 Git 备份与办公补丁恢复，集成验证须另核实际结果。历史路径仅用于定位原证据，不表示当前仍可访问。
 
 办公基础预览与局部请求修改已按本节范围实现；保留转换器作者字体，Excel 只读栏位于客户端外壳，选区纯绘制与文档样式分离。当前开发交付及分平台实际验证见下文，不等同原生 Office 像素一致或安装发行资格。

@@ -32,6 +32,7 @@ export interface NativeChildDetailProps {
   executionUnconfirmed?: boolean;
   readActive: boolean;
   writeClipboardText?: (text: string) => Promise<void>;
+  renderTurnOutputs?: ComponentProps<typeof Conversation>['renderTurnOutputs'];
   onTitleChange: (title: string) => void;
   /** Owned by the parent so switching tabs retains bounded reading data, without hidden readers. */
   readingCache?: ReadingStateCache;
@@ -49,6 +50,7 @@ export function NativeChildDetail({
   executionUnconfirmed = false,
   readActive,
   writeClipboardText,
+  renderTurnOutputs,
   onTitleChange,
   readingCache,
 }: NativeChildDetailProps) {
@@ -342,6 +344,7 @@ export function NativeChildDetail({
           initialReading={readings.get(readingKey)}
           saveReading={(state) => readings.save(readingKey, state)}
           renderMessageContent={renderMessage}
+          renderTurnOutputs={renderTurnOutputs}
           renderMessageAttachments={(model) => renderImages(model.id)}
           renderToolActivity={renderTools}
           traceTurns

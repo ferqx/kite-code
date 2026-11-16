@@ -71,7 +71,16 @@ export type OfficePreviewControl =
   | { kind: 'zoom'; value: number | 'fit' }
   | { kind: 'slide'; value: number }
   | { kind: 'presentation'; value: boolean };
+/** Display lineage from the authenticated original carrier. Never a new output owner. */
+export type NativeOutputSource = {
+  sessionId: string;
+  runId: string;
+  parentRunId: string;
+  carrierExecutionId: string;
+  name: string;
+};
 export type NativeOutputRequest =
+  | { method: 'outputs.sources'; generation: number; scope: { storeId: string; sessionId: string } }
   | ({
       method: 'localPreview.submit';
       generation: number;
@@ -175,6 +184,11 @@ export type NativeOutputRequest =
       context?: OfficeEditContext;
     };
 export type NativeOutputResult =
+  | {
+      kind: 'outputs.sources';
+      scope: { storeId: string; sessionId: string };
+      sources: NativeOutputSource[];
+    }
   | { kind: 'localPreview.interaction'; interaction: LocalOfficePreviewInteraction }
   | {
       kind: 'messageFile.preview';

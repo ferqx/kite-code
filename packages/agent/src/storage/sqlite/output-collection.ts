@@ -11,6 +11,7 @@ import { outputCollectionLimits } from '../../output-files';
 import type { Store } from '../port';
 import { AgentError, type Json } from '../types';
 import { artifactReferenceInTransaction, assertArtifactSessionScope } from './artifact-operations';
+import { actualRoot } from './execution-group-safety';
 import { forkSourceProjection } from './fork-readonly-sources';
 import type { SqliteOperations } from './operations';
 
@@ -113,27 +114,7 @@ export function registerOutputCollectionAtTerminal(db: SqliteOperations, executi
   const e = db.row('SELECT * FROM execution WHERE id=?', executionId);
   if (e?.kind !== 'job') return;
   if (settleUndispatchedCollector(db, e)) return;
-  if (
-    e.adapter_id === 'builtin.files/collect-outputs' &&
-    ['failed', 'cancelled'].includes(String(e.state))
-  ) {
-    const collection = outputCollectionActionEffect(db, e);
-    if (
-      collection?.state === 'pending' &&
-      collection.collectorExecutionId === null &&
-      !db.row(
-        "SELECT id FROM execution WHERE parent_execution_id=? AND adapter_id='builtin.files/collect'",
-        e.id!,
-      )
-    ) {
-      collection.state = 'failed';
-      collection.errorCode =
-        e.state === 'cancelled' ? 'output_collection_cancelled' : 'output_collection_start_failed';
-      collection.retryUntil = new Date(Date.now() + 7 * 86400000).toISOString();
-      save(db, collection);
-    }
-    return;
-  }
+  if (settleFailedOutputAction(db, e)) return;
   // Exact allocation key is attached before process launch, never accepted from stdout.
   const mapping = get(db, String(e.session_id), `allocation/${executionId}`);
   if (!mapping) return;
@@ -151,6 +132,42 @@ export function registerOutputCollectionAtTerminal(db: SqliteOperations, executi
   }
   save(db, c);
 }
+/** Known terminal Action failures never become owner-loss retries. */
+function settleFailedOutputAction(
+  db: SqliteOperations,
+  e: Record<string, string | number | bigint | null>,
+): boolean {
+  if (
+    e.adapter_id !== 'builtin.files/collect-outputs' ||
+    !['failed', 'cancelled'].includes(String(e.state))
+  )
+    return false;
+  const collection = outputCollectionActionEffect(db, e);
+  if (
+    collection?.state === 'pending' &&
+    currentCollectorAttempt(collection, e) &&
+    collection.collectorExecutionId === null &&
+    !db.row(
+      "SELECT id FROM execution WHERE parent_execution_id=? AND adapter_id='builtin.files/collect'",
+      e.id!,
+    )
+  ) {
+    collection.state = 'failed';
+    const result = JSON.parse(String(e.result_json));
+    const denied =
+      result?.details?.adapterAttempted === false && result.details.code === 'permission_denied';
+    collection.errorCode = denied
+      ? 'output_collection_permission_denied'
+      : e.state === 'cancelled'
+        ? 'output_collection_cancelled'
+        : 'output_collection_start_failed';
+    collection.cleanupAfter = new Date(Date.now() + 7 * 86400000).toISOString();
+    collection.retryUntil = denied ? null : collection.cleanupAfter;
+    save(db, collection);
+  }
+  return true;
+}
+
 export function outputCollectionOperation(
   db: SqliteOperations,
   method: string,
@@ -236,6 +253,7 @@ export function outputCollectionOperation(
         },
         state: 'allocated',
         attempt: 1,
+        dispatchRootWorkSeq: String(e.root_work_seq),
         startCommandId: null,
         collectorExecutionId: null,
         expectedFiles: null,
@@ -302,6 +320,13 @@ export function outputCollectionOperation(
         if (prior && !['failed', 'succeeded', 'cancelled'].includes(String(prior.state)))
           throw new AgentError('output_collector_unsettled');
       }
+      // This explicit scoped retry creates new collection work after any prior
+      // Stop. Cold automatic recovery never advances this root boundary.
+      const { root } = actualRoot(db, input.sessionId);
+      db.allocateSessionSequence(String(root.id));
+      c.dispatchRootWorkSeq = String(
+        db.row('SELECT next_seq FROM session WHERE id=?', root.id!)!.next_seq,
+      );
       c.attempt++;
       c.state = 'pending';
       c.collectorExecutionId = null;
@@ -1052,6 +1077,7 @@ export function recoverOutputCollections(db: SqliteOperations, rootId: string): 
         )
       )
         continue;
+      if (settleFailedOutputAction(db, action)) continue;
       db.run(
         "UPDATE execution SET state='cancelled',result_json=?,result_revision=result_revision+1 WHERE id=?",
         json({ outcome: 'cancelled', content: 'output_action_owner_lost' }),
@@ -1229,6 +1255,112 @@ function legacyInherited(
     reference: ref,
     publishedAt: '',
   };
+}
+
+/** Exact host collection intake, valid before the short Action is planned.
+ * It carries no business child liveness: its successful producer is immutable.
+ * Current-attempt authorization and ordinary owner/cancellation checks still apply.
+ */
+export function outputCollectionCommandEffect(
+  db: SqliteOperations,
+  command: Record<string, string | number | bigint | null>,
+): OutputCollection | null {
+  if (
+    command.kind !== 'extension.invoke' ||
+    command.root_work_command_id !== command.id ||
+    command.root_work_seq !== command.seq
+  )
+    return null;
+  const request = JSON.parse(String(command.request_json));
+  if (
+    request.extensionId !== namespace ||
+    request.actionId !== 'collect-outputs' ||
+    request.definitionVersion !== '1' ||
+    typeof request.input?.collectionId !== 'string' ||
+    !Number.isSafeInteger(request.input.attempt) ||
+    request.input.attempt < 1
+  )
+    return null;
+  let c: OutputCollection | null;
+  try {
+    c = readCollection(db, String(command.session_id), request.input.collectionId);
+  } catch {
+    return null;
+  }
+  if (
+    !c ||
+    c.source.sessionId !== command.session_id ||
+    c.source.storeId !== command.origin_store_id ||
+    c.source.subjectId !== command.subject_id ||
+    c.startCommandId !== command.id ||
+    c.attempt !== request.input.attempt ||
+    command.id !== `output-collect-${hash([c.source.storeId, c.id, request.input.attempt])}` ||
+    json(request) !==
+      json({
+        kind: 'extension.invoke',
+        extensionId: namespace,
+        actionId: 'collect-outputs',
+        definitionVersion: '1',
+        input: { collectionId: c.id, attempt: request.input.attempt },
+      })
+  )
+    return null;
+  const producer = db.row('SELECT * FROM execution WHERE id=?', c.source.producerExecutionId);
+  const allocation = get(db, c.source.sessionId, `allocation/${c.source.producerExecutionId}`);
+  if (
+    producer?.kind !== 'job' ||
+    producer.adapter_id !== 'shell.command' ||
+    producer.state !== 'succeeded' ||
+    producer.origin_store_id !== c.source.storeId ||
+    producer.session_id !== c.source.sessionId ||
+    String(producer.result_revision) !== c.source.producerResultRevision ||
+    !allocation ||
+    JSON.parse(String(allocation.json)).collectionId !== c.id
+  )
+    return null;
+  return c;
+}
+
+/** Host-only maintenance, never a Job-name exemption or child permission grant. */
+function collectionForCommand(
+  db: SqliteOperations,
+  command: Record<string, string | number | bigint | null>,
+): OutputCollection | null {
+  const action = outputCollectionCommandEffect(db, command);
+  if (action) return action;
+  if (command.kind !== 'operation.job') return null;
+  const execution = db.row('SELECT * FROM execution WHERE origin_command_id=?', command.id!);
+  const c = execution && outputCollectorEffect(db, execution);
+  return c &&
+    c.startCommandId === execution!.root_work_command_id &&
+    c.attempt === JSON.parse(String(execution!.intent_json)).attempt
+    ? c
+    : null;
+}
+export function isOutputCollectionCommand(
+  db: SqliteOperations,
+  command: Record<string, string | number | bigint | null>,
+): boolean {
+  return collectionForCommand(db, command) !== null;
+}
+/** Cancellation compares the producer's root work, never a child's local command sequence. */
+export function outputCollectionWorkSequence(
+  db: SqliteOperations,
+  command: Record<string, string | number | bigint | null>,
+): string | null {
+  const c = collectionForCommand(db, command);
+  if (!c) return null;
+  const producer = db.row(
+    'SELECT root_work_seq FROM execution WHERE id=?',
+    c.source.producerExecutionId,
+  )!;
+  const sequence = c.dispatchRootWorkSeq ?? String(producer.root_work_seq);
+  if (!/^[0-9]+$/.test(sequence) || BigInt(sequence) < BigInt(producer.root_work_seq!)) return null;
+  const root = db.row(
+    'SELECT root.next_seq FROM session child JOIN session root ON root.id=child.root_id WHERE child.id=?',
+    c.source.sessionId,
+  );
+  return root && BigInt(sequence) <= BigInt(root.next_seq!) ? sequence : null;
 }
 
 export function outputCollectionActionEffect(
