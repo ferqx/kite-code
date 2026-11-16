@@ -6350,7 +6350,7 @@ body {
   width: 100%;
   min-width: 0;
   font-size: var(--conversation-text-size);
-  color: var(--child-agent-color, var(--muted-foreground));
+  color: var(--muted-foreground);
 }
 .kite-client .tool-agent-name {
   flex: 0 1 auto;

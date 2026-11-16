@@ -1645,7 +1645,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 共享 UI／Native DOM 两整文件15项／360断言、Service响应与生成Message validator整文件6项／18断言通过；Core Task业务26整文件132项／2538断言，以及输入／派发／child result／Runtime报告恢复四文件27项／375断言通过。八 workspace typecheck、同源 API、边界和测试归属检查通过。本次资格限本机普通候选、已配置真实模型与隔离读取工具／Full选择，不外推安装发布或其他平台；修复前的失败证据保持。
 
-子 Agent 工具消息复用原 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 Trace 单行。[nativeAgentActivities / nativeAgentActivityForTool](src/native-agent-activity.ts) 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start。已成功受理的原工具回执与目录吻合后，消息补充名称和准确详情目标，创建行显示「名称 · 子agent开始工作」并应用同一身份配色。身份待核实时用通用图标和原操作标题，继续操作沿用原标签。`childAgent` 仅含 identity／name，工具行保留原操作事实。原工具本身的失败、取消与结果未知保持自身展示。整行点击沿原右侧标签交付准确 Session／Execution，详情回调暂不可用时仅暂停该行点击。该入口直接导航，原始受理 JSON 和子日志在各自原记录中读取。
+子 Agent 工具消息复用原 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 Trace 单行。[nativeAgentActivities / nativeAgentActivityForTool](src/native-agent-activity.ts) 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start。已成功受理的原工具回执与目录吻合后，消息补充名称和准确详情目标，创建行显示「名称 · 子agent开始工作」，其中图标应用身份配色，文字沿用默认工具消息颜色。身份待核实时用通用图标和原操作标题，继续操作沿用原标签。`childAgent` 仅含 identity／name，工具行保留原操作事实。原工具本身的失败、取消与结果未知保持自身展示。整行点击沿原右侧标签交付准确 Session／Execution，详情回调暂不可用时仅暂停该行点击。该入口直接导航，原始受理 JSON 和子日志在各自原记录中读取。
 
 [环境 hook](src/native-environment.tsx) 复用原完整目录和有界展示缓存，不增加网络读取；缓存成本包含子 Agent 展示事实，同 scope 校准先保留最新已读 display，即使完整展示超过缓存预算也不闪回旧行。普通刷新保留名称、原操作和详情目标；当前任务生命周期仍用于原环境卡、停止门禁和子详情，不投影为父历史工具行状态。图标按原 Store／child Session 稳定身份与审批卡共用。
 

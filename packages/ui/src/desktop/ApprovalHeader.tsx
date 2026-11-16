@@ -1,20 +1,25 @@
-import {
-  ArrowLeft01Icon,
-  ArrowRight01Icon,
-  Atom01Icon,
-  BotIcon,
-  Compass01Icon,
-  Leaf01Icon,
-  PuzzleIcon,
-  Rocket01Icon,
-  Shield01Icon,
-} from '@hugeicons/core-free-icons';
+import { ArrowLeft01Icon, ArrowRight01Icon, Shield01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import {
+  AlienIcon,
+  FlyingSaucerIcon,
+  GhostIcon,
+  PlanetIcon,
+  RobotIcon,
+  RocketLaunchIcon,
+} from '@phosphor-icons/react';
 import { Button } from './ui';
 
 // Session identities are random and immutable. Hashing them gives each child a stable
 // allocation across reloads without persisting presentation data or using its title.
-const childIcons = [BotIcon, Rocket01Icon, Compass01Icon, Atom01Icon, PuzzleIcon, Leaf01Icon];
+const childIcons = [
+  RobotIcon,
+  AlienIcon,
+  FlyingSaucerIcon,
+  GhostIcon,
+  PlanetIcon,
+  RocketLaunchIcon,
+];
 export function childAgentAppearance(identity: string) {
   let hash = 2166136261;
   for (const character of identity) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
@@ -30,6 +35,7 @@ export function ChildAgentIcon({
   neutral?: boolean;
 }) {
   const appearance = childAgentAppearance(identity);
+  const Icon = childIcons[appearance.icon]!;
   return (
     <span
       className="approval-child-icon"
@@ -37,7 +43,7 @@ export function ChildAgentIcon({
       data-child-color={appearance.color}
       data-neutral={neutral || undefined}
     >
-      <HugeiconsIcon icon={childIcons[appearance.icon]!} aria-hidden="true" />
+      <Icon size="var(--ui-icon-size, 14px)" weight="regular" aria-hidden="true" />
     </span>
   );
 }
