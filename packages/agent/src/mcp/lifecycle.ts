@@ -188,6 +188,7 @@ export interface McpLifecycleOptions {
   transportPort?: McpLifecycleTransportPort;
   /** Trusted late host resolver. Only safe bootstrap identity is persisted by the source Job. */
   scopedSources?: McpScopedSourcePort;
+  /** Startup/discovery budget after the admitted Job starts; excludes permission waiting. */
   readyTimeoutMs?: number;
 }
 export const mcpSourceConnectionJobId = 'mcp.source.connection';
@@ -537,26 +538,37 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let abort!: () => void;
     const observation = new AbortController();
+    const waitSignal = AbortSignal.any([signal, observation.signal]);
+    const terminal = async (): Promise<never> => {
+      for (;;) {
+        try {
+          await operations.wait(ref, {
+            signal: waitSignal,
+            // A bounded read is not the connection's startup deadline. A Job may
+            // still be waiting for its ordinary human approval with zero I/O.
+            timeoutMs: 30000,
+          });
+        } catch (error) {
+          if (!waitSignal.aborted && (error as { code?: string }).code === 'wait_timeout') continue;
+          throw error;
+        }
+        throw new McpAdapterError('mcp_connection_unavailable');
+      }
+    };
     try {
       return await Promise.race([
         source.then(async (entry) => {
-          await entry.ready.promise;
+          waitSignal.throwIfAborted();
+          // Entry publication happens only inside the admitted Job, before open.
+          // Include a hung open/discovery, but never charge human approval time.
+          const deadline = new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new McpAdapterError('mcp_ready_timeout')), timeout);
+          });
+          await Promise.race([entry.ready.promise, deadline]);
           return entry;
         }),
-        ...(typeof operations.wait === 'function'
-          ? [
-              operations
-                .wait(ref, {
-                  signal: AbortSignal.any([signal, observation.signal]),
-                  timeoutMs: timeout,
-                })
-                .then(() => {
-                  throw new McpAdapterError('mcp_connection_unavailable');
-                }),
-            ]
-          : []),
+        ...(typeof operations.wait === 'function' ? [terminal()] : []),
         new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new McpAdapterError('mcp_ready_timeout')), timeout);
           abort = () => reject(new McpAdapterError('mcp_cancelled_before_ready'));
           signal.addEventListener('abort', abort, { once: true });
           if (signal.aborted) abort();
@@ -1345,7 +1357,8 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
             actual.originCommandId === originalRef.commandId &&
             actual.originStoreId === own.originStoreId &&
             actual.sessionId === sessionId &&
-            actual.runId === own.runId &&
+            // The connection is explicitly detached from its parent Run.
+            actual.runId === null &&
             actual.parentExecutionId === own.id &&
             actual.rootWorkCommandId === own.rootWorkCommandId &&
             actual.rootWorkSeq === own.rootWorkSeq &&
@@ -1366,8 +1379,22 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       try {
         entry = await waitReady(ref, context.signal, context.operations);
       } catch (error) {
+        if (
+          context.signal.aborted ||
+          (error instanceof McpAdapterError &&
+            ['mcp_ready_timeout', 'mcp_adapter_closed'].includes(error.code))
+        ) {
+          try {
+            // Withdraw this exact unfinished opening, including a pending Job
+            // approval. Acceptance is not a stop proof; finally keeps quarantine
+            // until the original terminal evidence confirms stopped/unopened.
+            await context.operations.cancel?.(ref);
+          } catch {
+            // A late handle/approval must still meet the quarantined ticket fence.
+          }
+        }
         return {
-          outcome: 'failed',
+          outcome: context.signal.aborted ? 'cancelled' : 'failed',
           content: error instanceof McpAdapterError ? error.code : 'mcp_connection_unavailable',
           details: {
             operationRef: ref as unknown as Json,

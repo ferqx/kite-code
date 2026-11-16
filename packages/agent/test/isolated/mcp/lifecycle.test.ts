@@ -34,6 +34,12 @@ async function fixture(
   withPort = true,
   beforeOpen?: () => Promise<void>,
   ownedObservation = false,
+  options: {
+    readyTimeoutMs?: number;
+    jobApproval?: boolean;
+    scopedSource?: boolean;
+    beforeStart?: () => Promise<void>;
+  } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-mcp-lifecycle-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'new' };
@@ -139,7 +145,35 @@ async function fixture(
     },
   };
   const servers = [{ id: 'local', transport: { type: 'http' as const, url: network.url.href } }];
-  const lifecycle = createMcpLifecycle({ servers, ...(withPort ? { transportPort: port } : {}) });
+  const lifecycle = createMcpLifecycle({
+    servers: options.scopedSource ? [] : servers,
+    ...(withPort ? { transportPort: port } : {}),
+    readyTimeoutMs: options.readyTimeoutMs,
+    ...(options.scopedSource
+      ? {
+          scopedSources: {
+            async resolve() {
+              return {
+                server: servers[0]!,
+                captureDigest: 'a'.repeat(64),
+                transportPort: port,
+                assertFresh({ signal }: { signal: AbortSignal }) {
+                  signal.throwIfAborted();
+                },
+              };
+            },
+          },
+        }
+      : {}),
+  });
+  if (options.beforeStart) {
+    const job = lifecycle.extension.jobs![0]!;
+    const start = job.start;
+    job.start = async (input, context) => {
+      await options.beforeStart!();
+      return start(input, context);
+    };
+  }
   const steps = new Map<string, number>();
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -214,8 +248,15 @@ async function fixture(
     modelId: 'local',
     extensions: [lifecycle.extension],
     permissions: {
-      async authorize() {
-        return { allowed: true, revision: 'explicit-local-fixture' };
+      async authorize(request) {
+        const approval =
+          options.jobApproval &&
+          ['mcp.source.connection', 'mcp.connection.local'].includes(request.definitionId);
+        return {
+          allowed: !approval,
+          revision: 'explicit-local-fixture',
+          ...(approval ? { approval: { request: { title: 'Owned connection approval' } } } : {}),
+        };
       },
     },
     resolveRunConfiguration: async () => ({
@@ -284,10 +325,13 @@ async function fixture(
       return runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     },
     async close() {
-      await runtime.close();
-      await lifecycle.close();
-      provider.stop(true);
-      network.stop(true);
+      try {
+        await runtime.close();
+      } finally {
+        await lifecycle.close();
+        provider.stop(true);
+        network.stop(true);
+      }
       rmSync(root, { recursive: true, force: true });
     },
   };
@@ -974,3 +1018,282 @@ for (const corruptParent of [false, true])
       await f.close();
     }
   }, 30000);
+
+async function eventually<T>(read: () => Promise<T | null>): Promise<T> {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const value = await read();
+    if (value !== null) return value;
+    if (Date.now() >= deadline) throw Error('original_connection_fact_deadline');
+    await Bun.sleep(5);
+  }
+}
+const connectionApproval = (f: Awaited<ReturnType<typeof fixture>>) =>
+  eventually(
+    async () =>
+      (
+        await f.runtime.listInteractions({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 'a',
+          state: 'pending',
+        })
+      ).interactions[0] ?? null,
+  );
+const answerConnection = (
+  f: Awaited<ReturnType<typeof fixture>>,
+  card: Awaited<ReturnType<typeof connectionApproval>>,
+  decision: 'approve' | 'deny',
+) =>
+  f.runtime.answerInteraction({
+    expectedStoreId: f.expectedStoreId,
+    subjectId: 'user',
+    commandId: `answer-${decision}-${card.id}`,
+    presentationSessionId: card.presentationSessionId,
+    interactionId: card.id,
+    expectedRevision: card.revision,
+    answer:
+      decision === 'approve'
+        ? { kind: 'approval', decision, optionId: 'once' }
+        : { kind: 'approval', decision },
+  });
+
+for (const scopedSource of [false, true])
+  test(`connection startup budget excludes delayed ordinary Job approval (${scopedSource ? 'source' : 'static'})`, async () => {
+    const f = await fixture(true, undefined, false, {
+      scopedSource,
+      jobApproval: true,
+      readyTimeoutMs: 500,
+    });
+    let work: ReturnType<typeof f.run> | undefined;
+    try {
+      work = f.run('a', 'connect-a');
+      const card = await connectionApproval(f);
+      const job = (await f.store.getExecution(card.executionId))!;
+      const parent = (await f.store.getExecution(job.parentExecutionId!))!;
+      expect(job.runId).toBeNull();
+      expect(parent.runId).not.toBeNull();
+      await Bun.sleep(800);
+      expect((await f.store.getExecution(parent.id))!.status).toBe('dispatching');
+      expect((await f.store.getExecution(job.id))!.status).toBe('planned');
+      expect((await connectionApproval(f)).id).toBe(card.id);
+      expect(f.opens).toBe(0);
+      expect(f.connections).toBe(0);
+      await answerConnection(f, card, 'approve');
+      await work;
+      expect((await f.store.getExecution(parent.id))!.status).toBe('succeeded');
+      expect((await f.store.getExecution(job.id))!.status).toBe('running');
+      expect(f.opens).toBe(1);
+      expect(f.calls).toBe(1);
+    } finally {
+      await f.close();
+      await work?.catch(() => {});
+    }
+  }, 15000);
+
+for (const action of ['deny', 'cancel'] as const)
+  test(`pending connection approval ${action} settles the original without open or replay`, async () => {
+    const f = await fixture(true, undefined, false, {
+      scopedSource: true,
+      jobApproval: true,
+      readyTimeoutMs: 100,
+    });
+    let work: ReturnType<typeof f.run> | undefined;
+    try {
+      work = f.run('a', 'connect-a');
+      const card = await connectionApproval(f);
+      const job = (await f.store.getExecution(card.executionId))!;
+      await Bun.sleep(180);
+      if (action === 'deny') await answerConnection(f, card, 'deny');
+      else
+        await f.runtime.cancelCommand({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'user',
+          sessionId: 'a',
+          commandId: 'stop-original',
+          targetCommandId: 'connect-a',
+        });
+      await work;
+      const terminal = await eventually(async () => {
+        const e = (await f.store.getExecution(job.id))!;
+        return ['failed', 'cancelled'].includes(e.status) ? e : null;
+      });
+      expect(terminal.result).toMatchObject({ details: { adapterAttempted: false } });
+      expect(f.opens).toBe(0);
+      expect(f.connections).toBe(0);
+      expect(f.calls).toBe(0);
+      expect(
+        (
+          await f.runtime.listInteractions({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 'a',
+            state: 'pending',
+          })
+        ).interactions,
+      ).toEqual([]);
+      if (action === 'deny') {
+        let rejected: unknown;
+        try {
+          await answerConnection(f, card, 'approve');
+        } catch (error) {
+          rejected = error;
+        }
+        expect(rejected).toMatchObject({ code: 'interaction_answer_conflict' });
+      } else
+        expect((await answerConnection(f, card, 'approve')).receipt).toMatchObject({
+          cancelled: true,
+        });
+      expect(f.opens).toBe(0);
+    } finally {
+      await f.close();
+      await work?.catch(() => {});
+    }
+  }, 15000);
+
+for (const confirmStop of [true, false])
+  test(`startup timeout collects a late handle without ready or replay (${confirmStop ? 'confirmed' : 'initially unknown'} stop)`, async () => {
+    let entered!: () => void, release!: () => void;
+    const opening = new Promise<void>((r) => {
+      entered = r;
+    });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const f = await fixture(
+      true,
+      async () => {
+        entered();
+        await gate;
+      },
+      false,
+      {
+        scopedSource: true,
+        readyTimeoutMs: 100,
+      },
+    );
+    f.confirmStop = confirmStop;
+    let work: ReturnType<typeof f.run> | undefined;
+    try {
+      work = f.run('a', 'connect-a');
+      await opening;
+      const parent = await eventually(
+        async () =>
+          (await f.store.listExecutions('a')).find(
+            (e) => e.definitionId === 'mcp.connect' && e.status === 'failed',
+          ) ?? null,
+      );
+      expect(parent.result).toMatchObject({
+        content: 'mcp_ready_timeout',
+        details: { stopConfirmed: false },
+      });
+      const job = (await f.store.listExecutions('a')).find(
+        (e) => e.parentExecutionId === parent.id,
+      )!;
+      expect(f.opens).toBe(1);
+      expect(f.connections).toBe(0);
+      release();
+      await work;
+      await eventually(async () => (f.stops.length ? true : null));
+      if (!confirmStop) {
+        const pending = (await f.store.getExecution(job.id))!;
+        expect(['dispatching', 'running']).toContain(pending.status);
+        expect(pending.result).toBeNull();
+        expect(
+          (
+            await f.lifecycle.readStepCapabilities({
+              command: { originStoreId: f.expectedStoreId },
+              session: { id: 'a' },
+            })
+          ).toolIds,
+        ).toEqual([]);
+        f.confirmStop = true;
+        await f.lifecycle.close();
+      }
+      const terminal = await eventually(async () => {
+        const e = (await f.store.getExecution(job.id))!;
+        return ['failed', 'cancelled'].includes(e.status) ? e : null;
+      });
+      expect(terminal.result).toMatchObject({
+        details: { transportStopped: true, remoteToolStopConfirmed: false },
+      });
+      expect(f.stops).toContain('a');
+      expect(f.opens).toBe(1);
+      expect(f.connections).toBe(0);
+      expect(
+        (
+          await f.lifecycle.readStepCapabilities({
+            command: { originStoreId: f.expectedStoreId },
+            session: { id: 'a' },
+          })
+        ).toolIds,
+      ).toEqual([]);
+    } finally {
+      release();
+      f.confirmStop = true;
+      await f.close();
+      await work?.catch(() => {});
+    }
+  }, 15000);
+
+for (const corruptRootWork of [false, true])
+  test(`late admitted detached Job proves unopened only with exact lineage (${corruptRootWork ? 'corrupt' : 'original'})`, async () => {
+    let entered!: () => void, release!: () => void;
+    const starting = new Promise<void>((r) => {
+      entered = r;
+    });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const f = await fixture(true, undefined, false, {
+      scopedSource: true,
+      beforeStart: async () => {
+        entered();
+        await gate;
+      },
+    });
+    let work: ReturnType<typeof f.run> | undefined;
+    let db: Database | undefined;
+    let jobId: string | undefined;
+    try {
+      work = f.run('a', 'connect-a');
+      await starting;
+      const job = (await f.store.listExecutions('a')).find(
+        (e) => e.definitionId === 'mcp.source.connection',
+      )!;
+      jobId = job.id;
+      const parent = (await f.store.getExecution(job.parentExecutionId!))!;
+      expect(parent.runId).not.toBeNull();
+      expect(job.runId).toBeNull();
+      // The owned factory closes while Core has admitted start but no port exists.
+      // Retain the delayed original start, not a new request or a new connection.
+      await f.lifecycle.close();
+      if (corruptRootWork) {
+        db = new Database(selectProfile(f.profile).databasePath);
+        db.exec('PRAGMA busy_timeout = 1000');
+        db.query('UPDATE execution SET root_work_seq = root_work_seq + 1 WHERE id = ?').run(job.id);
+      }
+      release();
+      await work;
+      const terminal = await eventually(async () => {
+        const e = (await f.store.getExecution(job.id))!;
+        return ['failed', 'cancelled', 'outcome_unknown'].includes(e.status) ? e : null;
+      });
+      expect(terminal.status).toBe(corruptRootWork ? 'outcome_unknown' : 'failed');
+      if (!corruptRootWork)
+        expect(terminal.result).toMatchObject({
+          details: { transportStopped: true, remoteToolStopConfirmed: false },
+        });
+      else expect(terminal.result).not.toMatchObject({ details: { transportStopped: true } });
+      expect(f.opens).toBe(0);
+      expect(f.connections).toBe(0);
+    } finally {
+      if (db && jobId)
+        db.query('UPDATE execution SET root_work_seq = root_work_seq - 1 WHERE id = ?').run(jobId);
+      db?.close();
+      release();
+      if (corruptRootWork) {
+        await expect(f.close()).rejects.toMatchObject({ code: 'shutdown_cleanup_unconfirmed' });
+        await f.store.close();
+      } else await f.close();
+      await work?.catch(() => {});
+    }
+  }, 15000);

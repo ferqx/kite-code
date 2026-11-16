@@ -28,6 +28,8 @@ Worker 是纯 schema 缓存，不持有 Model/process 资源许可。一秒空�
 
 多个 scope 共享一条连接。`release()` 幂等，只废弃本 scope 的后续调用；其他 scope 继续使用。最后一个 scope 等有界在途请求结束后关闭连接。`close()` 是明确宿主关闭整个 adapter 的动作，不能把一个页面卸载当全局 close。失联后，只有下一次显式目录/读取操作可建立新连接；既有工具调用不会自动重连重发。
 
+[连接生命周期](lifecycle.ts)的 `readyTimeoutMs` 从普通权限获准、原 Job 发布 Entry 后开始，覆盖 transport open 与目录发现，不把人工审批等待误当服务启动失败。原 Job 终态观察沿有界 `operations.wait` 继续等待，拒绝与取消及时结算；父连接取消、宿主关闭或实际启动超时只取消原 operation，取消受理仍不等于停止证明。未确认的 opening 保留 quarantine，迟到 handle 必须收束而不能发布 ready。detached 连接的未打开证明要求 `runId:null`，并继续核原 Store、Session、parent、root work、definition 与完整输入摘要；没有 Entry/port 才能生成 unopened handle，错身份或真实打开后无法证明停止仍保 unknown。[生命周期回归](../../test/isolated/mcp/lifecycle.test.ts)在真实 Runtime/SQLite 与本地协议夹具验证延迟批准、拒绝、取消后迟到批准、启动超时迟到 handle、准确 detached 来源与篡改反例，不代替真实模型或 Native stdio 验收。
+
 连接 Job 不占 Shell 的短任务 process slot，避免默认四条空闲长连接耗尽普通执行许可。连接自身的 key、scope、权限、原 Job 监督和真实 stop 证明保持独立；移除共享槽位声明不授予 wire 权限，也不把未知停止当成释放。[资源组合回归](../../test/isolated/resources/serial.test.ts)使用实际 MCP/Shell factory 和资源管理器验证长连接持有期间 Shell 与另一连接可继续申请，而普通 Shell 的并发上限与等待取消仍生效。
 
 已确认ended的连接仅在Core dispose成功、且transition不再引用原holder时回收Entry；精确ticket释放同时断开holder/newEntry回链，并只在live仍指向该原对象时删除。旧dispose不能删除新连接，unknown、未确认停止和publication quarantine仍保原owner/proof。512只约束同时保留的实际热资源，不成为已关闭历史连接总数门槛。[完整生命周期回归](../../test/isolated/mcp/completed-lifetimes.test.ts)分别通过514次真实本机connect/stop和514次reconnect，并核原冷历史proof可读且零新RPC；没有据此取得数周soak或其他平台资格。
