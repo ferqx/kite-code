@@ -407,31 +407,105 @@ async function verifyMarkdownEdges(theme: 'light' | 'dark', width: number) {
     });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await table.screenshot({ path: path.join(artifact, `${theme}-${width}-wide-table.png`) });
+  } finally {
+    await page.close();
+  }
+  return results;
+}
 
-    await page.evaluate(() => sessionStorage.clear());
-    await page.reload();
+async function verifySendFeedback(theme: 'light' | 'dark', width: number) {
+  const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme });
+  await page.addInitScript((theme) => localStorage.setItem('kite.desktop.theme', theme), theme);
+  const alert = page.locator('.native-toast-card');
+  const input = page.locator('textarea.prompt-editor');
+  const loading = page.locator('.composer-action[aria-busy="true"]');
+  const transcriptNotices = page.locator(
+    '.conversation-viewport .delivery-status, .conversation-viewport .turn-failure, .conversation-viewport .native-toast-card',
+  );
+  try {
+    await page.goto(server.url.toString());
+    await input.waitFor();
     const source = `# 长消息\n\n${'需要完整保留的正文。\n\n'.repeat(25)}`;
-    await page.locator('textarea.prompt-editor').fill(source);
-    await page.locator('textarea.prompt-editor').press('Enter');
+    await input.fill(source);
+    await input.press('Enter');
+    await loading.waitFor();
     await page.getByRole('button', { name: '展开用户消息', exact: true }).waitFor();
+    assert.equal(await alert.count(), 0);
     await page.getByRole('button', { name: '结果未知', exact: true }).click();
-    const alert = page.locator('.message.user .delivery-status');
     await alert.waitFor();
     assert.match(await alert.innerText(), /发送结果尚未确认/);
-    assert.equal(await promptText(page.locator('.prompt-editor')), source);
-    const statusBounds = await alert.boundingBox();
-    const cropBounds = await page.locator('.message.user .prompt-markdown').boundingBox();
-    assert.ok(statusBounds!.y >= cropBounds!.y + cropBounds!.height);
+    assert.equal(await promptText(input), source);
+    assert.equal(await loading.count(), 0);
+    assert.equal(await transcriptNotices.count(), 0);
+    const unknownToast = await alert.elementHandle();
+    await page.getByRole('button', { name: '刷新核对', exact: true }).click();
+    assert.equal(
+      await page.evaluate(
+        (node) => node === document.querySelector('.native-toast-card'),
+        unknownToast,
+      ),
+      true,
+    );
     await page.setViewportSize({ width, height: 560 });
     await page.waitForFunction(() => {
       const crop = document.querySelector('.message.user .prompt-markdown-viewport');
       return crop?.getBoundingClientRect().height === 264;
     });
+    const statusBounds = await alert.boundingBox();
+    assert.ok(statusBounds && statusBounds.y >= 0 && statusBounds.y + statusBounds.height <= 560);
     await page.screenshot({ path: path.join(artifact, `${theme}-${width}-collapsed-unknown.png`) });
+    await page.getByRole('button', { name: '确认受理', exact: true }).click();
+    await alert.waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: '保存用户消息', exact: true }).click();
+    await page.getByRole('button', { name: '完成回复', exact: true }).click();
+    await page.locator('.message.assistant').waitFor();
+    assert.equal(await page.locator('.message.user').count(), 1);
+    assert.equal(await transcriptNotices.count(), 0);
+    assert.equal(await page.evaluate(() => window.promptSendFixture.posts.length), 1);
+
+    await page.setViewportSize({ width, height: 1000 });
+    await page.getByRole('button', { name: '新对话', exact: true }).click();
+    await page.locator('[data-model-trigger]').click();
+    await page
+      .getByRole('button', { name: /^选择模型，当前 / })
+      .first()
+      .click();
+    await page.locator('[aria-label="选择模型 model-a"]').click();
+    const picker = page.locator('[aria-label="模型与思考程度"]');
+    if (await picker.isVisible()) await picker.press('Escape');
+    await picker.waitFor({ state: 'detached' });
+    await input.fill('首条消息失败后保留的草稿');
+    await page.locator('.composer-action:not([disabled])').waitFor();
+    await input.press('Enter');
+    await loading.waitFor();
+    assert.equal(await alert.count(), 0);
+    await page.evaluate(() => window.promptSendFixture.rejectFirst());
+    await alert.waitFor();
+    assert.match(await alert.innerText(), /本地执行环境尚未就绪/);
+    assert.equal(await loading.count(), 0);
+    assert.equal(await input.getAttribute('aria-label'), '新对话草稿');
+    assert.equal(await page.locator('.message.user').count(), 0);
+    assert.equal(await transcriptNotices.count(), 0);
+    const failureToast = await alert.elementHandle();
+    await page.screenshot({ path: path.join(artifact, `${theme}-${width}-first-failure.png`) });
+    await page.evaluate(() => window.promptSendFixture.releaseFirstSelection());
+    await page.locator('[aria-label="当前会话私有草稿"]').waitFor();
+    assert.equal(await promptText(input), '首条消息失败后保留的草稿');
+    assert.equal(
+      await page.evaluate(
+        (node) => node === document.querySelector('.native-toast-card'),
+        failureToast,
+      ),
+      true,
+    );
+    await page.getByRole('button', { name: 'Session B', exact: true }).click();
+    await alert.waitFor({ state: 'detached' });
+    assert.equal(await transcriptNotices.count(), 0);
+    assert.equal(await page.evaluate(() => window.promptSendFixture.posts.length), 2);
   } finally {
     await page.close();
   }
-  return results;
+  return { receiptUnconfirmed: true, firstRejectionDuringSelection: true };
 }
 async function verifySendingInput(theme: 'light' | 'dark', width: number) {
   const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme });
@@ -613,6 +687,10 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
 try {
   for (const theme of ['light', 'dark'] as const)
     for (const width of [1280, 800]) {
+      if (process.argv.includes('--feedback-only')) {
+        cases.push({ theme, width, ...(await verifySendFeedback(theme, width)) });
+        continue;
+      }
       const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme });
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
@@ -932,7 +1010,8 @@ try {
       await page.close();
       const edges = await verifyMarkdownEdges(theme, width);
       const inputSending = await verifySendingInput(theme, width);
-      cases.push({ theme, width, initial, capture, cold, edges, inputSending });
+      const sendFeedback = await verifySendFeedback(theme, width);
+      cases.push({ theme, width, initial, capture, cold, edges, inputSending, sendFeedback });
     }
   await Bun.write(
     path.join(artifact, 'report.json'),

@@ -8051,7 +8051,3 @@ body {
   outline-offset: 2px;
   border-radius: 2px;
 }
-.kite-client .environment-information .output-references > small {
-  display: block;
-  color: var(--muted-foreground);
-}

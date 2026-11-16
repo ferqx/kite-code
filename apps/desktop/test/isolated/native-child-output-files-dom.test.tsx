@@ -6,7 +6,7 @@ import { act } from 'react';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
 import type { NativeOutputSource } from '../../src/output-files-bridge';
 
-test('parent and child outputs preserve source identity, original turn, late arrival, retry and selected-scope isolation', async () => {
+test('parent and child reference lists preserve source identity through late results and read recovery', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -158,7 +158,7 @@ test('parent and child outputs preserve source identity, original turn, late arr
     return (
       <>
         <output data-testid="target">{JSON.stringify(outputs.request?.target)}</output>
-        {outputs.references}
+        <div data-testid="reference-panel">{outputs.references}</div>
         <section data-testid="first">
           {outputs.renderTurnOutputs({ turnId: turn(session, 'parent1') })}
         </section>
@@ -189,6 +189,7 @@ test('parent and child outputs preserve source identity, original turn, late arr
   };
   const first = () => document.querySelector('[data-testid="first"]')!;
   const second = () => document.querySelector('[data-testid="second"]')!;
+  const referencePanel = () => document.querySelector('[data-testid="reference-panel"]')!;
   try {
     await render({});
     expect(first().querySelectorAll('.output-file-card')).toHaveLength(2);
@@ -218,29 +219,25 @@ test('parent and child outputs preserve source identity, original turn, late arr
       fileId: 'child-a-a1',
       locator: { kind: 'delivery', key: 'delivery/1/a1/child-a-a1' },
     });
-    await act(async () => {
-      [...first().querySelectorAll('button')].find((b) => b.textContent === '重试整理')!.click();
-    });
-    expect(calls.find((call) => call.method === 'outputs.retry')).toMatchObject({
-      generation: 1,
-      scope: { storeId: 'store', sessionId: 'child-b' },
-      collectionId: 'cb',
-      expectedRevision: '7',
-    });
-    await settle();
+    expect(first().querySelector('[role="alert"], [role="status"]')).toBeNull();
+    expect(first().textContent).not.toContain('重试整理');
+    expect(referencePanel().querySelector('[role="alert"], [role="status"]')).toBeNull();
+    expect(referencePanel().textContent).not.toMatch(/重试整理|文件整理|archive_failed/);
     // A child collection can arrive after a newer parent turn exists. The old turn owns it.
     lateFile = true;
     await render({ revision: 2 });
     expect(first().textContent).toContain('晚到.txt');
     expect(second().textContent).not.toContain('晚到.txt');
     expect(first().querySelector('.output-file-card')).toBe(card);
-    // An unavailable source directory preserves prior facts, not a false empty list.
+    const verifiedReferences = referencePanel().textContent;
+    const verifiedLink = referencePanel().querySelector('.output-reference-link');
+    expect(verifiedReferences).toContain('晚到.txt');
+    // An unavailable source directory keeps the verified list visible.
     sourceFailure = true;
     await render({ revision: 3 });
     expect(first().querySelectorAll('.output-file-card')).toHaveLength(3);
-    expect(document.querySelector('[aria-label="参考"]')?.textContent).toContain(
-      '暂时无法更新参考',
-    );
+    expect(referencePanel().textContent).toBe(verifiedReferences);
+    expect(referencePanel().querySelector('.output-reference-link')).toBe(verifiedLink);
     const sourceReads = calls.filter((call) => call.method === 'outputs.sources').length;
     sourceFailure = false;
     await act(async () => {
@@ -250,17 +247,13 @@ test('parent and child outputs preserve source identity, original turn, late arr
     expect(calls.filter((call) => call.method === 'outputs.sources').length).toBeGreaterThan(
       sourceReads,
     );
-    expect(document.querySelector('[aria-label="参考"]')?.textContent).not.toContain(
-      '暂时无法更新参考',
-    );
+    expect(referencePanel().textContent).toBe(verifiedReferences);
     // A mixed-scope page cannot replace the previous verified child page.
     forgedFile = true;
     await render({ revision: 4 });
     expect(first().querySelectorAll('.output-file-card')).toHaveLength(3);
     expect(first().textContent).not.toContain('读取文件失败');
-    expect(document.querySelector('[aria-label="参考"]')?.textContent).toContain(
-      '暂时无法更新参考',
-    );
+    expect(referencePanel().textContent).toBe(verifiedReferences);
     expect(latest!.request?.target.sessionId).toBe('child-a');
     forgedFile = false;
     await act(async () => {
@@ -268,10 +261,8 @@ test('parent and child outputs preserve source identity, original turn, late arr
     });
     await settle();
     expect(first().textContent).not.toContain('读取文件失败');
-    expect(document.querySelector('[aria-label="参考"]')?.textContent).not.toContain(
-      '暂时无法更新参考',
-    );
-    expect(calls.filter((call) => call.method === 'outputs.retry')).toHaveLength(1);
+    expect(referencePanel().textContent).toBe(verifiedReferences);
+    expect(calls.some((call) => call.method === 'outputs.retry')).toBe(false);
     // Pausing the child detail keeps the exact card, with no child-detail background read.
     const childCard = document.querySelector('[data-testid="child"] .output-file-card');
     await render({ revision: 4, childActive: false });

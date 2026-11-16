@@ -597,7 +597,7 @@ export function Conversation({
   saveReading: (state: ReadingState) => void;
   openFile?: (path: string) => void;
   writeClipboardText?: (text: string) => Promise<void>;
-  emptyState?: { title: string; detail: string };
+  emptyState?: { title: string; detail: string } | null;
   childSessionIdsByTaskId?: ReadonlyMap<string, string>;
   onOpenChildSession?: (childSessionId: string) => void;
   /** Public-body hosts supply their verified content reader without fabricating legacy tool facts. */
@@ -1827,7 +1827,7 @@ export function Conversation({
           >
             <div ref={content} className="reading-column">
               {!loading &&
-                (empty && !entryContent.length ? (
+                (empty && !entryContent.length && emptyState !== null ? (
                   <div className="welcome">
                     <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
                     <p>

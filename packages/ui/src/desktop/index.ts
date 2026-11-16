@@ -112,7 +112,7 @@ export {
   parseDesktopMarkdown,
   rememberDesktopMarkdownParse,
 } from './markdown-parse-cache';
-export type { OutputCollectionSummary, OutputFileSummary, OutputFilesProps } from './OutputFiles';
+export type { OutputFileSummary, OutputFilesProps } from './OutputFiles';
 export { OutputFiles, OutputReferences } from './OutputFiles';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
 export { PromptMarkdown } from './PromptMarkdown';

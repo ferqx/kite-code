@@ -224,6 +224,7 @@ export interface SessionPageProps {
   /** Optional bounded retention; hosts still own fresh read and operation admission. */
   conversationCache?: ConversationCacheScope;
   messages: readonly Message[];
+  hideEmptyWelcome?: boolean;
   renderMessage?: (message: Message) => ReactNode;
   renderMessageContent?: (message: Message) => ReactNode;
   renderTurnOutputs?: React.ComponentProps<typeof Conversation>['renderTurnOutputs'];
@@ -1247,7 +1248,12 @@ function SessionPageContent({
     retainedRightSidebarPanel.current = rightSidebarPanel;
   else if (props.detailPanel || props.fileChangesContent) retainedRightSidebarPanel.current = null;
   const historyVisible = !props.scheduledTasks && !props.workbench && !props.diagnosticView;
-  const welcoming = !!(props.newConversation && props.composer && !messages.length);
+  const welcoming = !!(
+    props.newConversation &&
+    props.composer &&
+    !messages.length &&
+    !props.hideEmptyWelcome
+  );
   const visiblePresentationIdentity = historyVisible
     ? JSON.stringify([props.conversationCache?.scope, props.readingKey])
     : undefined;
@@ -1340,18 +1346,20 @@ function SessionPageContent({
       onPresentationReady={() => finishPresentation(presentationIdentity)}
       selected={!!props.selected}
       emptyState={
-        !props.composer
-          ? {
-              title: props.selected
-                ? '暂无消息'
-                : props.workspaces.length
-                  ? '选择会话'
-                  : '暂无可查看的会话',
-              detail: props.selected
-                ? '当前会话没有可展示的历史消息。'
-                : '从左侧空间中点击会话即可加载消息。',
-            }
-          : undefined
+        props.hideEmptyWelcome
+          ? null
+          : !props.composer
+            ? {
+                title: props.selected
+                  ? '暂无消息'
+                  : props.workspaces.length
+                    ? '选择会话'
+                    : '暂无可查看的会话',
+                detail: props.selected
+                  ? '当前会话没有可展示的历史消息。'
+                  : '从左侧空间中点击会话即可加载消息。',
+              }
+            : undefined
       }
       connected={props.connected}
       initialReading={readings.current.get(props.readingKey)}

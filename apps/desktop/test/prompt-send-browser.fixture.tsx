@@ -32,6 +32,8 @@ let sequence = persisted?.sequence ?? 0;
 let pending: Extract<NativeRequest, { method: 'submit' | 'conversation.send' }> | undefined;
 let acknowledge: ((value: InputMetadata) => void) | undefined;
 let acknowledgeFirst: ((value: NativeConversationResult) => void) | undefined;
+let heldFirstSession: string | undefined;
+let resumeFirstSelection: (() => void) | undefined;
 const histories = new Map<string, Message[]>(
   persisted?.histories ?? [
     ['a', []],
@@ -74,6 +76,10 @@ function persist() {
 const bridge: NativeBridge = {
   ...transport.bridge,
   async request(request) {
+    if (request.method === 'select' && request.sessionId === heldFirstSession)
+      await new Promise<void>((resolve) => {
+        resumeFirstSelection = resolve;
+      });
     if (request.method === 'submit') {
       posts.push(request);
       persist();
@@ -193,6 +199,27 @@ const control = {
     acknowledge?.(metadata('unknown'));
     acknowledge = undefined;
     transport.publish();
+  },
+  rejectFirst() {
+    if (pending?.method !== 'conversation.send' || !acknowledgeFirst)
+      throw Error('first_send_not_pending');
+    heldFirstSession = pending.creation.sessionId;
+    transport.registerSession(heldFirstSession);
+    acknowledgeFirst({
+      kind: 'conversation',
+      commandId: pending.intent.commandId,
+      phase: 'failed',
+      stage: 'input',
+      creation: { input: pending.creation, phase: 'created' },
+      code: 'native_asset_unavailable',
+    });
+    acknowledgeFirst = undefined;
+    transport.publish();
+  },
+  releaseFirstSelection() {
+    heldFirstSession = undefined;
+    resumeFirstSelection?.();
+    resumeFirstSelection = undefined;
   },
   save() {
     if (!pending || !('content' in pending.intent)) throw Error('prompt_missing');

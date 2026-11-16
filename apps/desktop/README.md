@@ -22,13 +22,15 @@ Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)�
 
 [Main 产物来源](electron/output-sources.ts)从原授权后台目录核实 carrier、父 Run、child Session／Run 与根关系，将子 Agent 明确导出的 Shell 文件投影到原父轮末尾和会话“参考项”；[子详情](src/native-child-detail.tsx)显示相同历史产物。仍以原 child `OutputFileTarget` 查询、预览和另存，不复制为父产物，不扫描 Workspace，不根据结果邮件接收时间、同名或最新 child 工作猜归属。相同 child 的后继工作分别关联原父轮；历史多层来源仅在完整原 Run 链可证时投影。单来源查询与分页保留原 Service 合同，既有串行修订规则不扩展为跨 Session 去重。
 
-[Native 调用者](electron/native-caller.ts)和 [IPC](electron/native-ipc.ts)使用准确父选中代次、Store、主体、原 child 来源及不可变 target 的读取准入。来源目录只读且有界，同 scope 倒序响应不能覆盖新目录；目录或单来源文件页失败只在当前准入与来源修订仍有效时保留原列表，并按有界退避重读，不自动重试收集。连接／删除／选择变化撤销旧准入，预览与保存捕获原选择，往返同一会话也不接纳旧操作。child 产物事件刷新原父列表，首次 child Run 尚不在目录时也重新核来源。重试整理必须使用原 child collection 与观察到的 revision，沿 Store 原期限、权限及 unknown 规则，不重跑 Shell。准确 collection 路径通过 IPC，普通路径或伪造来源不取得资格。
+[Native 调用者](electron/native-caller.ts)和 [IPC](electron/native-ipc.ts)使用准确父选中代次、Store、主体、原 child 来源及不可变 target 的读取准入。来源目录只读且有界，同 scope 倒序响应不能覆盖新目录。目录或单来源文件页读取失败时，在当前准入与来源修订仍有效的范围内保留已核实的列表，后台按有界退避重读。会话中的文件卡展示交付文件及对应操作。环境信息的「参考」栏只显示文件链接和分页。另存或添加待修改附件失败时，使用现有 Toast 反馈。
 
-[产物展示版本](electron/output-display-versions.ts)按主体、Store、连接 epoch 和已核来源维护有界失效范围；[共享读取缓存](src/native-output-read-cache.ts)由[轮次文件卡与参考项](src/native-output-files.tsx)共同消费。相同有效来源修订下，热返回恢复已读列表并共享进行中的同键读取，不重新整理产物。存储层的[持久列表索引](../../packages/agent/src/business/output-collection.README.md#同任务同路径的当前产物)在原写事务内更新，冷开仍重新核实来源准入后读取。后台及 child 变更只更新已核实归属的原父轮；尚无准确来源关系的创建事件先使可能受影响的展示失效，再读取来源，不猜父轮。
+[产物展示版本](electron/output-display-versions.ts)按主体、Store、连接 epoch 和已核来源维护有界失效范围；[共享读取缓存](src/native-output-read-cache.ts)由[轮次文件卡与参考项](src/native-output-files.tsx)共同消费。切回已读会话时，选中交接期间保留仍受 Main 展示版本覆盖的文件列表，目标选中后恢复当前读取和操作准入。同键读取共享在途结果。存储层的[持久列表索引](../../packages/agent/src/business/output-collection.README.md#同任务同路径的当前产物)在原写事务内更新，冷开仍重新核实来源准入后读取。后台及 child 变更只更新已核实归属的原父轮；尚无准确来源关系的创建事件先使可能受影响的展示失效，再读取来源，不猜父轮。
 
-这些缓存只保留展示数据，不保留操作授权。主体、Store、连接、权限或来源失效时撤销旧展示；选择 ABA 丢弃旧在途读取，不能让迟到响应接管后来选择。打开、另存和继续修改仍走当前 Main 准入；显式整理重试重新取得准确 child collection 与 revision 的当前准入，不复用展示缓存中的操作资格。相关静态及受控回归入口为[共享缓存测试](test/native-output-read-cache.test.ts)、[来源权限测试](test/native-output-sources.test.ts)和[热返回与撤销 DOM 测试](test/isolated/native-output-cache-dom.test.tsx)；其通过不自动代表真实客户端或跨平台验收。
+这些缓存只保留展示数据。主体、Store、连接、权限或来源失效时撤销旧展示。选择 ABA 丢弃旧在途读取，预览与保存也捕获原选择。打开、另存和继续修改仍走当前 Main 准入。`outputs.retry` IPC 调用单独核对准确 child collection、revision 与当前准入，沿用 Store 原期限、权限及 unknown 规则。相关静态及受控回归入口为[共享缓存测试](test/native-output-read-cache.test.ts)、[来源权限测试](test/native-output-sources.test.ts)和[热返回与撤销 DOM 测试](test/isolated/native-output-cache-dom.test.tsx)。
 
 “继续修改”保留 child 来源引用，加入当前父输入草稿；发送前后重新核来源，明确提交后才通过原 InputFile import／工作副本链交给父轮，不覆盖子快照或自动续作 child。参考项合并仍默认五项，重复名称保留，来源标签使用子名称和原轮次，所有打开操作沿准确 target。
+
+2026-11-16，Windows x64／Chrome 157 通过受控宿主核对「参考」栏。首次等待时隐藏空栏，读取失败时保留原文件链接，后台恢复后加入新文件。点击链接提交准确的文件目标，切换会话后显示新会话的文件，切回已读会话从缓存恢复。各阶段均无参考栏状态提示或整理重试请求。阶段截图及记录位于本机 `.cache/desktop-reference-verification-xB2kTG/`。
 
 2026-11-16，macOS arm64／Bun 1.4.4，基于 `44a698326` 及当前 r3 在途补丁的独立工作树：[来源权限回归](test/native-output-sources.test.ts)、[Main 调用者回归](test/native-caller.test.ts)、[输入准备](test/input-files.test.ts)和[输出 IPC／字节保存](test/isolated/native-output-files.test.ts)共87项／842断言通过，覆盖兄弟根拒绝、相同 child 多轮、同名独立文件、冷读、目录倒序、选择ABA、准确重试和原 child→父编辑。Renderer的[父子产物 DOM](test/isolated/native-child-output-files-dom.test.tsx)另核原轮分组、晚到、暂停保留、分页、同 scope 目录／文件页恢复与切换丢弃迟到结果。该证据为受控 SDK／Main／DOM，不代替整合后真实受管 Shell→collector→普通客户端全过程验收；收集调度与真实平台资格仍由[输出 owner](../../packages/agent/src/business/output-collection.README.md)维护。
 
@@ -578,6 +580,8 @@ Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)�
 [启动 DOM](test/isolated/native-startup-dom.test.tsx)沿实际 NativeDesktop 核首次等待、未核目录、空项目／无模型、两类失败、重复重试、旧响应隔离和进入后草稿保持；同轮原新对话／草稿／定时任务测试保业务断言。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)核编译启动样式及首次／冷启动完成后进入原页面，保原任务、审批、冷读与退出；实际窗口不代证初始化失败矩阵。代码输入、执行结果及剩余迁移归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)，完整 PC、安装恢复及阶段退出仍按原方案核对。
 
 表单校验和右侧文件预览失败在所属界面反馈。没有对应内容区的操作错误使用 Toast，进行中由对应按钮或界面反馈。会话执行循环的异常留在会话消息区，实际工具执行结果留在对应过程记录。见[客户端状态反馈规范](../../docs/development/subsystems/clients.md#状态反馈规范)及[审批提交反馈](#原审批面板与授权观察)。
+
+2026-11-16，Windows x64 使用[生产界面浏览器夹具](test/prompt-send-browser-runner.fixture.ts)的 `--feedback-only` 跑过深浅主题及 1280／800px 四组。逐段核对按钮加载、回执未知的单条 Toast、刷新保留原提示、确认受理后撤下，以及首条失败在目标会话读取仍暂停时出现、接管后保留同一提示与原草稿、切换会话后撤下。受控桥只发用户点击的两次提交。[完整发送 DOM](test/isolated/native-new-conversation-dom.test.tsx) 119 项通过，[真实文件预览窗口](test/isolated/office-readonly-host.test.ts)复验了预览区的失败与重试。浏览器阶段截图保存在本机 `.cache/prompt-send-browser-YytT9f/`。
 
 旧读取的失败与成功使用同一展示归属：refresh 的 state 和 select/draft.read 捕获 generation、viewIntent 与 Main 退出生命周期 epoch，迟到拒绝不影响后来的页面；全局目录绑定 generation 与生命周期。读取、会话和草稿失败沿原局部状态、提交记录与后台恢复核实；诊断开关不再开启这些错误的全局Toast。只有普通客户端独立业务入口可提交临时消息，后台读取不会清除或继承它。原全局“操作未完成” AlertDialog 已移除；[NativeToast](src/native-message.tsx)通过 Portal 脱离会话正文与滚动布局，通常挂到 `document.body`，按会话区域的 CSS anchor 固定位置与宽度，避开标题栏和右侧网页。原 `beforeConversation` 渲染入口保留标题栏布局判断。设置中的错误 Toast 挂在当前设置 Dialog，仍只临时显示一条；同一呈现内更换挂载点保留原剩余时间，失去原挂载点的 hover／focus 不留下暂停。设置表单仅在字段校验处保留局部异常提示，业务提交错误使用 Toast，不复制为设置行内错误。消息停留6秒，hover或焦点在消息内时暂停，可以明确关闭；准确 occurrence ID 使旧定时器、关闭动作和未提交渲染不能清除继任消息。
 

@@ -2,6 +2,7 @@ import type { OutputFilesPage, OutputFileTarget } from '@kite-ai/client';
 import {
   type OutputFileSummary,
   OutputFiles,
+  type OutputFilesProps,
   OutputReferences,
   type SessionFileTabRequest,
   type SessionFileTarget,
@@ -60,8 +61,10 @@ export function useNativeOutputFiles(input: {
   storeId?: string;
   sessionId?: string;
   revision: number;
+  pendingReading?: { storeId: string; sessionId: string };
   display?: NativeOutputDisplayState;
   available?: boolean;
+  onError?: (message: string) => void;
   onEdit: (file: OutputFileSummary, context?: OfficeEditContext) => Promise<void>;
   onRequestEdit?: (
     file: OutputFileSummary,
@@ -81,13 +84,16 @@ export function useNativeOutputFiles(input: {
     ownerRunId?: string;
   }>();
   const scopeKey = JSON.stringify([input.generation, input.storeId, input.sessionId]);
-  const display = input.display?.storeId === input.storeId ? input.display : undefined;
+  // A pending session can retain covered display while Main prepares its active selection.
+  const displayStoreId = input.storeId ?? input.pendingReading?.storeId;
+  const displaySessionId = input.sessionId ?? input.pendingReading?.sessionId;
+  const display = input.display?.storeId === displayStoreId ? input.display : undefined;
   const displayRevision = display?.roots.find(
-    (root) => root.sessionId === input.sessionId,
+    (root) => root.sessionId === displaySessionId,
   )?.revision;
   const authority = JSON.stringify([
     input.generation,
-    input.storeId,
+    displayStoreId,
     display?.subjectId,
     display?.epoch,
     // Without Main's live invalidation coverage, sharing is limited to this selection.
@@ -123,7 +129,7 @@ export function useNativeOutputFiles(input: {
         : display!.roots.map((root) =>
             JSON.stringify([
               JSON.stringify([
-                JSON.stringify([input.generation, input.storeId, root.sessionId]),
+                JSON.stringify([input.generation, displayStoreId, root.sessionId]),
                 authority,
               ]),
               root.revision,
@@ -147,7 +153,6 @@ export function useNativeOutputFiles(input: {
     sources: NativeOutputSource[];
     revision: number;
     activation: number;
-    error?: string;
   }>();
   const sources =
     input.available === false
@@ -157,10 +162,6 @@ export function useNativeOutputFiles(input: {
           (displayRevision === undefined || sourceState.revision === displayRevision)
         ? sourceState.sources
         : (cache.get<NativeOutputSource[]>(`sources/${rootKey}`) ?? []);
-  const sourceError =
-    sourceState?.key === key && sourceState.activation === activation
-      ? sourceState.error
-      : undefined;
   useEffect(() => {
     if (input.available === false || !input.bridge || !input.storeId || !input.sessionId) return;
     const cached = cache.get<NativeOutputSource[]>(`sources/${rootKey}`);
@@ -203,18 +204,6 @@ export function useNativeOutputFiles(input: {
         });
       } catch {
         if (cancelled) return;
-        setSourceState((previous) => ({
-          key,
-          revision: sourceRevision,
-          activation,
-          sources:
-            previous?.key === key &&
-            previous.activation === activation &&
-            (displayRevision === undefined || previous.revision === displayRevision)
-              ? previous.sources
-              : [],
-          error: '子 Agent 文件暂时无法更新',
-        }));
         retry = setTimeout(
           () => {
             void read();
@@ -238,7 +227,6 @@ export function useNativeOutputFiles(input: {
     cache,
     input.available,
     activation,
-    displayRevision,
     sourceRevision,
   ]);
   useEffect(() => {
@@ -258,15 +246,14 @@ export function useNativeOutputFiles(input: {
       if (currentKey.current !== key || !cache.valid(rootKey)) return;
       void input.bridge
         ?.request({ method: 'outputs.save', generation: input.generation, target: target(file) })
-        .catch(() => setError('另存失败，请重试'));
+        .catch(() => input.onError?.('另存失败，请重试'));
     },
     onEdit: (file: OutputFileSummary, context?: OfficeEditContext) => {
       if (currentKey.current !== key || !cache.valid(rootKey)) return;
-      void input.onEdit(file, context).catch(() => setError('无法附加文件，请重试'));
+      void input.onEdit(file, context).catch(() => input.onError?.('无法附加文件，请重试'));
     },
     turnLabel: input.turnLabel,
   };
-  const [error, setError] = useState('');
   return {
     closeFile: (file: SessionFileTarget) => {
       if ('handleId' in file)
@@ -299,17 +286,13 @@ export function useNativeOutputFiles(input: {
         ? request.value
         : undefined,
     references: (
-      <>
-        <OutputReferenceReaders
-          key={key}
-          {...input}
-          {...reader}
-          sources={sources}
-          sourceError={sourceError}
-          actions={actions}
-        />
-        {error && <p role="alert">{error}</p>}
-      </>
+      <OutputReferenceReaders
+        key={key}
+        {...input}
+        {...reader}
+        sources={sources}
+        actions={actions}
+      />
     ),
     renderTurnOutputs: ({ turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, input.sessionId);
@@ -377,9 +360,9 @@ export function useNativeOutputFiles(input: {
       ),
   };
 }
+type FilePage = Pick<OutputFilesPage, 'items' | 'nextCursor' | 'revision'>;
 type OutputReadState = {
-  page?: OutputFilesPage;
-  error: string;
+  page?: FilePage;
   loading: boolean;
   more: () => void;
 };
@@ -392,14 +375,10 @@ type OutputReaderInput = {
   generation: number;
   storeId?: string;
   sessionId?: string;
-  revision: number;
   runId?: string;
   sourceLabel?: string;
-  collect?: boolean;
   onState?: (state: OutputReadState) => void;
-  actions: React.ComponentProps<typeof OutputFiles> extends infer P
-    ? Omit<Extract<P, object>, 'items' | 'collections'>
-    : never;
+  actions: Omit<OutputFilesProps, 'items'>;
 };
 function OutputFileReader(input: OutputReaderInput) {
   const readActive = useConversationReadActive();
@@ -409,10 +388,7 @@ function OutputFileReader(input: OutputReaderInput) {
   const [saved, savePage] = useState(() => ({
     key: windowKey,
     cache: input.cache,
-    page:
-      input.available === false
-        ? undefined
-        : input.cache.get<OutputFilesPage>(`window/${windowKey}`),
+    page: input.available === false ? undefined : input.cache.get<FilePage>(`window/${windowKey}`),
   }));
   const page =
     !scopeValid ||
@@ -425,18 +401,18 @@ function OutputFileReader(input: OutputReaderInput) {
   const loadedCount = useRef(saved.page?.items.length ?? 50);
   if (saved.page) loadedCount.current = Math.max(50, saved.page.items.length);
   const setPage = useCallback(
-    (page: OutputFilesPage) => savePage({ key: windowKey, cache: input.cache, page }),
+    (page: FilePage) => savePage({ key: windowKey, cache: input.cache, page }),
     [windowKey, input.cache],
   );
   const pageRef = useRef(page);
   pageRef.current = page;
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [read, setRead] = useState<{ kind: 'files' | 'collections'; cursor?: string }>({
-    kind: 'files',
-  });
+  const [read, setRead] = useState<{ cursor: string }>();
+  const nextCursor = page?.nextCursor;
+  const more = useCallback(() => {
+    if (nextCursor) setRead({ cursor: nextCursor });
+  }, [nextCursor]);
   const [retryRevision, setRetryRevision] = useState(0);
-  const retryPending = useRef(false);
   const readFailures = useRef(0);
   const lastRevision = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -453,23 +429,21 @@ function OutputFileReader(input: OutputReaderInput) {
     let retry: ReturnType<typeof setTimeout> | undefined;
     const revision = `${windowKey}/${retryRevision}`;
     const continuation = lastRevision.current === revision;
-    const readCursor = continuation && read.kind === 'files' ? read.cursor : undefined;
-    const collectionCursor = continuation && read.kind === 'collections' ? read.cursor : undefined;
+    const readCursor = continuation ? read?.cursor : undefined;
     lastRevision.current = revision;
-    if (!readCursor && !collectionCursor && retryRevision === 0) {
-      const cached = input.cache.get<OutputFilesPage>(`window/${windowKey}`);
+    if (!readCursor && retryRevision === 0) {
+      const cached = input.cache.get<FilePage>(`window/${windowKey}`);
       if (cached) {
         setPage(cached);
-        setError('');
         setLoading(false);
         return;
       }
     }
     setLoading(true);
     const timer = setTimeout(() => {
-      const query = (beforeKey?: string, collectionBeforeKey?: string) =>
+      const query = (beforeKey?: string) =>
         input.cache.read(
-          JSON.stringify(['page', windowKey, retryRevision, beforeKey, collectionBeforeKey]),
+          JSON.stringify(['page', windowKey, retryRevision, beforeKey]),
           async () => {
             const result = await input.bridge!.request({
               method: 'outputs.query',
@@ -478,7 +452,6 @@ function OutputFileReader(input: OutputReaderInput) {
               runId: input.runId,
               limit: 50,
               beforeKey,
-              collectionBeforeKey,
             });
             if (
               !result ||
@@ -494,38 +467,21 @@ function OutputFileReader(input: OutputReaderInput) {
               })
             )
               throw Error('output_scope_changed');
-            return result;
+            const { items, nextCursor, revision } = result.page;
+            return { items, nextCursor, revision } satisfies FilePage;
           },
         );
-      void query(readCursor, collectionCursor)
-        .then(async (result) => {
+      void query(readCursor)
+        .then(async (head) => {
           if (cancelled) return;
-          if (
-            !result ||
-            !('page' in result) ||
-            !('kind' in result) ||
-            result.kind !== 'outputs.page' ||
-            result.page.scope.storeId !== input.storeId ||
-            result.page.scope.sessionId !== input.sessionId ||
-            !outputPageMatches(result.page, {
-              storeId: input.storeId,
-              sessionId: input.sessionId,
-              runId: input.runId,
-            })
-          )
-            throw Error('output_scope_changed');
           const previous = pageRef.current;
-          if (
-            (readCursor || collectionCursor) &&
-            previous &&
-            previous.revision !== result.page.revision
-          ) {
+          if (readCursor && previous && previous.revision !== head.revision) {
             // Never merge a continuation from a different storage snapshot.
             setRetryRevision((value) => value + 1);
             return;
           }
-          let incoming = result.page;
-          if (!readCursor && !collectionCursor) {
+          let incoming = head;
+          if (!readCursor) {
             // Rebuild the loaded window atomically. Retaining an old tail can resurrect
             // a superseded delivery that the authoritative head no longer contains.
             const wanted = Math.max(50, previous?.items.length ?? 0, loadedCount.current);
@@ -537,27 +493,13 @@ function OutputFileReader(input: OutputReaderInput) {
               seen.add(cursor);
               const next = await query(cursor);
               if (cancelled) return;
-              if (
-                !next ||
-                !('kind' in next) ||
-                !('page' in next) ||
-                next.kind !== 'outputs.page' ||
-                next.page.scope.storeId !== input.storeId ||
-                next.page.scope.sessionId !== input.sessionId ||
-                next.page.revision !== incoming.revision ||
-                !outputPageMatches(next.page, {
-                  storeId: input.storeId,
-                  sessionId: input.sessionId,
-                  runId: input.runId,
-                })
-              )
-                throw Error('output_snapshot_changed');
+              if (next.revision !== incoming.revision) throw Error('output_snapshot_changed');
               incoming = {
                 ...incoming,
-                nextCursor: next.page.nextCursor,
+                nextCursor: next.nextCursor,
                 items: [
                   ...incoming.items,
-                  ...next.page.items.filter(
+                  ...next.items.filter(
                     (item) =>
                       !incoming.items.some((old) => outputTargetKey(old) === outputTargetKey(item)),
                   ),
@@ -567,37 +509,26 @@ function OutputFileReader(input: OutputReaderInput) {
           }
           if (cancelled) return;
           const updated =
-            previous && (readCursor || collectionCursor)
+            previous && readCursor
               ? {
                   ...incoming,
-                  nextCursor: collectionCursor ? previous.nextCursor : incoming.nextCursor,
-                  nextCollectionCursor: readCursor
-                    ? previous.nextCollectionCursor
-                    : incoming.nextCollectionCursor,
-                  collections: collectionCursor
-                    ? mergeCollections(previous.collections, incoming.collections)
-                    : previous.collections,
-                  items: readCursor
-                    ? [
-                        ...previous.items,
-                        ...incoming.items.filter(
-                          (item) =>
-                            !previous.items.some(
-                              (old) => outputTargetKey(old) === outputTargetKey(item),
-                            ),
+                  items: [
+                    ...previous.items,
+                    ...incoming.items.filter(
+                      (item) =>
+                        !previous.items.some(
+                          (old) => outputTargetKey(old) === outputTargetKey(item),
                         ),
-                      ]
-                    : previous.items,
+                    ),
+                  ],
                 }
               : incoming;
           input.cache.set(`window/${windowKey}`, updated);
           setPage(updated);
           readFailures.current = 0;
-          setError('');
         })
         .catch(() => {
           if (cancelled) return;
-          if (!input.runId || input.collect) setError('读取文件失败');
           retry = setTimeout(
             () => setRetryRevision((value) => value + 1),
             500 * 2 ** Math.min(readFailures.current++, 4),
@@ -618,7 +549,6 @@ function OutputFileReader(input: OutputReaderInput) {
     input.storeId,
     input.sessionId,
     input.runId,
-    input.collect,
     windowKey,
     input.cache,
     input.available,
@@ -631,94 +561,22 @@ function OutputFileReader(input: OutputReaderInput) {
   const onState = useRef(input.onState);
   onState.current = input.onState;
   useLayoutEffect(() => {
-    onState.current?.({
-      page: input.available === false ? undefined : page,
-      error,
-      loading,
-      more: () => setRead({ kind: 'files', cursor: page?.nextCursor }),
-    });
-  }, [page, error, loading, input.available]);
-  if (input.collect) return null;
-  const items = (input.available === false ? [] : (page?.items ?? [])).map((file) =>
+    onState.current?.({ page, loading, more });
+  }, [page, loading, more]);
+  if (input.onState) return null;
+  const items = (page?.items ?? []).map((file) =>
     input.sourceLabel ? { ...file, sourceLabel: input.sourceLabel } : file,
   );
-  return input.runId ? (
+  return (
     <>
-      <OutputFiles
-        {...input.actions}
-        items={items}
-        collections={input.available === false ? undefined : page?.collections}
-        onRetry={(collectionId) => {
-          const collection = page?.collections.find((item) => item.collectionId === collectionId);
-          if (
-            !collection ||
-            !input.bridge ||
-            !input.storeId ||
-            !input.sessionId ||
-            retryPending.current
-          )
-            return;
-          retryPending.current = true;
-          void input.bridge
-            .request({
-              method: 'outputs.retry',
-              generation: input.generation,
-              scope: { storeId: input.storeId, sessionId: input.sessionId },
-              collectionId,
-              expectedRevision: collection.revision,
-            })
-            .then(() => {
-              setError('');
-              setRetryRevision((value) => value + 1);
-            })
-            .catch(() => setError('重试整理失败，请重新读取后重试'))
-            .finally(() => {
-              retryPending.current = false;
-            });
-        }}
-      />
-      {page?.nextCollectionCursor && (
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => setRead({ kind: 'collections', cursor: page.nextCollectionCursor })}
-        >
-          更多整理状态
-        </button>
-      )}
-      {error && <p role="alert">{error}</p>}
-      {page?.nextCursor && (
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => setRead({ kind: 'files', cursor: page.nextCursor })}
-        >
+      <OutputFiles {...input.actions} items={items} />
+      {nextCursor && (
+        <button type="button" disabled={loading} onClick={more}>
           加载更多文件
         </button>
       )}
     </>
-  ) : (
-    <OutputReferences
-      {...input.actions}
-      items={items}
-      hasMore={!!page?.nextCursor}
-      onMore={() => setRead({ kind: 'files', cursor: page?.nextCursor })}
-      loading={loading}
-      error={error}
-    />
   );
-}
-
-function mergeCollections(
-  previous: OutputFilesPage['collections'],
-  incoming: OutputFilesPage['collections'],
-) {
-  const merged = new Map(previous.map((item) => [item.collectionId, item]));
-  for (const item of incoming) {
-    const old = merged.get(item.collectionId);
-    if (!old || BigInt(item.revision) >= BigInt(old.revision)) merged.set(item.collectionId, item);
-  }
-  return [...merged.values()];
 }
 
 function outputTargetKey(file: OutputFileTarget) {
@@ -748,7 +606,6 @@ function outputPageMatches(
 function OutputReferenceReaders(
   input: OutputReaderInput & {
     sources: readonly NativeOutputSource[];
-    sourceError?: string;
   },
 ) {
   useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
@@ -798,17 +655,14 @@ function OutputReferenceReaders(
           {...input}
           sessionId={source.sessionId}
           runId={source.runId}
-          collect
           onState={(state) => setStates((previous) => new Map(previous).set(source.key, state))}
         />
       ))}
       <OutputReferences
-        {...input.actions}
+        onOpen={input.actions.onOpen}
         items={scopeValid ? items : []}
-        hasMore={!!next}
-        onMore={() => next?.state.more()}
-        loading={active.length < unique.length || active.some(({ state }) => state.loading)}
-        error={input.sourceError || active.find(({ state }) => state.error)?.state.error}
+        onMore={next?.state.more}
+        moreDisabled={active.length < unique.length || active.some(({ state }) => state.loading)}
       />
     </>
   );

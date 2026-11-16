@@ -129,41 +129,25 @@ test('all file formats retain open and fallback type without claiming export', a
   ).toEqual(['Excel 工作簿', '演示文稿', 'PDF 文档', '文本文件', '文件']);
   expect(document.querySelectorAll('.output-file-open')).toHaveLength(5);
 });
-test('empty output, failed collection retry, and reference expansion remain available', async () => {
+test('empty file lists stay hidden and references can expand and page through files', async () => {
   mount();
   const callbacks = { onOpen() {}, onSave() {}, onEdit() {} };
-  await act(() => root!.render(<OutputFiles items={[]} {...callbacks} />));
-  expect(document.querySelector('section')).toBeNull();
-  let retried = '';
+  let pages = 0;
   await act(() =>
     root!.render(
-      <OutputFiles
-        items={[]}
-        {...callbacks}
-        collections={[
-          {
-            collectionId: 'c',
-            ownerRunId: 'r',
-            state: 'failed',
-            expectedCount: 1,
-            publishedCount: 0,
-            retryUntil: '2999-01-01T00:00:00Z',
-          },
-        ]}
-        onRetry={(id) => {
-          retried = id;
-        }}
-      />,
+      <>
+        <OutputFiles items={[]} {...callbacks} />
+        <OutputReferences items={[]} onOpen={callbacks.onOpen} />
+      </>,
     ),
   );
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('文件整理失败');
-  await act(() => document.querySelector<HTMLButtonElement>('button')!.click());
-  expect(retried).toBe('c');
+  expect(document.querySelector('section')).toBeNull();
   await act(() =>
     root!.render(
       <OutputReferences
         items={Array.from({ length: 6 }, (_, i) => file(String(i)))}
-        {...callbacks}
+        onOpen={callbacks.onOpen}
+        onMore={() => pages++}
       />,
     ),
   );
@@ -174,99 +158,13 @@ test('empty output, failed collection retry, and reference expansion remain avai
       .click(),
   );
   expect(document.querySelectorAll('.output-reference-link')).toHaveLength(6);
-});
-
-test('producer-only failures stay in execution history rather than output cards; unknown and collection failures remain', async () => {
-  mount();
-  const callbacks = { onOpen() {}, onSave() {}, onEdit() {} };
-  for (const items of [[], [file('recovered.xlsx')]]) {
-    await act(() =>
-      root!.render(
-        <OutputFiles
-          items={items}
-          {...callbacks}
-          collections={[
-            {
-              collectionId: 'producer',
-              ownerRunId: 'run-hidden',
-              state: 'failed',
-              expectedCount: null,
-              publishedCount: 0,
-              errorCode: 'producer_failed',
-            },
-            {
-              collectionId: 'unknown',
-              ownerRunId: 'run-hidden',
-              state: 'failed',
-              expectedCount: null,
-              publishedCount: 0,
-              errorCode: 'producer_stop_unknown',
-            },
-            {
-              collectionId: 'collector',
-              ownerRunId: 'run-hidden',
-              state: 'failed',
-              expectedCount: 1,
-              publishedCount: 0,
-              errorCode: 'output_collection_start_failed',
-              retryUntil: '2999-01-01T00:00:00Z',
-            },
-          ]}
-          onRetry={() => {}}
-        />,
-      ),
-    );
-    const alerts = [...document.querySelectorAll('[role="alert"]')];
-    expect(alerts).toHaveLength(2);
-    expect(document.body.textContent).not.toContain('producer_failed');
-    expect(alerts[0]?.textContent).toBe('生成结果未知，未收集该次输出 · producer_stop_unknown');
-    expect(alerts[0]?.querySelector('button')).toBeNull();
-    expect(alerts[1]?.textContent).toContain('文件整理失败');
-    expect(alerts[1]?.querySelector('button')?.textContent).toBe('重试整理');
-    expect(document.querySelectorAll('.output-file-card')).toHaveLength(items.length);
-    expect(document.body.textContent).not.toContain('已恢复');
-  }
-});
-
-test('producer failure alone renders no output panel; pending and expired collection still surface', async () => {
-  mount();
-  const actions = { onOpen() {}, onSave() {}, onEdit() {} };
-  const producer = {
-    collectionId: 'p',
-    ownerRunId: 'r',
-    state: 'failed' as const,
-    expectedCount: null,
-    publishedCount: 0,
-    errorCode: 'producer_failed',
-  };
-  await act(() => root!.render(<OutputFiles items={[]} {...actions} collections={[producer]} />));
-  expect(document.querySelector('.turn-output-files')).toBeNull();
   await act(() =>
-    root!.render(
-      <OutputFiles
-        items={[]}
-        {...actions}
-        collections={[
-          {
-            ...producer,
-            collectionId: 'pending',
-            state: 'pending',
-            expectedCount: 1,
-            errorCode: undefined,
-          },
-          {
-            ...producer,
-            collectionId: 'expired',
-            expectedCount: 1,
-            errorCode: 'output_staging_expired',
-          },
-        ]}
-      />,
-    ),
+    [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === '加载更多')!
+      .click(),
   );
-  expect(document.querySelector('[role="status"]')?.textContent).toContain('正在整理输出文件');
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('暂存文件已过期');
-  expect(document.body.textContent).not.toContain('生成步骤失败');
+  expect(pages).toBe(1);
+  expect(document.querySelector('[role="status"], [role="alert"]')).toBeNull();
 });
 
 test('duplicate names show exact millisecond collection times and size, ordinary cards stay quiet', async () => {
@@ -308,7 +206,7 @@ test('duplicate names show exact millisecond collection times and size, ordinary
   expect(document.body.textContent).not.toContain('Invalid Date');
 });
 
-test('environment reference section sits below Shell and agents with exact file actions and stale feedback', async () => {
+test('environment references are file links below Shell and agents', async () => {
   const { BackgroundExecutions } = await import('../../src/desktop/BackgroundExecutions');
   mount();
   const source = file('报告.xlsx', 'reference-source');
@@ -318,15 +216,7 @@ test('environment reference section sits below Shell and agents with exact file 
       <BackgroundExecutions
         currentOnly
         executions={[]}
-        references={
-          <OutputReferences
-            items={[source]}
-            onOpen={(f) => opened.push(f)}
-            onSave={() => {}}
-            onEdit={() => {}}
-            error="read failed"
-          />
-        }
+        references={<OutputReferences items={[source]} onOpen={(f) => opened.push(f)} />}
       />,
     ),
   );
@@ -337,7 +227,7 @@ test('environment reference section sits below Shell and agents with exact file 
     environment.textContent!.indexOf('参考'),
   );
   expect(references.querySelector('h4')?.textContent).toBe('参考');
-  expect(references.querySelector('[role="status"]')?.textContent).toContain('上次结果');
+  expect(references.querySelector('[role="status"], [role="alert"]')).toBeNull();
   await act(() =>
     references.querySelector<HTMLButtonElement>('[aria-label="打开 报告.xlsx"]')!.click(),
   );
@@ -365,8 +255,6 @@ test('reference links distinguish document formats and unknown fallback from hea
         <OutputReferences
           items={[{ ...file(name), mediaType: 'application/octet-stream' }]}
           onOpen={() => {}}
-          onSave={() => {}}
-          onEdit={() => {}}
         />,
       ),
     );
@@ -391,8 +279,6 @@ test('reference links distinguish document formats and unknown fallback from hea
         <OutputReferences
           items={[{ ...file('no-extension'), mediaType: mime }]}
           onOpen={() => {}}
-          onSave={() => {}}
-          onEdit={() => {}}
         />,
       ),
     );

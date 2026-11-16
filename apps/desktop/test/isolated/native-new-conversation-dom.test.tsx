@@ -1677,13 +1677,11 @@ test('an accepted prompt is removed from its own cache after leaving, while unkn
         ['accepted', 'applied', 'terminal'].includes(phase) ? '' : 'original submitted prompt 雪🙂',
       );
       if (phase === 'unknown' || phase === 'failed' || phase === 'rejected') {
-        const delivery = f.host.querySelector('.message.user .delivery-status');
-        expect(delivery?.textContent).toBe(
-          phase === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已保留。',
-        );
-        expect(delivery?.closest('.message.user')?.textContent).toContain(
-          'original submitted prompt 雪🙂',
-        );
+        const toast = f.host.querySelector('.native-toast-card');
+        expect(toast?.textContent).toContain(phase === 'unknown' ? '发送结果尚未确认' : '发送失败');
+        expect(toast?.closest('.conversation-viewport')).toBeNull();
+        expect(f.host.querySelector('.conversation-viewport .delivery-status')).toBeNull();
+        expect(f.host.querySelector('.conversation-viewport .turn-failure')).toBeNull();
         expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
       }
       expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
@@ -4082,6 +4080,38 @@ test('first send clears and renders original text; late failure cannot steal ano
   }
 });
 
+test('a failed first send ends loading and reports through one Toast while the created Session is still loading', async () => {
+  const f = fixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('retryable first input');
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    expect(f.host.querySelector('.composer-action')?.getAttribute('aria-busy')).toBe('true');
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    f.holdSelection();
+    const send = await f.resolve('failed', true, 'native_asset_unavailable');
+    await f.until(() => !!f.host.querySelector('.native-toast-card'));
+    const toast = f.host.querySelector('.native-toast-card');
+    expect(toast?.textContent).toContain('本地执行环境尚未就绪');
+    expect(f.host.querySelector('.composer-action')?.hasAttribute('aria-busy')).toBe(false);
+    expect(f.input('新对话草稿')).toBeDefined();
+    expect(f.host.querySelector('.conversation-viewport .delivery-status')).toBeNull();
+    expect(f.host.querySelector('.conversation-viewport .turn-failure')).toBeNull();
+    expect(f.host.querySelector('.message.user')).toBeNull();
+    await f.releaseSelection();
+    await f.until(() => !!f.input('当前会话私有草稿'));
+    expect(f.host.querySelector('.native-toast-card')).toBe(toast);
+    expect(f.selected()).toBe(send.creation.sessionId);
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('retryable first input');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    await f.releaseSelection();
+    await f.close();
+  }
+});
+
 test('a completed first send preserves the scheduled page and returning enters its original Session directly', async () => {
   const f = fixture();
   try {
@@ -5318,7 +5348,7 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
   }
 });
 
-test('first accepted input observes a later rejection before Run creation, keeps failure beside saved text and retries only explicitly', async () => {
+test('first accepted input surfaces a later pre-Run rejection once and retries only explicitly', async () => {
   const f = fixture(false, true, 'accept_edits', { firstHumanInput: true });
   const bridge = f.dom.window.kiteNative! as NativeBridge,
     originalRequest = bridge.request.bind(bridge);
@@ -5395,11 +5425,11 @@ test('first accepted input observes a later rejection before Run creation, keeps
     expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
     rejectReady = true;
     await f.refreshFacts();
-    await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
-    const failure = f.host.querySelector('.turn-failure[role="alert"]');
+    await f.until(() => !!f.host.querySelector('.native-toast-card'));
+    const failure = f.host.querySelector('.native-toast-card');
     expect(f.host.querySelector('.response-status')).toBeNull();
-    expect(failure?.getAttribute('aria-label')).toBe('本地执行环境尚未就绪，本轮未能启动');
-    expect(failure?.textContent).toBe('原消息已保留。请在本地执行环境恢复后重新发送。');
+    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+    expect(failure?.textContent).toContain('本地执行环境尚未就绪，请恢复后重新发送。');
     expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');
     expect(f.host.body.textContent).not.toContain('"reason"');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('你好');
@@ -5413,7 +5443,7 @@ test('first accepted input observes a later rejection before Run creation, keeps
       ),
     ).toBe(true);
     await f.click('Other B');
-    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
     await act(async () => {
       [...f.host.querySelectorAll<HTMLButtonElement>('.session-row')]
@@ -5421,7 +5451,7 @@ test('first accepted input observes a later rejection before Run creation, keeps
         .click();
       await nextDesktopPresentation(f.dom);
     });
-    expect(f.host.querySelector('.turn-failure[role="alert"]')).not.toBeNull();
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('你好');
     rejectReady = false;
     await f.click('发送明确的新轮次');
@@ -5435,14 +5465,10 @@ test('first accepted input observes a later rejection before Run creation, keeps
     expect(retry.intent.commandId).not.toBe(first.intent.commandId);
     expect(f.calls.filter((input) => input.method === 'conversation.send')).toHaveLength(2);
     await f.resolve('accepted');
-    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
+    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
-    const oldFailure = f.host.querySelector('.turn-failure[role="alert"]')!;
-    const latestInput = [...f.host.querySelectorAll('.message.user')].at(-1)!;
-    expect(
-      oldFailure.compareDocumentPosition(latestInput) &
-        f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
   } finally {
     await f.close();
   }
@@ -5496,12 +5522,12 @@ test.each([
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
-    await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
+    await f.until(() => !!f.host.querySelector('.native-toast-card'));
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(persistedInput ? 1 : 0);
     expect(f.host.body.textContent).not.toContain('从一个想法开始');
-    const failure = f.host.querySelector('.turn-failure[role="alert"]');
-    expect(failure?.getAttribute('aria-label')).toBe('本轮未能启动');
-    expect(failure?.textContent).toBe('原消息已保留，请检查模型和执行环境后重新发送。');
+    const failure = f.host.querySelector('.native-toast-card');
+    expect(failure?.textContent).toContain('发送失败，请检查模型和执行环境后重试。');
+    expect(f.host.querySelector('.turn-failure')).toBeNull();
     expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
     expect(
@@ -5510,17 +5536,17 @@ test.each([
       ),
     ).toBe(false);
     await f.click('Other B');
-    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
     await f.click('Original A');
-    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
   } finally {
     await f.close();
   }
 });
 
-test('cold pre-Run rejection stays after prior successful history and before a later explicit input', async () => {
+test('cold pre-Run rejection stays outside prior history and clears on a later explicit input', async () => {
   const commandId = 'cold-rejected-with-prior-history';
   const priorRun = {
     id: 'prior-successful-run',
@@ -5595,7 +5621,7 @@ test('cold pre-Run rejection stays after prior successful history and before a l
         }
       : value;
   };
-  const failure = () => f.host.querySelector('.turn-failure[role="alert"]');
+  const failure = () => f.host.querySelector('.native-toast-card');
   const expectBefore = (before: Element, after: Element) =>
     expect(
       before.compareDocumentPosition(after) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
@@ -5606,7 +5632,7 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     await f.click('Original A');
     await f.releaseHistory();
     await f.until(() => !!failure());
-    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.native-toast-card')).toHaveLength(1);
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
     expect(f.host.querySelector('.message.user')?.textContent).toContain(
       'prior successful request',
@@ -5615,7 +5641,8 @@ test('cold pre-Run rejection stays after prior successful history and before a l
       message.textContent?.includes('prior successful reply'),
     );
     expect(priorReply).toBeDefined();
-    expectBefore(priorReply!, failure()!);
+    expect(failure()?.closest('.conversation-viewport')).toBeNull();
+    expect(f.host.querySelector('.turn-failure')).toBeNull();
     expect(f.host.body.textContent).not.toContain('从一个想法开始');
     expect(
       f.calls.some((input) =>
@@ -5626,13 +5653,12 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     expect(failure()).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
     await f.click('Original A');
-    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
-    const originalFailure = failure();
+    expect(failure()).toBeNull();
     await f.edit('later explicitly submitted request', '当前会话私有草稿');
     await f.click('发送明确的新轮次');
     expect(submitted?.intent.kind).toBe('run.start');
     expect(submitted?.intent.commandId).not.toBe(commandId);
-    expectBefore(failure()!, [...f.host.querySelectorAll('.message.user')].at(-1)!);
+    expect(failure()).toBeNull();
     const laterRun = {
       ...priorRun,
       id: 'later-successful-run',
@@ -5662,14 +5688,14 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     const laterInput = [...f.host.querySelectorAll('.message.user')].at(-1)!;
     expect(laterInput.textContent).toContain('later explicitly submitted request');
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
-    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
-    expect(failure()).toBe(originalFailure);
-    expectBefore(failure()!, laterInput);
+    expect(f.host.querySelector('.turn-failure')).toBeNull();
+    expect(failure()).toBeNull();
+    expectBefore(priorReply!, laterInput);
     await f.click('Other B');
     expect(failure()).toBeNull();
     await f.click('Original A');
-    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
-    expectBefore(failure()!, [...f.host.querySelectorAll('.message.user')].at(-1)!);
+    expect(failure()).toBeNull();
+    expect(f.host.querySelector('.turn-failure')).toBeNull();
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
     expect(f.calls.filter((input) => input.method === 'submit')).toHaveLength(1);
     expect(

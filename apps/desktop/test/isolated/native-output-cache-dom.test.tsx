@@ -83,13 +83,22 @@ test('shared output views restore unchanged turns immediately while invalidating
     },
   } as NativeBridge;
   let latest: ReturnType<typeof useNativeOutputFiles>;
-  function Harness({ session, revision = 1 }: { session: string; revision?: number }) {
+  function Harness({
+    session,
+    revision = 1,
+    pending,
+  }: {
+    session: string;
+    revision?: number;
+    pending?: string;
+  }) {
     const outputs = useNativeOutputFiles({
       bridge,
       generation,
-      storeId: store,
-      sessionId: session,
+      storeId: pending ? undefined : store,
+      sessionId: pending ? undefined : session,
       revision,
+      pendingReading: pending ? { storeId: store, sessionId: pending } : undefined,
       display: versions.snapshot(store, owner, session),
       available,
       onEdit: async () => {},
@@ -111,8 +120,10 @@ test('shared output views restore unchanged turns immediately while invalidating
     if (session === 'a' && !freeze) retainedView = view;
     return freeze ? retainedView : view;
   }
-  const render = async (session: string, revision = 1) => {
-    await act(async () => root.render(<Harness session={session} revision={revision} />));
+  const render = async (session: string, revision = 1, pending?: string) => {
+    await act(async () =>
+      root.render(<Harness session={session} revision={revision} pending={pending} />),
+    );
   };
   const settle = async () => {
     await act(async () => {
@@ -138,6 +149,18 @@ test('shared output views restore unchanged turns immediately while invalidating
     await settle();
     expect(document.body.textContent).not.toContain('user-a-old.txt');
     const beforeReturn = calls.length;
+    freeze = true;
+    await render('b', 1, 'a');
+    expect(cards()).toHaveLength(3);
+    await act(async () =>
+      document
+        .querySelector<HTMLButtonElement>('[data-turn] [aria-label="打开 user-a-child-old.txt"]')!
+        .click(),
+    );
+    expect(latest!.request).toBeUndefined();
+    await settle();
+    expect(calls).toHaveLength(beforeReturn);
+    freeze = false;
     await render('a');
     expect(cards()).toHaveLength(3);
     expect(document.body.textContent).not.toContain('读取中');
@@ -229,7 +252,7 @@ test('shared output views restore unchanged turns immediately while invalidating
   }
 });
 
-test('warm references and turn cards retain display only; a retry reacquires current Main child admission', async () => {
+test('warm file lists hide collection status while Main rechecks child collection admission', async () => {
   const { NativeCaller } = await import('../../electron/native-caller');
   const { backgroundItem } = await import('../background-item.fixture');
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
@@ -258,6 +281,7 @@ test('warm references and turn cards retain display only; a retry reacquires cur
   const child = backgroundItem(1, true);
   let revision = '7',
     queries = 0,
+    sourceChecks = 0,
     retries = 0;
   const retried: unknown[] = [];
   const connection = {
@@ -284,8 +308,10 @@ test('warm references and turn cards retain display only; a retry reacquires cur
     listAllSessions: async () => [],
     listSessions: async () => [],
     disposeNetwork() {},
-    listAllBackgroundExecutions: async ({ rootSessionId }: { rootSessionId: string }) =>
-      rootSessionId === 'root' ? [structuredClone(child)] : [],
+    async listAllBackgroundExecutions({ rootSessionId }: { rootSessionId: string }) {
+      sourceChecks++;
+      return rootSessionId === 'root' ? [structuredClone(child)] : [];
+    },
     listBackgroundExecutions: async () => ({ items: [structuredClone(child)] }),
     async queryOutputFiles(
       input: Parameters<import('@kite-ai/client').AgentClient['queryOutputFiles']>[0],
@@ -382,29 +408,38 @@ test('warm references and turn cards retain display only; a retry reacquires cur
     await caller.invoke({ method: 'select', generation: 1, sessionId });
     await render();
   };
-  const retry = async () => {
-    await act(async () =>
-      [...document.querySelectorAll('button')]
-        .find((button) => button.textContent === '重试整理')!
-        .click(),
-    );
+  const retry = (expectedRevision = '7') =>
+    bridge.request({
+      method: 'outputs.retry',
+      generation: 1,
+      scope: { storeId: 'store', sessionId: 'child' },
+      collectionId: 'collection',
+      expectedRevision,
+    });
+  const expectFileListsOnly = () => {
+    expect(document.querySelectorAll('.output-file-card')).toHaveLength(2);
+    expect(document.querySelector('.output-references')?.textContent).toContain('child.txt');
+    expect(document.body.textContent).not.toMatch(/读取中|整理|重试/);
+    expect(document.querySelector('[role="alert"], [role="status"]')).toBeNull();
   };
   try {
     await caller.invoke({ method: 'attach' });
     await select('root');
     await settle();
-    expect(document.querySelectorAll('.output-file-card')).toHaveLength(2);
-    expect(document.body.textContent).toContain('child.txt');
+    expectFileListsOnly();
     await select('other');
     await settle();
     const warmQueries = queries,
       warmCalls = calls.length;
     await select('root');
-    expect(document.querySelectorAll('.output-file-card')).toHaveLength(2);
-    expect(document.body.textContent).not.toContain('读取中');
+    expectFileListsOnly();
     await settle();
     expect(queries).toBe(warmQueries);
     expect(calls).toHaveLength(warmCalls);
+    expect(calls.every((r) => r.method === 'outputs.sources' || r.method === 'outputs.query')).toBe(
+      true,
+    );
+    // Exercise the Main contract independently of the display-only lists.
     await retry();
     expect(retries).toBe(1);
     expect(queries).toBe(warmQueries + 1);
@@ -421,19 +456,19 @@ test('warm references and turn cards retain display only; a retry reacquires cur
     // The display is not a mutation credential: a changed revision must be re-read
     // and denied before the write, even if its change event has not arrived yet.
     revision = '8';
-    await retry();
+    await expect(retry()).rejects.toThrow('output_scope_unavailable');
+    expect(queries).toBe(warmQueries + 2);
     expect(retries).toBe(1);
-    expect(document.body.textContent).toContain('重试整理失败');
+    expectFileListsOnly();
     await select('other');
     await select('root');
     child.childSession!.deletedAt = 42;
     const beforeDeleted = queries;
-    await retry();
+    const beforeSourceCheck = sourceChecks;
+    await expect(retry('8')).rejects.toThrow(/output_(?:scope|source)_unavailable/);
+    expect(sourceChecks).toBeGreaterThan(beforeSourceCheck);
     expect(queries).toBe(beforeDeleted);
     expect(retries).toBe(1);
-    expect(
-      calls.every((r) => ['outputs.sources', 'outputs.query', 'outputs.retry'].includes(r.method)),
-    ).toBe(true);
   } finally {
     await act(async () => root.unmount());
     await caller.close();

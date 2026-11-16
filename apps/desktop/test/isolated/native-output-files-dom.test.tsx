@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
 
-test('file references are bounded, retries use collection revision, and stale scope responses cannot replace the selected reader', async () => {
+test('file references show only files across reads, pagination, and scope changes', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -27,6 +27,8 @@ test('file references are bounded, retries use collection revision, and stale sc
     });
   const { createRoot } = await import('react-dom/client');
   const { useNativeOutputFiles } = await import('../../src/native-output-files');
+  const { useNativeErrorFeedback } = await import('../../src/native-error-feedback');
+  const { NativeToast } = await import('../../src/native-message');
   const root = createRoot(document.getElementById('root')!);
   const calls: NativeRequest[] = [];
   const file = (index: number, sessionId = 'session') => ({
@@ -69,6 +71,7 @@ test('file references are bounded, retries use collection revision, and stale sc
       calls.push(request);
       if (request.method === 'outputs.sources')
         return { kind: 'outputs.sources', scope: request.scope, sources: [] };
+      if (request.method === 'outputs.save') throw Error('output_save_failed');
       if (request.method === 'outputs.query') {
         if (queryPage) return { kind: 'outputs.page', page: queryPage(request) };
         if (hold && request.scope.sessionId === 'old')
@@ -98,12 +101,14 @@ test('file references are bounded, retries use collection revision, and stale sc
     sessionId?: string;
     revision?: number;
   }) {
+    const feedback = useNativeErrorFeedback(sessionId);
     const output = useNativeOutputFiles({
       bridge,
       generation: 1,
       storeId: 'store',
       sessionId,
       revision,
+      onError: feedback.report,
       turnLabel: () => '第 1 轮',
       async onEdit() {
         edits++;
@@ -111,6 +116,7 @@ test('file references are bounded, retries use collection revision, and stale sc
     });
     return (
       <>
+        <NativeToast message={feedback.message} onDismiss={feedback.dismiss} />
         <output data-testid="opened-file">
           {output.request && 'fileId' in output.request.target ? output.request.target.fileId : ''}
         </output>
@@ -130,40 +136,51 @@ test('file references are bounded, retries use collection revision, and stale sc
     await act(async () => {
       await Bun.sleep(130);
     });
-    expect(document.querySelector('[aria-label="参考"]')?.querySelectorAll('li')).toHaveLength(5);
+    const references = () => document.querySelector('[aria-label="参考"]');
+    expect(references()?.querySelectorAll('li')).toHaveLength(5);
     const more = [...document.querySelectorAll('button')].find(
       (button) => button.textContent === '展开更多',
     )!;
     await act(() => more.click());
-    expect(document.querySelector('[aria-label="参考"]')?.querySelectorAll('li')).toHaveLength(7);
+    expect(references()?.querySelectorAll('li')).toHaveLength(7);
+    const link = references()!.querySelector<HTMLButtonElement>(
+      '[aria-label="打开 session-report-0.docx"]',
+    )!;
+    await act(() => link.click());
+    expect(document.querySelector('[data-testid="opened-file"]')?.textContent).toBe('file-0');
     const moreAction = document.querySelector<HTMLButtonElement>(
       '[aria-label="session-report-0.docx 的更多操作"]',
     )!;
-    await act(() => {
-      moreAction.focus();
-      moreAction.dispatchEvent(
-        new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
-    });
+    const openFileActions = () =>
+      act(() => {
+        moreAction.focus();
+        moreAction.dispatchEvent(
+          new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+      });
+    await openFileActions();
     const edit = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
       (button) => button.textContent === '继续修改',
     )!;
     await act(() => edit.click());
     expect(edits).toBe(1);
     expect(calls.every((call) => call.method.startsWith('outputs.'))).toBe(true);
-    const retry = [...document.querySelectorAll('button')].find(
-      (button) => button.textContent === '重试整理',
-    )!;
-    await act(async () => retry.click());
     expect(calls.some((call) => call.method === 'outputs.query' && call.runId === 'run')).toBe(
       true,
     );
-    expect(calls.find((call) => call.method === 'outputs.retry')).toMatchObject({
-      collectionId: 'collection',
-      expectedRevision: '7',
-      scope: { storeId: 'store', sessionId: 'session' },
-      generation: 1,
-    });
+    await openFileActions();
+    const save = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (button) => button.textContent === '另存为',
+    )!;
+    await act(async () => save.click());
+    expect(document.querySelector('.native-toast-card')?.textContent).toContain('另存失败');
+    expect(references()?.textContent).not.toContain('另存失败');
+    const outputs = document.querySelector('[data-testid="turn-outputs"]');
+    expect(outputs?.querySelector('[role="alert"], [role="status"]')).toBeNull();
+    expect(outputs?.textContent).not.toContain('重试整理');
+    expect(references()?.querySelector('[role="alert"], [role="status"]')).toBeNull();
+    expect(document.querySelector('[aria-label="文件整理"]')).toBeNull();
+    await act(() => document.querySelector<HTMLButtonElement>('.native-toast-close')!.click());
     const settle = async () => {
       await act(async () => {
         await Bun.sleep(130);
@@ -178,14 +195,16 @@ test('file references are bounded, retries use collection revision, and stale sc
       await settle();
     };
     const turnOutputs = () => document.querySelector('[data-testid="turn-outputs"]')!;
-    queryPage = (request) => {
-      if (request.runId) throw Error('output_query_failed');
-      return { scope: request.scope, revision: '1', items: [], collections: [] };
+    queryPage = () => {
+      throw Error('output_query_failed');
     };
     await act(() => root.render(<Harness sessionId="no-outputs" />));
     expect(turnOutputs().childNodes).toHaveLength(0);
+    expect(references()).toBeNull();
     await settle();
     expect(turnOutputs().childNodes).toHaveLength(0);
+    expect(references()).toBeNull();
+    expect(document.querySelector('.native-toast-card')).toBeNull();
 
     let lateBatch = false;
     queryPage = (request) => {
@@ -212,6 +231,9 @@ test('file references are bounded, retries use collection revision, and stale sc
       };
     };
     await settle();
+    await click('展开更多');
+    await click('加载更多');
+    expect(references()?.querySelectorAll('li')).toHaveLength(100);
     await click('加载更多文件');
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       100,
@@ -281,52 +303,32 @@ test('file references are bounded, retries use collection revision, and stale sc
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       2,
     );
-    queryPage = (request) => {
-      const offset = Number(request.collectionBeforeKey ?? 0);
-      return {
-        ...page,
-        scope: request.scope,
-        items: [],
-        collections: Array.from({ length: offset ? 12 : 50 }, (_, i) => ({
-          ...page.collections[0]!,
-          collectionId: `collection-${offset ? offset + i - 1 : i}`,
-          revision: offset && i === 0 ? '7' : '8',
-        })),
-        nextCollectionCursor: offset ? undefined : '50',
-      };
-    };
-    await act(async () => root.render(<Harness sessionId="statuses" revision={5} />));
-    await settle();
-    expect(document.querySelectorAll('[aria-label="本次产出"] [role="alert"]')).toHaveLength(50);
-    await click('更多整理状态');
-    expect(document.querySelectorAll('[aria-label="本次产出"] [role="alert"]')).toHaveLength(61);
-    expect(
-      calls.some((call) => call.method === 'outputs.query' && call.collectionBeforeKey === '50'),
-    ).toBe(true);
-    const duplicateRetry = [...document.querySelectorAll('button')].filter(
-      (button) => button.textContent === '重试整理',
-    )[49]!;
-    await act(async () => duplicateRetry.click());
-    expect(
-      calls.find(
-        (call) => call.method === 'outputs.retry' && call.collectionId === 'collection-49',
-      ),
-    ).toMatchObject({ expectedRevision: '8' });
-    queryPage = (request) => ({ ...page, scope: request.scope, items: [], collections: [] });
-    await settle();
-    expect(turnOutputs().childNodes).toHaveLength(0);
     queryPage = (request) => ({
       ...page,
       scope: request.scope,
       items: [],
-      collections: [{ ...page.collections[0]!, retryUntil: '2000-01-01T00:00:00Z' }],
+      collections: [
+        ...page.collections,
+        {
+          ...page.collections[0]!,
+          collectionId: 'pending',
+          state: 'pending',
+          errorCode: undefined,
+        },
+        {
+          ...page.collections[0]!,
+          collectionId: 'expired',
+          retryUntil: '2000-01-01T00:00:00Z',
+        },
+      ],
+      nextCollectionCursor: '50',
     });
-    await act(async () => root.render(<Harness sessionId="expired" revision={6} />));
+    await act(async () => root.render(<Harness sessionId="statuses" revision={5} />));
     await settle();
-    expect(document.body.textContent).toContain('暂存文件已过期，请重新生成');
-    expect(
-      [...document.querySelectorAll('button')].some((button) => button.textContent === '重试整理'),
-    ).toBe(false);
+    expect(turnOutputs().childNodes).toHaveLength(0);
+    expect(references()).toBeNull();
+    expect(document.querySelector('[role="alert"], [role="status"]')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/文件整理|重试|暂存文件/);
     queryPage = undefined;
     hold = true;
     await act(async () => root.render(<Harness sessionId="old" />));
@@ -346,6 +348,13 @@ test('file references are bounded, retries use collection revision, and stale sc
     );
     expect(document.body.textContent).toContain('new-report-0.docx');
     expect(document.body.textContent).not.toContain('report-99.docx');
+    expect(
+      calls.some(
+        (call) =>
+          call.method === 'outputs.retry' ||
+          (call.method === 'outputs.query' && call.collectionBeforeKey !== undefined),
+      ),
+    ).toBe(false);
   } finally {
     await act(() => root.unmount());
     dom.window.close();

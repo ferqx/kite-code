@@ -4,7 +4,7 @@
 
 `start`、`steer`、`followUp` 保存深拷贝冻结的原请求。同 commandId/相等内容共用 in-flight Promise，响应未知后也不再发送；不同 Session/内容拒绝。`lookup` 仅查询原 Command，沿 Client 的 `readOrdinaryCommandApplication` 核准确业务 Command/Run，不要求公开 ID 等于业务 Run.originCommandId。旧直接 steer 仍核原 targetRun；真实人类决定另开工作时以已封存业务回执绑定新 Run，原技术目标和请求保持不变。accepted 尚无已应用业务时不借原 targetRun 的终态冒称输入已完成。applied 不表示模型消费完成；terminal 必须另读取真实业务 Run，其 completed/failed/cancelled/interrupted 字段保持，不统一伪装成功。
 
-`accepted` 也不保证 Run 已创建：宿主资产或配置准备可在受理后将原 Command 拒绝。DesktopInput 保留已核实的 `receipt.reason`；Native 对当前 Session 的原输入 ID 继续只读查询，热首次提交沿原 `conversation.lookup`，冷持久 caller 沿原 `caller.lookup`。无 Run 的拒绝在原输入后显示共享轻量失败；冷 Session 没有对应新 Message 时也显示启动失败，即使已有成功历史，不回到欢迎页、不伪造用户历史。无可关联消息的失败按准确 Store/Session/Command 独立展示，完整历史首次可读后固定本进程位置，后续新输入不使旧失败漂移；冷态无排序依据时不臆造它与既有消息的因果顺序。错误详情采用可读说明，不展示内部原因码。热态仅在原草稿未被后续编辑时恢复原文，已保存的历史保持原顺序；再次发送必须来自明确的新输入意图，查询、切换和重开均不自动 POST。
+`accepted` 也不保证 Run 已创建：宿主资产或配置准备可在受理后将原 Command 拒绝。DesktopInput 保留已核实的 `receipt.reason`；Native 对当前 Session 的原输入 ID 继续只读查询，热首次提交沿原 `conversation.lookup`，冷持久 caller 沿原 `caller.lookup`。发送失败或结果待确认时，按钮结束加载并通过同一 Toast 宿主反馈。首次提交的提示跟随该次发送接管到原目标 Session，普通切换撤下旧提示。已确认的 Run 前拒绝可在冷开时反馈一次，已保存消息留在原位置，空历史直接呈现输入区。相同提交的同一状态在当前窗口只提示一次，确认受理后收起待确认提示。热态仅在原草稿未被后续编辑时恢复原文，再次发送来自明确的新输入意图。查询、切换和重开沿原身份只读核对。
 
 正式 Native 的[宿主 journal](../electron/caller-journal.ts)在核原公开 ID、请求摘要、主体和 Store/Workspace/Session 后，复用同一业务查回器。已封存的人类补充可沿实际 `input.steer` 业务绑定原 Run，独立工作可绑定新的业务 Run；旧技术 steer 仍核原 target 和 contextSelection。applied 的只读观察允许顶层 Run 为空，实际观察 Model 单独验证；unresolved 保持 accepted。冷查回只读原身份，不获得重新提交权限。[宿主回归](../test/native-caller.test.ts)覆盖这些分支与外来、未应用和伪造绑定拒绝。
 

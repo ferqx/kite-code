@@ -113,7 +113,7 @@ import { NativeGeneralSettings } from './native-general-settings';
 import { type HistoryState, NativeHistory } from './native-history';
 import {
   nativeAskUserAwaitingAnswer,
-  nativeInputFailureMessage,
+  nativeInputErrorText,
   nativeTextIntent,
 } from './native-input';
 import { nativeInputFileIntent } from './native-input-file-intent';
@@ -613,6 +613,22 @@ function NativeDesktopContent({
     report: showOperationMessage,
     dismiss: dismissOperationMessage,
   } = useNativeErrorFeedback(errorPresentationScope);
+  const {
+    message: inputErrorMessage,
+    report: showInputError,
+    dismiss: dismissInputError,
+  } = useNativeErrorFeedback(
+    JSON.stringify([
+      state?.generation ?? generation.current,
+      directory?.storeId,
+      // A first submission owns the same Toast while its new Session takes over.
+      preparing ? firstSubmission?.creation.sessionId : state?.selection?.session.id,
+      pageIntent.current,
+      scheduledTasksView,
+      settingsOpen,
+    ]),
+  );
+  const currentToast = inputErrorMessage ?? operationMessage;
   const setError = useCallback(
     (message: string | undefined, operation?: string) =>
       showOperationMessage(
@@ -660,6 +676,7 @@ function NativeDesktopContent({
   const [, recoveryVisibilityChanged] = useState(0);
   const [pending, setPending] = useState(false);
   const [sending, setSending] = useState(false);
+  const latestInputCommands = useRef(new Map<string, string>());
   const [inputDeliveries, setInputDeliveries] = useState(
     new Map<
       string,
@@ -672,6 +689,7 @@ function NativeDesktopContent({
         afterInputCommandId?: string;
         text: string;
         phase: 'sending' | 'unknown' | 'failed' | 'accepted';
+        error?: string;
         files?: readonly { name: string }[];
         images?: readonly { name: string }[];
       }
@@ -1835,10 +1853,12 @@ function NativeDesktopContent({
     storeId: selection?.storeId,
     sessionId: selection?.session.id,
     revision: state?.outputFilesRevision ?? state?.historyEpoch ?? 0,
+    pendingReading,
     display: state?.outputFilesDisplay,
     available:
       !state?.backgroundUnavailable &&
       !(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
+    onError: showOperationMessage,
     turnLabel: (runId) => `来源轮次 ${runId.slice(0, 8)}`,
     onRequestLocalEdit: async (file, request) => {
       if (
@@ -2418,9 +2438,15 @@ function NativeDesktopContent({
   }
   async function writeInput(action: () => Promise<unknown>, requiresHistory = true) {
     await write(async () => {
+      showOperationMessage();
+      showInputError();
       setSending(true);
       try {
         await action();
+      } catch (error) {
+        const code = (error as { code?: string })?.code ?? (error as Error)?.message;
+        if (code !== 'native_selection_changed')
+          showInputError(nativeInputErrorText('failed', code));
       } finally {
         setSending(false);
       }
@@ -2928,10 +2954,13 @@ function NativeDesktopContent({
     original: NonNullable<typeof firstSubmission>,
     current: number,
     page: number,
+    sendingReceipt = false,
   ) {
     if (current !== generation.current || firstRef.current?.commandId !== original.commandId)
       return;
     setFirstSubmission({ ...original, result: value });
+    if (sendingReceipt && (value.phase === 'failed' || value.phase === 'unknown'))
+      setSending(false);
     if (
       value.phase === 'unknown' &&
       original.result?.phase === 'unknown' &&
@@ -3038,6 +3067,10 @@ function NativeDesktopContent({
       permissionMode: preparedPermission,
     };
     firstRef.current = original;
+    latestInputCommands.current.set(
+      imageScope(original.creation.expectedStoreId, original.creation.sessionId),
+      original.commandId,
+    );
     setFirstSubmission(original);
     draftCache.current.set(
       imageScope(original.creation.expectedStoreId, original.creation.sessionId),
@@ -3063,7 +3096,7 @@ function NativeDesktopContent({
         });
         if (!value || !('kind' in value) || value.kind !== 'conversation' || !('stage' in value))
           throw Error('conversation_response_unknown');
-        await acceptFirstResult(value, original, current, page);
+        await acceptFirstResult(value, original, current, page, true);
       } catch (cause) {
         const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
         const value: NativeConversationResult = {
@@ -3084,7 +3117,6 @@ function NativeDesktopContent({
           if (newDraftRevision.current === original.preparationRevision)
             setNewDraft((draft) => draft || original.draft.content);
         }
-        throw cause;
       }
     }, false);
   }
@@ -3255,6 +3287,7 @@ function NativeDesktopContent({
         nonce = viewIntent.current,
         sessionId = selection.session.id,
         commandId = crypto.randomUUID();
+      latestInputCommands.current.set(draftKey, commandId);
       if (
         noteBatch.entries.length ||
         noteDocument.outputFiles?.length ||
@@ -3333,7 +3366,7 @@ function NativeDesktopContent({
           browserNotes.settle(commandId, value.phase, draftKey);
           if (value.phase === 'accepted')
             consumeInputDraft(commandId, selection.storeId, sessionId);
-          await acceptFirstResult(value, original, current, page);
+          await acceptFirstResult(value, original, current, page, true);
         } catch (cause) {
           const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
           browserNotes.settle(
@@ -3370,7 +3403,6 @@ function NativeDesktopContent({
             )
               setDraft((draft) => draft || original.draft.content);
           }
-          throw cause;
         }
         return;
       }
@@ -3427,6 +3459,7 @@ function NativeDesktopContent({
           if (original)
             next.set(commandId, {
               ...original,
+              error: code,
               phase: [
                 'invalid_native_request',
                 'native_request_too_large',
@@ -3437,7 +3470,7 @@ function NativeDesktopContent({
             });
           return next;
         });
-        throw cause;
+        return;
       }
       setInputDeliveries((previous) => {
         const next = new Map(previous),
@@ -3445,6 +3478,10 @@ function NativeDesktopContent({
         if (original)
           next.set(commandId, {
             ...original,
+            error:
+              value && 'error' in value && typeof value.error === 'string'
+                ? value.error
+                : undefined,
             phase:
               value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase)
                 ? 'accepted'
@@ -3860,46 +3897,6 @@ function NativeDesktopContent({
         rejected.set(input.intent.commandId, input.error);
     return rejected;
   }, [selection, state?.callerSubmissions, state?.inputSubmissions]);
-  const rejectedInputAnchors = useRef(new Map<string, string | null>());
-  useLayoutEffect(() => {
-    if (
-      !selection ||
-      preparing ||
-      selection.viewLoading ||
-      historyState.phase !== 'complete' ||
-      history.current?.state !== historyState ||
-      historyMetadataLoading ||
-      selectionRead.current?.holdPresentation
-    )
-      return;
-    for (const commandId of rejectedInputs.keys()) {
-      const key = JSON.stringify([replyDisplayScope, commandId]);
-      if (
-        !rejectedInputAnchors.current.has(key) &&
-        !displayMessages.some((message) =>
-          savedNativeInput(
-            message,
-            commandId,
-            { storeId: selection.storeId, sessionId: selection.session.id },
-            selection,
-          ),
-        )
-      )
-        // No historical input exists to order this rejection. Fix its first
-        // fully read position so later explicit inputs do not move it forward.
-        rejectedInputAnchors.current.set(key, displayMessages.at(-1)?.id ?? null);
-    }
-    while (rejectedInputAnchors.current.size > 256)
-      rejectedInputAnchors.current.delete(rejectedInputAnchors.current.keys().next().value!);
-  }, [
-    selection,
-    preparing,
-    historyState,
-    historyMetadataLoading,
-    displayMessages,
-    rejectedInputs,
-    replyDisplayScope,
-  ]);
   const firstRun =
     firstVisible &&
     !preparing &&
@@ -3909,6 +3906,66 @@ function NativeDesktopContent({
         run.sessionId === firstSubmission.creation.sessionId &&
         run.originCommandId === firstSubmission.commandId,
     );
+  const inputScope = preparing
+    ? firstVisible && firstOpenPage.current === pageIntent.current
+      ? firstSubmission.creation
+      : undefined
+    : selection && selected.current === selection.session.id
+      ? { expectedStoreId: selection.storeId, sessionId: selection.session.id }
+      : undefined;
+  const inputScopeKey = inputScope && imageScope(inputScope.expectedStoreId, inputScope.sessionId);
+  const latestInputId = inputScopeKey && latestInputCommands.current.get(inputScopeKey);
+  const rejectedId = latestInputId ?? rejectedInputs.keys().next().value;
+  const latestDelivery = pendingInputModels.find(({ id }) => id === latestInputId);
+  const firstResult =
+    firstVisible && latestInputId === firstSubmission.commandId && !firstRun
+      ? firstSubmission.result
+      : undefined;
+  const failedBeforeRun =
+    rejectedId !== undefined &&
+    rejectedInputs.has(rejectedId) &&
+    !runMessages.runs.some(
+      (run) =>
+        run.originCommandId === rejectedId &&
+        run.originStoreId === inputScope?.expectedStoreId &&
+        run.sessionId === inputScope?.sessionId,
+    );
+  let inputIssue: { id: string; phase: 'failed' | 'unknown'; reason?: string } | undefined;
+  if (inputScope && !sending && !settingsOpen && !scheduledTasksView) {
+    if (failedBeforeRun)
+      inputIssue = { id: rejectedId, phase: 'failed', reason: rejectedInputs.get(rejectedId) };
+    else if (firstResult?.phase === 'failed' || (firstResult?.phase === 'unknown' && !firstSaved))
+      inputIssue = {
+        id: firstResult.commandId,
+        phase: firstResult.phase,
+        reason: firstResult.code,
+      };
+    else if (latestDelivery?.delivery === 'failed' || latestDelivery?.delivery === 'unknown')
+      inputIssue = {
+        id: latestDelivery.id,
+        phase: latestDelivery.delivery,
+        reason: inputDeliveries.get(latestDelivery.id)?.error,
+      };
+  }
+  const inputIssueKey =
+    inputIssue && JSON.stringify([inputScopeKey, inputIssue.id, inputIssue.phase]);
+  const inputIssueText = inputIssue && nativeInputErrorText(inputIssue.phase, inputIssue.reason);
+  const previousInputIssue = useRef<string | undefined>(undefined);
+  const shownInputIssues = useRef(new Set<string>());
+  useEffect(() => {
+    if (previousInputIssue.current === inputIssueKey) return;
+    const previous = previousInputIssue.current;
+    previousInputIssue.current = inputIssueKey;
+    if (!inputIssueKey || shownInputIssues.current.has(inputIssueKey)) {
+      if (previous) showInputError();
+      return;
+    }
+    shownInputIssues.current.add(inputIssueKey);
+    if (shownInputIssues.current.size > 256)
+      shownInputIssues.current.delete(shownInputIssues.current.values().next().value!);
+    showOperationMessage();
+    showInputError(inputIssueText);
+  }, [inputIssueKey, inputIssueText, showInputError, showOperationMessage]);
   const confirmedFirstReply = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
     if (firstRun && (!firstRun.isActive || !executionUnconfirmed))
@@ -3981,6 +4038,7 @@ function NativeDesktopContent({
     }
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
+      if (input.delivery === 'failed') continue;
       // Run observation can arrive before persisted user history. Keep the
       // original input ahead of its own status, tool output and reply throughout.
       const delivery = inputDeliveries.get(input.id)!;
@@ -4009,7 +4067,12 @@ function NativeDesktopContent({
       if (index < 0) models.push(input);
       else models.splice(index, 0, input);
     }
-    if (firstVisible && !firstSaved) {
+    if (
+      firstVisible &&
+      !firstSaved &&
+      firstSubmission.result?.phase !== 'failed' &&
+      !rejectedInputs.has(firstSubmission.commandId)
+    ) {
       const turnId = nativeInputTurnId(
         firstSubmission.commandId,
         {
@@ -4034,50 +4097,10 @@ function NativeDesktopContent({
         delivery:
           firstSubmission.result?.phase === 'accepted'
             ? undefined
-            : firstSubmission.result?.phase === 'failed'
-              ? 'failed'
-              : firstSubmission.result?.phase === 'unknown'
-                ? 'unknown'
-                : 'sending',
+            : firstSubmission.result?.phase === 'unknown'
+              ? 'unknown'
+              : 'sending',
       });
-    }
-    if (selection && !preparing) {
-      for (const [commandId, reason] of rejectedInputs) {
-        const persisted = displayMessages.find((message) =>
-          savedNativeInput(
-            message,
-            commandId,
-            { storeId: selection.storeId, sessionId: selection.session.id },
-            selection,
-          ),
-        );
-        const index = models.findIndex((model) => model.id === (persisted?.id ?? commandId));
-        if (index < 0) {
-          // Preparation may reject before Core saves any Message or Run. The verified
-          // original rejection remains visible without inventing a historical input.
-          const key = JSON.stringify([replyDisplayScope, commandId]);
-          const anchor = rejectedInputAnchors.current.get(key);
-          const anchorIndex = anchor ? models.findIndex((model) => model.id === anchor) : -1;
-          let position = anchor === null ? 0 : models.length;
-          if (anchorIndex >= 0) {
-            position = anchorIndex + 1;
-            const turnId = models[anchorIndex]?.turnId;
-            while (turnId && models[position]?.turnId === turnId) position++;
-          }
-          models.splice(position, 0, nativeInputFailureMessage(commandId, reason));
-          continue;
-        }
-        const turnId =
-          models[index]?.turnId ??
-          JSON.stringify(['native-input', selection.storeId, selection.session.id, commandId]);
-        models[index] = { ...models[index]!, turnId };
-        if (models.some((model) => model.turnId === turnId && model.systemKind === 'turn_failure'))
-          continue;
-        models.splice(index + 1, 0, {
-          ...nativeInputFailureMessage(commandId, reason),
-          turnId,
-        });
-      }
     }
     return groupNativeToolMessages(models);
   }, [
@@ -5060,26 +5083,13 @@ function NativeDesktopContent({
           !message.outputBody &&
           message.contentFormat !== 'unsupported'))
     )
-      return (
-        <>
-          {model.text && (
-            <PromptMarkdown
-              text={model.text}
-              openFile={message ? openFile : undefined}
-              fileRootUri={messageFileRootUri}
-            />
-          )}
-          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
-            <p className="delivery-status" role="alert">
-              {model.delivery === 'unknown'
-                ? '发送结果尚未确认。'
-                : firstPending
-                  ? '发送失败，原文已恢复供重试。'
-                  : '发送失败，原文已保留。'}
-            </p>
-          )}
-        </>
-      );
+      return model.text ? (
+        <PromptMarkdown
+          text={model.text}
+          openFile={message ? openFile : undefined}
+          fileRootUri={messageFileRootUri}
+        />
+      ) : null;
     if (!message || !selection || !state) return null;
     if (message.agentMessage)
       return <NativeModelOutputMessage message={message} storeId={selection.storeId} />;
@@ -5403,6 +5413,10 @@ function NativeDesktopContent({
           (!historyMetadataLoading || !!selection.canReadHistoryPreviews),
       }}
       messages={pendingReading && !(firstVisible && !firstSaved) ? [] : messageModels}
+      hideEmptyWelcome={
+        (!preparing && rejectedInputs.size > 0) ||
+        (firstVisible && firstSubmission.result?.phase === 'failed')
+      }
       initialPresentationPending={
         !(firstVisible && !firstSaved) &&
         !pendingInputModels.length &&
@@ -5529,9 +5543,10 @@ function NativeDesktopContent({
       beforeConversation={
         <>
           <NativeToast
+            key={inputErrorMessage ? 'input' : 'operation'}
             container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
-            message={operationMessage}
-            onDismiss={dismissOperationMessage}
+            message={currentToast}
+            onDismiss={inputErrorMessage ? dismissInputError : dismissOperationMessage}
           />
           <NativeApprovalFeedback
             scope={
@@ -5543,7 +5558,7 @@ function NativeDesktopContent({
                 : undefined
             }
             notices={approvalPresentation.notices}
-            paused={!!operationMessage || settingsOpen}
+            paused={!!currentToast || settingsOpen}
             container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
             onLookup={async (notice) => {
               if (

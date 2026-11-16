@@ -31,22 +31,11 @@ export interface OutputFileSummary extends SessionOutputFileTarget {
   /** Presentation only; immutable file targets retain their original source scope. */
   readonly sourceLabel?: string;
 }
-export interface OutputCollectionSummary {
-  collectionId: string;
-  ownerRunId: string;
-  state: 'pending' | 'failed' | 'ready';
-  expectedCount: number | null;
-  publishedCount: number;
-  errorCode?: string;
-  retryUntil?: string;
-}
 export interface OutputFilesProps {
   items: readonly OutputFileSummary[];
-  collections?: readonly OutputCollectionSummary[];
   onOpen: (file: OutputFileSummary) => void;
   onSave: (file: OutputFileSummary) => void;
   onEdit: (file: OutputFileSummary) => void;
-  onRetry?: (collectionId: string) => void;
   turnLabel?: (runId: string) => string;
 }
 function fileType(file: OutputFileSummary) {
@@ -193,67 +182,32 @@ function FileRow({
   );
 }
 export function OutputFiles(props: OutputFilesProps) {
+  if (!props.items.length) return null;
   const repeated = duplicateNames(props.items);
-  const statuses =
-    props.collections?.filter(
-      (item) =>
-        // A producer that never entered collection is a tool-step fact, not an output error.
-        // Its execution history remains authoritative; this does not infer recovery from cards.
-        item.errorCode !== 'producer_failed' &&
-        (item.state === 'failed' || (item.state === 'pending' && (item.expectedCount ?? 0) > 0)),
-    ) ?? [];
-  if (!props.items.length && !statuses.length) return null;
   return (
     <section className="turn-output-files" aria-label="本次产出">
-      {props.items.length > 0 && (
-        <ul>
-          {props.items.map((file) => (
-            <FileRow
-              {...props}
-              key={fileIdentity(file)}
-              file={file}
-              distinguish={repeated.has(file.name)}
-            />
-          ))}
-        </ul>
-      )}
-      {statuses.map((collection) => (
-        <div
-          key={collection.collectionId}
-          role={collection.state === 'failed' ? 'alert' : 'status'}
-        >
-          {collection.errorCode === 'output_staging_expired' ||
-          (collection.retryUntil && Date.parse(collection.retryUntil) <= Date.now())
-            ? '暂存文件已过期，请重新生成'
-            : collection.errorCode === 'producer_stop_unknown'
-              ? '生成结果未知，未收集该次输出'
-              : collection.state === 'failed'
-                ? '文件整理失败'
-                : '正在整理输出文件'}
-          {collection.errorCode && <small> · {collection.errorCode}</small>}
-          {collection.state === 'failed' &&
-            props.onRetry &&
-            collection.errorCode !== 'output_staging_expired' &&
-            collection.retryUntil &&
-            Date.parse(collection.retryUntil) > Date.now() && (
-              <Button variant="ghost" onClick={() => props.onRetry?.(collection.collectionId)}>
-                重试整理
-              </Button>
-            )}
-        </div>
-      ))}
+      <ul>
+        {props.items.map((file) => (
+          <FileRow
+            {...props}
+            key={fileIdentity(file)}
+            file={file}
+            distinguish={repeated.has(file.name)}
+          />
+        ))}
+      </ul>
     </section>
   );
 }
+
 export function OutputReferences(
-  props: OutputFilesProps & {
-    hasMore?: boolean;
-    loading?: boolean;
+  props: Pick<OutputFilesProps, 'items' | 'onOpen'> & {
     onMore?: () => void;
-    error?: string;
+    moreDisabled?: boolean;
   },
 ) {
   const [expanded, setExpanded] = useState(false);
+  if (!props.items.length && !props.onMore) return null;
   const items = expanded ? props.items : props.items.slice(0, 5);
   const repeated = duplicateNames(items);
   return (
@@ -262,12 +216,6 @@ export function OutputReferences(
         <HugeiconsIcon icon={File01Icon} aria-hidden="true" />
         参考
       </h4>
-      {!items.length && (
-        <small>{props.loading ? '读取中…' : props.error ? '暂时无法读取参考项' : '暂无'}</small>
-      )}
-      {!!items.length && props.error && (
-        <small role="status">暂时无法更新参考，当前显示上次结果</small>
-      )}
       <ul>
         {items.map((file) => (
           <li key={fileIdentity(file)}>
@@ -292,8 +240,8 @@ export function OutputReferences(
           展开更多
         </Button>
       )}
-      {(expanded || props.items.length <= 5) && props.hasMore && (
-        <Button variant="ghost" disabled={props.loading} onClick={props.onMore}>
+      {(expanded || props.items.length <= 5) && props.onMore && (
+        <Button variant="ghost" disabled={props.moreDisabled} onClick={props.onMore}>
           加载更多
         </Button>
       )}
