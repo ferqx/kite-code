@@ -666,8 +666,8 @@ export type SessionHistoryEntry = {
 export class AgentError extends Error {
   readonly code: string;
   readonly retryable: boolean;
-  constructor(code: string, message: string = code, retryable = false) {
-    super(message);
+  constructor(code: string, message: string = code, retryable = false, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'AgentError';
     this.code = code;
     this.retryable = retryable;

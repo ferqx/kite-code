@@ -41,8 +41,9 @@ export function spawnNodePairedChild(
   return {
     pid: child.pid,
     exited,
-    stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+    // Unencoded pipes emit bytes. Node and Bun declare different Web reader overloads.
+    stdout: Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>,
+    stderr: Readable.toWeb(child.stderr) as unknown as ReadableStream<Uint8Array>,
     stdin: {
       write(value: string) {
         tail = tail.then(
