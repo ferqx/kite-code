@@ -180,6 +180,23 @@ test('new Step binding replaces only its original Model manifest; empty and malf
 test('a caller cannot borrow a different Model scope, stale root, fake body or a different actual ToolCall', async () => {
   const f = await fixture();
   try {
+    for (const source of [
+      { kind: 'model_decision', executionRoot: f.source.executionRoot },
+      { ...f.source, modelExecutionId: 'missing-model' },
+    ]) {
+      f.physical.run("UPDATE execution SET decision_source_json=? WHERE id='target'", [
+        JSON.stringify(source),
+      ]);
+      expect(() => executionBehaviorManifest(f.db, f.target())).toThrow(
+        'execution_behavior_source_invalid',
+      );
+      expect(() => verifyAuthorizationBehaviorBinding(f.db, f.target(), selected, {})).toThrow(
+        'authorization_check_binding_invalid',
+      );
+    }
+    f.physical.run("UPDATE execution SET decision_source_json=? WHERE id='target'", [
+      JSON.stringify(f.source),
+    ]);
     for (const [column, value] of [
       ['session_id', 'other'],
       ['run_id', 'another'],

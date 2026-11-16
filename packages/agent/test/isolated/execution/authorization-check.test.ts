@@ -1996,8 +1996,82 @@ test('cold planned authorization check is observation only and ordinary children
         tools: [{ id: 'fixture.effect', version: '1', extensionId: 'fixture' }],
       },
     });
+    const executionRoot = {
+      sessionId: 's',
+      workspaceId: 'w',
+      effectiveRootUri: pathToFileURL(root).href,
+      epoch: '0',
+      identity: null,
+    };
+    const modelInput = {
+      modelId: 'fixed',
+      messages: [{ role: 'user', content: 'original actual task' }],
+      tools: [
+        {
+          id: 'fixture.effect',
+          definitionVersion: '1',
+          description: 'Perform the exact fixture effect',
+          inputSchema: {
+            type: 'object',
+            properties: { value: { type: 'string' } },
+            required: ['value'],
+            additionalProperties: false,
+          },
+        },
+      ],
+    };
+    const modelSource = {
+      kind: 'model_request',
+      toolBindings: [{ id: 'fixture.effect', version: '1', extensionId: 'fixture' }],
+      toolBehaviorBindings: [],
+      executionRoot,
+      capabilitySnapshot: { executionRoot },
+    };
+    // Production seals every Tool decision to its succeeded original Model.
+    await store.planExecution({
+      expectedStoreId,
+      owner,
+      executionId: 'original-model',
+      sessionId: 's',
+      runId: run.id,
+      originCommandId: 'work',
+      stepId: 'step',
+      callId: 'model',
+      kind: 'model',
+      definitionId: 'fixed',
+      definitionVersion: '1',
+      input: modelInput,
+      decisionSource: modelSource,
+    });
+    await store.markDispatching({
+      expectedStoreId,
+      owner,
+      executionId: 'original-model',
+      authorization: {
+        allowed: true,
+        revision: 'fixture',
+        definitionVersion: '1',
+        inputDigest: await semanticDigest(modelInput),
+      },
+      requirements: [],
+      freshness: { checked: true, source: modelSource },
+    });
+    await store.finishExecution({
+      expectedStoreId,
+      owner,
+      executionId: 'original-model',
+      status: 'succeeded',
+      result: {
+        content: '',
+        toolCalls: [
+          { id: 'call', name: 'fixture.effect', arguments: JSON.stringify({ value: 'exact' }) },
+        ],
+      },
+    });
     const source = {
       kind: 'model_decision',
+      modelExecutionId: 'original-model',
+      executionRoot,
       sources: [{ id: 'fixture:plan', digest: 'v1', content: 'actual plan' }],
     };
     await store.planExecution({
@@ -2086,7 +2160,13 @@ test('cold planned authorization check is observation only and ordinary children
     expect((await store.getExecution(first.execution.id))?.status).toBe('planned');
     expect(first.execution).toMatchObject({ kind: 'model', runId: null, childSessionId: null });
     expect((await store.getView('s')).runs).toHaveLength(1);
-    expect(await store.listExecutions('s')).toHaveLength(2);
+    const executions = await store.listExecutions('s');
+    expect(executions.filter((row) => row.id !== 'original-model')).toHaveLength(2);
+    expect(executions.find((row) => row.id === 'original-model')).toMatchObject({
+      kind: 'model',
+      status: 'succeeded',
+    });
+    expect(executions.filter((row) => row.childSessionId !== null)).toHaveLength(0);
   } finally {
     await store.close();
     rmSync(root, { recursive: true, force: true });

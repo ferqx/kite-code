@@ -76,6 +76,8 @@ export function ConversationTrace({
 }) {
   const first = steps[0];
   const grouped = steps.length > 1;
+  const firstReasoning = first?.role === 'thinking';
+  const nested = grouped || firstReasoning;
   const firstTool = steps.find((step) => step.role === 'tool');
   const summaryIcon = firstTool ? toolIcon(firstTool) : waitingForTool ? Wrench01Icon : BulbIcon;
   const panelId = useId();
@@ -84,17 +86,17 @@ export function ConversationTrace({
   const hasDetails = grouped || first?.role === 'tool' || !!first?.reasoningSource;
   const open = hasDetails && expanded[id] === true;
   const detailsOpen = processOpen && open;
-  // Restored single-step traces may only carry the parent disclosure. Preserve
-  // that detail state before an appended tool changes the trace into a group.
+  // Older reading state may only carry the parent disclosure. Preserve its
+  // first detail without overriding an explicit reasoning disclosure choice.
   useEffect(() => {
-    if (grouped || !open || !firstKey) return;
+    if ((grouped && !firstReasoning) || !open || !firstKey) return;
     const detailKey = first?.role === 'tool' ? `activity:${firstKey}` : firstKey;
     if (expanded[detailKey] === undefined) onToggle(detailKey, true);
-  }, [grouped, open, firstKey, first?.role, expanded, onToggle]);
+  }, [grouped, firstReasoning, open, firstKey, first?.role, expanded, onToggle]);
   function toggle(next: boolean) {
     onToggle(id, next);
-    if (!grouped && firstKey) {
-      onToggle(first?.role === 'tool' ? `activity:${firstKey}` : firstKey, next);
+    if (!grouped && first?.role === 'tool' && firstKey) {
+      onToggle(`activity:${firstKey}`, next);
     }
   }
   if (
@@ -149,17 +151,17 @@ export function ConversationTrace({
         <DeferredProcessContent
           component={TraceCollapsibleContent}
           id={panelId}
-          data-direct-step={!grouped || undefined}
+          data-direct-step={!nested || undefined}
           open={open}
           render={() => (
-            <Trace className="conversation-trace-steps" data-grouped={grouped || undefined}>
+            <Trace className="conversation-trace-steps" data-grouped={nested || undefined}>
               {steps.map((step, index) => {
                 const stepKey = step.presentationKey ?? step.id;
-                const direct = index === 0 && (!grouped || step.role === 'thinking');
+                const direct = index === 0 && !grouped;
                 if (step.role === 'tool')
                   return <Fragment key={stepKey}>{renderTool(step, direct, detailsOpen)}</Fragment>;
                 const canRead = !!step.reasoningSource && !!renderReasoning;
-                const reasoningOpen = canRead && (direct || expanded[stepKey] === true);
+                const reasoningOpen = canRead && (expanded[stepKey] ?? (index === 0 && open));
                 const heading = (
                   <TraceLine className="conversation-trace-line" data-reasoning>
                     <TraceIcon>
@@ -177,20 +179,23 @@ export function ConversationTrace({
                   <TraceCollapsible
                     key={stepKey}
                     className="conversation-reasoning"
-                    data-direct-reasoning={direct || undefined}
+                    data-restored-expanded={
+                      restoredExpanded.has(stepKey) ||
+                      (expanded[stepKey] === undefined && restoredExpanded.has(id)) ||
+                      undefined
+                    }
                     open={reasoningOpen}
                     onOpenChange={(next) => onToggle(stepKey, next)}
                   >
-                    {!direct &&
-                      (canRead ? (
-                        <TraceCollapsibleTrigger asChild>
-                          <button type="button" className="conversation-trace-trigger">
-                            {heading}
-                          </button>
-                        </TraceCollapsibleTrigger>
-                      ) : (
-                        heading
-                      ))}
+                    {canRead ? (
+                      <TraceCollapsibleTrigger asChild>
+                        <button type="button" className="conversation-trace-trigger">
+                          {heading}
+                        </button>
+                      </TraceCollapsibleTrigger>
+                    ) : (
+                      heading
+                    )}
                     {canRead && (
                       <DeferredProcessContent
                         component={TraceCollapsibleContent}

@@ -180,6 +180,12 @@ try {
         if (conversation.querySelector('.conversation-trace-steps'))
           probe.violations.push(`${kind}:${probe.phase}:tool_items_mounted_without_user`);
       }
+      for (const body of conversation.querySelectorAll('.conversation-reasoning-body')) {
+        const owner = body.closest('.conversation-reasoning');
+        const disclosure = owner?.querySelector(':scope > button');
+        if (!disclosure || disclosure.getAttribute('aria-controls') !== body.id)
+          probe.violations.push(`${kind}:${probe.phase}:reasoning_outside_own_disclosure`);
+      }
       const assistants = conversation.querySelectorAll('.message.assistant').length;
       const final = conversation.querySelectorAll('.agent-turn-final').length;
       if (probe.phase === 'first-reasoning' && assistants)
@@ -343,6 +349,28 @@ try {
     'manually opened public reasoning',
   );
   const reasoningBody = page.locator('.conversation-reasoning-body .typeset-chat');
+  const reasoningDisclosure = page.locator('.conversation-reasoning > button');
+  assert.equal(await reasoningDisclosure.innerText(), '思考');
+  assert.equal(await reasoningDisclosure.getAttribute('aria-expanded'), 'true');
+  assert.equal(
+    await reasoningDisclosure.getAttribute('aria-controls'),
+    await page.locator('.conversation-reasoning-body').getAttribute('id'),
+    'reasoning text is owned by the independent accessible thinking step',
+  );
+  await reasoningDisclosure.focus();
+  await page.keyboard.press('Enter');
+  await until(
+    content,
+    (value) => !value.includes('PRIVATE_REASONING_SENTINEL_INITIAL'),
+    'keyboard closes only reasoning',
+  );
+  assert.equal(await thought.getAttribute('aria-expanded'), 'true');
+  await page.keyboard.press('Space');
+  await until(
+    content,
+    (value) => value.includes('PRIVATE_REASONING_SENTINEL_INITIAL'),
+    'keyboard reopens only reasoning',
+  );
   await reasoningBody.locator('strong').getByText('PRIVATE_REASONING_SENTINEL_INITIAL').waitFor();
   const paragraph = reasoningBody.getByText('核对原记录。', { exact: true });
   const box = (await paragraph.boundingBox())!;

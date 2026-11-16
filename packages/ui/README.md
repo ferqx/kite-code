@@ -747,6 +747,6 @@ Desktop `MessageContent` 的 `WebLinkContext` 由Native宿主注入，仅在当�
 
 文件标签的 `SessionFileTarget` 区分真实产物与 `local-preview` 只读handle，`OutputFileSummary` 仅继承产物类型，不伪造文件卡。标签身份含种类，切换不撤销handle；显式关闭或标签已满未接纳时调用宿主释放。
 
-`Conversation` 的当前活跃 Trace 在工具完成到下一模型事件的间隙继续显示进行中状态，不回落为“已读取”等完成摘要；准确结束或已有后续回复边界后才展示该过程的汇总。恢复展开的单步 Trace 会保留首个详情的展开标记，后续工具加入分组不将既有思考内容自动收起。回归位于 `desktop-reasoning-turns.test.tsx`；DOM 保持和状态断言不代表实际动画全过程验收。
+`Conversation` 的当前活跃 Trace 在工具完成到下一模型事件的间隙继续显示进行中状态，不回落为“已读取”等完成摘要；准确结束或已有后续回复边界后才展示该过程的汇总。`ConversationTrace` 中每条 reasoning 始终使用独立的思考 disclosure，不再将首条正文直接平铺到总过程下。首条从单步开始即保留嵌套标题、缩进与稳定展示键，工具加入不改布局；原 parent-only 阅读状态保持首条默认展开，但显式收起优先于父过程重开。恢复展开也作用于思考正文，避免重播开启动画。只消费宿主提供的 `reasoningSource`，不按正文语义改分类。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)覆盖流式、多个思考／工具、同身份重连、完成统计、冷读、独立折叠与 ARIA 关联；DOM 保持和状态断言不代表实际动画全过程验收。
 
 首条输入提交后、正式 Run 尚未确认时，Trace 沿原提交身份显示“正在准备回复…”；确认运行后继续显示准确阶段，不能把本地准备误当成已开始执行。运行中的 Trace 在首条模型正文尚未到达时，也显示已确认的回复状态；状态不可用或执行未确认时不伪造进行中提示。排队、等待、恢复和停止仍由原状态决定，不被准备阶段覆盖。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核阶段与观察边界，[Native 首条发送回归](../../apps/desktop/test/isolated/native-new-conversation-dom.test.tsx)核原提交、持久输入、模型派发、正文与结束间的状态节点接管。

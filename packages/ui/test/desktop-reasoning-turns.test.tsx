@@ -269,7 +269,8 @@ test('conversation trace keeps the first tool icon as the active title changes a
   const grouped = renderTrace([complete(thought), complete(read), complete(shell)], true);
   expectIcon(grouped.querySelector(summary)!, BookOpen01Icon);
   const reasoningLine = grouped.querySelector('.conversation-reasoning .conversation-trace-line')!;
-  expect(reasoningLine).toBeNull(); // The first reasoning retains its direct layout.
+  expectIcon(reasoningLine, BulbIcon);
+  expect(reasoningLine.textContent).toBe('已思考');
   expectIcon(
     grouped.querySelector('.conversation-trace-steps .tool-activity-step')!,
     BookOpen01Icon,
@@ -289,7 +290,7 @@ test('conversation trace keeps the first tool icon as the active title changes a
     return document.querySelectorAll(guideSelector!.replaceAll('::before', ''));
   };
   expect(guides(renderTrace([complete(thought)]))).toHaveLength(0);
-  expect(guides(renderTrace([complete(thought)], true))).toHaveLength(1);
+  expect(guides(renderTrace([complete(thought)], true))).toHaveLength(2);
   expect(guides(renderTrace([complete(shell)], true))).toHaveLength(1);
   expect(guides(grouped)).toHaveLength(3);
 });
@@ -816,7 +817,7 @@ test('an active trace never falls back to completed statistics between model and
   }
 });
 
-test('restored single reasoning stays mounted and expanded when tools arrive and update', async () => {
+test('reasoning keeps its own disclosure through streaming, tool updates, reconnect and completion', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -839,7 +840,15 @@ test('restored single reasoning stays mounted and expanded when tools arrive and
   });
   const host = dom.window.document.getElementById('root')!;
   const root = createRoot(host);
-  const thought = { ...thinking('run'), settled: true, reasoningSource: 'source' };
+  let thought = {
+    ...thinking('run'),
+    presentationKey: 'stable-thought',
+    reasoningSource: 'source',
+  };
+  let status: 'running' | 'completed' = 'running';
+  let executionUnconfirmed = false;
+  let bodyText = 'Existing reasoning';
+  const reading: import('../src/desktop/Conversation').ReadingState[] = [];
   const draw = (tools: Message[]) =>
     root.render(
       <Conversation
@@ -848,16 +857,37 @@ test('restored single reasoning stays mounted and expanded when tools arrive and
         selected
         connected
         loading={false}
-        saveReading={() => {}}
-        turnActivity={{ turnId: 'run', status: 'running' }}
+        saveReading={(value) => reading.push(value)}
+        turnActivity={{ turnId: 'run', status, executionUnconfirmed }}
         initialReading={{ top: 0, follow: false, expanded: { 'trace-turn:turn:run': true } }}
-        renderReasoning={() => <p data-thought-body>Existing reasoning</p>}
+        renderReasoning={(message, open) => (
+          <p data-thought-body={message.reasoningSource} data-reader-active={open}>
+            {bodyText}
+          </p>
+        )}
       />,
     );
   try {
     await act(async () => draw([]));
     const body = host.querySelector('[data-thought-body]');
     expect(body).not.toBeNull();
+    const reasoning = host.querySelector('.conversation-reasoning')!;
+    const button = reasoning.querySelector('button')!;
+    const panel = reasoning.querySelector('.conversation-reasoning-body')!;
+    const group = host.querySelector('.conversation-trace-steps')!;
+    expect(button.textContent).toBe('思考');
+    expect(button.type).toBe('button');
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.getAttribute('aria-controls')).toBe(panel.id);
+    expect(panel.contains(body)).toBe(true);
+    expect(group.getAttribute('data-grouped')).toBe('true');
+    expect(reasoning.hasAttribute('data-direct-reasoning')).toBe(false);
+    expect(host.querySelectorAll('.message.assistant')).toHaveLength(0);
+    bodyText += ' streamed';
+    await act(async () => draw([]));
+    expect(host.querySelector('[data-thought-body]')).toBe(body);
+    expect(body!.textContent).toBe('Existing reasoning streamed');
+    thought = { ...thought, settled: true };
     const tool: Message = {
       id: 'shell',
       turnId: 'run',
@@ -870,11 +900,70 @@ test('restored single reasoning stays mounted and expanded when tools arrive and
     await act(async () => draw([tool]));
     expect(host.querySelector('[data-thought-body]')).toBe(body);
     expect(host.querySelector('.conversation-reasoning')!.getAttribute('data-state')).toBe('open');
-    expect(host.querySelector('.conversation-reasoning .conversation-trace-line')).toBeNull();
-    await act(async () => draw([{ ...tool, status: 'completed', settled: true }]));
+    expect(
+      host.querySelector('.conversation-reasoning .conversation-trace-line')?.textContent,
+    ).toBe('已思考');
+    expect(host.querySelector('.conversation-reasoning')).toBe(reasoning);
+    expect(host.querySelector('.conversation-reasoning > button')).toBe(button);
+    expect(group.getAttribute('data-grouped')).toBe('true');
+    const done = { ...tool, status: 'completed', settled: true } as const;
+    await act(async () => draw([done]));
     expect(host.querySelector('[data-thought-body]')).toBe(body);
+    const summary = host.querySelector<HTMLButtonElement>('.conversation-trace > button')!;
+    expect(summary.textContent).toBe('正在回复…');
+    const second: Message = {
+      ...thinking('run'),
+      id: 'second-thought',
+      reasoningSource: 'second-source',
+    };
+    await act(async () => draw([done, second]));
+    expect(summary.textContent).toBe('正在思考…');
+    expect(host.querySelectorAll('.conversation-reasoning')).toHaveLength(2);
+    const secondButton = host.querySelectorAll<HTMLButtonElement>(
+      '.conversation-reasoning > button',
+    )[1]!;
+    expect(secondButton.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => secondButton.click());
+    expect(secondButton.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => button.click());
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => summary.click());
+    await act(async () => summary.click());
+    expect(
+      host.querySelector('.conversation-reasoning > button')?.getAttribute('aria-expanded'),
+    ).toBe('false');
+    expect(
+      host.querySelectorAll('.conversation-reasoning > button')[1]?.getAttribute('aria-expanded'),
+    ).toBe('true');
+
+    // A refreshed message ID must keep the original model presentation identity.
+    thought = { ...thought, id: 'saved-thought' };
+    executionUnconfirmed = true;
+    await act(async () => draw([done, second]));
+    expect(summary.textContent).toBe('执行状态待确认');
+    expect(
+      host.querySelector('.conversation-reasoning > button')?.getAttribute('aria-expanded'),
+    ).toBe('false');
+    executionUnconfirmed = false;
+    const finishedSecond = { ...second, settled: true };
+    await act(async () => draw([done, finishedSecond]));
+    expect(summary.textContent).toBe('正在回复…');
+    status = 'completed';
+    await act(async () => draw([done, finishedSecond]));
+    const completed = host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+    expect(completed.textContent).toBe('用时未知');
+    expect(completed.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => completed.click());
+    expect(host.querySelector('.conversation-trace > button')?.textContent).not.toMatch(/正在/);
+    const reasoningButtons = host.querySelectorAll('.conversation-reasoning > button');
+    expect([...reasoningButtons].map((item) => item.textContent)).toEqual(['已思考', '已思考']);
+    expect([...reasoningButtons].map((item) => item.getAttribute('aria-expanded'))).toEqual([
+      'false',
+      'true',
+    ]);
   } finally {
     await act(async () => root.unmount());
+    expect(reading.at(-1)?.expanded['stable-thought']).toBe(false);
     dom.window.close();
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -1077,5 +1166,63 @@ test('streaming native reasoning uses its source even when the body is loaded se
       expected,
     );
     dom.window.close();
+  }
+});
+
+test('cold and completed traces restore explicit reasoning choices without reclassifying real prose', () => {
+  for (const status of ['running', 'completed'] as const) {
+    for (const reasoningOpen of [undefined, true, false]) {
+      const thought: Message = {
+        ...thinking('run'),
+        presentationKey: 'reasoning-model',
+        settled: status === 'completed',
+        reasoningSource: 'model-output',
+      };
+      const prose: Message = {
+        id: 'actual-prose',
+        turnId: 'run',
+        role: 'assistant',
+        text: 'I need to make sure that the output filename is set correctly.',
+        settled: status === 'completed',
+        finalReply: status === 'completed',
+      };
+      const dom = new JSDOM(
+        renderToStaticMarkup(
+          <Conversation
+            traceTurns
+            selected
+            connected
+            loading={false}
+            messages={[user('first'), thought, prose]}
+            turnActivity={{ turnId: 'run', status }}
+            saveReading={() => {}}
+            initialReading={{
+              top: 42,
+              follow: false,
+              expanded: {
+                'turn:run:complete': true,
+                'trace-turn:turn:run': true,
+                ...(reasoningOpen === undefined ? {} : { 'reasoning-model': reasoningOpen }),
+              },
+            }}
+            renderMessage={(message) => <p data-original-message={message.id}>{message.text}</p>}
+            renderReasoning={() => <p data-public-reasoning>Reasoning from model output only</p>}
+          />,
+        ),
+      );
+      const document = dom.window.document;
+      const expectedOpen = reasoningOpen !== false;
+      const reasoning = document.querySelector('.conversation-reasoning')!;
+      const trigger = reasoning.querySelector('button')!;
+      expect(trigger.getAttribute('aria-expanded')).toBe(String(expectedOpen));
+      expect(reasoning.querySelector('[data-public-reasoning]') !== null).toBe(expectedOpen);
+      expect(reasoning.querySelector('[data-original-message]')).toBeNull();
+      const actual = document.querySelector('[data-original-message="actual-prose"]')!;
+      expect(actual.textContent).toBe(prose.text);
+      expect(actual.closest('.conversation-reasoning')).toBeNull();
+      expect(document.querySelectorAll('[data-original-message="actual-prose"]')).toHaveLength(1);
+      expect(document.body.textContent).not.toContain('PRIVATE REASONING');
+      dom.window.close();
+    }
   }
 });

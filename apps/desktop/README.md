@@ -359,6 +359,8 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 ## Markdown 与附件输入
 
+对话的公开思考来源由 [Native 投影](src/native-transcript.ts)按原模型输出来源及 reasoning 字节事实单独生成，正文仍用实际 content 通道。[思考 reader](src/native-model-output.ts)只返回准确输出快照的 reasoning；[NativeReasoning](src/native-reasoning.tsx)在所属思考子项与父过程均展开时读取，收起释放读取，不将原模型正文替换成思考。首条思考也由共享 UI 的独立 disclosure 承载，流式、工具到达、重连和历史使用同一边界。[实窗夹具](test/native-reasoning-render-electron.fixture.ts)新增每个思考正文与独立按钮的 ARIA 归属、Enter／Space 操作断言；本次修补的实际窗口验收须在最终集成版本运行，既有实窗结果不自动覆盖新布局。
+
 桌面主会话的 [Native 内容样式](src/native-content-theme.css)为用户与 Agent 消息共用 14px 正文、430 字重、1.625 倍行高、12px 正文块间距和 2px 同组列表项间距。标题沿各级比例排版，表格内容沿用正文行高。表格由共享滚动容器绘制 1px 圆角外框，Native 内容样式控制透明表头和横向分隔线。`NativeDesktop` 从当前 Store 的项目目录向共享正文传递 `fileRootUri`，供文件引用提示显示路径。引用激活仍复用原 `messageFile.open`，由 Main 核实当前消息、项目和文件。格式规则见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。
 
 2026-11-13，Windows x64／Bun 1.4.4／Chrome 157，在 `04807430e` 起的工作树用[发送夹具](test/prompt-send-browser-runner.fixture.ts)核对深浅主题与 1280／800px 的正文间距、投递占位、保存接管和冷重开。[文件引用夹具](test/markdown-content-browser-runner.fixture.ts)在 1280／390px 核对流式闭合、悬停移开、键盘提示和激活、读取暂停及缓存返回。四组[流式夹具](test/streaming-render-browser-runner.fixture.ts)逐帧核对渐显、上翻、重连、终态交接和首段正文位置。编辑器实开与安装版 Electron 未在本轮验证。
