@@ -6,10 +6,25 @@ import {
   useConversationReadActive,
 } from '@kite-ai/ui/desktop';
 import { startTransition, useEffect, useRef, useState } from 'react';
-import type { NativeDisplayCache } from './native-display-cache';
+import { NativeDisplayCache } from './native-display-cache';
 import { prepareNativeMarkdown } from './native-markdown';
 
 export type NativeReasoningBody = { text: string; prepared?: PreparedDesktopMarkdown };
+
+/** Body and retained-tree invalidation is observed even when no disclosure is mounted. */
+export class NativeReasoningCache extends NativeDisplayCache<NativeReasoningBody> {
+  private boundary = '';
+  private revoked = false;
+  private epoch = 0;
+
+  observe(boundary: string, authorized: boolean): number {
+    if (boundary !== this.boundary || (!authorized && !this.revoked)) this.clear();
+    if (!authorized && !this.revoked) this.epoch++;
+    this.boundary = boundary;
+    this.revoked = !authorized;
+    return this.epoch;
+  }
+}
 
 export function renderNativeReasoning({
   scope,
@@ -17,6 +32,8 @@ export function renderNativeReasoning({
   original,
   open,
   revision,
+  readEpoch,
+  authorized = true,
   read,
   cache,
 }: {
@@ -25,10 +42,13 @@ export function renderNativeReasoning({
   original?: Message;
   open: boolean;
   revision?: string;
+  readEpoch?: number;
+  authorized?: boolean;
   read?: (signal: AbortSignal) => Promise<string>;
   cache: NativeDisplayCache<NativeReasoningBody>;
 }) {
-  if (!original) return null;
+  // A paused reader can retain verified text; an explicit capability revocation cannot.
+  if (!authorized || !original) return null;
   const key = JSON.stringify([
     scope,
     original.id,
@@ -48,6 +68,7 @@ export function renderNativeReasoning({
         original.outputBody?.reasoningBytes,
         revision,
         model.settled,
+        readEpoch,
       ])}
       read={read}
     />

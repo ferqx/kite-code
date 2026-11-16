@@ -143,7 +143,7 @@ import {
 import { afterNativePresentation } from './native-presentation-frame';
 import { NativeProviderModelSettings } from './native-provider-model-settings';
 import { nativeReadDeadline } from './native-read-deadline';
-import { type NativeReasoningBody, renderNativeReasoning } from './native-reasoning';
+import { NativeReasoningCache, renderNativeReasoning } from './native-reasoning';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeExecutionResult, NativeExecutionResultRead } from './native-result';
 import { useNativeScheduledTasks } from './native-scheduled-tasks';
@@ -695,7 +695,7 @@ function NativeDesktopContent({
     queued?: QueuedStateRead;
   }>({});
   const verifiedReplyBodies = useRef(new Map<string, { identity: string; text: string }>());
-  const reasoningBodies = useRef(new NativeDisplayCache<NativeReasoningBody>());
+  const reasoningBodies = useRef(new NativeReasoningCache());
   const operationDiffs = useRef(new NativeDisplayCache<NativeFileChangeDetail>());
   const [verifiedReplyRevision, renderVerifiedReply] = useState(0);
   const transcriptDisplay = useRef(new NativeTranscriptDisplay());
@@ -2369,6 +2369,12 @@ function NativeDesktopContent({
     selection?.storeId,
     selection?.session.id,
   ]);
+  // An explicit capability removal must also retire folded and inactive retained trees.
+  // Ordinary transport/read suspension does not change this display boundary.
+  const reasoningAccessEpoch = reasoningBodies.current.observe(
+    conversationDomScope,
+    state?.selection?.canReadModelOutput !== false,
+  );
   async function write(
     action: () => Promise<unknown>,
     requiresHistory = true,
@@ -5352,7 +5358,7 @@ function NativeDesktopContent({
       }
       conversationCache={{
         interactive: !!selection && selected.current === selection.session.id,
-        scope: conversationDomScope,
+        scope: JSON.stringify([conversationDomScope, reasoningAccessEpoch]),
         revision: JSON.stringify([state?.historyEpoch ?? 0, domMembership.current.revision]),
         readActive:
           !!selection &&
@@ -5405,7 +5411,10 @@ function NativeDesktopContent({
           historyState.phase !== 'unavailable' &&
           !selection.permissionUnavailable;
         return renderNativeReasoning({
-          scope: JSON.stringify([replyDisplayScope, state.historyEpoch]),
+          // Transport revalidation retires the reader, not the already verified display body.
+          scope: JSON.stringify([replyDisplayScope, reasoningAccessEpoch]),
+          readEpoch: state.historyEpoch,
+          authorized: selection.canReadModelOutput === true,
           model,
           original,
           open,

@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test';
 import type { Message } from '@kite-ai/client';
 import { ModelOutputMessage } from '@kite-ai/ui';
-import { MessageContent, SessionPage } from '@kite-ai/ui/desktop';
+import { ConversationActivityContext, MessageContent, SessionPage } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ConversationCache } from '../../../../packages/ui/src/desktop/ConversationCache';
 import { desktopMessages } from '../../src/native-presentation';
+import { NativeReasoningCache, renderNativeReasoning } from '../../src/native-reasoning';
 import { desktopTranscript } from '../../src/native-transcript';
 import type { NativeRunFact } from '../../src/tool-messages-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
@@ -235,3 +237,263 @@ test('Native phase presentation retains real content, complete history and compr
   expect(presented.some((message) => message.systemKind === 'compaction')).toBe(false);
   expect(presented[5]!.text).toBe(' \n');
 });
+
+test('verified reasoning survives a read epoch without reviving revoked, unrelated or late output', async () => {
+  const dom = new JSDOM('<div id="root"></div>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  });
+  const restoreLayout = prepareDesktopDom(dom);
+  const previous = { window: globalThis.window, document: globalThis.document };
+  const previousAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const host = dom.window.document.getElementById('root')!;
+  const root = createRoot(host);
+  const cache = new NativeReasoningCache();
+  const pending: { signal: AbortSignal; resolve: (text: string) => void }[] = [];
+  let reads = 0;
+  let message = thought;
+  let scope = JSON.stringify([1, 'store', 's']);
+  let epoch = 0;
+  let revision = '1';
+  let active = true;
+  let available = true;
+  let authorized = true;
+  let settled = false;
+  let open = true;
+  const render = () =>
+    act(async () => {
+      const accessEpoch = cache.observe('connection', authorized);
+      root.render(
+        <ConversationActivityContext value={{ readActive: active, resume: 0 }}>
+          {renderNativeReasoning({
+            scope: JSON.stringify([scope, accessEpoch]),
+            model: { id: message.id, role: 'thinking', text: '', settled },
+            original: message,
+            open,
+            revision,
+            readEpoch: epoch,
+            authorized,
+            cache,
+            read: available
+              ? (signal) => {
+                  reads++;
+                  return new Promise<string>((resolve) => pending.push({ signal, resolve }));
+                }
+              : undefined,
+          })}
+        </ConversationActivityContext>,
+      );
+    });
+  const finish = (text: string) => act(async () => pending.at(-1)!.resolve(text));
+  try {
+    await render();
+    await finish('VERIFIED_STREAM_PREFIX');
+    const paragraph = host.querySelector('p');
+    expect(host.textContent).toContain('VERIFIED_STREAM_PREFIX');
+    revision = '2';
+    await render();
+    const oldRead = pending.at(-1)!;
+    active = false;
+    available = false;
+    epoch++;
+    await render();
+    expect(oldRead.signal.aborted).toBe(true);
+    expect(host.querySelector('p')).toBe(paragraph);
+    expect(host.textContent).toBe('VERIFIED_STREAM_PREFIX');
+    expect(host.querySelector('[role="status"]')).toBeNull();
+    await act(async () => oldRead.resolve('STALE_OFFLINE_OUTPUT'));
+    expect(host.textContent).toBe('VERIFIED_STREAM_PREFIX');
+    const pausedReads = reads;
+    epoch++;
+    await render();
+    expect(reads).toBe(pausedReads);
+    expect(host.textContent).toBe('VERIFIED_STREAM_PREFIX');
+
+    active = true;
+    available = true;
+    await render();
+    expect(reads).toBe(pausedReads + 1);
+    expect(host.textContent).toBe('VERIFIED_STREAM_PREFIX');
+    await finish('VERIFIED_STREAM_PREFIX AND_RECONNECTED_SUFFIX');
+    expect(host.textContent).toContain('AND_RECONNECTED_SUFFIX');
+    message = { ...message, status: 'complete' };
+    settled = true;
+    await render();
+    expect(host.textContent).toContain('AND_RECONNECTED_SUFFIX');
+    await finish('VERIFIED_FINAL_REASONING');
+    const finalReads = reads;
+    open = false;
+    await render();
+    open = true;
+    await render();
+    expect(reads).toBe(finalReads);
+    expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
+
+    // A new observation must revalidate even a settled cached body, without blanking it.
+    epoch++;
+    await render();
+    expect(reads).toBe(finalReads + 1);
+    expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
+    const revokedRead = pending.at(-1)!;
+    authorized = false;
+    await render();
+    expect(revokedRead.signal.aborted).toBe(true);
+    expect(host.textContent).toBe('');
+    await act(async () => revokedRead.resolve('STALE_REVOKED_OUTPUT'));
+    expect(host.textContent).toBe('');
+    authorized = true;
+    await render();
+    expect(host.textContent).toBe('');
+    expect(reads).toBe(finalReads + 2);
+    await finish('NEWLY_VERIFIED_AFTER_CAPABILITY_RESTORED');
+    expect(host.textContent).toBe('NEWLY_VERIFIED_AFTER_CAPABILITY_RESTORED');
+
+    for (const change of [
+      () => {
+        scope = JSON.stringify([1, 'store', 'different-session']);
+      },
+      () => {
+        scope = JSON.stringify([1, 'different-store', 'different-session']);
+      },
+      () => {
+        scope = JSON.stringify([2, 'different-store', 'different-session']);
+      },
+      () => {
+        message = { ...message, runId: 'different-run' };
+      },
+      () => {
+        message = { ...message, sourceIds: ['different-execution'] };
+      },
+    ]) {
+      revision += '-next';
+      await render();
+      const stale = pending.at(-1)!;
+      change();
+      await render();
+      expect(stale.signal.aborted).toBe(true);
+      expect(host.textContent).toBe('');
+      await act(async () => stale.resolve('UNRELATED_LATE_OUTPUT'));
+      expect(host.textContent).toBe('');
+      await finish('VERIFIED_CURRENT_IDENTITY');
+      expect(host.textContent).toBe('VERIFIED_CURRENT_IDENTITY');
+    }
+  } finally {
+    await act(async () => root.unmount());
+    restoreLayout();
+    Object.assign(globalThis, previous);
+    if (previousAct) Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', previousAct);
+    else Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+    dom.window.close();
+  }
+});
+
+for (const scenario of ['active-loading', 'inactive-loading', 'folded'] as const)
+  test(`explicit reasoning capability removal retires ${scenario} conversation trees and body cache`, async () => {
+    const dom = new JSDOM('<div id="root"></div>', {
+      url: 'http://localhost',
+      pretendToBeVisual: true,
+    });
+    const restoreLayout = prepareDesktopDom(dom);
+    const previous = { window: globalThis.window, document: globalThis.document };
+    const previousAct = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+    Object.assign(globalThis, {
+      window: dom.window,
+      document: dom.window.document,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    });
+    const host = dom.window.document.getElementById('root')!;
+    const root = createRoot(host);
+    const cache = new NativeReasoningCache();
+    const pending: { signal: AbortSignal; resolve: (text: string) => void }[] = [];
+    let authorized = true;
+    let loading = false;
+    let session = 's';
+    let folded = false;
+    let readEpoch = 0;
+    let reads = 0;
+    function Detail({ accessEpoch, allowed }: { accessEpoch: number; allowed: boolean }) {
+      return renderNativeReasoning({
+        scope: JSON.stringify(['s', accessEpoch]),
+        readEpoch,
+        model: { id: thought.id, role: 'thinking', text: '', settled: true },
+        original: { ...thought, status: 'complete' },
+        open: true,
+        authorized: allowed,
+        cache,
+        read: (signal) => {
+          reads++;
+          return new Promise<string>((resolve) => pending.push({ signal, resolve }));
+        },
+      });
+    }
+    const render = () =>
+      act(async () => {
+        const accessEpoch = cache.observe('connection', authorized);
+        root.render(
+          <ConversationCache
+            identity={session}
+            visible
+            loading={loading}
+            cache={{
+              scope: JSON.stringify(['connection', accessEpoch]),
+              revision: 'directory',
+              readActive: authorized && !loading,
+            }}
+          >
+            {session === 's' && !folded ? (
+              <Detail accessEpoch={accessEpoch} allowed={authorized} />
+            ) : (
+              <p>OTHER_OR_FOLDED</p>
+            )}
+          </ConversationCache>,
+        );
+      });
+    try {
+      await render();
+      await act(async () => pending.at(-1)!.resolve('PRE_REVOCATION_REASONING'));
+      expect(host.textContent).toContain('PRE_REVOCATION_REASONING');
+      readEpoch++;
+      await render();
+      const stale = pending.at(-1)!;
+      if (scenario === 'inactive-loading') session = 'other';
+      if (scenario === 'folded') folded = true;
+      if (scenario === 'active-loading') loading = true;
+      await render();
+      if (scenario === 'active-loading')
+        expect(host.textContent).toContain('PRE_REVOCATION_REASONING');
+      authorized = false;
+      await render();
+      expect(stale.signal.aborted).toBe(true);
+      expect(host.textContent).not.toContain('PRE_REVOCATION_REASONING');
+      await act(async () => stale.resolve('LATE_REVOKED_REASONING'));
+      expect(host.textContent).not.toContain('LATE_REVOKED_REASONING');
+      authorized = true;
+      await render();
+      const beforeReturnReads = reads;
+      session = 's';
+      folded = false;
+      loading = true;
+      await render();
+      expect(host.textContent).not.toContain('PRE_REVOCATION_REASONING');
+      expect(host.textContent).not.toContain('LATE_REVOKED_REASONING');
+      expect(reads).toBe(beforeReturnReads);
+      loading = false;
+      await render();
+      expect(reads).toBe(beforeReturnReads + 1);
+      expect(host.textContent).not.toContain('PRE_REVOCATION_REASONING');
+      await act(async () => pending.at(-1)!.resolve('CURRENT_VERIFIED_REASONING'));
+      expect(host.textContent).toContain('CURRENT_VERIFIED_REASONING');
+    } finally {
+      await act(async () => root.unmount());
+      restoreLayout();
+      Object.assign(globalThis, previous);
+      if (previousAct) Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', previousAct);
+      else Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+      dom.window.close();
+    }
+  });
