@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import {
+  closeSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -46,6 +51,41 @@ async function confirmDevelopmentProfileBackup(backup: string): Promise<boolean>
   });
 }
 
+function isSqliteCantOpen(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'SQLITE_CANTOPEN';
+}
+
+// The exclusive profile lease keeps other Kite readers and writers out while
+// inspecting the header. Apple SQLite's readonly connection can use an existing
+// WAL, but can fail to create the first empty WAL on a cold open (Bun #45171).
+function prepareMissingDevelopmentWal(databasePath: string): boolean {
+  const wal = `${databasePath}-wal`;
+  if (
+    lstatSync(wal, { throwIfNoEntry: false }) ||
+    lstatSync(`${databasePath}-shm`, { throwIfNoEntry: false })
+  )
+    return false;
+  const header = Buffer.alloc(20);
+  const file = openSync(databasePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    if (readSync(file, header, 0, header.length, 0) !== header.length) return false;
+  } finally {
+    closeSync(file);
+  }
+  if (
+    header.toString('latin1', 0, 16) !== 'SQLite format 3\0' ||
+    header[18] !== 2 ||
+    header[19] !== 2
+  )
+    return false;
+  try {
+    writeFileSync(wal, '', { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+  }
+  return true;
+}
+
 /** Development-only recovery; never migrate old authorization facts or delete user data. */
 export async function prepareDevelopmentDesktopProfile(
   dataRoot: string,
@@ -53,21 +93,37 @@ export async function prepareDevelopmentDesktopProfile(
 ): Promise<string | undefined> {
   const options = { dataRoot, profile: 'development' };
   const { preflightSqliteStore, sqliteStorageAssets } = await import('@kite-ai/agent/sqlite');
+  let coldWalFailure: Error | undefined;
   try {
     await preflightSqliteStore(options);
     return undefined;
   } catch (error) {
-    if (releaseErrorCode(error) !== 'store_incompatible') throw error;
+    const code = releaseErrorCode(error);
+    if (
+      process.platform === 'darwin' &&
+      code === 'store_preflight_failed' &&
+      error instanceof Error &&
+      isSqliteCantOpen(error.cause)
+    )
+      coldWalFailure = error;
+    else if (code !== 'store_incompatible') throw error;
   }
   // This repository-only host uses the original profile authority. Another client
   // must not be reading/writing the directory while it is moved out of service.
   const { acquireProfileAccess } = await import('../../packages/agent/src/platform/profile');
   const { preflightDatabase } = await import('../../packages/agent/src/storage/sqlite/connection');
   const access = acquireProfileAccess(options, 'exclusive');
+  const { baseline } = sqliteStorageAssets();
   try {
     // A peer may have repaired/replaced the profile after the first check.
     try {
-      preflightDatabase(access, sqliteStorageAssets().baseline);
+      try {
+        preflightDatabase(access, baseline);
+      } catch (error) {
+        if (!coldWalFailure || !isSqliteCantOpen(error)) throw error;
+        if (!prepareMissingDevelopmentWal(access.databasePath)) throw coldWalFailure;
+        preflightDatabase(access, baseline);
+      }
       return undefined;
     } catch (error) {
       // Missing legacy columns and malformed SQLite bytes also identify an

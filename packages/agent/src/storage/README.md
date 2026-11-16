@@ -242,7 +242,7 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 
 未完成 restore journal、exclusive 维护占用、rollback journal、链接/非私有文件和未知/损坏格式明确拒绝。只读连接使用 strict close 后才释放 lease；若数据库关闭未获确认，返回 `store_preflight_cleanup_failed` 并保留该进程的 profile-use 锁，不能冒充已释放。`compatible` 仅证明该次观察的格式与身份，未来 launch 仍须重新执行正式格式和身份准入，也不是完整业务历史的健康证明。源码与发布 SQLite leaf 分别使用各自真实包内 migration SQL，不回退到源码树。
 
-`profile.json` 的读取、文件元数据和 baseline SQL 读取错误不属于格式不兼容；只有解析失败、格式／指纹不匹配或明确的 SQLite 格式错误才进入 `store_incompatible`。公开预检将权限拒绝归为 `store_access_denied`，其他未分类故障（含缺少打包 baseline 和 I/O 错误）返回 `store_preflight_failed`。开发入口的第一次预检与 EX 锁下复查均须在读取故障时停止，不提示重建或移动健康 Profile。[开发入口回归](../../../../tests/isolated/unified-agent/development-desktop.test.ts)对两次预检分别注入 manifest／baseline 的权限和 I/O 错误，核零确认、零备份、原库与清单字节及恢复后的原 Store 身份；该夹具不代表真实平台 I/O 故障或完整启动验收。
+`profile.json` 的读取、文件元数据和 baseline SQL 读取错误不属于格式不兼容；只有解析失败、格式／指纹不匹配或明确的 SQLite 格式错误才进入 `store_incompatible`。公开预检将权限拒绝归为 `store_access_denied`，其他未分类故障（含缺少打包 baseline 和 I/O 错误）返回 `store_preflight_failed`。开发入口的第一次预检与 EX 锁下复查均须在读取故障时停止，不提示重建或移动健康 Profile。[开发入口回归](../../../../tests/isolated/unified-agent/development-desktop.test.ts)在独立进程中分别注入 manifest／baseline 的权限和 I/O 错误，核零确认、零备份、原库与清单字节及恢复后的原 Store 身份。复查用例让第一次预检在格式标记处拒绝，确保复查读取实际 SQL 时 schema 缓存仍为空。该夹具覆盖故障处理分支，真实平台 I/O 和完整启动由实际运行验证。
 
 [启动预检测试](../../test/isolated/storage/preflight.test.ts) 验证真实空库/缺库、合法 Store 和 live WAL 的原字节与 Core 事实、未来/未知/破坏 schema/checksum、链接/权限/journal、第二进程锁，以及源码树外公开 leaf 的实际包内资产读取。当前本机证据不能代表其他平台或发布引擎资格。
 

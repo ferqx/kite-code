@@ -447,6 +447,8 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 [开发入口回归](../../tests/isolated/unified-agent/development-desktop.test.ts)覆盖旧同编号／伪造当前指纹／其他 major 在非交互环境拒绝、明确拒绝时零备份／原数据保持、确认后的原数据库／WAL／SHM／附件字节、全局配置保持、全新与兼容数据复用、活跃使用锁及 restore journal 拒绝。下面 2026-11-07 的拒绝／人工处置记录是当时行为的历史证据；当前确认后自动处置以本段为准。
 
+macOS 上 Apple SQLite 只读打开缺少 WAL／SHM 的冷库时可能报 `SQLITE_CANTOPEN`。[准备函数](../../scripts/development/unified-desktop.ts)在该错误后取得原 Profile 的 EX 使用锁，重新做完整只读预检。复查仍报同一错误、两个辅助文件均缺失且 Core 文件头确认启用 WAL 时，使用独占创建方式建立私有空 WAL，再沿原只读连接验证当前 schema 和 Store 身份。预检保留原 `core.db`、`profile.json` 和任何已经存在的 WAL；兼容数据直接启动。macOS 回归用已关闭的真实 WAL Store 验证辅助文件缺失、原字节和 Store 身份保持。隔离 Profile 的 `bun run desktop:dev` 实际完成 Electron／Service 握手并在 SIGTERM 后退出，重新打开仍取得原 Store 身份。
+
 2026-11-09，Windows x64／Bun1.4.4：本轮开发入口整文件11项／182断言通过，原真实 Main 用例仍仅在 macOS 运行并在本机跳过。真实终端隔离数据分别核回车、Ctrl+C 和 `YeS`：前两者原数据不变，后者才完整改名保留，三次结束后均可重取原 EX 锁。实际默认 `npm run desktop:dev` 先停在准确备份路径和 `[y/N]` 提示，用户明确确认后才输入 `y`，原目录完整保留为 `~/.kite-code/development-backup-1794156761877-ece1f9eb-b9f5-45c9-8e84-2129f656de1b`；3444个文件共714206073字节的完整清单、SHA与文件身份逐项一致，全局模型配置SHA保持。Service握手就绪，新Profile通过当前格式1／schemaChecksum只读预检；真实窗口从初始无正文到完整唯一新对话、项目／模型选择和草稿区，未发送任务。启动总耗时包含等待用户确认，不作构建性能证据。核对摘要在本机 `.cache/desktop-profile-{before,recovery-result,current-result}.json`；本次范围为确认、备份和新开发数据启动，不代证旧历史迁移、模型执行或完整产品验收。聚合类型检查、定向格式、边界、测试归属与文档门禁通过。额外执行未改动的 Store 预检整文件为11通过／1失败，失败位于原 `chmod(0644)` 权限反例（Windows 该调用不改变私有 ACL），不计为该权限链或完整平台资格通过。
 
 同日继续修复上述权限失败：Store 预检将实际 Windows 私有 ACL 拒绝准确分类为 `store_access_denied`，不进入不兼容数据的确认／备份流程；开发入口完整文件重新验证11项／185断言通过，原macOS专属用例在Windows继续跳过。权限夹具与Store完整回归结果归 [Store owner](../../packages/agent/src/storage/README.md)，前述原失败保留为发现记录。

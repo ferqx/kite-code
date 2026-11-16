@@ -3832,7 +3832,8 @@ export class NativeCaller {
               size: String(revision.size),
               hash: revision.hash,
             },
-            Readable.toWeb(stream) as ReadableStream<Uint8Array>,
+            // The file stream emits bytes. Node and Bun declare different Web reader overloads.
+            Readable.toWeb(stream) as unknown as ReadableStream<Uint8Array>,
           );
         } finally {
           stream.destroy();

@@ -138,7 +138,7 @@ export async function preflightSqliteStore(options: ProfileOptions): Promise<Sql
           ? 'store_incompatible'
           : 'store_preflight_failed';
     if (code === 'store_preflight_cleanup_failed') closeConfirmed = false;
-    throw new AgentError(code, 'SQLite startup preflight failed.');
+    throw new AgentError(code, 'SQLite startup preflight failed.', false, { cause: error });
   } finally {
     // Unconfirmed close conservatively retains profile use until this process exits.
     if (closeConfirmed) access?.lock.release();
