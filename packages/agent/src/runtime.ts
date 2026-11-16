@@ -10736,6 +10736,16 @@ export class AgentRuntime {
     scope.signal.throwIfAborted();
     const content = Buffer.from(canonicalJson(value));
     const hash = await semanticDigestBytes(content, scope.signal);
+    // Blob bytes are content-addressed, but an immutable reference belongs to one
+    // exact authority scope. Equal model metadata is common across sessions.
+    const referenceKey = await semanticDigest({
+      purpose,
+      storeId: command.originStoreId,
+      sessionId: command.sessionId,
+      subjectId: command.subjectId,
+      scope: { kind: 'session', id: command.sessionId },
+      hash,
+    });
     const reference = await this.options.artifacts.publish({
       expectedStoreId: command.originStoreId,
       sessionId: command.sessionId,
@@ -10743,7 +10753,7 @@ export class AgentRuntime {
       scope: { kind: 'session', id: command.sessionId },
       // Only the policy's human-readable request is a public attachment.
       // Model inputs, decision sources and transport state retain the private prefix.
-      refId: `${purpose}-${hash}`,
+      refId: `${purpose}-${referenceKey}`,
       mediaType: 'application/json',
       content,
       signal: scope.signal,

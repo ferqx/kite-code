@@ -173,3 +173,20 @@ test('an invalid saved output and an incomplete model response retain their dist
   expect(limited.message).toContain('reached its output token limit without a complete response');
   expect(limited.message).toContain('This operation was not executed');
 });
+
+test('artifact identity conflict is a preparation failure, not a decision or an exposed private body', () => {
+  const failure = new AuthorizationCheckUnavailableError('check-conflict', 'check_not_succeeded', {
+    code: 'artifact_reference_conflict',
+    message: 'PRIVATE_SCOPE_AND_ARTIFACT',
+    content: 'PRIVATE_REQUEST_BODY',
+    dispatchCommitted: false,
+    incomplete: true,
+  });
+  expect(failure.code).toBe('authorization_check_unavailable');
+  expect(failure.check.failureCode).toBe('artifact_reference_conflict');
+  expect(failure.message).toContain('artifact identity conflicted');
+  expect(failure.message).toContain('This operation was not executed');
+  expect(failure.message).toContain('No approval or rejection decision was made');
+  expect(failure.message).not.toContain('PRIVATE_SCOPE_AND_ARTIFACT');
+  expect(failure.message).not.toContain('PRIVATE_REQUEST_BODY');
+});

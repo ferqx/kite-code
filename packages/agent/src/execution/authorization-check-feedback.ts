@@ -46,6 +46,8 @@ const failureDescriptions: Readonly<Record<string, string>> = {
   'MODEL_ATTEMPT_RETRYABLE_FAILURE:stream_incomplete':
     'the approval model stream ended without a complete response',
   model_preparation_failed: 'the approval model request could not be prepared',
+  artifact_reference_conflict:
+    'the approval request could not be saved because an artifact identity conflicted',
   model_response_incomplete: 'the approval model response was incomplete',
   authorization_check_output_empty: 'the approval model returned no decision',
   authorization_check_output_limit:
