@@ -157,7 +157,7 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 桌面 [MessageContent](src/desktop/MessageContent.tsx) 在 GFM 上支持以下展示；Web 的 `SafeMessageMarkdown` 和独立 TUI renderer 保持各自范围。
 
-文件引用展示由 `MessageContent` 负责。反引号路径默认用文件名作标签，带行号的 Markdown 链接沿用作者标签。两种引用共享文件图标、行号和悬停／焦点提示，并在悬停或键盘聚焦时显示虚线下划线。宿主可提供当前项目的 `fileRootUri` 供提示展示，原相对路径和可选行号仍独立交给 `openFile`。读权限暂停时关闭提示并禁止激活。未提供 `openFile` 时反引号引用保留行内代码，带行号的链接保留标签文本。具体排版、打开资格与验证见 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
+文件引用展示由 `MessageContent` 负责。反引号内的路径保留为行内代码。显式 Markdown 文件链接沿用作者标签，带行号时显示文件图标、行号和悬停／焦点提示，并在悬停或键盘聚焦时显示虚线下划线。宿主可提供当前项目的 `fileRootUri` 供提示展示，原相对路径和可选行号仍独立交给 `openFile`。读权限暂停时关闭提示并禁止激活。未提供 `openFile` 时带行号的链接保留标签文本。具体排版、打开资格与验证见 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
 
 行内文件图标和任务复选框按 `em` 跟随字号，并以当前字体的大写字高 `cap` 为参照对齐文字基线。设置导航等具备独立图标槽的控件以文字行盒和图标框的中心对齐。失败提示的图标沿首行行高居中，描述换行后继续对齐首行。
 
@@ -425,7 +425,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。`autoRead` 失败保留原文和错误说明，不发布未核验的全文复制内容；缺省不提供“重新读取”按钮，Web 的显式 `autoReadRetry` 差异见下文正文读取契约，Native 保持缺省。显式完整 reader 沿用原操作。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
 
-[桌面 Markdown](src/desktop/MessageContent.tsx)在 HAST 标记独立行内代码里的项目相对路径。自动识别有扩展名的斜杠路径，也支持带正整数行号的文件名。代码块和已有链接内的代码沿原语义。带宿主文件回调时，引用显示可换行的蓝色标签，悬停或键盘聚焦时带细虚线下划线。点击或按 Enter 分别交付路径和可选行号。当前阅读准入失效时暂停操作。无回调时反引号引用保留行内代码，带行号的链接显示标签文本。[Markdown 回归](test/markdown.test.tsx)覆盖预解析树、源码保留及渲染边界。
+[桌面 Markdown](src/desktop/MessageContent.tsx)通过显式 Markdown 链接接收项目相对路径，带正整数行号的文件链接从目标地址提取行号。行内代码和代码块沿 Markdown 语义显示。带宿主文件回调时，带行号的文件链接显示可换行的蓝色标签，悬停或键盘聚焦时带细虚线下划线。点击或按 Enter 分别交付路径和可选行号。当前阅读准入失效时暂停操作。无回调时带行号的链接显示标签文本。[Markdown 回归](test/markdown.test.tsx)覆盖预解析树、源码保留及渲染边界。
 
 [Code Block](src/desktop/components/ui/code-block.tsx)与[Trace](src/desktop/components/ui/trace.tsx)使用官方 shadcn/ui 的 Radix 源码结构，分别适配现有 Button、Hugeicons 和语义 token。[MarkdownCodeBlock](src/desktop/MarkdownCodeBlock.tsx)只接块级代码，保留原 `pre > code`、语言类、缩进与换行；保持单个代码容器，显式语言按token高亮，不拆行；Mermaid图表使用同一标题与准确源码复制，正文仍走固定Markdown parser与安全规则。语言标题和复制操作由 Code Block parts 组合，表格身份保持。[Markdown 回归](test/markdown.test.tsx)和[代码块回归](test/isolated/desktop-code-block.test.tsx)核语言、准确复制、原安全限制与复制资格。 CodeBlock的Header／Footer间距通过同父前置／后续兄弟关系决定，取消3条无界group-has样式规则，避免长消息分批追加时将整个agent-turn反复标为样式失效；保留default／sm及现有Shell／Markdown的最终padding覆盖，源码复制与读取准入不参与这些选择器。
 

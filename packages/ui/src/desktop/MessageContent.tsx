@@ -29,11 +29,7 @@ import { useConversationReadActive } from '../conversation-activity';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
 import { incrementalMarkdown, incrementalMarkdownComponents } from './incremental-markdown';
 import { MarkdownCodeBlock } from './MarkdownCodeBlock';
-import {
-  desktopMarkdownSemantics,
-  type InlineFileReference,
-  inlineFileReference,
-} from './markdown-extensions';
+import { desktopMarkdownSemantics, markdownFileLineReference } from './markdown-extensions';
 import { desktopKatexOptions, wrapMarkdownMath } from './markdown-math';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
@@ -188,9 +184,8 @@ function MarkdownLink({
       </a>
     );
   const path = decodeMarkdownHref(href);
-  const reference = inlineFileReference(path);
-  if (reference?.line !== undefined)
-    return <MarkdownFileLink {...reference}>{children}</MarkdownFileLink>;
+  const reference = markdownFileLineReference(path);
+  if (reference) return <MarkdownFileLink {...reference}>{children}</MarkdownFileLink>;
   if (/^[a-z][a-z\d+.-]*:/i.test(href)) return <span>{children}</span>;
   return <MarkdownFileLink path={path}>{children}</MarkdownFileLink>;
 }
@@ -206,12 +201,10 @@ function decodeMarkdownHref(href: string): string {
 function MarkdownFileLink({
   path,
   line,
-  inlineCode,
   children,
 }: {
   path: string;
   line?: number;
-  inlineCode?: boolean;
   children: ReactNode;
 }) {
   const openFile = useContext(FileLinkContext);
@@ -219,12 +212,11 @@ function MarkdownFileLink({
   const activate = () => {
     if (readActive) openFile?.(path, line);
   };
-  if (inlineCode || line !== undefined) {
-    if (!openFile) return inlineCode ? <code>{children}</code> : <span>{children}</span>;
-    const label = inlineCode ? path.split('/').at(-1) : children;
+  if (line !== undefined) {
+    if (!openFile) return <span>{children}</span>;
     return (
       <MarkdownReference path={path} line={line} readActive={readActive} activate={activate}>
-        {label}
+        {children}
       </MarkdownReference>
     );
   }
@@ -246,7 +238,13 @@ function MarkdownReference({
   readActive,
   activate,
   children,
-}: InlineFileReference & { readActive: boolean; activate: () => void; children: ReactNode }) {
+}: {
+  path: string;
+  line: number;
+  readActive: boolean;
+  activate: () => void;
+  children: ReactNode;
+}) {
   const rootUri = useContext(FileReferenceRootContext);
   const [open, setOpen] = useState(false);
   useLayoutEffect(() => {
@@ -271,7 +269,7 @@ function MarkdownReference({
         >
           <HugeiconsIcon icon={File01Icon} className="file-reference-icon" aria-hidden="true" />
           {children}
-          {line === undefined ? null : `（第 ${line} 行）`}
+          {`（第 ${line} 行）`}
         </a>
       </TooltipTrigger>
       <TooltipContent
@@ -279,25 +277,9 @@ function MarkdownReference({
         sideOffset={5}
       >
         {projectFilePath(rootUri, path)}
-        {line === undefined ? null : `（第 ${line} 行）`}
+        {`（第 ${line} 行）`}
       </TooltipContent>
     </Tooltip>
-  );
-}
-
-function MarkdownInlineCode({
-  children,
-  node,
-  ...props
-}: ComponentPropsWithoutRef<'code'> & ExtraProps) {
-  const reference = (node?.data as { fileReference?: InlineFileReference } | undefined)
-    ?.fileReference;
-  return reference ? (
-    <MarkdownFileLink {...reference} inlineCode>
-      {children}
-    </MarkdownFileLink>
-  ) : (
-    <code {...props}>{children}</code>
   );
 }
 
@@ -442,14 +424,13 @@ const MarkdownDocument = memo(
         ]}
         skipHtml
         urlTransform={(url, key) =>
-          key === 'href' && inlineFileReference(decodeMarkdownHref(url))?.line !== undefined
+          key === 'href' && markdownFileLineReference(decodeMarkdownHref(url))
             ? url
             : defaultUrlTransform(url)
         }
         components={{
           ...incrementalMarkdownComponents,
           a: MarkdownLink,
-          code: MarkdownInlineCode,
           p: MarkdownParagraph,
           pre: MarkdownCodeBlock,
           table: MarkdownTable,

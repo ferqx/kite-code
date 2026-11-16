@@ -20,7 +20,7 @@ async function checkFileReference(page: import('playwright').Page, width: number
     exact: true,
   });
   const plainPath = 'packages/agent/src/extensions/host.ts';
-  const plainLink = region.getByRole('link', { name: 'host.ts', exact: true });
+  const plainLink = region.getByRole('button', { name: 'host.ts', exact: true });
   const namedLink = region.getByRole('link', { name: '审批继承（第 802 行）', exact: true });
   const noteTitle = page.locator('.markdown-alert[data-alert="note"] .markdown-alert-title');
   const tooltip = page.getByRole('tooltip');
@@ -103,6 +103,7 @@ async function checkFileReference(page: import('playwright').Page, width: number
   assert.equal(await region.textContent(), `同一文件（\`${text}`);
   await page.getByRole('button', { name: '闭合文件引用', exact: true }).click();
   await link.waitFor();
+  assert.deepEqual(await region.locator('code').allTextContents(), [text, plainPath, 'waitMs: 0']);
   await region.getByText('waitMs: 0', { exact: true }).waitFor();
   const original = await link.elementHandle();
   assert.match((await region.textContent()) ?? '', /^同一文件（.*）与 .*waitMs: 0。$/);

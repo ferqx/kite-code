@@ -207,7 +207,7 @@ function Fixture() {
                   <MessageContent
                     text={
                       referenceClosed
-                        ? `${referenceMessage}\`）与 \`packages/agent/src/extensions/host.ts\`。[审批继承](packages/agent/src/extensions/host.ts:802)。这里继续核对窄窗口中文和长链接的换行，最后保留原来的 \`waitMs: 0\`。`
+                        ? `${referenceMessage}\`）与 \`packages/agent/src/extensions/host.ts\`。[collaboration-observation.test.ts](${fileReference})、[host.ts](packages/agent/src/extensions/host.ts)、[审批继承](packages/agent/src/extensions/host.ts:802)。这里继续核对窄窗口中文和长链接的换行，最后保留原来的 \`waitMs: 0\`。`
                         : referenceMessage
                     }
                     streaming={!referenceClosed}

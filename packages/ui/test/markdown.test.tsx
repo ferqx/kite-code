@@ -114,7 +114,7 @@ test('desktop GFM preserves complete large text, original links and code, and or
   }
 });
 
-test('desktop file references preserve inline code where the reference cannot be opened', () => {
+test('desktop file references require explicit Markdown links and preserve inline code', () => {
   const reference =
     'packages/agent/test/isolated/business/task/collaboration-observation.test.ts:94';
   const plainPath = 'packages/agent/src/extensions/task/index.ts';
@@ -136,23 +136,13 @@ test('desktop file references preserve inline code where the reference cannot be
       const document = dom.window.document;
       expect(
         [...document.querySelectorAll('.file-reference')].map((node) => node.textContent),
-      ).toEqual(
-        openFile
-          ? [
-              'collaboration-observation.test.ts（第 94 行）',
-              '雪.ts（第 8 行）',
-              'index.ts',
-              '审批继承（第 802 行）',
-              '同目录（第 8 行）',
-              '中文（第 2 行）',
-            ]
-          : [],
-      );
+      ).toEqual(openFile ? ['审批继承（第 802 行）', '同目录（第 8 行）', '中文（第 2 行）'] : []);
       expect(document.querySelector('p')!.textContent).toBe(
-        openFile
-          ? '同一文件（collaboration-observation.test.ts（第 94 行））与 雪.ts（第 8 行）、index.ts。'
-          : `同一文件（${reference}）与 src/雪.ts:8、${plainPath}。`,
+        `同一文件（${reference}）与 src/雪.ts:8、${plainPath}。`,
       );
+      expect(
+        [...document.querySelector('p')!.querySelectorAll('code')].map((node) => node.textContent),
+      ).toEqual([reference, 'src/雪.ts:8', plainPath]);
       expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
       expect(document.querySelector('a > code')!.textContent).toBe(reference);
       expect(document.querySelector('pre > code')!.textContent).toBe(`${reference}\n`);
