@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { type AgentRuntime, createRuntime } from '@kite-ai/agent';
+import { type AgentRuntime, createRuntime, prepareOutputDirectory } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -166,7 +167,8 @@ native(
           shellExecutable: '/bin/sh',
           host: {
             controlBase: join(root, 'control'),
-            protectedRoots: [profile.dataRoot, join(root, 'control')],
+            // Match the default host: do not protect the parent of its own staging.
+            protectedRoots: [join(root, 'control')],
             readonlyAssets: [join(root, 'assets')],
             runtimeReadOnlyRoots: [dirname(process.execPath)],
           },
@@ -177,6 +179,10 @@ native(
         ...host,
         permissions: host.permissions!,
         store,
+        artifacts: createArtifactStore({ profile, store }),
+        outputCollections: {
+          prepare: (context, identity) => prepareOutputDirectory(runtime!, context, identity),
+        },
         processConcurrency: 1,
         modelConcurrency: 1,
       });
@@ -438,6 +444,7 @@ test('registered Workspace query reads every page and rejects store, cursor, pat
       () =>
         ({
           getMetadata: async () => ({ storeId: 'store' }),
+          listSessionExecutionRoots: async () => ({ roots: [], snapshotCursor: '7' }),
           listWorkspaceDirectory: async () => {
             const page = structuredClone(
               pages[index] ?? { ...pages[1]!, items: [], nextAfterSeq: null },

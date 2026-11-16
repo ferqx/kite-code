@@ -1566,6 +1566,33 @@
         "type": "string",
         "pattern": "^[A-Za-z0-9_-]{1,128}$"
       },
+      "executionRoot": {
+        "type": "object",
+        "properties": {
+          "epoch": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "identity": {
+            "type": "object",
+            "properties": {
+              "device": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "inode": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
+              }
+            },
+            "required": ["device", "inode"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["epoch", "identity"],
+        "additionalProperties": false
+      },
       "sessionId": {
         "type": "string",
         "pattern": "^[A-Za-z0-9_-]{1,128}$"
@@ -1635,6 +1662,33 @@
           "workspaceId": {
             "type": "string",
             "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "executionRoot": {
+            "type": "object",
+            "properties": {
+              "epoch": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "identity": {
+                "type": "object",
+                "properties": {
+                  "device": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  },
+                  "inode": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  }
+                },
+                "required": ["device", "inode"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["epoch", "identity"],
+            "additionalProperties": false
           },
           "sessionId": {
             "type": "string",
@@ -2216,6 +2270,33 @@
                           "type": "string",
                           "pattern": "^[A-Za-z0-9_-]{1,128}$"
                         },
+                        "executionRoot": {
+                          "type": "object",
+                          "properties": {
+                            "epoch": {
+                              "type": "string",
+                              "maxLength": 19,
+                              "pattern": "^(0|[1-9][0-9]*)$"
+                            },
+                            "identity": {
+                              "type": "object",
+                              "properties": {
+                                "device": {
+                                  "type": "string",
+                                  "pattern": "^(0|[1-9][0-9]*)$"
+                                },
+                                "inode": {
+                                  "type": "string",
+                                  "pattern": "^(0|[1-9][0-9]*)$"
+                                }
+                              },
+                              "required": ["device", "inode"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["epoch", "identity"],
+                          "additionalProperties": false
+                        },
                         "sessionId": {
                           "type": "string",
                           "pattern": "^[A-Za-z0-9_-]{1,128}$"
@@ -2356,6 +2437,33 @@
                   "workspaceId": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                  },
+                  "executionRoot": {
+                    "type": "object",
+                    "properties": {
+                      "epoch": {
+                        "type": "string",
+                        "maxLength": 19,
+                        "pattern": "^(0|[1-9][0-9]*)$"
+                      },
+                      "identity": {
+                        "type": "object",
+                        "properties": {
+                          "device": {
+                            "type": "string",
+                            "pattern": "^(0|[1-9][0-9]*)$"
+                          },
+                          "inode": {
+                            "type": "string",
+                            "pattern": "^(0|[1-9][0-9]*)$"
+                          }
+                        },
+                        "required": ["device", "inode"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["epoch", "identity"],
+                    "additionalProperties": false
                   },
                   "sessionId": {
                     "type": "string",
@@ -3199,6 +3307,33 @@
               "workspaceId": {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9_-]{1,128}$"
+              },
+              "executionRoot": {
+                "type": "object",
+                "properties": {
+                  "epoch": {
+                    "type": "string",
+                    "maxLength": 19,
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  },
+                  "identity": {
+                    "type": "object",
+                    "properties": {
+                      "device": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9][0-9]*)$"
+                      },
+                      "inode": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9][0-9]*)$"
+                      }
+                    },
+                    "required": ["device", "inode"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["epoch", "identity"],
+                "additionalProperties": false
               },
               "sessionId": {
                 "type": "string",
@@ -10690,14 +10825,14 @@
                     "pattern": "^[a-f0-9]{64}$"
                   },
                   "controlReads": {
-                    "maxItems": 3,
+                    "maxItems": 4,
                     "type": "array",
                     "items": {
                       "type": "object",
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "enum": ["permission.mode", "workspace.trust"]
+                          "enum": ["permission.mode", "workspace.trust", "session.execution_root"]
                         },
                         "scope": {
                           "type": "string"
@@ -10818,14 +10953,14 @@
                     "pattern": "^[a-f0-9]{64}$"
                   },
                   "controlReads": {
-                    "maxItems": 3,
+                    "maxItems": 4,
                     "type": "array",
                     "items": {
                       "type": "object",
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "enum": ["permission.mode", "workspace.trust"]
+                          "enum": ["permission.mode", "workspace.trust", "session.execution_root"]
                         },
                         "scope": {
                           "type": "string"
@@ -12533,14 +12668,18 @@
                         "pattern": "^[a-f0-9]{64}$"
                       },
                       "controlReads": {
-                        "maxItems": 3,
+                        "maxItems": 4,
                         "type": "array",
                         "items": {
                           "type": "object",
                           "properties": {
                             "kind": {
                               "type": "string",
-                              "enum": ["permission.mode", "workspace.trust"]
+                              "enum": [
+                                "permission.mode",
+                                "workspace.trust",
+                                "session.execution_root"
+                              ]
                             },
                             "scope": {
                               "type": "string"
@@ -12661,14 +12800,18 @@
                         "pattern": "^[a-f0-9]{64}$"
                       },
                       "controlReads": {
-                        "maxItems": 3,
+                        "maxItems": 4,
                         "type": "array",
                         "items": {
                           "type": "object",
                           "properties": {
                             "kind": {
                               "type": "string",
-                              "enum": ["permission.mode", "workspace.trust"]
+                              "enum": [
+                                "permission.mode",
+                                "workspace.trust",
+                                "session.execution_root"
+                              ]
                             },
                             "scope": {
                               "type": "string"

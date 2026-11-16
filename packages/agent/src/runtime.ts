@@ -307,7 +307,14 @@ export interface StepCapabilities {
   /** Additional registrations, excluding the Runtime's global extensions. */
   readonly extensions?: readonly Extension[];
   readonly toolIds?: readonly string[];
-  /** Bounded, non-secret facts about the cached catalogue that produced these definitions. */
+  /** Trusted callbacks selected with this exact scope. Their lifetime belongs to the Run lease. */
+  readonly sources?: ContextSources;
+  readonly permissions?: Permissions;
+  readonly conditions?: NecessaryConditions;
+  readonly toolBehaviors?: readonly TrustedToolBehavior[];
+  /** Host-owned directory identity, also sealed as snapshot.executionRoot. Never tool input. */
+  readonly executionRoot?: import('./storage/types').SessionExecutionRoot;
+  /** Bounded, non-secret facts about the complete scope that produced these definitions. */
   readonly snapshot: Json;
 }
 
@@ -316,6 +323,8 @@ export type StepCapabilitiesReader = (input: {
   readonly run: Readonly<RunRecord>;
   readonly session: Readonly<SessionRecord>;
   readonly signal: AbortSignal;
+  /** Only Core supplies a verified original Model snapshot while restoring its exact scope. */
+  readonly originalSnapshot?: Json;
 }) => Promise<StepCapabilities>;
 
 export interface AuthorizationCheckBinding extends AuthorizationCheckIdentity {
@@ -799,6 +808,7 @@ export class AgentRuntime {
     }
     this.execution = new UnifiedExecution({
       store: options.store,
+      toolBehaviors: this.options.toolBehaviors,
       sealModelInput: (scope, request) => this.sealModelInput(scope, request),
       sealModelMetadata: (scope, metadata, request, sealedInput) =>
         this.sealModelMetadata(scope, metadata, request, sealedInput),
@@ -1003,6 +1013,19 @@ export class AgentRuntime {
     this.getCompressionOrigin = this.accountEntry(this.getCompressionOrigin, 'observation');
     this.getMessageOrigin = this.accountEntry(this.getMessageOrigin, 'observation');
     this.getWorkspace = this.accountEntry(this.getWorkspace, 'observation');
+    this.getSessionExecutionRoot = this.accountEntry(this.getSessionExecutionRoot, 'observation');
+    this.listSessionExecutionRoots = this.accountEntry(
+      this.listSessionExecutionRoots,
+      'observation',
+    );
+    this.getSessionExecutionRootPreparation = this.accountEntry(
+      this.getSessionExecutionRootPreparation,
+      'observation',
+    );
+    this.prepareSessionExecutionRoot = this.accountEntry(
+      this.prepareSessionExecutionRoot,
+      'admission',
+    );
     this.listWorkspaces = this.accountEntry(this.listWorkspaces, 'observation');
     this.listBackgroundExecutions = this.accountEntry(this.listBackgroundExecutions, 'observation');
     this.listSessionDirectory = this.accountEntry(this.listSessionDirectory, 'observation');
@@ -2073,7 +2096,7 @@ export class AgentRuntime {
         for (const decision of decisions) {
           const reads = decision.controlReads;
           if (reads === undefined) continue;
-          if (!Array.isArray(reads) || reads.length > 3) {
+          if (!Array.isArray(reads) || reads.length > 4) {
             controlError = 'invalid_permission_control_reads';
             break;
           }
@@ -2083,7 +2106,9 @@ export class AgentRuntime {
               typeof read !== 'object' ||
               Array.isArray(read) ||
               Object.keys(read).some((key) => !['kind', 'scope', 'revision'].includes(key)) ||
-              !['permission.mode', 'workspace.trust'].includes(read.kind) ||
+              !['permission.mode', 'workspace.trust', 'session.execution_root'].includes(
+                read.kind,
+              ) ||
               typeof read.scope !== 'string' ||
               !read.scope.length ||
               read.scope.length > 256 ||
@@ -2105,7 +2130,7 @@ export class AgentRuntime {
           }
           if (controlError) break;
         }
-        if (controlReads.length > 3) controlError = 'invalid_permission_control_reads';
+        if (controlReads.length > 4) controlError = 'invalid_permission_control_reads';
         const proof = {
           ...(decisions.some((decision) => decision.controlReads !== undefined)
             ? { controlReads }
@@ -2162,6 +2187,10 @@ export class AgentRuntime {
             : null,
         }));
         const revision = `child-intersection/${await semanticDigest(bindings)}`;
+        // Conflicting live control reads are a stale observation, not a policy
+        // rejection. Preserve the dispatch boundary's existing mode-refresh vs
+        // trust-revocation handling instead of formatting it as permission denied.
+        if (controlError === 'permission_control_changed') throw new AgentError(controlError);
         if (controlError) return { allowed: false, revision, reason: controlError };
         const denied = decisions.find(
           (decision) => !decision.allowed && !decision.approval && !decision.check,
@@ -2553,6 +2582,8 @@ export class AgentRuntime {
         );
         assertParentTools(bound.definitions, bound.extensions);
         assertParentJobs(bound.jobs, bound.extensions);
+        // The configured Run policy already contains the captured parent ceiling.
+        // readRunCapabilities intersects it with each selected Step policy.
         return selected;
       };
     }
@@ -4674,6 +4705,20 @@ export class AgentRuntime {
   getWorkspace(id: string) {
     return this.options.store.getWorkspace(id);
   }
+  listSessionExecutionRoots(input: Parameters<Store['listSessionExecutionRoots']>[0]) {
+    return this.options.store.listSessionExecutionRoots(input);
+  }
+  getSessionExecutionRoot(input: Parameters<Store['getSessionExecutionRoot']>[0]) {
+    return this.options.store.getSessionExecutionRoot(input);
+  }
+  getSessionExecutionRootPreparation(
+    input: Parameters<Store['getSessionExecutionRootPreparation']>[0],
+  ) {
+    return this.options.store.getSessionExecutionRootPreparation(input);
+  }
+  prepareSessionExecutionRoot(input: Parameters<Store['prepareSessionExecutionRoot']>[0]) {
+    return this.options.store.prepareSessionExecutionRoot(input);
+  }
   listWorkspaces(options?: Parameters<Store['listWorkspaces']>[0]) {
     return this.options.store.listWorkspaces(options);
   }
@@ -5136,7 +5181,14 @@ export class AgentRuntime {
       executionId: model.id,
       signal,
     });
-    const current = await this.readRunCapabilities(command, run, session, binding, signal);
+    const current = await this.readRunCapabilities(
+      command,
+      run,
+      session,
+      binding,
+      signal,
+      source.capabilitySnapshot ?? null,
+    );
     if (!current) throw new AgentError('child_parent_binding_unavailable');
     const tools = [...current.selected.definitions.values()]
       .sort((a, b) => a.id.localeCompare(b.id))
@@ -5148,6 +5200,12 @@ export class AgentRuntime {
       }));
     if (
       canonicalJson(current.snapshot) !== canonicalJson(source.capabilitySnapshot ?? null) ||
+      (source.toolBehaviorBindings !== undefined &&
+        canonicalJson(
+          current.selected.toolBehaviors.map((behavior) =>
+            this.reviewBinding(behavior),
+          ) as unknown as Json,
+        ) !== canonicalJson(source.toolBehaviorBindings)) ||
       canonicalJson(tools as unknown as Json) !==
         canonicalJson(original.request.tools as unknown as Json)
     )
@@ -5157,6 +5215,11 @@ export class AgentRuntime {
       extensions: current.selected.extensions,
       tools: current.selected.definitions,
       jobs: current.selected.jobs,
+      sources: current.sources,
+      permissions: current.permissions,
+      conditions: current.conditions,
+      toolBehaviors: current.selected.toolBehaviors,
+      executionRoot: current.executionRoot,
       capabilitySnapshot: current.snapshot,
     };
   }
@@ -8116,6 +8179,7 @@ export class AgentRuntime {
     session: SessionRecord,
     binding: RunBinding,
     signal: AbortSignal,
+    originalSnapshot?: Json,
   ) {
     if (!binding.readStepCapabilities) return null;
     signal.throwIfAborted();
@@ -8124,26 +8188,82 @@ export class AgentRuntime {
       run: freeze(structuredClone(run)),
       session: freeze(structuredClone(session)),
       signal: signal,
+      ...(originalSnapshot === undefined
+        ? {}
+        : { originalSnapshot: freeze(structuredClone(originalSnapshot)) }),
     });
     if (
       !value ||
       typeof value !== 'object' ||
       Array.isArray(value) ||
-      Object.keys(value).some((key) => !['extensions', 'toolIds', 'snapshot'].includes(key)) ||
-      value.snapshot === undefined
+      Object.keys(value).some(
+        (key) =>
+          ![
+            'extensions',
+            'toolIds',
+            'snapshot',
+            'sources',
+            'permissions',
+            'conditions',
+            'toolBehaviors',
+            'executionRoot',
+          ].includes(key),
+      ) ||
+      value.snapshot === undefined ||
+      (value.sources !== undefined && typeof value.sources?.capture !== 'function') ||
+      (value.permissions !== undefined && typeof value.permissions?.authorize !== 'function') ||
+      (value.conditions !== undefined && typeof value.conditions?.evaluate !== 'function') ||
+      (value.executionRoot !== undefined &&
+        (!value.executionRoot ||
+          typeof value.executionRoot !== 'object' ||
+          Array.isArray(value.executionRoot)))
     )
       throw new AgentError('invalid_step_capabilities');
     const snapshot = freeze(structuredClone(value.snapshot));
     if (new TextEncoder().encode(canonicalJson(snapshot)).byteLength > 64 * 1024)
       throw new AgentError('step_capability_snapshot_too_large');
+    const executionRoot =
+      value.executionRoot === undefined ? undefined : freeze(structuredClone(value.executionRoot));
+    if (
+      executionRoot &&
+      (executionRoot.sessionId !== session.id ||
+        executionRoot.workspaceId !== session.workspaceId ||
+        !/^(0|[1-9][0-9]{0,18})$/.test(executionRoot.epoch) ||
+        BigInt(executionRoot.epoch) > 9223372036854775807n ||
+        !snapshot ||
+        typeof snapshot !== 'object' ||
+        Array.isArray(snapshot) ||
+        canonicalJson(snapshot.executionRoot ?? null) !==
+          canonicalJson(executionRoot as unknown as Json) ||
+        !(await this.matchesStoredExecutionRoot(executionRoot)))
+    )
+      throw new AgentError('step_execution_root_invalid');
+    // A Step may refine its host policy, never replace an independent Run ceiling
+    // or a wrapper installed by the host. Preserve the original Run scheduling
+    // contract even when the Step policy declares a different optional order.
+    const ceiling = binding.permissions ?? this.options.permissions;
+    const permissions =
+      !value.permissions || value.permissions === ceiling
+        ? ceiling
+        : {
+            ...this.childPermissions(ceiling, value.permissions),
+            toolDispatchOrder: ceiling.toolDispatchOrder,
+          };
     const selected = this.runDefinitions(
       value.extensions,
       value.toolIds,
       binding.modelHiddenToolIds,
-      binding.toolBehaviors,
+      value.toolBehaviors ?? binding.toolBehaviors,
     );
     const facts: Json = {
       snapshot,
+      toolBehaviors: selected.toolBehaviors.map(
+        ({ capability, contractRef, configurationDigest }) => ({
+          capability: { ...capability },
+          contractRef,
+          configurationDigest,
+        }),
+      ) as unknown as Json,
       extensions: selected.extensions.map(({ id, version }) => ({ id, version })),
       tools: [...selected.definitions.values()]
         .sort((a, b) => a.id.localeCompare(b.id))
@@ -8166,7 +8286,43 @@ export class AgentRuntime {
           resources: (job.resources ?? null) as Json,
         })),
     };
-    return { selected, snapshot, fingerprint: await semanticDigest(facts) };
+    return {
+      selected,
+      snapshot,
+      executionRoot,
+      sources: sealSources(value.sources ?? binding.sources ?? this.options.sources),
+      permissions,
+      conditions: value.conditions ?? binding.conditions,
+      fingerprint: await semanticDigest(facts),
+    };
+  }
+  private async matchesStoredExecutionRoot(root: import('./storage/types').SessionExecutionRoot) {
+    const stored = await this.options.store.getSessionExecutionRoot({
+      sessionId: root.sessionId,
+      epoch: root.epoch,
+    });
+    // Epoch zero is an implicit, read-only Store fact until the first activation.
+    // Only the trusted host can resolve its directory identity; all other facts
+    // must match. Once persisted, identity is immutable for that epoch.
+    if (stored.epoch === '0' && stored.identity === null && root.identity !== null) {
+      const identity = root.identity;
+      if (
+        !identity ||
+        typeof identity !== 'object' ||
+        Array.isArray(identity) ||
+        Object.keys(identity).sort().join(',') !== 'dev,ino' ||
+        [identity.dev, identity.ino].some(
+          (value) =>
+            typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value) || value.length > 32,
+        )
+      )
+        return false;
+      return (
+        canonicalJson({ ...stored, identity } as unknown as Json) ===
+        canonicalJson(root as unknown as Json)
+      );
+    }
+    return canonicalJson(stored as unknown as Json) === canonicalJson(root as unknown as Json);
   }
   private retainRunBinding(runId: string, binding: RunBinding) {
     const existing = this.runBindingLeases.get(runId);
@@ -8217,6 +8373,7 @@ export class AgentRuntime {
       extensions: binding.extensions ?? this.extensions,
       tools: binding.definitions,
       jobs: binding.jobs ?? this.runDefinitions().jobs,
+      sources: binding.sources ?? this.options.sources,
       permissions: binding.permissions,
       authorizationCheck: binding.authorizationCheck,
       toolBehaviors: binding.toolBehaviors,
@@ -8493,20 +8650,29 @@ export class AgentRuntime {
         bindings: this.scopedRunBinding(run.id, binding),
       };
       let capabilityFingerprint: string | undefined;
-      const readCapabilities = () =>
-        this.readRunCapabilities(command, run, session, binding, controller.signal);
-      const selectCapabilities = async () => {
-        const current = await readCapabilities();
+      const readCapabilities = (originalSnapshot?: Json) =>
+        this.readRunCapabilities(
+          command,
+          run,
+          session,
+          binding,
+          controller.signal,
+          originalSnapshot,
+        );
+      const selectCapabilities = async (originalSnapshot?: Json) => {
+        const current = await readCapabilities(originalSnapshot);
         if (!current) return;
         capabilityFingerprint = current.fingerprint;
         scope.bindings = {
           extensions: current.selected.extensions,
           tools: current.selected.definitions,
           jobs: current.selected.jobs,
-          permissions: binding.permissions,
+          sources: current.sources,
+          permissions: current.permissions,
           authorizationCheck: binding.authorizationCheck,
           toolBehaviors: current.selected.toolBehaviors,
-          conditions: binding.conditions,
+          conditions: current.conditions,
+          executionRoot: current.executionRoot,
           capabilitySnapshot: current.snapshot,
           retain: this.retainRunBinding(run.id, binding).retain,
         };
@@ -8516,7 +8682,6 @@ export class AgentRuntime {
         if (current && current.fingerprint !== fingerprint)
           throw new AgentError('capability_refresh_required');
       };
-      const configuredSources = binding.sources ?? this.options.sources;
       let childRole: ContextSource | null = null;
       if (session.parentSessionId !== null) {
         const content = childAgentRoleSource();
@@ -8615,6 +8780,7 @@ export class AgentRuntime {
         bindings = scope.bindings,
         hostSources?: Map<string, ContextSource>,
       ) => {
+        const configuredSources = bindings.sources;
         const sources = new Map<string, ContextSource>();
         const requestList = [...requests].map((request) => ({
           ...request,
@@ -9009,7 +9175,10 @@ export class AgentRuntime {
         };
       };
       const registerToolRequests = async (calls: readonly import('./storage/types').ToolCall[]) => {
-        if (!configuredSources && !scope.bindings.extensions.some((extension) => extension.context))
+        if (
+          !scope.bindings.sources &&
+          !scope.bindings.extensions.some((extension) => extension.context)
+        )
           return;
         for (const call of calls) {
           const request = toolSourceRequest(call);
@@ -9022,6 +9191,7 @@ export class AgentRuntime {
         }
       };
       let toolAdmission: ReturnType<typeof createToolDispatchBatch> | undefined;
+      let toolBatchSize: number | undefined;
       let recoveredModelRetry = resumed?.modelRetry;
       const loopContext: LoopContext = {
         toolFailureStreak: failureStreak,
@@ -9033,6 +9203,7 @@ export class AgentRuntime {
         prepareToolCalls: registerToolRequests,
         beginToolBatch: (calls, signal, cancel) => {
           toolBatchActive = true;
+          toolBatchSize = calls.length;
           const current = orderedToolAdmission
             ? createToolDispatchBatch(
                 calls.map((call) => call.id),
@@ -9046,6 +9217,7 @@ export class AgentRuntime {
             finish() {
               current?.finish();
               toolBatchActive = false;
+              toolBatchSize = undefined;
               if (toolAdmission === current) toolAdmission = undefined;
             },
           };
@@ -9454,6 +9626,7 @@ export class AgentRuntime {
               checkFreshness: checkToolDecision,
               onRequirementsRegistered,
               toolAdmission: toolAdmission?.forCall(call.id),
+              toolBatchSize,
             },
             definition,
             call,
@@ -9477,12 +9650,18 @@ export class AgentRuntime {
         },
       };
       if (resumed?.modelRequest && resumed.modelSource) {
-        await selectCapabilities();
+        await selectCapabilities(resumed.modelSource.capabilitySnapshot ?? null);
         if (
           canonicalJson(modelTools() as unknown as Json) !==
             canonicalJson(resumed.modelRequest.tools as unknown as Json) ||
           canonicalJson((scope.bindings.capabilitySnapshot ?? null) as Json) !==
-            canonicalJson(resumed.modelSource.capabilitySnapshot ?? null)
+            canonicalJson(resumed.modelSource.capabilitySnapshot ?? null) ||
+          (resumed.modelSource.toolBehaviorBindings !== undefined &&
+            canonicalJson(
+              (scope.bindings.toolBehaviors ?? []).map((behavior) =>
+                this.reviewBinding(behavior),
+              ) as unknown as Json,
+            ) !== canonicalJson(resumed.modelSource.toolBehaviorBindings))
         )
           throw new AgentError('capability_refresh_required');
         captured = await captureModelSources();
@@ -10680,6 +10859,36 @@ export class AgentRuntime {
     return actual as unknown as ModelRequest;
   }
   private async sealSource(scope: ToolScope, source: Json): Promise<Json> {
+    const executionRoot = scope.bindings?.executionRoot;
+    const toolBatchSize = 'run' in scope ? scope.toolBatchSize : undefined;
+    if (executionRoot || toolBatchSize !== undefined) {
+      if (!source || typeof source !== 'object' || Array.isArray(source))
+        throw new AgentError('model_source_invalid');
+      if (
+        executionRoot &&
+        (executionRoot.sessionId !==
+          ('run' in scope ? scope.run.sessionId : scope.command.sessionId) ||
+          executionRoot.workspaceId !== scope.workspaceId ||
+          (source.executionRoot !== undefined &&
+            canonicalJson(source.executionRoot) !==
+              canonicalJson(executionRoot as unknown as Json)))
+      )
+        throw new AgentError('step_execution_root_invalid');
+      if (
+        toolBatchSize !== undefined &&
+        (!Number.isSafeInteger(toolBatchSize) ||
+          toolBatchSize < 1 ||
+          source.kind !== 'model_decision')
+      )
+        throw new AgentError('tool_batch_binding_invalid');
+      source = {
+        ...source,
+        ...(executionRoot
+          ? { executionRoot: structuredClone(executionRoot) as unknown as Json }
+          : {}),
+        ...(toolBatchSize === undefined ? {} : { toolBatchSize }),
+      };
+    }
     if (Buffer.byteLength(canonicalJson(source)) <= 64 * 1024) return source;
     if (!source || typeof source !== 'object' || Array.isArray(source))
       throw new AgentError('model_source_invalid');

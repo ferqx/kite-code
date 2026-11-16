@@ -8,6 +8,12 @@
 
 2026-10-26，本轮失败修复已通过21份受影响 Service 完整测试文件。夹具按持久权限控制保存 Full／工作区信任，并保持 Native Shell 的准确读取范围；普通输入沿原 Command 核 Run／Model 来源，显式 steering 与排队 follow-up 分别验证。Files 测试消费当前模型可见的文本回执及完整 baseline，不把呈现当作持久 JSON；原版本绑定、零重放、取消与清理断言保留。真实联验含257次文件读取、4／16槽混合 Shell 压测及公开 HTTP／SDK 读取；上下文预测只在提供准确捕获的呈现定义时取得资格，缺失定义的冷态读取仍明确不可用。Core复用原模型请求中已经封存的工具正文，并核对既有Store／Session／Run、调用、消息来源及不可变终态结果；不新增metadata字段，不改变统计数据结构，不重新执行工具或调用现在的格式器。主／子Agent及Run／step工具共用该通用路径，新增工具无需登记。相同事实在运行中、结束后和重启后保持同一统计口径；确实缺少原请求或来源冲突时才不可估算。机制与限制归[上下文owner](../../packages/agent/src/context-estimate.README.md)。该结果不代表全仓全量测试或其他平台资格。
 
+## 会话执行工作树
+
+[执行根解析](src/session-execution-root.ts)以 Store 的 Session／epoch 与实际目录 dev/ino 为可信根，不改共享 Workspace。使用工作树只切执行目录，会话仍属于原空间并保留在原空间会话列表中，Session ID 与父子身份不变；exit 返回原空间的原始目录，不迁移会话。明确 `git_worktree use/exit` 由[Host](src/worktree-host.ts)绑定原 Tool；目标审批前核同仓库 linked 指针，执行前重验。Tool 成功与根变更在同一持久事务提交，下一 step 重装 Files、Shell、项目指令、权限及检查点。创建通知、Shell workdir、客户端阅读导航没有这种 authority。
+
+[默认装配](src/configuration.ts)按根 epoch 缓存整套 binding；每个历史 assembly 活到原 Run 和已派发 Job lease 都释放，不在切根时销毁。权限用实际请求的 Session／Execution 根分类，包括父策略约束子请求；原模型恢复只读其封存根。配置与工具上限仍取原 Run，新的工作区指令不授新工具。删除占用读取还核当前执行根、待提交使用目标及未终态 Job 历史根；任何读取不完整／身份变化拒绝删除。检查点按物理根隔离，具体恢复合同归 [Files owner](../../packages/agent/src/business/file-checkpoints/README.md)。集成断言见[同轮显式切换测试](test/isolated/session-execution-root.test.ts)，不从受控模型推定真实客户端全过程或其他平台资格。
+
 ## Trajectory 与独立 Trace 消费
 
 [Trajectory source](src/trajectory/index.ts)将原 Store 的短事务 Reader 与 Runtime typed Evidence 交给同源 HTTP／生成 Client，事件分页固定 upper、逐页准入，无跨页 lease；只有材料读取持有有界分片 lease。旧 Session Logs 与通知 floor 的语义保持。原事实、材料、恢复与 GC 归 [Agent trajectory owner](../../packages/agent/src/trajectory/README.md)。
@@ -30,7 +36,9 @@
 
 默认 Files 装配依次组合工作区检查点、只读输入、Plan owner 协调与会话输出；请求分类和 execute 使用同一准确目标 revision，不放开整个 Profile。PDF 解析在独立 Worker，工具页图经 Artifact 和 Runtime 进入后继模型。具体文件、权限、Plan 与维护合同归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)与[维护](../../packages/agent/src/maintenance/README.md)；[真实默认宿主联验](test/isolated/planning-configuration.test.ts)覆盖这些交接，完整客户端和安装验收不从该测试推定。
 
-[最终 Files 目录装配](src/file-checkpoint-configuration.ts)统一英文工具与 path 说明：三种模式均支持普通外部读取、写入和编辑，分别按请求批准的人批、Auto 的自动审核和有效 Full 的直接授权执行；获准且可安全编辑的外部读取才有完整基线。准确附件和当前计划仍保专用范围，参数语义和版本不变；Files 批准不授予其他工具权限，Shell 的独立请求仍经过自身策略和原任务限制。普通文件确定缺失以成功观察及 `exists:false` 进入下一模型，不造正文或基线；私有文件缺失、保护失败与损坏不因此降成正常观察。[三模式目录及结果回归](test/isolated/full-external-files.test.ts)核实际默认装配和下一模型交接；UI 与真实模型资格另由实际观察及原测试记录说明。
+[最终 Files 目录装配](src/file-checkpoint-configuration.ts)统一英文工具与 path 说明：三种模式均支持普通外部读取、写入和编辑，请求批准先人批，有效 Full 直接授权；Auto 普通工作区读取免模型审核，普通外部文本隔离读取后仅对存在正文审核释放，缺失直接反馈；写入／编辑仍经自动审核；获准且可安全编辑的外部读取才有完整基线。准确附件和当前计划仍保专用范围，参数语义和版本不变；Files 批准不授予其他工具权限，Shell 的独立请求仍经过自身策略和原任务限制。普通文件确定缺失以成功观察及 `exists:false` 进入下一模型，不造正文或基线；私有文件缺失、保护失败与损坏不因此降成正常观察。[三模式目录及结果回归](test/isolated/full-external-files.test.ts)核实际默认装配和下一模型交接；UI 与真实模型资格另由实际观察及原测试记录说明。
+
+2026-11-16，macOS ARM64／Bun1.4.4：默认装配的[私有读取冷恢复](test/isolated/private-read-recovery.test.ts)4项87断言与[真实工作树冷恢复](test/isolated/worktree-read-recovery.test.ts)1项32断言同次通过。前者核审核落库后 SIGKILL 的零正文发布／零新增读取执行与审查，后者核原 epoch 1 Model／Files 调用恢复、exit 后回原根，均经真实 HTTP。未逐 syscall 计数，也不代替 Shell 执行、其他平台或真实客户端验收；准确边界见 [Files owner](../../packages/agent/src/tools/files/README.md#auto-文本读取的私有快照)。
 
 公开 `Message.createdAt` 为可选的消息首次记录毫秒时间，经[同源 schema](src/http/schema/index.ts)传给生成 Client；缺失保持未知。普通消息沿原 Store 事实，Fork 消息在[公开投影](src/message-response.ts)沿已核实来源保留原时间，不补造 Fork 或请求时钟。[HTTP 回归](test/isolated/http.test.ts)的真实受理／执行路径核对公开历史与 Store 时间一致；[来源回归](test/message-response.test.ts)核对 Fork 时间保真。
 
@@ -104,7 +112,7 @@ Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短
 
 工具包导出实际定义及[可信行为工厂](../../packages/agent/src/tool-behavior.ts)，`forRun` 按实际定义对象、kind／id／version 静态登记；普通 Extension／MCP 元数据和配置文本不能自签行为。Shell／Files／worktree owner 提供范围与领域审核，Service 只选择当前产品默认和全局上限。默认策略明确绑定 `check.behavior`，AND 只有所有检查选择同一行为才保留；混合独立检查沿通用 checker，不借 Shell 风险解释器替代。Run 保存准确行为 contractRef／configurationDigest；CLI/TUI/Native 同步使用 `options/optionId`，公开路由保持 `/v1`，不保留旧答案解析。范围与最终事务归[grant owner](../../packages/agent/src/storage/sqlite/permission-grants.README.md)。
 
-普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含文件、问答、网页、当前任务执行证据，以及宿主具备时的 Shell、浏览器和协作工具；实际目录按当前注册能力与用户选择生成，不把固定数量当作完整目录。`read_file` 统一读取工作区内文件和准确外部用户文件，专用外部读写工具已移除。外部读取复用统一权限和路径保护，不再附加基线、单链接限制或重复授权证明检查，不加载外部项目说明；外部写入使用 Shell。[真实 paired 回归](test/isolated/configuration.test.ts)核实际模型目录、外部完整正文、独立项目指令及显式禁用，[退役回归](test/isolated/tool-retirement.test.ts)核旧配置与激活在模型调用前拒绝。
+普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含文件、问答、网页、当前任务执行证据，以及宿主具备时的 Shell、浏览器和协作工具；实际目录按当前注册能力与用户选择生成，不把固定数量当作完整目录。`read_file` 统一读取工作区内文件和准确外部用户文件，专用外部读写工具已移除。外部读取复用统一权限和路径保护，可安全编辑目标保完整基线，其他可读目标不附加写基线或单链接限制，不加载外部项目说明；外部写入按 Files 当前模式执行。[真实 paired 回归](test/isolated/configuration.test.ts)核实际模型目录、外部完整正文、独立项目指令及显式禁用，[退役回归](test/isolated/tool-retirement.test.ts)核旧配置与激活在模型调用前拒绝。
 
 默认装配注册[Agent 命名扩展](../../packages/agent/src/business/session-title/index.ts)。beforeRun 短 Action 保存 fallback 并登记唯一 detached Job；原 Run 激活后独立生成，原 Run 正式成功后发布。不创建 child Agent，不等待完成前远端钩子。Service model-only resolver 接收原 Run 和 AbortSignal，核原配置封存摘要、所选模型绑定（含 Provider 身份）及实际路由摘要，重新读取当前凭据和宿主 ceiling；同 ID 新配置不能静默替换。只构造无工具独立绑定，不复用主 Run lease 或重新扫描知识。资源域、32KiB／10码点与真实 drain 归 Agent；自动元数据不推进 controlRevision。
 
@@ -1149,3 +1157,5 @@ MCP Agent 工具权限由 `permission-configuration.ts` 在准确宿主注册或
 [默认 MCP 装配](src/mcp-configuration.ts)从 lifecycle 的实际已选 ToolDefinition 对象读取原名称、描述和输入结构，只把本次工具的 `untrustedMcpTool` 交给[权限策略](../../packages/agent/src/permissions/README.md)，不扩展到同目录其他工具或连接配置。描述最多 2048 个 UTF-16 code units 并标明 complete/truncated/absent；结构最多 8 层、128 个节点、每层64个属性、8 KiB JSON，超过界限标 omitted，不裁成貌似完整的 schema。字面值及引用被省略的 structure_only 始终表示不完整语义，相关取舍和安全边界由权限 owner 维护。
 
 [实际 SDK 回归](test/isolated/mcp-configuration.test.ts)核默认 Auto 任务投影中的名称／描述／结构、准确 Tool id/version/参数、原系统提示、首次 HTTP 408 超时后的原输入重试和只执行一次远端效果，以及仅有不完整流 EOF 时不重试且零远端效果；重复读取原 Model input 不重新连接或重放工具。[生命周期回归](../../packages/agent/test/isolated/mcp/lifecycle.test.ts)核真实对象绑定、跨 Store／Session／未选 server 不发布、目录失效及冷历史不恢复。以上受控模型回答证明材料与执行链，不证明模型对任意远端语义的判断质量；实际客户端与真实模型资格分别验收。
+
+默认 Files 的可信 `prepareTool` 只在 Core 完整权限硬门禁与必要条件通过后私有预读普通外部文本，不在描述能力时读正文；特殊输入／计划／图片适配与独立人工上限保原合同。私有 metadata 绑定准确 Store／Session／root work／Run／Execution／attempt／owner／输入，根身份另由原子 `workspaceScope` 回调参与绑定；描述器只读取 metadata，缺失只调整自身默认 safeRead 分类，不覆写父子权限决定。正文仅在单次闭包中，最终 `markDispatching` 后生成原 ToolResult／Artifact，拒绝／取消／失败清理，已有审核的冷恢复不重建快照。实现与测试归 [Files owner](../../packages/agent/src/tools/files/README.md)。

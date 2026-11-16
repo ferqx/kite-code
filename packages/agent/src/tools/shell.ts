@@ -499,4 +499,5 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     ],
   };
 }
+export { inspectWorktreeExecutionRoot } from './git-worktree/execution-root';
 export { createShellToolBehaviors } from './shell-approval';

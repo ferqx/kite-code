@@ -12,6 +12,18 @@ const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'markdown-content-browser-'));
 const output = path.join(artifact, 'dist');
+// macOS Chrome serializes this system-family alias as "system-ui". Keep exact
+// family order and all other fallbacks; size, fit and interaction checks remain.
+function systemFontFamily(value: string): string {
+  return value
+    .split(',')
+    .map((family) => {
+      const name = family.trim();
+      return name === 'BlinkMacSystemFont' || name === '"system-ui"' ? 'system-ui' : name;
+    })
+    .join(', ');
+}
+
 async function checkFileReference(page: import('playwright').Page, width: number) {
   const text = 'packages/agent/test/isolated/business/task/collaboration-observation.test.ts:94';
   const region = page.getByRole('region', { name: '文件引用预览' });
@@ -35,8 +47,8 @@ async function checkFileReference(page: import('playwright').Page, width: number
       marker.remove();
       return icon.top + icon.height / 2 - (top + height / 2);
     });
-  const tooltipLayout = () =>
-    tooltip.evaluate((node) => {
+  const tooltipLayout = async () => {
+    const layout = await tooltip.evaluate((node) => {
       const { fontFamily, fontSize } = getComputedStyle(node);
       const { left, right } = node.getBoundingClientRect();
       return {
@@ -45,8 +57,12 @@ async function checkFileReference(page: import('playwright').Page, width: number
         fits: left >= 0 && right <= innerWidth && node.scrollWidth <= node.clientWidth,
       };
     });
+    return { ...layout, fontFamily: systemFontFamily(layout.fontFamily) };
+  };
   const expectedTooltipLayout = {
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+    fontFamily: systemFontFamily(
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+    ),
     fontSize: '13px',
     fits: true,
   };

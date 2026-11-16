@@ -119,9 +119,32 @@ export function fileCheckpointLocalEvents(
       });
     }
   }
-  events.sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
-  if (events.some((event, index) => index > 0 && event.seq === events[index - 1]!.seq))
-    fail('checkpoint_fork_snapshot_invalid');
+  const epoch = (event: FileCheckpointForkEvent) =>
+    event.kind === 'capture'
+      ? BigInt(ports.point(event.point).boundary.executionRoot?.epoch ?? '0')
+      : 0n;
+  events.sort((a, b) => {
+    if (a.seq !== b.seq) return a.seq < b.seq ? -1 : 1;
+    return epoch(a.event) < epoch(b.event) ? -1 : epoch(a.event) > epoch(b.event) ? 1 : 0;
+  });
+  for (let index = 1; index < events.length; index++) {
+    const current = events[index]!,
+      previous = events[index - 1]!;
+    if (current.seq !== previous.seq) continue;
+    if (current.event.kind !== 'capture' || previous.event.kind !== 'capture')
+      fail('checkpoint_fork_snapshot_invalid');
+    const a = ports.point(previous.event.point).boundary;
+    const b = ports.point(current.event.point).boundary;
+    if (
+      a.runId !== b.runId ||
+      a.triggerMessageId !== b.triggerMessageId ||
+      a.contextSelectionId !== b.contextSelectionId ||
+      a.messageId !== b.messageId ||
+      a.messageSeq !== b.messageSeq ||
+      epoch(previous.event) >= epoch(current.event)
+    )
+      fail('checkpoint_fork_snapshot_invalid');
+  }
   return events.map(({ event }) => event);
 }
 export function fileCheckpointForkRule(ports: FileCheckpointForkPorts): RecordForkRule {

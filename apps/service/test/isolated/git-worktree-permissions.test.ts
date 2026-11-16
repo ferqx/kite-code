@@ -10,7 +10,7 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRuntime } from '@kite-ai/agent';
+import { createRuntime, prepareOutputDirectory } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import type { Json, ToolResult } from '@kite-ai/agent/extensions';
@@ -455,6 +455,9 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
       permissions: host.permissions!,
       store,
       artifacts: createArtifactStore({ profile, store }),
+      outputCollections: {
+        prepare: (context, identity) => prepareOutputDirectory(runtime, context, identity),
+      },
       processConcurrency: 1,
       modelConcurrency: 1,
     });

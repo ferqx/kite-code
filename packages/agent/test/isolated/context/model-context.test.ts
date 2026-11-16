@@ -137,32 +137,20 @@ test('normal, summary and expanded admission keep host context before the real c
   expect(refreshed[2]?.content).toContain('plan_requirement: approved');
 });
 
-test('worktree exit guidance requires client navigation evidence and explicit target deletion intent', () => {
+test('worktree guidance separates explicit session activation, exit and target deletion', () => {
   const contract = agentContractSource('/source-checkout');
-  expect(contract.content).toContain(
-    'exit or leave a Git worktree, or switch back from it, means client navigation',
-  );
-  expect(contract.content).toContain(
-    'does not authorize git_worktree.remove, Shell deletion, pruning worktree registrations, or changing branches or refs',
-  );
-  expect(contract.content).toContain('Creating a worktree did not move the original Session cwd');
-  expect(contract.content).toContain(
-    'if the current Session already uses the source checkout, no Git change is needed',
-  );
-  expect(contract.content).toContain('Use only explicitly available client navigation');
-  expect(contract.content).toContain('report a switch only after the client confirms it');
-  expect(contract.content).toContain(
-    'If the source is unknown or client navigation is unavailable',
-  );
-  expect(contract.content).toContain(
-    'without deleting anything or claiming that the project, session or cwd changed',
-  );
-  expect(contract.content).toContain(
+  for (const text of [
+    'action use and its absolute path',
+    'Shell cd and workdir do not switch the Session execution root',
+    'action exit to return this Session to its original workspace',
+    'without deleting any directory, registration, branch or ref',
+    'only tool call in that model response',
+    'Existing Jobs, other Sessions and existing children keep their own roots',
+    'Never report a switch before the successful receipt',
     'Invoke git_worktree.remove only when the user explicitly requests deletion of the specific target',
-  );
-  expect(contract.content).toContain(
     'Even when Auto mode skips approval, that does not supply user task authorization for deletion or expand the execution scope',
-  );
+  ])
+    expect(contract.content).toContain(text);
 });
 
 test('legacy source placement remains prefix and invalid, elevated or duplicate runtime placements fail closed', () => {

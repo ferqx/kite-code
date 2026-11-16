@@ -41,6 +41,7 @@ for (const mode of [
   'group_binding',
   'group_dynamic',
   'group_dynamic_drift',
+  'group_dynamic_history',
   'group_handoff_cancel',
 ])
   test(`SIGKILL ${mode} resumes original carriers and Runs once`, async () => {
@@ -54,7 +55,7 @@ for (const mode of [
             ? 'group_owned'
             : mode === 'group_cleanup'
               ? 'group_background_job'
-              : mode === 'group_dynamic_drift'
+              : ['group_dynamic_drift', 'group_dynamic_history'].includes(mode)
                 ? 'group_dynamic'
                 : [
                       'group_expired',
@@ -109,6 +110,28 @@ for (const mode of [
             : carriers.length,
       );
       const options = groupOptions(directory, seedMode);
+      let historicalReads = 0,
+        activeReads = 0;
+      if (mode === 'group_dynamic_history') {
+        const resolve = options.resolveRecoveryRunConfiguration!;
+        options.resolveRecoveryRunConfiguration = async (input) => {
+          const binding = await resolve(input);
+          return {
+            ...binding,
+            readStepCapabilities: async (step) => {
+              const selected = await binding.readStepCapabilities!(step);
+              if (step.originalSnapshot !== undefined) {
+                historicalReads++;
+                expect(Object.isFrozen(step.originalSnapshot)).toBe(true);
+                expect(step.originalSnapshot).toEqual({ catalogue: 'dynamic1' });
+                return { ...selected, snapshot: step.originalSnapshot };
+              }
+              activeReads++;
+              return { ...selected, snapshot: { catalogue: 'dynamic2' } };
+            },
+          };
+        };
+      }
       if (mode === 'group_cleanup') {
         const resolve = options.resolveChildRunConfiguration!;
         options.resolveChildRunConfiguration = async (input) => {
@@ -329,6 +352,19 @@ for (const mode of [
             (await store!.getRun(ready.runId))?.status ===
             (mode === 'group_handoff_cancel' ? 'cancelled' : 'completed'),
         );
+        if (mode === 'group_dynamic_history') {
+          expect(historicalReads).toBeGreaterThan(0);
+          expect(activeReads).toBeGreaterThan(0);
+          const models = (await store.listExecutions('s')).filter(
+            (execution) => execution.kind === 'model',
+          );
+          expect(models[0]!.decisionSource).toMatchObject({
+            capabilitySnapshot: { catalogue: 'dynamic1' },
+          });
+          expect(models.at(-1)!.decisionSource).toMatchObject({
+            capabilitySnapshot: { catalogue: 'dynamic2' },
+          });
+        }
         if (mode === 'group_handoff_cancel') {
           await until(async () =>
             (await Promise.all(carriers.map((carrier) => store!.getExecution(carrier.id)))).every(
@@ -529,7 +565,7 @@ for (const mode of [
           expect(after.executions.filter((execution) => execution.kind === 'model')).toHaveLength(
             mode === 'group_background_job'
               ? 3
-              : mode === 'group_dynamic'
+              : ['group_dynamic', 'group_dynamic_history'].includes(mode)
                 ? 3
                 : ['group_expired', 'group_handoff_cancel'].includes(mode) ||
                     (mode === 'group_terminal' && !before.runs[0]!.isActive)
@@ -555,7 +591,7 @@ for (const mode of [
           expect(ledger.filter((line) => line === `child-model:${key}`)).toHaveLength(
             mode === 'group_background_job'
               ? 3
-              : mode === 'group_dynamic'
+              : ['group_dynamic', 'group_dynamic_history'].includes(mode)
                 ? 3
                 : ['group_expired', 'group_activation', 'group_handoff_cancel'].includes(mode) ||
                     (seedMode === 'group_queued' && ['three', 'four'].includes(key)) ||

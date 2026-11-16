@@ -1,6 +1,6 @@
 # Git Worktree 工具
 
-`builtin.shell` 注册 `git.worktree@1`，模型名为 `git_worktree`，提供 `list/create/remove/observe`。外层工具不持有进程槽或串行资源；全部 Git 调用由现有 `shell.command@1` 的受管 Bun worker 使用 argv 执行。创建返回路径，保留来源 checkout 和 Session cwd，不维护工作树数据库。
+`builtin.shell` 注册 `git.worktree@1`，模型名为 `git_worktree`，提供 `list/create/remove/observe/use/exit`。外层工具不持有进程槽或串行资源；Git 调用由现有 `shell.command@1` 的受管 Bun worker 使用 argv 执行。创建返回路径，保留来源 checkout 和 Session cwd；只有明确 `use/exit` 改当前会话执行根，不维护第二份 Git 工作树库存。
 
 ## 输入与产品边界
 
@@ -24,7 +24,9 @@ create 可省略 path，可信默认根为 `~/.kite-code/worktrees/`，最终目
 
 Auto 下准确 `builtin.shell/git.worktree@1` Tool 不调用 generic check 或人工审批，封闭内部 Job 只继承经 Store 完整核实的原 Auto 免审来源；普通 Shell 即使命令相同也不取得该例外。手动模式的一次创建／删除批准仍覆盖原 Tool 的两个封闭步骤，正常外部范围各一张业务卡。prepare 仍按所属变更分类，不改 safeRead，也不免除 Job 派发检查。[准确资产描述](../../permissions/shell.ts)在核验实际 worker 后封存配置身份；[授权边界](../../storage/sqlite/worktree-authorization.ts)核实际 builtin.shell 注册、同 Store／Session／root work／owner、原记录和步骤、权限、期限及原 prepare 的完整输出。mutation 必须使用其实际成功 prepared frame 的原 plan/digest。原来源、当前父子／Planning 策略、控制读集与撤销在最终派发事务再验；自定义独立人工上限不被吸收。普通 Shell 同命令统一范围与准确父链沿各自行为核验，不借用 Worktree 特例。
 
-退出工作树不属于本工具的 Git action：它只返回客户端来源项目／会话，不删除目录、登记或分支。模型须按[默认合同](../../model-context.ts)区分导航与明确目标的删除意图；创建未改变原 Session cwd，不能以 remove 模拟退出。
+`use` 只接收原生绝对 `path`，Host 只读核同一 Git commonDir、linked checkout 双向指针及真实目录身份；`exit` 不接收路径，只回原 Workspace 根。二者必须是原 Model 响应唯一 Tool，Tool 回执与 Session 执行根 epoch 在 Store 同事务提交。创建／通知、任意 Shell `cd/workdir` 和客户端阅读选择都不触发切换；退出不删除目录、登记、分支或文件。只读角色及 Planning 等原权限上限继续生效。
+
+[Host 根解析](../../../../../apps/service/src/session-execution-root.ts)在审批前冻结来源／目标物理身份，目标身份进入原命令摘要，执行前重验；同路径替换拒绝。下一 Model step 将 Files、Shell 默认 cwd、权限修订、项目指令与检查点一起绑定同一根。逻辑 Workspace 和 Session 身份不变，不改其他会话或既有 child；新 child／Fork 继承准确来源根。已派发 Job 持原 scope 和 Run lease，旧资源不因切根释放。失败／取消没有成功切换，冷恢复读取原 epoch，不能用当前目录补造原执行。完整 Store 和 Runtime 边界见[持久层](../../storage/README.md)和[Agent owner](../../../README.md)。
 
 [通知 helper](notification.ts)只在原创建 owner 已保存稳定成功后，沿现有 sendStableAgentMessage 向 parent 排队确定正文；用实际执行组根关系区分根与子会话，不以 quiescent 作为通知门槛。原 owner 合法恢复可续接同一正文和持久消息身份，新 Execution 历史回执不另发。单次 Tool 回执的 parentNotification 区分 queued/accepted:true、预检或稳定记录保存失败的 failed/accepted:false，以及入队受理不可核实的 outcome_unknown/accepted:null；只表示消息情况，Git outcome 保持。稳定操作记录保存原 Git 回执，消息受理继续由原邮箱 command 持久化；没有队列确认不能宣称父已收到。
 
@@ -56,7 +58,7 @@ status 为空不单独证明 tracked 内容安全。每个普通 stage-0 文件�
 
 [路径检查](paths.ts)在 POSIX 不跟随链接，Windows 复用原生 reparse 检查。Linux 使用完整 mountinfo，macOS 使用原生 getfsstat64 挂载表；检查目标及内部挂载边界。树扫描保存每个已遍历目录的代际、完整直接条目名称摘要及 mount digest；prepare 结束及真正 remove 前，与 tracked 文件证据一起同步复核这份闭合证据，防止提交检查期间新增 nested ignored 内容、空目录或挂载边界被漏过。读取错误、超限或变化不降级。Windows 按既有[工作树清理规则](../../../../../docs/development/worktree-safety.md)处理，不能靠 Node symlink 判断或 Git 默认 clean 放行。
 
-prepare 结束后、首次 remove ensure 之前，工具要求 `readRunExecutionSafety` 精确排除当前 Tool 且无未确认执行，以及 Service 提供的同 Store、完整分页、物理路径可解释的已登记 Workspace 根。目标等于或包含任何登记根即拒绝。缺少可信 Host 回调的 SDK 装配没有删除能力。
+prepare 结束后、首次 remove ensure 之前，工具要求 `readRunExecutionSafety` 精确排除当前 Tool 且无未确认执行，以及 Service 提供的同 Store、完整分页、物理路径可解释的已登记 Workspace 根。目标等于或包含任何登记根、当前会话执行根、未终态执行的封存历史根或正在提交的使用目标即拒绝。使用准备与未终态 remove 在 Store 接纳处互斥，准备在先时目标预留也计入删除占用；这不迁移根或替代原 Git 锁。缺少可信 Host 回调的 SDK 装配没有删除能力。
 
 所有 worker 变更用 commonDir 内原子目录锁协调，owner 含 operationToken 和随机 nonce；未知锁不按 PID/TTL 抢占。锁覆盖变更、失败残留观察和后置核验，仅 owner 定点 unlink 普通元数据和 rmdir 空锁。清理完成后才输出唯一终帧。业务成功但锁清理失败返回 failed/mutation completed，保留锁事实，不重跑 Git。不传 force、不 prune、不递归删除、不删除分支/tag。
 
@@ -68,6 +70,6 @@ Windows 的 Git 子调用由[文件句柄捕获](windows-process.ts)替代 stdio
 
 [构建](build-assets.ts)发布独立 `worker.js`、无 preload 的 `empty-bunfig.toml`、空 `empty-hooks/` 及 SHA256 manifest。Host 固定 Bun/Git/worker、cwd、配置身份和环境允许集合；严格识别规范化单一命令，派发前重验。macOS在首次装配只读核验root所有且祖先不可被group/world写入的系统native Git，不把`/usr/bin/git`的Apple调度桩当作实际实现身份；不依赖其沙箱外xcrun缓存写入。Bun1.4.4 实测使用 `--no-env-file --config=<absolute>`，分开的 config 参数会空执行，不能仅靠退出码断言成功。macOS 外层 supervisor 和 launchd 再启动、Linux 首次解释器以及 Windows 原生入口均应用该 profile；项目 .env/bunfig 和环境 preload 不得先执行。
 
-正式 Service 的合格 Shell host 支持三 action；自定义 POSIX zsh 等可加载启动文件的 Shell 不取得 worktree 能力。没有 scope-aware host 的 legacy POSIX 装配只支持 list，不能借它执行变更。资产或 Git 缺失局部不可用，不阻断普通 Session 启动。Linux/Windows 原生运行和安装资格分别取得，不能由源码检查或 macOS测试代证。
+正式 Service 的合格 Shell host 支持原 Git action 与明确执行根使用／退出；自定义 POSIX zsh 等可加载启动文件的 Shell 不取得 worktree 能力。没有 scope-aware host 的 legacy POSIX 装配只支持 list，不能借它执行变更。资产或 Git 缺失局部不可用，不阻断普通 Session 启动。Linux/Windows 原生运行和安装资格分别取得，不能由源码检查或 macOS测试代证。
 
 自动化入口：[测试目录](../../../test/isolated/tools/git-worktree/README.md)、[Service 全链路](../../../../../apps/service/test/isolated/git-worktree-configuration.test.ts)、[发行与搬迁](../../../../../tests/isolated/unified-agent/terminal-bundle.test.ts)、[真实模型与子 Agent](../../../../../tests/e2e/live/model/README.md#git-工作树与直接子-agent)。当前执行证据由 Shell/权限/Service owner 和 Terminal owner 维护。持久取舍见[设计决定](../../../../../.agents/notes/implemented/feature/2026-11-06-git-worktree-tool.md)。

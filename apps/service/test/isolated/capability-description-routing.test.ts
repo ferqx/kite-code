@@ -472,9 +472,11 @@ async function scenario(kind: string) {
           { definitionVersion: 'future' },
         ]) {
           shellIdentity = mismatch;
-          await expect(describe(request('shell.execute'))).rejects.toMatchObject({
-            code: 'capability_metadata_invalid',
-          });
+          // Resolve real root-identity I/O outside Bun's rejection matcher.
+          const rejected = await Promise.resolve(describe(request('shell.execute'))).catch(
+            (error: unknown) => error,
+          );
+          expect(rejected).toMatchObject({ code: 'capability_metadata_invalid' });
         }
         shellIdentity = undefined;
         owner = 'none';

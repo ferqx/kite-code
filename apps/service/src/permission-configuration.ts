@@ -39,6 +39,7 @@ import { mcpToolPermissionDescription } from './mcp-tool-permissions';
 import { isSupportedModelProvider } from './model-providers';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import { readBoundPlanningSuccessor, readPlanningPermissionState } from './planning-configuration';
+import { resolveSessionExecutionRoot } from './session-execution-root';
 import type { createTaskConfiguration } from './task-configuration';
 import type { createWebFetchConfiguration } from './web-fetch-configuration';
 
@@ -154,10 +155,19 @@ export function createDefaultPermissionConfiguration(options: {
         workspaceId: selected.workspaceId,
       }),
     ]);
+    const executionRoot = await resolveSessionExecutionRoot(policyRuntime, {
+      sessionId: request.sessionId,
+      executionId: request.executionId,
+    });
     return {
       mode: mode.mode,
       workspaceTrust: trust.trusted,
       controlReads: [
+        {
+          kind: 'session.execution_root',
+          scope: `session:${request.sessionId}`,
+          revision: executionRoot.binding.epoch,
+        },
         {
           kind: 'permission.mode',
           scope: `session:${mode.scopeSessionId}`,
@@ -180,6 +190,7 @@ export function createDefaultPermissionConfiguration(options: {
             canonicalIdentity: trust.canonicalIdentity,
             externalReadScopeDigest: trust.externalReadScopeDigest,
             trust: trust.status,
+            executionRoot: executionRoot.revision,
           }),
         )
         .digest('hex'),
@@ -382,6 +393,9 @@ export function createDefaultPermissionConfiguration(options: {
     extensions: readonly Extension[];
     toolIds: readonly string[];
     shell: Awaited<ReturnType<typeof createShellConfiguration>>;
+    shellForRequest?: (
+      request: AuthorizationRequest,
+    ) => Promise<Awaited<ReturnType<typeof createShellConfiguration>>>;
     web: ReturnType<typeof createWebFetchConfiguration>;
     selectedMcp: ReturnType<ReturnType<typeof createMcpConfiguration>['select']>;
     selectedSources: SelectedSources;
@@ -414,18 +428,42 @@ export function createDefaultPermissionConfiguration(options: {
     const toolBehaviorRegistry = createToolBehaviorRegistry({
       extensions: runExtensions,
       behaviors: [
-        ...createShellToolBehaviors({ ...shell, enableReview: defaultAutoReview !== undefined }),
+        ...createShellToolBehaviors({
+          ...shell,
+          enableReview: defaultAutoReview !== undefined,
+          commandDigest: async (request) =>
+            ((await input.shellForRequest?.(request)) ?? shell).commandDigest(request),
+          prepareRiskReview: async (request) =>
+            ((await input.shellForRequest?.(request)) ?? shell).prepareRiskReview(request),
+        }),
         ...files.toolBehaviors.filter(
           (behavior) =>
             behavior.capability.kind === 'tool' &&
-            toolIds.includes('files.write') &&
-            toolIds.includes('files.edit'),
+            (behavior.capability.definitionId === 'files.read' ||
+              (toolIds.includes('files.write') && toolIds.includes('files.edit'))),
         ),
       ].filter(
         (behavior) =>
           behavior.capability.kind !== 'tool' || toolIds.includes(behavior.capability.definitionId),
       ),
     });
+    const shellRegistries = new WeakMap<typeof shell, typeof toolBehaviorRegistry>();
+    shellRegistries.set(shell, toolBehaviorRegistry);
+    const shellBehavior = async (request: AuthorizationRequest) => {
+      const selected = (await input.shellForRequest?.(request)) ?? shell;
+      let registry = shellRegistries.get(selected);
+      if (!registry) {
+        registry = createToolBehaviorRegistry({
+          extensions: selected.extensions,
+          behaviors: createShellToolBehaviors({
+            ...selected,
+            enableReview: defaultAutoReview !== undefined,
+          }),
+        });
+        shellRegistries.set(selected, registry);
+      }
+      return registry.get(request);
+    };
     type DescriptionView = 'ordinary' | 'planning';
     type RefineCapability = (
       request: AuthorizationRequest,
@@ -446,8 +484,8 @@ export function createDefaultPermissionConfiguration(options: {
         description,
         refine,
       });
-    const refineShell: RefineCapability = (request, _view, policy) =>
-      shell.describeRequest(request, policy);
+    const refineShell: RefineCapability = async (request, _view, policy) =>
+      ((await input.shellForRequest?.(request)) ?? shell).describeRequest(request, policy);
     const refineTask: RefineCapability = (request, view) =>
       view === 'ordinary' ? describeDefaultTask(request) : undefined;
     const describeRegistered = async (
@@ -482,7 +520,10 @@ export function createDefaultPermissionConfiguration(options: {
       const description = mcpOwned
         ? mcpToolPermissionDescription(registeredDescription)
         : registeredDescription;
-      const behavior = toolBehaviorRegistry.get(request);
+      const behavior =
+        entry.refine === refineShell
+          ? await shellBehavior(request)
+          : toolBehaviorRegistry.get(request);
       // Planning's metadata-only read has no candidate consumer. Real policy reads
       // retain candidates even when that policy already allows the operation.
       const grantOffers =
@@ -553,8 +594,9 @@ export function createDefaultPermissionConfiguration(options: {
         definitionVersion: string,
       ): Pick<CapabilityDescription, 'autoReview' | 'autoTimeoutScope'> => {
         if (!trusted) return {};
-        // Files reads and mutations must use the normal automatic reviewer, not
-        // the trusted-extension default exemption. Special scope checks stay intact.
+        // No blanket Files exemption: only owner-proven ordinary workspace reads
+        // and private missing observations are safeRead. Other reads and mutations
+        // retain the normal reviewer and fail-closed timeout contract.
         if (
           extension === files.extension &&
           kind === 'tool' &&
@@ -569,14 +611,7 @@ export function createDefaultPermissionConfiguration(options: {
       const refine: RefineCapability | undefined = shellOwned
         ? refineShell
         : extension === files.extension
-          ? async (request, _view, policy) => {
-              const description = await files.describeRequest(request, policy);
-              return policy?.mode === 'auto' &&
-                request.kind === 'tool' &&
-                request.definitionId === 'files.read'
-                ? { ...description, safeRead: false }
-                : description;
-            }
+          ? async (request, _view, policy) => files.describeRequest(request, policy)
           : extension === task.extension
             ? refineTask
             : undefined;

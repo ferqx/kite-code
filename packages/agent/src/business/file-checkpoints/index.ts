@@ -421,6 +421,10 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
     // Record schema performs closed field validation; IDs are information, never authority.
     const checkpoint = { id: digest(value as unknown as Json), boundary: value, workspace };
     if (
+      !value.executionRoot ||
+      !equal(value.executionRoot.identity, workspace) ||
+      !/^(0|[1-9][0-9]*)$/.test(value.executionRoot.epoch) ||
+      BigInt(value.executionRoot.epoch) > 9223372036854775807n ||
       value.storeId !== actual.originStoreId ||
       value.workspaceId !== selected.id ||
       value.sessionId !== context.sessionId ||
@@ -656,8 +660,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
       event.head.sessionId !== checkpoint.boundary.sessionId ||
       event.head.originStoreId !== checkpoint.boundary.storeId ||
       head.checkpointId !== checkpoint.id ||
-      checkpoint.boundary.workspaceId !== selected.id ||
-      !equal(checkpoint.workspace, workspace)
+      checkpoint.boundary.workspaceId !== selected.id
     )
       fail('checkpoint_scope_conflict');
     return {
@@ -882,6 +885,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
     includeTextChanges = false,
   ) {
     const target = await readPoint(context, pointId);
+    if (!equal(target.checkpoint.workspace, workspace)) fail('checkpoint_execution_root_conflict');
     if (
       !options.readSelectedLineage ||
       !options.verifyCaptureSource ||
@@ -964,6 +968,15 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
         revision: string;
       }
     >();
+    // Keep every sealed event, but never combine same-named files from different physical roots.
+    // Journal root authority comes from its original point, not from its path or the active root.
+    const roots = new Map(
+      history.events.flatMap((event) => {
+        if (event.kind !== 'capture') return [];
+        const checkpoint = snapshotPoint(event).checkpoint;
+        return [[checkpoint.id, checkpoint] as const];
+      }),
+    );
     const proofs = history.events.slice(targetIndex);
     for (const event of proofs) {
       if (event.kind === 'capture') {
@@ -981,6 +994,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
           await receipt(reader, checkpoint, entry.last.source, entry.path, entry.last.baseline);
           await verifySource(checkpoint, entry.first.source);
           await verifySource(checkpoint, entry.last.source);
+          if (!equal(checkpoint.workspace, workspace)) continue;
           const old = rows.get(entry.path);
           if (old && !equal(old.expected, entry.first.baseline))
             fail('checkpoint_capture_chain_conflict');
@@ -1023,6 +1037,13 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
           !equal(JSON.parse(carrier.result.content), journal)
         )
           fail('checkpoint_restore_unconfirmed');
+        const origin = roots.get(journal.checkpointId);
+        if (
+          !origin ||
+          origin.boundary.workspaceId !== selected.id ||
+          (origin.boundary.sessionId !== record.sessionId && !projection)
+        )
+          fail('checkpoint_restore_evidence_missing');
         // Preserve this failed receipt in the source closure; it supplies no postimage or grant.
         if (failedWithoutEffects) continue;
         if (event.effects.length !== journal.files.length)
@@ -1052,6 +1073,7 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
           )
             fail('checkpoint_restore_unconfirmed');
           paths.add(effect.path);
+          if (!equal(origin.workspace, workspace)) continue;
           const old = rows.get(effect.path);
           if (old && !equal(old.expected, effect.expected))
             fail('checkpoint_capture_chain_conflict');

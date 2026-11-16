@@ -34,3 +34,5 @@ Windows仍遵守[原工作树清理决定](../../implemented/process/2026-10-19-
 macOS真实Git、故障窗口、只读/Auto/Planning、原Shell监管及安装搬迁验证归[测试入口](../../../../packages/agent/test/isolated/tools/git-worktree/README.md)、[Service证据](../../../../apps/service/README.md#默认-shell-装配)和[Terminal owner](../../../../apps/cli/docs/terminal-release.md)。Linux/Windows代码接线不等同实机监管、reparse或完整三平台发行资格。没有承诺冷Shell进程重连、自动完成每次崩溃、外部进程占用检测或工作树沙箱隔离。
 
 默认创建路径与普通 Shell 路径政策已由[持久默认目录决定](2026-11-06-persistent-worktree-default-and-shell-path-policy.md)局部调整；原 Git argv、重叠／删除保护、记录／恢复及平台限制继续适用。
+
+会话执行根不迁移的原范围现由[显式执行根决定](../architecture/2026-11-16-session-execution-root.md)局部替代：创建仍不切换，只有当前会话明确 use／exit 才切换；本篇 Git 操作、删除保护、未知效果与平台限制继续适用。

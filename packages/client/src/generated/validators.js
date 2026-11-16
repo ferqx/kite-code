@@ -13291,6 +13291,23 @@ var schema43 = {
                     properties: {
                       storeId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
                       workspaceId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
+                      executionRoot: {
+                        type: 'object',
+                        properties: {
+                          epoch: { type: 'string', maxLength: 19, pattern: '^(0|[1-9][0-9]*)$' },
+                          identity: {
+                            type: 'object',
+                            properties: {
+                              device: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+                              inode: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+                            },
+                            required: ['device', 'inode'],
+                            additionalProperties: false,
+                          },
+                        },
+                        required: ['epoch', 'identity'],
+                        additionalProperties: false,
+                      },
                       sessionId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
                       runId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
                       contextSelectionId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
@@ -13352,7 +13369,7 @@ var schema43 = {
   additionalProperties: false,
 };
 var pattern45 = new RegExp('^[A-Za-z0-9_-]{1,128}$', 'u');
-var pattern61 = new RegExp('^checkpoint\\/[a-f0-9]{64}\\/point$', 'u');
+var pattern64 = new RegExp('^checkpoint\\/[a-f0-9]{64}\\/point$', 'u');
 function validate32(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -13952,21 +13969,29 @@ function validate32(
                                                                     }
                                                                     if (valid5) {
                                                                       if (
-                                                                        data8.sessionId !==
+                                                                        data8.executionRoot !==
                                                                         undefined
                                                                       ) {
                                                                         let data11 =
-                                                                          data8.sessionId;
+                                                                          data8.executionRoot;
                                                                         const _errs28 = errors;
                                                                         if (errors === _errs28) {
                                                                           if (
-                                                                            typeof data11 ===
-                                                                            'string'
+                                                                            data11 &&
+                                                                            typeof data11 ==
+                                                                              'object' &&
+                                                                            !Array.isArray(data11)
                                                                           ) {
+                                                                            let missing5;
                                                                             if (
-                                                                              !pattern45.test(
-                                                                                data11,
-                                                                              )
+                                                                              (data11.epoch ===
+                                                                                undefined &&
+                                                                                (missing5 =
+                                                                                  'epoch')) ||
+                                                                              (data11.identity ===
+                                                                                undefined &&
+                                                                                (missing5 =
+                                                                                  'identity'))
                                                                             ) {
                                                                               validate32.errors = [
                                                                                 {
@@ -13974,22 +13999,452 @@ function validate32(
                                                                                     instancePath +
                                                                                     '/payload/items/' +
                                                                                     i0 +
-                                                                                    '/checkpoint/boundary/sessionId',
+                                                                                    '/checkpoint/boundary/executionRoot',
                                                                                   schemaPath:
-                                                                                    '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/sessionId/pattern',
+                                                                                    '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/required',
                                                                                   keyword:
-                                                                                    'pattern',
+                                                                                    'required',
                                                                                   params: {
-                                                                                    pattern:
-                                                                                      '^[A-Za-z0-9_-]{1,128}$',
+                                                                                    missingProperty:
+                                                                                      missing5,
                                                                                   },
                                                                                   message:
-                                                                                    'must match pattern "' +
-                                                                                    '^[A-Za-z0-9_-]{1,128}$' +
-                                                                                    '"',
+                                                                                    "must have required property '" +
+                                                                                    missing5 +
+                                                                                    "'",
                                                                                 },
                                                                               ];
                                                                               return false;
+                                                                            } else {
+                                                                              const _errs30 =
+                                                                                errors;
+                                                                              for (const key5 in data11) {
+                                                                                if (
+                                                                                  !(
+                                                                                    key5 ===
+                                                                                      'epoch' ||
+                                                                                    key5 ===
+                                                                                      'identity'
+                                                                                  )
+                                                                                ) {
+                                                                                  validate32.errors =
+                                                                                    [
+                                                                                      {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/payload/items/' +
+                                                                                          i0 +
+                                                                                          '/checkpoint/boundary/executionRoot',
+                                                                                        schemaPath:
+                                                                                          '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/additionalProperties',
+                                                                                        keyword:
+                                                                                          'additionalProperties',
+                                                                                        params: {
+                                                                                          additionalProperty:
+                                                                                            key5,
+                                                                                        },
+                                                                                        message:
+                                                                                          'must NOT have additional properties',
+                                                                                      },
+                                                                                    ];
+                                                                                  return false;
+                                                                                  break;
+                                                                                }
+                                                                              }
+                                                                              if (
+                                                                                _errs30 === errors
+                                                                              ) {
+                                                                                if (
+                                                                                  data11.epoch !==
+                                                                                  undefined
+                                                                                ) {
+                                                                                  let data12 =
+                                                                                    data11.epoch;
+                                                                                  const _errs31 =
+                                                                                    errors;
+                                                                                  if (
+                                                                                    errors ===
+                                                                                    _errs31
+                                                                                  ) {
+                                                                                    if (
+                                                                                      typeof data12 ===
+                                                                                      'string'
+                                                                                    ) {
+                                                                                      if (
+                                                                                        func1(
+                                                                                          data12,
+                                                                                        ) > 19
+                                                                                      ) {
+                                                                                        validate32.errors =
+                                                                                          [
+                                                                                            {
+                                                                                              instancePath:
+                                                                                                instancePath +
+                                                                                                '/payload/items/' +
+                                                                                                i0 +
+                                                                                                '/checkpoint/boundary/executionRoot/epoch',
+                                                                                              schemaPath:
+                                                                                                '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/maxLength',
+                                                                                              keyword:
+                                                                                                'maxLength',
+                                                                                              params:
+                                                                                                {
+                                                                                                  limit: 19,
+                                                                                                },
+                                                                                              message:
+                                                                                                'must NOT have more than 19 characters',
+                                                                                            },
+                                                                                          ];
+                                                                                        return false;
+                                                                                      } else {
+                                                                                        if (
+                                                                                          !pattern38.test(
+                                                                                            data12,
+                                                                                          )
+                                                                                        ) {
+                                                                                          validate32.errors =
+                                                                                            [
+                                                                                              {
+                                                                                                instancePath:
+                                                                                                  instancePath +
+                                                                                                  '/payload/items/' +
+                                                                                                  i0 +
+                                                                                                  '/checkpoint/boundary/executionRoot/epoch',
+                                                                                                schemaPath:
+                                                                                                  '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/pattern',
+                                                                                                keyword:
+                                                                                                  'pattern',
+                                                                                                params:
+                                                                                                  {
+                                                                                                    pattern:
+                                                                                                      '^(0|[1-9][0-9]*)$',
+                                                                                                  },
+                                                                                                message:
+                                                                                                  'must match pattern "' +
+                                                                                                  '^(0|[1-9][0-9]*)$' +
+                                                                                                  '"',
+                                                                                              },
+                                                                                            ];
+                                                                                          return false;
+                                                                                        }
+                                                                                      }
+                                                                                    } else {
+                                                                                      validate32.errors =
+                                                                                        [
+                                                                                          {
+                                                                                            instancePath:
+                                                                                              instancePath +
+                                                                                              '/payload/items/' +
+                                                                                              i0 +
+                                                                                              '/checkpoint/boundary/executionRoot/epoch',
+                                                                                            schemaPath:
+                                                                                              '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/type',
+                                                                                            keyword:
+                                                                                              'type',
+                                                                                            params:
+                                                                                              {
+                                                                                                type: 'string',
+                                                                                              },
+                                                                                            message:
+                                                                                              'must be string',
+                                                                                          },
+                                                                                        ];
+                                                                                      return false;
+                                                                                    }
+                                                                                  }
+                                                                                  var valid6 =
+                                                                                    _errs31 ===
+                                                                                    errors;
+                                                                                } else {
+                                                                                  var valid6 = true;
+                                                                                }
+                                                                                if (valid6) {
+                                                                                  if (
+                                                                                    data11.identity !==
+                                                                                    undefined
+                                                                                  ) {
+                                                                                    let data13 =
+                                                                                      data11.identity;
+                                                                                    const _errs33 =
+                                                                                      errors;
+                                                                                    if (
+                                                                                      errors ===
+                                                                                      _errs33
+                                                                                    ) {
+                                                                                      if (
+                                                                                        data13 &&
+                                                                                        typeof data13 ==
+                                                                                          'object' &&
+                                                                                        !Array.isArray(
+                                                                                          data13,
+                                                                                        )
+                                                                                      ) {
+                                                                                        let missing6;
+                                                                                        if (
+                                                                                          (data13.device ===
+                                                                                            undefined &&
+                                                                                            (missing6 =
+                                                                                              'device')) ||
+                                                                                          (data13.inode ===
+                                                                                            undefined &&
+                                                                                            (missing6 =
+                                                                                              'inode'))
+                                                                                        ) {
+                                                                                          validate32.errors =
+                                                                                            [
+                                                                                              {
+                                                                                                instancePath:
+                                                                                                  instancePath +
+                                                                                                  '/payload/items/' +
+                                                                                                  i0 +
+                                                                                                  '/checkpoint/boundary/executionRoot/identity',
+                                                                                                schemaPath:
+                                                                                                  '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/required',
+                                                                                                keyword:
+                                                                                                  'required',
+                                                                                                params:
+                                                                                                  {
+                                                                                                    missingProperty:
+                                                                                                      missing6,
+                                                                                                  },
+                                                                                                message:
+                                                                                                  "must have required property '" +
+                                                                                                  missing6 +
+                                                                                                  "'",
+                                                                                              },
+                                                                                            ];
+                                                                                          return false;
+                                                                                        } else {
+                                                                                          const _errs35 =
+                                                                                            errors;
+                                                                                          for (const key6 in data13) {
+                                                                                            if (
+                                                                                              !(
+                                                                                                key6 ===
+                                                                                                  'device' ||
+                                                                                                key6 ===
+                                                                                                  'inode'
+                                                                                              )
+                                                                                            ) {
+                                                                                              validate32.errors =
+                                                                                                [
+                                                                                                  {
+                                                                                                    instancePath:
+                                                                                                      instancePath +
+                                                                                                      '/payload/items/' +
+                                                                                                      i0 +
+                                                                                                      '/checkpoint/boundary/executionRoot/identity',
+                                                                                                    schemaPath:
+                                                                                                      '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/additionalProperties',
+                                                                                                    keyword:
+                                                                                                      'additionalProperties',
+                                                                                                    params:
+                                                                                                      {
+                                                                                                        additionalProperty:
+                                                                                                          key6,
+                                                                                                      },
+                                                                                                    message:
+                                                                                                      'must NOT have additional properties',
+                                                                                                  },
+                                                                                                ];
+                                                                                              return false;
+                                                                                              break;
+                                                                                            }
+                                                                                          }
+                                                                                          if (
+                                                                                            _errs35 ===
+                                                                                            errors
+                                                                                          ) {
+                                                                                            if (
+                                                                                              data13.device !==
+                                                                                              undefined
+                                                                                            ) {
+                                                                                              let data14 =
+                                                                                                data13.device;
+                                                                                              const _errs36 =
+                                                                                                errors;
+                                                                                              if (
+                                                                                                errors ===
+                                                                                                _errs36
+                                                                                              ) {
+                                                                                                if (
+                                                                                                  typeof data14 ===
+                                                                                                  'string'
+                                                                                                ) {
+                                                                                                  if (
+                                                                                                    !pattern38.test(
+                                                                                                      data14,
+                                                                                                    )
+                                                                                                  ) {
+                                                                                                    validate32.errors =
+                                                                                                      [
+                                                                                                        {
+                                                                                                          instancePath:
+                                                                                                            instancePath +
+                                                                                                            '/payload/items/' +
+                                                                                                            i0 +
+                                                                                                            '/checkpoint/boundary/executionRoot/identity/device',
+                                                                                                          schemaPath:
+                                                                                                            '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/device/pattern',
+                                                                                                          keyword:
+                                                                                                            'pattern',
+                                                                                                          params:
+                                                                                                            {
+                                                                                                              pattern:
+                                                                                                                '^(0|[1-9][0-9]*)$',
+                                                                                                            },
+                                                                                                          message:
+                                                                                                            'must match pattern "' +
+                                                                                                            '^(0|[1-9][0-9]*)$' +
+                                                                                                            '"',
+                                                                                                        },
+                                                                                                      ];
+                                                                                                    return false;
+                                                                                                  }
+                                                                                                } else {
+                                                                                                  validate32.errors =
+                                                                                                    [
+                                                                                                      {
+                                                                                                        instancePath:
+                                                                                                          instancePath +
+                                                                                                          '/payload/items/' +
+                                                                                                          i0 +
+                                                                                                          '/checkpoint/boundary/executionRoot/identity/device',
+                                                                                                        schemaPath:
+                                                                                                          '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/device/type',
+                                                                                                        keyword:
+                                                                                                          'type',
+                                                                                                        params:
+                                                                                                          {
+                                                                                                            type: 'string',
+                                                                                                          },
+                                                                                                        message:
+                                                                                                          'must be string',
+                                                                                                      },
+                                                                                                    ];
+                                                                                                  return false;
+                                                                                                }
+                                                                                              }
+                                                                                              var valid7 =
+                                                                                                _errs36 ===
+                                                                                                errors;
+                                                                                            } else {
+                                                                                              var valid7 = true;
+                                                                                            }
+                                                                                            if (
+                                                                                              valid7
+                                                                                            ) {
+                                                                                              if (
+                                                                                                data13.inode !==
+                                                                                                undefined
+                                                                                              ) {
+                                                                                                let data15 =
+                                                                                                  data13.inode;
+                                                                                                const _errs38 =
+                                                                                                  errors;
+                                                                                                if (
+                                                                                                  errors ===
+                                                                                                  _errs38
+                                                                                                ) {
+                                                                                                  if (
+                                                                                                    typeof data15 ===
+                                                                                                    'string'
+                                                                                                  ) {
+                                                                                                    if (
+                                                                                                      !pattern38.test(
+                                                                                                        data15,
+                                                                                                      )
+                                                                                                    ) {
+                                                                                                      validate32.errors =
+                                                                                                        [
+                                                                                                          {
+                                                                                                            instancePath:
+                                                                                                              instancePath +
+                                                                                                              '/payload/items/' +
+                                                                                                              i0 +
+                                                                                                              '/checkpoint/boundary/executionRoot/identity/inode',
+                                                                                                            schemaPath:
+                                                                                                              '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/inode/pattern',
+                                                                                                            keyword:
+                                                                                                              'pattern',
+                                                                                                            params:
+                                                                                                              {
+                                                                                                                pattern:
+                                                                                                                  '^(0|[1-9][0-9]*)$',
+                                                                                                              },
+                                                                                                            message:
+                                                                                                              'must match pattern "' +
+                                                                                                              '^(0|[1-9][0-9]*)$' +
+                                                                                                              '"',
+                                                                                                          },
+                                                                                                        ];
+                                                                                                      return false;
+                                                                                                    }
+                                                                                                  } else {
+                                                                                                    validate32.errors =
+                                                                                                      [
+                                                                                                        {
+                                                                                                          instancePath:
+                                                                                                            instancePath +
+                                                                                                            '/payload/items/' +
+                                                                                                            i0 +
+                                                                                                            '/checkpoint/boundary/executionRoot/identity/inode',
+                                                                                                          schemaPath:
+                                                                                                            '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/inode/type',
+                                                                                                          keyword:
+                                                                                                            'type',
+                                                                                                          params:
+                                                                                                            {
+                                                                                                              type: 'string',
+                                                                                                            },
+                                                                                                          message:
+                                                                                                            'must be string',
+                                                                                                        },
+                                                                                                      ];
+                                                                                                    return false;
+                                                                                                  }
+                                                                                                }
+                                                                                                var valid7 =
+                                                                                                  _errs38 ===
+                                                                                                  errors;
+                                                                                              } else {
+                                                                                                var valid7 = true;
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      } else {
+                                                                                        validate32.errors =
+                                                                                          [
+                                                                                            {
+                                                                                              instancePath:
+                                                                                                instancePath +
+                                                                                                '/payload/items/' +
+                                                                                                i0 +
+                                                                                                '/checkpoint/boundary/executionRoot/identity',
+                                                                                              schemaPath:
+                                                                                                '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/type',
+                                                                                              keyword:
+                                                                                                'type',
+                                                                                              params:
+                                                                                                {
+                                                                                                  type: 'object',
+                                                                                                },
+                                                                                              message:
+                                                                                                'must be object',
+                                                                                            },
+                                                                                          ];
+                                                                                        return false;
+                                                                                      }
+                                                                                    }
+                                                                                    var valid6 =
+                                                                                      _errs33 ===
+                                                                                      errors;
+                                                                                  } else {
+                                                                                    var valid6 = true;
+                                                                                  }
+                                                                                }
+                                                                              }
                                                                             }
                                                                           } else {
                                                                             validate32.errors = [
@@ -13998,15 +14453,15 @@ function validate32(
                                                                                   instancePath +
                                                                                   '/payload/items/' +
                                                                                   i0 +
-                                                                                  '/checkpoint/boundary/sessionId',
+                                                                                  '/checkpoint/boundary/executionRoot',
                                                                                 schemaPath:
-                                                                                  '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/sessionId/type',
+                                                                                  '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/executionRoot/type',
                                                                                 keyword: 'type',
                                                                                 params: {
-                                                                                  type: 'string',
+                                                                                  type: 'object',
                                                                                 },
                                                                                 message:
-                                                                                  'must be string',
+                                                                                  'must be object',
                                                                               },
                                                                             ];
                                                                             return false;
@@ -14019,18 +14474,20 @@ function validate32(
                                                                       }
                                                                       if (valid5) {
                                                                         if (
-                                                                          data8.runId !== undefined
+                                                                          data8.sessionId !==
+                                                                          undefined
                                                                         ) {
-                                                                          let data12 = data8.runId;
-                                                                          const _errs30 = errors;
-                                                                          if (errors === _errs30) {
+                                                                          let data16 =
+                                                                            data8.sessionId;
+                                                                          const _errs40 = errors;
+                                                                          if (errors === _errs40) {
                                                                             if (
-                                                                              typeof data12 ===
+                                                                              typeof data16 ===
                                                                               'string'
                                                                             ) {
                                                                               if (
                                                                                 !pattern45.test(
-                                                                                  data12,
+                                                                                  data16,
                                                                                 )
                                                                               ) {
                                                                                 validate32.errors =
@@ -14040,9 +14497,9 @@ function validate32(
                                                                                         instancePath +
                                                                                         '/payload/items/' +
                                                                                         i0 +
-                                                                                        '/checkpoint/boundary/runId',
+                                                                                        '/checkpoint/boundary/sessionId',
                                                                                       schemaPath:
-                                                                                        '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/runId/pattern',
+                                                                                        '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/sessionId/pattern',
                                                                                       keyword:
                                                                                         'pattern',
                                                                                       params: {
@@ -14064,9 +14521,9 @@ function validate32(
                                                                                     instancePath +
                                                                                     '/payload/items/' +
                                                                                     i0 +
-                                                                                    '/checkpoint/boundary/runId',
+                                                                                    '/checkpoint/boundary/sessionId',
                                                                                   schemaPath:
-                                                                                    '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/runId/type',
+                                                                                    '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/sessionId/type',
                                                                                   keyword: 'type',
                                                                                   params: {
                                                                                     type: 'string',
@@ -14079,28 +14536,28 @@ function validate32(
                                                                             }
                                                                           }
                                                                           var valid5 =
-                                                                            _errs30 === errors;
+                                                                            _errs40 === errors;
                                                                         } else {
                                                                           var valid5 = true;
                                                                         }
                                                                         if (valid5) {
                                                                           if (
-                                                                            data8.contextSelectionId !==
+                                                                            data8.runId !==
                                                                             undefined
                                                                           ) {
-                                                                            let data13 =
-                                                                              data8.contextSelectionId;
-                                                                            const _errs32 = errors;
+                                                                            let data17 =
+                                                                              data8.runId;
+                                                                            const _errs42 = errors;
                                                                             if (
-                                                                              errors === _errs32
+                                                                              errors === _errs42
                                                                             ) {
                                                                               if (
-                                                                                typeof data13 ===
+                                                                                typeof data17 ===
                                                                                 'string'
                                                                               ) {
                                                                                 if (
                                                                                   !pattern45.test(
-                                                                                    data13,
+                                                                                    data17,
                                                                                   )
                                                                                 ) {
                                                                                   validate32.errors =
@@ -14110,9 +14567,9 @@ function validate32(
                                                                                           instancePath +
                                                                                           '/payload/items/' +
                                                                                           i0 +
-                                                                                          '/checkpoint/boundary/contextSelectionId',
+                                                                                          '/checkpoint/boundary/runId',
                                                                                         schemaPath:
-                                                                                          '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/contextSelectionId/pattern',
+                                                                                          '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/runId/pattern',
                                                                                         keyword:
                                                                                           'pattern',
                                                                                         params: {
@@ -14135,9 +14592,9 @@ function validate32(
                                                                                         instancePath +
                                                                                         '/payload/items/' +
                                                                                         i0 +
-                                                                                        '/checkpoint/boundary/contextSelectionId',
+                                                                                        '/checkpoint/boundary/runId',
                                                                                       schemaPath:
-                                                                                        '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/contextSelectionId/type',
+                                                                                        '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/runId/type',
                                                                                       keyword:
                                                                                         'type',
                                                                                       params: {
@@ -14151,228 +14608,288 @@ function validate32(
                                                                               }
                                                                             }
                                                                             var valid5 =
-                                                                              _errs32 === errors;
+                                                                              _errs42 === errors;
                                                                           } else {
                                                                             var valid5 = true;
                                                                           }
                                                                           if (valid5) {
                                                                             if (
-                                                                              data8.messageId !==
+                                                                              data8.contextSelectionId !==
                                                                               undefined
                                                                             ) {
-                                                                              let data14 =
-                                                                                data8.messageId;
-                                                                              const _errs34 =
-                                                                                errors;
-                                                                              const _errs35 =
-                                                                                errors;
-                                                                              let valid6 = false;
-                                                                              const _errs36 =
+                                                                              let data18 =
+                                                                                data8.contextSelectionId;
+                                                                              const _errs44 =
                                                                                 errors;
                                                                               if (
-                                                                                errors === _errs36
+                                                                                errors === _errs44
                                                                               ) {
                                                                                 if (
-                                                                                  typeof data14 ===
+                                                                                  typeof data18 ===
                                                                                   'string'
                                                                                 ) {
                                                                                   if (
                                                                                     !pattern45.test(
-                                                                                      data14,
+                                                                                      data18,
                                                                                     )
                                                                                   ) {
-                                                                                    const err0 = {
+                                                                                    validate32.errors =
+                                                                                      [
+                                                                                        {
+                                                                                          instancePath:
+                                                                                            instancePath +
+                                                                                            '/payload/items/' +
+                                                                                            i0 +
+                                                                                            '/checkpoint/boundary/contextSelectionId',
+                                                                                          schemaPath:
+                                                                                            '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/contextSelectionId/pattern',
+                                                                                          keyword:
+                                                                                            'pattern',
+                                                                                          params: {
+                                                                                            pattern:
+                                                                                              '^[A-Za-z0-9_-]{1,128}$',
+                                                                                          },
+                                                                                          message:
+                                                                                            'must match pattern "' +
+                                                                                            '^[A-Za-z0-9_-]{1,128}$' +
+                                                                                            '"',
+                                                                                        },
+                                                                                      ];
+                                                                                    return false;
+                                                                                  }
+                                                                                } else {
+                                                                                  validate32.errors =
+                                                                                    [
+                                                                                      {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/payload/items/' +
+                                                                                          i0 +
+                                                                                          '/checkpoint/boundary/contextSelectionId',
+                                                                                        schemaPath:
+                                                                                          '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/contextSelectionId/type',
+                                                                                        keyword:
+                                                                                          'type',
+                                                                                        params: {
+                                                                                          type: 'string',
+                                                                                        },
+                                                                                        message:
+                                                                                          'must be string',
+                                                                                      },
+                                                                                    ];
+                                                                                  return false;
+                                                                                }
+                                                                              }
+                                                                              var valid5 =
+                                                                                _errs44 === errors;
+                                                                            } else {
+                                                                              var valid5 = true;
+                                                                            }
+                                                                            if (valid5) {
+                                                                              if (
+                                                                                data8.messageId !==
+                                                                                undefined
+                                                                              ) {
+                                                                                let data19 =
+                                                                                  data8.messageId;
+                                                                                const _errs46 =
+                                                                                  errors;
+                                                                                const _errs47 =
+                                                                                  errors;
+                                                                                let valid8 = false;
+                                                                                const _errs48 =
+                                                                                  errors;
+                                                                                if (
+                                                                                  errors === _errs48
+                                                                                ) {
+                                                                                  if (
+                                                                                    typeof data19 ===
+                                                                                    'string'
+                                                                                  ) {
+                                                                                    if (
+                                                                                      !pattern45.test(
+                                                                                        data19,
+                                                                                      )
+                                                                                    ) {
+                                                                                      const err0 = {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/payload/items/' +
+                                                                                          i0 +
+                                                                                          '/checkpoint/boundary/messageId',
+                                                                                        schemaPath:
+                                                                                          '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/pattern',
+                                                                                        keyword:
+                                                                                          'pattern',
+                                                                                        params: {
+                                                                                          pattern:
+                                                                                            '^[A-Za-z0-9_-]{1,128}$',
+                                                                                        },
+                                                                                        message:
+                                                                                          'must match pattern "' +
+                                                                                          '^[A-Za-z0-9_-]{1,128}$' +
+                                                                                          '"',
+                                                                                      };
+                                                                                      if (
+                                                                                        vErrors ===
+                                                                                        null
+                                                                                      ) {
+                                                                                        vErrors = [
+                                                                                          err0,
+                                                                                        ];
+                                                                                      } else {
+                                                                                        vErrors.push(
+                                                                                          err0,
+                                                                                        );
+                                                                                      }
+                                                                                      errors++;
+                                                                                    }
+                                                                                  } else {
+                                                                                    const err1 = {
                                                                                       instancePath:
                                                                                         instancePath +
                                                                                         '/payload/items/' +
                                                                                         i0 +
                                                                                         '/checkpoint/boundary/messageId',
                                                                                       schemaPath:
-                                                                                        '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/pattern',
+                                                                                        '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/type',
                                                                                       keyword:
-                                                                                        'pattern',
+                                                                                        'type',
                                                                                       params: {
-                                                                                        pattern:
-                                                                                          '^[A-Za-z0-9_-]{1,128}$',
+                                                                                        type: 'string',
                                                                                       },
                                                                                       message:
-                                                                                        'must match pattern "' +
-                                                                                        '^[A-Za-z0-9_-]{1,128}$' +
-                                                                                        '"',
+                                                                                        'must be string',
                                                                                     };
                                                                                     if (
                                                                                       vErrors ===
                                                                                       null
                                                                                     ) {
                                                                                       vErrors = [
-                                                                                        err0,
+                                                                                        err1,
                                                                                       ];
                                                                                     } else {
                                                                                       vErrors.push(
-                                                                                        err0,
+                                                                                        err1,
                                                                                       );
                                                                                     }
                                                                                     errors++;
                                                                                   }
-                                                                                } else {
-                                                                                  const err1 = {
+                                                                                }
+                                                                                var _valid0 =
+                                                                                  _errs48 ===
+                                                                                  errors;
+                                                                                valid8 =
+                                                                                  valid8 || _valid0;
+                                                                                const _errs50 =
+                                                                                  errors;
+                                                                                if (
+                                                                                  data19 !== null
+                                                                                ) {
+                                                                                  const err2 = {
                                                                                     instancePath:
                                                                                       instancePath +
                                                                                       '/payload/items/' +
                                                                                       i0 +
                                                                                       '/checkpoint/boundary/messageId',
                                                                                     schemaPath:
-                                                                                      '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/type',
+                                                                                      '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageId/anyOf/1/type',
                                                                                     keyword: 'type',
                                                                                     params: {
-                                                                                      type: 'string',
+                                                                                      type: 'null',
                                                                                     },
                                                                                     message:
-                                                                                      'must be string',
+                                                                                      'must be null',
                                                                                   };
                                                                                   if (
                                                                                     vErrors === null
                                                                                   ) {
                                                                                     vErrors = [
-                                                                                      err1,
+                                                                                      err2,
                                                                                     ];
                                                                                   } else {
                                                                                     vErrors.push(
-                                                                                      err1,
+                                                                                      err2,
                                                                                     );
                                                                                   }
                                                                                   errors++;
                                                                                 }
-                                                                              }
-                                                                              var _valid0 =
-                                                                                _errs36 === errors;
-                                                                              valid6 =
-                                                                                valid6 || _valid0;
-                                                                              const _errs38 =
-                                                                                errors;
-                                                                              if (data14 !== null) {
-                                                                                const err2 = {
-                                                                                  instancePath:
-                                                                                    instancePath +
-                                                                                    '/payload/items/' +
-                                                                                    i0 +
-                                                                                    '/checkpoint/boundary/messageId',
-                                                                                  schemaPath:
-                                                                                    '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageId/anyOf/1/type',
-                                                                                  keyword: 'type',
-                                                                                  params: {
-                                                                                    type: 'null',
-                                                                                  },
-                                                                                  message:
-                                                                                    'must be null',
-                                                                                };
-                                                                                if (
-                                                                                  vErrors === null
-                                                                                ) {
-                                                                                  vErrors = [err2];
-                                                                                } else {
-                                                                                  vErrors.push(
-                                                                                    err2,
-                                                                                  );
-                                                                                }
-                                                                                errors++;
-                                                                              }
-                                                                              var _valid0 =
-                                                                                _errs38 === errors;
-                                                                              valid6 =
-                                                                                valid6 || _valid0;
-                                                                              if (!valid6) {
-                                                                                const err3 = {
-                                                                                  instancePath:
-                                                                                    instancePath +
-                                                                                    '/payload/items/' +
-                                                                                    i0 +
-                                                                                    '/checkpoint/boundary/messageId',
-                                                                                  schemaPath:
-                                                                                    '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageId/anyOf',
-                                                                                  keyword: 'anyOf',
-                                                                                  params: {},
-                                                                                  message:
-                                                                                    'must match a schema in anyOf',
-                                                                                };
-                                                                                if (
-                                                                                  vErrors === null
-                                                                                ) {
-                                                                                  vErrors = [err3];
-                                                                                } else {
-                                                                                  vErrors.push(
-                                                                                    err3,
-                                                                                  );
-                                                                                }
-                                                                                errors++;
-                                                                                validate32.errors =
-                                                                                  vErrors;
-                                                                                return false;
-                                                                              } else {
-                                                                                errors = _errs35;
-                                                                                if (
-                                                                                  vErrors !== null
-                                                                                ) {
-                                                                                  if (_errs35) {
-                                                                                    vErrors.length =
-                                                                                      _errs35;
+                                                                                var _valid0 =
+                                                                                  _errs50 ===
+                                                                                  errors;
+                                                                                valid8 =
+                                                                                  valid8 || _valid0;
+                                                                                if (!valid8) {
+                                                                                  const err3 = {
+                                                                                    instancePath:
+                                                                                      instancePath +
+                                                                                      '/payload/items/' +
+                                                                                      i0 +
+                                                                                      '/checkpoint/boundary/messageId',
+                                                                                    schemaPath:
+                                                                                      '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageId/anyOf',
+                                                                                    keyword:
+                                                                                      'anyOf',
+                                                                                    params: {},
+                                                                                    message:
+                                                                                      'must match a schema in anyOf',
+                                                                                  };
+                                                                                  if (
+                                                                                    vErrors === null
+                                                                                  ) {
+                                                                                    vErrors = [
+                                                                                      err3,
+                                                                                    ];
                                                                                   } else {
-                                                                                    vErrors = null;
+                                                                                    vErrors.push(
+                                                                                      err3,
+                                                                                    );
+                                                                                  }
+                                                                                  errors++;
+                                                                                  validate32.errors =
+                                                                                    vErrors;
+                                                                                  return false;
+                                                                                } else {
+                                                                                  errors = _errs47;
+                                                                                  if (
+                                                                                    vErrors !== null
+                                                                                  ) {
+                                                                                    if (_errs47) {
+                                                                                      vErrors.length =
+                                                                                        _errs47;
+                                                                                    } else {
+                                                                                      vErrors =
+                                                                                        null;
+                                                                                    }
                                                                                   }
                                                                                 }
-                                                                              }
-                                                                              var valid5 =
-                                                                                _errs34 === errors;
-                                                                            } else {
-                                                                              var valid5 = true;
-                                                                            }
-                                                                            if (valid5) {
-                                                                              if (
-                                                                                data8.messageSeq !==
-                                                                                undefined
-                                                                              ) {
-                                                                                let data15 =
-                                                                                  data8.messageSeq;
-                                                                                const _errs40 =
+                                                                                var valid5 =
+                                                                                  _errs46 ===
                                                                                   errors;
+                                                                              } else {
+                                                                                var valid5 = true;
+                                                                              }
+                                                                              if (valid5) {
                                                                                 if (
-                                                                                  errors === _errs40
+                                                                                  data8.messageSeq !==
+                                                                                  undefined
                                                                                 ) {
+                                                                                  let data20 =
+                                                                                    data8.messageSeq;
+                                                                                  const _errs52 =
+                                                                                    errors;
                                                                                   if (
-                                                                                    typeof data15 ===
-                                                                                    'string'
+                                                                                    errors ===
+                                                                                    _errs52
                                                                                   ) {
                                                                                     if (
-                                                                                      func1(
-                                                                                        data15,
-                                                                                      ) > 19
+                                                                                      typeof data20 ===
+                                                                                      'string'
                                                                                     ) {
-                                                                                      validate32.errors =
-                                                                                        [
-                                                                                          {
-                                                                                            instancePath:
-                                                                                              instancePath +
-                                                                                              '/payload/items/' +
-                                                                                              i0 +
-                                                                                              '/checkpoint/boundary/messageSeq',
-                                                                                            schemaPath:
-                                                                                              '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageSeq/maxLength',
-                                                                                            keyword:
-                                                                                              'maxLength',
-                                                                                            params:
-                                                                                              {
-                                                                                                limit: 19,
-                                                                                              },
-                                                                                            message:
-                                                                                              'must NOT have more than 19 characters',
-                                                                                          },
-                                                                                        ];
-                                                                                      return false;
-                                                                                    } else {
                                                                                       if (
-                                                                                        !pattern38.test(
-                                                                                          data15,
-                                                                                        )
+                                                                                        func1(
+                                                                                          data20,
+                                                                                        ) > 19
                                                                                       ) {
                                                                                         validate32.errors =
                                                                                           [
@@ -14383,98 +14900,49 @@ function validate32(
                                                                                                 i0 +
                                                                                                 '/checkpoint/boundary/messageSeq',
                                                                                               schemaPath:
-                                                                                                '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageSeq/pattern',
+                                                                                                '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageSeq/maxLength',
                                                                                               keyword:
-                                                                                                'pattern',
+                                                                                                'maxLength',
                                                                                               params:
                                                                                                 {
-                                                                                                  pattern:
-                                                                                                    '^(0|[1-9][0-9]*)$',
+                                                                                                  limit: 19,
                                                                                                 },
                                                                                               message:
-                                                                                                'must match pattern "' +
-                                                                                                '^(0|[1-9][0-9]*)$' +
-                                                                                                '"',
+                                                                                                'must NOT have more than 19 characters',
                                                                                             },
                                                                                           ];
                                                                                         return false;
-                                                                                      }
-                                                                                    }
-                                                                                  } else {
-                                                                                    validate32.errors =
-                                                                                      [
-                                                                                        {
-                                                                                          instancePath:
-                                                                                            instancePath +
-                                                                                            '/payload/items/' +
-                                                                                            i0 +
-                                                                                            '/checkpoint/boundary/messageSeq',
-                                                                                          schemaPath:
-                                                                                            '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageSeq/type',
-                                                                                          keyword:
-                                                                                            'type',
-                                                                                          params: {
-                                                                                            type: 'string',
-                                                                                          },
-                                                                                          message:
-                                                                                            'must be string',
-                                                                                        },
-                                                                                      ];
-                                                                                    return false;
-                                                                                  }
-                                                                                }
-                                                                                var valid5 =
-                                                                                  _errs40 ===
-                                                                                  errors;
-                                                                              } else {
-                                                                                var valid5 = true;
-                                                                              }
-                                                                              if (valid5) {
-                                                                                if (
-                                                                                  data8.triggerMessageId !==
-                                                                                  undefined
-                                                                                ) {
-                                                                                  let data16 =
-                                                                                    data8.triggerMessageId;
-                                                                                  const _errs42 =
-                                                                                    errors;
-                                                                                  if (
-                                                                                    errors ===
-                                                                                    _errs42
-                                                                                  ) {
-                                                                                    if (
-                                                                                      typeof data16 ===
-                                                                                      'string'
-                                                                                    ) {
-                                                                                      if (
-                                                                                        !pattern45.test(
-                                                                                          data16,
-                                                                                        )
-                                                                                      ) {
-                                                                                        validate32.errors =
-                                                                                          [
-                                                                                            {
-                                                                                              instancePath:
-                                                                                                instancePath +
-                                                                                                '/payload/items/' +
-                                                                                                i0 +
-                                                                                                '/checkpoint/boundary/triggerMessageId',
-                                                                                              schemaPath:
-                                                                                                '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerMessageId/pattern',
-                                                                                              keyword:
-                                                                                                'pattern',
-                                                                                              params:
-                                                                                                {
-                                                                                                  pattern:
-                                                                                                    '^[A-Za-z0-9_-]{1,128}$',
-                                                                                                },
-                                                                                              message:
-                                                                                                'must match pattern "' +
-                                                                                                '^[A-Za-z0-9_-]{1,128}$' +
-                                                                                                '"',
-                                                                                            },
-                                                                                          ];
-                                                                                        return false;
+                                                                                      } else {
+                                                                                        if (
+                                                                                          !pattern38.test(
+                                                                                            data20,
+                                                                                          )
+                                                                                        ) {
+                                                                                          validate32.errors =
+                                                                                            [
+                                                                                              {
+                                                                                                instancePath:
+                                                                                                  instancePath +
+                                                                                                  '/payload/items/' +
+                                                                                                  i0 +
+                                                                                                  '/checkpoint/boundary/messageSeq',
+                                                                                                schemaPath:
+                                                                                                  '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageSeq/pattern',
+                                                                                                keyword:
+                                                                                                  'pattern',
+                                                                                                params:
+                                                                                                  {
+                                                                                                    pattern:
+                                                                                                      '^(0|[1-9][0-9]*)$',
+                                                                                                  },
+                                                                                                message:
+                                                                                                  'must match pattern "' +
+                                                                                                  '^(0|[1-9][0-9]*)$' +
+                                                                                                  '"',
+                                                                                              },
+                                                                                            ];
+                                                                                          return false;
+                                                                                        }
                                                                                       }
                                                                                     } else {
                                                                                       validate32.errors =
@@ -14484,9 +14952,9 @@ function validate32(
                                                                                               instancePath +
                                                                                               '/payload/items/' +
                                                                                               i0 +
-                                                                                              '/checkpoint/boundary/triggerMessageId',
+                                                                                              '/checkpoint/boundary/messageSeq',
                                                                                             schemaPath:
-                                                                                              '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerMessageId/type',
+                                                                                              '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/messageSeq/type',
                                                                                             keyword:
                                                                                               'type',
                                                                                             params:
@@ -14501,32 +14969,32 @@ function validate32(
                                                                                     }
                                                                                   }
                                                                                   var valid5 =
-                                                                                    _errs42 ===
+                                                                                    _errs52 ===
                                                                                     errors;
                                                                                 } else {
                                                                                   var valid5 = true;
                                                                                 }
                                                                                 if (valid5) {
                                                                                   if (
-                                                                                    data8.triggerSeq !==
+                                                                                    data8.triggerMessageId !==
                                                                                     undefined
                                                                                   ) {
-                                                                                    let data17 =
-                                                                                      data8.triggerSeq;
-                                                                                    const _errs44 =
+                                                                                    let data21 =
+                                                                                      data8.triggerMessageId;
+                                                                                    const _errs54 =
                                                                                       errors;
                                                                                     if (
                                                                                       errors ===
-                                                                                      _errs44
+                                                                                      _errs54
                                                                                     ) {
                                                                                       if (
-                                                                                        typeof data17 ===
+                                                                                        typeof data21 ===
                                                                                         'string'
                                                                                       ) {
                                                                                         if (
-                                                                                          func1(
-                                                                                            data17,
-                                                                                          ) > 19
+                                                                                          !pattern45.test(
+                                                                                            data21,
+                                                                                          )
                                                                                         ) {
                                                                                           validate32.errors =
                                                                                             [
@@ -14535,51 +15003,23 @@ function validate32(
                                                                                                   instancePath +
                                                                                                   '/payload/items/' +
                                                                                                   i0 +
-                                                                                                  '/checkpoint/boundary/triggerSeq',
+                                                                                                  '/checkpoint/boundary/triggerMessageId',
                                                                                                 schemaPath:
-                                                                                                  '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerSeq/maxLength',
+                                                                                                  '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerMessageId/pattern',
                                                                                                 keyword:
-                                                                                                  'maxLength',
+                                                                                                  'pattern',
                                                                                                 params:
                                                                                                   {
-                                                                                                    limit: 19,
+                                                                                                    pattern:
+                                                                                                      '^[A-Za-z0-9_-]{1,128}$',
                                                                                                   },
                                                                                                 message:
-                                                                                                  'must NOT have more than 19 characters',
+                                                                                                  'must match pattern "' +
+                                                                                                  '^[A-Za-z0-9_-]{1,128}$' +
+                                                                                                  '"',
                                                                                               },
                                                                                             ];
                                                                                           return false;
-                                                                                        } else {
-                                                                                          if (
-                                                                                            !pattern38.test(
-                                                                                              data17,
-                                                                                            )
-                                                                                          ) {
-                                                                                            validate32.errors =
-                                                                                              [
-                                                                                                {
-                                                                                                  instancePath:
-                                                                                                    instancePath +
-                                                                                                    '/payload/items/' +
-                                                                                                    i0 +
-                                                                                                    '/checkpoint/boundary/triggerSeq',
-                                                                                                  schemaPath:
-                                                                                                    '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerSeq/pattern',
-                                                                                                  keyword:
-                                                                                                    'pattern',
-                                                                                                  params:
-                                                                                                    {
-                                                                                                      pattern:
-                                                                                                        '^(0|[1-9][0-9]*)$',
-                                                                                                    },
-                                                                                                  message:
-                                                                                                    'must match pattern "' +
-                                                                                                    '^(0|[1-9][0-9]*)$' +
-                                                                                                    '"',
-                                                                                                },
-                                                                                              ];
-                                                                                            return false;
-                                                                                          }
                                                                                         }
                                                                                       } else {
                                                                                         validate32.errors =
@@ -14589,9 +15029,9 @@ function validate32(
                                                                                                 instancePath +
                                                                                                 '/payload/items/' +
                                                                                                 i0 +
-                                                                                                '/checkpoint/boundary/triggerSeq',
+                                                                                                '/checkpoint/boundary/triggerMessageId',
                                                                                               schemaPath:
-                                                                                                '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerSeq/type',
+                                                                                                '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerMessageId/type',
                                                                                               keyword:
                                                                                                 'type',
                                                                                               params:
@@ -14606,10 +15046,116 @@ function validate32(
                                                                                       }
                                                                                     }
                                                                                     var valid5 =
-                                                                                      _errs44 ===
+                                                                                      _errs54 ===
                                                                                       errors;
                                                                                   } else {
                                                                                     var valid5 = true;
+                                                                                  }
+                                                                                  if (valid5) {
+                                                                                    if (
+                                                                                      data8.triggerSeq !==
+                                                                                      undefined
+                                                                                    ) {
+                                                                                      let data22 =
+                                                                                        data8.triggerSeq;
+                                                                                      const _errs56 =
+                                                                                        errors;
+                                                                                      if (
+                                                                                        errors ===
+                                                                                        _errs56
+                                                                                      ) {
+                                                                                        if (
+                                                                                          typeof data22 ===
+                                                                                          'string'
+                                                                                        ) {
+                                                                                          if (
+                                                                                            func1(
+                                                                                              data22,
+                                                                                            ) > 19
+                                                                                          ) {
+                                                                                            validate32.errors =
+                                                                                              [
+                                                                                                {
+                                                                                                  instancePath:
+                                                                                                    instancePath +
+                                                                                                    '/payload/items/' +
+                                                                                                    i0 +
+                                                                                                    '/checkpoint/boundary/triggerSeq',
+                                                                                                  schemaPath:
+                                                                                                    '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerSeq/maxLength',
+                                                                                                  keyword:
+                                                                                                    'maxLength',
+                                                                                                  params:
+                                                                                                    {
+                                                                                                      limit: 19,
+                                                                                                    },
+                                                                                                  message:
+                                                                                                    'must NOT have more than 19 characters',
+                                                                                                },
+                                                                                              ];
+                                                                                            return false;
+                                                                                          } else {
+                                                                                            if (
+                                                                                              !pattern38.test(
+                                                                                                data22,
+                                                                                              )
+                                                                                            ) {
+                                                                                              validate32.errors =
+                                                                                                [
+                                                                                                  {
+                                                                                                    instancePath:
+                                                                                                      instancePath +
+                                                                                                      '/payload/items/' +
+                                                                                                      i0 +
+                                                                                                      '/checkpoint/boundary/triggerSeq',
+                                                                                                    schemaPath:
+                                                                                                      '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerSeq/pattern',
+                                                                                                    keyword:
+                                                                                                      'pattern',
+                                                                                                    params:
+                                                                                                      {
+                                                                                                        pattern:
+                                                                                                          '^(0|[1-9][0-9]*)$',
+                                                                                                      },
+                                                                                                    message:
+                                                                                                      'must match pattern "' +
+                                                                                                      '^(0|[1-9][0-9]*)$' +
+                                                                                                      '"',
+                                                                                                  },
+                                                                                                ];
+                                                                                              return false;
+                                                                                            }
+                                                                                          }
+                                                                                        } else {
+                                                                                          validate32.errors =
+                                                                                            [
+                                                                                              {
+                                                                                                instancePath:
+                                                                                                  instancePath +
+                                                                                                  '/payload/items/' +
+                                                                                                  i0 +
+                                                                                                  '/checkpoint/boundary/triggerSeq',
+                                                                                                schemaPath:
+                                                                                                  '#/properties/payload/properties/items/items/properties/checkpoint/properties/boundary/properties/triggerSeq/type',
+                                                                                                keyword:
+                                                                                                  'type',
+                                                                                                params:
+                                                                                                  {
+                                                                                                    type: 'string',
+                                                                                                  },
+                                                                                                message:
+                                                                                                  'must be string',
+                                                                                              },
+                                                                                            ];
+                                                                                          return false;
+                                                                                        }
+                                                                                      }
+                                                                                      var valid5 =
+                                                                                        _errs56 ===
+                                                                                        errors;
+                                                                                    } else {
+                                                                                      var valid5 = true;
+                                                                                    }
                                                                                   }
                                                                                 }
                                                                               }
@@ -14645,20 +15191,20 @@ function validate32(
                                                         }
                                                         if (valid4) {
                                                           if (data6.workspace !== undefined) {
-                                                            let data18 = data6.workspace;
-                                                            const _errs46 = errors;
-                                                            if (errors === _errs46) {
+                                                            let data23 = data6.workspace;
+                                                            const _errs58 = errors;
+                                                            if (errors === _errs58) {
                                                               if (
-                                                                data18 &&
-                                                                typeof data18 == 'object' &&
-                                                                !Array.isArray(data18)
+                                                                data23 &&
+                                                                typeof data23 == 'object' &&
+                                                                !Array.isArray(data23)
                                                               ) {
-                                                                let missing5;
+                                                                let missing7;
                                                                 if (
-                                                                  (data18.device === undefined &&
-                                                                    (missing5 = 'device')) ||
-                                                                  (data18.inode === undefined &&
-                                                                    (missing5 = 'inode'))
+                                                                  (data23.device === undefined &&
+                                                                    (missing7 = 'device')) ||
+                                                                  (data23.inode === undefined &&
+                                                                    (missing7 = 'inode'))
                                                                 ) {
                                                                   validate32.errors = [
                                                                     {
@@ -14671,22 +15217,22 @@ function validate32(
                                                                         '#/properties/payload/properties/items/items/properties/checkpoint/properties/workspace/required',
                                                                       keyword: 'required',
                                                                       params: {
-                                                                        missingProperty: missing5,
+                                                                        missingProperty: missing7,
                                                                       },
                                                                       message:
                                                                         "must have required property '" +
-                                                                        missing5 +
+                                                                        missing7 +
                                                                         "'",
                                                                     },
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  const _errs48 = errors;
-                                                                  for (const key5 in data18) {
+                                                                  const _errs60 = errors;
+                                                                  for (const key7 in data23) {
                                                                     if (
                                                                       !(
-                                                                        key5 === 'device' ||
-                                                                        key5 === 'inode'
+                                                                        key7 === 'device' ||
+                                                                        key7 === 'inode'
                                                                       )
                                                                     ) {
                                                                       validate32.errors = [
@@ -14702,7 +15248,7 @@ function validate32(
                                                                             'additionalProperties',
                                                                           params: {
                                                                             additionalProperty:
-                                                                              key5,
+                                                                              key7,
                                                                           },
                                                                           message:
                                                                             'must NOT have additional properties',
@@ -14712,18 +15258,18 @@ function validate32(
                                                                       break;
                                                                     }
                                                                   }
-                                                                  if (_errs48 === errors) {
+                                                                  if (_errs60 === errors) {
                                                                     if (
-                                                                      data18.device !== undefined
+                                                                      data23.device !== undefined
                                                                     ) {
-                                                                      let data19 = data18.device;
-                                                                      const _errs49 = errors;
-                                                                      if (errors === _errs49) {
+                                                                      let data24 = data23.device;
+                                                                      const _errs61 = errors;
+                                                                      if (errors === _errs61) {
                                                                         if (
-                                                                          typeof data19 === 'string'
+                                                                          typeof data24 === 'string'
                                                                         ) {
                                                                           if (
-                                                                            !pattern38.test(data19)
+                                                                            !pattern38.test(data24)
                                                                           ) {
                                                                             validate32.errors = [
                                                                               {
@@ -14768,25 +15314,25 @@ function validate32(
                                                                           return false;
                                                                         }
                                                                       }
-                                                                      var valid7 =
-                                                                        _errs49 === errors;
+                                                                      var valid9 =
+                                                                        _errs61 === errors;
                                                                     } else {
-                                                                      var valid7 = true;
+                                                                      var valid9 = true;
                                                                     }
-                                                                    if (valid7) {
+                                                                    if (valid9) {
                                                                       if (
-                                                                        data18.inode !== undefined
+                                                                        data23.inode !== undefined
                                                                       ) {
-                                                                        let data20 = data18.inode;
-                                                                        const _errs51 = errors;
-                                                                        if (errors === _errs51) {
+                                                                        let data25 = data23.inode;
+                                                                        const _errs63 = errors;
+                                                                        if (errors === _errs63) {
                                                                           if (
-                                                                            typeof data20 ===
+                                                                            typeof data25 ===
                                                                             'string'
                                                                           ) {
                                                                             if (
                                                                               !pattern38.test(
-                                                                                data20,
+                                                                                data25,
                                                                               )
                                                                             ) {
                                                                               validate32.errors = [
@@ -14833,10 +15379,10 @@ function validate32(
                                                                             return false;
                                                                           }
                                                                         }
-                                                                        var valid7 =
-                                                                          _errs51 === errors;
+                                                                        var valid9 =
+                                                                          _errs63 === errors;
                                                                       } else {
-                                                                        var valid7 = true;
+                                                                        var valid9 = true;
                                                                       }
                                                                     }
                                                                   }
@@ -14859,7 +15405,7 @@ function validate32(
                                                                 return false;
                                                               }
                                                             }
-                                                            var valid4 = _errs46 === errors;
+                                                            var valid4 = _errs58 === errors;
                                                           } else {
                                                             var valid4 = true;
                                                           }
@@ -14891,11 +15437,11 @@ function validate32(
                                             }
                                             if (valid3) {
                                               if (data5.revision !== undefined) {
-                                                let data21 = data5.revision;
-                                                const _errs53 = errors;
-                                                if (errors === _errs53) {
-                                                  if (typeof data21 === 'string') {
-                                                    if (func1(data21) > 19) {
+                                                let data26 = data5.revision;
+                                                const _errs65 = errors;
+                                                if (errors === _errs65) {
+                                                  if (typeof data26 === 'string') {
+                                                    if (func1(data26) > 19) {
                                                       validate32.errors = [
                                                         {
                                                           instancePath:
@@ -14913,7 +15459,7 @@ function validate32(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern38.test(data21)) {
+                                                      if (!pattern38.test(data26)) {
                                                         validate32.errors = [
                                                           {
                                                             instancePath:
@@ -14954,20 +15500,20 @@ function validate32(
                                                     return false;
                                                   }
                                                 }
-                                                var valid3 = _errs53 === errors;
+                                                var valid3 = _errs65 === errors;
                                               } else {
                                                 var valid3 = true;
                                               }
                                               if (valid3) {
                                                 if (data5.recordedAt !== undefined) {
-                                                  let data22 = data5.recordedAt;
-                                                  const _errs55 = errors;
+                                                  let data27 = data5.recordedAt;
+                                                  const _errs67 = errors;
                                                   if (
                                                     !(
-                                                      typeof data22 == 'number' &&
-                                                      !(data22 % 1) &&
-                                                      !isNaN(data22) &&
-                                                      isFinite(data22)
+                                                      typeof data27 == 'number' &&
+                                                      !(data27 % 1) &&
+                                                      !isNaN(data27) &&
+                                                      isFinite(data27)
                                                     )
                                                   ) {
                                                     validate32.errors = [
@@ -14986,14 +15532,14 @@ function validate32(
                                                     ];
                                                     return false;
                                                   }
-                                                  if (errors === _errs55) {
+                                                  if (errors === _errs67) {
                                                     if (
-                                                      typeof data22 == 'number' &&
-                                                      isFinite(data22)
+                                                      typeof data27 == 'number' &&
+                                                      isFinite(data27)
                                                     ) {
                                                       if (
-                                                        data22 > 8640000000000000 ||
-                                                        isNaN(data22)
+                                                        data27 > 8640000000000000 ||
+                                                        isNaN(data27)
                                                       ) {
                                                         validate32.errors = [
                                                           {
@@ -15014,7 +15560,7 @@ function validate32(
                                                         ];
                                                         return false;
                                                       } else {
-                                                        if (data22 < 0 || isNaN(data22)) {
+                                                        if (data27 < 0 || isNaN(data27)) {
                                                           validate32.errors = [
                                                             {
                                                               instancePath:
@@ -15037,7 +15583,7 @@ function validate32(
                                                       }
                                                     }
                                                   }
-                                                  var valid3 = _errs55 === errors;
+                                                  var valid3 = _errs67 === errors;
                                                 } else {
                                                   var valid3 = true;
                                                 }
@@ -15084,14 +15630,14 @@ function validate32(
                           }
                           if (valid1) {
                             if (data3.nextAfterKey !== undefined) {
-                              let data23 = data3.nextAfterKey;
-                              const _errs57 = errors;
-                              const _errs58 = errors;
-                              let valid8 = false;
-                              const _errs59 = errors;
-                              if (errors === _errs59) {
-                                if (typeof data23 === 'string') {
-                                  if (!pattern61.test(data23)) {
+                              let data28 = data3.nextAfterKey;
+                              const _errs69 = errors;
+                              const _errs70 = errors;
+                              let valid10 = false;
+                              const _errs71 = errors;
+                              if (errors === _errs71) {
+                                if (typeof data28 === 'string') {
+                                  if (!pattern64.test(data28)) {
                                     const err4 = {
                                       instancePath: instancePath + '/payload/nextAfterKey',
                                       schemaPath:
@@ -15127,10 +15673,10 @@ function validate32(
                                   errors++;
                                 }
                               }
-                              var _valid1 = _errs59 === errors;
-                              valid8 = valid8 || _valid1;
-                              const _errs61 = errors;
-                              if (data23 !== null) {
+                              var _valid1 = _errs71 === errors;
+                              valid10 = valid10 || _valid1;
+                              const _errs73 = errors;
+                              if (data28 !== null) {
                                 const err6 = {
                                   instancePath: instancePath + '/payload/nextAfterKey',
                                   schemaPath:
@@ -15146,9 +15692,9 @@ function validate32(
                                 }
                                 errors++;
                               }
-                              var _valid1 = _errs61 === errors;
-                              valid8 = valid8 || _valid1;
-                              if (!valid8) {
+                              var _valid1 = _errs73 === errors;
+                              valid10 = valid10 || _valid1;
+                              if (!valid10) {
                                 const err7 = {
                                   instancePath: instancePath + '/payload/nextAfterKey',
                                   schemaPath: '#/properties/payload/properties/nextAfterKey/anyOf',
@@ -15165,16 +15711,16 @@ function validate32(
                                 validate32.errors = vErrors;
                                 return false;
                               } else {
-                                errors = _errs58;
+                                errors = _errs70;
                                 if (vErrors !== null) {
-                                  if (_errs58) {
-                                    vErrors.length = _errs58;
+                                  if (_errs70) {
+                                    vErrors.length = _errs70;
                                   } else {
                                     vErrors = null;
                                   }
                                 }
                               }
-                              var valid1 = _errs57 === errors;
+                              var valid1 = _errs69 === errors;
                             } else {
                               var valid1 = true;
                             }
@@ -15240,6 +15786,23 @@ var schema44 = {
               properties: {
                 storeId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
                 workspaceId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
+                executionRoot: {
+                  type: 'object',
+                  properties: {
+                    epoch: { type: 'string', maxLength: 19, pattern: '^(0|[1-9][0-9]*)$' },
+                    identity: {
+                      type: 'object',
+                      properties: {
+                        device: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+                        inode: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+                      },
+                      required: ['device', 'inode'],
+                      additionalProperties: false,
+                    },
+                  },
+                  required: ['epoch', 'identity'],
+                  additionalProperties: false,
+                },
                 sessionId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
                 runId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
                 contextSelectionId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
@@ -15831,42 +16394,376 @@ function validate33(
                                                     var valid3 = true;
                                                   }
                                                   if (valid3) {
-                                                    if (data6.sessionId !== undefined) {
-                                                      let data9 = data6.sessionId;
+                                                    if (data6.executionRoot !== undefined) {
+                                                      let data9 = data6.executionRoot;
                                                       const _errs23 = errors;
                                                       if (errors === _errs23) {
-                                                        if (typeof data9 === 'string') {
-                                                          if (!pattern45.test(data9)) {
+                                                        if (
+                                                          data9 &&
+                                                          typeof data9 == 'object' &&
+                                                          !Array.isArray(data9)
+                                                        ) {
+                                                          let missing4;
+                                                          if (
+                                                            (data9.epoch === undefined &&
+                                                              (missing4 = 'epoch')) ||
+                                                            (data9.identity === undefined &&
+                                                              (missing4 = 'identity'))
+                                                          ) {
                                                             validate33.errors = [
                                                               {
                                                                 instancePath:
                                                                   instancePath +
-                                                                  '/payload/checkpoint/boundary/sessionId',
+                                                                  '/payload/checkpoint/boundary/executionRoot',
                                                                 schemaPath:
-                                                                  '#/properties/payload/properties/checkpoint/properties/boundary/properties/sessionId/pattern',
-                                                                keyword: 'pattern',
+                                                                  '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/required',
+                                                                keyword: 'required',
                                                                 params: {
-                                                                  pattern: '^[A-Za-z0-9_-]{1,128}$',
+                                                                  missingProperty: missing4,
                                                                 },
                                                                 message:
-                                                                  'must match pattern "' +
-                                                                  '^[A-Za-z0-9_-]{1,128}$' +
-                                                                  '"',
+                                                                  "must have required property '" +
+                                                                  missing4 +
+                                                                  "'",
                                                               },
                                                             ];
                                                             return false;
+                                                          } else {
+                                                            const _errs25 = errors;
+                                                            for (const key4 in data9) {
+                                                              if (
+                                                                !(
+                                                                  key4 === 'epoch' ||
+                                                                  key4 === 'identity'
+                                                                )
+                                                              ) {
+                                                                validate33.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/payload/checkpoint/boundary/executionRoot',
+                                                                    schemaPath:
+                                                                      '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/additionalProperties',
+                                                                    keyword: 'additionalProperties',
+                                                                    params: {
+                                                                      additionalProperty: key4,
+                                                                    },
+                                                                    message:
+                                                                      'must NOT have additional properties',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                                break;
+                                                              }
+                                                            }
+                                                            if (_errs25 === errors) {
+                                                              if (data9.epoch !== undefined) {
+                                                                let data10 = data9.epoch;
+                                                                const _errs26 = errors;
+                                                                if (errors === _errs26) {
+                                                                  if (typeof data10 === 'string') {
+                                                                    if (func1(data10) > 19) {
+                                                                      validate33.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/payload/checkpoint/boundary/executionRoot/epoch',
+                                                                          schemaPath:
+                                                                            '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/maxLength',
+                                                                          keyword: 'maxLength',
+                                                                          params: { limit: 19 },
+                                                                          message:
+                                                                            'must NOT have more than 19 characters',
+                                                                        },
+                                                                      ];
+                                                                      return false;
+                                                                    } else {
+                                                                      if (!pattern38.test(data10)) {
+                                                                        validate33.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/payload/checkpoint/boundary/executionRoot/epoch',
+                                                                            schemaPath:
+                                                                              '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/pattern',
+                                                                            keyword: 'pattern',
+                                                                            params: {
+                                                                              pattern:
+                                                                                '^(0|[1-9][0-9]*)$',
+                                                                            },
+                                                                            message:
+                                                                              'must match pattern "' +
+                                                                              '^(0|[1-9][0-9]*)$' +
+                                                                              '"',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                    }
+                                                                  } else {
+                                                                    validate33.errors = [
+                                                                      {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/payload/checkpoint/boundary/executionRoot/epoch',
+                                                                        schemaPath:
+                                                                          '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/type',
+                                                                        keyword: 'type',
+                                                                        params: { type: 'string' },
+                                                                        message: 'must be string',
+                                                                      },
+                                                                    ];
+                                                                    return false;
+                                                                  }
+                                                                }
+                                                                var valid4 = _errs26 === errors;
+                                                              } else {
+                                                                var valid4 = true;
+                                                              }
+                                                              if (valid4) {
+                                                                if (data9.identity !== undefined) {
+                                                                  let data11 = data9.identity;
+                                                                  const _errs28 = errors;
+                                                                  if (errors === _errs28) {
+                                                                    if (
+                                                                      data11 &&
+                                                                      typeof data11 == 'object' &&
+                                                                      !Array.isArray(data11)
+                                                                    ) {
+                                                                      let missing5;
+                                                                      if (
+                                                                        (data11.device ===
+                                                                          undefined &&
+                                                                          (missing5 = 'device')) ||
+                                                                        (data11.inode ===
+                                                                          undefined &&
+                                                                          (missing5 = 'inode'))
+                                                                      ) {
+                                                                        validate33.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/payload/checkpoint/boundary/executionRoot/identity',
+                                                                            schemaPath:
+                                                                              '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/required',
+                                                                            keyword: 'required',
+                                                                            params: {
+                                                                              missingProperty:
+                                                                                missing5,
+                                                                            },
+                                                                            message:
+                                                                              "must have required property '" +
+                                                                              missing5 +
+                                                                              "'",
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      } else {
+                                                                        const _errs30 = errors;
+                                                                        for (const key5 in data11) {
+                                                                          if (
+                                                                            !(
+                                                                              key5 === 'device' ||
+                                                                              key5 === 'inode'
+                                                                            )
+                                                                          ) {
+                                                                            validate33.errors = [
+                                                                              {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/payload/checkpoint/boundary/executionRoot/identity',
+                                                                                schemaPath:
+                                                                                  '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/additionalProperties',
+                                                                                keyword:
+                                                                                  'additionalProperties',
+                                                                                params: {
+                                                                                  additionalProperty:
+                                                                                    key5,
+                                                                                },
+                                                                                message:
+                                                                                  'must NOT have additional properties',
+                                                                              },
+                                                                            ];
+                                                                            return false;
+                                                                            break;
+                                                                          }
+                                                                        }
+                                                                        if (_errs30 === errors) {
+                                                                          if (
+                                                                            data11.device !==
+                                                                            undefined
+                                                                          ) {
+                                                                            let data12 =
+                                                                              data11.device;
+                                                                            const _errs31 = errors;
+                                                                            if (
+                                                                              errors === _errs31
+                                                                            ) {
+                                                                              if (
+                                                                                typeof data12 ===
+                                                                                'string'
+                                                                              ) {
+                                                                                if (
+                                                                                  !pattern38.test(
+                                                                                    data12,
+                                                                                  )
+                                                                                ) {
+                                                                                  validate33.errors =
+                                                                                    [
+                                                                                      {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/payload/checkpoint/boundary/executionRoot/identity/device',
+                                                                                        schemaPath:
+                                                                                          '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/device/pattern',
+                                                                                        keyword:
+                                                                                          'pattern',
+                                                                                        params: {
+                                                                                          pattern:
+                                                                                            '^(0|[1-9][0-9]*)$',
+                                                                                        },
+                                                                                        message:
+                                                                                          'must match pattern "' +
+                                                                                          '^(0|[1-9][0-9]*)$' +
+                                                                                          '"',
+                                                                                      },
+                                                                                    ];
+                                                                                  return false;
+                                                                                }
+                                                                              } else {
+                                                                                validate33.errors =
+                                                                                  [
+                                                                                    {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/payload/checkpoint/boundary/executionRoot/identity/device',
+                                                                                      schemaPath:
+                                                                                        '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/device/type',
+                                                                                      keyword:
+                                                                                        'type',
+                                                                                      params: {
+                                                                                        type: 'string',
+                                                                                      },
+                                                                                      message:
+                                                                                        'must be string',
+                                                                                    },
+                                                                                  ];
+                                                                                return false;
+                                                                              }
+                                                                            }
+                                                                            var valid5 =
+                                                                              _errs31 === errors;
+                                                                          } else {
+                                                                            var valid5 = true;
+                                                                          }
+                                                                          if (valid5) {
+                                                                            if (
+                                                                              data11.inode !==
+                                                                              undefined
+                                                                            ) {
+                                                                              let data13 =
+                                                                                data11.inode;
+                                                                              const _errs33 =
+                                                                                errors;
+                                                                              if (
+                                                                                errors === _errs33
+                                                                              ) {
+                                                                                if (
+                                                                                  typeof data13 ===
+                                                                                  'string'
+                                                                                ) {
+                                                                                  if (
+                                                                                    !pattern38.test(
+                                                                                      data13,
+                                                                                    )
+                                                                                  ) {
+                                                                                    validate33.errors =
+                                                                                      [
+                                                                                        {
+                                                                                          instancePath:
+                                                                                            instancePath +
+                                                                                            '/payload/checkpoint/boundary/executionRoot/identity/inode',
+                                                                                          schemaPath:
+                                                                                            '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/inode/pattern',
+                                                                                          keyword:
+                                                                                            'pattern',
+                                                                                          params: {
+                                                                                            pattern:
+                                                                                              '^(0|[1-9][0-9]*)$',
+                                                                                          },
+                                                                                          message:
+                                                                                            'must match pattern "' +
+                                                                                            '^(0|[1-9][0-9]*)$' +
+                                                                                            '"',
+                                                                                        },
+                                                                                      ];
+                                                                                    return false;
+                                                                                  }
+                                                                                } else {
+                                                                                  validate33.errors =
+                                                                                    [
+                                                                                      {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/payload/checkpoint/boundary/executionRoot/identity/inode',
+                                                                                        schemaPath:
+                                                                                          '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/inode/type',
+                                                                                        keyword:
+                                                                                          'type',
+                                                                                        params: {
+                                                                                          type: 'string',
+                                                                                        },
+                                                                                        message:
+                                                                                          'must be string',
+                                                                                      },
+                                                                                    ];
+                                                                                  return false;
+                                                                                }
+                                                                              }
+                                                                              var valid5 =
+                                                                                _errs33 === errors;
+                                                                            } else {
+                                                                              var valid5 = true;
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    } else {
+                                                                      validate33.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/payload/checkpoint/boundary/executionRoot/identity',
+                                                                          schemaPath:
+                                                                            '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/type',
+                                                                          keyword: 'type',
+                                                                          params: {
+                                                                            type: 'object',
+                                                                          },
+                                                                          message: 'must be object',
+                                                                        },
+                                                                      ];
+                                                                      return false;
+                                                                    }
+                                                                  }
+                                                                  var valid4 = _errs28 === errors;
+                                                                } else {
+                                                                  var valid4 = true;
+                                                                }
+                                                              }
+                                                            }
                                                           }
                                                         } else {
                                                           validate33.errors = [
                                                             {
                                                               instancePath:
                                                                 instancePath +
-                                                                '/payload/checkpoint/boundary/sessionId',
+                                                                '/payload/checkpoint/boundary/executionRoot',
                                                               schemaPath:
-                                                                '#/properties/payload/properties/checkpoint/properties/boundary/properties/sessionId/type',
+                                                                '#/properties/payload/properties/checkpoint/properties/boundary/properties/executionRoot/type',
                                                               keyword: 'type',
-                                                              params: { type: 'string' },
-                                                              message: 'must be string',
+                                                              params: { type: 'object' },
+                                                              message: 'must be object',
                                                             },
                                                           ];
                                                           return false;
@@ -15877,19 +16774,19 @@ function validate33(
                                                       var valid3 = true;
                                                     }
                                                     if (valid3) {
-                                                      if (data6.runId !== undefined) {
-                                                        let data10 = data6.runId;
-                                                        const _errs25 = errors;
-                                                        if (errors === _errs25) {
-                                                          if (typeof data10 === 'string') {
-                                                            if (!pattern45.test(data10)) {
+                                                      if (data6.sessionId !== undefined) {
+                                                        let data14 = data6.sessionId;
+                                                        const _errs35 = errors;
+                                                        if (errors === _errs35) {
+                                                          if (typeof data14 === 'string') {
+                                                            if (!pattern45.test(data14)) {
                                                               validate33.errors = [
                                                                 {
                                                                   instancePath:
                                                                     instancePath +
-                                                                    '/payload/checkpoint/boundary/runId',
+                                                                    '/payload/checkpoint/boundary/sessionId',
                                                                   schemaPath:
-                                                                    '#/properties/payload/properties/checkpoint/properties/boundary/properties/runId/pattern',
+                                                                    '#/properties/payload/properties/checkpoint/properties/boundary/properties/sessionId/pattern',
                                                                   keyword: 'pattern',
                                                                   params: {
                                                                     pattern:
@@ -15908,9 +16805,9 @@ function validate33(
                                                               {
                                                                 instancePath:
                                                                   instancePath +
-                                                                  '/payload/checkpoint/boundary/runId',
+                                                                  '/payload/checkpoint/boundary/sessionId',
                                                                 schemaPath:
-                                                                  '#/properties/payload/properties/checkpoint/properties/boundary/properties/runId/type',
+                                                                  '#/properties/payload/properties/checkpoint/properties/boundary/properties/sessionId/type',
                                                                 keyword: 'type',
                                                                 params: { type: 'string' },
                                                                 message: 'must be string',
@@ -15919,26 +16816,24 @@ function validate33(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid3 = _errs25 === errors;
+                                                        var valid3 = _errs35 === errors;
                                                       } else {
                                                         var valid3 = true;
                                                       }
                                                       if (valid3) {
-                                                        if (
-                                                          data6.contextSelectionId !== undefined
-                                                        ) {
-                                                          let data11 = data6.contextSelectionId;
-                                                          const _errs27 = errors;
-                                                          if (errors === _errs27) {
-                                                            if (typeof data11 === 'string') {
-                                                              if (!pattern45.test(data11)) {
+                                                        if (data6.runId !== undefined) {
+                                                          let data15 = data6.runId;
+                                                          const _errs37 = errors;
+                                                          if (errors === _errs37) {
+                                                            if (typeof data15 === 'string') {
+                                                              if (!pattern45.test(data15)) {
                                                                 validate33.errors = [
                                                                   {
                                                                     instancePath:
                                                                       instancePath +
-                                                                      '/payload/checkpoint/boundary/contextSelectionId',
+                                                                      '/payload/checkpoint/boundary/runId',
                                                                     schemaPath:
-                                                                      '#/properties/payload/properties/checkpoint/properties/boundary/properties/contextSelectionId/pattern',
+                                                                      '#/properties/payload/properties/checkpoint/properties/boundary/properties/runId/pattern',
                                                                     keyword: 'pattern',
                                                                     params: {
                                                                       pattern:
@@ -15957,9 +16852,9 @@ function validate33(
                                                                 {
                                                                   instancePath:
                                                                     instancePath +
-                                                                    '/payload/checkpoint/boundary/contextSelectionId',
+                                                                    '/payload/checkpoint/boundary/runId',
                                                                   schemaPath:
-                                                                    '#/properties/payload/properties/checkpoint/properties/boundary/properties/contextSelectionId/type',
+                                                                    '#/properties/payload/properties/checkpoint/properties/boundary/properties/runId/type',
                                                                   keyword: 'type',
                                                                   params: { type: 'string' },
                                                                   message: 'must be string',
@@ -15968,220 +16863,220 @@ function validate33(
                                                               return false;
                                                             }
                                                           }
-                                                          var valid3 = _errs27 === errors;
+                                                          var valid3 = _errs37 === errors;
                                                         } else {
                                                           var valid3 = true;
                                                         }
                                                         if (valid3) {
-                                                          if (data6.messageId !== undefined) {
-                                                            let data12 = data6.messageId;
-                                                            const _errs29 = errors;
-                                                            const _errs30 = errors;
-                                                            let valid4 = false;
-                                                            const _errs31 = errors;
-                                                            if (errors === _errs31) {
-                                                              if (typeof data12 === 'string') {
-                                                                if (!pattern45.test(data12)) {
-                                                                  const err0 = {
+                                                          if (
+                                                            data6.contextSelectionId !== undefined
+                                                          ) {
+                                                            let data16 = data6.contextSelectionId;
+                                                            const _errs39 = errors;
+                                                            if (errors === _errs39) {
+                                                              if (typeof data16 === 'string') {
+                                                                if (!pattern45.test(data16)) {
+                                                                  validate33.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/payload/checkpoint/boundary/contextSelectionId',
+                                                                      schemaPath:
+                                                                        '#/properties/payload/properties/checkpoint/properties/boundary/properties/contextSelectionId/pattern',
+                                                                      keyword: 'pattern',
+                                                                      params: {
+                                                                        pattern:
+                                                                          '^[A-Za-z0-9_-]{1,128}$',
+                                                                      },
+                                                                      message:
+                                                                        'must match pattern "' +
+                                                                        '^[A-Za-z0-9_-]{1,128}$' +
+                                                                        '"',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                }
+                                                              } else {
+                                                                validate33.errors = [
+                                                                  {
                                                                     instancePath:
                                                                       instancePath +
-                                                                      '/payload/checkpoint/boundary/messageId',
+                                                                      '/payload/checkpoint/boundary/contextSelectionId',
                                                                     schemaPath:
-                                                                      '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/pattern',
-                                                                    keyword: 'pattern',
-                                                                    params: {
-                                                                      pattern:
-                                                                        '^[A-Za-z0-9_-]{1,128}$',
-                                                                    },
-                                                                    message:
-                                                                      'must match pattern "' +
-                                                                      '^[A-Za-z0-9_-]{1,128}$' +
-                                                                      '"',
-                                                                  };
-                                                                  if (vErrors === null) {
-                                                                    vErrors = [err0];
-                                                                  } else {
-                                                                    vErrors.push(err0);
-                                                                  }
-                                                                  errors++;
-                                                                }
-                                                              } else {
-                                                                const err1 = {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/payload/checkpoint/boundary/messageId',
-                                                                  schemaPath:
-                                                                    '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/type',
-                                                                  keyword: 'type',
-                                                                  params: { type: 'string' },
-                                                                  message: 'must be string',
-                                                                };
-                                                                if (vErrors === null) {
-                                                                  vErrors = [err1];
-                                                                } else {
-                                                                  vErrors.push(err1);
-                                                                }
-                                                                errors++;
+                                                                      '#/properties/payload/properties/checkpoint/properties/boundary/properties/contextSelectionId/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
+                                                                  },
+                                                                ];
+                                                                return false;
                                                               }
                                                             }
-                                                            var _valid0 = _errs31 === errors;
-                                                            valid4 = valid4 || _valid0;
-                                                            const _errs33 = errors;
-                                                            if (data12 !== null) {
-                                                              const err2 = {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/payload/checkpoint/boundary/messageId',
-                                                                schemaPath:
-                                                                  '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageId/anyOf/1/type',
-                                                                keyword: 'type',
-                                                                params: { type: 'null' },
-                                                                message: 'must be null',
-                                                              };
-                                                              if (vErrors === null) {
-                                                                vErrors = [err2];
-                                                              } else {
-                                                                vErrors.push(err2);
-                                                              }
-                                                              errors++;
-                                                            }
-                                                            var _valid0 = _errs33 === errors;
-                                                            valid4 = valid4 || _valid0;
-                                                            if (!valid4) {
-                                                              const err3 = {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/payload/checkpoint/boundary/messageId',
-                                                                schemaPath:
-                                                                  '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageId/anyOf',
-                                                                keyword: 'anyOf',
-                                                                params: {},
-                                                                message:
-                                                                  'must match a schema in anyOf',
-                                                              };
-                                                              if (vErrors === null) {
-                                                                vErrors = [err3];
-                                                              } else {
-                                                                vErrors.push(err3);
-                                                              }
-                                                              errors++;
-                                                              validate33.errors = vErrors;
-                                                              return false;
-                                                            } else {
-                                                              errors = _errs30;
-                                                              if (vErrors !== null) {
-                                                                if (_errs30) {
-                                                                  vErrors.length = _errs30;
-                                                                } else {
-                                                                  vErrors = null;
-                                                                }
-                                                              }
-                                                            }
-                                                            var valid3 = _errs29 === errors;
+                                                            var valid3 = _errs39 === errors;
                                                           } else {
                                                             var valid3 = true;
                                                           }
                                                           if (valid3) {
-                                                            if (data6.messageSeq !== undefined) {
-                                                              let data13 = data6.messageSeq;
-                                                              const _errs35 = errors;
-                                                              if (errors === _errs35) {
-                                                                if (typeof data13 === 'string') {
-                                                                  if (func1(data13) > 19) {
-                                                                    validate33.errors = [
-                                                                      {
-                                                                        instancePath:
-                                                                          instancePath +
-                                                                          '/payload/checkpoint/boundary/messageSeq',
-                                                                        schemaPath:
-                                                                          '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageSeq/maxLength',
-                                                                        keyword: 'maxLength',
-                                                                        params: { limit: 19 },
-                                                                        message:
-                                                                          'must NOT have more than 19 characters',
+                                                            if (data6.messageId !== undefined) {
+                                                              let data17 = data6.messageId;
+                                                              const _errs41 = errors;
+                                                              const _errs42 = errors;
+                                                              let valid6 = false;
+                                                              const _errs43 = errors;
+                                                              if (errors === _errs43) {
+                                                                if (typeof data17 === 'string') {
+                                                                  if (!pattern45.test(data17)) {
+                                                                    const err0 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/payload/checkpoint/boundary/messageId',
+                                                                      schemaPath:
+                                                                        '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/pattern',
+                                                                      keyword: 'pattern',
+                                                                      params: {
+                                                                        pattern:
+                                                                          '^[A-Za-z0-9_-]{1,128}$',
                                                                       },
-                                                                    ];
-                                                                    return false;
+                                                                      message:
+                                                                        'must match pattern "' +
+                                                                        '^[A-Za-z0-9_-]{1,128}$' +
+                                                                        '"',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err0];
+                                                                    } else {
+                                                                      vErrors.push(err0);
+                                                                    }
+                                                                    errors++;
+                                                                  }
+                                                                } else {
+                                                                  const err1 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/payload/checkpoint/boundary/messageId',
+                                                                    schemaPath:
+                                                                      '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err1];
                                                                   } else {
-                                                                    if (!pattern38.test(data13)) {
+                                                                    vErrors.push(err1);
+                                                                  }
+                                                                  errors++;
+                                                                }
+                                                              }
+                                                              var _valid0 = _errs43 === errors;
+                                                              valid6 = valid6 || _valid0;
+                                                              const _errs45 = errors;
+                                                              if (data17 !== null) {
+                                                                const err2 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/payload/checkpoint/boundary/messageId',
+                                                                  schemaPath:
+                                                                    '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageId/anyOf/1/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'null' },
+                                                                  message: 'must be null',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err2];
+                                                                } else {
+                                                                  vErrors.push(err2);
+                                                                }
+                                                                errors++;
+                                                              }
+                                                              var _valid0 = _errs45 === errors;
+                                                              valid6 = valid6 || _valid0;
+                                                              if (!valid6) {
+                                                                const err3 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/payload/checkpoint/boundary/messageId',
+                                                                  schemaPath:
+                                                                    '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageId/anyOf',
+                                                                  keyword: 'anyOf',
+                                                                  params: {},
+                                                                  message:
+                                                                    'must match a schema in anyOf',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err3];
+                                                                } else {
+                                                                  vErrors.push(err3);
+                                                                }
+                                                                errors++;
+                                                                validate33.errors = vErrors;
+                                                                return false;
+                                                              } else {
+                                                                errors = _errs42;
+                                                                if (vErrors !== null) {
+                                                                  if (_errs42) {
+                                                                    vErrors.length = _errs42;
+                                                                  } else {
+                                                                    vErrors = null;
+                                                                  }
+                                                                }
+                                                              }
+                                                              var valid3 = _errs41 === errors;
+                                                            } else {
+                                                              var valid3 = true;
+                                                            }
+                                                            if (valid3) {
+                                                              if (data6.messageSeq !== undefined) {
+                                                                let data18 = data6.messageSeq;
+                                                                const _errs47 = errors;
+                                                                if (errors === _errs47) {
+                                                                  if (typeof data18 === 'string') {
+                                                                    if (func1(data18) > 19) {
                                                                       validate33.errors = [
                                                                         {
                                                                           instancePath:
                                                                             instancePath +
                                                                             '/payload/checkpoint/boundary/messageSeq',
                                                                           schemaPath:
-                                                                            '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageSeq/pattern',
-                                                                          keyword: 'pattern',
-                                                                          params: {
-                                                                            pattern:
-                                                                              '^(0|[1-9][0-9]*)$',
-                                                                          },
+                                                                            '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageSeq/maxLength',
+                                                                          keyword: 'maxLength',
+                                                                          params: { limit: 19 },
                                                                           message:
-                                                                            'must match pattern "' +
-                                                                            '^(0|[1-9][0-9]*)$' +
-                                                                            '"',
+                                                                            'must NOT have more than 19 characters',
                                                                         },
                                                                       ];
                                                                       return false;
-                                                                    }
-                                                                  }
-                                                                } else {
-                                                                  validate33.errors = [
-                                                                    {
-                                                                      instancePath:
-                                                                        instancePath +
-                                                                        '/payload/checkpoint/boundary/messageSeq',
-                                                                      schemaPath:
-                                                                        '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageSeq/type',
-                                                                      keyword: 'type',
-                                                                      params: { type: 'string' },
-                                                                      message: 'must be string',
-                                                                    },
-                                                                  ];
-                                                                  return false;
-                                                                }
-                                                              }
-                                                              var valid3 = _errs35 === errors;
-                                                            } else {
-                                                              var valid3 = true;
-                                                            }
-                                                            if (valid3) {
-                                                              if (
-                                                                data6.triggerMessageId !== undefined
-                                                              ) {
-                                                                let data14 = data6.triggerMessageId;
-                                                                const _errs37 = errors;
-                                                                if (errors === _errs37) {
-                                                                  if (typeof data14 === 'string') {
-                                                                    if (!pattern45.test(data14)) {
-                                                                      validate33.errors = [
-                                                                        {
-                                                                          instancePath:
-                                                                            instancePath +
-                                                                            '/payload/checkpoint/boundary/triggerMessageId',
-                                                                          schemaPath:
-                                                                            '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerMessageId/pattern',
-                                                                          keyword: 'pattern',
-                                                                          params: {
-                                                                            pattern:
-                                                                              '^[A-Za-z0-9_-]{1,128}$',
+                                                                    } else {
+                                                                      if (!pattern38.test(data18)) {
+                                                                        validate33.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/payload/checkpoint/boundary/messageSeq',
+                                                                            schemaPath:
+                                                                              '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageSeq/pattern',
+                                                                            keyword: 'pattern',
+                                                                            params: {
+                                                                              pattern:
+                                                                                '^(0|[1-9][0-9]*)$',
+                                                                            },
+                                                                            message:
+                                                                              'must match pattern "' +
+                                                                              '^(0|[1-9][0-9]*)$' +
+                                                                              '"',
                                                                           },
-                                                                          message:
-                                                                            'must match pattern "' +
-                                                                            '^[A-Za-z0-9_-]{1,128}$' +
-                                                                            '"',
-                                                                        },
-                                                                      ];
-                                                                      return false;
+                                                                        ];
+                                                                        return false;
+                                                                      }
                                                                     }
                                                                   } else {
                                                                     validate33.errors = [
                                                                       {
                                                                         instancePath:
                                                                           instancePath +
-                                                                          '/payload/checkpoint/boundary/triggerMessageId',
+                                                                          '/payload/checkpoint/boundary/messageSeq',
                                                                         schemaPath:
-                                                                          '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerMessageId/type',
+                                                                          '#/properties/payload/properties/checkpoint/properties/boundary/properties/messageSeq/type',
                                                                         keyword: 'type',
                                                                         params: { type: 'string' },
                                                                         message: 'must be string',
@@ -16190,68 +17085,51 @@ function validate33(
                                                                     return false;
                                                                   }
                                                                 }
-                                                                var valid3 = _errs37 === errors;
+                                                                var valid3 = _errs47 === errors;
                                                               } else {
                                                                 var valid3 = true;
                                                               }
                                                               if (valid3) {
                                                                 if (
-                                                                  data6.triggerSeq !== undefined
+                                                                  data6.triggerMessageId !==
+                                                                  undefined
                                                                 ) {
-                                                                  let data15 = data6.triggerSeq;
-                                                                  const _errs39 = errors;
-                                                                  if (errors === _errs39) {
+                                                                  let data19 =
+                                                                    data6.triggerMessageId;
+                                                                  const _errs49 = errors;
+                                                                  if (errors === _errs49) {
                                                                     if (
-                                                                      typeof data15 === 'string'
+                                                                      typeof data19 === 'string'
                                                                     ) {
-                                                                      if (func1(data15) > 19) {
+                                                                      if (!pattern45.test(data19)) {
                                                                         validate33.errors = [
                                                                           {
                                                                             instancePath:
                                                                               instancePath +
-                                                                              '/payload/checkpoint/boundary/triggerSeq',
+                                                                              '/payload/checkpoint/boundary/triggerMessageId',
                                                                             schemaPath:
-                                                                              '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerSeq/maxLength',
-                                                                            keyword: 'maxLength',
-                                                                            params: { limit: 19 },
+                                                                              '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerMessageId/pattern',
+                                                                            keyword: 'pattern',
+                                                                            params: {
+                                                                              pattern:
+                                                                                '^[A-Za-z0-9_-]{1,128}$',
+                                                                            },
                                                                             message:
-                                                                              'must NOT have more than 19 characters',
+                                                                              'must match pattern "' +
+                                                                              '^[A-Za-z0-9_-]{1,128}$' +
+                                                                              '"',
                                                                           },
                                                                         ];
                                                                         return false;
-                                                                      } else {
-                                                                        if (
-                                                                          !pattern38.test(data15)
-                                                                        ) {
-                                                                          validate33.errors = [
-                                                                            {
-                                                                              instancePath:
-                                                                                instancePath +
-                                                                                '/payload/checkpoint/boundary/triggerSeq',
-                                                                              schemaPath:
-                                                                                '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerSeq/pattern',
-                                                                              keyword: 'pattern',
-                                                                              params: {
-                                                                                pattern:
-                                                                                  '^(0|[1-9][0-9]*)$',
-                                                                              },
-                                                                              message:
-                                                                                'must match pattern "' +
-                                                                                '^(0|[1-9][0-9]*)$' +
-                                                                                '"',
-                                                                            },
-                                                                          ];
-                                                                          return false;
-                                                                        }
                                                                       }
                                                                     } else {
                                                                       validate33.errors = [
                                                                         {
                                                                           instancePath:
                                                                             instancePath +
-                                                                            '/payload/checkpoint/boundary/triggerSeq',
+                                                                            '/payload/checkpoint/boundary/triggerMessageId',
                                                                           schemaPath:
-                                                                            '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerSeq/type',
+                                                                            '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerMessageId/type',
                                                                           keyword: 'type',
                                                                           params: {
                                                                             type: 'string',
@@ -16262,9 +17140,83 @@ function validate33(
                                                                       return false;
                                                                     }
                                                                   }
-                                                                  var valid3 = _errs39 === errors;
+                                                                  var valid3 = _errs49 === errors;
                                                                 } else {
                                                                   var valid3 = true;
+                                                                }
+                                                                if (valid3) {
+                                                                  if (
+                                                                    data6.triggerSeq !== undefined
+                                                                  ) {
+                                                                    let data20 = data6.triggerSeq;
+                                                                    const _errs51 = errors;
+                                                                    if (errors === _errs51) {
+                                                                      if (
+                                                                        typeof data20 === 'string'
+                                                                      ) {
+                                                                        if (func1(data20) > 19) {
+                                                                          validate33.errors = [
+                                                                            {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/payload/checkpoint/boundary/triggerSeq',
+                                                                              schemaPath:
+                                                                                '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerSeq/maxLength',
+                                                                              keyword: 'maxLength',
+                                                                              params: { limit: 19 },
+                                                                              message:
+                                                                                'must NOT have more than 19 characters',
+                                                                            },
+                                                                          ];
+                                                                          return false;
+                                                                        } else {
+                                                                          if (
+                                                                            !pattern38.test(data20)
+                                                                          ) {
+                                                                            validate33.errors = [
+                                                                              {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/payload/checkpoint/boundary/triggerSeq',
+                                                                                schemaPath:
+                                                                                  '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerSeq/pattern',
+                                                                                keyword: 'pattern',
+                                                                                params: {
+                                                                                  pattern:
+                                                                                    '^(0|[1-9][0-9]*)$',
+                                                                                },
+                                                                                message:
+                                                                                  'must match pattern "' +
+                                                                                  '^(0|[1-9][0-9]*)$' +
+                                                                                  '"',
+                                                                              },
+                                                                            ];
+                                                                            return false;
+                                                                          }
+                                                                        }
+                                                                      } else {
+                                                                        validate33.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/payload/checkpoint/boundary/triggerSeq',
+                                                                            schemaPath:
+                                                                              '#/properties/payload/properties/checkpoint/properties/boundary/properties/triggerSeq/type',
+                                                                            keyword: 'type',
+                                                                            params: {
+                                                                              type: 'string',
+                                                                            },
+                                                                            message:
+                                                                              'must be string',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                    }
+                                                                    var valid3 = _errs51 === errors;
+                                                                  } else {
+                                                                    var valid3 = true;
+                                                                  }
                                                                 }
                                                               }
                                                             }
@@ -16297,19 +17249,19 @@ function validate33(
                                       }
                                       if (valid2) {
                                         if (data4.workspace !== undefined) {
-                                          let data16 = data4.workspace;
-                                          const _errs41 = errors;
-                                          if (errors === _errs41) {
+                                          let data21 = data4.workspace;
+                                          const _errs53 = errors;
+                                          if (errors === _errs53) {
                                             if (
-                                              data16 &&
-                                              typeof data16 == 'object' &&
-                                              !Array.isArray(data16)
+                                              data21 &&
+                                              typeof data21 == 'object' &&
+                                              !Array.isArray(data21)
                                             ) {
-                                              let missing4;
+                                              let missing6;
                                               if (
-                                                (data16.device === undefined &&
-                                                  (missing4 = 'device')) ||
-                                                (data16.inode === undefined && (missing4 = 'inode'))
+                                                (data21.device === undefined &&
+                                                  (missing6 = 'device')) ||
+                                                (data21.inode === undefined && (missing6 = 'inode'))
                                               ) {
                                                 validate33.errors = [
                                                   {
@@ -16319,18 +17271,18 @@ function validate33(
                                                     schemaPath:
                                                       '#/properties/payload/properties/checkpoint/properties/workspace/required',
                                                     keyword: 'required',
-                                                    params: { missingProperty: missing4 },
+                                                    params: { missingProperty: missing6 },
                                                     message:
                                                       "must have required property '" +
-                                                      missing4 +
+                                                      missing6 +
                                                       "'",
                                                   },
                                                 ];
                                                 return false;
                                               } else {
-                                                const _errs43 = errors;
-                                                for (const key4 in data16) {
-                                                  if (!(key4 === 'device' || key4 === 'inode')) {
+                                                const _errs55 = errors;
+                                                for (const key6 in data21) {
+                                                  if (!(key6 === 'device' || key6 === 'inode')) {
                                                     validate33.errors = [
                                                       {
                                                         instancePath:
@@ -16339,7 +17291,7 @@ function validate33(
                                                         schemaPath:
                                                           '#/properties/payload/properties/checkpoint/properties/workspace/additionalProperties',
                                                         keyword: 'additionalProperties',
-                                                        params: { additionalProperty: key4 },
+                                                        params: { additionalProperty: key6 },
                                                         message:
                                                           'must NOT have additional properties',
                                                       },
@@ -16348,13 +17300,13 @@ function validate33(
                                                     break;
                                                   }
                                                 }
-                                                if (_errs43 === errors) {
-                                                  if (data16.device !== undefined) {
-                                                    let data17 = data16.device;
-                                                    const _errs44 = errors;
-                                                    if (errors === _errs44) {
-                                                      if (typeof data17 === 'string') {
-                                                        if (!pattern38.test(data17)) {
+                                                if (_errs55 === errors) {
+                                                  if (data21.device !== undefined) {
+                                                    let data22 = data21.device;
+                                                    const _errs56 = errors;
+                                                    if (errors === _errs56) {
+                                                      if (typeof data22 === 'string') {
+                                                        if (!pattern38.test(data22)) {
                                                           validate33.errors = [
                                                             {
                                                               instancePath:
@@ -16390,17 +17342,17 @@ function validate33(
                                                         return false;
                                                       }
                                                     }
-                                                    var valid5 = _errs44 === errors;
+                                                    var valid7 = _errs56 === errors;
                                                   } else {
-                                                    var valid5 = true;
+                                                    var valid7 = true;
                                                   }
-                                                  if (valid5) {
-                                                    if (data16.inode !== undefined) {
-                                                      let data18 = data16.inode;
-                                                      const _errs46 = errors;
-                                                      if (errors === _errs46) {
-                                                        if (typeof data18 === 'string') {
-                                                          if (!pattern38.test(data18)) {
+                                                  if (valid7) {
+                                                    if (data21.inode !== undefined) {
+                                                      let data23 = data21.inode;
+                                                      const _errs58 = errors;
+                                                      if (errors === _errs58) {
+                                                        if (typeof data23 === 'string') {
+                                                          if (!pattern38.test(data23)) {
                                                             validate33.errors = [
                                                               {
                                                                 instancePath:
@@ -16436,9 +17388,9 @@ function validate33(
                                                           return false;
                                                         }
                                                       }
-                                                      var valid5 = _errs46 === errors;
+                                                      var valid7 = _errs58 === errors;
                                                     } else {
-                                                      var valid5 = true;
+                                                      var valid7 = true;
                                                     }
                                                   }
                                                 }
@@ -16458,7 +17410,7 @@ function validate33(
                                               return false;
                                             }
                                           }
-                                          var valid2 = _errs41 === errors;
+                                          var valid2 = _errs53 === errors;
                                         } else {
                                           var valid2 = true;
                                         }
@@ -16485,33 +17437,33 @@ function validate33(
                           }
                           if (valid1) {
                             if (data3.files !== undefined) {
-                              let data19 = data3.files;
-                              const _errs48 = errors;
-                              if (errors === _errs48) {
-                                if (Array.isArray(data19)) {
-                                  var valid6 = true;
-                                  const len0 = data19.length;
+                              let data24 = data3.files;
+                              const _errs60 = errors;
+                              if (errors === _errs60) {
+                                if (Array.isArray(data24)) {
+                                  var valid8 = true;
+                                  const len0 = data24.length;
                                   for (let i0 = 0; i0 < len0; i0++) {
-                                    let data20 = data19[i0];
-                                    const _errs50 = errors;
-                                    if (errors === _errs50) {
+                                    let data25 = data24[i0];
+                                    const _errs62 = errors;
+                                    if (errors === _errs62) {
                                       if (
-                                        data20 &&
-                                        typeof data20 == 'object' &&
-                                        !Array.isArray(data20)
+                                        data25 &&
+                                        typeof data25 == 'object' &&
+                                        !Array.isArray(data25)
                                       ) {
-                                        let missing5;
+                                        let missing7;
                                         if (
-                                          (data20.path === undefined && (missing5 = 'path')) ||
-                                          (data20.recordRevision === undefined &&
-                                            (missing5 = 'recordRevision')) ||
-                                          (data20.status === undefined && (missing5 = 'status')) ||
-                                          (data20.reason === undefined && (missing5 = 'reason')) ||
-                                          (data20.preimage === undefined &&
-                                            (missing5 = 'preimage')) ||
-                                          (data20.original === undefined &&
-                                            (missing5 = 'original')) ||
-                                          (data20.expected === undefined && (missing5 = 'expected'))
+                                          (data25.path === undefined && (missing7 = 'path')) ||
+                                          (data25.recordRevision === undefined &&
+                                            (missing7 = 'recordRevision')) ||
+                                          (data25.status === undefined && (missing7 = 'status')) ||
+                                          (data25.reason === undefined && (missing7 = 'reason')) ||
+                                          (data25.preimage === undefined &&
+                                            (missing7 = 'preimage')) ||
+                                          (data25.original === undefined &&
+                                            (missing7 = 'original')) ||
+                                          (data25.expected === undefined && (missing7 = 'expected'))
                                         ) {
                                           validate33.errors = [
                                             {
@@ -16519,25 +17471,25 @@ function validate33(
                                               schemaPath:
                                                 '#/properties/payload/properties/files/items/required',
                                               keyword: 'required',
-                                              params: { missingProperty: missing5 },
+                                              params: { missingProperty: missing7 },
                                               message:
-                                                "must have required property '" + missing5 + "'",
+                                                "must have required property '" + missing7 + "'",
                                             },
                                           ];
                                           return false;
                                         } else {
-                                          const _errs52 = errors;
-                                          for (const key5 in data20) {
+                                          const _errs64 = errors;
+                                          for (const key7 in data25) {
                                             if (
                                               !(
-                                                key5 === 'path' ||
-                                                key5 === 'recordRevision' ||
-                                                key5 === 'status' ||
-                                                key5 === 'reason' ||
-                                                key5 === 'preimage' ||
-                                                key5 === 'original' ||
-                                                key5 === 'expected' ||
-                                                key5 === 'textChange'
+                                                key7 === 'path' ||
+                                                key7 === 'recordRevision' ||
+                                                key7 === 'status' ||
+                                                key7 === 'reason' ||
+                                                key7 === 'preimage' ||
+                                                key7 === 'original' ||
+                                                key7 === 'expected' ||
+                                                key7 === 'textChange'
                                               )
                                             ) {
                                               validate33.errors = [
@@ -16547,7 +17499,7 @@ function validate33(
                                                   schemaPath:
                                                     '#/properties/payload/properties/files/items/additionalProperties',
                                                   keyword: 'additionalProperties',
-                                                  params: { additionalProperty: key5 },
+                                                  params: { additionalProperty: key7 },
                                                   message: 'must NOT have additional properties',
                                                 },
                                               ];
@@ -16555,13 +17507,13 @@ function validate33(
                                               break;
                                             }
                                           }
-                                          if (_errs52 === errors) {
-                                            if (data20.path !== undefined) {
-                                              let data21 = data20.path;
-                                              const _errs53 = errors;
-                                              if (errors === _errs53) {
-                                                if (typeof data21 === 'string') {
-                                                  if (func1(data21) > 4096) {
+                                          if (_errs64 === errors) {
+                                            if (data25.path !== undefined) {
+                                              let data26 = data25.path;
+                                              const _errs65 = errors;
+                                              if (errors === _errs65) {
+                                                if (typeof data26 === 'string') {
+                                                  if (func1(data26) > 4096) {
                                                     validate33.errors = [
                                                       {
                                                         instancePath:
@@ -16579,7 +17531,7 @@ function validate33(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (func1(data21) < 1) {
+                                                    if (func1(data26) < 1) {
                                                       validate33.errors = [
                                                         {
                                                           instancePath:
@@ -16616,17 +17568,17 @@ function validate33(
                                                   return false;
                                                 }
                                               }
-                                              var valid7 = _errs53 === errors;
+                                              var valid9 = _errs65 === errors;
                                             } else {
-                                              var valid7 = true;
+                                              var valid9 = true;
                                             }
-                                            if (valid7) {
-                                              if (data20.recordRevision !== undefined) {
-                                                let data22 = data20.recordRevision;
-                                                const _errs55 = errors;
-                                                if (errors === _errs55) {
-                                                  if (typeof data22 === 'string') {
-                                                    if (func1(data22) > 19) {
+                                            if (valid9) {
+                                              if (data25.recordRevision !== undefined) {
+                                                let data27 = data25.recordRevision;
+                                                const _errs67 = errors;
+                                                if (errors === _errs67) {
+                                                  if (typeof data27 === 'string') {
+                                                    if (func1(data27) > 19) {
                                                       validate33.errors = [
                                                         {
                                                           instancePath:
@@ -16644,7 +17596,7 @@ function validate33(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern38.test(data22)) {
+                                                      if (!pattern38.test(data27)) {
                                                         validate33.errors = [
                                                           {
                                                             instancePath:
@@ -16685,15 +17637,15 @@ function validate33(
                                                     return false;
                                                   }
                                                 }
-                                                var valid7 = _errs55 === errors;
+                                                var valid9 = _errs67 === errors;
                                               } else {
-                                                var valid7 = true;
+                                                var valid9 = true;
                                               }
-                                              if (valid7) {
-                                                if (data20.status !== undefined) {
-                                                  let data23 = data20.status;
-                                                  const _errs57 = errors;
-                                                  if (typeof data23 !== 'string') {
+                                              if (valid9) {
+                                                if (data25.status !== undefined) {
+                                                  let data28 = data25.status;
+                                                  const _errs69 = errors;
+                                                  if (typeof data28 !== 'string') {
                                                     validate33.errors = [
                                                       {
                                                         instancePath:
@@ -16712,11 +17664,11 @@ function validate33(
                                                   }
                                                   if (
                                                     !(
-                                                      data23 === 'restore' ||
-                                                      data23 === 'remove' ||
-                                                      data23 === 'unchanged' ||
-                                                      data23 === 'conflict' ||
-                                                      data23 === 'unavailable'
+                                                      data28 === 'restore' ||
+                                                      data28 === 'remove' ||
+                                                      data28 === 'unchanged' ||
+                                                      data28 === 'conflict' ||
+                                                      data28 === 'unavailable'
                                                     )
                                                   ) {
                                                     validate33.errors = [
@@ -16740,20 +17692,20 @@ function validate33(
                                                     ];
                                                     return false;
                                                   }
-                                                  var valid7 = _errs57 === errors;
+                                                  var valid9 = _errs69 === errors;
                                                 } else {
-                                                  var valid7 = true;
+                                                  var valid9 = true;
                                                 }
-                                                if (valid7) {
-                                                  if (data20.reason !== undefined) {
-                                                    let data24 = data20.reason;
-                                                    const _errs59 = errors;
-                                                    const _errs60 = errors;
-                                                    let valid8 = false;
-                                                    const _errs61 = errors;
-                                                    if (errors === _errs61) {
-                                                      if (typeof data24 === 'string') {
-                                                        if (func1(data24) > 256) {
+                                                if (valid9) {
+                                                  if (data25.reason !== undefined) {
+                                                    let data29 = data25.reason;
+                                                    const _errs71 = errors;
+                                                    const _errs72 = errors;
+                                                    let valid10 = false;
+                                                    const _errs73 = errors;
+                                                    if (errors === _errs73) {
+                                                      if (typeof data29 === 'string') {
+                                                        if (func1(data29) > 256) {
                                                           const err4 = {
                                                             instancePath:
                                                               instancePath +
@@ -16795,10 +17747,10 @@ function validate33(
                                                         errors++;
                                                       }
                                                     }
-                                                    var _valid1 = _errs61 === errors;
-                                                    valid8 = valid8 || _valid1;
-                                                    const _errs63 = errors;
-                                                    if (data24 !== null) {
+                                                    var _valid1 = _errs73 === errors;
+                                                    valid10 = valid10 || _valid1;
+                                                    const _errs75 = errors;
+                                                    if (data29 !== null) {
                                                       const err6 = {
                                                         instancePath:
                                                           instancePath +
@@ -16818,9 +17770,9 @@ function validate33(
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid1 = _errs63 === errors;
-                                                    valid8 = valid8 || _valid1;
-                                                    if (!valid8) {
+                                                    var _valid1 = _errs75 === errors;
+                                                    valid10 = valid10 || _valid1;
+                                                    if (!valid10) {
                                                       const err7 = {
                                                         instancePath:
                                                           instancePath +
@@ -16842,42 +17794,42 @@ function validate33(
                                                       validate33.errors = vErrors;
                                                       return false;
                                                     } else {
-                                                      errors = _errs60;
+                                                      errors = _errs72;
                                                       if (vErrors !== null) {
-                                                        if (_errs60) {
-                                                          vErrors.length = _errs60;
+                                                        if (_errs72) {
+                                                          vErrors.length = _errs72;
                                                         } else {
                                                           vErrors = null;
                                                         }
                                                       }
                                                     }
-                                                    var valid7 = _errs59 === errors;
+                                                    var valid9 = _errs71 === errors;
                                                   } else {
-                                                    var valid7 = true;
+                                                    var valid9 = true;
                                                   }
-                                                  if (valid7) {
-                                                    if (data20.preimage !== undefined) {
-                                                      let data25 = data20.preimage;
-                                                      const _errs65 = errors;
-                                                      const _errs66 = errors;
-                                                      let valid9 = false;
-                                                      const _errs67 = errors;
-                                                      if (errors === _errs67) {
+                                                  if (valid9) {
+                                                    if (data25.preimage !== undefined) {
+                                                      let data30 = data25.preimage;
+                                                      const _errs77 = errors;
+                                                      const _errs78 = errors;
+                                                      let valid11 = false;
+                                                      const _errs79 = errors;
+                                                      if (errors === _errs79) {
                                                         if (
-                                                          data25 &&
-                                                          typeof data25 == 'object' &&
-                                                          !Array.isArray(data25)
+                                                          data30 &&
+                                                          typeof data30 == 'object' &&
+                                                          !Array.isArray(data30)
                                                         ) {
-                                                          let missing6;
+                                                          let missing8;
                                                           if (
-                                                            (data25.id === undefined &&
-                                                              (missing6 = 'id')) ||
-                                                            (data25.mediaType === undefined &&
-                                                              (missing6 = 'mediaType')) ||
-                                                            (data25.size === undefined &&
-                                                              (missing6 = 'size')) ||
-                                                            (data25.scope === undefined &&
-                                                              (missing6 = 'scope'))
+                                                            (data30.id === undefined &&
+                                                              (missing8 = 'id')) ||
+                                                            (data30.mediaType === undefined &&
+                                                              (missing8 = 'mediaType')) ||
+                                                            (data30.size === undefined &&
+                                                              (missing8 = 'size')) ||
+                                                            (data30.scope === undefined &&
+                                                              (missing8 = 'scope'))
                                                           ) {
                                                             const err8 = {
                                                               instancePath:
@@ -16888,10 +17840,10 @@ function validate33(
                                                               schemaPath:
                                                                 '#/properties/payload/properties/files/items/properties/preimage/anyOf/0/required',
                                                               keyword: 'required',
-                                                              params: { missingProperty: missing6 },
+                                                              params: { missingProperty: missing8 },
                                                               message:
                                                                 "must have required property '" +
-                                                                missing6 +
+                                                                missing8 +
                                                                 "'",
                                                             };
                                                             if (vErrors === null) {
@@ -16901,14 +17853,14 @@ function validate33(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            const _errs69 = errors;
-                                                            for (const key6 in data25) {
+                                                            const _errs81 = errors;
+                                                            for (const key8 in data30) {
                                                               if (
                                                                 !(
-                                                                  key6 === 'id' ||
-                                                                  key6 === 'mediaType' ||
-                                                                  key6 === 'size' ||
-                                                                  key6 === 'scope'
+                                                                  key8 === 'id' ||
+                                                                  key8 === 'mediaType' ||
+                                                                  key8 === 'size' ||
+                                                                  key8 === 'scope'
                                                                 )
                                                               ) {
                                                                 const err9 = {
@@ -16921,7 +17873,7 @@ function validate33(
                                                                     '#/properties/payload/properties/files/items/properties/preimage/anyOf/0/additionalProperties',
                                                                   keyword: 'additionalProperties',
                                                                   params: {
-                                                                    additionalProperty: key6,
+                                                                    additionalProperty: key8,
                                                                   },
                                                                   message:
                                                                     'must NOT have additional properties',
@@ -16935,13 +17887,13 @@ function validate33(
                                                                 break;
                                                               }
                                                             }
-                                                            if (_errs69 === errors) {
-                                                              if (data25.id !== undefined) {
-                                                                let data26 = data25.id;
-                                                                const _errs70 = errors;
-                                                                if (errors === _errs70) {
-                                                                  if (typeof data26 === 'string') {
-                                                                    if (func1(data26) > 4096) {
+                                                            if (_errs81 === errors) {
+                                                              if (data30.id !== undefined) {
+                                                                let data31 = data30.id;
+                                                                const _errs82 = errors;
+                                                                if (errors === _errs82) {
+                                                                  if (typeof data31 === 'string') {
+                                                                    if (func1(data31) > 4096) {
                                                                       const err10 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -16962,7 +17914,7 @@ function validate33(
                                                                       }
                                                                       errors++;
                                                                     } else {
-                                                                      if (func1(data26) < 1) {
+                                                                      if (func1(data31) < 1) {
                                                                         const err11 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -17005,17 +17957,17 @@ function validate33(
                                                                     errors++;
                                                                   }
                                                                 }
-                                                                var valid10 = _errs70 === errors;
+                                                                var valid12 = _errs82 === errors;
                                                               } else {
-                                                                var valid10 = true;
+                                                                var valid12 = true;
                                                               }
-                                                              if (valid10) {
+                                                              if (valid12) {
                                                                 if (
-                                                                  data25.mediaType !== undefined
+                                                                  data30.mediaType !== undefined
                                                                 ) {
-                                                                  let data27 = data25.mediaType;
-                                                                  const _errs72 = errors;
-                                                                  if (typeof data27 !== 'string') {
+                                                                  let data32 = data30.mediaType;
+                                                                  const _errs84 = errors;
+                                                                  if (typeof data32 !== 'string') {
                                                                     const err13 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -17036,7 +17988,7 @@ function validate33(
                                                                     errors++;
                                                                   }
                                                                   if (
-                                                                    data27 !==
+                                                                    data32 !==
                                                                     'application/octet-stream'
                                                                   ) {
                                                                     const err14 = {
@@ -17062,20 +18014,20 @@ function validate33(
                                                                     }
                                                                     errors++;
                                                                   }
-                                                                  var valid10 = _errs72 === errors;
+                                                                  var valid12 = _errs84 === errors;
                                                                 } else {
-                                                                  var valid10 = true;
+                                                                  var valid12 = true;
                                                                 }
-                                                                if (valid10) {
-                                                                  if (data25.size !== undefined) {
-                                                                    let data28 = data25.size;
-                                                                    const _errs74 = errors;
-                                                                    if (errors === _errs74) {
+                                                                if (valid12) {
+                                                                  if (data30.size !== undefined) {
+                                                                    let data33 = data30.size;
+                                                                    const _errs86 = errors;
+                                                                    if (errors === _errs86) {
                                                                       if (
-                                                                        typeof data28 === 'string'
+                                                                        typeof data33 === 'string'
                                                                       ) {
                                                                         if (
-                                                                          !pattern38.test(data28)
+                                                                          !pattern38.test(data33)
                                                                         ) {
                                                                           const err15 = {
                                                                             instancePath:
@@ -17125,33 +18077,33 @@ function validate33(
                                                                         errors++;
                                                                       }
                                                                     }
-                                                                    var valid10 =
-                                                                      _errs74 === errors;
+                                                                    var valid12 =
+                                                                      _errs86 === errors;
                                                                   } else {
-                                                                    var valid10 = true;
+                                                                    var valid12 = true;
                                                                   }
-                                                                  if (valid10) {
+                                                                  if (valid12) {
                                                                     if (
-                                                                      data25.scope !== undefined
+                                                                      data30.scope !== undefined
                                                                     ) {
-                                                                      let data29 = data25.scope;
-                                                                      const _errs76 = errors;
-                                                                      if (errors === _errs76) {
+                                                                      let data34 = data30.scope;
+                                                                      const _errs88 = errors;
+                                                                      if (errors === _errs88) {
                                                                         if (
-                                                                          data29 &&
-                                                                          typeof data29 ==
+                                                                          data34 &&
+                                                                          typeof data34 ==
                                                                             'object' &&
-                                                                          !Array.isArray(data29)
+                                                                          !Array.isArray(data34)
                                                                         ) {
-                                                                          let missing7;
+                                                                          let missing9;
                                                                           if (
-                                                                            (data29.kind ===
+                                                                            (data34.kind ===
                                                                               undefined &&
-                                                                              (missing7 =
+                                                                              (missing9 =
                                                                                 'kind')) ||
-                                                                            (data29.id ===
+                                                                            (data34.id ===
                                                                               undefined &&
-                                                                              (missing7 = 'id'))
+                                                                              (missing9 = 'id'))
                                                                           ) {
                                                                             const err17 = {
                                                                               instancePath:
@@ -17164,11 +18116,11 @@ function validate33(
                                                                               keyword: 'required',
                                                                               params: {
                                                                                 missingProperty:
-                                                                                  missing7,
+                                                                                  missing9,
                                                                               },
                                                                               message:
                                                                                 "must have required property '" +
-                                                                                missing7 +
+                                                                                missing9 +
                                                                                 "'",
                                                                             };
                                                                             if (vErrors === null) {
@@ -17178,12 +18130,12 @@ function validate33(
                                                                             }
                                                                             errors++;
                                                                           } else {
-                                                                            const _errs78 = errors;
-                                                                            for (const key7 in data29) {
+                                                                            const _errs90 = errors;
+                                                                            for (const key9 in data34) {
                                                                               if (
                                                                                 !(
-                                                                                  key7 === 'kind' ||
-                                                                                  key7 === 'id'
+                                                                                  key9 === 'kind' ||
+                                                                                  key9 === 'id'
                                                                                 )
                                                                               ) {
                                                                                 const err18 = {
@@ -17198,7 +18150,7 @@ function validate33(
                                                                                     'additionalProperties',
                                                                                   params: {
                                                                                     additionalProperty:
-                                                                                      key7,
+                                                                                      key9,
                                                                                   },
                                                                                   message:
                                                                                     'must NOT have additional properties',
@@ -17217,18 +18169,18 @@ function validate33(
                                                                               }
                                                                             }
                                                                             if (
-                                                                              _errs78 === errors
+                                                                              _errs90 === errors
                                                                             ) {
                                                                               if (
-                                                                                data29.kind !==
+                                                                                data34.kind !==
                                                                                 undefined
                                                                               ) {
-                                                                                let data30 =
-                                                                                  data29.kind;
-                                                                                const _errs79 =
+                                                                                let data35 =
+                                                                                  data34.kind;
+                                                                                const _errs91 =
                                                                                   errors;
                                                                                 if (
-                                                                                  typeof data30 !==
+                                                                                  typeof data35 !==
                                                                                   'string'
                                                                                 ) {
                                                                                   const err19 = {
@@ -17260,7 +18212,7 @@ function validate33(
                                                                                   errors++;
                                                                                 }
                                                                                 if (
-                                                                                  data30 !==
+                                                                                  data35 !==
                                                                                   'execution'
                                                                                 ) {
                                                                                   const err20 = {
@@ -17293,32 +18245,32 @@ function validate33(
                                                                                   }
                                                                                   errors++;
                                                                                 }
-                                                                                var valid11 =
-                                                                                  _errs79 ===
+                                                                                var valid13 =
+                                                                                  _errs91 ===
                                                                                   errors;
                                                                               } else {
-                                                                                var valid11 = true;
+                                                                                var valid13 = true;
                                                                               }
-                                                                              if (valid11) {
+                                                                              if (valid13) {
                                                                                 if (
-                                                                                  data29.id !==
+                                                                                  data34.id !==
                                                                                   undefined
                                                                                 ) {
-                                                                                  let data31 =
-                                                                                    data29.id;
-                                                                                  const _errs81 =
+                                                                                  let data36 =
+                                                                                    data34.id;
+                                                                                  const _errs93 =
                                                                                     errors;
                                                                                   if (
                                                                                     errors ===
-                                                                                    _errs81
+                                                                                    _errs93
                                                                                   ) {
                                                                                     if (
-                                                                                      typeof data31 ===
+                                                                                      typeof data36 ===
                                                                                       'string'
                                                                                     ) {
                                                                                       if (
                                                                                         !pattern45.test(
-                                                                                          data31,
+                                                                                          data36,
                                                                                         )
                                                                                       ) {
                                                                                         const err21 =
@@ -17388,11 +18340,11 @@ function validate33(
                                                                                       errors++;
                                                                                     }
                                                                                   }
-                                                                                  var valid11 =
-                                                                                    _errs81 ===
+                                                                                  var valid13 =
+                                                                                    _errs93 ===
                                                                                     errors;
                                                                                 } else {
-                                                                                  var valid11 = true;
+                                                                                  var valid13 = true;
                                                                                 }
                                                                               }
                                                                             }
@@ -17421,10 +18373,10 @@ function validate33(
                                                                           errors++;
                                                                         }
                                                                       }
-                                                                      var valid10 =
-                                                                        _errs76 === errors;
+                                                                      var valid12 =
+                                                                        _errs88 === errors;
                                                                     } else {
-                                                                      var valid10 = true;
+                                                                      var valid12 = true;
                                                                     }
                                                                   }
                                                                 }
@@ -17452,10 +18404,10 @@ function validate33(
                                                           errors++;
                                                         }
                                                       }
-                                                      var _valid2 = _errs67 === errors;
-                                                      valid9 = valid9 || _valid2;
-                                                      const _errs83 = errors;
-                                                      if (data25 !== null) {
+                                                      var _valid2 = _errs79 === errors;
+                                                      valid11 = valid11 || _valid2;
+                                                      const _errs95 = errors;
+                                                      if (data30 !== null) {
                                                         const err25 = {
                                                           instancePath:
                                                             instancePath +
@@ -17475,9 +18427,9 @@ function validate33(
                                                         }
                                                         errors++;
                                                       }
-                                                      var _valid2 = _errs83 === errors;
-                                                      valid9 = valid9 || _valid2;
-                                                      if (!valid9) {
+                                                      var _valid2 = _errs95 === errors;
+                                                      valid11 = valid11 || _valid2;
+                                                      if (!valid11) {
                                                         const err26 = {
                                                           instancePath:
                                                             instancePath +
@@ -17499,42 +18451,42 @@ function validate33(
                                                         validate33.errors = vErrors;
                                                         return false;
                                                       } else {
-                                                        errors = _errs66;
+                                                        errors = _errs78;
                                                         if (vErrors !== null) {
-                                                          if (_errs66) {
-                                                            vErrors.length = _errs66;
+                                                          if (_errs78) {
+                                                            vErrors.length = _errs78;
                                                           } else {
                                                             vErrors = null;
                                                           }
                                                         }
                                                       }
-                                                      var valid7 = _errs65 === errors;
+                                                      var valid9 = _errs77 === errors;
                                                     } else {
-                                                      var valid7 = true;
+                                                      var valid9 = true;
                                                     }
-                                                    if (valid7) {
-                                                      if (data20.original !== undefined) {
-                                                        let data32 = data20.original;
-                                                        const _errs85 = errors;
-                                                        const _errs86 = errors;
-                                                        let valid12 = false;
-                                                        const _errs87 = errors;
-                                                        if (errors === _errs87) {
+                                                    if (valid9) {
+                                                      if (data25.original !== undefined) {
+                                                        let data37 = data25.original;
+                                                        const _errs97 = errors;
+                                                        const _errs98 = errors;
+                                                        let valid14 = false;
+                                                        const _errs99 = errors;
+                                                        if (errors === _errs99) {
                                                           if (
-                                                            data32 &&
-                                                            typeof data32 == 'object' &&
-                                                            !Array.isArray(data32)
+                                                            data37 &&
+                                                            typeof data37 == 'object' &&
+                                                            !Array.isArray(data37)
                                                           ) {
-                                                            let missing8;
+                                                            let missing10;
                                                             if (
-                                                              (data32.hash === undefined &&
-                                                                (missing8 = 'hash')) ||
-                                                              (data32.size === undefined &&
-                                                                (missing8 = 'size')) ||
-                                                              (data32.device === undefined &&
-                                                                (missing8 = 'device')) ||
-                                                              (data32.inode === undefined &&
-                                                                (missing8 = 'inode'))
+                                                              (data37.hash === undefined &&
+                                                                (missing10 = 'hash')) ||
+                                                              (data37.size === undefined &&
+                                                                (missing10 = 'size')) ||
+                                                              (data37.device === undefined &&
+                                                                (missing10 = 'device')) ||
+                                                              (data37.inode === undefined &&
+                                                                (missing10 = 'inode'))
                                                             ) {
                                                               const err27 = {
                                                                 instancePath:
@@ -17546,11 +18498,11 @@ function validate33(
                                                                   '#/properties/payload/properties/files/items/properties/original/anyOf/0/required',
                                                                 keyword: 'required',
                                                                 params: {
-                                                                  missingProperty: missing8,
+                                                                  missingProperty: missing10,
                                                                 },
                                                                 message:
                                                                   "must have required property '" +
-                                                                  missing8 +
+                                                                  missing10 +
                                                                   "'",
                                                               };
                                                               if (vErrors === null) {
@@ -17560,14 +18512,14 @@ function validate33(
                                                               }
                                                               errors++;
                                                             } else {
-                                                              const _errs89 = errors;
-                                                              for (const key8 in data32) {
+                                                              const _errs101 = errors;
+                                                              for (const key10 in data37) {
                                                                 if (
                                                                   !(
-                                                                    key8 === 'hash' ||
-                                                                    key8 === 'size' ||
-                                                                    key8 === 'device' ||
-                                                                    key8 === 'inode'
+                                                                    key10 === 'hash' ||
+                                                                    key10 === 'size' ||
+                                                                    key10 === 'device' ||
+                                                                    key10 === 'inode'
                                                                   )
                                                                 ) {
                                                                   const err28 = {
@@ -17580,7 +18532,7 @@ function validate33(
                                                                       '#/properties/payload/properties/files/items/properties/original/anyOf/0/additionalProperties',
                                                                     keyword: 'additionalProperties',
                                                                     params: {
-                                                                      additionalProperty: key8,
+                                                                      additionalProperty: key10,
                                                                     },
                                                                     message:
                                                                       'must NOT have additional properties',
@@ -17594,15 +18546,15 @@ function validate33(
                                                                   break;
                                                                 }
                                                               }
-                                                              if (_errs89 === errors) {
-                                                                if (data32.hash !== undefined) {
-                                                                  let data33 = data32.hash;
-                                                                  const _errs90 = errors;
-                                                                  if (errors === _errs90) {
+                                                              if (_errs101 === errors) {
+                                                                if (data37.hash !== undefined) {
+                                                                  let data38 = data37.hash;
+                                                                  const _errs102 = errors;
+                                                                  if (errors === _errs102) {
                                                                     if (
-                                                                      typeof data33 === 'string'
+                                                                      typeof data38 === 'string'
                                                                     ) {
-                                                                      if (!pattern9.test(data33)) {
+                                                                      if (!pattern9.test(data38)) {
                                                                         const err29 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -17649,20 +18601,20 @@ function validate33(
                                                                       errors++;
                                                                     }
                                                                   }
-                                                                  var valid13 = _errs90 === errors;
+                                                                  var valid15 = _errs102 === errors;
                                                                 } else {
-                                                                  var valid13 = true;
+                                                                  var valid15 = true;
                                                                 }
-                                                                if (valid13) {
-                                                                  if (data32.size !== undefined) {
-                                                                    let data34 = data32.size;
-                                                                    const _errs92 = errors;
+                                                                if (valid15) {
+                                                                  if (data37.size !== undefined) {
+                                                                    let data39 = data37.size;
+                                                                    const _errs104 = errors;
                                                                     if (
                                                                       !(
-                                                                        typeof data34 == 'number' &&
-                                                                        !(data34 % 1) &&
-                                                                        !isNaN(data34) &&
-                                                                        isFinite(data34)
+                                                                        typeof data39 == 'number' &&
+                                                                        !(data39 % 1) &&
+                                                                        !isNaN(data39) &&
+                                                                        isFinite(data39)
                                                                       )
                                                                     ) {
                                                                       const err31 = {
@@ -17684,15 +18636,15 @@ function validate33(
                                                                       }
                                                                       errors++;
                                                                     }
-                                                                    if (errors === _errs92) {
+                                                                    if (errors === _errs104) {
                                                                       if (
-                                                                        typeof data34 == 'number' &&
-                                                                        isFinite(data34)
+                                                                        typeof data39 == 'number' &&
+                                                                        isFinite(data39)
                                                                       ) {
                                                                         if (
-                                                                          data34 >
+                                                                          data39 >
                                                                             9007199254740991 ||
-                                                                          isNaN(data34)
+                                                                          isNaN(data39)
                                                                         ) {
                                                                           const err32 = {
                                                                             instancePath:
@@ -17718,8 +18670,8 @@ function validate33(
                                                                           errors++;
                                                                         } else {
                                                                           if (
-                                                                            data34 < 0 ||
-                                                                            isNaN(data34)
+                                                                            data39 < 0 ||
+                                                                            isNaN(data39)
                                                                           ) {
                                                                             const err33 = {
                                                                               instancePath:
@@ -17747,23 +18699,23 @@ function validate33(
                                                                         }
                                                                       }
                                                                     }
-                                                                    var valid13 =
-                                                                      _errs92 === errors;
+                                                                    var valid15 =
+                                                                      _errs104 === errors;
                                                                   } else {
-                                                                    var valid13 = true;
+                                                                    var valid15 = true;
                                                                   }
-                                                                  if (valid13) {
+                                                                  if (valid15) {
                                                                     if (
-                                                                      data32.device !== undefined
+                                                                      data37.device !== undefined
                                                                     ) {
-                                                                      let data35 = data32.device;
-                                                                      const _errs94 = errors;
-                                                                      if (errors === _errs94) {
+                                                                      let data40 = data37.device;
+                                                                      const _errs106 = errors;
+                                                                      if (errors === _errs106) {
                                                                         if (
-                                                                          typeof data35 === 'string'
+                                                                          typeof data40 === 'string'
                                                                         ) {
                                                                           if (
-                                                                            !pattern38.test(data35)
+                                                                            !pattern38.test(data40)
                                                                           ) {
                                                                             const err34 = {
                                                                               instancePath:
@@ -17814,25 +18766,25 @@ function validate33(
                                                                           errors++;
                                                                         }
                                                                       }
-                                                                      var valid13 =
-                                                                        _errs94 === errors;
+                                                                      var valid15 =
+                                                                        _errs106 === errors;
                                                                     } else {
-                                                                      var valid13 = true;
+                                                                      var valid15 = true;
                                                                     }
-                                                                    if (valid13) {
+                                                                    if (valid15) {
                                                                       if (
-                                                                        data32.inode !== undefined
+                                                                        data37.inode !== undefined
                                                                       ) {
-                                                                        let data36 = data32.inode;
-                                                                        const _errs96 = errors;
-                                                                        if (errors === _errs96) {
+                                                                        let data41 = data37.inode;
+                                                                        const _errs108 = errors;
+                                                                        if (errors === _errs108) {
                                                                           if (
-                                                                            typeof data36 ===
+                                                                            typeof data41 ===
                                                                             'string'
                                                                           ) {
                                                                             if (
                                                                               !pattern38.test(
-                                                                                data36,
+                                                                                data41,
                                                                               )
                                                                             ) {
                                                                               const err36 = {
@@ -17886,10 +18838,10 @@ function validate33(
                                                                             errors++;
                                                                           }
                                                                         }
-                                                                        var valid13 =
-                                                                          _errs96 === errors;
+                                                                        var valid15 =
+                                                                          _errs108 === errors;
                                                                       } else {
-                                                                        var valid13 = true;
+                                                                        var valid15 = true;
                                                                       }
                                                                     }
                                                                   }
@@ -17917,10 +18869,10 @@ function validate33(
                                                             errors++;
                                                           }
                                                         }
-                                                        var _valid3 = _errs87 === errors;
-                                                        valid12 = valid12 || _valid3;
-                                                        const _errs98 = errors;
-                                                        if (data32 !== null) {
+                                                        var _valid3 = _errs99 === errors;
+                                                        valid14 = valid14 || _valid3;
+                                                        const _errs110 = errors;
+                                                        if (data37 !== null) {
                                                           const err39 = {
                                                             instancePath:
                                                               instancePath +
@@ -17940,9 +18892,9 @@ function validate33(
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid3 = _errs98 === errors;
-                                                        valid12 = valid12 || _valid3;
-                                                        if (!valid12) {
+                                                        var _valid3 = _errs110 === errors;
+                                                        valid14 = valid14 || _valid3;
+                                                        if (!valid14) {
                                                           const err40 = {
                                                             instancePath:
                                                               instancePath +
@@ -17964,42 +18916,42 @@ function validate33(
                                                           validate33.errors = vErrors;
                                                           return false;
                                                         } else {
-                                                          errors = _errs86;
+                                                          errors = _errs98;
                                                           if (vErrors !== null) {
-                                                            if (_errs86) {
-                                                              vErrors.length = _errs86;
+                                                            if (_errs98) {
+                                                              vErrors.length = _errs98;
                                                             } else {
                                                               vErrors = null;
                                                             }
                                                           }
                                                         }
-                                                        var valid7 = _errs85 === errors;
+                                                        var valid9 = _errs97 === errors;
                                                       } else {
-                                                        var valid7 = true;
+                                                        var valid9 = true;
                                                       }
-                                                      if (valid7) {
-                                                        if (data20.expected !== undefined) {
-                                                          let data37 = data20.expected;
-                                                          const _errs100 = errors;
-                                                          const _errs101 = errors;
-                                                          let valid14 = false;
-                                                          const _errs102 = errors;
-                                                          if (errors === _errs102) {
+                                                      if (valid9) {
+                                                        if (data25.expected !== undefined) {
+                                                          let data42 = data25.expected;
+                                                          const _errs112 = errors;
+                                                          const _errs113 = errors;
+                                                          let valid16 = false;
+                                                          const _errs114 = errors;
+                                                          if (errors === _errs114) {
                                                             if (
-                                                              data37 &&
-                                                              typeof data37 == 'object' &&
-                                                              !Array.isArray(data37)
+                                                              data42 &&
+                                                              typeof data42 == 'object' &&
+                                                              !Array.isArray(data42)
                                                             ) {
-                                                              let missing9;
+                                                              let missing11;
                                                               if (
-                                                                (data37.hash === undefined &&
-                                                                  (missing9 = 'hash')) ||
-                                                                (data37.size === undefined &&
-                                                                  (missing9 = 'size')) ||
-                                                                (data37.device === undefined &&
-                                                                  (missing9 = 'device')) ||
-                                                                (data37.inode === undefined &&
-                                                                  (missing9 = 'inode'))
+                                                                (data42.hash === undefined &&
+                                                                  (missing11 = 'hash')) ||
+                                                                (data42.size === undefined &&
+                                                                  (missing11 = 'size')) ||
+                                                                (data42.device === undefined &&
+                                                                  (missing11 = 'device')) ||
+                                                                (data42.inode === undefined &&
+                                                                  (missing11 = 'inode'))
                                                               ) {
                                                                 const err41 = {
                                                                   instancePath:
@@ -18011,11 +18963,11 @@ function validate33(
                                                                     '#/properties/payload/properties/files/items/properties/expected/anyOf/0/required',
                                                                   keyword: 'required',
                                                                   params: {
-                                                                    missingProperty: missing9,
+                                                                    missingProperty: missing11,
                                                                   },
                                                                   message:
                                                                     "must have required property '" +
-                                                                    missing9 +
+                                                                    missing11 +
                                                                     "'",
                                                                 };
                                                                 if (vErrors === null) {
@@ -18025,14 +18977,14 @@ function validate33(
                                                                 }
                                                                 errors++;
                                                               } else {
-                                                                const _errs104 = errors;
-                                                                for (const key9 in data37) {
+                                                                const _errs116 = errors;
+                                                                for (const key11 in data42) {
                                                                   if (
                                                                     !(
-                                                                      key9 === 'hash' ||
-                                                                      key9 === 'size' ||
-                                                                      key9 === 'device' ||
-                                                                      key9 === 'inode'
+                                                                      key11 === 'hash' ||
+                                                                      key11 === 'size' ||
+                                                                      key11 === 'device' ||
+                                                                      key11 === 'inode'
                                                                     )
                                                                   ) {
                                                                     const err42 = {
@@ -18046,7 +18998,7 @@ function validate33(
                                                                       keyword:
                                                                         'additionalProperties',
                                                                       params: {
-                                                                        additionalProperty: key9,
+                                                                        additionalProperty: key11,
                                                                       },
                                                                       message:
                                                                         'must NOT have additional properties',
@@ -18060,16 +19012,16 @@ function validate33(
                                                                     break;
                                                                   }
                                                                 }
-                                                                if (_errs104 === errors) {
-                                                                  if (data37.hash !== undefined) {
-                                                                    let data38 = data37.hash;
-                                                                    const _errs105 = errors;
-                                                                    if (errors === _errs105) {
+                                                                if (_errs116 === errors) {
+                                                                  if (data42.hash !== undefined) {
+                                                                    let data43 = data42.hash;
+                                                                    const _errs117 = errors;
+                                                                    if (errors === _errs117) {
                                                                       if (
-                                                                        typeof data38 === 'string'
+                                                                        typeof data43 === 'string'
                                                                       ) {
                                                                         if (
-                                                                          !pattern9.test(data38)
+                                                                          !pattern9.test(data43)
                                                                         ) {
                                                                           const err43 = {
                                                                             instancePath:
@@ -18119,22 +19071,22 @@ function validate33(
                                                                         errors++;
                                                                       }
                                                                     }
-                                                                    var valid15 =
-                                                                      _errs105 === errors;
+                                                                    var valid17 =
+                                                                      _errs117 === errors;
                                                                   } else {
-                                                                    var valid15 = true;
+                                                                    var valid17 = true;
                                                                   }
-                                                                  if (valid15) {
-                                                                    if (data37.size !== undefined) {
-                                                                      let data39 = data37.size;
-                                                                      const _errs107 = errors;
+                                                                  if (valid17) {
+                                                                    if (data42.size !== undefined) {
+                                                                      let data44 = data42.size;
+                                                                      const _errs119 = errors;
                                                                       if (
                                                                         !(
-                                                                          typeof data39 ==
+                                                                          typeof data44 ==
                                                                             'number' &&
-                                                                          !(data39 % 1) &&
-                                                                          !isNaN(data39) &&
-                                                                          isFinite(data39)
+                                                                          !(data44 % 1) &&
+                                                                          !isNaN(data44) &&
+                                                                          isFinite(data44)
                                                                         )
                                                                       ) {
                                                                         const err45 = {
@@ -18159,16 +19111,16 @@ function validate33(
                                                                         }
                                                                         errors++;
                                                                       }
-                                                                      if (errors === _errs107) {
+                                                                      if (errors === _errs119) {
                                                                         if (
-                                                                          typeof data39 ==
+                                                                          typeof data44 ==
                                                                             'number' &&
-                                                                          isFinite(data39)
+                                                                          isFinite(data44)
                                                                         ) {
                                                                           if (
-                                                                            data39 >
+                                                                            data44 >
                                                                               9007199254740991 ||
-                                                                            isNaN(data39)
+                                                                            isNaN(data44)
                                                                           ) {
                                                                             const err46 = {
                                                                               instancePath:
@@ -18194,8 +19146,8 @@ function validate33(
                                                                             errors++;
                                                                           } else {
                                                                             if (
-                                                                              data39 < 0 ||
-                                                                              isNaN(data39)
+                                                                              data44 < 0 ||
+                                                                              isNaN(data44)
                                                                             ) {
                                                                               const err47 = {
                                                                                 instancePath:
@@ -18225,25 +19177,25 @@ function validate33(
                                                                           }
                                                                         }
                                                                       }
-                                                                      var valid15 =
-                                                                        _errs107 === errors;
+                                                                      var valid17 =
+                                                                        _errs119 === errors;
                                                                     } else {
-                                                                      var valid15 = true;
+                                                                      var valid17 = true;
                                                                     }
-                                                                    if (valid15) {
+                                                                    if (valid17) {
                                                                       if (
-                                                                        data37.device !== undefined
+                                                                        data42.device !== undefined
                                                                       ) {
-                                                                        let data40 = data37.device;
-                                                                        const _errs109 = errors;
-                                                                        if (errors === _errs109) {
+                                                                        let data45 = data42.device;
+                                                                        const _errs121 = errors;
+                                                                        if (errors === _errs121) {
                                                                           if (
-                                                                            typeof data40 ===
+                                                                            typeof data45 ===
                                                                             'string'
                                                                           ) {
                                                                             if (
                                                                               !pattern38.test(
-                                                                                data40,
+                                                                                data45,
                                                                               )
                                                                             ) {
                                                                               const err48 = {
@@ -18297,25 +19249,25 @@ function validate33(
                                                                             errors++;
                                                                           }
                                                                         }
-                                                                        var valid15 =
-                                                                          _errs109 === errors;
+                                                                        var valid17 =
+                                                                          _errs121 === errors;
                                                                       } else {
-                                                                        var valid15 = true;
+                                                                        var valid17 = true;
                                                                       }
-                                                                      if (valid15) {
+                                                                      if (valid17) {
                                                                         if (
-                                                                          data37.inode !== undefined
+                                                                          data42.inode !== undefined
                                                                         ) {
-                                                                          let data41 = data37.inode;
-                                                                          const _errs111 = errors;
-                                                                          if (errors === _errs111) {
+                                                                          let data46 = data42.inode;
+                                                                          const _errs123 = errors;
+                                                                          if (errors === _errs123) {
                                                                             if (
-                                                                              typeof data41 ===
+                                                                              typeof data46 ===
                                                                               'string'
                                                                             ) {
                                                                               if (
                                                                                 !pattern38.test(
-                                                                                  data41,
+                                                                                  data46,
                                                                                 )
                                                                               ) {
                                                                                 const err50 = {
@@ -18374,10 +19326,10 @@ function validate33(
                                                                               errors++;
                                                                             }
                                                                           }
-                                                                          var valid15 =
-                                                                            _errs111 === errors;
+                                                                          var valid17 =
+                                                                            _errs123 === errors;
                                                                         } else {
-                                                                          var valid15 = true;
+                                                                          var valid17 = true;
                                                                         }
                                                                       }
                                                                     }
@@ -18405,10 +19357,10 @@ function validate33(
                                                               errors++;
                                                             }
                                                           }
-                                                          var _valid4 = _errs102 === errors;
-                                                          valid14 = valid14 || _valid4;
-                                                          const _errs113 = errors;
-                                                          if (data37 !== null) {
+                                                          var _valid4 = _errs114 === errors;
+                                                          valid16 = valid16 || _valid4;
+                                                          const _errs125 = errors;
+                                                          if (data42 !== null) {
                                                             const err53 = {
                                                               instancePath:
                                                                 instancePath +
@@ -18428,9 +19380,9 @@ function validate33(
                                                             }
                                                             errors++;
                                                           }
-                                                          var _valid4 = _errs113 === errors;
-                                                          valid14 = valid14 || _valid4;
-                                                          if (!valid14) {
+                                                          var _valid4 = _errs125 === errors;
+                                                          valid16 = valid16 || _valid4;
+                                                          if (!valid16) {
                                                             const err54 = {
                                                               instancePath:
                                                                 instancePath +
@@ -18453,44 +19405,44 @@ function validate33(
                                                             validate33.errors = vErrors;
                                                             return false;
                                                           } else {
-                                                            errors = _errs101;
+                                                            errors = _errs113;
                                                             if (vErrors !== null) {
-                                                              if (_errs101) {
-                                                                vErrors.length = _errs101;
+                                                              if (_errs113) {
+                                                                vErrors.length = _errs113;
                                                               } else {
                                                                 vErrors = null;
                                                               }
                                                             }
                                                           }
-                                                          var valid7 = _errs100 === errors;
+                                                          var valid9 = _errs112 === errors;
                                                         } else {
-                                                          var valid7 = true;
+                                                          var valid9 = true;
                                                         }
-                                                        if (valid7) {
-                                                          if (data20.textChange !== undefined) {
-                                                            let data42 = data20.textChange;
-                                                            const _errs115 = errors;
-                                                            const _errs116 = errors;
-                                                            let valid16 = false;
-                                                            const _errs117 = errors;
-                                                            if (errors === _errs117) {
+                                                        if (valid9) {
+                                                          if (data25.textChange !== undefined) {
+                                                            let data47 = data25.textChange;
+                                                            const _errs127 = errors;
+                                                            const _errs128 = errors;
+                                                            let valid18 = false;
+                                                            const _errs129 = errors;
+                                                            if (errors === _errs129) {
                                                               if (
-                                                                data42 &&
-                                                                typeof data42 == 'object' &&
-                                                                !Array.isArray(data42)
+                                                                data47 &&
+                                                                typeof data47 == 'object' &&
+                                                                !Array.isArray(data47)
                                                               ) {
-                                                                let missing10;
+                                                                let missing12;
                                                                 if (
-                                                                  (data42.addedLines ===
+                                                                  (data47.addedLines ===
                                                                     undefined &&
-                                                                    (missing10 = 'addedLines')) ||
-                                                                  (data42.removedLines ===
+                                                                    (missing12 = 'addedLines')) ||
+                                                                  (data47.removedLines ===
                                                                     undefined &&
-                                                                    (missing10 = 'removedLines')) ||
-                                                                  (data42.preview === undefined &&
-                                                                    (missing10 = 'preview')) ||
-                                                                  (data42.truncated === undefined &&
-                                                                    (missing10 = 'truncated'))
+                                                                    (missing12 = 'removedLines')) ||
+                                                                  (data47.preview === undefined &&
+                                                                    (missing12 = 'preview')) ||
+                                                                  (data47.truncated === undefined &&
+                                                                    (missing12 = 'truncated'))
                                                                 ) {
                                                                   const err55 = {
                                                                     instancePath:
@@ -18502,11 +19454,11 @@ function validate33(
                                                                       '#/properties/payload/properties/files/items/properties/textChange/anyOf/0/required',
                                                                     keyword: 'required',
                                                                     params: {
-                                                                      missingProperty: missing10,
+                                                                      missingProperty: missing12,
                                                                     },
                                                                     message:
                                                                       "must have required property '" +
-                                                                      missing10 +
+                                                                      missing12 +
                                                                       "'",
                                                                   };
                                                                   if (vErrors === null) {
@@ -18516,14 +19468,14 @@ function validate33(
                                                                   }
                                                                   errors++;
                                                                 } else {
-                                                                  const _errs119 = errors;
-                                                                  for (const key10 in data42) {
+                                                                  const _errs131 = errors;
+                                                                  for (const key12 in data47) {
                                                                     if (
                                                                       !(
-                                                                        key10 === 'addedLines' ||
-                                                                        key10 === 'removedLines' ||
-                                                                        key10 === 'preview' ||
-                                                                        key10 === 'truncated'
+                                                                        key12 === 'addedLines' ||
+                                                                        key12 === 'removedLines' ||
+                                                                        key12 === 'preview' ||
+                                                                        key12 === 'truncated'
                                                                       )
                                                                     ) {
                                                                       const err56 = {
@@ -18537,7 +19489,7 @@ function validate33(
                                                                         keyword:
                                                                           'additionalProperties',
                                                                         params: {
-                                                                          additionalProperty: key10,
+                                                                          additionalProperty: key12,
                                                                         },
                                                                         message:
                                                                           'must NOT have additional properties',
@@ -18551,21 +19503,21 @@ function validate33(
                                                                       break;
                                                                     }
                                                                   }
-                                                                  if (_errs119 === errors) {
+                                                                  if (_errs131 === errors) {
                                                                     if (
-                                                                      data42.addedLines !==
+                                                                      data47.addedLines !==
                                                                       undefined
                                                                     ) {
-                                                                      let data43 =
-                                                                        data42.addedLines;
-                                                                      const _errs120 = errors;
+                                                                      let data48 =
+                                                                        data47.addedLines;
+                                                                      const _errs132 = errors;
                                                                       if (
                                                                         !(
-                                                                          typeof data43 ==
+                                                                          typeof data48 ==
                                                                             'number' &&
-                                                                          !(data43 % 1) &&
-                                                                          !isNaN(data43) &&
-                                                                          isFinite(data43)
+                                                                          !(data48 % 1) &&
+                                                                          !isNaN(data48) &&
+                                                                          isFinite(data48)
                                                                         )
                                                                       ) {
                                                                         const err57 = {
@@ -18590,16 +19542,16 @@ function validate33(
                                                                         }
                                                                         errors++;
                                                                       }
-                                                                      if (errors === _errs120) {
+                                                                      if (errors === _errs132) {
                                                                         if (
-                                                                          typeof data43 ==
+                                                                          typeof data48 ==
                                                                             'number' &&
-                                                                          isFinite(data43)
+                                                                          isFinite(data48)
                                                                         ) {
                                                                           if (
-                                                                            data43 >
+                                                                            data48 >
                                                                               9007199254740991 ||
-                                                                            isNaN(data43)
+                                                                            isNaN(data48)
                                                                           ) {
                                                                             const err58 = {
                                                                               instancePath:
@@ -18625,8 +19577,8 @@ function validate33(
                                                                             errors++;
                                                                           } else {
                                                                             if (
-                                                                              data43 < 0 ||
-                                                                              isNaN(data43)
+                                                                              data48 < 0 ||
+                                                                              isNaN(data48)
                                                                             ) {
                                                                               const err59 = {
                                                                                 instancePath:
@@ -18656,26 +19608,26 @@ function validate33(
                                                                           }
                                                                         }
                                                                       }
-                                                                      var valid17 =
-                                                                        _errs120 === errors;
+                                                                      var valid19 =
+                                                                        _errs132 === errors;
                                                                     } else {
-                                                                      var valid17 = true;
+                                                                      var valid19 = true;
                                                                     }
-                                                                    if (valid17) {
+                                                                    if (valid19) {
                                                                       if (
-                                                                        data42.removedLines !==
+                                                                        data47.removedLines !==
                                                                         undefined
                                                                       ) {
-                                                                        let data44 =
-                                                                          data42.removedLines;
-                                                                        const _errs122 = errors;
+                                                                        let data49 =
+                                                                          data47.removedLines;
+                                                                        const _errs134 = errors;
                                                                         if (
                                                                           !(
-                                                                            typeof data44 ==
+                                                                            typeof data49 ==
                                                                               'number' &&
-                                                                            !(data44 % 1) &&
-                                                                            !isNaN(data44) &&
-                                                                            isFinite(data44)
+                                                                            !(data49 % 1) &&
+                                                                            !isNaN(data49) &&
+                                                                            isFinite(data49)
                                                                           )
                                                                         ) {
                                                                           const err60 = {
@@ -18700,16 +19652,16 @@ function validate33(
                                                                           }
                                                                           errors++;
                                                                         }
-                                                                        if (errors === _errs122) {
+                                                                        if (errors === _errs134) {
                                                                           if (
-                                                                            typeof data44 ==
+                                                                            typeof data49 ==
                                                                               'number' &&
-                                                                            isFinite(data44)
+                                                                            isFinite(data49)
                                                                           ) {
                                                                             if (
-                                                                              data44 >
+                                                                              data49 >
                                                                                 9007199254740991 ||
-                                                                              isNaN(data44)
+                                                                              isNaN(data49)
                                                                             ) {
                                                                               const err61 = {
                                                                                 instancePath:
@@ -18737,8 +19689,8 @@ function validate33(
                                                                               errors++;
                                                                             } else {
                                                                               if (
-                                                                                data44 < 0 ||
-                                                                                isNaN(data44)
+                                                                                data49 < 0 ||
+                                                                                isNaN(data49)
                                                                               ) {
                                                                                 const err62 = {
                                                                                   instancePath:
@@ -18772,26 +19724,26 @@ function validate33(
                                                                             }
                                                                           }
                                                                         }
-                                                                        var valid17 =
-                                                                          _errs122 === errors;
+                                                                        var valid19 =
+                                                                          _errs134 === errors;
                                                                       } else {
-                                                                        var valid17 = true;
+                                                                        var valid19 = true;
                                                                       }
-                                                                      if (valid17) {
+                                                                      if (valid19) {
                                                                         if (
-                                                                          data42.preview !==
+                                                                          data47.preview !==
                                                                           undefined
                                                                         ) {
-                                                                          let data45 =
-                                                                            data42.preview;
-                                                                          const _errs124 = errors;
-                                                                          if (errors === _errs124) {
+                                                                          let data50 =
+                                                                            data47.preview;
+                                                                          const _errs136 = errors;
+                                                                          if (errors === _errs136) {
                                                                             if (
-                                                                              typeof data45 ===
+                                                                              typeof data50 ===
                                                                               'string'
                                                                             ) {
                                                                               if (
-                                                                                func1(data45) >
+                                                                                func1(data50) >
                                                                                 65536
                                                                               ) {
                                                                                 const err63 = {
@@ -18847,19 +19799,19 @@ function validate33(
                                                                               errors++;
                                                                             }
                                                                           }
-                                                                          var valid17 =
-                                                                            _errs124 === errors;
+                                                                          var valid19 =
+                                                                            _errs136 === errors;
                                                                         } else {
-                                                                          var valid17 = true;
+                                                                          var valid19 = true;
                                                                         }
-                                                                        if (valid17) {
+                                                                        if (valid19) {
                                                                           if (
-                                                                            data42.truncated !==
+                                                                            data47.truncated !==
                                                                             undefined
                                                                           ) {
-                                                                            const _errs126 = errors;
+                                                                            const _errs138 = errors;
                                                                             if (
-                                                                              typeof data42.truncated !==
+                                                                              typeof data47.truncated !==
                                                                               'boolean'
                                                                             ) {
                                                                               const err65 = {
@@ -18886,10 +19838,10 @@ function validate33(
                                                                               }
                                                                               errors++;
                                                                             }
-                                                                            var valid17 =
-                                                                              _errs126 === errors;
+                                                                            var valid19 =
+                                                                              _errs138 === errors;
                                                                           } else {
-                                                                            var valid17 = true;
+                                                                            var valid19 = true;
                                                                           }
                                                                         }
                                                                       }
@@ -18917,10 +19869,10 @@ function validate33(
                                                                 errors++;
                                                               }
                                                             }
-                                                            var _valid5 = _errs117 === errors;
-                                                            valid16 = valid16 || _valid5;
-                                                            const _errs128 = errors;
-                                                            if (data42 !== null) {
+                                                            var _valid5 = _errs129 === errors;
+                                                            valid18 = valid18 || _valid5;
+                                                            const _errs140 = errors;
+                                                            if (data47 !== null) {
                                                               const err67 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -18940,9 +19892,9 @@ function validate33(
                                                               }
                                                               errors++;
                                                             }
-                                                            var _valid5 = _errs128 === errors;
-                                                            valid16 = valid16 || _valid5;
-                                                            if (!valid16) {
+                                                            var _valid5 = _errs140 === errors;
+                                                            valid18 = valid18 || _valid5;
+                                                            if (!valid18) {
                                                               const err68 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -18965,18 +19917,18 @@ function validate33(
                                                               validate33.errors = vErrors;
                                                               return false;
                                                             } else {
-                                                              errors = _errs116;
+                                                              errors = _errs128;
                                                               if (vErrors !== null) {
-                                                                if (_errs116) {
-                                                                  vErrors.length = _errs116;
+                                                                if (_errs128) {
+                                                                  vErrors.length = _errs128;
                                                                 } else {
                                                                   vErrors = null;
                                                                 }
                                                               }
                                                             }
-                                                            var valid7 = _errs115 === errors;
+                                                            var valid9 = _errs127 === errors;
                                                           } else {
-                                                            var valid7 = true;
+                                                            var valid9 = true;
                                                           }
                                                         }
                                                       }
@@ -19001,8 +19953,8 @@ function validate33(
                                         return false;
                                       }
                                     }
-                                    var valid6 = _errs50 === errors;
-                                    if (!valid6) {
+                                    var valid8 = _errs62 === errors;
+                                    if (!valid8) {
                                       break;
                                     }
                                   }
@@ -19019,7 +19971,7 @@ function validate33(
                                   return false;
                                 }
                               }
-                              var valid1 = _errs48 === errors;
+                              var valid1 = _errs60 === errors;
                             } else {
                               var valid1 = true;
                             }
@@ -27730,6 +28682,23 @@ var schema46 = {
           properties: {
             storeId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
             workspaceId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
+            executionRoot: {
+              type: 'object',
+              properties: {
+                epoch: { type: 'string', maxLength: 19, pattern: '^(0|[1-9][0-9]*)$' },
+                identity: {
+                  type: 'object',
+                  properties: {
+                    device: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+                    inode: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
+                  },
+                  required: ['device', 'inode'],
+                  additionalProperties: false,
+                },
+              },
+              required: ['epoch', 'identity'],
+              additionalProperties: false,
+            },
             sessionId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
             runId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
             contextSelectionId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
@@ -28221,42 +29190,336 @@ function validate35(
                                             var valid2 = true;
                                           }
                                           if (valid2) {
-                                            if (data6.sessionId !== undefined) {
-                                              let data9 = data6.sessionId;
+                                            if (data6.executionRoot !== undefined) {
+                                              let data9 = data6.executionRoot;
                                               const _errs22 = errors;
                                               if (errors === _errs22) {
-                                                if (typeof data9 === 'string') {
-                                                  if (!pattern45.test(data9)) {
+                                                if (
+                                                  data9 &&
+                                                  typeof data9 == 'object' &&
+                                                  !Array.isArray(data9)
+                                                ) {
+                                                  let missing3;
+                                                  if (
+                                                    (data9.epoch === undefined &&
+                                                      (missing3 = 'epoch')) ||
+                                                    (data9.identity === undefined &&
+                                                      (missing3 = 'identity'))
+                                                  ) {
                                                     validate35.errors = [
                                                       {
                                                         instancePath:
                                                           instancePath +
-                                                          '/checkpoint/boundary/sessionId',
+                                                          '/checkpoint/boundary/executionRoot',
                                                         schemaPath:
-                                                          '#/properties/checkpoint/properties/boundary/properties/sessionId/pattern',
-                                                        keyword: 'pattern',
-                                                        params: {
-                                                          pattern: '^[A-Za-z0-9_-]{1,128}$',
-                                                        },
+                                                          '#/properties/checkpoint/properties/boundary/properties/executionRoot/required',
+                                                        keyword: 'required',
+                                                        params: { missingProperty: missing3 },
                                                         message:
-                                                          'must match pattern "' +
-                                                          '^[A-Za-z0-9_-]{1,128}$' +
-                                                          '"',
+                                                          "must have required property '" +
+                                                          missing3 +
+                                                          "'",
                                                       },
                                                     ];
                                                     return false;
+                                                  } else {
+                                                    const _errs24 = errors;
+                                                    for (const key3 in data9) {
+                                                      if (
+                                                        !(key3 === 'epoch' || key3 === 'identity')
+                                                      ) {
+                                                        validate35.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/checkpoint/boundary/executionRoot',
+                                                            schemaPath:
+                                                              '#/properties/checkpoint/properties/boundary/properties/executionRoot/additionalProperties',
+                                                            keyword: 'additionalProperties',
+                                                            params: { additionalProperty: key3 },
+                                                            message:
+                                                              'must NOT have additional properties',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                        break;
+                                                      }
+                                                    }
+                                                    if (_errs24 === errors) {
+                                                      if (data9.epoch !== undefined) {
+                                                        let data10 = data9.epoch;
+                                                        const _errs25 = errors;
+                                                        if (errors === _errs25) {
+                                                          if (typeof data10 === 'string') {
+                                                            if (func1(data10) > 19) {
+                                                              validate35.errors = [
+                                                                {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/checkpoint/boundary/executionRoot/epoch',
+                                                                  schemaPath:
+                                                                    '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/maxLength',
+                                                                  keyword: 'maxLength',
+                                                                  params: { limit: 19 },
+                                                                  message:
+                                                                    'must NOT have more than 19 characters',
+                                                                },
+                                                              ];
+                                                              return false;
+                                                            } else {
+                                                              if (!pattern38.test(data10)) {
+                                                                validate35.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/checkpoint/boundary/executionRoot/epoch',
+                                                                    schemaPath:
+                                                                      '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/pattern',
+                                                                    keyword: 'pattern',
+                                                                    params: {
+                                                                      pattern: '^(0|[1-9][0-9]*)$',
+                                                                    },
+                                                                    message:
+                                                                      'must match pattern "' +
+                                                                      '^(0|[1-9][0-9]*)$' +
+                                                                      '"',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
+                                                            }
+                                                          } else {
+                                                            validate35.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/checkpoint/boundary/executionRoot/epoch',
+                                                                schemaPath:
+                                                                  '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/epoch/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'string' },
+                                                                message: 'must be string',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                        }
+                                                        var valid3 = _errs25 === errors;
+                                                      } else {
+                                                        var valid3 = true;
+                                                      }
+                                                      if (valid3) {
+                                                        if (data9.identity !== undefined) {
+                                                          let data11 = data9.identity;
+                                                          const _errs27 = errors;
+                                                          if (errors === _errs27) {
+                                                            if (
+                                                              data11 &&
+                                                              typeof data11 == 'object' &&
+                                                              !Array.isArray(data11)
+                                                            ) {
+                                                              let missing4;
+                                                              if (
+                                                                (data11.device === undefined &&
+                                                                  (missing4 = 'device')) ||
+                                                                (data11.inode === undefined &&
+                                                                  (missing4 = 'inode'))
+                                                              ) {
+                                                                validate35.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/checkpoint/boundary/executionRoot/identity',
+                                                                    schemaPath:
+                                                                      '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/required',
+                                                                    keyword: 'required',
+                                                                    params: {
+                                                                      missingProperty: missing4,
+                                                                    },
+                                                                    message:
+                                                                      "must have required property '" +
+                                                                      missing4 +
+                                                                      "'",
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              } else {
+                                                                const _errs29 = errors;
+                                                                for (const key4 in data11) {
+                                                                  if (
+                                                                    !(
+                                                                      key4 === 'device' ||
+                                                                      key4 === 'inode'
+                                                                    )
+                                                                  ) {
+                                                                    validate35.errors = [
+                                                                      {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/checkpoint/boundary/executionRoot/identity',
+                                                                        schemaPath:
+                                                                          '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/additionalProperties',
+                                                                        keyword:
+                                                                          'additionalProperties',
+                                                                        params: {
+                                                                          additionalProperty: key4,
+                                                                        },
+                                                                        message:
+                                                                          'must NOT have additional properties',
+                                                                      },
+                                                                    ];
+                                                                    return false;
+                                                                    break;
+                                                                  }
+                                                                }
+                                                                if (_errs29 === errors) {
+                                                                  if (data11.device !== undefined) {
+                                                                    let data12 = data11.device;
+                                                                    const _errs30 = errors;
+                                                                    if (errors === _errs30) {
+                                                                      if (
+                                                                        typeof data12 === 'string'
+                                                                      ) {
+                                                                        if (
+                                                                          !pattern38.test(data12)
+                                                                        ) {
+                                                                          validate35.errors = [
+                                                                            {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/checkpoint/boundary/executionRoot/identity/device',
+                                                                              schemaPath:
+                                                                                '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/device/pattern',
+                                                                              keyword: 'pattern',
+                                                                              params: {
+                                                                                pattern:
+                                                                                  '^(0|[1-9][0-9]*)$',
+                                                                              },
+                                                                              message:
+                                                                                'must match pattern "' +
+                                                                                '^(0|[1-9][0-9]*)$' +
+                                                                                '"',
+                                                                            },
+                                                                          ];
+                                                                          return false;
+                                                                        }
+                                                                      } else {
+                                                                        validate35.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/checkpoint/boundary/executionRoot/identity/device',
+                                                                            schemaPath:
+                                                                              '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/device/type',
+                                                                            keyword: 'type',
+                                                                            params: {
+                                                                              type: 'string',
+                                                                            },
+                                                                            message:
+                                                                              'must be string',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                    }
+                                                                    var valid4 = _errs30 === errors;
+                                                                  } else {
+                                                                    var valid4 = true;
+                                                                  }
+                                                                  if (valid4) {
+                                                                    if (
+                                                                      data11.inode !== undefined
+                                                                    ) {
+                                                                      let data13 = data11.inode;
+                                                                      const _errs32 = errors;
+                                                                      if (errors === _errs32) {
+                                                                        if (
+                                                                          typeof data13 === 'string'
+                                                                        ) {
+                                                                          if (
+                                                                            !pattern38.test(data13)
+                                                                          ) {
+                                                                            validate35.errors = [
+                                                                              {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/checkpoint/boundary/executionRoot/identity/inode',
+                                                                                schemaPath:
+                                                                                  '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/inode/pattern',
+                                                                                keyword: 'pattern',
+                                                                                params: {
+                                                                                  pattern:
+                                                                                    '^(0|[1-9][0-9]*)$',
+                                                                                },
+                                                                                message:
+                                                                                  'must match pattern "' +
+                                                                                  '^(0|[1-9][0-9]*)$' +
+                                                                                  '"',
+                                                                              },
+                                                                            ];
+                                                                            return false;
+                                                                          }
+                                                                        } else {
+                                                                          validate35.errors = [
+                                                                            {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/checkpoint/boundary/executionRoot/identity/inode',
+                                                                              schemaPath:
+                                                                                '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/properties/inode/type',
+                                                                              keyword: 'type',
+                                                                              params: {
+                                                                                type: 'string',
+                                                                              },
+                                                                              message:
+                                                                                'must be string',
+                                                                            },
+                                                                          ];
+                                                                          return false;
+                                                                        }
+                                                                      }
+                                                                      var valid4 =
+                                                                        _errs32 === errors;
+                                                                    } else {
+                                                                      var valid4 = true;
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            } else {
+                                                              validate35.errors = [
+                                                                {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/checkpoint/boundary/executionRoot/identity',
+                                                                  schemaPath:
+                                                                    '#/properties/checkpoint/properties/boundary/properties/executionRoot/properties/identity/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'object' },
+                                                                  message: 'must be object',
+                                                                },
+                                                              ];
+                                                              return false;
+                                                            }
+                                                          }
+                                                          var valid3 = _errs27 === errors;
+                                                        } else {
+                                                          var valid3 = true;
+                                                        }
+                                                      }
+                                                    }
                                                   }
                                                 } else {
                                                   validate35.errors = [
                                                     {
                                                       instancePath:
                                                         instancePath +
-                                                        '/checkpoint/boundary/sessionId',
+                                                        '/checkpoint/boundary/executionRoot',
                                                       schemaPath:
-                                                        '#/properties/checkpoint/properties/boundary/properties/sessionId/type',
+                                                        '#/properties/checkpoint/properties/boundary/properties/executionRoot/type',
                                                       keyword: 'type',
-                                                      params: { type: 'string' },
-                                                      message: 'must be string',
+                                                      params: { type: 'object' },
+                                                      message: 'must be object',
                                                     },
                                                   ];
                                                   return false;
@@ -28267,19 +29530,19 @@ function validate35(
                                               var valid2 = true;
                                             }
                                             if (valid2) {
-                                              if (data6.runId !== undefined) {
-                                                let data10 = data6.runId;
-                                                const _errs24 = errors;
-                                                if (errors === _errs24) {
-                                                  if (typeof data10 === 'string') {
-                                                    if (!pattern45.test(data10)) {
+                                              if (data6.sessionId !== undefined) {
+                                                let data14 = data6.sessionId;
+                                                const _errs34 = errors;
+                                                if (errors === _errs34) {
+                                                  if (typeof data14 === 'string') {
+                                                    if (!pattern45.test(data14)) {
                                                       validate35.errors = [
                                                         {
                                                           instancePath:
                                                             instancePath +
-                                                            '/checkpoint/boundary/runId',
+                                                            '/checkpoint/boundary/sessionId',
                                                           schemaPath:
-                                                            '#/properties/checkpoint/properties/boundary/properties/runId/pattern',
+                                                            '#/properties/checkpoint/properties/boundary/properties/sessionId/pattern',
                                                           keyword: 'pattern',
                                                           params: {
                                                             pattern: '^[A-Za-z0-9_-]{1,128}$',
@@ -28297,9 +29560,9 @@ function validate35(
                                                       {
                                                         instancePath:
                                                           instancePath +
-                                                          '/checkpoint/boundary/runId',
+                                                          '/checkpoint/boundary/sessionId',
                                                         schemaPath:
-                                                          '#/properties/checkpoint/properties/boundary/properties/runId/type',
+                                                          '#/properties/checkpoint/properties/boundary/properties/sessionId/type',
                                                         keyword: 'type',
                                                         params: { type: 'string' },
                                                         message: 'must be string',
@@ -28308,24 +29571,24 @@ function validate35(
                                                     return false;
                                                   }
                                                 }
-                                                var valid2 = _errs24 === errors;
+                                                var valid2 = _errs34 === errors;
                                               } else {
                                                 var valid2 = true;
                                               }
                                               if (valid2) {
-                                                if (data6.contextSelectionId !== undefined) {
-                                                  let data11 = data6.contextSelectionId;
-                                                  const _errs26 = errors;
-                                                  if (errors === _errs26) {
-                                                    if (typeof data11 === 'string') {
-                                                      if (!pattern45.test(data11)) {
+                                                if (data6.runId !== undefined) {
+                                                  let data15 = data6.runId;
+                                                  const _errs36 = errors;
+                                                  if (errors === _errs36) {
+                                                    if (typeof data15 === 'string') {
+                                                      if (!pattern45.test(data15)) {
                                                         validate35.errors = [
                                                           {
                                                             instancePath:
                                                               instancePath +
-                                                              '/checkpoint/boundary/contextSelectionId',
+                                                              '/checkpoint/boundary/runId',
                                                             schemaPath:
-                                                              '#/properties/checkpoint/properties/boundary/properties/contextSelectionId/pattern',
+                                                              '#/properties/checkpoint/properties/boundary/properties/runId/pattern',
                                                             keyword: 'pattern',
                                                             params: {
                                                               pattern: '^[A-Za-z0-9_-]{1,128}$',
@@ -28343,9 +29606,9 @@ function validate35(
                                                         {
                                                           instancePath:
                                                             instancePath +
-                                                            '/checkpoint/boundary/contextSelectionId',
+                                                            '/checkpoint/boundary/runId',
                                                           schemaPath:
-                                                            '#/properties/checkpoint/properties/boundary/properties/contextSelectionId/type',
+                                                            '#/properties/checkpoint/properties/boundary/properties/runId/type',
                                                           keyword: 'type',
                                                           params: { type: 'string' },
                                                           message: 'must be string',
@@ -28354,215 +29617,214 @@ function validate35(
                                                       return false;
                                                     }
                                                   }
-                                                  var valid2 = _errs26 === errors;
+                                                  var valid2 = _errs36 === errors;
                                                 } else {
                                                   var valid2 = true;
                                                 }
                                                 if (valid2) {
-                                                  if (data6.messageId !== undefined) {
-                                                    let data12 = data6.messageId;
-                                                    const _errs28 = errors;
-                                                    const _errs29 = errors;
-                                                    let valid3 = false;
-                                                    const _errs30 = errors;
-                                                    if (errors === _errs30) {
-                                                      if (typeof data12 === 'string') {
-                                                        if (!pattern45.test(data12)) {
-                                                          const err0 = {
+                                                  if (data6.contextSelectionId !== undefined) {
+                                                    let data16 = data6.contextSelectionId;
+                                                    const _errs38 = errors;
+                                                    if (errors === _errs38) {
+                                                      if (typeof data16 === 'string') {
+                                                        if (!pattern45.test(data16)) {
+                                                          validate35.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/checkpoint/boundary/contextSelectionId',
+                                                              schemaPath:
+                                                                '#/properties/checkpoint/properties/boundary/properties/contextSelectionId/pattern',
+                                                              keyword: 'pattern',
+                                                              params: {
+                                                                pattern: '^[A-Za-z0-9_-]{1,128}$',
+                                                              },
+                                                              message:
+                                                                'must match pattern "' +
+                                                                '^[A-Za-z0-9_-]{1,128}$' +
+                                                                '"',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                      } else {
+                                                        validate35.errors = [
+                                                          {
                                                             instancePath:
                                                               instancePath +
-                                                              '/checkpoint/boundary/messageId',
+                                                              '/checkpoint/boundary/contextSelectionId',
                                                             schemaPath:
-                                                              '#/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/pattern',
-                                                            keyword: 'pattern',
-                                                            params: {
-                                                              pattern: '^[A-Za-z0-9_-]{1,128}$',
-                                                            },
-                                                            message:
-                                                              'must match pattern "' +
-                                                              '^[A-Za-z0-9_-]{1,128}$' +
-                                                              '"',
-                                                          };
-                                                          if (vErrors === null) {
-                                                            vErrors = [err0];
-                                                          } else {
-                                                            vErrors.push(err0);
-                                                          }
-                                                          errors++;
-                                                        }
-                                                      } else {
-                                                        const err1 = {
-                                                          instancePath:
-                                                            instancePath +
-                                                            '/checkpoint/boundary/messageId',
-                                                          schemaPath:
-                                                            '#/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/type',
-                                                          keyword: 'type',
-                                                          params: { type: 'string' },
-                                                          message: 'must be string',
-                                                        };
-                                                        if (vErrors === null) {
-                                                          vErrors = [err1];
-                                                        } else {
-                                                          vErrors.push(err1);
-                                                        }
-                                                        errors++;
+                                                              '#/properties/checkpoint/properties/boundary/properties/contextSelectionId/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'string' },
+                                                            message: 'must be string',
+                                                          },
+                                                        ];
+                                                        return false;
                                                       }
                                                     }
-                                                    var _valid0 = _errs30 === errors;
-                                                    valid3 = valid3 || _valid0;
-                                                    const _errs32 = errors;
-                                                    if (data12 !== null) {
-                                                      const err2 = {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/checkpoint/boundary/messageId',
-                                                        schemaPath:
-                                                          '#/properties/checkpoint/properties/boundary/properties/messageId/anyOf/1/type',
-                                                        keyword: 'type',
-                                                        params: { type: 'null' },
-                                                        message: 'must be null',
-                                                      };
-                                                      if (vErrors === null) {
-                                                        vErrors = [err2];
-                                                      } else {
-                                                        vErrors.push(err2);
-                                                      }
-                                                      errors++;
-                                                    }
-                                                    var _valid0 = _errs32 === errors;
-                                                    valid3 = valid3 || _valid0;
-                                                    if (!valid3) {
-                                                      const err3 = {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/checkpoint/boundary/messageId',
-                                                        schemaPath:
-                                                          '#/properties/checkpoint/properties/boundary/properties/messageId/anyOf',
-                                                        keyword: 'anyOf',
-                                                        params: {},
-                                                        message: 'must match a schema in anyOf',
-                                                      };
-                                                      if (vErrors === null) {
-                                                        vErrors = [err3];
-                                                      } else {
-                                                        vErrors.push(err3);
-                                                      }
-                                                      errors++;
-                                                      validate35.errors = vErrors;
-                                                      return false;
-                                                    } else {
-                                                      errors = _errs29;
-                                                      if (vErrors !== null) {
-                                                        if (_errs29) {
-                                                          vErrors.length = _errs29;
-                                                        } else {
-                                                          vErrors = null;
-                                                        }
-                                                      }
-                                                    }
-                                                    var valid2 = _errs28 === errors;
+                                                    var valid2 = _errs38 === errors;
                                                   } else {
                                                     var valid2 = true;
                                                   }
                                                   if (valid2) {
-                                                    if (data6.messageSeq !== undefined) {
-                                                      let data13 = data6.messageSeq;
-                                                      const _errs34 = errors;
-                                                      if (errors === _errs34) {
-                                                        if (typeof data13 === 'string') {
-                                                          if (func1(data13) > 19) {
-                                                            validate35.errors = [
-                                                              {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/checkpoint/boundary/messageSeq',
-                                                                schemaPath:
-                                                                  '#/properties/checkpoint/properties/boundary/properties/messageSeq/maxLength',
-                                                                keyword: 'maxLength',
-                                                                params: { limit: 19 },
-                                                                message:
-                                                                  'must NOT have more than 19 characters',
+                                                    if (data6.messageId !== undefined) {
+                                                      let data17 = data6.messageId;
+                                                      const _errs40 = errors;
+                                                      const _errs41 = errors;
+                                                      let valid5 = false;
+                                                      const _errs42 = errors;
+                                                      if (errors === _errs42) {
+                                                        if (typeof data17 === 'string') {
+                                                          if (!pattern45.test(data17)) {
+                                                            const err0 = {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/checkpoint/boundary/messageId',
+                                                              schemaPath:
+                                                                '#/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/pattern',
+                                                              keyword: 'pattern',
+                                                              params: {
+                                                                pattern: '^[A-Za-z0-9_-]{1,128}$',
                                                               },
-                                                            ];
-                                                            return false;
+                                                              message:
+                                                                'must match pattern "' +
+                                                                '^[A-Za-z0-9_-]{1,128}$' +
+                                                                '"',
+                                                            };
+                                                            if (vErrors === null) {
+                                                              vErrors = [err0];
+                                                            } else {
+                                                              vErrors.push(err0);
+                                                            }
+                                                            errors++;
+                                                          }
+                                                        } else {
+                                                          const err1 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/checkpoint/boundary/messageId',
+                                                            schemaPath:
+                                                              '#/properties/checkpoint/properties/boundary/properties/messageId/anyOf/0/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'string' },
+                                                            message: 'must be string',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err1];
                                                           } else {
-                                                            if (!pattern38.test(data13)) {
+                                                            vErrors.push(err1);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                      }
+                                                      var _valid0 = _errs42 === errors;
+                                                      valid5 = valid5 || _valid0;
+                                                      const _errs44 = errors;
+                                                      if (data17 !== null) {
+                                                        const err2 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/checkpoint/boundary/messageId',
+                                                          schemaPath:
+                                                            '#/properties/checkpoint/properties/boundary/properties/messageId/anyOf/1/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'null' },
+                                                          message: 'must be null',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err2];
+                                                        } else {
+                                                          vErrors.push(err2);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      var _valid0 = _errs44 === errors;
+                                                      valid5 = valid5 || _valid0;
+                                                      if (!valid5) {
+                                                        const err3 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/checkpoint/boundary/messageId',
+                                                          schemaPath:
+                                                            '#/properties/checkpoint/properties/boundary/properties/messageId/anyOf',
+                                                          keyword: 'anyOf',
+                                                          params: {},
+                                                          message: 'must match a schema in anyOf',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err3];
+                                                        } else {
+                                                          vErrors.push(err3);
+                                                        }
+                                                        errors++;
+                                                        validate35.errors = vErrors;
+                                                        return false;
+                                                      } else {
+                                                        errors = _errs41;
+                                                        if (vErrors !== null) {
+                                                          if (_errs41) {
+                                                            vErrors.length = _errs41;
+                                                          } else {
+                                                            vErrors = null;
+                                                          }
+                                                        }
+                                                      }
+                                                      var valid2 = _errs40 === errors;
+                                                    } else {
+                                                      var valid2 = true;
+                                                    }
+                                                    if (valid2) {
+                                                      if (data6.messageSeq !== undefined) {
+                                                        let data18 = data6.messageSeq;
+                                                        const _errs46 = errors;
+                                                        if (errors === _errs46) {
+                                                          if (typeof data18 === 'string') {
+                                                            if (func1(data18) > 19) {
                                                               validate35.errors = [
                                                                 {
                                                                   instancePath:
                                                                     instancePath +
                                                                     '/checkpoint/boundary/messageSeq',
                                                                   schemaPath:
-                                                                    '#/properties/checkpoint/properties/boundary/properties/messageSeq/pattern',
-                                                                  keyword: 'pattern',
-                                                                  params: {
-                                                                    pattern: '^(0|[1-9][0-9]*)$',
-                                                                  },
+                                                                    '#/properties/checkpoint/properties/boundary/properties/messageSeq/maxLength',
+                                                                  keyword: 'maxLength',
+                                                                  params: { limit: 19 },
                                                                   message:
-                                                                    'must match pattern "' +
-                                                                    '^(0|[1-9][0-9]*)$' +
-                                                                    '"',
+                                                                    'must NOT have more than 19 characters',
                                                                 },
                                                               ];
                                                               return false;
-                                                            }
-                                                          }
-                                                        } else {
-                                                          validate35.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/checkpoint/boundary/messageSeq',
-                                                              schemaPath:
-                                                                '#/properties/checkpoint/properties/boundary/properties/messageSeq/type',
-                                                              keyword: 'type',
-                                                              params: { type: 'string' },
-                                                              message: 'must be string',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        }
-                                                      }
-                                                      var valid2 = _errs34 === errors;
-                                                    } else {
-                                                      var valid2 = true;
-                                                    }
-                                                    if (valid2) {
-                                                      if (data6.triggerMessageId !== undefined) {
-                                                        let data14 = data6.triggerMessageId;
-                                                        const _errs36 = errors;
-                                                        if (errors === _errs36) {
-                                                          if (typeof data14 === 'string') {
-                                                            if (!pattern45.test(data14)) {
-                                                              validate35.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/checkpoint/boundary/triggerMessageId',
-                                                                  schemaPath:
-                                                                    '#/properties/checkpoint/properties/boundary/properties/triggerMessageId/pattern',
-                                                                  keyword: 'pattern',
-                                                                  params: {
-                                                                    pattern:
-                                                                      '^[A-Za-z0-9_-]{1,128}$',
+                                                            } else {
+                                                              if (!pattern38.test(data18)) {
+                                                                validate35.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/checkpoint/boundary/messageSeq',
+                                                                    schemaPath:
+                                                                      '#/properties/checkpoint/properties/boundary/properties/messageSeq/pattern',
+                                                                    keyword: 'pattern',
+                                                                    params: {
+                                                                      pattern: '^(0|[1-9][0-9]*)$',
+                                                                    },
+                                                                    message:
+                                                                      'must match pattern "' +
+                                                                      '^(0|[1-9][0-9]*)$' +
+                                                                      '"',
                                                                   },
-                                                                  message:
-                                                                    'must match pattern "' +
-                                                                    '^[A-Za-z0-9_-]{1,128}$' +
-                                                                    '"',
-                                                                },
-                                                              ];
-                                                              return false;
+                                                                ];
+                                                                return false;
+                                                              }
                                                             }
                                                           } else {
                                                             validate35.errors = [
                                                               {
                                                                 instancePath:
                                                                   instancePath +
-                                                                  '/checkpoint/boundary/triggerMessageId',
+                                                                  '/checkpoint/boundary/messageSeq',
                                                                 schemaPath:
-                                                                  '#/properties/checkpoint/properties/boundary/properties/triggerMessageId/type',
+                                                                  '#/properties/checkpoint/properties/boundary/properties/messageSeq/type',
                                                                 keyword: 'type',
                                                                 params: { type: 'string' },
                                                                 message: 'must be string',
@@ -28571,62 +29833,45 @@ function validate35(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid2 = _errs36 === errors;
+                                                        var valid2 = _errs46 === errors;
                                                       } else {
                                                         var valid2 = true;
                                                       }
                                                       if (valid2) {
-                                                        if (data6.triggerSeq !== undefined) {
-                                                          let data15 = data6.triggerSeq;
-                                                          const _errs38 = errors;
-                                                          if (errors === _errs38) {
-                                                            if (typeof data15 === 'string') {
-                                                              if (func1(data15) > 19) {
+                                                        if (data6.triggerMessageId !== undefined) {
+                                                          let data19 = data6.triggerMessageId;
+                                                          const _errs48 = errors;
+                                                          if (errors === _errs48) {
+                                                            if (typeof data19 === 'string') {
+                                                              if (!pattern45.test(data19)) {
                                                                 validate35.errors = [
                                                                   {
                                                                     instancePath:
                                                                       instancePath +
-                                                                      '/checkpoint/boundary/triggerSeq',
+                                                                      '/checkpoint/boundary/triggerMessageId',
                                                                     schemaPath:
-                                                                      '#/properties/checkpoint/properties/boundary/properties/triggerSeq/maxLength',
-                                                                    keyword: 'maxLength',
-                                                                    params: { limit: 19 },
+                                                                      '#/properties/checkpoint/properties/boundary/properties/triggerMessageId/pattern',
+                                                                    keyword: 'pattern',
+                                                                    params: {
+                                                                      pattern:
+                                                                        '^[A-Za-z0-9_-]{1,128}$',
+                                                                    },
                                                                     message:
-                                                                      'must NOT have more than 19 characters',
+                                                                      'must match pattern "' +
+                                                                      '^[A-Za-z0-9_-]{1,128}$' +
+                                                                      '"',
                                                                   },
                                                                 ];
                                                                 return false;
-                                                              } else {
-                                                                if (!pattern38.test(data15)) {
-                                                                  validate35.errors = [
-                                                                    {
-                                                                      instancePath:
-                                                                        instancePath +
-                                                                        '/checkpoint/boundary/triggerSeq',
-                                                                      schemaPath:
-                                                                        '#/properties/checkpoint/properties/boundary/properties/triggerSeq/pattern',
-                                                                      keyword: 'pattern',
-                                                                      params: {
-                                                                        pattern:
-                                                                          '^(0|[1-9][0-9]*)$',
-                                                                      },
-                                                                      message:
-                                                                        'must match pattern "' +
-                                                                        '^(0|[1-9][0-9]*)$' +
-                                                                        '"',
-                                                                    },
-                                                                  ];
-                                                                  return false;
-                                                                }
                                                               }
                                                             } else {
                                                               validate35.errors = [
                                                                 {
                                                                   instancePath:
                                                                     instancePath +
-                                                                    '/checkpoint/boundary/triggerSeq',
+                                                                    '/checkpoint/boundary/triggerMessageId',
                                                                   schemaPath:
-                                                                    '#/properties/checkpoint/properties/boundary/properties/triggerSeq/type',
+                                                                    '#/properties/checkpoint/properties/boundary/properties/triggerMessageId/type',
                                                                   keyword: 'type',
                                                                   params: { type: 'string' },
                                                                   message: 'must be string',
@@ -28635,9 +29880,74 @@ function validate35(
                                                               return false;
                                                             }
                                                           }
-                                                          var valid2 = _errs38 === errors;
+                                                          var valid2 = _errs48 === errors;
                                                         } else {
                                                           var valid2 = true;
+                                                        }
+                                                        if (valid2) {
+                                                          if (data6.triggerSeq !== undefined) {
+                                                            let data20 = data6.triggerSeq;
+                                                            const _errs50 = errors;
+                                                            if (errors === _errs50) {
+                                                              if (typeof data20 === 'string') {
+                                                                if (func1(data20) > 19) {
+                                                                  validate35.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/checkpoint/boundary/triggerSeq',
+                                                                      schemaPath:
+                                                                        '#/properties/checkpoint/properties/boundary/properties/triggerSeq/maxLength',
+                                                                      keyword: 'maxLength',
+                                                                      params: { limit: 19 },
+                                                                      message:
+                                                                        'must NOT have more than 19 characters',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                } else {
+                                                                  if (!pattern38.test(data20)) {
+                                                                    validate35.errors = [
+                                                                      {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/checkpoint/boundary/triggerSeq',
+                                                                        schemaPath:
+                                                                          '#/properties/checkpoint/properties/boundary/properties/triggerSeq/pattern',
+                                                                        keyword: 'pattern',
+                                                                        params: {
+                                                                          pattern:
+                                                                            '^(0|[1-9][0-9]*)$',
+                                                                        },
+                                                                        message:
+                                                                          'must match pattern "' +
+                                                                          '^(0|[1-9][0-9]*)$' +
+                                                                          '"',
+                                                                      },
+                                                                    ];
+                                                                    return false;
+                                                                  }
+                                                                }
+                                                              } else {
+                                                                validate35.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/checkpoint/boundary/triggerSeq',
+                                                                    schemaPath:
+                                                                      '#/properties/checkpoint/properties/boundary/properties/triggerSeq/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
+                                                            }
+                                                            var valid2 = _errs50 === errors;
+                                                          } else {
+                                                            var valid2 = true;
+                                                          }
                                                         }
                                                       }
                                                     }
@@ -28669,18 +29979,18 @@ function validate35(
                               }
                               if (valid1) {
                                 if (data4.workspace !== undefined) {
-                                  let data16 = data4.workspace;
-                                  const _errs40 = errors;
-                                  if (errors === _errs40) {
+                                  let data21 = data4.workspace;
+                                  const _errs52 = errors;
+                                  if (errors === _errs52) {
                                     if (
-                                      data16 &&
-                                      typeof data16 == 'object' &&
-                                      !Array.isArray(data16)
+                                      data21 &&
+                                      typeof data21 == 'object' &&
+                                      !Array.isArray(data21)
                                     ) {
-                                      let missing3;
+                                      let missing5;
                                       if (
-                                        (data16.device === undefined && (missing3 = 'device')) ||
-                                        (data16.inode === undefined && (missing3 = 'inode'))
+                                        (data21.device === undefined && (missing5 = 'device')) ||
+                                        (data21.inode === undefined && (missing5 = 'inode'))
                                       ) {
                                         validate35.errors = [
                                           {
@@ -28688,16 +29998,16 @@ function validate35(
                                             schemaPath:
                                               '#/properties/checkpoint/properties/workspace/required',
                                             keyword: 'required',
-                                            params: { missingProperty: missing3 },
+                                            params: { missingProperty: missing5 },
                                             message:
-                                              "must have required property '" + missing3 + "'",
+                                              "must have required property '" + missing5 + "'",
                                           },
                                         ];
                                         return false;
                                       } else {
-                                        const _errs42 = errors;
-                                        for (const key3 in data16) {
-                                          if (!(key3 === 'device' || key3 === 'inode')) {
+                                        const _errs54 = errors;
+                                        for (const key5 in data21) {
+                                          if (!(key5 === 'device' || key5 === 'inode')) {
                                             validate35.errors = [
                                               {
                                                 instancePath:
@@ -28705,7 +30015,7 @@ function validate35(
                                                 schemaPath:
                                                   '#/properties/checkpoint/properties/workspace/additionalProperties',
                                                 keyword: 'additionalProperties',
-                                                params: { additionalProperty: key3 },
+                                                params: { additionalProperty: key5 },
                                                 message: 'must NOT have additional properties',
                                               },
                                             ];
@@ -28713,13 +30023,13 @@ function validate35(
                                             break;
                                           }
                                         }
-                                        if (_errs42 === errors) {
-                                          if (data16.device !== undefined) {
-                                            let data17 = data16.device;
-                                            const _errs43 = errors;
-                                            if (errors === _errs43) {
-                                              if (typeof data17 === 'string') {
-                                                if (!pattern38.test(data17)) {
+                                        if (_errs54 === errors) {
+                                          if (data21.device !== undefined) {
+                                            let data22 = data21.device;
+                                            const _errs55 = errors;
+                                            if (errors === _errs55) {
+                                              if (typeof data22 === 'string') {
+                                                if (!pattern38.test(data22)) {
                                                   validate35.errors = [
                                                     {
                                                       instancePath:
@@ -28752,17 +30062,17 @@ function validate35(
                                                 return false;
                                               }
                                             }
-                                            var valid4 = _errs43 === errors;
+                                            var valid6 = _errs55 === errors;
                                           } else {
-                                            var valid4 = true;
+                                            var valid6 = true;
                                           }
-                                          if (valid4) {
-                                            if (data16.inode !== undefined) {
-                                              let data18 = data16.inode;
-                                              const _errs45 = errors;
-                                              if (errors === _errs45) {
-                                                if (typeof data18 === 'string') {
-                                                  if (!pattern38.test(data18)) {
+                                          if (valid6) {
+                                            if (data21.inode !== undefined) {
+                                              let data23 = data21.inode;
+                                              const _errs57 = errors;
+                                              if (errors === _errs57) {
+                                                if (typeof data23 === 'string') {
+                                                  if (!pattern38.test(data23)) {
                                                     validate35.errors = [
                                                       {
                                                         instancePath:
@@ -28796,9 +30106,9 @@ function validate35(
                                                   return false;
                                                 }
                                               }
-                                              var valid4 = _errs45 === errors;
+                                              var valid6 = _errs57 === errors;
                                             } else {
-                                              var valid4 = true;
+                                              var valid6 = true;
                                             }
                                           }
                                         }
@@ -28817,7 +30127,7 @@ function validate35(
                                       return false;
                                     }
                                   }
-                                  var valid1 = _errs40 === errors;
+                                  var valid1 = _errs52 === errors;
                                 } else {
                                   var valid1 = true;
                                 }
@@ -28844,24 +30154,24 @@ function validate35(
                   }
                   if (valid0) {
                     if (data.boundary !== undefined) {
-                      let data19 = data.boundary;
-                      const _errs47 = errors;
-                      const _errs48 = errors;
-                      let valid5 = false;
-                      const _errs49 = errors;
-                      if (errors === _errs49) {
-                        if (data19 && typeof data19 == 'object' && !Array.isArray(data19)) {
-                          let missing4;
+                      let data24 = data.boundary;
+                      const _errs59 = errors;
+                      const _errs60 = errors;
+                      let valid7 = false;
+                      const _errs61 = errors;
+                      if (errors === _errs61) {
+                        if (data24 && typeof data24 == 'object' && !Array.isArray(data24)) {
+                          let missing6;
                           if (
-                            (data19.messageId === undefined && (missing4 = 'messageId')) ||
-                            (data19.seq === undefined && (missing4 = 'seq'))
+                            (data24.messageId === undefined && (missing6 = 'messageId')) ||
+                            (data24.seq === undefined && (missing6 = 'seq'))
                           ) {
                             const err4 = {
                               instancePath: instancePath + '/boundary',
                               schemaPath: '#/properties/boundary/anyOf/0/required',
                               keyword: 'required',
-                              params: { missingProperty: missing4 },
-                              message: "must have required property '" + missing4 + "'",
+                              params: { missingProperty: missing6 },
+                              message: "must have required property '" + missing6 + "'",
                             };
                             if (vErrors === null) {
                               vErrors = [err4];
@@ -28870,14 +30180,14 @@ function validate35(
                             }
                             errors++;
                           } else {
-                            const _errs51 = errors;
-                            for (const key4 in data19) {
-                              if (!(key4 === 'messageId' || key4 === 'seq')) {
+                            const _errs63 = errors;
+                            for (const key6 in data24) {
+                              if (!(key6 === 'messageId' || key6 === 'seq')) {
                                 const err5 = {
                                   instancePath: instancePath + '/boundary',
                                   schemaPath: '#/properties/boundary/anyOf/0/additionalProperties',
                                   keyword: 'additionalProperties',
-                                  params: { additionalProperty: key4 },
+                                  params: { additionalProperty: key6 },
                                   message: 'must NOT have additional properties',
                                 };
                                 if (vErrors === null) {
@@ -28889,13 +30199,13 @@ function validate35(
                                 break;
                               }
                             }
-                            if (_errs51 === errors) {
-                              if (data19.messageId !== undefined) {
-                                let data20 = data19.messageId;
-                                const _errs52 = errors;
-                                if (errors === _errs52) {
-                                  if (typeof data20 === 'string') {
-                                    if (!pattern45.test(data20)) {
+                            if (_errs63 === errors) {
+                              if (data24.messageId !== undefined) {
+                                let data25 = data24.messageId;
+                                const _errs64 = errors;
+                                if (errors === _errs64) {
+                                  if (typeof data25 === 'string') {
+                                    if (!pattern45.test(data25)) {
                                       const err6 = {
                                         instancePath: instancePath + '/boundary/messageId',
                                         schemaPath:
@@ -28929,17 +30239,17 @@ function validate35(
                                     errors++;
                                   }
                                 }
-                                var valid6 = _errs52 === errors;
+                                var valid8 = _errs64 === errors;
                               } else {
-                                var valid6 = true;
+                                var valid8 = true;
                               }
-                              if (valid6) {
-                                if (data19.seq !== undefined) {
-                                  let data21 = data19.seq;
-                                  const _errs54 = errors;
-                                  if (errors === _errs54) {
-                                    if (typeof data21 === 'string') {
-                                      if (func1(data21) > 19) {
+                              if (valid8) {
+                                if (data24.seq !== undefined) {
+                                  let data26 = data24.seq;
+                                  const _errs66 = errors;
+                                  if (errors === _errs66) {
+                                    if (typeof data26 === 'string') {
+                                      if (func1(data26) > 19) {
                                         const err8 = {
                                           instancePath: instancePath + '/boundary/seq',
                                           schemaPath:
@@ -28955,7 +30265,7 @@ function validate35(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern38.test(data21)) {
+                                        if (!pattern38.test(data26)) {
                                           const err9 = {
                                             instancePath: instancePath + '/boundary/seq',
                                             schemaPath:
@@ -28990,9 +30300,9 @@ function validate35(
                                       errors++;
                                     }
                                   }
-                                  var valid6 = _errs54 === errors;
+                                  var valid8 = _errs66 === errors;
                                 } else {
-                                  var valid6 = true;
+                                  var valid8 = true;
                                 }
                               }
                             }
@@ -29013,10 +30323,10 @@ function validate35(
                           errors++;
                         }
                       }
-                      var _valid1 = _errs49 === errors;
-                      valid5 = valid5 || _valid1;
-                      const _errs56 = errors;
-                      if (data19 !== null) {
+                      var _valid1 = _errs61 === errors;
+                      valid7 = valid7 || _valid1;
+                      const _errs68 = errors;
+                      if (data24 !== null) {
                         const err12 = {
                           instancePath: instancePath + '/boundary',
                           schemaPath: '#/properties/boundary/anyOf/1/type',
@@ -29031,9 +30341,9 @@ function validate35(
                         }
                         errors++;
                       }
-                      var _valid1 = _errs56 === errors;
-                      valid5 = valid5 || _valid1;
-                      if (!valid5) {
+                      var _valid1 = _errs68 === errors;
+                      valid7 = valid7 || _valid1;
+                      if (!valid7) {
                         const err13 = {
                           instancePath: instancePath + '/boundary',
                           schemaPath: '#/properties/boundary/anyOf',
@@ -29050,50 +30360,50 @@ function validate35(
                         validate35.errors = vErrors;
                         return false;
                       } else {
-                        errors = _errs48;
+                        errors = _errs60;
                         if (vErrors !== null) {
-                          if (_errs48) {
-                            vErrors.length = _errs48;
+                          if (_errs60) {
+                            vErrors.length = _errs60;
                           } else {
                             vErrors = null;
                           }
                         }
                       }
-                      var valid0 = _errs47 === errors;
+                      var valid0 = _errs59 === errors;
                     } else {
                       var valid0 = true;
                     }
                     if (valid0) {
                       if (data.trigger !== undefined) {
-                        let data22 = data.trigger;
-                        const _errs58 = errors;
-                        if (errors === _errs58) {
-                          if (data22 && typeof data22 == 'object' && !Array.isArray(data22)) {
-                            let missing5;
+                        let data27 = data.trigger;
+                        const _errs70 = errors;
+                        if (errors === _errs70) {
+                          if (data27 && typeof data27 == 'object' && !Array.isArray(data27)) {
+                            let missing7;
                             if (
-                              (data22.messageId === undefined && (missing5 = 'messageId')) ||
-                              (data22.seq === undefined && (missing5 = 'seq'))
+                              (data27.messageId === undefined && (missing7 = 'messageId')) ||
+                              (data27.seq === undefined && (missing7 = 'seq'))
                             ) {
                               validate35.errors = [
                                 {
                                   instancePath: instancePath + '/trigger',
                                   schemaPath: '#/properties/trigger/required',
                                   keyword: 'required',
-                                  params: { missingProperty: missing5 },
-                                  message: "must have required property '" + missing5 + "'",
+                                  params: { missingProperty: missing7 },
+                                  message: "must have required property '" + missing7 + "'",
                                 },
                               ];
                               return false;
                             } else {
-                              const _errs60 = errors;
-                              for (const key5 in data22) {
-                                if (!(key5 === 'messageId' || key5 === 'seq')) {
+                              const _errs72 = errors;
+                              for (const key7 in data27) {
+                                if (!(key7 === 'messageId' || key7 === 'seq')) {
                                   validate35.errors = [
                                     {
                                       instancePath: instancePath + '/trigger',
                                       schemaPath: '#/properties/trigger/additionalProperties',
                                       keyword: 'additionalProperties',
-                                      params: { additionalProperty: key5 },
+                                      params: { additionalProperty: key7 },
                                       message: 'must NOT have additional properties',
                                     },
                                   ];
@@ -29101,13 +30411,13 @@ function validate35(
                                   break;
                                 }
                               }
-                              if (_errs60 === errors) {
-                                if (data22.messageId !== undefined) {
-                                  let data23 = data22.messageId;
-                                  const _errs61 = errors;
-                                  if (errors === _errs61) {
-                                    if (typeof data23 === 'string') {
-                                      if (!pattern45.test(data23)) {
+                              if (_errs72 === errors) {
+                                if (data27.messageId !== undefined) {
+                                  let data28 = data27.messageId;
+                                  const _errs73 = errors;
+                                  if (errors === _errs73) {
+                                    if (typeof data28 === 'string') {
+                                      if (!pattern45.test(data28)) {
                                         validate35.errors = [
                                           {
                                             instancePath: instancePath + '/trigger/messageId',
@@ -29137,17 +30447,17 @@ function validate35(
                                       return false;
                                     }
                                   }
-                                  var valid7 = _errs61 === errors;
+                                  var valid9 = _errs73 === errors;
                                 } else {
-                                  var valid7 = true;
+                                  var valid9 = true;
                                 }
-                                if (valid7) {
-                                  if (data22.seq !== undefined) {
-                                    let data24 = data22.seq;
-                                    const _errs63 = errors;
-                                    if (errors === _errs63) {
-                                      if (typeof data24 === 'string') {
-                                        if (func1(data24) > 19) {
+                                if (valid9) {
+                                  if (data27.seq !== undefined) {
+                                    let data29 = data27.seq;
+                                    const _errs75 = errors;
+                                    if (errors === _errs75) {
+                                      if (typeof data29 === 'string') {
+                                        if (func1(data29) > 19) {
                                           validate35.errors = [
                                             {
                                               instancePath: instancePath + '/trigger/seq',
@@ -29160,7 +30470,7 @@ function validate35(
                                           ];
                                           return false;
                                         } else {
-                                          if (!pattern38.test(data24)) {
+                                          if (!pattern38.test(data29)) {
                                             validate35.errors = [
                                               {
                                                 instancePath: instancePath + '/trigger/seq',
@@ -29190,9 +30500,9 @@ function validate35(
                                         return false;
                                       }
                                     }
-                                    var valid7 = _errs63 === errors;
+                                    var valid9 = _errs75 === errors;
                                   } else {
-                                    var valid7 = true;
+                                    var valid9 = true;
                                   }
                                 }
                               }
@@ -29210,7 +30520,7 @@ function validate35(
                             return false;
                           }
                         }
-                        var valid0 = _errs58 === errors;
+                        var valid0 = _errs70 === errors;
                       } else {
                         var valid0 = true;
                       }
@@ -29425,9 +30735,9 @@ var schema47 = {
   ],
   additionalProperties: false,
 };
-var pattern152 = new RegExp('^builtin\\.files\\/checkpoint\\/[a-f0-9]{64}\\/point$', 'u');
-var pattern153 = new RegExp('^[a-z][a-z0-9_.]{0,127}$', 'u');
-var pattern155 = new RegExp('^[A-Za-z0-9@][A-Za-z0-9_.:@/-]{0,127}$', 'u');
+var pattern161 = new RegExp('^builtin\\.files\\/checkpoint\\/[a-f0-9]{64}\\/point$', 'u');
+var pattern162 = new RegExp('^[a-z][a-z0-9_.]{0,127}$', 'u');
+var pattern164 = new RegExp('^[A-Za-z0-9@][A-Za-z0-9_.:@/-]{0,127}$', 'u');
 function validate36(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -30048,7 +31358,7 @@ function validate36(
                                               const _errs31 = errors;
                                               if (errors === _errs31) {
                                                 if (typeof data10 === 'string') {
-                                                  if (!pattern152.test(data10)) {
+                                                  if (!pattern161.test(data10)) {
                                                     const err7 = {
                                                       instancePath:
                                                         instancePath +
@@ -30132,7 +31442,7 @@ function validate36(
                                                 const _errs33 = errors;
                                                 if (errors === _errs33) {
                                                   if (typeof data11 === 'string') {
-                                                    if (!pattern153.test(data11)) {
+                                                    if (!pattern162.test(data11)) {
                                                       validate36.errors = [
                                                         {
                                                           instancePath:
@@ -30749,7 +32059,7 @@ function validate36(
                                                                           typeof data19 === 'string'
                                                                         ) {
                                                                           if (
-                                                                            !pattern155.test(data19)
+                                                                            !pattern164.test(data19)
                                                                           ) {
                                                                             validate36.errors = [
                                                                               {
@@ -30813,7 +32123,7 @@ function validate36(
                                                                             'string'
                                                                           ) {
                                                                             if (
-                                                                              !pattern155.test(
+                                                                              !pattern164.test(
                                                                                 data20,
                                                                               )
                                                                             ) {
@@ -36263,7 +37573,7 @@ var schema88 = {
 };
 var schema91 = { type: 'string', enum: ['verified_origin', 'legacy_local'] };
 var schema227 = { type: 'string', enum: ['stdout', 'stderr', 'progress', 'gap'] };
-var pattern172 = new RegExp('^te_[a-f0-9]{64}$', 'u');
+var pattern181 = new RegExp('^te_[a-f0-9]{64}$', 'u');
 function validate40(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -39069,7 +40379,7 @@ function validate39(
               const _errs11 = errors;
               if (errors === _errs11) {
                 if (typeof data2 === 'string') {
-                  if (!pattern172.test(data2)) {
+                  if (!pattern181.test(data2)) {
                     const err5 = {
                       instancePath: instancePath + '/eventId',
                       schemaPath: '#/$defs/__schema6/pattern',
@@ -41365,7 +42675,7 @@ function validate39(
               const _errs119 = errors;
               if (errors === _errs119) {
                 if (typeof data38 === 'string') {
-                  if (!pattern172.test(data38)) {
+                  if (!pattern181.test(data38)) {
                     const err92 = {
                       instancePath: instancePath + '/eventId',
                       schemaPath: '#/$defs/__schema6/pattern',
@@ -43060,7 +44370,7 @@ function validate39(
                 const _errs210 = errors;
                 if (errors === _errs210) {
                   if (typeof data67 === 'string') {
-                    if (!pattern172.test(data67)) {
+                    if (!pattern181.test(data67)) {
                       const err165 = {
                         instancePath: instancePath + '/eventId',
                         schemaPath: '#/$defs/__schema6/pattern',
@@ -44887,7 +46197,7 @@ function validate39(
                   const _errs307 = errors;
                   if (errors === _errs307) {
                     if (typeof data98 === 'string') {
-                      if (!pattern172.test(data98)) {
+                      if (!pattern181.test(data98)) {
                         const err241 = {
                           instancePath: instancePath + '/eventId',
                           schemaPath: '#/$defs/__schema6/pattern',
@@ -48505,7 +49815,7 @@ function validate39(
                     const _errs447 = errors;
                     if (errors === _errs447) {
                       if (typeof data144 === 'string') {
-                        if (!pattern172.test(data144)) {
+                        if (!pattern181.test(data144)) {
                           const err351 = {
                             instancePath: instancePath + '/eventId',
                             schemaPath: '#/$defs/__schema6/pattern',
@@ -51177,7 +52487,7 @@ function validate39(
                       const _errs566 = errors;
                       if (errors === _errs566) {
                         if (typeof data183 === 'string') {
-                          if (!pattern172.test(data183)) {
+                          if (!pattern181.test(data183)) {
                             const err441 = {
                               instancePath: instancePath + '/eventId',
                               schemaPath: '#/$defs/__schema6/pattern',
@@ -54095,7 +55405,7 @@ function validate39(
                         const _errs689 = errors;
                         if (errors === _errs689) {
                           if (typeof data224 === 'string') {
-                            if (!pattern172.test(data224)) {
+                            if (!pattern181.test(data224)) {
                               const err535 = {
                                 instancePath: instancePath + '/eventId',
                                 schemaPath: '#/$defs/__schema6/pattern',
@@ -56090,7 +57400,7 @@ function validate39(
                           const _errs783 = errors;
                           if (errors === _errs783) {
                             if (typeof data254 === 'string') {
-                              if (!pattern172.test(data254)) {
+                              if (!pattern181.test(data254)) {
                                 const err610 = {
                                   instancePath: instancePath + '/eventId',
                                   schemaPath: '#/$defs/__schema6/pattern',
@@ -58203,7 +59513,7 @@ function validate39(
                             const _errs878 = errors;
                             if (errors === _errs878) {
                               if (typeof data284 === 'string') {
-                                if (!pattern172.test(data284)) {
+                                if (!pattern181.test(data284)) {
                                   const err687 = {
                                     instancePath: instancePath + '/eventId',
                                     schemaPath: '#/$defs/__schema6/pattern',
@@ -60411,7 +61721,7 @@ function validate39(
                               const _errs976 = errors;
                               if (errors === _errs976) {
                                 if (typeof data316 === 'string') {
-                                  if (!pattern172.test(data316)) {
+                                  if (!pattern181.test(data316)) {
                                     const err764 = {
                                       instancePath: instancePath + '/eventId',
                                       schemaPath: '#/$defs/__schema6/pattern',
@@ -62252,7 +63562,7 @@ function validate39(
                                 const _errs1064 = errors;
                                 if (errors === _errs1064) {
                                   if (typeof data344 === 'string') {
-                                    if (!pattern172.test(data344)) {
+                                    if (!pattern181.test(data344)) {
                                       const err833 = {
                                         instancePath: instancePath + '/eventId',
                                         schemaPath: '#/$defs/__schema6/pattern',
@@ -64210,7 +65520,7 @@ function validate39(
                                   const _errs1153 = errors;
                                   if (errors === _errs1153) {
                                     if (typeof data372 === 'string') {
-                                      if (!pattern172.test(data372)) {
+                                      if (!pattern181.test(data372)) {
                                         const err904 = {
                                           instancePath: instancePath + '/eventId',
                                           schemaPath: '#/$defs/__schema6/pattern',
@@ -66329,7 +67639,7 @@ function validate39(
                                     const _errs1244 = errors;
                                     if (errors === _errs1244) {
                                       if (typeof data401 === 'string') {
-                                        if (!pattern172.test(data401)) {
+                                        if (!pattern181.test(data401)) {
                                           const err977 = {
                                             instancePath: instancePath + '/eventId',
                                             schemaPath: '#/$defs/__schema6/pattern',
@@ -73762,8 +75072,8 @@ var schema451 = {
   required: ['scope', 'storeId', 'readSet', 'sources', 'errors'],
   additionalProperties: false,
 };
-var pattern252 = new RegExp('^mcp-[a-f0-9]{64}$', 'u');
-var pattern253 = new RegExp('^[a-z0-9_]+$', 'u');
+var pattern261 = new RegExp('^mcp-[a-f0-9]{64}$', 'u');
+var pattern262 = new RegExp('^[a-z0-9_]+$', 'u');
 function validate88(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -74066,7 +75376,7 @@ function validate88(
                                   const _errs17 = errors;
                                   if (errors === _errs17) {
                                     if (typeof data5 === 'string') {
-                                      if (!pattern252.test(data5)) {
+                                      if (!pattern261.test(data5)) {
                                         validate88.errors = [
                                           {
                                             instancePath: instancePath + '/sources/' + i0 + '/id',
@@ -74441,7 +75751,7 @@ function validate88(
                                                             ];
                                                             return false;
                                                           } else {
-                                                            if (!pattern253.test(data12)) {
+                                                            if (!pattern262.test(data12)) {
                                                               validate88.errors = [
                                                                 {
                                                                   instancePath:
@@ -75290,7 +76600,7 @@ function validate88(
                                   ];
                                   return false;
                                 } else {
-                                  if (!pattern253.test(data22)) {
+                                  if (!pattern262.test(data22)) {
                                     validate88.errors = [
                                       {
                                         instancePath: instancePath + '/errors/' + i2,
@@ -75625,8 +76935,8 @@ var schema452 = {
   required: ['scope', 'storeId', 'commandId', 'expectedReadSet', 'operation', 'state', 'receipt'],
   additionalProperties: false,
 };
-var pattern258 = new RegExp('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', 'u');
-var pattern259 = new RegExp('^[A-Za-z_][A-Za-z0-9_]{0,127}$', 'u');
+var pattern267 = new RegExp('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$', 'u');
+var pattern268 = new RegExp('^[A-Za-z_][A-Za-z0-9_]{0,127}$', 'u');
 function validate89(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -75972,7 +77282,7 @@ function validate89(
                                 const _errs17 = errors;
                                 if (errors === _errs17) {
                                   if (typeof data6 === 'string') {
-                                    if (!pattern258.test(data6)) {
+                                    if (!pattern267.test(data6)) {
                                       const err4 = {
                                         instancePath: instancePath + '/operation/name',
                                         schemaPath:
@@ -76187,7 +77497,7 @@ function validate89(
                                                 const _errs28 = errors;
                                                 if (errors === _errs28) {
                                                   if (typeof data10 === 'string') {
-                                                    if (!pattern259.test(data10)) {
+                                                    if (!pattern268.test(data10)) {
                                                       const err13 = {
                                                         instancePath:
                                                           instancePath +
@@ -76422,7 +77732,7 @@ function validate89(
                                                             const _errs42 = errors;
                                                             if (errors === _errs42) {
                                                               if (typeof data14 === 'string') {
-                                                                if (!pattern259.test(data14)) {
+                                                                if (!pattern268.test(data14)) {
                                                                   const err22 = {
                                                                     instancePath:
                                                                       instancePath +
@@ -76951,7 +78261,7 @@ function validate89(
                                                             const _errs64 = errors;
                                                             if (errors === _errs64) {
                                                               if (typeof data22 === 'string') {
-                                                                if (!pattern259.test(data22)) {
+                                                                if (!pattern268.test(data22)) {
                                                                   const err43 = {
                                                                     instancePath:
                                                                       instancePath +
@@ -77270,7 +78580,7 @@ function validate89(
                                 const _errs73 = errors;
                                 if (errors === _errs73) {
                                   if (typeof data25 === 'string') {
-                                    if (!pattern252.test(data25)) {
+                                    if (!pattern261.test(data25)) {
                                       const err56 = {
                                         instancePath: instancePath + '/operation/serverId',
                                         schemaPath:
@@ -77429,7 +78739,7 @@ function validate89(
                                   const _errs80 = errors;
                                   if (errors === _errs80) {
                                     if (typeof data27 === 'string') {
-                                      if (!pattern252.test(data27)) {
+                                      if (!pattern261.test(data27)) {
                                         const err63 = {
                                           instancePath: instancePath + '/operation/serverId',
                                           schemaPath:
@@ -77610,7 +78920,7 @@ function validate89(
                                     const _errs89 = errors;
                                     if (errors === _errs89) {
                                       if (typeof data30 === 'string') {
-                                        if (!pattern252.test(data30)) {
+                                        if (!pattern261.test(data30)) {
                                           const err71 = {
                                             instancePath: instancePath + '/operation/serverId',
                                             schemaPath:
@@ -77767,7 +79077,7 @@ function validate89(
                                       const _errs96 = errors;
                                       if (errors === _errs96) {
                                         if (typeof data32 === 'string') {
-                                          if (!pattern252.test(data32)) {
+                                          if (!pattern261.test(data32)) {
                                             const err78 = {
                                               instancePath: instancePath + '/operation/serverId',
                                               schemaPath:
@@ -77924,7 +79234,7 @@ function validate89(
                                         const _errs103 = errors;
                                         if (errors === _errs103) {
                                           if (typeof data34 === 'string') {
-                                            if (!pattern252.test(data34)) {
+                                            if (!pattern261.test(data34)) {
                                               const err85 = {
                                                 instancePath: instancePath + '/operation/serverId',
                                                 schemaPath:
@@ -78083,7 +79393,7 @@ function validate89(
                                           const _errs110 = errors;
                                           if (errors === _errs110) {
                                             if (typeof data36 === 'string') {
-                                              if (!pattern252.test(data36)) {
+                                              if (!pattern261.test(data36)) {
                                                 const err92 = {
                                                   instancePath:
                                                     instancePath + '/operation/serverId',
@@ -78243,7 +79553,7 @@ function validate89(
                                             const _errs117 = errors;
                                             if (errors === _errs117) {
                                               if (typeof data38 === 'string') {
-                                                if (!pattern252.test(data38)) {
+                                                if (!pattern261.test(data38)) {
                                                   const err99 = {
                                                     instancePath:
                                                       instancePath + '/operation/serverId',
@@ -78417,7 +79727,7 @@ function validate89(
                                               const _errs124 = errors;
                                               if (errors === _errs124) {
                                                 if (typeof data40 === 'string') {
-                                                  if (!pattern252.test(data40)) {
+                                                  if (!pattern261.test(data40)) {
                                                     const err106 = {
                                                       instancePath:
                                                         instancePath + '/operation/serverId',
@@ -78664,7 +79974,7 @@ function validate89(
                                                 const _errs133 = errors;
                                                 if (errors === _errs133) {
                                                   if (typeof data43 === 'string') {
-                                                    if (!pattern252.test(data43)) {
+                                                    if (!pattern261.test(data43)) {
                                                       const err116 = {
                                                         instancePath:
                                                           instancePath + '/operation/serverId',
@@ -78832,7 +80142,7 @@ function validate89(
                                                   const _errs140 = errors;
                                                   if (errors === _errs140) {
                                                     if (typeof data45 === 'string') {
-                                                      if (!pattern252.test(data45)) {
+                                                      if (!pattern261.test(data45)) {
                                                         const err123 = {
                                                           instancePath:
                                                             instancePath + '/operation/serverId',
@@ -79002,7 +80312,7 @@ function validate89(
                                                     const _errs147 = errors;
                                                     if (errors === _errs147) {
                                                       if (typeof data47 === 'string') {
-                                                        if (!pattern252.test(data47)) {
+                                                        if (!pattern261.test(data47)) {
                                                           const err130 = {
                                                             instancePath:
                                                               instancePath + '/operation/serverId',
@@ -79178,7 +80488,7 @@ function validate89(
                                                       const _errs154 = errors;
                                                       if (errors === _errs154) {
                                                         if (typeof data49 === 'string') {
-                                                          if (!pattern252.test(data49)) {
+                                                          if (!pattern261.test(data49)) {
                                                             const err137 = {
                                                               instancePath:
                                                                 instancePath +
@@ -79429,7 +80739,7 @@ function validate89(
                                           }
                                           errors++;
                                         } else {
-                                          if (!pattern253.test(data52)) {
+                                          if (!pattern262.test(data52)) {
                                             const err143 = {
                                               instancePath: instancePath + '/receipt/code',
                                               schemaPath:
@@ -80905,7 +82215,7 @@ function validate90(
                 const _errs6 = errors;
                 if (errors === _errs6) {
                   if (typeof data2 === 'string') {
-                    if (!pattern252.test(data2)) {
+                    if (!pattern261.test(data2)) {
                       validate90.errors = [
                         {
                           instancePath: instancePath + '/serverId',
@@ -84976,7 +86286,7 @@ var schema456 = {
   ],
   additionalProperties: true,
 };
-var pattern279 = new RegExp('^[a-z][a-z0-9_]{0,127}$', 'u');
+var pattern288 = new RegExp('^[a-z][a-z0-9_]{0,127}$', 'u');
 function validate94(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -85419,7 +86729,7 @@ function validate94(
                             const _errs21 = errors;
                             if (errors === _errs21) {
                               if (typeof data9 === 'string') {
-                                if (!pattern279.test(data9)) {
+                                if (!pattern288.test(data9)) {
                                   validate94.errors = [
                                     {
                                       instancePath: instancePath + '/capabilities/' + i0,
@@ -86279,7 +87589,7 @@ function validate95(
                                         const _errs28 = errors;
                                         if (errors === _errs28) {
                                           if (typeof data12 === 'string') {
-                                            if (!pattern279.test(data12)) {
+                                            if (!pattern288.test(data12)) {
                                               validate95.errors = [
                                                 {
                                                   instancePath:
@@ -86655,8 +87965,8 @@ var schema458 = {
   required: ['storeId', 'scope', 'readSet', 'defaultModelId', 'models', 'errors'],
   additionalProperties: true,
 };
-var pattern288 = new RegExp('^[A-Za-z0-9_.-]+$', 'u');
-var pattern291 = new RegExp('^[a-z0-9_]{1,128}$', 'u');
+var pattern297 = new RegExp('^[A-Za-z0-9_.-]+$', 'u');
+var pattern300 = new RegExp('^[a-z0-9_]{1,128}$', 'u');
 function validate96(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -87203,7 +88513,7 @@ function validate96(
                           }
                           errors++;
                         } else {
-                          if (!pattern288.test(data8)) {
+                          if (!pattern297.test(data8)) {
                             const err16 = {
                               instancePath: instancePath + '/defaultModelId',
                               schemaPath: '#/properties/defaultModelId/anyOf/0/pattern',
@@ -87348,7 +88658,7 @@ function validate96(
                                           ];
                                           return false;
                                         } else {
-                                          if (!pattern288.test(data11)) {
+                                          if (!pattern297.test(data11)) {
                                             validate96.errors = [
                                               {
                                                 instancePath:
@@ -87986,7 +89296,7 @@ function validate96(
                                                               const _errs72 = errors;
                                                               if (errors === _errs72) {
                                                                 if (typeof data24 === 'string') {
-                                                                  if (!pattern291.test(data24)) {
+                                                                  if (!pattern300.test(data24)) {
                                                                     validate96.errors = [
                                                                       {
                                                                         instancePath:
@@ -88116,7 +89426,7 @@ function validate96(
                             const _errs76 = errors;
                             if (errors === _errs76) {
                               if (typeof data26 === 'string') {
-                                if (!pattern291.test(data26)) {
+                                if (!pattern300.test(data26)) {
                                   validate96.errors = [
                                     {
                                       instancePath: instancePath + '/errors/' + i3,
@@ -89029,7 +90339,7 @@ function validate97(
                                                                         return false;
                                                                       } else {
                                                                         if (
-                                                                          !pattern288.test(data17)
+                                                                          !pattern297.test(data17)
                                                                         ) {
                                                                           validate97.errors = [
                                                                             {
@@ -89168,7 +90478,7 @@ function validate97(
                                                                           return false;
                                                                         } else {
                                                                           if (
-                                                                            !pattern288.test(data19)
+                                                                            !pattern297.test(data19)
                                                                           ) {
                                                                             validate97.errors = [
                                                                               {
@@ -89589,7 +90899,7 @@ function validate97(
                       const _errs67 = errors;
                       if (errors === _errs67) {
                         if (typeof data27 === 'string') {
-                          if (!pattern291.test(data27)) {
+                          if (!pattern300.test(data27)) {
                             validate97.errors = [
                               {
                                 instancePath: instancePath + '/errors/' + i5,
@@ -89696,7 +91006,7 @@ var schema460 = {
   required: ['storeId', 'readSet', 'operation', 'modelNames'],
   additionalProperties: true,
 };
-var pattern307 = new RegExp('^[^\\x00-\\x1f\\x7f]+$', 'u');
+var pattern316 = new RegExp('^[^\\x00-\\x1f\\x7f]+$', 'u');
 function validate98(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -90087,7 +91397,7 @@ function validate98(
                               ];
                               return false;
                             } else {
-                              if (!pattern307.test(data7)) {
+                              if (!pattern316.test(data7)) {
                                 validate98.errors = [
                                   {
                                     instancePath: instancePath + '/operation/name',
@@ -91672,7 +92982,7 @@ var schema463 = {
     },
   ],
 };
-var pattern331 = new RegExp('^credential:[0-9a-f-]{36}$', 'u');
+var pattern340 = new RegExp('^credential:[0-9a-f-]{36}$', 'u');
 function validate104(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -92504,7 +93814,7 @@ function validate104(
                                                   }
                                                   errors++;
                                                 } else {
-                                                  if (!pattern288.test(data14)) {
+                                                  if (!pattern297.test(data14)) {
                                                     const err37 = {
                                                       instancePath:
                                                         instancePath +
@@ -92710,7 +94020,7 @@ function validate104(
                                                   }
                                                   errors++;
                                                 } else {
-                                                  if (!pattern288.test(data17)) {
+                                                  if (!pattern297.test(data17)) {
                                                     const err46 = {
                                                       instancePath:
                                                         instancePath +
@@ -92900,7 +94210,7 @@ function validate104(
                                                     }
                                                     errors++;
                                                   } else {
-                                                    if (!pattern288.test(data19)) {
+                                                    if (!pattern297.test(data19)) {
                                                       const err54 = {
                                                         instancePath:
                                                           instancePath +
@@ -93607,7 +94917,7 @@ function validate104(
                                                     }
                                                     errors++;
                                                   } else {
-                                                    if (!pattern307.test(data29)) {
+                                                    if (!pattern316.test(data29)) {
                                                       const err81 = {
                                                         instancePath:
                                                           instancePath +
@@ -94555,7 +95865,7 @@ function validate104(
                                             const _errs133 = errors;
                                             if (errors === _errs133) {
                                               if (typeof data45 === 'string') {
-                                                if (!pattern331.test(data45)) {
+                                                if (!pattern340.test(data45)) {
                                                   const err120 = {
                                                     instancePath:
                                                       instancePath + '/receipt/opaqueRef',
@@ -94694,7 +96004,7 @@ function validate104(
                                       const _errs140 = errors;
                                       if (errors === _errs140) {
                                         if (typeof data47 === 'string') {
-                                          if (!pattern331.test(data47)) {
+                                          if (!pattern340.test(data47)) {
                                             const err126 = {
                                               instancePath: instancePath + '/receipt/opaqueRef',
                                               schemaPath:
@@ -94875,7 +96185,7 @@ function validate104(
                                       const _errs149 = errors;
                                       if (errors === _errs149) {
                                         if (typeof data50 === 'string') {
-                                          if (!pattern291.test(data50)) {
+                                          if (!pattern300.test(data50)) {
                                             const err134 = {
                                               instancePath: instancePath + '/receipt/code',
                                               schemaPath:
@@ -95013,7 +96323,7 @@ function validate104(
                                       const _errs156 = errors;
                                       if (errors === _errs156) {
                                         if (typeof data52 === 'string') {
-                                          if (!pattern291.test(data52)) {
+                                          if (!pattern300.test(data52)) {
                                             const err140 = {
                                               instancePath: instancePath + '/receipt/code',
                                               schemaPath:
@@ -95158,7 +96468,7 @@ function validate104(
                                             const _errs162 = errors;
                                             if (errors === _errs162) {
                                               if (typeof data55 === 'string') {
-                                                if (!pattern331.test(data55)) {
+                                                if (!pattern340.test(data55)) {
                                                   const err146 = {
                                                     instancePath:
                                                       instancePath + '/receipt/opaqueRef',
@@ -96096,7 +97406,7 @@ function validate104(
                                                   }
                                                   errors++;
                                                 } else {
-                                                  if (!pattern288.test(data70)) {
+                                                  if (!pattern297.test(data70)) {
                                                     const err188 = {
                                                       instancePath:
                                                         instancePath +
@@ -96302,7 +97612,7 @@ function validate104(
                                                   }
                                                   errors++;
                                                 } else {
-                                                  if (!pattern288.test(data73)) {
+                                                  if (!pattern297.test(data73)) {
                                                     const err197 = {
                                                       instancePath:
                                                         instancePath +
@@ -96493,7 +97803,7 @@ function validate104(
                                                     }
                                                     errors++;
                                                   } else {
-                                                    if (!pattern288.test(data75)) {
+                                                    if (!pattern297.test(data75)) {
                                                       const err205 = {
                                                         instancePath:
                                                           instancePath +
@@ -99168,7 +100478,7 @@ var schema467 = {
   ],
   additionalProperties: true,
 };
-var pattern372 = new RegExp(
+var pattern381 = new RegExp(
   '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
   'u',
 );
@@ -99418,7 +100728,7 @@ function validate109(
                   const _errs10 = errors;
                   if (errors === _errs10) {
                     if (typeof data4 === 'string') {
-                      if (!pattern279.test(data4)) {
+                      if (!pattern288.test(data4)) {
                         validate109.errors = [
                           {
                             instancePath: instancePath + '/field',
@@ -99535,7 +100845,7 @@ function validate109(
                               ];
                               return false;
                             } else {
-                              if (!pattern372.test(data7)) {
+                              if (!pattern381.test(data7)) {
                                 validate109.errors = [
                                   {
                                     instancePath: instancePath + '/contentBase64',
@@ -117457,7 +118767,7 @@ function validate116(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (!pattern288.test(data9)) {
+                                                  if (!pattern297.test(data9)) {
                                                     validate116.errors = [
                                                       {
                                                         instancePath:
@@ -118858,7 +120168,7 @@ function validate117(
                             const _errs51 = errors;
                             if (errors === _errs51) {
                               if (typeof data18 === 'string') {
-                                if (!pattern279.test(data18)) {
+                                if (!pattern288.test(data18)) {
                                   const err44 = {
                                     instancePath: instancePath + '/receipt/code',
                                     schemaPath:
@@ -119189,7 +120499,7 @@ function validate117(
                               const _errs67 = errors;
                               if (errors === _errs67) {
                                 if (typeof data24 === 'string') {
-                                  if (!pattern279.test(data24)) {
+                                  if (!pattern288.test(data24)) {
                                     const err60 = {
                                       instancePath: instancePath + '/receipt/code',
                                       schemaPath:
@@ -120229,7 +121539,7 @@ function validate117(
                             const _errs119 = errors;
                             if (errors === _errs119) {
                               if (typeof data43 === 'string') {
-                                if (!pattern279.test(data43)) {
+                                if (!pattern288.test(data43)) {
                                   const err109 = {
                                     instancePath: instancePath + '/receipt/code',
                                     schemaPath:
@@ -120560,7 +121870,7 @@ function validate117(
                               const _errs135 = errors;
                               if (errors === _errs135) {
                                 if (typeof data49 === 'string') {
-                                  if (!pattern279.test(data49)) {
+                                  if (!pattern288.test(data49)) {
                                     const err125 = {
                                       instancePath: instancePath + '/receipt/code',
                                       schemaPath:
@@ -121570,7 +122880,7 @@ function validate117(
                             const _errs183 = errors;
                             if (errors === _errs183) {
                               if (typeof data66 === 'string') {
-                                if (!pattern279.test(data66)) {
+                                if (!pattern288.test(data66)) {
                                   const err173 = {
                                     instancePath: instancePath + '/receipt/code',
                                     schemaPath:
@@ -121901,7 +123211,7 @@ function validate117(
                               const _errs199 = errors;
                               if (errors === _errs199) {
                                 if (typeof data72 === 'string') {
-                                  if (!pattern279.test(data72)) {
+                                  if (!pattern288.test(data72)) {
                                     const err189 = {
                                       instancePath: instancePath + '/receipt/code',
                                       schemaPath:
@@ -126483,12 +127793,15 @@ var schema479 = {
                     definitionVersion: { type: 'string' },
                     inputDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
                     controlReads: {
-                      maxItems: 3,
+                      maxItems: 4,
                       type: 'array',
                       items: {
                         type: 'object',
                         properties: {
-                          kind: { type: 'string', enum: ['permission.mode', 'workspace.trust'] },
+                          kind: {
+                            type: 'string',
+                            enum: ['permission.mode', 'workspace.trust', 'session.execution_root'],
+                          },
                           scope: { type: 'string' },
                           revision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
                         },
@@ -126563,12 +127876,15 @@ var schema479 = {
                     definitionVersion: { type: 'string' },
                     inputDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
                     controlReads: {
-                      maxItems: 3,
+                      maxItems: 4,
                       type: 'array',
                       items: {
                         type: 'object',
                         properties: {
-                          kind: { type: 'string', enum: ['permission.mode', 'workspace.trust'] },
+                          kind: {
+                            type: 'string',
+                            enum: ['permission.mode', 'workspace.trust', 'session.execution_root'],
+                          },
                           scope: { type: 'string' },
                           revision: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
                         },
@@ -132259,7 +133575,7 @@ function validate122(
                                                                               Array.isArray(data91)
                                                                             ) {
                                                                               if (
-                                                                                data91.length > 3
+                                                                                data91.length > 4
                                                                               ) {
                                                                                 const err104 = {
                                                                                   instancePath:
@@ -132270,10 +133586,10 @@ function validate122(
                                                                                   keyword:
                                                                                     'maxItems',
                                                                                   params: {
-                                                                                    limit: 3,
+                                                                                    limit: 4,
                                                                                   },
                                                                                   message:
-                                                                                    'must NOT have more than 3 items',
+                                                                                    'must NOT have more than 4 items',
                                                                                 };
                                                                                 if (
                                                                                   vErrors === null
@@ -132412,7 +133728,9 @@ function validate122(
                                                                                               data93 ===
                                                                                                 'permission.mode' ||
                                                                                               data93 ===
-                                                                                                'workspace.trust'
+                                                                                                'workspace.trust' ||
+                                                                                              data93 ===
+                                                                                                'session.execution_root'
                                                                                             )
                                                                                           ) {
                                                                                             const err107 =
@@ -133843,7 +135161,7 @@ function validate122(
                                                                               Array.isArray(data114)
                                                                             ) {
                                                                               if (
-                                                                                data114.length > 3
+                                                                                data114.length > 4
                                                                               ) {
                                                                                 const err148 = {
                                                                                   instancePath:
@@ -133854,10 +135172,10 @@ function validate122(
                                                                                   keyword:
                                                                                     'maxItems',
                                                                                   params: {
-                                                                                    limit: 3,
+                                                                                    limit: 4,
                                                                                   },
                                                                                   message:
-                                                                                    'must NOT have more than 3 items',
+                                                                                    'must NOT have more than 4 items',
                                                                                 };
                                                                                 if (
                                                                                   vErrors === null
@@ -133996,7 +135314,9 @@ function validate122(
                                                                                               data116 ===
                                                                                                 'permission.mode' ||
                                                                                               data116 ===
-                                                                                                'workspace.trust'
+                                                                                                'workspace.trust' ||
+                                                                                              data116 ===
+                                                                                                'session.execution_root'
                                                                                             )
                                                                                           ) {
                                                                                             const err151 =
@@ -136121,7 +137441,7 @@ var schema482 = {
   ],
   additionalProperties: true,
 };
-var pattern575 = new RegExp('^[0-9a-f]{64}$', 'u');
+var pattern584 = new RegExp('^[0-9a-f]{64}$', 'u');
 function validate128(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -136271,7 +137591,7 @@ function validate128(
               const _errs6 = errors;
               if (errors === _errs6) {
                 if (typeof data2 === 'string') {
-                  if (!pattern575.test(data2)) {
+                  if (!pattern584.test(data2)) {
                     validate128.errors = [
                       {
                         instancePath: instancePath + '/pageIdentity',
@@ -145164,8 +146484,8 @@ var schema488 = {
     },
   },
 };
-var pattern646 = new RegExp('^file:\\/\\/.*', 'u');
-var pattern647 = new RegExp('^input-file-[A-Za-z0-9_-]{1,100}$', 'u');
+var pattern655 = new RegExp('^file:\\/\\/.*', 'u');
+var pattern656 = new RegExp('^input-file-[A-Za-z0-9_-]{1,100}$', 'u');
 var wrapper12 = { validate: validate136 };
 function validate136(
   data,
@@ -148197,7 +149517,7 @@ function validate135(
                                                                           return false;
                                                                         } else {
                                                                           if (
-                                                                            !pattern646.test(data40)
+                                                                            !pattern655.test(data40)
                                                                           ) {
                                                                             validate135.errors = [
                                                                               {
@@ -148331,7 +149651,7 @@ function validate135(
                                                                                 'string'
                                                                               ) {
                                                                                 if (
-                                                                                  !pattern647.test(
+                                                                                  !pattern656.test(
                                                                                     data42,
                                                                                   )
                                                                                 ) {
@@ -160868,7 +162188,7 @@ function validate142(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern288.test(data38)) {
+                                        if (!pattern297.test(data38)) {
                                           validate142.errors = [
                                             {
                                               instancePath:
@@ -168772,7 +170092,7 @@ function validate152(
                                                                                         errors++;
                                                                                       } else {
                                                                                         if (
-                                                                                          !pattern646.test(
+                                                                                          !pattern655.test(
                                                                                             data36,
                                                                                           )
                                                                                         ) {
@@ -168965,7 +170285,7 @@ function validate152(
                                                                                               'string'
                                                                                             ) {
                                                                                               if (
-                                                                                                !pattern647.test(
+                                                                                                !pattern656.test(
                                                                                                   data38,
                                                                                                 )
                                                                                               ) {
@@ -172998,7 +174318,7 @@ function validate152(
                                                                                       errors++;
                                                                                     } else {
                                                                                       if (
-                                                                                        !pattern646.test(
+                                                                                        !pattern655.test(
                                                                                           data69,
                                                                                         )
                                                                                       ) {
@@ -173188,7 +174508,7 @@ function validate152(
                                                                                             'string'
                                                                                           ) {
                                                                                             if (
-                                                                                              !pattern647.test(
+                                                                                              !pattern656.test(
                                                                                                 data71,
                                                                                               )
                                                                                             ) {
@@ -175486,7 +176806,7 @@ function validate152(
                                                                                               errors++;
                                                                                             } else {
                                                                                               if (
-                                                                                                !pattern288.test(
+                                                                                                !pattern297.test(
                                                                                                   data89,
                                                                                                 )
                                                                                               ) {
@@ -180580,7 +181900,7 @@ function validate156(
                                                                                         errors++;
                                                                                       } else {
                                                                                         if (
-                                                                                          !pattern646.test(
+                                                                                          !pattern655.test(
                                                                                             data36,
                                                                                           )
                                                                                         ) {
@@ -180773,7 +182093,7 @@ function validate156(
                                                                                               'string'
                                                                                             ) {
                                                                                               if (
-                                                                                                !pattern647.test(
+                                                                                                !pattern656.test(
                                                                                                   data38,
                                                                                                 )
                                                                                               ) {
@@ -184806,7 +186126,7 @@ function validate156(
                                                                                       errors++;
                                                                                     } else {
                                                                                       if (
-                                                                                        !pattern646.test(
+                                                                                        !pattern655.test(
                                                                                           data69,
                                                                                         )
                                                                                       ) {
@@ -184996,7 +186316,7 @@ function validate156(
                                                                                             'string'
                                                                                           ) {
                                                                                             if (
-                                                                                              !pattern647.test(
+                                                                                              !pattern656.test(
                                                                                                 data71,
                                                                                               )
                                                                                             ) {
@@ -187294,7 +188614,7 @@ function validate156(
                                                                                               errors++;
                                                                                             } else {
                                                                                               if (
-                                                                                                !pattern288.test(
+                                                                                                !pattern297.test(
                                                                                                   data89,
                                                                                                 )
                                                                                               ) {
@@ -206539,7 +207859,7 @@ function validate172(
                                                                             return false;
                                                                           } else {
                                                                             if (
-                                                                              !pattern646.test(
+                                                                              !pattern655.test(
                                                                                 data115,
                                                                               )
                                                                             ) {
@@ -206687,7 +208007,7 @@ function validate172(
                                                                                   'string'
                                                                                 ) {
                                                                                   if (
-                                                                                    !pattern647.test(
+                                                                                    !pattern656.test(
                                                                                       data117,
                                                                                     )
                                                                                   ) {
@@ -214126,7 +215446,7 @@ function validate180(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern253.test(data11)) {
+                                        if (!pattern262.test(data11)) {
                                           const err22 = {
                                             instancePath: instancePath + '/receipt/reason',
                                             schemaPath:
@@ -214396,7 +215716,7 @@ function validate180(
                                           }
                                           errors++;
                                         } else {
-                                          if (!pattern253.test(data15)) {
+                                          if (!pattern262.test(data15)) {
                                             const err35 = {
                                               instancePath: instancePath + '/receipt/reason',
                                               schemaPath:
@@ -232333,7 +233653,7 @@ function validate198(
                                                         ];
                                                         return false;
                                                       } else {
-                                                        if (!pattern646.test(data26)) {
+                                                        if (!pattern655.test(data26)) {
                                                           validate198.errors = [
                                                             {
                                                               instancePath:
@@ -232427,7 +233747,7 @@ function validate198(
                                                           const _errs67 = errors;
                                                           if (errors === _errs67) {
                                                             if (typeof data28 === 'string') {
-                                                              if (!pattern647.test(data28)) {
+                                                              if (!pattern656.test(data28)) {
                                                                 validate198.errors = [
                                                                   {
                                                                     instancePath:
@@ -237045,7 +238365,7 @@ function validate200(
                     ];
                     return false;
                   } else {
-                    if (!pattern646.test(data1)) {
+                    if (!pattern655.test(data1)) {
                       validate200.errors = [
                         {
                           instancePath: instancePath + '/uri',
@@ -237109,7 +238429,7 @@ function validate200(
                       const _errs9 = errors;
                       if (errors === _errs9) {
                         if (typeof data3 === 'string') {
-                          if (!pattern647.test(data3)) {
+                          if (!pattern656.test(data3)) {
                             validate200.errors = [
                               {
                                 instancePath: instancePath + '/reference/id',
@@ -238028,7 +239348,7 @@ function validate201(
                     const _errs12 = errors;
                     if (errors === _errs12) {
                       if (typeof data5 === 'string') {
-                        if (!pattern646.test(data5)) {
+                        if (!pattern655.test(data5)) {
                           validate201.errors = [
                             {
                               instancePath: instancePath + '/uri',
@@ -238090,7 +239410,7 @@ function validate201(
                               const _errs17 = errors;
                               if (errors === _errs17) {
                                 if (typeof data7 === 'string') {
-                                  if (!pattern647.test(data7)) {
+                                  if (!pattern656.test(data7)) {
                                     validate201.errors = [
                                       {
                                         instancePath: instancePath + '/reference/id',
@@ -239008,12 +240328,12 @@ var schema529 = {
   required: ['scope', 'revision', 'items', 'collections'],
   additionalProperties: true,
 };
-var pattern1157 = new RegExp('^(0|[1-9][0-9]{0,19})$', 'u');
-var pattern1164 = new RegExp(
+var pattern1166 = new RegExp('^(0|[1-9][0-9]{0,19})$', 'u');
+var pattern1173 = new RegExp(
   '^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$',
   'u',
 );
-var pattern1165 = new RegExp('^collection\\/[0-9]{20}\\/[A-Za-z0-9_.:-]+$', 'u');
+var pattern1174 = new RegExp('^collection\\/[0-9]{20}\\/[A-Za-z0-9_.:-]+$', 'u');
 function validate202(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -239162,7 +240482,7 @@ function validate202(
             const _errs9 = errors;
             if (errors === _errs9) {
               if (typeof data3 === 'string') {
-                if (!pattern1157.test(data3)) {
+                if (!pattern1166.test(data3)) {
                   validate202.errors = [
                     {
                       instancePath: instancePath + '/revision',
@@ -240056,7 +241376,7 @@ function validate202(
                                             const _errs51 = errors;
                                             if (errors === _errs51) {
                                               if (typeof data19 === 'string') {
-                                                if (!pattern1157.test(data19)) {
+                                                if (!pattern1166.test(data19)) {
                                                   validate202.errors = [
                                                     {
                                                       instancePath:
@@ -240102,7 +241422,7 @@ function validate202(
                                               if (errors === _errs55) {
                                                 if (errors === _errs55) {
                                                   if (typeof data20 === 'string') {
-                                                    if (!pattern1164.test(data20)) {
+                                                    if (!pattern1173.test(data20)) {
                                                       const err21 = {
                                                         instancePath:
                                                           instancePath +
@@ -240345,7 +241665,7 @@ function validate202(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern1165.test(data23)) {
+                                        if (!pattern1174.test(data23)) {
                                           validate202.errors = [
                                             {
                                               instancePath:
@@ -240395,7 +241715,7 @@ function validate202(
                                   const _errs66 = errors;
                                   if (errors === _errs66) {
                                     if (typeof data24 === 'string') {
-                                      if (!pattern1157.test(data24)) {
+                                      if (!pattern1166.test(data24)) {
                                         validate202.errors = [
                                           {
                                             instancePath:
@@ -240801,7 +242121,7 @@ function validate202(
                                               if (errors === _errs82) {
                                                 if (errors === _errs82) {
                                                   if (typeof data30 === 'string') {
-                                                    if (!pattern1164.test(data30)) {
+                                                    if (!pattern1173.test(data30)) {
                                                       validate202.errors = [
                                                         {
                                                           instancePath:
@@ -241887,7 +243207,7 @@ function validate203(
                                 const _errs40 = errors;
                                 if (errors === _errs40) {
                                   if (typeof data14 === 'string') {
-                                    if (!pattern1157.test(data14)) {
+                                    if (!pattern1166.test(data14)) {
                                       validate203.errors = [
                                         {
                                           instancePath: instancePath + '/summary/size',
@@ -241928,7 +243248,7 @@ function validate203(
                                   if (errors === _errs44) {
                                     if (errors === _errs44) {
                                       if (typeof data15 === 'string') {
-                                        if (!pattern1164.test(data15)) {
+                                        if (!pattern1173.test(data15)) {
                                           const err21 = {
                                             instancePath: instancePath + '/summary/publishedAt',
                                             schemaPath:
@@ -242798,7 +244118,7 @@ function validate204(
                                     ];
                                     return false;
                                   } else {
-                                    if (!pattern646.test(data3)) {
+                                    if (!pattern655.test(data3)) {
                                       validate204.errors = [
                                         {
                                           instancePath: instancePath + '/files/' + i0 + '/uri',
@@ -242864,7 +244184,7 @@ function validate204(
                                       const _errs14 = errors;
                                       if (errors === _errs14) {
                                         if (typeof data5 === 'string') {
-                                          if (!pattern647.test(data5)) {
+                                          if (!pattern656.test(data5)) {
                                             validate204.errors = [
                                               {
                                                 instancePath:
@@ -243648,7 +244968,7 @@ var schema532 = {
   required: ['page', 'totalPages', 'mediaType', 'data'],
   additionalProperties: true,
 };
-var pattern1189 = new RegExp('^[A-Za-z0-9+/]*={0,2}$', 'u');
+var pattern1198 = new RegExp('^[A-Za-z0-9+/]*={0,2}$', 'u');
 function validate205(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -244866,7 +246186,7 @@ function validate205(
                           ];
                           return false;
                         } else {
-                          if (!pattern1189.test(data20)) {
+                          if (!pattern1198.test(data20)) {
                             validate205.errors = [
                               {
                                 instancePath: instancePath + '/data',
@@ -248442,7 +249762,7 @@ function validate211(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (!pattern646.test(data27)) {
+                                                              if (!pattern655.test(data27)) {
                                                                 validate211.errors = [
                                                                   {
                                                                     instancePath:
@@ -248549,7 +249869,7 @@ function validate211(
                                                                 const _errs69 = errors;
                                                                 if (errors === _errs69) {
                                                                   if (typeof data29 === 'string') {
-                                                                    if (!pattern647.test(data29)) {
+                                                                    if (!pattern656.test(data29)) {
                                                                       validate211.errors = [
                                                                         {
                                                                           instancePath:
@@ -253625,7 +254945,7 @@ function validate214(
                         ];
                         return false;
                       } else {
-                        if (!pattern288.test(data1)) {
+                        if (!pattern297.test(data1)) {
                           validate214.errors = [
                             {
                               instancePath: instancePath + '/' + i0 + '/extensionId',
@@ -253739,7 +255059,7 @@ function validate214(
                                           ];
                                           return false;
                                         } else {
-                                          if (!pattern288.test(data5)) {
+                                          if (!pattern297.test(data5)) {
                                             validate214.errors = [
                                               {
                                                 instancePath:
@@ -254055,7 +255375,7 @@ function validate214(
                                             ];
                                             return false;
                                           } else {
-                                            if (!pattern288.test(data12)) {
+                                            if (!pattern297.test(data12)) {
                                               validate214.errors = [
                                                 {
                                                   instancePath:
@@ -254754,7 +256074,7 @@ function validate218(
                         ];
                         return false;
                       } else {
-                        if (!pattern288.test(data1)) {
+                        if (!pattern297.test(data1)) {
                           validate218.errors = [
                             {
                               instancePath: instancePath + '/' + i0 + '/extensionId',
@@ -255539,7 +256859,7 @@ function validate218(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (!pattern288.test(data17)) {
+                                                  if (!pattern297.test(data17)) {
                                                     validate218.errors = [
                                                       {
                                                         instancePath:
@@ -258790,7 +260110,7 @@ function validate222(
                                                                                     return false;
                                                                                   } else {
                                                                                     if (
-                                                                                      !pattern646.test(
+                                                                                      !pattern655.test(
                                                                                         data35,
                                                                                       )
                                                                                     ) {
@@ -258951,7 +260271,7 @@ function validate222(
                                                                                           'string'
                                                                                         ) {
                                                                                           if (
-                                                                                            !pattern647.test(
+                                                                                            !pattern656.test(
                                                                                               data37,
                                                                                             )
                                                                                           ) {
@@ -267086,7 +268406,7 @@ function validate225(
 }
 validate225.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var request_OutputFilesQuery = validate226;
-var pattern1327 = new RegExp('^(?:[1-9]|[1-4][0-9]|50)$', 'u');
+var pattern1336 = new RegExp('^(?:[1-9]|[1-4][0-9]|50)$', 'u');
 function validate226(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -267311,7 +268631,7 @@ function validate226(
                     const _errs10 = errors;
                     if (errors === _errs10) {
                       if (typeof data4 === 'string') {
-                        if (!pattern1327.test(data4)) {
+                        if (!pattern1336.test(data4)) {
                           validate226.errors = [
                             {
                               instancePath: instancePath + '/limit',
@@ -268311,7 +269631,7 @@ function validate228(
                       ];
                       return false;
                     } else {
-                      if (!pattern1165.test(data1)) {
+                      if (!pattern1174.test(data1)) {
                         validate228.errors = [
                           {
                             instancePath: instancePath + '/collectionId',
@@ -268351,7 +269671,7 @@ function validate228(
                 const _errs6 = errors;
                 if (errors === _errs6) {
                   if (typeof data2 === 'string') {
-                    if (!pattern1157.test(data2)) {
+                    if (!pattern1166.test(data2)) {
                       validate228.errors = [
                         {
                           instancePath: instancePath + '/expectedRevision',
@@ -269863,7 +271183,7 @@ function validate230(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern646.test(data6)) {
+                                              if (!pattern655.test(data6)) {
                                                 validate230.errors = [
                                                   {
                                                     instancePath:
@@ -269980,7 +271300,7 @@ function validate230(
                                                   const _errs20 = errors;
                                                   if (errors === _errs20) {
                                                     if (typeof data8 === 'string') {
-                                                      if (!pattern647.test(data8)) {
+                                                      if (!pattern656.test(data8)) {
                                                         validate230.errors = [
                                                           {
                                                             instancePath:
@@ -276076,7 +277396,7 @@ function validate245(
           const _errs2 = errors;
           if (errors === _errs2) {
             if (typeof data0 === 'string') {
-              if (!pattern61.test(data0)) {
+              if (!pattern64.test(data0)) {
                 validate245.errors = [
                   {
                     instancePath: instancePath + '/afterKey',
@@ -277947,7 +279267,7 @@ function validate252(
                               const _errs15 = errors;
                               if (errors === _errs15) {
                                 if (typeof data5 === 'string') {
-                                  if (!pattern258.test(data5)) {
+                                  if (!pattern267.test(data5)) {
                                     const err4 = {
                                       instancePath: instancePath + '/operation/name',
                                       schemaPath:
@@ -278156,7 +279476,7 @@ function validate252(
                                               const _errs26 = errors;
                                               if (errors === _errs26) {
                                                 if (typeof data9 === 'string') {
-                                                  if (!pattern259.test(data9)) {
+                                                  if (!pattern268.test(data9)) {
                                                     const err13 = {
                                                       instancePath:
                                                         instancePath +
@@ -278390,7 +279710,7 @@ function validate252(
                                                           const _errs40 = errors;
                                                           if (errors === _errs40) {
                                                             if (typeof data13 === 'string') {
-                                                              if (!pattern259.test(data13)) {
+                                                              if (!pattern268.test(data13)) {
                                                                 const err22 = {
                                                                   instancePath:
                                                                     instancePath +
@@ -278912,7 +280232,7 @@ function validate252(
                                                           const _errs62 = errors;
                                                           if (errors === _errs62) {
                                                             if (typeof data21 === 'string') {
-                                                              if (!pattern259.test(data21)) {
+                                                              if (!pattern268.test(data21)) {
                                                                 const err43 = {
                                                                   instancePath:
                                                                     instancePath +
@@ -279229,7 +280549,7 @@ function validate252(
                               const _errs71 = errors;
                               if (errors === _errs71) {
                                 if (typeof data24 === 'string') {
-                                  if (!pattern252.test(data24)) {
+                                  if (!pattern261.test(data24)) {
                                     const err56 = {
                                       instancePath: instancePath + '/operation/serverId',
                                       schemaPath:
@@ -279386,7 +280706,7 @@ function validate252(
                                 const _errs78 = errors;
                                 if (errors === _errs78) {
                                   if (typeof data26 === 'string') {
-                                    if (!pattern252.test(data26)) {
+                                    if (!pattern261.test(data26)) {
                                       const err63 = {
                                         instancePath: instancePath + '/operation/serverId',
                                         schemaPath:
@@ -279566,7 +280886,7 @@ function validate252(
                                   const _errs87 = errors;
                                   if (errors === _errs87) {
                                     if (typeof data29 === 'string') {
-                                      if (!pattern252.test(data29)) {
+                                      if (!pattern261.test(data29)) {
                                         const err71 = {
                                           instancePath: instancePath + '/operation/serverId',
                                           schemaPath:
@@ -279723,7 +281043,7 @@ function validate252(
                                     const _errs94 = errors;
                                     if (errors === _errs94) {
                                       if (typeof data31 === 'string') {
-                                        if (!pattern252.test(data31)) {
+                                        if (!pattern261.test(data31)) {
                                           const err78 = {
                                             instancePath: instancePath + '/operation/serverId',
                                             schemaPath:
@@ -279880,7 +281200,7 @@ function validate252(
                                       const _errs101 = errors;
                                       if (errors === _errs101) {
                                         if (typeof data33 === 'string') {
-                                          if (!pattern252.test(data33)) {
+                                          if (!pattern261.test(data33)) {
                                             const err85 = {
                                               instancePath: instancePath + '/operation/serverId',
                                               schemaPath:
@@ -280037,7 +281357,7 @@ function validate252(
                                         const _errs108 = errors;
                                         if (errors === _errs108) {
                                           if (typeof data35 === 'string') {
-                                            if (!pattern252.test(data35)) {
+                                            if (!pattern261.test(data35)) {
                                               const err92 = {
                                                 instancePath: instancePath + '/operation/serverId',
                                                 schemaPath:
@@ -280196,7 +281516,7 @@ function validate252(
                                           const _errs115 = errors;
                                           if (errors === _errs115) {
                                             if (typeof data37 === 'string') {
-                                              if (!pattern252.test(data37)) {
+                                              if (!pattern261.test(data37)) {
                                                 const err99 = {
                                                   instancePath:
                                                     instancePath + '/operation/serverId',
@@ -280363,7 +281683,7 @@ function validate252(
                                             const _errs122 = errors;
                                             if (errors === _errs122) {
                                               if (typeof data39 === 'string') {
-                                                if (!pattern252.test(data39)) {
+                                                if (!pattern261.test(data39)) {
                                                   const err106 = {
                                                     instancePath:
                                                       instancePath + '/operation/serverId',
@@ -280604,7 +281924,7 @@ function validate252(
                                               const _errs131 = errors;
                                               if (errors === _errs131) {
                                                 if (typeof data42 === 'string') {
-                                                  if (!pattern252.test(data42)) {
+                                                  if (!pattern261.test(data42)) {
                                                     const err116 = {
                                                       instancePath:
                                                         instancePath + '/operation/serverId',
@@ -280770,7 +282090,7 @@ function validate252(
                                                 const _errs138 = errors;
                                                 if (errors === _errs138) {
                                                   if (typeof data44 === 'string') {
-                                                    if (!pattern252.test(data44)) {
+                                                    if (!pattern261.test(data44)) {
                                                       const err123 = {
                                                         instancePath:
                                                           instancePath + '/operation/serverId',
@@ -280938,7 +282258,7 @@ function validate252(
                                                   const _errs145 = errors;
                                                   if (errors === _errs145) {
                                                     if (typeof data46 === 'string') {
-                                                      if (!pattern252.test(data46)) {
+                                                      if (!pattern261.test(data46)) {
                                                         const err130 = {
                                                           instancePath:
                                                             instancePath + '/operation/serverId',
@@ -281108,7 +282428,7 @@ function validate252(
                                                     const _errs152 = errors;
                                                     if (errors === _errs152) {
                                                       if (typeof data48 === 'string') {
-                                                        if (!pattern252.test(data48)) {
+                                                        if (!pattern261.test(data48)) {
                                                           const err137 = {
                                                             instancePath:
                                                               instancePath + '/operation/serverId',
@@ -281492,7 +282812,7 @@ function validate254(
               const _errs4 = errors;
               if (errors === _errs4) {
                 if (typeof data1 === 'string') {
-                  if (!pattern252.test(data1)) {
+                  if (!pattern261.test(data1)) {
                     validate254.errors = [
                       {
                         instancePath: instancePath + '/serverId',
@@ -284960,7 +286280,7 @@ function validate267(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern288.test(data10)) {
+                                        if (!pattern297.test(data10)) {
                                           const err10 = {
                                             instancePath: instancePath + '/operation/modelId',
                                             schemaPath:
@@ -285167,7 +286487,7 @@ function validate267(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern288.test(data13)) {
+                                        if (!pattern297.test(data13)) {
                                           const err20 = {
                                             instancePath: instancePath + '/operation/modelId',
                                             schemaPath:
@@ -285364,7 +286684,7 @@ function validate267(
                                           }
                                           errors++;
                                         } else {
-                                          if (!pattern288.test(data15)) {
+                                          if (!pattern297.test(data15)) {
                                             const err29 = {
                                               instancePath: instancePath + '/operation/modelId',
                                               schemaPath:
@@ -286209,7 +287529,7 @@ function validate268(
                                       ];
                                       return false;
                                     } else {
-                                      if (!pattern307.test(data9)) {
+                                      if (!pattern316.test(data9)) {
                                         validate268.errors = [
                                           {
                                             instancePath: instancePath + '/operation/name',
@@ -287210,7 +288530,7 @@ function validate269(
                                   ];
                                   return false;
                                 } else {
-                                  if (!pattern307.test(data7)) {
+                                  if (!pattern316.test(data7)) {
                                     validate269.errors = [
                                       {
                                         instancePath: instancePath + '/operation/name',
@@ -287900,7 +289220,7 @@ function validate271(
 }
 validate271.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var request_ConfigurationPatchRequest = validate272;
-var pattern1456 = new RegExp(
+var pattern1465 = new RegExp(
   '^(?!(?:__proto__|constructor|prototype)$)[^\\u0000-\\u001f\\u007f]+$',
   'u',
 );
@@ -288650,7 +289970,7 @@ function validate272(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern1456.test(data8)) {
+                                                            if (!pattern1465.test(data8)) {
                                                               const err8 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -289076,7 +290396,7 @@ function validate272(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern1456.test(data12)) {
+                                                            if (!pattern1465.test(data12)) {
                                                               const err24 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -292949,7 +294269,7 @@ function validate282(
                     const _errs40 = errors;
                     if (errors === _errs40) {
                       if (typeof data18 === 'string') {
-                        if (!pattern279.test(data18)) {
+                        if (!pattern288.test(data18)) {
                           validate282.errors = [
                             {
                               instancePath: instancePath + '/field',
@@ -296401,7 +297721,7 @@ function validate286(
                   const _errs38 = errors;
                   if (errors === _errs38) {
                     if (typeof data17 === 'string') {
-                      if (!pattern279.test(data17)) {
+                      if (!pattern288.test(data17)) {
                         validate286.errors = [
                           {
                             instancePath: instancePath + '/field',
@@ -306109,7 +307429,7 @@ function validate311(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (!pattern646.test(data20)) {
+                                                if (!pattern655.test(data20)) {
                                                   validate311.errors = [
                                                     {
                                                       instancePath:
@@ -306230,7 +307550,7 @@ function validate311(
                                                     const _errs51 = errors;
                                                     if (errors === _errs51) {
                                                       if (typeof data22 === 'string') {
-                                                        if (!pattern647.test(data22)) {
+                                                        if (!pattern656.test(data22)) {
                                                           validate311.errors = [
                                                             {
                                                               instancePath:
@@ -308976,7 +310296,7 @@ function validate312(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern646.test(data19)) {
+                                              if (!pattern655.test(data19)) {
                                                 validate312.errors = [
                                                   {
                                                     instancePath:
@@ -309094,7 +310414,7 @@ function validate312(
                                                   const _errs49 = errors;
                                                   if (errors === _errs49) {
                                                     if (typeof data21 === 'string') {
-                                                      if (!pattern647.test(data21)) {
+                                                      if (!pattern656.test(data21)) {
                                                         validate312.errors = [
                                                           {
                                                             instancePath:
@@ -310351,7 +311671,7 @@ function validate312(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern288.test(data39)) {
+                                                      if (!pattern297.test(data39)) {
                                                         validate312.errors = [
                                                           {
                                                             instancePath:
@@ -316099,7 +317419,7 @@ function validate325(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (!pattern646.test(data21)) {
+                                                  if (!pattern655.test(data21)) {
                                                     validate325.errors = [
                                                       {
                                                         instancePath:
@@ -316223,7 +317543,7 @@ function validate325(
                                                       const _errs53 = errors;
                                                       if (errors === _errs53) {
                                                         if (typeof data23 === 'string') {
-                                                          if (!pattern647.test(data23)) {
+                                                          if (!pattern656.test(data23)) {
                                                             validate325.errors = [
                                                               {
                                                                 instancePath:
@@ -317319,7 +318639,7 @@ function validate325(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern288.test(data39)) {
+                                                      if (!pattern297.test(data39)) {
                                                         validate325.errors = [
                                                           {
                                                             instancePath:
@@ -317834,7 +319154,7 @@ function validate328(
                             ];
                             return false;
                           } else {
-                            if (!pattern1189.test(data4)) {
+                            if (!pattern1198.test(data4)) {
                               validate328.errors = [
                                 {
                                   instancePath: instancePath + '/data',
@@ -320029,7 +321349,7 @@ function validate335(
                           ];
                           return false;
                         } else {
-                          if (!pattern288.test(data3)) {
+                          if (!pattern297.test(data3)) {
                             validate335.errors = [
                               {
                                 instancePath: instancePath + '/extensionId',
@@ -320090,7 +321410,7 @@ function validate335(
                             ];
                             return false;
                           } else {
-                            if (!pattern288.test(data4)) {
+                            if (!pattern297.test(data4)) {
                               validate335.errors = [
                                 {
                                   instancePath: instancePath + '/actionId',

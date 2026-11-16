@@ -24,16 +24,15 @@ const directory = {
   ],
 } as NativeDirectory;
 
-test('only standalone exit commands select local navigation; explanations, quoted text and deletion remain chat', () => {
+test('only explicit source navigation is local; worktree use/exit remain current-Session model input', () => {
+  for (const text of ['返回来源会话', ' 返回来源项目\n'])
+    expect(isNativeWorktreeExitCommand(text)).toBe(true);
   for (const text of [
     '退出工作树',
     '退出 Git 工作树',
     '  exit worktree\n',
     'LEAVE GIT WORKTREE',
-    '返回来源会话',
-  ])
-    expect(isNativeWorktreeExitCommand(text)).toBe(true);
-  for (const text of [
+    '使用工作树 /linked',
     '删除工作树',
     'git worktree remove /linked',
     '退出工作树是什么意思？',

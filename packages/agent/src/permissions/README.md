@@ -175,7 +175,7 @@ Worktree create省略path时，可信Host默认根为homedir()下`.kite-code/wor
 
 2026-11-06，macOS／Bun1.4.4 当前工作树：以 `bun test --parallel=1 --max-concurrency=1` 完整执行权限 policy、grant-policy、auto-check、constraints、Execution/Store grants、输入事务、完成边界及 child/bindings 九份文件，114项／1582断言通过；全仓 typecheck、文档结构与影响检查通过。新版回归核新正文和新完整 revision 的 edit→write 稳定绑定、第三定义拒绝、allowed 一方不支持时仅单次、独立 checker 继续且其拒绝零效果、未声明覆盖时仍保独立人工、解释器绑定必须全方一致、准确 Session 隔离和最终 epoch 竞争。精确入口及验证边界归[grant owner](../storage/sqlite/permission-grants.README.md)；固定模型、SQLite 与本机结果不代替真实模型性能、客户端全过程或其他平台资格。
 
-默认 Service 真实登记的 Files `read_file/write_file/edit_file` 在 Auto 下不免审，包含工作区内读写和原有特殊文件范围。Files 通过内部 capability 的 `autoTimeoutScope:stop` 选择已有 `stopOnTimeout` 派发合同；该值参与权限 revision，父子交集保留停止要求。未经审核批准、拒绝、取消或审核超时的调用均不执行；统一有界重试及技术失败停止规则见下节；不改变持久化协议或工具版本。具体路径范围与原生基线检查见 [Files owner](../tools/files/README.md)。
+默认 Service 的 Auto 普通工作区 `read_file` 免模型审核；普通外部文本先通过完整硬门禁私有读取，实际缺失直接反馈，存在正文须通过原审核与最终派发才释放。`write_file/edit_file` 和原有特殊文件范围的审核规则保持。Files 通过内部 capability 的 `autoTimeoutScope:stop` 选择已有 `stopOnTimeout` 派发合同；该值参与权限 revision，父子交集保留停止要求。需要审核的调用在批准前不释放正文或执行写入，拒绝、取消或审核超时均丢弃私有快照；统一有界重试及技术失败停止规则见下节；不改变持久化协议或工具版本。具体路径范围与原生基线检查见 [Files owner](../tools/files/README.md)。
 
 
 ### 有界审批模型重试
@@ -186,7 +186,7 @@ Worktree create省略path时，可信Host默认根为homedir()下`.kite-code/wor
 
 任务授权审核的 `ask_user` 仅用于已有具体高风险效果且需要用户决定的情况；信息不足本身不触发人工确认。普通任务内同目标必要准备／读回校验按原任务和现行限制判断，不要求用户逐步重复授权，也不假设缺失的写入已发生。材料不足不能默认批准，明确越权／禁令仍拒绝，技术失败和耗尽重试继续未派发失败。原三态回执与人工高风险交互保持，不改变 Files/MCP 权限边界；提示合同回归不替代真实审核模型和客户端验收。
 
-Files 的任务授权审核明确区分 `effects` 操作效果标签和真实权限限制；`external` 只标本地工作区外路径，不代表联网外传或默认禁止。Auto 的内外目标均交模型审核，不能因 workspaceRoot 或未选 Full 臆造禁令；准确路径、受保护资源、父子权限和原生检查不变。针对真实外部读取误拒的修正仅澄清审核材料语义，不改 schema、存储或派发权限。
+Files 的任务授权审核明确区分 `effects` 操作效果标签和真实权限限制；`external` 只标本地工作区外路径，不代表联网外传或默认禁止。需要审核的 Auto 内外目标按实际任务判断，不能因 workspaceRoot 或未选 Full 臆造禁令；准确路径、受保护资源、父子权限和原生检查不变。针对真实外部读取误拒的修正仅澄清审核材料语义，不改 schema、存储或派发权限。
 
 Files 同轮读回的审核材料可附 `recordedFileMutations`：仅普通工作区 `files.read` 目标，由 Service 原生文件边界观察准确路径及文件身份；Core 再核同 Store／Session／Run／root work、准确 builtin Files 版本、已派发成功且完成早于当前调用创建的 write/edit 回执。仅在当前 native device/inode 与保存基线一致且路径匹配时提供最近一项历史元数据，不传文件正文、diff 或内容 hash，不把历史写入当授权或当前字节验证。路径身份进入原审核 request digest，审核中替换文件使旧批准失效；缺少身份、符号链接、保护路径或区外目标不补造事实，继续原权限审核。现有已封存检查不重写，超时／取消／未知和父子权限边界不变。受控 SQLite、native 与 Service/provider wire 回归覆盖范围与隐私；不替代最终真实模型和客户端验收。
 

@@ -23,6 +23,7 @@ import {
 } from './authorization-policy-evidence';
 import { decisionContext } from './authorization-review';
 import { assertCurrentChildPurpose } from './child-operations';
+import { executionBehaviorManifest } from './execution-behavior-manifest';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { verifyHostControlReads } from './host-control-dispatch';
 import { assertHumanWorkDispatch } from './human-work-control';
@@ -54,20 +55,13 @@ export function verifyAuthorizationBehaviorBinding(
     binding.capability.definitionVersion !== target.definition_version
   )
     throw new AgentError('authorization_check_binding_invalid');
-  let current: Row | null | undefined = target;
-  const seen = new Set<string>();
-  let run: Row | null | undefined;
-  while (current && !seen.has(String(current.id))) {
-    seen.add(String(current.id));
-    if (current.run_id) {
-      run = db.row('SELECT config_json FROM run WHERE id=?', current.run_id);
-      break;
-    }
-    current = current.parent_execution_id
-      ? db.row('SELECT * FROM execution WHERE id=?', current.parent_execution_id)
-      : undefined;
+  let manifest: ReturnType<typeof executionBehaviorManifest>;
+  try {
+    manifest = executionBehaviorManifest(db, target);
+  } catch {
+    throw new AgentError('authorization_check_binding_invalid');
   }
-  const configuration = run ? object(JSON.parse(String(run.config_json))) : null;
+  const { configuration } = manifest;
   if (binding.contractRef === 'kite.authorization-check') {
     if (binding.configurationDigest !== hash(checker))
       throw new AgentError('authorization_check_binding_invalid');
@@ -87,10 +81,9 @@ export function verifyAuthorizationBehaviorBinding(
     return;
   }
   if (
-    !configuration ||
-    !Array.isArray(configuration.toolBehaviors) ||
-    !configuration.toolBehaviors.some(
-      (candidate) => canonicalJson(candidate) === canonicalJson(binding as unknown as Json),
+    !manifest.bindings.some(
+      (candidate) =>
+        canonicalJson(candidate as unknown as Json) === canonicalJson(binding as unknown as Json),
     )
   )
     throw new AgentError('authorization_check_binding_invalid');

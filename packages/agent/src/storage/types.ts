@@ -33,6 +33,20 @@ export interface WorkspaceRecord {
   rootUri: string;
   name: string;
 }
+/** A Session's execution directory, independent of its logical Workspace and relatives. */
+export interface SessionExecutionRoot {
+  sessionId: string;
+  workspaceId: string;
+  effectiveRootUri: string;
+  epoch: string;
+  /** Null only for the untouched implicit Workspace binding. */
+  identity: { dev: string; ino: string } | null;
+  activationExecutionId?: string;
+}
+export interface SessionExecutionRootPreparation {
+  state: 'prepared' | 'committed';
+  binding: SessionExecutionRoot;
+}
 export interface WorkspaceRemoval {
   commandId: string;
   originStoreId: string;

@@ -278,12 +278,14 @@ export function modelDispatchMetadata(value: Json | null): ModelInputMetadata['a
   if (
     value.controlReads !== undefined &&
     (!Array.isArray(value.controlReads) ||
-      value.controlReads.length > 3 ||
+      value.controlReads.length > 4 ||
       !value.controlReads.every(
         (read) =>
           object(read) &&
           closed(read, ['kind', 'scope', 'revision']) &&
-          ['permission.mode', 'workspace.trust'].includes(String(read.kind)) &&
+          ['permission.mode', 'workspace.trust', 'session.execution_root'].includes(
+            String(read.kind),
+          ) &&
           typeof read.scope === 'string' &&
           typeof read.revision === 'string' &&
           /^(0|[1-9][0-9]*)$/.test(read.revision) &&

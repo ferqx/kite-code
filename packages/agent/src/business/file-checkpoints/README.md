@@ -76,3 +76,13 @@ prepare 重建完整 preview、读原 records/list，并调用 scoped `requireEx
 ## 只读文本预览
 
 公开 checkpoint preview 的 `textChange` 从已核 current／preimage 完整 UTF-8 复用 `computeLineDiff`，统计全部 added/removed lines；只有展示 preview 限 64KiB 并带 truncated。binary、非法 UTF-8、conflict／unavailable 不提供虚假行数。此字段独立于 restorePlan digest／writer／原持久记录，实际恢复继续核完整 bytes。[真实回归](../../../test/isolated/file-checkpoints/text-preview.test.ts)核完整统计、有界 Unicode、私有 bytes 与零业务写入。
+
+## 会话执行根与恢复点
+
+新捕获的 boundary 增加可信 `executionRoot:{epoch,identity:{device,inode}}`，从实际 Tool 封存的执行根与宿主原 epoch 读取；leaf 核 identity 与实际 Files 根一致，缺失或失配在任何 preimage／point／文件写入前拒绝。同 Run、同 trigger 的切根和返回会建立不同 point ID，不能覆盖原根的 first preimage。epoch 排序只允许同一真实 Run／trigger／selection／before 边界，不能把相同 seq 当成可合并的任意事件。
+
+旧 point 保留原 body、ID、revision 和既有元数据；可选字段只用于读取这些既有记录，不迁移、重写、清空或补造旧 identity。默认 Service 对旧点仅接受原 epoch zero 证明，并继续核 point.workspace 的实际物理身份。Tool 和 namespace 版本均未递增。
+
+只读目录与历史 metadata 保留其他根的点；代码 preview／restore 必须匹配当前已核物理根，不会把旧相对路径套到新根。完整 sealed timeline 保留所有根的 capture 与 restore，核各原来源后按可信物理 identity 分开计算文件 baseline；restore journal 的根来自准确原 point，不来自同名路径或当前 Session。返回同一原物理根后可以恢复旧点，即使中途存在另一根的同名文件变更或恢复 journal；缺失、损坏、原 source 失配及未确认事件仍 fail-closed。历史证明不要求重新打开无关 worktree，当前恢复根则必须重新验证；recovery-boundary 的 session-only 分支读取不取得代码恢复权限。
+
+定向回归见 [root metadata](../../../test/isolated/file-checkpoints/execution-root.test.ts) 与 [capture](../../../test/isolated/file-checkpoints/capture.test.ts)：同一 Run／trigger 的三个根 epoch、跨根零发布、各根切回恢复、其他根 journal 隔离及旧记录原样读取。实际命令与结果由本次交付记录说明，不外推未运行客户端流程。

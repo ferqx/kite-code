@@ -109,7 +109,7 @@ export interface PlanExecutionInput extends OwnedWrite {
   modelMetadata?: Json;
 }
 export interface PermissionControlRead {
-  readonly kind: 'permission.mode' | 'workspace.trust';
+  readonly kind: 'permission.mode' | 'workspace.trust' | 'session.execution_root';
   readonly scope: string;
   readonly revision: string;
 }
@@ -624,6 +624,34 @@ export interface Store {
     input: WriteContext & { id: string; rootUri: string; name: string },
   ): Promise<WorkspaceRecord>;
   getWorkspace(id: string): Promise<WorkspaceRecord | null>;
+  getSessionExecutionRoot(input: {
+    sessionId: string;
+    epoch?: string;
+  }): Promise<import('./types').SessionExecutionRoot>;
+  /** Complete bounded host occupancy snapshot, including retained deleted Sessions. */
+  listSessionExecutionRoots(input: WriteContext): Promise<{
+    roots: import('./types').SessionExecutionRoot[];
+    snapshotCursor: string;
+  }>;
+  getSessionExecutionRootPreparation(input: {
+    sessionId: string;
+    executionId: string;
+  }): Promise<import('./types').SessionExecutionRootPreparation | null>;
+  /** Host-verified candidate only. The successful Tool terminal transaction publishes it. */
+  prepareSessionExecutionRoot(
+    input: OwnedWrite & {
+      sessionId: string;
+      executionId: string;
+      expectedEpoch: string;
+      action: 'use' | 'exit';
+      source: { rootUri: string; identity: { dev: string; ino: string } };
+      target: {
+        rootUri: string;
+        identity: { dev: string; ino: string };
+        requestedPath?: string;
+      };
+    },
+  ): Promise<import('./types').SessionExecutionRoot>;
   removeWorkspace(
     input: WriteContext & {
       workspaceId: string;

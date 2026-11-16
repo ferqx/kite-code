@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
-import { lstat, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   AgentError,
   type AgentRuntime,
@@ -35,6 +34,8 @@ import type {
   MessageRecord,
 } from '@kite-ai/agent/storage';
 
+import { resolveSessionExecutionRoot } from './session-execution-root';
+
 const maxBytes = 16 * 1024 * 1024;
 const maxMessages = 8192;
 const maxProofBytes = 64 * 1024 * 1024;
@@ -54,6 +55,17 @@ function canonical(value: Json): string {
     .join(',')}}`;
 }
 const digest = (value: Json) => createHash('sha256').update(canonical(value)).digest('hex');
+function equalRootIdentity(a: unknown, b: unknown): boolean {
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  const left = a as { dev?: unknown; ino?: unknown },
+    right = b as { dev?: unknown; ino?: unknown };
+  return (
+    typeof left.dev === 'string' &&
+    typeof left.ino === 'string' &&
+    left.dev === right.dev &&
+    left.ino === right.ino
+  );
+}
 function selected(selection: ContextSelection, seq: string) {
   const value = BigInt(seq);
   return (
@@ -116,16 +128,21 @@ export function createDefaultFileCheckpointConfiguration(options: {
       group.originStoreId !== metadata.storeId
     )
       fail('checkpoint_scope_conflict');
-    let path: string;
-    try {
-      path = fileURLToPath(workspace.rootUri);
-    } catch {
-      return fail('checkpoint_scope_conflict');
-    }
-    const root = await realpath(path);
-    const stat = await lstat(path);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) fail('checkpoint_scope_conflict');
-    return { runtime, storeId: metadata.storeId, session, workspace, root };
+    const bound = await resolveSessionExecutionRoot(runtime, {
+      sessionId: session.id,
+      ...('executionId' in context && typeof context.executionId === 'string'
+        ? { executionId: context.executionId }
+        : {}),
+    });
+    return {
+      runtime,
+      storeId: metadata.storeId,
+      session,
+      workspace,
+      root: bound.root,
+      executionRoot: bound.binding,
+      rootRevision: bound.revision,
+    };
   }
   type Scope = Awaited<ReturnType<typeof scope>>;
   async function history(
@@ -382,8 +399,56 @@ export function createDefaultFileCheckpointConfiguration(options: {
     const before = actual.messages
       .filter((message) => BigInt(message.seq) < BigInt(trigger.seq))
       .at(-1);
+    // Read the original Tool's sealed root, never reinterpret its bytes under today's Session root.
+    // Historical verification is metadata-only: a later unrelated worktree need not still exist.
+    const sealedRoot = object(source.executionRoot ?? null);
+    const rootEpoch = sealedRoot?.epoch ?? '0';
+    if (
+      typeof rootEpoch !== 'string' ||
+      !/^(0|[1-9][0-9]*)$/.test(rootEpoch) ||
+      (source.executionRoot !== undefined && !sealedRoot)
+    )
+      fail('checkpoint_execution_root_unverifiable');
+    const originalRoot = await runtime.getSessionExecutionRoot({
+      sessionId: session.id,
+      epoch: rootEpoch,
+    });
+    if (
+      sealedRoot &&
+      (sealedRoot.sessionId !== session.id ||
+        sealedRoot.workspaceId !== workspace.id ||
+        sealedRoot.effectiveRootUri !== originalRoot.effectiveRootUri)
+    )
+      fail('checkpoint_execution_root_unverifiable');
+    const rootIdentity =
+      originalRoot.identity ??
+      (rootEpoch === bound.executionRoot.epoch &&
+      originalRoot.effectiveRootUri === bound.executionRoot.effectiveRootUri
+        ? bound.executionRoot.identity
+        : null);
+    if (
+      !rootIdentity ||
+      (sealedRoot &&
+        sealedRoot.identity !== null &&
+        !equalRootIdentity(sealedRoot.identity, rootIdentity)) ||
+      (!expected &&
+        (rootEpoch !== bound.executionRoot.epoch ||
+          originalRoot.effectiveRootUri !== bound.executionRoot.effectiveRootUri ||
+          !equalRootIdentity(rootIdentity, bound.executionRoot.identity)))
+    )
+      fail('checkpoint_execution_root_unverifiable');
+    const checkpointRoot = {
+      epoch: rootEpoch,
+      identity: { device: rootIdentity.dev, inode: rootIdentity.ino },
+    };
+    if (expected && canonical(checkpointRoot.identity) !== canonical(expected.workspace))
+      fail('checkpoint_execution_root_conflict');
+    // Existing immutable points retain their original hash and format. They can only prove epoch zero.
+    if (expected && !expected.boundary.executionRoot && rootEpoch !== '0')
+      fail('checkpoint_execution_root_unverifiable');
     const boundary = {
       storeId: tool.originStoreId,
+      ...(!expected || expected.boundary.executionRoot ? { executionRoot: checkpointRoot } : {}),
       workspaceId: workspace.id,
       sessionId: session.id,
       runId: run.id,
@@ -451,21 +516,62 @@ export function createDefaultFileCheckpointConfiguration(options: {
       options.profile.coordinationPath,
       ...options.runtimeAssets(),
     ],
+    async workspaceScope(
+      request: Pick<
+        import('@kite-ai/agent/extensions').AuthorizationRequest,
+        'sessionId' | 'executionId' | 'signal'
+      >,
+    ) {
+      const { root, revision } = await resolveSessionExecutionRoot(options.runtime(), request);
+      return { root, revision };
+    },
     async workspaceRoot(
       request: Pick<
         import('@kite-ai/agent/extensions').AuthorizationRequest,
         'sessionId' | 'executionId' | 'signal'
       >,
     ) {
-      const runtime = options.runtime();
-      const session = await runtime.getSession(request.sessionId);
-      const workspace = session && (await runtime.getWorkspace(session.workspaceId));
-      if (!workspace) throw new AgentError('file_read_scope_unavailable');
-      return fileURLToPath(workspace.rootUri);
+      return (await resolveSessionExecutionRoot(options.runtime(), request)).root;
     },
   };
   const externalReads = withExternalFileReads({ tools: extension.tools ?? [], ...fileScope });
-  const fullAccessFiles = withFullAccessFiles({ tools: externalReads.tools, ...fileScope });
+  const fullAccessFiles = withFullAccessFiles({
+    tools: externalReads.tools,
+    ...fileScope,
+    async preparationBinding(request, preparing) {
+      const runtime = options.runtime();
+      const execution = await runtime.getExecution(request.executionId);
+      const metadata = await runtime.getMetadata();
+      if (
+        !execution ||
+        execution.originStoreId !== metadata.storeId ||
+        execution.sessionId !== request.sessionId ||
+        execution.runId !== request.runId ||
+        execution.kind !== request.kind ||
+        execution.definitionId !== request.definitionId ||
+        execution.definitionVersion !== request.definitionVersion ||
+        digest(execution.input) !== digest(request.input) ||
+        !['planned', 'dispatching'].includes(execution.status) ||
+        execution.cancelRequestedAt !== null
+      )
+        throw new AgentError('file_preparation_unavailable');
+      // Only an eligible new private read reaches this phase. Other modes and
+      // independent human requirements retain their ordinary recovery path.
+      if (preparing && execution.authorization?.check)
+        throw new AgentError('file_preparation_unavailable');
+      return digest({
+        storeId: metadata.storeId,
+        sessionId: execution.sessionId,
+        runId: execution.runId,
+        rootWorkCommandId: execution.rootWorkCommandId,
+        rootWorkSeq: execution.rootWorkSeq,
+        executionId: execution.id,
+        attempt: execution.attempt,
+        ownerGeneration: execution.ownerGeneration,
+        inputDigest: digest(execution.input),
+      });
+    },
+  });
   const inputFiles = withInputFileReads({
     profilePath: options.profile.profilePath,
     tools: fullAccessFiles.tools,
@@ -627,11 +733,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
       ...options.runtimeAssets(),
     ],
     async workspaceRoot(request) {
-      const runtime = options.runtime(),
-        session = await runtime.getSession(request.sessionId);
-      const workspace = session && (await runtime.getWorkspace(session.workspaceId));
-      if (!workspace) fail('file_read_scope_unavailable');
-      return fileURLToPath(workspace.rootUri);
+      return (await resolveSessionExecutionRoot(options.runtime(), request)).root;
     },
     async readWorkspace(path, context, signal) {
       const bound = await scope(context);
@@ -679,7 +781,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
     },
   });
   const fileScopeDescription =
-    'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. Files read_file/write_file/edit_file use the current permission mode. Auto requests automatic authorization; Request Approval allows workspace operations and requests user approval for ordinary external paths; Full allows ordinary paths subject to inherited policy. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files follow their separate declared scope. External files are outside workspace checkpoints.';
+    'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. Files read_file/write_file/edit_file use the current permission mode. Auto reads ordinary workspace files directly; ordinary external text reads are privately captured first, known missing files return without review, and existing bytes are released only after automatic authorization; writes and edits request automatic authorization; Request Approval allows workspace operations and requests user approval for ordinary external paths; Full allows ordinary paths subject to inherited policy. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files follow their separate declared scope. External files are outside workspace checkpoints.';
   const descriptions: Readonly<Record<string, string>> = {
     'files.read':
       'Read UTF-8 file lines, at most 200 by default. start_line begins at 1; continue with next_line. Editable workspace reads return base_ref bound to the complete file even for a partial read. Authorized ordinary external reads return base_ref only for targets supported by safe native editing. A reference never grants write permission. A known missing file returns exists:false, not empty contents or an edit reference. For workspace and non-PDF files, omit pages/mode and use start_line/max_lines. Saved PDF attachments use pages and mode=text|image, omit line parameters; default is page 1 text, at most 20 text pages or 4 images. Empty extracted text does not prove a blank page.',
@@ -701,7 +803,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
           path: {
             ...((tool.inputSchema.properties as Record<string, Json>).path as Record<string, Json>),
             description:
-              'Workspace-relative or absolute file path, including ordinary external files. Ordinary external read/write/edit requests use Auto review, Request Approval human approval, or effective Full authorization. Exact saved attachment, current Plan paths retain their separate scope; other private/protected paths are denied.',
+              'Workspace-relative or absolute file path, including ordinary external files. Ordinary external paths use Request Approval human approval or effective Full authorization. Auto privately reads external text first, reports a known missing file without review, and reviews before releasing existing bytes; write/edit still require Auto review. Exact saved attachment, current Plan paths retain their separate scope; other private/protected paths are denied.',
           },
         },
       },
@@ -742,6 +844,28 @@ export function createDefaultFileCheckpointConfiguration(options: {
     tools,
     toolBehaviors: [
       restoreConfirmation,
+      {
+        capability: { kind: 'tool', definitionId: 'files.read', definitionVersion: '5' },
+        definition: tools.find((tool) => tool.id === 'files.read')!,
+        contractRef: 'kite.files.private-read',
+        configurationDigest: createHash('sha256')
+          .update('private-external-read-before-auto-review')
+          .digest('hex'),
+        async prepareTool(request, decision) {
+          // Scoped input/plan/image adapters keep their own authorization contracts.
+          if (
+            (await images.describeRequest(request)) ||
+            (await planFiles.describeRequest(request)) ||
+            (await inputFiles.describeRequest(request))
+          )
+            return null;
+          // Keep PDF-option validation and its recovery result in the input adapter.
+          // A private ordinary-file snapshot must not bypass that wrapper.
+          const input = object(request.input);
+          if (input?.pages !== undefined || input?.mode !== undefined) return null;
+          return fullAccessFiles.prepareRead(request, decision);
+        },
+      } satisfies TrustedToolBehavior,
       ...createFileToolBehaviors({
         tools,
         async readFiles(request) {
@@ -749,10 +873,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
           const session = await runtime.getSession(request.sessionId);
           const workspace = session && (await runtime.getWorkspace(session.workspaceId));
           if (!session || session.deletedAt !== null || !workspace) fail('file_scope_unavailable');
-          const path = fileURLToPath(workspace.rootUri);
-          const root = await realpath(path);
-          const stat = await lstat(path);
-          if (!stat.isDirectory() || stat.isSymbolicLink()) fail('file_scope_unavailable');
+          const { root } = await resolveSessionExecutionRoot(runtime, request);
           return {
             workspaceId: workspace.id,
             root,
@@ -783,10 +904,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
         const session = await runtime.getSession(request.sessionId);
         const workspace = session && (await runtime.getWorkspace(session.workspaceId));
         if (!session || session.deletedAt !== null || !workspace) return null;
-        const path = fileURLToPath(workspace.rootUri);
-        const stat = await lstat(path);
-        if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
-        const root = await realpath(path);
+        const { root } = await resolveSessionExecutionRoot(runtime, request);
         native = createWorkspaceFiles({
           root,
           protectReads: true,
@@ -818,12 +936,17 @@ export function createDefaultFileCheckpointConfiguration(options: {
       request: import('@kite-ai/agent/extensions').AuthorizationRequest,
       policy?: Readonly<PermissionPolicySnapshot>,
     ) {
-      return (
+      const special =
         (await images.describeRequest(request)) ??
         (await planFiles.describeRequest(request)) ??
-        (await inputFiles.describeRequest(request)) ??
+        (await inputFiles.describeRequest(request));
+      if (special)
+        return policy?.mode === 'auto' && request.definitionId === 'files.read'
+          ? { ...special, safeRead: false }
+          : special;
+      return (
         (await fullAccessFiles.describeRequest(request, policy)) ??
-        (await externalReads.describeRequest(request))
+        (await fullAccessFiles.describeReadRequest(request))
       );
     },
   };

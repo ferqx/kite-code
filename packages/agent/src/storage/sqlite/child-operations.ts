@@ -18,6 +18,7 @@ import { record as extensionRecord, verifyNamespace } from './extension-operatio
 import { applyInputWork } from './input-operations';
 import { sealAfterTurn } from './job-report-operations';
 import type { SqliteOperations } from './operations';
+import { inheritSessionExecutionRoot } from './session-execution-root';
 
 /** A closed display envelope; arbitrary custom inputs retain their original JSON body. */
 function displayInput(input: Json): { content: string; name?: string } | undefined {
@@ -402,6 +403,7 @@ export function ensureAgent(
         display?.name ?? `Child ${configuration.id}`,
         randomUUID(),
       );
+      inheritSessionExecutionRoot(db, parent, childSessionId);
     }
     const create: Json = {
       kind: 'session.create',

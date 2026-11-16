@@ -13,6 +13,7 @@ import {
   type Json,
   type RequirementRef,
 } from '../types';
+import { executionBehaviorManifest } from './execution-behavior-manifest';
 import { verifyHostControlReads } from './host-control-dispatch';
 import type { SqliteOperations } from './operations';
 import { revokePermissionGrant, savePermissionGrant } from './permission-grants';
@@ -388,15 +389,21 @@ function verifyExecutionConfirmation(
     rootBinding.decisionRevision !== proof.decisionRevision
   )
     throw new AgentError('execution_confirmation_changed');
-  // Tool callbacks are frozen in the actual Run. Runless Actions carry the exact
+  // Tool callbacks belong to their original Model Step. Runless Actions carry the exact
   // registered owner binding in their Core-built preparation source instead.
   const source = decode<Record<string, Json>>(root.decision_source_json);
   if (root.run_id !== null) {
-    const run = db.row('SELECT config_json FROM run WHERE id=?', root.run_id!);
-    const config = run && decode<{ toolBehaviors?: Json[] }>(run.config_json);
+    let manifest: ReturnType<typeof executionBehaviorManifest>;
+    try {
+      manifest = executionBehaviorManifest(db, root);
+    } catch {
+      throw new AgentError('execution_confirmation_changed');
+    }
     if (
-      !config?.toolBehaviors?.some(
-        (candidate) => canonicalJson(candidate) === canonicalJson(binding.owner as unknown as Json),
+      !manifest.bindings.some(
+        (candidate) =>
+          canonicalJson(candidate as unknown as Json) ===
+          canonicalJson(binding.owner as unknown as Json),
       )
     )
       throw new AgentError('execution_confirmation_changed');

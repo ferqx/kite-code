@@ -407,6 +407,7 @@ export type FileCheckpointArtifact = {
 export type FileCheckpointBoundary = {
   storeId: string;
   workspaceId: string;
+  executionRoot?: { epoch: string; identity: { device: string; inode: string } };
   sessionId: string;
   runId: string;
   contextSelectionId: string;
@@ -420,6 +421,7 @@ export type FileCheckpoint = {
   boundary: {
     storeId: string;
     workspaceId: string;
+    executionRoot?: { epoch: string; identity: { device: string; inode: string } };
     sessionId: string;
     runId: string;
     contextSelectionId: string;
@@ -510,6 +512,7 @@ export type FileCheckpointPage = {
         boundary: {
           storeId: string;
           workspaceId: string;
+          executionRoot?: { epoch: string; identity: { device: string; inode: string } };
           sessionId: string;
           runId: string;
           contextSelectionId: string;
@@ -536,6 +539,7 @@ export type FileCheckpointDetail = {
       boundary: {
         storeId: string;
         workspaceId: string;
+        executionRoot?: { epoch: string; identity: { device: string; inode: string } };
         sessionId: string;
         runId: string;
         contextSelectionId: string;
@@ -669,6 +673,7 @@ export type FileCheckpointRecoveryBoundary = {
     boundary: {
       storeId: string;
       workspaceId: string;
+      executionRoot?: { epoch: string; identity: { device: string; inode: string } };
       sessionId: string;
       runId: string;
       contextSelectionId: string;
@@ -2329,7 +2334,7 @@ export type ModelInputMetadata =
             definitionVersion: string;
             inputDigest: string;
             controlReads?: Array<{
-              kind: 'permission.mode' | 'workspace.trust';
+              kind: 'permission.mode' | 'workspace.trust' | 'session.execution_root';
               scope: string;
               revision: string;
             }>;
@@ -2354,7 +2359,7 @@ export type ModelInputMetadata =
             definitionVersion: string;
             inputDigest: string;
             controlReads?: Array<{
-              kind: 'permission.mode' | 'workspace.trust';
+              kind: 'permission.mode' | 'workspace.trust' | 'session.execution_root';
               scope: string;
               revision: string;
             }>;
@@ -2680,7 +2685,7 @@ export type ModelInputSnapshot = {
               definitionVersion: string;
               inputDigest: string;
               controlReads?: Array<{
-                kind: 'permission.mode' | 'workspace.trust';
+                kind: 'permission.mode' | 'workspace.trust' | 'session.execution_root';
                 scope: string;
                 revision: string;
               }>;
@@ -2705,7 +2710,7 @@ export type ModelInputSnapshot = {
               definitionVersion: string;
               inputDigest: string;
               controlReads?: Array<{
-                kind: 'permission.mode' | 'workspace.trust';
+                kind: 'permission.mode' | 'workspace.trust' | 'session.execution_root';
                 scope: string;
                 revision: string;
               }>;

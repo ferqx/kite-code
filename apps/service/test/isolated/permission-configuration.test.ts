@@ -390,7 +390,12 @@ test('custom task-review keeps a rejected project placeholder write undispatched
       tools.filter((row) => row.definitionId === 'files.read').map((row) => row.status),
     ).toEqual(['succeeded', 'succeeded']);
     expect(readFileSync(join(f.workspace, f.projectFile), 'utf8')).toBe(f.projectBytes);
-    expect(f.authReviews).toHaveLength(3);
+    expect(f.authReviews).toHaveLength(1);
+    expect(
+      tools
+        .filter((row) => row.definitionId === 'files.read')
+        .every((row) => !row.authorization?.check),
+    ).toBe(true);
     expect(f.requests).toHaveLength(4);
     const recovery = f.requests[2]!.messages as {
       role: string;

@@ -2,6 +2,7 @@
 
 负责 [git_worktree](../../../../src/tools/git-worktree/README.md) 的真实 Git 行为及可控故障窗口，不使用收费模型。
 
+- [execution-root](execution-root.test.ts)：明确 use／exit 封闭输入、真实同仓库 linked 指针、异库／别名／伪造反向指针拒绝。
 - [protocol](protocol.test.ts)：封闭输入、命令规范化、可信身份和各阶段终帧。
 - [schema-runtime](schema-runtime.test.ts)：真实 Runtime 在授权前拒绝 action 字段组合错误，原模型收到参数纠正与零效果反馈；合法 list 随后经过原 Job 与记录链。
 - [read-output](read-output.test.ts)：原 Job 完整输出、固定高水位、丢块/重复/非法 UTF-8 和空 droppedBytes。
@@ -76,3 +77,7 @@ Windows当前普通开发客户端的真实创建／图标、独立Workspace读�
 [Service权限整文件](../../../../../../apps/service/test/isolated/git-worktree-permissions.test.ts)10项／159断言通过，5个原macOS隔离HOME用例在Windows跳过。实际 Windows 根 Auto list/create/remove 和默认 general child create/remove 均由正式原生 Job 执行、零 check／卡，mutation仍保 `parent_review` 和原 `full_access/none`，list沿原工作区受限范围；manual两张业务卡、workspace_write外写、dirty、登记根、overlap、只读child及Planning保护同时通过。测试只按平台修正宿主收尾证据、合法 Tool 本地拒绝缺末 ref 的形状，以及 Windows child 多步骤观察期限，不改生产期限或范围。最终串行日志在本机 `.cache/worktree-desktop-live-20261106-b8da26c4/auto-final-service-tests.log`。
 
 此前一次原生 `windows_owned_child_start_failed` 保存为 Job outcome_unknown，发生在 Git worker 启动前；原DB与过滤事实在同目录 `auto-native-host-start-unknown.json` 保留，底层errno未持久化，不能猜因或改写为成功。相邻成功与失败 Job 的 scope均为Full／离线；资产冻结后整文件未再出现，不以通过重跑授予该原未知操作成功或完整宿主稳定资格。退出本身的真实桌面零执行、文件／登记保留与过程验证归[Native owner](../../../../../../apps/desktop/README.md)。
+
+2026-11-16，基线 `62c7d4d` 加本轮执行根差量，macOS arm64／Bun1.4.4：`execution-root.test.ts` 与 `context/model-context.test.ts` 两文件6项／70断言通过；[Service 同轮回归](../../../../../../apps/service/test/isolated/session-execution-root.test.ts)以原生进程核验权限运行，5项／88断言通过。真实 use→Files→Shell→Git list/create→exit→Files→Shell 保同一 Run，项目指令随下一步切换，其他会话及文件不变；Auto 在目标根和原根各保一次准确 Shell 风险审核；Full 仍拒宿主 protectedRoots，审批后目标同路径替换零激活。受限执行沙箱中的早期 Shell 监督 unknown 保留，没有为通过测试放宽生产监督或恢复。
+
+后台 Shell 场景先观察 epoch1 原 Job 已 running／dispatched，再让同一 Run exit 至 epoch2；原 Job 保目标 cwd 完成且只有一次执行，collector 将旧 staging 的 late.txt 保存为 ready，读回 artifact 精确包含旧目标路径。不对尚未派发的旧 Job 添加历史授权豁免。[真实 Service 根恢复](../../../../../../apps/service/test/isolated/worktree-read-recovery.test.ts)另核 use 后原 Model／Files 封 epoch1，在派发前 SIGKILL，经 HTTP 冷恢复读取目标，再 exit 和读取原根，不重复原 Model／Tool；它不执行 Shell，也不授予真实 Provider 或 Native 窗口资格。

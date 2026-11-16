@@ -301,7 +301,13 @@ Trace 设置的最终生产 Native 经真实 Main／Client／候选 Service 完�
 
 2026-11-07普通 `testDiagnostics:false` Native 的真实 Luna／medium 自然任务覆盖三模式中文方案保存、四次计划人答、拒绝后三模式新问题及原计划待答时Full→Auto→Full。40份完整Model输出、80条Execution与10个Run保存；三个计划拒绝均由原Tool返回简短说明并直接结束原轮，零后继Model／实施效果。Full原计划写入与读回成功，模型三次抄错进度Run ID的原失败保留；正是该样本暴露上述错误展示。修复后重建普通制品，沿同Profile冷开逐段观察正确说明、原拒绝历史与新回复，原Run／Execution／Command／Interaction／Message完整摘要和文件字节均保持，零重放，Main正常exit0且三个Session owner释放。报告与原失败边界归[模型验证](../../tests/e2e/live/model/README.md#当前-v1-扩展验证8秒默认)，不以这次冷读追加真实模型样本或授予其他平台／完整发布资格。
 
-[本地工作树导航](src/native-worktree-navigation.ts)只消费目录有限 `worktreeSource`，在同 Store 可见根 Session／Workspace 内验证来源，标题栏的“退出工作树”和独立无附件退出命令沿 [Native](src/native.tsx)刷新目录、核原 nonce 后调用既有 select。创建原会话 cwd 未变时仅说明，无来源时保草稿并提示，不向模型回退；解释、引用、代码、复合正文及带附件输入仍走原聊天。退出不创建 Run／Tool／Job、不调用 Git/remove、不改权限或停止原任务，各会话草稿和阅读状态继续沿原切换流程保存。Main 只传 Store 已核有限关系，未引入新 IPC、工具或版本；自动审批策略与导航意图指导分别由 Agent owner 维护。
+[本地工作树导航](src/native-worktree-navigation.ts)只消费目录有限 `worktreeSource`，在同 Store 可见根 Session／Workspace 内验证来源。标题栏明确标“返回来源会话”，只有独立无附件的“返回来源项目／会话”沿 [Native](src/native.tsx)刷新目录、核原 nonce 后调用既有 select。已在来源会话时只说明导航身份，不推断当前执行目录；无来源时保草稿并提示，不向模型回退。导航不创建 Run／Tool／Job、不调用 Git/remove、不改执行根、权限或停止原任务，各会话草稿和阅读状态沿原切换流程保存。Main 只传 Store 已核有限关系，没有新 IPC。
+
+“退出工作树”及 `exit worktree`／`leave worktree` 不再被 Renderer 当成来源导航拦截，而是准确提交给当前 Session 的普通输入。执行中沿原引导／排队规则受理，是否使用 `git_worktree.exit`、审批与安全 Step 边界归 Agent／Service；客户端不直接修改根、不换会话、不把退出解释为删除。下面 2026-11-06 的旧真实窗口证据只保留历史导航行为和未变的草稿／读取隔离，不代表现在的退出词路由已取得真实窗口验收。当前语义由[导航单元回归](test/native-worktree-navigation.test.ts)和[Native DOM](test/isolated/native-new-conversation-dom.test.tsx)覆盖明确来源导航、中文／英文退出原文提交及保留当前会话。
+
+当前会话 `use`／`exit` 只改变私有执行根，不改变原空间归属。Store 的实际根会话目录仍按原 `workspace_id` 与可见主体读取，子会话仍保留原父子关系且不升为侧栏根会话；[Main](electron/native-caller.ts)完整读取目录后，[Native 投影](src/native-presentation.ts)继续按原 `workspaceId` 分组交给 Sidebar，不按执行路径推断或创建空间。目标 worktree 已登记为另一空间时也不迁移原会话。专门的[执行根与空间归属回归](test/isolated/native-execution-root-directory.test.tsx)连接真实 SQLite 切换事务、分页目录、SDK collectors、NativeCaller、生产投影及 Sidebar 渲染，覆盖准备／切换／退出、冷重读、第二空间和两代子会话；这是内存传输适配下的跨层测试，不代称 HTTP、实际 Git 操作或完整窗口交互验收。
+
+2026-11-16，macOS arm64／Bun 1.4.4，上述两整文件121项／2550断言通过，Desktop类型检查1619文件通过。更新导航按钮文案的独立 Chrome runner 已构建并启动，但在进入本轮导航操作前的初始保存草稿断言取得空串而非 `Draft A`，尚未完成浏览器全过程验证；不以 DOM 通过或旧窗口证据替代该资格。
 
 2026-11-06，`8364d9e40`加退出／Auto差量、Windows x64／Bun1.4.4／Electron44.3.0：八 workspace 构建后重启普通桌面客户端，在真实旧 linked-r2 项目观察输入草稿→标题栏退出→来源历史、返回 linked 恢复草稿，再以独立“退出工作树”命令返回来源。过程无新消息占位、重复正文或旧会话串入，原来源草稿保持；只读前后核对两个 Session 的 workspace/context/nextSeq、Run/Model/Tool/Job 计数、Git登记和文件摘要完全相同，零新执行，原失败历史不改写。材料在本机 `.cache/worktree-exit-20261106/{before,after,result}.json`。源目录读取等待中的整体变暗曾在夹具暴露，已改为仅阻止重复发送，草稿保持可编辑；最终生产 renderer 已由开发热更新加载。
 
@@ -360,6 +366,8 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 2026-11-14 在同一 Windows 浏览器夹具补核表格四边外框、圆角、列宽与宽表格的键盘横向滚动，页面宽度保持在视口内。
 
 同日以 Windows x64／Chrome 157 核对统一字体。浏览器实际绘制的正文字形为 Segoe UI 与 Microsoft YaHei UI，代码与 Shell 输出使用 Consolas。深浅主题与宽窄窗口核对发送、正文接管、打开和退出设置、文件引用提示 13px，以及流式换行与重连时的阅读位置。macOS 系统字形尚待实机核对。
+
+2026-11-16，`c752f9f` 加执行根整合差量，macOS／Chrome157.0.8103.78：文件引用浏览器夹具以1280和390宽度通过，保留显式链接、反引号纯代码、缓存返回、禁用、悬停／焦点与视觉检查，两组均无脚本错误或外部请求。原版先因 Chromium 把 `BlinkMacSystemFont` 序列化为 `"system-ui"` 的字符串比较失败；夹具仅规范化这两个等价系统字体名称，仍核原顺序、其他 fallback、字号和宽度。不据此授予完整 Native 窗口或真实模型资格。
 
 提示词输入使用UI的原生多行[PromptEditor](../../packages/ui/src/desktop/PromptEditor.tsx)，只编辑原始Markdown字符串，不预览或标准化源文。首次发送、已有会话投递占位、已保存用户消息和Agent正文复用[MessageContent](../../packages/ui/src/desktop/MessageContent.tsx)，[PromptMarkdown](../../packages/ui/src/desktop/PromptMarkdown.tsx)仅增加用户正文的高度与展开控制，内部复用同一renderer；表格对齐、CJK强调、公式、提示块、脚注和图表沿共同语义与Native内容主题。输入法、选区、撤销及scope隔离见[UI owner](../../packages/ui/README.md#markdown-提示词编辑)与[纯文本输入决定](../../.agents/notes/implemented/bug-fix/2026-11-07-plain-prompt-markdown-messages.md)。[Native展示](src/native.tsx)让普通inline用户正文在占位与历史之间保持同一组件位置；[正文reader](src/native-model-output-message.tsx)保留完整读取、复制与文件打开准入。Agent正文HTTP(S)链接由宿主显式拦截，在右侧现有浏览器标签打开，仍经Main地址、当前会话与页面控制权校验，不交系统浏览器；阅读暂停时不导航。文件路径由messageFile.open沿原message/run/workspace、保护根、实际路径和文件身份核验；代码沿原编辑器，其余返回绑定scope的只读随机handle，经独立NativeLocalFilePreview进入右侧。该handle不是OutputFileTarget、不产生交付记录，不授予另存或原文件写入权限；本地PDF可沿现有读取授权提交可信标注请求，其他类型保持只读；同一标签切换仅关闭原生view，显式关闭释放handle，满标签时释放未展示handle，scope变化由Main释放。活跃只读检查失败时关闭view并提示重新打开，不自动重试读取。草稿链接只是文本。正文首末及引用／列表／单元格边缘不叠加外边距，末尾一级／二级标题不显示分隔线和其留白，有后续内容时保留原排版。普通用户正文默认约360px上限，矮窗口收敛至约半屏；超出时通过泡内渐隐／内阴影的“展开”按钮阅读全文，可再次收起。附件、发送失败／未知提示及全文复制不被裁切，手动展开随同一节点跨接管／缓存保留，冷重开默认收起；具体生命周期沿UI owner。
 

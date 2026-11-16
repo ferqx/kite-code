@@ -1,21 +1,8 @@
 import type { NativeDirectory, NativeSelection } from './native-bridge';
 
-const exitCommands = new Set([
-  '退出工作树',
-  '退出 git 工作树',
-  '退出git工作树',
-  '退出 worktree',
-  '退出worktree',
-  '退出 git worktree',
-  '返回来源项目',
-  '返回来源会话',
-  'exit worktree',
-  'exit git worktree',
-  'leave worktree',
-  'leave git worktree',
-]);
+const exitCommands = new Set(['返回来源项目', '返回来源会话']);
 
-/** A standalone local navigation command, never a free-text intent classifier. */
+/** Explicit source navigation only. Worktree exit stays ordinary input for a safe Tool boundary. */
 export function isNativeWorktreeExitCommand(text: string): boolean {
   return exitCommands.has(text.trim().toLowerCase());
 }

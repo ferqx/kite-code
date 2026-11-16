@@ -54,7 +54,7 @@ export function intersectPermissionPolicies(
           return { allowed: false, revision, reason: 'permission_control_changed' };
         if (!previous) controlReads.push(read);
       }
-      if (controlReads.length > 3)
+      if (controlReads.length > 4)
         return { allowed: false, revision, reason: 'invalid_permission_control_reads' };
       const grantOffers = await intersectGrantOffers(request, [
         { permissions: current, decision: base },

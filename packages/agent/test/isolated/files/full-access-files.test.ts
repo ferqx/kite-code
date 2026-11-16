@@ -31,7 +31,11 @@ import {
 } from '../../../src/permissions';
 import type { Json } from '../../../src/storage/types';
 
-function fixture() {
+function fixture(
+  options: Partial<
+    Pick<Parameters<typeof withFullAccessFiles>[0], 'workspaceScope' | 'preparationBinding'>
+  > = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-full-files-'))),
     workspace = join(root, 'workspace'),
     external = join(root, 'external'),
@@ -55,6 +59,7 @@ function fixture() {
     protectedRoots: () => [protectedRoot],
   });
   const api = withFullAccessFiles({
+    ...options,
     tools: reads.tools,
     workspaceRoot: async () => workspace,
     protectedRoots: () => [protectedRoot],
@@ -73,7 +78,7 @@ function fixture() {
   const proof = (mode: PermissionMode, capability: CapabilityDescription | null) => ({
     namespace: 'builtin.permissions',
     version: '1',
-    data: { mode, workspaceTrust: true, capability },
+    data: { mode, workspaceTrust: true, capability: capability as unknown as Json },
   });
   async function context(req: AuthorizationRequest, mode: PermissionMode = 'full') {
     const capability =
@@ -586,3 +591,164 @@ test('external read authorization cannot follow a different symlink target after
     await f.close();
   }
 });
+
+async function prepareAutoRead(f: ReturnType<typeof fixture>, path: string, extra: Json = {}) {
+  const request = {
+    ...f.request('files.read', { path, ...(extra as Record<string, Json>) }),
+    definitionVersion: '5',
+  };
+  const capability = await f.api.describeReadRequest(request);
+  const prepared = await f.api.prepareRead(request, {
+    allowed: false,
+    revision: 'before-preparation',
+    check: { request: {} },
+    snapshot: f.proof('auto', capability),
+  });
+  expect(prepared).not.toBeNull();
+  const context = {
+    ...request,
+    dispatchAuthorization: {
+      revision: 'final-owned-dispatch',
+      snapshot: f.proof('auto', await f.api.describeReadRequest(request)),
+    },
+  } as unknown as ToolContext;
+  return { request, prepared: prepared!, context };
+}
+
+test('private read freezes exact BOM/CRLF line window, consumes once and never rereads a replacement', async () => {
+  const f = fixture();
+  try {
+    const path = join(f.external, 'frozen.txt');
+    writeFileSync(path, '\uFEFFone\r\ntwo 😀\r\nthree\r\n');
+    const { prepared, context } = await prepareAutoRead(f, path, { offset: 2, limit: 1 });
+    writeFileSync(path, 'new content');
+    try {
+      const result = await prepared.execute(context);
+      expect(JSON.parse(result.content).content).toBe('two 😀\r\n');
+      expect(JSON.parse(result.content).selection).toEqual({
+        fromLine: 2,
+        toLine: 2,
+        totalLines: 3,
+        nextOffset: 3,
+      });
+      await expect(prepared.execute(context)).rejects.toThrow('file_preparation_unavailable');
+    } finally {
+      prepared.dispose();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('missing private observation stays missing when a file appears; a disposed read has no body to consume', async () => {
+  const f = fixture();
+  try {
+    const path = join(f.external, 'missing.txt');
+    const { prepared, context, request } = await prepareAutoRead(f, path);
+    expect(await f.api.describeReadRequest(request)).toMatchObject({
+      safeRead: true,
+      effects: ['read'],
+    });
+    writeFileSync(path, 'must-not-be-read');
+    try {
+      expect(await prepared.execute(context)).toMatchObject({
+        outcome: 'succeeded',
+        details: { exists: false },
+      });
+    } finally {
+      prepared.dispose();
+    }
+    const next = await prepareAutoRead(f, path);
+    next.prepared.dispose();
+    next.prepared.dispose();
+    await expect(next.prepared.execute(next.context)).rejects.toThrow(
+      'file_preparation_unavailable',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('private read contexts cannot borrow another execution or survive cancellation', async () => {
+  const f = fixture();
+  try {
+    const path = join(f.external, 'shared.txt');
+    writeFileSync(path, 'first');
+    const first = await prepareAutoRead(f, path);
+    writeFileSync(path, 'second');
+    const second = await prepareAutoRead(f, path);
+    try {
+      await expect(first.prepared.execute(second.context)).rejects.toThrow(
+        'file_preparation_unavailable',
+      );
+      expect(JSON.parse((await first.prepared.execute(first.context)).content).content).toBe(
+        'first',
+      );
+      expect(JSON.parse((await second.prepared.execute(second.context)).content).content).toBe(
+        'second',
+      );
+    } finally {
+      first.prepared.dispose();
+      second.prepared.dispose();
+    }
+    const cancelled = await prepareAutoRead(f, path);
+    try {
+      await expect(
+        cancelled.prepared.execute({ ...cancelled.context, signal: AbortSignal.abort() }),
+      ).rejects.toThrow();
+    } finally {
+      cancelled.prepared.dispose();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('private read does not pre-read behind an independent human requirement', async () => {
+  const f = fixture();
+  try {
+    const request = {
+      ...f.request('files.read', { path: join(f.external, 'absent.txt') }),
+      definitionVersion: '5',
+    };
+    const capability = await f.api.describeReadRequest(request);
+    expect(
+      await f.api.prepareRead(request, {
+        allowed: false,
+        revision: 'independent-human',
+        check: { request: {}, requireApproval: true },
+        snapshot: f.proof('auto', capability),
+      }),
+    ).toBeNull();
+    expect(await f.api.describeReadRequest(request)).toMatchObject({
+      safeRead: false,
+      effects: ['read', 'external'],
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+for (const boundary of ['root-epoch', 'execution-owner'] as const)
+  test(`private snapshot cannot survive a changed ${boundary}`, async () => {
+    let revision = 'original';
+    const f = fixture(
+      boundary === 'root-epoch'
+        ? { workspaceScope: async () => ({ root: f.workspace, revision }) }
+        : { preparationBinding: async () => revision },
+    );
+    try {
+      const path = join(f.external, 'owned.txt');
+      writeFileSync(path, 'BOUND_TO_ORIGINAL_ROOT_AND_OWNER');
+      const { prepared, request, context } = await prepareAutoRead(f, path);
+      revision = 'changed';
+      try {
+        expect(await f.api.describeReadRequest(request)).toMatchObject({ hardAllowed: false });
+        await expect(prepared.execute(context)).rejects.toThrow();
+      } finally {
+        prepared.dispose();
+      }
+    } finally {
+      await f.close();
+    }
+  });

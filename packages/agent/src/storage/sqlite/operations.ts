@@ -184,6 +184,13 @@ import { assertRequirementReadSet } from './requirement-read-set';
 import { readRunExecutionSafetySnapshot } from './run-execution-safety';
 import { callRunResume } from './run-resume-operations';
 import { storageMeta } from './schema';
+import {
+  finalizeSessionExecutionRoot,
+  getSessionExecutionRoot,
+  getSessionExecutionRootPreparation,
+  listSessionExecutionRoots,
+  prepareSessionExecutionRoot,
+} from './session-execution-root';
 import { callSessionExport } from './session-export';
 import { readFirstSessionRun } from './session-first-run';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
@@ -1451,6 +1458,37 @@ export class SqliteOperations {
         });
       case 'readDesktopShellPreference':
         return readDesktopShellPreference(this, String(args[0]));
+      case 'getSessionExecutionRoot':
+      case 'listSessionExecutionRoots':
+      case 'getSessionExecutionRootPreparation': {
+        this.db.run('BEGIN');
+        try {
+          const result =
+            method === 'listSessionExecutionRoots'
+              ? listSessionExecutionRoots(
+                  this,
+                  args[0] as Parameters<Store['listSessionExecutionRoots']>[0],
+                )
+              : method === 'getSessionExecutionRoot'
+                ? getSessionExecutionRoot(
+                    this,
+                    args[0] as Parameters<Store['getSessionExecutionRoot']>[0],
+                  )
+                : getSessionExecutionRootPreparation(
+                    this,
+                    args[0] as Parameters<Store['getSessionExecutionRootPreparation']>[0],
+                  );
+          this.db.run('COMMIT');
+          return result;
+        } catch (error) {
+          return this.rollback(error);
+        }
+      }
+      case 'prepareSessionExecutionRoot':
+        return prepareSessionExecutionRoot(
+          this,
+          args[0] as Parameters<Store['prepareSessionExecutionRoot']>[0],
+        );
       case 'saveDesktopShellPreference':
         return saveDesktopShellPreference(
           this,
@@ -2294,6 +2332,7 @@ export class SqliteOperations {
             );
           if (BigInt(execution.result_revision!) >= 9223372036854775807n)
             throw new AgentError('sequence_exhausted');
+          finalizeSessionExecutionRoot(this, execution, { owner: input.owner, status, result });
           this.run(
             'UPDATE execution SET state=?,result_json=?,result_revision=result_revision+1 WHERE id=?',
             status,

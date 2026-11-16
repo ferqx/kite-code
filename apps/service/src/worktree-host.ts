@@ -8,6 +8,12 @@ import {
   type ShellConfigurationOptions,
 } from '@kite-ai/agent/permissions/shell';
 import { planningSnapshotDigest } from './planning-configuration';
+import {
+  inspectExecutionRoot,
+  inspectWorktreeRootSelection,
+  prepareWorktreeExecutionRoot,
+  resolveSessionExecutionRoot,
+} from './session-execution-root';
 
 const object = (value: unknown): Record<string, Json> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -86,16 +92,30 @@ export async function readOnlyWorktreeBoundary(
     if (!workspace || !savedAssets?.gitWorktree) return false;
     const options = await shellForSession(session.rootSessionId);
     if (!options) return false;
+    const executionRoot = await resolveSessionExecutionRoot(runtime, {
+      sessionId: tool.sessionId,
+      executionId: tool.id,
+    });
     const shell = await createShellConfiguration({
-      workspaceRoot: fileURLToPath(workspace.rootUri),
+      workspaceRoot: executionRoot.root,
       toolIds: ['git.worktree'],
       options,
     });
+    const assetIdentity = (value: Json) => {
+      const facts = object(value),
+        configuration = object(facts?.configuration);
+      if (!facts || !configuration) throw new AgentError('worktree_asset_changed');
+      // The actual cwd is independently verified from the exact Execution root.
+      // All executable assets, host profile and other configuration remain sealed.
+      const { sourceCwd: _cwd, identity: _identity, ...stable } = configuration;
+      return { ...facts, configuration: stable };
+    };
     const current = object(shell.snapshot),
       assets = object(current?.assets);
     if (
       !assets?.gitWorktree ||
-      planningSnapshotDigest(assets.gitWorktree) !== planningSnapshotDigest(savedAssets.gitWorktree)
+      planningSnapshotDigest(assetIdentity(assets.gitWorktree)) !==
+        planningSnapshotDigest(assetIdentity(savedAssets.gitWorktree))
     )
       return false;
     // A canonical list Job must still originate from the exact list Tool.
@@ -129,11 +149,52 @@ export async function readOnlyWorktreeBoundary(
 
 /** Reads existing authority only. No worktree inventory or occupation lease is created. */
 export function createWorktreeHost(readRuntime: () => AgentRuntime | undefined) {
+  const selections = new Map<string, Awaited<ReturnType<typeof inspectWorktreeRootSelection>>>();
   return {
+    async describeExecutionRoot(
+      request: { action: 'use'; path: string } | { action: 'exit' },
+      scope: { sessionId: string; executionId: string },
+      sourceCwd: string,
+    ) {
+      const runtime = readRuntime();
+      if (!runtime) throw new AgentError('execution_root_unavailable');
+      const value = await inspectWorktreeRootSelection(runtime, request, scope, sourceCwd);
+      selections.set(scope.executionId, value);
+      return value as unknown as Json;
+    },
+    async prepareExecutionRoot(
+      request: { action: 'use'; path: string } | { action: 'exit' },
+      context: import('@kite-ai/agent/extensions').ToolContext,
+      sourceCwd: string,
+    ) {
+      const runtime = readRuntime();
+      if (!runtime) throw new AgentError('execution_root_unavailable');
+      const approved = selections.get(context.executionId);
+      if (!approved) throw new AgentError('execution_root_authorization_unavailable');
+      try {
+        return await prepareWorktreeExecutionRoot(runtime, request, context, sourceCwd, approved);
+      } finally {
+        selections.delete(context.executionId);
+      }
+    },
     async readRegisteredWorkspaceRoots() {
       const runtime = readRuntime();
       if (!runtime) throw new AgentError('worktree_occupancy_unavailable');
       const { storeId } = await runtime.getMetadata();
+      const active = await runtime.listSessionExecutionRoots({ expectedStoreId: storeId });
+      const executionRoots: string[] = [];
+      for (const binding of active.roots) {
+        // The snapshot includes committed roots and uncommitted activation
+        // reservations. A reservation's next epoch intentionally is not current.
+        const checked = await inspectExecutionRoot(binding.effectiveRootUri);
+        if (
+          binding.identity &&
+          (checked.identity.dev !== binding.identity.dev ||
+            checked.identity.ino !== binding.identity.ino)
+        )
+          throw new AgentError('worktree_occupancy_unavailable');
+        executionRoots.push(checked.root);
+      }
       let afterSeq = '0';
       let upperSeq: string | undefined;
       let highWaterSeq: string | undefined;
@@ -210,7 +271,15 @@ export function createWorktreeHost(readRuntime: () => AgentRuntime | undefined) 
             check.nextAfterSeq !== null
           )
             throw new AgentError('worktree_occupancy_unavailable');
-          return { originStoreId: storeId, complete: true as const, roots, snapshotCursor };
+          const activeCheck = await runtime.listSessionExecutionRoots({ expectedStoreId: storeId });
+          if (activeCheck.snapshotCursor !== active.snapshotCursor)
+            throw new AgentError('worktree_occupancy_unavailable');
+          return {
+            originStoreId: storeId,
+            complete: true as const,
+            roots: [...new Set([...roots, ...executionRoots])],
+            snapshotCursor,
+          };
         }
         if (!page.items.length || page.nextAfterSeq !== lastSeq)
           throw new AgentError('worktree_occupancy_unavailable');

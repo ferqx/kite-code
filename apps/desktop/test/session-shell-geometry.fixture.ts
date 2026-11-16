@@ -648,7 +648,7 @@ export async function verifyWorktreeNavigation(browser: Browser, url: string, ar
             .filter((node) => node.getBoundingClientRect().height > 0)
             .map((node) => ({ id: node.dataset.messageId, text: node.textContent }));
           const exit = document.querySelector<HTMLButtonElement>(
-            '.session-header [aria-label="退出工作树"]',
+            '.session-header [aria-label="返回来源会话"]',
           );
           const model = document.querySelector<HTMLButtonElement>('[data-model-trigger]');
           return {
@@ -730,7 +730,7 @@ export async function verifyWorktreeNavigation(browser: Browser, url: string, ar
       const target = await phase('02-worktree-draft');
       assert.equal(target.editor, '工作树草稿：保留阅读与输入位置');
       await page.evaluate(() => window.sessionShellFixture.holdNavigationDirectory());
-      await page.getByRole('button', { name: '退出工作树', exact: true }).click();
+      await page.getByRole('button', { name: '返回来源会话', exact: true }).click();
       await page.waitForFunction(() => window.sessionShellFixture.navigationDirectoryHeld());
       const latestDraft = '目录读取期间继续编辑的最新工作树草稿';
       await editor.fill(latestDraft);
@@ -770,8 +770,8 @@ export async function verifyWorktreeNavigation(browser: Browser, url: string, ar
       });
       await page.getByRole('status', { name: '工作区目录不可用' }).waitFor();
       await phase('08-missing-worktree');
-      await editor.fill('退出工作树');
-      await page.locator('.composer [aria-label="退出工作树"]').click();
+      await editor.fill('返回来源会话');
+      await page.locator('.composer [aria-label="返回来源会话"]').click();
       await ready('a');
       const missing = await phase('09-returned-missing-source');
       assert.equal(missing.missing, true);
@@ -784,20 +784,20 @@ export async function verifyWorktreeNavigation(browser: Browser, url: string, ar
       await row('b').click();
       await ready('b');
       await page.evaluate(() => window.sessionShellFixture.navigationSource(false));
-      await page.locator('.session-header [aria-label="退出工作树"]').click();
+      await page.locator('.session-header [aria-label="返回来源会话"]').click();
       await page.waitForFunction(() =>
         document.querySelector('[aria-label="工作树导航"]')?.textContent?.includes('无法核实'),
       );
       const unknown = await phase('10-source-unavailable');
       assert.equal(unknown.title, 'Session B');
-      assert.equal(unknown.editor, '退出工作树');
+      assert.equal(unknown.editor, '返回来源会话');
       await page.evaluate(() => {
         window.sessionShellFixture.navigationSource(true);
         window.sessionShellFixture.publish();
       });
-      await page.locator('.session-header [aria-label="退出工作树"]').waitFor();
+      await page.locator('.session-header [aria-label="返回来源会话"]').waitFor();
       await page.evaluate(() => window.sessionShellFixture.holdNavigationDirectory());
-      await page.locator('.session-header [aria-label="退出工作树"]').click();
+      await page.locator('.session-header [aria-label="返回来源会话"]').click();
       await page.waitForFunction(() => window.sessionShellFixture.navigationDirectoryHeld());
       await row('a').click();
       await ready('a');

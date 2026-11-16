@@ -1,11 +1,18 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { AuthorizationRequest, ToolContext, ToolDefinition, ToolResult } from '../extensions';
+import type {
+  AuthorizationRequest,
+  PermissionDecision,
+  ToolContext,
+  ToolDefinition,
+  ToolResult,
+} from '../extensions';
 import { canonicalJson } from '../json';
 import type { CapabilityDescription, PermissionPolicySnapshot } from '../permissions';
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import { AgentError, type Json } from '../storage/types';
+import type { PreparedToolExecution } from '../tool-behavior';
 import { withExternalFileReads } from './external-file-reads';
 import { createWorkspaceFiles, type FileSnapshot, type WorkspaceFiles } from './files';
 import {
@@ -66,6 +73,8 @@ export function withFullAccessFiles(options: {
   tools: readonly ToolDefinition[];
   workspaceRoot(request: Request): Promise<string>;
   protectedRoots(): readonly string[];
+  workspaceScope?(request: Request): Promise<{ root: string; revision: string }>;
+  preparationBinding?(request: AuthorizationRequest, preparing?: true): Promise<string>;
 }) {
   const readScope = withExternalFileReads(options);
   async function outside(request: Request, input: Json) {
@@ -183,7 +192,206 @@ export function withFullAccessFiles(options: {
       },
     };
   }
+  type ReadSnapshot = {
+    path: string;
+    value: (Omit<FileSnapshot, 'baseline'> & { baseline?: FileSnapshot['baseline'] }) | null;
+  };
+  /** No ToolResult or Artifact exists until the final dispatch consumes this value. */
+  async function readSnapshot(request: Request, input: Json): Promise<ReadSnapshot | null> {
+    let files: WorkspaceFiles | undefined;
+    try {
+      const selected = await prepare(request, input);
+      if (!selected) return null;
+      files = createWorkspaceFiles({ root: selected.anchor, strictReads: true });
+      if (
+        canonicalJson({
+          path: selected.path,
+          actual: await canonicalTarget(selected.path),
+          anchor: selected.anchor,
+          probe: selected.binding.probe,
+          parent: await identity(selected.anchor),
+          file: await identity(selected.binding.probe),
+        } as Json) !== canonicalJson(selected.binding as Json)
+      )
+        throw new AgentError('file_dispatch_scope_changed');
+      const parameters = input as Record<string, Json>;
+      let value: FileSnapshot | null = null;
+      try {
+        value = await files.read(selected.relativePath, {
+          offset: parameters.offset === undefined ? 1 : Number(parameters.offset),
+          limit: parameters.limit === undefined ? 200 : Number(parameters.limit),
+          signal: request.signal,
+        });
+      } catch (error) {
+        if (codeOf(error) !== 'ENOENT') throw error;
+        request.signal.throwIfAborted();
+      }
+      return { path: selected.path, value: value ? { ...value, path: selected.path } : null };
+    } catch (error) {
+      if (!unsupportedEditableRead.has(codeOf(error))) throw error;
+      return readScope.readSnapshot(request, input);
+    } finally {
+      await files?.close();
+    }
+  }
+  // Metadata only. Bodies are owned by the returned single-use closure, never by
+  // request description, review material, public records, or the Artifact store.
+  const preparations = new Map<
+    string,
+    {
+      key: string;
+      revision: string;
+      baseRevision: string;
+      scope: string;
+      missing: boolean;
+      binding: string;
+    }
+  >();
+  const requestKey = (request: AuthorizationRequest) =>
+    canonicalJson({
+      sessionId: request.sessionId,
+      runId: request.runId,
+      executionId: request.executionId,
+      kind: request.kind,
+      definitionId: request.definitionId,
+      definitionVersion: request.definitionVersion,
+      input: request.input,
+    });
+  const readScopeIdentity = async (request: Request) => {
+    const scope = options.workspaceScope
+      ? await options.workspaceScope(request)
+      : { root: await options.workspaceRoot(request), revision: '' };
+    return canonicalJson({
+      ...scope,
+      root: resolve(scope.root),
+      protectedRoots: [...options.protectedRoots()],
+    });
+  };
+  async function describeReadRequest(
+    request: AuthorizationRequest,
+  ): Promise<CapabilityDescription | null> {
+    const current = await readScope.describeRequest(request);
+    const prepared = preparations.get(request.executionId);
+    if (!prepared) return current;
+    if (
+      !current?.hardAllowed ||
+      prepared.key !== requestKey(request) ||
+      prepared.binding !== ((await options.preparationBinding?.(request)) ?? requestKey(request)) ||
+      (!prepared.missing && prepared.baseRevision !== current.revision) ||
+      prepared.scope !== (await readScopeIdentity(request))
+    )
+      return current
+        ? { ...current, hardAllowed: false, denialReason: 'file_preparation_changed' }
+        : {
+            kind: request.kind,
+            definitionId: request.definitionId,
+            definitionVersion: request.definitionVersion,
+            revision: 'builtin.files:preparation-changed',
+            effects: ['read'],
+            safeRead: false,
+            hardAllowed: false,
+            denialReason: 'file_preparation_changed',
+          };
+    return {
+      ...current,
+      revision: prepared.revision,
+      // A completed missing read exposes no bytes. Native policy still applies its
+      // own hard gates; independent parent/child checkers are not rewritten.
+      ...(prepared.missing ? { effects: ['read'] as const, safeRead: true } : {}),
+    };
+  }
+  async function prepareRead(
+    request: AuthorizationRequest,
+    decision: PermissionDecision,
+  ): Promise<PreparedToolExecution | null> {
+    if (
+      request.kind !== 'tool' ||
+      request.definitionId !== 'files.read' ||
+      request.definitionVersion !== '5' ||
+      decision.check?.requireApproval === true ||
+      (decision.approval !== undefined && !decision.check)
+    )
+      return null;
+    const leaves = [...dispatchScopeLeaves(decision.snapshot, 'file_dispatch_scope_unavailable')];
+    if (
+      !leaves.some((leaf) => leaf.namespace === 'builtin.permissions' && leaf.data.mode === 'auto')
+    )
+      return null;
+    const initial = await readScope.describeRequest(request);
+    if (!initial) return null;
+    if (!initial.hardAllowed)
+      throw new AgentError(initial.denialReason ?? 'file_read_scope_unavailable');
+    if (preparations.has(request.executionId)) throw new AgentError('file_preparation_conflict');
+    const scope = await readScopeIdentity(request);
+    const binding = (await options.preparationBinding?.(request, true)) ?? requestKey(request);
+    let snapshot = await readSnapshot(request, request.input);
+    if (!snapshot) throw new AgentError('file_preparation_changed');
+    request.signal.throwIfAborted();
+    const after = await readScope.describeRequest(request);
+    if (
+      !after?.hardAllowed ||
+      (snapshot.value !== null && after.revision !== initial.revision) ||
+      scope !== (await readScopeIdentity(request))
+    )
+      throw new AgentError('file_preparation_changed');
+    const metadata = {
+      key: requestKey(request),
+      baseRevision: initial.revision,
+      revision: `${initial.revision}:prepared:${randomUUID()}`,
+      scope,
+      missing: snapshot.value === null,
+      binding,
+    };
+    if (binding !== ((await options.preparationBinding?.(request)) ?? requestKey(request)))
+      throw new AgentError('file_preparation_changed');
+    request.signal.throwIfAborted();
+    preparations.set(request.executionId, metadata);
+    let consumed = false;
+    const dispose = () => {
+      if (preparations.get(request.executionId) === metadata)
+        preparations.delete(request.executionId);
+      snapshot = null;
+      request.signal.removeEventListener('abort', dispose);
+    };
+    request.signal.addEventListener('abort', dispose, { once: true });
+    return {
+      dispose,
+      async execute(context) {
+        request.signal.throwIfAborted();
+        context.signal.throwIfAborted();
+        if (
+          consumed ||
+          !snapshot ||
+          preparations.get(request.executionId) !== metadata ||
+          context.sessionId !== request.sessionId ||
+          context.executionId !== request.executionId ||
+          context.runId !== request.runId ||
+          scope !== (await readScopeIdentity(request))
+        )
+          throw new AgentError('file_preparation_unavailable');
+        const tool = options.tools.find((value) => value.id === 'files.read')!;
+        if (!authorized(context, tool, metadata.revision))
+          throw new AgentError('file_dispatch_scope_changed');
+        const current = await describeReadRequest(request);
+        if (!current?.hardAllowed || current.revision !== metadata.revision)
+          throw new AgentError('file_preparation_changed');
+        request.signal.throwIfAborted();
+        context.signal.throwIfAborted();
+        consumed = true;
+        const frozen = snapshot;
+        dispose();
+        return frozen.value
+          ? createFileReadResult(frozen.value, context, {
+              fileScope: 'external_path',
+              workspaceCheckpoint: false,
+            })
+          : createMissingFileReadResult(frozen.path);
+      },
+    };
+  }
   return {
+    prepareRead,
+    describeReadRequest,
     async describeRequest(
       request: AuthorizationRequest,
       _policy?: Pick<PermissionPolicySnapshot, 'mode'>,

@@ -1458,3 +1458,53 @@ test('concurrent identical child ensure creates one carrier and releases the los
   }
   expect(disposals).toBe(2);
 });
+
+test('a child Step policy refresh remains intersected with the captured parent denial', async () => {
+  let effects = 0,
+    refreshed = 0;
+  const extra = module([
+    tool('extra.effect', async () => {
+      effects++;
+      return { outcome: 'succeeded', content: 'must not execute' };
+    }),
+  ]);
+  const parentPolicy: Permissions = {
+    async authorize(request) {
+      return request.definitionId === 'extra.effect'
+        ? { allowed: false, revision: 'parent-ceiling', reason: 'parent_forbids_effect' }
+        : { allowed: true, revision: 'parent-ceiling' };
+    },
+  };
+  const f = await fixture(
+    configuration(createFixedModel([call('extra.effect'), [finish]]), extra, {
+      permissions: allow,
+      async readStepCapabilities() {
+        refreshed++;
+        return {
+          extensions: [extra],
+          toolIds: ['extra.effect'],
+          permissions: allow,
+          snapshot: { selected: 'child-allows' },
+        };
+      },
+    }),
+    extra,
+    { permissions: parentPolicy },
+  );
+  try {
+    await f.submit();
+    await f.done();
+    expect(refreshed).toBeGreaterThan(0);
+    expect(f.refs).toHaveLength(1);
+    expect(effects).toBe(0);
+    const execution = (await f.store.listExecutions(f.refs[0]!.childSessionId!)).find(
+      (e) => e.definitionId === 'extra.effect',
+    );
+    expect(execution!.status).toBe('failed');
+    expect(execution!.result).toMatchObject({
+      details: { adapterAttempted: false, reason: 'parent_forbids_effect' },
+    });
+  } finally {
+    await f.close();
+  }
+});

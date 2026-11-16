@@ -24,7 +24,7 @@ Shell最终文件沿[宿主输出收集](src/business/output-collection.README.m
 
 Git 工作树错误指导以[原工具分类](src/tools/git-worktree/README.md)和 mutation／Job 事实区分启动、权限与命令失败；`spawn EPERM/EACCES` 不证明用户拒绝，旧 generic 无元数据不猜原因。不得换 key、参数或工具重复尝试，部分／未知效果及未确认清理只观察原证据；此为模型指导，稳定操作记录另行保证原 key 不重放。
 
-同一默认合同区分退出与删除：退出／返回来源只请求客户端导航，不调用 remove、Shell 清理或修改 refs；原创建会话 cwd 未变时无需 Git 操作，来源或导航能力不可用时如实说明。明确具体目标的删除意图才可进入 remove，Auto 的工作树免审批不新增任务授权；客户端的实际本地导航归[Native owner](../../apps/desktop/README.md)。
+同一默认合同区分退出与删除：工具 `exit` 仅将当前 Session 的执行根切回原逻辑 Workspace，保留工作树、分支、文件和历史，不调用 remove 或 Shell 清理；客户端仅导航则不产生执行根切换。明确具体目标的删除意图才可进入 remove，Auto 的工作树免审批不新增任务授权；客户端的实际本地导航归[Native owner](../../apps/desktop/README.md)。
 
 审批可在模型视窗外处理，调用成功或未见提示不能证明“无审批”；内部步骤复用也不是整项操作免审批。合同要求仅按原证据报告来源／次数，缺少证据时不作该结论，不新增审批或权限规则。该指导来自 Worktree 真实父子报告与原两张卡矛盾的实际失败；[模型验证](../../tests/e2e/live/model/README.md#git-工作树与直接子-agent)保留原样本及修后资格。
 
@@ -44,7 +44,7 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 
 ## Git 工作树工具
 
-[Worktree owner](src/tools/git-worktree/README.md)维护 `builtin.shell/git.worktree@1` 的 `list/create/remove`、原 `shell.command` 可信 worker、冻结意图/原 ref 观察、保守删除和平台限制。创建不迁移 Session cwd；同 key 不重发已接纳变更。工具、Runtime 和协议既有版本保持，新增工具初始定义为1。[隔离验证](test/isolated/tools/git-worktree/README.md)与[Service链路](../../apps/service/test/isolated/git-worktree-configuration.test.ts)分别核故障边界和实际装配，完整平台/发行资格单独判断。
+[Worktree owner](src/tools/git-worktree/README.md)维护 `builtin.shell/git.worktree@1` 的 `list/create/remove/use/exit`、原 `shell.command` 可信 worker、冻结意图/原 ref 观察、保守删除和平台限制。创建本身不迁移 Session 执行根，显式 `use/exit` 仅在成功 Tool 终态提交时切换当前 Session 的可信根 epoch；同 key 不重发已接纳变更。工具、Runtime 和协议既有版本保持。[隔离验证](test/isolated/tools/git-worktree/README.md)与[Service链路](../../apps/service/test/isolated/git-worktree-configuration.test.ts)分别核故障边界和实际装配，完整平台/发行资格单独判断。
 
 ## 本地图片读取
 
@@ -270,7 +270,9 @@ Tool 的 `failed`、人工／自动拒绝、adapter 抛异常与 `outcome_unknow
 
 `resolveRunConfiguration` 在新 Run 激活前解析实际模型与工具选择，原子保存脱敏配置和准确 Tool 版本；旧 Run 继续使用自己的绑定。宿主可返回每 Run 的 `extensions/sources/dispose`，Core 复制并冻结 schema、资源声明及定义集合；模型目录、自有 namespace 和子操作使用同一绑定。后台 Job 保留该绑定 lease，最后一个真实任务结束后才释放资源，新 Run 的定义或来源不会替换旧任务。未知或重复选择在模型调用前局部拒绝，只有实际清理成功才释放失败准入资源；准备清理双失败通过 `ConfigurationPreparationCleanupError` 保原错误及资源并阻止关闭，具体五个接收点和可信producer合同归[生命周期owner](src/lifecycle.README.md)。权限请求明确区分 model/tool/job，模型权限不会因同名 Tool 被复用。普通 Tool 的 progress 合并为一个待写点，以 100ms 起测间隔写入，单点最多 32 KiB；终态前排空。观察写入失败记录在真实结果中，不把已知效果改写为未知或再次执行。
 
-宿主可选 `readStepCapabilities` 只读取已存在的目录缓存。每个 Model 安全边界固定额外 extensions、所选 tools 和最多 64 KiB 的非秘密 snapshot；全局注册由 Runtime 加入，调用者不能重复它们。子能力刷新与根能力刷新一样，先应用原 binding 的 `modelHiddenToolIds`，再核父冻结定义的完整身份；隐藏呈现不因刷新丢失，也不放宽工具交集。[默认子角色回归](../../apps/service/test/isolated/child-skill-capability-inheritance.test.ts)核实际 worker 启动与后续模型目录。实际 Model 保存准确 `toolBindings` 与 `capabilitySnapshot`，不会重写初始 Run manifest。审批或资源等待期间目录变更使尚未派发的旧调用明确 `capability_refresh_required`，下一 Model 重新选择；模型准入的有限刷新也同时重建 tools。已派发 Job 的 scope、来源和实现保持原绑定。定义版本负责标识实现，宿主负责让整个 Run 的 disposer 保留所有在途 Step 注册资源；Query/历史读取不调用该回调，回调不能建立连接或执行工具。
+宿主可选 `readStepCapabilities` 在每个 Model 安全边界读取可信范围，固定额外 extensions、所选 tools、对应 `sources/permissions/conditions/toolBehaviors` 和最多 64 KiB 的非秘密 snapshot；全局注册由 Runtime 加入，调用者不能重复它们。同一范围的来源捕获与权限、必要条件、工具行为一并选择，不能以新目录配旧范围描述。Step 权限只作为原 Run 权限（包括宿主独立 wrapper）的附加交集，不能替换或跳过原上界；相同 policy 对象只调用一次。宿主 Run 策略必须依据请求的真实绑定描述当前文件与 Shell 范围，不能用冻结旧 cwd 误拦合法切换。工具派发顺序只取原 Run manifest，Step 的可选声明不会改变调度，也不会因外层 wrapper 未复制该字段而拒绝整个 Run。子能力刷新先应用原 binding 的 `modelHiddenToolIds`，再核父冻结定义完整身份，新权限仍与原父权限取交集。[默认子角色回归](../../apps/service/test/isolated/child-skill-capability-inheritance.test.ts)核实际 worker 启动与后续模型目录。实际 Model 保存准确 `toolBindings`、`toolBehaviorBindings` 与 `capabilitySnapshot`，不会重写初始 Run manifest。行为绑定保留显式空数组；审核与 owner execution-confirmation 均沿真实 Tool/Job 祖先核原成功 Model 的范围、调用和绑定，而不是今天的根或初始 Run digest。Artifact 输出在原 Model 成功结果中另封无正文的 `modelToolCalls`（调用 id/name 与 canonical input digest）；Store 核完整 descriptor、数量、唯一 id 与准确调用，不能让后建 Tool 自证原 Model 授权。动态根缺失或错配原行为证明拒绝，旧无动态根 Model 才可沿原 Run manifest。审批或资源等待期间目录或工具行为绑定变更使尚未派发的旧调用明确 `capability_refresh_required`，下一 Model 重新选择；模型准入的有限刷新也同时重建 tools。已派发 Job 的 scope、来源和实现保持原绑定。定义版本和行为 digest 标识实现；宿主负责让整个 Run 的 disposer 保留所有在途 Step 的注册和回调资源，最后一个 Job lease 释放后再清理，不能在激活新 Step 时关闭旧资源。
+
+可信 `executionRoot` 与 `snapshot.executionRoot` 必须相同，Core 复核实际 Session、逻辑 Workspace 和 Store 历史 epoch，并将它封入 Model/Tool 原 decision source；Tool 另封完整原 Model 的 `toolBatchSize`，普通子 Job 沿原父 source 继承。首次未激活的 epoch 0 允许可信 host 补全真实目录 identity，Store 其他字段仍必须匹配；已存历史 identity 不能改写。显式恢复时，Core 仅从已核验的原 Model 提供冻结 `originalSnapshot`，宿主据此选原范围，下一新 Model 再选择当前范围。恢复不能把今天的 active 根冒充旧 Model 的根，也不改变稳定 workspaceId。Query/历史读取不调用该回调，回调不能建立连接或执行工具。验证归 [step bindings](test/isolated/extensions/step-bindings.test.ts)、[child bindings](test/isolated/child/bindings.test.ts)与[冷恢复](test/isolated/recovery/run-resume-group-runtime.test.ts)。
 
 Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execution 与稳定 key 发布，Query/prepare 只能读取原 subject/scope。终态声明的 Artifact refs 必须再次核实实际 Store、scope 和元数据；效果发生后伪造引用保留未知结果。真实内容下载由 Service/Client 的二进制协议负责，不通过 renderer 路径或 hash 自授权。
 

@@ -27,6 +27,12 @@ export const FileCheckpointArtifactSchema = z.strictObject({
 export const FileCheckpointBoundarySchema = z.strictObject({
   storeId: id,
   workspaceId: id,
+  executionRoot: z
+    .strictObject({
+      epoch: sequence,
+      identity: z.strictObject({ device: decimal, inode: decimal }),
+    })
+    .optional(),
   sessionId: id,
   runId: id,
   contextSelectionId: id,

@@ -221,7 +221,7 @@ export const gitWorktreeModelSchema: Json = {
   additionalProperties: false,
   required: ['action'],
   properties: {
-    action: { enum: ['list', 'create', 'remove', 'observe'] },
+    action: { enum: ['list', 'create', 'remove', 'observe', 'use', 'exit'] },
     path: {
       type: 'string',
       minLength: 1,
@@ -251,6 +251,8 @@ export const gitWorktreeModelSchema: Json = {
     },
   },
   oneOf: [
+    { properties: { action: { const: 'use' } }, required: ['path'], maxProperties: 2 },
+    { properties: { action: { const: 'exit' } }, maxProperties: 1 },
     { properties: { action: { const: 'list' } }, maxProperties: 1 },
     { properties: { action: { const: 'create' } }, not: { required: ['operationRef'] } },
     {

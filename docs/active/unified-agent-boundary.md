@@ -254,9 +254,11 @@ Task carrier成功继续要求原child的attached效果域结算，child Model�
 
 同一目录的可选 `activity.hasCreatedWorktree` 只读投影原 Session 原生 worktree 创建稳定成功记录，用于 Native 右侧历史图标。它不证明实时路径存在、不迁移 cwd，不从 child／Fork 或消息文本推造；后续移除不擦除已发生的创建。生成 schema／Client 保持字段可选，省略不补造标记，原目录快照和执行准入边界不变；具体来源归上述 Store owner 与[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。
 
+显式 `git_worktree use/exit` 仅提交当前 Session 的可信执行根，保原 Workspace 归属及工具版本。Host 核真实 linked worktree／来源根、目标目录身份和授权摘要；Store 在原成功 Tool 终态事务内 CAS epoch 与不可变历史，同一 Model 响应只能含该 Tool。下一 step 的 Files、Shell、权限、指令源、检查点一起切换；原 Model 恢复读原封存 epoch，已派发 Job 保旧绑定及 lease。父子权限交集不变，新 child／Fork 继承准确派发根，既有子会话不迁移。创建通知、任意 workdir 与阅读导航都不授切根权；退出不删除文件。私有 host binding 不进入通用扩展写入；`session.execution_root` 控制读在最终派发和提交事务复验。实现、验证和平台限制分别归[Service owner](../../apps/service/README.md#会话执行工作树)、[Store](../../packages/agent/src/storage/README.md)与[Worktree](../../packages/agent/src/tools/git-worktree/README.md)。
+
 Worktree 新失败的可选分类由实际失败阶段产生，仍属于原版本1回执，不改变输入、权限或 Job 身份。spawn 失败与明确访问拒绝、Git 非零退出分开，旧 generic 不追溯猜测；清理未确认保主因与原 mutation。Native 仅从准确原消息／Execution／Run 注册投影有限可读说明，完整配置不进入展示 IPC。默认模型指导不得因错误码猜用户拒绝、自动扩权或换 key／参数／工具重放；原稳定记录、未知效果只查原 Job 的恢复合同保持，当前范围与验证归[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。
 
-退出工作树属于客户端导航，不能映射为 remove／Shell 清理或改 refs。原目录新增可选 `worktreeSource`，只按同 Store／主体可见、唯一且完整的原生稳定 create 关系给出来源 Session／Workspace；它不证明实时路径或派发资格。Native 对独立无附件退出命令及明确按钮刷新目录、核当前选择代次后复用原 select，保草稿和原任务，不提交业务输入。Auto 下准确 worktree Tool 及其有证明的内部 Job 不走审核，手动、父子／Planning 上限、原申请范围和最终派发检查保持；普通 Shell 不继承该免审。当前实现与实际范围分别归[Native owner](../../apps/desktop/README.md)和[权限 owner](../../packages/agent/src/permissions/README.md#git-worktree-的准确权限)。
+返回来源会话与退出当前执行工作树分别表达：Native 只将明确“返回来源项目／会话”和同名按钮作为本地导航，刷新目录、核当前选择代次后复用原 select，保草稿和原任务，不提交业务输入或改变执行根。原目录可选 `worktreeSource` 只按同 Store／主体可见、唯一且完整的原生稳定 create 关系给出来源 Session／Workspace；它不证明实时路径或派发资格。“退出工作树”及英文 exit／leave 意图不再被 Renderer 拦截，沿当前 Session 普通输入和原执行边界处理；`git_worktree.exit` 只回原工作区，不删除目录、清理登记或改 refs。Auto 下准确 worktree Tool 及其有证明的内部 Job 不走审核，手动、父子／Planning 上限、原申请范围和最终派发检查保持；普通 Shell 不继承该免审。当前实现与实际范围分别归[Native owner](../../apps/desktop/README.md)和[权限 owner](../../packages/agent/src/permissions/README.md#git-worktree-的准确权限)。
 
 Native 在已核实 Store／Session 选择后，只有准确的 `workspace_identity_unavailable` 可转为内部 `workspaceUnavailable`，保留保存的消息、原 Model 输出与只读 Context，并撤下该轮权限事实和依赖目录的新执行资格。网络、主体或 Store 身份失败不沿此路径降级；恢复后重新读取实际目录身份及信任，不重发原任务。该状态不授予执行或文件访问权，具体读取／控制分离及验证由[Desktop owner](../../apps/desktop/README.md#native-项目会话目录)负责。
 

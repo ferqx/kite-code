@@ -40,7 +40,7 @@ export interface PermissionPolicySnapshot {
   readonly revision: string;
   readonly allowed: readonly CapabilityIdentity[];
   readonly controlReads?: readonly {
-    kind: 'permission.mode' | 'workspace.trust';
+    kind: 'permission.mode' | 'workspace.trust' | 'session.execution_root';
     scope: string;
     revision: string;
   }[];
@@ -143,13 +143,13 @@ function validPolicy(policy: PermissionPolicySnapshot) {
     policy.allowed.every(identity) &&
     (policy.controlReads === undefined ||
       (Array.isArray(policy.controlReads) &&
-        policy.controlReads.length <= 3 &&
+        policy.controlReads.length <= 4 &&
         policy.controlReads.every(
           (read) =>
             read !== null &&
             typeof read === 'object' &&
             Object.keys(read).every((key) => ['kind', 'scope', 'revision'].includes(key)) &&
-            (read.kind === 'permission.mode' || read.kind === 'workspace.trust') &&
+            ['permission.mode', 'workspace.trust', 'session.execution_root'].includes(read.kind) &&
             text(read.scope) &&
             typeof read.revision === 'string' &&
             /^(0|[1-9]\d{0,18})$/.test(read.revision) &&

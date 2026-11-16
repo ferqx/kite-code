@@ -7,6 +7,7 @@ import { filter, pairBoundary, selected } from './context-selection-operations';
 import { bindDesktopShell } from './desktop-shell';
 import { applyNamespacePlan, validateNamespacePlan } from './fork-namespaces';
 import type { SqliteOperations } from './operations';
+import { forkSessionExecutionRoot } from './session-execution-root';
 
 type Row = Record<string, string | number | bigint | null>;
 const hash = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
@@ -233,6 +234,7 @@ export function forkSession(
       selectionId,
     );
     bindDesktopShell(db, input.expectedStoreId, input.newSessionId, desktopShell);
+    forkSessionExecutionRoot(db, input.sourceSessionId, input.newSessionId);
     applyNamespacePlan(db, input, String(upper));
     db.insertCommand(
       {

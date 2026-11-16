@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import {
   createRuntime,
@@ -10,6 +10,7 @@ import {
   type RuntimeOptions,
   type StepCapabilitiesReader,
 } from '../../../src';
+import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension, JobEvent, OperationRef, ToolDefinition } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage';
@@ -69,6 +70,10 @@ async function fixture(
     model = createFixedModel(responses);
   const runtime = createRuntime({
     store,
+    artifacts: createArtifactStore({
+      profile: { dataRoot: join(root, 'data'), profile: 'new' },
+      store,
+    }),
     modelId: 'fixed',
     model,
     modelConcurrency: 1,
@@ -457,7 +462,12 @@ test('dispatched background Job keeps its original step implementation and Run l
       extensions: [versions['1']!],
       snapshot: null,
       async readStepCapabilities() {
-        return { extensions: [versions[current]!], snapshot: { catalogue: current } };
+        const root = await f.runtime.getSessionExecutionRoot({ sessionId: 's' });
+        return {
+          extensions: [versions[current]!],
+          executionRoot: root,
+          snapshot: { catalogue: current, executionRoot: root as unknown as Json },
+        };
       },
       async dispose() {
         runDisposals++;
@@ -479,6 +489,13 @@ test('dispatched background Job keeps its original step implementation and Run l
     const actual = await f.store.getExecution(reference!.executionId!);
     expect(actual!.status).toBe('succeeded');
     expect(actual!.result).toMatchObject({ content: 'original version 1' });
+    expect(actual!.decisionSource).toMatchObject({
+      executionRoot: await f.runtime.getSessionExecutionRoot({ sessionId: 's', epoch: '0' }),
+      toolBatchSize: 1,
+    });
+    expect(actual!.decisionSource).toEqual(
+      (await f.store.getExecution(actual!.parentExecutionId!))!.decisionSource,
+    );
     expect(jobDisposals).toEqual([1, 0]);
     expect(runDisposals).toBe(1);
     await f.runtime.close();
@@ -590,3 +607,726 @@ test('a catalogue change at Model admission retries with a rebuilt actual tool r
     await f.close();
   }
 });
+
+test('each Step selects one coherent source and permission scope without falling back to the initial policy', async () => {
+  let current = '1';
+  const effects: string[] = [],
+    authorizations: string[] = [],
+    evaluations: string[] = [];
+  const ext = extension('1', [
+    tool('fixture.change', '1', async () => {
+      effects.push('change');
+      current = '2';
+      return { outcome: 'succeeded', content: 'select next scope' };
+    }),
+    tool('fixture.write', '1', async () => {
+      effects.push('write');
+      return { outcome: 'succeeded', content: 'new scope write' };
+    }),
+    tool('fixture.forbidden', '1', async () => {
+      effects.push('forbidden');
+      return { outcome: 'succeeded', content: 'must not execute' };
+    }),
+  ]);
+  const f = await fixture(
+    [
+      call('fixture.change', '1'),
+      call('fixture.write', '1'),
+      call('fixture.forbidden', '1'),
+      [finish],
+    ],
+    (model) => ({
+      model,
+      modelId: 'fixed',
+      extensions: [ext],
+      snapshot: null,
+      sources: {
+        async capture() {
+          throw Error('initial source must not be captured');
+        },
+      },
+      async initializeRequirements(input) {
+        const context = await input.forExtension('fixture');
+        const record = await context.records.create({
+          key: `run/${input.run.id}/required`,
+          contentType: 'fixture.record',
+          contentVersion: 1,
+          value: { required: true },
+        });
+        return [
+          {
+            extensionId: 'fixture',
+            definitionVersion: '1',
+            requirementId: 'required',
+            recordKey: record.key,
+            revision: record.revision,
+            phase: 'both',
+            sessionId: input.session.id,
+            runId: input.run.id,
+          },
+        ];
+      },
+      conditions: {
+        async evaluate(refs, _phase, context) {
+          evaluations.push(`initial:${context?.boundary.definitionId}`);
+          return refs.map((requirement) => ({
+            requirement,
+            recordRevision: requirement.revision,
+            outcome: 'satisfied' as const,
+            evidence: { scope: 'initial' },
+          }));
+        },
+      },
+      async readStepCapabilities(input) {
+        expect(input.originalSnapshot).toBeUndefined();
+        const selected = current;
+        return {
+          extensions: [ext],
+          snapshot: { scope: selected },
+          sources: {
+            async capture() {
+              return [
+                {
+                  id: 'scope',
+                  kind: 'test',
+                  scope: 's',
+                  digest: selected,
+                  content: `scope-canary-${selected}`,
+                },
+              ];
+            },
+          },
+          conditions: {
+            async evaluate(refs, _phase, context) {
+              evaluations.push(`${selected}:${context?.boundary.definitionId}`);
+              return refs.map((requirement) => ({
+                requirement,
+                recordRevision: requirement.revision,
+                outcome: 'satisfied' as const,
+                evidence: { scope: selected },
+              }));
+            },
+          },
+          permissions: {
+            async authorize(request) {
+              authorizations.push(`${selected}:${request.definitionId}`);
+              return request.definitionId === 'fixture.forbidden' ||
+                (selected === '1' && request.definitionId === 'fixture.write')
+                ? { allowed: false, revision: `scope-${selected}`, reason: 'selected_scope_denial' }
+                : { allowed: true, revision: `scope-${selected}` };
+            },
+          },
+        };
+      },
+    }),
+  );
+  try {
+    await f.submit();
+    const run = await f.done();
+    expect(run!.status, JSON.stringify(run)).toBe('completed');
+    expect(effects).toEqual(['change', 'write']);
+    expect(authorizations).toContain('1:fixture.change');
+    expect(authorizations).toContain('2:fixture.write');
+    expect(authorizations).not.toContain('1:fixture.write');
+    expect(authorizations).toContain('2:fixture.forbidden');
+    expect(evaluations).toContain('1:fixture.change');
+    expect(evaluations).toContain('2:fixture.write');
+    expect(evaluations).not.toContain('1:fixture.write');
+    expect(f.model.requests).toHaveLength(4);
+    for (const [index, request] of f.model.requests.entries()) {
+      const actual = JSON.stringify(request.messages);
+      expect(actual).toContain(`scope-canary-${index === 0 ? '1' : '2'}`);
+      expect(actual).not.toContain(`scope-canary-${index === 0 ? '2' : '1'}`);
+    }
+    const blocked = (await f.store.listExecutions('s')).find(
+      (e) => e.definitionId === 'fixture.forbidden',
+    );
+    expect(blocked!.status).toBe('failed');
+    expect(blocked!.result).toMatchObject({
+      details: { reason: 'selected_scope_denial', adapterAttempted: false },
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test('actual Model and Tool proofs seal host-resolved epoch zero identity and complete model tool batch size', async () => {
+  const effects: string[] = [];
+  const ext = extension('1', [
+    tool('fixture.write', '1', async () => {
+      effects.push('write');
+      return { outcome: 'succeeded', content: 'written' };
+    }),
+  ]);
+  let f!: Awaited<ReturnType<typeof fixture>>;
+  f = await fixture(
+    [[...call('fixture.write', '1').slice(0, 1), ...call('fixture.write', '1')], [finish]],
+    (model) => ({
+      model,
+      modelId: 'fixed',
+      extensions: [ext],
+      snapshot: null,
+      async readStepCapabilities() {
+        const root = await f.runtime.getSessionExecutionRoot({ sessionId: 's' });
+        const identity = statSync(fileURLToPath(root.effectiveRootUri), { bigint: true });
+        const resolved = {
+          ...root,
+          identity: { dev: String(identity.dev), ino: String(identity.ino) },
+        };
+        return {
+          extensions: [ext],
+          executionRoot: resolved,
+          snapshot: { executionRoot: resolved as unknown as Json },
+        };
+      },
+    }),
+  );
+  try {
+    const original = await f.runtime.getSessionExecutionRoot({ sessionId: 's' });
+    const identity = statSync(fileURLToPath(original.effectiveRootUri), { bigint: true });
+    const sealed = {
+      ...original,
+      identity: { dev: String(identity.dev), ino: String(identity.ino) },
+    };
+    await f.submit();
+    expect((await f.done())!.status).toBe('completed');
+    expect(effects).toEqual(['write', 'write']);
+    const executions = await f.store.listExecutions('s');
+    for (const execution of executions) {
+      expect(execution.decisionSource).toMatchObject({ executionRoot: sealed });
+      if (execution.kind === 'tool')
+        expect(execution.decisionSource).toMatchObject({ toolBatchSize: 2 });
+      else expect(execution.decisionSource).not.toHaveProperty('toolBatchSize');
+    }
+    expect(
+      await f.runtime.getSessionExecutionRoot({ sessionId: 's', epoch: original.epoch }),
+    ).toEqual(original);
+  } finally {
+    await f.close();
+  }
+});
+
+test('forged, foreign or mismatched root snapshots fail before any Model or Tool', async () => {
+  for (const invalid of ['foreign', 'snapshot', 'identity', 'epoch'] as const) {
+    let effects = 0;
+    const ext = extension('1', [
+      tool('fixture.write', '1', async () => {
+        effects++;
+        return { outcome: 'succeeded', content: 'must not execute' };
+      }),
+    ]);
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    f = await fixture([call('fixture.write', '1')], (model) => ({
+      model,
+      modelId: 'fixed',
+      extensions: [ext],
+      snapshot: null,
+      async readStepCapabilities() {
+        const original = await f.runtime.getSessionExecutionRoot({ sessionId: 's' });
+        const root = {
+          ...original,
+          ...(invalid === 'foreign' ? { sessionId: 'other' } : {}),
+          ...(invalid === 'identity' ? { identity: { dev: 'invalid', ino: '2' } } : {}),
+          ...(invalid === 'epoch' ? { epoch: '9223372036854775808' } : {}),
+        };
+        return {
+          extensions: [ext],
+          executionRoot: root,
+          snapshot: {
+            executionRoot: (invalid === 'snapshot'
+              ? { ...root, epoch: '123' }
+              : root) as unknown as Json,
+          },
+        };
+      },
+    }));
+    try {
+      await f.submit();
+      const run = await f.done();
+      expect(run!.status).toBe('failed');
+      expect(run!.reason).toBe('step_execution_root_invalid');
+      expect(f.model.requests).toHaveLength(0);
+      expect(await f.store.listExecutions('s')).toHaveLength(0);
+      expect(effects).toBe(0);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('a trusted behavior configuration change invalidates a waiting Tool even with unchanged schemas and snapshot', async () => {
+  let current = 'a',
+    held = false,
+    effects = 0;
+  const entered = gate(),
+    release = gate();
+  const definition: ToolDefinition = {
+    ...tool('fixture.write', '1', async () => {
+      effects++;
+      return { outcome: 'succeeded', content: 'actual fresh behavior' };
+    }),
+    resources: { serial: { scope: 'workspace', key: 'same' } },
+  };
+  const ext = extension('1', [definition]);
+  const f = await fixture(
+    [call('fixture.write', '1'), call('fixture.write', '1'), [finish]],
+    (model) => ({
+      model,
+      modelId: 'fixed',
+      extensions: [ext],
+      snapshot: null,
+      async readStepCapabilities() {
+        return {
+          extensions: [ext],
+          snapshot: { unchanged: true },
+          toolBehaviors: [
+            {
+              definition,
+              capability: {
+                kind: 'tool',
+                definitionId: definition.id,
+                definitionVersion: definition.version,
+              },
+              contractRef: 'fixture:scope',
+              configurationDigest: current.repeat(64),
+            },
+          ],
+        };
+      },
+    }),
+    {
+      workspaceSerialLocks: {
+        async acquire(_input, signal) {
+          if (!held) {
+            held = true;
+            entered.release();
+            await release.promise;
+          }
+          signal.throwIfAborted();
+          return () => {};
+        },
+      },
+    },
+  );
+  try {
+    await f.submit();
+    await entered.promise;
+    current = 'b';
+    release.release();
+    expect((await f.done())!.status).toBe('completed');
+    expect(effects).toBe(1);
+    const tools = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.kind === 'tool',
+    );
+    expect(tools).toHaveLength(2);
+    expect(tools[0]!.result).toMatchObject({
+      content: 'capability_refresh_required',
+      details: { adapterAttempted: false },
+    });
+    expect(tools[1]!.status).toBe('succeeded');
+  } finally {
+    release.release();
+    await f.close();
+  }
+});
+
+test('a selected Step allowance cannot replace an independent Run denial', async () => {
+  let effects = 0,
+    ceilingCalls = 0;
+  const ext = extension('1', [
+    tool('fixture.write', '1', async () => {
+      effects++;
+      return { outcome: 'succeeded', content: 'must not execute' };
+    }),
+  ]);
+  const f = await fixture([call('fixture.write', '1'), [finish]], (model) => ({
+    model,
+    modelId: 'fixed',
+    extensions: [ext],
+    snapshot: null,
+    permissions: {
+      async authorize(request) {
+        ceilingCalls++;
+        return request.kind === 'tool'
+          ? { allowed: false, revision: 'run-ceiling', reason: 'run_denies_effect' }
+          : { allowed: true, revision: 'run-ceiling' };
+      },
+    },
+    async readStepCapabilities() {
+      return {
+        extensions: [ext],
+        snapshot: { scope: 'new' },
+        permissions: {
+          toolDispatchOrder: 'model',
+          async authorize() {
+            return { allowed: true, revision: 'step-allows' };
+          },
+        },
+      };
+    },
+  }));
+  try {
+    await f.submit();
+    expect((await f.done())!.status).toBe('completed');
+    expect(ceilingCalls).toBeGreaterThan(0);
+    expect(effects).toBe(0);
+    const actual = (await f.store.listExecutions('s')).find((e) => e.kind === 'tool');
+    expect(actual!.result).toMatchObject({
+      details: { reason: 'run_denies_effect', adapterAttempted: false },
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test('an independently wrapped Run policy still gates the final Tool authorization when Step policy declares model order', async () => {
+  let effects = 0,
+    calls = 0;
+  const entered = gate(),
+    resume = gate();
+  const ext = extension('1', [
+    tool('fixture.write', '1', async () => {
+      effects++;
+      return { outcome: 'succeeded', content: 'actual effect' };
+    }),
+  ]);
+  const selected = {
+    toolDispatchOrder: 'model' as const,
+    async authorize() {
+      return { allowed: true, revision: 'same-default' };
+    },
+  };
+  const f = await fixture([call('fixture.write', '1'), [finish]], (model) => ({
+    model,
+    modelId: 'fixed',
+    extensions: [ext],
+    snapshot: null,
+    permissions: {
+      async authorize(request) {
+        const decision = await selected.authorize();
+        if (request.kind === 'tool' && ++calls === 2) {
+          entered.release();
+          await resume.promise;
+        }
+        return decision;
+      },
+    },
+    async readStepCapabilities() {
+      return { extensions: [ext], snapshot: { selected: true }, permissions: selected };
+    },
+  }));
+  try {
+    await f.submit();
+    await entered.promise;
+    expect(effects).toBe(0);
+    const planned = (await f.store.listExecutions('s')).find((e) => e.kind === 'tool');
+    expect(planned!.authorization?.dispatched).not.toBe(true);
+    resume.release();
+    expect((await f.done())!.status).toBe('completed');
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(effects).toBe(1);
+  } finally {
+    resume.release();
+    await f.close();
+  }
+});
+
+test('a Run mandatory human confirmation survives the selected Step policy and one automatic reviewer', async () => {
+  let effects = 0;
+  const ext = extension('1', [
+    tool('fixture.write', '1', async () => {
+      effects++;
+      return { outcome: 'succeeded', content: 'once approved' };
+    }),
+  ]);
+  const reviewer = createFixedModel([
+    [
+      {
+        type: 'text_delta',
+        text: JSON.stringify({ decision: 'approve_once', reason: 'ordinary risk only' }),
+      },
+      finish,
+    ],
+  ]);
+  const f = await fixture([call('fixture.write', '1'), [finish]], (model) => ({
+    model,
+    modelId: 'fixed',
+    extensions: [ext],
+    snapshot: null,
+    authorizationCheck: {
+      id: 'run-ceiling-review',
+      version: '1',
+      modelId: 'review',
+      model: reviewer,
+    },
+    permissions: {
+      async authorize(request) {
+        return request.kind === 'tool'
+          ? {
+              allowed: false,
+              revision: 'run-mandatory',
+              approval: { request: { title: 'Independent Run confirmation' } },
+              check: { request: { kind: 'run-ceiling', requires: 'human' }, requireApproval: true },
+            }
+          : { allowed: true, revision: 'run-mandatory' };
+      },
+    },
+    async readStepCapabilities() {
+      return {
+        extensions: [ext],
+        snapshot: { selected: true },
+        permissions: {
+          async authorize() {
+            return { allowed: true, revision: 'step-allows' };
+          },
+        },
+      };
+    },
+  }));
+  try {
+    await f.submit();
+    const card = await fact(
+      async () =>
+        (
+          await f.runtime.listInteractions({
+            expectedStoreId: f.base.expectedStoreId,
+            sessionId: 's',
+            state: 'pending',
+          })
+        ).interactions[0] ?? null,
+    );
+    expect(reviewer.requests).toHaveLength(1);
+    expect(effects).toBe(0);
+    await f.runtime.answerInteraction({
+      ...f.base,
+      commandId: `answer-${card.id}`,
+      presentationSessionId: 's',
+      interactionId: card.id,
+      expectedRevision: card.revision,
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+    });
+    expect((await f.done())!.status).toBe('completed');
+    expect(effects).toBe(1);
+    expect(reviewer.requests).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const artifactBacked of [false, true])
+  test(`automatic review uses each original Model Step behavior rather than the initial Run behavior (${artifactBacked ? 'artifact' : 'inline'})`, async () => {
+    let current = 'a';
+    const effects: string[] = [];
+    const definition = tool('fixture.reviewed', '1', async () => {
+      effects.push(current);
+      current = 'b';
+      return { outcome: 'succeeded', content: 'actual reviewed Step' };
+    });
+    const ext = extension('1', [definition]);
+    const capability = {
+      kind: 'tool' as const,
+      definitionId: definition.id,
+      definitionVersion: '1',
+    };
+    const behaviors = Object.fromEntries(
+      ['a', 'b'].map((value) => [
+        value,
+        {
+          definition,
+          capability,
+          contractRef: 'fixture.reviewed-step',
+          configurationDigest: value.repeat(64),
+          async prepareReview() {
+            return {
+              instructions: 'Return one approval JSON object for this harmless fixture.',
+              material: { selected: value },
+              fingerprint: value.repeat(64),
+              reusable: false,
+            };
+          },
+          interpretReview(content: string) {
+            return { answer: JSON.parse(content) };
+          },
+        },
+      ]),
+    );
+    const reviewer = createFixedModel(
+      Array.from({ length: 2 }, () => [
+        {
+          type: 'text_delta' as const,
+          text: JSON.stringify({ decision: 'approve_once', reason: 'harmless fixture' }),
+        },
+        finish,
+      ]),
+    );
+    const f = await fixture(
+      [
+        ...Array.from({ length: 2 }, () => [
+          ...(artifactBacked ? [{ type: 'text_delta' as const, text: 'x'.repeat(70 * 1024) }] : []),
+          ...call('fixture.reviewed', '1'),
+        ]),
+        [finish],
+      ],
+      (model) => ({
+        model,
+        modelId: 'fixed',
+        extensions: [ext],
+        snapshot: null,
+        toolBehaviors: [behaviors.a!],
+        authorizationCheck: { id: 'step-review', version: '1', modelId: 'review', model: reviewer },
+        async readStepCapabilities() {
+          const selected = behaviors[current]!;
+          const binding = {
+            capability,
+            contractRef: selected.contractRef,
+            configurationDigest: selected.configurationDigest,
+          };
+          return {
+            extensions: [ext],
+            snapshot: { selected: current },
+            toolBehaviors: [selected],
+            permissions: {
+              async authorize(request) {
+                return request.kind === 'tool'
+                  ? {
+                      allowed: false,
+                      revision: selected.configurationDigest,
+                      check: { request: { selected: binding }, behavior: binding },
+                    }
+                  : { allowed: true, revision: selected.configurationDigest };
+              },
+            },
+          };
+        },
+      }),
+    );
+    try {
+      await f.submit();
+      expect((await f.done())!.status).toBe('completed');
+      expect(effects).toEqual(['a', 'b']);
+      expect(reviewer.requests).toHaveLength(2);
+      const models = (await f.store.listExecutions('s')).filter(
+        (execution) => execution.kind === 'model' && execution.definitionId === 'fixed',
+      );
+      expect(models).toHaveLength(3);
+      for (const [index, model] of models.entries()) {
+        if (artifactBacked && index < 2) {
+          expect(model.result).toMatchObject({
+            modelOutput: { complete: true, toolCallCount: 1 },
+            modelToolCalls: [
+              { name: 'fixture.reviewed', inputDigest: expect.stringMatching(/^[a-f0-9]{64}$/) },
+            ],
+          });
+          expect(
+            JSON.stringify((model.result as Record<string, Json>).modelToolCalls),
+          ).not.toContain('arguments');
+        }
+        expect(model.decisionSource).toMatchObject({
+          toolBehaviorBindings: [
+            {
+              capability,
+              contractRef: 'fixture.reviewed-step',
+              configurationDigest: (index === 0 ? 'a' : 'b').repeat(64),
+            },
+          ],
+        });
+      }
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const artifactBacked of [false, true])
+  test(`owner execution-confirmation consumes each original Step binding (${artifactBacked ? 'artifact' : 'inline'})`, async () => {
+    let current = 'a';
+    const effects: string[] = [];
+    const definition = tool('fixture.confirmed-step', '1', async () => {
+      effects.push(current);
+      current = 'b';
+      return { outcome: 'succeeded', content: 'exact confirmed effect' };
+    });
+    const ext = extension('1', [definition]);
+    const capability = {
+      kind: 'tool' as const,
+      definitionId: definition.id,
+      definitionVersion: '1',
+    };
+    const behaviors = Object.fromEntries(
+      ['a', 'b'].map((value) => [
+        value,
+        {
+          definition,
+          capability,
+          contractRef: 'fixture.confirmed-step',
+          configurationDigest: value.repeat(64),
+          async executionConfirmation() {
+            return { request: { reason: 'Confirm this exact Step effect', selected: value } };
+          },
+        },
+      ]),
+    );
+    const f = await fixture(
+      [
+        ...Array.from({ length: 2 }, () => [
+          ...(artifactBacked ? [{ type: 'text_delta' as const, text: 'x'.repeat(70 * 1024) }] : []),
+          ...call(definition.id, '1'),
+        ]),
+        [finish],
+      ],
+      (model) => ({
+        model,
+        modelId: 'fixed',
+        extensions: [ext],
+        snapshot: null,
+        toolBehaviors: [behaviors.a!],
+        async readStepCapabilities() {
+          const behavior = behaviors[current]!;
+          return { extensions: [ext], snapshot: { selected: current }, toolBehaviors: [behavior] };
+        },
+      }),
+    );
+    try {
+      await f.submit();
+      for (const [index, value] of ['a', 'b'].entries()) {
+        const card = await fact(
+          async () =>
+            (
+              await f.runtime.listInteractions({
+                expectedStoreId: f.base.expectedStoreId,
+                sessionId: 's',
+                state: 'pending',
+              })
+            ).interactions[0] ?? null,
+        );
+        expect(effects).toHaveLength(index);
+        expect(card.request).toMatchObject({
+          executionConfirmation: {
+            owner: {
+              capability,
+              contractRef: 'fixture.confirmed-step',
+              configurationDigest: value.repeat(64),
+            },
+          },
+        });
+        await f.runtime.answerInteraction({
+          ...f.base,
+          commandId: `confirm-${card.id}`,
+          presentationSessionId: 's',
+          interactionId: card.id,
+          expectedRevision: card.revision,
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+        });
+        await fact(async () => (effects.length === index + 1 ? true : null));
+      }
+      expect((await f.done())!.status).toBe('completed');
+      expect(effects).toEqual(['a', 'b']);
+      const tools = (await f.store.listExecutions('s')).filter((e) => e.kind === 'tool');
+      expect(tools).toHaveLength(2);
+      for (const execution of tools) {
+        expect(execution.status).toBe('succeeded');
+        expect(execution.authorization?.dispatched).toBe(true);
+      }
+    } finally {
+      await f.close();
+    }
+  });

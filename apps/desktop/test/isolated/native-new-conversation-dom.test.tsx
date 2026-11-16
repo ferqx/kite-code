@@ -876,22 +876,22 @@ const worktreeBusinessMethods = new Set([
 ]);
 
 async function sendWorktreeExitInput(f: ReturnType<typeof worktreeNavigationFixture>) {
-  const button = f.host.querySelector<HTMLButtonElement>('.composer [aria-label="退出工作树"]');
+  const button = f.host.querySelector<HTMLButtonElement>('.composer [aria-label="返回来源会话"]');
   expect(button?.disabled).toBe(false);
   await act(async () => button!.click());
 }
 
-test('exiting a worktree via its header only returns to the original source and preserves both drafts', async () => {
+test('source navigation via its header only returns to the original source and preserves both drafts', async () => {
   const f = worktreeNavigationFixture();
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Other B');
     await f.until(() => !!f.input('当前会话私有草稿'));
     await f.edit('工作树里尚未发送的草稿', '当前会话私有草稿');
-    expect(f.host.querySelector('[aria-label="退出工作树"]')?.getAttribute('title')).toContain(
+    expect(f.host.querySelector('[aria-label="返回来源会话"]')?.getAttribute('title')).toContain(
       'Original A',
     );
-    await f.click('退出工作树');
+    await f.click('返回来源会话');
     await f.until(() => f.selected() === 'a' && !!f.input('当前会话私有草稿'));
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved A');
     expect(f.host.querySelector('[aria-label="工作树导航"]')?.textContent).toContain(
@@ -905,28 +905,28 @@ test('exiting a worktree via its header only returns to the original source and 
   }
 });
 
-test('standalone worktree exit input navigates without sending the command or deleting, including an unavailable directory', async () => {
+test('standalone source navigation input navigates without sending the command or deleting, including an unavailable directory', async () => {
   for (const unavailable of [undefined, 'b', 'a']) {
     const f = worktreeNavigationFixture(unavailable);
     try {
       await act(async () => f.root.render(<NativeDesktop />));
       await f.click('Other B');
       await f.until(() => !!f.input('当前会话私有草稿'));
-      await f.edit('退出工作树', '当前会话私有草稿');
+      await f.edit('返回来源会话', '当前会话私有草稿');
       await sendWorktreeExitInput(f);
       await f.until(() => f.selected() === 'a');
       expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
       if (unavailable === 'a')
         expect(f.host.querySelector('[aria-label="工作区目录不可用"]')).not.toBeNull();
       await f.click('Other B');
-      await f.until(() => promptValue(f.input('当前会话私有草稿')) === '退出工作树');
+      await f.until(() => promptValue(f.input('当前会话私有草稿')) === '返回来源会话');
     } finally {
       await f.close();
     }
   }
 });
 
-test('worktree exit needs no configured model and the header remains available from a missing workspace', async () => {
+test('source navigation needs no configured model and the header remains available from a missing workspace', async () => {
   for (const inputCommand of [true, false]) {
     const f = worktreeNavigationFixture('b', true);
     try {
@@ -937,10 +937,10 @@ test('worktree exit needs no configured model and the header remains available f
         await f.edit('返回来源会话', '当前会话私有草稿');
         await sendWorktreeExitInput(f);
       } else {
-        expect(f.host.querySelector<HTMLButtonElement>('[aria-label="退出工作树"]')?.disabled).toBe(
-          false,
-        );
-        await f.click('退出工作树');
+        expect(
+          f.host.querySelector<HTMLButtonElement>('[aria-label="返回来源会话"]')?.disabled,
+        ).toBe(false);
+        await f.click('返回来源会话');
       }
       await f.until(() => f.selected() === 'a');
       expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
@@ -950,35 +950,35 @@ test('worktree exit needs no configured model and the header remains available f
   }
 });
 
-test('exit input already at the creation source stays there and unavailable provenance preserves the command draft', async () => {
+test('source navigation input already at the creation source stays there and unavailable provenance preserves the command draft', async () => {
   const f = worktreeNavigationFixture();
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
-    await f.edit('leave worktree', '当前会话私有草稿');
+    await f.edit('返回来源会话', '当前会话私有草稿');
     await sendWorktreeExitInput(f);
     await f.until(() => !!f.host.querySelector('[aria-label="工作树导航"]'));
     expect(f.selected()).toBe('a');
-    expect(promptValue(f.input('当前会话私有草稿'))).toBe('leave worktree');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('返回来源会话');
     expect(f.host.querySelector('[aria-label="工作树导航"]')?.textContent).toContain(
-      '未改变本会话',
+      '已是工作树的创建来源会话',
     );
     await f.click('Other B');
     f.setRelation(undefined);
-    await f.edit('exit worktree', '当前会话私有草稿');
+    await f.edit('返回来源项目', '当前会话私有草稿');
     await sendWorktreeExitInput(f);
     await f.until(
       () => !!f.host.querySelector('[aria-label="工作树导航"]')?.textContent?.includes('无法核实'),
     );
     expect(f.selected()).toBe('b');
-    expect(promptValue(f.input('当前会话私有草稿'))).toBe('exit worktree');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('返回来源项目');
     expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
   } finally {
     await f.close();
   }
 });
 
-test('worktree exit rechecks vanished, cross-Store and mismatched source relationships before selecting', async () => {
+test('source navigation rechecks vanished, cross-Store and mismatched source relationships before selecting', async () => {
   for (const invalid of ['missing', 'foreign-store', 'wrong-workspace'] as const) {
     const f = worktreeNavigationFixture();
     try {
@@ -988,7 +988,7 @@ test('worktree exit rechecks vanished, cross-Store and mismatched source relatio
       if (invalid === 'missing') f.setSourceVisible(false);
       if (invalid === 'foreign-store') f.setDirectoryStore('another-store');
       if (invalid === 'wrong-workspace') f.setRelation({ sessionId: 'a', workspaceId: 'worktree' });
-      await f.click('退出工作树');
+      await f.click('返回来源会话');
       await f.until(
         () =>
           !!f.host.querySelector('[aria-label="工作树导航"]')?.textContent?.includes('无法核实'),
@@ -1002,14 +1002,14 @@ test('worktree exit rechecks vanished, cross-Store and mismatched source relatio
   }
 });
 
-test('late worktree exit directory results cannot override a later explicit session selection', async () => {
+test('late source navigation directory results cannot override a later explicit session selection', async () => {
   const f = worktreeNavigationFixture();
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Other B');
     await f.edit('工作树草稿保留', '当前会话私有草稿');
     f.holdNavigationDirectory();
-    await f.click('退出工作树');
+    await f.click('返回来源会话');
     await f.until(f.directoryHeld);
     await f.click('Third C');
     await f.releaseNavigationDirectory();
@@ -1045,19 +1045,19 @@ test('a late selection cannot take over the composer after opening a new convers
   }
 });
 
-test('a pending worktree exit directory read keeps the draft editable and restores the latest edit after returning', async () => {
+test('a pending source navigation directory read keeps the draft editable and restores the latest edit after returning', async () => {
   const f = worktreeNavigationFixture();
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Other B');
     await f.edit('目录读取前的工作树草稿', '当前会话私有草稿');
     f.holdNavigationDirectory();
-    await f.click('退出工作树');
+    await f.click('返回来源会话');
     await f.until(f.directoryHeld);
     expect(f.input('当前会话私有草稿')?.hasAttribute('readonly')).toBe(false);
     expect(f.host.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled).toBe(false);
     expect(
-      f.host.querySelector<HTMLButtonElement>('.session-header [aria-label="退出工作树"]')
+      f.host.querySelector<HTMLButtonElement>('.session-header [aria-label="返回来源会话"]')
         ?.disabled,
     ).toBe(true);
     await f.edit('读取期间继续编辑的最新草稿', '当前会话私有草稿');
@@ -1078,6 +1078,10 @@ test('a pending worktree exit directory read keeps the draft editable and restor
 });
 
 for (const content of [
+  '退出工作树',
+  '退出 Git 工作树',
+  'exit worktree',
+  'leave worktree',
   '请解释退出工作树会发生什么。',
   '```\nexit worktree\n```',
   '"退出工作树"',

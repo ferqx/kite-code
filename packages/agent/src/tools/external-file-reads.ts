@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { AuthorizationRequest, ToolDefinition, ToolResult } from '../extensions';
@@ -6,6 +7,7 @@ import { canonicalJson } from '../json';
 import type { CapabilityDescription } from '../permissions';
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import { AgentError, type Json } from '../storage/types';
+import type { FileSnapshot } from './files';
 import { createFileReadResult, createMissingFileReadResult } from './files-tools';
 
 const normalized = (path: string) => (process.platform === 'win32' ? path.toLowerCase() : path);
@@ -89,7 +91,105 @@ export function withExternalFileReads(options: {
     `external-read:1:${createHash('sha256')
       .update(canonicalJson({ selected, input } as Json))
       .digest('hex')}`;
+  /** Read into a private value. This does not create a result or publish an Artifact. */
+  async function readSnapshot(
+    request: Pick<AuthorizationRequest, 'sessionId' | 'executionId' | 'signal'>,
+    input: Json,
+  ): Promise<{ path: string; value: Omit<FileSnapshot, 'baseline'> | null } | null> {
+    const selected = await target(request, input);
+    if (!selected) return null;
+    const parameters = input as Record<string, Json>;
+    const offset = parameters.offset ?? 1,
+      limit = parameters.limit ?? 200;
+    if (
+      !Number.isSafeInteger(offset) ||
+      Number(offset) < 1 ||
+      !Number.isSafeInteger(limit) ||
+      Number(limit) < 1
+    )
+      throw new AgentError('file_input_invalid');
+    request.signal.throwIfAborted();
+    // Even a metadata-missing target is opened: only an actual ENOENT establishes
+    // absence. NONBLOCK prevents a substituted FIFO from blocking before fstat.
+    let file: Awaited<ReturnType<typeof open>>;
+    try {
+      file = await open(
+        selected.actual,
+        constants.O_RDONLY |
+          (process.platform === 'win32' ? 0 : constants.O_NONBLOCK | constants.O_NOFOLLOW),
+      );
+    } catch (error) {
+      if (codeOf(error) !== 'ENOENT') throw error;
+      const current = await target(request, input);
+      if (!current || current.exists || current.actual !== selected.actual)
+        throw new AgentError('file_changed');
+      request.signal.throwIfAborted();
+      return { path: selected.path, value: null };
+    }
+    let bytes: Buffer;
+    try {
+      const before = await file.stat({ bigint: true });
+      const current = await target(request, input);
+      const actual = current && (await lstat(current.actual, { bigint: true }));
+      if (!before.isFile()) throw new AgentError('file_not_regular');
+      if (
+        !current?.exists ||
+        current.actual !== selected.actual ||
+        !actual?.isFile() ||
+        before.dev !== actual.dev ||
+        before.ino !== actual.ino
+      )
+        throw new AgentError('file_changed');
+      bytes = await file.readFile({ signal: request.signal });
+      const after = await file.stat({ bigint: true });
+      if (
+        before.dev !== after.dev ||
+        before.ino !== after.ino ||
+        before.size !== after.size ||
+        before.mtimeNs !== after.mtimeNs ||
+        before.ctimeNs !== after.ctimeNs ||
+        BigInt(bytes.byteLength) !== after.size
+      )
+        throw new AgentError('file_changed');
+      const finished = await target(request, input);
+      const identity = finished && (await lstat(finished.actual, { bigint: true }));
+      if (
+        !finished?.exists ||
+        finished.actual !== selected.actual ||
+        identity?.dev !== after.dev ||
+        identity.ino !== after.ino
+      )
+        throw new AgentError('file_changed');
+    } finally {
+      await file.close();
+    }
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+      throw new AgentError('file_encoding_invalid');
+    }
+    if (bytes.subarray(0, 8192).includes(0)) throw new AgentError('file_binary');
+    const lines = text === '' ? [] : text.match(/[^\n]*\n|[^\n]+$/g)!;
+    const from = Number(offset) - 1,
+      through = Math.min(lines.length, from + Number(limit));
+    request.signal.throwIfAborted();
+    return {
+      path: selected.path,
+      value: {
+        path: selected.path,
+        content: lines.slice(from, through).join(''),
+        selection: {
+          fromLine: Number(offset),
+          toLine: from >= lines.length ? null : through,
+          totalLines: lines.length,
+          nextOffset: through < lines.length ? through + 1 : null,
+        },
+      },
+    };
+  }
   return {
+    readSnapshot,
     tools: options.tools.map(
       (tool): ToolDefinition =>
         tool.id !== 'files.read'
@@ -136,55 +236,14 @@ export function withExternalFileReads(options: {
                     )
                       throw new AgentError('file_dispatch_scope_changed');
                   }
-                  const parameters = input as Record<string, Json>;
-                  const offset = parameters.offset ?? 1,
-                    limit = parameters.limit ?? 200;
-                  if (
-                    !Number.isSafeInteger(offset) ||
-                    Number(offset) < 1 ||
-                    !Number.isSafeInteger(limit) ||
-                    Number(limit) < 1
-                  )
-                    throw new AgentError('file_input_invalid');
-                  if (!selected.exists) {
-                    context.signal.throwIfAborted();
-                    return createMissingFileReadResult(selected.path);
-                  }
-                  const file = await open(selected.actual, 'r');
-                  let bytes: Buffer;
-                  try {
-                    if (!(await file.stat()).isFile()) throw new AgentError('file_not_regular');
-                    if ((await realpath(selected.path)) !== selected.actual)
-                      throw new AgentError('file_changed');
-                    bytes = await file.readFile({ signal: context.signal });
-                  } finally {
-                    await file.close();
-                  }
-                  let text: string;
-                  try {
-                    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-                  } catch {
-                    throw new AgentError('file_encoding_invalid');
-                  }
-                  if (bytes.subarray(0, 8192).includes(0)) throw new AgentError('file_binary');
-                  const lines = text === '' ? [] : text.match(/[^\n]*\n|[^\n]+$/g)!;
-                  const from = Number(offset) - 1,
-                    through = Math.min(lines.length, from + Number(limit));
-                  context.signal.throwIfAborted();
-                  return await createFileReadResult(
-                    {
-                      path: selected.path,
-                      content: lines.slice(from, through).join(''),
-                      selection: {
-                        fromLine: Number(offset),
-                        toLine: from >= lines.length ? null : through,
-                        totalLines: lines.length,
-                        nextOffset: through < lines.length ? through + 1 : null,
-                      },
-                    },
-                    context,
-                    { fileScope: 'external_path', workspaceCheckpoint: false },
-                  );
+                  const snapshot = await readSnapshot(context, input);
+                  if (!snapshot) throw new AgentError('file_dispatch_scope_changed');
+                  return snapshot.value
+                    ? await createFileReadResult(snapshot.value, context, {
+                        fileScope: 'external_path',
+                        workspaceCheckpoint: false,
+                      })
+                    : createMissingFileReadResult(snapshot.path);
                 } catch (error) {
                   const code = codeOf(error);
                   return {

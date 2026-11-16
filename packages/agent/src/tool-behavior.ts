@@ -6,7 +6,9 @@ import type {
   JobDefinition,
   Json,
   PermissionDecision,
+  ToolContext,
   ToolDefinition,
+  ToolResult,
 } from './extensions';
 import type { CapabilityBinding, GrantCandidate } from './permission-grants';
 import { AgentError } from './storage/types';
@@ -39,12 +41,24 @@ export interface ToolBehaviorContext {
 export interface ParentAuthorizationBridge {
   worktree(): Promise<import('./storage/port').AutoAuthorizationEvidence | null>;
 }
+/** Core owns this private preparation until dispatch or disposal. It is never serialized. */
+export interface PreparedToolExecution {
+  execute(context: ToolContext): Promise<ToolResult>;
+  dispose(): void;
+}
 /** Functions are host code, never reconstructed from configuration JSON or extension records. */
 export interface TrustedToolBehavior extends ToolBehaviorBinding {
   readonly definition: ToolDefinition | JobDefinition | ActionDefinition;
   executionConfirmation?(
     request: AuthorizationRequest,
   ): Promise<import('./execution-confirmation').ExecutionConfirmationDeclaration | null>;
+  /** Read-only preparation after all hard policy gates, before optional model review.
+   * No ToolResult, artifact or body may be published until execute after final dispatch.
+   */
+  prepareTool?(
+    request: AuthorizationRequest,
+    decision: PermissionDecision,
+  ): Promise<PreparedToolExecution | null>;
   readonly autoReview?: 'check' | 'none';
   readonly grantSatisfiesDefaultCheck?: true;
   prepareReview?(
@@ -113,6 +127,8 @@ export function createToolBehaviorRegistry(input: {
       !behavior.contractRef ||
       behavior.contractRef.length > 512 ||
       !/^[a-f0-9]{64}$/.test(behavior.configurationDigest) ||
+      (behavior.prepareTool !== undefined &&
+        (behavior.capability.kind !== 'tool' || typeof behavior.prepareTool !== 'function')) ||
       (behavior.executionConfirmation !== undefined &&
         typeof behavior.executionConfirmation !== 'function') ||
       (behavior.autoReview !== undefined && !['check', 'none'].includes(behavior.autoReview)) ||

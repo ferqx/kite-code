@@ -64,7 +64,9 @@ test('Runtime rejects action-invalid worktree calls before authorization or reco
       path: root,
       newBranch: 'forbidden-remove-branch',
     },
-    { action: 'create', path: root },
+    { action: 'create', path: root, operationRef: 'gw_not_an_accepted_operation' },
+    { action: 'use', path: root, key: 'not-an-accepted-intent' },
+    { action: 'exit', path: root },
   ];
   const model = createFixedModel([calls(invalid), calls([{ action: 'list' }]), [finish]]);
   const authorizations: AuthorizationRequest[] = [];
@@ -178,7 +180,7 @@ test('Runtime rejects action-invalid worktree calls before authorization or reco
     const view = await runtime.getView('s');
     expect(view.runs[0]?.status).toBe('completed');
     const tools = view.executions.filter((entry) => entry.kind === 'tool');
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(invalid.length + 1);
     for (const input of invalid) {
       const rejected = tools.find((entry) => canonicalJson(entry.input) === canonicalJson(input));
       expect(rejected?.result).toMatchObject({
@@ -209,9 +211,9 @@ test('Runtime rejects action-invalid worktree calls before authorization or reco
     expect(view.executions.filter((entry) => entry.kind === 'job')).toHaveLength(1);
     expect(checkpoints[2]).toEqual({ jobs: 1, records: 1, authorizedTools: 1 });
     const declared = model.requests[1]!.tools.find((tool) => tool.id === 'git_worktree');
-    expect(declared?.description).toContain('send exactly {"action":"list"}');
-    expect(declared?.description).toContain('unknown operations must not be restarted');
-    expect(declared?.inputSchema.description).toContain('not broader permissions');
+    expect(declared?.description).toContain('list accepts only action');
+    expect(declared?.description).toContain('never retries an unknown mutation');
+    expect(declared?.description).toContain('filesystem requests existing scope');
     expect(declared?.inputSchema.type).toBe('object');
     expect(declared?.inputSchema.additionalProperties).toBe(false);
   } finally {

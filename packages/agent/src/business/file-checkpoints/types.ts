@@ -4,6 +4,8 @@ import type { FileBaseline } from '../../tools/files';
 export interface FileCheckpointBoundary {
   storeId: string;
   workspaceId: string;
+  /** Trusted original Tool root. Absent only on saved checkpoints predating root selection. */
+  executionRoot?: { epoch: string; identity: { device: string; inode: string } };
   sessionId: string;
   runId: string;
   contextSelectionId: string;

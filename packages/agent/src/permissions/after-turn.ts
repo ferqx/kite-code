@@ -95,7 +95,7 @@ export function createDefaultAfterTurnPolicy(options: {
       for (const read of reads ?? []) {
         const key = `${read.kind}/${read.scope}`;
         if (
-          !['permission.mode', 'workspace.trust'].includes(read.kind) ||
+          !['permission.mode', 'workspace.trust', 'session.execution_root'].includes(read.kind) ||
           typeof read.scope !== 'string' ||
           !read.scope ||
           typeof read.revision !== 'string' ||

@@ -54,6 +54,8 @@ export {
   type StepCapabilitiesReader,
 } from './runtime';
 export type {
+  SessionExecutionRoot,
+  SessionExecutionRootPreparation,
   SessionExportCompletion,
   SessionExportManifest,
   SessionExportPage,

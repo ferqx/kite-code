@@ -27,6 +27,7 @@ import type { WindowsShellBackend } from '../jobs/windows-shell';
 import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
 import type { GitWorktreeHost } from '../tools/git-worktree';
+import { parseWorktreeRootRequest } from '../tools/git-worktree/execution-root';
 import {
   buildPowerShellWorkerCommand,
   digest,
@@ -568,6 +569,8 @@ export async function createShellConfiguration(input: {
     const worktreeRequest = (request: AuthorizationRequest) => {
       if (request.definitionVersion !== '1') return undefined;
       if (request.kind === 'tool' && request.definitionId === 'git.worktree') {
+        const root = parseWorktreeRootRequest(request.input);
+        if (root) return { action: root.action };
         const value = parseGitWorktreeRequest(request.input, request.executionId);
         return value ? { action: value.action } : undefined;
       }
@@ -697,6 +700,18 @@ export async function createShellConfiguration(input: {
         .digest('hex');
     }
     async function commandDigest(request: AuthorizationRequest): Promise<string | undefined> {
+      if (
+        request.kind === 'tool' &&
+        request.definitionId === 'git.worktree' &&
+        request.definitionVersion === '1'
+      ) {
+        const root = parseWorktreeRootRequest(request.input);
+        if (root) {
+          if (!input.worktreeHost?.describeExecutionRoot) return undefined;
+          const selection = await input.worktreeHost.describeExecutionRoot(root, request, cwd);
+          return digest({ sourceCwd: cwd, request: root, selection });
+        }
+      }
       if (worktreeRequest(request) && worktree?.profile) return worktreeCommandDigest(request);
       const value = commandRequest(request, !!host);
       if (!value) return undefined;
@@ -1101,6 +1116,25 @@ export async function createShellConfiguration(input: {
         request: AuthorizationRequest,
         policy?: Readonly<PermissionPolicySnapshot>,
       ): Promise<Partial<CapabilityDescription> | undefined> {
+        if (
+          request.kind === 'tool' &&
+          request.definitionId === 'git.worktree' &&
+          request.definitionVersion === '1'
+        ) {
+          const root = parseWorktreeRootRequest(request.input);
+          if (root)
+            return {
+              hardAllowed:
+                !!input.worktreeHost?.prepareExecutionRoot &&
+                !!input.worktreeHost?.describeExecutionRoot,
+              ...(!input.worktreeHost?.prepareExecutionRoot
+                ? { denialReason: 'worktree_execution_root_unavailable' }
+                : {}),
+              safeRead: false,
+              effects: ['record_write', 'workspace_write'],
+              commandDigest: await commandDigest(request),
+            };
+        }
         if (
           request.kind === 'tool' &&
           request.definitionId === 'git.worktree' &&

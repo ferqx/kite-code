@@ -2,6 +2,7 @@ import type { DispatchInput, PermissionControlRead } from '../port';
 import { AgentError } from '../types';
 import { assertHumanWorkDispatch } from './human-work-control';
 import type { SqliteOperations } from './operations';
+import { getSessionExecutionRoot } from './session-execution-root';
 
 type Row = Record<string, string | number | bigint | null | undefined>;
 /** Called inside markDispatching's owner transaction; proof never supplies subject or Store identity. */
@@ -11,6 +12,16 @@ export function verifyHostControlDispatch(
   input: DispatchInput,
 ): void {
   assertHumanWorkDispatch(db, execution as Parameters<typeof assertHumanWorkDispatch>[1]);
+  const root = getSessionExecutionRoot(db, { sessionId: String(execution.session_id) });
+  const workspace = db.row('SELECT root_uri FROM workspace WHERE id=?', root.workspaceId);
+  if (
+    (root.epoch !== '0' || root.effectiveRootUri !== workspace?.root_uri) &&
+    !input.authorization.controlReads?.some(
+      (read) =>
+        read.kind === 'session.execution_root' && read.scope === `session:${execution.session_id}`,
+    )
+  )
+    throw new AgentError('execution_root_read_required');
   verifyHostControlReads(db, execution, input.expectedStoreId, input.authorization.controlReads);
 }
 export function verifyHostControlReads(
@@ -20,7 +31,7 @@ export function verifyHostControlReads(
   reads: readonly PermissionControlRead[] | undefined,
 ): void {
   if (reads === undefined) return; // Explicit injected policies need not read persistent controls.
-  if (!Array.isArray(reads) || reads.length > 3)
+  if (!Array.isArray(reads) || reads.length > 4)
     throw new AgentError('invalid_permission_control_reads');
   if (!reads.length) return;
   const command = db.row('SELECT * FROM command WHERE id=?', execution.origin_command_id!);
@@ -47,7 +58,7 @@ export function verifyHostControlReads(
       typeof read !== 'object' ||
       Array.isArray(read) ||
       Object.keys(read).some((key) => !['kind', 'scope', 'revision'].includes(key)) ||
-      !['permission.mode', 'workspace.trust'].includes(read.kind) ||
+      !['permission.mode', 'workspace.trust', 'session.execution_root'].includes(read.kind) ||
       typeof read.scope !== 'string' ||
       read.scope.length < 1 ||
       read.scope.length > 256 ||
@@ -59,6 +70,13 @@ export function verifyHostControlReads(
     const identity = JSON.stringify([read.kind, read.scope]);
     if (seen.has(identity)) throw new AgentError('invalid_permission_control_reads');
     seen.add(identity);
+    if (read.kind === 'session.execution_root') {
+      if (read.scope !== `session:${session.id}`)
+        throw new AgentError('permission_control_scope_denied');
+      if (getSessionExecutionRoot(db, { sessionId: String(session.id) }).epoch !== read.revision)
+        throw new AgentError('permission_control_changed');
+      continue;
+    }
     if (read.kind === 'permission.mode') {
       if (read.scope !== 'user' && read.scope !== `session:${root.id}`)
         throw new AgentError('permission_control_scope_denied');

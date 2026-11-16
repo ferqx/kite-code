@@ -1,5 +1,5 @@
 import { type ModelAdapter, ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
-import type { ContextSource } from '../context';
+import type { ContextSource, ContextSources } from '../context';
 import { frozenModelInputLimit } from '../context-estimate';
 import type {
   ActionContext,
@@ -15,6 +15,7 @@ import type {
   Permissions,
   ResourceRequest,
   StopConfirmation,
+  ToolContext,
   ToolDefinition,
   ToolResult,
 } from '../extensions';
@@ -43,6 +44,7 @@ import {
   type RunRecord,
   type ToolCall,
 } from '../storage/types';
+import type { PreparedToolExecution, TrustedToolBehavior } from '../tool-behavior';
 import { toolImages } from '../tool-images';
 import { runInternalModelCall } from './authorization-check';
 import { AuthorizationCheckUnavailableError } from './authorization-check-feedback';
@@ -179,6 +181,8 @@ export interface ExecutionScope {
   /** Core-owned interpretation of one durable human input, never a business grant. */
   humanInputInterpretation?: { inputCommandId: string; inputDigest: string };
   toolAdmission?: ToolDispatchAdmission;
+  /** Size of the actual complete Model tool batch, supplied by Core rather than Tool input. */
+  toolBatchSize?: number;
   modelRetry?: import('../model-attempt').ModelRetrySource;
   compressionId?: string;
   /** Core-owned state at the boundary before this replaceable Model attempt. */
@@ -199,9 +203,11 @@ export interface ScopedBindings {
   readonly extensions: readonly Extension[];
   readonly tools: ReadonlyMap<string, ToolDefinition>;
   readonly jobs: ReadonlyMap<string, JobDefinition>;
+  readonly sources?: ContextSources;
   readonly permissions?: Permissions;
   readonly conditions?: NecessaryConditions;
   readonly capabilitySnapshot?: Json;
+  readonly executionRoot?: import('../storage/types').SessionExecutionRoot;
   retain(): () => Promise<void>;
 }
 export interface StandaloneScope {
@@ -242,6 +248,7 @@ function identity(scope: ToolScope) {
       };
 }
 export interface ExecutionOptions {
+  toolBehaviors?: readonly TrustedToolBehavior[];
   prepareExecutionConfirmation?: (
     scope: ToolScope,
     request: AuthorizationRequest,
@@ -1167,6 +1174,17 @@ export class UnifiedExecution {
               ? [{ id: tool.id, version: tool.definitionVersion, extensionId: extension.id }]
               : [];
           }),
+          // Exact trusted Step registrations, including Job behaviors used by
+          // descendant operations. Never inferred from Model/tool arguments.
+          toolBehaviorBindings: (
+            scope.bindings?.toolBehaviors ??
+            this.options.toolBehaviors ??
+            []
+          ).map(({ capability, contractRef, configurationDigest }) => ({
+            capability: { ...capability },
+            contractRef,
+            configurationDigest,
+          })),
           ...(scope.bindings?.capabilitySnapshot === undefined
             ? {}
             : { capabilitySnapshot: scope.bindings.capabilitySnapshot }),
@@ -1343,6 +1361,25 @@ export class UnifiedExecution {
         if (!output) await activateOutput();
         await output!.continuation(finish.continuation);
       }
+      // Artifact-backed output keeps only finite, body-free call identities in
+      // the original Model result. Store can bind a descendant review to the
+      // completed Model without trusting the later Tool's own source claims.
+      const modelToolCalls: Json[] = [];
+      if (output) {
+        for (const call of calls) {
+          let inputDigest: string | null = null;
+          try {
+            inputDigest = await semanticDigest(JSON.parse(call.arguments) as Json);
+          } catch (error) {
+            if (
+              !(error instanceof SyntaxError) &&
+              !(error instanceof AgentError && error.code === 'invalid_json')
+            )
+              throw error;
+          }
+          modelToolCalls.push({ id: call.id, name: call.name, inputDigest });
+        }
+      }
       const settled = await this.options.store.finishExecution({
         expectedStoreId: scope.run.originStoreId,
         owner: scope.owner,
@@ -1353,7 +1390,9 @@ export class UnifiedExecution {
           reasoning: output ? '' : reasoning,
           ...(firstOutput ? { firstOutput } : {}),
           toolCalls: output ? [] : calls.map((call) => ({ ...call })),
-          ...(output ? { modelOutput: output.descriptor(true) as unknown as Json } : {}),
+          ...(output
+            ? { modelOutput: output.descriptor(true) as unknown as Json, modelToolCalls }
+            : {}),
           usage: finish.usage,
           finishReason: finish.reason,
           ...(input &&
@@ -1607,6 +1646,7 @@ export class UnifiedExecution {
     let dispatched = Boolean(resuming);
     let attempted = false;
     let cancelledBeforeAdapter = false;
+    let preparedTool: PreparedToolExecution | null = null;
     let result: ToolResult;
     const progress = createProgressWriter((content) =>
       this.options.store.appendExecutionOutput({
@@ -1648,6 +1688,45 @@ export class UnifiedExecution {
               input: structuredClone(input),
             }),
           });
+        }
+      }
+      // A trusted read may privately freeze bytes before an optional reviewer sees
+      // metadata. This is not dispatch: first evaluate the complete inherited policy
+      // and necessary conditions, and never call an arbitrary extension preflight.
+      const behavior = (scope.bindings?.toolBehaviors ?? this.options.toolBehaviors ?? []).find(
+        (value) =>
+          value.capability.kind === 'tool' &&
+          value.capability.definitionId === definition.id &&
+          value.capability.definitionVersion === definition.version,
+      );
+      if (!resuming && behavior?.prepareTool) {
+        const request: AuthorizationRequest = {
+          kind: 'tool',
+          sessionId: work.sessionId,
+          runId: work.runId,
+          executionId,
+          definitionId: definition.id,
+          definitionVersion: definition.version,
+          input,
+          signal: scope.signal,
+        };
+        const policy = await (scope.bindings?.permissions ?? this.options.permissions).authorize(
+          request,
+        );
+        if (policy.allowed || policy.approval || policy.check) {
+          await this.requirements(scope, 'dispatch', executionId);
+          await scope.checkFreshness?.();
+          scope.signal.throwIfAborted();
+          const current = await this.options.store.getExecution(executionId);
+          if (
+            current?.status !== 'planned' ||
+            current.ownerGeneration !== scope.owner.generation ||
+            current.attempt !== execution.attempt ||
+            current.cancelRequestedAt !== null
+          )
+            throw new AgentError('tool_preparation_unavailable');
+          preparedTool = await behavior.prepareTool(request, policy);
+          scope.signal.throwIfAborted();
         }
       }
       const prepareContext = async () => {
@@ -1697,18 +1776,27 @@ export class UnifiedExecution {
       scope.signal.throwIfAborted();
       attempted = true;
       result = toolResultSnapshot(
-        await (resuming ? definition.resume! : definition.execute).call(definition, input, {
-          ...context,
-          resourceCapacity: this.options.resources.capacity,
-          dispatchAuthorization,
-          runId: work.runId,
-          modelInputTokenLimit:
-            'run' in scope ? frozenModelInputLimit(scope.run.configuration) : undefined,
-          reportProgress: progress.report,
-          requestInput: (request) => requestInteraction({ kind: 'question', request }),
-          requestInteraction,
-          requestInteractionWithReceipt,
-        }),
+        await (async () => {
+          const toolContext: ToolContext = {
+            ...context,
+            resourceCapacity: this.options.resources.capacity,
+            dispatchAuthorization,
+            runId: work.runId,
+            modelInputTokenLimit:
+              'run' in scope ? frozenModelInputLimit(scope.run.configuration) : undefined,
+            reportProgress: progress.report,
+            requestInput: (request) => requestInteraction({ kind: 'question', request }),
+            requestInteraction,
+            requestInteractionWithReceipt,
+          };
+          return preparedTool
+            ? preparedTool.execute(toolContext)
+            : (resuming ? definition.resume! : definition.execute).call(
+                definition,
+                input,
+                toolContext,
+              );
+        })(),
       );
       if (result.modelImages !== undefined) {
         if (!this.options.validateArtifacts)
@@ -1812,6 +1900,8 @@ export class UnifiedExecution {
         },
       };
     }
+    preparedTool?.dispose();
+    preparedTool = null;
     const progressFailure = await progress.finish();
     try {
       if (

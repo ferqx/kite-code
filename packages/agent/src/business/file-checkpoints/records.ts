@@ -59,7 +59,7 @@ const preimage = object({
   baseline: { anyOf: [baselineSchema, { type: 'null' }] },
   artifact: { anyOf: [artifact, { type: 'null' }] },
 });
-export const boundarySchema = object({
+const originalBoundaryProperties = {
   storeId: id,
   workspaceId: id,
   sessionId: id,
@@ -69,7 +69,18 @@ export const boundarySchema = object({
   messageSeq: decimal,
   triggerMessageId: id,
   triggerSeq: decimal,
-});
+};
+// Old immutable points keep their original body/hash. New capture separately requires this field.
+export const boundarySchema = object(
+  {
+    ...originalBoundaryProperties,
+    executionRoot: object({
+      epoch: decimal,
+      identity: object({ device: decimal, inode: decimal }),
+    }),
+  },
+  Object.keys(originalBoundaryProperties),
+);
 const pointSchema = object({
   id: hash,
   boundary: boundarySchema,
@@ -268,7 +279,9 @@ export function point(record: ExtensionRecord): FileCheckpoint {
     record.key !== pointKey(value.id) ||
     digest(value.boundary as unknown as Json) !== value.id ||
     record.sessionId !== value.boundary.sessionId ||
-    record.originStoreId !== value.boundary.storeId
+    record.originStoreId !== value.boundary.storeId ||
+    (value.boundary.executionRoot !== undefined &&
+      canonicalJson(value.boundary.executionRoot.identity) !== canonicalJson(value.workspace))
   )
     throw new AgentError('checkpoint_scope_conflict');
   return value;

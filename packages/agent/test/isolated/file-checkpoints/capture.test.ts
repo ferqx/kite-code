@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -36,6 +37,9 @@ const finish: ModelEvent = {
 async function fixture(
   mode:
     | 'normal'
+    | 'root-switch'
+    | 'root-missing-proof'
+    | 'root-wrong-proof'
     | 'nested-create'
     | 'legacy-write'
     | 'no-boundary'
@@ -54,6 +58,20 @@ async function fixture(
   mkdirSync(workspace);
   const original = Buffer.from(`\uFEFF${'完整预像\r\n'.repeat(40000)}`);
   writeFileSync(join(workspace, 'original'), original);
+  const alternate = join(root, 'alternate');
+  mkdirSync(alternate);
+  const alternateOriginal = Buffer.from('alternate preimage\r\n');
+  writeFileSync(join(alternate, 'original'), alternateOriginal);
+  let selectedRoot = workspace,
+    rootEpoch = '0';
+  const capturedRoots = new Map<
+    string,
+    { epoch: string; identity: { device: string; inode: string } }
+  >();
+  const executionRoot = () => {
+    const stat = lstatSync(selectedRoot, { bigint: true });
+    return { epoch: rootEpoch, identity: { device: String(stat.dev), inode: String(stat.ino) } };
+  };
   const profile = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(profile);
   const artifacts = createArtifactStore({ profile, store });
@@ -105,10 +123,19 @@ async function fixture(
             const before = page.messages
               .filter((row) => BigInt(row.seq) < BigInt(message.seq))
               .at(-1);
+            capturedRoots.set(actual.id, executionRoot());
             return {
               boundary: {
                 storeId,
                 workspaceId: 'w',
+                ...(mode === 'root-missing-proof'
+                  ? {}
+                  : {
+                      executionRoot:
+                        mode === 'root-wrong-proof'
+                          ? { epoch: rootEpoch, identity: { device: '0', inode: '0' } }
+                          : executionRoot(),
+                    }),
                 sessionId: 's',
                 runId: run.id,
                 contextSelectionId: page.selection.id,
@@ -144,6 +171,11 @@ async function fixture(
     },
     async verifyCaptureSource(context, point, source) {
       const tool = await store.getExecution(source.executionId);
+      if (
+        JSON.stringify(capturedRoots.get(source.executionId)) !==
+        JSON.stringify(point.boundary.executionRoot)
+      )
+        throw new Error('original root binding mismatch');
       const binding = tool!.decisionSource as { modelExecutionId: string };
       if (
         binding.modelExecutionId !== source.modelExecutionId ||
@@ -173,6 +205,11 @@ async function fixture(
         return;
       }
       const turn = stage++;
+      if (mode === 'root-switch' && (turn === 2 || turn === 4)) {
+        selectedRoot = turn === 2 ? alternate : workspace;
+        rootEpoch = turn === 2 ? '1' : '2';
+        checkpointOptions.workspace.root = selectedRoot;
+      }
       if (turn === 0 || turn === 2) {
         yield {
           type: 'tool_call',
@@ -218,6 +255,7 @@ async function fixture(
   const extension: { -readonly [K in keyof Extension]: Extension[K] } = [
     'lazy',
     'lazy-close',
+    'root-switch',
   ].includes(mode)
     ? {
         ...createScopedFileCheckpointing(
@@ -482,6 +520,16 @@ async function fixture(
   return {
     root,
     workspace,
+    alternate,
+    alternateOriginal,
+    setRoot(root: string, epoch: string) {
+      selectedRoot = root;
+      rootEpoch = epoch;
+      checkpointOptions.workspace.root = root;
+    },
+    openCheckpoint(root: string) {
+      return createFileCheckpointing({ ...checkpointOptions, workspace: { id: 'w', root } });
+    },
     original,
     profile,
     store,
@@ -536,6 +584,90 @@ async function fixture(
     },
   };
 }
+
+test('new captures require a trusted matching execution root before any file or checkpoint publication', async () => {
+  for (const mode of ['root-missing-proof', 'root-wrong-proof'] as const) {
+    const f = await fixture(mode);
+    try {
+      await f.run();
+      expect(readFileSync(join(f.workspace, 'original'))).toEqual(f.original);
+      expect(existsSync(join(f.workspace, 'created'))).toBe(false);
+      expect((await f.checkpoint.listPoints(f.read)).items).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('one Run and trigger retain distinct root epochs, reject cross-root restore and recover each original root after returning', async () => {
+  const f = await fixture('root-switch');
+  const alternate = f.openCheckpoint(f.alternate);
+  try {
+    await f.run();
+    const points = (await f.checkpoint.listPoints(f.read)).items.map((row) => row.checkpoint);
+    expect(points).toHaveLength(3);
+    expect(new Set(points.map((point) => point.id)).size).toBe(3);
+    expect(new Set(points.map((point) => point.boundary.runId)).size).toBe(1);
+    expect(new Set(points.map((point) => point.boundary.triggerMessageId)).size).toBe(1);
+    const first = points.find((point) => point.boundary.executionRoot!.epoch === '0')!;
+    const other = points.find((point) => point.boundary.executionRoot!.epoch === '1')!;
+    const savedPoints = await f.store.listExtensionRecords({
+      sessionId: 's',
+      extensionId: 'builtin.files',
+      contentType: 'builtin.files.checkpoint',
+    });
+    expect(
+      (await f.checkpoint.preview(f.read, other.id)).files.every(
+        (file) =>
+          file.status === 'unavailable' && file.reason === 'checkpoint_execution_root_conflict',
+      ),
+    ).toBe(true);
+    expect(
+      (await alternate.preview(f.read, first.id)).files.every(
+        (file) =>
+          file.status === 'unavailable' && file.reason === 'checkpoint_execution_root_conflict',
+      ),
+    ).toBe(true);
+    await invokeRestore(f, other.id, 'cross-root', 'cross-root-intent');
+    await f.runtime.waitForCommand('cross-root');
+    expect(await f.checkpoint.readRestoreIntent(f.read, other.id, 'cross-root-intent')).toBeNull();
+    expect(readFileSync(join(f.alternate, 'original'), 'utf8')).toBe('last\r\n');
+    expect(readFileSync(join(f.workspace, 'original'), 'utf8')).toBe('middle\r\n');
+    expect(
+      (await f.checkpoint.preview(f.read, first.id)).files.map((file) => file.status).sort(),
+    ).toEqual(['remove', 'restore']);
+    await invokeRestore(f, first.id, 'restore-source', 'restore-source-intent');
+    await f.runtime.waitForCommand('restore-source');
+    expect(
+      (await f.checkpoint.readRestoreIntent(f.read, first.id, 'restore-source-intent'))!.value,
+    ).toMatchObject({ phase: 'restored' });
+    expect(readFileSync(join(f.workspace, 'original'))).toEqual(f.original);
+    expect(existsSync(join(f.workspace, 'created'))).toBe(false);
+    expect(readFileSync(join(f.alternate, 'original'), 'utf8')).toBe('last\r\n');
+    // The source-root restore journal must not contaminate the alternate-root baseline.
+    f.setRoot(f.alternate, '3');
+    expect((await alternate.preview(f.read, other.id)).files.map((file) => file.status)).toEqual([
+      'restore',
+    ]);
+    await invokeRestore(f, other.id, 'restore-alternate', 'restore-alternate-intent');
+    await f.runtime.waitForCommand('restore-alternate');
+    expect(
+      (await alternate.readRestoreIntent(f.read, other.id, 'restore-alternate-intent'))!.value,
+    ).toMatchObject({ phase: 'restored' });
+    expect(readFileSync(join(f.alternate, 'original'))).toEqual(f.alternateOriginal);
+    expect(readFileSync(join(f.workspace, 'original'))).toEqual(f.original);
+    expect(
+      await f.store.listExtensionRecords({
+        sessionId: 's',
+        extensionId: 'builtin.files',
+        contentType: 'builtin.files.checkpoint',
+      }),
+    ).toEqual(savedPoints);
+  } finally {
+    await alternate.close();
+    await f.close();
+  }
+});
 
 test('saved version 2 file sources remain readable and recoverable with the expanded source schema', async () => {
   const f = await fixture('legacy-write');

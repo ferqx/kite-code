@@ -19,6 +19,7 @@ import {
 } from '../../tools/git-worktree/protocol';
 import { AgentError, type Json } from '../types';
 import type { SqliteOperations } from './operations';
+import { getSessionExecutionRoot } from './session-execution-root';
 
 type Row = Record<string, string | number | bigint | null>;
 const obj = (value: unknown): Record<string, Json> => {
@@ -29,6 +30,85 @@ const obj = (value: unknown): Record<string, Json> => {
 const parsed = (value: unknown) => obj(JSON.parse(String(value)));
 const same = (a: unknown, b: unknown) =>
   canonicalJson((a ?? null) as Json) === canonicalJson((b ?? null) as Json);
+
+/** Only the original Model's host-sealed Step may rebind cwd; Tool input is never a root. */
+export function boundWorktreeConfiguration(
+  db: SqliteOperations,
+  parent: Row,
+  config: Record<string, Json>,
+) {
+  const snapshot = obj(config.snapshot);
+  const originalShell = obj(
+    (snapshot.shell === undefined ? obj(snapshot.configuration) : snapshot).shell,
+  );
+  const original = obj(obj(originalShell.assets).gitWorktree);
+  const originalConfiguration = obj(original.configuration);
+  const source = parsed(parent.decision_source_json);
+  if (source.executionRoot === undefined) return originalConfiguration;
+  const root = obj(source.executionRoot);
+  if (
+    source.kind !== 'model_decision' ||
+    typeof source.modelExecutionId !== 'string' ||
+    root.sessionId !== parent.session_id ||
+    typeof root.epoch !== 'string'
+  )
+    throw new AgentError('worktree_authorization_changed');
+  const stored = getSessionExecutionRoot(db, {
+    sessionId: String(parent.session_id),
+    epoch: root.epoch,
+  });
+  if (
+    root.workspaceId !== stored.workspaceId ||
+    root.effectiveRootUri !== stored.effectiveRootUri ||
+    (stored.identity !== null && !same(stored.identity, root.identity))
+  )
+    throw new AgentError('worktree_authorization_changed');
+  const accepted = parsed(parent.dispatch_authorization_json);
+  if (
+    !Array.isArray(accepted.controlReads) ||
+    !accepted.controlReads.some((read) => {
+      const proof = obj(read);
+      return (
+        proof.kind === 'session.execution_root' &&
+        proof.scope === `session:${parent.session_id}` &&
+        proof.revision === stored.epoch
+      );
+    })
+  )
+    throw new AgentError('worktree_authorization_changed');
+  const model = db.row('SELECT * FROM execution WHERE id=?', source.modelExecutionId);
+  if (
+    model?.kind !== 'model' ||
+    model.state !== 'succeeded' ||
+    ['session_id', 'run_id', 'origin_store_id', 'root_work_command_id', 'root_work_seq'].some(
+      (key) => model[key] !== parent[key],
+    )
+  )
+    throw new AgentError('worktree_authorization_changed');
+  const modelSource = parsed(model.decision_source_json);
+  const step = obj(modelSource.capabilitySnapshot);
+  if (!same(modelSource.executionRoot, root) || !same(step.executionRoot, root))
+    throw new AgentError('worktree_authorization_changed');
+  const shell = obj(step.shell);
+  const captured = obj(obj(shell.assets).gitWorktree);
+  const configuration = obj(captured.configuration);
+  const {
+    sourceCwd: _originalCwd,
+    identity: _originalIdentity,
+    ...originalAssets
+  } = originalConfiguration;
+  const { sourceCwd, identity: _identity, ...assets } = configuration;
+  const { configuration: _originalConfiguration, ...originalCapture } = original;
+  const { configuration: _configuration, ...capture } = captured;
+  if (
+    typeof sourceCwd !== 'string' ||
+    sourceCwd !== shell.cwd ||
+    !same(originalAssets, assets) ||
+    !same(originalCapture, capture)
+  )
+    throw new AgentError('worktree_authorization_changed');
+  return configuration;
+}
 function preparationFrame(
   db: SqliteOperations,
   execution: Row,
@@ -211,16 +291,18 @@ export function worktreeAuthorizationBoundary(
     steps = obj(value.steps);
   const identity = worktreeConfigurationIdentity(decision.snapshot);
   const usesDefaultTarget = input.action === 'create' && input.path === undefined;
+  const configuration =
+    usesDefaultTarget || parsed(parent.decision_source_json).executionRoot !== undefined
+      ? boundWorktreeConfiguration(db, parent, config)
+      : undefined;
+  if (configuration && digest(configuration) !== identity)
+    throw new AgentError('worktree_authorization_changed');
   if (usesDefaultTarget) {
-    // The original Run seals the host configuration. A model or record cannot select a root.
-    const snapshot = obj(config.snapshot);
-    const shellSnapshot = snapshot.shell === undefined ? obj(snapshot.configuration) : snapshot;
-    const captured = obj(obj(obj(shellSnapshot.shell).assets).gitWorktree);
-    const configuration = obj(captured.configuration);
+    // Original assets remain sealed; only the trusted original Step can select its execution root.
     if (
+      !configuration ||
       typeof configuration.defaultRoot !== 'string' ||
       typeof configuration.sourceCwd !== 'string' ||
-      digest(configuration) !== identity ||
       !validateResolvedWorktreeTarget(value.resolvedTarget) ||
       value.resolvedTarget.defaultRoot !== resolve(configuration.defaultRoot) ||
       value.resolvedTarget.path !==
@@ -286,6 +368,7 @@ export function worktreeAuthorizationBoundary(
     const request = parsed(origin.request_json);
     if (
       !validateRequest(worker) ||
+      (configuration !== undefined && worker.sourceCwd !== configuration.sourceCwd) ||
       worker.operationToken !== token ||
       worker.phase !== (name === 'prepare' ? `prepare_${input.action}` : input.action) ||
       value.requestDigest !== digest({ input, sourceCwd: worker.sourceCwd }) ||

@@ -5,10 +5,12 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -57,13 +59,13 @@ async function fixture(options: {
   forbidHumanApproval?: boolean;
   childFileCeiling?: 'approval' | 'deny';
   beforeDispatch?: 'demote' | 'untrust';
-  decision?: 'approve' | 'deny' | 'ask_user' | 'unavailable' | 'timeout' | 'cancel';
+  decision?: 'approve' | 'deny' | 'ask_user' | 'unavailable' | 'timeout' | 'cancel' | 'invalid';
   humanAnswer?: 'approve' | 'deny';
   task?: (paths: Paths) => string;
   beforeAnswer?: (paths: Paths) => void;
   decisionTool?: string;
   retryTimeouts?: number;
-  beforeReview?: (body: Body, paths: Paths) => void;
+  beforeReview?: (body: Body, paths: Paths) => void | Promise<void>;
   program: Program;
 }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-full-external-files-')));
@@ -91,7 +93,7 @@ async function fixture(options: {
       const body = (await request.json()) as Body;
       if (!body.tools?.length) {
         reviewInputs.push(body);
-        options.beforeReview?.(body, paths);
+        await options.beforeReview?.(body, paths);
         reviewing = true;
         reviewRequests += 1;
         if (reviewRequests <= (options.retryTimeouts ?? 0))
@@ -114,11 +116,18 @@ async function fixture(options: {
         if (decision === 'timeout' || decision === 'cancel') await Bun.sleep(300);
         if (decision === 'unavailable')
           return new Response('controlled unavailable reviewer', { status: 503 });
-        const answer = JSON.stringify({
-          decision:
-            decision === 'deny' ? 'reject' : decision === 'ask_user' ? 'ask_user' : 'approve_once',
-          reason: 'Controlled fixture decision',
-        });
+        const answer =
+          decision === 'invalid'
+            ? 'not-json'
+            : JSON.stringify({
+                decision:
+                  decision === 'deny'
+                    ? 'reject'
+                    : decision === 'ask_user'
+                      ? 'ask_user'
+                      : 'approve_once',
+                reason: 'Controlled fixture decision',
+              });
         const frame = (delta: unknown, finish_reason: string | null) =>
           `data: ${JSON.stringify({ id: 'check', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
         return new Response(
@@ -306,6 +315,7 @@ async function fixture(options: {
     storeId,
     configurationPath,
     databasePath: profile.databasePath,
+    profilePath: profile.profilePath,
     requests,
     reviewInputs,
     reviewing: () => reviewing,
@@ -382,11 +392,12 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const) {
         (row) => row.definitionId === 'files.read',
       );
       expect(reads).toHaveLength(2);
+      if (mode === 'auto') expect(f.reviewRequests()).toBe(0);
       for (const [index, row] of reads.entries()) {
         const path = index === 0 ? 'missing-workspace.txt' : f.target;
         expect(row.status).toBe('succeeded');
         expect(row.authorization?.dispatched).toBe(true);
-        if (mode === 'auto') expect(row.authorization?.check?.decision).toBe('approve_once');
+        if (mode === 'auto') expect(row.authorization?.check).toBeUndefined();
         if (mode === 'accept_edits' && index === 1) expect(row.authorization?.human).toBeDefined();
         expect(row.result).toEqual({
           outcome: 'succeeded',
@@ -821,7 +832,7 @@ for (const mode of ['full', 'auto', 'accept_edits'] as const) {
 for (const scope of ['workspace', 'external'] as const) {
   for (const name of ['read_file', 'write_file'] as const) {
     for (const decision of ['approve', 'deny', 'unavailable'] as const) {
-      test(`Auto ${scope} ${name} requires actual review: ${decision}`, async () => {
+      test(`Auto ${scope} ${name} uses the expected review boundary: ${decision}`, async () => {
         const f = await fixture({
           mode: 'auto',
           decision,
@@ -847,16 +858,23 @@ for (const scope of ['workspace', 'external'] as const) {
           const row = (await f.store.listExecutions('s')).find(
             (e) => e.definitionId === (name === 'read_file' ? 'files.read' : 'files.write'),
           )!;
-          expect(row.authorization?.check?.decision).toBe(
-            decision === 'approve'
-              ? 'approve_once'
-              : decision === 'deny'
-                ? 'reject'
-                : 'unavailable',
-          );
-          expect(row.authorization?.dispatched).toBe(decision === 'approve');
+          const directRead = scope === 'workspace' && name === 'read_file';
+          if (directRead) {
+            expect(row.authorization?.check).toBeUndefined();
+            expect(f.reviewRequests()).toBe(0);
+            expect(row.status).toBe('succeeded');
+            expect(JSON.stringify(row.result)).toContain('private fixture content');
+          } else
+            expect(row.authorization?.check?.decision).toBe(
+              decision === 'approve'
+                ? 'approve_once'
+                : decision === 'deny'
+                  ? 'reject'
+                  : 'unavailable',
+            );
+          expect(row.authorization?.dispatched).toBe(directRead || decision === 'approve');
           if (name === 'write_file') expect(existsSync(path)).toBe(decision === 'approve');
-          else if (decision !== 'approve')
+          else if (!directRead && decision !== 'approve')
             expect(JSON.stringify(row.result)).not.toContain('private fixture content');
         } finally {
           await f.close();
@@ -996,78 +1014,31 @@ test('cancelling a pending Auto reviewer cannot later dispatch its approved writ
   }
 }, 30000);
 
-for (const replaceDuringReview of [false, true])
-  test(`Auto read-back uses bounded mutation metadata; replacement=${replaceDuringReview}`, async () => {
-    let replaced = false;
+for (const absolutePath of [false, true])
+  test(`Auto workspace read-back skips review and retains the native baseline; absolute=${absolutePath}`, async () => {
     const f = await fixture({
       mode: 'auto',
       decision: 'approve',
-      beforeReview(body, paths) {
-        if (!replaceDuringReview || replaced) return;
-        const payload = body.messages.flatMap((message) => {
-          try {
-            const value = JSON.parse(message.content);
-            return value?.target ? [value] : [];
-          } catch {
-            return [];
-          }
-        })[0];
-        if (
-          payload?.target?.definitionId !== 'files.read' ||
-          !payload.authorizationContext?.recordedFileMutations?.length
-        )
-          return;
-        writeFileSync(
-          join(paths.workspace, 'replacement.md'),
-          'replacement not authorized by the old identity',
-        );
-        renameSync(join(paths.workspace, 'replacement.md'), join(paths.workspace, 'notes.md'));
-        replaced = true;
-      },
-      program: (_body, step): Call | null =>
+      program: (_body, step, _actor, paths): Call | null =>
         step === 0
-          ? {
-              name: 'write_file',
-              input: { path: 'notes.md', content: 'PRIVATE_TEST_BODY_NOT_IN_METADATA' },
-            }
+          ? { name: 'write_file', input: { path: 'notes.md', content: 'WORKSPACE_READ_BACK' } }
           : step === 1
-            ? { name: 'read_file', input: { path: 'notes.md' } }
+            ? {
+                name: 'read_file',
+                input: { path: absolutePath ? join(paths.workspace, 'notes.md') : 'notes.md' },
+              }
             : null,
     });
     try {
       await f.run();
-      const payloads = f.reviewInputs.flatMap((body) =>
-        body.messages.flatMap((message) => {
-          try {
-            const value = JSON.parse(message.content);
-            return value?.target?.definitionId === 'files.read' ? [value] : [];
-          } catch {
-            return [];
-          }
-        }),
-      );
-      expect(payloads.length).toBeGreaterThan(0);
-      const facts = payloads[0].authorizationContext.recordedFileMutations;
-      expect(facts).toHaveLength(1);
-      expect(facts[0]).toMatchObject({
-        historical: true,
-        currentVersionVerified: false,
-        definitionId: 'files.write',
-        status: 'succeeded',
-        dispatched: true,
-      });
-      expect(JSON.stringify(facts)).not.toContain('PRIVATE_TEST_BODY');
+      expect(f.reviewRequests()).toBe(1); // The write still receives its own review.
       const read = (await f.store.listExecutions('s')).find(
-        (entry) => entry.definitionId === 'files.read',
+        (row) => row.definitionId === 'files.read',
       )!;
-      if (replaceDuringReview) {
-        expect(replaced).toBe(true);
-        expect(read.authorization?.dispatched).not.toBe(true);
-        expect(read.status).not.toBe('succeeded');
-      } else {
-        expect(read.status).toBe('succeeded');
-        expect(read.authorization?.dispatched).toBe(true);
-      }
+      expect(read.status).toBe('succeeded');
+      expect(read.authorization?.check).toBeUndefined();
+      expect(JSON.stringify(read.result)).toContain('WORKSPACE_READ_BACK');
+      expect(JSON.parse((read.result as { content: string }).content).baseline).toBeDefined();
     } finally {
       await f.close();
     }
@@ -1193,3 +1164,185 @@ for (const retryTimeouts of [2, 3])
       await f.close();
     }
   }, 30000);
+
+// The canary is only on the local source disk until the final dispatch consumes
+// the private snapshot. SQLite serialization includes committed WAL contents.
+function assertQuarantined(f: Awaited<ReturnType<typeof fixture>>, canary: string) {
+  expect(JSON.stringify(f.requests)).not.toContain(canary);
+  expect(JSON.stringify(f.reviewInputs)).not.toContain(canary);
+  const database = new Database(f.databasePath, { readonly: true });
+  try {
+    expect(database.serialize().includes(Buffer.from(canary))).toBe(false);
+  } finally {
+    database.close();
+  }
+  const blobs = join(f.profilePath, 'blobs');
+  if (existsSync(blobs))
+    for (const path of readdirSync(blobs, { recursive: true })) {
+      const entry = join(blobs, String(path));
+      if (statSync(entry).isFile())
+        expect(readFileSync(entry).includes(Buffer.from(canary))).toBe(false);
+    }
+}
+
+for (const decision of ['approve', 'deny', 'unavailable', 'timeout', 'invalid'] as const)
+  test(`Auto external read quarantines full bytes through ${decision}`, async () => {
+    const canary = `UNREVIEWED_EXTERNAL_CANARY_${decision}_947`; // Never in task/input.
+    const body = `${canary}\r\n${'x'.repeat(1100000)}\r\n`;
+    let checked = false;
+    const f = await fixture({
+      mode: 'auto',
+      decision,
+      beforeReview(_request, paths) {
+        assertQuarantined(f, canary);
+        // A review cannot cause a second path read. Even replacement publishes
+        // exactly the already frozen bytes, never the newly substituted file.
+        writeFileSync(join(paths.root, 'replacement.txt'), 'REPLACED_DURING_REVIEW');
+        renameSync(join(paths.root, 'replacement.txt'), paths.target);
+        checked = true;
+      },
+      program: (_request, step, _actor, paths) =>
+        step === 0 ? { name: 'read_file', input: { path: paths.target, max_lines: 10 } } : null,
+    });
+    mkdirSync(join(f.target, '..'), { recursive: true });
+    writeFileSync(f.target, body);
+    try {
+      await f.run();
+      expect(checked).toBe(true);
+      const read = (await f.store.listExecutions('s')).find(
+        (row) => row.definitionId === 'files.read',
+      )!;
+      if (decision === 'approve') {
+        expect(read.status).toBe('succeeded');
+        expect(read.authorization?.dispatched).toBe(true);
+        const presented = f.requests
+          .at(-1)!
+          .messages.filter((m) => m.role === 'tool')
+          .at(-1)!.content;
+        expect(presented).toContain(canary);
+        expect(presented).not.toContain('REPLACED_DURING_REVIEW');
+        const result = read.result as { artifactRefs?: unknown[] };
+        expect(result.artifactRefs).toHaveLength(1);
+      } else {
+        expect(read.authorization?.dispatched).not.toBe(true);
+        assertQuarantined(f, canary);
+      }
+    } finally {
+      await f.close();
+    }
+  }, 30000);
+
+test('cancelling an external Auto read discards its snapshot and ignores late allow', async () => {
+  const canary = 'CANCELLED_EXTERNAL_READ_BODY_947';
+  const f = await fixture({
+    mode: 'auto',
+    decision: 'cancel',
+    program: (_body, step, _actor, paths) =>
+      step === 0 ? { name: 'read_file', input: { path: paths.target } } : null,
+  });
+  mkdirSync(join(f.target, '..'), { recursive: true });
+  writeFileSync(f.target, canary);
+  try {
+    const running = f.run();
+    const end = Date.now() + 5000;
+    while (!f.reviewing()) {
+      if (Date.now() > end) throw Error('review_not_started');
+      await Bun.sleep(5);
+    }
+    assertQuarantined(f, canary);
+    await f.runtime.cancelCommand({
+      expectedStoreId: f.storeId,
+      sessionId: 's',
+      commandId: 'cancel-read',
+      subjectId: 'owner',
+      targetCommandId: 'work',
+    });
+    await running;
+    await Bun.sleep(350);
+    assertQuarantined(f, canary);
+    const read = (await f.store.listExecutions('s')).find(
+      (row) => row.definitionId === 'files.read',
+    )!;
+    expect(read.authorization?.dispatched).not.toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 30000);
+
+for (const error of ['encoding', 'binary', 'not-directory', 'protected'] as const)
+  test(`Auto external pre-read ${error} is not a missing observation or an approval`, async () => {
+    const f = await fixture({
+      mode: 'auto',
+      decision: 'approve',
+      program: (_body, step, _actor, paths) =>
+        step === 0
+          ? {
+              name: 'read_file',
+              input: { path: error === 'protected' ? paths.privateTarget : paths.target },
+            }
+          : null,
+    });
+    if (error === 'not-directory') {
+      mkdirSync(join(f.root, 'external'));
+      writeFileSync(join(f.root, 'external', 'missing-parent'), 'not a directory');
+    } else if (error !== 'protected') {
+      mkdirSync(join(f.target, '..'), { recursive: true });
+      writeFileSync(
+        f.target,
+        error === 'encoding' ? Buffer.from([0xff]) : Buffer.from([65, 0, 66]),
+      );
+    }
+    try {
+      await f.run();
+      const read = (await f.store.listExecutions('s')).find(
+        (row) => row.definitionId === 'files.read',
+      )!;
+      expect(read.status).toBe('failed');
+      expect(read.authorization?.dispatched).not.toBe(true);
+      expect(f.reviewRequests()).toBe(0);
+      expect(JSON.stringify(read.result)).not.toContain('"exists":false');
+      expect(JSON.stringify(read.result)).not.toContain('File does not exist');
+    } finally {
+      await f.close();
+    }
+  }, 30000);
+
+for (const mode of ['auto', 'full'] as const)
+  for (const exists of [true, false])
+    for (const params of [{ pages: '1' }, { mode: 'text' }, { mode: 'image' }] as Record<
+      string,
+      Json
+    >[])
+      test(`${mode} external ${exists ? 'present' : 'missing'} read preserves PDF-option errors: ${JSON.stringify(params)}`, async () => {
+        const canary = 'INVALID_PDF_OPTIONS_EXTERNAL_TEXT_947';
+        const f = await fixture({
+          mode,
+          decision: 'approve',
+          program: (_body, step, _actor, paths) =>
+            step === 0 ? { name: 'read_file', input: { path: paths.target, ...params } } : null,
+        });
+        if (exists) {
+          mkdirSync(join(f.target, '..'), { recursive: true });
+          writeFileSync(f.target, canary);
+        }
+        try {
+          await f.run();
+          const read = (await f.store.listExecutions('s')).find(
+            (row) => row.definitionId === 'files.read',
+          )!;
+          expect(read.status).toBe('failed');
+          expect(read.result).toEqual({
+            outcome: 'failed',
+            content:
+              'pdf_options_require_saved_attachment: pages and mode apply only to saved PDF attachments. Retry read_file for this workspace file with path and optional start_line/max_lines; omit pages and mode.',
+            details: { code: 'pdf_options_require_saved_attachment' },
+          });
+          // Invalid PDF options retain the original adapter path, not a private
+          // snapshot or a misleading missing-file success.
+          expect(f.reviewRequests()).toBe(mode === 'auto' ? 1 : 0);
+          assertQuarantined(f, canary);
+          expect(existsSync(f.target)).toBe(exists);
+        } finally {
+          await f.close();
+        }
+      }, 30000);

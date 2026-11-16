@@ -105,6 +105,7 @@ import {
   readBusinessRunInputs,
   readPlanningIntent,
 } from './planning-configuration';
+import { resolveSessionExecutionRoot } from './session-execution-root';
 import { assertSessionModelProtocol } from './session-model-protocol';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
 import { createTaskConfiguration, defaultTaskRoles } from './task-configuration';
@@ -176,6 +177,7 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
       browserSnapshot: snapshot.browser ?? null,
       browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
       shellSnapshot: snapshot.shell,
+      executionRoot: snapshot.executionRoot,
       modelTransportSnapshot: snapshot.modelTransport ?? null,
       ...(Object.hasOwn(snapshot, 'readOnlyTaskSource')
         ? { readOnlyTaskSource: snapshot.readOnlyTaskSource }
@@ -821,12 +823,23 @@ export function createDefaultProcessConfiguration(options: {
         ? (selection.skillSelection?.requested ?? undefined)
         : commandSkills(command.request);
       const user = (await readHostState(() => userConfiguration.read(), signal)).value;
+      const rootSelection = policyRuntime
+        ? await resolveSessionExecutionRoot(policyRuntime, {
+            sessionId: session.id,
+            ...(recovery?.executionRoot &&
+            typeof recovery.executionRoot === 'object' &&
+            !Array.isArray(recovery.executionRoot) &&
+            typeof recovery.executionRoot.epoch === 'string'
+              ? { epoch: recovery.executionRoot.epoch, requireCurrent: false }
+              : {}),
+          })
+        : undefined;
       let root: string;
       try {
         const uri = new URL(workspace.rootUri);
         if (uri.protocol !== 'file:' || (uri.hostname && uri.hostname !== 'localhost'))
           throw new Error();
-        root = fileURLToPath(uri);
+        root = rootSelection?.root ?? fileURLToPath(uri);
       } catch {
         throw new ConfigurationError('workspace_configuration_unavailable');
       }
@@ -1101,33 +1114,54 @@ export function createDefaultProcessConfiguration(options: {
         toolIds,
         selectedSources.servers,
       );
-      const shell = await createShellConfiguration({
-        workspaceRoot: root,
-        toolIds,
-        options: runShellOptions
-          ? {
-              ...runShellOptions,
-              host: {
-                controlBase: options.profile.coordinationPath,
-                protectedRoots: [],
-                readonlyAssets: [],
-                runtimeReadOnlyRoots: [],
-                ...runShellOptions.host,
-                temporaryRoot: prepareOutputStaging(
-                  join(options.profile.coordinationPath, 'shell-staging'),
-                ),
-              },
-              outputCollection: {
-                prepare(context, identity) {
-                  if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
-                  return policyRuntime.prepareOutputCollection(context, identity);
+      const worktreeHost = createWorktreeHost(() => policyRuntime);
+      const makeShell = (workspaceRoot: string) =>
+        createShellConfiguration({
+          workspaceRoot,
+          toolIds,
+          options: runShellOptions
+            ? {
+                ...runShellOptions,
+                host: {
+                  controlBase: options.profile.coordinationPath,
+                  protectedRoots: [],
+                  readonlyAssets: [],
+                  runtimeReadOnlyRoots: [],
+                  ...runShellOptions.host,
+                  temporaryRoot: prepareOutputStaging(
+                    join(options.profile.coordinationPath, 'shell-staging'),
+                  ),
                 },
-              },
-            }
-          : undefined,
-        signal: recovery?.signal,
-        worktreeHost: createWorktreeHost(() => policyRuntime),
-      });
+                outputCollection: {
+                  prepare(context, identity) {
+                    if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+                    return policyRuntime.prepareOutputCollection(context, identity);
+                  },
+                },
+              }
+            : undefined,
+          signal: recovery?.signal,
+          worktreeHost,
+        });
+      const shell = await makeShell(root);
+      const policyShells = new Map<string, Promise<typeof shell>>([[root, Promise.resolve(shell)]]);
+      const shellForRequest = async (
+        request: import('@kite-ai/agent/extensions').AuthorizationRequest,
+      ) => {
+        if (!policyRuntime) return shell;
+        // A parent policy still constrains a child, but must describe that child's
+        // exact, Store-bound filesystem root rather than the parent's old cwd.
+        const scoped = await resolveSessionExecutionRoot(policyRuntime, {
+          sessionId: request.sessionId,
+          executionId: request.executionId,
+        });
+        let candidate = policyShells.get(scoped.root);
+        if (!candidate) {
+          candidate = makeShell(scoped.root);
+          policyShells.set(scoped.root, candidate);
+        }
+        return candidate;
+      };
       const shellTools = new Map(
         shell.extensions.flatMap((extension) =>
           (extension.tools ?? []).map((tool) => [tool.id, tool] as const),
@@ -1152,40 +1186,43 @@ export function createDefaultProcessConfiguration(options: {
               inheritedSkills ? (inheritedSkills.installed ?? new Map()) : undefined,
             );
       signal?.throwIfAborted();
-      const assembly = await createWorkspaceAssembly({
-        workspaceRoot: root,
-        profile: options.profile,
-        externallyRegisteredFileTools: files.tools,
-        externallyRegisteredExtensions: [askUser, browser.extension],
-        toolIds,
-        toolConfigurations: effective.tools,
-        skills: effective.skills,
-        installedUserSkills,
-        selectedSkills: skillSelection,
-        inheritedSkillIds: inheritedSkills?.resolvedIds,
-        inheritedInstalledSkills: inheritedSkills?.installed,
-        knownToolIds: [
-          ...(options.knownToolIds ?? []),
-          ...businessTools.keys(),
-          ...task.tools.keys(),
-          ...shellToolIds,
-          ...web.toolIds,
-          ...browser.toolIds,
-          ...mcp.tools.keys(),
-          selectedSources.directoryToolId,
-        ],
-        allowedCapabilities: [
-          ...(options.allowedToolCapabilities ?? []),
-          ...(unifiedBrowser && browser.executionAvailable ? ['browser.execute'] : []),
-        ],
-      });
+      const makeAssembly = (workspaceRoot: string) =>
+        createWorkspaceAssembly({
+          workspaceRoot,
+          profile: options.profile,
+          externallyRegisteredFileTools: files.tools,
+          externallyRegisteredExtensions: [askUser, browser.extension],
+          toolIds,
+          toolConfigurations: effective.tools,
+          skills: effective.skills,
+          installedUserSkills,
+          selectedSkills: skillSelection,
+          inheritedSkillIds: inheritedSkills?.resolvedIds,
+          inheritedInstalledSkills: inheritedSkills?.installed,
+          knownToolIds: [
+            ...(options.knownToolIds ?? []),
+            ...businessTools.keys(),
+            ...task.tools.keys(),
+            ...shellToolIds,
+            ...web.toolIds,
+            ...browser.toolIds,
+            ...mcp.tools.keys(),
+            selectedSources.directoryToolId,
+          ],
+          allowedCapabilities: [
+            ...(options.allowedToolCapabilities ?? []),
+            ...(unifiedBrowser && browser.executionAvailable ? ['browser.execute'] : []),
+          ],
+        });
+      const assembly = await makeAssembly(root);
+      const epochAssemblies = new Set([assembly]);
       let webBinding: ReturnType<typeof web.bind> | undefined;
       let runWeb = web;
       let disposal: Promise<void> | undefined;
       const dispose = () =>
         (disposal ??= Promise.allSettled([
           Promise.resolve().then(async () => {
-            await assembly.dispose();
+            await Promise.all([...epochAssemblies].map((entry) => entry.dispose()));
           }),
           Promise.resolve().then(() => webBinding?.dispose()),
           Promise.resolve().then(() => browser.disposeCommand(session.id, command.id)),
@@ -1229,7 +1266,6 @@ export function createDefaultProcessConfiguration(options: {
           ...effective,
           skills: assembly.skillConfigurations,
         });
-        let mcpResourceSource: ContextSource | null = null;
         const runExtensions = [...builtinExtensions, ...assembly.extensions];
         const readOnlyDefinitions = [...runExtensions, mcpSources.extension].flatMap((extension) =>
           (extension.tools ?? [])
@@ -1381,6 +1417,7 @@ export function createDefaultProcessConfiguration(options: {
           extensions: runExtensions,
           toolIds: assembly.toolIds,
           shell,
+          shellForRequest,
           web,
           selectedMcp,
           selectedSources,
@@ -1391,6 +1428,106 @@ export function createDefaultProcessConfiguration(options: {
           trustedExtensions: runExtensions,
           readOnlyTask: selection?.readOnlyTask === true,
         });
+        const sourcesFor = (
+          assembly: Awaited<ReturnType<typeof makeAssembly>>,
+          readOnlyTaskSource: ContextSource | undefined,
+          mcpResourceSource?: ContextSource | null,
+        ): NonNullable<RunConfiguration['sources']> => ({
+          async capture(
+            request: Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0],
+          ) {
+            return [
+              ...(await assembly.sources.capture(request)),
+              ...(await selectedSources.sources.capture(request)),
+              ...(mcpResourceSource ? [mcpResourceSource] : []),
+              ...(readOnlyTaskSource ? [structuredClone(readOnlyTaskSource)] : []),
+            ];
+          },
+          async captureBatch(
+            requests: readonly Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0][],
+          ) {
+            const sources = new Map<string, ContextSource>();
+            const append = (values: ContextSource[]) => {
+              if (!Array.isArray(values)) throw new AgentError('context_source_invalid');
+              for (const source of values) {
+                const previous = sources.get(source.id);
+                if (previous && previous.digest !== source.digest)
+                  throw new AgentError('context_refresh_required');
+                sources.set(source.id, source);
+              }
+            };
+            if (assembly.sources.captureBatch)
+              append(await assembly.sources.captureBatch(requests));
+            else for (const request of requests) append(await assembly.sources.capture(request));
+            for (const request of requests) append(await selectedSources.sources.capture(request));
+            if (mcpResourceSource) append([mcpResourceSource]);
+            if (readOnlyTaskSource) append([structuredClone(readOnlyTaskSource)]);
+            return [...sources.values()];
+          },
+        });
+        type EpochBundle = {
+          assembly: Awaited<ReturnType<typeof makeAssembly>>;
+          shell: Awaited<ReturnType<typeof makeShell>>;
+          permissions: typeof runPermissions;
+          role: ContextSource | undefined;
+        };
+        const epochBundles = new Map<string, Promise<EpochBundle>>();
+        if (rootSelection)
+          epochBundles.set(
+            `${rootSelection.binding.sessionId}:${rootSelection.binding.epoch}`,
+            Promise.resolve({
+              assembly,
+              shell,
+              permissions: runPermissions,
+              role: readOnlyTaskSource,
+            }),
+          );
+        const epochBundle = (
+          bound: NonNullable<typeof rootSelection>,
+          input: Parameters<NonNullable<RunConfiguration['readStepCapabilities']>>[0],
+        ) => {
+          const key = `${bound.binding.sessionId}:${bound.binding.epoch}`;
+          let pending = epochBundles.get(key);
+          if (!pending) {
+            pending = (async () => {
+              const nextShell = await makeShell(bound.root);
+              const nextAssembly = await makeAssembly(bound.root);
+              epochAssemblies.add(nextAssembly);
+              nextAssembly.extensions.push(...nextShell.extensions);
+              if (webBinding) nextAssembly.extensions.push(webBinding.extension);
+              const extensions = [...builtinExtensions, ...nextAssembly.extensions];
+              const permissions = permissionConfiguration.forRun({
+                command,
+                modelId: selected.id,
+                models: effective.models,
+                extensions,
+                toolIds: nextAssembly.toolIds,
+                shell: nextShell,
+                shellForRequest,
+                web,
+                selectedMcp,
+                selectedSources,
+                requirePlan,
+                readOnlyDefinitions,
+                recoveryRunIdentity: { runId: input.run.id, sessionId: input.session.id },
+                ...(defaultAutoReview ? { defaultAutoReview } : {}),
+                trustedExtensions: extensions,
+                readOnlyTask: selection?.readOnlyTask === true,
+              });
+              const role = readOnlyTaskSource
+                ? { ...structuredClone(readOnlyTaskSource), scope: bound.root }
+                : undefined;
+              return {
+                assembly: nextAssembly,
+                shell: nextShell,
+                permissions,
+                role,
+              };
+            })();
+            epochBundles.set(key, pending);
+          }
+          return pending;
+        };
         return {
           ...runPermissions,
           ...(permissionConfiguration.afterTurn
@@ -1425,8 +1562,39 @@ export function createDefaultProcessConfiguration(options: {
           readStepCapabilities: async (
             input: Parameters<NonNullable<RunConfiguration['readStepCapabilities']>>[0],
           ) => {
-            const step = await selectedMcp.readStepCapabilities(input);
-            mcpResourceSource = createMcpResourceModelSource({
+            const saved =
+              input.originalSnapshot &&
+              typeof input.originalSnapshot === 'object' &&
+              !Array.isArray(input.originalSnapshot)
+                ? input.originalSnapshot
+                : undefined;
+            const savedRoot =
+              saved?.executionRoot &&
+              typeof saved.executionRoot === 'object' &&
+              !Array.isArray(saved.executionRoot)
+                ? saved.executionRoot
+                : undefined;
+            const bound = policyRuntime
+              ? await resolveSessionExecutionRoot(policyRuntime, {
+                  sessionId: input.session.id,
+                  ...(savedRoot && typeof savedRoot.epoch === 'string'
+                    ? { epoch: savedRoot.epoch, requireCurrent: false }
+                    : {}),
+                })
+              : undefined;
+            const bundle = bound
+              ? await epochBundle(bound, input)
+              : {
+                  assembly,
+                  shell,
+                  permissions: runPermissions,
+                  role: readOnlyTaskSource,
+                };
+            const step = await selectedMcp.readStepCapabilities({
+              ...input,
+              ...(saved ? { originalSnapshot: saved.catalogue } : {}),
+            });
+            const mcpResourceSource = createMcpResourceModelSource({
               storeId: input.command.originStoreId,
               sessionId: input.session.id,
               runId: input.run.id,
@@ -1436,13 +1604,13 @@ export function createDefaultProcessConfiguration(options: {
                   : [],
             });
             return {
-              extensions: [...assembly.extensions, ...(step.extensions ?? [])],
+              extensions: [...bundle.assembly.extensions, ...(step.extensions ?? [])],
               toolIds: [
-                ...assembly.toolIds,
+                ...bundle.assembly.toolIds,
                 ...(mcpResourceSource
                   ? mcpResourceModelToolIds.filter(
                       (id) =>
-                        !assembly.toolIds.includes(id) &&
+                        !bundle.assembly.toolIds.includes(id) &&
                         (!selection?.toolIds || selection.toolIds.includes(id)),
                     )
                   : []),
@@ -1454,48 +1622,23 @@ export function createDefaultProcessConfiguration(options: {
                     !effective.tools?.some((tool) => tool.id === id && tool.enabled === false),
                 ),
               ],
-              snapshot: step.snapshot,
+              snapshot: {
+                catalogue: step.snapshot,
+                shell: bundle.shell.snapshot as unknown as Json,
+                ...(bound ? { executionRoot: bound.binding as unknown as Json } : {}),
+              },
+              ...(bound ? { executionRoot: bound.binding } : {}),
+              sources: sourcesFor(bundle.assembly, bundle.role, mcpResourceSource),
+              permissions: bundle.permissions.permissions,
+              conditions: planning.conditions,
+              toolBehaviors: bundle.permissions.toolBehaviors,
             };
           },
-          sources: {
-            async capture(
-              request: Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0],
-            ) {
-              return [
-                ...(await assembly.sources.capture(request)),
-                ...(await selectedSources.sources.capture(request)),
-                ...(mcpResourceSource ? [mcpResourceSource] : []),
-                ...(readOnlyTaskSource ? [structuredClone(readOnlyTaskSource)] : []),
-              ];
-            },
-            async captureBatch(
-              requests: readonly Parameters<
-                NonNullable<RunConfiguration['sources']>['capture']
-              >[0][],
-            ) {
-              const sources = new Map<string, ContextSource>();
-              const append = (values: ContextSource[]) => {
-                if (!Array.isArray(values)) throw new AgentError('context_source_invalid');
-                for (const source of values) {
-                  const previous = sources.get(source.id);
-                  if (previous && previous.digest !== source.digest)
-                    throw new AgentError('context_refresh_required');
-                  sources.set(source.id, source);
-                }
-              };
-              if (assembly.sources.captureBatch)
-                append(await assembly.sources.captureBatch(requests));
-              else for (const request of requests) append(await assembly.sources.capture(request));
-              for (const request of requests)
-                append(await selectedSources.sources.capture(request));
-              if (mcpResourceSource) append([mcpResourceSource]);
-              if (readOnlyTaskSource) append([structuredClone(readOnlyTaskSource)]);
-              return [...sources.values()];
-            },
-          },
+          sources: sourcesFor(assembly, readOnlyTaskSource),
           dispose,
           snapshot: {
             ...snapshot,
+            ...(rootSelection ? { executionRoot: rootSelection.binding as unknown as Json } : {}),
             modelBindingDigest: modelBindingDigest(selected),
             authorizationCheckPreset,
             defaultAutoReview: defaultAutoReview ?? null,

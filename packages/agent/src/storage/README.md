@@ -4,6 +4,28 @@ Shell交付的原子终态、私有索引、collector恢复与Fork只读来源�
 
 当前未投产版本按用户确认统一为 Store `formatMajor=1`、内部自动审核回执 `version=1`，公开 API 保持 `/v1`。当前 reviewed schema 与新版审批完整合同保持；既有 Tool／Job、Native 私库和备份清单版本不属于本次重编号。Profile 的 `schemaChecksum` 在打开 SQLite 前区分历史同编号旧结构，实际数据库仍完整核 schema/checksum。`0001-baseline` 保持原字节；新增的受支持迁移及只读／写入准入见下节。
 
+## 当前会话执行根
+
+[执行根 owner](sqlite/session-execution-root.ts)保留 Session 的逻辑 `workspaceId`、父子关系与共享 Workspace 不变，在私有 `extension_record` 的 `host.session-execution-root`／`scope_kind=host` 保存每个 Session 的 current、历史 epoch、原 Tool preparation 与 activation receipt。普通 Extension 的 session records 无权写该 scope。没有新增表、baseline 修改、迁移或 Store 格式升级；没有记录的旧 Session 只读解释为 Workspace 根、epoch `0`、未钉住的物理身份，读取不写历史或推进游标。
+
+`git.worktree` 的明确 `use`／`exit` 由 Host 核实际目录和 Git 关系后准备候选，创建工作树不触发绑定。prepare 核准确 Store、root owner generation、原 Tool／Model／Run／root work、Core 封存的单 Tool 批次及完整 Model 输出计数、当前 epoch、原请求路径和 dispatch control reads。它既不改 current，也不发布成功。`finishExecution` 在同一事务再次核取消、epoch 和并发前沿，确认原成功结果准确引用候选后，原子发布 current、历史、幂等 receipt、`session.execution_root.changed` 与 Tool 终态。SQL 故障整体回滚；失败、取消和 unknown 不激活。已有原 receipt 不重复推进 epoch；prepared 与 committed 冷读明确区分，准备记录本身不是恢复执行许可。
+
+`session.execution_root` 是当前 Session 的最终派发 control read，revision 为十进制 epoch；不能借用父或兄弟 Session 的 epoch。切换后缺少证明或旧 epoch 的新派发拒绝。相同 Session 的未结算 Model／Tool 阻止切换；已派发 Job 不迁移，保原执行根和历史身份。Host 在下一 Step 重建能力和目录边界；持久根不代表旧批准自动适用于新目录，实际物理目录校验由 Host 负责。
+
+[工作树子 Job 授权](sqlite/worktree-authorization.ts)从准确原 Model 的 Host 封存 `capabilitySnapshot.shell` 读取该 Step 的实际 cwd，核 Model／Tool／snapshot 的同一执行根、Store 历史 epoch 与 dispatch read。与 Run 原资产比较时只允许 cwd 和其身份摘要随已核根重绑，其他配置、默认根、二进制资产与启动 profile 保持；默认创建路径和内部 worker 的 sourceCwd 继续严格核对。不使用模型 input 替换根，也不以旧 Run 的 cwd 拒绝已经合法切根的后续操作。
+
+[原 Step behavior 读取](sqlite/execution-behavior-manifest.ts)同时供自动审核与 execution-confirmation 使用，不再用 Run 启动时的 `toolBehaviors` 否定后续 Step 合法选定的配置摘要。Store 沿实际 Tool／Job 父边及原 operation 请求定位同 Store／Session／Run／root work 的原成功 Model，取 Core 封存的完整 `toolBehaviorBindings`；显式空数组不可回退，带执行根的新来源缺字段也拒绝。仅没有该字段且没有新执行根元数据的旧 Model 沿原 Run manifest。原 Model／Tool／capabilitySnapshot 的根须一致，历史 epoch 和物理身份仍核验；当前 active 配置或调用者传入的摘要不能替代原事实。
+
+普通输出核准确原 ToolCall 的 id／name／参数；artifact 输出核原 Model 成功结果同事务保存的 `modelToolCalls`（准确数量、唯一 id、name 和参数 digest），不能采用后来 Tool 自述。大 source body 核原注册 envelope，完整字节继续由 Core 原读取路径验证，不在 Worker 事务执行文件 I/O。[Store 反例](../../test/isolated/storage/execution-behavior-manifest.test.ts)覆盖空／畸形 manifest、跨 Model scope、根与 snapshot 漂移、伪造 body／call、Job 原操作边，以及大输出缺清单／重复 id／错误 digest；真实双 Step 与大输出审核、人工确认由[运行回归](../../test/isolated/execution/tool-behavior-review.test.ts)负责。
+
+新 child 从父执行的**派发 epoch**继承根，并以自己的 epoch `0` 开始；已有 child 不随父会话切换。Fork 在原无活动执行的事务中复制源当前有效根为新 Session epoch `0`，不复制候选、activation receipt 或旧执行 authority。`exit` 的目标始终是逻辑 Workspace 的原根，不删除任何工作树、分支或文件。
+
+`listSessionExecutionRoots` 是同一只读事务的完整 Host 占用快照：保留的 Session（含已请求删除但仍存续的记录）当前根、未终态 Execution 的封存历史根，以及未终态切根 Tool 的候选目标预留。候选未来 epoch 不代表该历史已发布；它只禁止删除即将使用的目录。旧执行无封存根时只沿历史 epoch `0`，不借最新根；未核实历史拒绝。Session／未终态 Execution 各超过 10,000 项或根元数据超过 1 MiB 时整体拒绝，不以部分列表授权删除。Host 合并其他已登记根后须复验 `snapshotCursor`，并核实际目录身份。
+
+新 preparation 与 `session.execution_root.prepared` 事件同事务保存，重复准备不再推进游标。新准备还保守拒绝全 Store 任何未终态的 `git.worktree.remove` Tool（含 planned／unknown），直到该移除已结算；它可能暂时挡住无关目录的切根，但不推断尚未得到物理计划的删除目标。反向顺序由候选目标占用阻止删除。候选建立后的成功提交不因后来无关 remove 被重复阻塞；失败／取消后预留退出占用快照，unknown 仍保留。此互斥是本 Store 管理动作的准入保护，不声称阻止仓库外进程直接删除目录。
+
+[Store 专项回归](../../test/isolated/storage/session-execution-root.test.ts)在 macOS arm64／Bun 1.4.4 覆盖默认只读根、use／exit 与精确历史、并发幂等完成、终态 SQL 故障回滚、取消和旧 owner、单批次／目标／epoch 校验、旧 Job 不迁移、派发栅栏、冷只读恢复、child／Fork 和完整占用超限拒绝。此为 Store 事务与元数据边界证据，不代替真实 Git、审批、Filesystem／Shell、Native 全过程或其他平台验证。
+
 ## Trajectory 事实格式与一次性边界
 
 [明确迁移](migrations/0002-trajectory-facts.sql)为原 `change_event` 新增 nullable `trajectory_fact_json`，为 `storage_meta` 新增 `trajectory_enabled_after_cursor`。写入打开在原初始化事务内从准确 baseline 升级，并以当时的全 Store `last_change_cursor` 一次性封存边界；新库为 0，重开和追加不推进边界，旧事件不补造事实。`formatMajor`、原 `payload_json` 和 Session Log envelope 保持。

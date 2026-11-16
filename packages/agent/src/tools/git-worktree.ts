@@ -17,6 +17,7 @@ import {
 } from '../permissions/worktree-path-policy';
 import { AgentError } from '../storage/types';
 import { failureGuidance } from './git-worktree/errors';
+import { parseWorktreeRootRequest, type WorktreeRootRequest } from './git-worktree/execution-root';
 import { notifyWorktreeCreated } from './git-worktree/notification';
 import {
   buildWorkerCommand,
@@ -44,6 +45,17 @@ import {
 import { assertOriginalWorktreeJob, readWorktreeOutput } from './git-worktree/read-output';
 
 export interface GitWorktreeHost {
+  describeExecutionRoot?(
+    request: WorktreeRootRequest,
+    scope: { sessionId: string; executionId: string },
+    sourceCwd: string,
+  ): Promise<Json>;
+  /** Private host preparation. Store atomically applies it with this Tool's successful result. */
+  prepareExecutionRoot?(
+    request: WorktreeRootRequest,
+    context: ToolContext,
+    sourceCwd: string,
+  ): Promise<Json>;
   readRegisteredWorkspaceRoots(): Promise<{
     originStoreId: string;
     complete: true;
@@ -895,6 +907,34 @@ export function createGitWorktreeTool(options: GitWorktreeToolOptions): ToolDefi
     }
   }
   async function run(input: Json, context: ToolContext, resuming: boolean): Promise<ToolResult> {
+    if (jsonObject(input) && (input.action === 'use' || input.action === 'exit')) {
+      try {
+        const request = parseWorktreeRootRequest(input);
+        if (!request) throw new AgentError('invalid_worktree_arguments');
+        if (!options.worktreeHost?.prepareExecutionRoot)
+          throw new AgentError('worktree_execution_root_unavailable');
+        const executionRoot = await options.worktreeHost.prepareExecutionRoot(
+          request,
+          context,
+          configuration.sourceCwd,
+        );
+        return {
+          outcome: 'succeeded',
+          content:
+            request.action === 'use'
+              ? 'This session now uses the selected worktree. Existing Jobs and other sessions keep their original directories.'
+              : 'This session is back in its original workspace. No worktree, branch or files were removed.',
+          details: { action: request.action, cwdChanged: true, executionRoot },
+        };
+      } catch (error) {
+        const code = errorCode(error);
+        return {
+          outcome: context.signal.aborted ? 'cancelled' : 'failed',
+          content: code,
+          details: { code, cwdChanged: false },
+        };
+      }
+    }
     if (jsonObject(input) && input.action === 'observe') {
       try {
         if (typeof input.operationRef !== 'string' || !input.operationRef.startsWith('gw_'))
@@ -960,7 +1000,7 @@ export function createGitWorktreeTool(options: GitWorktreeToolOptions): ToolDefi
     version: '1',
     model: { name: 'git_worktree', snakeCase: true },
     description:
-      'List, create or remove Git worktrees. list accepts only action. create omits path for the persistent host root, defaults to detached HEAD, and optionally selects base_ref (Git branch/commit) and new_branch. remove requires an absolute path and preserves branches/tags; protected, dirty or uncertain targets are refused. filesystem requests existing scope, network remains none. The host creates the intent. Observe an earlier operation using action:observe and its exact operation_ref; observation starts no Job and never retries an unknown mutation. Session cwd never changes.',
+      'List, create, remove, use or exit Git worktrees. list accepts only action. create omits path for the persistent host root, defaults to detached HEAD, and optionally selects base_ref (Git branch/commit) and new_branch; creation does not change the session directory. use requires only action and an absolute path to a registered worktree in the same repository. exit accepts only action and returns this session to its original workspace, without deleting anything. use/exit must be the only Tool call in their Model response; on success the next Model step, Files and Shell use the same new session root. Existing Jobs and other sessions keep their directories. remove requires an absolute path and preserves branches/tags; protected, dirty or uncertain targets are refused. filesystem requests existing scope, network remains none. The host creates the intent. Observe an earlier Git mutation using action:observe and its exact operation_ref; observation starts no Job and never retries an unknown mutation.',
     inputSchema: gitWorktreeModelSchema as ToolDefinition['inputSchema'],
     recovery: { version: '1' },
     execute: (input, context) => run(input, context, false),

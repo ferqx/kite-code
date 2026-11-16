@@ -318,12 +318,12 @@ const modelAuthorizationMetadata = z.discriminatedUnion('availability', [
     controlReads: z
       .array(
         z.object({
-          kind: z.enum(['permission.mode', 'workspace.trust']),
+          kind: z.enum(['permission.mode', 'workspace.trust', 'session.execution_root']),
           scope: z.string(),
           revision: sequence,
         }),
       )
-      .max(3)
+      .max(4)
       .optional(),
     policy: z.object({ namespace: z.string(), version: z.string(), data: json }).nullable(),
   }),

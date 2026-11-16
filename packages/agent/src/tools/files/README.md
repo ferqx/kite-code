@@ -10,7 +10,7 @@
 
 [Files 行为工厂](../files-approval.ts)随实际 `files.edit@2`、`files.write@3` 两个定义登记到可信宿主；两者共享同一 Workspace／真实根对象、已验证父目录与精确文件槽位范围，只包含 edit/write，不递归，也不包含其他定义。范围取证复用 [WorkspaceFiles](../files.ts) 的原 native 根／父对象与普通文件核验，不新增原生文件引擎。缺失文件可以绑定已存在父目录下的准确槽位；父目录缺失、受保护路径、链接或无法描述的对象不提供后续范围，原单次安全检查保持。
 
-位置范围不保存当前文件 inode、正文或 baseline，因此正常原子替换和正文变化不会自动撤销位置授权。实际每次写入仍核当前完整 baseline、内容冲突、no-follow、保护路径与当前权限。默认产品工作区写入沿原模式直接允许，不为展示该范围制造人工卡；普通外部 Files 修改在 Auto 经过自动审核、请求批准模式经过用户批准；Full 沿有效权限执行。领域回归见[授权行为](../../../test/isolated/tools/approval-behavior.test.ts)，统一接纳／撤销和最终派发归[grant owner](../../storage/sqlite/permission-grants.README.md)。
+位置范围不保存当前文件 inode、正文或 baseline，因此正常原子替换和正文变化不会自动撤销位置授权。实际每次写入仍核当前完整 baseline、内容冲突、no-follow、保护路径与当前权限。请求批准模式的普通工作区写入直接允许，Auto 写入仍审核，不为展示该范围制造额外人工卡；普通外部 Files 修改在 Auto 经过自动审核、请求批准模式经过用户批准；Full 沿有效权限执行。领域回归见[授权行为](../../../test/isolated/tools/approval-behavior.test.ts)，统一接纳／撤销和最终派发归[grant owner](../../storage/sqlite/permission-grants.README.md)。
 
 ## 图片读取
 
@@ -209,7 +209,7 @@ Full 外部写入／编辑复用原 `createFileTools` 的取消、逐操作 `fil
 
 保存的 input/plan 适配器位于普通外部读写层之上，仍只接受原准确私有引用；历史 output 仅保留记录读取，不再接管 Files 工具。Service 动态提供 Profile、数据根、协调目录和 Runtime 资产保护路径，请求及实际路径均检查；Full 不解除这些保护。普通外部读取和 Full 外部修改都绕过 Workspace checkpoint capture，并保留 `fileScope:external_path/workspaceCheckpoint:false`；每次操作 Artifact 保留历史完整内容，Workspace 检查点恢复不会回写外部目标。Workspace 的原生平台、ACL、取消和完整数据校验合同保持；普通外部读取使用宿主 OS 权限，路径规则不承诺识别同一文件的所有硬链接别名。
 
-[Service 最终装配](../../../../../apps/service/src/file-checkpoint-configuration.ts)统一英文工具及 path 说明，避免附件层遮蔽普通外部读取：三种模式下普通外部读写均遵守当前授权：Auto 自动审核，请求批准模式人工批准，Full 按有效权限执行；Files 没有 Shell 的文件／网络申请字段。编辑基线只用于可安全编辑的目标，准确附件和当前计划仍属各自范围。入口不支持本身不等于用户拒绝业务任务；原任务仍授权且工具／角色允许、没有真实拒绝或未知效果时，Shell 可接收独立请求并经过自身审批，不能据此扩权或重放原效果。
+[Service 最终装配](../../../../../apps/service/src/file-checkpoint-configuration.ts)统一英文工具及 path 说明，避免附件层遮蔽普通外部读取：三种模式下普通外部读写均遵守当前授权：Auto 外部文本先私有读取，实际缺失直接反馈、存在正文审核后释放，写入／编辑仍自动审核；请求批准模式人工批准，Full 按有效权限执行；Files 没有 Shell 的文件／网络申请字段。编辑基线只用于可安全编辑的目标，准确附件和当前计划仍属各自范围。入口不支持本身不等于用户拒绝业务任务；原任务仍授权且工具／角色允许、没有真实拒绝或未知效果时，Shell 可接收独立请求并经过自身审批，不能据此扩权或重放原效果。
 
 [外部读取回归](../../../test/isolated/files/external-file-reads.test.ts)核同一定义、分页／BOM／CRLF、无外部基线、硬链接正常读取、私有路径及链接实际目标、完整大正文和取消；[真实 Service](../../../../../apps/service/test/isolated/configuration.test.ts)核模型仅使用 `read_file` 读取外部正文且不读取外部项目说明。
 
@@ -296,4 +296,18 @@ read 的 observation 另含 `excerpt:{text,truncated}`：仅取本次真实选�
 
 每次 search 的反馈都说明：字面匹配只覆盖本次明确范围与过滤条件，扫描完整不证明调用可达、没有其他实现或没有不同写法的引用。查询含 `|`、`.*` 或字面 `\\b` 时补充具体说明：这些符号按原字符串匹配，不是 OR、通配或词边界；需要测试不同词时分别查询。提示不改变匹配、不拒绝请求、不增加正则能力、执行权或次数限制。
 
-2026-11-15 权限修正：默认 Service 的真实 Files 登记不再使用可信扩展 `autoReview:none`，Auto 的 `read_file/write_file/edit_file`（含已登记的 session-output 范围）均进入原自动审核。审核超时显式停止，不采用通用 `timeout_continue`；读取产生的 baseline 不授予编辑权。请求批准模式对应 `accept_edits`，工作区内免人工审批，普通外部请求先人工批准；Full 仍受可信工作区、父子交集、工具选择、保护路径和原生安全边界限制。原输出、上传附件、Plan 专用范围的归属校验不扩大。上述为本地实现，真实 Mac 客户端／真实模型验收和提交门禁仍待完成，不能把确定性 Service 测试称为实机验收。
+2026-11-15 权限修正移除了默认 Files 的整类 `autoReview:none`；2026-11-16 读取调整仅恢复普通工作区 read 的免审核分类，并将普通外部文本改为先私有读取、再审核存在正文的释放。write/edit 与特殊范围不获得整类免审。审核超时显式停止，不采用通用 `timeout_continue`；读取产生的 baseline 不授予编辑权。请求批准模式对应 `accept_edits`，工作区内免人工审批，普通外部请求先人工批准；Full 仍受可信工作区、父子交集、工具选择、保护路径和原生安全边界限制。原输出、上传附件、Plan 专用范围的归属校验不扩大。上述为本地实现，真实 Mac 客户端／真实模型验收和提交门禁仍待完成，不能把确定性 Service 测试称为实机验收。
+
+## Auto 文本读取的私有快照
+
+[Core](../../execution/index.ts)仅为准确可信注册定义调用 `prepareTool`，先核完整父子权限硬门禁、必要条件、当前 owner／attempt 与取消。普通工作区 read 沿原 native 引擎免模型审核；普通外部文本由[外部适配](../full-access-files.ts)在本地创建私有快照。实际 `ENOENT` 才成为缺失观察；保护拒绝、悬空链接、非目录、权限与编码错误不伪装不存在。独立人工要求、输入／计划／图片私有范围保持原路径；普通文件携带 PDF 专用 `pages/mode` 时不准备快照，沿原输入适配器保留参数错误和修正提示。
+
+正文不进入描述器、审核模型、ToolResult、事件／消息或公开 Artifact；仅 metadata 参与当前能力 revision。metadata 绑定准确执行身份与输入，根和 epoch 由宿主 `workspaceScope` 原子回调绑定；缺失只将 Files 自身默认分类设为 safeRead，所有组合策略和最终 SQL 派发仍重新检查。存在文件通过审核后只能消费该快照一次，不按原路径重读；读后文件替换不会偷偷交付新字节。read-only fallback 从同一 FD 读取并核前后 device／inode／size／mtime／ctime、普通文件类型、实际路径与保护根。native 安全读取保完整编辑基线，其他可读外部目标保无基线合同。
+
+取消、拒绝、技术失败和作用域变化丢弃私有正文；已存在审核记录但丢失快照的恢复失败关闭，不根据旧允许重新读取。没有新增可公开读取的暂存文件或持久正文表。私有内存不承担崩溃后的内容恢复；业务工具派发与未知结果的零重放合同不变。持久取舍见[隔离读取决定](../../../../../.agents/notes/implemented/architecture/2026-11-16-private-external-file-read.md)。
+
+本次确定性验证通过 [默认 Service](../../../../../apps/service/test/isolated/full-external-files.test.ts)、[叶适配](../../../test/isolated/files/full-access-files.test.ts)、[外部只读](../../../test/isolated/files/external-file-reads.test.ts)与 [Core 准备生命周期](../../../test/isolated/execution/tool-preparation.test.ts)：大正文 canary 在审核等待与拒绝／取消／失败后不出现在业务／审核请求、SQLite 或公开 Blob；批准后保持冻结字节，覆盖替换、分页、缺失后出现、一次消费、跨调用拒借和独立人工要求。此为 macOS 本地受控 Provider／真实 Store 和 native 回归，不替代真实模型或客户端全过程验收。
+
+[Service 冷恢复回归](../../../../../apps/service/test/isolated/private-read-recovery.test.ts)使用独立进程的默认装配，在真实 SQLite 审核已结算、Files 尚未派发时 SIGKILL，再通过 HTTP 恢复：`approve_once`、`ask_user`、技术失败均因私有快照丢失明确失败，原／替换正文不进入请求、Store 或 Blob，也不新增读取执行或审核；原检查 owner 被破坏且公开 check 投影缺失时，恢复准入拒绝并保原 owner。该覆盖不包含尚未证明可达的同一目标多检查状态，不代替其他平台或真实客户端验收。
+
+[真实工作树冷恢复](../../../../../apps/service/test/isolated/worktree-read-recovery.test.ts)在 Auto 同一 Run 激活真实 linked worktree，后继 Model 和普通工作区读取已封存 epoch 1、尚未派发时 SIGKILL，再由 HTTP 恢复原读取执行并取得目标树字节；随后显式 exit 和新读取回到原根。原 Model 不重复调用，项目说明与 Files 同根，共享 Workspace 不改。此 macOS native 装配回归不包含 Shell 子进程执行；外部私有快照丢失仍按上一段失败，不借普通工作区恢复重建正文。

@@ -1151,7 +1151,7 @@ function NativeDesktopContent({
           nonce,
           text:
             target.kind === 'already_source'
-              ? '创建工作树未改变本会话的项目或工作目录，无需删除工作树。查看其他项目时可从侧栏选择会话。'
+              ? '当前已是工作树的创建来源会话；返回来源只切换查看的会话，不改变执行目录或删除工作树。'
               : '无法核实工作树的唯一来源会话。请从侧栏选择来源项目或会话；草稿和工作树均已保留，未发送模型任务。',
         });
         return;
@@ -3196,7 +3196,7 @@ function NativeDesktopContent({
       !files.length &&
       !browserNotes.get(draftKey).length
     ) {
-      void report(exitWorktree, false, '退出工作树');
+      void report(exitWorktree, false, '返回来源会话');
       return;
     }
     let noteBatch: ReturnType<BrowserAnnotationDrafts['capture']>,
@@ -3485,7 +3485,7 @@ function NativeDesktopContent({
     !imageDrafts.files(imageScope(selection.storeId, selection.session.id)).length &&
     !browserNotes.get(imageScope(selection.storeId, selection.session.id)).length;
   const currentSendLabel = localWorktreeExit
-    ? '退出工作树'
+    ? '返回来源会话'
     : activeInputRun
       ? planMode
         ? '排队新的计划任务'
@@ -5766,13 +5766,13 @@ function NativeDesktopContent({
             <DesktopButton
               variant="ghost"
               title={`返回来源会话：${directory?.sessions.find((session) => session.id === worktreeExitTarget.sessionId)?.title || '来源会话'}`}
-              aria-label="退出工作树"
+              aria-label="返回来源会话"
               disabled={
                 worktreeExitPending || pending || selected.current !== selection?.session.id
               }
-              onClick={() => void report(exitWorktree, false, '退出工作树')}
+              onClick={() => void report(exitWorktree, false, '返回来源会话')}
             >
-              退出工作树
+              返回来源会话
             </DesktopButton>
           )}
           {!scheduledTasksView && (
