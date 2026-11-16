@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { AgentClient, Execution, Message, Run } from '@kite-ai/client';
+import { nativeMcpServerName, nativeMcpToolName } from '../electron/mcp-tool-label';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { nativeLiveShellInputFact, nativeToolMessageFact } from '../electron/tool-message-fact';
 import { NativeToolMessages } from '../electron/tool-messages';
@@ -39,6 +40,7 @@ function fixture() {
     client,
     () => scope,
     () => messages,
+    () => [...executions.values()],
   );
   const add = (
     id: string,
@@ -771,12 +773,32 @@ test('plan, validation and MCP display names retain exact versions and generic M
 
 test('Native MCP names come only from exact saved metadata; failed metadata never withdraws an original tool outcome', async () => {
   const f = fixture();
-  const name = 'search_docs',
-    hash = 'a'.repeat(64),
+  const hash = 'a'.repeat(64),
     version = 'b'.repeat(64);
-  const definitionId = `mcp.docs.${createHash('sha256').update(JSON.stringify(name)).digest('hex').slice(0, 32)}`;
+  let name = 'search_docs';
+  let definitionId = `mcp.docs.${createHash('sha256').update(JSON.stringify(name)).digest('hex').slice(0, 32)}`;
   f.add('mcp', 'failed', 'run', definitionId);
   f.executions.get('execution-mcp')!.definitionVersion = version;
+  f.executions.get('execution-mcp')!.toolCallId = 'repeated';
+  const savedRun = {
+    id: 'run',
+    originStoreId: 'store',
+    sessionId: 's',
+    configuration: {
+      snapshot: {
+        mcp: {
+          servers: [{ id: 'docs', configDigest: hash }],
+          sources: {
+            version: 1,
+            selection: { serverIds: ['docs'] },
+            servers: [{ id: 'docs', name: 'Docs-Service', configDigest: hash }],
+          },
+        },
+      },
+    },
+  } as unknown as Run;
+  f.client.getRun = async () => savedRun;
+
   const origin = {
     originStoreId: 'store',
     sessionId: 's',
@@ -867,10 +889,29 @@ test('Native MCP names come only from exact saved metadata; failed metadata neve
   };
   try {
     expect((await f.list(['mcp'])).entries[0]).toMatchObject({
-      label: 'MCP · search_docs',
+      label: 'MCP · Docs-Service · search_docs',
       status: 'failed',
     });
     expect(queries).toEqual(['mcp.tools.snapshots', 'mcp.tools']);
+    const live = await f.manager.list({
+      method: 'toolMessages.list',
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      readId: 'live-mcp',
+      messageIds: [],
+      executionIds: ['execution-mcp'],
+    });
+    expect(live.entries[0]).toMatchObject({
+      label: 'MCP · Docs-Service · search_docs',
+      inputSource: { storeId: 'store', sessionId: 's', runId: 'run', toolCallId: 'repeated' },
+    });
+    expect(live.entries[0]).not.toHaveProperty('shellInput');
+    expect(live.entries[0]).not.toHaveProperty('toolInput');
+    expect(live.entries[0]).not.toHaveProperty('result');
+    // Cold history does not require a current server or live execution.
+    expect((await f.list(['mcp'])).entries[0]?.label).toBe(live.entries[0]?.label);
+
     for (const change of ['version', 'name', 'origin', 'unavailable']) {
       pageVersion = change === 'version' ? 'c'.repeat(64) : version;
       label = change === 'name' ? 'forged_name' : name;
@@ -891,6 +932,28 @@ test('Native MCP names come only from exact saved metadata; failed metadata neve
     expect(artifactReads).toBe(0);
     labelComplete = true;
     descriptorBytes = '100';
+    for (const [remote, displayed] of [
+      ['search\u202edocs\nnext', 'search docs next'],
+      [`${String.fromCharCode(27)}[31msearch_docs${String.fromCharCode(27)}[0m`, 'search_docs'],
+      ['<img src=x onerror=alert(1)>', '<img src=x onerror=alert(1)>'],
+    ]) {
+      name = remote!;
+      label = name;
+      definitionId = `mcp.docs.${createHash('sha256').update(JSON.stringify(name)).digest('hex').slice(0, 32)}`;
+      f.executions.get('execution-mcp')!.definitionId = definitionId;
+      expect((await f.list(['mcp'])).entries[0]?.label).toBe(`MCP · Docs-Service · ${displayed}`);
+    }
+    name = label = 'search_docs';
+    definitionId = `mcp.docs.${createHash('sha256').update(JSON.stringify(name)).digest('hex').slice(0, 32)}`;
+    f.executions.get('execution-mcp')!.definitionId = definitionId;
+    f.client.getRun = async () => {
+      throw Error('frozen run unavailable');
+    };
+    expect((await f.list(['mcp'])).entries[0]).toMatchObject({
+      label: 'MCP · 未知服务 · search_docs',
+      status: 'failed',
+    });
+    f.client.getRun = async () => savedRun;
     const originalQuery = f.client.queryExtension;
     let start!: () => void, release!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -1226,7 +1289,7 @@ test('cache samples use immutable original Model receipts beyond the View, retai
         originStoreId: 'old-store',
         status: 'interrupted',
         isActive: false,
-      }) as Run;
+      }) as unknown as Run;
     expect((await read(['restored'])).entries[0]?.originStoreId).toBe('old-store');
     f.client.getRun = async () =>
       ({
@@ -1235,7 +1298,7 @@ test('cache samples use immutable original Model receipts beyond the View, retai
         originStoreId: 'old-store',
         status: 'running',
         isActive: true,
-      }) as Run;
+      }) as unknown as Run;
     await expect(read(['restored'])).rejects.toMatchObject({
       code: 'model_usage_identity_mismatch',
     });
@@ -2832,4 +2895,116 @@ test('live Shell request reads use only exact observed Tools and bounded command
     manager.release();
     f.manager.release();
   }
+});
+
+test('MCP provider labels use one exact frozen declaration, never source hashes, live settings or nested secrets', () => {
+  const hash = 'a'.repeat(64),
+    serverId = `mcp-${'b'.repeat(64)}`;
+  const execution = { runId: 'run', originStoreId: 'store', sessionId: 's' } as Execution;
+  const mcp = {
+    servers: [{ id: serverId, configDigest: hash }],
+    sources: {
+      version: 1,
+      selection: { serverIds: [serverId] },
+      servers: [
+        {
+          id: serverId,
+          name: 'Original-Docs',
+          configDigest: hash,
+          transport: { url: 'https://SECRET' },
+        },
+      ],
+    },
+  };
+  const make = (snapshot: unknown, identity = {}) =>
+    ({
+      id: 'run',
+      originStoreId: 'store',
+      sessionId: 's',
+      ...identity,
+      configuration: { snapshot },
+    }) as unknown as Run;
+  const read = (run: Run | undefined, id = serverId) =>
+    nativeMcpServerName(run, execution, id, hash);
+  expect(read(make({ mcp }))).toBe('Original-Docs');
+  expect(
+    read(
+      make({
+        roleId: 'general',
+        roleVersion: '1',
+        roleModelId: null,
+        roleToolIds: null,
+        configuration: { mcp },
+      }),
+    ),
+  ).toBe('Original-Docs');
+  for (const identity of [{ id: 'other' }, { originStoreId: 'foreign' }, { sessionId: 'other' }])
+    expect(read(make({ mcp }, identity))).toBeUndefined();
+  expect(read(undefined)).toBeUndefined();
+  expect(read(make({ configuration: { mcp } }))).toBeUndefined();
+  expect(
+    read(
+      make({
+        roleId: 'general',
+        roleVersion: '1',
+        roleModelId: null,
+        roleToolIds: null,
+        configuration: { mcp },
+        mcp,
+      }),
+    ),
+  ).toBeUndefined();
+  expect(read(make({ mcp: { servers: mcp.servers } }))).toBeUndefined();
+  expect(read(make({ mcp: { ...mcp, sources: { ...mcp.sources, servers: [] } } }))).toBeUndefined();
+  for (const name of [
+    '',
+    'bad\nname',
+    'bad\u202ename',
+    '<img src=x>',
+    'https://SECRET',
+    'x'.repeat(129),
+  ]) {
+    expect(
+      read(
+        make({
+          mcp: {
+            ...mcp,
+            sources: { ...mcp.sources, servers: [{ ...mcp.sources.servers[0], name }] },
+          },
+        }),
+      ),
+    ).toBeUndefined();
+  }
+  for (const servers of [
+    [mcp.sources.servers[0], mcp.sources.servers[0]],
+    [{ ...mcp.sources.servers[0], configDigest: 'c'.repeat(64) }],
+  ])
+    expect(read(make({ mcp: { ...mcp, sources: { ...mcp.sources, servers } } }))).toBeUndefined();
+  expect(
+    read(make({ mcp: { servers: [{ id: 'static-docs', configDigest: hash }] } }), 'static-docs'),
+  ).toBe('static-docs');
+  // Another server with the same name does not replace this execution's identity.
+  expect(
+    read(
+      make({
+        mcp: {
+          ...mcp,
+          sources: {
+            ...mcp.sources,
+            servers: [...mcp.sources.servers, { ...mcp.sources.servers[0], id: 'other' }],
+          },
+        },
+      }),
+    ),
+  ).toBe('Original-Docs');
+});
+
+test('verified full MCP names have bounded Unicode-safe plain text without terminal or direction controls', () => {
+  expect(nativeMcpToolName('雪🙂'.repeat(200))).toBe(`${'雪🙂'.repeat(128)}…`);
+  expect(nativeMcpToolName('\n\u202e\t')).toBeUndefined();
+  expect(
+    nativeMcpToolName(
+      `${String.fromCharCode(27)}]8;;https://secret.invalid${String.fromCharCode(7)}search${String.fromCharCode(27)}]8;;${String.fromCharCode(7)}`,
+    ),
+  ).toBe('search');
 });

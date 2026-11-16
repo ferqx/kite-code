@@ -546,6 +546,7 @@ export function liveToolMessages(
           ...desktopToolMessage(
             {
               ...execution,
+              ...(input?.label ? { label: input.label } : {}),
               target: execution.definitionId.startsWith('shell.')
                 ? undefined
                 : (execution.target ??
@@ -558,7 +559,9 @@ export function liveToolMessages(
             `native-execution:${execution.id}`,
             '',
           ),
-          ...(input ? { shell: nativeShellInputPresentation(input), target: input.target } : {}),
+          ...(input?.shellInput
+            ? { shell: nativeShellInputPresentation(input), target: input.target }
+            : {}),
           presentationKey: nativeToolPresentationKey(
             selection.storeId,
             selection.session.id,
@@ -798,7 +801,7 @@ export function NativeLiveToolMessage({
   );
 }
 
-function useNativeLiveShellInputs({
+function useNativeLiveToolInputs({
   bridge,
   generation,
   selection,
@@ -822,7 +825,11 @@ function useNativeLiveShellInputs({
     selection?.viewSelection ?? selection?.viewGeneration,
     historyEpoch,
   ]);
-  const targets = liveToolMessages(selection, messages).filter((item) => !!item.message.shell);
+  const targets = liveToolMessages(selection, messages).filter(
+    (item) =>
+      !!item.message.shell ||
+      /^mcp\.([A-Za-z0-9_-]{1,128})\.[a-f0-9]{32}$/.test(item.execution.definitionId),
+  );
   const identity = JSON.stringify(
     targets.map(({ execution }) => [
       execution.id,
@@ -1055,7 +1062,7 @@ export function useNativeToolMessages({
     receiptCache.current = candidates;
   const eligible = receiptCache.current;
   const [retryRevision, setRetryRevision] = useState(0);
-  const liveRead = useNativeLiveShellInputs({
+  const liveRead = useNativeLiveToolInputs({
     bridge,
     generation,
     selection,

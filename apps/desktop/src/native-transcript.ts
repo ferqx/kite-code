@@ -501,7 +501,12 @@ export function desktopTranscript({
       : undefined;
     const result: DesktopMessage = {
       ...(factMessage ?? model),
-      ...(execution ? desktopToolPresentation(execution) : {}),
+      ...(execution
+        ? desktopToolPresentation({
+            ...execution,
+            ...(liveInput?.label ? { label: liveInput.label } : {}),
+          })
+        : {}),
       ...(inputPresentation && inputCompatible && (!fact || fact.shellInput?.command === undefined)
         ? {
             shell: {

@@ -34,6 +34,7 @@ const {
   liveToolMessages,
   NativeLiveToolMessage,
   NativeToolMessage,
+  NativeToolPresentation,
   useNativeToolMessages,
 } = await import('../../src/native-tool-messages');
 const { desktopTranscript } = await import('../../src/native-transcript');
@@ -1533,8 +1534,8 @@ test('a verified MCP name replaces its generic title in place without closing th
     await act(async () => summary.click());
     const viewport = f.host.querySelector('.tool-detail-viewport');
     expect(f.host.textContent).toContain('ORIGINAL_MCP_ERROR 雪🙂');
-    await render('MCP · search_docs');
-    expect(f.host.textContent).toContain('MCP · search_docs');
+    await render('MCP · Docs-Service · search_docs');
+    expect(f.host.textContent).toContain('MCP · Docs-Service · search_docs');
     expect(f.host.textContent).not.toContain(fact.definitionId);
     expect(f.host.querySelector('.tool-activity-summary')).toBe(summary);
     expect(summary.getAttribute('aria-expanded')).toBe('true');
@@ -2149,6 +2150,165 @@ test('verified freshness rejections stay neutral in the real Native grouped tran
     expect([...executions.values()].every((entry) => entry.status === 'failed')).toBe(true);
   } finally {
     manager.release();
+    await f.close();
+  }
+});
+
+test('MCP live metadata, original receipt and cold history keep one named row without leaking request input', async () => {
+  const f = fixture(),
+    requests: NativeRequest[] = [],
+    retained = new NativeToolPresentation();
+  const run = {
+    id: 'run',
+    originCommandId: 'start',
+    originStoreId: 'store',
+    sessionId: 's',
+    isActive: true,
+    status: 'running' as const,
+    createdAt: 0,
+    finishedAt: null,
+    reason: null,
+  };
+  const execution: Execution = {
+    id: 'e-mcp',
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'run',
+    kind: 'tool',
+    definitionId: `mcp.docs.${'a'.repeat(32)}`,
+    definitionVersion: 'b'.repeat(64),
+    status: 'running',
+    toolCallId: 'call',
+    toolInput: { token: 'DO_NOT_RENDER_ARGUMENT' },
+    result: null,
+    resultRevision: '0',
+    cancelRequestedAt: null,
+  };
+  let selected = { ...selection(), runs: [run], executions: [execution] };
+  let messages: Message[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let first = true;
+  const label = 'MCP · Docs-Service · <img src=x onerror=alert(1)>';
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      requests.push(request);
+      if (request.method !== 'toolMessages.list') return null;
+      if (first) {
+        first = false;
+        await gate;
+      }
+      return {
+        ...pageFor(request, 's'),
+        entries: [
+          {
+            messageId: request.executionIds ? 'native-execution:e-mcp' : 'mcp',
+            executionId: 'e-mcp',
+            definitionId: execution.definitionId,
+            definitionVersion: execution.definitionVersion,
+            status: request.executionIds ? 'running' : 'succeeded',
+            resultRevision: '1',
+            label,
+            ...(request.executionIds
+              ? {
+                  inputSource: {
+                    storeId: 'store',
+                    sessionId: 's',
+                    runId: 'run',
+                    toolCallId: 'call',
+                  },
+                }
+              : {}),
+          },
+        ],
+      } as NativeToolMessagePage;
+    },
+  } as NativeBridge;
+  function LiveHarness() {
+    const facts = useNativeToolMessages({
+      bridge,
+      generation: 1,
+      selection: selected,
+      historyEpoch: 0,
+      messages,
+      observationRevision: selected.viewGeneration,
+    });
+    const transcript = desktopTranscript({
+      messages,
+      runs: selected.runs,
+      tools: facts.entries,
+      executions: selected.executions,
+      storeId: 'store',
+      sessionId: 's',
+    });
+    const rows = retained.project(
+      'mcp-scope',
+      transcript.messages,
+      facts.entries,
+      liveToolMessages(selected, messages, false, facts.entries),
+    );
+    return (
+      <>
+        {rows
+          .filter((row) => row.role === 'tool')
+          .map((row) => (
+            <NativeToolMessage key={row.presentationKey ?? row.id} message={row} />
+          ))}
+      </>
+    );
+  }
+  const render = () => act(async () => f.root.render(<LiveHarness />));
+  try {
+    await render();
+    expect(
+      requests.some(
+        (request) =>
+          request.method === 'toolMessages.list' && request.executionIds?.[0] === 'e-mcp',
+      ),
+    ).toBe(true);
+    expect(f.host.textContent).toContain('MCP 工具');
+    expect(f.host.textContent).not.toContain('DO_NOT_RENDER_ARGUMENT');
+    const summary = f.host.querySelector('.tool-activity-summary');
+    const row = f.host.querySelector('.tool-activity');
+    await act(async () => release());
+    await render();
+    expect(f.host.textContent).toContain(label);
+    expect(f.host.querySelector('img')).toBeNull();
+    expect(f.host.querySelector('.tool-activity-summary') === summary).toBe(true);
+    messages = [{ ...message('mcp', 'ORIGINAL_MCP_RESULT'), toolCallId: 'call' }];
+    selected = {
+      ...selected,
+      viewGeneration: 2,
+      executions: [{ ...execution, status: 'succeeded' }],
+    };
+    await render();
+    expect(f.host.textContent).toContain(label);
+    expect(f.host.querySelector('.tool-activity') === row).toBe(true);
+    expect(f.host.querySelectorAll('.tool-activity-summary').length).toBe(1);
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+    );
+    expect(f.host.textContent).toContain('ORIGINAL_MCP_RESULT');
+    const viewport = f.host.querySelector('.tool-detail-viewport');
+    selected = {
+      ...selected,
+      viewGeneration: 3,
+      executions: [],
+      runs: [{ ...run, isActive: false }],
+    };
+    await render();
+    expect(f.host.textContent).toContain(label);
+    expect(f.host.querySelector('.tool-detail-viewport')).toBe(viewport);
+    expect(f.host.textContent).not.toContain('DO_NOT_RENDER_ARGUMENT');
+    // Fresh hook/cache, with only a saved receipt and no current live catalogue.
+    await act(async () => f.root.render(<div />));
+    await render();
+    expect(f.host.textContent).toContain(label);
+    expect(f.host.querySelectorAll('.tool-activity-summary').length).toBe(1);
+  } finally {
+    release();
     await f.close();
   }
 });

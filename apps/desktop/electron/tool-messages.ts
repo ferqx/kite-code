@@ -371,6 +371,30 @@ export class NativeToolMessages {
       const entries: NativeToolMessagePage['entries'] = [];
       const labels = new Map<string, Promise<string | undefined>>();
       const receiptRuns = new Map<string, Run | undefined>();
+      const labelFor = (execution: Execution) => {
+        const key = JSON.stringify([
+          execution.originStoreId,
+          execution.sessionId,
+          execution.runId,
+          execution.definitionId,
+          execution.definitionVersion,
+        ]);
+        if (!labels.has(key))
+          labels.set(
+            key,
+            nativeMcpToolLabel(
+              this.client,
+              execution,
+              scope.storeId,
+              scope.sessionId,
+              labelBudget,
+            ).catch(() => {
+              this.check(lease);
+              return undefined;
+            }),
+          );
+        return labels.get(key)!;
+      };
       let shellOutputBytes = 0;
       for (const id of input.executionIds ?? []) {
         const observed = this.liveExecutions().find((execution) => execution.id === id);
@@ -382,10 +406,11 @@ export class NativeToolMessages {
         )
           throw new ClientError('tool_message_unavailable');
         if (
-          observed.definitionVersion !== '1' ||
-          !['shell.execute', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].includes(
-            observed.definitionId,
-          )
+          !/^mcp\.([A-Za-z0-9_-]{1,128})\.[a-f0-9]{32}$/.test(observed.definitionId) &&
+          (observed.definitionVersion !== '1' ||
+            !['shell.execute', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].includes(
+              observed.definitionId,
+            ))
         )
           continue;
         const execution = await this.client.getExecution(id, { signal: lease.abort.signal });
@@ -414,6 +439,25 @@ export class NativeToolMessages {
           input.commandOffsets?.[`native-execution:${id}`] ?? 0,
         );
         if (fact) entries.push(fact);
+        else if (execution.toolCallId) {
+          const label = await labelFor(execution);
+          this.check(lease);
+          entries.push({
+            messageId: `native-execution:${execution.id}`,
+            executionId: execution.id,
+            definitionId: execution.definitionId,
+            definitionVersion: execution.definitionVersion,
+            status: execution.status,
+            resultRevision: execution.resultRevision,
+            ...(label ? { label } : {}),
+            inputSource: {
+              storeId: scope.storeId,
+              sessionId: scope.sessionId,
+              runId: execution.runId!,
+              toolCallId: execution.toolCallId,
+            },
+          });
+        }
       }
       for (const id of input.messageIds) {
         const message = this.messages().get(id);
@@ -481,27 +525,7 @@ export class NativeToolMessages {
             if (input.messageIds.length > 1 && shellOutputBytes > nativeShellOutputPageBytes)
               throw new ClientError('tool_message_page_too_large');
           }
-          const key = JSON.stringify([
-            execution.originStoreId,
-            execution.sessionId,
-            execution.definitionId,
-            execution.definitionVersion,
-          ]);
-          if (!labels.has(key))
-            labels.set(
-              key,
-              nativeMcpToolLabel(
-                this.client,
-                execution,
-                scope.storeId,
-                scope.sessionId,
-                labelBudget,
-              ).catch(() => {
-                this.check(lease);
-                return undefined;
-              }),
-            );
-          const label = await labels.get(key);
+          const label = await labelFor(execution);
           this.check(lease);
           entries.push(label ? { ...fact, label } : fact);
         }
