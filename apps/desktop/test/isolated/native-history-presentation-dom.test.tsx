@@ -732,7 +732,7 @@ for (const first of ['runs', 'tools'] as const) {
       await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
       expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
       expect(f.host.querySelector('.context-compacted')?.textContent).toBe('已压缩上下文');
-      expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('已读取文件');
+      expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('读取了文件');
       await act(async () =>
         f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
       );
@@ -896,7 +896,7 @@ test('a failed cold historical tool check keeps history readable and publishes e
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     await f.release('tools');
     await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
-    expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('已读取文件');
+    expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('读取了文件');
     await act(async () =>
       f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
     );

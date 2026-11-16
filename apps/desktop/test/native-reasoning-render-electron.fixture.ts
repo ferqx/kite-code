@@ -480,12 +480,12 @@ try {
   await checkReasoning('second-reasoning', 1);
   assert.deepEqual(
     await page.locator('.conversation-trace > button').allTextContents(),
-    ['已思考', '正在思考…'],
+    ['思考了', '正在思考…'],
     'the completed first segment never inherits the current Model phase',
   );
   const toolTrace = page
     .locator('.conversation-trace')
-    .filter({ hasText: /正在思考|已读取文件/ })
+    .filter({ hasText: /正在思考|读取了文件/ })
     .last();
   assert.equal(
     await toolTrace.locator(':scope > .conversation-trace-trigger').getAttribute('aria-expanded'),
@@ -558,7 +558,7 @@ try {
   assert.equal(await elapsed.count(), 1);
   assert.equal(await page.locator('.conversation .conversation-trace').count(), 0);
   await elapsed.click();
-  const readTrace = page.locator('.conversation-trace').filter({ hasText: '已读取文件' });
+  const readTrace = page.locator('.conversation-trace').filter({ hasText: '读取了文件' });
   const trigger = readTrace.locator(':scope > .conversation-trace-trigger');
   await trigger.click();
   await until(
