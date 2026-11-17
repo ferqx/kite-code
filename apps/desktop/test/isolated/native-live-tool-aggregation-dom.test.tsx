@@ -601,7 +601,7 @@ for (const expanded of [false, true])
       }
       await f.complete(1);
       await f.flush();
-      expect(summary.textContent).toBe('读取了文件 file-execution-1.ts');
+      expect(summary.textContent).toBe('读取了');
       expect(summary.querySelector('[data-status="running"]')).toBeNull();
       expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
     } finally {
@@ -704,7 +704,7 @@ test.each([
     await f.appendStage([]);
     expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
     expect(summary?.getAttribute('aria-expanded')).toBe('true');
-    expect(summary?.textContent).toBe('运行了工具 · 读取了文件');
+    expect(summary?.textContent).toBe('运行了 · 读取了');
     expect(summary?.querySelector('[data-status="running"]')).toBeNull();
     expect(summary?.textContent).not.toContain('已完成 2 项');
   } finally {
@@ -860,7 +860,7 @@ test('Native readable stage prose separates exploration activities without shari
     expect(summaries[0] ?? null).toBe(first);
     expect(summaries[0]?.getAttribute('aria-expanded')).toBe('true');
     expect(summaries[0]?.querySelector('[data-slot="trace-title"]')).toBe(title);
-    expect(summaries[0]?.textContent).toBe('读取了文件');
+    expect(summaries[0]?.textContent).toBe('读取了');
     expect(summaries[0]?.querySelector('[data-status="running"]')).toBeNull();
     expect(summaries[1]?.getAttribute('aria-expanded')).toBe('false');
     expect(summaries[1]?.textContent).toBe('读取 file-execution-3.ts');

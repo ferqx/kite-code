@@ -380,7 +380,7 @@ try {
       if (
         probe.phase === 'body' &&
         visible.includes('PUBLIC_LIVE_PREFIX') &&
-        (segments.length !== 2 || segments[1]?.text !== '读取了文件' || segments[1].running)
+        (segments.length !== 2 || segments[1]?.text !== '读取了' || segments[1].running)
       )
         probe.violations.push(`${kind}:${probe.phase}:finished_trace_missing_tool_summary`);
       if (visible.includes('PUBLIC_STAGE_PROSE') && segments.length > 1) {
@@ -836,7 +836,7 @@ try {
   );
   assert.deepEqual(
     await traceHeadings.allTextContents(),
-    ['思考了', '读取了文件'],
+    ['思考了', '读取了'],
     'actual prose ends the Trace and the completed reads share one result category',
   );
   assert.equal(
@@ -848,7 +848,7 @@ try {
   assert.equal(await page.locator('.message-copy[aria-label="复制本轮Agent回复"]').count(), 0);
   await step('later-reasoning');
   await page.waitForTimeout(400);
-  assert.equal(await toolHeading.textContent(), '读取了文件');
+  assert.equal(await toolHeading.textContent(), '读取了');
   assert.equal(
     await toolHeading.getAttribute('aria-expanded'),
     'false',
@@ -901,7 +901,7 @@ try {
   const finishedTiming = await elapsed.innerText();
   assert.equal(await page.locator('.conversation .conversation-trace').count(), 0);
   await elapsed.click();
-  const readTrace = page.locator('.conversation-trace').filter({ hasText: '读取了文件' });
+  const readTrace = page.locator('.conversation-trace').filter({ hasText: '读取了' });
   const trigger = readTrace.locator(':scope > .conversation-trace-trigger');
   await trigger.click();
   await until(
@@ -961,7 +961,7 @@ try {
     (value) => value.includes('PRIVATE_REASONING_SENTINEL_SECOND_MODEL'),
     'the reasoning from the third Model is readable in its own step',
   );
-  assert.equal(await trigger.textContent(), '读取了文件');
+  assert.equal(await trigger.textContent(), '读取了');
   await readThought.click();
   await until(
     () => readTrace.innerText(),

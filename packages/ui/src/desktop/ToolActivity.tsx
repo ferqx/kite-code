@@ -488,41 +488,41 @@ export function toolTextFailed(message: Message): boolean {
   return traceStatus(message) === 'error' || message.shell?.jobStatus === 'failed';
 }
 
-/** Owned action copy only. Never rewrite a remote title, target or result. */
+/** Owned summary copy only. Never infer an action from a title, target or command. */
 const COMPLETED_TRACE_ACTIONS: ReadonlyMap<string, string> = new Map(
   Object.entries({
-    read_file: '读取了文件',
-    read_skill_resource: '读取了技能资料',
-    view_images: '查看了图像',
-    write_file: '写入了文件',
-    edit_file: '编辑了文件',
-    web_fetch: '读取了网页',
-    browser_execute: '完成了浏览器操作',
-    tool_search: '查找了工具',
-    skill: '使用了技能',
-    task: '运行了子 Agent 任务',
-    spawn_agent: '创建了子 Agent',
-    follow_up_agent: '继续了子 Agent 任务',
-    send_agent_message: '发送了 Agent 消息',
-    wait_agent_events: '查看了 Agent 进展',
-    list_agents: '查看了 Agent 进展',
-    interrupt_agent: '请求了中断 Agent',
-    ask_user: '询问了用户',
-    write_plan: '更新了计划',
-    update_plan: '更新了计划',
-    request_plan_review: '请求了计划审阅',
-    'planning.read': '读取了计划',
-    'planning.write': '编写了计划',
-    'planning.review': '请求了计划审阅',
-    'planning.update': '更新了计划',
-    'git.worktree': '操作了 Git 工作树',
+    read_file: '读取了',
+    read_skill_resource: '读取了',
+    view_images: '读取了',
+    write_file: '运行了',
+    edit_file: '运行了',
+    web_fetch: '读取了',
+    browser_execute: '运行了',
+    tool_search: '搜索了',
+    skill: '运行了',
+    task: '运行了',
+    spawn_agent: '运行了',
+    follow_up_agent: '运行了',
+    send_agent_message: '运行了',
+    wait_agent_events: '运行了',
+    list_agents: '运行了',
+    interrupt_agent: '运行了',
+    ask_user: '运行了',
+    write_plan: '运行了',
+    update_plan: '运行了',
+    request_plan_review: '运行了',
+    'planning.read': '读取了',
+    'planning.write': '运行了',
+    'planning.review': '运行了',
+    'planning.update': '运行了',
+    'git.worktree': '运行了',
   }),
 );
 
 /** Summary categories never replace the original per-tool title or target. */
 function traceCategoryAction(message: Message): string | undefined {
-  if (message.toolSummaryCategory === 'mcp') return '运行了 MCP 工具';
-  if (message.toolSummaryCategory === 'skill') return '加载了技能';
+  if (message.toolSummaryCategory === 'mcp') return '运行了';
+  if (message.toolSummaryCategory === 'skill') return '加载了';
   switch (message.toolName) {
     case 'mcp_tool':
     case 'list_mcp_tools':
@@ -531,9 +531,9 @@ function traceCategoryAction(message: Message): string | undefined {
     case 'mcp.tools.search':
     case 'mcp.resources.list':
     case 'mcp.resources.read':
-      return '运行了 MCP 工具';
+      return '运行了';
     case 'load_skill':
-      return '加载了技能';
+      return '加载了';
     default:
       return undefined;
   }
@@ -542,50 +542,37 @@ function traceCategoryAction(message: Message): string | undefined {
 function completedTraceAction(message: Message): string {
   const category = traceCategoryAction(message);
   if (category) return category;
-  if (isShellMessage(message))
-    return {
-      execute: '运行了命令',
-      launch: '请求了启动后台 Shell',
-      read: '查看了命令输出',
-      wait: '等待了命令',
-      stop: '请求了停止命令',
-    }[shellOperation(message)];
-  if (message.fileCreated) return '创建了文件';
-  return COMPLETED_TRACE_ACTIONS.get(message.toolName ?? '') ?? '运行了工具';
+  if (isShellMessage(message) || message.fileCreated) return '运行了';
+  return COMPLETED_TRACE_ACTIONS.get(message.toolName ?? '') ?? '运行了';
 }
 
 function hasCompletedTraceAction(message: Message): boolean {
   // A finite Shell process can exit unsuccessfully and still have run.
   const ran = isShellExecution(message) && message.shell?.jobStatus === 'failed';
-  return (message.status === 'completed' || ran) && message.dispatchCommitted !== false;
+  return (
+    (message.status === 'completed' || ran) &&
+    message.dispatchCommitted !== false &&
+    message.approval?.state !== 'rejected' &&
+    // A completed wrapper alone does not establish missing or unknown Shell evidence.
+    (!isShellMessage(message) || shellTitle(message).startsWith('已'))
+  );
 }
 
-/** Generic summaries hide identity only at the outer level; opening keeps the original title. */
+/** Preserve the existing single-tool disclosure layout while hiding outer identities. */
 export function completedToolCategory(message: Message): string | undefined {
-  if (message.status !== 'completed' || message.dispatchCommitted === false) return undefined;
+  if (message.status !== 'completed' || !hasCompletedTraceAction(message)) return undefined;
   return (
     traceCategoryAction(message) ??
     (!isShellMessage(message) &&
     !message.fileCreated &&
     !COMPLETED_TRACE_ACTIONS.get(message.toolName ?? '')
-      ? '运行了工具'
+      ? '运行了'
       : undefined)
   );
 }
 
 export function completedToolSummary(message: Message): string | undefined {
-  if (!hasCompletedTraceAction(message)) return undefined;
-  const category = completedToolCategory(message);
-  if (category) return category;
-  // A completed wrapper with missing or unknown Shell evidence keeps its neutral title.
-  if (isShellMessage(message) && !shellTitle(message).startsWith('已')) return undefined;
-  const target =
-    message.toolName === 'view_images'
-      ? undefined
-      : (toolTarget(message) ?? (isShellMessage(message) ? shellCommand(message) : undefined));
-  return [completedTraceAction(message), target?.replace(/\s+/g, ' ').trim().slice(0, 512)]
-    .filter(Boolean)
-    .join(' ');
+  return hasCompletedTraceAction(message) ? completedTraceAction(message) : undefined;
 }
 
 export function completedToolActions(messages: readonly Message[]): string {
@@ -1206,8 +1193,9 @@ export function ToolActivity({
       !!message.text ||
       (imageOnly && !!renderImages) ||
       getChildren().some(Boolean));
+  const ownSummaryTitle = canExpand && !directTraceDetails ? traceSummaryTitle : undefined;
   const label =
-    traceSummaryTitle ??
+    ownSummaryTitle ??
     (imageOnly
       ? imageCount && !issues.length && !running
         ? `已查看 ${imageCount} 张图像`
@@ -1257,6 +1245,10 @@ export function ToolActivity({
       ? agent?.identity
       : undefined;
   const childOperationLabel = startedChildIdentity ? '子agent开始工作' : label;
+  const showDirectIdentity =
+    directTraceDetails &&
+    !!traceSummaryTitle &&
+    (!shell || (!!target && target !== (shellCommand(message) ?? message.shell?.commandPreview)));
   const heading = agent ? (
     <>
       <TraceIcon className="tool-activity-marker-icon">
@@ -1289,7 +1281,8 @@ export function ToolActivity({
         aria-atomic={grouped ? 'true' : undefined}
       >
         <span className="tool-activity-title tool-label">{label}</span>
-        {target &&
+        {!ownSummaryTitle &&
+          target &&
           (shell ? (
             <code className="tool-command tool-label">{shortCommand}</code>
           ) : (
@@ -1306,7 +1299,7 @@ export function ToolActivity({
           summaryFocused={approvalFocused}
         />
       )}
-      {canExpand && (
+      {canExpand && !showDirectIdentity && (
         <TraceIcon className="tool-activity-chevron">
           <HugeiconsIcon icon={ArrowDown01Icon} />
         </TraceIcon>
@@ -1337,7 +1330,13 @@ export function ToolActivity({
             : `${label}${!grouped && accessibleStatus ? ` · ${accessibleStatus}` : ''}`
         }
       >
-        {directTraceDetails && canExpand ? null : agent ? (
+        {directTraceDetails && canExpand ? (
+          showDirectIdentity ? (
+            <TraceLine status={summaryTraceStatus} className="tool-activity-summary">
+              {heading}
+            </TraceLine>
+          ) : null
+        ) : agent ? (
           <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
             <Button
               variant="ghost"
@@ -1382,17 +1381,18 @@ export function ToolActivity({
                   variant="ghost"
                   className="tool-file-disclosure tool-diff-toggle"
                   aria-expanded={open}
-                  aria-label={`${open ? '收起' : '展开'}已编辑的文件${target ? `：${target}` : ''}`}
-                  title={target}
+                  aria-label={`${open ? '收起' : '展开'}${ownSummaryTitle ?? '已编辑的文件'}${!ownSummaryTitle && target ? `：${target}` : ''}`}
+                  title={ownSummaryTitle ? undefined : target}
                   onClick={() => onToggle(!open)}
                 >
-                  <span className="tool-label">已编辑的文件</span>
+                  <span className="tool-label">{ownSummaryTitle ?? '已编辑的文件'}</span>
                   <HugeiconsIcon className="tool-file-chevron" icon={ArrowDown01Icon} />
                 </Button>
               ) : (
                 <TraceTitle className="tool-activity-marker-content">
                   <span className="tool-label">{label}</span>
-                  {target &&
+                  {!ownSummaryTitle &&
+                    target &&
                     (messageOpenFile ? (
                       <Button
                         className="file-link"
@@ -1434,6 +1434,9 @@ export function ToolActivity({
               const detailText = itemIssue && !shell ? toolDetailText(message) : undefined;
               return (
                 <>
+                  {ownSummaryTitle && !edit && (
+                    <p className="tool-detail-status">{toolTraceTitle(message)}</p>
+                  )}
                   {grouped && (
                     <ScrollArea
                       className="tool-activity-scroll"

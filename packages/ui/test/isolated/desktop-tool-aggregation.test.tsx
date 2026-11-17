@@ -1739,8 +1739,8 @@ test('completed Trace categories deduplicate in first-action order without borro
       skill,
       { ...skill, id: 'skill-2' },
     ]),
-  ).toBe('运行了 MCP 工具 · 读取了文件 · 加载了技能');
-  expect(completedToolActions([skill, mcp, skill])).toBe('加载了技能 · 运行了 MCP 工具');
+  ).toBe('运行了 · 读取了 · 加载了');
+  expect(completedToolActions([skill, mcp, skill])).toBe('加载了 · 运行了');
   for (const category of [mcp, skill]) {
     for (const status of [
       'failed',
@@ -1771,9 +1771,9 @@ test('completed Trace categories deduplicate in first-action order without borro
     'mcp.resources.read',
   ])
     expect(completedToolActions([{ ...mcp, toolSummaryCategory: undefined, toolName }])).toBe(
-      '运行了 MCP 工具',
+      '运行了',
     );
-  expect(completedToolActions([{ ...skill, toolSummaryCategory: undefined }])).toBe('加载了技能');
+  expect(completedToolActions([{ ...skill, toolSummaryCategory: undefined }])).toBe('加载了');
   expect(
     completedToolActions([
       {
@@ -1783,7 +1783,7 @@ test('completed Trace categories deduplicate in first-action order without borro
         title: '读取技能资料',
       },
     ]),
-  ).toBe('读取了技能资料');
+  ).toBe('读取了');
   expect(
     completedToolActions([
       {
@@ -1793,7 +1793,7 @@ test('completed Trace categories deduplicate in first-action order without borro
         title: 'MCP spoofed title',
       },
     ]),
-  ).toBe('运行了工具');
+  ).toBe('运行了');
   expect(
     completedToolActions([
       {
@@ -1802,7 +1802,7 @@ test('completed Trace categories deduplicate in first-action order without borro
         shell: { operation: 'execute', jobStatus: 'failed' },
       },
     ]),
-  ).toBe('运行了命令');
+  ).toBe('运行了');
 });
 
 test('retired tools retain original titles, targets, states and results through generic presentation', () => {
@@ -1841,10 +1841,8 @@ test('retired tools retain original titles, targets, states and results through 
       const generic = { ...original, toolName: 'unknown_tool' };
       expect(toolIcon(original)).toBe(toolIcon(generic));
       expect(toolTraceTitle(original)).toBe(`Original ${toolName} original-target.txt`);
-      expect(completedToolActions([original])).toBe(status === 'completed' ? '运行了工具' : '');
-      expect(completedToolCategory(original)).toBe(
-        status === 'completed' ? '运行了工具' : undefined,
-      );
+      expect(completedToolActions([original])).toBe(status === 'completed' ? '运行了' : '');
+      expect(completedToolCategory(original)).toBe(status === 'completed' ? '运行了' : undefined);
       const dom = new JSDOM(
         renderToStaticMarkup(
           <ToolActivity
@@ -1873,39 +1871,39 @@ test('retired tools retain original titles, targets, states and results through 
   }
 });
 
-test('completed action summaries use owned natural past tense for every supported action without rewriting data', () => {
+test('completed action summaries use four owned labels for supported actions without rewriting data', () => {
   const matrix: readonly [string | undefined, string][] = [
-    ['read_file', '读取了文件'],
-    ['read_skill_resource', '读取了技能资料'],
-    ['view_images', '查看了图像'],
-    ['write_file', '写入了文件'],
-    ['edit_file', '编辑了文件'],
-    ['web_fetch', '读取了网页'],
-    ['browser_execute', '完成了浏览器操作'],
-    ['tool_search', '查找了工具'],
-    ['skill', '使用了技能'],
-    ['task', '运行了子 Agent 任务'],
-    ['spawn_agent', '创建了子 Agent'],
-    ['follow_up_agent', '继续了子 Agent 任务'],
-    ['send_agent_message', '发送了 Agent 消息'],
-    ['wait_agent_events', '查看了 Agent 进展'],
-    ['list_agents', '查看了 Agent 进展'],
-    ['interrupt_agent', '请求了中断 Agent'],
-    ['ask_user', '询问了用户'],
-    ['write_plan', '更新了计划'],
-    ['update_plan', '更新了计划'],
-    ['request_plan_review', '请求了计划审阅'],
-    ['planning.read', '读取了计划'],
-    ['planning.write', '编写了计划'],
-    ['planning.review', '请求了计划审阅'],
-    ['planning.update', '更新了计划'],
-    ['git.worktree', '操作了 Git 工作树'],
-    ['unknown-tool', '运行了工具'],
-    ['toString', '运行了工具'],
-    ['constructor', '运行了工具'],
-    ['__proto__', '运行了工具'],
-    ['hasOwnProperty', '运行了工具'],
-    [undefined, '运行了工具'],
+    ['read_file', '读取了'],
+    ['read_skill_resource', '读取了'],
+    ['view_images', '读取了'],
+    ['write_file', '运行了'],
+    ['edit_file', '运行了'],
+    ['web_fetch', '读取了'],
+    ['browser_execute', '运行了'],
+    ['tool_search', '搜索了'],
+    ['skill', '运行了'],
+    ['task', '运行了'],
+    ['spawn_agent', '运行了'],
+    ['follow_up_agent', '运行了'],
+    ['send_agent_message', '运行了'],
+    ['wait_agent_events', '运行了'],
+    ['list_agents', '运行了'],
+    ['interrupt_agent', '运行了'],
+    ['ask_user', '运行了'],
+    ['write_plan', '运行了'],
+    ['update_plan', '运行了'],
+    ['request_plan_review', '运行了'],
+    ['planning.read', '读取了'],
+    ['planning.write', '运行了'],
+    ['planning.review', '运行了'],
+    ['planning.update', '运行了'],
+    ['git.worktree', '运行了'],
+    ['unknown-tool', '运行了'],
+    ['toString', '运行了'],
+    ['constructor', '运行了'],
+    ['__proto__', '运行了'],
+    ['hasOwnProperty', '运行了'],
+    [undefined, '运行了'],
   ];
   for (const [toolName, expected] of matrix) {
     const original: Message = {
@@ -1915,11 +1913,9 @@ test('completed action summaries use owned natural past tense for every supporte
       target: undefined,
     };
     expect(completedToolActions([original, { ...original, id: 'duplicate' }])).toBe(expected);
-    expect(completedToolSummary(original)).toBe(
-      toolName === 'browser_execute' ? `${expected} 操作浏览器` : expected,
-    );
+    expect(completedToolSummary(original)).toBe(expected);
     expect(original.title).toBe('已保存工具');
-    if (expected === '运行了工具') expect(completedToolCategory(original)).toBe(expected);
+
     for (const status of [
       'creating',
       'queued',
@@ -1942,22 +1938,22 @@ test('completed action summaries use owned natural past tense for every supporte
     expect(completedToolSummary({ ...original, dispatchCommitted: false })).toBeUndefined();
   }
   const read = { ...tool('read', 'completed'), target: '已完成.txt' };
-  expect(completedToolSummary(read)).toBe('读取了文件 已完成.txt');
+  expect(completedToolSummary(read)).toBe('读取了');
   expect(completedToolActions([read, { ...read, toolName: 'edit_file' }, read])).toBe(
-    '读取了文件 · 编辑了文件',
+    '读取了 · 运行了',
   );
   expect(completedToolSummary({ ...read, toolName: 'write_file', fileCreated: true })).toBe(
-    '创建了文件 已完成.txt',
+    '运行了',
   );
   const image = { ...read, toolName: 'view_images', toolImageCount: 7 };
-  expect(completedToolSummary(image)).toBe('查看了图像');
+  expect(completedToolSummary(image)).toBe('读取了');
   expect(image.toolImageCount).toBe(7);
   for (const [operation, expected] of [
-    ['execute', '运行了命令'],
-    ['launch', '请求了启动后台 Shell'],
-    ['read', '查看了命令输出'],
-    ['wait', '等待了命令'],
-    ['stop', '请求了停止命令'],
+    ['execute', '运行了'],
+    ['launch', '运行了'],
+    ['read', '运行了'],
+    ['wait', '运行了'],
+    ['stop', '运行了'],
   ] as const) {
     const shell: Message = {
       ...tool('shell', 'completed'),
@@ -1966,7 +1962,7 @@ test('completed action summaries use owned natural past tense for every supporte
       shell: { operation, jobStatus: 'succeeded', command: 'printf 已完成' },
     };
     expect(completedToolActions([shell])).toBe(expected);
-    expect(completedToolSummary(shell)).toBe(`${expected} printf 已完成`);
+    expect(completedToolSummary(shell)).toBe(expected);
   }
   const failed: Message = {
     ...tool('failed', 'failed'),
@@ -1974,7 +1970,7 @@ test('completed action summaries use owned natural past tense for every supporte
     target: undefined,
     shell: { operation: 'execute', jobStatus: 'failed' },
   };
-  expect(completedToolSummary(failed)).toBe('运行了命令');
+  expect(completedToolSummary(failed)).toBe('运行了');
   expect(failed.status).toBe('failed');
   for (const shell of [
     { operation: 'execute' as const },
@@ -1983,4 +1979,52 @@ test('completed action summaries use owned natural past tense for every supporte
   ])
     expect(completedToolSummary({ ...failed, status: 'completed', shell })).toBeUndefined();
   expect(completedToolActions([])).toBe('');
+});
+
+test('simple Trace summaries group by first occurrence, not command or remote content, and exclude unperformed actions', () => {
+  const completed = (id: string, toolName: string, fields: Partial<Message> = {}): Message => ({
+    ...tool(id, 'completed'),
+    toolName,
+    ...fields,
+  });
+  const messages = [
+    completed('read', 'read_file'),
+    completed('image', 'view_images'),
+    completed('search', 'tool_search'),
+    completed('shell', 'shell_execute', {
+      target: 'rg needle . && cat result.txt',
+      arguments: { command: 'rg needle . && cat result.txt' },
+      shell: { operation: 'execute', jobStatus: 'succeeded' },
+    }),
+    completed('mcp', 'mcp.resources.read', { toolSummaryCategory: 'mcp' }),
+    completed('skill', 'load_skill', { toolSummaryCategory: 'skill', target: 'private_skill' }),
+    completed('resource', 'read_skill_resource'),
+    completed('retired-search', 'search_files'),
+  ];
+  const original = structuredClone(messages);
+  expect(completedToolActions(messages)).toBe('读取了 · 搜索了 · 运行了 · 加载了');
+  expect(completedToolActions([...messages].reverse())).toBe('运行了 · 读取了 · 加载了 · 搜索了');
+  expect(messages).toEqual(original);
+  for (const message of messages) {
+    const rejected: Message = { ...message, approval: { state: 'rejected', source: 'auto' } };
+    expect(completedToolActions([rejected])).toBe('');
+    expect(completedToolSummary(rejected)).toBeUndefined();
+    expect(completedToolCategory(rejected)).toBeUndefined();
+  }
+  for (const shell of [
+    { operation: 'execute' as const },
+    { operation: 'execute' as const, jobStatus: 'outcome_unknown' as const },
+    { operation: 'execute' as const, jobStatus: 'succeeded' as const, timedOut: true },
+  ]) {
+    const message = completed('uncertain', 'shell_execute', { shell });
+    expect(completedToolActions([message])).toBe('');
+    expect(completedToolSummary(message)).toBeUndefined();
+  }
+  for (const operation of ['read', 'wait', 'stop'] as const) {
+    const message = completed(operation, `shell.${operation}`, {
+      shell: { operation, jobStatus: 'running' },
+    });
+    expect(completedToolSummary(message)).toBe('运行了');
+    expect(message.shell?.jobStatus).toBe('running');
+  }
 });

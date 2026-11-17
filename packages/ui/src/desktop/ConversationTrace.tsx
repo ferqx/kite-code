@@ -174,7 +174,13 @@ export function ConversationTrace({
                             toggle,
                             (summarizeTools && completedToolActions([step])) || undefined,
                           )
-                        : renderTool(step, direct, detailsOpen)}
+                        : renderTool(
+                            step,
+                            direct,
+                            detailsOpen,
+                            undefined,
+                            (direct && summarizeTools && completedToolActions([step])) || undefined,
+                          )}
                     </Fragment>
                   );
                 const canRead = !!step.reasoningSource && !!renderReasoning;

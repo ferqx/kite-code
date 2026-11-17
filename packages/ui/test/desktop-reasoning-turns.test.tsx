@@ -161,7 +161,7 @@ test('a single Agent wait shows one tool heading and opens directly to its resul
 
   for (const [status, label] of [
     ['running', '等待 Agent 事件'],
-    ['completed', '查看了 Agent 进展'],
+    ['completed', '运行了'],
   ] as const) {
     for (const open of [false, true]) {
       const document = renderWait(wait, open, status);
@@ -969,7 +969,7 @@ test('separate traces retain their own result or thinking while the Turn shows i
       expect(headings).toHaveLength(2);
       const thinking = status === 'running' && !executionUnconfirmed;
       expect(headings.map((heading) => heading.textContent)).toEqual([
-        '读取了文件',
+        '读取了',
         thinking ? '正在思考…' : '思考',
       ]);
       expect(headings[0]!.querySelector('[data-status="running"]')).toBeNull();
@@ -1061,8 +1061,8 @@ test('tool handoff retains the latest message until a reply or terminal ends the
   for (const [status, tail, expected] of [
     ['running', pending, '已运行 printf second'],
     ['waiting', pending, '已运行 printf second'],
-    ['running', reply, '读取了文件 · 运行了命令'],
-    ['completed', pending, '读取了文件 · 运行了命令'],
+    ['running', reply, '读取了 · 运行了'],
+    ['completed', pending, '读取了 · 运行了'],
   ] as const) {
     const dom = new JSDOM(
       renderToStaticMarkup(
@@ -1242,7 +1242,7 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
     expect(completed.textContent).toBe('用时未知');
     expect(completed.getAttribute('aria-expanded')).toBe('false');
     await act(async () => completed.click());
-    expect(host.querySelector('.conversation-trace > button')?.textContent).toBe('运行了命令');
+    expect(host.querySelector('.conversation-trace > button')?.textContent).toBe('运行了');
     const reasoningButtons = host.querySelectorAll('.conversation-reasoning > button');
     expect([...reasoningButtons].map((item) => item.textContent)).toEqual(['已思考', '已思考']);
     expect([...reasoningButtons].map((item) => item.getAttribute('aria-expanded'))).toEqual([
@@ -1440,7 +1440,7 @@ test('a connection notice separates a tool result from later reasoning', () => {
     const titles = [...dom.window.document.querySelectorAll('.conversation-trace > button')].map(
       (node) => node.textContent,
     );
-    expect(titles).toEqual(['运行了命令', executionUnconfirmed ? '思考' : '正在思考…']);
+    expect(titles).toEqual(['运行了', executionUnconfirmed ? '思考' : '正在思考…']);
     expect(dom.window.document.querySelectorAll('.model-connection')).toHaveLength(1);
     dom.window.close();
   }
@@ -1579,9 +1579,9 @@ test('single MCP, Skill and unknown traces keep their tool title until the trace
   const root = createRoot(host);
   try {
     for (const [category, title, target, expected] of [
-      ['mcp', 'MCP · qa-names-7e · add', undefined, '运行了 MCP 工具'],
-      ['skill', '加载技能', 'private-skill-name', '加载了技能'],
-      ['unknown', '已保存工具', undefined, '运行了工具'],
+      ['mcp', 'MCP · qa-names-7e · add', undefined, '运行了'],
+      ['skill', '加载技能', 'private-skill-name', '加载了'],
+      ['unknown', '已保存工具', undefined, '运行了'],
     ] as const) {
       const tool: Message = {
         id: category,
@@ -1728,10 +1728,7 @@ test('separate completed traces keep category order, ordinary summaries and orig
     ),
   );
   const summaries = [...dom.window.document.querySelectorAll('.conversation-trace > button')];
-  expect(summaries.map((node) => node.textContent)).toEqual([
-    '运行了 MCP 工具 · 读取了文件',
-    '加载了技能 · 运行了 MCP 工具',
-  ]);
+  expect(summaries.map((node) => node.textContent)).toEqual(['运行了 · 读取了', '加载了 · 运行了']);
   expect(summaries.every((node) => !node.textContent?.includes('provider'))).toBe(true);
   const details = dom.window.document.querySelectorAll('.conversation-trace-steps');
   expect(details[0]?.textContent).toContain('MCP · provider · sources');
@@ -1740,7 +1737,7 @@ test('separate completed traces keep category order, ordinary summaries and orig
   dom.window.close();
 });
 
-test('completed Trace summary entry points use past-tense actions while data and independent detail headings stay original', () => {
+test('completed Trace summaries use four action labels without changing single-step disclosure or detail data', () => {
   const completed = (id: string, toolName?: string, extra: Partial<Message> = {}): Message => ({
     id,
     turnId: 'run',
@@ -1776,15 +1773,12 @@ test('completed Trace summary entry points use past-tense actions while data and
       ),
     );
   for (const [message, expected] of [
-    [completed('read', 'read_file', { target: '已完成.txt' }), '读取了文件 已完成.txt'],
-    [completed('write', 'write_file', { target: '已完成.txt' }), '写入了文件 已完成.txt'],
-    [
-      completed('create', 'write_file', { fileCreated: true, target: '已完成.txt' }),
-      '创建了文件 已完成.txt',
-    ],
-    [completed('images', 'view_images', { toolImageCount: 2 }), '查看了图像'],
-    [completed('shell', 'shell_execute', { target: 'echo 已完成' }), '运行了命令 echo 已完成'],
-    [completed('unknown', undefined, { title: '已保存工具' }), '运行了工具'],
+    [completed('read', 'read_file', { target: '已完成.txt' }), '读取了'],
+    [completed('write', 'write_file', { target: '已完成.txt' }), '运行了'],
+    [completed('create', 'write_file', { fileCreated: true, target: '已完成.txt' }), '运行了'],
+    [completed('images', 'view_images', { toolImageCount: 2 }), '读取了'],
+    [completed('shell', 'shell_execute', { target: 'echo 已完成' }), '运行了'],
+    [completed('unknown', undefined, { title: '已保存工具' }), '运行了'],
   ] as const) {
     const dom = renderSummary([message], true);
     expect(dom.window.document.querySelector('.conversation-trace > button')?.textContent).toBe(
@@ -1805,9 +1799,12 @@ test('completed Trace summary entry points use past-tense actions while data and
         changeConfirmed: true,
         toolResult: { ok: true, stdout: '+new' },
       }),
-      '已编辑的文件',
+      '运行了',
     ],
-    [completed('wait', 'wait_agent_events', { title: '等待 Agent 事件' }), '查看了 Agent 进展'],
+    [
+      completed('wait', 'wait_agent_events', { title: '等待 Agent 事件', target: 'original-work' }),
+      '运行了',
+    ],
   ] as const) {
     for (const open of [false, true]) {
       const dom = renderSummary([message], open);
@@ -1830,9 +1827,61 @@ test('completed Trace summary entry points use past-tense actions while data and
       dom.window.close();
     }
   }
+  const noDiffEdit = renderSummary([
+    completed('edit', 'edit_file', { title: '修改', target: 'original-no-diff.ts' }),
+  ]);
+  expect(noDiffEdit.window.document.querySelector('.conversation-trace')?.textContent).toContain(
+    'original-no-diff.ts',
+  );
+  expect(noDiffEdit.window.document.querySelector('.tool-diff-toggle')).toBeNull();
+  noDiffEdit.window.close();
+  for (const message of [
+    completed('resource', 'read_skill_resource', {
+      title: '读取技能资料',
+      target: 'private-skill · reference.md',
+      text: 'ORIGINAL RESOURCE BODY',
+    }),
+    completed('question', 'ask_user', {
+      title: '询问用户',
+      ask: {
+        questions: [{ id: 'q', question: 'ORIGINAL QUESTION' }],
+        answers: { q: 'ORIGINAL ANSWER' },
+      },
+    }),
+  ]) {
+    const dom = renderSummary([message], true);
+    const trace = dom.window.document.querySelector('.conversation-trace');
+    const detail = trace?.querySelector('.conversation-trace-steps');
+    expect(trace?.querySelector(':scope > button')?.textContent).toBe(
+      message.toolName === 'read_skill_resource' ? '读取了' : '运行了',
+    );
+    expect(detail?.textContent).toContain(
+      message.toolName === 'read_skill_resource' ? message.target! : 'ORIGINAL QUESTION',
+    );
+    expect(detail?.textContent).toContain(
+      message.toolName === 'read_skill_resource' ? 'ORIGINAL RESOURCE BODY' : 'ORIGINAL ANSWER',
+    );
+    expect(detail?.querySelector('button.tool-activity-summary')).toBeNull();
+    expect(detail?.querySelector('.tool-activity-chevron')).toBeNull();
+    dom.window.close();
+  }
+  for (const operation of ['execute', 'read'] as const) {
+    const message = completed('shell-identity', `shell.${operation}`, {
+      target: operation === 'read' ? 'original-shell-id' : 'original-command-description',
+      shell: { operation, jobStatus: 'succeeded', command: 'printf original-command' },
+    });
+    const dom = renderSummary([message], true);
+    const trace = dom.window.document.querySelector('.conversation-trace');
+    expect(trace?.querySelector(':scope > button')?.textContent).toBe('运行了');
+    const detail = trace?.querySelector('.conversation-trace-steps');
+    expect(detail?.textContent).toContain(message.target!);
+    expect(detail?.textContent).toContain('printf original-command');
+    expect(detail?.querySelector('button.tool-activity-summary')).toBeNull();
+    dom.window.close();
+  }
   const edits = renderSummary([completed('one', 'edit_file'), completed('two', 'edit_file')]);
   expect(edits.window.document.querySelector('.conversation-trace > button')?.textContent).toBe(
-    '编辑了文件',
+    '运行了',
   );
   edits.window.close();
   const mixed = renderSummary(
@@ -1845,7 +1894,7 @@ test('completed Trace summary entry points use past-tense actions while data and
     true,
   );
   expect(mixed.window.document.querySelector('.conversation-trace > button')?.textContent).toBe(
-    '编辑了文件 · 读取了文件 · 查看了图像',
+    '运行了 · 读取了',
   );
   const details = mixed.window.document.querySelector('.conversation-trace-steps');
   expect(details?.textContent).toContain('已编辑');

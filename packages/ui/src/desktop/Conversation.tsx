@@ -1424,24 +1424,12 @@ export function Conversation({
               !trailing.settled;
             const singleTool =
               steps.length === 1 && steps[0]?.role === 'tool' ? steps[0] : undefined;
-            const editedFiles =
-              steps.length > 1 &&
-              steps.every(
-                (step) =>
-                  step.role === 'tool' &&
-                  step.toolName === 'edit_file' &&
-                  step.status === 'completed' &&
-                  step.settled &&
-                  step.dispatchCommitted !== false,
-              );
             const summary = latestTool
               ? toolTraceTitle(latestTool)
               : singleTool
                 ? (completedToolSummary(singleTool) ?? toolTraceTitle(singleTool))
                 : tools.length
-                  ? editedFiles
-                    ? '编辑了文件'
-                    : completedToolActions(tools) || '工具执行'
+                  ? completedToolActions(tools) || '工具执行'
                   : thinking
                     ? '正在思考…'
                     : steps.some((step) => !step.settled)
