@@ -187,6 +187,7 @@ test('local draft storage failures explain that no message was sent without blam
     'draft_revision_conflict',
     'browser_draft_save_unconfirmed',
     'draft_not_loaded',
+    'draft_changed_before_send',
   ]) {
     expect(nativeInputErrorText('failed', code)).toContain('消息没有发送');
     expect(nativeInputErrorText('failed', code)).not.toContain('模型');

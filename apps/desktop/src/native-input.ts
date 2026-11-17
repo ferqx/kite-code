@@ -46,6 +46,8 @@ export function nativeInputErrorText(phase: 'failed' | 'unknown', reason?: strin
   if (reason === 'shell_asset_unavailable' || reason === 'native_asset_unavailable')
     return '本地执行环境尚未就绪，请恢复后重新发送。';
   if (reason === 'native_request_too_large') return '消息或附件过大，请减少内容后重新发送。';
+  if (reason === 'draft_changed_before_send')
+    return '草稿在发送前已更新，消息没有发送。请确认当前内容后重新发送。';
   if (
     reason &&
     [

@@ -3330,17 +3330,10 @@ function NativeDesktopContent({
       plan: newPlanMode,
       permissionMode: preparedPermission,
     };
-    firstRef.current = original;
-    latestInputCommands.current.set(
-      imageScope(original.creation.expectedStoreId, original.creation.sessionId),
-      original.commandId,
-    );
-    setFirstSubmission(original);
-    draftCache.current.set(
-      imageScope(original.creation.expectedStoreId, original.creation.sessionId),
-      original.draft,
-    );
-    setNewDraft('');
+    // Local preparation has not dispatched an input. Keep this same editable
+    // draft visible until its exact snapshot can become a submitted intent.
+    firstRef.current = undefined;
+    setFirstSubmission(undefined);
     void writeInput(async () => {
       let dispatched = false;
       try {
@@ -3359,12 +3352,23 @@ function NativeDesktopContent({
           original.preparationScope,
         )!.revision;
         original.attachmentRevision = await imageDrafts.flush(original.imageScope);
-        if (
-          generation.current !== current ||
-          pageIntent.current !== page ||
-          preparationDrafts.current.get(original.preparationScope) !== original.draft
-        )
+        if (generation.current !== current || pageIntent.current !== page)
           throw Error('native_selection_changed');
+        if (preparationDrafts.current.get(original.preparationScope) !== original.draft)
+          throw Error('draft_changed_before_send');
+        // Publish the delivery and clear the composer only at the actual dispatch
+        // boundary. Later edits now belong to the first Session, as before.
+        firstRef.current = original;
+        latestInputCommands.current.set(
+          imageScope(original.creation.expectedStoreId, original.creation.sessionId),
+          original.commandId,
+        );
+        setFirstSubmission(original);
+        draftCache.current.set(
+          imageScope(original.creation.expectedStoreId, original.creation.sessionId),
+          original.draft,
+        );
+        setNewDraft('');
         // Only an exact committed source revision may be consumed by this first send.
         noteDraftStates.current.get(original.preparationScope)!.consumedCommand =
           original.commandId;
@@ -3392,12 +3396,6 @@ function NativeDesktopContent({
       } catch (cause) {
         // No command exists when the local durable draft barrier failed. Do not query or label it unknown.
         if (!dispatched) {
-          if (firstRef.current?.commandId === original.commandId) {
-            firstRef.current = undefined;
-            setFirstSubmission(undefined);
-            if (newDraftRevision.current === original.preparationRevision)
-              setNewDraft((draft) => draft || original.draft.content);
-          }
           // An explicit send that never left the local draft barrier still needs
           // immediate failure feedback, not a later autosave warning or lookup.
           if (noteDraftStates.current.get(original.preparationScope)?.uncertain)

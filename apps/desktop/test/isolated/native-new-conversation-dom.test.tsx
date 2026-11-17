@@ -7022,6 +7022,154 @@ test('preparation text cold-restores as one private draft across workspace chang
   }
 });
 
+for (const editing of ['append', 'replace'] as const)
+  test(`first-send local preparation keeps the original editor until dispatch and preserves a concurrent ${editing}`, async () => {
+    const f = fixture(true, true, 'accept_edits', { withoutSelection: true });
+    const bridge = f.dom.window.kiteNative! as NativeBridge,
+      request = bridge.request;
+    let releaseSave: (() => void) | undefined;
+    let held = false;
+    bridge.request = async (input) => {
+      if (input.method === 'draft.write' && input.sessionId === 'new-conversation' && !held) {
+        held = true;
+        await new Promise<void>((resolve) => {
+          releaseSave = resolve;
+        });
+      }
+      return request(input);
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.chooseModel();
+      const original = 'Original first request 雪🙂';
+      await f.edit(original);
+      const editor = f.input()!;
+      await act(async () => editor.focus());
+      await f.click('发送首条消息');
+      await f.until(() => !!releaseSave);
+      expect(f.input()).toBe(editor);
+      expect(f.host.activeElement).toBe(editor);
+      expect(promptValue(f.input())).toBe(original);
+      expect((f.input() as HTMLTextAreaElement).readOnly).toBe(false);
+      expect((f.input() as HTMLTextAreaElement).disabled).toBe(false);
+      expect(f.host.querySelectorAll('.message.user')).toHaveLength(0);
+      await f.click('发送首条消息');
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(0);
+      const edited = editing === 'append' ? `${original}\nAdditional detail` : 'Replacement 雪🙂';
+      await f.edit(edited);
+      await act(async () => releaseSave!());
+      await f.until(
+        () =>
+          !!f.host.querySelector('.native-toast-card')?.textContent?.includes('草稿在发送前已更新'),
+      );
+      expect(promptValue(f.input())).toBe(edited);
+      expect(f.input()).toBe(editor);
+      expect(f.host.activeElement).toBe(editor);
+      expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('消息没有发送');
+      expect(f.host.querySelectorAll('.message.user')).toHaveLength(0);
+      expect(
+        f.calls.filter((call) =>
+          ['conversation.send', 'conversation.lookup', 'submit', 'lookup'].includes(call.method),
+        ),
+      ).toHaveLength(0);
+      await act(async () => f.flushDrafts());
+      expect(f.drafts.get('new-conversation')).toBe(edited);
+      await f.remount();
+      expect(promptValue(f.input())).toBe(edited);
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(0);
+    } finally {
+      releaseSave?.();
+      await f.close();
+    }
+  });
+
+test('first-send local preparation clears once at dispatch and then preserves the next editable draft', async () => {
+  const f = fixture(true, true, 'accept_edits', { withoutSelection: true });
+  const bridge = f.dom.window.kiteNative! as NativeBridge,
+    request = bridge.request;
+  let releaseSave: (() => void) | undefined;
+  let held = false;
+  bridge.request = async (input) => {
+    if (input.method === 'draft.write' && input.sessionId === 'new-conversation' && !held) {
+      held = true;
+      await new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      });
+    }
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.chooseModel();
+    await f.edit('Exact first message');
+    await f.click('发送首条消息');
+    await f.until(() => !!releaseSave);
+    expect(promptValue(f.input())).toBe('Exact first message');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(0);
+    await act(async () => releaseSave!());
+    await f.until(() => f.calls.some((call) => call.method === 'conversation.send'));
+    expect(promptValue(f.input())).toBe('');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    const send = f.calls.find((call) => call.method === 'conversation.send')!;
+    expect(send.intent.content).toBe('Exact first message');
+    expect(send.preparationRevision).toBeGreaterThan(1);
+    await f.edit('Next draft after real dispatch');
+    await f.resolve('accepted');
+    await f.until(() => !!f.input('当前会话私有草稿'));
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('Next draft after real dispatch');
+    await act(async () => f.flushDrafts());
+    expect(f.drafts.get(send.creation.sessionId)).toBe('Next draft after real dispatch');
+    await f.remount();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('Next draft after real dispatch');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    releaseSave?.();
+    await f.close();
+  }
+});
+
+for (const failure of ['changed', 'storage'] as const)
+  test(`a first-send retry retires the old failed delivery before reporting local ${failure} failure`, async () => {
+    const f = fixture(true, true, 'accept_edits', { withoutSelection: true });
+    const bridge = f.dom.window.kiteNative! as NativeBridge,
+      request = bridge.request;
+    let saveRetry = false;
+    let finishSave: (() => void) | undefined;
+    bridge.request = async (input) => {
+      if (input.method === 'draft.write' && input.sessionId === 'new-conversation' && saveRetry) {
+        saveRetry = false;
+        await new Promise<void>((resolve, reject) => {
+          finishSave = () =>
+            failure === 'storage' ? reject(Error('draft_storage_unavailable')) : resolve();
+        });
+      }
+      return request(input);
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.chooseModel();
+      await f.edit('First rejected request');
+      await f.click('发送首条消息');
+      await f.resolve('failed', false, 'model_selection_unavailable');
+      await f.edit('Explicit retry still in editor');
+      saveRetry = true;
+      await f.click('发送首条消息');
+      await f.until(() => !!finishSave);
+      expect(promptValue(f.input())).toBe('Explicit retry still in editor');
+      await f.edit('Explicit retry still in editor\nNew detail');
+      await act(async () => finishSave!());
+      await f.until(
+        () => !!f.host.querySelector('.native-toast-card')?.textContent?.includes('消息没有发送'),
+      );
+      expect(promptValue(f.input())).toBe('Explicit retry still in editor\nNew detail');
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+      expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toHaveLength(0);
+    } finally {
+      finishSave?.();
+      await f.close();
+    }
+  });
+
 test('first-send handoff durably moves only the newer preparation edit and does not restore the sent text', async () => {
   const f = fixture(false, true, 'accept_edits', { withoutSelection: true });
   try {
