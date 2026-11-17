@@ -17,13 +17,9 @@ import { sessionTitleInstructions } from '../../../../packages/agent/src/busines
 import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
-import { workflowManifest } from '../fixtures/workflow-manifest';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
-async function fixture(
-  duplicateNames = false,
-  workflow?: 'enabled' | 'disabled' | 'structured' | 'unsupported',
-) {
+async function fixture(duplicateNames = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-host-skills-')));
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace'),
@@ -76,17 +72,12 @@ async function fixture(
                 index: 0,
                 id: `load-${calls}`,
                 type: 'function',
-                function: workflow
-                  ? {
-                      name: 'complete_skill',
-                      arguments: JSON.stringify({ activation_id: 'manual-1', output: {} }),
-                    }
-                  : {
-                      name: 'load_skill',
-                      arguments: JSON.stringify({
-                        skill_id: chosen,
-                      }),
-                    },
+                function: {
+                  name: 'load_skill',
+                  arguments: JSON.stringify({
+                    skill_id: chosen,
+                  }),
+                },
               },
             ],
           }
@@ -143,21 +134,6 @@ async function fixture(
       `echo unexpected > ${join(root, 'script-effect')}\n`,
     );
   }
-  if (workflow) {
-    writeFileSync(
-      join(workspace, 'skills/alpha/SKILL.md'),
-      `---\n${JSON.stringify(workflowManifest('alpha-skill', workflow === 'structured'))}\n---\nWORKFLOW_INLINE_ORIGINAL_BODY\n`,
-    );
-    if (workflow !== 'disabled')
-      writeFileSync(
-        join(profile.profilePath, 'skill-workflow.jsonc'),
-        JSON.stringify({
-          version: 1,
-          features: { skillActivation: true, skillWorkflow: true, verification: false },
-        }),
-        { mode: 0o600 },
-      );
-  }
   const outdir = join(root, 'apps/service/dist');
   mkdirSync(outdir, { recursive: true });
   const service = join(outdir, 'service.js');
@@ -167,11 +143,7 @@ async function fixture(
   );
   directoryLink(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
   const result = await Bun.build({
-    entrypoints: [
-      workflow === 'unsupported'
-        ? join(import.meta.dir, '../fixtures/workflow-no-capability-child.ts')
-        : join(import.meta.dir, '../../../service/src/main.ts'),
-    ],
+    entrypoints: [join(import.meta.dir, '../../../service/src/main.ts')],
     target: 'bun',
     packages: 'external',
     outdir,

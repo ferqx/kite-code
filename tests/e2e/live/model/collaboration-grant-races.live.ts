@@ -107,7 +107,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
             },
           ],
           tools: [
-            'files.write_path',
+            'files.write',
             'task.spawn',
             'task.message',
             'task.follow_up',
@@ -152,7 +152,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
               if (
                 !heldDispatch &&
                 execution?.kind === 'tool' &&
-                execution.definitionId === 'files.write_path' &&
+                execution.definitionId === 'files.write' &&
                 input.authorization?.interactionId
               ) {
                 heldDispatch = structuredClone(input);
@@ -182,7 +182,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
         permissions: {
           ...binding.permissions!,
           async authorize(request) {
-            if (request.kind === 'tool' && request.definitionId === 'files.write_path') {
+            if (request.kind === 'tool' && request.definitionId === 'files.write') {
               const input = request.input;
               if (
                 !input ||
@@ -190,7 +190,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
                 Array.isArray(input) ||
                 input.path !== target ||
                 input.content !== body ||
-                input.base !== null
+                Object.keys(input).some((field) => !['path', 'content'].includes(field))
               )
                 return {
                   allowed: false,
@@ -289,7 +289,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
           expectedStoreId,
           commandId: 'work',
           kind: 'run.start',
-          content: `New task: Delegate exactly one collaborator with spawn_agent, prompt only, no preset. Tell it to use write_user_file exactly once to create ${JSON.stringify(target)} with content ${JSON.stringify(body)} and base null. You must not write yourself. The collaborator must not delegate or retry. Wait for its actual result with wait_agent_events and honestly report cancellation or completion. Never replace or follow up a cancelled collaborator.`,
+          content: `New task: Delegate exactly one collaborator with spawn_agent, prompt only, no preset. Tell it to use write_file exactly once to create ${JSON.stringify(target)} with content ${JSON.stringify(body)}; omit base_ref because this is a new file. You must not write yourself. The collaborator must not delegate or retry. Wait for its actual result with wait_agent_events and honestly report cancellation or completion. Never replace or follow up a cancelled collaborator.`,
         },
         { signal: options.signal },
       );
@@ -316,9 +316,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
               storeId: expectedStoreId,
               state: 'pending',
             })
-          ).interactions.find(
-            (c) => c.kind === 'approval' && c.definitionId === 'files.write_path',
-          );
+          ).interactions.find((c) => c.kind === 'approval' && c.definitionId === 'files.write');
         }
         if (!card) await Bun.sleep(30);
       }
@@ -331,7 +329,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
           card.sessionId === leaf &&
           write?.sessionId === leaf &&
           write.kind === 'tool' &&
-          write.definitionId === 'files.write_path' &&
+          write.definitionId === 'files.write' &&
           write.input !== null;
         checks.zeroEffectBeforeDecision =
           !existsSync(target) && write?.authorization?.dispatched !== true;
@@ -459,13 +457,13 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
         }
         checks.settled = settled;
         const writes = (await store.listExecutions(leaf)).filter(
-          (e) => e.kind === 'tool' && e.definitionId === 'files.write_path',
+          (e) => e.kind === 'tool' && e.definitionId === 'files.write',
         );
         checks.oneExactInvocation = writes.length === 1 && writes[0]?.id === card.executionId;
         checks.noReplacementChild =
           (await store.listExecutions('s')).filter((e) => e.childSessionId).length === 1;
         checks.parentNeverWrote = !(await store.listExecutions('s')).some(
-          (e) => e.definitionId === 'files.write_path',
+          (e) => e.definitionId === 'files.write',
         );
         checks.effectOracle =
           existsSync(target) &&

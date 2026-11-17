@@ -2976,10 +2976,7 @@ test('cold compression outcomes stay separators without summary prose or final-c
 });
 
 test('paged file read versions retain known lightweight exploration presentation alongside historical versions', () => {
-  for (const [definitionId, versions] of [
-    ['files.read', ['2', '3', '4']],
-    ['files.read_path', ['1', '2']],
-  ] as const) {
+  for (const [definitionId, versions] of [['files.read', ['2', '3', '4']]] as const) {
     for (const definitionVersion of versions) {
       const receipt = {
         ...message('read-version', 'tool', '1', 'original paged result'),
@@ -3001,7 +2998,7 @@ test('paged file read versions retain known lightweight exploration presentation
   }
 });
 
-test('search v2/v3 keep exact exploration presentation while unknown versions remain generic', () => {
+test('retired search receipts preserve raw results and identity using generic presentation', () => {
   for (const definitionVersion of ['2', '3', '99']) {
     const receipt = {
       ...message('search-version', 'tool', '1', 'original search result'),
@@ -3014,12 +3011,11 @@ test('search v2/v3 keep exact exploration presentation while unknown versions re
       messages: [receipt],
       tools: [{ ...tool('search-version'), definitionId: 'files.search', definitionVersion }],
     });
-    expect(projection.messages[0]).toMatchObject(
-      definitionVersion === '99'
-        ? { title: '搜索内容', toolName: undefined }
-        : { title: '搜索内容', toolName: 'search_content', presentation: 'exploration' },
-    );
-    if (definitionVersion === '99')
-      expect(projection.messages[0]?.presentation).not.toBe('exploration');
+    expect(projection.messages[0]).toMatchObject({
+      title: 'files.search',
+      toolName: undefined,
+      text: 'original search result',
+    });
+    expect(projection.messages[0]?.presentation).not.toBe('exploration');
   }
 });

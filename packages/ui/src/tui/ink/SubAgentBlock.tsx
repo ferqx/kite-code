@@ -60,14 +60,6 @@ function toolArgsLabel(name: string, args: Record<string, unknown>, totalLines?:
       const firstLine = c.split('\n')[0]!;
       return firstLine.slice(0, 80);
     }
-    case 'grep': {
-      const q = args.pattern ?? args.query;
-      return typeof q === 'string' ? `"${q.slice(0, 60)}"` : '';
-    }
-    case 'glob': {
-      const p = args.pattern;
-      return typeof p === 'string' ? p.slice(0, 60) : '';
-    }
     case 'read_mcp_resource': {
       const u = args.uri ?? args.resource;
       return typeof u === 'string' ? u.slice(0, 60) : '';

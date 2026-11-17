@@ -338,11 +338,7 @@ export function nativeToolMessageEligible(
 }
 
 function fileCreation(execution: Execution): string | undefined {
-  if (
-    execution.status !== 'succeeded' ||
-    !['files.write', 'files.write_path'].includes(execution.definitionId)
-  )
-    return;
+  if (execution.status !== 'succeeded' || execution.definitionId !== 'files.write') return;
   const change = object(object(object(execution.result)?.details)?.fileChange);
   if (change?.version === 1 && change.before === null && typeof change.path === 'string')
     return change.path;

@@ -1624,7 +1624,7 @@ test('the retained tool UI shows exact failures without exposing unverified Shel
   }
 });
 
-test('the directory row retains the verified workspace root target when the path was omitted', async () => {
+test('retired directory receipts remain expandable with original results and no inferred root', async () => {
   const f = fixture();
   try {
     await act(async () =>
@@ -1635,7 +1635,6 @@ test('the directory row retains the verified workspace root target when the path
               definitionId: 'files.list',
               definitionVersion: '1',
               status: 'succeeded',
-              target: '.',
             },
             'root-directory',
             '{"entries":[],"next":null}',
@@ -1643,7 +1642,12 @@ test('the directory row retains the verified workspace root target when the path
         />,
       ),
     );
-    expect(f.host.textContent).toContain('列出目录.');
+    expect(f.host.textContent).toContain('files.list');
+    expect(f.host.textContent).not.toContain('列出目录');
+    expect(f.host.querySelector('.tool-step-target')).toBeNull();
+    const toggle = f.host.querySelector<HTMLButtonElement>('button')!;
+    await act(async () => toggle.click());
+    expect(f.host.textContent).toContain('{"entries":[],"next":null}');
     expect(f.host.querySelector('.tool-activity-step.failed')).toBeNull();
   } finally {
     await f.close();
@@ -1846,14 +1850,14 @@ const statusSelection = (executions: Execution[]): NativeSelection => ({
   executions,
 });
 
-test('current and future file discovery versions keep readable live and saved row names', async () => {
+test('retired discovery IDs use generic live and saved rows without hiding original results', async () => {
   const f = fixture();
   try {
     for (const [definitionId, definitionVersion, title] of [
-      ['files.glob', '3', '查找文件'],
-      ['files.search', '5', '搜索内容'],
-      ['files.glob', '999', '查找文件'],
-      ['files.search', '999', '搜索内容'],
+      ['files.glob', '3', 'files.glob'],
+      ['files.search', '5', 'files.search'],
+      ['files.glob', '999', 'files.glob'],
+      ['files.search', '999', 'files.search'],
     ] as const) {
       const execution = { ...statusExecution(definitionId, 'dispatching'), definitionVersion };
       const [live] = liveToolMessages(statusSelection([execution]), []);
@@ -1861,7 +1865,7 @@ test('current and future file discovery versions keep readable live and saved ro
         f.root.render(<NativeLiveToolMessage {...live!} unavailable={false} />),
       );
       expect(f.host.textContent).toContain(title);
-      expect(f.host.textContent).not.toContain(definitionId);
+      expect(f.host.querySelector('.tool-step-target')).toBeNull();
       await act(async () =>
         f.root.render(
           <NativeToolMessage
@@ -1874,7 +1878,7 @@ test('current and future file discovery versions keep readable live and saved ro
         ),
       );
       expect(f.host.textContent).toContain(title);
-      expect(f.host.textContent).not.toContain(definitionId);
+      expect(f.host.querySelector('.tool-step-target')).toBeNull();
     }
   } finally {
     await f.close();
@@ -1941,7 +1945,7 @@ test('a mixed Native exploration batch shows the dispatched read as active while
     const live = liveToolMessages(
       statusSelection([
         statusExecution('files.read', 'dispatching'),
-        { ...statusExecution('files.search', 'planned'), id: 'queued-search' },
+        { ...statusExecution('files.read', 'planned'), id: 'queued-read' },
       ]),
       [],
     );
@@ -1956,7 +1960,7 @@ test('a mixed Native exploration batch shows the dispatched read as active while
       ),
     );
     expect(f.host.querySelector('.tool-activity-summary')?.textContent).toContain('读取文件');
-    expect(f.host.querySelector('.tool-activity-summary')?.textContent).toBe('读取文件搜索内容');
+    expect(f.host.querySelector('.tool-activity-summary')?.textContent).toBe('读取文件');
     expect(f.host.querySelector('.tool-activity.is-running')).not.toBeNull();
     expect(f.host.querySelector('.tool-activity-step.running')?.getAttribute('aria-label')).toBe(
       '执行中',

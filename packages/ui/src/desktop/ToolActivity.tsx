@@ -4,7 +4,6 @@ import {
   BotIcon,
   Edit02Icon,
   File01Icon,
-  FileSearchIcon,
   Folder01Icon,
   GitBranchIcon,
   Globe02Icon,
@@ -54,7 +53,6 @@ const TOOL_LABELS: Record<string, string> = {
   ask_user: '询问用户',
   browser_execute: '浏览器操作',
   edit_file: '修改',
-  glob: '查找文件',
   list_mcp_resources: '列出 MCP 资源',
   list_mcp_tools: '列出 MCP 工具',
   load_skill: '加载技能',
@@ -64,8 +62,6 @@ const TOOL_LABELS: Record<string, string> = {
   read_mcp_resource: '读取 MCP 资源',
   read_skill_resource: '读取技能资料',
   request_plan_review: '请求计划审阅',
-  search_content: '搜索内容',
-  search_files: '搜索文件',
   shell_execute: '运行',
   skill: '使用 Skill',
   task: '运行子 Agent 任务',
@@ -275,10 +271,6 @@ function toolTarget(message: Message): string | undefined {
     case 'edit_file':
     case 'write_file':
       return argument('path');
-    case 'search_content':
-    case 'search_files':
-    case 'glob':
-      return argument('pattern');
     case 'shell_execute':
       return argument('description')?.replace(/\s+/gu, ' ').trim() || argument('command');
     case 'write_plan':
@@ -370,18 +362,12 @@ export function toolIcon(message: Message) {
     case 'load_skill':
     case 'read_skill_resource':
       return BookOpen01Icon;
-    case 'search_content':
     case 'tool_search':
     case 'list_mcp_tools':
     case 'mcp.tools.search':
       return Search01Icon;
-    case 'search_files':
-    case 'glob':
-      return FileSearchIcon;
     case 'edit_file':
     case 'write_file':
-    case 'files.write_path':
-    case 'files.edit_path':
       return Edit02Icon;
     case 'browser_execute':
     case 'web_fetch':
@@ -398,7 +384,6 @@ export function toolIcon(message: Message) {
       return UserQuestion01Icon;
     case 'list_mcp_resources':
     case 'mcp.resources.list':
-    case 'files.list':
       return Folder01Icon;
     case 'git.worktree':
       return GitBranchIcon;
@@ -410,12 +395,6 @@ export function toolIcon(message: Message) {
     case 'planning.review':
     case 'planning.update':
       return File01Icon;
-    case 'validation.define':
-    case 'validation.check':
-    case 'validation.rebind':
-    case 'validation.request_waiver':
-    case 'validation.auto_check':
-      return Tick02Icon;
     default:
       return Wrench01Icon;
   }
@@ -435,22 +414,12 @@ function activityAction(message: Message, trace = false): string {
     case 'view_images':
       return '查看图像';
     case 'write_file':
-    case 'files.write_path':
       if (trace) return '写入文件';
       return '编辑文件';
     case 'edit_file':
-    case 'files.edit_path':
       return '编辑文件';
     case 'read_file':
       return '读取文件';
-    case 'search_content':
-      return '搜索内容';
-    case 'search_files':
-    case 'glob':
-    case 'files.glob':
-      return '查找文件';
-    case 'files.list':
-      return '浏览目录';
     case 'shell_execute':
     case 'shell.launch':
       return '运行命令';
@@ -526,14 +495,7 @@ const COMPLETED_TRACE_ACTIONS: ReadonlyMap<string, string> = new Map(
     read_skill_resource: '读取了技能资料',
     view_images: '查看了图像',
     write_file: '写入了文件',
-    'files.write_path': '写入了文件',
     edit_file: '编辑了文件',
-    'files.edit_path': '编辑了文件',
-    search_content: '搜索了内容',
-    search_files: '查找了文件',
-    glob: '查找了文件',
-    'files.glob': '查找了文件',
-    'files.list': '浏览了目录',
     web_fetch: '读取了网页',
     browser_execute: '完成了浏览器操作',
     tool_search: '查找了工具',
@@ -553,11 +515,6 @@ const COMPLETED_TRACE_ACTIONS: ReadonlyMap<string, string> = new Map(
     'planning.write': '编写了计划',
     'planning.review': '请求了计划审阅',
     'planning.update': '更新了计划',
-    'validation.define': '定义了验证检查',
-    'validation.check': '运行了验证',
-    'validation.rebind': '关联了修复结果',
-    'validation.request_waiver': '请求了验证豁免',
-    'validation.auto_check': '检查了文件变更',
     'git.worktree': '操作了 Git 工作树',
   }),
 );
@@ -1176,11 +1133,7 @@ export function ToolActivity({
   if (grouped) ask = undefined;
   const shell = !grouped && isShellMessage(message);
   const managedShell = !grouped ? shellSnapshot(message) : undefined;
-  const read =
-    !grouped &&
-    ['read_file', 'search_content', 'search_files', 'glob', 'read_mcp_resource'].includes(
-      message.toolName ?? '',
-    );
+  const read = !grouped && ['read_file', 'read_mcp_resource'].includes(message.toolName ?? '');
   const edit = !grouped && ['edit_file', 'write_file'].includes(message.toolName ?? '');
   const running = messages.some(
     (item) => !executionUnconfirmed(item) && !item.settled && item.status === 'running',
@@ -1495,13 +1448,7 @@ export function ToolActivity({
                           <Fragment key={item.presentationKey ?? item.id}>
                             {renderItem?.(item) ??
                               (!needsResultDetails(item) &&
-                              [
-                                'read_file',
-                                'search_content',
-                                'search_files',
-                                'glob',
-                                'read_mcp_resource',
-                              ].includes(item.toolName ?? '') ? (
+                              ['read_file', 'read_mcp_resource'].includes(item.toolName ?? '') ? (
                                 <ToolRow
                                   message={item}
                                   openFile={

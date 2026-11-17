@@ -3,8 +3,6 @@ export const ACTION_NAMES: Record<string, string> = {
   read_file: 'Read',
   edit_file: 'Update',
   write_file: 'Create',
-  search_content: 'Search',
-  search_files: 'Find',
   shell_execute: 'Bash',
   read_mcp_resource: 'MCP',
   write_plan: 'Plan',
@@ -171,14 +169,6 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
     case 'write_file':
     case 'edit_file':
       return String(args.path ?? '') || undefined;
-    case 'search_content': {
-      const p = typeof args.pattern === 'string' ? args.pattern : '';
-      return p ? `"${p.slice(0, 55)}"` : undefined;
-    }
-    case 'search_files': {
-      const p = typeof args.pattern === 'string' ? args.pattern : '';
-      return p ? p.slice(0, 57) : undefined;
-    }
     case 'shell_execute': {
       const description = typeof args.description === 'string' ? args.description.trim() : '';
       const cmd = String(args.command ?? '');
@@ -244,14 +234,6 @@ export function getToolDetail(
     case 'edit_file': {
       const path = typeof args.path === 'string' ? args.path : '';
       return `(${path})`;
-    }
-    case 'search_content': {
-      const pattern = typeof args.pattern === 'string' ? args.pattern : '';
-      return `Search: "${pattern}"`;
-    }
-    case 'search_files': {
-      const pattern = typeof args.pattern === 'string' ? args.pattern : '';
-      return `Find: ${pattern}`;
     }
     case 'shell_execute': {
       const cmd = typeof args.command === 'string' ? args.command.slice(0, 60) : '';

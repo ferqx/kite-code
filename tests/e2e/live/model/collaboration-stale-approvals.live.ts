@@ -111,7 +111,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
       const targets = [join(root, 'external-first.txt'), join(root, 'external-next.txt')];
       const contents = targets.map(() => `verified-stale-approval-${randomUUID()}`);
       const assignment = (index: number) =>
-        `Use write_user_file exactly once to create ${JSON.stringify(targets[index])} with content ${JSON.stringify(contents[index])} and base null. Report its actual Tool result and include the complete exact content you actually wrote. Do not delegate. Do not retry denied work. Do not write any other path.`;
+        `Use write_file exactly once to create ${JSON.stringify(targets[index])} with content ${JSON.stringify(contents[index])}; omit base_ref because this is a new file. Report its actual Tool result and include the complete exact content you actually wrote. Do not delegate. Do not retry denied work. Do not write any other path.`;
       const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'live' });
       mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
       const configurationPath = join(profile.profilePath, 'config.jsonc');
@@ -128,7 +128,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
             },
           ],
           tools: [
-            'files.write_path',
+            'files.write',
             'task.spawn',
             'task.follow_up',
             'task.message',
@@ -171,16 +171,20 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
         permissions: {
           ...binding.permissions!,
           async authorize(request) {
-            if (
-              request.kind === 'tool' &&
-              request.definitionId === 'files.write_path' &&
-              !targets.includes(String(object(request.input).path))
-            )
-              return {
-                allowed: false,
-                revision: 'owned-stale-target-only-1',
-                reason: 'live_target_out_of_scope',
-              };
+            if (request.kind === 'tool' && request.definitionId === 'files.write') {
+              const input = object(request.input);
+              const index = targets.indexOf(String(input.path));
+              if (
+                index < 0 ||
+                input.content !== contents[index] ||
+                Object.keys(input).some((field) => !['path', 'content'].includes(field))
+              )
+                return {
+                  allowed: false,
+                  revision: 'owned-stale-target-only-1',
+                  reason: 'live_target_out_of_scope',
+                };
+            }
             return binding.permissions!.authorize(request);
           },
         },
@@ -279,7 +283,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
               await live.listInteractions('s', { storeId: expectedStoreId, state: 'pending' })
             ).interactions;
             for (const card of cards) {
-              if (card.kind !== 'approval' || card.definitionId !== 'files.write_path') continue;
+              if (card.kind !== 'approval' || card.definitionId !== 'files.write') continue;
               const execution = await owned.getExecution(card.executionId!);
               if (object(execution?.input).path === targets[index]) return card;
             }
@@ -337,7 +341,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
         originalRun?.sessionId === childId &&
           originalRun.rootWorkCommandId === originalCarrier.rootWorkCommandId &&
           originalExecution?.runId === first.runId &&
-          originalExecution.definitionId === 'files.write_path' &&
+          originalExecution.definitionId === 'files.write' &&
           originalExecution.authorization?.dispatched !== true &&
           first.answer === null &&
           first.acceptedDecisionRevision === null &&
@@ -381,7 +385,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
       const oldBefore = await getCard(first);
       const oldToolBefore = await owned.getExecution(first.executionId!);
       assert(
-        oldBefore.state === (id === 'P03-old-answered' ? 'answered' : 'cancelled') &&
+        oldBefore.state === (id === 'P03-old-cancelled' ? 'cancelled' : 'answered') &&
           (id === 'P03-old-cancelled'
             ? oldBefore.answer === null
             : object(oldBefore.answer).decision ===
@@ -394,15 +398,24 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
             : oldToolBefore?.authorization?.dispatched !== true && !existsSync(targets[0]!)),
         'first_round_accurate_answered_denied_or_cancelled_history',
       );
-      const firstParent = (await owned.getView('s')).runs.find(
-        (run) => run.rootWorkCommandId === originalRun!.rootWorkCommandId,
+      const priorParent = (await owned.getView('s')).runs.at(-1);
+      const parentSelectionId = (await owned.getSession('s'))!.contextSelectionId;
+      const childSelectionId = (await owned.getSession(childId))!.contextSelectionId;
+      branch(
+        priorParent &&
+          !priorParent.isActive &&
+          priorParent.rootWorkCommandId === originalRun!.rootWorkCommandId,
+        'original_parent_work_missing',
       );
-      branch(firstParent, 'original_parent_work_missing');
-      await live.startRun('s', {
+      // A new public follow-up has its own work identity, but can manage the same direct child.
+      // Natural-language "continue" no longer routes a new parent Run into an earlier work.
+      await live.followUp('s', {
         expectedStoreId,
         commandId: 'continue-work',
-        kind: 'run.start',
-        content: `Continue ${firstParent!.rootWorkCommandId}.\nAsk the same collaborator ${childId} with follow_up_agent exactly once. Use this complete content exactly: ${JSON.stringify(assignment(1))}. Do not spawn a collaborator. Do not write files yourself. After follow_up_agent returns, finish your response with its actual acceptance status. Do not wait. Do not retry.`,
+        kind: 'input.follow_up',
+        afterRunId: priorParent!.id,
+        contextSelectionId: parentSelectionId,
+        content: `Continue collaborating in this new task.\nAsk the same collaborator ${childId} with follow_up_agent exactly once. Use this complete content exactly: ${JSON.stringify(assignment(1))}. Do not spawn a collaborator. Do not write files yourself. After follow_up_agent returns, finish your response with its actual acceptance status. Do not wait. Do not retry.`,
       });
       // task.follow_up has its own formal permission card under the current default strategy.
       await until(async () => {
@@ -411,7 +424,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
         ).interactions;
         const second = current.find(
           (card) =>
-            card.definitionId === 'files.write_path' &&
+            card.definitionId === 'files.write' &&
             card.sessionId === childId &&
             card.id !== first.id,
         );
@@ -436,19 +449,34 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
       const nextRun = await owned.getRun(second.runId!);
       const continueCommand = await owned.getCommand('continue-work');
       const continueReceipt = object(continueCommand?.receipt);
-      const businessId = Object.hasOwn(continueReceipt, 'businessCommandId')
-        ? continueReceipt.businessCommandId
-        : continueCommand?.id;
       const continuedRuns = (await owned.getView('s')).runs.filter(
-        (run) => run.originCommandId === businessId,
+        (run) => run.originCommandId === continueCommand?.id,
       );
+      const continuedParent = continuedRuns[0];
       assert(
-        typeof businessId === 'string' &&
+        continueCommand?.kind === 'input.follow_up' &&
+          continueCommand.status === 'applied' &&
+          object(continueCommand.request).afterRunId === priorParent!.id &&
+          object(continueCommand.request).contextSelectionId === parentSelectionId &&
           continuedRuns.length === 1 &&
-          continuedRuns[0]?.id === continueReceipt.runId &&
-          continuedRuns[0]?.rootWorkCommandId === originalRun!.rootWorkCommandId &&
-          continuedRuns[0]?.rootWorkSeq === originalRun!.rootWorkSeq,
-        'formal_continue_receipt_identifies_one_business_run_in_original_work',
+          continuedParent?.id === continueReceipt.runId &&
+          continuedParent?.contextSelectionId === parentSelectionId &&
+          continuedParent?.rootWorkCommandId === continueCommand.id &&
+          continuedParent?.rootWorkSeq === continueCommand.seq &&
+          continuedParent.rootWorkCommandId !== originalRun!.rootWorkCommandId &&
+          continuedParent.rootWorkSeq !== originalRun!.rootWorkSeq,
+        'formal_follow_up_pins_predecessor_and_selection_with_distinct_new_work',
+      );
+      const childFollowUp = await owned.getCommand(nextRun!.originCommandId);
+      assert(
+        childFollowUp?.kind === 'input.follow_up' &&
+          childFollowUp.status === 'applied' &&
+          object(childFollowUp.request).afterRunId === originalRun!.id &&
+          object(childFollowUp.request).contextSelectionId === childSelectionId &&
+          object(childFollowUp.request).content === assignment(1) &&
+          object(childFollowUp.receipt).runId === nextRun!.id &&
+          nextRun!.contextSelectionId === childSelectionId,
+        'same_child_follow_up_pins_original_child_predecessor_and_selection',
       );
       assert(
         second.id !== first.id &&
@@ -459,10 +487,10 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
           nextCarrier.id !== originalCarrier.id &&
           nextRun?.sessionId === childId &&
           nextRun.id !== originalRun!.id &&
-          nextRun.rootWorkCommandId === originalRun!.rootWorkCommandId &&
-          nextRun.rootWorkSeq === originalRun!.rootWorkSeq &&
-          nextCarrier.rootWorkCommandId === originalRun!.rootWorkCommandId &&
-          nextCarrier.rootWorkSeq === originalRun!.rootWorkSeq &&
+          nextRun.rootWorkCommandId === continuedParent!.rootWorkCommandId &&
+          nextRun.rootWorkSeq === continuedParent!.rootWorkSeq &&
+          nextCarrier.rootWorkCommandId === continuedParent!.rootWorkCommandId &&
+          nextCarrier.rootWorkSeq === continuedParent!.rootWorkSeq &&
           secondExecution?.runId === nextRun.id &&
           secondExecution.authorization?.dispatched !== true &&
           second.state === 'pending' &&
@@ -541,7 +569,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
       );
       if (id !== 'P03-old-answered')
         assert(
-          staleAfter.state === 'cancelled' &&
+          staleAfter.state === (id === 'P03-old-cancelled' ? 'cancelled' : 'answered') &&
             staleAfter.acceptedDecisionRevision === null &&
             !existsSync(targets[0]!),
           'denied_or_cancelled_history_never_dispatches',
@@ -580,8 +608,8 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
       assert(
         acceptance!.resultRevision === acceptedCarrier!.resultRevision &&
           acceptance!.selectionId === acceptedParent?.contextSelectionId &&
-          acceptedParent?.rootWorkCommandId === originalRun!.rootWorkCommandId &&
-          acceptedParent?.rootWorkSeq === originalRun!.rootWorkSeq,
+          acceptedParent?.rootWorkCommandId === continuedParent!.rootWorkCommandId &&
+          acceptedParent?.rootWorkSeq === continuedParent!.rootWorkSeq,
         'new_result_acceptance_pins_exact_revision_and_parent_selection',
       );
       const prepared = [];
@@ -638,7 +666,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
       );
       const childView = await owned.getView(childId);
       const allCarriers = (await owned.listExecutions('s')).filter((row) => row.childSessionId);
-      const writes = childView.executions.filter((row) => row.definitionId === 'files.write_path');
+      const writes = childView.executions.filter((row) => row.definitionId === 'files.write');
       assert(
         allCarriers.length === 2 &&
           allCarriers.every((row) => row.childSessionId === childId) &&
@@ -741,7 +769,8 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
       adapterAttempts: options.requests().length - firstRequest,
       canonicalEvidenceRetained: retained,
       coverage: [
-        'formal_default_policy_same_child_two_rounds',
+        'formal_default_policy_same_child_two_rounds_with_distinct_parent_works',
+        'explicit_parent_and_child_follow_up_predecessor_and_selection_binding',
         'actual_client_historical_answer_replays_and_conflict',
         'new_pending_approval_unaffected_then_exact_positive_control',
         'exact_original_result_source_in_real_parent_model',

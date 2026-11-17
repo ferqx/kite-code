@@ -87,7 +87,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //
   // 消息结构：
   //   Response 1: PHASE_ONE 思考 + read_file(CLAUDE.md)
-  //   Response 2: PHASE_TWO 思考 + search_files  ← 新一轮模型调用
+  //   Response 2: PHASE_TWO 思考 + shell_execute(rg --files)  ← 新一轮模型调用
   //   Response 3: 文本输出（阶段结束，最终回答脱离）
   //
   // 预期 TUI 现象：
@@ -117,7 +117,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
             reasoning_content: 'PHASE_TWO: also searching the source tree.',
             content: '继续搜索源码和文档目录。',
             tool_calls: [
-              { id: 't2', name: 'search_files', args: { pattern: 'CLAUDE.md', path: '.' } },
+              { id: 't2', name: 'shell_execute', args: { command: "rg --files -g 'CLAUDE.md' ." } },
             ],
           },
         },
@@ -143,8 +143,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // narration is not accumulated into the archived Thought.
       expect(screenContains(output, 'Thinking ')).toBe(true);
       expect(screenContains(output, 'read 1 file')).toBe(true);
-      expect(screenContains(output, 'searched 1 file pattern')).toBe(true);
-      expect(screenContains(output, 'read 1 file, searched 1 file pattern')).toBe(true);
+      expect(screenContains(output, 'ran 1 shell command')).toBe(true);
+      expect(screenContains(output, 'read 1 file, ran 1 shell command')).toBe(true);
       expect(screenContains(output, '先查看项目入口和核心配置。')).toBe(false);
       expect(screenContains(output, '继续搜索源码和文档目录。')).toBe(false);
       expect(screenContains(output, 'PHASE_ONE')).toBe(false);
@@ -273,6 +273,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   test(
     'queueing a successor does not duplicate the active exploration Thought',
     async () => {
+      let finishThought!: () => void;
+      let continuationRequested = false;
+      const queuedObserved = new Promise<void>((resolve) => {
+        finishThought = resolve;
+      });
       server.setResponses([
         {
           message: {
@@ -298,35 +303,57 @@ describe('TUI PTY System — Thought Lifecycle', () => {
             tool_calls: [
               {
                 id: 'queue-thought-search',
-                name: 'search_files',
-                args: { path: '.', pattern: 'README.md' },
+                name: 'shell_execute',
+                args: { command: "rg --files -g 'README.md' ." },
               },
             ],
           },
         },
         {
-          expectedRequest: {
-            toolResults: [{ toolCallId: 'queue-thought-search', contentIncludes: ['README.md'] }],
+          response: async () => {
+            continuationRequested = true;
+            await queuedObserved;
+            return {
+              expectedRequest: {
+                toolResults: [
+                  { toolCallId: 'queue-thought-search', contentIncludes: ['README.md'] },
+                ],
+              },
+              message: { content: 'QUEUE_THOUGHT_DONE' },
+            };
           },
-          message: { content: 'QUEUE_THOUGHT_DONE' },
-          delay: 2_000,
         },
         { message: { content: 'QUEUE_SUCCESSOR_DONE' }, delay: 10 },
       ]);
 
       await submitUserMessage(tui, server, 'Inspect before queued successor', { timeout: 15_000 });
-      await waitForText(() => tui.viewport(), 'searched 1 file pattern', 15_000);
-      const beforeQueue = stripAnsi(tui.scrollback());
-      const beforeThoughtCount = beforeQueue.match(/Thinking /g)?.length ?? 0;
+      try {
+        // A queued Shell has not yet established exploration facts. Observe the
+        // actual next Model request and its two-result aggregate before queueing;
+        // hold that response so this is an active, not already-completed Thought.
+        await waitForCondition(
+          () =>
+            continuationRequested &&
+            screenContains(tui.viewport(), 'read 1 file, ran 1 shell command'),
+          'both original tool results to form the active exploration aggregate',
+          15_000,
+        );
+        await tui.settleScreen();
+        const beforeQueue = stripAnsi(tui.scrollback());
+        expect(beforeQueue.match(/Thinking /g) ?? []).toHaveLength(1);
 
-      await submitUserMessageForDeferredDelivery(tui, server, 'Queued successor', {
-        acceptWhen: (viewport) => screenContains(viewport, '↵ Queued successor'),
-        timeout: 15_000,
-      });
-      const whileQueued = stripAnsi(tui.scrollback());
-      expect(whileQueued.match(/Thinking /g)?.length ?? 0).toBe(beforeThoughtCount);
-      expect(whileQueued.match(/read 1 file/g)?.length ?? 0).toBe(1);
-      expect(whileQueued.match(/searched 1 file pattern/g)?.length ?? 0).toBe(1);
+        await submitUserMessageForDeferredDelivery(tui, server, 'Queued successor', {
+          acceptWhen: (viewport) => screenContains(viewport, '↵ Queued successor'),
+          timeout: 15_000,
+        });
+        await tui.settleScreen();
+        const whileQueued = stripAnsi(tui.scrollback());
+        expect(whileQueued.match(/Thinking /g) ?? []).toHaveLength(1);
+        expect(whileQueued.match(/read 1 file/g)?.length ?? 0).toBe(1);
+        expect(whileQueued.match(/ran 1 shell command/g)?.length ?? 0).toBe(1);
+      } finally {
+        finishThought();
+      }
 
       await waitForText(() => tui.scrollback(), 'QUEUE_THOUGHT_DONE', 15_000);
       await waitForText(() => tui.scrollback(), 'QUEUE_SUCCESSOR_DONE', 15_000);
@@ -335,7 +362,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   test(
-    'adjacent file searches retain active pattern detail and settle as one plural summary',
+    'adjacent Shell file searches retain active command detail and settle as one plural summary',
     async () => {
       let finishSearchPhase!: () => void;
       const searchPhaseObserved = new Promise<void>((resolve) => {
@@ -345,14 +372,22 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         {
           message: {
             tool_calls: [
-              { id: 'search-a', name: 'search_files', args: { pattern: 'CLAUDE.md' } },
-              { id: 'search-b', name: 'search_files', args: { pattern: 'CLAUDE.md' } },
+              {
+                id: 'search-a',
+                name: 'shell_execute',
+                args: { command: "rg --files -g 'CLAUDE.md'" },
+              },
+              {
+                id: 'search-b',
+                name: 'shell_execute',
+                args: { command: "rg --files -g 'CLAUDE.md'" },
+              },
             ],
           },
         },
         {
           // Hold the real next Model request until its active exploration is painted.
-          // Fast local glob calls can otherwise finish before the first Session read;
+          // Fast local Shell searches can otherwise finish before the first Session read;
           // a final answer after 10ms does not establish an observable active phase.
           response: async () => {
             await searchPhaseObserved;
@@ -376,8 +411,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           () =>
             tui
               .screenFramesSince(searchFrames)
-              .some((frame) => screenContains(frame, 'Find CLAUDE.md')),
-          'the active safe search summary to retain its bounded pattern detail',
+              .some((frame) => screenContains(frame, "Bash rg --files -g 'CLAUDE.md'")),
+          'the active safe Shell summary to retain its bounded command detail',
           10_000,
         );
       } finally {
@@ -387,9 +422,9 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
-      expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
-      expect(screenContains(output, 'searched 1 file pattern')).toBe(false);
-      expect(tui.scrollback()).not.toContain('● Find');
+      expect(screenContains(output, 'ran 2 shell commands')).toBe(true);
+      expect(screenContains(output, 'ran 1 shell command')).toBe(false);
+      expect(tui.scrollback()).not.toContain('● Bash Ran: rg --files');
       expect(screenContains(output, 'CLAUDE.md')).toBe(false);
       expect(screenContains(output, 'src/index.ts')).toBe(false);
       expect(screenContains(output, 'SEARCH_PAIR_DONE')).toBe(true);
@@ -406,8 +441,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: content 文本输出（关闭 Thought）
   //
   // 预期 TUI 现象：
-  //   - Thought 标题 = "Thinking Xs · read 1 file, searched for 1 pattern"（规则 22）
-  //   - 工具步骤 tree 展开：├─ Read CLAUDE.md / ├─ Search: langgraph
+  //   - Thought 标题 = "Thinking Xs · read 2 files"（规则 22）
+  //   - 工具步骤 tree 展开：├─ Read CLAUDE.md / ├─ Read index.ts
   //   - settled 后无 footer
   //   - 模型回复文本可见
   // ═══════════════════════════════════════════════════════════════
@@ -422,7 +457,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
             reasoning_content: 'Let me explore the codebase structure.',
             tool_calls: [
               { id: 'c1', name: 'read_file', args: { path: 'CLAUDE.md' } },
-              { id: 'c2', name: 'search_content', args: { pattern: 'langgraph', path: 'src' } },
+              { id: 'c2', name: 'read_file', args: { path: 'src/index.ts' } },
             ],
           },
         },
@@ -449,7 +484,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const clean = stripAnsi(output);
 
       expect(screenContains(output, 'Thinking ')).toBe(true);
-      expect(/read 1 file[\s\S]*searched for 1 pattern/.test(clean)).toBe(true);
+      expect(screenContains(output, 'read 2 files')).toBe(true);
 
       // ── reasoning 正文始终隐藏，工具步骤 settle 后折叠 ──
       expect(screenContains(output, 'Let me explore the codebase structure.')).toBe(false);
@@ -630,13 +665,13 @@ describe('TUI PTY System — Thought Lifecycle', () => {
               },
               {
                 id: 'post-bash-search-a',
-                name: 'search_files',
-                args: { pattern: 'CLAUDE.md' },
+                name: 'shell_execute',
+                args: { command: "rg --files -g 'CLAUDE.md'" },
               },
               {
                 id: 'post-bash-search-b',
-                name: 'search_files',
-                args: { pattern: 'package.json' },
+                name: 'shell_execute',
+                args: { command: "rg --files -g 'package.json'" },
               },
             ],
           },
@@ -670,15 +705,15 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
       expect(screenContains(output, 'Bash')).toBe(true);
-      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(true);
+      expect(/Thinking [^\n]*ran 2 shell commands/u.test(clean)).toBe(true);
       expect(clean.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
-      expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
+      expect(screenContains(output, 'ran 2 shell commands')).toBe(true);
       const bash = clean.indexOf('● Bash Ran:');
       const explorationThought = clean.lastIndexOf('Thinking ');
       const finalText = clean.indexOf('POST_BASH_DONE:');
       expect(explorationThought).toBeGreaterThan(bash);
       expect(finalText).toBeGreaterThan(explorationThought);
-      expect(tui.scrollback()).not.toContain('● Find');
+      expect(tui.scrollback()).not.toContain('● Bash Ran: rg --files');
 
       await waitForCondition(
         () => {
@@ -753,9 +788,9 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const replay = stripAnsi(tui.viewport());
       const searchLines = replay
         .split('\n')
-        .filter((line) => line.includes('searched 2 file patterns'));
+        .filter((line) => line.includes('ran 2 shell commands'));
       expect(searchLines).toHaveLength(1);
-      expect(searchLines[0]?.trim()).toMatch(/^Thinking \d+s · searched 2 file patterns$/u);
+      expect(searchLines[0]?.trim()).toMatch(/^Thinking \d+s · ran 2 shell commands$/u);
       expect(replay.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
       expect(replay.indexOf('Thinking ')).toBeGreaterThan(replay.indexOf('● Bash Ran:'));
     },
@@ -780,12 +815,12 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         }));
       const search = (id: string, pattern: string) => ({
         id,
-        name: 'search_files',
-        args: { pattern },
+        name: 'shell_execute',
+        args: { command: `rg --files -g '${pattern}'` },
       });
       const overviewA = [...reads('overview-a'), search('overview-search-a', 'CLAUDE.md')];
       const overviewB = [...reads('overview-b'), search('overview-search-b', 'package.json')];
-      const overviewC = [...reads('overview-c'), search('overview-search-c', 'src')];
+      const overviewC = [...reads('overview-c'), search('overview-search-c', 'src/**')];
       const overviewD = [...reads('overview-d'), search('overview-search-d', '*.ts')];
       const bashCalls = [
         {
@@ -866,8 +901,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const thoughtLines = lines.filter((line) => line.startsWith('Thinking '));
       expect(thoughtLines).toHaveLength(1);
       expect(lines.some((line) => line.includes('read 8 files'))).toBe(true);
-      expect(lines.some((line) => line.includes('searched 6 file patterns'))).toBe(true);
-      expect(lines.some((line) => line.includes('ran 1 shell command'))).toBe(true);
+      expect(lines.some((line) => line.includes('ran 7 shell commands'))).toBe(true);
       captions.forEach((caption) => {
         expect(lines).not.toContain(caption);
       });
@@ -876,7 +910,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(
         lines.indexOf('PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。'),
       ).toBeGreaterThan(lines.indexOf(thoughtLines[0]!));
-      expect(tui.scrollback()).not.toContain('● Find');
+      expect(tui.scrollback()).not.toContain('● Bash Ran: rg --files');
 
       console.log('  [project-overview] clean output:', stripAnsi(output));
     },
@@ -890,11 +924,15 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // The response/tool topology and process narration are preserved;
       // filesystem output and the final answer are reduced to stable fixtures.
       const firstBatch = [
-        { id: 'real-search-package', name: 'search_files', args: { pattern: 'package.json' } },
+        {
+          id: 'real-search-package',
+          name: 'shell_execute',
+          args: { command: "rg --files -g 'package.json'" },
+        },
         {
           id: 'real-search-docs',
-          name: 'search_files',
-          args: { path: 'docs', pattern: '*.md' },
+          name: 'shell_execute',
+          args: { command: "rg --files -g '*.md' docs" },
         },
         { id: 'real-read-readme', name: 'read_file', args: { path: 'README.md' } },
       ];
@@ -1015,8 +1053,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const activeProjectFrame = activeFrame.slice(activeFrame.indexOf('❯ 了解当前项目'));
       expect(activeProjectFrame.match(/Thinking /g)).toHaveLength(1);
       expect(activeProjectFrame).toContain('read 3 files');
-      expect(activeProjectFrame).toContain('searched 2 file patterns');
-      expect(activeProjectFrame).toContain('ran 2 shell commands');
+      expect(activeProjectFrame).toContain('ran 4 shell commands');
       narrations.forEach((narration) => {
         expect(activeProjectFrame).not.toContain(narration);
       });
@@ -1031,8 +1068,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const queuedProjectFrame = queuedFrame.slice(queuedFrame.indexOf('❯ 了解当前项目'));
       expect(queuedProjectFrame.match(/Thinking /g)).toHaveLength(1);
       expect(queuedProjectFrame).toContain('read 3 files');
-      expect(queuedProjectFrame).toContain('searched 2 file patterns');
-      expect(queuedProjectFrame).toContain('ran 2 shell commands');
+      expect(queuedProjectFrame).toContain('ran 4 shell commands');
       expect(queuedProjectFrame).toContain('↵ 你好');
       narrations.forEach((narration) => {
         expect(queuedProjectFrame).not.toContain(narration);
@@ -1043,10 +1079,13 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const settled = stripAnsi(tui.viewport());
-      const lines = settled.split('\n').map((line) => line.trim());
+      // The final answer and successor can scroll the completed aggregate above
+      // this 40-row viewport. Its saved screen history must still occur once.
+      const lines = stripAnsi(tui.scrollback())
+        .split('\n')
+        .map((line) => line.trim());
       expect(lines.filter((line) => line.includes('read 3 files'))).toHaveLength(1);
-      expect(lines.filter((line) => line.includes('searched 2 file patterns'))).toHaveLength(1);
-      expect(lines.filter((line) => line.includes('ran 2 shell commands'))).toHaveLength(1);
+      expect(lines.filter((line) => line.includes('ran 4 shell commands'))).toHaveLength(1);
       expect(lines.filter((line) => line === 'REAL_SESSION_RENDER_DONE')).toHaveLength(1);
       // The earlier completed greeting can have scrolled out of the viewport;
       // its original Static material must still occur exactly once in history.
@@ -1146,7 +1185,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // The original 2026-09-03 trace painted `Thinking 1s`, then promoted the
       // same Thought to Static as `Thinking 3s`, leaving both physical lines.
       const exploration = [
-        { id: 'incident-search', name: 'search_files', args: { pattern: 'CLAUDE.md' } },
+        {
+          id: 'incident-search',
+          name: 'shell_execute',
+          args: { command: "rg --files -g 'CLAUDE.md'" },
+        },
         {
           id: 'incident-shell',
           name: 'shell_execute',
@@ -1185,8 +1228,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         .map((line) => line.trim())
         .filter((line) => line.startsWith('Thinking '));
       expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain('searched 1 file pattern');
-      expect(lines[0]).toContain('ran 1 shell command');
+      expect(lines[0]).toContain('ran 2 shell commands');
       expect(screenContains(viewport, '我来先了解一下仓库的当前状况，然后给出总结。')).toBe(false);
       expect(screenContains(viewport, 'SESSION_LOG_REPLAY_DONE')).toBe(true);
       const frames = tui.screenFramesSince(activityFrames);
@@ -1194,13 +1236,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         frames.some((frame) => screenContains(frame, 'Inspecting the repository before choosing')),
       ).toBe(true);
       expect(frames.some((frame) => screenContains(frame, 'Thinking 2s'))).toBe(true);
-      expect(
-        frames.some(
-          (frame) =>
-            screenContains(frame, 'searched 1 file pattern') &&
-            screenContains(frame, 'ran 1 shell command'),
-        ),
-      ).toBe(true);
+      expect(frames.some((frame) => screenContains(frame, 'ran 2 shell commands'))).toBe(true);
     },
     TIMEOUT,
   );

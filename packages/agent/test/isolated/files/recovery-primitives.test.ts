@@ -76,9 +76,6 @@ test('trusted byte primitives preserve binary, BOM/CRLF and full baseline withou
       'files.read',
       'files.write',
       'files.edit',
-      'files.list',
-      'files.glob',
-      'files.search',
     ]);
     const created = await f.files.restore({
       path: 'created',

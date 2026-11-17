@@ -24,17 +24,8 @@ test.each([
   ['files.view_images', '1', { paths: ['a.png', 'b.png'] }, 'a.png · b.png'],
   ['files.view_images', '1', { paths: Array.from({ length: 11 }, () => 'a.png') }, undefined],
   ['files.view_images', '1', { path: 'a.png', paths: ['b.png'] }, undefined],
-  ['files.read_path', '2', { path: '/Users/example/private.txt' }, '/Users/example/private.txt'],
   ['files.write', '3', { path: 'out/report.md', content: 'PRIVATE BODY' }, 'out/report.md'],
   ['files.edit', '2', { path: 'src/app.ts', find: 'PRIVATE BODY' }, 'src/app.ts'],
-  ['files.write_path', '1', { path: '/tmp/output.txt' }, '/tmp/output.txt'],
-  ['files.edit_path', '1', { path: '/tmp/output.txt' }, '/tmp/output.txt'],
-  ['files.list', '1', {}, '.'],
-  ['files.list', '1', { path: '' }, '.'],
-  ['files.list', '1', { path: 'src' }, 'src'],
-  ['files.glob', '3', { pattern: '**/*.ts' }, '**/*.ts'],
-  ['files.glob', '3', { pattern: '*.ts', path: 'src' }, '*.ts · src'],
-  ['files.search', '5', { text: 'toolTarget', path: 'src/main.ts' }, 'toolTarget · src/main.ts'],
   [
     'web_fetch',
     '1',
@@ -74,13 +65,6 @@ test.each([
   ],
   ['planning.review', '1', { planId: 'plan' }, 'plan'],
   ['planning.update', '1', { planId: 'plan', stepId: 'fix' }, 'plan · fix'],
-  ['activate_skill', '1', { skill_id: 'review', input: { secret: 'PRIVATE BODY' } }, 'review'],
-  [
-    'read_skill_reference',
-    '1',
-    { activation_id: 'private', path: 'references/guide.md' },
-    'references/guide.md',
-  ],
 ] as const)('%s@%s extracts only its known display target', (id, version, input, expected) => {
   expect(nativeToolRequestTarget(input, id, version)).toBe(expected);
 });
@@ -107,10 +91,6 @@ test('short purposes are single-line and bounded without exposing code or unknow
 test('supported saved file versions retain target display', () => {
   for (const version of ['2', '3', '4', '5'])
     expect(nativeToolRequestTarget({ path: 'README.md' }, 'files.read', version)).toBe('README.md');
-  for (const version of ['2', '3', '4', '5'])
-    expect(nativeToolRequestTarget({ text: 'needle' }, 'files.search', version)).toBe('needle');
-  for (const version of ['2', '3'])
-    expect(nativeToolRequestTarget({ pattern: '*.md' }, 'files.glob', version)).toBe('*.md');
 });
 
 test('unknown tools, versions and inputs never expose arbitrary arguments', () => {
@@ -159,7 +139,25 @@ test('long targets preserve complete Unicode code points and fit the display bou
   expect([...target]).toHaveLength(4096);
   expect(target.endsWith('…')).toBe(true);
   expect(target).not.toContain('\ufffd');
-  const search = nativeToolRequestTarget({ text: '雪'.repeat(4095), path }, 'files.search', '5')!;
+  const search = nativeToolRequestTarget({ id: '雪'.repeat(4095), path }, 'skills.resource', '1')!;
   expect([...search]).toHaveLength(4096);
   expect(search.endsWith('…')).toBe(true);
+});
+
+test.each([
+  ['files.read_path', ['1', '2']],
+  ['files.write_path', ['1']],
+  ['files.edit_path', ['1']],
+  ['files.list', ['1']],
+  ['files.glob', ['2', '3']],
+  ['files.search', ['2', '3', '4', '5']],
+  ['activate_skill', ['1']],
+  ['read_skill_reference', ['1']],
+] as const)('retired %s versions do not infer request targets', (id, versions) => {
+  for (const version of [...versions, 'future'])
+    for (const input of [
+      {},
+      { path: '/private/file', pattern: '*.ts', text: 'secret', skill_id: 'old' },
+    ])
+      expect(nativeToolRequestTarget(input, id, version)).toBeUndefined();
 });

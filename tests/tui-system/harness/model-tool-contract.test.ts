@@ -122,9 +122,13 @@ test('actual SDK mock calls execute real Runtime Files tools with original ident
       ['original-edit', 'files.edit', 'succeeded'],
     ]);
     expect(executions[0]!.input).toEqual({ path: 'sample.txt', offset: 2, limit: 1 });
-    expect(executions[1]!.input).toMatchObject({
-      base: { hash: expect.stringMatching(/^[a-f0-9]{64}$/), size: 19 },
+    const readReceipt = JSON.parse(String((executions[0]!.result as { content: string }).content));
+    expect(readReceipt.baseline).toMatchObject({
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      size: 19,
     });
+    expect(executions[1]!.input).toMatchObject({ baseRef: readReceipt.base_ref });
+    expect(executions[1]!.input).not.toHaveProperty('base');
     expect(executions[2]!.input).toMatchObject({
       find: 'full 🪁',
       replace: 'changed 雪',
@@ -158,7 +162,34 @@ test('actual SDK mock calls execute real Runtime Files tools with original ident
   }
 }, 20000);
 
-test('planning and MCP metadata round-trip exact CAS and connection identity without changing opaque data', () => {
+test('current file schema preserves omitted creation base and exact references while rejecting old or extra fields', () => {
+  const request: MockChatRequest = { body: {}, messages: [] };
+  const args = { path: 'new.txt', content: 'exact bytes' };
+  const call = { id: 'new', name: 'files.write', args };
+  expect(projectOriginalModelToolCall(call, request)).toEqual({ ...call, name: 'write_file' });
+  expect(
+    projectOriginalModelToolCall(
+      { ...call, args: { ...args, baseRef: 'file.original-host-reference' } },
+      request,
+    ),
+  ).toEqual({
+    ...call,
+    name: 'write_file',
+    args: { ...args, base_ref: 'file.original-host-reference' },
+  });
+  for (const extra of [
+    { base: null },
+    { base: { hash: 'a'.repeat(64), size: 0, device: '1', inode: '2' } },
+    { baseRef: null },
+    { baseRef: '' },
+    { invented: true },
+  ])
+    expect(() =>
+      projectOriginalModelToolCall({ ...call, args: { ...args, ...extra } }, request),
+    ).toThrow('original_tool_model_projection_changed_input:files.write');
+});
+
+test('planning and MCP metadata round-trip exact host references without changing opaque data', () => {
   const tools = [
     ...createPlanningValidation().extension.tools!,
     ...createMcpLifecycle({ servers: [] }).extension.tools!,
@@ -170,7 +201,7 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
       name: 'planning.write',
       args: {
         planId: 'exact',
-        expectedVersion: null,
+        expectedPlanRef: 'plan.original-host-reference',
         title: 'Goal',
         body: 'Full body 🪁',
         steps: [{ id: 'one', title: 'Exact step' }],
@@ -179,19 +210,13 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
     {
       id: 'review',
       name: 'planning.review',
-      args: { planId: 'exact', version: 1, digest: 'a'.repeat(64) },
+      args: { planRef: 'plan.original-host-reference' },
     },
     {
       id: 'resource',
       name: 'mcp.resources.read',
       args: {
-        serverId: 'server',
-        connectionKey: 'connection',
-        configDigest: 'a'.repeat(64),
-        generation: 1,
-        uri: 'fixture://full',
-        catalogueExecutionId: 'original-catalogue',
-        descriptorDigest: 'b'.repeat(64),
+        resourceRef: 'mr_original_host_reference',
       },
     },
   ];
@@ -221,13 +246,11 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
   }
   expect(projectOriginalModelToolCall(cases[0]!, request).args).toMatchObject({
     plan_id: 'exact',
-    expected_version: null,
+    expected_plan_ref: 'plan.original-host-reference',
     steps: [{ id: 'one', title: 'Exact step' }],
   });
   expect(projectOriginalModelToolCall(cases[2]!, request).args).toMatchObject({
-    connection_key: 'connection',
-    catalogue_execution_id: 'original-catalogue',
-    descriptor_digest: 'b'.repeat(64),
+    resource_ref: 'mr_original_host_reference',
   });
   expect(() =>
     projectOriginalModelToolCall({ id: 'hidden', name: 'task.execute', args: {} }, request),
@@ -235,7 +258,7 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
   const publicTask = {
     id: 'public',
     name: 'spawn_agent',
-    args: { prompt: 'Original task', task_name: 'Child', preset: 'code' },
+    args: { prompt: 'Original task', task_name: 'Child', preset: 'general' },
   };
   expect(projectOriginalModelToolCall(publicTask, request)).toEqual(publicTask);
   expect(originalModelToolName('shell.execute', request)).toBe('shell_execute');

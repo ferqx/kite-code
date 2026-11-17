@@ -109,7 +109,7 @@ export function projectOriginalModelToolCall(
   assertUniqueDeclaredName(model.name, request);
   const parameters = Object.keys(call.args).flatMap((key) => {
     // Do not infer names inside user JSON or undeclared keys.
-    const properties = tool.inputSchema.properties;
+    const properties = (model.inputSchema ?? tool.inputSchema).properties;
     if (
       !properties ||
       typeof properties !== 'object' ||

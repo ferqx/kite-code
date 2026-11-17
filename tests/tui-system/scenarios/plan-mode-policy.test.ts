@@ -1,7 +1,7 @@
 /**
  * Original Plan Mode policy journey, migrated to the current Core contract.
- * Before review, exact readonly metadata is allowed; Full does not permit
- * writes, Shell Jobs, or child tasks. No legacy sandbox dispatch/event is
+ * Before review, exact readonly file access is allowed; Full does not permit
+ * writes, mutating Shell Jobs, or general child tasks. No legacy sandbox dispatch/event is
  * treated as proof. Single-use planning does not persist as a Session mode.
  */
 
@@ -48,13 +48,17 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
                 content: 'This file must not be created from planning mode.',
               },
             },
-            { id: 'call_plan_shell_denied', name: 'shell_execute', args: { command: 'pwd' } },
+            {
+              id: 'call_plan_shell_denied',
+              name: 'shell_execute',
+              args: { command: 'touch plan-shell-created.txt' },
+            },
             {
               id: 'call_plan_child_denied',
               name: 'spawn_agent',
               args: {
                 task_name: 'Forbidden planning child',
-                preset: 'code',
+                preset: 'general',
                 prompt: 'Do not start before approval.',
               },
             },
@@ -65,7 +69,10 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         expectedRequest: {
           toolResults: ['write', 'shell', 'child'].map((kind) => ({
             toolCallId: `call_plan_${kind}_denied`,
-            contentIncludes: ['Plan mode is read-only', 'not dispatched'],
+            contentIncludes: [
+              'The current plan requires approval',
+              'This request was not executed.',
+            ],
           })),
         },
         message: {
@@ -91,8 +98,8 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           tool_calls: [
             {
               id: 'call_plan_baseline_readonly',
-              name: 'files.list',
-              args: { limit: 100 },
+              name: 'read_file',
+              args: { path: 'planning-baseline.txt' },
             },
           ],
         },
@@ -103,7 +110,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
             (message) =>
               message.role === 'tool' && message.tool_call_id === 'call_plan_baseline_readonly',
           );
-          if (!String(result?.content).includes('planning-baseline.txt'))
+          if (!String(result?.content).includes('Exact readonly baseline.'))
             throw Error('planning_readonly_actual_baseline_missing');
           readonlyReceipt = true;
           return {
@@ -111,12 +118,12 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
               toolResults: [
                 {
                   toolCallId: 'call_plan_baseline_readonly',
-                  contentIncludes: ['planning-baseline.txt'],
+                  contentIncludes: ['planning-baseline.txt', 'Exact readonly baseline.'],
                 },
               ],
             },
             delay: 5_000,
-            message: { content: 'Validated actual readonly metadata during planning.' },
+            message: { content: 'Validated actual readonly file content during planning.' },
           };
         },
       },
@@ -163,6 +170,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       db.query("SELECT id FROM interaction WHERE run_id=? AND kind='approval'").all(runId),
     ).toHaveLength(0);
     expect(existsSync(join(workspace.workspace, 'plan-created.txt'))).toBe(false);
+    expect(existsSync(join(workspace.workspace, 'plan-shell-created.txt'))).toBe(false);
   }
 
   step(
@@ -250,7 +258,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       using db = new Database(workspace.databasePath, { readonly: true });
       const actual = db
         .query<{ state: string; dispatched: number; result_json: string }, [string]>(
-          "SELECT state,dispatched,result_json FROM execution WHERE run_id=? AND call_id='call_plan_baseline_readonly' AND adapter_id='files.list'",
+          "SELECT state,dispatched,result_json FROM execution WHERE run_id=? AND call_id='call_plan_baseline_readonly' AND adapter_id='files.read'",
         )
         .get(identity.turnId);
       expect(actual).toBeDefined();
@@ -259,10 +267,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       expect(actual!.result_json).toContain('planning-baseline.txt');
       const result = JSON.parse(actual!.result_json);
       expect(result.outcome).toBe('succeeded');
-      expect(JSON.parse(result.content).entries).toContainEqual({
-        name: 'planning-baseline.txt',
-        kind: 'file',
-      });
+      expect(JSON.parse(result.content).content).toBe('Exact readonly baseline.\n');
       const modelRequestsAtResult = server.getWorkRequestCount();
       tui.write('\x03');
       await observedRun(readonlyTask, 'cancelled');
@@ -272,10 +277,10 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       expect(screenContains(output, 'Deferred until execution')).toBe(false);
       expect(screenContains(output, '工具授权')).toBe(false);
       // Readonly exploration is an aggregate on the main screen. Its original
-      // directory entries remain readable through the ordinary execution panel.
+      // file content remains readable through the ordinary execution panel.
       await waitForTuiReady(tui);
       tui.write('\x05');
-      await waitForText(() => tui.viewport(), 'files.list', 5000);
+      await waitForText(() => tui.viewport(), 'files.read', 5000);
       await waitForText(
         () => tui.viewport().replace(/\s*\n\s*/g, ''),
         'planning-baseline.txt',

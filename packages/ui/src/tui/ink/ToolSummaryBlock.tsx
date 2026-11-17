@@ -34,17 +34,6 @@ function toolArgsLabel(name: string, args: Record<string, unknown>, totalLines?:
       const range = formatReadFileRange(args, totalLines);
       return `${filename}${range}`;
     }
-    case 'search_content': {
-      const pattern = typeof args.pattern === 'string' ? args.pattern : '';
-      const glob = typeof args.glob === 'string' ? ` [${args.glob}]` : '';
-      const path = typeof args.path === 'string' ? ` → ${args.path}` : '';
-      return `"${pattern.slice(0, 60)}"${glob}${path}`;
-    }
-    case 'search_files': {
-      const pattern = typeof args.pattern === 'string' ? args.pattern : '';
-      const path = typeof args.path === 'string' ? ` in ${args.path}` : '';
-      return `${pattern.slice(0, 60)}${path}`;
-    }
     case 'shell_execute':
     case 'bash': {
       const c = args.command;

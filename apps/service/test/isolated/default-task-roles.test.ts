@@ -13,23 +13,20 @@ const model = {
 function input(role: string, tools: string[]) {
   const actualTools = tools.map((id) => ({
     id,
-    version:
-      id === 'files.read' ? '4' : id === 'files.search' ? '4' : id === 'files.glob' ? '2' : '1',
-    extensionId: id.endsWith('_path')
-      ? 'builtin.files.path'
-      : id.startsWith('files.')
-        ? 'builtin.files'
-        : id.startsWith('shell.')
-          ? 'builtin.shell'
-          : id.startsWith('planning.')
-            ? 'builtin.planning'
-            : id.startsWith('task.')
-              ? 'builtin.task'
-              : id === 'execution_evidence.read'
-                ? 'builtin.execution-evidence'
-                : id === 'web_fetch'
-                  ? 'builtin.web'
-                  : 'fixture',
+    version: id === 'files.read' ? '4' : '1',
+    extensionId: id.startsWith('files.')
+      ? 'builtin.files'
+      : id.startsWith('shell.')
+        ? 'builtin.shell'
+        : id.startsWith('planning.')
+          ? 'builtin.planning'
+          : id.startsWith('task.')
+            ? 'builtin.task'
+            : id === 'execution_evidence.read'
+              ? 'builtin.execution-evidence'
+              : id === 'web_fetch'
+                ? 'builtin.web'
+                : 'fixture',
   }));
   return {
     configurationId: role,
@@ -71,7 +68,7 @@ test('default general and explore bind only actual parent definitions', async ()
   });
   const parent = [
     'files.read',
-    'files.search',
+    'files.view_images',
     'files.write',
     'shell.launch',
     'shell.stop',
@@ -86,7 +83,13 @@ test('default general and explore bind only actual parent definitions', async ()
   }
   for (const role of ['explore']) {
     const readonly = await configured.resolveChildRunConfiguration!(input(role, parent));
-    expect(readonly.toolIds).toEqual(['files.read', 'shell.launch', 'shell.stop', 'shell.read']);
+    expect(readonly.toolIds).toEqual([
+      'files.read',
+      'files.view_images',
+      'shell.launch',
+      'shell.stop',
+      'shell.read',
+    ]);
     expect(readonly.modelId).toBe('actual-parent');
   }
   expect(configured.childConfigurations![1]!.inputSchema).toMatchObject({
@@ -117,7 +120,7 @@ test('default children exclude the exact root clarification tool while retaining
   }
 });
 
-test('public spawn presets retain current builtin file discovery definitions and reject untrusted bindings', async () => {
+test('public spawn presets retain current builtin file read definitions and reject untrusted bindings', async () => {
   // Construction is pure: use the actual definitions without performing file IO.
   const current = createFileTools({} as WorkspaceFiles).map(({ id, version }) => ({
     extensionId: 'builtin.files',
@@ -139,7 +142,7 @@ test('public spawn presets retain current builtin file discovery definitions and
         async ensure({ request }) {
           if (request.kind !== 'agent') throw new Error('expected_agent_request');
           selected = request.configurationId;
-          return { childSessionId: `child-${role}` };
+          return { childSessionId: `child-${role}`, executionId: `work-${role}` };
         },
       },
     } as ToolContext);
@@ -218,7 +221,7 @@ test('explore rejects unknown owners, future versions and prepared mutation addi
     });
     const request = input(role, [
       'files.read',
-      'files.list',
+      'files.view_images',
       'files.write',
       'planning.update',
       'shell.launch',
@@ -231,15 +234,30 @@ test('explore rejects unknown owners, future versions and prepared mutation addi
     tools.tools[4]!.version = 'future';
     const result = await configured.resolveChildRunConfiguration!(request);
     expect(result.toolIds).toEqual([]);
-    const oldSearch = input(role, ['files.search']);
-    expect(
-      (
-        await configured.resolveChildRunConfiguration!({
-          ...oldSearch,
-          parentTools: oldSearch.parentTools!.map((tool) => ({ ...tool, version: '2' })),
-        })
-      ).toolIds,
-    ).toEqual([]);
+    for (const [id, version] of [
+      ['files.list', '1'],
+      ['files.glob', '2'],
+      ['files.glob', '3'],
+      ['files.search', '2'],
+      ['files.search', '3'],
+      ['files.search', '4'],
+      ['files.search', '5'],
+    ] as const) {
+      const retired = input(role, [id]);
+      const parentTools = retired.parentTools!.map((tool) => ({ ...tool, version }));
+      expect(
+        (
+          await configured.resolveChildRunConfiguration!({
+            ...retired,
+            parentTools,
+            parentRun: {
+              ...retired.parentRun!,
+              configuration: { modelId: 'actual-parent', tools: parentTools },
+            },
+          })
+        ).toolIds,
+      ).toEqual([]);
+    }
     let disposed = 0;
     const escalated = createChildConfiguration({
       roles: defaultTaskRoles,
@@ -272,7 +290,10 @@ test('general is both the omitted default and an explicit preset while removed p
       async ensure({ request }) {
         if (request.kind !== 'agent') throw new Error('expected_agent_request');
         selected.push(request.configurationId);
-        return { childSessionId: `child-${selected.length}` };
+        return {
+          childSessionId: `child-${selected.length}`,
+          executionId: `work-${selected.length}`,
+        };
       },
     },
   } as ToolContext;
@@ -363,7 +384,7 @@ test('trusted custom roles retain their declaration order, explicit default and 
       async ensure({ request }) {
         if (request.kind !== 'agent') throw Error('expected_agent_request');
         selected.push(request.configurationId);
-        return { childSessionId: 'trusted-custom' };
+        return { childSessionId: 'trusted-custom', executionId: 'trusted-custom-work' };
       },
     },
   } as ToolContext;

@@ -667,7 +667,7 @@ test('a tool-call-only Model remains inside one Native activity while its histor
 test.each([
   '3',
   '4',
-])('Native search v%s and reads retain one exploration node through settling and delayed receipt facts', async (version) => {
+])('Native retired search v%s and reads retain one generic tool group through settling and delayed receipt facts', async (version) => {
   const f = fixture();
   try {
     await f.render();
@@ -681,11 +681,11 @@ test.each([
     ]);
     collapsed(f.host);
     const summary = f.host.querySelector('.conversation-trace-trigger');
-    expect(summary?.textContent).toContain('搜索内容');
+    expect(summary?.textContent).toContain('files.search');
     expect(f.host.textContent).not.toContain(`files.search · ${version}`);
     await f.toggle();
     expect(f.host.querySelector('.conversation-trace-steps')?.children).toHaveLength(2);
-    expect(f.host.textContent).toContain('搜索内容');
+    expect(f.host.textContent).toContain('files.search');
     for (const index of [1, 2]) {
       await f.settleWithoutReceipt(index);
       expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
@@ -704,7 +704,7 @@ test.each([
     await f.appendStage([]);
     expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
     expect(summary?.getAttribute('aria-expanded')).toBe('true');
-    expect(summary?.textContent).toBe('搜索了内容 · 读取了文件');
+    expect(summary?.textContent).toBe('运行了工具 · 读取了文件');
     expect(summary?.querySelector('[data-status="running"]')).toBeNull();
     expect(summary?.textContent).not.toContain('已完成 2 项');
   } finally {
@@ -894,7 +894,7 @@ test('Native tools aggregate future versions with stable names and retain Run an
     expect(f.host.textContent).not.toContain('foreign-store');
     expect(f.host.querySelectorAll('.conversation-trace-steps')).toHaveLength(0);
     await f.toggle();
-    expect(f.host.textContent).toContain('搜索内容');
+    expect(f.host.textContent).toContain('files.search');
     expect(f.host.textContent).not.toContain('files.search · 99');
     expect(f.host.querySelector('.conversation-trace-steps')?.children).toHaveLength(3);
     expect(f.host.querySelector('.conversation-trace-steps')?.textContent).not.toContain(

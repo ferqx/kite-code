@@ -2134,8 +2134,8 @@ test('a completed child uses the shared collapsed process, concise exploration a
       tools: ['a', 'b'].map((suffix) => ({
         messageId: `child-read-${suffix}`,
         executionId: `child-tool-${suffix}`,
-        definitionId: suffix === 'a' ? 'files.read' : 'files.search',
-        definitionVersion: '3',
+        definitionId: 'files.read',
+        definitionVersion: '5',
         status: 'succeeded',
         resultRevision: '1',
         target: `child-${suffix}.txt`,
@@ -2177,10 +2177,10 @@ test('a completed child uses the shared collapsed process, concise exploration a
     expect(f.host.textContent).toContain('Child process explanation');
     const exploration = child.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
     expect(exploration).not.toBeNull();
-    expect(exploration.textContent).toContain('已读取文件');
-    expect(exploration.textContent).toContain('已搜索内容');
+    expect(exploration.textContent).toBe('读取了文件');
+    expect(exploration.textContent).not.toContain('已搜索内容');
     expect(exploration.textContent).not.toContain('已完成 2 项');
-    expect(child.textContent).not.toContain('files.search · 3');
+    expect(child.textContent).not.toContain('files.read · 5');
     await act(async () => exploration.click());
     await f.waitForText('child-b.txt');
     expect(child.querySelectorAll('.conversation-trace-steps .tool-activity')).toHaveLength(2);

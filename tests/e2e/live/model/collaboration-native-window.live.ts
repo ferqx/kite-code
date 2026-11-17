@@ -74,8 +74,8 @@ export async function runLiveNativeWindow(options: {
   const contentA = `approved-${crypto.randomUUID()}\n`,
     contentB = `denied-${crypto.randomUUID()}\n`,
     contentC = `followup-${crypto.randomUUID()}\n`;
-  const prompt = `New task: this is a synthetic two-child approval test. Use spawn_agent exactly twice, with worker/default children. Child A must make exactly one write_user_file call: path ${JSON.stringify(targetA)}, content ${JSON.stringify(contentA)}, base null. Child B must make exactly one write_user_file call: path ${JSON.stringify(targetB)}, content ${JSON.stringify(contentB)}, base null. Put each instruction only in its own child prompt. Neither parent nor child may create any other child or file, run shell, ask questions, retry a denied action, or use any other mutation. After creating BOTH children, keep the parent waiting using wait_agent_events on both accurate agent IDs with timeout_ms 30000; continue waiting until both are terminal, then summarize their real outcomes. Each child must stop after its one write attempt, whether approved or denied. A human will answer each exact child approval in the ordinary window. These two paths are explicitly authorized synthetic targets outside this workspace; do not weaken the current permission mode.`;
-  const followupChildInstruction = `You are the same original collaborator in a new round. Do not delegate or create another child. Make exactly one write_user_file call: path ${JSON.stringify(targetC)}, content ${JSON.stringify(contentC)}, base null. Stop after that one attempt. This is a new external target and needs its own fresh human approval; previous approvals do not authorize it.`;
+  const prompt = `New task: this is a synthetic two-child approval test. Use spawn_agent exactly twice, with the default general children (omit preset). Child A must make exactly one write_file call: path ${JSON.stringify(targetA)}, content ${JSON.stringify(contentA)}. Omit base_ref because this creates a new file. Child B must make exactly one write_file call: path ${JSON.stringify(targetB)}, content ${JSON.stringify(contentB)}. Omit base_ref because this creates a new file. Put each instruction only in its own child prompt. Neither parent nor child may create any other child or file, run shell, ask questions, retry a denied action, or use any other mutation. After creating BOTH children, keep the parent waiting using wait_agent_events with work_refs containing both exact returned work_ref values and wait_ms 30000; continue waiting until both are terminal, then summarize their real outcomes. Each child must stop after its one write attempt, whether approved or denied. A human will answer each exact child approval in the ordinary window. These two paths are explicitly authorized synthetic targets outside this workspace; do not weaken the current permission mode.`;
+  const followupChildInstruction = `You are the same original collaborator in a new round. Do not delegate or create another child. Make exactly one write_file call: path ${JSON.stringify(targetC)}, content ${JSON.stringify(contentC)}. Omit base_ref because this creates a new file. Stop after that one attempt. This is a new external target and needs its own fresh human approval; previous approvals do not authorize it.`;
   const checks: Record<string, boolean | number> = {};
   const wire: {
     attempt: number;
@@ -181,7 +181,7 @@ export async function runLiveNativeWindow(options: {
           "SELECT * FROM execution WHERE session_id='native-root' AND child_session_id IS NOT NULL ORDER BY rowid",
         );
         const allCards = rows(
-          "SELECT * FROM interaction WHERE presentation_session_id='native-root' AND kind='approval' AND definition_id='files.write_path' ORDER BY id",
+          "SELECT * FROM interaction WHERE presentation_session_id='native-root' AND kind='approval' AND definition_id='files.write' ORDER BY id",
         );
         const carriers = allCarriers.slice(0, 2);
         const cards = allCards.filter((card) =>
@@ -203,7 +203,7 @@ export async function runLiveNativeWindow(options: {
         });
         const runs = rows('SELECT * FROM run');
         const allTools = rows(
-          "SELECT * FROM execution WHERE kind='tool' AND adapter_id='files.write_path'",
+          "SELECT * FROM execution WHERE kind='tool' AND adapter_id='files.write'",
         );
         const tools = allTools.filter((tool) =>
           [targetA, targetB].includes(String(parse(tool.intent_json).path)),
@@ -229,16 +229,57 @@ export async function runLiveNativeWindow(options: {
           : undefined;
         const originalChildRun = runs.find((run) => run.id === originalA?.run_id);
         const followupChildRun = runs.find((run) => run.id === followupCard?.run_id);
+        const originalSource = originalCarrier
+          ? rows(
+              'SELECT * FROM execution WHERE id=?',
+              String(originalCarrier.parent_execution_id),
+            )[0]
+          : undefined;
+        const originalParentRun = runs.find((run) => run.id === originalSource?.run_id);
+        const followupParentRun = runs.find((run) => run.id === delegationTool?.run_id);
+        const followupParentCommand = followupParentRun
+          ? rows('SELECT * FROM command WHERE id=?', String(followupParentRun.origin_command_id))[0]
+          : undefined;
+        const followupChildCommand = followupChildRun
+          ? rows('SELECT * FROM command WHERE id=?', String(followupChildRun.origin_command_id))[0]
+          : undefined;
+        const followupPrompt = originalA
+          ? `New assignment for the same original A agent_id ${String(originalA.session_id)}: use follow_up_agent exactly once and pass this exact quoted new instruction as its content: ${JSON.stringify(followupChildInstruction)}. Do not spawn another child. Keep waiting with wait_agent_events using the exact new returned work_ref in work_refs and wait_ms 30000 until that new child round becomes terminal, then summarize its real outcome. Never retry a denied call. Mutate no other path.`
+          : null;
+        // Idle composer input is a new public run.start, not a classifier-selected old work.
+        const exactNewParent =
+          !!originalParentRun &&
+          !!followupParentRun &&
+          !!followupParentCommand &&
+          originalParentRun.is_active === 0 &&
+          originalParentRun.status === 'completed' &&
+          followupParentRun.id !== originalParentRun.id &&
+          followupParentRun.session_id === 'native-root' &&
+          followupParentCommand.session_id === 'native-root' &&
+          followupParentCommand.origin_store_id === storeId &&
+          followupParentCommand.kind === 'run.start' &&
+          followupParentCommand.status === 'applied' &&
+          parse(followupParentCommand.request_json).content === followupPrompt &&
+          parse(followupParentCommand.receipt_json).runId === followupParentRun.id &&
+          followupParentCommand.root_work_command_id === followupParentCommand.id &&
+          followupParentCommand.root_work_seq === followupParentCommand.seq &&
+          followupParentRun.root_work_command_id === followupParentCommand.id &&
+          followupParentRun.root_work_seq === followupParentCommand.seq &&
+          followupParentRun.root_work_command_id !== originalParentRun.root_work_command_id &&
+          followupParentRun.root_work_seq !== originalParentRun.root_work_seq;
+
         const exactLineage =
           carriers.length === 2 &&
           new Set(carriers.map((entry) => entry.child_session_id)).size === 2 &&
           cards.length === 2 &&
           cards.every(
             (card) =>
+              card.definition_version === '3' &&
               carriers.some((carrier) => carrier.child_session_id === card.session_id) &&
               tools.some(
                 (tool) =>
                   tool.id === card.execution_id &&
+                  tool.definition_version === '3' &&
                   tool.session_id === card.session_id &&
                   tool.run_id === card.run_id,
               ) &&
@@ -298,7 +339,10 @@ export async function runLiveNativeWindow(options: {
               delegationCard.presentation_session_id === 'native-root' &&
               delegationCard.run_id === delegationTool.run_id &&
               delegationTool.session_id === 'native-root' &&
-              delegationTool.root_work_command_id === originalCarrier.root_work_command_id &&
+              exactNewParent &&
+              delegationTool.run_id === followupParentRun?.id &&
+              delegationTool.root_work_command_id === followupParentCommand?.id &&
+              delegationTool.root_work_seq === followupParentCommand?.seq &&
               parse(delegationTool.intent_json).agentId === originalA?.session_id &&
               parse(delegationTool.intent_json).content ===
                 object(parse(delegationCard.request_json).input).content,
@@ -306,7 +350,11 @@ export async function runLiveNativeWindow(options: {
               delegationCard?.state === 'answered' &&
               delegationCard.accepted_decision_revision !== null &&
               parse(delegationCard.answer_json).decision === 'approve' &&
-              parse(delegationCard.answer_json).grant === 'approve_once',
+              parse(delegationCard.answer_json).optionId === 'once' &&
+              !!delegationTool &&
+              parse(delegationTool.interaction_binding_json).interactionId === delegationCard.id &&
+              parse(delegationTool.interaction_binding_json).decisionRevision ===
+                String(delegationCard.accepted_decision_revision),
             dispatched: delegationTool?.state === 'succeeded' && delegationTool.dispatched === 1,
           },
           followupInputUnresolved: rows(
@@ -356,13 +404,32 @@ export async function runLiveNativeWindow(options: {
                 )[0]!.count,
               ) === 4 &&
               allTools.length === 3 &&
+              followupCard.definition_version === '3' &&
+              followupTool.definition_version === '3' &&
               followupCard.session_id === originalA.session_id &&
               followupCard.run_id !== originalA.run_id &&
               followupCard.execution_id === followupTool.id &&
               followupTool.run_id === followupCard.run_id &&
               successor.id !== originalCarrier.id &&
-              successor.root_work_command_id === originalCarrier.root_work_command_id &&
-              followupChildRun.root_work_command_id === originalChildRun.root_work_command_id &&
+              exactNewParent &&
+              !!delegationTool &&
+              !!followupChildCommand &&
+              successor.parent_execution_id === delegationTool.id &&
+              successor.predecessor_execution_id === originalCarrier.id &&
+              successor.child_session_id === originalA.session_id &&
+              followupChildCommand.id === `child-start-${String(successor.id)}` &&
+              followupChildCommand.kind === 'input.follow_up' &&
+              followupChildCommand.session_id === originalA.session_id &&
+              followupChildCommand.agent_source_execution_id === delegationTool.id &&
+              followupChildCommand.agent_carrier_execution_id === successor.id &&
+              parse(followupChildCommand.request_json).afterRunId === originalChildRun.id &&
+              parse(followupChildCommand.request_json).content === followupChildInstruction &&
+              [successor, followupChildRun, followupChildCommand, followupTool].every(
+                (fact) =>
+                  fact.origin_store_id === storeId &&
+                  fact.root_work_command_id === followupParentCommand?.id &&
+                  fact.root_work_seq === followupParentCommand?.seq,
+              ) &&
               followupCard.origin_store_id === storeId &&
               followupCard.presentation_session_id === 'native-root',
             answered:
@@ -371,10 +438,7 @@ export async function runLiveNativeWindow(options: {
               parse(followupCard.answer_json).decision === 'approve',
             dispatched: followupTool?.state === 'succeeded' && followupTool.dispatched === 1,
           },
-          followupPrompt:
-            originalA && originalCarrier && originalChildRun
-              ? `Continue ${String(originalCarrier.root_work_command_id)}. Use follow_up_agent exactly once on the same original A agent_id ${String(originalA.session_id)} and pass this exact quoted new instruction as its content: ${JSON.stringify(followupChildInstruction)}. Do not spawn another child. Keep waiting for the exact new child round to become terminal, then summarize its real outcome. Never retry a denied call. Mutate no other path.`
-              : null,
+          followupPrompt,
           twoChildren: allCarriers.length === 2,
           exactLineage,
           rootWaiting:
@@ -479,8 +543,8 @@ export async function runLiveNativeWindow(options: {
       },
     });
     const enabled = new Set([
-      'files.read_path',
-      'files.write_path',
+      'files.read',
+      'files.write',
       'task.spawn',
       'task.follow_up',
       'task.message',

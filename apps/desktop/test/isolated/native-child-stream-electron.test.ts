@@ -20,6 +20,7 @@ test.skipIf(process.platform !== 'darwin').each(['chat-completions', 'responses'
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' });
     const workspace = join(root, 'workspace');
     mkdirSync(workspace);
+    writeFileSync(join(workspace, 'child-input.txt'), 'Child stream fixture input.\n');
     const configuration = ownedUserConfiguration(root);
     const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
     const storeId = (await store.getMetadata()).storeId;
@@ -147,7 +148,7 @@ test.skipIf(process.platform !== 'darwin').each(['chat-completions', 'responses'
           const id = `native-response-${calls.length}`;
           if (child && !tools) {
             expect(
-              (body.tools as { name: string }[]).some((tool) => tool.name === 'list_directory'),
+              (body.tools as { name: string }[]).some((tool) => tool.name === 'read_file'),
             ).toBe(true);
             return new Response(
               encodeFrames(
@@ -157,9 +158,9 @@ test.skipIf(process.platform !== 'darwin').each(['chat-completions', 'responses'
                     model: 'fixture',
                     calls: [
                       {
-                        id: `${child}-list`,
-                        name: 'list_directory',
-                        arguments: JSON.stringify({ path: '.', limit: 20 }),
+                        id: `${child}-read`,
+                        name: 'read_file',
+                        arguments: JSON.stringify({ path: 'child-input.txt', max_lines: 20 }),
                       },
                     ],
                   },
@@ -322,7 +323,7 @@ test.skipIf(process.platform !== 'darwin').each(['chat-completions', 'responses'
           ],
           tools: [
             { id: 'task.spawn', definitionVersion: '1' },
-            ...(protocol === 'responses' ? [{ id: 'files.list', definitionVersion: '1' }] : []),
+            ...(protocol === 'responses' ? [{ id: 'files.read', definitionVersion: '5' }] : []),
           ],
         }),
       );

@@ -766,3 +766,5 @@ Desktop `MessageContent` 的 `WebLinkContext` 由Native宿主注入，仅在当�
 `Conversation` 的当前活跃思维链显示最近仍在执行的工具。两次工具之间保留最后一条具体工具消息，思维链结束后显示本段已执行的动作汇总。`ConversationTrace` 中每条 reasoning 始终使用独立的思考 disclosure，不再将首条正文直接平铺到总过程下。首条从单步开始即保留嵌套标题、缩进与稳定展示键，工具加入不改布局；单步思考沿用旧的父级展开记录，已有的逐步开合选择优先。恢复展开也作用于思考正文，避免重播开启动画。只消费宿主提供的 `reasoningSource`，不按正文语义改分类。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)覆盖流式、多个思考／工具、同身份重连、完成统计、冷读、独立折叠与 ARIA 关联；DOM 保持和状态断言不代表实际动画全过程验收。
 
 首条输入提交后、正式 Run 尚未确认时，Trace 沿原提交身份显示“正在准备回复…”；确认运行后继续显示准确阶段，不能把本地准备误当成已开始执行。运行中的 Trace 在首条模型正文尚未到达时，也显示已确认的回复状态；状态不可用或执行未确认时不伪造进行中提示。排队、等待、恢复和停止仍由原状态决定，不被准备阶段覆盖。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核阶段与观察边界，[Native 首条发送回归](../../apps/desktop/test/isolated/native-new-conversation-dom.test.tsx)核原提交、持久输入、模型派发、正文与结束间的状态节点接管。
+
+退役工具的旧 ID 和旧模型显示别名不再进入工具行的专属图标、参数预览或完成动作统计；历史结果仍可用通用工具行展开，原内容和状态不变。现役 `read_file`、`write_file`、`edit_file`、`view_images`、Shell 与 Skills 的展示保持。[共享回归](test/isolated/desktop-tool-aggregation.test.tsx)核通用回退与现役分类；Native 的准确原调用和文件资格由 [Desktop owner](../../apps/desktop/README.md)负责。

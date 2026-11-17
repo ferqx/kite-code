@@ -128,14 +128,64 @@ async function currentBaseline(path: string, scope: OriginalToolWorkspace) {
     await files.close();
   }
 }
+
+type OriginalRequest = {
+  body: Record<string, unknown>;
+  messages: Array<{ role?: string; content?: unknown; tool_call_id?: string }>;
+};
+function toolResults(request?: OriginalRequest): Record<string, unknown>[] {
+  return (request?.messages ?? []).flatMap((message) => {
+    if (message.role !== 'tool' || typeof message.content !== 'string') return [];
+    try {
+      const value: unknown = JSON.parse(message.content);
+      return value && typeof value === 'object' && !Array.isArray(value)
+        ? [value as Record<string, unknown>]
+        : [];
+    } catch {
+      // File reads use a fixed host header. Never search the file's body for a reference.
+      const header =
+        /^Read ("(?:\\.|[^"\\])*");[^\n]*\n(?:External file;[^\n]*\n)?base_ref=("(?:\\.|[^"\\])*")\nContent \(/.exec(
+          message.content,
+        );
+      return header ? [{ path: JSON.parse(header[1]!), base_ref: JSON.parse(header[2]!) }] : [];
+    }
+  });
+}
+function fileReference(path: string, scope: OriginalToolWorkspace, request?: OriginalRequest) {
+  const matches = toolResults(request).filter(
+    (result) =>
+      typeof result.path === 'string' &&
+      resolve(scope.workspace, result.path) === ownedPath(path, scope) &&
+      typeof result.base_ref === 'string' &&
+      result.base_ref.startsWith('file.'),
+  );
+  const reference = matches.at(-1)?.base_ref;
+  if (typeof reference !== 'string') throw Error('original_tool_file_reference_unavailable');
+  return reference;
+}
+function planReference(
+  identity: { planId: string; version: unknown; digest?: string },
+  request?: OriginalRequest,
+) {
+  const matches = toolResults(request).filter((result) => {
+    const plan = (result.current ?? result) as Record<string, unknown>;
+    return (
+      plan?.planId === identity.planId &&
+      plan.version === identity.version &&
+      (identity.digest === undefined || plan.digest === identity.digest) &&
+      typeof result.plan_ref === 'string' &&
+      result.plan_ref.startsWith('plan.')
+    );
+  });
+  const reference = matches.at(-1)?.plan_ref;
+  if (typeof reference !== 'string') throw Error('original_tool_plan_reference_unavailable');
+  return reference;
+}
 /** Explicit fixture-language migration. Unsupported semantics fail before emitting a response. */
 export async function migrateOriginalToolCall(
   call: OriginalToolCall,
   scope: OriginalToolWorkspace,
-  request?: {
-    body: Record<string, unknown>;
-    messages: Array<{ role?: string; content?: unknown; tool_call_id?: string }>;
-  },
+  request?: OriginalRequest,
 ): Promise<OriginalToolCall> {
   const a = call.args;
   let name = originalToolName(call.name),
@@ -211,15 +261,17 @@ export async function migrateOriginalToolCall(
     case 'grep':
     case 'search_content':
       throw Error('retired_file_search_requires_shell_migration');
-    case 'write_file':
+    case 'write_file': {
       keys(a, ['path', 'content'], call.name);
+      const path = workspacePath(text(a, 'path'), scope);
+      const base = await currentBaseline(text(a, 'path'), scope);
       args = {
-        path: workspacePath(text(a, 'path'), scope),
+        path,
         content: text(a, 'content'),
-        base: await currentBaseline(text(a, 'path'), scope),
+        ...(base === null ? {} : { baseRef: fileReference(path, scope, request) }),
       };
-      if (isAbsolute(String(args.path))) throw Error('external_write_requires_shell');
       break;
+    }
     case 'edit_file': {
       keys(a, ['path', 'old_string', 'new_string', 'replace_all'], call.name);
       const path = text(a, 'path'),
@@ -230,8 +282,14 @@ export async function migrateOriginalToolCall(
       if (!base) throw Error('original_tool_edit_baseline_missing');
       if (a.replace_all === true)
         throw Error('original_tool_edit_replace_all_requires_scenario_migration');
-      args = { path: workspacePath(path, scope), find, replace, occurrences: 1, base };
-      if (isAbsolute(String(args.path))) throw Error('external_write_requires_shell');
+      const target = workspacePath(path, scope);
+      args = {
+        path: target,
+        find,
+        replace,
+        occurrences: 1,
+        baseRef: fileReference(target, scope, request),
+      };
       break;
     }
     case 'shell_execute':
@@ -252,9 +310,14 @@ export async function migrateOriginalToolCall(
         keys(a, ['action', 'plan_id', 'version', 'structural_digest'], call.name);
         name = 'planning.review';
         args = {
-          planId: text(a, 'plan_id'),
-          version: a.version,
-          digest: text(a, 'structural_digest'),
+          planRef: planReference(
+            {
+              planId: text(a, 'plan_id'),
+              version: a.version,
+              digest: text(a, 'structural_digest'),
+            },
+            request,
+          ),
         };
       } else {
         keys(a, ['title', 'body_markdown', 'steps', 'action', 'plan_id', 'version'], call.name);
@@ -262,7 +325,14 @@ export async function migrateOriginalToolCall(
           throw Error('original_tool_plan_action_requires_scenario_migration');
         args = {
           planId: a.plan_id ?? `fixture-${createHash('sha256').update(call.id).digest('hex')}`,
-          expectedVersion: a.version ?? null,
+          ...(a.version === undefined
+            ? {}
+            : {
+                expectedPlanRef: planReference(
+                  { planId: text(a, 'plan_id'), version: a.version },
+                  request,
+                ),
+              }),
           title: text(a, 'title'),
           body: text(a, 'body_markdown'),
           steps: a.steps,

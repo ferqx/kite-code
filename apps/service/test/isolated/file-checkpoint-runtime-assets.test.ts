@@ -152,6 +152,18 @@ function fixture() {
       runtimeReads++;
       return id === 'w' ? { id: 'w', rootUri: pathToFileURL(workspace).href } : null;
     },
+    async getSessionExecutionRoot(input: { sessionId: string; epoch?: string }) {
+      runtimeReads++;
+      if (input.sessionId !== session.id || (input.epoch !== undefined && input.epoch !== '0'))
+        throw new AgentError('execution_root_unavailable');
+      return {
+        sessionId: session.id,
+        workspaceId: session.workspaceId,
+        effectiveRootUri: pathToFileURL(workspace).href,
+        epoch: '0',
+        identity: null,
+      };
+    },
     async getRun(id: string) {
       runtimeReads++;
       return id === 'run' ? run : null;
@@ -335,7 +347,6 @@ test('pure default Files metadata does not resolve Runtime or filesystem assets 
     },
   });
   expect(calls).toBe(0);
-  expect(configuration.tools).toHaveLength(6);
   expect(configuration.extension.actions![0]!.inputSchema).toMatchObject({
     additionalProperties: false,
     required: ['checkpointId', 'restoreId'],
@@ -350,6 +361,7 @@ test('pure default Files metadata does not resolve Runtime or filesystem assets 
     'files.read',
     'files.write',
     'files.edit',
+    'files.view_images',
   ]);
   const actual = sqliteStorageAssets();
   expect(actual.worker.pathname.endsWith('/storage/worker/main.ts')).toBe(true);
@@ -357,11 +369,6 @@ test('pure default Files metadata does not resolve Runtime or filesystem assets 
   expect(actual.migrations.map((migration) => migration.pathname.split('/').at(-1))).toEqual([
     '0001-baseline.sql',
     '0002-trajectory-facts.sql',
-    '0002-recovery-audit.sql',
-    '0003-session-reconciliation.sql',
-    '0004-pending-input-order.sql',
-    '0005-authorization-check.sql',
-    '0006-input-file-imports.sql',
   ]);
 });
 

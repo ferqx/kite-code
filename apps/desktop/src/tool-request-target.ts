@@ -1,14 +1,8 @@
 const versions: Readonly<Record<string, readonly string[]>> = {
   'files.read': ['2', '3', '4', '5'],
   'files.view_images': ['1'],
-  'files.read_path': ['1', '2'],
   'files.write': ['2', '3'],
   'files.edit': ['2'],
-  'files.write_path': ['1'],
-  'files.edit_path': ['1'],
-  'files.list': ['1'],
-  'files.glob': ['2', '3'],
-  'files.search': ['2', '3', '4', '5'],
   web_fetch: ['1'],
   'shell.execute': ['1'],
   'shell.launch': ['1'],
@@ -26,8 +20,6 @@ const versions: Readonly<Record<string, readonly string[]>> = {
   'planning.write': ['1'],
   'planning.review': ['1'],
   'planning.update': ['1'],
-  activate_skill: ['1'],
-  read_skill_reference: ['1'],
   'skills.load': ['1'],
   'skills.resource': ['1'],
   'browser.execute': ['1'],
@@ -87,18 +79,9 @@ export function nativeToolRequestTarget(
         ? bounded(request.paths.join(' · '))
         : undefined;
     case 'files.read':
-    case 'files.read_path':
     case 'files.write':
     case 'files.edit':
-    case 'files.write_path':
-    case 'files.edit_path':
       return text('path');
-    case 'files.list':
-      return request.path === undefined || request.path === '' ? '.' : text('path');
-    case 'files.glob':
-      return text('pattern') ? join(text('pattern'), text('path')) : undefined;
-    case 'files.search':
-      return text('text') ? join(text('text'), text('path')) : undefined;
     case 'web_fetch':
       // URL credentials/query removal remains the shared UI's responsibility.
       return text('url');
@@ -127,10 +110,6 @@ export function nativeToolRequestTarget(
       return text('planId');
     case 'planning.update':
       return join(text('planId'), text('stepId'));
-    case 'activate_skill':
-      return text('skill_id');
-    case 'read_skill_reference':
-      return text('path');
     default:
       return undefined;
   }

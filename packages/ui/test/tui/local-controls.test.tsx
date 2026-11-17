@@ -141,7 +141,7 @@ test('pending approval keeps command and private-draft editing visible without a
         presentationSessionId: 'a',
         executionId: 'original-tool',
         runId: 'a-run',
-        definitionId: 'files.write_path',
+        definitionId: 'files.write',
         request: { description: 'Original decision' },
       } as unknown as Interaction,
     ],

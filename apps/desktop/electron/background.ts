@@ -708,13 +708,7 @@ export class NativeBackground {
               if (
                 fact.status === 'succeeded' &&
                 !message.originMessage &&
-                [
-                  'files.read',
-                  'files.edit',
-                  'files.write',
-                  'files.edit_path',
-                  'files.write_path',
-                ].includes(execution.definitionId)
+                ['files.read', 'files.edit', 'files.write'].includes(execution.definitionId)
               ) {
                 const hash = createHash('sha256')
                   .update(JSON.stringify(execution.result))

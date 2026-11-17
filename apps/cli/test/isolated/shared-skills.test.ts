@@ -28,7 +28,6 @@ import {
   originalLastIndex,
   originalToolResults,
 } from '../fixtures/original-tool-results';
-import { workflowManifest } from '../fixtures/workflow-manifest';
 
 const supportsDaemonFixture = process.platform === 'darwin';
 const nativeTest = supportsDaemonFixture ? test : test.skip;
@@ -71,7 +70,7 @@ function gate() {
   });
   return { promise, resolve };
 }
-async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
+async function fixture() {
   const base = join(root, randomUUID());
   privateDirectory(base);
   const profile = selectProfile({ dataRoot: join(base, 'data'), profile: 'owned' });
@@ -156,28 +155,16 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
                 index: 0,
                 id: `load-${requests.length}`,
                 type: 'function',
-                function:
-                  workflow && text.includes('SHARED_WORKFLOW_INLINE_ORIGINAL_BODY')
-                    ? {
-                        name: 'complete_skill',
-                        arguments: JSON.stringify({ activation_id: 'manual-1', output: {} }),
-                      }
-                    : {
-                        name: 'load_skill',
-                        arguments: JSON.stringify({
-                          skill_id: chosen,
-                        }),
-                      },
+                function: {
+                  name: 'load_skill',
+                  arguments: JSON.stringify({
+                    skill_id: chosen,
+                  }),
+                },
               },
             ],
           };
-      if (!toolReply)
-        issuedCalls.set(
-          `load-${requests.length}`,
-          workflow && text.includes('SHARED_WORKFLOW_INLINE_ORIGINAL_BODY')
-            ? 'complete_skill'
-            : 'load_skill',
-        );
+      if (!toolReply) issuedCalls.set(`load-${requests.length}`, 'load_skill');
       const held = !toolReply && text.includes('HOLD_ALPHA');
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -275,21 +262,6 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
       }),
       { mode: 0o600 },
     );
-    if (workflow) {
-      writeFileSync(
-        join(base, 'skills/alpha/SKILL.md'),
-        `---\n${JSON.stringify(workflowManifest('alpha-skill', workflow === 'structured'))}\n---\nSHARED_WORKFLOW_INLINE_ORIGINAL_BODY\n`,
-      );
-      if (workflow !== 'disabled')
-        writeFileSync(
-          join(profile.profilePath, 'skill-workflow.jsonc'),
-          JSON.stringify({
-            version: 1,
-            features: { skillActivation: true, skillWorkflow: true, verification: false },
-          }),
-          { mode: 0o600 },
-        );
-    }
     const web = join(base, 'web');
     mkdirSync(web);
     const manifest = [

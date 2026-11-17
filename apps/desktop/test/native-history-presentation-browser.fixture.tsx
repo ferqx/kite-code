@@ -95,8 +95,8 @@ for (const sessionId of ['a', 'b']) {
       tools.set(message.id, {
         messageId: message.id,
         executionId,
-        definitionId: tool === 0 ? 'files.search' : 'files.read',
-        definitionVersion: '4',
+        definitionId: 'files.read',
+        definitionVersion: '5',
         status: 'succeeded',
         resultRevision: '1',
         target: path,

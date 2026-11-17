@@ -136,10 +136,10 @@ test('actual approval card displays exact canonical tool and target without leak
   const card = {
     kind: 'approval',
     sessionId: 'source-session',
-    definitionId: 'files.write_path',
+    definitionId: 'files.write',
     request: {
-      definitionId: 'files.write_path',
-      definitionVersion: '1',
+      definitionId: 'files.write',
+      definitionVersion: '3',
       input: { path: '/owned/home/external.txt', content: 'private draft contents', base: null },
       options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
       policy: { effects: ['external'] },
@@ -147,7 +147,7 @@ test('actual approval card displays exact canonical tool and target without leak
   } as unknown as Interaction;
   const ui = render(<TuiApprovalPanel card={card} choices={['approve', 'deny']} selected={0} />);
   try {
-    expect(ui.lastFrame()).toContain('files.write_path');
+    expect(ui.lastFrame()).toContain('files.write');
     expect(ui.lastFrame()).toContain('/owned/home/external.txt');
     expect(ui.lastFrame()).not.toContain('private draft contents');
     expect(ui.lastFrame()).not.toContain('same command');

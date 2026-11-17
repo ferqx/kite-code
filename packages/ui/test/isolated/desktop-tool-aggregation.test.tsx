@@ -24,8 +24,15 @@ Object.defineProperty(globalThis, 'document', {
 });
 const { Conversation } = await import('../../src/desktop/Conversation');
 const { DesktopDiagnosticsProvider } = await import('../../src/desktop/diagnostics');
-const { completedToolActions, completedToolCategory, completedToolSummary, ToolActivity, ToolRow } =
-  await import('../../src/desktop/ToolActivity');
+const {
+  completedToolActions,
+  completedToolCategory,
+  completedToolSummary,
+  toolIcon,
+  toolTraceTitle,
+  ToolActivity,
+  ToolRow,
+} = await import('../../src/desktop/ToolActivity');
 for (const [key, descriptor] of bootstrapGlobals) {
   if (descriptor) Object.defineProperty(globalThis, key, descriptor);
   else Reflect.deleteProperty(globalThis, key);
@@ -439,8 +446,6 @@ test('known completed and failed tool actions use past tense without marking pen
     ['read_file', '读取', '已读取'],
     ['write_file', '写入', '已写入'],
     ['edit_file', '修改', '已修改'],
-    ['search_content', '搜索内容', '已搜索内容'],
-    ['glob', '查找文件', '已查找文件'],
     ['load_skill', '加载技能', '已加载技能'],
   ]) {
     for (const status of ['queued', 'running', 'completed', 'failed', 'not_executed'] as const) {
@@ -1800,20 +1805,81 @@ test('completed Trace categories deduplicate in first-action order without borro
   ).toBe('运行了命令');
 });
 
+test('retired tools retain original titles, targets, states and results through generic presentation', () => {
+  for (const toolName of [
+    'activate_skill',
+    'read_skill_reference',
+    'complete_skill',
+    'verify_skill',
+    'repair_skill',
+    'decide_skill_verification',
+    'files.read_path',
+    'files.write_path',
+    'files.edit_path',
+    'files.list',
+    'files.glob',
+    'files.search',
+    'validation.define',
+    'validation.check',
+    'validation.rebind',
+    'validation.auto_check',
+    'validation.request_waiver',
+    'search_content',
+    'search_files',
+    'glob',
+  ]) {
+    for (const status of ['completed', 'failed', 'cancelled', 'unknown'] as const) {
+      const original: Message = {
+        ...tool('retired', status),
+        toolName,
+        title: `Original ${toolName}`,
+        target: 'original-target.txt',
+        text: 'Original saved result',
+        arguments: { path: 'original-target.txt', pattern: 'original pattern' },
+      };
+      const before = structuredClone(original);
+      const generic = { ...original, toolName: 'unknown_tool' };
+      expect(toolIcon(original)).toBe(toolIcon(generic));
+      expect(toolTraceTitle(original)).toBe(`Original ${toolName} original-target.txt`);
+      expect(completedToolActions([original])).toBe(status === 'completed' ? '运行了工具' : '');
+      expect(completedToolCategory(original)).toBe(
+        status === 'completed' ? '运行了工具' : undefined,
+      );
+      const dom = new JSDOM(
+        renderToStaticMarkup(
+          <ToolActivity
+            messages={[original]}
+            inTrace
+            expanded
+            onToggle={() => {}}
+            renderChildren={() => null}
+          />,
+        ),
+      );
+      try {
+        expect(dom.window.document.querySelector('.tool-activity-title')?.textContent).toBe(
+          `Original ${toolName}`,
+        );
+        expect(dom.window.document.body.textContent).toContain('original-target.txt');
+        expect(dom.window.document.body.textContent).toContain('Original saved result');
+        expect(original).toEqual(before);
+      } finally {
+        dom.window.close();
+      }
+    }
+    expect(toolTraceTitle({ ...tool('without-title', 'completed'), toolName })).toBe(
+      `${toolName} without-title.ts`,
+    );
+  }
+});
+
 test('completed action summaries use owned natural past tense for every supported action without rewriting data', () => {
   const matrix: readonly [string | undefined, string][] = [
     ['read_file', '读取了文件'],
     ['read_skill_resource', '读取了技能资料'],
     ['view_images', '查看了图像'],
     ['write_file', '写入了文件'],
-    ['files.write_path', '写入了文件'],
     ['edit_file', '编辑了文件'],
-    ['files.edit_path', '编辑了文件'],
-    ['search_content', '搜索了内容'],
-    ['search_files', '查找了文件'],
-    ['glob', '查找了文件'],
-    ['files.glob', '查找了文件'],
-    ['files.list', '浏览了目录'],
     ['web_fetch', '读取了网页'],
     ['browser_execute', '完成了浏览器操作'],
     ['tool_search', '查找了工具'],
@@ -1833,11 +1899,6 @@ test('completed action summaries use owned natural past tense for every supporte
     ['planning.write', '编写了计划'],
     ['planning.review', '请求了计划审阅'],
     ['planning.update', '更新了计划'],
-    ['validation.define', '定义了验证检查'],
-    ['validation.check', '运行了验证'],
-    ['validation.rebind', '关联了修复结果'],
-    ['validation.request_waiver', '请求了验证豁免'],
-    ['validation.auto_check', '检查了文件变更'],
     ['git.worktree', '操作了 Git 工作树'],
     ['unknown-tool', '运行了工具'],
     ['toString', '运行了工具'],

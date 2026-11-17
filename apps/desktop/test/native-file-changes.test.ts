@@ -17,7 +17,7 @@ import type { AgentClient, Execution, Json, Message } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { directoryLink } from '../../../tests/fixtures/test-filesystem';
 import { editorFileTarget, openEditor, windowsVsCodeArgs } from '../electron/editor';
-import { NativeFileChanges } from '../electron/file-changes';
+import { NativeFileChanges, nativeFileReceiptFacts } from '../electron/file-changes';
 import type { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import { NativeProcessOwner } from '../electron/native-processes';
@@ -168,15 +168,12 @@ function fixture() {
   };
 }
 
-for (const external of [false, true])
-  test(`historical output reads the exact immutable receipt in UTF-8 pages after the current file changes (external=${external})`, async () => {
+for (const version of ['2', '3'])
+  test(`historical output reads the exact immutable receipt in UTF-8 pages after the current file changes (version=${version})`, async () => {
     const f = fixture();
     try {
       const execution = f.executions.get('execution-first')!;
-      if (external) {
-        execution.definitionId = 'files.write_path';
-        execution.definitionVersion = '1';
-      }
+      execution.definitionVersion = version;
       const text = 'a'.repeat(65535) + '中文🙂 historical tail';
       const bytes = Buffer.from(text);
       const old = JSON.parse((execution.result as { content: string }).content);
@@ -216,7 +213,6 @@ for (const external of [false, true])
       writeFileSync(join(f.workspace, f.path), 'later editable content');
       const page = await f.list(['first']);
       expect(page.entries[0]).toMatchObject({ snapshot: true, preview: 'available' });
-      if (external) expect(page.entries[0]!.openable).toBe(false);
       const first = await f.manager.detail(page.entries[0]!.changeId, 'snapshot-1');
       expect(first.text).toBe('a'.repeat(65535));
       expect(first.nextOffset).toBe(65535);
@@ -987,5 +983,29 @@ test('clicked txt returns scoped local preview handle and never launches externa
   } finally {
     stop();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('retired file receipts keep original records but gain no file preview or opening capability', async () => {
+  const f = fixture();
+  try {
+    const execution = f.executions.get('execution-first')!;
+    const result = execution.result;
+    const message = structuredClone(f.messages.get('first'));
+    for (const definitionId of ['files.read_path', 'files.write_path', 'files.edit_path']) {
+      for (const definitionVersion of ['1', '2', 'future']) {
+        Object.assign(execution, { definitionId, definitionVersion });
+        expect(nativeFileReceiptFacts(execution)).toEqual({
+          path: undefined,
+          preview: undefined,
+          snapshot: undefined,
+        });
+        expect((await f.list(['first'])).entries).toEqual([]);
+        expect(execution.result).toBe(result);
+        expect(f.messages.get('first')).toEqual(message);
+      }
+    }
+  } finally {
+    f.close();
   }
 });

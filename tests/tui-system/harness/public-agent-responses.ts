@@ -44,12 +44,21 @@ export function publicAgentResponses(
     if (!run && receipts.some(Boolean)) throw Error('public_agent_fixture_runtime_scope_missing');
     if (run && run === parentRun && receipts.some(Boolean)) {
       if (!receipts.every(Boolean)) throw Error('public_agent_fixture_partial_spawn_receipts');
-      const agentIds = receipts.map((receipt) => {
+      const accepted = receipts.map((receipt) => {
         const value = parsed(receipt!.content);
-        if (value.accepted !== true || typeof value.agent_id !== 'string')
+        if (
+          value.accepted !== true ||
+          typeof value.agent_id !== 'string' ||
+          typeof value.work_ref !== 'string' ||
+          !/^aw_(?:u[A-Za-z0-9_-]{22}|s[A-Za-z0-9_-]+)$/.test(value.work_ref)
+        )
           throw Error('public_agent_fixture_spawn_not_accepted');
-        return value.agent_id;
+        return { agentId: value.agent_id, workRef: value.work_ref };
       });
+      const agentIds = accepted.map((receipt) => receipt.agentId);
+      const workRefs = accepted.map((receipt) => receipt.workRef);
+      if (new Set(workRefs).size !== spawns.length)
+        throw Error('public_agent_fixture_duplicate_work_reference');
       if (new Set(agentIds).size !== spawns.length)
         throw Error('public_agent_fixture_duplicate_child_identity');
       if (tool(request, listId)) {
@@ -85,6 +94,12 @@ export function publicAgentResponses(
         };
       }
       if (tool(request, waitId)) {
+        const observed = parsed(tool(request, waitId)!.content);
+        if (
+          !['events', 'input', 'timeout', 'completed'].includes(String(observed.reason)) ||
+          !Array.isArray(observed.events)
+        )
+          throw Error('public_agent_fixture_wait_not_observed');
         // One event can precede a sibling's completion. Gate this synthetic Model
         // response on the real original carriers, then read every complete public
         // result; no child output or completion is manufactured by this fixture.
@@ -128,7 +143,7 @@ export function publicAgentResponses(
             {
               id: waitId,
               name: 'wait_agent_events',
-              args: { after_seq: '0', wait_ms: 30_000 },
+              args: { work_refs: workRefs, wait_ms: 30_000 },
             },
           ],
         },

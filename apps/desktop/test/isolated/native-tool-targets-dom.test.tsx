@@ -524,11 +524,6 @@ test('file target remains visible from planned to running and ModelOutput receip
 });
 
 test.each([
-  ['files.read_path', '2', { path }, path],
-  ['files.glob', '3', { pattern: '**/说明 *.md' }, '**/说明 *.md'],
-  ['files.search', '5', { path: '/工作区/src', text: '待处理 雪🙂' }, '待处理 雪🙂'],
-  ['files.list', '1', { path: '/工作区/项目 雪🙂' }, '/工作区/项目 雪🙂'],
-  ['files.list', '1', { limit: 30 }, '.'],
   ['mcp.tools.search', '1', { query: 'find project docs 雪🙂' }, 'find project docs 雪🙂'],
   ['mcp.resources.list', '1', { serverId: 'project-docs' }, 'project-docs'],
   [
@@ -556,9 +551,17 @@ test.each([
   });
 });
 
-test('missing input and unknown versions do not invent live or saved file targets', async () => {
+test('retired IDs, missing input and unknown versions do not invent live or saved file targets', async () => {
   await fixture(async ({ host, render }) => {
-    for (const tool of [execution('files.read', 'future'), execution('files.read', '5', {})]) {
+    for (const tool of [
+      execution('files.read', 'future'),
+      execution('files.read', '5', {}),
+      execution('files.read_path', '2', { path }),
+      execution('files.glob', '3', { pattern: '*.md' }),
+      execution('files.search', '5', { path, text: 'needle' }),
+      execution('files.list', '1', {}),
+      execution('files.list', '1', { path }),
+    ]) {
       await render(live(tool, true));
       expect(host.querySelector('.tool-step-target')).toBeNull();
       const { model, receipt, saved } = history(tool);

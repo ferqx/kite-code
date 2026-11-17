@@ -1032,7 +1032,7 @@ Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 faile
 
 Files等工具目标仅展示同一原来源／Run、结果之前且已读历史中唯一 Model call 的请求字段；重复 callId 不建立执行关联，有歧义不补目标。Shell原命令另沿下述确切Tool输入投影。请求文本不证明实际文件变更，也不授予打开文件资格。成功 Files 路径按钮仍沿独立原 receipt／观察 ID；Files read 的当前版本5与保留版本3、4均核原 baseline；write 支持保存版本2与当前版本3，edit 支持版本2。未来版本不沿旧格式推断路径或打开资格。文件读取失败行内保留简短状态，点击该工具展开完整异常原因；不附行内错误预览，也不提供文件打开动作。
 
-唯一原调用属于已知 `files.list@1` 且省略 path 或传空字符串时，目标按该版本的已知默认值显示 `.`，表示工作区根目录；显式路径保原文。缺原调用、重复身份或未知版本不补默认路径，目录文本不获得文件打开动作。[Main 回归](test/native-tool-messages.test.ts)核默认／显式路径及缺来源／歧义／未来版本，[原组件 DOM](test/isolated/native-tool-messages-dom.test.tsx)核目录行实际保留根路径。
+已退役的 Files 目录／检索、专用外部文件、Skill Workflow 和 Validation 工具不再拥有专属名称、目标提取、探索分类或文件产物展示映射。历史工具消息仍按原 ID、状态和完整原结果通用显示，旧参数不补默认目录，也不取得文件打开或预览资格；原 Execution、Message、Evidence 和导出不改写。[Main 回归](test/native-tool-messages.test.ts)、[文件结果回归](test/native-file-changes.test.ts)及[原组件 DOM](test/isolated/native-tool-messages-dom.test.tsx)核旧记录通用回退，现役 Files、Shell、Skills、计划及 MCP 沿各自已知定义展示。
 
 执行中的工具行只来自当前 Store、所选会话活动 Run 的真实 tool Execution，与同 Run 的原结果消息接管；旧 Store 恢复记录不遮掉新工作。停止申请尚非终态时明确等待结果，视图不可核实时保留原记录并后台重读，普通界面不追加“上次确认状态”。Shell execute/launch/read/wait/stop 显示各自实际操作；已知`shell.execute@1`也沿原工具输出卡呈现，启动受理不表示后台Job已完成，Job的准确停止与完整日志仍归原环境／Runtime logs入口。未知定义或版本保原 ID／version 和可展开原文，不借旧 UI 同名分类解释未来结果。
 

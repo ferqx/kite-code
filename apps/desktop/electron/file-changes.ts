@@ -60,10 +60,9 @@ export function nativeFileReceiptFacts(execution: Execution) {
     /* Old unreadable result. */
   }
   const path =
-    (execution.definitionVersion === '2' ||
+    ((['files.read', 'files.write', 'files.edit'].includes(execution.definitionId) &&
+      execution.definitionVersion === '2') ||
       (execution.definitionId === 'files.write' && execution.definitionVersion === '3') ||
-      (['files.write_path', 'files.edit_path'].includes(execution.definitionId) &&
-        execution.definitionVersion === '1') ||
       (execution.definitionId === 'files.read' &&
         ['3', '4', '5'].includes(execution.definitionVersion))) &&
     baseline(content?.baseline) &&
@@ -137,7 +136,7 @@ export function nativeFileOperationMetadata(
   execution: Execution,
   { path, preview, snapshot } = nativeFileReceiptFacts(execution),
 ) {
-  const operation = execution.definitionId.slice('files.'.length).replace(/_path$/, '');
+  const operation = execution.definitionId.slice('files.'.length);
   if (!['read', 'write', 'edit'].includes(operation)) return;
   if (!path) return;
   const diffCounts =
@@ -307,9 +306,7 @@ export class NativeFileChanges {
       throw new ClientError('file_change_identity_mismatch');
     const result = object(execution.result);
     return execution.kind === 'tool' &&
-      (['files.write', 'files.edit', 'files.write_path', 'files.edit_path'].includes(
-        execution.definitionId,
-      ) ||
+      (['files.write', 'files.edit'].includes(execution.definitionId) ||
         (includeRead && execution.definitionId === 'files.read')) &&
       execution.status === 'succeeded' &&
       result?.outcome === 'succeeded' &&
@@ -446,7 +443,7 @@ export class NativeFileChanges {
         const { execution, source } = receipt;
         const facts = nativeFileReceiptFacts(execution),
           changeId = randomUUID();
-        const operation = execution.definitionId.slice('files.'.length).replace(/_path$/, '') as
+        const operation = execution.definitionId.slice('files.'.length) as
           | 'read'
           | 'write'
           | 'edit';

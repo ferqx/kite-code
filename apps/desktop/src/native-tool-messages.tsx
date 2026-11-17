@@ -22,14 +22,8 @@ const emptyToolFacts: NativeToolMessageFact[] = [];
 
 const labels: Record<string, readonly [readonly string[], string]> = {
   'files.read': [['2', '3', '4', '5'], '读取'],
-  'files.read_path': [['1', '2'], '读取'],
-  'files.write_path': [['1'], '写入用户文件'],
-  'files.edit_path': [['1'], '修改用户文件'],
   'files.write': [['2', '3'], '写入'],
   'files.edit': [['2'], '修改'],
-  'files.glob': [['2', '3'], '查找文件'],
-  'files.search': [['2', '3', '4', '5'], '搜索内容'],
-  'files.list': [['1'], '列出目录'],
   'files.view_images': [['1'], '查看图像'],
   'shell.launch': [['1'], '启动后台 Shell'],
   'shell.execute': [['1'], '运行命令'],
@@ -49,11 +43,6 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'planning.write': [['1'], '编写计划'],
   'planning.review': [['1'], '请求计划审阅'],
   'planning.update': [['1'], '更新计划'],
-  'validation.define': [['1'], '定义验证检查'],
-  'validation.check': [['1'], '运行验证'],
-  'validation.rebind': [['1'], '关联修复结果'],
-  'validation.request_waiver': [['1'], '请求验证豁免'],
-  'validation.auto_check': [['1'], '检查文件变更'],
   'mcp.tools.search': [['1'], '搜索 MCP 工具'],
   'mcp.resources.list': [['1'], '列出 MCP 资源'],
   'mcp.resources.read': [['1'], '读取 MCP 资源'],
@@ -61,13 +50,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'skills.resource': [['1'], '读取技能资料'],
   'browser.execute': [['1'], '浏览器操作'],
 };
-const exploration = new Set([
-  'files.read',
-  'files.read_path',
-  'files.glob',
-  'files.search',
-  'files.list',
-]);
+const exploration = new Set(['files.read']);
 const mcpSummaryTools = new Set([
   'mcp.sources.list',
   'mcp.connect',
@@ -99,8 +82,6 @@ export function desktopToolPresentation(
       ? ((
           {
             'files.read': 'read_file',
-            'files.read_path': 'read_file',
-            'files.search': 'search_content',
             'files.write': 'write_file',
             'files.edit': 'edit_file',
             'files.view_images': 'view_images',

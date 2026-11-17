@@ -145,7 +145,7 @@ export async function runLiveTuiWindow(options: WindowOptions) {
           'task.message',
           'task.follow_up',
           'task.interrupt',
-          'files.write_path',
+          'files.write',
         ].map((id) => ({ id })),
       }),
       { mode: 0o600 },
@@ -179,7 +179,7 @@ export async function runLiveTuiWindow(options: WindowOptions) {
       permissions: {
         ...binding.permissions!,
         async authorize(request) {
-          if (request.kind === 'tool' && request.definitionId === 'files.write_path') {
+          if (request.kind === 'tool' && request.definitionId === 'files.write') {
             const input = request.input;
             if (
               !input ||
@@ -319,8 +319,8 @@ export async function runLiveTuiWindow(options: WindowOptions) {
     await key('\x1b', 'escape');
     await screen('ordinary_ready_for_business', (text) => /^❯(?: |$)/m.test(text));
     const leaf = (index: number) =>
-      `Use write_user_file exactly once with path ${JSON.stringify(targets[index])}, content ${JSON.stringify(bodies[index])}, base null. Respect a denied Tool and stop without retry or replacement. Report its actual outcome.`;
-    const content = `New task: Create exactly two worker collaborators using spawn_agent with only prompt and no preset before waiting. Do not select any preset. A: ${leaf(0)} B: ${leaf(1)} Do not write files yourself. Keep your Run waiting with wait_agent_events until BOTH children actually finish; use returned event sequence for subsequent waits. Operator will decide each approval. Do not retry denied work. Synthetic test ${crypto.randomUUID()}`;
+      `Use write_file exactly once with path ${JSON.stringify(targets[index])}, content ${JSON.stringify(bodies[index])}. Omit base_ref because this creates a new file. Respect a denied Tool and stop without retry or replacement. Report its actual outcome.`;
+    const content = `New task: Create exactly two default general collaborators using spawn_agent with only prompt and no preset before waiting. Do not select any preset. A: ${leaf(0)} B: ${leaf(1)} Do not write files yourself. Keep your Run waiting with wait_agent_events until BOTH children actually finish; pass both exact returned work_ref values as work_refs and wait_ms 30000; repeat the same work_refs so the runtime resumes observation automatically. Operator will decide each approval. Do not retry denied work. Synthetic test ${crypto.randomUUID()}`;
     await send(content, 'business_input');
     const allSessions = async () => {
       const rootSession = (await ownedStore.getSession('root'))!;
@@ -380,6 +380,9 @@ export async function runLiveTuiWindow(options: WindowOptions) {
       'parent_real_event_wait_active',
     );
     require((await allSessions()).length === 3, 'exactly_two_real_children');
+    require(cards.every(
+      (card) => card.definitionId === 'files.write' && card.definitionVersion === '3',
+    ), 'current_file_write_approval_identity');
     const parentBefore = await ownedStore.getView('root');
     require(parentBefore.runs.some((run) => run.isActive), 'parent_still_waiting_for_children');
     require(targets.every((target) => !existsSync(target)), 'zero_effects_before_ui_approval');
@@ -391,10 +394,10 @@ export async function runLiveTuiWindow(options: WindowOptions) {
     await key('\r', 'enter');
     const approvalScreen = await screen(
       'ordinary_exact_approval_panel',
-      (text) => text.includes('files.write_path') && text.includes('Allow once'),
+      (text) => text.includes('files.write') && text.includes('Allow once'),
     );
     const panel = approvalScreen
-      .slice(approvalScreen.lastIndexOf('files.write_path'))
+      .slice(approvalScreen.lastIndexOf('files.write'))
       .replace(/\s+/g, '');
     const chosenIndex = targets.findIndex(
       (target) =>
@@ -451,8 +454,7 @@ export async function runLiveTuiWindow(options: WindowOptions) {
     await screen(
       'ordinary_second_approval_panel',
       (text) =>
-        text.includes('files.write_path') &&
-        text.includes(targets[1 - chosenIndex]!.split('/').at(-1)!),
+        text.includes('files.write') && text.includes(targets[1 - chosenIndex]!.split('/').at(-1)!),
     );
     await key('\x1b', 'escape_deny');
     await until(async () => {
@@ -514,7 +516,8 @@ export async function runLiveTuiWindow(options: WindowOptions) {
     require(actual.filter(
       (execution) =>
         execution.kind === 'tool' &&
-        execution.definitionId === 'files.write_path' &&
+        execution.definitionId === 'files.write' &&
+        execution.definitionVersion === '3' &&
         execution.authorization?.dispatched,
     ).length === 1, 'one_exact_file_dispatch');
     const original = (await ownedStore.getChanges({ after: '0', limit: 200 })).events;

@@ -182,11 +182,7 @@ try {
   const toolNames: [string, string][] = [
     ['ask_user', 'ask_user'],
     ['files.edit', 'edit_file'],
-    ['files.glob', 'glob_files'],
-    ['files.list', 'list_directory'],
     ['files.read', 'read_file'],
-    ['files.read_path', 'read_user_file'],
-    ['files.search', 'search_content'],
     ['files.write', 'write_file'],
     ...(shellAvailable
       ? ([

@@ -27,7 +27,7 @@ const object = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 function approvalPanelHasExactTarget(text: string, target: string) {
-  const start = text.lastIndexOf('files.write_path');
+  const start = text.lastIndexOf('files.write');
   if (start < 0) return false;
   const panel = text.slice(start);
   return (
@@ -50,6 +50,8 @@ function stableChildConfiguration(configuration: unknown) {
   delete proof.parentExecutionId;
   delete proof.parentExecutionDigest;
   delete proof.parentRunId;
+  delete proof.rootWorkCommandId;
+  delete proof.rootWorkSeq;
   return stable;
 }
 function exactChildMcpBinding(
@@ -265,7 +267,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
           'task.message',
           'task.follow_up',
           'task.interrupt',
-          'files.write_path',
+          'files.write',
         ].map((id) => ({ id })),
       }),
       { mode: 0o600 },
@@ -299,7 +301,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
       permissions: {
         ...binding.permissions!,
         async authorize(request) {
-          if (request.kind === 'tool' && request.definitionId === 'files.write_path') {
+          if (request.kind === 'tool' && request.definitionId === 'files.write') {
             const input = request.input;
             if (
               !input ||
@@ -446,8 +448,8 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     await key('\x1b', 'escape');
     await screen('ordinary_ready_for_business', (text) => /^❯(?: |$)/m.test(text));
     const leaf = (index: number) =>
-      `Use write_user_file exactly once with path ${JSON.stringify(targets[index])}, content ${JSON.stringify(bodies[index])}, base null. Respect a denied Tool and stop without retry or replacement. Report its actual outcome.`;
-    const content = `New task: Create exactly two worker collaborators using spawn_agent with only prompt and no preset before waiting. Do not select any preset. A: ${leaf(0)} B: ${leaf(1)} Do not write files yourself. Keep your Run waiting with wait_agent_events until BOTH children actually finish; use returned event sequence for subsequent waits. Operator will decide each approval. Do not retry denied work. Synthetic test ${crypto.randomUUID()}`;
+      `Use write_file exactly once with path ${JSON.stringify(targets[index])}, content ${JSON.stringify(bodies[index])}. Omit base_ref because this creates a new file. Respect a denied Tool and stop without retry or replacement. Report its actual outcome.`;
+    const content = `New task: Create exactly two default general collaborators using spawn_agent with only prompt and no preset before waiting. Do not select any preset. A: ${leaf(0)} B: ${leaf(1)} Do not write files yourself. Keep your Run waiting with wait_agent_events until BOTH children actually finish; pass both exact returned work_ref values as work_refs and wait_ms 30000; repeat the same work_refs so the runtime resumes observation automatically. Operator will decide each approval. Do not retry denied work. Synthetic test ${crypto.randomUUID()}`;
     await send(content, 'business_input');
     const allSessions = async () => {
       const rootSession = (await ownedStore.getSession('root'))!;
@@ -507,6 +509,9 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
       'parent_real_event_wait_active',
     );
     require((await allSessions()).length === 3, 'exactly_two_real_children');
+    require(cards.every(
+      (card) => card.definitionId === 'files.write' && card.definitionVersion === '3',
+    ), 'current_file_write_approval_identity');
     const parentBefore = await ownedStore.getView('root');
     require(parentBefore.runs.some((run) => run.isActive), 'parent_still_waiting_for_children');
     require(targets.every((target) => !existsSync(target)), 'zero_effects_before_ui_approval');
@@ -514,7 +519,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     await key('\r', 'enter');
     const approvalScreen = await screen(
       'ordinary_exact_approval_panel',
-      (text) => text.includes('files.write_path') && text.includes('Allow once'),
+      (text) => text.includes('files.write') && text.includes('Allow once'),
     );
     const chosenIndex = targets.findIndex((target) =>
       approvalPanelHasExactTarget(approvalScreen, target),
@@ -630,7 +635,8 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     require(actual.filter(
       (execution) =>
         execution.kind === 'tool' &&
-        execution.definitionId === 'files.write_path' &&
+        execution.definitionId === 'files.write' &&
+        execution.definitionVersion === '3' &&
         execution.authorization?.dispatched,
     ).length === 1, 'one_exact_file_dispatch');
     // U02 adds a second real child round after the complete ordinary U01 setup.
@@ -665,6 +671,11 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     const oldCarrierMetadata = structuredClone(immutableCarrier(oldCarrier!));
     const oldInteractionMetadata = structuredClone(approved);
     const oldRunMetadata = structuredClone(oldRun);
+    const oldSource = await ownedStore.getExecution(oldCarrier!.parentExecutionId!);
+    const oldParentRun = oldSource?.runId ? await ownedStore.getRun(oldSource.runId) : null;
+    require(oldParentRun?.status === 'completed' &&
+      !oldParentRun.isActive, 'first_round_exact_parent_run_complete');
+    const oldParentRunMetadata = structuredClone(oldParentRun);
     const immutableMetadataUnchanged = async (stage: string) => {
       const carrier = await ownedStore.getExecution(oldCarrier!.id);
       const interaction = await ownedRuntime.getInteraction({
@@ -675,14 +686,15 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
       require(carrier &&
         isDeepStrictEqual(immutableCarrier(carrier), oldCarrierMetadata) &&
         isDeepStrictEqual(interaction, oldInteractionMetadata) &&
-        isDeepStrictEqual(await ownedStore.getRun(oldRun!.id), oldRunMetadata), stage);
+        isDeepStrictEqual(await ownedStore.getRun(oldRun!.id), oldRunMetadata) &&
+        isDeepStrictEqual(await ownedStore.getRun(oldParentRun!.id), oldParentRunMetadata), stage);
     };
     await key('\x02', 'ctrl_b');
     await screen('two_round_return_parent_chooser', (text) => text.includes('Pending cards'));
     await key('\x1b', 'escape');
     await screen('two_round_parent_composer', (text) => /^❯(?: |$)/m.test(text));
-    const instructionC = `New assignment in the same collaborator: use write_user_file exactly once with path ${JSON.stringify(targets[2])}, content ${JSON.stringify(bodies[2])}, base null. This fresh target needs its own human approval. Report the complete exact content marker only after the real successful write. Respect denial, without retry, replacement or delegation.`;
-    const continuation = `Continue ${oldCarrier!.rootWorkCommandId}. Continue the same original work and use follow_up_agent exactly once on the SAME original agent_id ${chosen!.sessionId}, content ${JSON.stringify(instructionC)}. Keep its saved history and original configuration. Wait for that new child round's actual result with finite wait_agent_events and report its complete actual content marker. Do not spawn, write yourself, replay prior writes, retry denials, or control other collaborators.`;
+    const instructionC = `New assignment in the same collaborator: use write_file exactly once with path ${JSON.stringify(targets[2])}, content ${JSON.stringify(bodies[2])}. Omit base_ref because this creates a new file. This fresh target needs its own human approval. Report the complete exact content marker only after the real successful write. Respect denial, without retry, replacement or delegation.`;
+    const continuation = `New assignment for the same collaborator: use follow_up_agent exactly once on the SAME original agent_id ${chosen!.sessionId}, content ${JSON.stringify(instructionC)}. Keep its saved history and original configuration. Wait for that new child round's actual result with wait_agent_events using the exact new returned work_ref in work_refs and wait_ms 30000, and report its complete actual content marker. Do not spawn, write yourself, replay prior writes, retry denials, or control other collaborators.`;
     await send(continuation, 'second_round_business_input');
     let parentFollowupApproved = false;
     const fresh = await until(async () => {
@@ -734,7 +746,9 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
             'same_child_real_second_round_approval',
           );
     checks.parentFollowupApprovalThroughOrdinaryTui = parentFollowupApproved;
-    require(next.sessionId === chosen!.sessionId &&
+    require(next.definitionId === 'files.write' &&
+      next.definitionVersion === '3' &&
+      next.sessionId === chosen!.sessionId &&
       next.id !== chosen!.id &&
       next.runId !== chosen!.runId &&
       next.executionId !== chosen!.executionId &&
@@ -770,11 +784,51 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
         nextRun,
         'task.follow_up',
       )), 'both_child_rounds_have_exact_fresh_MCP_parent_invocation_proofs');
+    const nextSource = nextCarrier?.parentExecutionId
+      ? await ownedStore.getExecution(nextCarrier.parentExecutionId)
+      : null;
+    const nextParentRun = nextSource?.runId ? await ownedStore.getRun(nextSource.runId) : null;
+    const nextParentCommand = nextParentRun
+      ? await ownedStore.getCommand(nextParentRun.originCommandId)
+      : null;
+    const nextChildCommand = nextRun ? await ownedStore.getCommand(nextRun.originCommandId) : null;
+    require(nextSource?.definitionId === 'task.follow_up' &&
+      nextSource.definitionVersion === '1' &&
+      object(nextSource.input).agentId === chosen!.sessionId &&
+      object(nextSource.input).content === instructionC &&
+      nextParentRun &&
+      nextParentCommand &&
+      nextParentRun.id !== oldParentRun!.id &&
+      nextParentCommand.kind === 'run.start' &&
+      nextParentCommand.status === 'applied' &&
+      nextParentCommand.sessionId === 'root' &&
+      nextParentCommand.rootWorkCommandId === nextParentCommand.id &&
+      nextParentCommand.rootWorkSeq === nextParentCommand.seq &&
+      object(nextParentCommand.request).content === continuation &&
+      object(nextParentCommand.receipt).runId === nextParentRun.id &&
+      nextParentRun.rootWorkCommandId !== oldParentRun!.rootWorkCommandId &&
+      nextParentRun.rootWorkSeq !== oldParentRun!.rootWorkSeq &&
+      [nextSource, nextParentRun, nextCarrier, nextRun, nextTool, nextChildCommand].every(
+        (fact) =>
+          fact &&
+          fact.originStoreId === expectedStoreId &&
+          fact.rootWorkCommandId === nextParentCommand.id &&
+          fact.rootWorkSeq === nextParentCommand.seq,
+      ) &&
+      (fresh.kind !== 'parent' ||
+        (fresh.card.executionId === nextSource.id &&
+          fresh.card.runId ===
+            nextParentRun.id)), 'second_human_input_owns_exact_new_parent_command_run_and_child_work');
+    require(nextChildCommand?.id === `child-start-${nextCarrier?.id}` &&
+      nextChildCommand.kind === 'input.follow_up' &&
+      nextChildCommand.sessionId === chosen!.sessionId &&
+      object(nextChildCommand.request).afterRunId === oldRun!.id &&
+      object(nextChildCommand.request).content === instructionC &&
+      nextRun?.carrierExecutionId ===
+        nextCarrier?.id, 'same_child_successor_preserves_exact_original_predecessor');
     require(nextCarrier &&
       nextCarrier.id !== oldCarrier!.id &&
-      nextCarrier.rootWorkCommandId === oldCarrier!.rootWorkCommandId &&
-      nextCarrier.rootWorkSeq === oldCarrier!.rootWorkSeq &&
-      nextRun?.rootWorkCommandId === oldRun!.rootWorkCommandId &&
+      nextCarrier.parentExecutionId === nextSource!.id &&
       nextTool?.runId === nextRun?.id &&
       nextTool.authorization?.dispatched !== true &&
       isDeepStrictEqual(
@@ -783,7 +837,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
       ) &&
       (await ownedStore.getView(chosen!.sessionId)).runs.length === 2 &&
       (await ownedStore.listExecutions('root')).filter((execution) => execution.childSessionId)
-        .length === 3, 'same_session_one_new_carrier_original_work_and_configuration');
+        .length === 3, 'same_session_one_new_carrier_new_work_and_original_configuration');
     await immutableMetadataUnchanged('old_first_round_metadata_unchanged_at_new_approval');
     require((await pending()).length === 1 &&
       (await pending())[0]?.id ===
@@ -918,12 +972,14 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     const completedCarrier = (await ownedStore.getExecution(nextCarrier!.id))!;
     const acceptance = completedCarrier.resultAcceptance!;
     const acceptedParentRun = acceptance.runId ? await ownedStore.getRun(acceptance.runId) : null;
-    require(acceptedParentRun?.rootWorkCommandId === oldCarrier!.rootWorkCommandId &&
+    require(acceptedParentRun?.id === nextParentRun!.id &&
+      acceptedParentRun.rootWorkCommandId === nextParentCommand!.id &&
+      acceptedParentRun.rootWorkSeq === nextParentCommand!.seq &&
       acceptedParentRun.contextSelectionId === acceptance.selectionId &&
       acceptance.resultRevision === completedCarrier.resultRevision &&
       String(object(completedCarrier.result).content ?? '').includes(
         bodies[2]!,
-      ), 'second_round_exact_result_revision_original_work_and_actual_fact');
+      ), 'second_round_exact_result_revision_new_parent_work_and_actual_fact');
     let exactPreparedSource = false;
     for (const request of options.requests().slice(requestStart)) {
       const execution = await ownedStore.getExecution(request.requestId);
@@ -949,7 +1005,9 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
       finalSameChild.runs.every((run) => run.status === 'completed') &&
       finalSameChild.executions.filter(
         (execution) =>
-          execution.definitionId === 'files.write_path' && execution.authorization?.dispatched,
+          execution.definitionId === 'files.write' &&
+          execution.definitionVersion === '3' &&
+          execution.authorization?.dispatched,
       ).length === 2 &&
       (await ownedStore.listExecutions('root')).filter((execution) => execution.childSessionId)
         .length === 3, 'two_real_child_rounds_exact_two_dispatches_no_replacement');

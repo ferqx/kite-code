@@ -178,3 +178,7 @@ controller 隔离原 scope/generation/Abort/selected Command。来源目录与 p
 `environment.context` 只表示最近已核实的原请求输入及其独立本地估算，`nextContext` 表示当前已保存上下文的下一请求预测，`usage` 为实际消费与统计覆盖。底部优先显示明确标为估算的下一请求数量；`/context` 同时区分三者，实际输入缺失明确不可用。错误 scope、空闲换模型或推理档位改变不把旧预测归给新选择；没有新增客户端测试入口。口径归 [Core](../../../agent/src/context-estimate.README.md)。
 
 [80×24 审批回归](../../test/isolated/tui/approval-presentation.test.ts)在真实 Service／SQLite 与普通 TUI 上核默认仅此次、范围35行首尾分页、切回原选择及私人草稿保持，期间 Answer POST 与实际工具效果均为零。[执行投影](../../test/tui/execution-ink-projection.test.tsx)同时核取消 Shell 的中性原命令标题，不把未执行的取消记录显示成 Ran。
+
+已退役工具的旧 ID 不再套用 Files 路径、搜索或 Workflow／Validation 的专属名称和探索预览，历史工具调用沿原 ID、参数及结果通用呈现，不删除事件。现役 Files、Shell、Skills 保持既有投影。[投影回归](../../test/tui/execution-ink-projection.test.tsx)核退役 ID 的通用回退与现役工具展示。
+
+现役`write_file`新建省略输入基线；TUI的Create标签沿已核scope、定义版本、成功结果、前像为null及完整发布基线一致的原`fileChange`回执生成，不因输入缺少引用猜测创建成功。失败、未知、错归属或不一致回执保持通用展示。

@@ -16,6 +16,7 @@
  * 5. Model continues after interaction completes
  */
 
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -68,12 +69,10 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
                       {
                         label: 'Blue',
                         description: 'Choose a calm primary color.',
-                        recommended: true,
                       },
                       {
                         label: 'Red',
                         description: 'Choose a warm primary color.',
-                        recommended: false,
                       },
                     ],
                   },
@@ -227,11 +226,9 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
 
       // Wait for follow-up text
       await waitForText(() => tui.outputSinceLastAction(), 'Draft saved', 15000);
-      await waitForText(() => tui.viewport(), '方案审核', 15_000);
+      await waitForText(() => tui.viewport(), '批准此计划', 15_000);
       tui.write('\x1b[B');
-      await tui.settleScreen();
-      tui.write('\x1b[B');
-      await tui.settleScreen();
+      await waitForText(() => tui.viewport(), '❯ 1. 批准此计划', 5_000);
       tui.write('\r');
       await waitForText(() => tui.viewport(), 'Lifecycle plan completed.', 15_000);
       await assertCurrentPlanCompletion(workspace, 'Draft a lifecycle plan', server);
@@ -274,6 +271,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
+      files: { 'README.md': 'Independent safe search fixture.\n' },
       configOverrides: {
         interactionMode: 'accept_edits',
       },
@@ -281,7 +279,6 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
     externalFile = join(workspace.home, 'tool-lifecycle-rejected.txt');
     server.setResponses([
       {
-        toolContinuation: 'aborted',
         message: {
           content: 'I will write the requested file.',
           tool_calls: [
@@ -295,10 +292,27 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
             },
             {
               id: 'call_search_sibling',
-              name: 'search_files',
-              args: { path: '.', pattern: '*.md' },
+              name: 'shell_execute',
+              args: { command: "rg --files -g '*.md' ." },
             },
           ],
+        },
+      },
+      {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_write_external',
+              contentIncludes: ['The user denied this request. It was not executed.'],
+            },
+            {
+              toolCallId: 'call_search_sibling',
+              contentIncludes: ['Exit code: 0.', 'README.md'],
+            },
+          ],
+        },
+        message: {
+          content: 'WRITE_DENIED_SAFE_SEARCH_DONE: write refused; safe search completed.',
         },
       },
     ]);
@@ -311,7 +325,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
   });
 
   test(
-    'full lifecycle: interrupt → deny → current turn stops without model continuation',
+    'full lifecycle: deny only the original write; independent search and model continue',
     async () => {
       // ── 1. 触发审批 / Trigger approval ──
       await submitUserMessage(tui, server, 'Make a directory', { timeout: 15000 });
@@ -323,7 +337,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
           const viewport = tui.viewport();
           return (
             screenContains(viewport, '工具授权') &&
-            screenContains(viewport, '❯ 允许一次') &&
+            screenContains(viewport, '❯ 仅此次') &&
             screenContains(viewport, '拒绝') &&
             screenContains(viewport, '↑↓ 导航  Enter 确认  Esc 取消')
           );
@@ -335,13 +349,25 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.viewport();
       expect(screenContains(output, '工具授权')).toBe(true);
-      expect(screenContains(output, '允许一次')).toBe(true);
+      expect(screenContains(output, '仅此次')).toBe(true);
       expect(screenContains(output, '拒绝')).toBe(true);
       expect(screenContains(output, '[接受编辑]')).toBe(false);
 
       // ── 3. 验证渲染顺序：模型文字在审批块之前 / Verify order: text before approval ──
-      const order = assertOrder(output, 'I will write the requested file', '工具授权');
-      expect(order.pass).toBe(true);
+      const order = assertOrder(tui.scrollback(), 'I will write the requested file', '工具授权');
+      expect(order.pass, `${order.detail}\n${stripAnsi(tui.scrollback())}`).toBe(true);
+
+      expect(existsSync(externalFile)).toBe(false);
+      {
+        using database = new Database(workspace.databasePath, { readonly: true });
+        expect(
+          database
+            .query(
+              "SELECT dispatched FROM execution WHERE kind='tool' AND call_id='call_write_external'",
+            )
+            .all(),
+        ).toEqual([{ dispatched: 0 }]);
+      }
 
       // ── 4. 拒绝：导航到 Deny 确认 / Deny: navigate to Deny and confirm ──
       tui.write('\x1b[B');
@@ -353,14 +379,13 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
           const observation = observePersistedTurnEvents(workspace, 'Make a directory');
           if (observation.status !== 'ready' || !observation.value) return false;
           return observation.value.events.some(
-            (event) =>
-              event.type === 'run.finished' &&
-              ['failed', 'cancelled'].includes(String(event.status)),
+            (event) => event.type === 'run.finished' && event.status === 'completed',
           );
         },
-        'approval rejection terminal settlement to become durable',
+        'denial and independent search completion to settle the original Run',
         15_000,
       );
+      await waitForText(() => tui.outputSinceLastAction(), 'WRITE_DENIED_SAFE_SEARCH_DONE', 15_000);
       await waitForTuiReady(tui);
       await waitForCondition(
         () => /●\s*Write/u.test(stripAnsi(tui.screenFramesSince(rejectionFrames).join('\n'))),
@@ -372,24 +397,17 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       const afterRejection = tui.screenFramesSince(rejectionFrames).join('\n');
       console.log('  output after approval rejection:', stripAnsi(afterRejection).slice(-2000));
 
-      // ── 5. 用户拒绝审批会中止当前 turn，不再执行工具或调用模型 ──
-      // Rejecting approval aborts the current turn without executing the tool
-      // or asking the model for a continuation.
-      // The receipt-aware UI intentionally keeps the approval visible while
-      // respond_interaction is in flight. Only the settled current viewport
-      // must have left the approval surface; transient frames may contain it.
+      // Denial is scoped to this exact write. Its independent sibling keeps
+      // its own permission and both original results enter the next Model.
+      // The approval stays visible only while its original answer is in flight.
       expect(screenContains(tui.viewport(), '工具授权')).toBe(false);
-      expect(screenContains(afterRejection, 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION')).toBe(
-        false,
-      );
-      // The rejected card retains the exact queued operation, while the safe
-      // sibling is cancelled before dispatch and remains off-screen.
+      expect(screenContains(tui.viewport(), 'WRITE_DENIED_SAFE_SEARCH_DONE')).toBe(true);
       expect(/●\s*Write/u.test(stripAnsi(afterRejection))).toBe(true);
       expect(screenContains(afterRejection, 'tool-lifecycle-rejected.txt')).toBe(true);
       expect(screenContains(afterRejection, 'Tool approval rejected by user.')).toBe(true);
       expect(screenContains(afterRejection, 'Tool execution rejected.')).toBe(false);
       expect(screenContains(afterRejection, 'Command not run: approval rejected.')).toBe(false);
-      expect(screenContains(afterRejection, 'searched 1 file pattern')).toBe(false);
+      expect(screenContains(afterRejection, 'ran 1 shell command')).toBe(true);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
       expect(existsSync(externalFile)).toBe(false);
 
@@ -410,35 +428,64 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         (event) =>
           event.type === 'interaction.answered' && event.executionId === rejectedTool?.executionId,
       );
-      const abortIndex = observed!.events.findIndex(
-        (event) =>
-          event.type === 'run.finished' && ['failed', 'cancelled'].includes(String(event.status)),
+      const completedIndex = observed!.events.findIndex(
+        (event) => event.type === 'run.finished' && event.status === 'completed',
       );
-      const siblingCancelledIndex = observed!.events.findIndex(
+      const siblingCompletedIndex = observed!.events.findIndex(
         (event) =>
           event.type === 'execution.finished' &&
           event.kind === 'tool' &&
           event.callId === 'call_search_sibling' &&
-          event.status === 'cancelled',
+          event.status === 'succeeded',
       );
       expect(rejectionIndex).toBeGreaterThanOrEqual(0);
       expect(toolRejectedIndex).toBeGreaterThan(rejectionIndex);
-      expect(siblingCancelledIndex).toBeGreaterThan(toolRejectedIndex);
-      expect(abortIndex).toBeGreaterThan(siblingCancelledIndex);
+      expect(siblingCompletedIndex).toBeGreaterThanOrEqual(0);
+      expect(completedIndex).toBeGreaterThan(toolRejectedIndex);
+      expect(completedIndex).toBeGreaterThan(siblingCompletedIndex);
       expect(
         observed!.events.some(
-          (event, index) =>
-            index > rejectionIndex &&
+          (event) =>
             event.type === 'execution.dispatching' &&
-            event.executionId === observed!.events[siblingCancelledIndex]?.executionId,
+            event.executionId === rejectedTool?.executionId,
         ),
       ).toBe(false);
+      const continuationModels = observed!.events.filter(
+        (event, index) =>
+          index > Math.max(toolRejectedIndex, siblingCompletedIndex) &&
+          event.type === 'execution.planned' &&
+          event.kind === 'model',
+      );
+      expect(continuationModels).toHaveLength(1);
+      expect(server.getWorkRequestCount()).toBe(2);
+      using database = new Database(workspace.databasePath, { readonly: true });
       expect(
-        observed!.events.some(
-          (event, index) =>
-            index > rejectionIndex && event.type === 'execution.planned' && event.kind === 'model',
-        ),
-      ).toBe(false);
+        database
+          .query(
+            "SELECT adapter_id,call_id,state,dispatched FROM execution WHERE kind='tool' ORDER BY call_id",
+          )
+          .all(),
+      ).toEqual([
+        {
+          adapter_id: 'shell.execute',
+          call_id: 'call_search_sibling',
+          state: 'succeeded',
+          dispatched: 1,
+        },
+        {
+          adapter_id: 'files.write',
+          call_id: 'call_write_external',
+          state: 'failed',
+          dispatched: 0,
+        },
+      ]);
+      expect(
+        database
+          .query(
+            "SELECT i.state,json_extract(i.answer_json,'$.decision') AS decision,i.accepted_decision_revision FROM interaction i JOIN execution e ON e.id=i.execution_id WHERE e.call_id='call_write_external'",
+          )
+          .all(),
+      ).toEqual([{ state: 'answered', decision: 'deny', accepted_decision_revision: null }]);
     },
     TIMEOUT,
   );
@@ -460,7 +507,9 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
       {
         message: {
           content: 'Let me search for files.',
-          tool_calls: [{ id: 'call_search', name: 'search_files', args: { pattern: '*.ts' } }],
+          tool_calls: [
+            { id: 'call_search', name: 'shell_execute', args: { command: "rg --files -g '*.ts'" } },
+          ],
         },
       },
       {

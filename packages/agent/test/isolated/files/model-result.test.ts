@@ -1,13 +1,10 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ArtifactRef, ToolContext, ToolResult } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, type WorkspaceFiles } from '../../../src/files';
-import {
-  formatFileReadResult,
-  formatFileSearchResult,
-} from '../../../src/tools/files/model-result';
+import { formatFileReadResult } from '../../../src/tools/files/model-result';
 
 const owners: WorkspaceFiles[] = [];
 const roots: string[] = [];
@@ -155,77 +152,6 @@ test('read presentation distinguishes a suffix/window, an empty file and an empt
   expect(presentedBody(eof)).toBe('');
 });
 
-test('search presentation retains every match/context, baseline, exact cursor and Unicode preview across pages', async () => {
-  const f = fixture();
-  f.put('a.ts', 'head\nneedle😀tail\nneedle second\nlast\n');
-  const firstResult = await f.execute('files.search', {
-    mode: 'content',
-    text: 'needle',
-    limit: 1,
-    contextLines: 1,
-    maxLineChars: 7,
-  });
-  const first = JSON.parse(firstResult.content);
-  const unchanged = JSON.stringify(firstResult);
-  const tool = f.tools.find((tool) => tool.id === 'files.search')!;
-  expect(tool.model?.resultVersion).toBe('2');
-  const text = tool.formatModelResult!({ result: firstResult })!;
-  expect(text).toContain('limit=1; context_lines=1; max_line_chars=7');
-  expect(text).toContain('Returned 1 matches');
-  expect(text).toContain('later matches remain');
-  expect(text).toContain(`next_cursor=${JSON.stringify(first.next)}`);
-  expect(text).toContain('1 [context] head');
-  expect(text).toContain('2 [match; truncated 6/12 UTF-16 chars] needle');
-  expect(text).toContain('3 [context; truncated 7/13 UTF-16 chars] needle ');
-  expect(text).toContain(`baseline=${JSON.stringify(first.files[0].baseline)}`);
-  expect(text).not.toContain('"observation"');
-  expect(text).not.toContain('"stats"');
-  expect(JSON.stringify(firstResult)).toBe(unchanged);
-  const second = formatFileSearchResult({
-    result: await f.execute('files.search', {
-      mode: 'content',
-      text: 'needle',
-      after: first.next,
-      limit: 1,
-      contextLines: 1,
-    }),
-  })!;
-  expect(second).toContain('continuation page');
-  expect(second).toContain('next_cursor=null');
-  expect(second).toContain('3 [match] needle second');
-  expect(second).toContain('2 [context] needle😀tail');
-  expect(second).not.toContain('Complete search');
-});
-
-test('zero search exposes real ignore/binary/encoding gaps and conditional literal-query correction once', async () => {
-  const f = fixture();
-  mkdirSync(join(f.root, 'dist'));
-  f.put('.gitignore', 'dist/\n');
-  f.put('dist/a', 'hidden');
-  f.put('b.bin', Buffer.from([0, 0, 0]));
-  f.put('bad', Buffer.from([0xff]));
-  f.put('a', 'unrelated');
-  const result = await f.execute('files.search', { text: 'absent|other' });
-  const original = JSON.stringify(result);
-  const text = formatFileSearchResult({ result })!;
-  expect(text).toContain('Returned 0 files');
-  expect(text).toContain('some entries not inspected');
-  expect(text).toContain('"ignored":1');
-  expect(text).toContain('"binary":1');
-  expect(text).toContain('"encoding":1');
-  expect(text).toContain('directories count once');
-  expect(text.match(/Pattern-like/g)).toHaveLength(1);
-  expect(text.match(/No literal matches/g)).toHaveLength(1);
-  expect(text).not.toContain('Complete search');
-  expect(text.length).toBeLessThan(result.content.length);
-  expect(JSON.stringify(result)).toBe(original);
-  const explicit = formatFileSearchResult({
-    result: await f.execute('files.search', { path: 'dist/a', text: 'hidden', mode: 'content' }),
-  })!;
-  expect(explicit).toContain('1 [match] hidden');
-  expect(explicit).toContain('Complete search within selected scope and filters');
-});
-
 test('read Artifact presentation requires the verified full body and never substitutes its bounded excerpt', async () => {
   const f = fixture();
   const content = `\uFEFF${'雪😀\\"\r\n'.repeat(100000)}TAIL_EXACT\n`;
@@ -260,63 +186,18 @@ test('read Artifact presentation requires the verified full body and never subst
   expect(presentedBody(text)).toBe(content);
   expect(text.endsWith('TAIL_EXACT\n')).toBe(true);
   expect(text).not.toContain('"excerpt"');
-});
-
-test('search Artifact uses its full JSON body and malformed/failed structures safely keep the original result', async () => {
-  const f = fixture();
-  f.put('a', 'needle\n');
-  const result = await f.execute('files.search', { text: 'needle' });
-  const artifactResult: ToolResult = {
-    outcome: 'succeeded',
-    content: JSON.stringify({
-      kind: 'search',
-      observation: JSON.parse(result.content).observation,
-      body: { complete: true, encoding: 'utf-8', format: 'json', reference: { id: 'verified' } },
-      inlineBody: false,
+  expect(
+    formatFileReadResult({ result: { ...result, artifactRefs: [reference] }, body: artifactBody }),
+  ).toBe(text);
+  expect(
+    formatFileReadResult({
+      result: { ...result, artifactRefs: [{ ...reference, id: 'other' }] },
+      body: artifactBody,
     }),
-    modelContent: {
-      kind: 'artifact',
-      encoding: 'utf-8',
-      reference: {
-        id: 'verified',
-        mediaType: 'application/json',
-        size: String(Buffer.byteLength(result.content)),
-        scope: { kind: 'execution', id: 'actual' },
-      },
-    },
-  };
-  expect(formatFileSearchResult({ result: artifactResult })).toBeUndefined();
-  expect(formatFileSearchResult({ result: artifactResult, body: result.content })).toBe(
-    formatFileSearchResult({ result }),
-  );
-  for (const bad of [
-    { ...result, outcome: 'failed' as const },
-    { ...result, content: 'not-json' },
-    {
-      ...result,
-      content: JSON.stringify({
-        ...JSON.parse(result.content),
-        feedback: 'A new material caveat must remain visible.',
-      }),
-    },
-    {
-      ...result,
-      content: JSON.stringify({
-        ...JSON.parse(result.content),
-        observation: { ...JSON.parse(result.content).observation, newFact: true },
-      }),
-    },
-    { ...result, content: JSON.stringify({ matches: [], next: null }) },
-    {
-      ...result,
-      content: JSON.stringify({ ...JSON.parse(result.content), newMeaningfulField: 'unknown' }),
-    },
-  ])
-    expect(formatFileSearchResult({ result: bad })).toBeUndefined();
-  expect(formatFileReadResult({ result })).toBeUndefined();
+  ).toBeUndefined();
 });
 
-test('material result details and unknown search filters preserve the original receipt instead of simplifying it', async () => {
+test('material result details and malformed or unknown read fields preserve the original receipt', async () => {
   const f = fixture();
   f.put('a', 'needle\n');
   const read = await f.execute('files.read', { path: 'a' });
@@ -331,100 +212,28 @@ test('material result details and unknown search filters preserve the original r
       result: { ...read, artifactRefs: [{ id: 'unrelated', mediaType: 'text/plain', size: '1' }] },
     }),
   ).toBeUndefined();
-  const search = await f.execute('files.search', { text: 'needle' });
-  const body = JSON.parse(search.content);
-  const newFilter = {
-    ...search,
-    content: JSON.stringify({
-      ...body,
-      scope: {
-        ...body.scope,
-        filters: { ...body.scope.filters, newExclusion: 'material restriction' },
-      },
+  for (const content of [
+    'not-json',
+    JSON.stringify({ ...JSON.parse(read.content), feedback: 'A material caveat.' }),
+    JSON.stringify({
+      ...JSON.parse(read.content),
+      observation: { ...JSON.parse(read.content).observation, newFact: true },
     }),
-  };
-  expect(formatFileSearchResult({ result: newFilter })).toBeUndefined();
-  expect(
-    formatFileSearchResult({ result: { ...search, details: { warning: 'material' } } }),
-  ).toBeUndefined();
-  const reference: ArtifactRef = {
-    id: 'original',
-    mediaType: 'application/json',
-    size: String(Buffer.byteLength(search.content)),
-  };
-  const artifactResult: ToolResult = {
-    outcome: 'succeeded',
-    modelContent: { kind: 'artifact', encoding: 'utf-8', reference },
-    artifactRefs: [reference],
-    content: JSON.stringify({
-      kind: 'search',
-      inlineBody: false,
-      body: { complete: true, encoding: 'utf-8', format: 'json', reference },
-    }),
-  };
-  expect(formatFileSearchResult({ result: artifactResult, body: search.content })).toBeDefined();
-  expect(
-    formatFileSearchResult({
-      result: { ...artifactResult, artifactRefs: [{ ...reference, id: 'other' }] },
-      body: search.content,
-    }),
-  ).toBeUndefined();
-});
-
-test('large search presentation preserves complete Artifact content without adding model execution IDs', async () => {
-  const f = fixture();
-  f.put('large', `${'needle'.padEnd(8000, '雪')}\n`.repeat(100));
-  let fullBody = '';
-  const reference: ArtifactRef = {
-    id: 'actual-search-body',
-    mediaType: 'application/json',
-    size: '0',
-    scope: { kind: 'execution', id: 'actual-execution' },
-  };
-  const ownContext = {
-    ...f.context,
-    artifacts: {
-      async publish(input: { content: Uint8Array }) {
-        fullBody = Buffer.from(input.content).toString('utf8');
-        return { ...reference, size: String(input.content.byteLength) };
-      },
-    },
-  } as ToolContext;
-  const result = await f.execute(
-    'files.search',
-    { path: 'large', text: 'needle', mode: 'content', maxLineChars: 10000, limit: 100 },
-    ownContext,
-  );
-  expect(Buffer.byteLength(fullBody)).toBeGreaterThan(1024 * 1024);
-  expect(JSON.parse(fullBody)).not.toHaveProperty('executionId');
-  expect(JSON.parse(fullBody)).not.toHaveProperty('runId');
-  expect(JSON.parse(result.content)).not.toHaveProperty('executionId');
-  expect(JSON.parse(result.content)).not.toHaveProperty('runId');
-  expect(result.modelContent).toBeDefined();
-  expect(formatFileSearchResult({ result })).toBeUndefined();
-  const text = formatFileSearchResult({ result, body: fullBody })!;
-  expect(text).toContain('Returned 100 matches');
-  expect(text.match(/\[match\]/g)).toHaveLength(100);
-  expect(text.includes(`100 [match] ${'needle'.padEnd(8000, '雪')}`)).toBe(true);
-  expect(JSON.parse(fullBody).files[0].baseline).toEqual((await f.files.read('large')).baseline);
+    JSON.stringify({ path: 'a', content: 'needle\n' }),
+    JSON.stringify({ ...JSON.parse(read.content), newMeaningfulField: 'unknown' }),
+  ])
+    expect(formatFileReadResult({ result: { ...read, content } })).toBeUndefined();
 });
 
 test('file presentation keeps original read receipt identity without exposing bookkeeping IDs to the model', async () => {
   const f = fixture();
   f.put('a', 'needle\n');
-  for (const id of ['files.read', 'files.search']) {
-    const result = await f.execute(id, id === 'files.read' ? { path: 'a' } : { text: 'needle' });
-    const raw = JSON.parse(result.content);
-    if (id === 'files.read') {
-      expect(raw.executionId).toBe('actual-execution');
-      expect(raw.runId).toBe('actual-run');
-    } else {
-      expect(raw).not.toHaveProperty('executionId');
-      expect(raw).not.toHaveProperty('runId');
-    }
-    const text = f.tools.find((tool) => tool.id === id)!.formatModelResult!({ result })!;
-    expect(text).not.toContain('evidence_ref=');
-    expect(text).not.toContain('actual-execution');
-    expect(text).not.toContain('actual-run');
-  }
+  const result = await f.execute('files.read', { path: 'a' });
+  const raw = JSON.parse(result.content);
+  expect(raw.executionId).toBe('actual-execution');
+  expect(raw.runId).toBe('actual-run');
+  const text = f.tools.find((tool) => tool.id === 'files.read')!.formatModelResult!({ result })!;
+  expect(text).not.toContain('evidence_ref=');
+  expect(text).not.toContain('actual-execution');
+  expect(text).not.toContain('actual-run');
 });

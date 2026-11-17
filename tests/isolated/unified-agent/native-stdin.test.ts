@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { appendFileSync, existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { browserToolIds } from '@kite-ai/agent/browser';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { connectSharedService } from '../../../apps/cli/host/shared-service';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
@@ -225,19 +226,31 @@ test.skipIf(process.platform !== 'darwin')(
       };
       expect(original.storeId).toBe(storeId);
       expect(requests).toHaveLength(1);
-      expect(requests[0]!.tools.map((tool) => tool.function.name)).toEqual([
+      const browserViews = await client.queryExtension(
+        original.sessionId,
+        'builtin.browser',
+        'browser.view',
+        {},
+      );
+      expect(browserViews.length).toBeLessThanOrEqual(1);
+      if (browserViews.length)
+        expect(browserViews[0]!.payload).toMatchObject({
+          state: 'unavailable',
+          error: expect.any(String),
+        });
+      const expectedNames = [
         'ask_user',
-        'edit_file',
-        'glob_files',
-        'list_directory',
         'read_file',
-        'read_user_file',
-        'search_content',
+        'view_images',
         'write_file',
+        'edit_file',
+        'git_worktree',
         'shell_execute',
         'shell_read',
         'shell_stop',
         'shell_wait',
+        'load_skill',
+        'read_skill_resource',
         'wait_agent_events',
         'follow_up_agent',
         'interrupt_agent',
@@ -245,7 +258,12 @@ test.skipIf(process.platform !== 'darwin')(
         'send_agent_message',
         'spawn_agent',
         'web_fetch',
-      ]);
+        ...(browserViews.length ? [] : browserToolIds.map((id) => id.replace('.', '_'))),
+      ];
+      const names = requests[0]!.tools.map((tool) => tool.function.name);
+      expect(names).toHaveLength(expectedNames.length);
+      expect(new Set(names).size).toBe(expectedNames.length);
+      expect([...names].sort()).toEqual([...expectedNames].sort());
       const originalUsers = requests[0]!.messages.filter(
         (message) => message.role === 'user' && message.content === task,
       );

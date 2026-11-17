@@ -1,12 +1,12 @@
 # Files mutation checkpoint business leaf
 
-`@kite-ai/agent/files` 的 `createFileCheckpointing` 显式选择原 Workspace、有限 `maxBytes`、可信 `protectedPaths` 和三个可信读取 callback，创建 `builtin.files@1` Extension，保留原六个 `files.*` Tool IDs/version。它替换同一装配里的旧 Files Extension，不能重复注册同名 namespace/Tool 或在冷恢复中替换原 manifest 实现。普通 `createFileTools(files)` 未注入 capture 时行为保持。
+`@kite-ai/agent/files` 的 `createFileCheckpointing` 显式选择原 Workspace、有限 `maxBytes`、可信 `protectedPaths` 和三个可信读取 callback，创建 `builtin.files@1` Extension，复用当前 `files.read`、`files.write`、`files.edit` 的 Tool IDs/version。它替换同一装配里的旧 Files Extension，不能重复注册同名 namespace/Tool 或在冷恢复中替换原 manifest 实现。普通 `createFileTools(files)` 未注入 capture 时行为保持。
 
 当前实现包括 Files capture、完整 Artifact、原 namespace records、只读列表/详情/预览、独立 code-only restore Action与跨 Fork 的封存业务时间线。默认 Service 和 Web只读消费者已有实际资格；CLI/TUI/Native 开发路径已有三种范围的持久两步骤 caller 和各自真实窗口；正式入口与完整 Native 发行安装继续按对应 owner 核验。code-only不修改 context selection、不发 Model或Shell，不引入Git broker或整个目录snapshot。
 
 ## 注册与可信捕获
 
-显式 factory 持有原 Workspace FD，`close()` 结束其生命周期。`createScopedFileCheckpointing(resolve,{includeTools?})` 是零 I/O 的纯注册 helper，默认仅注册同一 records/Actions/Queries；`includeTools:true` 同时注册原六 Tools。全部 descriptor 复用实际 factory/原 `createFileTools` 的 schema、resources、IDs/version，无 dummy Workspace。每次 Tool execute、Action prepare/execute、query 实际调用可信 resolver 创建原 scope factory，并在 finally 关闭。宿主只注册一次 `builtin.files`；per-Run Assembly 不再重复注册它。resolver 失败封闭拒绝，关闭失败不回退其他 factory。
+显式 factory 持有原 Workspace FD，`close()` 结束其生命周期。`createScopedFileCheckpointing(resolve,{includeTools?})` 是零 I/O 的纯注册 helper，默认仅注册同一 records/Actions/Queries；`includeTools:true` 同时注册当前三个 Files Tools。全部 descriptor 复用实际 factory/原 `createFileTools` 的 schema、resources、IDs/version，无 dummy Workspace。每次 Tool execute、Action prepare/execute、query 实际调用可信 resolver 创建原 scope factory，并在 finally 关闭。宿主只注册一次 `builtin.files`；per-Run Assembly 不再重复注册它。resolver 失败封闭拒绝，关闭失败不回退其他 factory。
 
 `readBoundary(actualToolContext,actualPublicExecution)` 返回 `{boundary,modelExecutionId,modelInputHash}`。boundary 保存实际 Store/W/S/Run 和原 Run 的不可变 selection，live 捕获还须与当前 Session selection 相同；`triggerMessageId/triggerSeq` 是本次 Model 实际消费的最后 User 输入，其之前完整恢复边界为 `messageId/messageSeq`，首次输入之前为 null/0。宿主从原 Tool 的真实 Model decisionSource、成功 Model 的完整 sealed input 和准确来源映射取得这些事实。Model input、JSONC、known IDs/hash、有限 view 不替代证明；缺 callback 拒绝 capture，零文件修改。point ID 只哈希 boundary，不含某一次 Model proof，避免同一输入的连续 Model 创建多个首 preimage 窗口。
 

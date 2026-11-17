@@ -149,7 +149,7 @@ export async function runLivePermissionBoundaries(options: Options) {
             },
           ],
           tools: [
-            'files.write_path',
+            'files.write',
             'task.spawn',
             'task.events',
             'task.list',
@@ -196,7 +196,7 @@ export async function runLivePermissionBoundaries(options: Options) {
               if (
                 !held &&
                 execution?.kind === 'tool' &&
-                execution.definitionId === 'files.write_path' &&
+                execution.definitionId === 'files.write' &&
                 execution.sessionId !== 's'
               ) {
                 held = structuredClone(input);
@@ -206,7 +206,7 @@ export async function runLivePermissionBoundaries(options: Options) {
               }
               try {
                 const result = await targetStore.markDispatching(input);
-                if (execution?.kind === 'tool' && execution.definitionId === 'files.write_path')
+                if (execution?.kind === 'tool' && execution.definitionId === 'files.write')
                   dispatches.push(structuredClone(input));
                 return result;
               } catch (error) {
@@ -238,13 +238,13 @@ export async function runLivePermissionBoundaries(options: Options) {
         permissions: {
           ...binding.permissions!,
           async authorize(request) {
-            if (request.kind === 'tool' && request.definitionId === 'files.write_path') {
+            if (request.kind === 'tool' && request.definitionId === 'files.write') {
               const input = record(request.input);
               if (
                 request.sessionId === 's' ||
                 input.path !== target ||
                 input.content !== body ||
-                input.base !== null
+                Object.keys(input).some((field) => !['path', 'content'].includes(field))
               )
                 return {
                   allowed: false,
@@ -424,7 +424,7 @@ export async function runLivePermissionBoundaries(options: Options) {
           expectedStoreId,
           commandId: 'work',
           kind: 'run.start',
-          content: `New task: Use spawn_agent exactly once, prompt only and no preset, to delegate this complete child instruction as content: ${JSON.stringify(`Use write_user_file exactly once to create ${target} with content ${JSON.stringify(body)} and base null. Report the actual result and finish. If denied, failed or unknown do not retry, replace the action or delegate.`)}. Do not write yourself. Wait for the actual child result with wait_agent_events and report its truthful result; never repeat the task or follow up. Synthetic ${crypto.randomUUID()}.`,
+          content: `New task: Use spawn_agent exactly once, prompt only and no preset, to delegate this complete child instruction as content: ${JSON.stringify(`Use write_file exactly once to create ${target} with content ${JSON.stringify(body)}; omit base_ref because this is a new file. Report the actual result and finish. If denied, failed or unknown do not retry, replace the action or delegate.`)}. Do not write yourself. Wait for the actual child result with wait_agent_events and report its truthful result; never repeat the task or follow up. Synthetic ${crypto.randomUUID()}.`,
         },
         { signal: options.signal },
       );
@@ -451,7 +451,7 @@ export async function runLivePermissionBoundaries(options: Options) {
                 state: 'pending',
               })
             ).interactions.find(
-              (card) => card.kind === 'approval' && card.definitionId === 'files.write_path',
+              (card) => card.kind === 'approval' && card.definitionId === 'files.write',
             ),
           'real_child_original_pending_approval',
         );
@@ -576,7 +576,7 @@ export async function runLivePermissionBoundaries(options: Options) {
           : undefined;
       }, 'original_child_and_parent_settled');
       const writes = (await actualStore.listExecutions(leaf)).filter(
-        (execution) => execution.kind === 'tool' && execution.definitionId === 'files.write_path',
+        (execution) => execution.kind === 'tool' && execution.definitionId === 'files.write',
       );
       assert(
         writes.length === 1 && writes[0]?.id === heldExecutionId,
@@ -586,7 +586,7 @@ export async function runLivePermissionBoundaries(options: Options) {
         (await actualStore.listExecutions('s')).filter((execution) => execution.childSessionId)
           .length === 1 &&
           !(await actualStore.listExecutions('s')).some(
-            (execution) => execution.definitionId === 'files.write_path',
+            (execution) => execution.definitionId === 'files.write',
           ),
         'no_replacement_child_or_parent_write',
       );

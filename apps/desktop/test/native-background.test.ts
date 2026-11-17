@@ -1312,6 +1312,7 @@ for (const corruption of ['none', 'foreign run', 'foreign tool'] as const) {
         resultRevision: '7',
         result: { outcome: 'succeeded', content },
       }) as Execution;
+    // Retired IDs remain original historical facts, without current tool semantics.
     const listExecution = tool('list-execution', oldRun.id, 'files.list', rows[1]!.content),
       askExecution = tool('ask-execution', currentRun.id, 'ask_user', askContent);
     f.port.getView = async () =>
@@ -1385,7 +1386,6 @@ for (const corruption of ['none', 'foreign run', 'foreign tool'] as const) {
             definitionVersion: '1',
             status: 'succeeded',
             resultRevision: '7',
-            target: '.',
           },
           {
             messageId: 'question-result',
@@ -1398,6 +1398,7 @@ for (const corruption of ['none', 'foreign run', 'foreign tool'] as const) {
             },
           },
         ]);
+        expect(body.presentation!.tools[0]).not.toHaveProperty('target');
         expect(body.presentation!.executions).toHaveLength(1);
         expect(body.presentation!.executions[0]!.id).toBe(askExecution.id);
         expect(body.presentation!.executions[0]).not.toHaveProperty('result');

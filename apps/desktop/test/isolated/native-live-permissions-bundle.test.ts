@@ -226,7 +226,7 @@ test.skipIf(process.platform !== 'darwin')(
             } else if (review.length) {
               assert.equal(review.length, 1);
               assert.deepEqual(body.tools ?? [], []);
-              assert.equal(review[0].target.definitionId, 'files.write_path');
+              assert.equal(review[0].target.definitionId, 'files.write');
               reviews++;
               requests.push({ actor: 'review', tools: 0 });
               delta = {
@@ -278,9 +278,8 @@ test.skipIf(process.platform !== 'darwin')(
                   execution_timeout_ms: 60000,
                 });
               } else if (tools.length === (actor === 'main' ? 2 : 1)) {
-                delta = call('write_user_file', {
+                delta = call('write_file', {
                   path: actor === 'main' ? mainEffectPath : childEffectPath,
-                  base: null,
                   content: `${actor.toUpperCase()} EFFECT\n`,
                 });
               } else if (actor === 'child') {
@@ -328,7 +327,7 @@ test.skipIf(process.platform !== 'darwin')(
           }
         },
       });
-      const enabled = new Set(['shell.execute', 'task.spawn', 'task.events']);
+      const enabled = new Set(['shell.execute', 'files.write', 'task.spawn', 'task.events']);
       writeFileSync(
         userConfigurationPath(home),
         JSON.stringify({
@@ -342,13 +341,10 @@ test.skipIf(process.platform !== 'darwin')(
               baseURL: `${provider.url.href}v1`,
             },
           ],
-          tools: [
-            ...ordinaryHostConfigurationDefaults(true, true, true, true).tools.map(({ id }) => ({
-              id,
-              enabled: enabled.has(id),
-            })),
-            { id: 'files.write_path', enabled: true, definitionVersion: '1' },
-          ],
+          tools: ordinaryHostConfigurationDefaults(true, true, true, true).tools.map(({ id }) => ({
+            id,
+            enabled: enabled.has(id),
+          })),
         }),
       );
       const fixture = join(root, 'driver.ts');

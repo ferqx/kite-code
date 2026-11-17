@@ -2,9 +2,9 @@
  * PTY System Test — 探索阶段块：真实会话回放
  *
  * 测试数据取自真实会话日志 ~/.kite-code/sessions/tui/tui-ms0cuzee-0
- * （"仔细了解TUI模块" 对话：7 次模型调用 / 32 次工具调用），按原结构回放：
+ * （"仔细了解TUI模块" 对话：7 次模型调用 / 32 次工具调用），保留原调用数量与响应结构、用现役工具回放：
  *
- *   Response 1: reason + search_files×2 + read_file×1
+ *   Response 1: reason + shell_execute(rg --files)×2 + read_file×1
  *   Response 2: reason + text + read_file×6   （旁白 → 块顶字幕）
  *   Response 3: reason + read_file×5
  *   Response 4: reason + read_file×6
@@ -89,7 +89,7 @@ function expectedFixtureToolResults(calls: readonly FixtureToolCall[]) {
     return {
       toolCallId: call.id,
       contentIncludes: [
-        call.name === 'search_files'
+        call.name === 'shell_execute'
           ? 'apps/kite-cli/src/tui'
           : path === 'package.json'
             ? 'tui-header-merge-fixture'
@@ -134,8 +134,16 @@ describe('TUI PTY System — Thought Text Header Merge (real-session replay)', (
     async () => {
       toolSeq = 0;
       const response1Calls = [
-        { id: `t${++toolSeq}`, name: 'search_files', args: { pattern: '**/tui/**' } },
-        { id: `t${++toolSeq}`, name: 'search_files', args: { pattern: '**/tui/**/*.tsx' } },
+        {
+          id: `t${++toolSeq}`,
+          name: 'shell_execute',
+          args: { command: "rg --files -g '**/tui/**'" },
+        },
+        {
+          id: `t${++toolSeq}`,
+          name: 'shell_execute',
+          args: { command: "rg --files -g '**/tui/**/*.tsx'" },
+        },
         { id: `t${++toolSeq}`, name: 'read_file', args: { path: 'package.json' } },
       ];
       const response2Calls = readCalls(RESP2_FILES);
@@ -228,7 +236,7 @@ describe('TUI PTY System — Thought Text Header Merge (real-session replay)', (
       expect(screenContains(output, 'Thinking ')).toBe(true);
       expect(screenContains(output, 'read 30 files')).toBe(true);
       expect(clean.match(/Thinking \d+s · read 30 files/gu)?.length ?? 0).toBe(1);
-      expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
+      expect(screenContains(output, 'ran 2 shell commands')).toBe(true);
       expect(tui.scrollback().match(/Thinking /g)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'Let me continue reading')).toBe(false);
       expect(screenContains(output, 'Let me read the core files systematically.')).toBe(false);
@@ -297,6 +305,7 @@ describe('TUI PTY System — Thought Text Header Merge (real-session replay)', (
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
+      console.log('  [carryover] clean output (last 2000 chars):', clean.slice(-2000));
 
       expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'read 2 files')).toBe(true);
@@ -316,8 +325,6 @@ describe('TUI PTY System — Thought Text Header Merge (real-session replay)', (
         Buffer.from('entry: apps/kite-cli/src/tui/index.tsx\n'),
       );
       expect(/read 1 file[\s\S]*Create[\s\S]*read 2 files/.test(clean)).toBe(true);
-
-      console.log('  [carryover] clean output (last 2000 chars):', clean.slice(-2000));
     },
     TIMEOUT,
   );

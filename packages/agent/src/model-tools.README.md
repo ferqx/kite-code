@@ -84,7 +84,7 @@ Files 的目录与检索 API 仍服务客户端文件候选等内部读取，不
 
 ## 工具选择与职责
 
-普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：不含可选 Browser 的基础模型目录在具备合格 Shell 时为17项，不具备时为13项，包括 Files 读写三项、图片读取、问题、网页、当前任务证据读取及协作六项；其中 read_file 支持准确工作区外路径，有效 Full 下的 write_file/edit_file 也支持普通外部修改。宿主允许 Browser 时另选择对应浏览器能力；新 Native 默认对模型提供 `browser_execute` 与两个 Skill 读取入口，原子依赖保持内部隐藏。最小嵌入配置仍只默认提供问题工具。名称表同时列可选能力，不是每次 Run 的固定清单；Planning、Skill 和 MCP 仍按配置、能力及权限选择。旧 Task 工具和专用 required-result 机制已删除，不保留内部兼容入口。
+普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：Files 读写三项、图片读取、问题、网页及可用时的六项协作工具；Shell、Git 工作树和两个 Skill 读取入口按宿主能力选择。`read_file/write_file/edit_file` 都支持准确的普通工作区外路径：请求批准模式取得本次人工批准，Auto 按实际审核结果，Full 按有效权限执行；父子限制与受保护资源不因此放宽。宿主允许 Browser 时另选择对应浏览器能力；新 Native 使用 `browser_execute`，原子依赖保持内部隐藏。最小嵌入配置仍只默认提供问题工具。名称表同时列可选能力，不是每次 Run 的固定清单；Planning、Skill 和 MCP 仍按配置、能力及权限选择。旧 Task 工具和专用 required-result 机制已删除，不保留模型调用入口；上文已保存的证据结果只保历史读取。
 
 工具按独立操作及可观察结果划分，不把模型填写的结论包装成事实来源。研究状态工具及其 records/context、权限例外和导出入口已撤回。计划工具管理步骤、批准和版本；专用验证工具已移除，检查通过普通 Shell 执行并如实报告。
 
@@ -99,6 +99,6 @@ Files 的目录与检索 API 仍服务客户端文件候选等内部读取，不
 [真实模型工具测试](../../../tests/e2e/live/model/README.md)另以显式门禁调用现有默认模型，使用合成工作区验证文件读改写、公开历史和单子任务的准确等待/结果。它不进入默认测试发现；运行次数、超时、凭据和报告边界归该入口。固定模型与本机 HTTP 的通过不能替代真实 Provider 结果，真实单模型通过也不外推其他模型。
 
 
-Skill Workflow 的六个工具和专用外部文件三个工具已移除定义及宿主装配；旧名称没有 alias。`read_file` 的外部读取由 [external-file-reads](tools/external-file-reads.ts) 在同一定义下核准确授权与原生身份，不做外部项目指令发现；普通外部修改仅由 [Full 适配器](tools/full-access-files.ts)在最终有效 Full 下复用 write_file/edit_file，其他模式沿原 Shell 独立申请链路，不新增 Files 权限参数或审批入口。
+Skill Workflow 的六个工具和专用外部文件三个工具已移除定义及宿主装配；旧名称没有 alias。`read_file` 的外部读取由 [external-file-reads](tools/external-file-reads.ts) 在同一定义下核准确授权与原生身份，不做外部项目指令发现；普通外部修改由[外部文件适配器](tools/full-access-files.ts)复用 `write_file/edit_file`，在请求批准、Auto 和 Full 三种模式下分别取得准确人工批准、自动审核或有效直接授权；适配器的历史名称不代表 Full-only 限制。Files 不接受 Shell 的权限申请字段，读取基线也不授予后续修改权。
 
 纯模型元数据可声明 `model.inputSchema`（内部字段名）。表面投影对该Schema做闭合校验，Core仍按准确Tool的inputSchema校验实际输入。当前仅Browser需要同时保留统一入口的内部显式步骤与公开引用入口；公开Schema不开放内部key/generation/seq。没有新执行前处理器、权限缓存或旧模型字段读取。准确引用与原回执范围的取舍见[准确引用决定](../../../.agents/notes/implemented/architecture/2026-11-08-model-tool-exact-references.md)。

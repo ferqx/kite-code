@@ -82,7 +82,7 @@ export function readLivePermissionFacts(input: {
         const effectPath = role === 'main' ? input.mainEffectPath : input.childEffectPath;
         const targets = db
           .query(
-            "SELECT * FROM execution WHERE session_id=? AND kind='tool' AND adapter_id='files.write_path' AND json_extract(intent_json,'$.path')=? ORDER BY rowid",
+            "SELECT * FROM execution WHERE session_id=? AND kind='tool' AND adapter_id='files.write' AND json_extract(intent_json,'$.path')=? ORDER BY rowid",
           )
           .all(sessionId, effectPath) as Execution[];
         const target = targets[0];

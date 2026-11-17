@@ -157,10 +157,6 @@ export function inkToolName(
     'builtin.files/files.view_images': 'view_images',
     'builtin.files/files.write': 'write_file',
     'builtin.files/files.edit': 'edit_file',
-    'builtin.files.path/files.write_path': 'write_file',
-    'builtin.files.path/files.edit_path': 'edit_file',
-    'builtin.files/files.glob': 'search_files',
-    'builtin.files/files.search': 'search_content',
     'builtin.shell/shell.launch': 'shell_execute',
     'builtin.shell/shell.execute': 'shell_execute',
     'builtin.web/web_fetch': 'web_fetch',
@@ -439,7 +435,7 @@ function inkFileChangePresentation(
   execution: Execution,
   snapshot: TuiSnapshot,
   args: Record<string, unknown>,
-): { notice: string; text?: string; truncated: boolean } | undefined {
+): { notice: string; text?: string; truncated: boolean; created: boolean } | undefined {
   if (
     !inkExecutionScope(execution, snapshot) ||
     execution.kind !== 'tool' ||
@@ -449,12 +445,7 @@ function inkFileChangePresentation(
       (['2', '3'].includes(execution.definitionVersion) &&
         frozenBuiltin(execution, snapshot, 'builtin.files', 'files.write')) ||
       (execution.definitionVersion === '2' &&
-        frozenBuiltin(execution, snapshot, 'builtin.files', 'files.edit')) ||
-      (execution.definitionVersion === '1' &&
-        record(record(execution.result)?.details)?.fileScope === 'external_path' &&
-        record(record(execution.result)?.details)?.workspaceCheckpoint === false &&
-        (frozenBuiltin(execution, snapshot, 'builtin.files.path', 'files.write_path') ||
-          frozenBuiltin(execution, snapshot, 'builtin.files.path', 'files.edit_path')))
+        frozenBuiltin(execution, snapshot, 'builtin.files', 'files.edit'))
     )
   )
     return undefined;
@@ -496,12 +487,18 @@ function inkFileChangePresentation(
   const unchanged = before && before.hash === after.hash && before.size === after.size;
   const resultBody = typeof result.content === 'string' ? parsed(result.content) : undefined;
   const published = baseline(resultBody?.baseline);
+  // Current write@3 omits the baseline reference for creation. Only the
+  // successful, scoped receipt proves that there was no previous file.
+  const currentCreationInput =
+    execution.definitionVersion === '3' &&
+    frozenBuiltin(execution, snapshot, 'builtin.files', 'files.write') &&
+    !['base', 'baseRef', 'base_ref'].some((key) => Object.hasOwn(args, key));
   if (
     !published ||
     resultBody?.path !== change.path ||
     ['hash', 'size', 'device', 'inode'].some((key) => published[key] !== after[key]) ||
     (change.before === null
-      ? args.base !== null
+      ? args.base !== null && !currentCreationInput
       : !baseline(args.base) ||
         ['hash', 'size', 'device', 'inode'].some(
           (key) => baseline(args.base)![key] !== before![key],
@@ -513,6 +510,7 @@ function inkFileChangePresentation(
     notice,
     ...(unchanged ? {} : { text: change.text as string }),
     truncated: change.truncated as boolean,
+    created: change.before === null,
   });
   try {
     const observedRoot = snapshot.environment?.workspacePath;
@@ -659,7 +657,7 @@ export function projectInkTool(
       ? { fileNotice: fileChange.notice, filePreviewTruncated: fileChange.truncated }
       : {}),
     ...(name === 'write_file' && fileChange
-      ? { fileAction: args.base === null ? ('Create' as const) : ('Write' as const) }
+      ? { fileAction: fileChange.created ? ('Create' as const) : ('Write' as const) }
       : {}),
     summary:
       privateMcpSummary ??
@@ -788,13 +786,7 @@ export function projectInkChild(
           stepId: item.id,
           toolCallId: item.toolCallId ?? item.id,
           toolName: card?.name ?? terminalText(inkToolName(item.definitionId, item, childSnapshot)),
-          toolArgs: displayArguments(
-            frozenBuiltin(item, childSnapshot, 'builtin.files', 'files.search') &&
-              (inkToolArguments(item, childSnapshot)?.path === undefined ||
-                inkToolArguments(item, childSnapshot)?.path === '')
-              ? { ...inkToolArguments(item, childSnapshot), path: '.' }
-              : (card?.args ?? inkToolArguments(item, childSnapshot) ?? {}),
-          ),
+          toolArgs: displayArguments(card?.args ?? inkToolArguments(item, childSnapshot) ?? {}),
           status:
             item.status === 'succeeded'
               ? ('success' as const)

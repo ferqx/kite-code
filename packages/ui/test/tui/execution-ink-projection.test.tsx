@@ -15,7 +15,9 @@ import {
   projectInkTool,
 } from '../../src/tui/execution-projection';
 import type { TuiChildLog } from '../../src/tui/executions';
+import { actionName, getToolDetail, getToolPreview } from '../../src/tui/ink/render-utils';
 import ToolSummaryBlock from '../../src/tui/ink/ToolSummaryBlock';
+import { buildToolSummaryLine } from '../../src/tui/ink/tool-summary-line';
 import { defaultTuiPreferences } from '../../src/tui/preferences';
 import { TuiPresentationProvider } from '../../src/tui/presentation';
 
@@ -821,21 +823,240 @@ test('formal short builtin IDs use frozen registered extension proof instead of 
   expect(projectInkTool(read, snapshot([read])).name).toBe('files.read');
 });
 test('a child builtin label uses exact Core-frozen registered tools when its role has no planning binding', () => {
-  const search = execution('search', {
+  const read = execution('read', {
+    definitionId: 'files.read',
+    definitionVersion: '5',
+    toolInput: { path: 'source.ts' },
+  });
+  const facts = snapshot([read]);
+  facts.view.runs[0]!.configuration = {
+    tools: [{ id: 'files.read', version: '5', extensionId: 'builtin.files' }],
+  };
+  expect(projectInkTool(read, facts).name).toBe('read_file');
+  expect(projectInkTool({ ...read, definitionVersion: '1' }, facts).name).toBe('files.read');
+  facts.view.runs[0]!.configuration = {
+    tools: [{ id: 'files.read', version: '5', extensionId: 'custom.files' }],
+  };
+  expect(projectInkTool(read, facts).name).toBe('files.read');
+});
+
+test('retired builtin IDs use generic cards even with old registration and file-change receipts', () => {
+  const after = { hash: 'a'.repeat(64), size: 1, device: '1', inode: '2' };
+  const content = JSON.stringify({
+    note: 'Original saved result',
+    path: 'original.txt',
+    baseline: after,
+  });
+  for (const [extensionId, ids] of [
+    [
+      'builtin.skill-workflow',
+      [
+        'activate_skill',
+        'read_skill_reference',
+        'complete_skill',
+        'verify_skill',
+        'repair_skill',
+        'decide_skill_verification',
+      ],
+    ],
+    ['builtin.files.path', ['files.read_path', 'files.write_path', 'files.edit_path']],
+    ['builtin.files', ['files.list', 'files.glob', 'files.search']],
+    [
+      'builtin.validation',
+      [
+        'validation.define',
+        'validation.check',
+        'validation.rebind',
+        'validation.auto_check',
+        'validation.request_waiver',
+      ],
+    ],
+  ] as const) {
+    for (const id of ids) {
+      for (const definitionId of [id, `${extensionId}/${id}`]) {
+        const source = execution('retired', {
+          definitionId,
+          toolInput: { path: 'original.txt', base: null, pattern: 'original pattern' },
+          result: {
+            outcome: 'succeeded',
+            content,
+            details: {
+              fileScope: 'external_path',
+              workspaceCheckpoint: false,
+              fileChange: {
+                version: 1,
+                format: 'file_content',
+                path: 'original.txt',
+                before: null,
+                after,
+                text: 'Old specialized preview',
+                truncated: false,
+              },
+            },
+          },
+        });
+        const facts = snapshot([source]);
+        facts.view.runs[0]!.configuration = { tools: [{ id, version: '1', extensionId }] };
+        const before = structuredClone(facts);
+        const card = projectInkTool(source, facts);
+        expect(card).toMatchObject({
+          name: definitionId,
+          args: source.toolInput,
+          status: 'done',
+          summary: content,
+        });
+        expect(card.fileNotice).toBeUndefined();
+        expect(card.fileAction).toBeUndefined();
+        expect(card.preview).toBeUndefined();
+        expect(card.detail).toBeUndefined();
+        const app = render(
+          <InkExecution execution={source} snapshot={facts} expanded columns={120} />,
+        );
+        try {
+          // The existing card bounds long names; the projection retains the full identity.
+          expect(app.lastFrame()).toContain(definitionId.slice(0, 30));
+          expect(app.lastFrame()).toContain('Original saved result');
+          expect(app.lastFrame()).not.toContain('Old specialized preview');
+        } finally {
+          app.unmount();
+        }
+        for (const [status, expected] of [
+          ['failed', 'error'],
+          ['cancelled', 'cancelled'],
+          ['outcome_unknown', 'error'],
+        ] as const) {
+          const state = projectInkTool({ ...source, status }, facts);
+          expect(state.status).toBe(expected);
+          expect(state.name).toBe(definitionId);
+          expect(state.args).toEqual({
+            path: 'original.txt',
+            base: null,
+            pattern: 'original pattern',
+          });
+        }
+        expect(facts).toEqual(before);
+      }
+    }
+  }
+});
+
+test('current Files, Shell and Skill identities retain their existing labels', () => {
+  for (const [extensionId, id, version, expected] of [
+    ['builtin.files', 'files.read', '5', 'read_file'],
+    ['builtin.files', 'files.write', '3', 'write_file'],
+    ['builtin.files', 'files.edit', '2', 'edit_file'],
+    ['builtin.files', 'files.view_images', '1', 'view_images'],
+    ['builtin.shell', 'shell.execute', '1', 'shell_execute'],
+    ['builtin.shell', 'shell.launch', '1', 'shell_execute'],
+    ['builtin.shell', 'shell.read', '1', 'shell.read'],
+    ['builtin.shell', 'shell.wait', '1', 'shell.wait'],
+    ['builtin.shell', 'shell.stop', '1', 'shell.stop'],
+    ['builtin.skills', 'skills.load', '1', 'skills.load'],
+    ['builtin.skills', 'skills.resource', '1', 'skills.resource'],
+  ] as const) {
+    const source = execution('current', { definitionId: id, definitionVersion: version });
+    const facts = snapshot([source]);
+    facts.view.runs[0]!.configuration = { tools: [{ id, version, extensionId }] };
+    expect(projectInkTool(source, facts).name).toBe(expected);
+    const toolLabels = [
+      {
+        executionId: source.id,
+        originStoreId: 'store',
+        sessionId: source.sessionId,
+        runId: source.runId,
+        definitionId: source.definitionId,
+        definitionVersion: source.definitionVersion,
+        label: `Original ${id}`,
+      },
+    ];
+    expect(projectInkTool(source, { ...facts, toolLabels }).name).toBe(`Original ${id}`);
+  }
+});
+
+test('retired search aliases use generic names and counts without guessing path or pattern details', () => {
+  for (const name of ['search_content', 'search_files', 'glob']) {
+    const args = { pattern: '*.md', path: '.' };
+    expect(actionName(name)).toBe(name);
+    expect(getToolPreview(name, args)).toBeUndefined();
+    expect(getToolDetail(name, args)).toBeUndefined();
+    const tool = {
+      callId: name,
+      name,
+      args,
+      status: 'done' as const,
+      ok: true,
+      summary: 'Saved result',
+    };
+    expect(buildToolSummaryLine([tool])).toBe('1 tool call');
+    const app = render(
+      <ToolSummaryBlock
+        columns={100}
+        block={{
+          id: 0,
+          kind: 'tool_summary',
+          createdAt: 0,
+          tools: [tool],
+          summaryLine: '1 tool call',
+          active: true,
+          hasThought: false,
+        }}
+      />,
+    );
+    try {
+      expect(app.lastFrame()).toContain(name);
+      expect(app.lastFrame()).toContain('1 tool call');
+      expect(app.lastFrame()).not.toContain('*.md');
+    } finally {
+      app.unmount();
+    }
+  }
+});
+
+test('retired child searches preserve original arguments without adding the former default path', () => {
+  const parent = execution('task', {
+    definitionId: 'builtin.task/task.spawn',
+    toolInput: { preset: 'explore', prompt: 'Original delegated work' },
+  });
+  const carrier = execution('carrier', {
+    kind: 'job',
+    runId: null,
+    definitionId: 'agent/explore',
+    parentExecutionId: parent.id,
+    childSessionId: 'child',
+  });
+  const childTool = execution('child-tool', {
+    sessionId: 'child',
     definitionId: 'files.search',
     definitionVersion: '2',
-    toolInput: { path: '.', query: 'source' },
+    toolInput: { query: 'original query' },
   });
-  const facts = snapshot([search]);
-  facts.view.runs[0]!.configuration = {
-    tools: [{ id: 'files.search', version: '2', extensionId: 'builtin.files' }],
+  const child = view('child', {
+    executions: [childTool],
+    runs: [
+      {
+        ...view().runs[0]!,
+        sessionId: 'child',
+        originCommandId: 'child-start-carrier',
+        configuration: {
+          tools: [{ id: 'files.search', version: '2', extensionId: 'builtin.files' }],
+        },
+      },
+    ],
+  });
+  const facts = {
+    ...snapshot([parent, carrier]),
+    childViews: [{ executionId: 'carrier', view: child }],
   };
-  expect(projectInkTool(search, facts).name).toBe('search_content');
-  expect(projectInkTool({ ...search, definitionVersion: '1' }, facts).name).toBe('files.search');
-  facts.view.runs[0]!.configuration = {
-    tools: [{ id: 'files.search', version: '2', extensionId: 'custom.files' }],
-  };
-  expect(projectInkTool(search, facts).name).toBe('files.search');
+  const before = structuredClone(facts);
+  expect(projectInkChild(carrier, facts)?.steps).toEqual([
+    expect.objectContaining({
+      toolName: 'files.search',
+      toolArgs: { query: 'original query' },
+      summary: 'original body',
+      status: 'success',
+    }),
+  ]);
+  expect(facts).toEqual(before);
 });
 
 test('readonly aggregation consumes consecutive exact original calls and frozen read-only definitions', async () => {
@@ -1657,6 +1878,76 @@ test('file changed display requires a successful scoped builtin receipt and both
   ]) {
     expect(projectInkTool(invalid, snapshot([invalid])).fileNotice).toBeUndefined();
   }
+});
+
+test('current file creation without an input baseline uses only the verified original creation receipt', () => {
+  const after = { hash: 'a'.repeat(64), size: 8, device: '1', inode: '2' };
+  const result = {
+    outcome: 'succeeded',
+    content: JSON.stringify({ path: 'created.txt', baseline: after }),
+    details: {
+      fileChange: {
+        version: 1,
+        format: 'file_content',
+        path: 'created.txt',
+        before: null,
+        after,
+        text: 'created\n',
+        truncated: false,
+      },
+    },
+  };
+  const source = execution('current-create', {
+    definitionId: 'builtin.files/files.write',
+    definitionVersion: '3',
+    toolInput: { path: 'created.txt', content: 'created\n' },
+    result,
+  });
+  expect(projectInkTool(source, snapshot([source]))).toMatchObject({
+    fileAction: 'Create',
+    fileNotice: 'Workspace file changed.',
+    summary: 'created\n',
+  });
+  const app = render(<InkExecution execution={source} snapshot={snapshot([source])} />);
+  try {
+    expect(app.lastFrame()).toContain('Create');
+    expect(app.lastFrame()).toContain('created.txt');
+    expect(app.lastFrame()).toContain('created');
+  } finally {
+    app.unmount();
+  }
+  const change = result.details.fileChange;
+  const invalidCases: Execution[] = [
+    { ...source, status: 'failed' as const },
+    { ...source, status: 'cancelled' as const },
+    { ...source, status: 'outcome_unknown' as const },
+    { ...source, originStoreId: 'foreign' },
+    { ...source, sessionId: 'foreign' },
+    { ...source, resultRevision: '0' },
+    { ...source, definitionVersion: '2' },
+    { ...source, definitionVersion: '4' },
+    { ...source, definitionId: 'unrelated.write' },
+    { ...source, toolInput: { path: 'other.txt', content: 'created\n' } },
+    { ...source, toolInput: { path: 'created.txt', content: 'created\n', baseRef: 'file.ref' } },
+    { ...source, toolInput: { path: 'created.txt', content: 'created\n', base_ref: 'file.ref' } },
+    { ...source, result: { outcome: 'succeeded', content: result.content } },
+    { ...source, result: { ...result, details: { fileChange: { ...change, before: after } } } },
+    { ...source, result: { ...result, details: { fileChange: { ...change, version: 2 } } } },
+    {
+      ...source,
+      result: {
+        ...result,
+        content: JSON.stringify({ path: 'created.txt', baseline: { ...after, inode: '99' } }),
+      },
+    },
+  ];
+  for (const invalid of invalidCases) {
+    const projected = projectInkTool(invalid, snapshot([invalid]));
+    expect(projected.fileAction).toBeUndefined();
+    expect(projected.fileNotice).toBeUndefined();
+  }
+  expect(source.toolInput).toEqual({ path: 'created.txt', content: 'created\n' });
+  expect(source.result).toEqual(result);
 });
 
 test('qualified file previews reach the original diff renderer, with bounded UTF-8 and explicit truncation', () => {

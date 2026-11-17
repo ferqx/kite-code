@@ -5,16 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
-import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { createTaskExtension, defaultTaskRoles } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelRequest } from '@kite-ai/ai';
-import { createChildConfiguration } from '../../../../apps/service/src/child-configuration';
 import { formatFileReadResult } from '../../../../packages/agent/src/tools/files/model-result';
 import {
   assertCheckoutIdentity,
   assertCheckoutModelBinding,
-  assertCheckoutToolCatalog,
   checkoutControls,
   checkoutHarnessProvenance,
   checkoutProvenance,
@@ -308,107 +304,6 @@ test('real SQLite sealed Model inputs exactly match dispatched requests and reje
     } finally {
       await store.close();
       rmSync(root, { recursive: true, force: true });
-    }
-  }
-}, 10000);
-
-test('actual Files and Task assembly exposes exactly the production study catalog and rejects accidental extra tools', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'quality-tool-catalog-')));
-  const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
-  const files = createWorkspaceFiles({ root });
-  const model = createFixedModel([
-    [
-      { type: 'text_delta', text: 'synthetic catalog probe' },
-      { type: 'finish', reason: 'stop', usage: { inputTokens: null, outputTokens: null } },
-    ],
-  ]);
-  const task = createTaskExtension({
-    roles: defaultTaskRoles.map((role) => ({
-      id: role.id,
-      configurationId: role.id,
-      description: role.description!,
-    })),
-    defaultRole: 'worker',
-    presets: defaultTaskRoles.filter((role) => role.id !== 'worker').map((role) => role.id),
-  });
-  const child = createChildConfiguration({
-    roles: defaultTaskRoles,
-    async resolve(_input, selection) {
-      return { model, modelId: 'fixed', toolIds: selection.role.toolIds, snapshot: {} };
-    },
-  });
-  const runtime = createRuntime({
-    store,
-    model,
-    modelId: 'fixed',
-    ...child,
-    extensions: [
-      task,
-      {
-        id: 'builtin.files',
-        version: '1',
-        apiMajor: 1,
-        tools: createFileTools(files).filter((tool) =>
-          ['files.read', 'files.list', 'files.glob', 'files.search', 'files.write'].includes(
-            tool.id,
-          ),
-        ),
-      },
-    ],
-    permissions: { authorize: async () => ({ allowed: true, revision: 'owned-catalog-test' }) },
-  });
-  try {
-    const expectedStoreId = (await store.getMetadata()).storeId;
-    const identity = { expectedStoreId, sessionId: 'root', subjectId: 'owner' };
-    await runtime.createWorkspace({
-      expectedStoreId,
-      id: 'w',
-      name: 'Synthetic',
-      rootUri: pathToFileURL(root).href,
-    });
-    await runtime.createSession({
-      ...identity,
-      workspaceId: 'w',
-      commandId: 'create',
-      title: 'Catalog probe',
-    });
-    await runtime.submitCommand({
-      ...identity,
-      commandId: 'work',
-      request: { kind: 'run.start', content: 'Synthetic exact catalog probe' },
-    });
-    const deadline = Date.now() + 5000;
-    for (;;) {
-      const view = await store.getView('root');
-      if (view.runs.length && view.runs.every((run) => !run.isActive)) break;
-      if (Date.now() > deadline) throw Error('finite_catalog_fixture_budget');
-      await Bun.sleep(10);
-    }
-    expect(model.requests).toHaveLength(1);
-    const tools = model.requests[0]!.tools;
-    expect(() => assertCheckoutToolCatalog(tools)).not.toThrow();
-    expect(() =>
-      assertCheckoutToolCatalog([
-        ...tools,
-        { id: 'accidental_tool', definitionVersion: '1', inputSchema: { type: 'object' } },
-      ]),
-    ).toThrow('unexpected_production_tool_catalog');
-    expect(() =>
-      assertCheckoutToolCatalog(tools.filter((tool) => tool.id !== 'read_file')),
-    ).toThrow('unexpected_production_tool_catalog');
-    expect(() => assertCheckoutToolCatalog([...tools, tools[0]!])).toThrow(
-      'unexpected_production_tool_catalog',
-    );
-  } finally {
-    try {
-      await runtime.close();
-    } finally {
-      try {
-        await files.close();
-      } finally {
-        await store.close();
-        rmSync(root, { recursive: true, force: true });
-      }
     }
   }
 }, 10000);

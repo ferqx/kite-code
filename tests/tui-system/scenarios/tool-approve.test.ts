@@ -43,8 +43,8 @@ describe('TUI PTY System — Tool Approve', () => {
     server.setResponses([
       {
         message: {
-          reasoning_content: 'The user wants a tool approved. I will run a command.',
-          content: 'I will run a quick command for you.',
+          reasoning_content: 'The user wants an external file written after approval.',
+          content: 'I will write the requested external file.',
           tool_calls: [
             {
               id: 'call_1',
@@ -85,22 +85,26 @@ describe('TUI PTY System — Tool Approve', () => {
   // ── Approve (Enter) → Tool Executes → Agent Continues ─────────
 
   test(
-    'approve (Enter, default "Yes") triggers tool execution and agent continues',
+    'approve (Enter, default "Only this time") triggers tool execution and agent continues',
     async () => {
-      await submitUserMessage(tui, server, 'Run a command for me', { timeout: 15000 });
+      await submitUserMessage(tui, server, 'Write the external approval marker file', {
+        timeout: 15000,
+      });
 
       // Wait for approval block to render
       await waitForText(() => tui.viewport(), '工具授权', 15000);
-      await waitForText(() => tui.viewport(), '允许一次', 15000);
+      await waitForText(() => tui.viewport(), '仅此次', 15000);
 
       const beforeOutput = tui.viewport();
       expect(screenContains(beforeOutput, '工具授权')).toBe(true);
-      expect(screenContains(beforeOutput, '允许一次')).toBe(true);
+      expect(screenContains(beforeOutput, '仅此次')).toBe(true);
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
+      expect(screenContains(beforeOutput, 'files.write')).toBe(true);
+      expect(screenContains(beforeOutput, approvalMarkerPath)).toBe(true);
       expect(existsSync(approvalMarkerPath)).toBe(false);
       expect(server.getWorkRequestCount()).toBe(1);
 
-      // Approve the tool ("允许一次" is default selected at index 0, press Enter)
+      // Approve the tool ("仅此次" is default selected at index 0, press Enter)
       const executionFrames = tui.markScreen();
       tui.write('\r');
       // The fixture serves the follow-up only after seeing the marker in the
@@ -132,7 +136,7 @@ describe('TUI PTY System — Tool Approve', () => {
           .query("SELECT adapter_id,call_id,state,dispatched FROM execution WHERE kind='tool'")
           .all(),
       ).toEqual([
-        { adapter_id: 'files.write_path', call_id: 'call_1', state: 'succeeded', dispatched: 1 },
+        { adapter_id: 'files.write', call_id: 'call_1', state: 'succeeded', dispatched: 1 },
       ]);
 
       // TUI should recover — prompt visible

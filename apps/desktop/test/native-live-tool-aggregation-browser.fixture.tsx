@@ -150,7 +150,7 @@ const definitions = [
   ['shell.launch', '1', { command: 'bun test ./test/example.test.ts' }],
   ['mcp.fixture.search', '7', { query: 'mixed tools' }],
   ['task.message', '1', { task_id: 'child', message: '核对工具状态' }],
-  ['files.search', '4', { pattern: 'ToolActivity' }],
+  ['shell.execute', '1', { command: 'rg ToolActivity src' }],
   ['files.edit', '2', { path: 'src/entry.ts' }],
 ] as const;
 function add(index: number) {

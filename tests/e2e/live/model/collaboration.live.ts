@@ -136,10 +136,7 @@ const observationOrderCases = [
 const interruptGenerationCases = ['A08-pinned-old-receipt-new-run'];
 const staleApprovalCases = ['P03-old-answered', 'P03-old-denied', 'P03-old-cancelled'];
 const workScopeCases = ['I13-running-cross-work-reuse', 'I13-queued-cross-work-reuse'];
-const untrustedResultCases = [
-  'I12-report-while-approval-pending',
-  'I12-report-during-B-then-explicit-A',
-];
+const untrustedResultCases = ['I12-report-while-approval-pending', 'I12-report-during-successor-B'];
 const resultCoalescingCases = [
   'R03-simultaneous-results',
   'R03-started-parent-second-result-and-B-deferred',

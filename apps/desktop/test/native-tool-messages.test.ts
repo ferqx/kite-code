@@ -697,29 +697,37 @@ test('current and saved workspace write versions retain their known Native prese
   ).toMatchObject({ title: '写入', toolName: undefined });
 });
 
-test('current and saved file discovery versions keep readable labels and exploration grouping', () => {
-  for (const [definitionId, versions, toolName, title] of [
-    ['files.glob', ['2', '3'], 'files.glob', '查找文件'],
-    ['files.search', ['2', '3', '4', '5'], 'search_content', '搜索内容'],
-  ] as const) {
-    for (const definitionVersion of versions)
-      expect(desktopToolPresentation({ definitionId, definitionVersion })).toMatchObject({
-        toolName,
-        title,
-        presentation: 'exploration',
+test('retired tools retain only their original ID without specialized presentation', () => {
+  for (const [definitionId, versions] of [
+    ['files.read_path', ['1', '2']],
+    ['files.write_path', ['1']],
+    ['files.edit_path', ['1']],
+    ['files.list', ['1']],
+    ['files.glob', ['2', '3']],
+    ['files.search', ['2', '3', '4', '5']],
+    ['activate_skill', ['1']],
+    ['read_skill_reference', ['1']],
+    ['complete_skill', ['1']],
+    ['verify_skill', ['1']],
+    ['repair_skill', ['1']],
+    ['decide_skill_verification', ['1']],
+    ['validation.define', ['1']],
+    ['validation.check', ['1']],
+    ['validation.rebind', ['1']],
+    ['validation.request_waiver', ['1']],
+    ['validation.auto_check', ['1']],
+  ] as const)
+    for (const definitionVersion of [...versions, 'future'])
+      expect(desktopToolPresentation({ definitionId, definitionVersion })).toEqual({
+        toolName: undefined,
+        title: definitionId,
       });
-    expect(desktopToolPresentation({ definitionId, definitionVersion: 'future' })).toEqual({
-      toolName: undefined,
-      title,
-    });
-  }
 });
 
 test('future known tools keep stable names without borrowing structured semantics', () => {
   for (const [definitionId, title] of [
     ['files.read', '读取'],
     ['files.edit', '修改'],
-    ['files.list', '列出目录'],
     ['shell.execute', '运行命令'],
     ['ask_user', '询问用户'],
     ['task.spawn', '创建子 Agent'],
@@ -734,19 +742,12 @@ test('future known tools keep stable names without borrowing structured semantic
   });
 });
 
-test('plan, validation and MCP display names retain exact versions and generic MCP fallback', () => {
+test('plan and MCP display names retain exact versions and generic MCP fallback', () => {
   for (const [definitionId, title] of [
-    ['files.write_path', '写入用户文件'],
-    ['files.edit_path', '修改用户文件'],
     ['planning.read', '读取计划'],
     ['planning.write', '编写计划'],
     ['planning.review', '请求计划审阅'],
     ['planning.update', '更新计划'],
-    ['validation.define', '定义验证检查'],
-    ['validation.check', '运行验证'],
-    ['validation.rebind', '关联修复结果'],
-    ['validation.request_waiver', '请求验证豁免'],
-    ['validation.auto_check', '检查文件变更'],
     ['mcp.tools.search', '搜索 MCP 工具'],
     ['mcp.resources.list', '列出 MCP 资源'],
     ['mcp.resources.read', '读取 MCP 资源'],
@@ -1492,7 +1493,7 @@ test('incomplete or unsupported matching calls remain conflicts before original 
   }
 });
 
-test('list_directory displays the known root default only for a unique verified original call', async () => {
+test('retired directory receipts retain original results without inferring default or explicit targets', async () => {
   const f = fixture();
   try {
     for (const [id, input] of [
@@ -1511,7 +1512,7 @@ test('list_directory displays the known root default only for a unique verified 
       (await f.list(['omitted', 'empty', 'dot', 'absolute', 'invalid', 'future'])).entries.map(
         (entry) => entry.target,
       ),
-    ).toEqual(['.', '.', '.', 'C:\\workspace\\project', undefined, undefined]);
+    ).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
     f.messages.delete('call-omitted');
     expect((await f.list(['omitted'])).entries[0]!.target).toBeUndefined();
     f.add('ambiguous-first', 'succeeded', 'shared', 'files.list');

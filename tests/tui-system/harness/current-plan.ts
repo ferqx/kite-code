@@ -24,7 +24,8 @@ export function currentPlanWorkResponses(
 ): MockResponse[] {
   let identity: ReturnType<typeof parseDraftSavedPlan>,
     runId: string,
-    revision: string | null = null;
+    planRef: string,
+    progressRef: string | null = null;
   const readId = `${reviewCallId}-current`;
   return [
     {
@@ -44,14 +45,29 @@ export function currentPlanWorkResponses(
             const value = toolResult(request, previousId);
             if (index === 0) {
               identity = parseDraftSavedPlan(JSON.stringify(value.current));
-              if (typeof value.runId !== 'string' || value.progress !== null)
+              if (
+                typeof value.runId !== 'string' ||
+                value.progress !== null ||
+                value.progress_ref !== null
+              )
                 throw Error('current_plan_run_or_initial_progress_unavailable');
               runId = value.runId;
             } else {
-              if (value.runId !== runId || typeof value.revision !== 'string')
+              if (
+                value.runId !== runId ||
+                typeof value.revision !== 'string' ||
+                value.planId !== identity.plan_id ||
+                value.version !== identity.version ||
+                value.digest !== identity.structural_digest ||
+                typeof value.progress_ref !== 'string' ||
+                !value.progress_ref.startsWith('progress.')
+              )
                 throw Error('current_plan_progress_receipt_unavailable');
-              revision = value.revision;
+              progressRef = value.progress_ref;
             }
+            if (typeof value.plan_ref !== 'string' || !value.plan_ref.startsWith('plan.'))
+              throw Error('current_plan_reference_unavailable');
+            planRef = value.plan_ref;
             return {
               expectedRequest: {
                 toolResults: [
@@ -91,11 +107,8 @@ export function currentPlanWorkResponses(
                     id: updateId,
                     name: 'planning.update',
                     args: {
-                      runId,
-                      planId: identity.plan_id,
-                      version: identity.version,
-                      digest: identity.structural_digest,
-                      expectedProgressRevision: revision,
+                      planRef,
+                      progressRef,
                       stepId,
                       status: 'completed',
                       executionId: actual.executionId,

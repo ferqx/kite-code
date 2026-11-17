@@ -312,14 +312,8 @@ export function translateOriginalTestConfig(input: Record<string, unknown> = {})
     modelId: id,
     tools: [
       'files.read',
-      'files.read_path',
       'files.write',
-      'files.write_path',
       'files.edit',
-      'files.edit_path',
-      'files.list',
-      'files.glob',
-      'files.search',
       ...(process.platform === 'win32'
         ? []
         : ['shell.launch', 'shell.execute', 'shell.read', 'shell.wait', 'shell.stop']),

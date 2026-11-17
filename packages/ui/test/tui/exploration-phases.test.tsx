@@ -472,17 +472,17 @@ test('retry presentation requires the real failed predecessor in the exact origi
   expect(observedModelRetry(sixth, [fifth, sixth])).toEqual(sixth.modelRetry);
 });
 
-test('queued or cancelled exploration retains its actual row without claiming performed file searches', () => {
+test('queued or cancelled exploration retains its actual row without claiming performed shell searches', () => {
   for (const status of ['queued', 'cancelled', 'rejected'] as const) {
     const tool = {
-      callId: 'original-search',
-      name: 'search_files',
-      args: { pattern: '*.md' },
+      callId: 'original-shell',
+      name: 'shell_execute',
+      args: { command: "rg --files -g '*.md'" },
       status,
       ok: false,
       summary: 'original state',
     };
-    expect(buildToolSummaryLine([tool])).not.toContain('searched');
+    expect(buildToolSummaryLine([tool])).not.toContain('ran');
     const ui = render(
       <ToolSummaryBlock
         columns={80}
@@ -499,7 +499,7 @@ test('queued or cancelled exploration retains its actual row without claiming pe
       />,
     );
     try {
-      expect(ui.lastFrame()).not.toContain('searched 1 file pattern');
+      expect(ui.lastFrame()).not.toContain('ran 1 shell command');
     } finally {
       ui.unmount();
     }
@@ -507,15 +507,15 @@ test('queued or cancelled exploration retains its actual row without claiming pe
   expect(
     buildToolSummaryLine([
       {
-        callId: 'actual-search',
-        name: 'search_files',
-        args: { pattern: '*.md' },
+        callId: 'actual-shell',
+        name: 'shell_execute',
+        args: { command: "rg --files -g '*.md'" },
         status: 'done',
         ok: true,
         summary: 'actual result',
       },
     ]),
-  ).toBe('searched 1 file pattern');
+  ).toBe('ran 1 shell command');
 });
 test('missing pending Execution material cannot seal an incomplete original read batch', () => {
   const complete = fixture([['first', 'second', 'third'], []]);

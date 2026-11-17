@@ -765,7 +765,7 @@ KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-nat
 KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/final-results.json --final-results-only
 ```
 
-该范围先核父原 Turn 正常结束，再释放子真实最终响应；原结果经当前资格与授权创建唯一续 Run，准确发送者和完整结果气泡必须先于被暂挂的父续跑回复可见。另一场景在父原 Turn 活动时让子结果进入邮箱，由原检查点与一次 `wait_agent_events` 接入本轮，完整结果进入后继实际 Model 请求，等待工具的完成事件和准确子详情可读；父始终只有原 Run、一段处理过程，完成及冷开后也不补气泡。子最终响应的时序门以真实 `read_user_file` 调用及准确配对的完整读取回执识别，不依赖请求序号或普通邮件。公开结果正文、原 carrier／revision／Source、完整低信任 Provider 输入和父最终事实分别比对；两会话冷开须保持请求及持久记录数量。阶段截图、连续帧、原输入输出与时序事实沿现有证据目录保存，本机执行资格仍由 Desktop owner 维护。
+该范围先核父原 Turn 正常结束，再释放子真实最终响应；原结果经当前资格与授权创建唯一续 Run，准确发送者和完整结果气泡必须先于被暂挂的父续跑回复可见。另一场景在父原 Turn 活动时让子结果进入邮箱，由原检查点与一次 `wait_agent_events` 接入本轮，完整结果进入后继实际 Model 请求，等待工具的完成事件和准确子详情可读；父始终只有原 Run、一段处理过程，完成及冷开后也不补气泡。子最终响应的时序门以真实 `read_file` 调用及准确配对的完整读取回执识别，不依赖请求序号或普通邮件。公开结果正文、原 carrier／revision／Source、完整低信任 Provider 输入和父最终事实分别比对；两会话冷开须保持请求及持久记录数量。阶段截图、连续帧、原输入输出与时序事实沿现有证据目录保存，本机执行资格仍由 Desktop owner 维护。
 
 `--steering-boundaries` 是同一普通窗口的独立交错范围，与另两个参数互斥。idle 仍核仅最终结果的唯一续跑；active 在原子最终结果已排队时，从 Composer 发送第一波 Blue 引导；其后实际 Provider 的首个内容 delta 已交付并显示，再发送第二波 Green 更正和明确的一次大材料读取；实际自动摘要进行时发送第三波 Purple 更正。SSE 时序门只按完整原事件划分交付，原始与实际转发字节的 SHA256 必须相同，不重写任何 delta。摘要期间的 accepted 引导阻止旧冻结摘要发布；后续若再次摘要，核新覆盖与三条原文，若沿旧窗口继续，核完整原材料及三条原文，不能为测试预设而放宽发布门禁。最终核中文、仅最新 Purple、三条引导核验码、子结果与原任务码、材料内独立事实、一次实际读取、同 Run／单过程，以及终态折叠、展开全文原序与冷开零重放。报告据实际分支记录旧摘要拒绝与新摘要是否发布；普通邮件仍为零。
 
@@ -794,7 +794,7 @@ KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=inpu
 | attached-shell | L03-real-attached-Shell-after-child-Model-EOF-natural-settlement、C05-real-attached-Shell-observation-fault-unknown-original-stop-no-replay | 实际附着POSIX Shell在child Model/Run结束后仍运行；自然terminal/EOF后结算，或原观察异常由Runtime判unknown并停止原进程组；不代证未确认清理或queued分支 |
 | files | F01 | 两真实 child 旧基线竞争、实际冲突、重读与合并；真实 Files，明确 owned-fixture 权限 |
 | files-partial | F02-X-success-Y-conflict-then-explicit-fresh-baseline | 同child的X成功/Y旧基线冲突、另一真实writer修改、原回执只读查回，明确新轮重读当前基线保双方改动；owned allow |
-| files-partial-default | F02-default-policy-external-exact-approval-partial-conflict | 正式默认策略/accept_edits下，外部路径四张准确approve_once卡、真实X成功/Y旧基线冲突和新轮重读；权限判断前的隔离gate不持资源锁 |
+| files-partial-default | F02-default-policy-external-exact-approval-partial-conflict | 正式默认策略/accept_edits下，外部路径四张准确编辑卡及四张读取卡分别approve_once、真实X成功/Y旧基线冲突和新轮重读；权限判断前的隔离gate不持资源锁 |
 | external-files-boundaries | F03-external-process-same-inode-mtime-old-baseline-conflict、F03-real-publication-postcapture-confirmation-unknown | 真实外部进程同inode/大小/mtime改内容后原CAS拒绝；或真实发布后capture确认失败映射原unknown，均只读核实零重放；owned allow |
 | cancellation | cancellation-attached-branch、cancellation-root-stop | 真实三层与兄弟的 attached 局部取消和根组全停止，有限真实读取 gate 与迟到零复活 |
 | approval-races | P04-cancel-first / dispatch-first、P04-parent-cancel-first / parent-dispatch-first、P04-root-cancel-first / root-dispatch-first | 正式默认策略下child stop、准确父轮取消、root stop，各自取消先持久/真实文件效果先成立；不代证P08旧grant模式竞争 |
@@ -811,7 +811,7 @@ KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=inpu
 | mail-adoption | R11-idle-child-dual-upper-late-confirm-late-send-old-explicit-Run、R11-idle-child-dual-upper-receive-rollback-two-idempotent-consumers | 自有trusted Operations真实idle-child双水位、晚确认/晚发送排除、同次调用回执重放、旧明确Run不改投、后续合法新轮接纳；独立例加准确接收事务回滚和双消费者，非普通六工具/UI资格 |
 | stale-approvals | P03-old-answered、P03-old-denied、P03-old-cancelled | 正式默认策略下同child两轮，旧卡答案重放/冲突与新卡独立批准、实际文件和准确父Source |
 | work-scope | I13-running-cross-work-reuse、I13-queued-cross-work-reuse | B真实尝试三种跨工作控制并被Store拒绝；准确恢复A后排队激活、真正idle同child复用于B、停止A仍保B，owned allow |
-| untrusted-results | I12-report-while-approval-pending、I12-report-during-B-then-explicit-A | 默认策略下真实Files资料经child报告进入父Source；伪批准/停止不能改变准确待批卡、工作或效果，B期间暂缓后明确恢复A |
+| untrusted-results | I12-report-while-approval-pending、I12-report-during-successor-B | 默认策略下真实Files资料经child报告进入父Source；伪批准/停止不能改变准确待批卡、工作或效果，原A的报告在同Session后继B安全边界接纳，来源与接纳目标独立核准 |
 | result-coalescing | R03-simultaneous-results、R03-started-parent-second-result-and-B-deferred、R03-dispatched-parent-second-result-and-B-deferred | 两个真实A结果同一安全边界进入唯一父轮，或首报告已建立父轮、第二份随后耐久；第三变体须真实父Provider首事件后第二结果才形成，同R后续请求处理；不同B结果保持原归属并暂缓，owned allow |
 | result-acceptance-orders | R04-parent-completes-before-report-transaction、R04-stop-after-acceptance-before-prepared、R04-normal-completion-receives-accepted-source | 真实报告事务前候选父轮普通结束；准确Source接纳后prepared前正式停止；普通完成检查在同R1处理已接纳Source后才结束，owned allow；不代证全部完成hook |
 | work-controls | I14-pause-continue-before-result、I14-pause-result-before-continue、I14-stop-continue-late-report、R06-revoked-report-terminal-binding-release-idle | 正式暂停/继续分别先于或晚于原真实结果，或原报告准入前停止并拒绝普通继续；R06另核准确accepted报告撤销后持久原因、原binding释放一次、队列/owner退出及3秒有限静默；owned allow |
@@ -881,7 +881,7 @@ F03在真实发布已经成功后，由受支持的可信capture.after抛普通�
 
 I12 的机械结果另须独立核原 reader 和父 Model 全文：完整低信任资料、Source 和 nonce、实际待批状态与用户控制必须一致，不能把“没有新效果”单独当作语义通过。路径 oracle 按实际 Workspace 解析相对/绝对路径；B 交错先完成真实 reader 文件读取，再透明持有原 finish 输入，不能用 B 选中后未派发的读取冒充已有报告。正控writer明确只执行一次外部写入并报告其真实回执，不要求无关的外部目标重读；原已写成功后因额外Workspace读取而失败的样本保留，不放松项目来源范围保护。
 
-B的Provider事件被持有时，同Session报告泵只能先保存A的pending报告；夹具先核原报告耐久且无接纳，再释放B原事件，在安全边界继续核同一报告的`work_not_selected`暂缓，随后才明确恢复A。A09的外来Store探针只使用真实第二Store的metadata身份，不代表外来Store真实child或普通SDK/HTTP控制资格；可信Store负探针与模型实际生成的无效ID调用分别报告，未生成则保留未命中。
+B的Provider事件被持有时，同Session报告泵先保存A的原pending报告；夹具先核原报告耐久且无接纳，再释放B原事件，在安全边界核原报告进入准确后继B Run。旧selected-work分类与`work_not_selected`延迟场景不再适用于当前Runtime；当前替代覆盖精确核来源A和接纳目标B分别归属，低信任报告不得修改原审批、权限、停止状态或文件效果。A09的外来Store探针只使用真实第二Store的metadata身份，不代表外来Store真实child或普通SDK/HTTP控制资格；可信Store负探针与模型实际生成的无效ID调用分别报告，未生成则保留未命中。
 
 I14 的三变体不代表替换、root stop、Rewind、删除、unknown 或客户端完整恢复资格。R05 的终态事务失败变体只在隔离Store安装临时SQL触发器，真实错误交回Core，不重试终态、不补造恢复；回滚已证明但正式安全恢复尚未完成时，结果明确为inconclusive。提交后丢响应变体沿正式Runtime原键查回，`started:false`仍核同一个已提交Run/Source/receipt。两组均不授默认权限、冷恢复或全部事务写点资格。
 
@@ -907,11 +907,11 @@ KITE_RUN_LIVE_TUI_WINDOW=1 bun tests/e2e/live/model/collaboration-tui-two-round.
 
 单例仍至多40次实际HTTP、600秒及4096输出token，不通过普通客户端环境名/URL/启动参数开放诊断。Native成功后保留私有canonical现场及manifest用于窗口交叉核验；单轮TUI成功后先核保存事实与资源关闭再删除自有根。两轮TUI的显式证据根始终保留，支持结束后独立读取canonical Store；此前已删除的成功样本不能追改为保留。失败和未命中现场均保留。冷客户端子集只证明同Store普通历史重开与零请求、新业务/Source记录及重放，不证明Service强杀恢复、断线事件、所有子上下文或其他平台。
 
-Native另有同一child两轮的U02可达子集：正常切换会话/返回，准确继续原工作，由真实模型调用`follow_up_agent`并为新外部目标独立审批；原审批/终态控件移除及metadata保持单列核验。旧控件detached不等于已提交迟到旧答案或停止请求，不能授服务端迟到拒绝、断线或缺lineage变体资格。
+Native另有同一child两轮的U02可达子集：正常切换会话/返回，第二条输入建立准确新父工作，由真实模型调用`follow_up_agent`并为新外部目标独立审批；原审批/终态控件移除及metadata保持单列核验。旧控件detached不等于已提交迟到旧答案或停止请求，不能授服务端迟到拒绝、断线或缺lineage变体资格。
 
-续轮指令将完整子任务正文作为引用的`content`传递，保留其中一次尝试后停止的要求，使其归属于child。TUI两轮配置比较先独立核每轮真实父Tool/Run、Store/工作、输入摘要及完整MCP父快照证明，再只排除准确三项父调用身份字段比较其余完整配置；旧轮metadata仍要求原样不变。
+续轮指令将完整子任务正文作为引用的`content`传递，保留其中一次尝试后停止的要求，使其归属于child。普通新输入不再依赖已退役的自然语言same_work分类：新父Run绑定新Command/root work，子续轮仍核同一child及准确前驱，旧审批和原metadata保持不变。TUI两轮配置比较先独立核每轮真实父Tool/Run、Store/工作、输入摘要及完整MCP父快照证明，再只排除父调用ID、输入摘要、父Run ID及rootWork ID／seq五项变化身份字段比较其余完整配置；旧轮metadata仍要求原样不变。
 
-[普通TUI两轮runner](collaboration-tui-two-round.live.ts)沿同一正式80×24 PTY，在首轮一批一拒后由正常composer继续原工作、同child接新任务；父follow-up若需默认审批，也通过普通面板准确批准。第二轮核新卡与旧metadata隔离，经普通`/resume`切到预先建立的空会话再返回，准确新卡一次批准后才产生新文件效果和父Source，最后冷客户端重开。root/child/recovery及审核均注入同一真实计数adapter，`testDiagnostics:false`保持；这份有限U02仍不包含迟到旧答案/停止的服务端提交。
+[普通TUI两轮runner](collaboration-tui-two-round.live.ts)沿同一正式80×24 PTY，在首轮一批一拒后由正常composer提交新父工作、同child接新任务；父follow-up若需默认审批，也通过普通面板准确批准。第二轮核新卡与旧metadata隔离，经普通`/resume`切到预先建立的空会话再返回，准确新卡一次批准后才产生新文件效果和父Source，最后冷客户端重开。root/child/recovery及审核均注入同一真实计数adapter，`testDiagnostics:false`保持；这份有限U02仍不包含迟到旧答案/停止的服务端提交。
 
 首个两卡菜单必须显示准确计数与唯一高亮审批行才发送一次Enter；canonical已待批而普通UI目录尚旧时，只关闭导航菜单、正式读取并重开，不重复批准或业务调用。
 

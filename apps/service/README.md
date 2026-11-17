@@ -431,7 +431,7 @@ W09 二进制内容使用 `GET /v1/sessions/{id}/artifacts/{refId}?storeId=&scop
 
 resolver 返回每 Run 的 `extensions`、`sources` 与 `dispose`。项目来源针对实际 File Tool 的可信相对目标，读取从 root 到目标的 `AGENTS.md`/`CLAUDE.md`。Runtime 冻结选中定义，并在关闭 Workspace 文件 handle 前为后台操作保留 binding lease；后续配置不能替换活动 Run 的定义或快照。Files 保留其实际 FD/path/hash 身份、POSIX/no-follow 和外部编辑 CAS 约束；大正文通过原 scope Artifact 和通用 Model 正文交接，范围以 [Files owner](../../packages/agent/src/tools/files/README.md)和[Model 正文 owner](../../packages/agent/src/model-body/README.md)为准，不声明 Windows 资格完成。
 
-默认全局 [Files checkpoint 配置](src/file-checkpoint-configuration.ts) 唯一登记 `builtin.files@1` 和准确六个 Files Tool，Run resolver 只选择这组定义，不重复注册。纯 metadata factory 不解析 Runtime 或打开文件；实际 scope 从当前 Store/Session/Workspace 的可信事实取得 canonical root，每次独立关闭 FD。捕获固定原 Run 已封存的 `contextSelectionId`，逐项核实际 Tool→成功 Model decisionSource、完整 sealed Model input/hash、原 Command/subject 与完整消费 User 的准确 source IDs/正文。nullable Execution delivery selection 不替代原 Run pin，后来 User 不成为旧 Tool trigger。
+默认全局 [Files checkpoint 配置](src/file-checkpoint-configuration.ts) 唯一登记 `builtin.files@1` 和三个 Files Tool（图片工具由独立装配补入），Run resolver 只选择这组定义，不重复注册。纯 metadata factory 不解析 Runtime 或打开文件；实际 scope 从当前 Store/Session/Workspace 的可信事实取得 canonical root，每次独立关闭 FD。捕获固定原 Run 已封存的 `contextSelectionId`，逐项核实际 Tool→成功 Model decisionSource、完整 sealed Model input/hash、原 Command/subject 与完整消费 User 的准确 source IDs/正文。nullable Execution delivery selection 不替代原 Run pin，后来 User 不成为旧 Tool trigger。
 
 同一装配支持三种权限模式下的普通外部 `write_file`／`edit_file`，不增工具版本；请求批准先人批，Auto 先自动审核，Full 按有效权限直接执行。权限 refinement 接收 Agent 本次已读取并校验的 policy 隔离副本，普通与 Planning 链均透传，Service 不另读根偏好决定外写。执行与描述优先匹配会话输出、当前 Plan 和准确输入文件，再走通用外部文件与原外部只读适配；私有例外不被通用外部能力接管。外部适配独立核最终证明的所有权限叶及目标 revision，保留 trust、父子／计划／工具集合和受保护资源限制；可安全编辑的外部读提供 baseline，外部变化不进入 Workspace checkpoint。当前源码与确定性边界见[适配器](../../packages/agent/src/tools/full-access-files.ts)、[权限 owner](../../packages/agent/src/permissions/README.md)及[默认 Service 回归](test/isolated/full-external-files.test.ts)，真实模型结果单独记录。
 
@@ -539,7 +539,7 @@ Model 必须有准确 kind 的允许项，不给同名 Tool 授权。所有非 M
 
 默认工厂通过 `createPermissionManagement({allowModeChanges:true})` 保留运行中的根模式控制，即使注入策略使其余管理操作 `writable:false`，原 `permission.mode` HTTP 入口仍可写；trust 和清除 grants 继续由原宿主边界限制。`host-status` 显示真实持久 mode/default，不再因存在注入策略而清空；无法完整解释的注入 trust 上限继续显示 unavailable。原工厂自身管理器与真实 HTTP 的[配置回归](test/isolated/permission-configuration.test.ts)验证待批切 Full、最终派发前收紧及 Full 不绕过硬拒绝／强制人工；没有另建可写管理器代替被测入口。
 
-`describeCapability` 由当次真实 assembly 产生：选中的 builtin files read/list/glob/search 和 Skill load/resource 是 safe read；files write/edit 是 Workspace write；真实注册但未识别的其他能力是 unknown，缺实际注册则拒绝。实际 `files.read@5`、`files.write@3`、`files.edit/glob@2`、`files.search@4`、`files.list@1` 来自当次定义，配置不能改写它。Shell 仅在下文可信宿主显式选择的执行资格与真实 guardian 下注册；MCP 仅在上文明确 programmatic lifecycle/port 配置下注册。当前六个 files Tools 没有 mkdir，不因权限分类保留可能的未来 ID 就宣称已提供该工具。
+`describeCapability` 由当次真实 assembly 产生：选中的 builtin Files read/view_images 和 Skill load/resource 是 safe read；Files write/edit 是 Workspace write；真实注册但未识别的其他能力是 unknown，缺实际注册则拒绝。准确版本来自当次定义，配置不能改写它。Shell 仅在下文可信宿主显式选择的执行资格与真实 guardian 下注册；MCP 仅在上文明确 programmatic lifecycle/port 配置下注册。模型 Files 目录只保留 read/write/edit 与单独装配的 view_images；list/glob/search 已退役，底层内部文件查询 API 的保留不代表模型有对应工具。
 
 旧 Run 保留原 manifest/definitions 与文件绑定，单纯禁用后续 Tool 配置不等于全局撤权；当前 mode/trust/allowlist 的变化仍会在派发前生效。新 Run 重读配置并封存新目录。默认每次授权允许集合包含实际已选中的静态能力和纯缓存 MCP 动态 Tool/Task Job 目录，不为未注册定义补授权；读取该集合不打开连接。非 Run Action 根据原 Execution/Command 取得准确 Store、Session 与宿主主体，再读取同一控制事实，不采用当前 UI 选择或全局猜测。
 

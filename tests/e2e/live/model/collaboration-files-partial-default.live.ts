@@ -22,6 +22,7 @@ import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '../../../../apps/service/src/configuration';
+import { fileBaselineReference } from '../../../../packages/agent/src/tools/files-tools';
 import { saveLiveCanonicalModelEvidence } from './live-canonical-evidence';
 
 const id = 'F02-default-policy-external-exact-approval-partial-conflict' as const;
@@ -61,7 +62,7 @@ const canonical = (value: Json): string =>
           .join(',')}}`
       : JSON.stringify(value);
 /** Read only the two existing permission intersection envelopes and exact default leaves. */
-function defaultExternalApproval(policy: Json): boolean {
+function defaultExternalApproval(policy: Json, effects: readonly string[] = ['external']): boolean {
   const pending: Json[] = [policy];
   let leaves = 0,
     visited = 0;
@@ -74,7 +75,7 @@ function defaultExternalApproval(policy: Json): boolean {
       if (
         value.mode !== 'accept_edits' ||
         value.reason !== 'approval_required' ||
-        !isDeepStrictEqual(value.effects, ['external']) ||
+        !isDeepStrictEqual(value.effects, effects) ||
         Object.keys(value).some((key) => !['mode', 'reason', 'effects'].includes(key))
       )
         return false;
@@ -189,6 +190,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
     input: Json;
     result: Json;
     baseline: Json;
+    baseRef: string;
+    presented: string;
     completeContentMatchesBeforeBytes: boolean;
     ordinal: number;
     phase: 'initial' | 'explicit-followup';
@@ -201,6 +204,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
     path: string;
     input: Json;
     result: Json;
+    resolvedBaseline: Json | null;
+    presented: string;
     success: boolean;
     conflict: boolean;
     before: string;
@@ -211,6 +216,10 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
   let ordinal = 0;
   let approvePending: (() => Promise<void>) | undefined;
   const approved = new Map<string, { executionId: string; original: unknown; answered: unknown }>();
+  const readApprovals = new Map<
+    string,
+    { executionId: string; original: unknown; answered: unknown }
+  >();
   const taskApprovals: unknown[] = [];
   const preAuthorization: { executionId: string; role: string; path: string; phase: string }[] = [];
   const assert = (value: unknown, point: string) => {
@@ -259,8 +268,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
           },
         ],
         tools: [
-          'files.read_path',
-          'files.edit_path',
+          'files.read',
+          'files.edit',
           'task.spawn',
           'task.events',
           'task.list',
@@ -279,18 +288,16 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
         model: options.model,
       },
     });
-    const pathExtension = host.extensions!.find(
-      (extension) => extension.id === 'builtin.files.path',
-    );
+    const fileExtension = host.extensions!.find((extension) => extension.id === 'builtin.files');
     const originals =
-      pathExtension?.tools?.filter((tool) =>
-        ['files.read_path', 'files.edit_path'].includes(tool.id),
-      ) ?? [];
+      fileExtension?.tools?.filter((tool) => ['files.read', 'files.edit'].includes(tool.id)) ?? [];
     assert(
       originals.length === 2 &&
-        originals.find((tool) => tool.id === 'files.edit_path')?.resources?.serial?.key ===
-          'files.path.mutation',
-      'real_default_path_definitions_and_shared_mutation_resource_retained',
+        originals.find((tool) => tool.id === 'files.edit')?.resources?.serial?.key ===
+          'files.mutation' &&
+        originals.find((tool) => tool.id === 'files.edit')?.resources?.serial?.scope ===
+          'workspace',
+      'real_default_file_definitions_and_shared_mutation_resource_retained',
     );
     const tools: ToolDefinition[] = originals.map((tool) => ({
       ...tool,
@@ -307,14 +314,15 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
         const before = readFileSync(join(external, path));
         const result = await tool.execute(input, context);
         const after = readFileSync(join(external, path));
-        if (tool.id === 'files.read_path' && result.outcome === 'succeeded') {
+        const presented = tool.formatModelResult?.({ result }) ?? result.content;
+        if (tool.id === 'files.read' && result.outcome === 'succeeded') {
           let body: Record<string, Json> = {};
           try {
             body = object(JSON.parse(result.content));
           } catch {
             /* No baseline means this branch stays unqualified. */
           }
-          if (body.baseline)
+          if (body.baseline && typeof body.base_ref === 'string')
             reads.push({
               role: currentRole,
               sessionId: context.sessionId,
@@ -324,6 +332,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
               input: structuredClone(input),
               result: structuredClone(result) as unknown as Json,
               baseline: structuredClone(body.baseline),
+              baseRef: body.base_ref,
+              presented,
               completeContentMatchesBeforeBytes:
                 body.content === before.toString('utf8') &&
                 object(body.baseline).hash === hash(before) &&
@@ -331,7 +341,18 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
               ordinal: ++ordinal,
               phase,
             });
-        } else if (tool.id === 'files.edit_path') {
+        } else if (tool.id === 'files.edit') {
+          // Observe the production resolver without changing the original call or granting authority.
+          let resolvedBaseline: Json | null = null;
+          try {
+            resolvedBaseline = await fileBaselineReference(
+              args.baseRef!,
+              context,
+              String(args.path),
+            );
+          } catch {
+            // The real Tool result, including invalid references, remains authoritative.
+          }
           writes.push({
             role: currentRole,
             sessionId: context.sessionId,
@@ -340,6 +361,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
             path,
             input: structuredClone(input),
             result: structuredClone(result) as unknown as Json,
+            resolvedBaseline,
+            presented,
             success: result.outcome === 'succeeded',
             conflict:
               result.outcome === 'failed' &&
@@ -374,7 +397,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
     };
     const wrapExtensions = (extensions: readonly Extension[]) =>
       extensions.map((extension) =>
-        extension.id === 'builtin.files.path'
+        extension.id === 'builtin.files'
           ? {
               ...extension,
               tools: extension.tools!.map(
@@ -383,9 +406,18 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
             }
           : extension,
       );
+    const wrappedDefinitions = new Map<unknown, ToolDefinition>(
+      originals.map((definition, index) => [definition, tools[index]!]),
+    );
+    const wrapBehaviors = (behaviors: NonNullable<RunConfiguration['toolBehaviors']>) =>
+      behaviors.map((behavior) => {
+        const definition = wrappedDefinitions.get(behavior.definition);
+        return definition ? { ...behavior, definition } : behavior;
+      });
     const inject = (binding: RunConfiguration): RunConfiguration => ({
       ...binding,
       model,
+      ...(binding.toolBehaviors ? { toolBehaviors: wrapBehaviors(binding.toolBehaviors) } : {}),
       ...(binding.extensions ? { extensions: wrapExtensions(binding.extensions) } : {}),
       ...(binding.readStepCapabilities
         ? {
@@ -393,6 +425,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
               const step = await binding.readStepCapabilities!(input);
               return {
                 ...step,
+                ...(step.toolBehaviors ? { toolBehaviors: wrapBehaviors(step.toolBehaviors) } : {}),
                 ...(step.extensions ? { extensions: wrapExtensions(step.extensions) } : {}),
               };
             },
@@ -406,17 +439,13 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
             const path = args.path === xPath ? 'X.ini' : args.path === yPath ? 'Y.ini' : '';
             const role = roles.get(request.sessionId);
             // This ceiling can only deny. Original default decisions and their read sets remain authoritative.
-            if (
-              !role ||
-              !path ||
-              !['files.read_path', 'files.edit_path'].includes(request.definitionId)
-            )
+            if (!role || !path || !['files.read', 'files.edit'].includes(request.definitionId))
               return {
                 allowed: false,
                 revision: 'F02-default-target-ceiling-1',
                 reason: 'live_target_out_of_scope',
               };
-            if (request.definitionId === 'files.edit_path' && phase === 'initial') {
+            if (request.definitionId === 'files.edit' && phase === 'initial') {
               preAuthorization.push({ executionId: request.executionId, role, path, phase });
               // Absolute edits own a shared mutation resource. Never wait inside execute.
               if (role === 'B')
@@ -431,13 +460,14 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
     });
     runtime = createRuntime({
       ...host,
+      ...(host.toolBehaviors ? { toolBehaviors: wrapBehaviors(host.toolBehaviors) } : {}),
       store: owned,
       permissions: host.permissions!,
       modelConcurrency: 4,
       artifacts: createArtifactStore({ profile, store: owned }),
       workspaceSerialLocks: locks,
       extensions: host.extensions!.map((extension) =>
-        extension.id === 'builtin.files.path'
+        extension.id === 'builtin.files'
           ? {
               ...extension,
               tools: extension.tools!.map(
@@ -521,8 +551,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
       ).state === 'applied',
       'real_default_workspace_trust_applied',
     );
-    const aAssignment = `${aMarker}: Read ${xPath} and ${yPath} completely with read_user_file and retain each exact complete baseline. Then use edit_user_file on ${xPath} with find="A=0", replace="A=1", occurrences=1 and its actual complete base from the read. Then use edit_user_file on ${yPath} with find="A=0", replace="A=1", occurrences=1 and base from your ORIGINAL Y read. Both find/replace fields are exactly those single-line strings with no line endings or other keys included. Preserve every other byte, CRLF and keep data. These are separate real operations. If Y actually conflicts, do not reread, retry, compensate, roll back X, or change any further file in this turn. Report the separate actual X and Y outcomes, the actual error code, and complete keep marker. Finish. Use no other tool, delegate, messages, cancellation or Shell.`;
-    const bAssignment = `${bMarker}: Read ${yPath} completely using read_user_file, then use edit_user_file on ${yPath} with find="B=0", replace="B=1", occurrences=1 and that exact complete base. The find/replace fields are exactly those single-line strings; do not include A=0, any line ending or another key in either field. Preserve every other byte, CRLF and keep data. Report your actual edit outcome and complete keep marker. Do not touch X.ini, delegate, send messages, cancel, retry or use Shell. Finish.`;
+    const aAssignment = `${aMarker}: Read ${xPath} and ${yPath} completely with read_file and retain each exact base_ref for its complete-file baseline. Then use edit_file on ${xPath} with old_text="A=0", new_text="A=1", expected_matches=1 and the exact base_ref returned by that read. Then use edit_file on ${yPath} with old_text="A=0", new_text="A=1", expected_matches=1 and base_ref from your ORIGINAL Y read. Both old_text/new_text fields are exactly those single-line strings with no line endings or other keys included. Preserve every other byte, CRLF and keep data. These are separate real operations. If Y actually conflicts, do not reread, retry, compensate, roll back X, or change any further file in this turn. Report the separate actual X and Y outcomes, the actual error code, and complete keep marker. Finish. Use no other tool, delegate, messages, cancellation or Shell.`;
+    const bAssignment = `${bMarker}: Read ${yPath} completely using read_file, then use edit_file on ${yPath} with old_text="B=0", new_text="B=1", expected_matches=1 and that exact returned base_ref. The old_text/new_text fields are exactly those single-line strings; do not include A=0, any line ending or another key in either field. Preserve every other byte, CRLF and keep data. Report your actual edit outcome and complete keep marker. Do not touch X.ini, delegate, send messages, cancel, retry or use Shell. Finish.`;
     let freshAssignmentForApproval: string | undefined;
     approvePending = async () => {
       const cards = [
@@ -545,6 +575,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
       for (const card of cards) {
         if (
           approved.has(card.id) ||
+          readApprovals.has(card.id) ||
           taskApprovals.some((entry) => object(entry).executionId === card.executionId)
         )
           continue;
@@ -582,7 +613,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
           'exact_card_full_input_digest_attempt_and_subject_match_original_execution',
         );
         const role = roles.get(card.sessionId);
-        if (card.definitionId === 'files.edit_path') {
+        if (card.definitionId === 'files.edit') {
           assert(
             defaultExternalApproval(request.policy ?? null),
             'real_default_external_write_requires_human_card',
@@ -612,7 +643,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
               expectedRead &&
               isDeepStrictEqual(args, {
                 path: args.path,
-                base: expectedRead.baseline,
+                baseRef: expectedRead.baseRef,
                 find: expectedFind,
                 replace: expectedReplace,
                 occurrences: 1,
@@ -633,6 +664,35 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
           assert(
             readFileSync(xPath, 'utf8') === expectedX && readFileSync(yPath, 'utf8') === expectedY,
             `exact_preapproval_physical_bytes_${approved.size}`,
+          );
+        } else if (card.definitionId === 'files.read') {
+          const validRead =
+            phase === 'initial'
+              ? (role === 'A' && (args.path === xPath || args.path === yPath)) ||
+                (role === 'B' && args.path === yPath)
+              : role === 'A' && args.path === yPath;
+          branch(
+            validRead &&
+              readApprovals.size < 4 &&
+              Object.keys(args).every((key) => ['path', 'offset', 'limit'].includes(key)) &&
+              (args.offset === undefined || args.offset === 1) &&
+              (args.limit === undefined || (typeof args.limit === 'number' && args.limit >= 3)) &&
+              !reads.some(
+                (read) =>
+                  read.sessionId === card.sessionId &&
+                  read.path === (args.path === xPath ? 'X.ini' : 'Y.ini') &&
+                  read.phase === phase,
+              ),
+            'pending_read_not_exact_authorized_original_target',
+          );
+          assert(
+            defaultExternalApproval(request.policy ?? null, ['read', 'external']),
+            'real_default_external_read_requires_own_human_card',
+          );
+          assert(
+            execution!.authorization?.dispatched === false &&
+              !reads.some((read) => read.executionId === card.executionId),
+            `zero_read_before_exact_approval_${readApprovals.size}`,
           );
         } else {
           // Default Task classifier normally admits these internal record operations.
@@ -684,7 +744,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
           original: structuredClone(card),
           answered: structuredClone(answered),
         };
-        if (card.definitionId === 'files.edit_path') approved.set(card.id, entry);
+        if (card.definitionId === 'files.edit') approved.set(card.id, entry);
+        else if (card.definitionId === 'files.read') readApprovals.set(card.id, entry);
         else taskApprovals.push(entry);
       }
     };
@@ -765,7 +826,12 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
       (read) => read.role === 'A' && read.path === 'Y.ini' && read.phase === 'initial',
     );
     branch(
-      x && b && conflict && oldY && isDeepStrictEqual(object(conflict.input).base, oldY.baseline),
+      x &&
+        b &&
+        conflict &&
+        oldY &&
+        object(conflict.input).baseRef === oldY.baseRef &&
+        isDeepStrictEqual(conflict.resolvedBaseline, oldY.baseline),
       'actual_old_baseline_Y_conflict_not_generated',
     );
     const oldX = reads.find(
@@ -830,8 +896,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
       'three_independent_exact_original_edit_approvals',
     );
     const originalApprovalHistory = await Promise.all(
-      [...approved.keys()].map((interactionId) => {
-        const entry = approved.get(interactionId)!;
+      [...approved, ...readApprovals].map(([interactionId, entry]) => {
         const card = entry.answered as Awaited<ReturnType<typeof live.getInteraction>>;
         return live.getInteraction(card.presentationSessionId, interactionId, {
           storeId: expectedStoreId,
@@ -965,7 +1030,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
       readOnlyRetrievalCount: 9,
     };
     phase = 'explicit-followup';
-    const freshAssignment = `${aMarker}: This is a NEW explicit task after your earlier Y conflict. Do not replay either old edit or compensate X. Read CURRENT ${yPath} completely using read_user_file. Use its NEW exact complete base in ONE NEW edit_user_file invocation with find="A=0", replace="A=1", occurrences=1, using exactly those single-line strings without any line ending or other key in find/replace. Preserve the B=1 change, CRLF and complete keep data. Do not modify X.ini. Report actual new outcome and complete keep marker, distinguishing it from your earlier X success and Y conflict. No retries, delegation, messages, cancellation or Shell.`;
+    const freshAssignment = `${aMarker}: This is a NEW explicit task after your earlier Y conflict. Do not replay either old edit or compensate X. Read CURRENT ${yPath} completely using read_file. Use its NEW exact returned base_ref in ONE NEW edit_file invocation with old_text="A=0", new_text="A=1", expected_matches=1, using exactly those single-line strings without any line ending or other key in old_text/new_text. Preserve the B=1 change, CRLF and complete keep data. Do not modify X.ini. Report actual new outcome and complete keep marker, distinguishing it from your earlier X success and Y conflict. No retries, delegation, messages, cancellation or Shell.`;
     freshAssignmentForApproval = freshAssignment;
     await live.startRun('root', {
       expectedStoreId,
@@ -1010,7 +1075,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
         fresh.runId !== conflict!.runId &&
         freshRead!.runId === fresh.runId &&
         freshRead!.ordinal < fresh.ordinal &&
-        isDeepStrictEqual(object(fresh.input).base, freshRead!.baseline) &&
+        object(fresh.input).baseRef === freshRead!.baseRef &&
+        isDeepStrictEqual(fresh.resolvedBaseline, freshRead!.baseline) &&
         !isDeepStrictEqual(freshRead!.baseline, oldY!.baseline),
       'same_A_new_run_new_invocation_uses_real_current_Y_baseline',
     );
@@ -1021,9 +1087,34 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
         fresh.after === hash(yRecovered),
       'new_Y_edit_preserves_B_change_X_CRLF_and_keep_bytes',
     );
+    const followupCommand = (await owned.getCommand('explicit-followup'))!;
+    const followupParent = await owned.getRun(String(object(followupCommand.receipt).runId));
+    const followupTool = await owned.getExecution(final.newA.parentExecutionId!);
+    const freshChildRun = (await owned.getRun(fresh.runId))!;
+    const freshChildCommand = (await owned.getCommand(freshChildRun.originCommandId))!;
+    assert(
+      followupCommand.kind === 'run.start' &&
+        followupCommand.status === 'applied' &&
+        followupParent?.originCommandId === followupCommand.id &&
+        followupParent.rootWorkCommandId === followupCommand.id &&
+        followupParent.rootWorkSeq === followupCommand.seq &&
+        object(final.newA.afterTurn).parentRunId === followupParent.id &&
+        followupTool?.runId === followupParent.id &&
+        followupTool.definitionId === 'task.follow_up' &&
+        isDeepStrictEqual(followupTool.input, { agentId: aSession, content: freshAssignment }) &&
+        freshChildCommand.kind === 'input.follow_up' &&
+        freshChildCommand.status === 'applied' &&
+        object(freshChildCommand.request).afterRunId === originalARun.id &&
+        object(freshChildCommand.receipt).runId === fresh.runId &&
+        freshChildRun.contextSelectionId === originalARun.contextSelectionId,
+      'exact_new_parent_command_and_same_child_followup_predecessor',
+    );
     assert(
       final.newA.childSessionId === aSession &&
-        final.newA.rootWorkCommandId === 'A' &&
+        final.newA.rootWorkCommandId === followupCommand.id &&
+        final.newA.rootWorkSeq === followupCommand.seq &&
+        final.newA.rootWorkCommandId !== aCarrier.rootWorkCommandId &&
+        final.newA.rootWorkSeq !== aCarrier.rootWorkSeq &&
         final.newA.resultAcceptance?.resultRevision === final.newA.resultRevision &&
         final.view.executions.filter((row) => row.childSessionId).length === 3,
       'one_new_original_A_child_carrier_no_replacements',
@@ -1031,8 +1122,12 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
     const aFinal = await owned.getView(aSession);
     assert(
       aFinal.runs.length === 2 &&
-        aFinal.runs.every((run) => run.status === 'completed' && run.rootWorkCommandId === 'A') &&
-        aFinal.runs[0]!.id === originalARun.id,
+        aFinal.runs.every((run) => run.status === 'completed') &&
+        aFinal.runs[0]!.id === originalARun.id &&
+        aFinal.runs[0]!.rootWorkCommandId === 'A' &&
+        aFinal.runs[1]!.id === fresh.runId &&
+        aFinal.runs[1]!.rootWorkCommandId === followupCommand.id &&
+        aFinal.runs[1]!.rootWorkSeq === followupCommand.seq,
       'original_child_history_and_new_A_turn_distinct',
     );
     assert(
@@ -1062,8 +1157,15 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
           saved.originStoreId === expectedStoreId &&
           saved.sessionId === action.sessionId &&
           saved.runId === action.runId &&
-          saved.rootWorkCommandId === 'A' &&
-          saved.rootWorkSeq === originalARun.rootWorkSeq &&
+          saved.rootWorkCommandId === (action.phase === 'initial' ? 'A' : followupCommand.id) &&
+          saved.rootWorkSeq ===
+            (action.phase === 'initial' ? originalARun.rootWorkSeq : followupCommand.seq) &&
+          saved.parentExecutionId ===
+            (action.phase !== 'initial'
+              ? final.newA.id
+              : action.role === 'A'
+                ? aCarrier.id
+                : bCarrier.id) &&
           isDeepStrictEqual(saved.input, action.input) &&
           isDeepStrictEqual(saved.result, action.result) &&
           saved.resultRevision === '1',
@@ -1076,8 +1178,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
       const body = String(object(carrier.result).content ?? '');
       assert(
         carrier.originStoreId === expectedStoreId &&
-          carrier.rootWorkCommandId === 'A' &&
-          carrier.rootWorkSeq === originalARun.rootWorkSeq &&
+          carrier.rootWorkCommandId === (index < 2 ? 'A' : followupCommand.id) &&
+          carrier.rootWorkSeq === (index < 2 ? originalARun.rootWorkSeq : followupCommand.seq) &&
           carrier.resultRevision === '1' &&
           body.includes(keep) &&
           allExecutions.some(
@@ -1117,14 +1219,44 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
       for (const action of [...reads, ...writes].filter(
         (item) => item.sessionId === row.sessionId,
       )) {
-        const completeBody = String(object(action.result).content ?? '');
+        const completeBody = action.presented;
         if (
           completeBody &&
           saved.request.messages.some(
             (message) =>
               message.sourceIds?.includes(action.executionId) &&
-              (message.content.includes(completeBody) ||
-                message.content.includes(JSON.stringify(completeBody).slice(1, -1))),
+              (() => {
+                if (
+                  message.content.includes(completeBody) ||
+                  message.content.includes(JSON.stringify(completeBody).slice(1, -1))
+                )
+                  return true;
+                // Runtime projects successful mutation metadata and adds immutable artifact references.
+                // Compare the complete owner projection, not the no-longer-model-visible raw baseline.
+                try {
+                  const expected = object(JSON.parse(completeBody));
+                  const refs = object(action.result).artifactRefs;
+                  if (!Array.isArray(refs) || refs.length === 0) return false;
+                  const content_refs = refs.map((raw, index) => {
+                    const ref = object(raw);
+                    return {
+                      content_ref: `artifact.${Buffer.from(JSON.stringify([action.executionId, '1', index])).toString('base64url')}`,
+                      artifact: {
+                        id: ref.id,
+                        mediaType: ref.mediaType,
+                        scope: ref.scope,
+                        size: ref.size,
+                      },
+                    };
+                  });
+                  return isDeepStrictEqual(JSON.parse(message.content), {
+                    ...expected,
+                    content_refs,
+                  });
+                } catch {
+                  return false;
+                }
+              })(),
           )
         )
           toolResultsPrepared.add(action.executionId);
@@ -1192,7 +1324,14 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
         `original_approval_history_unchanged_${hash(original.id).slice(0, 12)}`,
       );
     }
-    for (const [interactionId, entry] of approved) {
+    assert(
+      readApprovals.size === 4 &&
+        reads.every((read) =>
+          [...readApprovals.values()].some((entry) => entry.executionId === read.executionId),
+        ),
+      'four_exact_external_reads_separately_approved_without_mutation_authority',
+    );
+    for (const [interactionId, entry] of [...approved, ...readApprovals]) {
       const card = await live.getInteraction(
         (entry.answered as Awaited<ReturnType<typeof live.getInteraction>>).presentationSessionId,
         interactionId,
@@ -1219,6 +1358,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
     }
     stages.privateDefaultApprovals = {
       approved: [...approved],
+      readApprovals: [...readApprovals],
       taskApprovals,
       preAuthorization,
       originalApprovalHistory,
@@ -1244,6 +1384,8 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
     };
     status = 'passed';
   } catch (error) {
+    stages.failure =
+      error instanceof Error ? { name: error.name, message: error.message } : String(error);
     if (error instanceof Boundary) {
       reason = error.reason;
       failurePoint = error.point;
@@ -1262,6 +1404,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
     stages.privateDefaultApprovals = {
       ...object(stages.privateDefaultApprovals),
       approved: [...approved],
+      readApprovals: [...readApprovals],
       taskApprovals,
       preAuthorization,
     };
@@ -1360,7 +1503,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
         canonicalEvidenceRetained: existsSync(root),
         semanticReviewRequired: true,
         coverage: [
-          'real_default_accept_edits_external_Files_four_exact_approve_once',
+          'real_default_accept_edits_external_Files_four_exact_edit_and_four_read_approve_once',
           'actual_two_child_real_Files_X_success_then_Y_old_baseline_conflict',
           'formal_read_only_original_execution_retrieval_zero_replay',
           'explicit_same_A_new_turn_rereads_current_Y_preserves_B_and_X',

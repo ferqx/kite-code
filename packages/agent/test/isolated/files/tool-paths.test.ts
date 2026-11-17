@@ -61,7 +61,7 @@ function fixture() {
   };
 }
 
-test('all six Model file tools accept workspace absolute paths and keep relative results and checkpoint capture', async () => {
+test('three Model file tools and internal queries normalize workspace paths while preserving results and checkpoint capture', async () => {
   const f = fixture();
   try {
     mkdirSync(join(f.workspace, 'nested'));
@@ -85,17 +85,19 @@ test('all six Model file tools accept workspace absolute paths and keep relative
     expect(JSON.parse(edit.content).fileChange.path).toBe('nested/Exact.txt');
     expect(f.captured).toEqual(Array(4).fill('nested/Exact.txt'));
     expect(readFileSync(path, 'utf8')).toBe('changed\n');
-    const listed = await f.call('list', { path: join(f.workspace, 'nested') });
-    expect(listed.outcome).toBe('succeeded');
-    expect(JSON.parse(listed.content).entries).toEqual([{ name: 'Exact.txt', kind: 'file' }]);
-    const glob = await f.call('glob', { path: f.workspace, pattern: '**/*.txt' });
-    expect(glob.outcome).toBe('succeeded');
-    expect(JSON.parse(glob.content).paths).toEqual(['nested/Exact.txt']);
-    const search = await f.call('search', { path: f.workspace, text: 'changed', mode: 'content' });
-    expect(search.outcome).toBe('succeeded');
-    expect(JSON.parse(search.content).matches).toEqual([
-      { path: 'nested/Exact.txt', line: 1, content: 'changed' },
-    ]);
+    const listed = await f.files.list({ path: f.files.relativePath(join(f.workspace, 'nested')) });
+    expect(listed.entries).toEqual([{ name: 'Exact.txt', kind: 'file' }]);
+    const glob = await f.files.glob({
+      path: f.files.relativePath(f.workspace),
+      pattern: '**/*.txt',
+    });
+    expect(glob.paths).toEqual(['nested/Exact.txt']);
+    const search = await f.files.search({
+      path: f.files.relativePath(f.workspace),
+      text: 'changed',
+      mode: 'content',
+    });
+    expect(search.matches).toEqual([{ path: 'nested/Exact.txt', line: 1, content: 'changed' }]);
     // Native and recovery primitives retain their original relative-only contract.
     await expect(f.files.read(path)).rejects.toMatchObject({ code: 'file_path_invalid' });
     await expect(f.files.readBytes(path, { maxBytes: 1024 })).rejects.toMatchObject({
@@ -202,11 +204,13 @@ test('directory defaults, absolute roots and native Windows separators select th
   const f = fixture();
   try {
     writeFileSync(join(f.workspace, 'local.txt'), 'local');
-    const inputs: Json[] = [{ limit: 50 }, { path: '' }, { path: '.' }, { path: f.workspace }];
+    const inputs = [{ limit: 50 }, { path: '' }, { path: '.' }, { path: f.workspace }];
     for (const input of inputs) {
-      const result = await f.call('list', input);
-      expect(result.outcome).toBe('succeeded');
-      expect(JSON.parse(result.content)).toEqual({
+      const result = await f.files.list({
+        ...input,
+        ...(input.path === undefined ? {} : { path: f.files.relativePath(input.path) }),
+      });
+      expect(result).toEqual({
         entries: [{ name: 'local.txt', kind: 'file' }],
         next: null,
       });

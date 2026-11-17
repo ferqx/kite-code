@@ -4,7 +4,7 @@ import { publicAgentResponses } from '../harness/public-agent-responses';
  *
  * Verifies that when a sub-agent attempts to write a file outside the workspace
  * (an absolute path outside the workspace), the approval flow is triggered correctly:
- *   1. Main agent spawns a code sub-agent via the task tool
+ *   1. Main agent spawns a general sub-agent via the task tool
  *   2. Sub-agent attempts write_file with an absolute path
  *   3. Approval dialog appears for the external write
  *   4. User approves → tool executes → sub-agent continues → completes
@@ -70,7 +70,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     externalFile = join(workspace.home, 'external-subagent-write.txt');
 
     // Response sequence:
-    // #1: Main agent → dispatches a code sub-agent (task tool)
+    // #1: Main agent → dispatches a general sub-agent (task tool)
     // #2: Sub-agent → attempts write_file with absolute path (triggers approval)
     // #3: Sub-agent after approval → summary
     // #4: Main agent after sub-agent completes → final response
@@ -85,7 +85,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
                 name: 'spawn_agent',
                 args: {
                   task_name: 'Write external test file',
-                  preset: 'code',
+                  preset: 'general',
                   prompt: `Write a test file at ${externalFile} with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.`,
                 },
               },
@@ -155,7 +155,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
       // Wait for the sub-agent to start and the external write to trigger approval
       await focusChildApproval(tui);
       await waitForText(() => tui.viewport(), '工具授权', TIMEOUT);
-      await waitForText(() => tui.viewport(), 'files.write_path', TIMEOUT);
+      await waitForText(() => tui.viewport(), 'files.write', TIMEOUT);
       await waitForText(() => tui.viewport(), externalFile, TIMEOUT);
 
       const beforeApprove = tui.viewport();
@@ -171,7 +171,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
       // its concrete target, while authority remains bound to the closed
       // interaction identity rather than reconstructed from this text.
       expect(externalFile.startsWith(workspace.workspace)).toBe(false);
-      expect(screenContains(beforeApprove, 'files.write_path')).toBe(true);
+      expect(screenContains(beforeApprove, 'files.write')).toBe(true);
       expect(screenContains(beforeApprove, 'external-subagent-write')).toBe(true);
       expect(screenContains(beforeApprove, externalFile)).toBe(true);
       expect(existsSync(externalFile)).toBe(false);
@@ -298,7 +298,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
   );
 });
 
-describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
+describe('TUI PTY System — Sub-agent Approval Denial and Cancellation', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -314,8 +314,8 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
     });
     externalFile = join(workspace.home, 'cancelled-subagent-write.txt');
 
-    // The child reaches the real approval boundary. A denied child must not
-    // continue its Model; the waiting parent may observe its exact terminal result.
+    // The child reaches the real approval boundary. Denial rejects only this
+    // Tool; Ctrl+C cancels the root work and all attached child work.
     cancelledResponses = [
       {
         toolContinuation: 'aborted',
@@ -327,7 +327,7 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
               name: 'spawn_agent',
               args: {
                 task_name: 'Cancel child write',
-                preset: 'code',
+                preset: 'general',
                 prompt: `Write a file at ${externalFile}. This operation will be cancelled by the user.`,
               },
             },
@@ -363,27 +363,42 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
     'child approval %s leaves no manual approval or Working surface and never executes the tool',
     async (action) => {
       server.setResponses(
-        publicAgentResponses(
-          workspace,
-          [
-            ...cancelledResponses,
-            ...(action === 'ctrl-c'
-              ? []
-              : [
-                  {
-                    expectedRequest: {
-                      toolResults: [
-                        { toolCallId: 'call_cancelled_child', contentIncludes: ['cancelled'] },
-                      ],
-                    },
-                    message: {
-                      content: 'The child write was cancelled; no external file was written.',
-                    },
+        publicAgentResponses(workspace, [
+          ...cancelledResponses.map((response) => ({
+            ...response,
+            toolContinuation: action === 'ctrl-c' ? ('aborted' as const) : ('required' as const),
+          })),
+          ...(action === 'ctrl-c'
+            ? []
+            : [
+                {
+                  expectedRequest: {
+                    toolResults: [
+                      {
+                        toolCallId: 'call_cancelled_child_write',
+                        contentIncludes: ['The user denied this request.', 'not executed'],
+                      },
+                    ],
                   },
-                ]),
-          ],
-          action === 'ctrl-c' ? 'succeeded' : 'cancelled',
-        ),
+                  message: {
+                    content: 'The requested write was denied; no external file was written.',
+                  },
+                },
+                {
+                  expectedRequest: {
+                    toolResults: [
+                      {
+                        toolCallId: 'call_cancelled_child',
+                        contentIncludes: ['write was denied', 'no external file was written'],
+                      },
+                    ],
+                  },
+                  message: {
+                    content: 'The child respected the denial; no external file was written.',
+                  },
+                },
+              ]),
+        ]),
       );
       const prompt = `Cancel child approval with ${action}`;
       await submitUserMessage(tui, server, prompt, { timeout: 15_000 });
@@ -393,7 +408,7 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
           const viewport = tui.viewport();
           return (
             screenContains(viewport, '工具授权') &&
-            screenContains(viewport, '❯ 允许一次') &&
+            screenContains(viewport, '❯ 仅此次') &&
             screenContains(viewport, '拒绝')
           );
         },
@@ -406,6 +421,12 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
       expect(screenContains(approvalFrame, 'Working')).toBe(false);
       expect(screenContains(approvalFrame, 'cancelled-subagent-write')).toBe(true);
       const requestCountBeforeAction = server.getWorkRequestCount();
+      expect(requestCountBeforeAction).toBe(3);
+      expect(existsSync(externalFile)).toBe(false);
+      using beforeDatabase = new Database(workspace.databasePath, { readonly: true });
+      const beforeActionCursor = beforeDatabase
+        .query<{ cursor: number }, []>('SELECT max(cursor) AS cursor FROM change_event')
+        .get()!.cursor;
 
       if (action === 'reject') {
         tui.write('\x1b[B');
@@ -430,16 +451,20 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
         15_000,
       );
       await waitForTuiReady(tui);
+      if (action !== 'ctrl-c')
+        await waitForText(() => tui.viewport(), 'The child respected the denial', 15_000);
+      await tui.settleScreen();
 
       const output = stripAnsi(tui.viewport());
       expect(output).not.toContain('工具授权');
       expect(output).not.toContain('Working');
       expect(output).toContain('❯');
       expect(existsSync(externalFile)).toBe(false);
-      // Deny/Esc ends only this child; the parent reads the actual result once.
-      // Ctrl+C cancels the whole root, so no parent continuation is permitted.
+      // Deny/Esc permits exactly one child Model to consume the original denial
+      // and two parent Models to read/report that child's result, without retrying.
+      // Ctrl+C cancels the whole root, so no continuation is permitted.
       expect(server.getWorkRequestCount()).toBe(
-        requestCountBeforeAction + (action === 'ctrl-c' ? 0 : 2),
+        requestCountBeforeAction + (action === 'ctrl-c' ? 0 : 3),
       );
 
       const persisted = requirePersistedRuntimeReady(observePersistedTurnEvents(workspace, prompt));
@@ -452,21 +477,84 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
         expect(run).toBeDefined();
         expect(run!.status).toBe(action === 'ctrl-c' ? 'cancelled' : 'completed');
         const child = database
-          .query<{ state: string; result_json: string }, [string]>(
-            `SELECT c.state,c.result_json FROM execution c JOIN execution p ON p.id=c.parent_execution_id
-           WHERE p.call_id=? AND c.child_session_id IS NOT NULL`,
+          .query<
+            { state: string; result_json: string; child_session_id: string },
+            [string, string]
+          >(
+            `SELECT c.state,c.result_json,c.child_session_id FROM execution c JOIN execution p ON p.id=c.parent_execution_id
+           WHERE p.call_id=? AND p.run_id=? AND c.child_session_id IS NOT NULL`,
           )
-          .get('call_cancelled_child');
-        expect(child?.state).toBe('cancelled');
-        expect(JSON.parse(child!.result_json)).toMatchObject({ outcome: 'cancelled' });
+          .get('call_cancelled_child', persisted!.turnId);
+        const childOutcome = action === 'ctrl-c' ? 'cancelled' : 'succeeded';
+        expect(child?.state).toBe(childOutcome);
+        const childResult = JSON.parse(child!.result_json);
+        expect(childResult).toMatchObject({ outcome: childOutcome });
         const writes = database
-          .query<{ dispatched: number; state: string }, [string]>(
-            'SELECT dispatched,state FROM execution WHERE call_id=?',
+          .query<
+            { id: string; dispatched: number; state: string; result_json: string },
+            [string, string]
+          >(
+            'SELECT id,dispatched,state,result_json FROM execution WHERE call_id=? AND session_id=?',
           )
-          .all('call_cancelled_child_write');
+          .all('call_cancelled_child_write', child!.child_session_id);
+        expect(writes).toHaveLength(1);
+        expect(writes[0]!.dispatched).toBe(0);
+        expect(writes[0]!.state).toBe(action === 'ctrl-c' ? 'cancelled' : 'failed');
+        const modelCount = (runId: string, sessionId: string) =>
+          database
+            .query<{ count: number }, [string, string]>(
+              "SELECT count(*) AS count FROM execution WHERE kind='model' AND run_id=? AND session_id=?",
+            )
+            .get(runId, sessionId)!.count;
+        expect(modelCount(persisted!.turnId, persisted!.threadId)).toBe(
+          action === 'ctrl-c' ? 2 : 4,
+        );
+        expect(modelCount(childResult.details.runId, child!.child_session_id)).toBe(
+          action === 'ctrl-c' ? 1 : 2,
+        );
         expect(
-          writes.some((execution) => execution.dispatched !== 0 || execution.state === 'succeeded'),
-        ).toBe(false);
+          database
+            .query<{ count: number }, [string]>(
+              "SELECT count(*) AS count FROM execution WHERE kind='tool' AND session_id=?",
+            )
+            .get(child!.child_session_id)!.count,
+        ).toBe(1);
+        if (action === 'ctrl-c') {
+          expect(
+            database
+              .query<{ count: number }, [string, number]>(`
+            SELECT count(*) AS count FROM change_event e JOIN execution x ON x.id=e.object_id
+            WHERE x.root_work_command_id=(SELECT root_work_command_id FROM run WHERE id=?)
+              AND e.cursor>? AND e.type='execution.dispatching' AND x.kind IN ('model','tool')
+          `)
+              .get(persisted!.turnId, beforeActionCursor)!.count,
+          ).toBe(0);
+        } else {
+          expect(JSON.parse(writes[0]!.result_json)).toMatchObject({
+            outcome: 'failed',
+            content: 'approval_denied',
+          });
+          const approval = database
+            .query<
+              {
+                state: string;
+                answer_json: string;
+                accepted_decision_revision: number | null;
+              },
+              [string, string]
+            >(`
+            SELECT state,answer_json,accepted_decision_revision FROM interaction
+            WHERE execution_id=? AND session_id=? AND kind='approval'
+          `)
+            .get(writes[0]!.id, child!.child_session_id);
+          expect(approval?.state).toBe('answered');
+          expect(JSON.parse(approval!.answer_json)).toMatchObject({
+            kind: 'approval',
+            decision: 'deny',
+          });
+          expect(approval!.accepted_decision_revision).toBeNull();
+          expect(output).toContain('The child respected the denial');
+        }
       } finally {
         database.close();
       }
@@ -502,7 +590,7 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
                 name: 'spawn_agent',
                 args: {
                   task_name: 'Write auto-reviewed file',
-                  preset: 'code',
+                  preset: 'general',
                   prompt: `Write "auto review succeeded" to ${externalFile}.`,
                 },
               },
@@ -527,41 +615,140 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
         {
           response: ({ messages }) => {
             const reviewRequest = String(messages.at(-1)?.content ?? '');
-            const actual = JSON.parse(reviewRequest) as {
-              request: {
-                kind: string;
-                policies: {
-                  scope: string;
-                  request: {
-                    context: {
-                      task: {
-                        availability: string;
-                        workspaceRoot: string;
-                        isChild: boolean;
-                        role: { id: string; version: string };
-                        rootUserTask: string;
-                        parentUserTask: string;
-                      };
-                    };
-                  };
-                }[];
-              };
+            const wire = JSON.parse(reviewRequest);
+            expect(wire.purpose).toBe('authorization_check');
+            expect(wire.target).toMatchObject({
+              definitionId: 'files.write',
+              definitionVersion: '3',
+              input: { path: externalFile, content: 'auto review succeeded' },
+            });
+            expect(wire.policy).toMatchObject({
+              appliesToExecutionId: wire.target.executionId,
+              constraints: { kind: 'parent_child_permission_intersection' },
+            });
+            expect(
+              wire.policy.constraints.contributions.map(
+                (policy: { contributor: string }) => policy.contributor,
+              ),
+            ).toEqual(['parent', 'child']);
+            expect(wire.authorizationContext).toMatchObject({
+              availability: 'available',
+              workspaceRoot: workspace.workspace,
+              role: { id: 'general', version: '1' },
+              actor: {
+                participant: 'child',
+                sessionId: wire.target.sessionId,
+                runId: wire.target.runId,
+              },
+            });
+            expect(wire.authorizationContext.taskInputs).toContainEqual(
+              expect.objectContaining({
+                source: 'user',
+                recipientRelation: 'parent',
+                content: 'Use a subagent to perform the external fixture write',
+              }),
+            );
+            expect(wire.authorizationContext.taskInputs).toContainEqual(
+              expect.objectContaining({
+                source: 'delegation',
+                recipientRelation: 'current',
+                content: `Write "auto review succeeded" to ${externalFile}.`,
+              }),
+            );
+            // The wire carries compact current actor/policy facts. Preserve the
+            // original parent/child scopes and complete task facts in its exact sealed request.
+            using database = new Database(workspace.databasePath, { readonly: true });
+            const checks = database
+              .query<{ request_json: string }, [string]>(`
+              SELECT request_json FROM command WHERE kind='authorization.check'
+                AND json_extract(request_json,'$.input.target.executionId')=?
+            `)
+              .all(wire.target.executionId);
+            expect(checks).toHaveLength(1);
+            const actual = JSON.parse(checks[0]!.request_json).input;
+            type PolicyNode = {
+              kind?: string;
+              policies?: { scope: string; revision: string; request: PolicyNode }[];
+              context?: { task: unknown };
+              mode?: string;
+              effects?: string[];
+              invocation?: unknown;
             };
-            expect(actual.request.kind).toBe('parent_child_permission_intersection');
-            expect(actual.request.policies.map((policy) => policy.scope)).toEqual([
-              'parent',
-              'child',
-            ]);
-            for (const policy of actual.request.policies) {
-              expect(policy.request.context.task).toMatchObject({
+            type ProjectedPolicy = {
+              kind?: string;
+              contributions?: { contributor: string; constraints: ProjectedPolicy }[];
+              mode?: string;
+              effects?: string[];
+            };
+            let leaves = 0;
+            const verifyPolicy = (node: PolicyNode, projected: ProjectedPolicy): void => {
+              if (node.kind === 'parent_child_permission_intersection') {
+                expect(Object.keys(node).sort()).toEqual(['kind', 'policies']);
+                expect(Object.keys(projected).sort()).toEqual(['contributions', 'kind']);
+                expect(projected.kind).toBe(node.kind);
+                expect(node.policies?.map((policy) => policy.scope)).toEqual(['parent', 'child']);
+                expect(projected.contributions?.map((policy) => policy.contributor)).toEqual([
+                  'parent',
+                  'child',
+                ]);
+                for (const [index, policy] of node.policies!.entries()) {
+                  expect(Object.keys(policy).sort()).toEqual(['request', 'revision', 'scope']);
+                  expect(typeof policy.revision).toBe('string');
+                  expect(policy.revision.length).toBeGreaterThan(0);
+                  verifyPolicy(policy.request, projected.contributions![index]!.constraints);
+                }
+                return;
+              }
+              // Only the actual File policy leaf is valid; unknown wrappers or
+              // missing branches cannot be skipped while walking the AND tree.
+              expect(Object.keys(node).sort()).toEqual([
+                'context',
+                'effects',
+                'invocation',
+                'mode',
+              ]);
+              expect(node.mode).toBe('auto');
+              expect(node.effects).toEqual(['external']);
+              expect(projected).toEqual({ mode: 'auto', effects: ['external'] });
+              expect(node.invocation).toEqual({ kind: 'tool', ...wire.target });
+              expect(node.context?.task).toMatchObject({
                 availability: 'available',
                 workspaceRoot: workspace.workspace,
                 isChild: true,
-                role: { id: 'code', version: '1' },
+                role: { id: 'general', version: '1' },
                 rootUserTask: 'Use a subagent to perform the external fixture write',
                 parentUserTask: 'Use a subagent to perform the external fixture write',
               });
-            }
+              leaves++;
+            };
+            verifyPolicy(actual.request, wire.policy.constraints);
+            expect(leaves).toBeGreaterThanOrEqual(2);
+            expect(actual.authorizationContext).toEqual(wire.authorizationContext);
+            expect(actual.target).toMatchObject(wire.target);
+            const target = database
+              .query<
+                {
+                  session_id: string;
+                  run_id: string;
+                  root_session_id: string;
+                  parent_id: string;
+                  dispatched: number;
+                },
+                [string]
+              >(`
+              SELECT e.session_id,e.run_id,e.root_session_id,s.parent_id,e.dispatched
+              FROM execution e JOIN session s ON s.id=e.session_id WHERE e.id=?
+            `)
+              .get(wire.target.executionId)!;
+            expect(wire.authorizationContext.actor).toEqual({
+              participant: 'child',
+              sessionId: target.session_id,
+              runId: target.run_id,
+              rootSessionId: target.root_session_id,
+              parentSessionId: target.parent_id,
+            });
+            expect(target.dispatched).toBe(0);
+            expect(existsSync(externalFile)).toBe(false);
             return {
               // Keep the reviewer request in flight long enough to assert the transient TUI state.
               delay: 750,
@@ -1028,7 +1215,11 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
           throw Error('original cancellation search continuation identity mismatch');
         searchContinued = true;
         return {
-          expectedRequest: { toolResults: [{ toolCallId: 'call_cancel_empty_search' }] },
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'call_cancel_empty_search', contentIncludes: ['Exit code: 1.'] },
+            ],
+          },
           delay: 5_000,
           message: { content: 'Cancellation area 1 inspection complete.' },
         };
@@ -1052,8 +1243,8 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
               tool_calls: [
                 {
                   id: 'call_cancel_empty_search',
-                  name: 'search_content',
-                  args: { pattern: 'KITE_EMPTY_SUBAGENT_CANCEL_SENTINEL_7D7C', path: '.' },
+                  name: 'shell_execute',
+                  args: { command: 'rg KITE_EMPTY_SUBAGENT_CANCEL_SENTINEL_7D7C .' },
                 },
               ],
             },
@@ -1106,7 +1297,11 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
         'an empty child search result to reach the next model request',
         TIMEOUT,
       );
-      await waitForText(() => tui.viewport(), 'Search .', TIMEOUT);
+      await waitForText(
+        () => tui.viewport(),
+        'Bash rg KITE_EMPTY_SUBAGENT_CANCEL_SENTINEL_7D7C .',
+        TIMEOUT,
+      );
       await tui.settleScreen();
       expect(stripAnsi(tui.scrollback())).not.toContain('Invalid AcceptedPresentationEnvelope');
       const active = stripAnsi(tui.viewport());
@@ -1175,6 +1370,7 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
         TIMEOUT,
       );
 
+      await tui.settleScreen();
       const output = stripAnsi(tui.scrollback());
       expect(output).not.toContain('Task could not continue: Internal error');
       expect(output).not.toContain('Cancellation was not accepted');
@@ -1217,6 +1413,24 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
       `)
           .all(persisted.turnId, persisted.threadId);
         expect(carriers).toHaveLength(4);
+        const searches = database
+          .query<{ session_id: string; adapter_id: string; result_json: string }, [string]>(`
+          SELECT session_id,adapter_id,result_json FROM execution
+          WHERE call_id='call_cancel_empty_search' AND run_id IN
+            (SELECT id FROM run WHERE root_work_command_id=(SELECT root_work_command_id FROM run WHERE id=?))
+        `)
+          .all(persisted.turnId);
+        expect(searches).toHaveLength(1);
+        expect(searches[0]!.adapter_id).toBe('shell.execute');
+        expect(searches[0]!.session_id).toBe(
+          carriers.find((carrier) => carrier.call_id === 'call_cancel_child_1')!.child_session_id,
+        );
+        // rg's no-match result has no stdout/stderr but still reaches exactly
+        // one child continuation before cancellation, rather than being dropped.
+        expect(JSON.parse(searches[0]!.result_json)).toMatchObject({
+          content: '',
+          details: { stdoutBytes: '0', stderrBytes: '0' },
+        });
         expect(new Set(carriers.map((carrier) => carrier.call_id)).size).toBe(4);
         for (const carrier of carriers) {
           expect(carrier.state).toBe('cancelled');

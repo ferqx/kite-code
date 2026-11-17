@@ -140,13 +140,13 @@ Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF W
 
 模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file`；外部普通文件也由 `read_file` 读取，`read_file/write_file/edit_file` 在 Auto 经过自动审核、请求批准模式在工作区内直接执行且外部路径请求用户批准，Full 按有效权限执行。读取使用 `start_line/max_lines`，编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline 和权限合同保持原样，Workspace 检查点只覆盖原工作区。目录、文件查找和正文搜索使用 Shell 与内置 rg。
 
-公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将三个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。外部 Full 范围由下文适配器接入，不改变这个固定根。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
+公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将三个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。按当前模式获准的外部范围由下文适配器接入，不改变这个固定根。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
-普通 `read_file` 只在实际目标读取边界将确定缺失返回为正常观察：`outcome:succeeded`、`File does not exist: "<path>".`、`details:{path,exists:false}`；没有空正文、行窗口、Artifact 或编辑 baseline。既有空文件保真实空正文，工作区及 Full 安全可编辑目标仍有完整基线，其他外部只读不补造基线。`createFileTools` 的可信工厂选项 `missingRead:'error'` 由 input／plan 私有适配器显式选择，不成为模型参数。路径校验、权限／保护失败、取消、私有引用损坏和 Artifact 发布 `ENOENT` 不被通用转换；[纯结果呈现](model-result.ts)只识别准确缺失结构，未知扩展字段保原结果。
+普通 `read_file` 只在实际目标读取边界将确定缺失返回为正常观察：`outcome:succeeded`、`File does not exist: "<path>".`、`details:{path,exists:false}`；没有空正文、行窗口、Artifact 或编辑 baseline。既有空文件保真实空正文，工作区及获准的外部安全可编辑目标仍有完整基线，其他外部只读不补造基线。`createFileTools` 的可信工厂选项 `missingRead:'error'` 由 input／plan 私有适配器显式选择，不成为模型参数。路径校验、权限／保护失败、取消、私有引用损坏和 Artifact 发布 `ENOENT` 不被通用转换；[纯结果呈现](model-result.ts)只识别准确缺失结构，未知扩展字段保原结果。
 
 [缺失读取回归](../../../test/isolated/files/missing-file.test.ts)经真实 native 核工作区／外部及 Full 缺失、空文件、保护路径及祖先别名、非法参数、取消、私有工厂和读取后 Artifact 失败；[Service 最终目录回归](../../../../../apps/service/test/isolated/full-external-files.test.ts)核三模式下一模型及最终说明。普通缺失的客户端颜色和真实模型继续行为须由相应客户端与实际测试另验，不能从这些固定回归推定。
 
-只读 `read` 的可信 options 可携带 `signal`；普通 `read_file` 和绝对 `read_user_file` 从实际 ToolContext 传入，不新增模型字段。完整文件读取仍以 64 KiB 块核 hash、UTF-8 解码及前后身份，在 8ms 或 64 块预算后通过真实 event loop 让出；行选区在块内统计完整 totalLines，只保留请求正文，不建立全文行起点数组。BOM、CRLF、跨块 UTF-8 和完整 baseline 不变，行窗口不构成字节截断。search 的单文件读取复用该异步读取，逐行匹配另按预算让出；底层未指定 limit 时保留全部命中和完整长行，模型默认改为有界预览，见下节。
+只读 `read` 的可信 options 可携带 `signal`；现役 `read_file` 的工作区与外部分支从实际 ToolContext 传入，不新增模型字段。完整文件读取仍以 64 KiB 块核 hash、UTF-8 解码及前后身份，在 8ms 或 64 块预算后通过真实 event loop 让出；行选区在块内统计完整 totalLines，只保留请求正文，不建立全文行起点数组。BOM、CRLF、跨块 UTF-8 和完整 baseline 不变，行窗口不构成字节截断。search 的单文件读取复用该异步读取，逐行匹配另按预算让出；底层未指定 limit 时保留全部命中和完整长行，模型默认改为有界预览，见下节。
 
 异步读取保留原目录及文件 FD，恢复时核原根和取消，EOF 后再次核完整文件身份；漂移不发布旧结果。`close()` 先拒绝新读取并让在途只读退出、关闭各自 FD 后再关闭 native owner，多次 close 共用同一结果。取消和异常不关闭别的读取句柄。写入/edit 的共享读取按同步方式消费同一分块校验，不在原最后 CAS 与发布之间插入让出；字节恢复和发布后 unknown 合同不变。合作让出不能给单次慢磁盘 native read/fsync 承诺耗时上限，也不为完整正文增加文件额度。
 
@@ -156,7 +156,7 @@ Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF W
 
 2026-10-25，Windows x64／Bun1.4.3，`aefb47472` 加本次查询 diff：同一仓库、同一原生后端的只读前后对照中，`packages/agent/**/README.md` 查找由2762ms降至289ms（均41项），`packages` 中的 `autoReview` 内容搜索由20017ms降至4809ms（均返回30条，实际检查文件由2348降至1172）；根 `AGENTS.md` 查找为1192ms，仅返回3个未忽略路径。忽略域变化意味着不承诺两种模式返回相同产物命中，`respect_ignore:false` 可明确读取原普通范围。入口与结果保留于本机 `.cache/file-query-performance.ts`／`.cache/file-query-performance.json`；这是当前本机文件查询对照，不代表所有工作区、完整客户端切换延迟或内存峰值。Files五份完整回归50项744断言通过，覆盖原生六工具、父规则继承／否定、分页、宏任务取消、目录联接拒绝与关闭边界；Windows 的链接夹具使用真实目录 junction，POSIX 保原 symlink。
 
-模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `start_line`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部读取沿同一呈现路径：Full 安全可编辑目标展示真实完整基线，其他只读结果不补造编辑基线。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
+模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `start_line`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部读取沿同一呈现路径：按当前模式获准的安全可编辑目标展示真实完整基线，其他只读结果不补造编辑基线。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
 
 内部 `WorkspaceFiles.search` 的 `path` 可选择普通文件或目录，省略、空字符串和 `.` 选择工作区根。它按字面文本匹配；文件名查找使用内部 `glob`。`mode:files` 每文件只返回一次路径、完整 baseline 与首命中行，`mode:content` 返回命中行及上下文。省略 mode 保持 `content`；`limit/maxLineChars` 可省略以保留全部命中及完整长行。这些内部参数和游标不是已退役模型工具的继续入口。
 
@@ -197,19 +197,19 @@ Agent／Service／Desktop typecheck、原包边界与 API／测试归属、文�
 
 原 `WorkspaceFiles` IO 和字节恢复原语仍只接收相对路径，原目录对象锚定、reparse／symlink／短名、受保护路径和 baseline 检查继续生效。Workspace 文件结果、变更预览与检查点 capture 使用转换后的相对路径；原模型调用、审批与执行记录保留原始参数。工具 schema 明确路径范围，统一外部适配器另处理工作区外绝对路径，不扩大原 Workspace IO。设计理由见[路径分层决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-16-workspace-tool-paths.md)。
 
-[工具路径回归](../../../test/isolated/files/tool-paths.test.ts)实际调用全部六工具，核工作区绝对路径、目录默认、原生分隔符、准确 capture／结果及越界和保护拒绝；[真实 capture](../../../test/isolated/file-checkpoints/capture.test.ts)让同一路径的首个绝对调用和后续相对调用共用原 preimage／末 postimage。[Windows Core 用例](../../../test/isolated/files/windows.test.ts)经原 Runtime 实际列绝对工作区并读取绝对文件，将完整 Artifact 交给下一 Model。具体本机范围见下节。
+[工具路径回归](../../../test/isolated/files/tool-paths.test.ts)实际调用三个现役 Files 模型工具及保留的内部查询 API，核工作区绝对路径、目录默认、原生分隔符、准确 capture／结果及越界和保护拒绝；[真实 capture](../../../test/isolated/file-checkpoints/capture.test.ts)让同一路径的首个绝对调用和后续相对调用共用原 preimage／末 postimage。[Windows Core 用例](../../../test/isolated/files/windows.test.ts)经原 Runtime 读取绝对文件，将完整 Artifact 交给下一 Model；目录与检索由同文件内的低层 API 断言覆盖。具体本机范围见下节。
 
-## 工作区外文件与 Full 直接修改
+## 工作区外文件与当前模式授权
 
-[external-file-reads](../external-file-reads.ts) 将工作区外绝对路径接入同一个 `read_file`；没有单独的外部读写工具。请求批准与 Auto 模式保留原普通 OS 只读路径：检查请求路径和解析后的实际路径，不计算完整基线、不检查 owner 或硬链接数，保留 UTF-8、分页、取消和大正文 Artifact 交付。普通外部读取仍由统一权限模块决定，外部路径不加载项目指令。
+[external-file-reads](../external-file-reads.ts) 将工作区外绝对路径接入同一个 `read_file`；没有单独的外部读写工具。普通 OS 只读适配检查请求路径和解析后的实际路径，保留 UTF-8、分页、取消和大正文 Artifact 交付。最终装配在三种模式获准后优先使用下述原生适配读取安全可编辑目标；不满足可编辑条件的普通读取才保持只读结果，不提供基线。普通外部读取仍由统一权限模块决定，外部路径不加载项目指令。
 
 [withFullAccessFiles](../full-access-files.ts) 在此层之上复用同一个 `write_file/edit_file`，只允许最终获得授权的准确外部绝对路径。`describeRequest(request, policy)` 使用新鲜可信策略描述范围；执行前复核每一个 `builtin.permissions` 派发叶的有效模式、信任、工具定义／版本和已接纳目标 revision，父子权限交集、Planning 与工具集合限制仍由原链路落实。请求值、模型参数或工具名称都不能代替最终证明；请求批准和 Auto 使用既有人工与自动审批链，拒绝、取消或未决请求不派发；读取基线不授予后续写权。
 
-Full 外部普通文件读取改用原 native 引擎，返回可安全编辑的完整 baseline；窗口仍只返回所选正文。无法作为安全可编辑目标的普通符号链接、硬链接或 owner 不匹配文件保持原只读读取、不发基线，保护路径失败不回退。修改继续拒绝链接／不安全对象，使用完整基线、原 no-follow 目录对象与文件身份校验。预检绑定逻辑路径、实际路径及已存在父对象／目标身份；最终打开后再次核对，目录替换不取得新的写入资格。新建缺失父目录只沿原 native `base:null` 路径，不在 OS 可写共享父目录上额外要求父目录 owner。
+获准的外部普通文件读取使用原 native 引擎，返回可安全编辑的完整 baseline；窗口仍只返回所选正文。无法作为安全可编辑目标的普通符号链接、硬链接或 owner 不匹配文件保持原只读读取、不发基线，保护路径失败不回退。修改继续拒绝链接／不安全对象，使用完整基线、原 no-follow 目录对象与文件身份校验。预检绑定逻辑路径、实际路径及已存在父对象／目标身份；最终打开后再次核对，目录替换不取得新的写入资格。新建缺失父目录只沿原 native `base:null` 路径，不在 OS 可写共享父目录上额外要求父目录 owner。
 
-Full 外部写入／编辑复用原 `createFileTools` 的取消、逐操作 `fileChange` 和完整 postimage Artifact 发布；结果路径保持原准确绝对路径。发布或结果保存无法确认保留 `outcome_unknown` 和原诊断，后续 close 失败不降成普通失败，不为取回结果重放。该适配器不改变文件系统对非合作 writer 缺少原子 CAS 的既有边界。
+获准的外部写入／编辑复用原 `createFileTools` 的取消、逐操作 `fileChange` 和完整 postimage Artifact 发布；结果路径保持原准确绝对路径。发布或结果保存无法确认保留 `outcome_unknown` 和原诊断，后续 close 失败不降成普通失败，不为取回结果重放。该适配器不改变文件系统对非合作 writer 缺少原子 CAS 的既有边界。
 
-保存的 input/plan 适配器位于普通外部读写层之上，仍只接受原准确私有引用；历史 output 仅保留记录读取，不再接管 Files 工具。Service 动态提供 Profile、数据根、协调目录和 Runtime 资产保护路径，请求及实际路径均检查；Full 不解除这些保护。普通外部读取和 Full 外部修改都绕过 Workspace checkpoint capture，并保留 `fileScope:external_path/workspaceCheckpoint:false`；每次操作 Artifact 保留历史完整内容，Workspace 检查点恢复不会回写外部目标。Workspace 的原生平台、ACL、取消和完整数据校验合同保持；普通外部读取使用宿主 OS 权限，路径规则不承诺识别同一文件的所有硬链接别名。
+保存的 input/plan 适配器位于普通外部读写层之上，仍只接受原准确私有引用；历史 output 仅保留记录读取，不再接管 Files 工具。Service 动态提供 Profile、数据根、协调目录和 Runtime 资产保护路径，请求及实际路径均检查；Full 不解除这些保护。普通外部读取和获准的外部修改都绕过 Workspace checkpoint capture，并保留 `fileScope:external_path/workspaceCheckpoint:false`；每次操作 Artifact 保留历史完整内容，Workspace 检查点恢复不会回写外部目标。Workspace 的原生平台、ACL、取消和完整数据校验合同保持；普通外部读取使用宿主 OS 权限，路径规则不承诺识别同一文件的所有硬链接别名。
 
 [Service 最终装配](../../../../../apps/service/src/file-checkpoint-configuration.ts)统一英文工具及 path 说明，避免附件层遮蔽普通外部读取：三种模式下普通外部读写均遵守当前授权：Auto 外部文本先私有读取，实际缺失直接反馈、存在正文审核后释放，写入／编辑仍自动审核；请求批准模式人工批准，Full 按有效权限执行；Files 没有 Shell 的文件／网络申请字段。编辑基线只用于可安全编辑的目标，准确附件和当前计划仍属各自范围。入口不支持本身不等于用户拒绝业务任务；原任务仍授权且工具／角色允许、没有真实拒绝或未知效果时，Shell 可接收独立请求并经过自身审批，不能据此扩权或重放原效果。
 
@@ -220,7 +220,7 @@ Full 外部写入／编辑复用原 `createFileTools` 的取消、逐操作 `fil
 
 ## Windows Workspace 文件源码
 
-[平台交接](../files-io.ts)让同一个 `WorkspaceFiles` 语义层使用 [Node-API 原资源 owner](../../../native/files/README.md)。正式 Service／六工具、完整 Artifact／Model 正文和检查点 restore／remove 沿原公开入口使用该后端；不增加第二套工具、权限来源、恢复状态或旧 filesystem fallback。源码接入不等于原生、全部正式客户端或安装制品资格已通过。
+[平台交接](../files-io.ts)让同一个 `WorkspaceFiles` 语义层使用 [Node-API 原资源 owner](../../../native/files/README.md)。正式 Service／三个 Files 模型工具、完整 Artifact／Model 正文和检查点 restore／remove 沿原公开入口使用该后端；不增加第二套工具、权限来源、恢复状态或旧 filesystem fallback。源码接入不等于原生、全部正式客户端或安装制品资格已通过。
 
 Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他架构或路径范围不从源码接入推定可用。工厂固定当前 token SID 和 System DLL，只在实际创建能力时加载。它持有原根及祖先目录 HANDLE，以 `NtCreateFile` 的原父 HANDLE 逐段打开，不跟随 reparse；普通 Workspace 使用已有 DACL，不修 ACL。新 temporary 与 POSIX 的 0600 对应，使用当前 SID 私有权限。完整 baseline 使用实际 volume、128-bit FileID、完整 EOF／hash／size，并比较原 HANDLE 的 LastWriteTime 与 ChangeTime。字节恢复的严格身份检查要求父目录和文件的当前 SID owner、文件单链接；普通 Workspace 默认读取保宿主已有权限。
 
@@ -232,7 +232,7 @@ Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他�
 
 同日本机 [capture 整文件](../../../test/isolated/file-checkpoints/capture.test.ts)19项267断言通过，首个绝对路径与后续相对路径保同一个准确文件及原检查点。冷回放夹具显式关闭自己创建的 serial-lock owner 后再删目录，修复原 Windows `EBUSY` 收尾失败；没有改变生产关闭顺序或把清理失败算作通过。
 
-[Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行六工具、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip。2026-10-16 在 Windows x64／Bun1.4.2，基于 `84b17867` 的本轮未提交 diff，本次路径、变更预览、检查点与 Native 工具展示六文件43项535断言通过（正常用户权限，51.69秒，包含实际会话的重复反斜杠输入），包含原生六工具、字节恢复、绝对路径 Core／完整 Artifact 和真实组件 DOM。原用例的 CRLF 搜索断言改为保留实际 `\r`，大正文夹具明确超过1MiB后才断言 Artifact，未降低验证要求。该结果不证明正式安装、完整 Service／客户端或其他平台。共享默认装配及恢复后新 Store 的原验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
+[Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行三个 Files 模型工具与内部目录／检索 API、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip。2026-10-16 在 Windows x64／Bun1.4.2，基于 `84b17867` 的本轮未提交 diff，本次路径、变更预览、检查点与 Native 工具展示六文件43项535断言通过（正常用户权限，51.69秒，包含实际会话的重复反斜杠输入），包含原生六工具、字节恢复、绝对路径 Core／完整 Artifact 和真实组件 DOM。原用例的 CRLF 搜索断言改为保留实际 `\r`，大正文夹具明确超过1MiB后才断言 Artifact，未降低验证要求。该结果不证明正式安装、完整 Service／客户端或其他平台。共享默认装配及恢复后新 Store 的原验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
 
 Model 可调用的 `files.read` 缺省 `limit=200`，将 `next_line` 传给 `start_line` 续读（原 JSON 回退为 `selection.nextOffset`）；显式 limit 保原请求。该默认页仅控制返回范围，不改变低层全文读取、完整文件验证或累计读取能力。
 
