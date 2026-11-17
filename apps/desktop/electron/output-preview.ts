@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OutputFileSummary, OutputFileTarget } from '@kite-ai/client';
-import { app, protocol, session, WebContentsView } from 'electron';
+import { app, protocol, screen, session, WebContentsView } from 'electron';
 import { filePreviewFormat } from '../src/file-preview-format';
 import {
   assertPanelMeasurement,
@@ -12,6 +12,7 @@ import {
   type NativeBrowserLayout,
   projectNativeBrowserLayout,
 } from '../src/native-content-geometry';
+import type { NativeImageDisplayMediaType } from '../src/native-image-display-bridge';
 import {
   type NativePreviewLayoutRequest,
   nativePreviewPresentationChannel,
@@ -22,6 +23,13 @@ import type {
   OfficeRequestOutcome,
 } from '../src/output-files-bridge';
 import { officeSelectionLabel } from '../src/output-files-bridge';
+import {
+  imageDisplayDocument,
+  imageDisplayMediaType,
+  imageDisplayReadingEdge,
+} from './image-display-document';
+import { createImageDisplayRegionResource } from './image-display-region-resource';
+import { renderImageDisplay } from './image-display-service';
 import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
 import { waitForNativeFrame } from './native-frame-readiness';
 import { addNativeWindowView, focusNativeWindowContent } from './native-overlay-layer';
@@ -127,6 +135,7 @@ export class NativeOutputPreview {
     ) => Promise<{ data: string; totalPages: number; textLayer?: PdfTextLayer }>;
     materialize: (
       destination: string,
+      signal: AbortSignal,
     ) => Promise<Pick<OutputFileSummary, 'name' | 'mediaType' | 'size'> & { sourceHash?: string }>;
   }) {
     this.close();
@@ -152,7 +161,7 @@ export class NativeOutputPreview {
       active.directory = await mkdtemp(join(tmpdir(), 'kite-output-preview-'));
       current();
       const source = join(active.directory, 'source');
-      const file = await input.materialize(source);
+      const file = await input.materialize(source, active.abort.signal);
       current();
       if (file.sourceHash && /^[a-f0-9]{64}$/.test(file.sourceHash))
         active.sourceHash = file.sourceHash;
@@ -173,6 +182,9 @@ export class NativeOutputPreview {
       active.officeKind = kind;
       const office = kind ? officePreviews[kind] : undefined;
       let files: Resource[], entry: string;
+      let imageSource:
+        | { mediaType: NativeImageDisplayMediaType; width: number; height: number }
+        | undefined;
       if (office) {
         if (BigInt(file.size) > 128n * 1024n * 1024n) throw Error('preview_office_source_budget');
         const html = Buffer.from(
@@ -283,13 +295,31 @@ export class NativeOutputPreview {
         ];
         entry = 'index.html';
       } else if (filePreviewFormat(file.name, file.mediaType) === 'image') {
-        if (BigInt(file.size) > 32n * 1024n * 1024n) throw Error('preview_image_budget');
-        const bytes = await readFile(source);
-        const html = Buffer.from(
-          '<!doctype html><meta charset="utf-8"><style>img{max-width:100%;height:auto}body{margin:0}</style><img src="image">',
-        );
+        const display = await renderImageDisplay({
+          source: { path: source },
+          mediaType: imageDisplayMediaType(file.name, file.mediaType),
+          edge: imageDisplayReadingEdge(
+            input.bounds,
+            screen.getDisplayMatching(input.window.getBounds()).scaleFactor,
+          ),
+          signal: active.abort.signal,
+        });
+        current();
+        await input.verifyAccess?.();
+        current();
+        imageSource = {
+          mediaType: imageDisplayMediaType(file.name, file.mediaType),
+          width: display.sourceWidth,
+          height: display.sourceHeight,
+        };
+        // Only the bounded display copy enters the manifest. The materialized original
+        // remains private and its hash/output identity is never replaced by this copy.
+        const image = join(active.directory, 'display-image');
+        await writeFile(image, display.bytes, { flag: 'wx', mode: 0o600 });
+        current();
+        const html = Buffer.from(imageDisplayDocument(display));
         const path = join(active.directory, 'index.html');
-        await writeFile(path, html, { flag: 'wx' });
+        await writeFile(path, html, { flag: 'wx', mode: 0o600 });
         files = [
           {
             path: 'index.html',
@@ -300,18 +330,26 @@ export class NativeOutputPreview {
           },
           {
             path: 'image',
-            absolutePath: source,
-            mimeType: /^image\/(png|jpeg|webp|gif)$/.test(file.mediaType)
-              ? file.mediaType
-              : `image/${/\.jpe?g$/i.test(file.name) ? 'jpeg' : file.name.split('.').pop()!.toLowerCase()}`,
-            size: bytes.length,
-            sha256: digest(bytes),
+            absolutePath: image,
+            mimeType: display.mimeType,
+            size: display.bytes.length,
+            sha256: digest(display.bytes),
           },
         ];
         entry = 'index.html';
       } else throw Error('preview_format_unavailable');
       current();
       const origin = `kite-preview://${randomUUID()}`;
+      const regions = imageSource
+        ? createImageDisplayRegionResource({
+            origin,
+            source,
+            ...imageSource,
+            signal: active.abort.signal,
+            check: current,
+            verifyAccess: input.verifyAccess,
+          })
+        : undefined;
       const manifest = new Map(
         files.map((file) => [
           `${origin}/${file.path.split('/').map(encodeURIComponent).join('/')}`,
@@ -325,14 +363,33 @@ export class NativeOutputPreview {
       previewSession.setPermissionCheckHandler(() => false);
       previewSession.on('will-download', (event) => event.preventDefault());
       previewSession.webRequest.onBeforeRequest((details, callback) =>
-        callback({ cancel: !manifest.has(details.url.split('#')[0]!) }),
+        callback({
+          cancel: !manifest.has(details.url.split('#')[0]!) && !regions?.accepts(details.url),
+        }),
       );
       await previewSession.protocol.handle('kite-preview', async (request) => {
         const resource = manifest.get(request.url.split('#')[0]!);
-        if (!resource || this.active !== active || request.method !== 'GET')
+        if (
+          (!resource && !regions?.accepts(request.url)) ||
+          this.active !== active ||
+          request.method !== 'GET'
+        )
           return new Response(null, { status: 403 });
         try {
           current();
+          if (!resource && regions) {
+            const display = await regions.load(request.url, request.signal);
+            current();
+            return new Response(new Uint8Array(display.bytes).buffer, {
+              headers: {
+                'Content-Type': display.mimeType,
+                'Content-Security-Policy': csp,
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'no-store',
+              },
+            });
+          }
+          if (!resource) return new Response(null, { status: 403 });
           const bytes = resource.load
             ? await resource.load()
             : await readFile(resource.absolutePath);

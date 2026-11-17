@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, open, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalFilePreview } from '../electron/local-file-preview';
@@ -27,7 +27,7 @@ test('local handle reauthorizes reads, materializes only snapshot, and release r
     const result = await handle.materialize(join(root, 'snapshot'));
     expect(result.name).toBe('source.md');
     expect(await readFile(join(root, 'snapshot'), 'utf8')).toBe('original');
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
     expect('target' in result).toBe(false);
     expect('fileId' in result).toBe(false);
     handle.release();
@@ -126,4 +126,73 @@ test('Main-only original reference verifies source hash and never creates output
     await expect(handle.reference('0'.repeat(64))).rejects.toThrow('local_preview_changed');
     handle.release();
     await expect(handle.reference(hash)).rejects.toThrow('local_preview_released');
+  }));
+
+test('large image snapshots stream beyond the old local limit without granting other files that budget', async () =>
+  fixture(async (root) => {
+    const path = join(root, 'large.PNG');
+    const file = await open(path, 'wx');
+    await file.truncate(65 * 1024 * 1024);
+    await file.close();
+    const handle = await LocalFilePreview.create(
+      async (consume) => consume(path),
+      () => {},
+    );
+    const output = join(root, 'large-snapshot');
+    const result = await handle.materialize(output);
+    expect(result.size).toBe(String(65 * 1024 * 1024));
+    const { createHash } = await import('node:crypto');
+    const { createReadStream } = await import('node:fs');
+    const hashFile = async (name: string) => {
+      const hash = createHash('sha256');
+      for await (const chunk of createReadStream(name)) hash.update(chunk);
+      return hash.digest('hex');
+    };
+    expect(await hashFile(output)).toBe(await hashFile(path));
+    expect(result.sourceHash).toBe(await hashFile(path));
+    await expect(handle.read()).rejects.toThrow('local_preview_unavailable');
+    const textPath = join(root, 'large.txt');
+    await rename(path, textPath);
+    await expect(
+      LocalFilePreview.create(
+        async (consume) => consume(textPath),
+        () => {},
+      ),
+    ).rejects.toThrow('local_preview_unavailable');
+  }));
+
+test('streaming cancellation and post-copy permission revocation remove only owned snapshots', async () =>
+  fixture(async (root, path) => {
+    await writeFile(path, Buffer.alloc(192 * 1024));
+    const abort = new AbortController();
+    let reads = 0;
+    let copying = false;
+    const handle = await LocalFilePreview.create(
+      async (consume) => consume(path),
+      () => {
+        if (copying && ++reads === 4) abort.abort();
+      },
+    );
+    copying = true;
+    const canceled = join(root, 'canceled');
+    await expect(handle.materialize(canceled, abort.signal)).rejects.toThrow();
+    await expect(access(canceled)).rejects.toThrow();
+    let allowed = true;
+    let revokeAfterRead = false;
+    const revoked = await LocalFilePreview.create(
+      async (consume) => {
+        if (!allowed) throw Error('permission_revoked');
+        await consume(path);
+        if (revokeAfterRead) allowed = false;
+      },
+      () => {},
+    );
+    revokeAfterRead = true;
+    const rejected = join(root, 'revoked');
+    await expect(revoked.materialize(rejected)).rejects.toThrow('permission_revoked');
+    await expect(access(rejected)).rejects.toThrow();
+    const existing = join(root, 'existing');
+    await writeFile(existing, 'preserve');
+    await expect(handle.materialize(existing)).rejects.toThrow();
+    expect(await readFile(existing, 'utf8')).toBe('preserve');
   }));

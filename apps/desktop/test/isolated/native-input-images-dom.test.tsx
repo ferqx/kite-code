@@ -7,7 +7,6 @@ import { installImagePreviewWorker } from '../image-preview-worker.fixture';
 import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 test('Native attachments preserve original scopes and distinguish an outdated Main from ordinary picker failures', async () => {
-  const restoreWorker = installImagePreviewWorker();
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const old = {
     window: globalThis.window,
@@ -24,6 +23,8 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     FileReader: dom.window.FileReader,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+
+  const restoreWorker = installImagePreviewWorker();
   URL.createObjectURL = () => 'blob:fixture';
   URL.revokeObjectURL = () => {};
   const { createRoot } = await import('react-dom/client');
@@ -117,13 +118,9 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
       offset: 0,
       data: 'AQID',
     });
-    const worker = globalThis.Worker;
+    const display = window.kiteNativeImageDisplay;
     images.previews.clear();
-    Object.defineProperty(globalThis, 'Worker', {
-      configurable: true,
-      writable: true,
-      value: undefined,
-    });
+    delete window.kiteNativeImageDisplay;
     await act(async () =>
       images.add('preview-failure', [
         new dom.window.File([new Uint8Array([4, 5, 6])], 'still-send.png', {
@@ -147,11 +144,7 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     await expect(failedPreviewSource.load(new AbortController().signal)).rejects.toThrow(
       'input_image_draft_inactive',
     );
-    Object.defineProperty(globalThis, 'Worker', {
-      configurable: true,
-      writable: true,
-      value: worker,
-    });
+    window.kiteNativeImageDisplay = display;
     await act(async () => images.addFiles('a', files));
     await act(async () => images.addFiles('a', files));
     expect(images.files('a')).toHaveLength(1);
@@ -293,7 +286,6 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
 });
 
 test('real Composer switches scopes during image encoding and removes only the selected attachment without finishing cancelled bytes', async () => {
-  const restoreWorker = installImagePreviewWorker();
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const restoreLayout = prepareDesktopDom(dom);
   const previous = {
@@ -311,6 +303,8 @@ test('real Composer switches scopes during image encoding and removes only the s
     FileReader: dom.window.FileReader,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+
+  const restoreWorker = installImagePreviewWorker();
   const revoked: string[] = [];
   URL.createObjectURL = () => 'blob:encoding';
   URL.revokeObjectURL = (url) => revoked.push(url);
@@ -437,7 +431,6 @@ test.each([
   'unmounted',
   'reporter',
 ] as const)('already adopted image batches survive a newer picker but retire feedback when %s', async (mode) => {
-  const restoreWorker = installImagePreviewWorker();
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const restoreLayout = prepareDesktopDom(dom);
   const previous = {
@@ -455,6 +448,8 @@ test.each([
     FileReader: dom.window.FileReader,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+
+  const restoreWorker = installImagePreviewWorker();
   URL.createObjectURL = () => 'blob:batch';
   URL.revokeObjectURL = () => {};
   const { createRoot } = await import('react-dom/client');

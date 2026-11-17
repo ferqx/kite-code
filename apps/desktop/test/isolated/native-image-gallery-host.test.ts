@@ -396,3 +396,87 @@ test('a failed cold creation or partial setup clears its native owner and a new 
     }
   }
 });
+
+test('quality requests are exact-selection bounded display hints and do not clear admitted pixels', async () => {
+  const f = fixture();
+  try {
+    const state = f.state();
+    if (state.image.status !== 'ready') throw Error('expected_ready');
+    state.image.display = {
+      key: 'original-one',
+      sourceWidth: 8000,
+      sourceHeight: 4000,
+      edge: 1024,
+      frame: 'static',
+    };
+    f.emit(nativeImageGalleryPresentChannel, state);
+    await f.ready();
+    const viewer = f.views.at(-1)!.webContents;
+    const before = f.current();
+    const sent = f.root.webContents.messages.length;
+    for (const input of [
+      { sessionId: 'old', type: 'quality', id: 'a', edge: 2048 },
+      { sessionId: 'one', type: 'quality', id: 'b', edge: 2048 },
+      { sessionId: 'one', type: 'quality', id: 'a', edge: 1024 },
+      { sessionId: 'one', type: 'quality', id: 'a', edge: 8192 },
+      { sessionId: 'one', type: 'quality', id: 'a', edge: 2048, path: '/private' },
+    ])
+      f.emit(nativeImageGalleryEventChannel, input, viewer);
+    expect(f.root.webContents.messages).toHaveLength(sent);
+    const valid = { sessionId: 'one', type: 'quality', id: 'a', edge: 2048 };
+    f.emit(nativeImageGalleryEventChannel, valid, viewer);
+    expect(f.root.webContents.messages.at(-1)).toEqual({
+      channel: nativeImageGalleryActionChannel,
+      state: valid,
+    });
+    expect(f.current()).toBe(before);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+test('ROI hints bind current item and opaque source and reject out-of-source coordinates', async () => {
+  const f = fixture();
+  try {
+    const state = f.state();
+    if (state.image.status !== 'ready') throw Error('ready');
+    state.image.display = {
+      key: 'oriented-source',
+      sourceWidth: 1000,
+      sourceHeight: 40000,
+      edge: 4096,
+      frame: 'static',
+    };
+    f.emit(nativeImageGalleryPresentChannel, state);
+    await f.ready();
+    const viewer = f.views.at(-1)!.webContents;
+    const valid = {
+      sessionId: 'one',
+      type: 'detail',
+      id: 'a',
+      sourceKey: 'oriented-source',
+      requestId: 'one-crop',
+      region: { left: 100, top: 20000, width: 600, height: 900 },
+    };
+    const count = f.root.webContents.messages.length;
+    for (const input of [
+      { ...valid, sourceKey: 'previous' },
+      { ...valid, id: 'b' },
+      { ...valid, region: { ...valid.region, left: 800 } },
+      { ...valid, region: { ...valid.region, top: 39900 } },
+      { ...valid, region: { ...valid.region, width: 0 } },
+      { ...valid, path: '/private' },
+    ])
+      f.emit(nativeImageGalleryEventChannel, input, viewer);
+    expect(f.root.webContents.messages).toHaveLength(count);
+    f.emit(nativeImageGalleryEventChannel, valid, viewer);
+    expect(f.root.webContents.messages.at(-1)?.state).toEqual(valid);
+    f.emit(nativeImageGalleryEventChannel, { ...valid, region: null }, viewer);
+    expect(f.root.webContents.messages.at(-1)?.state).toMatchObject({
+      type: 'detail',
+      region: null,
+    });
+  } finally {
+    f.host.dispose();
+  }
+});

@@ -30,6 +30,7 @@ type ImageDraft = {
   error?: string;
   errorKind?: 'system';
   previewError?: string;
+  previewFrame?: 'first' | 'static';
   previewSource?: ImagePreviewSource;
 };
 const mediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
@@ -328,7 +329,10 @@ export function useNativeInputImages(
       originals.current.set(item, { file: blob, blob, mediaType: saved.mediaType! });
       item.previewSource = originalSource(key, item);
       const preview = await previews.prepare(blob, saved.hash!, item.abort.signal);
-      if (alive()) item.url = URL.createObjectURL(preview.blob);
+      if (alive()) {
+        item.url = URL.createObjectURL(preview.blob);
+        item.previewFrame = preview.frame;
+      }
     } catch {
       if (alive()) item.previewError = '预览不可用';
     }
@@ -923,6 +927,7 @@ export function useNativeInputImages(
             );
             if (!alive()) return;
             item.url = URL.createObjectURL(preview.blob);
+            item.previewFrame = preview.frame;
           } catch {
             if (!alive()) return;
             // Preview failure does not change or prevent the original image submission.

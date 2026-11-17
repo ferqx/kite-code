@@ -6,11 +6,16 @@ type Entry = {
   id: string;
   src: string;
   size: number;
+  pixels: number;
   mimeType: ReadyImage['mimeType'];
   retired: boolean;
 };
-/** Encoded presentation bytes only, not a bound on Chromium's decoded pixel heap. */
-export const nativeImageGalleryUrlBudget = { bytes: 64 * 1024 * 1024, entries: 32 };
+/** Encoded bytes and conservative derivative RGBA estimates, not a browser heap limit. */
+export const nativeImageGalleryUrlBudget = {
+  bytes: 64 * 1024 * 1024,
+  pixels: 128 * 1024 * 1024,
+  entries: 32,
+};
 
 /** A single opaque gallery session. A cache hit is usable only after a current ready DTO. */
 export function createNativeImageGalleryUrlCache(options: {
@@ -18,12 +23,15 @@ export function createNativeImageGalleryUrlCache(options: {
   revoke: (src: string) => void;
   maxBytes?: number;
   maxEntries?: number;
+  maxPixels?: number;
 }) {
   const maxBytes = options.maxBytes ?? nativeImageGalleryUrlBudget.bytes;
   const maxEntries = options.maxEntries ?? nativeImageGalleryUrlBudget.entries;
+  const maxPixels = options.maxPixels ?? nativeImageGalleryUrlBudget.pixels;
   const reusable = new Map<string, Entry>();
   const live = new Map<string, Entry>();
   let bytes = 0;
+  let pixels = 0;
   let displayed: string | undefined;
   let candidate: string | undefined;
   let disposed = false;
@@ -32,16 +40,24 @@ export function createNativeImageGalleryUrlCache(options: {
     if (reusable.get(entry.key) === entry) reusable.delete(entry.key);
     live.delete(entry.src);
     bytes -= entry.size;
+    pixels -= entry.pixels;
     options.revoke(entry.src);
   };
-  const prune = (extraBytes = 0, extraEntries = 0) => {
+  const prune = (extraBytes = 0, extraEntries = 0, extraPixels = 0) => {
     for (const entry of live.values())
       if (
         !pinned(entry) &&
-        (entry.retired || bytes + extraBytes > maxBytes || live.size + extraEntries > maxEntries)
+        (entry.retired ||
+          bytes + extraBytes > maxBytes ||
+          pixels + extraPixels > maxPixels ||
+          live.size + extraEntries > maxEntries)
       )
         revoke(entry);
-    if (bytes + extraBytes > maxBytes || live.size + extraEntries > maxEntries)
+    if (
+      bytes + extraBytes > maxBytes ||
+      pixels + extraPixels > maxPixels ||
+      live.size + extraEntries > maxEntries
+    )
       throw Error('image_gallery_presentation_budget');
   };
   const touch = (entry: Entry) => {
@@ -63,12 +79,23 @@ export function createNativeImageGalleryUrlCache(options: {
         return existing.src;
       }
       const size = image.bytes.byteLength;
-      prune(size, 1);
+      // Conservative RGBA estimate of bounded derivatives, not Chromium heap accounting.
+      const pixelCost = image.display ? image.display.edge ** 2 * 4 : 0;
+      prune(size, 1, pixelCost);
       const src = options.create(image);
-      const entry = { key, id, src, size, mimeType: image.mimeType, retired: false };
+      const entry = {
+        key,
+        id,
+        src,
+        size,
+        pixels: pixelCost,
+        mimeType: image.mimeType,
+        retired: false,
+      };
       reusable.set(key, entry);
       live.set(src, entry);
       bytes += size;
+      pixels += pixelCost;
       candidate = src;
       return src;
     },

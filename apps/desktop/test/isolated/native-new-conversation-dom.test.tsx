@@ -17,6 +17,7 @@ import type {
   NativeWorkspaceRemoval,
 } from '../../src/native-bridge';
 import { desktopConversationMessages } from '../../src/native-presentation';
+import { installImagePreviewWorker } from '../image-preview-worker.fixture';
 import {
   captureQueuedPromptChange,
   nextDesktopPresentation,
@@ -117,6 +118,7 @@ function fixture(
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+  const restoreWorker = installImagePreviewWorker();
   const host = dom.window.document,
     root = createRoot(host.getElementById('root')!);
   const calls: NativeRequest[] = [],
@@ -714,6 +716,7 @@ function fixture(
       await act(async () => root.unmount());
       await new Promise((resolve) => setTimeout(resolve, 0));
       restore();
+      restoreWorker();
       Object.defineProperty(stylePrototype, 'clip', clip);
       Object.assign(globalThis, prior);
       dom.window.close();
@@ -6190,6 +6193,108 @@ test('the first Native send includes the displayed medium default without touchi
     });
   } finally {
     await f.close();
+  }
+});
+
+test('Native restores an animated image as a labeled first-frame derivative without rewriting its saved source', async () => {
+  const f = fixture(true);
+  const previousBlob = globalThis.Blob;
+  const createObjectURL = URL.createObjectURL,
+    revokeObjectURL = URL.revokeObjectURL;
+  const previews: Blob[] = [];
+  globalThis.Blob = f.dom.window.Blob;
+  URL.createObjectURL = (blob) => {
+    previews.push(blob as Blob);
+    return `blob:restored-animation-${previews.length}`;
+  };
+  URL.revokeObjectURL = () => {};
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  const bytes = new Uint8Array([71, 73, 70, 56, 57, 97, 1, 2, 3]);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const hash = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  const saved = {
+    kind: 'input.attachments' as const,
+    revision: 3,
+    attachments: [
+      {
+        id: 'pending-animation',
+        kind: 'image' as const,
+        name: 'animation.gif',
+        state: 'ready' as const,
+        size: bytes.length,
+        mediaType: 'image/gif',
+        hash,
+      },
+    ],
+  };
+  const display = f.dom.window.kiteNativeImageDisplay!;
+  const render = display.render;
+  const displayedSources: Uint8Array[] = [];
+  display.render = async (input) => {
+    displayedSources.push(input.bytes.slice());
+    const result = await render(input);
+    return result.ok
+      ? { ok: true, value: { ...result.value, animated: true, frame: 'first' } }
+      : result;
+  };
+  bridge.request = async (input) => {
+    const value = await request(input);
+    if (input.method === 'input.attachments.read')
+      return input.sessionId === 'a'
+        ? structuredClone(saved)
+        : { kind: 'input.attachments', revision: 0, attachments: [] };
+    if (input.method === 'input.attachments.preview') {
+      expect(input.sessionId).toBe('a');
+      expect(input.id).toBe('pending-animation');
+      expect(input.offset).toBe(0);
+      return {
+        kind: 'input.image.chunk',
+        readId: input.id,
+        offset: 0,
+        nextOffset: bytes.length,
+        data: btoa(String.fromCharCode(...bytes)),
+        done: true,
+      };
+    }
+    if (value && 'generation' in value) return { ...value, pendingAttachmentDrafts: true };
+    return value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.until(() => !!f.host.querySelector('form .composer-attachments img'));
+    expect(f.host.querySelector('form .composer-attachments')?.textContent).toContain('动画首帧');
+    expect(displayedSources.map((source) => [...source])).toEqual([[...bytes]]);
+    expect(new TextDecoder().decode(await previews[0]!.arrayBuffer())).toBe('derived');
+    await f.click('Other B');
+    await f.until(() => f.host.querySelector('form .composer-attachments') === null);
+    await f.click('Original A');
+    await f.until(() => !!f.host.querySelector('form .composer-attachments img'));
+    expect(f.host.querySelector('form .composer-attachments')?.textContent).toContain('动画首帧');
+    expect(
+      f.calls.filter((call) =>
+        [
+          'submit',
+          'conversation.send',
+          'input.images.begin',
+          'input.images.append',
+          'input.attachments.write',
+        ].includes(call.method),
+      ),
+    ).toEqual([]);
+    expect(saved.attachments[0]).toMatchObject({
+      size: bytes.length,
+      hash,
+      mediaType: 'image/gif',
+    });
+    expect([...bytes]).toEqual([71, 73, 70, 56, 57, 97, 1, 2, 3]);
+  } finally {
+    await f.close();
+    globalThis.Blob = previousBlob;
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
   }
 });
 

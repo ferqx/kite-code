@@ -1,34 +1,43 @@
-import type { ImagePreviewWorker } from '../src/native-image-previews';
+import type { NativeImageDisplayBridge } from '../src/native-image-display-bridge';
 
-/** JSDOM does not decode images. Browser fixtures exercise the actual native worker. */
+/** JSDOM cannot decode images. The codec suite exercises actual derived pixel bytes. */
 export function installImagePreviewWorker() {
-  const original = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
-  class PreviewWorker {
-    onmessage: ImagePreviewWorker['onmessage'] = null;
-    onerror: ImagePreviewWorker['onerror'] = null;
-    private closed = false;
-    postMessage({ id }: { id: number; source: Blob }) {
-      queueMicrotask(() => {
-        if (this.closed) return;
-        this.onmessage?.call(
-          this as unknown as Worker,
-          {
-            data: { id, blob: new Blob(['derived'], { type: 'image/webp' }), width: 1, height: 1 },
-          } as MessageEvent,
-        );
-      });
-    }
-    terminate() {
-      this.closed = true;
-    }
-  }
-  Object.defineProperty(globalThis, 'Worker', {
-    configurable: true,
-    writable: true,
-    value: PreviewWorker,
-  });
+  const owner = window;
+  const original = owner.kiteNativeImageDisplay;
+  const bridge: NativeImageDisplayBridge = {
+    render: async () => ({
+      ok: true,
+      value: {
+        bytes: new TextEncoder().encode('derived'),
+        mimeType: 'image/webp',
+        width: 1,
+        height: 1,
+        sourceWidth: 1,
+        sourceHeight: 1,
+        animated: false,
+        frame: 'static',
+      },
+    }),
+    cancel() {},
+  };
+  owner.kiteNativeImageDisplay = bridge;
+  // JSDOM's Blob lacks arrayBuffer, unlike Chromium. Preserve its actual source bytes.
+  const prototype = owner.Blob.prototype;
+  const arrayBuffer = Object.getOwnPropertyDescriptor(prototype, 'arrayBuffer');
+  if (!arrayBuffer)
+    Object.defineProperty(prototype, 'arrayBuffer', {
+      configurable: true,
+      value() {
+        return new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new owner.FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(this);
+        });
+      },
+    });
   return () => {
-    if (original) Object.defineProperty(globalThis, 'Worker', original);
-    else Reflect.deleteProperty(globalThis, 'Worker');
+    owner.kiteNativeImageDisplay = original;
+    if (!arrayBuffer) Reflect.deleteProperty(prototype, 'arrayBuffer');
   };
 }

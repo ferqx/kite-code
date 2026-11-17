@@ -105,3 +105,29 @@ test('admission enforces encoded limits before allocating and rejects revision m
   expect(f.revoked).toEqual([]);
   f.cache.dispose();
 });
+
+test('bounded derivative RGBA estimates evict unpinned high-tier URLs without pretending to measure browser heap', () => {
+  const revoked: string[] = [];
+  let serial = 0;
+  const cache = createNativeImageGalleryUrlCache({
+    create: () => `blob:${++serial}`,
+    revoke: (src) => revoked.push(src),
+  });
+  const image = (revision: string): Extract<NativeImageGalleryImage, { status: 'ready' }> => ({
+    status: 'ready',
+    revision,
+    bytes: new Uint8Array([1]),
+    mimeType: 'image/webp',
+    display: { key: revision, sourceWidth: 8000, sourceHeight: 4000, edge: 4096, frame: 'static' },
+  });
+  const first = cache.admit('a', image('a'));
+  cache.commit(first);
+  const second = cache.admit('b', image('b'));
+  cache.commit(second);
+  const third = cache.admit('c', image('c'));
+  expect(revoked).toEqual([first]);
+  expect(cache.snapshot().entries).toBe(2);
+  cache.commit(third);
+  cache.dispose();
+  expect(new Set(revoked).size).toBe(3);
+});

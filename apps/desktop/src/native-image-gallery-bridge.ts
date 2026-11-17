@@ -1,3 +1,8 @@
+import {
+  isNativeImageDisplayRegion,
+  type NativeImageDisplayRegion,
+  nativeImageDisplayRegionFits,
+} from './native-image-display-bridge';
 /** Presentation-only bridge. No paths, URLs, file handles or application requests. */
 export const nativeImageGalleryPresentChannel = 'kite:native:image-gallery-present';
 export const nativeImageGalleryCloseChannel = 'kite:native:image-gallery-close';
@@ -6,6 +11,20 @@ export const nativeImageGalleryEventChannel = 'kite:native:image-gallery-event';
 export const nativeImageGalleryStateChannel = 'kite:native:image-gallery-state';
 export const nativeImageGalleryActiveChannel = 'kite:native:image-gallery-active';
 export const nativeImageGalleryLimit = 16 * 1024 * 1024;
+export type NativeImageGalleryDetail = {
+  requestId: string;
+  sourceKey: string;
+  region: NativeImageDisplayRegion;
+} & (
+  | { status: 'loading' | 'error' }
+  | {
+      status: 'ready';
+      bytes: Uint8Array;
+      mimeType: 'image/webp' | 'image/png';
+      width: number;
+      height: number;
+    }
+);
 export type NativeImageGalleryItem = { id: string; name: string };
 export type NativeImageGalleryImage =
   | { status: 'loading' | 'error' }
@@ -15,6 +34,15 @@ export type NativeImageGalleryImage =
       revision: string;
       mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
       bytes: Uint8Array;
+      detail?: NativeImageGalleryDetail;
+      /** Derived display pixels; original identity and oriented dimensions preserve zoom. */
+      display?: {
+        key: string;
+        sourceWidth: number;
+        sourceHeight: number;
+        edge: 1024 | 2048 | 4096;
+        frame: 'first' | 'static';
+      };
     };
 export type NativeImageGalleryPresentation = {
   sessionId: string;
@@ -28,6 +56,14 @@ export type NativeImageGalleryState =
   | null;
 export type NativeImageGalleryAction = { sessionId: string } & (
   | { type: 'select'; id: string }
+  | {
+      type: 'detail';
+      id: string;
+      sourceKey: string;
+      requestId: string;
+      region: NativeImageDisplayRegion | null;
+    }
+  | { type: 'quality'; id: string; edge: 1024 | 2048 | 4096 }
   | { type: 'retry' | 'close' }
   | { type: 'unavailable' }
 );
@@ -54,6 +90,20 @@ function record(input: unknown): input is Record<string, unknown> {
 }
 export function isNativeImageGalleryAction(input: unknown): input is NativeImageGalleryAction {
   if (!record(input) || !nativeImageGallerySessionId(input.sessionId)) return false;
+  if (input.type === 'detail')
+    return (
+      Object.keys(input).sort().join(',') === 'id,region,requestId,sessionId,sourceKey,type' &&
+      nativeImageGalleryId(input.id) &&
+      nativeImageGallerySessionId(input.sourceKey) &&
+      nativeImageGallerySessionId(input.requestId) &&
+      (input.region === null || isNativeImageDisplayRegion(input.region))
+    );
+  if (input.type === 'quality')
+    return (
+      Object.keys(input).sort().join(',') === 'edge,id,sessionId,type' &&
+      nativeImageGalleryId(input.id) &&
+      [1024, 2048, 4096].includes(input.edge as number)
+    );
   return input.type === 'select'
     ? Object.keys(input).sort().join(',') === 'id,sessionId,type' && nativeImageGalleryId(input.id)
     : Object.keys(input).sort().join(',') === 'sessionId,type' &&
@@ -95,8 +145,64 @@ export function isNativeImageGalleryPresentation(
   const image = input.image;
   if (image.status === 'loading' || image.status === 'error')
     return Object.keys(image).join(',') === 'status';
+  const display = image.display;
+  if (
+    display !== undefined &&
+    (!record(display) ||
+      Object.keys(display).sort().join(',') !== 'edge,frame,key,sourceHeight,sourceWidth' ||
+      !nativeImageGallerySessionId(display.key) ||
+      ![1024, 2048, 4096].includes(display.edge as number) ||
+      !['first', 'static'].includes(display.frame as string) ||
+      ![display.sourceWidth, display.sourceHeight].every(
+        (value) =>
+          Number.isSafeInteger(value) && (value as number) > 0 && (value as number) <= 65535,
+      ))
+  )
+    return false;
+  const detail = image.detail;
+  if (detail !== undefined) {
+    if (
+      !record(detail) ||
+      !record(display) ||
+      !nativeImageGallerySessionId(detail.requestId) ||
+      detail.sourceKey !== display.key ||
+      !isNativeImageDisplayRegion(detail.region) ||
+      !nativeImageDisplayRegionFits(
+        detail.region,
+        display.sourceWidth as number,
+        display.sourceHeight as number,
+      )
+    )
+      return false;
+    const fields = ['region', 'requestId', 'sourceKey', 'status'];
+    if (detail.status === 'ready') {
+      fields.push('bytes', 'mimeType', 'width', 'height');
+      if (
+        !ArrayBuffer.isView(detail.bytes) ||
+        Object.prototype.toString.call(detail.bytes) !== '[object Uint8Array]' ||
+        detail.bytes.byteLength < 1 ||
+        detail.bytes.byteLength > nativeImageGalleryLimit ||
+        !['image/png', 'image/webp'].includes(detail.mimeType as string) ||
+        ![detail.width, detail.height].every(
+          (v) => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= 2048,
+        )
+      )
+        return false;
+    } else if (detail.status !== 'loading' && detail.status !== 'error') return false;
+    if (Object.keys(detail).sort().join(',') !== fields.sort().join(',')) return false;
+  }
   return (
-    Object.keys(image).sort().join(',') === 'bytes,mimeType,revision,status' &&
+    Object.keys(image).sort().join(',') ===
+      [
+        'bytes',
+        'mimeType',
+        'revision',
+        'status',
+        ...(display ? ['display'] : []),
+        ...(detail ? ['detail'] : []),
+      ]
+        .sort()
+        .join(',') &&
     image.status === 'ready' &&
     nativeImageGallerySessionId(image.revision) &&
     ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(image.mimeType as string) &&
@@ -111,4 +217,9 @@ declare global {
     kiteNativeImageGallery?: NativeImageGalleryBridge;
     kiteImageGalleryViewer?: NativeImageGalleryViewerBridge;
   }
+}
+
+/** Choose the smallest bounded derivative that covers physical display pixels. */
+export function nativeImageGalleryEdge(pixels: number): 1024 | 2048 | 4096 {
+  return pixels <= 1024 ? 1024 : pixels <= 2048 ? 2048 : 4096;
 }

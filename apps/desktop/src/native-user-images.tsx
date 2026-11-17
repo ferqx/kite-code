@@ -13,6 +13,7 @@ import {
 } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
+import { nativeImageDisplaySourceByteLimit } from './native-image-display-bridge';
 import type { NativeImageOriginalScope, NativeImagePreviews } from './native-image-previews';
 
 type Props = {
@@ -123,7 +124,9 @@ async function readImage(
       (image.reference.hash !== undefined && opened.hash !== image.reference.hash) ||
       opened.mediaType !== image.reference.mediaType ||
       opened.size !== Number(image.reference.size) ||
-      opened.size > 16 * 1024 * 1024
+      !Number.isSafeInteger(opened.size) ||
+      opened.size < 1 ||
+      opened.size > nativeImageDisplaySourceByteLimit
     )
       throw Error('input_image_metadata_invalid');
     const identity = {
@@ -240,6 +243,7 @@ function NativeUserImage({
   const readActive = useConversationReadActive();
   const retention = useConversationResourceRetention();
   const readAvailable = props.readAvailable && readActive;
+  const [firstFrame, setFirstFrame] = useState(false);
   const [url, setUrl] = useState(''),
     [loading, setLoading] = useState(false),
     [error, setError] = useState(''),
@@ -339,6 +343,7 @@ function NativeUserImage({
           release: clear,
           releaseOnWindowHide: true,
         });
+        setFirstFrame(preview.frame === 'first');
         setUrl(next);
       } catch {
         if (!abort.signal.aborted) setError('图片预览失败，请重试。');
@@ -373,10 +378,11 @@ function NativeUserImage({
             type="button"
             className="image-gallery-trigger"
             disabled={!readAvailable}
-            aria-label={`预览图片：${image.name}`}
+            aria-label={`预览图片：${image.name}${firstFrame ? '（动画首帧）' : ''}`}
             onClick={onPreview}
           >
             <img src={url} alt={image.name} decoding="async" />
+            {firstFrame && <span className="image-preview-frame-label">动画首帧</span>}
           </button>
         ) : error ? (
           <Button

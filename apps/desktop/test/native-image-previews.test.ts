@@ -276,3 +276,29 @@ test('invalid original metadata and foreign scope tokens never enter the origina
     other.previews.clear();
   }
 });
+
+test('a valid large single source bypasses the queue byte budget, and oversize originals skip cache without evicting usable entries', async () => {
+  const f = fixture();
+  try {
+    const scope = f.previews.createOriginalScope('large');
+    const identity = { key: 'small', hash: hash(1), mediaType: source.type, size: source.size };
+    f.previews.rememberOriginal(scope, identity, source);
+    const large = new Blob([new Uint8Array(65 * 1024 * 1024)], { type: 'image/png' });
+    expect(
+      f.previews.rememberOriginal(scope, { ...identity, key: 'large', size: large.size }, large),
+    ).toBe(false);
+    expect(f.previews.getOriginal(scope, identity)).toBe(source);
+    const pending = f.previews.prepare(large, hash(2), signal());
+    expect(f.workers[0]!.messages[0]!.source).toBe(large);
+    await expect(f.previews.prepare(source, hash(3), signal())).rejects.toThrow(
+      'image_preview_busy',
+    );
+    f.workers[0]!.complete();
+    expect((await pending).width).toBe(512);
+    const next = f.previews.prepare(source, hash(3), signal());
+    f.workers[0]!.complete();
+    await next;
+  } finally {
+    f.previews.clear();
+  }
+});

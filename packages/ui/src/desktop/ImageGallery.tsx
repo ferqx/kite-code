@@ -21,6 +21,11 @@ import {
 import { useConversationReadActive } from '../conversation-activity';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from './components/ui/dialog';
 import { Spinner } from './components/ui/spinner';
+import {
+  ImageGalleryDetail,
+  type ImageGalleryDetailValue,
+  type ImageGalleryRegion,
+} from './ImageGalleryDetail';
 import { useReadGate } from './ReadGate';
 
 /** The host admits the image. The gallery never fetches paths or remote URLs. */
@@ -74,7 +79,7 @@ export interface ImageGalleryPresentationProps {
   sourceKey?: number;
   /** Renderer-local admitted URL, never a filesystem or remote URL. */
   src?: string;
-  /** Hosts may transfer only these bounded original bytes to an isolated renderer. */
+  /** Hosts receive admitted source bytes and must derive display pixels before rendering. */
   blob?: Blob;
   onRetry: () => void;
   canRestoreFocus?: () => boolean;
@@ -82,6 +87,20 @@ export interface ImageGalleryPresentationProps {
   allowDownload?: boolean;
   /** Runs after the decoded image and its caption commit together. */
   onImageCommit?: (src: string) => void;
+  /** Native derivative metadata; stable key preserves zoom/pan across quality upgrades. */
+  display?: {
+    key: string;
+    sourceWidth: number;
+    sourceHeight: number;
+    frame: 'first' | 'static';
+    edge?: number;
+  };
+  detail?: ImageGalleryDetailValue;
+  onDetailDemand?: (region: ImageGalleryRegion | null) => void;
+  onDetailCommit?: (requestId: string) => void;
+  onDetailError?: (requestId: string) => void;
+  onDetailRetry?: () => void;
+  onDisplayDemand?: (id: string, pixels: number) => void;
 }
 
 /** Native may supply its existing full-window transparent presentation host. */
@@ -179,7 +198,11 @@ function GalleryPresentation({
         .then(() => (controller.signal.aborted ? undefined : load(controller.signal)))
         .then((blob) => {
           if (controller.signal.aborted || !blob) return;
-          if (!blob.size || blob.size > MAX_IMAGE_BYTES || !imageMime.test(blob.type))
+          if (
+            !blob.size ||
+            (!nativePresentation && blob.size > MAX_IMAGE_BYTES) ||
+            !imageMime.test(blob.type)
+          )
             throw Error('image_preview_unavailable');
           if (!nativePresentation) objectUrl = URL.createObjectURL(blob);
           setLoaded({ id: image.id, load, src, url: objectUrl, blob });
@@ -232,6 +255,7 @@ type GalleryBuffer = {
   sourceKey: number | undefined;
   width?: number;
   height?: number;
+  display?: ImageGalleryPresentationProps['display'];
 };
 
 /** Presentation-only surface reused by the isolated Native viewer renderer. */
@@ -246,6 +270,13 @@ export function ImageGallerySurface({
   canRestoreFocus = () => true,
   allowDownload = true,
   onImageCommit,
+  display,
+  onDisplayDemand,
+  detail,
+  onDetailDemand,
+  onDetailCommit,
+  onDetailError,
+  onDetailRetry,
 }: ImageGalleryPresentationProps) {
   const index = images.findIndex((image) => image.id === selectedId);
   const image = images[index];
@@ -292,6 +323,7 @@ export function ImageGallerySurface({
           total: images.length,
           src: url,
           sourceKey,
+          display,
         }
       : undefined;
   const candidateRef = useRef<GalleryBuffer | undefined>(undefined);
@@ -311,9 +343,16 @@ export function ImageGallerySurface({
     };
   }, []);
 
+  const previousDisplay = useRef<GalleryBuffer | undefined>(undefined);
   useLayoutEffect(() => {
     if (!committed) return;
-    if (viewport.current) {
+    const previous = previousDisplay.current;
+    previousDisplay.current = committed;
+    const qualityUpgrade =
+      previous?.id === committed.id &&
+      previous.display?.key &&
+      previous.display.key === committed.display?.key;
+    if (viewport.current && !qualityUpgrade) {
       viewport.current.scrollTop = 0;
       viewport.current.scrollLeft = 0;
     }
@@ -338,6 +377,22 @@ export function ImageGallerySurface({
     };
   }, []);
 
+  const demandCallback = useRef(onDisplayDemand);
+  demandCallback.current = onDisplayDemand;
+  useEffect(() => {
+    if (!committed?.width || !committed.height || committed.id !== selectedId) return;
+    const fit = Math.min(
+      viewportSize.width / committed.width,
+      viewportSize.height / committed.height,
+      1,
+    );
+    if (fit > 0)
+      demandCallback.current?.(
+        committed.id,
+        Math.max(committed.width, committed.height) * fit * zoom * (window.devicePixelRatio || 1),
+      );
+  }, [committed, selectedId, viewportSize, zoom]);
+
   if (!image) return null;
 
   const select = (next: number) => {
@@ -354,10 +409,19 @@ export function ImageGallerySurface({
         setFailedToken(buffer.token);
         return;
       }
-      const next = { ...buffer, width: element.naturalWidth, height: element.naturalHeight };
+      const next = {
+        ...buffer,
+        width: buffer.display?.sourceWidth ?? element.naturalWidth,
+        height: buffer.display?.sourceHeight ?? element.naturalHeight,
+      };
+      const previous = committedRef.current;
+      const qualityUpgrade =
+        previous?.id === next.id &&
+        previous.display?.key &&
+        previous.display.key === next.display?.key;
       committedRef.current = next;
       setCommitted(next);
-      setZoom(1);
+      if (!qualityUpgrade) setZoom(1);
     };
     if (typeof element.decode === 'function') {
       void element
@@ -381,7 +445,21 @@ export function ImageGallerySurface({
     if (currentCandidate(buffer) || committedRef.current?.token === buffer.token)
       setFailedToken(current.token);
   };
-  const caption = committed ?? { name: image.name, index, total: images.length };
+  const fitScale =
+    committed?.width && committed.height
+      ? Math.min(viewportSize.width / committed.width, viewportSize.height / committed.height, 1)
+      : 1;
+  const zoomLimit = display && fitScale > 0 ? Math.max(4, 2 / fitScale) : 4;
+  const caption = committed ?? {
+    name: image.name,
+    index,
+    total: images.length,
+    display: undefined,
+  };
+  const qualityPending =
+    !!candidate?.display?.key &&
+    candidate.id === committed?.id &&
+    candidate.display.key === committed.display?.key;
   const buffers = [...(committed ? [committed] : []), ...(candidate ? [candidate] : [])];
 
   return (
@@ -417,6 +495,7 @@ export function ImageGallerySurface({
         <div className="image-gallery-toolbar">
           <span className="image-gallery-caption" aria-live="polite">
             <span title={caption.name}>{caption.name}</span>
+            {caption.display?.frame === 'first' && <span>动画首帧</span>}
             <span>
               {caption.index + 1} / {caption.total}
             </span>
@@ -489,7 +568,7 @@ export function ImageGallerySurface({
               <div
                 key={buffer.token}
                 className={`image-gallery-stage${displayed ? '' : ' image-gallery-candidate'}`}
-                style={size}
+                style={{ ...size, position: 'relative' }}
                 aria-hidden={!displayed || undefined}
               >
                 <img
@@ -501,10 +580,30 @@ export function ImageGallerySurface({
                   onLoad={(event) => commit(buffer, event.currentTarget)}
                   onError={() => fail(buffer)}
                 />
+                {displayed &&
+                  status === 'ready' &&
+                  buffer.id === selectedId &&
+                  buffer.display?.key === display?.key &&
+                  display &&
+                  onDetailDemand && (
+                    <ImageGalleryDetail
+                      key={`${buffer.id}/${display.key}`}
+                      sourceKey={display.key}
+                      sourceWidth={display.sourceWidth}
+                      sourceHeight={display.sourceHeight}
+                      overviewEdge={display.edge ?? 4096}
+                      viewport={viewport.current}
+                      geometryKey={`${zoom}/${viewportSize.width}/${viewportSize.height}`}
+                      value={detail}
+                      demand={onDetailDemand}
+                      commit={onDetailCommit ?? (() => {})}
+                      fail={onDetailError ?? (() => {})}
+                    />
+                  )}
               </div>
             );
           })}
-          {!ready && (
+          {!ready && !qualityPending && (
             <div
               className={`image-gallery-status${committed ? ' image-gallery-transition-status' : ''}`}
               role={failed ? 'alert' : 'status'}
@@ -544,11 +643,19 @@ export function ImageGallerySurface({
             <HugeiconsIcon icon={ArrowRight02Icon} aria-hidden="true" />
           </button>
         )}
+        {detail?.status === 'error' && (
+          <div role="alert" className="image-gallery-detail-error">
+            高清预览不可用{' '}
+            <button type="button" onClick={onDetailRetry}>
+              重试高清预览
+            </button>
+          </div>
+        )}
         <fieldset className="image-gallery-zoom" aria-label="图片缩放">
           <button
             className="image-gallery-control"
             type="button"
-            disabled={!ready || zoom <= 0.25}
+            disabled={(!ready && !qualityPending) || zoom <= 0.25}
             onClick={() => setZoom((value) => Math.max(0.25, value - 0.25))}
             aria-label="缩小图片"
             title="缩小"
@@ -558,23 +665,42 @@ export function ImageGallerySurface({
           <button
             className="image-gallery-zoom-reset"
             type="button"
-            disabled={!ready}
+            disabled={!ready && !qualityPending}
             onClick={() => setZoom(1)}
             aria-label="重置图片缩放"
-            title="重置缩放"
+            title={display ? '还原适应窗口' : '重置缩放'}
           >
-            {Math.round(zoom * 100)}%
+            {display
+              ? zoom === 1
+                ? '适应'
+                : `${Math.round(fitScale * zoom * 100)}%`
+              : `${Math.round(zoom * 100)}%`}
           </button>
           <button
             className="image-gallery-control"
             type="button"
-            disabled={!ready || zoom >= 4}
-            onClick={() => setZoom((value) => Math.min(4, value + 0.25))}
+            disabled={(!ready && !qualityPending) || zoom >= zoomLimit}
+            onClick={() =>
+              setZoom((value) =>
+                Math.min(zoomLimit, value + (display ? Math.max(0.25, value / 4) : 0.25)),
+              )
+            }
             aria-label="放大图片"
             title="放大"
           >
             <HugeiconsIcon icon={Add01Icon} aria-hidden="true" />
           </button>
+          {display && (
+            <button
+              type="button"
+              className="image-gallery-zoom-reset"
+              aria-label="原始大小"
+              disabled={!ready || fitScale <= 0}
+              onClick={() => setZoom(1 / fitScale)}
+            >
+              原始大小
+            </button>
+          )}
         </fieldset>
       </DialogContent>
     </Dialog>

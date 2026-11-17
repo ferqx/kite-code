@@ -31,7 +31,6 @@ async function fixture(nativeHost = false) {
     costs.delete(this);
     return stopCost.apply(this, args);
   };
-  const restoreWorker = installImagePreviewWorker();
   const previews = new NativeImagePreviews();
   const originalRecords: {
     scope: Parameters<NativeImagePreviews['rememberOriginal']>[0];
@@ -56,6 +55,8 @@ async function fixture(nativeHost = false) {
     document: dom.window.document,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+
+  const restoreWorker = installImagePreviewWorker();
   const { NativeUserImages } = await import('../../src/native-user-images');
   const { NativeImageGalleryProvider } = await import('../../src/native-image-gallery');
   const nativeStates: GalleryState[] = [];
@@ -710,8 +711,15 @@ test('Native host receives only one verified original from a six-image group, cr
     expect(f.nativeStates.at(-1)!.image).toEqual({
       status: 'ready',
       revision: expect.any(String),
-      mimeType: 'image/png',
-      bytes: new Uint8Array(bytes),
+      mimeType: 'image/webp',
+      bytes: new TextEncoder().encode('derived'),
+      display: {
+        key: expect.any(String),
+        sourceWidth: 1,
+        sourceHeight: 1,
+        edge: 1024,
+        frame: 'static',
+      },
     });
     expect(f.blobs).toHaveLength(6);
     await f.nativeAction({ sessionId, type: 'select', id: '5' });

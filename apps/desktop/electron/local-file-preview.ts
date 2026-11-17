@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { type BigIntStats, constants, statSync } from 'node:fs';
-import { open, writeFile } from 'node:fs/promises';
+import { open, rm } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { nativeImageDisplaySourceByteLimit } from '../src/native-image-display-bridge';
+
+const localImage = (path: string) => /\.(png|jpe?g|webp|gif)$/i.test(path);
+const sourceBudget = (path: string) =>
+  localImage(path) ? nativeImageDisplaySourceByteLimit : 64 * 1024 * 1024;
 
 type Identity = { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint };
 const identity = (value: Identity) =>
@@ -59,7 +64,7 @@ export class LocalFilePreview {
     await authorize(async (path) => {
       scope();
       const file = statSync(path, { bigint: true });
-      if (!file.isFile() || file.size > 64n * 1024n * 1024n)
+      if (!file.isFile() || file.size > BigInt(sourceBudget(path)))
         throw Error('local_preview_unavailable');
       result = new LocalFilePreview(path, identity(file), authorize, scope);
     });
@@ -90,6 +95,9 @@ export class LocalFilePreview {
         if (identity(await file.stat({ bigint: true })) !== this.baseline)
           throw Error('local_preview_changed');
         const size = Number((await file.stat({ bigint: true })).size);
+        // Whole-buffer consumers (PDF/reference) keep their original budget. Images
+        // use the streaming materialize path and do not allocate the source in Main.
+        if (size > 64 * 1024 * 1024) throw Error('local_preview_unavailable');
         const buffer = Buffer.alloc(size + 1);
         let offset = 0;
         while (offset < buffer.length) {
@@ -120,16 +128,73 @@ export class LocalFilePreview {
     if (sourceHash !== expectedHash) throw Error('local_preview_changed');
     return { path: this.path, name: this.name, sourceHash };
   }
-  async materialize(destination: string) {
-    const bytes = await this.read();
-    await writeFile(destination, bytes, { flag: 'wx', mode: 0o600 });
+  async materialize(destination: string, signal?: AbortSignal) {
     this.check();
-    return {
-      name: this.name,
-      size: String(bytes.length),
-      mediaType: this.mediaType,
-      sourceHash: createHash('sha256').update(bytes).digest('hex'),
-    };
+    signal?.throwIfAborted();
+    let created = false;
+    let result: { size: number; sourceHash: string } | undefined;
+    try {
+      await this.authorize(async (path) => {
+        this.check();
+        signal?.throwIfAborted();
+        if (path !== this.path) throw Error('local_preview_changed');
+        const source = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+          const stat = await source.stat({ bigint: true });
+          if (identity(stat) !== this.baseline || stat.size > BigInt(sourceBudget(path)))
+            throw Error('local_preview_changed');
+          const destinationFile = await open(destination, 'wx', 0o600);
+          created = true;
+          try {
+            const hash = createHash('sha256');
+            const buffer = Buffer.alloc(64 * 1024);
+            let offset = 0;
+            while (true) {
+              signal?.throwIfAborted();
+              this.check();
+              const { bytesRead } = await source.read(buffer, 0, buffer.length, offset);
+              if (!bytesRead) break;
+              offset += bytesRead;
+              if (offset > Number(stat.size)) throw Error('local_preview_changed');
+              const chunk = buffer.subarray(0, bytesRead);
+              hash.update(chunk);
+              let written = 0;
+              while (written < bytesRead) {
+                signal?.throwIfAborted();
+                const value = await destinationFile.write(chunk, written, bytesRead - written);
+                if (!value.bytesWritten) throw Error('local_preview_write_failed');
+                written += value.bytesWritten;
+              }
+            }
+            if (
+              offset !== Number(stat.size) ||
+              identity(await source.stat({ bigint: true })) !== this.baseline
+            )
+              throw Error('local_preview_changed');
+            result = { size: offset, sourceHash: hash.digest('hex') };
+          } finally {
+            await destinationFile.close();
+          }
+        } finally {
+          await source.close();
+        }
+      });
+      signal?.throwIfAborted();
+      // Authorization may have changed while reading a large snapshot. The snapshot
+      // is not delivered until the same source and capability have been re-admitted.
+      await this.verifyAccess();
+      signal?.throwIfAborted();
+      if (!result) throw Error('local_preview_unavailable');
+      return {
+        name: this.name,
+        size: String(result.size),
+        mediaType: this.mediaType,
+        sourceHash: result.sourceHash,
+      };
+    } catch (error) {
+      if (created) await rm(destination, { force: true });
+      throw error;
+    }
   }
   get mediaType() {
     return /\.pdf$/i.test(this.name) ? 'application/pdf' : 'application/octet-stream';

@@ -15,6 +15,7 @@ import type {
   NativeImageGalleryPresentation as GalleryState,
   NativeImageGalleryAction,
 } from '../../src/native-image-gallery-bridge';
+import { installImagePreviewWorker } from '../image-preview-worker.fixture';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 function fixture() {
@@ -29,6 +30,7 @@ function fixture() {
     document: dom.window.document,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+  const restoreDisplay = installImagePreviewWorker();
   const states: GalleryState[] = [];
   const closed: string[] = [];
   const watchers = new Set<(action: NativeImageGalleryAction) => void>();
@@ -125,6 +127,7 @@ function fixture() {
     },
     async close() {
       await act(async () => root.unmount());
+      restoreDisplay();
       restoreLayout();
       for (const [key, descriptor] of old)
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -134,7 +137,7 @@ function fixture() {
   };
 }
 
-test('Native gallery forwards only the selected original bytes and scopes viewer actions and close to its presentation', async () => {
+test('Native gallery forwards only the selected derived bytes and scopes viewer actions and close to its presentation', async () => {
   const f = fixture();
   try {
     await f.render();
@@ -147,8 +150,15 @@ test('Native gallery forwards only the selected original bytes and scopes viewer
     expect(f.states.at(-1)!.image).toEqual({
       status: 'ready',
       revision: expect.any(String),
-      mimeType: 'image/png',
-      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: 'image/webp',
+      bytes: new TextEncoder().encode('derived'),
+      display: {
+        key: expect.any(String),
+        sourceWidth: 1,
+        sourceHeight: 1,
+        edge: 1024,
+        frame: 'static',
+      },
     });
     expect(JSON.stringify(f.states)).not.toContain('root-only');
     await f.action({ sessionId: 'unrelated', type: 'close' });
@@ -212,7 +222,8 @@ test('Native presentation refuses URL-only, unsupported and oversized originals 
     });
     await f.render({ status: 'ready', blob: unsupported });
     expect(f.states.at(-1)?.image).toEqual({ status: 'error' });
-    const oversized = new Blob([new Uint8Array(16 * 1024 * 1024 + 1)], { type: 'image/png' });
+    const oversized = new Blob([new Uint8Array(1)], { type: 'image/png' });
+    Object.defineProperty(oversized, 'size', { value: 256 * 1024 * 1024 + 1 });
     Object.defineProperty(oversized, 'arrayBuffer', {
       value: () => {
         throw Error('must_not_read');
@@ -295,6 +306,180 @@ test('Root Blob revision stays stable without extra ready-to-loading transitions
     expect(f.states.length).toBe(before + 1);
     const changed = f.states.at(-1)!.image;
     expect(changed.status === 'ready' && changed.revision).not.toBe(first.revision);
+  } finally {
+    await f.close();
+  }
+});
+
+test('large sources enter only the byte codec, quality upgrades retain source identity and close cancels late pixels', async () => {
+  const f = fixture();
+  try {
+    const requests: import('../../src/native-image-display-bridge').NativeImageDisplayRequest[] =
+      [];
+    const cancelled: string[] = [];
+    let release!: (
+      value: import('../../src/native-image-display-bridge').NativeImageDisplayReply,
+    ) => void;
+    window.kiteNativeImageDisplay = {
+      render(request) {
+        requests.push(request);
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+      cancel(id) {
+        cancelled.push(id);
+      },
+    };
+    const blob = new Blob([new Uint8Array(17 * 1024 * 1024)], { type: 'image/png' });
+    await f.render({ status: 'ready', blob });
+    await f.until(() => requests.length === 1);
+    expect(requests[0]!.edge).toBe(1024);
+    expect(requests[0]!.bytes.byteLength).toBe(blob.size);
+    const value = {
+      bytes: new Uint8Array([7]),
+      mimeType: 'image/png' as const,
+      width: 1024,
+      height: 512,
+      sourceWidth: 8000,
+      sourceHeight: 4000,
+      animated: true,
+      frame: 'first' as const,
+    };
+    await act(async () => release({ ok: true, value }));
+    const first = f.states.at(-1)!;
+    if (first.image.status !== 'ready') throw Error('expected_ready');
+    expect(first.image.bytes).toEqual(new Uint8Array([7]));
+    expect(first.image.display?.frame).toBe('first');
+    await f.action({ sessionId: first.sessionId, type: 'quality', id: '0', edge: 2048 });
+    await f.until(() => requests.length === 2);
+    expect(requests[1]!.edge).toBe(2048);
+    expect(f.states.at(-1)).toBe(first); // Keep prior pixels while sharpening.
+    await act(async () => release({ ok: true, value: { ...value, width: 2048, height: 1024 } }));
+    const second = f.states.at(-1)!.image;
+    expect(second.status === 'ready' && second.display?.key).toBe(first.image.display?.key);
+    expect(second.status === 'ready' && second.revision).not.toBe(first.image.revision);
+    await f.action({ sessionId: first.sessionId, type: 'quality', id: '0', edge: 4096 });
+    await f.until(() => requests.length === 3);
+    const count = f.states.length;
+    await f.unmount();
+    expect(cancelled).toContain(requests[2]!.id);
+    await act(async () => release({ ok: true, value }));
+    expect(f.states).toHaveLength(count);
+  } finally {
+    await f.close();
+  }
+});
+
+test('ROI uses only current admitted Blob and exact source key, cancels older crops and shows retryable failure', async () => {
+  const f = fixture();
+  try {
+    const requests: import('../../src/native-image-display-bridge').NativeImageDisplayRequest[] =
+      [];
+    const cancelled: string[] = [];
+    const replies = new Map<
+      string,
+      (reply: import('../../src/native-image-display-bridge').NativeImageDisplayReply) => void
+    >();
+    window.kiteNativeImageDisplay = {
+      render(request) {
+        requests.push(request);
+        return new Promise((resolve) => replies.set(request.id, resolve));
+      },
+      cancel(id) {
+        cancelled.push(id);
+      },
+    };
+    const blob = new Blob(['unchanged-original'], { type: 'image/png' });
+    await f.render({ status: 'ready', blob });
+    await f.until(() => requests.length === 1);
+    const base = {
+      bytes: new Uint8Array([1]),
+      mimeType: 'image/webp' as const,
+      width: 1024,
+      height: 512,
+      sourceWidth: 8000,
+      sourceHeight: 4000,
+      animated: false,
+      frame: 'static' as const,
+    };
+    await act(async () => replies.get(requests[0]!.id)!({ ok: true, value: base }));
+    const state = f.states.at(-1)!;
+    if (state.image.status !== 'ready') throw Error('ready');
+    const sourceKey = state.image.display!.key;
+    await f.action({
+      sessionId: state.sessionId,
+      type: 'detail',
+      id: '0',
+      sourceKey: 'wrong',
+      requestId: 'wrong',
+      region: { left: 0, top: 0, width: 500, height: 400 },
+    });
+    expect(requests).toHaveLength(1);
+    const region = { left: 2000, top: 1000, width: 500, height: 400 };
+    await f.action({
+      sessionId: state.sessionId,
+      type: 'detail',
+      id: '0',
+      sourceKey,
+      requestId: 'first',
+      region,
+    });
+    await f.until(() => requests.length === 2);
+    expect(requests[1]!.edge).toBe(2048);
+    expect(requests[1]!.region).toEqual(region);
+    expect(new TextDecoder().decode(requests[1]!.bytes)).toBe('unchanged-original');
+    await f.action({
+      sessionId: state.sessionId,
+      type: 'detail',
+      id: '0',
+      sourceKey,
+      requestId: 'cancel',
+      region: null,
+    });
+    expect(cancelled).toContain(requests[1]!.id);
+    await act(async () =>
+      replies.get(requests[1]!.id)!({
+        ok: true,
+        value: { ...base, width: 500, height: 400, region },
+      }),
+    );
+    expect(f.states.at(-1)).toBe(state);
+    await f.action({
+      sessionId: state.sessionId,
+      type: 'detail',
+      id: '0',
+      sourceKey,
+      requestId: 'second',
+      region,
+    });
+    await f.until(() => requests.length === 3);
+    await act(async () =>
+      replies.get(requests[2]!.id)!({ ok: false, code: 'native_image_display_decode_failed' }),
+    );
+    expect(f.states.at(-1)!.image).toMatchObject({
+      status: 'ready',
+      detail: { status: 'error', requestId: 'second', region },
+    });
+    await f.action({
+      sessionId: state.sessionId,
+      type: 'detail',
+      id: '0',
+      sourceKey,
+      requestId: 'retry',
+      region,
+    });
+    await f.until(() => requests.length === 4);
+    const count = f.states.length;
+    await f.unmount();
+    expect(cancelled).toContain(requests[3]!.id);
+    await act(async () =>
+      replies.get(requests[3]!.id)!({
+        ok: true,
+        value: { ...base, width: 500, height: 400, region },
+      }),
+    );
+    expect(f.states).toHaveLength(count);
   } finally {
     await f.close();
   }

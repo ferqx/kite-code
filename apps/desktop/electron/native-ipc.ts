@@ -1868,7 +1868,7 @@ export function registerNativeIpc(options: {
             caller.checkOutputGeneration(request.generation);
             file.check();
           },
-          materialize: (path) => file.materialize(path),
+          materialize: (path, signal) => file.materialize(path, signal),
           renderPdfPage: (page, signal) =>
             file.renderPdf(page, signal, (bytes, hash, page, signal) =>
               caller.renderLocalPreviewPdf(request.generation, bytes, hash, page, signal),

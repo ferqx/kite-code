@@ -162,6 +162,7 @@ export interface ComposerProps {
     error?: string;
     errorKind?: 'system';
     previewError?: string;
+    previewFrame?: 'first' | 'static';
     /** Original admitted by the host; url remains the inexpensive draft thumbnail. */
     previewSource?: ImagePreviewSource;
   }[];
@@ -828,13 +829,18 @@ export function Composer(props: ComposerProps) {
                 <button
                   type="button"
                   className="composer-attachment-preview composer-image-preview-trigger"
-                  aria-label={`预览图片 ${image.name}`}
+                  aria-label={`预览图片 ${image.name}${image.previewFrame === 'first' ? '（动画首帧）' : ''}`}
                   aria-busy={(!image.url && !image.previewError && !image.error) || undefined}
                   disabled={props.disabled || props.readOnly}
                   onClick={() => setPreviewImageId(image.id)}
                 >
                   {image.url ? (
-                    <img src={image.url} alt={image.name} decoding="async" />
+                    <>
+                      <img src={image.url} alt={image.name} decoding="async" />
+                      {image.previewFrame === 'first' && (
+                        <span className="image-preview-frame-label">动画首帧</span>
+                      )}
+                    </>
                   ) : image.previewError || image.error ? (
                     !onError && <span>{image.previewError ?? '预览不可用'}</span>
                   ) : null}

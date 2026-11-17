@@ -1,4 +1,5 @@
 import type { IpcMain, IpcMainEvent, WebContentsView } from 'electron';
+import { nativeImageDisplayRegionFits } from '../src/native-image-display-bridge';
 import {
   isNativeImageGalleryAction,
   isNativeImageGalleryPresentation,
@@ -115,6 +116,31 @@ export function createNativeImageGalleryHost(options: {
         input.sessionId !== state.sessionId
       )
         return;
+      if (input.type === 'detail') {
+        if (
+          input.id === state.selectedId &&
+          state.image.status === 'ready' &&
+          state.image.display?.key === input.sourceKey &&
+          (input.region === null ||
+            nativeImageDisplayRegionFits(
+              input.region,
+              state.image.display.sourceWidth,
+              state.image.display.sourceHeight,
+            ))
+        )
+          action(input);
+        return;
+      }
+      if (input.type === 'quality') {
+        if (
+          input.id === state.selectedId &&
+          state.image.status === 'ready' &&
+          state.image.display &&
+          input.edge > state.image.display.edge
+        )
+          action(input);
+        return;
+      }
       if (input.type === 'select' && input.id === state.selectedId) return;
       if (input.type === 'close') close();
       else if (

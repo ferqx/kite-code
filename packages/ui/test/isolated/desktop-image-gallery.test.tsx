@@ -838,3 +838,23 @@ test('source group changes unmount Native host ownership before a new selection 
   await act(async () => select('a'));
   expect(mounts).toBe(2);
 });
+
+test('Native host accepts large admitted sources without Root URLs while the Web size contract stays separate', async () => {
+  let latest!: ImageGalleryPresentationProps;
+  const Host = (props: ImageGalleryPresentationProps) => {
+    latest = props;
+    return null;
+  };
+  const source = new Blob([new Uint8Array(17 * 1024 * 1024)], { type: 'image/png' });
+  await render(
+    <ImageGalleryHostContext.Provider value={Host}>
+      <Harness
+        images={[{ id: 'large', name: 'large.png', source: { load: async () => source } }]}
+      />
+    </ImageGalleryHostContext.Provider>,
+  );
+  expect(latest.status).toBe('ready');
+  expect(latest.blob).toBe(source);
+  expect(created).toHaveLength(0);
+  expect(document.querySelector('img')).toBeNull();
+});

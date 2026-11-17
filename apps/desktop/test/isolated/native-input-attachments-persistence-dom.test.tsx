@@ -246,7 +246,6 @@ function durableHost() {
 }
 
 async function fixture(main = durableHost()) {
-  const restoreWorker = installImagePreviewWorker();
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const previous = {
     window: globalThis.window,
@@ -264,8 +263,14 @@ async function fixture(main = durableHost()) {
     Blob: dom.window.Blob,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+  const restoreWorker = installImagePreviewWorker();
+  const previewBlobs = new Map<string, Blob>();
   let nextUrl = 0;
-  URL.createObjectURL = () => `blob:pending-${++nextUrl}`;
+  URL.createObjectURL = (blob) => {
+    const url = `blob:pending-${++nextUrl}`;
+    previewBlobs.set(url, blob as Blob);
+    return url;
+  };
   URL.revokeObjectURL = () => {};
   const { createRoot } = await import('react-dom/client');
   const { Composer } = await import('../../../../packages/ui/src/desktop/Composer');
@@ -319,6 +324,7 @@ async function fixture(main = durableHost()) {
     main,
     dom,
     sends,
+    previewBlobs,
     get attachments() {
       return attachments;
     },
@@ -419,6 +425,59 @@ test('durable mixed attachments survive unmount and restore exact session, works
     await act(async () => f.attachments.restore('a', 'session-a', 'workspace'));
     expect(f.attachments.files('a')).toEqual([]);
     expect(f.attachments.get('a')).toEqual([]);
+    expect(f.sends).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a restored animated attachment keeps first-frame metadata and original gallery bytes without reuploading', async () => {
+  const f = await fixture();
+  const display = f.dom.window.kiteNativeImageDisplay!;
+  const render = display.render;
+  const sources: Uint8Array[] = [];
+  display.render = async (request) => {
+    sources.push(request.bytes.slice());
+    expect(request.mediaType).toBe('image/gif');
+    expect(request.edge).toBe(512);
+    const result = await render(request);
+    return result.ok
+      ? { ok: true, value: { ...result.value, animated: true, frame: 'first' } }
+      : result;
+  };
+  try {
+    await act(async () => f.attachments.restore('a', 'session-a', 'workspace'));
+    await act(async () => {
+      await f.attachments.add('a', [f.file('animated.gif', 'image/gif')]);
+      await f.attachments.flush('a');
+    });
+    const saved = f.main.read('session-a', 'workspace');
+    const original = f.attachments.get('a')[0]!;
+    expect(original.previewFrame).toBe('first');
+    expect(document.querySelector('.composer-attachments')?.textContent).toContain('动画首帧');
+    const uploadCount = f.main.calls.filter((call) => call.method === 'input.images.begin').length;
+    sources.length = 0;
+    await f.remount();
+    await act(async () => f.attachments.restore('a', 'session-a', 'workspace'));
+    for (let attempt = 0; attempt < 100 && !f.attachments.get('a')[0]?.url; attempt++)
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 5)));
+    const restored = f.attachments.get('a')[0]!;
+    expect(restored.id).toBe(original.id);
+    expect(restored.previewFrame).toBe('first');
+    expect(restored.previewError).toBeUndefined();
+    expect(document.querySelector('.composer-attachments')?.textContent).toContain('动画首帧');
+    expect(sources.map((bytes) => [...bytes])).toEqual([[1, 2, 3]]);
+    const thumbnail = f.previewBlobs.get(restored.url)!;
+    expect(thumbnail.type).toBe('image/webp');
+    expect(new TextDecoder().decode(await thumbnail.arrayBuffer())).toBe('derived');
+    const gallerySource = await restored.previewSource!.load!(new AbortController().signal);
+    expect(gallerySource.type).toBe('image/gif');
+    expect([...new Uint8Array(await gallerySource.arrayBuffer())]).toEqual([1, 2, 3]);
+    expect(f.main.bytes.get(restored.id)).toEqual([1, 2, 3]);
+    expect(f.main.read('session-a', 'workspace')).toEqual(saved);
+    expect(f.main.calls.filter((call) => call.method === 'input.images.begin')).toHaveLength(
+      uploadCount,
+    );
     expect(f.sends).toEqual([]);
   } finally {
     await f.close();

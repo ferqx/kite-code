@@ -37,6 +37,7 @@ import { build as buildRenderer } from 'vite';
 import { type DesktopDevelopment, parseDesktopDevelopment } from '../electron/development';
 import type { MacosElectronResize } from '../electron/macos-electron-resize';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
+import { buildImageDisplay } from './build-image-display';
 import { buildOfficePreviews } from './build-office-previews';
 import { buildWindowsAccess } from './build-windows-access';
 import {
@@ -93,6 +94,7 @@ async function buildNativeApp(
   else await mkdir(outdir, { recursive: true });
   const root = resolve(import.meta.dir, '..');
   await buildOfficePreviews(outdir);
+  const imageDisplayAsset = await buildImageDisplay(outdir);
   await writeFile(join(outdir, 'app-icon.ico'), await readFile(join(root, 'app-icon.ico')));
   const windowsAccessAsset = process.platform === 'win32' ? await buildWindowsAccess(outdir) : null;
   const helper = await Bun.build({
@@ -136,6 +138,7 @@ async function buildNativeApp(
       naming: `${entry}.cjs`,
       define: {
         __KITE_DESKTOP_NATIVE_ASSETS__: JSON.stringify(assets),
+        __KITE_DESKTOP_IMAGE_DISPLAY__: JSON.stringify(imageDisplayAsset),
         __KITE_DESKTOP_DEVELOPMENT__: JSON.stringify(development),
         __KITE_DESKTOP_PROFILE_ACCESS__: JSON.stringify(profileAccessAsset),
         __KITE_DESKTOP_WINDOWS_ACCESS__: JSON.stringify(windowsAccessAsset),

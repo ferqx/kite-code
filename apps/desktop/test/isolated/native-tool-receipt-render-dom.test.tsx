@@ -112,7 +112,6 @@ function fixture(mode: Mode, testDiagnostics = false) {
       : original;
   const isImage = mode === 'image' || mode === 'image-batch';
   const imageCount = mode === 'image-batch' ? 10 : 1;
-  const restoreWorker = isImage ? installImagePreviewWorker() : () => {};
   const imageData =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VQAAAABJRU5ErkJggg==';
   const imageBytes = Buffer.from(imageData, 'base64');
@@ -133,6 +132,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+
+  const restoreWorker = isImage ? installImagePreviewWorker() : () => {};
   const session = {
     ...backgroundItem().rootSession,
     nextSeq: mode === 'mixed' ? '5' : groupedDiff ? '4' : '3',

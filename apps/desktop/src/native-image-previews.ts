@@ -1,7 +1,11 @@
+import { nativeImageDisplaySourceByteLimit } from './native-image-display-bridge';
+import { createNativeImagePreviewTask } from './native-image-preview-worker';
+
 export type ImagePreview = {
   readonly blob: Blob;
   readonly width: number;
   readonly height: number;
+  readonly frame?: 'first' | 'static';
   /** Encoded data plus an RGBA estimate; this is not a browser heap limit. */
   readonly cost: number;
 };
@@ -49,10 +53,7 @@ export class NativeImagePreviews {
   private cost = 0;
   private pendingBytes = 0;
   private readonly create: () => ImagePreviewWorker;
-  constructor(
-    create: () => ImagePreviewWorker = () =>
-      new Worker(new URL('./native-image-preview-worker.ts', import.meta.url), { type: 'module' }),
-  ) {
+  constructor(create: () => ImagePreviewWorker = createNativeImagePreviewTask) {
     this.create = create;
   }
 
@@ -100,7 +101,7 @@ export class NativeImagePreviews {
       !originalMediaTypes.has(identity.mediaType) ||
       !Number.isSafeInteger(identity.size) ||
       identity.size < 1 ||
-      identity.size > 16 * 1024 * 1024 ||
+      identity.size > MAX_ORIGINAL_BYTES ||
       blob.type !== identity.mediaType ||
       blob.size !== identity.size
     )
@@ -132,7 +133,12 @@ export class NativeImagePreviews {
 
   prepare(source: Blob, hash: string, signal: AbortSignal): Promise<ImagePreview> {
     signal.throwIfAborted();
-    if (!/^[a-f0-9]{64}$/.test(hash) || source.size < 1 || source.size > 16 * 1024 * 1024)
+    if (
+      !/^[a-f0-9]{64}$/.test(hash) ||
+      source.size < 1 ||
+      source.size > nativeImageDisplaySourceByteLimit ||
+      !originalMediaTypes.has(source.type)
+    )
       return Promise.reject(Error('image_preview_source_invalid'));
     // Only full-content identities established by the original reader enter the cache.
     const key = JSON.stringify(['preview-512-webp-v1', hash, source.type, source.size]);
@@ -144,7 +150,10 @@ export class NativeImagePreviews {
     }
     let job = this.jobs.get(key);
     if (!job) {
-      if (this.jobs.size >= 8 || this.pendingBytes + source.size > MAX_PENDING_BYTES)
+      if (
+        this.jobs.size >= 8 ||
+        (this.jobs.size > 0 && this.pendingBytes + source.size > MAX_PENDING_BYTES)
+      )
         return Promise.reject(Error('image_preview_busy'));
       job = { id: ++this.serial, key, source, subscribers: new Set() };
       this.jobs.set(key, job);
@@ -274,6 +283,7 @@ export class NativeImagePreviews {
             blob: value.blob,
             width: value.width,
             height: value.height,
+            frame: value.frame === 'first' ? 'first' : 'static',
             cost: value.blob.size + value.width * value.height * 4,
           });
       };

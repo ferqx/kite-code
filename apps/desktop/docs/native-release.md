@@ -28,6 +28,8 @@ macOS arm64 和 Windows x64 执行 `bun run release:build --product native` 可�
 
 Native 构建将 Word、Excel、PPT 原件预览脚本放入桌面应用目录，并随制品记录 Word、PPT 渲染器的许可与上游声明。默认运行时提供四个 Office Skill、PDF helper 与独立字体。运行时以已准入的 Service 入口定位同级 Agent 包，支持桌面专用 `terminal/code` 和完整 Terminal 的 `terminal/node_modules` 布局。 [已准入的 Service 入口](../electron/native-assets.ts) · [文档资产的构建与校验](../../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
 
+图片显示由[固定构建](../scripts/build-image-display.ts)加入独立codec JS、当前平台sharp原生绑定及libvips、完整第三方许可声明。JS与版本元数据打入固定入口，原生绑定只从入口同目录的私有assets加载，不依赖仓库或环境中的包，不新增`node_modules`目录。macOS本机的[默认路径与搬迁回归](../test/isolated/native-image-display-bundle.test.ts)核实际Electron整图／区域解码，并在禁止外部依赖查找时核包内闭包；绑定缺失时明确失败，不回退环境。此项构建验证不代表本轮完整DMG、Windows安装包或跨平台发行资格。
+
 CLI/TUI 由 `bun run release:build` 构建的独立 Terminal 提供。下面的组合包示例用 `--terminal` 显式选择完整 Terminal，供组合安装和 `register-cli` 使用。
 
 macOS arm64 的 Electron 仍固定44.3.0；[构建准备](../scripts/macos-electron-runtime.ts)只接受完整原始Framework SHA与封闭分发，在新候选的独立 `electron` 副本内应用[resize补丁](../patches/electron-44.3.0-macos-resize.patch)，重新进行 ad-hoc 签名及校验，再执行SQLite探针、Main构建和完整manifest。两处指令及签名以外的payload、源分发与副本独立性均复核；重新签名产生的CodeResources与最终Framework字节进入原清单，不跳过任何文件。开发入口也准备每次专属副本；不修改 `node_modules` 或已存在的不可变候选。

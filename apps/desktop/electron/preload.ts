@@ -39,6 +39,14 @@ import {
 } from '../src/native-browser-bridge';
 import { nativeGlobalDialogActiveChannel } from '../src/native-global-dialog-bridge';
 import {
+  isNativeImageDisplayId,
+  isNativeImageDisplayRequest,
+  isNativeImageDisplayResultForRequest,
+  type NativeImageDisplayBridge,
+  nativeImageDisplayCancelChannel,
+  nativeImageDisplayChannel,
+} from '../src/native-image-display-bridge';
+import {
   isNativeImageGalleryAction,
   isNativeImageGalleryPresentation,
   type NativeImageGalleryBridge,
@@ -117,6 +125,25 @@ const imageGallery: NativeImageGalleryBridge = {
   },
 };
 contextBridge.exposeInMainWorld('kiteNativeImageGallery', imageGallery);
+const imageDisplay: NativeImageDisplayBridge = {
+  async render(request) {
+    if (!isNativeImageDisplayRequest(request)) throw Error('native_image_display_invalid');
+    const reply = await ipcRenderer.invoke(nativeImageDisplayChannel, request);
+    if (
+      reply?.ok === false &&
+      typeof reply.code === 'string' &&
+      /^native_image_display_[a-z_]+$/.test(reply.code)
+    )
+      return reply;
+    if (reply?.ok !== true || !isNativeImageDisplayResultForRequest(reply.value, request))
+      throw Error('native_image_display_output_invalid');
+    return reply;
+  },
+  cancel(id) {
+    if (isNativeImageDisplayId(id)) ipcRenderer.send(nativeImageDisplayCancelChannel, id);
+  },
+};
+contextBridge.exposeInMainWorld('kiteNativeImageDisplay', imageDisplay);
 function readBrowserLayoutReply(reply: BrowserLayoutReply) {
   if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
   if (reply.value !== null && !isNativeBrowserState(reply.value))

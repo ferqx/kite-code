@@ -37,6 +37,8 @@ import {
   serveDevelopmentReload,
 } from './development';
 import { registerNativeExternalLinks } from './external-links';
+import { createNativeImageDisplayHost } from './image-display-host';
+import { disposeImageDisplay } from './image-display-service';
 import { configureMacosElectronResize, type MacosElectronResize } from './macos-electron-resize';
 import { nativeModelPreferences } from './model-preference';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
@@ -440,7 +442,7 @@ function stopNativeProcess(code = 0): void {
       if (exitAllowed) return;
       await developmentReload?.catch(() => {});
       if (exitAllowed) return;
-      await closeNativeResources();
+      await Promise.all([disposeImageDisplay(), closeNativeResources()]);
     },
   });
   setQuitting();
@@ -685,6 +687,7 @@ void app
     });
     globalDialogOwner = globalDialog;
     globalDialog.prewarm();
+    createNativeImageDisplayHost({ window, ipcMain, rootUrl: rendererUrl });
     const imageGallery = createNativeImageGalleryHost({
       window,
       ipcMain,

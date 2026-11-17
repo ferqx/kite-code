@@ -49,7 +49,6 @@ function fixture(
     historyCatchup?: boolean;
   } = {},
 ) {
-  const restoreWorker = withImage ? installImagePreviewWorker() : () => {};
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -68,6 +67,8 @@ function fixture(
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+
+  const restoreWorker = withImage ? installImagePreviewWorker() : () => {};
   const session = { ...backgroundItem().rootSession, nextSeq: '6' };
   let selected = 'root',
     revision = 1,
