@@ -12,12 +12,18 @@ Status: implemented
 
 固定 Seatbelt 允许 fork、保留 HOME/宿主运行根和广泛读取；后代继承边界。普通 Shell 的实际 Profile/coordination 拒读写映射，准确 runtimeAssets/运行根只读，私有 temp 不执行。正式 Profile Skill verifier 后来加入[准确原来源只读例外](2026-10-10-profile-workflow-read-only-original-source.md)，仅原 Skill 子树与祖先 metadata 可读，整个保护根写入及 native exec-map 仍拒绝；该例外不适用于普通 Shell。Full 也拒绝这些根和准确祖先的 unlink。真实 Full 父目录 rename 先复现绕过，随后用准确祖先规则关闭；只保护子路径不足以保持其原归属。非 Full 允许 IP、拒绝 Unix socket bind/outbound，Full 使用宿主网络范围。
 
-私有 broker 在受保护 control base 创建0700目录、独立秘密握手及随机准确本用户 launchd Background 标签。先核 launchctl 返回的原 guardian PID，再传业务帧；relative Unix socket 支持长 Profile 路径。guardian 原自身 unique/pidversion/resource coalition 稳定且内核 task count=1 时才启动命令。fork/exec 继承此资源归属，setsid/orphan 不改变它；停止信号使用成员原 pidversion audit token，内核原子比对身份，不回退数值 PID。
+私有 broker 在受保护 control base 创建0700目录、独立秘密握手及本用户 launchd Background 会话中的随机准确标签。先核 launchctl 返回的原 guardian PID，再传业务帧；relative Unix socket 支持长 Profile 路径。guardian 原自身 unique/pidversion/resource coalition 稳定且内核 task count=1 时才启动命令。fork/exec 继承此资源归属，setsid/orphan 不改变它；停止信号使用成员原 pidversion audit token，内核原子比对身份，不回退数值 PID。
+
+2026-11-16 的 [本机对照](../../../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)发现 `Background` 资源调度拉长了 guardian 启动和完整资产复核。Shell guardian 与命令进程采用 `Standard` 资源调度，继续在原 Background 会话拥有单独的 coalition。`Standard` 改变 Shell 进程的 CPU 和 I/O 调度等级，MCP 与 Browser 继续采用其 Background 资源调度。父进程和 guardian 各自在原边界核验完整资产。
 
 完整后代为空由原 guardian 仍属原 coalition、内核 task count=1、原根真实退出及 held-root/group proof 共同确认，再准确回收原根。自然退出、cancel、父 EOF/SIGKILL 共用同一次 closing。正常 broker 在原 subtree 证明后撤销标签，并以准确 print=absence 和原目录身份确认清理；bootout 成功本身不作 subtree 或清理证明，先前已经移除或移除已提交但回复丢失也可由准确 absence 确认。失联、容量不足、漂移或未确认保持 unknown。host start 只将固定非秘密错误码交给原 Core 失败合同，guardian stderr 与有界早期失败诊断留在受保护 control base，读取最多8192bytes，不用诊断代替停止证明。cold reference 只读持久结果，不重建旧 handle 或执行。
 
+
+业务帧发送前取消时，broker 关闭私有套接字并确认原 launchd 注册已清理，或确认尚未尝试注册。宿主核对原 broker 回执的 nonce 和 PID，确认原输出管道完整结束且 broker 正常退出后再清理宿主资源并确认停止。清理或退出证据不足时保留结果未知。
+
 ## Alternatives considered
 
+- 保留 Shell 的 Background 调度并延长启动等待。延长等待能容纳慢启动，实测的启动和完整资产复核延迟仍受同一资源调度限制。
 - 只用原 PGID、PID/ppid 列表或 kqueue：实际 setsid/orphan 可逃组，PID 观察有复用窗口，Darwin NOTE_TRACK/CHILD 不提供完整跟踪；不能满足全树停止。
 - 默认使用原固定 confined deny-fork：破坏需要派生进程的宿主工具；仍保留原声明补偿工厂及其理由，不给它增加可选 allow-fork。
 - Endpoint Security descendants client：SDK27 声明最低 macOS27/entitlement，本机26.7.1运行库没有符号，无法取得当前资格；不升级OS或安装 entitlement。

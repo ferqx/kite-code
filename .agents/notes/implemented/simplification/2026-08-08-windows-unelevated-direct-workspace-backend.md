@@ -1,4 +1,4 @@
-# Agent Note: Codex 式无 UAC restricted-token 直接 Workspace 后端
+# Agent Note: Windows 无 UAC restricted-token 直接 Workspace 后端
 
 Status: implemented
 
@@ -6,10 +6,9 @@ Status: implemented
 私有 Workspace AppContainer 候选对其 staging 的路径具有较强隔离形态，但即使把工作移出
 TUI 线程，复制并回写大仓库仍会让首个命令等待很久。这样的等待不能成为 Windows 交互式默认体验。
 
-Codex 的 Windows 实现展示了另一种开发期沙箱形态：从当前用户创建无 UAC 的 write-restricted token，
-向 token 附加 capability SID，只在需要写入的路径上授予这些 SID，并让子进程运行在 Job Object 中。
-它直接操作真实 Workspace，普通使用不需要管理员确认。但它不等价于受管身份、结构性网络边界或
-投影文件系统。
+使用当前用户的 write-restricted token 与按路径授予的 capability SID，可以直接在真实 Workspace 启动，
+由 Job Object 管理子进程。这样可以省去整仓复制与 UAC，代价是该开发路径缺少受管身份、结构性网络
+边界与投影文件系统。
 
 [Agent Note 0079](../architecture/2026-08-08-windows-managed-restricted-token-sandbox.md) 曾把 elevated managed restricted-token profile 作为默认目标，并把对动态根级
 .env.* 创建的保证保留为门槛。这仍是更强的 profile；但若把它作为普通开发路径前置条件，就会把不必要、

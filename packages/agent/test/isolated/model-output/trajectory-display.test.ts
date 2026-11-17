@@ -9,6 +9,7 @@ import {
   sealedModelTrajectoryDisplay,
   toolTrajectoryDisplay,
 } from '../../../src/trajectory/display';
+import { toolResultEvidence } from '../../../src/trajectory/evidence-projection';
 import { toolResultPresentation } from '../../../src/trajectory/tool-result-presentation';
 
 test('message snippets copy only verified inline public content and never reconstruct private message siblings', () => {
@@ -189,6 +190,34 @@ test('the six current Task result operations keep their real admission observati
       toolResultPresentation({ ...input, result: { ...input.result, content: 'different' } }),
     ).toBeUndefined();
   }
+});
+
+test('Shell evidence identifies a verified saved preview without interpreting command output as receipt fields', () => {
+  const result = {
+    outcome: 'succeeded',
+    content: '{"ref":"stdout as JSON"}\n',
+    details: {
+      outputFormat: 'model-preview',
+      outputLimited: false,
+      ref: { extensionId: 'builtin.shell', executionId: 'job' },
+      execution: { id: 'job', status: 'succeeded' },
+    },
+  };
+  const presentation = toolResultPresentation({
+    extensionId: 'builtin.shell',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    executionId: 'tool',
+    input: { command: 'printf original' },
+    result,
+  });
+  expect(toolResultEvidence(result, presentation as Json)).toEqual({
+    outcome: 'succeeded',
+    content: result.content,
+    outputFormat: 'model-preview',
+    presentation: { kind: 'shell', operation: 'execute', executionId: 'job', status: 'succeeded' },
+  });
+  expect(toolResultEvidence(result)).not.toHaveProperty('outputFormat');
 });
 
 test('inline output presence never guesses old missing fields and remains incomplete for non-success states', () => {

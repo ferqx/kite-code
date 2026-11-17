@@ -26,6 +26,17 @@ export interface LaunchdControl {
 }
 const MAX_FRAME = 1024 * 1024;
 const TERMINAL_EOF_MS = 2000;
+const MACOS_SHELL_GUARDIAN_START_TIMEOUT_MS = 10_000;
+// The host also waits for launch identity verification and the command to spawn.
+export const MACOS_SHELL_START_TIMEOUT_MS = MACOS_SHELL_GUARDIAN_START_TIMEOUT_MS + 5_000;
+
+/** The startup request was cancelled before sending any business frame, and its registration was removed. */
+export class LaunchdStartupCancelled extends Error {
+  constructor() {
+    super('launchd_start_cancelled');
+  }
+}
+
 const xml = (text: string) =>
   text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 function startupDiagnostic(rootPath: string) {
@@ -144,6 +155,7 @@ export async function startLaunchdSupervisor(input: {
   kind?: 'shell' | 'mcp' | 'browser';
   includeRegistration?: boolean;
   cancelled?: () => boolean;
+  startSignal?: AbortSignal;
   /** Present only in the fixed worker broker which already started with this profile. */
   trustedRuntime?: { bunFlags: readonly string[]; env: Readonly<Record<string, string>> };
   onFrame(frame: Record<string, unknown>): Promise<void>;
@@ -157,6 +169,8 @@ export async function startLaunchdSupervisor(input: {
   const kind = input.kind ?? 'shell';
   if (kind !== 'shell' && kind !== 'mcp' && kind !== 'browser')
     throw Error('launchd_supervisor_unsupported');
+  const { startSignal } = input;
+  if (startSignal?.aborted) throw new LaunchdStartupCancelled();
   const frameLimit = kind === 'mcp' ? 2 * 1024 * 1024 + 64 * 1024 : MAX_FRAME;
   const rootPath = realpathSync.native(mkdtempSync(join(input.controlBase, `${kind}-`)));
   chmodSync(rootPath, 0o700);
@@ -309,6 +323,9 @@ export async function startLaunchdSupervisor(input: {
     });
   });
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancellation = Error('launchd_start_cancelled');
+  const cancelStart = () => readyReject(cancellation);
+  startSignal?.addEventListener('abort', cancelStart, { once: true });
   try {
     // The broker is a dedicated private process. Relative socket paths avoid the
     // Darwin sockaddr_un length limit for long installed Profile paths.
@@ -318,6 +335,7 @@ export async function startLaunchdSupervisor(input: {
       server.once('error', reject);
       server.listen('control.sock', resolve);
     });
+    if (startSignal?.aborted) throw cancellation;
     const plist = join(rootPath, 'job.plist');
     const strings = [
       ...(input.trustedRuntime
@@ -343,17 +361,20 @@ export async function startLaunchdSupervisor(input: {
 <key>StandardErrorPath</key><string>${xml(join(rootPath, 'guardian-stderr.log'))}</string>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/bin:/bin</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><false/>
-<key>AbandonProcessGroup</key><false/><key>ProcessType</key><string>Background</string>
+<key>AbandonProcessGroup</key><false/><key>ProcessType</key><string>${kind === 'shell' ? 'Standard' : 'Background'}</string>
 <key>LimitLoadToSessionType</key><string>Background</string>
 </dict></plist>`,
       { mode: 0o600, flag: 'wx' },
     );
-    timer = setTimeout(() => readyReject(Error('launchd_guardian_start_timeout')), 4000);
+    timer = setTimeout(
+      () => readyReject(Error('launchd_guardian_start_timeout')),
+      kind === 'shell' ? MACOS_SHELL_GUARDIAN_START_TIMEOUT_MS : 4000,
+    );
     bootstrapAttempted = true;
     const bootstrapped = await launchctl(['bootstrap', registration.domain, plist]);
     if (bootstrapped.code !== 0) throw Error('launchd_bootstrap_failed');
     await ready;
-    if (input.cancelled?.()) throw Error('launchd_start_cancelled');
+    if (startSignal?.aborted || input.cancelled?.()) throw cancellation;
     const send = async (frame: Record<string, unknown>): Promise<void> => {
       if (!frame || Array.isArray(frame) || frame.nonce !== input.frame.nonce)
         throw Error('launchd_frame_identity_invalid');
@@ -437,26 +458,31 @@ export async function startLaunchdSupervisor(input: {
     } catch (failure) {
       cleanupErrors.push(failure);
     }
-    const cause =
-      error instanceof Error ? (error as NodeJS.ErrnoException & { address?: unknown }) : undefined;
-    try {
-      writeFileSync(
-        join(
-          input.controlBase,
-          `${kind}-failure-${registration.label.slice(`com.kitecode.${kind}.`.length)}.json`,
-        ),
-        JSON.stringify({
-          code: error instanceof Error ? error.message.slice(0, 1024) : 'unknown',
-          causeCode: typeof cause?.code === 'string' ? cause.code.slice(0, 64) : null,
-          syscall: typeof cause?.syscall === 'string' ? cause.syscall.slice(0, 64) : null,
-          address: typeof cause?.address === 'string' ? cause.address.slice(0, 256) : null,
-          guardianStderr: startupDiagnostic(rootPath),
-        }),
-        { mode: 0o600, flag: 'wx' },
-      );
-    } catch (failure) {
-      cleanupErrors.push(failure);
-    }
+    const recordFailure = () => {
+      const cause =
+        error instanceof Error
+          ? (error as NodeJS.ErrnoException & { address?: unknown })
+          : undefined;
+      try {
+        writeFileSync(
+          join(
+            input.controlBase,
+            `${kind}-failure-${registration.label.slice(`com.kitecode.${kind}.`.length)}.json`,
+          ),
+          JSON.stringify({
+            code: error instanceof Error ? error.message.slice(0, 1024) : 'unknown',
+            causeCode: typeof cause?.code === 'string' ? cause.code.slice(0, 64) : null,
+            syscall: typeof cause?.syscall === 'string' ? cause.syscall.slice(0, 64) : null,
+            address: typeof cause?.address === 'string' ? cause.address.slice(0, 256) : null,
+            guardianStderr: startupDiagnostic(rootPath),
+          }),
+          { mode: 0o600, flag: 'wx' },
+        );
+      } catch (failure) {
+        cleanupErrors.push(failure);
+      }
+    };
+    if (error !== cancellation) recordFailure();
     if (controlClosed) {
       try {
         // A failed bootstrap reply does not prove that registration never committed.
@@ -466,10 +492,14 @@ export async function startLaunchdSupervisor(input: {
         cleanupErrors.push(failure);
       }
     }
-    if (cleanupErrors.length)
+    if (cleanupErrors.length) {
+      if (error === cancellation) recordFailure();
       throw new AggregateError([error, ...cleanupErrors], 'launchd_start_cleanup_unconfirmed');
+    }
+    if (error === cancellation && !businessSent) throw new LaunchdStartupCancelled();
     throw error;
   } finally {
     clearTimeout(timer);
+    startSignal?.removeEventListener('abort', cancelStart);
   }
 }

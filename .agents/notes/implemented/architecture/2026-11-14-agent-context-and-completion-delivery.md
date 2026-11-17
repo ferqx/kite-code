@@ -11,7 +11,7 @@ Status: implemented
 ## Decision
 
 - 静态来源、带出处的项目快照和唯一 Runtime 观察块组成统一前缀，原会话随后按实际顺序进入模型。普通调用、压缩、展开校验共用组装，保留低权限角色、原来源标签和完整工具配对。这更新了[原来源捕获决定](2026-10-10-complete-checkpoint-source-capture.md)中的相对消息位置。
-- 模型合同要求子任务通过最终回复交付报告，普通消息用于工作期间需要对方处理的内容。2026-11-15 确认采用 [Codex CLI 的默认邮箱交付](https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/core/src/agent/control/completion.rs#L107-L123)。终态沿[原统一邮箱](2026-10-23-unified-message-reception.md)进入活动父轮，空闲时留待下次运行。普通 Service 不自动开通知轮，可信宿主显式授权的续轮与其原安全验证保留。
+- 模型合同要求子任务通过最终回复交付报告，普通消息用于工作期间需要对方处理的内容。2026-11-15 确认子任务终态沿[原统一邮箱](2026-10-23-unified-message-reception.md)进入活动父轮，空闲时留待下次运行。普通 Service 不自动开通知轮，可信宿主显式授权的续轮与其原安全验证保留。
 - 主会话和子详情共用 Conversation、Trace、工具行、思考正文及模型正文组件。子详情只提供独立授权的原消息读口，展开时仍通过相同组件消费差异、快照与附件。最终展示归[桌面 owner](../../../../apps/desktop/README.md#内部模型调用与子-agent)，模型请求归[Agent owner](../../../../packages/agent/README.md)。
 
 ## Alternatives considered

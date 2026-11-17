@@ -4,11 +4,9 @@
 
 本阶段补充验收：正式 App Server 的 `current_turn` 边界 5/5，包括原 Run 下一次只读模型消费消息，以及 Provider 返回未公布的 Shell Tool 时被拒绝；两处真实 SIGKILL 恢复 2/2；满位排队／有位后启动的容量回归 2/2。另有 queued 容量真实 SIGKILL 恢复 1/1：两个占槽 child 的在途 Provider 尝试在崩溃后成为 unknown，来源备付保持 queued 并报告 `followup_recovery_required`；没有目标路由／派发或来源释放，不能在该不确定状态结算 `capacity_timeout`。Store 的 queued 后备证明已收紧为两种准确事实：仍 queued 且无槽获取事件，或已转 reserved 且有准确 `resource_budget.child_slot_acquired`；不再凭状态单独推断槽已取得。这些是本地受控 Provider 和进程恢复证据，D3 的 `new_turn` 与 `current_turn` 各有独立合成隔离环境下的真实 DeepSeek 定向验收；不以模型是否回显提示词标记作为通过条件。
 
-本方案面向真实会话中多个后台子 Agent 与有限 Shell 的派发、等待、部分结果、用户引导和停止。原“一个 child 回复后本轮回复失败”已从本机持久事件和结果 Artifact 定位为 child `suspended` 结果在 Kernel 接纳前被 Service 投影为 `unavailable` 的窗口；准确失败时序和仍需补验范围见第 7 节。Codex 的 Agent 通信只作为目标行为依据，不能用工具改名替代 Kite 的接纳与恢复验证。
+本方案面向真实会话中多个后台子 Agent 与有限 Shell 的派发、等待、部分结果、用户引导和停止。原“一个 child 回复后本轮回复失败”已从本机持久事件和结果 Artifact 定位为 child `suspended` 结果在 Kernel 接纳前被 Service 投影为 `unavailable` 的窗口；准确失败时序和仍需补验范围见第 7 节。
 
-## 1. 参考依据与 Kite 现状
-
-[Codex Responses Multi-agent 指南](https://developers.openai.com/api/docs/guides/responses-multi-agent)区分创建、查询、等待、排队消息、显式续轮和中断。固定源码提交 `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09` 中，[V1 定向等待](https://github.com/openai/codex/blob/40eac3ce8a0c10cbcb9db910d529355eb2f8fc09/codex-rs/core/src/tools/handlers/multi_agents/wait.rs)对指定目标做 wait-any；[V2 `wait_agent`](https://github.com/openai/codex/blob/40eac3ce8a0c10cbcb9db910d529355eb2f8fc09/codex-rs/core/src/tools/handlers/multi_agents_v2/wait.rs)等待调用者邮箱更新、用户引导或超时。`wait_agent` 不承诺每次返回所有 Agent 的全量状态；整体状态由 [`list_agents`](https://github.com/openai/codex/blob/40eac3ce8a0c10cbcb9db910d529355eb2f8fc09/codex-rs/core/src/tools/handlers/multi_agents_v2/list_agents.rs)查询。成功等待回执与消息正文进入下一模型上下文也是两个事实。
+## 1. Kite 现状
 
 Kite 已有[执行手册](../handbook/features/execution.md)、[Builtin 工具契约](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/docs/tool-pipeline.md)、[CompletionGuard](../active/completion-guard.md)和 [Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)：`task(background=true)` 返回 task ID；`task_wait` 对指定 1–8 个 task ID 做有限 wait-any；`task_read` 补读状态或报告。`shell_execute(yield_ms)` 返回 Shell 句柄，`shell_read` 按游标读取或等待，`shell_stop` 精确停止。required 子任务结果仍属于原 Run：唯一 watcher 先写结果 Artifact，Kernel 接纳后以低权限具名内容进入主模型输入。阶段 A–C 沿用这套权威，不另建结果收件箱、生命周期 registry 或 `await_agent`／`wait_shell` 同义工具。
 
@@ -30,7 +28,7 @@ Kite 已有[执行手册](../handbook/features/execution.md)、[Builtin 工具�
 5. **真实在途等待不算模型错误。** live admitted attempt 的工具、required Shell 和 child 均不因等待或局部唤醒增加 CompletionGuard 的 correction attempt。未知 owner／外部副作用走有证据的恢复或 unknown，不伪造成功或无限等待。
 6. **停止以清理证据为准。** 精确停止一个 child 或 Shell 与取消父 Run 分开；停止受理、执行退出和清理确认也分开。未知副作用不得自动重放。
 7. **低权限交付。** 子 Agent 结果和阶段 D 的 Agent 间消息保留来源，不视为用户授权；运行中消息不能扩大原任务权限、预算或 deadline，新轮重新校验授权。
-8. **主、子引导分开。** Kite 现有 `steer_turn` 由活动主 Run 处理。Codex 式 `send_message` 只排队，`followup_task` 才触发目标继续；回执均不等于模型已读或已执行。已发模型请求、已启动工具和已展示 final 不追溯改写；停止另走独立操作。
+8. **主、子引导分开。** Kite 现有 `steer_turn` 由活动主 Run 处理。`send_message` 只排队，`followup_task` 才触发目标继续；回执均不等于模型已读或已执行。已发模型请求、已启动工具和已展示 final 不追溯改写；停止另走独立操作。
 
 ## 3. 阶段 A–C：当前工具的合理调用
 
@@ -53,13 +51,11 @@ Kite 已有[执行手册](../handbook/features/execution.md)、[Builtin 工具�
 
 典型当前会话：主 Agent 派发 A/B/C 和一个有限 Shell，继续独立工作。若 A 的结论影响下一步，它对 A/B/C 的 task ID 调 `task_wait`；A 先终态则处理 A，B/C 和 Shell 继续。若只需最终汇总，提交完成候选，Runtime 等齐剩余 required 工作。用户在等待时发引导，由原 Run 处理；每次局部终态只更新事实，最终才恢复模型形成答复。
 
-## 4. Codex 式 Agent 通信：Kite 接线决定
-
-[OpenAI 官方 Multi-agent 文档](https://developers.openai.com/api/docs/guides/responses-multi-agent)将 `send_message`（排队）、`followup_task`（启动或恢复非根 Agent）、`wait_agent`（调用者邮箱等待）、`list_agents`（Agent 树状态）和 `interrupt_agent`（独立中断）分开。固定源码提交 `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09` 中，[`send_message = QueueOnly`](https://github.com/openai/codex/blob/40eac3ce8a0c10cbcb9db910d529355eb2f8fc09/codex-rs/core/src/tools/handlers/multi_agents_v2/send_message.rs#L35-L47)、[`followup_task = TriggerTurn`](https://github.com/openai/codex/blob/40eac3ce8a0c10cbcb9db910d529355eb2f8fc09/codex-rs/core/src/tools/handlers/multi_agents_v2/followup_task.rs#L35-L47) 的[共同处理器](https://github.com/openai/codex/blob/40eac3ce8a0c10cbcb9db910d529355eb2f8fc09/codex-rs/core/src/tools/handlers/multi_agents_v2/message_tool.rs#L57-L93)成功时返回空工具结果，不返回新 task ID；[`wait_agent`](https://github.com/openai/codex/blob/40eac3ce8a0c10cbcb9db910d529355eb2f8fc09/codex-rs/core/src/tools/handlers/multi_agents_v2/wait.rs#L35-L163)只返回唤醒／超时摘要，不是结果正文或所有 Agent 快照。这些是交互依据；Kite 的现行会话边界见 §4.0，原单 Session 草案的取舍由 Agent Note 0190 保留。
+## 4. Agent 通信设计
 
 ### 4.0 会话线程边界：阶段 D 的新前提
 
-[Codex CLI 的 Subagents 文档](https://learn.chatgpt.com/docs/agent-configuration/subagents)把子 Agent 的工作场所称为 Agent thread，CLI 可用 `/agent` 切换并查看各线程；主线程汇总子线程结果。该文档证明独立上下文的产品语义，不规定 Kite 或 Codex 的数据库布局。Kite 在阶段 D 选择更明确的运行边界：每个 Agent 拥有独立的持久会话线程（`agentThreadId`／Store Session ID）、State revision、模型 transcript、轮次与执行 owner。子线程可继承工作区与受限配置，创建时记录 `parentAgentId`／`parentThreadId`，但不能直接在父线程 State 上提交自己的生命周期、模型或进度事件；兄弟线程的正常写入也不能使彼此的 effect lease 失效。同一 SQLite 文件可以保存多个 Session，独立线程不要求独立数据库文件或工作树。
+在阶段 D，每个 Agent 拥有独立的持久会话线程（`agentThreadId`／Store Session ID）、State revision、模型 transcript、轮次与执行 owner。子线程可继承工作区与受限配置，创建时记录 `parentAgentId`／`parentThreadId`，但不能直接在父线程 State 上提交自己的生命周期、模型或进度事件；兄弟线程的正常写入也不能使彼此的 effect lease 失效。同一 SQLite 文件可以保存多个 Session，独立线程不要求独立数据库文件或工作树。
 
 子线程是内部 Agent 执行会话，不是空间下的顶层会话。Store 须持久记录根／子线程类型及父线程血缘；旧会话迁移时按已证实的原有顶层会话身份标记为根线程。空间会话列表及其搜索、最近会话等同源查询须在排序、游标和 `LIMIT` 之前过滤子线程，不能仅靠客户端或取页后隐藏。子线程的状态和历史由父线程的 Agent 树入口或授权的 Agent 详情访问；已知子线程 ID 也不绕过父子血缘与权限校验。重启、迁移和分页后均保持这一可见性边界。
 
@@ -174,7 +170,7 @@ stateDiagram-v2
 | 精确停止或整轮取消 | 分别记录意图、回执和真实清理；迟到结果不能复活已关闭 Run |
 | Store、owner 或 wait port 异常 | 以持久事实恢复或显示 unknown；不能证明的外部副作用不重放，不把未知当作完成 |
 
-TUI、CLI 和开发中的 Desktop 使用同一 canonical 状态。任务卡可区分派发、执行、收尾、终态和“结果已进入主模型输入”；最后一项必须有对应 prepared input revision 证据，不能从通知排队推断。父 Run 显示等待原因时，初始 required 集合与当前仍运行的集合需区分：阶段 C 若要显示动态“剩余任务”，必须从已接纳终态推导或新增有权威的等待原因更新，并测试局部完成后的变化；否则只显示原等待集合及各任务卡的实时状态。用户仍能在等待时引导主 Agent 或精确停止目标；Web 只读。私有子 Agent 内容和完整 Shell 输出不进入状态摘要或诊断日志。Codex 式 Agent 邮箱卡属于阶段 D，当前客户端不能显示未实现的“已排队消息”状态。
+TUI、CLI 和开发中的 Desktop 使用同一 canonical 状态。任务卡可区分派发、执行、收尾、终态和“结果已进入主模型输入”；最后一项必须有对应 prepared input revision 证据，不能从通知排队推断。父 Run 显示等待原因时，初始 required 集合与当前仍运行的集合需区分：阶段 C 若要显示动态“剩余任务”，必须从已接纳终态推导或新增有权威的等待原因更新，并测试局部完成后的变化；否则只显示原等待集合及各任务卡的实时状态。用户仍能在等待时引导主 Agent 或精确停止目标；Web 只读。私有子 Agent 内容和完整 Shell 输出不进入状态摘要或诊断日志。Agent 邮箱卡属于阶段 D，当前客户端不能显示未实现的“已排队消息”状态。
 
 ## 7. 实施顺序与验证
 
@@ -198,7 +194,7 @@ D3 最近的定向证据是[正式入口当前轮边界](https://github.com/ferq
 
 更新工具描述与真实会话示例，使模型在需要首个结果决策时选 `task_wait`，只需等齐时提交完成候选；Shell 按游标使用 `shell_read`。验证具名结果进入主模型输入、截断后补读、准确来源标签与幂等性。客户端明确初始等待集合和当前任务卡状态；若承诺动态剩余集合，完成其权威推导与测试。
 
-### 阶段 D：Codex 式 Agent 消息与续轮
+### 阶段 D：Agent 消息与续轮
 
 按 §4.0 与 [Agent Note 0191](../../.agents/notes/implemented/feature/2026-09-26-independent-agent-sessions-and-result-bridge.md)实施：D0／D1 的独立子 Session、根会话过滤、结果桥接与审批恢复已完成受控验收；D2 的跨线程邮箱与模型输入水位已在正式入口通过受控验收。`list_agents` 与 `wait_agent` 的跨 Session 模型 Surface、直接子树读取、未读唤醒及超时也已通过正式入口受控回归。D3 的 `followup_task` 来源 Tool 持久受理、空成功回执、目标 `new_turn` 终态及来源 ACK，和 `interrupt_agent` 的准确直接子停止，已通过正式 App Server 回归；当前轮零 Tool 旧 grant 的路由及 route-only／released 两种进程级重启窗口通过内部真实链路验收。不同 Session 的 mode revision 数值不能直接作为相同策略证明；Store 已分别核验来源政策及其 revision、目标初始 mode／revision 0，来源 auto revision 1 与子 revision 0 的 `current_turn` 在线及真实 SIGKILL 用例已通过。当前轮的非零 Tool 旧 grant 仅在有限、无 binding 的 `explore`／`plan`／`review` 角色中受理，并把下一模型 Surface 与后续工具派发压到静态只读工具交集；正式 App Server 定向测试覆盖第二次模型请求的原 Run 消费。有限备付排队等待执行位、满位 `capacity_timeout` 的定向回归已通过。A–C 的等待故障修复不依赖 D3 完成。
 
@@ -218,4 +214,4 @@ D3 最近的定向证据是[正式入口当前轮边界](https://github.com/ferq
 | 持久化与 owner 故障注入 | Artifact 已写但 Kernel 尚未接纳时 required 不解除；无关 owner watermark 不调用模型；wait port 抛错／owner 代际丢失进入有分类恢复或 unknown，不能掉入泛化的 `Completion blocked...` 致命兜底；旧租约、重复通知与迟到 terminal 不产生第二次结果帧 |
 | 模型输入与客户端 | 每个已接纳 child 的输入是带准确 task ID、低权限来源的具名 `<subagent_result>` 帧；完整报告保留在 Artifact，`task_read` 只用于截断或诊断。客户端等待原因若显示动态剩余 ID，A/B 结算后该集合准确缩小；若采用初始集合，卡片终态准确，文案不称其为“剩余” |
 
-阶段 A–C 的设计与交付证据以本方案第 7 节为准；阶段 D 按 §4.0 的每 Agent 独立 Session 决定与现行 owner 契约核对。[Agent Note 0190](../../.agents/notes/implemented/feature/2026-09-26-codex-style-agent-mailbox-and-followup-authority.md)保留原交互及单 Session 取舍的历史正文，其共享 Session 事务范围已暂停作为实施依据。[Agent Note 0191](../../.agents/notes/implemented/feature/2026-09-26-independent-agent-sessions-and-result-bridge.md)及已同步的 owner 文档记录 D0 已确认设计；各实施迭代完成后执行 `iteration_complete`。受控 D0／D2／D3 验收支持已开放的独立子 Session、QueueOnly 邮箱、Agent 列表／等待、显式续轮和直接子停止；真实 DeepSeek 验证覆盖 A–C，以及 D3 各自独立的合成 `new_turn`／跨 Run 回复和 `current_turn` 同 Run 邮件输入；其他竞态与恢复边界仍以本地受控 mock 和进程级测试验证。
+阶段 A–C 的设计与交付证据以本方案第 7 节为准；阶段 D 按 §4.0 的每 Agent 独立 Session 决定与现行 owner 契约核对。[Agent Note 0190](../../.agents/notes/implemented/feature/2026-09-26-agent-mailbox-and-followup-authority.md)保留原交互及单 Session 取舍的历史正文，其共享 Session 事务范围已暂停作为实施依据。[Agent Note 0191](../../.agents/notes/implemented/feature/2026-09-26-independent-agent-sessions-and-result-bridge.md)及已同步的 owner 文档记录 D0 已确认设计；各实施迭代完成后执行 `iteration_complete`。受控 D0／D2／D3 验收支持已开放的独立子 Session、QueueOnly 邮箱、Agent 列表／等待、显式续轮和直接子停止；真实 DeepSeek 验证覆盖 A–C，以及 D3 各自独立的合成 `new_turn`／跨 Run 回复和 `current_turn` 同 Run 邮件输入；其他竞态与恢复边界仍以本地受控 mock 和进程级测试验证。

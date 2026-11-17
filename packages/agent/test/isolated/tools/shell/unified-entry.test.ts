@@ -133,12 +133,14 @@ async function fixture(
     async *observe(handle): AsyncIterable<JobEvent> {
       yield* output;
       if (hold) await gate;
+      const cancelled = signals.get(handle)!.aborted;
       yield {
         type: 'terminal',
         supervision: 'ended',
         result: {
-          outcome: signals.get(handle)!.aborted ? 'cancelled' : 'succeeded',
+          outcome: cancelled ? 'cancelled' : 'succeeded',
           content: 'original Shell ended',
+          ...(cancelled ? {} : { details: { exitCode: 0 } }),
         },
       };
     },
@@ -452,7 +454,7 @@ test('default foreground execution waits for one original Job and preserves its 
     )!.result;
     expect(result).toMatchObject({
       outcome: 'succeeded',
-      content: 'stdout:\noriginal durable output\n',
+      content: 'original durable output\n',
       details: { ref: { executionId: jobs[0]!.id }, outputFormat: 'model-preview' },
     });
     expect(
@@ -478,6 +480,80 @@ test('default foreground execution waits for one original Job and preserves its 
       definitionVersion: '1',
     });
     expect(original.sourceTool).not.toHaveProperty('background');
+  } finally {
+    await f.close();
+  }
+});
+
+test('foreground and original Shell read preserve interleaved output bytes across the row limit', async () => {
+  const output: JobEvent[] = [
+    { type: 'output', stream: 'stdout', content: '  A: par' },
+    { type: 'output', stream: 'stdout', content: 'tial  \r' },
+    { type: 'output', stream: 'stdout', content: '\n' },
+    { type: 'output', stream: 'stderr', content: '\tB: warning \r\n' },
+    { type: 'output', stream: 'stdout', content: ' C: back' },
+    ...Array.from(
+      { length: 194 },
+      (): JobEvent => ({ type: 'output', stream: 'stdout', content: 'x' }),
+    ),
+    { type: 'output', stream: 'stdout', content: ' end\t' },
+    { type: 'output', stream: 'stdout', content: ' of line \r\n' },
+    { type: 'output', stream: 'stdout', content: '\n  ' },
+  ];
+  const expectedPage = `  A: partial  \r\n\tB: warning \r\n C: back${'x'.repeat(194)} end\t`;
+  const expectedOutput = `${expectedPage} of line \r\n\n  `;
+  const f = await fixture(
+    [
+      calls(['shell_execute', { command: 'emit interleaved output' }]),
+      calls(['shell_read', { shell_id: 'original', limit: 200 }]),
+      [finish],
+    ],
+    false,
+    false,
+    output,
+  );
+  try {
+    const view = await f.run();
+    const job = view.executions.find((entry) => entry.definitionId === 'shell.command')!;
+    expect(job.result).toMatchObject({ outcome: 'succeeded', details: { exitCode: 0 } });
+    expect(f.started).toEqual([job.id]);
+    expect(f.inputs).toEqual([{ command: 'emit interleaved output' }]);
+    expect(readFileSync(join(f.root, 'effects'), 'utf8')).toBe(`${job.id}\n`);
+    for (const [name, modelRequest, expected] of [
+      ['shell.execute', 1, expectedOutput],
+      ['shell.read', 2, expectedPage],
+    ] as const) {
+      const stored = view.executions.find((entry) => entry.definitionId === name)!.result!;
+      expect(stored).toMatchObject({
+        outcome: 'succeeded',
+        content: expected,
+        details: {
+          ref: { executionId: job.id },
+          outputFormat: 'model-preview',
+          outputLimited: false,
+        },
+      });
+      expect(stored).not.toHaveProperty('details.stdout');
+      expect(stored).not.toHaveProperty('details.stderr');
+      expect(stored).not.toHaveProperty('details.output');
+      const feedback = f.model.requests[modelRequest]!.messages.filter(
+        (message) => message.role === 'tool',
+      ).at(-1)!.content;
+      const bodyStart = feedback.indexOf('\n\n');
+      expect(bodyStart).toBeGreaterThan(0);
+      expect(feedback.slice(0, bodyStart)).toContain('Exit code: 0.');
+      const body = feedback.slice(bodyStart + 2);
+      if (name === 'shell.read') {
+        const cursorPrefix = '\nOutput cursor: ';
+        const cursorStart = body.lastIndexOf(cursorPrefix);
+        expect(cursorStart).toBeGreaterThan(0);
+        expect(body.slice(0, cursorStart)).toBe(expected);
+        expect(JSON.parse(body.slice(cursorStart + cursorPrefix.length))).toMatchObject({
+          caught_up: false,
+          terminal: true,
+        });
+      } else expect(body).toBe(expected);
+    }
   } finally {
     await f.close();
   }

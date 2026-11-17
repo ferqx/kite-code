@@ -30,8 +30,11 @@ export function decodeTrajectoryEvidence(
   const data: Record<string, unknown> = { outcome: body.outcome, content: body.content };
   if (body.presentation !== undefined) {
     const presentation = toolResultPresentationSchema.safeParse(body.presentation);
-    if (presentation.success) data.presentation = presentation.data;
-    else
+    if (presentation.success) {
+      data.presentation = presentation.data;
+      if (presentation.data.kind === 'shell' && body.outputFormat === 'model-preview')
+        data.outputFormat = body.outputFormat;
+    } else
       return {
         ...formatted,
         rawText,

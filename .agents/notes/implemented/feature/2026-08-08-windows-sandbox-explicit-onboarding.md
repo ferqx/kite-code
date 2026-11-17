@@ -9,10 +9,8 @@ restricted-token backend 中正常工作。最初实现把账户安装挂在首�
 意外进入 UAC/账户创建 control plane；账户已经创建但凭据 state/receipt 尚未提交时，会留下难以诊断的
 半完成状态。
 
-Codex 的强 Windows sandbox 把 setup 作为首次 onboarding 的独立阶段：setup 创建受管身份并持久化
-machine-protected credentials/readiness marker；后续命令只使用已完成状态，不负责安装。Kite 当前仍是
-lower-assurance development backend，但可以采用相同的生命周期与 credential custody，不必等待完整
-Offline/WFP profile。
+显式 setup 负责创建受管身份、保存受系统保护的凭据并写入就绪标记。普通命令只使用已完成的状态。
+当前开发路径可以单独采用这套 Online 身份生命周期，独立于完整的 Offline/WFP profile。
 
 ## Decision
 1. 受管联网身份 setup 是独立 control-plane 操作。TUI 在进入主界面前运行只读 status probe；若状态
@@ -27,7 +25,7 @@ Offline/WFP profile。
 5. `networkMode=allow_all` command path 只消费 ready state。missing 返回
    `managed_network_setup_required`，invalid 返回稳定 identity/state 错误；不得自动调用 setup，不得回退
    current-user restricted token 或 host Shell，也不得重放用户脚本。
-6. 当前决策只为 [Agent Note 0083](../architecture/2026-08-08-windows-approved-network-managed-logon.md) 的 Online 身份采用 Codex-style setup lifecycle。它不创建 Offline 身份，不安装
+6. 当前决策只为 [Agent Note 0083](../architecture/2026-08-08-windows-approved-network-managed-logon.md) 的 Online 身份执行显式 setup。它不创建 Offline 身份，不安装
    WFP/防火墙代理规则，也不把 windows_restricted_token 提升为 Full 或 production-qualified backend。
 
 ## Alternatives considered
@@ -49,4 +47,4 @@ V4 决策继续有效。
 
 ## Historical relationships
 
-相关：[Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md)、[Agent Note 0082](../architecture/2026-08-08-windows-development-network-authorization-parity.md)、[Agent Note 0083](../architecture/2026-08-08-windows-approved-network-managed-logon.md)
+相关：[Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md)、[Agent Note 0082](../architecture/2026-08-08-windows-development-network-authorization-parity.md)、[Agent Note 0083](../architecture/2026-08-08-windows-approved-network-managed-logon.md)

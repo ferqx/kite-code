@@ -33,7 +33,7 @@ test('retained FileChanges mounts only through the selected changes tab, reads a
     viewGeneration: 9,
     session: { id: 's', workspaceId: 'w' },
   } as NativeSelection;
-  const messages = Array.from(
+  let messages = Array.from(
     { length: 36 },
     (_, index): Message => ({
       id: `m${index}`,
@@ -46,11 +46,22 @@ test('retained FileChanges mounts only through the selected changes tab, reads a
       sourceIds: [`e${index}`],
     }),
   );
+  let failNewReceipt = true;
+  let releaseRetry: (() => void) | undefined;
   const bridge: NativeBridge = {
     watch: () => () => {},
     async request(input) {
       requests.push(input);
-      if (input.method === 'fileChanges.list')
+      if (input.method === 'fileChanges.list') {
+        if (input.messageIds.includes('m36')) {
+          if (failNewReceipt) {
+            failNewReceipt = false;
+            throw Error('new_file_receipt_unavailable');
+          }
+          await new Promise<void>((resolve) => {
+            releaseRetry = resolve;
+          });
+        }
         return {
           kind: 'fileChanges.page',
           readId: input.readId,
@@ -63,15 +74,16 @@ test('retained FileChanges mounts only through the selected changes tab, reads a
             workspaceId: 'w',
           },
           entries: input.messageIds
-            .filter((id) => ['m0', 'm33'].includes(id))
+            .filter((id) => ['m0', 'm33', 'm36'].includes(id))
             .map((id) => ({
               changeId: `observed-${id}`,
               messageId: id,
-              path: id === 'm0' ? 'written.txt' : 'old.txt',
+              path: id === 'm0' ? 'written.txt' : id === 'm36' ? 'later.txt' : 'old.txt',
               preview: id === 'm0' ? 'available' : 'unavailable',
               openable: true,
             })),
         };
+      }
       if (input.method === 'fileChanges.detail')
         return {
           kind: 'fileChanges.detail',
@@ -164,11 +176,25 @@ test('retained FileChanges mounts only through the selected changes tab, reads a
       detail.dispatchEvent(new dom.window.Event('toggle'));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(dom.window.document.querySelector('[aria-label="文件差异"]')!.textContent).toContain(
-      'saved new',
-    );
+    const diff = dom.window.document.querySelector('[aria-label="文件差异"]')!;
+    expect(diff.textContent).toContain('saved new');
     expect(dom.window.document.querySelector('.diff-added')!.textContent).toContain('+saved new');
     expect(dom.window.document.body.textContent).toContain('差异预览已截断');
+    messages = [...messages, { ...messages[0]!, id: 'm36', seq: '37', sourceIds: ['e36'] }];
+    await act(async () => render());
+    expect(button('重新读取文件操作')).toBeDefined();
+    expect(dom.window.document.querySelector('details.file-change')).toBe(detail);
+    expect(dom.window.document.querySelector('[aria-label="文件差异"]')).toBe(diff);
+    await act(async () => button('重新读取文件操作').click());
+    expect(dom.window.document.querySelector('details.file-change') === detail).toBe(true);
+    expect(dom.window.document.querySelector('[aria-label="文件差异"]') === diff).toBe(true);
+    expect(
+      requests.filter((request) => request.method === 'fileChanges.list').at(-1),
+    ).toMatchObject({ messageIds: ['m36'] });
+    await act(async () => releaseRetry!());
+    expect(dom.window.document.querySelectorAll('details.file-change')).toHaveLength(3);
+    expect(dom.window.document.querySelector('[aria-label="文件差异"]')).toBe(diff);
+    expect(requests.filter((request) => request.method === 'fileChanges.detail')).toHaveLength(1);
     await act(async () => {
       button('打开当前文件：written.txt').click();
     });
@@ -218,6 +244,7 @@ test('retained FileChanges mounts only through the selected changes tab, reads a
     expect(requests.some((request) => request.method === 'fileChanges.close')).toBe(true);
     expect(requests.every((request) => request.method.startsWith('fileChanges.'))).toBe(true);
   } finally {
+    releaseRetry?.();
     await act(async () => {
       root.unmount();
     });

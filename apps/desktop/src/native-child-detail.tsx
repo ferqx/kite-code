@@ -357,7 +357,6 @@ export function NativeChildDetail({
             const snapshot = original && outputs.get(original.id);
             return renderNativeReasoning({
               scope: readingKey,
-              model,
               original,
               open,
               revision: snapshot?.bodyHash,

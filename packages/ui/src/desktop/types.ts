@@ -17,7 +17,7 @@ export interface Message {
   readonly streaming?: boolean;
   /** Original assistant message whose public reasoning can be read on disclosure. */
   readonly reasoningSource?: string;
-  /** Handoff status shown in the title until the original Model or Tool step arrives. */
+  /** Model/Tool handoff marker for the current reasoning phase, without a visible step. */
   readonly tracePending?: 'reasoning' | 'tool';
   /** Client-observed reasoning segment timing, in epoch milliseconds. */
   readonly thinkingStartedAt?: number;

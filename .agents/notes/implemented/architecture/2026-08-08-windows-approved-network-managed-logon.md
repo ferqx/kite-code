@@ -3,17 +3,15 @@
 Status: implemented
 
 ## Problem
-[Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 选择 current-user restricted token 作为无 UAC 的 Windows 默认开发路径，[Agent Note 0082](2026-08-08-windows-development-network-authorization-parity.md)
+[Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md) 选择 current-user restricted token 作为无 UAC 的 Windows 默认开发路径，[Agent Note 0082](2026-08-08-windows-development-network-authorization-parity.md)
 又把 macOS/Linux 的逐调用 `off | allow_all` 授权投影带到该路径。实际验证表明，批准后的 TCP、明文
 HTTP 和 Node 自带 TLS 可以工作，但 Windows Schannel 客户端（包括系统 curl 与
 `Invoke-WebRequest`）在 current-user restricted token 中以 `SEC_E_NO_CREDENTIALS` 失败。
 
-Codex CLI 的 Windows 实现没有移除 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED`。其需要
-网络代理强制执行的路径会切换到由 `CreateProcessWithLogonW` 建立的专用本地账户会话，再从该会话
-创建 restricted token。真实登录会话与受限命令令牌是两个独立层次。
+真实登录会话与受限命令令牌是两个独立层次。
 
 ## Decision
-1. 普通 `networkMode=off` 调用继续使用 [Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 的无 UAC current-user restricted-token 路径；启动
+1. 普通 `networkMode=off` 调用继续使用 [Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md) 的无 UAC current-user restricted-token 路径；启动
    probe 和本地命令不得因为受管联网身份尚未安装而失败或弹出 UAC。
 2. 已经通过工具授权的 `networkMode=allow_all` 调用不得再直接使用 current-user restricted token。
    native runner 必须确保专用非管理员账户 `KiteSandboxOnline` 已安装，并通过
@@ -31,7 +29,7 @@ Codex CLI 的 Windows 实现没有移除 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WR
 6. native invocation protocol 升为 V4。V1/V2/V3 runner 不理解受管联网登录语义，adapter 必须因版本
    不匹配拒绝它们。
 7. 本决策修复 development `allow_all` 的 Windows/Schannel 可执行性，但不把它升级成 allowlist、代理或
-   production network boundary。Codex 风格 Offline 身份、仅回环代理端口、防火墙/WFP、逐域名策略和
+   production network boundary。独立 Offline 身份、仅回环代理端口、防火墙/WFP、逐域名策略和
    rustls 上游代理仍是独立的下一阶段。
 
 ## Alternatives considered
@@ -46,10 +44,10 @@ Codex CLI 的 Windows 实现没有移除 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WR
 - Windows production support、Full 和动态 future `.env.*` 保证不因本决策改变。
 
 ## 对既有决策的影响
-本记录 仅取代 [Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md)/[Agent Note 0082](2026-08-08-windows-development-network-authorization-parity.md) 中“批准后的 `allow_all` 仍直接使用 current-user restricted token”的
-部分。[Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 的普通无 UAC默认路径和低保证定位继续有效；[Agent Note 0079](2026-08-08-windows-managed-restricted-token-sandbox.md) 的完整 managed
+本记录 仅取代 [Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md)/[Agent Note 0082](2026-08-08-windows-development-network-authorization-parity.md) 中“批准后的 `allow_all` 仍直接使用 current-user restricted token”的
+部分。[Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md) 的普通无 UAC默认路径和低保证定位继续有效；[Agent Note 0079](2026-08-08-windows-managed-restricted-token-sandbox.md) 的完整 managed
 Offline/Online、WFP/代理与更强 profile 仍未被本记录 完成。
 
 ## Historical relationships
 
-相关：[Agent Note 0079](2026-08-08-windows-managed-restricted-token-sandbox.md)、[Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md)、[Agent Note 0082](2026-08-08-windows-development-network-authorization-parity.md)
+相关：[Agent Note 0079](2026-08-08-windows-managed-restricted-token-sandbox.md)、[Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md)、[Agent Note 0082](2026-08-08-windows-development-network-authorization-parity.md)

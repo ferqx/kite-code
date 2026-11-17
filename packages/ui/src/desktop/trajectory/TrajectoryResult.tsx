@@ -461,7 +461,7 @@ export function TrajectoryResult({ data, fallback }: { data: unknown; fallback?:
     value.status !== undefined &&
     !containsBody &&
     typeof body?.content === 'string' &&
-    !body.content.startsWith('{');
+    (body.outputFormat === 'model-preview' || !body.content.startsWith('{'));
   return (
     <div className="trajectory-tool-result">
       {typeof body?.outcome === 'string' && (!value || body.outcome !== 'succeeded') && (

@@ -11,6 +11,12 @@ import { fileURLToPath } from 'node:url';
 const kind = process.argv[2] as 'browser' | 'mcp' | 'shell';
 const mode = process.argv[3]!;
 const heldAuthentication = mode === 'auth-held-timeout';
+const slowAuthentication = mode === 'auth-slow';
+const cleanupUnconfirmed = mode === 'auth-cancel-cleanup-unconfirmed';
+const cancellation =
+  mode === 'auth-cancelled' || cleanupUnconfirmed ? new AbortController() : undefined;
+const interruptedAuthentication = heldAuthentication || !!cancellation;
+const delayedAuthentication = heldAuthentication || slowAuthentication;
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-channel-mock-')));
 const cwd = process.cwd();
 const calls: string[][] = [];
@@ -31,6 +37,10 @@ let deadline: ReturnType<typeof setTimeout> | undefined;
 let settleOnFrame!: () => void;
 const onFrameGate = new Promise<void>((resolve) => {
   settleOnFrame = resolve;
+});
+let settleAuthentication!: () => void;
+const authenticationDone = new Promise<void>((resolve) => {
+  settleAuthentication = resolve;
 });
 class Channel extends EventEmitter {
   writable = true;
@@ -95,7 +105,7 @@ class Channel extends EventEmitter {
 const socket = new Channel();
 const unauthenticatedSocket = new Channel();
 const lateSocket = new Channel();
-const accepted = heldAuthentication ? [socket, unauthenticatedSocket, lateSocket] : [socket];
+const accepted = interruptedAuthentication ? [socket, unauthenticatedSocket, lateSocket] : [socket];
 const openSockets = new Set(accepted);
 function settleServerClose() {
   if (openSockets.size === 0) {
@@ -116,7 +126,7 @@ const server = Object.assign(new EventEmitter(), {
     return server;
   },
   close(done?: (error?: Error) => void) {
-    if (heldAuthentication) {
+    if (interruptedAuthentication) {
       closeAttemptedAt = performance.now() - began;
       closeCallback = () => {
         closeCompleted = true;
@@ -154,9 +164,13 @@ fixtureGlobal.fixtureSpawn = (executable: string, args: string[]) => {
   });
   const complete = () => {
     if (args[0] === 'bootstrap') {
+      const plist = readFileSync(args[2]!, 'utf8');
+      const processType = kind === 'shell' ? 'Standard' : 'Background';
+      assert.ok(plist.includes(`<key>ProcessType</key><string>${processType}</string>`));
+      assert.ok(plist.includes('<key>LimitLoadToSessionType</key><string>Background</string>'));
       registration = JSON.parse(readFileSync(join(dirname(args[2]!), 'owner.json'), 'utf8'));
       callback(socket);
-      if (heldAuthentication) callback(unauthenticatedSocket);
+      if (interruptedAuthentication) callback(unauthenticatedSocket);
       socket.emit(
         'data',
         Buffer.from(
@@ -168,22 +182,26 @@ fixtureGlobal.fixtureSpawn = (executable: string, args: string[]) => {
       if (args[0] === 'bootout') removed = true;
       else assert.equal(args[0], 'print');
     }
-    const code = args[0] === 'print' && wasRemoved ? 113 : 0;
+    const code = args[0] === 'print' && wasRemoved ? (cleanupUnconfirmed ? 77 : 113) : 0;
     child.stdout.end(args[0] === 'print' && !wasRemoved ? '\tpid = 777\n' : '');
     child.stderr.end();
     child.emit('exit', code, null);
     child.emit('close', code, null);
   };
-  if (heldAuthentication && args[0] === 'bootstrap') setTimeout(complete, 1500);
-  else if (heldAuthentication && args[0] === 'print' && !removed) {
-    // Bootstrap has already consumed 1.5s of the real 4s ready budget. Keep
-    // identity verification pending across that deadline, within launchctl's
-    // separate 3s budget. No production timer or option is replaced.
+  if (delayedAuthentication && args[0] === 'bootstrap') setTimeout(complete, 1500);
+  else if ((delayedAuthentication || cancellation) && args[0] === 'print' && !removed) {
+    // With delayed bootstrap, keep the PID check pending beyond the original
+    // four-second deadline while staying within launchctl's separate budget.
     authenticationPending = true;
-    setTimeout(() => {
-      authenticationPending = false;
-      complete();
-    }, 2700);
+    setTimeout(
+      () => {
+        authenticationPending = false;
+        complete();
+        settleAuthentication();
+      },
+      cancellation ? 200 : 2700,
+    );
+    cancellation?.abort();
   } else queueMicrotask(complete);
   return child;
 };
@@ -208,17 +226,20 @@ const instrumented = original
 assert.notEqual(instrumented, original);
 writeFileSync(join(root, 'supervisor.ts'), instrumented);
 try {
-  const { startLaunchdSupervisor } = await import(join(root, 'supervisor.ts'));
+  const { LaunchdStartupCancelled, startLaunchdSupervisor } = await import(
+    join(root, 'supervisor.ts')
+  );
   const starting = startLaunchdSupervisor({
     kind,
     controlBase: root,
+    startSignal: cancellation?.signal,
     frame: { type: 'start', nonce: 'nonce' },
     async onFrame(frame: Record<string, unknown>) {
       if (mode === 'delayed-handler' && frame.type === 'ready') await onFrameGate;
       frames.push(frame);
     },
   });
-  if (heldAuthentication) {
+  if (interruptedAuthentication) {
     let caught: unknown;
     try {
       await Promise.race([
@@ -243,8 +264,14 @@ try {
         noNativeSpawn: true,
       }),
     );
-    assert.equal(caught instanceof Error ? caught.message : null, 'launchd_guardian_start_timeout');
-    assert.ok(closeAttemptedAt! >= 3800);
+    const expectedError = cleanupUnconfirmed
+      ? 'launchd_start_cleanup_unconfirmed'
+      : cancellation
+        ? 'launchd_start_cancelled'
+        : 'launchd_guardian_start_timeout';
+    assert.equal(caught instanceof Error ? caught.message : null, expectedError);
+    assert.equal(caught instanceof LaunchdStartupCancelled, !!cancellation && !cleanupUnconfirmed);
+    if (heldAuthentication) assert.ok(closeAttemptedAt! >= 3800);
     assert.equal(authenticationPending, true);
     assert.equal(closeCompleted, true);
     assert.deepEqual(
@@ -258,7 +285,8 @@ try {
     assert.equal(frames.length, 0);
     // Let the successful original PID response arrive after startup cleanup.
     // It must not send any business frame or escape as an unhandled rejection.
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    await authenticationDone;
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(authenticationPending, false);
     assert.deepEqual(writes, []);
     assert.deepEqual(unhandled, []);
@@ -280,7 +308,13 @@ try {
       error = cause;
     }
     clearTimeout(deadline);
-    const valid = ['valid', 'delayed-handler', 'split-utf8', 'eof-half-close'].includes(mode);
+    const valid = [
+      'valid',
+      'delayed-handler',
+      'split-utf8',
+      'eof-half-close',
+      'auth-slow',
+    ].includes(mode);
     assert.equal(
       !error,
       valid,
@@ -290,6 +324,10 @@ try {
     assert.equal(frames.filter((frame) => frame.type === 'terminal').length, valid ? 1 : 0);
     if (valid) assert.equal(frames[0]?.content, '慢');
     assert.equal(calls.filter((args) => args[0] === 'bootout').length, valid ? 1 : 0);
+    if (slowAuthentication) {
+      assert.ok(performance.now() - began > 4000);
+      assert.deepEqual(writes, ['start']);
+    }
     console.log(
       JSON.stringify({ kind, mode, valid, terminalDelivered: valid, noNativeSpawn: true }),
     );

@@ -3,7 +3,7 @@
 Status: implemented
 
 ## Problem
-[Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 的 `windows_restricted_token` 是无需 UAC 的默认开发 backend，但 Windows restricted
+[Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md) 的 `windows_restricted_token` 是无需 UAC 的默认开发 backend，但 Windows restricted
 token 本身不提供任意 descendant 的结构性 network-off。[Agent Note 0088](../simplification/2026-08-08-remove-windows-appcontainer-backend.md) 因 private Workspace staging 的
 复制、回写和 POSIX runtime 兼容性问题删除了旧 AppContainer backend；它不允许以旧 staging 方案重新
 开放 Full。

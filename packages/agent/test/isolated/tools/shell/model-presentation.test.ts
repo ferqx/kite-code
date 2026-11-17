@@ -138,7 +138,8 @@ for (const name of [
         `execution_id: ${JSON.stringify(modelExecutionId(f.execution.id))}`,
       );
     expect(body).toContain(`shell_id: ${JSON.stringify(f.ref.key)}`);
-    expect(body).toContain(`stdout:\n${f.details.stdout}`);
+    expect(body).toContain(`\n\n${f.details.stdout}`);
+    expect(body).not.toContain('stdout:\n');
     expect(body).not.toContain('stderr:');
     expect(f).toEqual(before);
   });
@@ -156,14 +157,21 @@ test('completed command preserves original Unicode streams and usable handle wit
   f.result.content = canonicalJson(f.details);
   const before = structuredClone(f);
   const body = formatShellResult(f)!;
-  expect(body).toContain(`stdout:\n${f.details.stdout}`);
-  expect(body).toContain(`stderr:\n${f.details.stderr}`);
+  expect(body).toEndWith(`\n\n${f.details.stdout}\n${f.details.stderr}`);
+  expect(body).not.toMatch(/^(stdout|stderr):$/m);
   expect(body).toContain(`shell_id: ${JSON.stringify(f.ref.key)}`);
   expect(body).toContain('Exit code: 0');
   expect(body).toContain('supervised processes have stopped');
   for (const secret of ['PRIVATE_MODEL_DECISION', 'originStoreId', 'parentExecutionId'])
     expect(body).not.toContain(secret);
   expect(f).toEqual(before);
+});
+
+test('literal stream labels printed by the command are preserved as output', () => {
+  const f = fixture();
+  f.details.stdout = 'stdout:\n程序自己的标签\n';
+  f.details.stderr = 'stderr:\n程序自己的诊断信息\n';
+  expect(render(f)).toEndWith(`\n\n${f.details.stdout}\n${f.details.stderr}`);
 });
 
 test('exit17 is a command failure with actionable original diagnostic, not an approval refusal', () => {
@@ -173,8 +181,8 @@ test('exit17 is a command failure with actionable original diagnostic, not an ap
   const body = render(f)!;
   expect(body).toContain('command failed');
   expect(body).toContain('Exit code: 17');
-  expect(body).toContain(`stderr:\n${f.details.stderr}`);
-  expect(body).not.toContain('stdout:');
+  expect(body).toEndWith(`\n\n${f.details.stderr}`);
+  expect(body).not.toMatch(/^(stdout|stderr):$/m);
   expect(body).not.toContain('user denied');
 });
 
@@ -377,10 +385,12 @@ test('paged original output keeps stream order, Unicode, cursor and missing-byte
     highWaterSeq: '4',
   };
   const body = render(f)!;
-  expect(body.indexOf('stderr:\n原错误🪁\n')).toBeLessThan(body.indexOf('stdout:\n下一行\n'));
+  const errorOutput = body.indexOf('原错误🪁\n');
+  expect(errorOutput).toBeGreaterThan(-1);
+  expect(body.indexOf('下一行\n')).toBeGreaterThan(errorOutput);
   expect(body).toContain('Output bytes unavailable: 7');
   expect(body).toContain('Output bytes unavailable: 9 (stderr).');
-  expect(body.match(/^stderr:$/gm)).toHaveLength(1);
+  expect(body).not.toMatch(/^(stdout|stderr):$/m);
   expect(body).toContain(JSON.stringify(f.details.next_cursor));
   expect(body).toContain('"caught_up":true');
   expect(body).toContain('"terminal":true');
@@ -546,7 +556,7 @@ for (const droppedBytes of ['9', null])
     expect(smaller).toContain('Output cursor:');
     expect(smaller).toContain('same input cursor');
     expect(canonicalJson(f.result)).toBe(before);
-    const output = smaller.slice(smaller.indexOf('stdout:'), smaller.indexOf('\nUse the same'));
+    const output = smaller.slice(smaller.indexOf('\n\n') + 2, smaller.indexOf('\nUse the same'));
     expect(Buffer.byteLength(output)).toBeLessThanOrEqual(400);
     f.details.outputGaps = [];
     expect(formatShellResult({ ...f, modelTokenLimit: 100 })).not.toContain(warning);

@@ -22,15 +22,17 @@ export function shellOutputPreview(
   requestedTokens: unknown,
   modelTokenLimit?: number,
 ) {
-  const lines: string[] = [];
+  const sections: string[] = [];
   const gaps: ShellOutputGap[] = [];
+  // Legacy results have two aggregate fields with no cross-stream order.
   for (const stream of ['stdout', 'stderr']) {
     const content = details[stream];
-    if (typeof content === 'string' && content.length) lines.push(`${stream}:\n${content}`);
+    if (typeof content === 'string' && content.length) sections.push(content);
   }
   if (details.output !== undefined) {
     const output = object(details.output);
     if (!Array.isArray(output?.items)) return;
+    const chunks: string[] = [];
     for (const raw of output.items) {
       const item = object(raw);
       if (
@@ -40,16 +42,19 @@ export function shellOutputPreview(
         (item.stream !== 'stdout' && item.stream !== 'stderr')
       )
         return;
-      if (item.content.length) lines.push(`${item.stream}:\n${item.content}`);
+      if (item.content.length) chunks.push(item.content);
       if (
         item.droppedBytes === null ||
         (typeof item.droppedBytes === 'string' && /^[1-9]\d*$/.test(item.droppedBytes))
       ) {
         const gap: ShellOutputGap = { stream: item.stream, droppedBytes: item.droppedBytes };
         gaps.push(gap);
-        lines.push(shellOutputGapMessage(gap));
+        if (chunks.length) sections.push(chunks.join(''));
+        chunks.length = 0;
+        sections.push(shellOutputGapMessage(gap));
       }
     }
+    if (chunks.length) sections.push(chunks.join(''));
   }
   const limit = Math.min(
     typeof requestedTokens === 'number' &&
@@ -59,7 +64,7 @@ export function shellOutputPreview(
       : 10_000,
     modelTokenLimit ?? Number.POSITIVE_INFINITY,
   );
-  return { ...limitShellOutput(lines.join('\n'), limit, gaps.map(shellOutputGapMessage)), gaps };
+  return { ...limitShellOutput(sections.join('\n'), limit, gaps.map(shellOutputGapMessage)), gaps };
 }
 
 /** Reuse the saved output section as-is unless the receiving model has less room. */

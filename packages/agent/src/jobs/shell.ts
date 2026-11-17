@@ -12,6 +12,7 @@ import type {
   ToolResult,
 } from '@kite-ai/agent/extensions';
 import { JobStartError } from '../extensions';
+import { MACOS_SHELL_START_TIMEOUT_MS } from '../platform/process/darwin-launchd-supervisor';
 import { ownedProcessKernelState } from '../platform/process/owned-process-observation';
 import {
   type ConfinedLaunch,
@@ -83,6 +84,7 @@ interface State {
   nonce: string;
   process: ChildProcess;
   brokerNeverStarted?: true;
+  startupCancellationProven?: true;
   queue: QueueItem[];
   queuedBytes: number;
   gaps: Map<'stdout' | 'stderr', QueueItem>;
@@ -264,12 +266,15 @@ function shellJob(
         status: state.groupStopped ? 'already_finished' : 'unknown',
         details: { processGroupId: state.groupId ?? null },
       };
-    if (state.brokerNeverStarted) {
+    if (state.brokerNeverStarted || state.startupCancellationProven) {
       try {
-        // Only the original no-PID spawn failure permits a cleanup-only retry.
+        // The original broker could not dispatch the business command. Retry only its cleanup.
         finish(
           state,
-          state.result ?? { outcome: 'failed', content: 'Shell supervisor failed' },
+          state.result ??
+            (state.startupCancellationProven
+              ? { outcome: 'cancelled', content: 'Shell cancelled' }
+              : { outcome: 'failed', content: 'Shell supervisor failed' }),
           true,
         );
         return { status: 'stopped', details: { processGroupId: null } };
@@ -460,6 +465,9 @@ function shellJob(
       void state.ready.catch(() => {});
       context.signal.addEventListener('abort', state.aborted, { once: true });
       let buffer = '';
+      let brokerFrames = 0;
+      let startupCancelled = false;
+      let stdoutEnded = false;
       proc.stdin!.on('error', () => {
         finish(
           state,
@@ -469,9 +477,13 @@ function shellJob(
         state.rejectReady(new Error('shell_supervisor_disconnected'));
       });
       proc.stdout!.setEncoding('utf8');
+      proc.stdout!.once('end', () => {
+        stdoutEnded = true;
+      });
       proc.stdout!.on('data', (chunk: string) => {
         buffer += chunk;
         if (buffer.length > 512 * 1024) {
+          brokerFrames++;
           buffer = '';
           finish(
             state,
@@ -486,9 +498,24 @@ function shellJob(
           const boundary = buffer.indexOf('\n');
           const line = buffer.slice(0, boundary);
           buffer = buffer.slice(boundary + 1);
+          brokerFrames++;
           try {
             const frame = JSON.parse(line) as Record<string, unknown>;
             if (frame.nonce !== nonce) throw new Error('invalid_private_identity');
+            if (startupCancelled) throw new Error('invalid_private_frame_after_start_cancelled');
+            if (frame.type === 'start_cancelled') {
+              if (
+                !configuration.supervision ||
+                !state.stopping ||
+                brokerFrames !== 1 ||
+                proc.pid === undefined ||
+                frame.brokerPid !== proc.pid ||
+                Object.keys(frame).length !== 3
+              )
+                throw new Error('invalid_private_start_cancellation');
+              startupCancelled = true;
+              continue;
+            }
             if (
               frame.type === 'ready' &&
               Number.isSafeInteger(frame.processGroupId) &&
@@ -689,6 +716,31 @@ function shellJob(
         state.brokerExit = { code, signal, reaped: true };
       });
       proc.on('close', () => {
+        if (
+          startupCancelled &&
+          brokerFrames === 1 &&
+          !buffer.length &&
+          stdoutEnded &&
+          state.brokerExit?.code === 0 &&
+          state.brokerExit.signal === null
+        ) {
+          state.startupCancellationProven = true;
+          try {
+            finish(state, { outcome: 'cancelled', content: 'Shell cancelled' }, true);
+          } catch {
+            finish(
+              state,
+              { outcome: 'outcome_unknown', content: 'shell_start_cleanup_unconfirmed' },
+              false,
+            );
+          }
+          state.rejectReady(
+            new Error(
+              state.groupStopped ? 'shell_start_cancelled' : 'shell_start_cleanup_unconfirmed',
+            ),
+          );
+          return;
+        }
         if (configuration.supervision && state.pendingTerminal && state.evidence) {
           const snapshot = copyShellProcessEvidence({
             ...state.evidence,
@@ -725,16 +777,19 @@ function shellJob(
         );
         state.rejectReady(new Error('shell_supervisor_disconnected'));
       });
-      const timer = setTimeout(() => {
-        // Keep the original channel alive for a late ready/terminal stop proof.
-        finish(
-          state,
-          { outcome: 'outcome_unknown', content: 'shell_supervisor_start_timeout' },
-          false,
-        );
-        state.rejectReady(new Error('shell_supervisor_start_timeout'));
-        void cancelState(state).catch(() => {});
-      }, 5000);
+      const timer = setTimeout(
+        () => {
+          // Keep the original channel alive for a late ready/terminal stop proof.
+          finish(
+            state,
+            { outcome: 'outcome_unknown', content: 'shell_supervisor_start_timeout' },
+            false,
+          );
+          state.rejectReady(new Error('shell_supervisor_start_timeout'));
+          void cancelState(state).catch(() => {});
+        },
+        configuration.supervision ? MACOS_SHELL_START_TIMEOUT_MS : 5000,
+      );
       try {
         proc.stdin!.write(
           `${JSON.stringify({

@@ -44,7 +44,7 @@ Status: implemented
 
 按后续需求全部撤回这一未提交实验，而非保留显式启用入口：删除工具、导出、记录和上下文投影、权限例外、宿主选择、桌面标签及测试注入；也删除 Files 为其增加的模型引用 UUID。原成功 ToolResult、Source、Artifact 仍负责观察事实；模型写入的来源索引或“采用”状态不能成为第二份事实权威。原计划和验证工具有已有批准、版本及实际执行用途，不与这次研究记录混同。
 
-工具设计核对采用[官方工具工程原则](https://www.anthropic.com/research/writing-tools-for-agents)、[官方工具参考](https://code.claude.com/docs/en/tools-reference)和固定版本的[公开执行工具声明](https://github.com/openai/codex/blob/970111f6cb62cc02fe36a82ea7d71b37a2889c97/codex-rs/core/src/tools/handlers/shell_spec.rs)、[公开计划工具声明](https://github.com/openai/codex/blob/970111f6cb62cc02fe36a82ea7d71b37a2889c97/codex-rs/core/src/tools/handlers/plan_spec.rs)。采用职责清晰的原语、默认按命中文件定位、显式按行取内容、准确续页参数和可操作的失败结果；计划只记录步骤，不能证明自然语言结论。其他产品按平台选择进程检索或专用读取工具，不构成本项目删除只读角色 Files 的依据。仅公开的工具参考与 SDK 合同可用于未公开完整核心实现的部分，不把示例仓库冒称完整内核源码。
+工具设计核对采用[官方工具工程原则](https://www.anthropic.com/research/writing-tools-for-agents)、[官方工具参考](https://code.claude.com/docs/en/tools-reference)。采用职责清晰的原语、默认按命中文件定位、显式按行取内容、准确续页参数和可操作的失败结果；计划只记录步骤，不能证明自然语言结论。其他产品按平台选择进程检索或专用读取工具，不构成本项目删除只读角色 Files 的依据。仅公开的工具参考与 SDK 合同可用于未公开完整核心实现的部分，不把示例仓库冒称完整内核源码。
 
 现有 `list_agents` 能从原持久结果核身份并重新返回最近终态的完整子报告，`wait_agent_events` 只给事件摘要，无需另建结果工具。旧 Source 经过压缩不代表原全文仍在每次输入；重读最近报告可重新取得正文，但不保证任选更早轮次。当前活动轮与最近旧终态仍须区分，全文可读不能替代本轮结果接纳或主张核验。
 

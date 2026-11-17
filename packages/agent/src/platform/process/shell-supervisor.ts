@@ -8,6 +8,7 @@ import {
 } from '../../jobs/launch-identity';
 import {
   connectLaunchdControl,
+  LaunchdStartupCancelled,
   removeLaunchdRegistration,
   startLaunchdSupervisor,
 } from './darwin-launchd-supervisor';
@@ -43,6 +44,7 @@ const outgoing = launchdControl?.socket ?? process.stdout;
 const brokerIdentity = launchdOwned ? undefined : observeOwnedProcessIdentity(process.pid);
 let bridge: Awaited<ReturnType<typeof startLaunchdSupervisor>> | undefined;
 let bridgeStarting: Promise<void> | undefined;
+const bridgeStartup = new AbortController();
 let request: Request | undefined;
 let child: Pick<ChildProcess, 'pid' | 'stdout' | 'stderr'> | undefined;
 let ownedChild: DarwinOwnedChild | undefined;
@@ -197,6 +199,7 @@ async function start(): Promise<void> {
         frame: input as unknown as Record<string, unknown>,
         controlBase: input.controlBase!,
         includeRegistration: true,
+        startSignal: bridgeStartup.signal,
         // The only caller which supplies these exact interpreter flags is the
         // trusted worker Job resolver. Preserve them across the launchd hop;
         // env -i in the launcher excludes launchd's ambient preload variables.
@@ -214,6 +217,7 @@ async function start(): Promise<void> {
           : {}),
         cancelled: () => parentGone,
         async onFrame(frame) {
+          if (frame.type === 'start_cancelled') throw Error('invalid_private_guardian_frame');
           if (frame.type === 'ready') await send({ ...frame, broker: brokerIdentity });
           else if (frame.type === 'terminal' && frame.guardian) {
             const guardian = frame.guardian as ReturnType<typeof observeOwnedProcessIdentity>;
@@ -230,7 +234,11 @@ async function start(): Promise<void> {
       await bridgeStarting;
       await bridge!.finished;
       process.exit(0);
-    } catch {
+    } catch (error) {
+      if (error instanceof LaunchdStartupCancelled) {
+        await send({ type: 'start_cancelled', brokerPid: process.pid });
+        process.exit(0);
+      }
       await send({
         type: 'terminal',
         outcome: 'outcome_unknown',
@@ -327,13 +335,15 @@ async function start(): Promise<void> {
   }
 }
 function stop(): Promise<void> {
-  if (bridgeStarting)
+  if (bridgeStarting) {
+    bridgeStartup.abort();
     return bridgeStarting
       .then(() => {
         bridge!.stop();
         return bridge!.finished;
       })
       .catch(() => {});
+  }
   if (closing) return closing;
   if (!child?.pid) process.exit(125);
   return close('cancelled', null);

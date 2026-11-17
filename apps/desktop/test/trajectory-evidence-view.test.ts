@@ -44,6 +44,18 @@ test('typed result renders only the public presentation union, with future field
   expect(future.notice).toContain('格式不可识别');
 });
 
+test('verified Shell evidence retains the saved output format for JSON command output', () => {
+  const evidence = {
+    outcome: 'succeeded',
+    content: '{"value":"程序原文"}\n',
+    outputFormat: 'model-preview',
+    presentation: { kind: 'shell', operation: 'execute', status: 'succeeded' },
+  };
+  expect(decodeTrajectoryEvidence('tool_result', 'application/json', bytes(evidence)).data).toEqual(
+    evidence,
+  );
+});
+
 test('message evidence displays the saved conversation text and public attachment names', () => {
   const view = formatTrajectoryEvidence(
     'message',

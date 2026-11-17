@@ -155,6 +155,32 @@ function turnElapsedMilliseconds(startedAtMs?: number, endedAtMs?: number): numb
   return endedAtMs - startedAtMs;
 }
 
+function RunningTurnStatus({ startedAtMs }: { startedAtMs?: number }) {
+  const { readActive } = useConversationActivity();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!readActive || startedAtMs === undefined || !Number.isFinite(startedAtMs)) return;
+    let timeout: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const current = Date.now();
+      setNow(current);
+      const elapsed = Math.max(0, current - startedAtMs);
+      timeout = setTimeout(tick, 1000 - (elapsed % 1000));
+    };
+    tick();
+    return () => clearTimeout(timeout);
+  }, [readActive, startedAtMs]);
+  const elapsed = turnElapsedMilliseconds(startedAtMs, Math.max(now, startedAtMs ?? now));
+  return (
+    <div className="agent-turn-summary agent-turn-summary-static agent-turn-running">
+      <span className="agent-turn-status-label">
+        <span role="status">进行中</span>
+        {elapsed !== undefined && ` ${formatTurnElapsed(elapsed + 1000)}`}
+      </span>
+    </div>
+  );
+}
+
 function TurnElapsed({
   startedAtMs,
   finishedAtMs,
@@ -1301,6 +1327,12 @@ export function Conversation({
         const messages = processGroups.flat();
         const lastMessage = messages.at(-1);
         const showElapsed = lastTurnEntry && ended;
+        const showRunning =
+          lastTurnEntry &&
+          !ended &&
+          activity?.status === 'running' &&
+          !activity.executionUnconfirmed &&
+          (!activity.unavailable || timing?.turnStartedAtMs !== undefined);
         // Keep the trailing live body and its saved final reply under the same
         // keyed parent, outside the process that closes on settlement.
         const reply =
@@ -1318,7 +1350,7 @@ export function Conversation({
             isConversationTraceStep(previous[0])
           )
             previous.push(message);
-          else blocks.push([message]);
+          else if (!message.tracePending) blocks.push([message]);
         }
         const streaming =
           lastTurnEntry &&
@@ -1343,14 +1375,12 @@ export function Conversation({
                           !activity.executionUnconfirmed &&
                           !messages.some((message) => message.role === 'tool' && !message.settled)
                         ? '正在等待'
-                        : messages.length === 0 &&
-                            (activity?.status === 'preparing' || activity?.status === 'running') &&
+                        : !reply &&
+                            blocks.length === 0 &&
+                            activity?.status === 'preparing' &&
                             !activity.executionUnconfirmed &&
                             !activity.unavailable
-                          ? activity.status === 'preparing' ||
-                            activity.responsePhase === 'preparing'
-                            ? '正在准备回复…'
-                            : '正在回复…'
+                          ? '正在准备回复…'
                           : undefined
           : undefined;
         const turnKey = `turn:${entry.turnId}:complete`;
@@ -1376,40 +1406,22 @@ export function Conversation({
           blocks.map((block, index) => {
             const first = block[0]!;
             if (!isConversationTraceStep(first)) return renderBody(first);
-            // Turn-level handoff progress belongs only to the trailing segment.
-            // Earlier segments retain their own facts, including a still-running
-            // tool across prose, guidance or a standalone child result.
-            const phaseActive = !ended && lastTurnEntry && !reply && index === blocks.length - 1;
-            const tool = turnActive ? latestRunningTraceTool(block) : undefined;
+            const steps = block.filter((item) => !item.tracePending);
+            const tools = steps.filter((item) => item.role === 'tool');
+            const currentTrace =
+              ongoing && !ended && lastTurnEntry && !reply && index === blocks.length - 1;
+            const runningTool = turnActive ? latestRunningTraceTool(tools) : undefined;
+            const latestTool = runningTool ?? (currentTrace ? tools.at(-1) : undefined);
             const trailing = block.at(-1);
             const thinking =
-              phaseActive &&
-              !tool &&
+              tools.length === 0 &&
+              turnActive &&
+              currentTrace &&
               (!activity || activity.status === 'running') &&
               trailing?.role === 'thinking' &&
+              !trailing.tracePending &&
               (!!trailing.text.trim() || !!trailing.reasoningSource) &&
-              !trailing.settled &&
-              trailing.tracePending !== 'tool';
-            const working = tool
-              ? toolTraceTitle(tool)
-              : phaseActive
-                ? activity?.executionUnconfirmed
-                  ? '执行状态待确认'
-                  : activity?.status === 'cancelling'
-                    ? '正在停止'
-                    : activity?.status === 'recovery_required'
-                      ? '需要恢复'
-                      : activity?.status === 'queued'
-                        ? '等待处理'
-                        : trailing?.tracePending === 'tool'
-                          ? '等待工具执行'
-                          : thinking
-                            ? '正在思考…'
-                            : activity?.status === 'waiting'
-                              ? '正在等待'
-                              : '正在回复…'
-                : undefined;
-            const steps = block.filter((item) => !item.tracePending);
+              !trailing.settled;
             const singleTool =
               steps.length === 1 && steps[0]?.role === 'tool' ? steps[0] : undefined;
             const editedFiles =
@@ -1422,20 +1434,19 @@ export function Conversation({
                   step.settled &&
                   step.dispatchCommitted !== false,
               );
-            const summary =
-              working ??
-              ((singleTool
+            const summary = latestTool
+              ? toolTraceTitle(latestTool)
+              : singleTool
                 ? (completedToolSummary(singleTool) ?? toolTraceTitle(singleTool))
-                : editedFiles
-                  ? '编辑了文件'
-                  : completedToolActions(steps.filter((step) => step.role === 'tool'))) ||
-                (phaseActive && trailing?.tracePending === 'tool'
-                  ? '等待工具执行'
-                  : block.some((item) => item.role === 'tool')
-                    ? '工具执行'
-                    : steps.some((item) => item.role === 'thinking' && !item.settled)
+                : tools.length
+                  ? editedFiles
+                    ? '编辑了文件'
+                    : completedToolActions(tools) || '工具执行'
+                  : thinking
+                    ? '正在思考…'
+                    : steps.some((step) => !step.settled)
                       ? '思考'
-                      : '思考了'));
+                      : '思考了';
             const boundary = blocks[index - 1]?.[0];
             const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
             if (open && expanded[id] === true) trackOpen(id);
@@ -1444,9 +1455,9 @@ export function Conversation({
                 key={id}
                 id={id}
                 steps={steps}
-                waitingForTool={!steps.length && trailing?.tracePending === 'tool'}
                 label={summary}
-                running={!!working && !activity?.executionUnconfirmed}
+                running={!!runningTool || thinking}
+                summarizeTools={!latestTool}
                 failed={!!singleTool && toolTextFailed(singleTool)}
                 processOpen={open}
                 notice={
@@ -1510,6 +1521,7 @@ export function Conversation({
               terminalStatus ?? activity?.status ?? (completed ? 'completed' : 'unknown')
             }
           >
+            {showRunning && <RunningTurnStatus startedAtMs={timing?.turnStartedAtMs} />}
             {content}
             {!finalGroup && turnOutputs}
             {waitingLabel && (

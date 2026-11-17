@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Json, OperationRef, PublicExecution, ToolContext, ToolResult } from '../extensions';
 import { canonicalJson } from '../json';
-import { AgentError } from '../storage/types';
+import { AgentError, type ExecutionOutputRecord } from '../storage/types';
 
 function assertOriginalShell(
   ref: OperationRef,
@@ -72,7 +72,7 @@ async function readForegroundShell(
   }
   assertOriginalShell(ref, execution);
   if (!terminal.includes(execution.status)) throw new AgentError('shell_unverifiable');
-  const text: { stdout: string[]; stderr: string[] } = { stdout: [], stderr: [] };
+  const items: ExecutionOutputRecord[] = [];
   const bytes = { stdout: 0, stderr: 0 };
   let cursor = '0',
     upper: string | undefined;
@@ -103,7 +103,7 @@ async function readForegroundShell(
       if (item.droppedBytes) droppedBytes += BigInt(item.droppedBytes);
       if (item.stream !== 'stdout' && item.stream !== 'stderr') continue;
       bytes[item.stream] += Buffer.byteLength(item.content);
-      text[item.stream].push(item.content);
+      items.push(item);
     }
     if (next === BigInt(upper)) break;
     if (next === BigInt(cursor)) throw new AgentError('shell_output_conflict');
@@ -114,8 +114,7 @@ async function readForegroundShell(
     presentation,
     timedOut,
     execution: execution as unknown as Json,
-    stdout: text.stdout.join(''),
-    stderr: text.stderr.join(''),
+    output: { items, highWaterSeq: upper } as unknown as Json,
     stdoutBytes: String(bytes.stdout),
     stderrBytes: String(bytes.stderr),
     droppedBytes: String(droppedBytes),

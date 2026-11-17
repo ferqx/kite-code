@@ -66,7 +66,7 @@ export function parseShellModelFeedback(content: string): ShellModelFeedback {
   const lines = content.split('\n');
   const status = statuses[lines[0]!];
   if (!status) throw Error('fixture_shell_feedback_status_invalid');
-  const boundary = lines.findIndex((line) => line === 'stdout:' || line === 'stderr:');
+  const boundary = lines.findIndex((line) => !line || line === 'stdout:' || line === 'stderr:');
   const header = boundary < 0 ? lines : lines.slice(0, boundary);
   const handles = header.filter((line) => line.startsWith('shell_id: '));
   if (handles.length !== 1) throw Error('fixture_shell_feedback_handle_invalid');

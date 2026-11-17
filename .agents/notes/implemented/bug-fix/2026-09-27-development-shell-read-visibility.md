@@ -5,8 +5,6 @@ Status: implemented
 ## Problem
 已批准的 `git show HEAD:...` 在 macOS Native Shell 中因用户 `.gitconfig` 不在默认读取 roots 而失败。普通工具还可能隐式读取用户配置、动态库或其他工作区外文件。逐命令识别这些依赖无法覆盖通用 Shell 与子进程，且会把沙箱行为绑到不完整的命令白名单。POSIX 启动文件的隐式执行另由非 login Shell 与 `BASH_ENV`/`ENV` 清理控制，和普通文件读取权限是不同问题。
 
-Codex CLI 的 [macOS Seatbelt](https://github.com/openai/codex/blob/main/codex-rs/sandboxing/src/seatbelt.rs) 与 [Linux bubblewrap](https://github.com/openai/codex/blob/main/codex-rs/linux-sandbox/src/bwrap.rs) 实现提供可参考的机制：广泛只读文件视图与独立的可写 roots。Kite 在此基础上保留自己的 Host-control、网络、运行时和发布资格边界。
-
 ## Decision
 1. 开发期 TUI／foreground CLI 的 Native Shell 默认使用 `broad` read scope。macOS 允许广泛文件读取，Linux 以只读方式挂载主机根目录，Windows direct restricted-token 保持现有普通用户读取能力。宿主 ACL／TCC 仍生效。
 2. 读取范围与写入权限正交。非 Full 调用仍只可写 canonical Workspace 与独立 runtime 临时目录；`read_only` 调用不能写 Workspace。广泛读取不授予网络、进程、外部写入或 Full authority。

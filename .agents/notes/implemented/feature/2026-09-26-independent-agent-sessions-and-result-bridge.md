@@ -5,7 +5,7 @@ Status: implemented
 旧 Task 的 required 桥接与显式 after_turn 执行已由[退役决定](../architecture/2026-11-02-retire-legacy-task.md)部分取代；独立子 Session、目录过滤、准确来源和取消取舍继续适用。
 
 ## Problem
-阶段 A–C 已修复父 Run 在多个后台子任务及 Shell 错峰完成时的等待和结果接纳。阶段 D 的未发布候选实现却把多个 Agent 行、子模型事实和邮箱写入同一个父 Session。并发兄弟写入会竞争同一 revision／effect lease；该结构也无法赋予子 Agent 独立的持久对话上下文。用户要求子 Agent 像 Codex 的 Agent thread 一样拥有自己的会话线程，且内部线程不能占据空间的顶层会话列表。官方 [Subagents 文档](https://learn.chatgpt.com/docs/agent-configuration/subagents)说明可检查 Agent thread 与独立上下文，但不规定 Kite 的数据库布局。
+阶段 A–C 已修复父 Run 在多个后台子任务及 Shell 错峰完成时的等待和结果接纳。阶段 D 的未发布候选实现却把多个 Agent 行、子模型事实和邮箱写入同一个父 Session。并发兄弟写入会竞争同一 revision／effect lease；该结构也无法赋予子 Agent 独立的持久对话上下文。用户要求子 Agent 拥有可查看的独立会话线程和持久上下文，内部线程不进入空间的顶层会话列表。
 
 ## Decision
 1. 每个 Agent 的 `agentThreadId` 对应一个持久 Store Session，独立持有 State revision、模型 transcript、Run/Turn、execution owner 和 effect lease。稳定 `agent_id`、线程 ID、逐轮 `task_id` 分别保存。子 Session 继承经过收窄的 Workspace/project 与 grant，不能直接写父 State；同一个 SQLite 文件可容纳所有 Session。
@@ -35,4 +35,4 @@ Status: implemented
 
 决策者：用户确认每 Agent 独立会话线程及隐藏子线程；Runtime 设计确定提交与恢复边界
 
-现行依据：[后台 Agent 与 Shell 会话协调方案 §4.0](../../../../docs/plans/background-agent-shell-conversation-coordination.md)、[执行手册](../../../../docs/handbook/features/execution.md)、[Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)、[Host owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-host/docs/execution-lifecycle.md)、[Store owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md)。[Agent Note 0190](2026-09-26-codex-style-agent-mailbox-and-followup-authority.md)保留原单 Session 决定的历史理由；其交互目标仍供核对，共享 Session revision 和同 Session 邮箱事务的接线范围由本记录 替代。
+现行依据：[后台 Agent 与 Shell 会话协调方案 §4.0](../../../../docs/plans/background-agent-shell-conversation-coordination.md)、[执行手册](../../../../docs/handbook/features/execution.md)、[Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)、[Host owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-host/docs/execution-lifecycle.md)、[Store owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md)。[Agent Note 0190](2026-09-26-agent-mailbox-and-followup-authority.md)保留原单 Session 决定的历史理由；其交互目标仍供核对，共享 Session revision 和同 Session 邮箱事务的接线范围由本记录 替代。

@@ -254,7 +254,11 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
   const host = dom.window.document.getElementById('root')!;
   const root = createRoot(host);
   const cache = new NativeReasoningCache();
-  const pending: { signal: AbortSignal; resolve: (text: string) => void }[] = [];
+  const pending: {
+    signal: AbortSignal;
+    resolve: (text: string) => void;
+    reject: (error: Error) => void;
+  }[] = [];
   let reads = 0;
   let message = thought;
   let scope = JSON.stringify([1, 'store', 's']);
@@ -263,16 +267,15 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
   let active = true;
   let available = true;
   let authorized = true;
-  let settled = false;
   let open = true;
+  let mounted = 0;
   const render = () =>
     act(async () => {
       const accessEpoch = cache.observe('connection', authorized);
       root.render(
-        <ConversationActivityContext value={{ readActive: active, resume: 0 }}>
+        <ConversationActivityContext key={mounted} value={{ readActive: active, resume: 0 }}>
           {renderNativeReasoning({
             scope: JSON.stringify([scope, accessEpoch]),
-            model: { id: message.id, role: 'thinking', text: '', settled },
             original: message,
             open,
             revision,
@@ -282,7 +285,9 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
             read: available
               ? (signal) => {
                   reads++;
-                  return new Promise<string>((resolve) => pending.push({ signal, resolve }));
+                  return new Promise<string>((resolve, reject) =>
+                    pending.push({ signal, resolve, reject }),
+                  );
                 }
               : undefined,
           })}
@@ -290,7 +295,15 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
       );
     });
   const finish = (text: string) => act(async () => pending.at(-1)!.resolve(text));
+  const fail = () =>
+    act(async () => pending.at(-1)!.reject(Error('model_output_identity_mismatch')));
   try {
+    await render();
+    await fail();
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('暂时无法读取思考内容');
+    open = false;
+    await render();
+    open = true;
     await render();
     await finish('VERIFIED_STREAM_PREFIX');
     const paragraph = host.querySelector('p');
@@ -322,7 +335,6 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
     await finish('VERIFIED_STREAM_PREFIX AND_RECONNECTED_SUFFIX');
     expect(host.textContent).toContain('AND_RECONNECTED_SUFFIX');
     message = { ...message, status: 'complete' };
-    settled = true;
     await render();
     expect(host.textContent).toContain('AND_RECONNECTED_SUFFIX');
     await finish('VERIFIED_FINAL_REASONING');
@@ -334,10 +346,36 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
     expect(reads).toBe(finalReads);
     expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
 
-    // A new observation must revalidate even a settled cached body, without blanking it.
+    // A stale or empty retry never interrupts a previously verified body.
+    const verifiedBody = host.querySelector('p');
     epoch++;
     await render();
-    expect(reads).toBe(finalReads + 1);
+    await fail();
+    expect(host.querySelector('p')).toBe(verifiedBody);
+    expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
+    epoch++;
+    await render();
+    await finish('');
+    expect(host.querySelector('p')).toBe(verifiedBody);
+    expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
+    epoch++;
+    await render();
+    await finish('VERIFIED_FINAL_REASONING');
+    expect(host.querySelector('p')).toBe(verifiedBody);
+    expect(reads).toBe(finalReads + 3);
+
+    // A restarted view paints its cached body during reader calibration and then revalidates.
+    epoch++;
+    active = false;
+    available = false;
+    mounted++;
+    await render();
+    expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
+    expect(reads).toBe(finalReads + 3);
+    active = true;
+    available = true;
+    await render();
+    expect(reads).toBe(finalReads + 4);
     expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
     const revokedRead = pending.at(-1)!;
     authorized = false;
@@ -349,7 +387,7 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
     authorized = true;
     await render();
     expect(host.textContent).toBe('');
-    expect(reads).toBe(finalReads + 2);
+    expect(reads).toBe(finalReads + 5);
     await finish('NEWLY_VERIFIED_AFTER_CAPABILITY_RESTORED');
     expect(host.textContent).toBe('NEWLY_VERIFIED_AFTER_CAPABILITY_RESTORED');
 
@@ -392,6 +430,26 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
   }
 });
 
+test('a missing selection preserves the last reasoning capability only within its boundary', () => {
+  const cache = new NativeReasoningCache();
+  const initialEpoch = cache.observe('connection', true);
+  const body = { text: 'cached reasoning' };
+  cache.set('body', body);
+  expect(cache.observe('connection', undefined)).toBe(initialEpoch);
+  expect(cache.get('body')).toBe(body);
+
+  const revokedEpoch = cache.observe('connection', false);
+  expect(revokedEpoch).toBe(initialEpoch + 1);
+  expect(cache.get('body')).toBeUndefined();
+  expect(cache.observe('connection', undefined)).toBe(revokedEpoch);
+  expect(cache.observe('connection', false)).toBe(revokedEpoch);
+
+  expect(cache.observe('connection', true)).toBe(revokedEpoch);
+  cache.set('body', body);
+  cache.observe('new connection', undefined);
+  expect(cache.get('body')).toBeUndefined();
+});
+
 for (const scenario of ['active-loading', 'inactive-loading', 'folded'] as const)
   test(`explicit reasoning capability removal retires ${scenario} conversation trees and body cache`, async () => {
     const dom = new JSDOM('<div id="root"></div>', {
@@ -420,7 +478,6 @@ for (const scenario of ['active-loading', 'inactive-loading', 'folded'] as const
       return renderNativeReasoning({
         scope: JSON.stringify(['s', accessEpoch]),
         readEpoch,
-        model: { id: thought.id, role: 'thinking', text: '', settled: true },
         original: { ...thought, status: 'complete' },
         open: true,
         authorized: allowed,

@@ -4247,7 +4247,7 @@ for (const body of [
   });
 }
 
-test('the first reply status follows the original submission into the dispatched model and visible stream', async () => {
+test('the first reply starts timing with its Run and keeps its place through dispatch and streaming', async () => {
   const executions: Execution[] = [];
   const f = fixture(true, true, 'accept_edits', { deferFirstRun: true, executions });
   const statuses = () => [...f.host.querySelectorAll('.agent-turn .response-status')];
@@ -4275,6 +4275,7 @@ test('the first reply status follows the original submission into the dispatched
     await f.releaseSelection();
     expectStatus('正在准备回复…');
 
+    const createdAt = Date.now() - 3_000;
     const run: Run = {
       id: 'first-run',
       sessionId: sent.creation.sessionId,
@@ -4283,7 +4284,7 @@ test('the first reply status follows the original submission into the dispatched
       isActive: true,
       status: 'running',
       configuration: chatRunConfiguration(),
-      createdAt: 1,
+      createdAt,
       finishedAt: null,
       reason: null,
     };
@@ -4298,7 +4299,11 @@ test('the first reply status follows the original submission into the dispatched
       content: sent.intent.content,
     };
     await f.publishMessages([input], [run]);
-    expectStatus('正在准备回复…');
+    const progress = f.host.querySelector('.agent-turn-running');
+    expect(progress?.textContent).toMatch(/^进行中 \d+ 秒$/);
+    expect(Number(progress?.textContent?.match(/\d+/)?.[0])).toBeGreaterThanOrEqual(4);
+    expect(f.host.querySelector('.conversation-turn-notice')).toBeNull();
+    expect([...f.host.querySelectorAll('.message.user')]).toEqual([user]);
     executions.push({
       id: 'first-model',
       kind: 'model',
@@ -4313,9 +4318,9 @@ test('the first reply status follows the original submission into the dispatched
       cancelRequestedAt: null,
     });
     await f.refreshFacts();
-    const thinking = f.host.querySelector('.conversation-trace-line');
     // Dispatch alone is not evidence of public reasoning content.
-    expect(thinking?.textContent).toBe('正在回复…');
+    expect(f.host.querySelector('.agent-turn-running')).toBe(progress);
+    expect(f.host.querySelector('.conversation-trace-line')).toBeNull();
     expect(f.host.body.textContent).not.toContain('正在思考…');
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant')).toBeNull();
@@ -4339,8 +4344,9 @@ test('the first reply status follows the original submission into the dispatched
       },
     };
     await f.publishMessages([input, reasoning], [run]);
-    expect(f.host.querySelector('.conversation-trace-line')).toBe(thinking);
+    const thinking = f.host.querySelector('.conversation-trace-line');
     expect(thinking?.textContent).toBe('正在思考…');
+    expect(f.host.querySelector('.agent-turn-running')).toBe(progress);
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant')).toBeNull();
     const reply: Message = {
@@ -4349,16 +4355,24 @@ test('the first reply status follows the original submission into the dispatched
       outputBody: { ...reasoning.outputBody!, contentBytes: '12' },
     };
     await f.publishMessages([input, reply], [run]);
+    expect(f.host.querySelector('.agent-turn-running')).toBe(progress);
     expect(statuses().map((entry) => entry.textContent)).toEqual(['正在回复…']);
     const info = statuses()[0]!.closest('.message-meta');
     expect(info).not.toBeNull();
     expect(f.host.querySelector('.conversation-trace-line')).toBe(thinking);
     const visibleReply = f.host.querySelector('.message.assistant .typeset-chat');
     expect(visibleReply?.textContent).toBe('首段正文');
-    const terminal: Run = { ...run, status: 'completed', isActive: false, finishedAt: 2 };
+    const terminal: Run = {
+      ...run,
+      status: 'completed',
+      isActive: false,
+      finishedAt: createdAt + 9_000,
+    };
     // Run completion may arrive before the final saved message change.
     await f.publishMessages([input, reply], [terminal]);
     expect(statuses()).toHaveLength(0);
+    expect(f.host.querySelector('.agent-turn-running')).toBeNull();
+    expect(f.host.querySelector('.agent-turn-summary')?.textContent).toBe('用时 9 秒');
     expect(f.host.querySelector('.message.assistant .typeset-chat')).toBe(visibleReply);
     expect(f.host.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
       'false',

@@ -538,20 +538,30 @@ export function originalToolFeedbackReceived(
       return false;
     const exitCode = object(object(job.result).details).exitCode;
     if (Number.isSafeInteger(exitCode) && !text.includes(`Exit code: ${exitCode}.`)) return false;
-    for (const stream of ['stdout', 'stderr'])
-      if (typeof details[stream] === 'string' && !text.includes(`${stream}:\n${details[stream]}`))
-        return false;
+    const chunks = [details.stdout, details.stderr].filter(
+      (content): content is string => typeof content === 'string' && content.length > 0,
+    );
+    if (
+      details.outputFormat === 'model-preview' &&
+      typeof result.content === 'string' &&
+      result.content.length
+    )
+      chunks.push(result.content);
     const output = object(details.output);
     if (Array.isArray(output.items))
       for (const value of output.items) {
         const item = object(value);
-        if (
-          typeof item.content !== 'string' ||
-          !['stdout', 'stderr'].includes(String(item.stream)) ||
-          !text.includes(`${item.stream}:\n${item.content}`)
-        )
+        if (typeof item.content !== 'string' || !['stdout', 'stderr'].includes(String(item.stream)))
           return false;
+        if (item.content.length) chunks.push(item.content);
       }
+    const boundary = text.search(/\n(?:\n|stdout:\n|stderr:\n)/u);
+    let offset = boundary < 0 ? text.length : boundary + 1;
+    for (const chunk of chunks) {
+      const start = text.indexOf(chunk, offset);
+      if (start < 0) return false;
+      offset = start + chunk.length;
+    }
     return true;
   }
   if (tool.status === 'outcome_unknown') return text.includes('Outcome unknown.');

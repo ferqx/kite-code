@@ -13,11 +13,6 @@ part of every AppContainer invocation. On the observed 880 MiB Workspace it cons
 48--57 seconds. Moving this work to a Worker kept Ink responsive but did not make a
 user command start quickly.
 
-Codex's Windows architecture uses managed sandbox identities, persistent ACL/WFP
-setup, a restricted child token, and direct Workspace ACLs. It avoids per-command
-Workspace copies, but cannot alone express this project's rule that every future
-root `.env.*` must be denied.
-
 ## Decision
 1. Treat a managed `windows_restricted_token` backend as the next Windows sandbox
    candidate, in parallel with the existing `windows_appcontainer` private-staging

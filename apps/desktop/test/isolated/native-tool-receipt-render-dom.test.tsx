@@ -573,6 +573,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
                 });
               }),
             );
+          if (request.view === 'diff')
+            return { kind: 'fileChanges.detail', changeId: request.changeId };
           return {
             kind: 'fileChanges.detail',
             changeId: request.changeId,
@@ -779,6 +781,9 @@ for (const mode of ['known', 'mixed', 'image'] as const)
       expect(icons.length).toBe(mode === 'mixed' ? 3 : 1);
       const drawings = icons.map((icon) => icon.innerHTML);
       const image = f.host.querySelector('.tool-image-thumbnails img');
+      const fileHeading = f.host.querySelector('.tool-edit-heading');
+      if (mode === 'mixed')
+        expect(!!fileHeading?.querySelector('.tool-file-disclosure')).toBe(true);
       for (let round = 0; round < 3; round++) {
         await f.selectOther();
         const pendingReads = f.requests.filter(
@@ -805,13 +810,20 @@ for (const mode of ['known', 'mixed', 'image'] as const)
             f.requests.filter((request) => request.method === 'input.image.open'),
           ).toHaveLength(imageReads);
         }
-        if (mode === 'mixed' && round === 0)
+        if (mode === 'mixed' && round === 0) {
+          expect(f.host.querySelector('.tool-edit-heading')).toBe(fileHeading);
+          expect(fileHeading?.querySelector('.tool-file-disclosure')).toBeNull();
           expect(f.host.querySelector('.file-link') === null).toBe(true);
+        }
         // Leave once while metadata is still held; late reads belong to that retired scope.
         if (round > 0) await f.flush();
         const currentIcons = [...f.host.querySelectorAll(iconSelector)];
         expect(currentIcons.map((icon) => icon.innerHTML)).toEqual(drawings);
         expect(currentIcons.every((icon, index) => icon === icons[index])).toBe(true);
+        if (mode === 'mixed' && round > 0) {
+          expect(f.host.querySelector('.tool-edit-heading')).toBe(fileHeading);
+          expect(!!fileHeading?.querySelector('.tool-file-disclosure')).toBe(true);
+        }
         await f.settlePresentation();
       }
     } finally {
@@ -914,6 +926,9 @@ for (const mode of ['shell-deferred', 'shell-saved-preview'] as const)
 
       await f.toggle();
       expect(output()?.querySelector('.shell-command-text')?.textContent).toBe('Get-Location');
+      expect(output()?.querySelector('.shell-console-output')?.textContent).toStartWith(
+        '首段输出\n',
+      );
       expect(output()?.querySelector('.shell-console-output')?.textContent).toBe(
         f.expectedShellOutput,
       );
@@ -955,10 +970,11 @@ test('an unavailable saved Shell receipt shows its original card without a retry
   }
 });
 
-for (const output of ['', 'stderr:\ncommand output\n'])
+for (const output of ['', 'command output\n'])
   test(`a failed saved Shell receipt keeps its reason separate from ${output ? 'the original output' : 'empty output'}`, async () => {
     const f = fixture('shell-saved-preview');
-    f.setShellFailure(output, '原 Shell 启动失败');
+    const preview = shellOutputPreview({ stderr: output }, 'job', undefined)!;
+    f.setShellFailure(preview.text, '原 Shell 启动失败');
     try {
       await f.render();
       await f.flush();
@@ -1028,12 +1044,18 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
     await f.flush();
     await f.openTurn();
     const aggregate = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
-    expect(aggregate.textContent).toBe('已写入文件');
+    expect(aggregate.textContent).toBe('写入了文件');
     await act(async () => aggregate.click());
     await f.flushTargets();
     expect(f.host.querySelector('.conversation-trace-trigger') === aggregate).toBe(true);
+    const disclosure = f.host.querySelector<HTMLButtonElement>(
+      '.conversation-trace-steps button.tool-file-disclosure',
+    )!;
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false');
+    expect(f.requests.filter((request) => request.method === 'fileChanges.detail')).toHaveLength(0);
+    await act(async () => disclosure.click());
     const file = f.host.querySelector<HTMLButtonElement>(
-      '.conversation-trace-steps button.file-link',
+      '.conversation-trace-steps button.file-diff-path.file-link',
     )!;
     expect(file.textContent).toBe('delivered.txt');
     expect(f.host.textContent).not.toContain('查看本次交付的文件');
@@ -1046,7 +1068,9 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
     );
     expect(failed?.textContent).toContain('failed.txt');
     expect(failed?.querySelector('button.file-link')).toBeNull();
-    expect(f.host.textContent).not.toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
+    const details = f.requests.filter((request) => request.method === 'fileChanges.detail');
+    expect(details).toHaveLength(1);
+    expect(details[0]).toMatchObject({ view: 'diff', changeId: 'verified-output' });
     expect(f.host.querySelectorAll('.conversation-trace-steps > .tool-activity')).toHaveLength(2);
     expect(f.host.textContent).not.toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
     await act(async () => file.click());
@@ -1205,7 +1229,7 @@ test('actual NativeDesktop grouped operations on the same path read distinct rec
     await act(async () => elapsed.click());
     const trace = f.host.querySelector<HTMLButtonElement>('.conversation-trace > button')!;
     expect(trace).not.toBeNull();
-    expect(trace.textContent).toBe('已编辑的文件');
+    expect(trace.textContent).toBe('编辑了文件');
     await act(async () => trace.click());
     expect(bodies()).toHaveLength(0);
     const items = [

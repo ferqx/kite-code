@@ -31,7 +31,6 @@
 
 | 官方机制 | 本方案采用的部分 |
 | --- | --- |
-| [Codex Auto-review](https://learn.chatgpt.com/docs/sandboxing/auto-review) 只处理需要批准的请求，建议先减少常见操作的升级审核 | 已有许可先处理，避免为普通工具新增模型门禁 |
 | [Cursor Run Modes](https://cursor.com/docs/agent/security/run-modes) 先规则与沙箱，再审剩余请求；[工程说明](https://cursor.com/blog/agent-autonomy-auto-review) 减少独立往返 | 明确快速路径，复用原审核通路；不为模仿同 RPC 架构重构 Provider |
 | [Claude Code](https://code.claude.com/docs/en/permission-modes) 将普通操作与模型分类分开，并在部分服务端合并审查 | 独立轻量审核 preset 和短输出；本轮不引入第二模型或服务端依赖 |
 | [Devin 权限](https://docs.devin.ai/cli/reference/permissions) 先明确规则，Smart 才判断剩余操作 | 冻结范围和会话内批准复用，区分人工许可与风险审核 |

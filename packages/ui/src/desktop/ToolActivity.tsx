@@ -1414,30 +1414,6 @@ export function ToolActivity({
           </div>
         ) : read && !itemIssue ? (
           <ToolRow message={message} openFile={messageOpenFile} />
-        ) : edit && !itemIssue && inlineEdit ? (
-          <TraceLine
-            asChild
-            status={traceStatus(message)}
-            className="tool-activity-summary tool-edit-heading"
-          >
-            <div>
-              <Button
-                variant="ghost"
-                className="tool-file-disclosure tool-diff-toggle"
-                aria-expanded={open}
-                aria-label={`${open ? '收起' : '展开'}已编辑的文件${target ? `：${target}` : ''}`}
-                title={target}
-                onClick={() => onToggle(!open)}
-              >
-                <TraceIcon className="tool-activity-marker-icon">
-                  <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
-                </TraceIcon>
-                <span className="tool-label">已编辑的文件</span>
-                <HugeiconsIcon className="tool-file-chevron" icon={ArrowDown01Icon} />
-              </Button>
-              {approval && <ToolApproval message={message} label={approval} />}
-            </div>
-          </TraceLine>
         ) : edit && !itemIssue ? (
           <TraceLine
             asChild
@@ -1448,23 +1424,37 @@ export function ToolActivity({
               <TraceIcon className="tool-activity-marker-icon">
                 <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
               </TraceIcon>
-              <TraceTitle className="tool-activity-marker-content">
-                <span className="tool-label">{label}</span>
-                {target &&
-                  (messageOpenFile ? (
-                    <Button
-                      className="file-link"
-                      title={target}
-                      onClick={() => messageOpenFile(target)}
-                    >
-                      {target}
-                    </Button>
-                  ) : (
-                    <span className="tool-step-target" title={target}>
-                      {target}
-                    </span>
-                  ))}
-              </TraceTitle>
+              {inlineEdit ? (
+                <Button
+                  variant="ghost"
+                  className="tool-file-disclosure tool-diff-toggle"
+                  aria-expanded={open}
+                  aria-label={`${open ? '收起' : '展开'}已编辑的文件${target ? `：${target}` : ''}`}
+                  title={target}
+                  onClick={() => onToggle(!open)}
+                >
+                  <span className="tool-label">已编辑的文件</span>
+                  <HugeiconsIcon className="tool-file-chevron" icon={ArrowDown01Icon} />
+                </Button>
+              ) : (
+                <TraceTitle className="tool-activity-marker-content">
+                  <span className="tool-label">{label}</span>
+                  {target &&
+                    (messageOpenFile ? (
+                      <Button
+                        className="file-link"
+                        title={target}
+                        onClick={() => messageOpenFile(target)}
+                      >
+                        {target}
+                      </Button>
+                    ) : (
+                      <span className="tool-step-target" title={target}>
+                        {target}
+                      </span>
+                    ))}
+                </TraceTitle>
+              )}
               {approval && <ToolApproval message={message} label={approval} />}
             </div>
           </TraceLine>

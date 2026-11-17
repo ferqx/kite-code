@@ -104,7 +104,7 @@ lefthook 安装失败继续是非关键开发工具故障，不能阻断应用�
 | Ubuntu 24.04 | none（bubblewrap namespace probe 不可用） | excluded | runner 不能启动所需 namespace；没有 filesystem、process-tree、继承与入口组合证据 |
 | Windows 10 22H2+（Win11 为主要原生证据） | windows_restricted_token（默认开发 backend） | excluded | direct token 缺少结构性网络与 strict production 资格；V3 ledger migration 尚待新 runner artifact |
 
-[Agent Note 0081](../../.agents/notes/implemented/simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，普通
+[Agent Note 0081](../../.agents/notes/implemented/simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md) 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，普通
 `networkMode=off` 调用以 restricted current-user token、capability-SID ACL 和 Job Object 直接运行
 canonical 真实 Workspace，不创建 staging 副本。按 [Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)，只有明确 `interactionMode=full` 且 sealed scope 为
 `filesystem=full_access, network=allow_all` 的调用
@@ -137,7 +137,7 @@ scope。它不是 startup downgrade、host Shell 或 native failure replay；三
 且进程、网络与资源 sandbox 继续有效。此能力不能写入 capability probe 的静态 enforced 项，也不能
 改变下表或 D-04 production support verdict。
 
-[Agent Note 0077](../../.agents/notes/implemented/simplification/2026-08-08-unified-sandbox-startup-downgrade.md)、[Agent Note 0080](../../.agents/notes/implemented/simplification/2026-08-08-sandbox-environment-only-host-fallback.md) 与 [Agent Note 0081](../../.agents/notes/implemented/simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
+[Agent Note 0077](../../.agents/notes/implemented/simplification/2026-08-08-unified-sandbox-startup-downgrade.md)、[Agent Note 0080](../../.agents/notes/implemented/simplification/2026-08-08-sandbox-environment-only-host-fallback.md) 与 [Agent Note 0081](../../.agents/notes/implemented/simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md) 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
 startup state machine。允许 host fallback 的开发入口只在用户脚本前确认 selected sandbox environment
 或 essential structural startup capability unavailable 时缓存 host Bash/cmd/PowerShell/POSIX，effective
 backend=none 且受限 capability 不可用；Full mode 仍由 interactionMode 表达，实际 boundary 不可用时执行 fail closed。若 static candidate 只有在 durable preparation intent 后才暴露不可用，App 还可

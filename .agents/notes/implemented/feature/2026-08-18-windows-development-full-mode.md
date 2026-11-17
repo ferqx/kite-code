@@ -8,7 +8,7 @@ Windows 的 `windows_restricted_token` 已是可执行的 direct Workspace sandb
 都不创建 Windows 登录账户、不请求 UAC。用户要求在该 backend 被实际选中时可使用 Full，不能让
 尚未完成 production qualification 的严格 backend 阻塞开发期工作流。
 
-[Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md)、[Agent Note 0082](../architecture/2026-08-08-windows-development-network-authorization-parity.md) 和 [Agent Note 0120](2026-08-18-windows-strict-appcontainer-profile.md) 曾将 Windows Full UI 与 production strict qualification
+[Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md)、[Agent Note 0082](../architecture/2026-08-08-windows-development-network-authorization-parity.md) 和 [Agent Note 0120](2026-08-18-windows-strict-appcontainer-profile.md) 曾将 Windows Full UI 与 production strict qualification
 绑定；这会把两个不同层次的产品语义混为一谈。
 
 ## Decision

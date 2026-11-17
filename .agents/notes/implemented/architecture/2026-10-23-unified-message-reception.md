@@ -14,7 +14,7 @@ Status: implemented
 
 ## Decision
 
-参考 Codex 的 InputQueue，保留用户输入入口与 Agent 通信来源，在一个串行接收检查点汇合。普通子 Agent 消息与最终结果复用现有邮箱，用户明确排队的输入继续遵守原前驱与顺序；不引入通用目标策略。
+保留用户输入入口与 Agent 通信来源，在一个串行接收检查点汇合。普通子 Agent 消息与最终结果复用现有邮箱，用户明确排队的输入继续遵守原前驱与顺序；不引入通用目标策略。
 
 新的 `agent_completion` 沿原唯一 `job.report`／`job.report.continue` Command 封存内部邮箱版本和目标列，成为同一邮箱中的结果项。沿用原结果 ID、父会话准入回执和 Run origin，不建立第二条 accepted 记录。新结果从邮箱消费，旧未标记报告与非 Agent Job 保留原协议。结果仍以唯一 result Source 发布，物理 Message 与 Source 的接收身份明确区分。
 
@@ -24,7 +24,7 @@ Status: implemented
 
 ## Alternatives considered
 
-- 为三类输入建立统一目标策略和新的总队列，会重复现有用户队列与邮箱的职责；用户明确要求沿 Codex 的接收结构收敛，保留原接口校验。
+- 为三类输入建立统一目标策略和新的总队列，会重复现有用户队列与邮箱的职责。原接口继续负责各自的校验。
 - 为结果另建 `agent.message`，再创建父会话准入记录，会增加两份身份、状态与恢复证明。直接把原结果 Command 作为 typed 邮箱项可以复用现有精确来源与 Run origin。
 - 仅把三个消费函数放进包装函数，仍然保留新结果的独立 pending 扫描，无法收敛接收 owner。新结果应只经过邮箱接收入口。
 - 把结果正文同时写入普通 Message 和 Source，会让模型重复读取正文；展示继续引用原 Source，不额外投递。

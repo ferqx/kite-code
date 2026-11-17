@@ -310,7 +310,7 @@ test('a live long command survives queued approvals, View refresh and receipt-fi
     expect(projected.find((model) => model.id === 'receipt')?.shell).toMatchObject({
       command,
       jobStatus: 'succeeded',
-      output: 'stdout:\ndone\n',
+      output: 'done\n',
     });
     expect(f.host.querySelector('.shell-output') === card).toBe(true);
     expect(f.host.querySelector('.shell-output-viewport') === viewport).toBe(true);

@@ -48,7 +48,7 @@ const feedback = {
   role: 'tool',
   toolCallId: 'call',
   sourceIds: [tool.id],
-  content: `The command failed.\nExit code: 17.\nshell_id: "original-handle"\nstdout:\n${details.stdout}\nstderr:\n${details.stderr}`,
+  content: `The command failed.\nExit code: 17.\nshell_id: "original-handle"\n\n${details.stdout}\n${details.stderr}`,
 };
 
 test('live reasoning effort preserves low by default and accepts explicit medium', () => {
@@ -862,6 +862,7 @@ test('public Shell cause with exact original source, handle, exit code and uncha
     { ...feedback, content: feedback.content.replace('original-handle', 'invented') },
     { ...feedback, content: feedback.content.replace('Exit code: 17.', 'Exit code: 0.') },
     { ...feedback, content: feedback.content.replace('雪😀', '雪') },
+    { ...feedback, content: feedback.content.replace(details.stdout, '') },
     {
       ...feedback,
       content: feedback.content.replace('INPUT_NOT_READY: prepare READY', 'INPUT_NOT_READY'),
@@ -872,6 +873,22 @@ test('public Shell cause with exact original source, handle, exit code and uncha
   expect(originalToolFeedbackReceived(tool, feedback, [tool, { ...job, sessionId: 'other' }])).toBe(
     false,
   );
+  const saved = {
+    ...tool,
+    result: {
+      outcome: 'failed',
+      content: `${details.stdout}\n${details.stderr}`,
+      details: { ref: details.ref, outputFormat: 'model-preview' },
+    },
+  };
+  expect(originalToolFeedbackReceived(saved, feedback, [job])).toBe(true);
+  expect(
+    originalToolFeedbackReceived(
+      saved,
+      { ...feedback, content: feedback.content.replace(details.stderr, '') },
+      [job],
+    ),
+  ).toBe(false);
 });
 
 test('a timed-out original command retains its public deadline cause and accurate terminal outcome', () => {

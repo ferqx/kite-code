@@ -1,9 +1,9 @@
-# Agent Note: Codex 式 Agent 邮箱与续轮保留唯一结果权威
+# Agent Note: Agent 邮箱与续轮保留唯一结果权威
 
 Status: implemented
 
 ## Problem
-用户要求主 Agent 与子 Agent 都能在活动轮接受引导，并按 Codex 的排队消息、显式续轮、邮箱等待和状态查询来协调后台工作。[OpenAI Multi-agent 文档](https://developers.openai.com/api/docs/guides/responses-multi-agent)将这些操作分开。原决定形成时，Kite 只有单次 child `task_id`、原 Run 的 required 结果接纳和用户→主 Agent 的 `steer_turn`。现有 child terminal 由唯一 watcher 保存结果 Artifact，再按原 Run／Turn／Tool／attempt 交给 Kernel；跨 Run 重发旧 `subagent.background_result_persisted` 既不合法也会改写结果血缘。当时的子 Agent 模型循环没有普通续轮的已结算对话 checkpoint，资源预算也要求每次模型／工具执行先准入。
+用户要求主 Agent 与子 Agent 都能在活动轮接受引导，并以排队消息、显式续轮、邮箱等待和状态查询协调后台工作。原决定形成时，Kite 只有单次 child `task_id`、原 Run 的 required 结果接纳和用户→主 Agent 的 `steer_turn`。现有 child terminal 由唯一 watcher 保存结果 Artifact，再按原 Run／Turn／Tool／attempt 交给 Kernel；跨 Run 重发旧 `subagent.background_result_persisted` 既不合法也会改写结果血缘。当时的子 Agent 模型循环没有普通续轮的已结算对话 checkpoint，资源预算也要求每次模型／工具执行先准入。
 
 本记录保存通信和续轮协议的架构取舍；当前交付范围以产品手册与 owner 文档为准。
 
@@ -26,7 +26,7 @@ Agent 邮箱与续轮已采用每 Agent 独立持久 Session、来源 outbox 与
 
 ## Alternatives considered
 - 把 `task_wait` 改名为 `wait_agent`，或只用内存 owner Map 存消息：拒绝。指定 task 的 wait-any 与调用者邮箱等待不同，内存事实也无法证明重启后的成功受理。
-- 每次 `followup_task` 都创建新的 task，或强制活动 child 当前 final 等消息：拒绝。前者失去活动轮引导，后者把受理误写成“当前轮必读”，均偏离选定的 Codex 交互。
+- 每次 `followup_task` 都创建新的 task，或强制活动 child 当前 final 等消息：拒绝。前者失去活动轮引导，后者把受理误写成“当前轮必读”。
 - 将旧 `subagent.background_result_persisted` 改写到后续 Run，或给每条 followup 加发送方 required claim：拒绝。它破坏原结果身份与 CompletionGuard 的当前工作边界。
 - 复用审批专用 continuation、旧 grant 或旧 Run 额度开启新轮：拒绝。它们都不能证明普通终态上下文及本次授权。
 - 成功入队后才尝试取得新轮预算，失败时静默停留在 queued：拒绝。TriggerTurn 的成功回执必须已有可用的首模型／turn 后备预算；后续执行位和策略变化以可查询状态结算。
@@ -40,6 +40,6 @@ Kernel、Host/Store、Builtin child runtime、Service watcher、Runtime Contract
 
 ## Historical relationships
 
-决策者：产品需求由用户确认采用 Codex 的 Agent 交互；Kite 的接线取舍由 Runtime 设计负责
+用户确认 Agent 通信的产品需求，Runtime 负责接线取舍。
 
 相关：[后台 Agent 与 Shell 的会话协调方案](../../../../docs/plans/background-agent-shell-conversation-coordination.md)、[执行手册](../../../../docs/handbook/features/execution.md)、[CompletionGuard](../../../../docs/active/completion-guard.md)、[Agent Note 0114](../testing/2026-08-18-stable-subagent-actor-identity-for-strict-replay.md)、[Agent Note 0055](../architecture/2026-07-30-cumulative-runtime-resource-governance.md)

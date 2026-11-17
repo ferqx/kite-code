@@ -16,7 +16,7 @@
 
 [kite 界面与协作体验](kite-client-experience.md)：Figma 主稿使用用户提供的 shadcn 组件文件，Kite 内容集中在客户端页面、交互原型和业务组件三个页面。当前 13 个原型状态和 8 个客户端状态复用已有组件；工具过程按需展开，审批处理后退出操作区。最新修订移除批注，主动添加项目即授权，子 Agent 沿用普通消息并显示回传主 Agent 的结果，资料与产出改为顶部按钮控制的右侧副层。产品要求、实施进展和后续验证边界由方案正文维护；设计完成不代表对应客户端能力已交付。
 
-[后台 Agent 与 Shell 的会话协调方案](background-agent-shell-conversation-coordination.md)：阶段 A–C 与 D0–D3 的已交付路径及受控验收见方案和 owner 文档；真实 Provider、进程恢复及客户端的剩余资格按方案中的准确范围继续核对。[独立 Session Agent Note](../../.agents/notes/implemented/feature/2026-09-26-independent-agent-sessions-and-result-bridge.md)记录取舍，[旧单 Session Agent Note](../../.agents/notes/implemented/feature/2026-09-26-codex-style-agent-mailbox-and-followup-authority.md)的适用范围已收窄。
+[后台 Agent 与 Shell 的会话协调方案](background-agent-shell-conversation-coordination.md)：阶段 A–C 与 D0–D3 的已交付路径及受控验收见方案和 owner 文档；真实 Provider、进程恢复及客户端的剩余资格按方案中的准确范围继续核对。[独立 Session Agent Note](../../.agents/notes/implemented/feature/2026-09-26-independent-agent-sessions-and-result-bridge.md)记录取舍，[旧单 Session Agent Note](../../.agents/notes/implemented/feature/2026-09-26-agent-mailbox-and-followup-authority.md)的适用范围已收窄。
 
 ## 已实施方案的剩余资格
 

@@ -163,7 +163,8 @@ export function groupNativeToolMessages(messages: readonly DesktopMessage[]): De
     return message;
   });
 }
-const sameReceipt = (left: Message, right: Message) =>
+export const sameToolReceipt = (left: Message, right: Message) =>
+  left.id === right.id &&
   left.sessionId === right.sessionId &&
   left.seq === right.seq &&
   left.content === right.content &&
@@ -1074,7 +1075,7 @@ export function useNativeToolMessages({
   const receiptCache = useRef(candidates);
   if (
     receiptCache.current.length !== candidates.length ||
-    candidates.some((message, index) => !sameReceipt(message, receiptCache.current[index]!))
+    candidates.some((message, index) => !sameToolReceipt(message, receiptCache.current[index]!))
   )
     receiptCache.current = candidates;
   const eligible = receiptCache.current;
@@ -1181,7 +1182,7 @@ export function useNativeToolMessages({
               previous.inputRevision !== inputRevisions.get(message.id)?.omission))) ||
         (previous.fact?.status === 'outcome_unknown' &&
           previous.observationRevision !== observationRevision) ||
-        !sameReceipt(previous.message, message)
+        !sameToolReceipt(previous.message, message)
       );
     });
     // Mark the new read as pending now; retaining the last error would report
@@ -1286,7 +1287,7 @@ export function useNativeToolMessages({
                 delete next[message.id];
                 const previous = current.read.get(message.id);
                 fact =
-                  previous && sameReceipt(previous.message, message)
+                  previous && sameToolReceipt(previous.message, message)
                     ? previous.fact &&
                       (previous.callRevision !== inputRevisions.get(message.id)?.call
                         ? withoutToolInput(previous.fact)
@@ -1331,7 +1332,7 @@ export function useNativeToolMessages({
             current.read.set(message.id, {
               message,
               fact:
-                previous && sameReceipt(previous.message, message)
+                previous && sameToolReceipt(previous.message, message)
                   ? previous.fact &&
                     (previous.callRevision !== inputRevisions.get(message.id)?.call
                       ? withoutToolInput(previous.fact)
@@ -1380,7 +1381,9 @@ export function useNativeToolMessages({
             if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
               return true;
             const previous = cache.current.read.get(message.id);
-            return !previous || previous.commandPending || !sameReceipt(previous.message, message);
+            return (
+              !previous || previous.commandPending || !sameToolReceipt(previous.message, message)
+            );
           })
           .map((message) => message.id),
   );
@@ -1395,7 +1398,7 @@ export function useNativeToolMessages({
           const record = cache.current.read.get(fact.messageId);
           const original = record?.message;
           const current = messagesById.get(fact.messageId);
-          if (!original || !current || !sameReceipt(original, current)) return [];
+          if (!original || !current || !sameToolReceipt(original, current)) return [];
           return [
             record.callRevision !== inputRevisions.get(fact.messageId)?.call
               ? withoutToolInput(fact)

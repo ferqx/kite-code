@@ -10,7 +10,7 @@ Status: implemented
 
 以可核实的原请求实际输入为基线，对新增消息做有界通用估算；路由、工具和原内容不能核实时全量回退。只加本次实际将采用的新增消息估算，不把报告输出和隐藏推理盲目加入输入。Core 与 Service 共用纯投影，完整累计从原 Store／Session 的 usage 叶子读取，缺失给出覆盖数。TUI 保留三个不同指标，预测不改写实际统计。当前契约由[负责文档](../../../../packages/agent/src/context-estimate.README.md)维护。
 
-源码研究核对 [Codex](https://github.com/openai/codex/blob/4eb4a65407d98cebc4c83bf13be440b9fbc78a7c/codex-rs/core/src/context_manager/history.rs#L924-L955) 与 [OpenCode](https://github.com/anomalyco/opencode/blob/ed772f5009755b5262805a7ba07e66e1417f140a/packages/core/src/session/compaction.ts#L874-L903) 的实测与增量分层，仅借鉴机制，不直接采用其 token 字段合计口径或未知窗口策略。
+对照了 [OpenCode 的上下文压缩实现](https://github.com/anomalyco/opencode/blob/ed772f5009755b5262805a7ba07e66e1417f140a/packages/core/src/session/compaction.ts#L874-L903)。Kite 按自己的 token 口径与未知窗口策略处理。
 
 ## Alternatives considered
 

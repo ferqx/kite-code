@@ -10,9 +10,6 @@ previous-build stop、PID/reservation验证、busy换代与source `tui:fresh`等
 早期方案通过为每个 source TUI 创建临时 Service 与临时 Store 消除了默认 build drift，但也让开发态失去持久Session、多客户端共享行为和稳定
 Web语义，与installed拓扑不一致。问题根因不是Server必须共享或独享，而是持久Session authority错误地从属于Server进程生命周期。
 
-Codex的公开命令面与app-server schema表明它支持stdio/daemon等可替换连接进程以及Thread/Turn的start、resume、read、list、fork操作。
-这只作为接口与生命周期方向的启发，不证明Codex内部持久化或authority实现。Kite不把未公开实现当作事实，也不复制其领域模型。
-
 ## Decision
 ### 1. 三层authority
 

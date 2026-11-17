@@ -11,9 +11,6 @@ AppContainer 路径没有成为 production-qualified backend。它还要求在�
 调用后回写差异，并维护第二套 ACL、协议、预算与错误语义。实际验证也表明 vendored POSIX runtime
 不能在 Classic AppContainer 中可靠初始化。因此继续保留该实验路径只会扩大安全和维护表面。
 
-Codex CLI 的 Windows sandbox 方向同样采用受限 token、专用身份、ACL 和网络策略，而没有采用
-AppContainer。这与 Kite Code 已经落地的 direct Workspace 架构一致。
-
 ## Decision
 1. 删除 `windows_appcontainer` backend、实验环境变量选择逻辑、Classic AppContainer native launch
    代码及其测试。

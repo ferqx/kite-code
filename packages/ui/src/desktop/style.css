@@ -3722,7 +3722,7 @@ body {
   block-size: var(--ui-icon-size);
 }
 .kite-client .conversation-trace-steps .tool-activity,
-.kite-client .conversation-trace > .tool-activity {
+.kite-client [data-direct-trace-tool] > .tool-activity {
   margin-block: 0;
 }
 .kite-client .conversation-reasoning-body .typeset-chat {
@@ -3842,12 +3842,19 @@ body {
 .kite-client .conversation-trace-turn > .agent-turn-summary-static {
   box-shadow: none;
 }
+.kite-client .agent-turn-running {
+  width: fit-content;
+  font-variant-numeric: tabular-nums;
+}
 .kite-client .conversation-trace-turn {
   & > .agent-turn-process > .agent-turn-summary-row > .agent-turn-summary,
   & > .agent-turn-summary-static,
   & > .conversation-turn-notice,
   & .response-status,
-  & :where(.conversation-trace, .agent-turn-body) > :where(.tool-activity) > .tool-activity-summary,
+  &
+    :where([data-direct-trace-tool], .agent-turn-body)
+    > :where(.tool-activity)
+    > .tool-activity-summary,
   & :where(.conversation-trace) > .conversation-trace-trigger > .conversation-trace-line {
     min-height: 0;
     padding-block: 0;
@@ -4356,14 +4363,26 @@ body {
   color: inherit;
   background: transparent;
 }
+.kite-client .tool-edit-heading:has(> .tool-file-disclosure) {
+  display: grid;
+  grid-auto-flow: column;
+}
+/* Keep the icon on the row while its existing button covers the same area. */
+.kite-client .tool-edit-heading:where(:has(> .tool-file-disclosure)) > .tool-activity-marker-icon {
+  grid-area: 1 / 1;
+  z-index: 1;
+  pointer-events: none;
+}
 .kite-client .tool-file-disclosure.tool-diff-toggle {
   display: flex;
+  grid-area: 1 / 1;
   align-items: center;
   gap: 8px;
   width: auto;
   height: auto;
   min-height: 24px;
   padding: 0;
+  padding-inline-start: calc(var(--spacing, 0.25rem) * 4 + 8px);
   color: inherit;
   font: inherit;
   opacity: 1;

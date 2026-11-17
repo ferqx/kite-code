@@ -10,6 +10,7 @@ import {spawn} from 'node:child_process';
 import {appendFileSync,existsSync,writeFileSync} from 'node:fs';
 let input='',nonce,child,ready=false,cancelled=false,closing=false;
 const scenario=process.env.SCENARIO,root=process.env.FIXTURE_ROOT;
+const cancelBeforeStart=scenario.startsWith('macos-start-cancelled');
 function send(frame,done){process.stdout.write(JSON.stringify({nonce,...frame})+'\n',done);}
 function stop(){
  if(closing||!child)return;closing=true;
@@ -20,6 +21,7 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data',chunk=>{input+=chunk;while(input.includes('\n')){
  const end=input.indexOf('\n'),frame=JSON.parse(input.slice(0,end));input=input.slice(end+1);
  if(frame.type==='start'){
+  if(cancelBeforeStart){nonce=frame.nonce;writeFileSync(root+'/broker-ready',String(process.pid));continue;}
   nonce=frame.nonce;child=spawn('/bin/sleep',['30'],{detached:true,stdio:'ignore'});
   child.once('spawn',()=>{
    writeFileSync(root+'/child.pid',String(child.pid));
@@ -27,19 +29,32 @@ process.stdin.on('data',chunk=>{input+=chunk;while(input.includes('\n')){
    setTimeout(()=>{ready=true;send({type:'ready',processGroupId:child.pid});if(cancelled&&!scenario.includes('unknown'))stop();},250);
   });
  }else if(frame.type==='cancel'){
+  if(cancelBeforeStart){
+   if(closing||frame.nonce!==nonce)continue;
+   closing=true;
+   send({type:'start_cancelled',brokerPid:scenario.endsWith('wrong-pid')?process.pid+1:process.pid},()=>{
+    if(scenario.endsWith('truncated'))process.stdout.write('{');
+    writeFileSync(root+'/broker-receipt',nonce);
+    const gate=setInterval(()=>{
+     if(!existsSync(root+'/release'))return;
+     clearInterval(gate);process.exit(scenario.endsWith('nonzero')?125:0);
+    },10);
+   });
+   continue;
+  }
   if(!nonce){nonce=frame.nonce;appendFileSync(root+'/cancel.log',nonce+'\n');send({type:'terminal',outcome:'cancelled',groupStopped:true,exitCode:null},()=>process.exit(0));continue;}
   appendFileSync(root+'/cancel.log',frame.nonce+'\n');cancelled=true;
   if(scenario.includes('unknown'))send({type:'terminal',outcome:'outcome_unknown',groupStopped:false,exitCode:null});
   else if(ready)stop();
  }
 }});
-process.stdin.on('end',()=>{appendFileSync(root+'/eof.log','eof\n');stop();});
+process.stdin.on('end',()=>{if(cancelBeforeStart)process.exit(125);appendFileSync(root+'/eof.log','eof\n');stop();});
 setInterval(()=>{if(existsSync(root+'/release'))stop();},10);
 `;
 
 const probe = String.raw`
 import assert from 'node:assert/strict';
-import {existsSync,readFileSync,writeFileSync,unlinkSync} from 'node:fs';
+import {existsSync,mkdirSync,readdirSync,readFileSync,renameSync,rmdirSync,writeFileSync,unlinkSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 const [source,root,scenario]=process.argv.slice(2);
 let cleanupCalls=0;const cleanupFixture=scenario.startsWith('spawn-cleanup-');
@@ -69,6 +84,75 @@ const job=(cleanupFixture?createMacosHostShellJob:createShellJob)({cwd:root,env:
 const until=async check=>{const end=Date.now()+7000;while(!await check()){if(Date.now()>end)throw Error('fixture_condition_timeout');await new Promise(r=>originalTimer(r,10));}};
 let handle,store,runtime;
 try{
+ if(scenario.startsWith('macos-start-cancelled')){
+  const workspace=root+'/workspace';const controlBase=root+'/control';const temporaryRoot=root+'/temp';
+  for(const path of [workspace,controlBase,temporaryRoot])mkdirSync(path);
+  const options={cwd:workspace,controlBase,temporaryRoot,protectedRoots:[],filesystemScope:'workspace_write',env:{PATH:'/usr/bin:/bin',SCENARIO:scenario,FIXTURE_ROOT:root}};
+  const macosJob=createMacosHostShellJob({...options,supervisorPath:root+'/guardian.js'});
+  if(scenario!=='macos-start-cancelled'){
+   const controller=new AbortController();
+   const starting=macosJob.start({command:'never executed'},{sessionId:'s',executionId:'startup',signal:controller.signal}).catch(error=>error);
+   await until(()=>existsSync(root+'/broker-ready'));
+   controller.abort();await until(()=>existsSync(root+'/broker-receipt'));
+   const replacedTemp=scenario.endsWith('replaced-temp')?temporaryRoot+'/'+readdirSync(temporaryRoot)[0]:undefined;
+   if(replacedTemp){renameSync(replacedTemp,root+'/original-temp');mkdirSync(replacedTemp);}
+   writeFileSync(root+'/release','release original broker');
+   const failed=await starting;assert.ok(failed instanceof JobStartError);assert.ok(failed.handle);
+   const events=[];for await(const event of macosJob.observe(failed.handle))events.push(event);
+   assert.equal(events.at(-1).result.outcome,'outcome_unknown');
+   assert.equal(events.at(-1).supervision,'unknown');
+   assert.equal((await macosJob.cancel(failed.handle)).status,'unknown');
+   await assert.rejects(macosJob.dispose(failed.handle),/shell_owned_cleanup_unconfirmed/);
+   assert.equal(readdirSync(temporaryRoot).length,1);
+   if(replacedTemp){
+    rmdirSync(replacedTemp);renameSync(root+'/original-temp',replacedTemp);
+    assert.equal((await macosJob.cancel(failed.handle)).status,'stopped');
+    await macosJob.dispose(failed.handle);
+    assert.deepEqual(readdirSync(temporaryRoot),[]);
+    assert.equal(events.at(-1).result.outcome,'outcome_unknown');
+   }
+   console.log('invalid startup cancellation leaves original resources retained');process.exit(0);
+  }
+  const {createRuntime}=await import(source+'/index.ts');const {openSqliteStore}=await import(source+'/sqlite.ts');
+  const {createFixedModel}=await import(source+'/../../ai/src/index.ts');const {createShellExtension}=await import(source+'/tools/shell.ts');
+  const built=await Bun.build({entrypoints:[source+'/platform/process/shell-supervisor.ts'],outdir:root+'/assets',target:'bun',naming:'real-guardian.js'});assert.equal(built.success,true);
+  const healthy=createMacosHostShellJob({...options,supervisorPath:built.outputs[0].path});
+  const effect=workspace+'/effect';
+  store=await openSqliteStore({dataRoot:root+'/data',profile:'test'});
+  let bindingDisposals=0;
+  const finish={type:'finish',reason:'stop',usage:{inputTokens:1,outputTokens:1}};
+  runtime=createRuntime({store,resourceCapacity:{model:1,process:1},permissions:{async authorize(){return{allowed:true,revision:'fixture-1'}}},async resolveRunConfiguration({session}){
+   const selected=session.id==='cancel'?macosJob:healthy;
+   const command=session.id==='cancel'?"printf cancelled > '"+effect+"'":"printf healthy > '"+effect+"'";
+   return{model:createFixedModel([[{type:'tool_call',id:'one',name:'shell_execute',arguments:JSON.stringify({command})},{...finish,reason:'tool_calls'}],[finish]]),modelId:'fixed',extensions:[createShellExtension({job:selected})],snapshot:{},async dispose(){bindingDisposals++;}};
+  }});
+  const expectedStoreId=(await store.getMetadata()).storeId;
+  await runtime.createWorkspace({expectedStoreId,id:'w',rootUri:pathToFileURL(workspace).href,name:'fixture'});
+  for(const sessionId of ['cancel','healthy'])await runtime.createSession({expectedStoreId,workspaceId:'w',sessionId,commandId:'create-'+sessionId,subjectId:'owner',title:sessionId});
+  await runtime.submitCommand({expectedStoreId,sessionId:'cancel',commandId:'run-cancel',subjectId:'owner',request:{kind:'run.start',content:'one exact Shell'}});
+  await until(()=>existsSync(root+'/broker-ready'));
+  const original=(await store.listExecutions('cancel')).find(e=>e.kind==='job');
+  assert.equal(original.status,'dispatching');assert.equal(readdirSync(temporaryRoot).length,1);
+  await runtime.cancelExecution({expectedStoreId,sessionId:'cancel',commandId:'stop',subjectId:'owner',executionId:original.id});
+  await until(()=>existsSync(root+'/broker-receipt'));
+  assert.equal((await store.listExecutions('cancel')).find(e=>e.id===original.id).status,'dispatching');
+  assert.equal(readdirSync(temporaryRoot).length,1);
+  assert.equal(existsSync(effect),false);
+  writeFileSync(root+'/release','release original broker');
+  await runtime.waitForCommand('run-cancel',{timeoutMs:7000});
+  const cancelled=(await store.listExecutions('cancel')).find(e=>e.id===original.id);
+  assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.result.content,'Shell cancelled');
+  assert.equal(readdirSync(temporaryRoot).length,0);assert.equal(existsSync(effect),false);
+  await runtime.submitCommand({expectedStoreId,sessionId:'healthy',commandId:'run-healthy',subjectId:'owner',request:{kind:'run.start',content:'one healthy exact Shell'}});
+  await runtime.waitForCommand('run-healthy',{timeoutMs:7000});
+  const completed=(await store.listExecutions('healthy')).find(e=>e.kind==='job');
+  assert.equal(completed.status,'succeeded',JSON.stringify(completed.result));
+  assert.equal(completed.result.details.processTreeStopped,true);
+  assert.equal(readFileSync(effect,'utf8'),'healthy');
+  await runtime.close();assert.equal(runtime.getLifecycleState().state,'closed');assert.equal(bindingDisposals,2);
+  assert.deepEqual(readdirSync(temporaryRoot),[]);assert.deepEqual(readdirSync(controlBase),[]);
+  console.log('proved pre-dispatch cancellation releases the original process slot and temp after broker close');process.exit(0);
+ }
  if(scenario==='runtime-preflight'){
   const {createRuntime}=await import(source+'/index.ts');const {openSqliteStore}=await import(source+'/sqlite.ts');
   const {createFixedModel}=await import(source+'/../../ai/src/index.ts');const {createShellExtension}=await import(source+'/tools/shell.ts');
@@ -161,7 +245,17 @@ posixTest.each([
   'protocol',
   'unknown',
   'spawn-failure',
-  ...(process.platform === 'darwin' ? ['spawn-cleanup-success', 'spawn-cleanup-unknown'] : []),
+  ...(process.platform === 'darwin'
+    ? [
+        'spawn-cleanup-success',
+        'spawn-cleanup-unknown',
+        'macos-start-cancelled',
+        'macos-start-cancelled-wrong-pid',
+        'macos-start-cancelled-truncated',
+        'macos-start-cancelled-nonzero',
+        'macos-start-cancelled-replaced-temp',
+      ]
+    : []),
   'write-failure',
   'runtime-preflight',
   'runtime-late',

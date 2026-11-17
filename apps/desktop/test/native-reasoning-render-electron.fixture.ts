@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { _electron } from 'playwright';
+import { _electron, type Locator } from 'playwright';
 import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
@@ -41,6 +41,22 @@ try {
       await page.waitForTimeout(20);
     }
   }
+  const waitForDisclosure = (locator: Locator) =>
+    locator.evaluate(async (element) => {
+      // Scroll-linked edge fades do not finish while stationary.
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .filter(
+            (animation) =>
+              animation.timeline === element.ownerDocument.timeline &&
+              Number.isFinite(animation.effect?.getComputedTiming().endTime) &&
+              animation.playState !== 'finished' &&
+              animation.playState !== 'idle',
+          )
+          .map((animation) => animation.finished.catch(() => {})),
+      );
+    });
   const select = async (title: string, id: string) => {
     await page.getByRole('button', { name: title, exact: true }).click();
     await until(
@@ -140,9 +156,20 @@ try {
       assistants: number;
       thinking: boolean;
       final: number;
+      timer: string;
       at: number;
     };
     type Closed = { at: number; height: number; text: string };
+    type ProtectedDetails = {
+      reasoning: HTMLElement;
+      reasoningStep: HTMLElement;
+      tool: HTMLElement;
+      toolBody: HTMLElement;
+      reasoningText: string;
+      toolText: string;
+      focus: Element | null;
+      selection: string;
+    };
     const global = globalThis as typeof globalThis & {
       reasoningRenderProbe: {
         violations: string[];
@@ -151,6 +178,10 @@ try {
         phase: string;
         samples: Sample[];
         closedFrames: Closed[];
+        protectedFrames: number;
+        protectedMutations: number;
+        protect: (reasoning: HTMLElement, tool: HTMLElement, toolBody: HTMLElement) => void;
+        unprotect: () => void;
         stop: () => void;
       };
     };
@@ -161,10 +192,39 @@ try {
       phase: 'finished',
       samples: [],
       closedFrames: [],
+      protectedFrames: 0,
+      protectedMutations: 0,
+      protect: () => {},
+      unprotect: () => {},
       stop: () => {},
     };
     const probe = global.reasoningRenderProbe;
     let last = '';
+    let originalTimer: HTMLElement | undefined;
+    let lastElapsed = 0;
+    let details: ProtectedDetails | undefined;
+    probe.protect = (reasoning, tool, toolBody) => {
+      const reasoningStep = reasoning.closest<HTMLElement>('.conversation-reasoning')!;
+      const range = document.createRange();
+      range.selectNodeContents(reasoning);
+      const selection = getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      details = {
+        reasoning,
+        reasoningStep,
+        tool,
+        toolBody,
+        reasoningText: reasoning.textContent,
+        toolText: tool.textContent,
+        focus: document.activeElement,
+        selection: selection.toString(),
+      };
+    };
+    probe.unprotect = () => {
+      details = undefined;
+      getSelection()?.removeAllRanges();
+    };
     const sample = (kind: string) => {
       const conversation = document.querySelector('.conversation');
       if (!conversation) return;
@@ -172,9 +232,44 @@ try {
       const visible = (conversation as HTMLElement).innerText;
       if (/ACTUAL_READ_ONLY_TOOL_RESULT|"baseline"|"executionId"/.test(text))
         probe.violations.push(`${kind}:${probe.phase}:raw_tool_json`);
-      if (text.includes('PRIVATE_REASONING_SENTINEL') && probe.phase !== 'reasoning-open')
+      const reasoningOpen = [
+        'reasoning-open',
+        'tool-reasoning-open',
+        'settled-reasoning-open',
+      ].includes(probe.phase);
+      if (text.includes('PRIVATE_REASONING_SENTINEL') && !reasoningOpen)
         probe.violations.push(`${kind}:${probe.phase}:reasoning_disclosed_without_user`);
-      if (!['manual-open', 'manual-close', 'history', 'reasoning-open'].includes(probe.phase)) {
+      if (details) {
+        if (kind === 'frame') probe.protectedFrames++;
+        else probe.protectedMutations++;
+        if (
+          !details.reasoning.isConnected ||
+          details.reasoning.textContent !== details.reasoningText ||
+          details.reasoningStep.querySelector(':scope > button')?.getAttribute('aria-expanded') !==
+            'true' ||
+          !details.reasoning.getClientRects().length ||
+          details.reasoningStep.textContent.includes('暂时无法读取思考内容')
+        )
+          probe.violations.push(`${kind}:${probe.phase}:open_reasoning_changed`);
+        if (
+          !details.toolBody.isConnected ||
+          details.tool.textContent !== details.toolText ||
+          details.tool
+            .querySelector('button.tool-activity-summary')
+            ?.getAttribute('aria-expanded') !== 'true' ||
+          !details.toolBody.getClientRects().length
+        )
+          probe.violations.push(`${kind}:${probe.phase}:completed_tool_changed`);
+        if (
+          document.activeElement !== details.focus ||
+          getSelection()?.toString() !== details.selection
+        )
+          probe.violations.push(`${kind}:${probe.phase}:protected_reading_position_changed`);
+      }
+      if (
+        !reasoningOpen &&
+        !['manual-open', 'manual-close', 'tools-complete-open', 'history'].includes(probe.phase)
+      ) {
         if (conversation.querySelector('.conversation-trace-trigger[aria-expanded="true"]'))
           probe.violations.push(`${kind}:${probe.phase}:tool_opened_without_user`);
         if (conversation.querySelector('.conversation-trace-steps'))
@@ -183,28 +278,111 @@ try {
       for (const body of conversation.querySelectorAll('.conversation-reasoning-body')) {
         const owner = body.closest('.conversation-reasoning');
         const disclosure = owner?.querySelector(':scope > button');
-        if (!disclosure || disclosure.getAttribute('aria-controls') !== body.id)
+        if (
+          !disclosure ||
+          (disclosure.getAttribute('aria-expanded') === 'true' &&
+            disclosure.getAttribute('aria-controls') !== body.id)
+        )
           probe.violations.push(`${kind}:${probe.phase}:reasoning_outside_own_disclosure`);
       }
       const assistants = conversation.querySelectorAll('.message.assistant').length;
       const final = conversation.querySelectorAll('.agent-turn-final').length;
+      const timers = conversation.querySelectorAll<HTMLElement>('.agent-turn-running');
+      const timer = timers[0];
+      const timerText = timer?.innerText.replace(/\s+/g, ' ').trim() ?? '';
+      if (timers.length > 1) probe.violations.push(`${kind}:${probe.phase}:duplicate_timer`);
+      if (timer) {
+        originalTimer ??= timer;
+        if (timer !== originalTimer) probe.violations.push(`${kind}:${probe.phase}:replaced_timer`);
+        if (timer.parentElement?.firstElementChild !== timer)
+          probe.violations.push(`${kind}:${probe.phase}:timer_moved_from_turn_start`);
+        const duration = /^进行中 (?:(\d+) 天 )?(?:(\d+) 小时 )?(?:(\d+) 分 )?(\d+) 秒$/.exec(
+          timerText,
+        );
+        if (!duration) probe.violations.push(`${kind}:${probe.phase}:invalid_timer_text`);
+        else {
+          const [, days, hours, minutes, seconds] = duration;
+          const elapsed =
+            Number(days ?? 0) * 86400 +
+            Number(hours ?? 0) * 3600 +
+            Number(minutes ?? 0) * 60 +
+            Number(seconds);
+          if (elapsed < 1) probe.violations.push(`${kind}:${probe.phase}:timer_below_one_second`);
+          if (elapsed < lastElapsed)
+            probe.violations.push(`${kind}:${probe.phase}:timer_moved_backwards`);
+          lastElapsed = elapsed;
+        }
+      } else if (
+        originalTimer &&
+        [
+          'before-output',
+          'first-reasoning',
+          'reasoning-open',
+          'stage-prose',
+          'tool',
+          'tools-complete',
+          'tools-complete-open',
+          'tool-reasoning-open',
+          'second-reasoning',
+          'body',
+        ].includes(probe.phase)
+      ) {
+        probe.violations.push(`${kind}:${probe.phase}:timer_disappeared`);
+      }
+      if (
+        timer &&
+        ['settled', 'manual-open', 'manual-close', 'settled-reasoning-open', 'history'].includes(
+          probe.phase,
+        )
+      )
+        probe.violations.push(`${kind}:${probe.phase}:timer_after_settlement`);
       if (probe.phase === 'first-reasoning' && assistants)
         probe.violations.push(`${kind}:first-reasoning:assistant_before_body`);
       if (
-        ['first-reasoning', 'stage-prose', 'tool', 'second-reasoning', 'body'].includes(
-          probe.phase,
-        ) &&
+        [
+          'first-reasoning',
+          'stage-prose',
+          'tool',
+          'tools-complete',
+          'tools-complete-open',
+          'tool-reasoning-open',
+          'second-reasoning',
+          'body',
+        ].includes(probe.phase) &&
         final
       )
         probe.violations.push(`${kind}:${probe.phase}:premature_final`);
       if (probe.phase === 'settled' && visible.includes('正在思考'))
         probe.violations.push(`${kind}:settled:thinking_after_final`);
       const segments = [...conversation.querySelectorAll('.conversation-trace > button')].map(
-        (button) => ({
-          text: button.textContent,
-          running: !!button.querySelector('[data-status="running"]'),
-        }),
+        (button) => {
+          const label = button.textContent;
+          if (
+            /^(正在回复|等待工具执行|正在等待|等待处理|正在停止|需要恢复|执行状态待确认)/.test(
+              label,
+            ) ||
+            (label.startsWith('正在思考') && !button.querySelector('[data-reasoning]'))
+          )
+            probe.violations.push(`${kind}:${probe.phase}:trace_borrowed_turn_activity`);
+          return {
+            text: label,
+            running: !!button.querySelector('[data-status="running"]'),
+          };
+        },
       );
+      if (
+        ['tools-complete', 'tools-complete-open', 'second-reasoning'].includes(probe.phase) &&
+        (segments.length !== 2 ||
+          segments[1]?.text !== '已读取 read-only.txt' ||
+          segments[1].running)
+      )
+        probe.violations.push(`${kind}:${probe.phase}:unfinished_trace_lost_latest_tool`);
+      if (
+        probe.phase === 'body' &&
+        visible.includes('PUBLIC_LIVE_PREFIX') &&
+        (segments.length !== 2 || segments[1]?.text !== '读取了文件' || segments[1].running)
+      )
+        probe.violations.push(`${kind}:${probe.phase}:finished_trace_missing_tool_summary`);
       if (visible.includes('PUBLIC_STAGE_PROSE') && segments.length > 1) {
         if (segments[0]?.running || /正在|待确认/.test(segments[0]?.text ?? ''))
           probe.violations.push(`${kind}:${probe.phase}:settled_segment_borrowed_turn_activity`);
@@ -215,9 +393,17 @@ try {
         thinking: visible.includes('正在思考'),
         final,
         segments,
+        timer: timerText,
         at: performance.now(),
       };
-      const signature = JSON.stringify([value.phase, assistants, value.thinking, final, segments]);
+      const signature = JSON.stringify([
+        value.phase,
+        assistants,
+        value.thinking,
+        final,
+        segments,
+        timerText,
+      ]);
       if (signature !== last) {
         probe.samples.push(value);
         last = signature;
@@ -306,6 +492,8 @@ try {
             frames: number;
             samples: unknown[];
             closedFrames: unknown[];
+            protectedFrames: number;
+            protectedMutations: number;
           };
         }
       ).reasoningRenderProbe;
@@ -315,10 +503,11 @@ try {
         frames: value.frames,
         samples: value.samples,
         closedFrames: value.closedFrames.slice(0, 20),
+        protectedFrames: value.protectedFrames,
+        protectedMutations: value.protectedMutations,
       };
     });
-  const checkReasoning = async (label: string, expectedAssistants: number) => {
-    assert.ok((await content()).includes('正在思考'), `${label}: thinking indicator`);
+  const checkBeforeReply = async (label: string, expectedAssistants: number) => {
     assert.equal(
       await page.locator('.conversation .message.assistant').count(),
       expectedAssistants,
@@ -331,7 +520,13 @@ try {
     );
     assert.deepEqual((await probe()).violations, [], `${label}: no transient disclosure`);
   };
-  await setPhase('first-reasoning');
+  const resetClosedFrames = () =>
+    page.evaluate(() => {
+      const probe = (globalThis as unknown as { reasoningRenderProbe: { closedFrames: unknown[] } })
+        .reasoningRenderProbe;
+      probe.closedFrames = [];
+    });
+  await setPhase('before-output');
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('REASONING_RENDER');
@@ -339,6 +534,23 @@ try {
   await selectNativeFixtureModel(page, 'fixture');
   await until(() => send.isEnabled(), Boolean, 'send enabled');
   await send.click();
+  const timer = page.locator('.agent-turn-running');
+  await timer.waitFor({ state: 'visible' });
+  const readTimer = async () => (await timer.innerText()).replace(/\s+/g, ' ').trim();
+  const initialTiming = await readTimer();
+  assert.match(initialTiming, /^进行中 \d+ 秒$/);
+  const advancedTiming = await until(readTimer, (value) => value !== initialTiming, 'elapsed tick');
+  assert.match(advancedTiming, /^进行中 \d+ 秒$/);
+  assert.ok(Number(advancedTiming.match(/\d+/)![0]) > Number(initialTiming.match(/\d+/)![0]));
+  assert.equal(await page.locator('.conversation .message.assistant').count(), 0);
+  assert.equal((await messages()).filter((message) => message.role === 'assistant').length, 0);
+  await until(
+    counts,
+    (value) => value.calls === 1 && value.active,
+    'first Model waiting for output',
+  );
+  await setPhase('first-reasoning');
+  await step('initial-reasoning');
   await until(
     messages,
     (value) => value.some((message) => message.firstOutput === 'reasoning'),
@@ -346,7 +558,8 @@ try {
   );
   await until(content, (value) => value.includes('正在思考'), 'first reasoning painted');
   await page.waitForTimeout(300);
-  await checkReasoning('inline-reasoning', 0);
+  assert.ok((await content()).includes('正在思考'), 'inline reasoning keeps its own heading');
+  await checkBeforeReply('inline-reasoning', 0);
   await setPhase('reasoning-open');
   const thought = page.locator('.conversation-trace > .conversation-trace-trigger');
   const arrow = thought.locator('.conversation-trace-chevron');
@@ -384,16 +597,18 @@ try {
   );
   await reasoningBody.locator('strong').getByText('PRIVATE_REASONING_SENTINEL_INITIAL').waitFor();
   const paragraph = reasoningBody.getByText('核对原记录。', { exact: true });
-  const box = (await paragraph.boundingBox())!;
-  await page.mouse.move(box.x + 2, box.y + box.height / 2);
-  assert.equal(await arrow.evaluate((element) => getComputedStyle(element).opacity), '1');
-  const end = await paragraph.evaluate((element) => {
+  await waitForDisclosure(page.locator('.conversation-trace'));
+  await paragraph.scrollIntoViewIfNeeded();
+  const textBounds = await paragraph.evaluate((element) => {
     const range = document.createRange();
     range.selectNodeContents(element);
-    return range.getBoundingClientRect().right;
+    return range.getBoundingClientRect().toJSON();
   });
+  const y = (textBounds.top + textBounds.bottom) / 2;
+  await page.mouse.move(textBounds.left + 2, y);
+  assert.equal(await arrow.evaluate((element) => getComputedStyle(element).opacity), '1');
   await page.mouse.down();
-  await page.mouse.move(end + 1, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.move(textBounds.right + 1, y, { steps: 8 });
   await page.mouse.up();
   assert.equal(await page.evaluate(() => getSelection()?.toString()), '核对原记录。');
   assert.equal(await thought.getAttribute('aria-expanded'), 'true');
@@ -411,7 +626,8 @@ try {
     'reasoning Artifact recorded',
   );
   await page.waitForTimeout(300);
-  await checkReasoning('artifact-reasoning', 0);
+  assert.ok((await content()).includes('正在思考'), 'artifact reasoning keeps its own heading');
+  await checkBeforeReply('artifact-reasoning', 0);
   const reasoningArtifactBytes = Math.max(
     ...(await messages()).map((message) => Number(message.outputBody?.reasoningBytes ?? 0)),
   );
@@ -461,6 +677,73 @@ try {
     gate.hold = false;
     for (const release of gate.releases.splice(0)) release();
   });
+  const traceHeadings = page.locator('.conversation-trace > .conversation-trace-trigger');
+  const toolHeading = traceHeadings.nth(1);
+  const latestReadTitle = '已读取 read-only.txt';
+  await until(
+    () => traceHeadings.allTextContents(),
+    (labels) => labels.length === 2 && labels[1] === latestReadTitle,
+    'the unfinished Trace shows the latest settled read while the next Model is held',
+  );
+  const originalToolHeading = await toolHeading.elementHandle();
+  assert.equal(await toolHeading.getAttribute('aria-expanded'), 'false');
+  assert.equal(await toolHeading.locator('[data-status="running"]').count(), 0);
+  assert.deepEqual(await traceHeadings.allTextContents(), ['思考了', latestReadTitle]);
+  await setPhase('tools-complete');
+  const toolTiming = await readTimer();
+  await until(readTimer, (value) => value !== toolTiming, 'Run keeps ticking over the latest read');
+  assert.deepEqual(await counts(), { calls: 2, active: true, toolObserved: true });
+  await checkBeforeReply('completed-tools', 1);
+  assert.deepEqual((await probe()).closedFrames, [], 'closed tools have not painted their details');
+  await setPhase('tools-complete-open');
+  await toolHeading.click();
+  const activeToolSteps = page.locator('.conversation-trace-steps > .tool-activity');
+  await until(
+    () => activeToolSteps.count(),
+    (count) => count === 2,
+    'read results open in live Run',
+  );
+  assert.equal(await toolHeading.textContent(), latestReadTitle);
+  const liveTrace = page.locator('.conversation-trace').nth(1);
+  const missingTool = activeToolSteps.filter({ hasText: 'missing-read.txt' });
+  const missingDisclosure = missingTool.locator('button.tool-activity-summary');
+  await missingDisclosure.click();
+  const completedDetail = missingTool.locator('.tool-activity-content').getByText('文件不存在', {
+    exact: true,
+  });
+  await completedDetail.waitFor({ state: 'visible' });
+  await setPhase('tool-reasoning-open');
+  await step('tool-reasoning');
+  const liveReasoningDisclosure = liveTrace.locator('.conversation-reasoning > button').first();
+  await liveReasoningDisclosure.click();
+  const liveReasoning = liveTrace.locator('.conversation-reasoning-body .typeset-chat');
+  await liveReasoning.getByText('PRIVATE_REASONING_SENTINEL_TOOL_MODEL', { exact: true }).waitFor();
+  await waitForDisclosure(liveTrace);
+  await liveReasoningDisclosure.focus();
+  await page.evaluate(
+    ([reasoning, tool, toolBody]) => {
+      (
+        globalThis as unknown as {
+          reasoningRenderProbe: { protect: (...elements: HTMLElement[]) => void };
+        }
+      ).reasoningRenderProbe.protect(
+        reasoning as HTMLElement,
+        tool as HTMLElement,
+        toolBody as HTMLElement,
+      );
+    },
+    [
+      await liveReasoning.elementHandle(),
+      await missingTool.elementHandle(),
+      await completedDetail.elementHandle(),
+    ],
+  );
+  const priorToolFacts = await app.evaluate(() => {
+    const gate = (globalThis as unknown as { toolFactGate: { hold: boolean; blocked: number } })
+      .toolFactGate;
+    gate.hold = true;
+    return gate.blocked;
+  });
   await step('pure-tool');
   await until(
     counts,
@@ -471,26 +754,73 @@ try {
     messages,
     (value) =>
       value.filter((message) => message.role === 'assistant' && message.firstOutput === 'reasoning')
-        .length === 2,
+        .length === 3,
     'third reasoning Model recorded',
   );
-  await setPhase('second-reasoning');
-  await until(content, (value) => value.includes('正在思考'), 'third Model thinking indicator');
-  await page.waitForTimeout(300);
-  await checkReasoning('second-reasoning', 1);
-  assert.deepEqual(
-    await page.locator('.conversation-trace > button').allTextContents(),
-    ['思考了', '正在思考…'],
-    'the completed first segment never inherits the current Model phase',
+  await until(
+    () =>
+      app.evaluate(
+        () => (globalThis as unknown as { toolFactGate: { blocked: number } }).toolFactGate.blocked,
+      ),
+    (value) => value > priorToolFacts,
+    'later Tool settled while the original disclosures stay open',
   );
-  const toolTrace = page
-    .locator('.conversation-trace')
-    .filter({ hasText: /正在思考|读取了文件/ })
-    .last();
+  await app.evaluate(() => {
+    const gate = (
+      globalThis as unknown as { toolFactGate: { hold: boolean; releases: (() => void)[] } }
+    ).toolFactGate;
+    gate.hold = false;
+    for (const release of gate.releases.splice(0)) release();
+  });
+  await until(
+    () => activeToolSteps.count(),
+    (count) => count === 3,
+    'later Tool joined the Trace',
+  );
+  await until(
+    () => traceHeadings.allTextContents(),
+    (labels) => labels.length === 2 && labels[1] === latestReadTitle,
+    'the latest read stays visible when the third Model emits reasoning',
+  );
+  await page.waitForTimeout(200);
+  const changes = await probe();
+  assert.ok(changes.protectedFrames > 0 && changes.protectedMutations > 0);
+  assert.deepEqual(
+    changes.violations,
+    [],
+    'expanded reasoning, result and selection survive later Tools',
+  );
+  assert.equal(await liveTrace.locator('.conversation-reasoning-body .typeset-chat').count(), 1);
+  await page.evaluate(() =>
+    (
+      globalThis as unknown as { reasoningRenderProbe: { unprotect: () => void } }
+    ).reasoningRenderProbe.unprotect(),
+  );
+  await liveReasoningDisclosure.click();
+  await missingDisclosure.click();
+  await toolHeading.click();
+  await until(
+    () => activeToolSteps.count(),
+    (count) => count === 0,
+    'user closes the active Trace after the later Tool',
+  );
+  await resetClosedFrames();
+  await setPhase('second-reasoning');
+  await checkBeforeReply('second-reasoning', 1);
+  assert.deepEqual(
+    await traceHeadings.allTextContents(),
+    ['思考了', latestReadTitle],
+    'neither trace heading inherits the current Model phase',
+  );
   assert.equal(
-    await toolTrace.locator(':scope > .conversation-trace-trigger').getAttribute('aria-expanded'),
+    await toolHeading.evaluate((element, original) => element === original, originalToolHeading),
+    true,
+    'the tool heading retains its node across the Model handoff',
+  );
+  assert.equal(
+    await toolHeading.getAttribute('aria-expanded'),
     'false',
-    'tool aggregation starts collapsed while the Model continues',
+    'tool aggregation stays closed after explicit user action',
   );
   assert.equal(await page.locator('.conversation .conversation-trace-steps').count(), 0);
   assert.ok((await content()).includes('PUBLIC_STAGE_PROSE'), 'actual stage prose preserved');
@@ -504,12 +834,23 @@ try {
     (value) => value.includes('PUBLIC_LIVE_PREFIX'),
     'actual prefix visible before Model finish',
   );
+  assert.deepEqual(
+    await traceHeadings.allTextContents(),
+    ['思考了', '读取了文件'],
+    'actual prose ends the Trace and the completed reads share one result category',
+  );
+  assert.equal(
+    await toolHeading.evaluate((element, original) => element === original, originalToolHeading),
+    true,
+    'the tool heading retains its node when the Trace ends',
+  );
   assert.equal(await page.locator('.agent-turn-final').count(), 0);
   assert.equal(await page.locator('.message-copy[aria-label="复制本轮Agent回复"]').count(), 0);
   await step('later-reasoning');
   await page.waitForTimeout(400);
+  assert.equal(await toolHeading.textContent(), '读取了文件');
   assert.equal(
-    await toolTrace.locator(':scope > .conversation-trace-trigger').getAttribute('aria-expanded'),
+    await toolHeading.getAttribute('aria-expanded'),
     'false',
     'later Model output does not open tool aggregation',
   );
@@ -540,6 +881,7 @@ try {
     'one final reply',
   );
   await until(content, (value) => value.includes('PUBLIC_FINAL_REPLY'), 'final body visible');
+  assert.equal(await timer.count(), 0);
   await setPhase('settled');
   await page.waitForTimeout(800);
   const warm = await probe();
@@ -556,6 +898,7 @@ try {
   await setPhase('manual-open');
   const elapsed = page.getByRole('button', { name: /^用时 .*展开本轮处理过程$/ });
   assert.equal(await elapsed.count(), 1);
+  const finishedTiming = await elapsed.innerText();
   assert.equal(await page.locator('.conversation .conversation-trace').count(), 0);
   await elapsed.click();
   const readTrace = page.locator('.conversation-trace').filter({ hasText: '读取了文件' });
@@ -586,21 +929,7 @@ try {
       ),
     ),
   );
-  await readTrace.evaluate(async (element) => {
-    // Scroll-linked edge fades do not finish while stationary; wait only real time-based disclosure transitions.
-    await Promise.all(
-      element
-        .getAnimations({ subtree: true })
-        .filter(
-          (animation) =>
-            animation.timeline === element.ownerDocument.timeline &&
-            Number.isFinite(animation.effect?.getComputedTiming().endTime) &&
-            animation.playState !== 'finished' &&
-            animation.playState !== 'idle',
-        )
-        .map((animation) => animation.finished.catch(() => {})),
-    );
-  });
+  await waitForDisclosure(readTrace);
   const stepColumns = await readTrace
     .locator('.conversation-trace-steps [data-trace-line]')
     .evaluateAll((rows) =>
@@ -612,8 +941,8 @@ try {
     );
   assert.equal(
     stepColumns.length,
-    4,
-    'reasoning and the three expanded tool rows share the trace layout',
+    5,
+    'two reasoning steps and three expanded tool rows share the trace layout',
   );
   assert.ok(
     stepColumns.every(
@@ -623,11 +952,23 @@ try {
     ),
     'reasoning and tool columns line up',
   );
-  await page.evaluate(() => {
-    (
-      globalThis as unknown as { reasoningRenderProbe: { closedFrames: unknown[] } }
-    ).reasoningRenderProbe.closedFrames = [];
-  });
+  await setPhase('settled-reasoning-open');
+  const readThought = readTrace.locator('.conversation-reasoning > button').last();
+  assert.equal(await readThought.getAttribute('aria-expanded'), 'false');
+  await readThought.click();
+  await until(
+    () => readTrace.innerText(),
+    (value) => value.includes('PRIVATE_REASONING_SENTINEL_SECOND_MODEL'),
+    'the reasoning from the third Model is readable in its own step',
+  );
+  assert.equal(await trigger.textContent(), '读取了文件');
+  await readThought.click();
+  await until(
+    () => readTrace.innerText(),
+    (value) => !value.includes('PRIVATE_REASONING_SENTINEL_SECOND_MODEL'),
+    'closing the reasoning step leaves the tool result in place',
+  );
+  await resetClosedFrames();
   await setPhase('manual-close');
   await trigger.click();
   await page.waitForTimeout(100);
@@ -651,6 +992,8 @@ try {
     'reopened warm history visible',
   );
   assert.ok(!(await content()).includes('正在思考'));
+  assert.equal(await timer.count(), 0);
+  assert.equal(await elapsed.innerText(), finishedTiming);
   assert.deepEqual((await probe()).violations, []);
   await page.reload();
   await page.getByRole('button', { name: 'Reasoning Stream', exact: true }).click();
@@ -659,6 +1002,8 @@ try {
   const cold = await probe();
   assert.deepEqual(cold.violations, []);
   assert.equal(await elapsed.count(), 1);
+  assert.equal(await timer.count(), 0);
+  assert.equal(await elapsed.innerText(), finishedTiming);
   assert.ok(!(await content()).includes('正在思考'));
   assert.equal((await counts()).calls, 3);
   const report = {

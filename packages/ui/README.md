@@ -151,7 +151,7 @@ Native 提供 `retainedPresentation` 时，输入区的模型或审核标签可�
 
 “正在回复…”与工具消息共用字号、字体及文字颜色规则，使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`。独立的思考／回复标签使用 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer) 的16px和1.5秒参数。思维链、工具和模型重连行将运行状态交给共享 `TraceLine`。思维链摘要的图标从第一条可见工具行取得，思考行使用同一灯泡图标。工具图标使用 `TraceIcon` 的统一尺寸。思维链中的图标和开合箭头按当前字体度量做视觉对齐，文字沿用原来的行高和间距。折叠箭头保持布局占位，只旋转内部 SVG，并遵循系统的减少动态效果设置。工具动作和描述共用一个 `TraceTitle`，由 shadcn 默认流光覆盖整段文字。启用减少动态效果时，标题显示为静态文字。
 
-该提示由 [Conversation](src/desktop/Conversation.tsx) 按准确 `turnActivity` 与终态 marker 在轮次底部呈现，位于过程折叠区外。普通活动过程入口固定为“处理过程”；准确的当前未结束思考且没有活动工具时，底部同一节点显示“正在思考…”，出现正文或活动工具后恢复“正在回复…”。底部状态只显示思考／回复文字，不附运行时长；`TurnElapsed` 仅在原 summary 展示可靠起止时间对应的终态耗时，不再启动活动计时器。没有可展开过程的普通活动轮次不显示空 summary，首条状态行不额外增加顶部留白；等待、停止、恢复和失败等真实轮次状态保留；观察失败不追加普通界面异常标签。
+该提示由 [Conversation](src/desktop/Conversation.tsx) 按准确 `turnActivity` 与终态 marker 在轮次底部呈现，位于过程折叠区外。普通活动过程入口固定为“处理过程”；准确的当前未结束思考且没有活动工具时，底部同一节点显示“正在思考…”，出现正文或活动工具后恢复“正在回复…”。Native 的 Trace 轮次另在摘要位置显示「进行中」，唯一的 `RunningTurnStatus` 按准确 `turn_timing` 的起点从 1 秒起显示，每秒递增。计时更新限于摘要组件，可见会话恢复后从原起点重新计算，执行权待核实、进入等待或停止及确认终态时移除。流式正文仍在原信息行显示回复状态，终态摘要显示可靠起止时间对应的耗时。没有可展开过程的普通活动轮次不显示空 summary，首条状态行不额外增加顶部留白；等待、停止、恢复和失败等真实轮次状态保留；观察失败不追加普通界面异常标签。
 
 外层 Turn 过程仅在确证轮次结束后允许折叠：进行中强制展开并使用静态状态行，没有折叠按钮或 chevron，工具自己的异常详情不受影响。单条最终正文或工具结算不覆盖仍在进行的宿主 Turn；`unavailable`／执行待核实不等于终态。结束后恢复原默认折叠、手动选择和阅读缓存。
 
@@ -584,15 +584,15 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 宿主已经完成公共 Client 的 EOF／SHA／UTF-8 验证时，可直接提供 `verifiedSnapshot`，组件仍核同一 Store／Session／Run／Execution、complete、正文／reasoning字节数和toolCalls，再呈现原正文或已保存的未完成前缀。关闭后可本地重开，不重复下载；宿主替换 snapshot、暂停、身份替换和卸载均撤销旧读取。该 prop 不接受未验证 transport 数据，也不赋予组件网络或执行权。
 
-Native 主会话启用 [ConversationTrace](src/desktop/ConversationTrace.tsx)，共享 Trace 的折叠根、标题和内容。宿主提供准确的轮次、流式正文、公开思考来源和工具事实。相邻的思考和工具复用同一标题与阅读 key，首条工具可以直接展开其结果，后来加入的步骤保持各自的阅读状态。工具标题复用 `ToolActivity` 的图标映射，思考行始终使用思考图标，多步工具摘要使用流程图标。展开后的 `TraceLine` 共用行内缩进、图标宽度和图文间距。多步列表与各项展开详情分别绘制左侧竖线，详情竖线位于原折叠内容内，随原展开与收起过渡裁切。首次展开前不构造步骤内容；整条思维链与思考正文随会话滚动，单项工具沿各自输出组件处理溢出。[Native 工具回归](../../apps/desktop/test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖并行顺序、元数据延迟和回执接管。
+Native 主会话启用 [ConversationTrace](src/desktop/ConversationTrace.tsx)，共享 Trace 的折叠根、标题和内容。宿主提供准确的轮次、流式正文、公开思考来源和工具事实。单步思考或工具可由摘要打开详情。多步思维链的标题控制步骤列表，各项详情独立保存开合状态。已打开的单步思考在新步骤加入后沿原 key 保留正文。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核对打开多步列表时首条思考保持收起，并核对手动打开单条思考后工具加入时的正文节点。工具标题复用 `ToolActivity` 的图标映射，思考行使用思考图标，含工具的摘要使用首个工具的图标。展开后的 `TraceLine` 共用行内缩进、图标宽度和图文间距。多步列表与各项展开详情分别绘制左侧竖线，详情竖线位于原折叠内容内，随原展开与收起过渡裁切。首次展开前不构造步骤内容；整条思维链与思考正文随会话滚动，单项工具沿各自输出组件处理溢出。[Native 工具回归](../../apps/desktop/test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖并行顺序、元数据延迟和回执接管。
 
 [ToolActivity](src/desktop/ToolActivity.tsx) 的完成摘要仅消费宿主按准确定义提供的 `toolSummaryCategory` 或原已识别工具类型，不从低信任标题、参数或输出猜分类。MCP 合并为“运行了 MCP 工具”，Skill 加载合并为“加载了技能”；读取技能资料仍独立于技能加载，首现顺序去重、原成功／派发门槛及 Shell 失败后确实已运行的例外不变。完成摘要由固定动作表生成“读取了文件”“编辑了文件”等自然过去式，不向外部标题机械加前缀；未知动作使用“运行了工具”。单工具目标沿原有界显示保留，包括名称中的“已”，图像实际计数及独立具体卡文案不变。单条编辑／等待事件工具仍沿原直接结果布局，仅用展示参数替换兼任外层摘要的动作标题；不新增折叠层，不改原结果与开关。Shell 启动／停止以“请求了…”保留受理语义；单条执行的未知／缺失 Job 证据沿原中性标题。纯思考外层完成标题为“思考了”，展开思考行的原状态标题不变。单工具 Trace 同样使用完成分类摘要，展开后保留原具体工具标题；运行、失败、取消和未知不借分类制造完成事实。上方摘要及其 title 不包含服务商、工具或技能名称，具体执行行仍使用原标签和目标。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)覆盖活动→完成、单工具展开／重开、多段去重和具体名称；[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)核状态与分类边界。
 
-[Conversation](src/desktop/Conversation.tsx)把轮次交接与每段 Trace 的生命周期分开：仅最后一个轮次片段的末尾 Trace、且没有流式回复接管时承接正在回复／等待／停止／待确认提示。旧段沿本段原事实总结，不借整轮活动；确实仍在运行的原工具即使隔着正文或独立子结果也保留活动，原 Run 终态与执行权待核实优先停止活动。没有段终态的思考保持中性“思考”，不因整轮结束补造已完成；待确认标题不绘制运行动画。原消息与阅读 key、不对外展示思考正文的默认折叠边界保持。[分段回归](test/desktop-reasoning-turns.test.tsx)覆盖正文、引导、来信、重连与子结果的边界、跨段真实工具和终态。
+[Conversation](src/desktop/Conversation.tsx)按本段的宿主事实选择 Trace 标题。含工具的 Trace 优先显示最近开始且仍在执行的工具。原轮次正在继续且本段仍是尾段时，工具之间的交接显示本段末条具体工具消息。正文、引导或独立子结果等可读边界和原轮次终态结束该段，随后以本段已核实的动作去重生成摘要。隔着已出现边界仍在执行的原工具继续显示本段活动。执行权待核实和明确终态停止活动效果，原结果继续可读。纯思考片段按实际思考内容显示，尚无结算事实时保留中性的「思考」。模型和工具交接标记仅用于识别当前思考阶段，轮次进度、等待、停止和流式回复各用原提示行。原消息与阅读 key 保持，公开思考正文仍默认收起。[分段回归](test/desktop-reasoning-turns.test.tsx)覆盖正文、引导、来信、重连与子结果的边界、跨段真实工具和终态。
 
 Native 主会话最后一个轮次片段复用「用时」折叠控件与 `turn:<id>:complete` 阅读状态。折叠时延迟构造过程，过程中各段思维链仍沿原阅读 key 开合；独立消息保留原先顺序。流式末段和同一消息的最终回复复用正文节点。没有可展开过程时显示静态耗时。[Native 历史回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核对冷打开、展开及缓存恢复。
 
-单条 `wait_agent_events` 沿 `ToolActivity` 直接打开结果，多个相邻步骤仍由 `ConversationTrace` 聚合。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核对单条等待在折叠、展开和运行时只呈现一个工具标题。单条思考、单条工具和组内步骤的详情共同使用折叠内容内的竖线样式，和思维链外层竖线一样按 `--ui-icon-size` 对准各自图标中心。Native 准备回复和流式回复状态与同层工具行共用 `--conversation-line-height`，文字与正文共用 `--conversation-text-size`。
+单条 `wait_agent_events` 和 `edit_file` 沿 `ToolActivity` 直接打开结果。多个相邻步骤加入时，`ConversationTrace` 沿原步骤 key 保留该工具行、开合控件和已经展开的详情。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核对单条等待只有一个工具标题，并核对等待和编辑在后续工具开始、结束时保留原节点及展开选择。单条思考、单条工具和组内步骤的详情共同使用折叠内容内的竖线样式，和思维链外层竖线一样按 `--ui-icon-size` 对准各自图标中心。Native 准备回复和流式回复状态与同层工具行共用 `--conversation-line-height`，文字与正文共用 `--conversation-text-size`。
 
 主会话的「用时」标题下无分隔线。轮次摘要、思考与工具摘要、正文、压缩状态及停止提示共用 `--conversation-line-height` 和 `--conversation-block-gap`。该层的简短标题采用正文行高，默认段间距约 11.2 CSS px；工具详情收展时外侧间距保持一致。外层 Trace 的首图标与正文同起点，图标槽使用 `--ui-icon-size`，多步详情的缩进由步骤列表维护。
 
@@ -761,6 +761,6 @@ Desktop `MessageContent` 的 `WebLinkContext` 由Native宿主注入，仅在当�
 
 文件标签的 `SessionFileTarget` 区分真实产物与 `local-preview` 只读handle，`OutputFileSummary` 仅继承产物类型，不伪造文件卡。标签身份含种类，切换不撤销handle；显式关闭或标签已满未接纳时调用宿主释放。
 
-`Conversation` 的当前活跃 Trace 在工具完成到下一模型事件的间隙继续显示进行中状态，不回落为“已读取”等完成摘要；准确结束或已有后续回复边界后才展示该过程的汇总。`ConversationTrace` 中每条 reasoning 始终使用独立的思考 disclosure，不再将首条正文直接平铺到总过程下。首条从单步开始即保留嵌套标题、缩进与稳定展示键，工具加入不改布局；原 parent-only 阅读状态保持首条默认展开，但显式收起优先于父过程重开。恢复展开也作用于思考正文，避免重播开启动画。只消费宿主提供的 `reasoningSource`，不按正文语义改分类。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)覆盖流式、多个思考／工具、同身份重连、完成统计、冷读、独立折叠与 ARIA 关联；DOM 保持和状态断言不代表实际动画全过程验收。
+`Conversation` 的当前活跃思维链显示最近仍在执行的工具。两次工具之间保留最后一条具体工具消息，思维链结束后显示本段已执行的动作汇总。`ConversationTrace` 中每条 reasoning 始终使用独立的思考 disclosure，不再将首条正文直接平铺到总过程下。首条从单步开始即保留嵌套标题、缩进与稳定展示键，工具加入不改布局；单步思考沿用旧的父级展开记录，已有的逐步开合选择优先。恢复展开也作用于思考正文，避免重播开启动画。只消费宿主提供的 `reasoningSource`，不按正文语义改分类。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)覆盖流式、多个思考／工具、同身份重连、完成统计、冷读、独立折叠与 ARIA 关联；DOM 保持和状态断言不代表实际动画全过程验收。
 
 首条输入提交后、正式 Run 尚未确认时，Trace 沿原提交身份显示“正在准备回复…”；确认运行后继续显示准确阶段，不能把本地准备误当成已开始执行。运行中的 Trace 在首条模型正文尚未到达时，也显示已确认的回复状态；状态不可用或执行未确认时不伪造进行中提示。排队、等待、恢复和停止仍由原状态决定，不被准备阶段覆盖。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核阶段与观察边界，[Native 首条发送回归](../../apps/desktop/test/isolated/native-new-conversation-dom.test.tsx)核原提交、持久输入、模型派发、正文与结束间的状态节点接管。

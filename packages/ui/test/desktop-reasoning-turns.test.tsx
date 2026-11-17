@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { BookOpen01Icon, BulbIcon, TerminalIcon, Wrench01Icon } from '@hugeicons/core-free-icons';
+import { BookOpen01Icon, BulbIcon, TerminalIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
@@ -135,7 +135,11 @@ test('a single Agent wait shows one tool heading and opens directly to its resul
     status: 'completed',
     settled: true,
   };
-  const renderWait = (message: Message, open: boolean) =>
+  const renderWait = (
+    message: Message,
+    open: boolean,
+    status: 'running' | 'completed' = 'running',
+  ) =>
     new JSDOM(
       renderToStaticMarkup(
         <Conversation
@@ -149,20 +153,27 @@ test('a single Agent wait shows one tool heading and opens directly to its resul
             follow: true,
             expanded: { 'turn:run:complete': true, 'activity:wait': open },
           }}
-          turnActivity={{ turnId: 'run', status: 'running' }}
+          turnActivity={{ turnId: 'run', status }}
           saveReading={() => {}}
         />,
       ),
     ).window.document;
 
-  for (const open of [false, true]) {
-    const document = renderWait(wait, open);
-    const headings = document.querySelectorAll('.conversation-trace [data-trace-line]');
-    expect(headings).toHaveLength(1);
-    expect(headings[0]?.textContent).toBe('查看了 Agent 进展');
-    expect(headings[0]?.getAttribute('aria-expanded')).toBe(String(open));
-    expect(document.querySelector('.conversation-trace-steps')).toBeNull();
-    expect(document.querySelector('.tool-detail')?.textContent).toBe(open ? wait.text : undefined);
+  for (const [status, label] of [
+    ['running', '等待 Agent 事件'],
+    ['completed', '查看了 Agent 进展'],
+  ] as const) {
+    for (const open of [false, true]) {
+      const document = renderWait(wait, open, status);
+      const headings = document.querySelectorAll('.conversation-trace [data-trace-line]');
+      expect(headings).toHaveLength(1);
+      expect(headings[0]?.textContent).toBe(label);
+      expect(headings[0]?.getAttribute('aria-expanded')).toBe(String(open));
+      expect(document.querySelector('.conversation-trace-steps')).toBeNull();
+      expect(document.querySelector('.tool-detail')?.textContent).toBe(
+        open ? wait.text : undefined,
+      );
+    }
   }
 
   const pending = renderWait({ ...wait, text: '', status: 'running', settled: false }, false);
@@ -184,6 +195,101 @@ test('a single Agent wait shows one tool heading and opens directly to its resul
       open ? failed.text : undefined,
     );
     expect(document.querySelector('.tool-detail-scroll')).toBeNull();
+  }
+});
+
+test('adding a later tool preserves the open result of a completed direct tool', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const globals = {
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+  };
+  const originals = Object.keys(globals).map(
+    (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
+  );
+  Object.assign(globalThis, globals);
+  const host = dom.window.document.getElementById('root')!;
+  const root = createRoot(host);
+  const later: Message = {
+    id: 'later',
+    turnId: 'run',
+    role: 'tool',
+    toolName: 'read_file',
+    target: 'later.md',
+    status: 'running',
+    settled: false,
+    text: '',
+  };
+  try {
+    for (const toolName of ['wait_agent_events', 'edit_file'] as const) {
+      const isEdit = toolName === 'edit_file';
+      const output = 'stable original result';
+      const earlier: Message = {
+        ...later,
+        id: toolName,
+        toolName,
+        title: isEdit ? '编辑文件' : '等待 Agent 事件',
+        target: isEdit ? 'original.md' : undefined,
+        status: 'completed',
+        settled: true,
+        text: isEdit ? '' : output,
+        agentWait: isEdit ? undefined : true,
+        changeConfirmed: isEdit,
+        toolResult: isEdit ? { ok: true, stdout: `+${output}` } : undefined,
+      };
+      const draw = (messages: Message[]) =>
+        act(async () => {
+          root.render(
+            <Conversation
+              key={toolName}
+              traceTurns
+              messages={messages}
+              selected
+              connected
+              loading={false}
+              saveReading={() => {}}
+              turnActivity={{ turnId: 'run', status: 'running' }}
+            />,
+          );
+        });
+      await draw([earlier]);
+      const trace = host.querySelector('.conversation-trace')!;
+      expect(trace.querySelector(':scope > .conversation-trace-trigger')).toBeNull();
+      const tool = trace.querySelector('.tool-activity')!;
+      const toggle = tool.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+      await act(async () => toggle.click());
+      const detail = tool.querySelector('.tool-activity-content')!;
+      expect(detail.textContent).toContain(output);
+      const original = tool.textContent;
+      for (const next of [later, { ...later, status: 'completed', settled: true }] as const) {
+        await draw([earlier, next]);
+        expect(host.querySelector('.conversation-trace')).toBe(trace);
+        expect(trace.querySelector('.conversation-trace-steps > .tool-activity')).toBe(tool);
+        expect(tool.querySelector('.tool-activity-content')).toBe(detail);
+        expect(tool.querySelector('button[aria-expanded]')).toBe(toggle);
+        expect(toggle.getAttribute('aria-expanded')).toBe('true');
+        expect(tool.textContent).toBe(original);
+      }
+      const groupToggle = trace.querySelector<HTMLButtonElement>(
+        ':scope > .conversation-trace-trigger',
+      )!;
+      expect(groupToggle.getAttribute('aria-expanded')).toBe('true');
+      await act(async () => groupToggle.click());
+      expect(groupToggle.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => groupToggle.click());
+      expect(trace.querySelector('.tool-activity-content')?.textContent).toContain(output);
+    }
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
   }
 });
 
@@ -279,9 +385,6 @@ test('conversation trace keeps the first tool icon as the active title changes a
     grouped.querySelector('.conversation-trace-steps .shell-activity .tool-activity-summary')!,
     TerminalIcon,
   );
-  const pending = renderTrace([{ ...thought, tracePending: 'tool' }]).querySelector(summary)!;
-  expectIcon(pending, Wrench01Icon);
-
   const css = readFileSync(new URL('../src/desktop/style.css', import.meta.url), 'utf8');
   const guideSelector = css.match(/([^{}]+)\{\s*--trace-guide-width:/)?.[1];
   expect(guideSelector).toBeDefined();
@@ -784,7 +887,7 @@ test('interleaved steers and child mail share input bubbles in one process throu
   }
 });
 
-test('separate trace segments keep their own lifecycle while only the tail carries turn progress', () => {
+test('separate traces retain their own result or thinking while the Turn shows its own status', () => {
   const old: Message = {
     ...thinking('run'),
     id: 'old-thought',
@@ -838,15 +941,15 @@ test('separate trace segments keep their own lifecycle while only the tail carri
     },
   ];
   for (const boundary of boundaries) {
-    for (const [status, executionUnconfirmed, expected] of [
-      ['running', false, '正在思考…'],
-      ['running', true, '执行状态待确认'],
+    for (const [status, executionUnconfirmed, notice] of [
+      ['running', false, undefined],
+      ['running', true, undefined],
       ['waiting', false, '正在等待'],
       ['cancelling', false, '正在停止'],
       ['recovery_required', false, '需要恢复'],
-      ['completed', false, '思考'],
-      ['cancelled', false, '思考'],
-      ['failed', false, '思考'],
+      ['completed', false, undefined],
+      ['cancelled', false, '你已停止'],
+      ['failed', false, '本轮异常结束'],
     ] as const) {
       const dom = new JSDOM(
         renderToStaticMarkup(
@@ -864,8 +967,16 @@ test('separate trace segments keep their own lifecycle while only the tail carri
       );
       const headings = [...dom.window.document.querySelectorAll('.conversation-trace > button')];
       expect(headings).toHaveLength(2);
-      expect(headings.map((heading) => heading.textContent)).toEqual(['读取了文件', expected]);
+      const thinking = status === 'running' && !executionUnconfirmed;
+      expect(headings.map((heading) => heading.textContent)).toEqual([
+        '读取了文件',
+        thinking ? '正在思考…' : '思考',
+      ]);
       expect(headings[0]!.querySelector('[data-status="running"]')).toBeNull();
+      expect(!!headings[1]!.querySelector('[data-status="running"]')).toBe(thinking);
+      expect(
+        dom.window.document.querySelector('.agent-turn > .conversation-turn-notice')?.textContent,
+      ).toBe(notice);
       expect(dom.window.document.body.textContent).not.toContain('PRIVATE REASONING');
       dom.window.close();
     }
@@ -922,7 +1033,7 @@ test('a non-tail trace preserves its own active tool without lending activity to
   }
 });
 
-test('an active trace never falls back to completed statistics between model and tool events', () => {
+test('tool handoff retains the latest message until a reply or terminal ends the trace', () => {
   const done: Message = {
     id: 'read',
     turnId: 'run',
@@ -932,12 +1043,32 @@ test('an active trace never falls back to completed statistics between model and
     status: 'completed',
     settled: true,
   };
-  for (const status of ['running', 'waiting', 'completed'] as const) {
+  const lastTool: Message = {
+    ...done,
+    id: 'second-shell',
+    toolName: 'shell_execute',
+    target: 'printf second',
+  };
+  const pending: Message = { ...thinking('run'), text: '', tracePending: 'tool' };
+  const reply: Message = {
+    id: 'prose',
+    turnId: 'run',
+    role: 'assistant',
+    text: 'Streaming reply',
+    settled: false,
+    streaming: true,
+  };
+  for (const [status, tail, expected] of [
+    ['running', pending, '已运行 printf second'],
+    ['waiting', pending, '已运行 printf second'],
+    ['running', reply, '读取了文件 · 运行了命令'],
+    ['completed', pending, '读取了文件 · 运行了命令'],
+  ] as const) {
     const dom = new JSDOM(
       renderToStaticMarkup(
         <Conversation
           traceTurns
-          messages={[done]}
+          messages={[done, { ...done, id: 'shell', toolName: 'shell_execute' }, lastTool, tail]}
           selected
           connected
           loading={false}
@@ -947,10 +1078,9 @@ test('an active trace never falls back to completed statistics between model and
         />,
       ),
     );
-    const title = dom.window.document.querySelector('.conversation-trace > button')!.textContent;
-    expect(title).toBe(
-      status === 'running' ? '正在回复…' : status === 'waiting' ? '正在等待' : '读取了文件',
-    );
+    const heading = dom.window.document.querySelector('.conversation-trace > button')!;
+    expect(heading.textContent).toBe(expected);
+    expect(heading.querySelector('[data-status="running"]')).toBeNull();
     dom.window.close();
   }
 });
@@ -982,14 +1112,26 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
     ...thinking('run'),
     presentationKey: 'stable-thought',
     reasoningSource: 'source',
+    settled: true,
   };
   let status: 'running' | 'completed' = 'running';
   let executionUnconfirmed = false;
   let bodyText = 'Existing reasoning';
+  let layout = 'grouped';
+  const tool: Message = {
+    id: 'shell',
+    turnId: 'run',
+    role: 'tool',
+    toolName: 'shell_execute',
+    text: '',
+    settled: false,
+    status: 'running',
+  };
   const reading: import('../src/desktop/Conversation').ReadingState[] = [];
   const draw = (tools: Message[]) =>
     root.render(
       <Conversation
+        key={layout}
         traceTurns
         messages={[thought, ...tools]}
         selected
@@ -997,7 +1139,6 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
         loading={false}
         saveReading={(value) => reading.push(value)}
         turnActivity={{ turnId: 'run', status, executionUnconfirmed }}
-        initialReading={{ top: 0, follow: false, expanded: { 'trace-turn:turn:run': true } }}
         renderReasoning={(message, open) => (
           <p data-thought-body={message.reasoningSource} data-reader-active={open}>
             {bodyText}
@@ -1006,7 +1147,25 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
       />,
     );
   try {
+    await act(async () => draw([tool]));
+    const groupedTrace = host.querySelector<HTMLButtonElement>('.conversation-trace > button')!;
+    expect(groupedTrace.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => groupedTrace.click());
+    expect(groupedTrace.getAttribute('aria-expanded')).toBe('true');
+    const groupedThought = host.querySelector<HTMLButtonElement>(
+      '.conversation-reasoning > button',
+    )!;
+    expect(groupedThought.getAttribute('aria-expanded')).toBe('false');
+    expect(host.querySelector('[data-thought-body]')).toBeNull();
+    await act(async () => groupedThought.click());
+    expect(groupedThought.getAttribute('aria-expanded')).toBe('true');
+    expect(host.querySelector('[data-thought-body]')?.textContent).toBe(bodyText);
+
+    layout = 'single';
+    thought = { ...thought, settled: false };
     await act(async () => draw([]));
+    const singleTrace = host.querySelector<HTMLButtonElement>('.conversation-trace > button')!;
+    await act(async () => singleTrace.click());
     const body = host.querySelector('[data-thought-body]');
     expect(body).not.toBeNull();
     const reasoning = host.querySelector('.conversation-reasoning')!;
@@ -1026,15 +1185,6 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
     expect(host.querySelector('[data-thought-body]')).toBe(body);
     expect(body!.textContent).toBe('Existing reasoning streamed');
     thought = { ...thought, settled: true };
-    const tool: Message = {
-      id: 'shell',
-      turnId: 'run',
-      role: 'tool',
-      toolName: 'shell_execute',
-      text: '',
-      settled: false,
-      status: 'running',
-    };
     await act(async () => draw([tool]));
     expect(host.querySelector('[data-thought-body]')).toBe(body);
     expect(host.querySelector('.conversation-reasoning')!.getAttribute('data-state')).toBe('open');
@@ -1048,14 +1198,14 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
     await act(async () => draw([done]));
     expect(host.querySelector('[data-thought-body]')).toBe(body);
     const summary = host.querySelector<HTMLButtonElement>('.conversation-trace > button')!;
-    expect(summary.textContent).toBe('正在回复…');
+    expect(summary.textContent).toBe('已运行');
     const second: Message = {
       ...thinking('run'),
       id: 'second-thought',
       reasoningSource: 'second-source',
     };
     await act(async () => draw([done, second]));
-    expect(summary.textContent).toBe('正在思考…');
+    expect(summary.textContent).toBe('已运行');
     expect(host.querySelectorAll('.conversation-reasoning')).toHaveLength(2);
     const secondButton = host.querySelectorAll<HTMLButtonElement>(
       '.conversation-reasoning > button',
@@ -1078,21 +1228,21 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
     thought = { ...thought, id: 'saved-thought' };
     executionUnconfirmed = true;
     await act(async () => draw([done, second]));
-    expect(summary.textContent).toBe('执行状态待确认');
+    expect(summary.textContent).toBe('已运行');
     expect(
       host.querySelector('.conversation-reasoning > button')?.getAttribute('aria-expanded'),
     ).toBe('false');
     executionUnconfirmed = false;
     const finishedSecond = { ...second, settled: true };
     await act(async () => draw([done, finishedSecond]));
-    expect(summary.textContent).toBe('正在回复…');
+    expect(summary.textContent).toBe('已运行');
     status = 'completed';
     await act(async () => draw([done, finishedSecond]));
     const completed = host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
     expect(completed.textContent).toBe('用时未知');
     expect(completed.getAttribute('aria-expanded')).toBe('false');
     await act(async () => completed.click());
-    expect(host.querySelector('.conversation-trace > button')?.textContent).not.toMatch(/正在/);
+    expect(host.querySelector('.conversation-trace > button')?.textContent).toBe('运行了命令');
     const reasoningButtons = host.querySelectorAll('.conversation-reasoning > button');
     expect([...reasoningButtons].map((item) => item.textContent)).toEqual(['已思考', '已思考']);
     expect([...reasoningButtons].map((item) => item.getAttribute('aria-expanded'))).toEqual([
@@ -1101,21 +1251,17 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
     ]);
   } finally {
     await act(async () => root.unmount());
-    expect(reading.at(-1)?.expanded['stable-thought']).toBe(false);
     dom.window.close();
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);
     }
   }
+  expect(reading.at(-1)?.expanded['stable-thought']).toBe(false);
 });
 
 test('running trace reports progress before the first model body arrives', () => {
-  for (const [phase, expected] of [
-    [undefined, '正在回复…'],
-    ['preparing', '正在准备回复…'],
-    ['thinking', '正在回复…'],
-  ] as const) {
+  for (const status of ['preparing', 'running'] as const) {
     const dom = new JSDOM(
       renderToStaticMarkup(
         <Conversation
@@ -1125,11 +1271,13 @@ test('running trace reports progress before the first model body arrives', () =>
           connected
           loading={false}
           saveReading={() => {}}
-          turnActivity={{ turnId: 'run', status: 'running', responsePhase: phase }}
+          turnActivity={{ turnId: 'run', status }}
         />,
       ),
     );
-    expect(dom.window.document.querySelector('[role="status"]')?.textContent).toBe(expected);
+    expect(dom.window.document.querySelector('[role="status"]')?.textContent).toBe(
+      status === 'preparing' ? '正在准备回复…' : '进行中',
+    );
     dom.window.close();
   }
   for (const unavailable of [true, false]) {
@@ -1152,6 +1300,42 @@ test('running trace reports progress before the first model body arrives', () =>
       ),
     );
     expect(dom.window.document.querySelector('[role="status"]')).toBeNull();
+    dom.window.close();
+  }
+});
+
+test('temporary read failure retains the permitted Run timer and an ownership loss hides it', () => {
+  const timing: Message = {
+    id: 'timing',
+    turnId: 'run',
+    role: 'system',
+    systemKind: 'turn_timing',
+    text: '',
+    turnStartedAtMs: Date.now() + 60_000,
+    settled: false,
+  };
+  for (const executionUnconfirmed of [false, true]) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={[timing]}
+          selected
+          connected
+          loading={false}
+          saveReading={() => {}}
+          turnActivity={{
+            turnId: 'run',
+            status: 'running',
+            unavailable: true,
+            executionUnconfirmed,
+          }}
+        />,
+      ),
+    );
+    expect(dom.window.document.querySelector('.agent-turn-running')?.textContent).toBe(
+      executionUnconfirmed ? undefined : '进行中 1 秒',
+    );
     dom.window.close();
   }
 });
@@ -1184,6 +1368,7 @@ test('first reply preparation respects execution observation and real waiting st
         expected,
       );
       expect(dom.window.document.querySelector('.response-status')).toBeNull();
+      expect(dom.window.document.querySelector('.agent-turn-running')).toBeNull();
       dom.window.close();
     }
   }
@@ -1215,7 +1400,7 @@ test('first reply preparation respects execution observation and real waiting st
   }
 });
 
-test('connection notices and subsequent reasoning do not finalize an unfinished trace', () => {
+test('a connection notice separates a tool result from later reasoning', () => {
   const tool: Message = {
     id: 'shell',
     turnId: 'run',
@@ -1233,6 +1418,7 @@ test('connection notices and subsequent reasoning do not finalize an unfinished 
       role: 'system',
       systemKind: 'model_connection',
       text: '',
+      status: 'running',
       settled: false,
     },
     { ...thinking('run'), id: 'next-thought' },
@@ -1254,35 +1440,38 @@ test('connection notices and subsequent reasoning do not finalize an unfinished 
     const titles = [...dom.window.document.querySelectorAll('.conversation-trace > button')].map(
       (node) => node.textContent,
     );
-    expect(titles.length).toBeGreaterThan(0);
-    expect(
-      titles.every((title) => title === (executionUnconfirmed ? '执行状态待确认' : '正在思考…')),
-    ).toBe(true);
+    expect(titles).toEqual(['运行了命令', executionUnconfirmed ? '思考' : '正在思考…']);
+    expect(dom.window.document.querySelectorAll('.model-connection')).toHaveLength(1);
     dom.window.close();
   }
 });
 
-test('an empty reasoning placeholder cannot claim visible thinking', () => {
-  const html = renderToStaticMarkup(
-    <Conversation
-      traceTurns
-      messages={[{ ...thinking('run'), text: '' }]}
-      selected
-      connected
-      loading={false}
-      saveReading={() => {}}
-      turnActivity={{ turnId: 'run', status: 'running', responsePhase: 'thinking' }}
-    />,
-  );
-  expect(html).not.toContain('正在思考');
-  expect(html).toContain('正在回复');
+test('Model and Tool handoff markers have no activity row of their own', () => {
+  for (const tracePending of ['reasoning', 'tool'] as const) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={[{ ...thinking('run'), text: '', tracePending }]}
+          selected
+          connected
+          loading={false}
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'run', status: 'running' }}
+        />,
+      ),
+    );
+    expect(dom.window.document.querySelector('.conversation-trace')).toBeNull();
+    expect(dom.window.document.querySelector('.agent-turn-running')?.textContent).toBe('进行中');
+    dom.window.close();
+  }
 });
 
 test('streaming native reasoning uses its source even when the body is loaded separately', () => {
   for (const [settled, executionUnconfirmed, expected] of [
     [false, false, '正在思考…'],
-    [true, false, '正在回复…'],
-    [false, true, '执行状态待确认'],
+    [true, false, '思考了'],
+    [false, true, '思考'],
   ] as const) {
     const dom = new JSDOM(
       renderToStaticMarkup(
@@ -1365,7 +1554,7 @@ test('cold and completed traces restore explicit reasoning choices without recla
   }
 });
 
-test('single MCP, Skill and unknown traces summarize only after completion and keep the original tool heading when opened or reopened', async () => {
+test('single MCP, Skill and unknown traces keep their tool title until the trace ends', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -1427,12 +1616,16 @@ test('single MCP, Skill and unknown traces summarize only after completion and k
         );
       const heading = () => host.querySelector<HTMLButtonElement>('.conversation-trace > button')!;
       await act(async () => draw('running', 'running'));
+      const originalHeading = heading();
       expect(heading().textContent).toContain(title);
       expect(heading().textContent).not.toBe(expected);
       await act(async () => heading().click());
       expect(host.querySelector('.conversation-trace-steps .tool-activity-title')).toBeNull();
       await act(async () => draw('completed', 'running'));
-      expect(heading().textContent).toBe('正在回复…');
+      expect(heading()).toBe(originalHeading);
+      expect(heading().textContent).toContain(title);
+      expect(heading().querySelector('[data-status="running"]')).toBeNull();
+      expect(heading().getAttribute('aria-expanded')).toBe('true');
       expect(host.querySelector('.conversation-trace-steps .tool-activity-title')).toBeNull();
       await act(async () => heading().click());
       await act(async () => draw('completed', 'completed'));

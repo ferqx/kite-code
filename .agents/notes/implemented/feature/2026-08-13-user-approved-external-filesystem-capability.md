@@ -51,10 +51,10 @@ macOS Seatbelt、Linux bubblewrap 与 Windows restricted-token 都默认把 Shel
 ## 替代关系
 本记录 仅就“host Shell 只能作为 startup availability fallback”这一表述，增加一个用户明确批准的
 逐 invocation capability 例外；它不改变 [Agent Note 0077](../simplification/2026-08-08-unified-sandbox-startup-downgrade.md)/[Agent Note 0080](../simplification/2026-08-08-sandbox-environment-only-host-fallback.md) 的 startup fallback、no replay 与 backend
-qualification 结论。它替代 [Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 中 approved external filesystem invocation 仍必须留在
+qualification 结论。它替代 [Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md) 中 approved external filesystem invocation 仍必须留在
 restricted-token Workspace ceiling 内的隐含选择，不改变 Windows backend 的默认路径或 production
 excluded 结论。
 
 ## Historical relationships
 
-相关：[Agent Note 0043](2026-07-26-tool-spec-registry-and-strict-edit.md)、[Agent Note 0077](../simplification/2026-08-08-unified-sandbox-startup-downgrade.md)、[Agent Note 0080](../simplification/2026-08-08-sandbox-environment-only-host-fallback.md)、[Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md)、[Agent Note 0082](../architecture/2026-08-08-windows-development-network-authorization-parity.md)
+相关：[Agent Note 0043](2026-07-26-tool-spec-registry-and-strict-edit.md)、[Agent Note 0077](../simplification/2026-08-08-unified-sandbox-startup-downgrade.md)、[Agent Note 0080](../simplification/2026-08-08-sandbox-environment-only-host-fallback.md)、[Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md)、[Agent Note 0082](../architecture/2026-08-08-windows-development-network-authorization-parity.md)

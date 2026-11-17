@@ -32,7 +32,7 @@ function publicHandle(request: ModelRequest): string {
   throw Error('original_public_shell_handle_missing');
 }
 function publicFeedback(content: string) {
-  const prose = content.split('stdout:\n')[0]!;
+  const prose = content.split('\n\n')[0]!;
   expect(prose).not.toMatch(/\b(?:Job|carrier|dispatch|dispatched|Run|Session)\b/i);
   for (const field of ['originStoreId', 'parentExecutionId', 'definitionVersion', 'job_result'])
     expect(content).not.toContain(field);
@@ -207,12 +207,18 @@ test('actual foreground model feedback is public text while the original command
     expect(feedback.content).not.toContain(
       `execution_id: ${JSON.stringify(modelExecutionId(command.id))}`,
     );
-    const saved = tool.result as { content: string; details: Json };
-    expect(JSON.parse(saved.content)).toEqual(saved.details);
-    expect(JSON.parse(saved.content).execution.id).toBe(command.id);
-    expect(JSON.parse(saved.content).execution_id).toBe(tool.id);
+    const savedOutput = stdout + stderr;
+    expect(tool.result).toMatchObject({
+      content: savedOutput,
+      details: {
+        outputFormat: 'model-preview',
+        outputLimited: false,
+        execution: { id: command.id },
+        execution_id: tool.id,
+      },
+    });
     expect(command.parentExecutionId).toBe(tool.id);
-    expect(saved.content).not.toBe(feedback.content);
+    expect(feedback.content).toEndWith(`\n\n${savedOutput}`);
     expect(f.counts().starts).toBe(1);
   } finally {
     await f.close();
@@ -267,9 +273,10 @@ test('actual original-command human denial reaches the next model without execut
       dispatched: false,
       human: { decision: 'deny', accepted: false },
     });
-    expect(JSON.parse((tool.result as { content: string }).content).execution.result.content).toBe(
-      'approval_denied',
-    );
+    expect(tool.result).toMatchObject({
+      content: '',
+      details: { execution: { result: { content: 'approval_denied' } } },
+    });
     expect(rows.filter((row) => row.kind === 'job')).toHaveLength(1);
     expect(f.counts().starts).toBe(0);
   } finally {

@@ -9,11 +9,10 @@ Status: implemented
 TLS 继续成功。Microsoft 的 SSPI contract 明确 restricted/constrained security context 可能没有可用的
 outbound credentials。
 
-Codex 的强 Windows sandbox 可以把 restricted Offline/Online token 与代理/WFP 网络架构组合。Kite 当前
-development `allow_all` 没有 TLS-terminating proxy，不能仅复制 token flags 就声称 Schannel 可执行。
+当前 development `allow_all` 使用 Schannel 直连。缺少 TLS-terminating proxy 时，这条路径需要能取得系统 TLS 凭据的登录令牌。
 
 ## Decision
-1. `networkMode=off` 保持 [Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 的 current-user write-restricted token 路径。
+1. `networkMode=off` 保持 [Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md) 的 current-user write-restricted token 路径。
 2. 已审批 `allow_all` 仍必须切换到 setup 完成的 `KiteSandboxOnline` 非管理员真实登录会话，但 command
    child 不再从该登录令牌二次派生 restricted token。runner 使用 `LOGON_WITH_PROFILE`，suspended 创建
    child，先加入 kill-on-close/active-process-limit Job，再 resume。
@@ -37,8 +36,6 @@ development `allow_all` 没有 TLS-terminating proxy，不能仅复制 token fla
 - local-only 命令继续使用 restricted token；只有已审批联网 invocation 使用专用 Online primary token。
 - 当前已存在的 `.env` 等 protected paths 通过 Online SID deny 抵抗间接脚本写入；未来创建的动态名称仍不
   构成 strict protected-path guarantee。
-- 与 Codex 的共同点是显式 onboarding、专用 Online identity、credential custody、Job 与 ACL lifecycle；
-  不同点是 Kite 尚无 Codex 的代理/WFP，因此不能保留 restricted token 并同时依赖 Schannel direct TLS。
 
 ## 对既有决策的影响
 本记录 取代 [Agent Note 0083](../architecture/2026-08-08-windows-approved-network-managed-logon.md) 第 2 项中“Online 登录后再次派生 restricted command token”的部分，并保留其专用
@@ -46,4 +43,4 @@ development `allow_all` 没有 TLS-terminating proxy，不能仅复制 token fla
 
 ## Historical relationships
 
-相关：[Agent Note 0081](../simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md)、[Agent Note 0082](../architecture/2026-08-08-windows-development-network-authorization-parity.md)、[Agent Note 0083](../architecture/2026-08-08-windows-approved-network-managed-logon.md)、[Agent Note 0084](2026-08-08-windows-sandbox-explicit-onboarding.md)
+相关：[Agent Note 0081](../simplification/2026-08-08-windows-unelevated-direct-workspace-backend.md)、[Agent Note 0082](../architecture/2026-08-08-windows-development-network-authorization-parity.md)、[Agent Note 0083](../architecture/2026-08-08-windows-approved-network-managed-logon.md)、[Agent Note 0084](2026-08-08-windows-sandbox-explicit-onboarding.md)

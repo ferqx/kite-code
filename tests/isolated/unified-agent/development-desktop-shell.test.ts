@@ -12,7 +12,7 @@ const nativeTest = process.platform === 'darwin' ? test : test.skip;
 const shellNames = ['shell_execute', 'shell_read', 'shell_wait', 'shell_stop'];
 
 nativeTest(
-  'actual Desktop development Service supplies and executes Shell for the root and existing default/code child roles',
+  'actual Desktop development Service supplies and executes Shell for the root and default general and explicit explore child roles',
   async () => {
     const cache = join(repository, '.cache');
     mkdirSync(cache, { recursive: true });
@@ -40,10 +40,10 @@ nativeTest(
           body.messages.find(
             (row) =>
               row.role === 'user' &&
-              /DEV_SHELL_(PARENT|CHILD_DEFAULT|CHILD_CODE)/.test(row.content ?? ''),
+              /DEV_SHELL_(PARENT|CHILD_DEFAULT|CHILD_EXPLORE)/.test(row.content ?? ''),
           )?.content ?? '';
-        const marker = content.includes('DEV_SHELL_CHILD_CODE')
-          ? 'DEV_SHELL_CHILD_CODE'
+        const marker = content.includes('DEV_SHELL_CHILD_EXPLORE')
+          ? 'DEV_SHELL_CHILD_EXPLORE'
           : content.includes('DEV_SHELL_CHILD_DEFAULT')
             ? 'DEV_SHELL_CHILD_DEFAULT'
             : 'DEV_SHELL_PARENT';
@@ -59,7 +59,7 @@ nativeTest(
               { name: 'spawn_agent', input: { prompt: 'DEV_SHELL_CHILD_DEFAULT' } },
               {
                 name: 'spawn_agent',
-                input: { prompt: 'DEV_SHELL_CHILD_CODE', preset: 'code' },
+                input: { prompt: 'DEV_SHELL_CHILD_EXPLORE', preset: 'explore' },
               },
             );
           calls.push({
@@ -169,7 +169,8 @@ nativeTest(
       const childExecutions = (actual: typeof view) =>
         actual.executions.filter(
           (execution) =>
-            execution.definitionId === 'agent/worker' || execution.definitionId === 'agent/code',
+            execution.definitionId === 'agent/general' ||
+            execution.definitionId === 'agent/explore',
         );
       while (
         !view.runs.some((run) => run.originCommandId === 'run' && !run.isActive) ||
@@ -194,8 +195,8 @@ nativeTest(
         views.push({
           actual: await client.getView(child.childSessionId!),
           marker:
-            child.definitionId === 'agent/code'
-              ? 'DEV_SHELL_CHILD_CODE'
+            child.definitionId === 'agent/explore'
+              ? 'DEV_SHELL_CHILD_EXPLORE'
               : 'DEV_SHELL_CHILD_DEFAULT',
         });
       for (const { actual, marker } of views) {
@@ -212,9 +213,10 @@ nativeTest(
         expect(foreground[0]!.status).toBe('succeeded');
         expect(foreground[0]!.result).toMatchObject({
           outcome: 'succeeded',
+          content: `${marker}_EXECUTED\n`,
           details: {
-            stdout: `${marker}_EXECUTED\n`,
-            stderr: '',
+            outputFormat: 'model-preview',
+            outputLimited: false,
             droppedBytes: '0',
             truncated: false,
           },
@@ -223,7 +225,7 @@ nativeTest(
       for (const marker of [
         'DEV_SHELL_PARENT',
         'DEV_SHELL_CHILD_DEFAULT',
-        'DEV_SHELL_CHILD_CODE',
+        'DEV_SHELL_CHILD_EXPLORE',
       ]) {
         const calls = requests.filter((request) => request.marker === marker);
         expect(calls.length).toBeGreaterThanOrEqual(2);

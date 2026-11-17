@@ -196,11 +196,16 @@ export function contextEvidence(value: Json): Json {
 export function toolResultEvidence(value: Json, presentation?: Json): Record<string, Json> {
   const saved = evidenceObject(value);
   const parsed = toolResultPresentationSchema.safeParse(presentation);
+  const shellPreview =
+    parsed.success &&
+    parsed.data.kind === 'shell' &&
+    object(saved.details)?.outputFormat === 'model-preview';
   return {
     outcome: ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(String(saved.outcome))
       ? saved.outcome!
       : 'outcome_unknown',
     content: typeof saved.content === 'string' ? saved.content : '',
+    ...(shellPreview ? { outputFormat: 'model-preview' } : {}),
     ...(parsed.success ? { presentation: parsed.data as unknown as Json } : {}),
   };
 }

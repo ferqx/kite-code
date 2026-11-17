@@ -2417,7 +2417,7 @@ function NativeDesktopContent({
   // Ordinary transport/read suspension does not change this display boundary.
   const reasoningAccessEpoch = reasoningBodies.current.observe(
     conversationDomScope,
-    state?.selection?.canReadModelOutput !== false,
+    state?.selection?.canReadModelOutput,
   );
   async function write(
     action: () => Promise<unknown>,
@@ -3988,19 +3988,6 @@ function NativeDesktopContent({
     (!firstRun || firstRun.isActive)
       ? firstSubmission.commandId
       : undefined;
-  const firstModelDispatched =
-    firstRun &&
-    executionRecords?.some(
-      (execution) =>
-        execution.runId === firstRun.id &&
-        execution.originStoreId === firstRun.originStoreId &&
-        execution.sessionId === firstRun.sessionId &&
-        execution.kind === 'model' &&
-        execution.parentExecutionId == null &&
-        (execution.status === 'dispatching' ||
-          execution.status === 'running' ||
-          execution.status === 'succeeded'),
-    );
   const toolPresentation = useRef(new NativeToolPresentation());
   const messageModels = useMemo(() => {
     const models = preparing
@@ -5466,7 +5453,6 @@ function NativeDesktopContent({
           scope: JSON.stringify([replyDisplayScope, reasoningAccessEpoch]),
           readEpoch: state.historyEpoch,
           authorized: selection.canReadModelOutput === true,
-          model,
           original,
           open,
           cache: reasoningBodies.current,
@@ -5497,16 +5483,10 @@ function NativeDesktopContent({
               turnId: transcript.turnActivity?.turnId ?? pendingFirstReply,
               presentationKey: pendingFirstReply,
               status: 'preparing',
-              responsePhase: 'preparing',
             }
           : !preparing && transcript.turnActivity
             ? {
                 ...transcript.turnActivity,
-                ...(firstRun && firstRun.id === activeExecutionRun?.id
-                  ? {
-                      responsePhase: firstModelDispatched ? 'thinking' : 'preparing',
-                    }
-                  : {}),
                 executionUnconfirmed,
                 // Read admission is revoked during scans; the last observed Run still owns its label.
                 unavailable: executionObservation

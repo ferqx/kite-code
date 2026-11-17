@@ -70,10 +70,14 @@ test.skipIf(process.platform !== 'darwin')(
           return Response.json({ calls, active: !!active, toolObserved });
         if (url.pathname === '/step') {
           const stage = url.searchParams.get('stage');
-          if (stage === 'long')
+          if (stage === 'initial-reasoning')
+            send({ reasoning_content: '**PRIVATE_REASONING_SENTINEL_INITIAL**\n\n核对原记录。' });
+          else if (stage === 'long')
             send({ reasoning_content: 'PRIVATE_REASONING_SENTINEL '.repeat(20000) });
           else if (stage === 'stage-prose')
             send({ content: 'PUBLIC_STAGE_PROSE: I will read the isolated file.' });
+          else if (stage === 'tool-reasoning')
+            send({ reasoning_content: 'PRIVATE_REASONING_SENTINEL_TOOL_MODEL' });
           else if (stage === 'tool' || stage === 'pure-tool') {
             send(
               {
@@ -83,7 +87,9 @@ test.skipIf(process.platform !== 'darwin')(
                   type: 'function',
                   function: {
                     name: 'read_file',
-                    arguments: JSON.stringify({ path: 'read-only.txt' }),
+                    arguments: JSON.stringify({
+                      path: stage === 'tool' && index === 0 ? 'missing-read.txt' : 'read-only.txt',
+                    }),
                   },
                 })),
               },
@@ -105,22 +111,18 @@ test.skipIf(process.platform !== 'darwin')(
         }
         const body = (await request.json()) as { messages: { role: string; content: string }[] };
         calls++;
-        if (calls >= 2) {
-          const tool = body.messages.find((message) => message.role === 'tool');
-          toolObserved = !!tool?.content.includes('ACTUAL_READ_ONLY_TOOL_RESULT');
-        }
+        if (calls >= 2)
+          toolObserved = body.messages.some(
+            (message) =>
+              message.role === 'tool' && message.content.includes('ACTUAL_READ_ONLY_TOOL_RESULT'),
+          );
         if (calls > 3) return new Response('unexpected_extra_model', { status: 500 });
         return new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
               active = controller;
-              if (calls !== 2)
-                send({
-                  reasoning_content:
-                    calls === 1
-                      ? '**PRIVATE_REASONING_SENTINEL_INITIAL**\n\n核对原记录。'
-                      : 'PRIVATE_REASONING_SENTINEL_SECOND_MODEL',
-                });
+              if (calls === 3)
+                send({ reasoning_content: 'PRIVATE_REASONING_SENTINEL_SECOND_MODEL' });
             },
           }),
           { headers: { 'content-type': 'text/event-stream' } },
@@ -202,7 +204,7 @@ test.skipIf(process.platform !== 'darwin')(
             JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
           )
           .replace(
-            "import { _electron } from 'playwright';",
+            "import { _electron, type Locator } from 'playwright';",
             `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
           ),
       );

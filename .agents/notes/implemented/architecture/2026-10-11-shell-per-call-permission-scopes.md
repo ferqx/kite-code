@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-参考 Codex CLI 固定源码 [Bash 解析](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/shell-command/src/bash.rs)、[执行策略](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/core/src/exec_policy.rs)与[Seatbelt](https://github.com/openai/codex/blob/8c0f7011674145da7e10627769fb221c74fbf7a0/codex-rs/sandboxing/src/seatbelt.rs)的分工。有限字面量 Bash AST 和固定危险扫描分开；复杂命令不取得“已证明只读”资格。危险扫描按源序保留字面量 `cd` 的可能目录，内部 subshell 不把目录变化传给外层；条件或失败不能丢弃原目录，末尾 pipeline 保留父 Shell 执行的可能性。超过分析预算直接失败关闭。OS 执行范围负责未知后代的实际越界拦截，不按失败后扩大权限重放。
+有限字面量 Bash AST 和固定危险扫描分开；复杂命令不取得“已证明只读”资格。危险扫描按源序保留字面量 `cd` 的可能目录，内部 subshell 不把目录变化传给外层；条件或失败不能丢弃原目录，末尾 pipeline 保留父 Shell 执行的可能性。超过分析预算直接失败关闭。OS 执行范围负责未知后代的实际越界拦截，不按失败后扩大权限重放。
 
 正式 `shell.launch` 的可选 `permissions` 只请求独立的 filesystem/network tuple，同一请求传到普通 `shell.command`。Core 原人工/模型决定和最终 SQL 接纳保持唯一 authority；Agent 独立权限模块仅从最终接受快照读取 scope，父子逐维求交；Service 只注入已校验宿主事实。摘要绑定命令、范围、环境、执行/解析资产及配置；Full 先核固定拒绝，再取得普通 host 范围。正式权限从类型、HTTP/IPC、持久控制、Client 和用户入口统一为三选一，退役第四种 raw `ask`；旧输入和旧控制记录失败关闭，不按兼容映射扩大权限。旧严格模式的独立审批/零效果场景迁到真正 Auto 审核的 `ask_user` 决定或确实需要人工审批的请求批准调用。`web_fetch` 消费原 network 能力的同一授权流程，原网络政策与 SSRF guard 保留。
 

@@ -350,6 +350,23 @@ test('non-gap shell output reports dropped bytes even when the retained text is 
   dom.window.close();
 });
 
+test('a saved Shell preview beginning with JSON opens as original command output', () => {
+  const data = {
+    outcome: 'succeeded',
+    content: '{"value":"程序原文"}\n',
+    outputFormat: 'model-preview',
+    presentation: { kind: 'shell', operation: 'execute', status: 'succeeded' },
+  };
+  const preview = result(data);
+  expect(preview.primary.querySelector('pre')?.textContent).toBe(data.content);
+  preview.dom.window.close();
+
+  const legacy = result({ ...data, outputFormat: undefined });
+  expect(legacy.primary.textContent).not.toContain(data.content.trim());
+  expect(legacy.body.querySelector('details')).not.toBeNull();
+  legacy.dom.window.close();
+});
+
 test('retained Job checkpoints group original text and exact gaps without joining distinct sequences', () => {
   const dom = new JSDOM(
     renderToStaticMarkup(

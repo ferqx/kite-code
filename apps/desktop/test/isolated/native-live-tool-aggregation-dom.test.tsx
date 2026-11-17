@@ -453,7 +453,9 @@ test('Native exploration starts as one collapsed activity and retains it across 
     collapsed(f.host);
     await f.flush();
     collapsed(f.host);
-    expect(f.host.textContent).toContain('读取文件');
+    const summary = f.host.querySelector('.conversation-trace-trigger');
+    expect(summary?.textContent).toBe('已读取 file-execution-3.ts');
+    expect(summary?.querySelector('[data-status="running"]')).toBeNull();
     expect(f.host.textContent).not.toContain('已完成 3 项');
     // Each tool now has a complete receipt; the accurate parent Run is still active.
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
@@ -463,24 +465,35 @@ test('Native exploration starts as one collapsed activity and retains it across 
   }
 });
 
-test('Native follows the last started running tool even in a different request order', async () => {
+test('Native follows tool start order, then keeps the latest concrete tool between calls', async () => {
   const f = fixture();
   try {
     await f.render();
+    await f.observeRun({ ...backgroundItem().run!, status: 'running', createdAt: Date.now() });
     const a = tool(1, { status: 'planned' });
     const b = tool(2, { status: 'running' });
     await f.start([a, b]);
     collapsed(f.host);
-    const title = f.host.querySelector('.conversation-trace-line [data-slot="trace-title"]');
-    expect(title?.textContent).toBe('读取 file-execution-2.ts');
+    const summary = f.host.querySelector('.conversation-trace-trigger')!;
+    const line = summary.querySelector('[data-trace-line]')!;
+    const title = line.querySelector('[data-slot="trace-title"]')!;
+    const checkLabel = (label: string, running: boolean) => {
+      expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
+      expect(summary.querySelector('[data-slot="trace-title"]')).toBe(title);
+      expect(title.textContent).toBe(label);
+      expect(line.getAttribute('data-status') === 'running').toBe(running);
+    };
+    checkLabel('读取 file-execution-2.ts', true);
     await f.start([{ ...a, status: 'running' }, b]);
-    expect(title?.textContent).toBe('读取 file-execution-1.ts');
+    checkLabel('读取 file-execution-1.ts', true);
     await f.complete(1);
     await f.flush();
-    expect(title?.textContent).toBe('读取 file-execution-2.ts');
+    checkLabel('读取 file-execution-2.ts', true);
     await f.complete(2);
     await f.flush();
-    expect(title?.textContent).toBe('已读取文件');
+    checkLabel('已读取 file-execution-2.ts', false);
+    expect(f.host.querySelector('.agent-turn-running')).not.toBeNull();
+    expect(f.host.querySelector('.response-status')).toBeNull();
     collapsed(f.host);
   } finally {
     await f.close();
@@ -588,6 +601,7 @@ for (const expanded of [false, true])
       }
       await f.complete(1);
       await f.flush();
+      expect(summary.textContent).toBe('读取了文件 file-execution-1.ts');
       expect(summary.querySelector('[data-status="running"]')).toBeNull();
       expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
     } finally {
@@ -599,31 +613,51 @@ test('a tool-call-only Model remains inside one Native activity while its histor
   const f = fixture();
   try {
     await f.render();
+    await f.observeRun({ ...backgroundItem().run!, status: 'running', createdAt: Date.now() });
     await f.start([tool(1)]);
     await f.complete(1);
     await f.flush();
     collapsed(f.host);
-    const summary = f.host.querySelector('.conversation-trace-trigger');
+    const summary = f.host.querySelector('.conversation-trace-trigger')!;
+    const title = summary.querySelector('[data-slot="trace-title"]');
+    expect(summary.textContent).toBe('已读取 file-execution-1.ts');
+    expect(summary.querySelector('[data-status="running"]')).toBeNull();
     await f.appendToolCallModel();
     collapsed(f.host);
     expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
+    expect(summary.querySelector('[data-slot="trace-title"]')).toBe(title);
+    expect(summary.textContent).toBe('已读取 file-execution-1.ts');
+    expect(summary.querySelector('[data-status="running"]')).toBeNull();
     expect(f.host.querySelectorAll('.model-output-message')).toHaveLength(0);
     await f.finishToolCallModelAndStart([tool(2, { status: 'running' })]);
     // The current View has admitted Tool B, while the independent history GET
     // still retains its source Model as an incomplete empty assistant message.
     collapsed(f.host);
     expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
-    expect(summary?.textContent).toBe('读取 file-execution-2.ts');
+    expect(summary.textContent).toBe('读取 file-execution-2.ts');
+    expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
     await f.releaseHistory();
     collapsed(f.host);
     expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
     await f.toggle();
-    expect(f.host.querySelector('.conversation-trace-steps')?.children).toHaveLength(2);
+    const steps = f.host.querySelector('.conversation-trace-steps')!;
+    const rows = Array.from(steps.children);
+    expect(rows).toHaveLength(2);
     await f.complete(2);
+    expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
+    expect(f.host.querySelector('.conversation-trace-steps')).toBe(steps);
     await f.flush();
     expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
-    expect(summary?.getAttribute('aria-expanded')).toBe('true');
-    expect(summary?.textContent).not.toContain('执行中');
+    expect(summary.querySelector('[data-slot="trace-title"]')).toBe(title);
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    expect(summary.textContent).toBe('已读取 file-execution-2.ts');
+    expect(summary.querySelector('[data-status="running"]')).toBeNull();
+    expect(f.host.querySelector('.conversation-trace-steps')).toBe(steps);
+    expect(steps.children).toHaveLength(rows.length);
+    rows.forEach((row, index) => {
+      expect(steps.children[index]).toBe(row);
+    });
+    expect(f.host.querySelector('.agent-turn-running')).not.toBeNull();
     expect(f.host.textContent).not.toContain(raw);
   } finally {
     await f.close();
@@ -666,7 +700,12 @@ test.each([
       expect(f.host.textContent).not.toContain(raw);
     }
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
-    expect(summary?.textContent).toBe('已搜索内容 · 已读取文件');
+    expect(summary?.textContent).toBe('已读取 file-execution-2.ts');
+    await f.appendStage([]);
+    expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
+    expect(summary?.getAttribute('aria-expanded')).toBe('true');
+    expect(summary?.textContent).toBe('搜索了内容 · 读取了文件');
+    expect(summary?.querySelector('[data-status="running"]')).toBeNull();
     expect(summary?.textContent).not.toContain('已完成 2 项');
   } finally {
     await f.close();
@@ -797,6 +836,7 @@ test('Native readable stage prose separates exploration activities without shari
   const f = fixture();
   try {
     await f.render();
+    await f.observeRun({ ...backgroundItem().run!, status: 'running', createdAt: Date.now() });
     await f.start([tool(1), tool(2)]);
     await f.complete(1);
     await f.flush();
@@ -807,15 +847,28 @@ test('Native readable stage prose separates exploration activities without shari
     const first = f.host.querySelector('.conversation-trace-trigger');
     expect(first).not.toBeNull();
     expect(first?.getAttribute('aria-expanded')).toBe('true');
+    expect(first?.textContent).toBe('已读取 file-execution-2.ts');
+    expect(first?.querySelector('[data-status="running"]')).toBeNull();
+    const title = first?.querySelector('[data-slot="trace-title"]');
+    const steps = f.host.querySelector('.conversation-trace-steps');
+    const timer = f.host.querySelector('.agent-turn-running');
+    expect(timer).not.toBeNull();
     await f.appendStage([tool(3, { status: 'running' }), tool(4)]);
     const summaries = f.host.querySelectorAll('.conversation-trace-trigger');
     expect(topActivities(f.host)).toHaveLength(2);
     expect(summaries).toHaveLength(2);
     expect(summaries[0] ?? null).toBe(first);
     expect(summaries[0]?.getAttribute('aria-expanded')).toBe('true');
+    expect(summaries[0]?.querySelector('[data-slot="trace-title"]')).toBe(title);
+    expect(summaries[0]?.textContent).toBe('读取了文件');
+    expect(summaries[0]?.querySelector('[data-status="running"]')).toBeNull();
     expect(summaries[1]?.getAttribute('aria-expanded')).toBe('false');
+    expect(summaries[1]?.textContent).toBe('读取 file-execution-3.ts');
+    expect(summaries[1]?.querySelector('[data-status="running"]')).not.toBeNull();
     expect(f.host.querySelectorAll('.conversation-trace-steps')).toHaveLength(1);
+    expect(f.host.querySelector('.conversation-trace-steps')).toBe(steps);
     expect(f.host.querySelector('.conversation-trace-steps')?.children).toHaveLength(2);
+    expect(f.host.querySelector('.agent-turn-running')).toBe(timer);
     expect(f.host.textContent).toContain('目录已了解，接着查看应用入口。');
     expect(f.host.textContent).not.toContain(raw);
   } finally {

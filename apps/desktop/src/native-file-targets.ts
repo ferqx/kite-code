@@ -3,6 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeFileChange } from './file-changes-bridge';
 import type { NativeBridge, NativeResult, NativeSelection } from './native-bridge';
 import { nativeReadDeadline } from './native-read-deadline';
+import { sameToolReceipt } from './native-tool-messages';
+
+type FileTargetRead = { receipt: Message; entry?: NativeFileChange };
 
 /** Both retained file consumers read the same exact metadata; bodies remain lazy. */
 export function useNativeFileTargets({
@@ -29,57 +32,66 @@ export function useNativeFileTargets({
   const hasSelection = !!selection;
   const scope = JSON.stringify([
     generation,
-    selection?.storeId,
-    selection?.session.id,
+    storeId,
+    sessionId,
+    workspaceId,
     viewSelection,
     historyEpoch,
     includeRead,
   ]);
-  const ids = useMemo(
+  const receipts = useMemo(
     () =>
       hasSelection
-        ? messages
-            .filter((message) => {
-              if (
-                message.role !== 'tool' ||
-                message.status !== 'complete' ||
-                message.sourceIds?.length !== 1
-              )
-                return false;
-              if (!includeRead) return true;
-              // This is only a request filter. Main verifies the original Files definition and result.
-              try {
-                return typeof JSON.parse(message.content)?.path === 'string';
-              } catch {
-                return false;
-              }
-            })
-            .map((message) => message.id)
-            .join(',')
-        : '',
+        ? messages.filter((message) => {
+            if (
+              message.role !== 'tool' ||
+              message.status !== 'complete' ||
+              message.sourceIds?.length !== 1
+            )
+              return false;
+            if (!includeRead) return true;
+            // This is only a request filter. Main verifies the original Files definition and result.
+            try {
+              return typeof JSON.parse(message.content)?.path === 'string';
+            } catch {
+              return false;
+            }
+          })
+        : [],
     [hasSelection, messages, includeRead],
   );
+  const eligible = useRef(receipts);
+  if (
+    eligible.current.length !== receipts.length ||
+    receipts.some((receipt, index) => !sameToolReceipt(receipt, eligible.current[index]!))
+  )
+    eligible.current = receipts;
+  const candidates = eligible.current;
   const [revision, setRevision] = useState(0);
   const cache = useRef({
     scope,
-    revision,
-    read: new Set<string>(),
-    entries: new Map<string, NativeFileChange>(),
+    bridge,
+    read: new Map<string, FileTargetRead>(),
   });
   const [state, setState] = useState<{
     scope: string;
-    entries: NativeFileChange[];
+    bridge?: NativeBridge;
+    reads: FileTargetRead[];
     loading: boolean;
     error?: string;
-  }>({ scope, entries: [], loading: true });
+  }>({ scope, bridge, reads: [], loading: true });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A retry restarts only unresolved receipts in the current scope.
   useEffect(() => {
-    if (cache.current.scope !== scope || cache.current.revision !== revision)
-      cache.current = { scope, revision, read: new Set(), entries: new Map() };
+    if (cache.current.scope !== scope || cache.current.bridge !== bridge)
+      cache.current = { scope, bridge, read: new Map() };
     const current = cache.current;
+    // A retry of unresolved receipts does not withdraw another tool's confirmed target.
+    const ids = new Set(candidates.map((receipt) => receipt.id));
+    for (const id of current.read.keys()) if (!ids.has(id)) current.read.delete(id);
     let active = true,
       readId: string | undefined;
     const publish = (loading: boolean, error?: string) =>
-      setState({ scope, entries: [...current.entries.values()], loading, error });
+      setState({ scope, bridge, reads: [...current.read.values()], loading, error });
     if (!bridge || !storeId || !sessionId || !workspaceId || viewSelection === undefined) {
       publish(false);
       return;
@@ -87,9 +99,13 @@ export function useNativeFileTargets({
     if (suspended) return;
     publish(true);
     void (async () => {
-      const pending = ids ? ids.split(',').filter((id) => !current.read.has(id)) : [];
+      const pending = candidates.filter((receipt) => {
+        const previous = current.read.get(receipt.id);
+        return !previous || !sameToolReceipt(receipt, previous.receipt);
+      });
       for (let index = 0; index < pending.length; index += 32) {
         const batch = pending.slice(index, index + 32);
+        const messageIds = batch.map((receipt) => receipt.id);
         readId = crypto.randomUUID();
         const page: NativeResult = await nativeReadDeadline(
           bridge.request({
@@ -98,7 +114,7 @@ export function useNativeFileTargets({
             viewSelection,
             historyEpoch,
             readId,
-            messageIds: batch,
+            messageIds,
           }),
         );
         if (!active) return;
@@ -114,11 +130,14 @@ export function useNativeFileTargets({
           page.scope.viewSelection !== viewSelection ||
           page.scope.historyEpoch !== historyEpoch ||
           page.scope.workspaceId !== workspaceId ||
-          page.entries.some((entry) => !batch.includes(entry.messageId))
+          page.entries.some((entry) => !messageIds.includes(entry.messageId))
         )
           throw Error('file_change_identity_mismatch');
-        for (const id of batch) current.read.add(id);
-        for (const entry of page.entries) current.entries.set(entry.messageId, entry);
+        for (const receipt of batch)
+          current.read.set(receipt.id, {
+            receipt,
+            entry: page.entries.find((entry) => entry.messageId === receipt.id),
+          });
         publish(true);
       }
       if (active) publish(false);
@@ -133,7 +152,7 @@ export function useNativeFileTargets({
   }, [
     bridge,
     scope,
-    ids,
+    candidates,
     revision,
     generation,
     historyEpoch,
@@ -144,10 +163,19 @@ export function useNativeFileTargets({
     includeRead,
     suspended,
   ]);
+  const sameScope = state.scope === scope && state.bridge === bridge;
+  const entries = useMemo(() => {
+    if (!sameScope) return [];
+    const originals = new Map(candidates.map((receipt) => [receipt.id, receipt]));
+    return state.reads.flatMap(({ receipt, entry }) => {
+      const original = originals.get(receipt.id);
+      return entry && original && sameToolReceipt(receipt, original) ? [entry] : [];
+    });
+  }, [sameScope, candidates, state.reads]);
   return {
-    entries: state.scope === scope ? state.entries : [],
-    loading: state.scope !== scope || state.loading,
-    error: state.scope === scope ? state.error : undefined,
+    entries,
+    loading: !sameScope || state.loading,
+    error: sameScope ? state.error : undefined,
     retry: () => setRevision((value) => value + 1),
   };
 }

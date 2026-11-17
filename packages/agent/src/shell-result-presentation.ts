@@ -253,7 +253,7 @@ export function formatShellResult(input: {
       );
   if (!preview) return;
   if (preview.text) {
-    lines.push(preview.text);
+    lines.push('', preview.text);
     if (preview.limited || details.outputLimited === true) {
       if (cursorLine)
         lines.push(

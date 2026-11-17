@@ -6,13 +6,13 @@ Status: implemented
 
 ## Problem
 
-桌面定时任务页原先只能填写草稿。用户要求参考Codex的具体实现，让稳定重复任务按时运行并能回到原结果，同时不能干扰正在阅读或运行的会话，也不能在重启或回执丢失后重复产生效果。
+桌面定时任务页原先只能填写草稿。用户要求稳定重复任务按时运行并能回到原结果，同时不能干扰正在阅读或运行的会话，也不能在重启或回执丢失后重复产生效果。
 
 ## Decision
 
 首版只提供应用运行期间的本地日／工作日／周任务。Main单运行器使用可注入时钟，Node私有SQLite保存任务与运行快照，首次使用惰性DB10；Agent基线和schema保持。每次用普通createSession和run.start创建独立会话，原权限与审批保持。已错过时间最多补最近一次，同任务、同 Store 绑定不重叠；DST gap跳过、overlap只取第一次。稳定原ID与快照在网络效果前写入，冷恢复只GET原创建／启动Command。创建与启动之间中断也保持unknown，不以缺回执推断未发送。备份恢复为新Store保原绑定，不能自动执行；明确重绑后旧运行仅留只读历史，新 claim 身份包含Store。前台Run结束不代表组内效果结算，原Tool／后台／child事实仍有未知或活动项时继续阻止后继。after-turn 原报告待处理或根／已核 child Session 仍有活动 Run 同样等待，覆盖尚无 Model 的派发窗口。可信结算保存可选版本标识；旧终态无标识时也阻止派发，只按需每轮最多4条核原记录，不扫描无关任务、不由最新成功覆盖更早未知，也不通过重放取得证明。
 
-Codex参考的是线程与轮次分离，以及本地自动任务需应用运行、提供结果入口的行为。[官方公开源码](https://github.com/openai/codex/tree/f0c5077c34ec7a76b4ad9134835925e6ae3d72ec)的thread/start与turn/start分别承担会话和轮次；turn/start可start_or_steer_turn，所以每次独立会话避免引导当前工作。[Automations文档](https://learn.chatgpt.com/docs/automations?surface=app)用于产品行为对照。公开源码没有桌面调度器内部实现，本文不把本地SQLite/轮询说成复制Codex。
+[Automations文档](https://learn.chatgpt.com/docs/automations?surface=app)用于产品行为对照。
 
 ## Alternatives considered
 

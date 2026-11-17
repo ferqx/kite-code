@@ -7,8 +7,7 @@ Status: implemented
 Workspace、临时 runtime 或 PATH 工具目录。若在每次 invocation 中给 `USERPROFILE` 祖先临时增加 ACE，
 Windows 可能触发大范围继承传播；命令会长时间占用 ACL lease，crash recovery 也会重复该成本。
 
-Codex 的 Windows sandbox 把 sandbox identity 的 read roots 放在 elevated setup 中配置，并排除常见凭据
-目录。Kite 应采用相同的 control-plane/data-plane 分离，而不是让普通联网命令改写 profile 祖先 DACL。
+在提权 setup 阶段配置读取范围，可以提前排除凭据目录，并避免普通联网命令改写 profile 祖先 DACL。
 
 ## Decision
 1. managed-network setup payload V2 包含发起用户 `USERPROFILE` 下已存在、非 reparse-point 的顶层目录。

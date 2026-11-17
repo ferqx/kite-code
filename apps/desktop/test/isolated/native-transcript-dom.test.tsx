@@ -321,7 +321,7 @@ test('Native model segments retain exact reasoning identity through prose, obser
       expect(f.host.querySelector('[data-source="first-model-message"]')).toBe(body);
       expect(headings().map((entry) => entry.textContent)).toEqual([
         '思考了',
-        unconfirmed ? '执行状态待确认' : '正在思考…',
+        unconfirmed ? '思考' : '正在思考…',
       ]);
       expect(headings()[0]!.querySelector('[data-status="running"]')).toBeNull();
       if (unconfirmed) expect(headings()[1]!.querySelector('[data-status="running"]')).toBeNull();

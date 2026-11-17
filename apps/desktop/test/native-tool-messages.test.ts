@@ -2363,7 +2363,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
         command: 'printf first\nprintf second\n',
         jobStatus: 'succeeded',
         exitCode: 0,
-        output: 'stdout:\nfirst\nsecond\n\nstderr:\nwarning\n',
+        output: 'first\nsecond\n\nwarning\n',
         outputComplete: true,
       },
     });
@@ -2489,7 +2489,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       shellId: keylessForeground.id,
       command: keylessInput.command,
       jobStatus: 'succeeded',
-      output: 'stdout:\nfirst\nsecond\n',
+      output: 'first\nsecond\n',
     });
     keylessForeground.details.shell_id = 'unrelated-handle';
     keylessForeground.save();
@@ -2534,7 +2534,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
         operation: 'read',
         jobStatus: 'running',
         output:
-          'stdout:\none\n\nOutput gap in stdout (byte count unavailable for this page).\nstderr:\ntwo\n\nOutput gap in stderr (byte count unavailable for this page).\nstdout:\nthree\n\nOutput gap in stdout (byte count unavailable for this page).',
+          'one\n\nOutput gap in stdout (byte count unavailable for this page).\ntwo\n\nOutput gap in stderr (byte count unavailable for this page).\nthree\n\nOutput gap in stdout (byte count unavailable for this page).',
         outputComplete: false,
       },
     });
@@ -2610,7 +2610,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
     unknown.save();
     expect((await unknown.read()).message).toMatchObject({
       status: 'unknown',
-      shell: { jobStatus: 'outcome_unknown', output: 'stdout:\npartial\n' },
+      shell: { jobStatus: 'outcome_unknown', output: 'partial\n' },
     });
     const malformed = receipt('execute', 'succeeded', {
       stdout: '',

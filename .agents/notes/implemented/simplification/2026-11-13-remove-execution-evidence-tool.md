@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-The owner questioned the extra model-facing receipt retrieval tool and requested its removal if public competitors had no matching standalone design. Public competitor mechanisms are not identical: Claude Code removed TaskOutput in v2.1.277 in favor of Read on background output files; Codex has running-session output and optional rollout reads; OpenCode retains long outputs in files. This is not proof that competitors lack recovery mechanisms.
+The owner questioned the extra model-facing receipt retrieval tool and requested its removal if public competitors had no matching standalone design. Public competitor mechanisms are not identical: Claude Code removed TaskOutput in v2.1.277 in favor of Read on background output files; OpenCode retains long outputs in files. This is not proof that competitors lack recovery mechanisms.
 
 ## Decision
 

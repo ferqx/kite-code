@@ -75,8 +75,6 @@ function savedOutput(
   );
   if (!preview) throw new AgentError('shell_output_conflict');
   const receipt = { ...details };
-  delete receipt.stdout;
-  delete receipt.stderr;
   delete receipt.output;
   return {
     outcome,
@@ -345,14 +343,14 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
             shell_id: launched.shell_id,
             execution_id: launched.execution_id,
           };
+          if (details.output !== undefined)
+            return savedOutput(completed.outcome, details, ref, input, context);
           if (completed.content !== canonicalJson(completed.details ?? null))
             return {
               ...completed,
               content: `${completed.content}\nShell handle: ${canonicalJson({ shell_id: launched.shell_id, execution_id: launched.execution_id })}`,
               details,
             };
-          if (typeof details.stdout === 'string')
-            return savedOutput(completed.outcome, details, ref, input, context);
           return { ...completed, content: canonicalJson(details), details };
         },
       },
