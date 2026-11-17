@@ -9,6 +9,7 @@ import type {
   NativeBridge,
   NativeCallerMetadata,
   NativeDirectory,
+  NativeDraft,
   NativeEvent,
   NativeRequest,
   NativeResult,
@@ -120,6 +121,7 @@ function fixture(
       interactionsAfterId: null,
     },
   });
+  const draftVersions = new Map<string, { revision: number; content: string }>();
   const bridge: NativeBridge = {
     watch(listener) {
       listeners.add(listener);
@@ -145,14 +147,30 @@ function fixture(
         case 'messages':
           return { messages: [], nextAfterSeq: null, highWaterSeq: '0' };
         case 'draft.read':
+        case 'draft.write': {
+          const saved = draftVersions.get(request.sessionId) ?? {
+            revision: 1,
+            content:
+              request.sessionId === 'new-conversation'
+                ? ''
+                : request.sessionId === 'a'
+                  ? 'original text'
+                  : 'other text',
+          };
+          if (request.method === 'draft.write') {
+            if (request.revision !== saved.revision) throw Error('draft_revision_conflict');
+            saved.revision++;
+            saved.content = request.content;
+            draftVersions.set(request.sessionId, saved);
+          }
           return {
             id: request.sessionId,
             storeId: 'store',
-            workspaceId: 'w',
+            workspaceId: request.sessionId === 'new-conversation' ? 'new-conversation' : 'w',
             rootSessionId: request.sessionId,
-            revision: 1,
-            content: request.sessionId === 'a' ? 'original text' : 'other text',
+            ...saved,
           };
+        }
         case 'conversation.branch':
           return {
             kind: 'conversation.branch',
@@ -280,7 +298,9 @@ for (const method of ['select', 'draft.read'] as const) {
     try {
       await f.render();
       await f.click('Original A');
-      expect(f.calls.filter((request) => request.method === method)).toHaveLength(1);
+      expect(
+        f.calls.filter((request) => request.method === method && request.sessionId === 'a'),
+      ).toHaveLength(1);
       await f.click('Other B');
       f.assertOther();
       await act(async () => held.reject(Error('native_selection_changed')));
@@ -358,7 +378,9 @@ test('a current event state failure recovers in the background without a dialog 
     fail = true;
     await f.notify();
     expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
-    expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+      true,
+    );
     expect(f.dom.window.document.body.textContent).not.toContain('network_outcome_unknown');
     fail = false;
     await until(
@@ -386,11 +408,15 @@ test('a current select rejection retries its exact target without an external er
     await f.click('Original A');
     expect(f.calls.filter((request) => request.method === 'select')).toHaveLength(1);
     expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
-    expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+      true,
+    );
     failed = true;
     await act(async () => held.reject(Error('network_outcome_unknown')));
     expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
-    expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+      true,
+    );
     await until(() => f.calls.filter((request) => request.method === 'select').length === 2);
     expect(
       promptValue(
@@ -467,7 +493,9 @@ test('a mutation transport failure automatically checks the original intent with
     await f.click('发送首条消息');
     expect(submitted).toBeDefined();
     expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
-    expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+      true,
+    );
     await until(() => f.calls.some((request) => request.method === 'conversation.lookup'));
     const lookups = f.calls.filter((request) => request.method === 'conversation.lookup');
     expect(lookups).toHaveLength(1);
@@ -522,7 +550,9 @@ for (const method of ['state', 'directory'] as const)
       expect(
         f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
       ).toBeNull();
-      expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+        true,
+      );
       expect(
         promptValue(
           f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
@@ -538,7 +568,9 @@ for (const method of ['state', 'directory'] as const)
       expect(
         f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
       ).toBeNull();
-      expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+        true,
+      );
       expect(
         promptValue(
           f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
@@ -565,7 +597,9 @@ test('a temporary native_draining observation automatically retries without a fa
     fail = true;
     await f.notify();
     expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
-    expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+      true,
+    );
     fail = false;
     await until(
       () => f.calls.filter((request) => request.method === 'state').length >= priorStateReads + 2,
@@ -597,7 +631,9 @@ for (const method of ['select', 'draft.read'] as const)
       expect(
         f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
       ).toBeNull();
-      expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+        true,
+      );
       hold = false;
       await f.notify({ kind: 'lifecycle', phase: 'active' });
       expect(
@@ -608,7 +644,9 @@ for (const method of ['select', 'draft.read'] as const)
       expect(
         f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
       ).toBeNull();
-      expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+        true,
+      );
       expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
       expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
       expect(f.calls.filter((request) => request.method === 'draft.write')).toHaveLength(0);
@@ -650,7 +688,9 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
     await f.notify({ kind: 'lifecycle', phase: 'quitting' });
     await act(async () => held.reject(Error('network_outcome_unknown')));
     expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
-    expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-toast [role="status"]') === null).toBe(
+      true,
+    );
     expect(f.calls.filter((request) => request.method === 'conversation.lookup')).toHaveLength(0);
     await f.notify({ kind: 'lifecycle', phase: 'active' });
     await until(() => f.calls.some((request) => request.method === 'conversation.lookup'));
@@ -725,7 +765,15 @@ test('private draft save is test-only and retains its original scope and CAS whi
     expect(button.disabled).toBe(false);
     await f.click('保留草稿');
     expect(saves).toEqual([
-      { method: 'draft.write', generation: 1, sessionId: 'a', revision: 7, content: raw },
+      {
+        method: 'draft.write',
+        generation: 1,
+        sessionId: 'a',
+        revision: 7,
+        content: raw,
+        browserAnnotations: [],
+        annotationImageOffset: 0,
+      },
     ]);
     await f.click('Other B');
     expect(
@@ -751,6 +799,8 @@ test('private draft save is test-only and retains its original scope and CAS whi
       sessionId: 'b',
       revision: 1,
       content: 'other text',
+      browserAnnotations: [],
+      annotationImageOffset: 0,
     });
     expect(
       f.calls.some((request) =>
@@ -995,7 +1045,7 @@ test('cold unknown annotation keeps missing pixels and locks cards; accepted ori
   const { saved: note } = annotationFixture();
   let phase: 'unknown' | 'accepted' = 'unknown',
     revision = 1;
-  const saved = {
+  let saved: NativeDraft = {
     id: 'a'.repeat(64),
     storeId: 'store',
     workspaceId: 'w',
@@ -1060,6 +1110,13 @@ test('cold unknown annotation keeps missing pixels and locks cards; accepted ori
     );
     phase = 'accepted';
     revision = 2;
+    saved = {
+      ...saved,
+      revision,
+      content: '',
+      browserAnnotations: [],
+      consumedFrom: { commandId: 'cold-original', revision: 1 },
+    };
     await f.notify();
     await until(() => writes.some((write) => write.content === 'newer edit'));
     expect(f.dom.window.document.querySelector('.browser-note-card')).toBeNull();
@@ -1299,6 +1356,7 @@ test('failed selection and unavailable observation share one read while the orig
       'background.open',
       'background.close',
       'lookupInteraction',
+      'outputs.sources',
     ]);
     expect(f.calls.filter((request) => !reads.has(request.method))).toEqual([]);
   } finally {

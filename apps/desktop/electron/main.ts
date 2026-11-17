@@ -44,10 +44,12 @@ import { nativeModelPreferences } from './model-preference';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { registerNativeBrowserIpc } from './native-browser';
 import { createNativeCallerGenerationOwner, NativeCaller } from './native-caller';
+import { createNativeDraftFlush } from './native-draft-flush';
 import { registerNativeFullPermissionDialogIpc } from './native-full-permission-dialog';
 import { createNativeGlobalDialogHost } from './native-global-dialog-host';
 import { createNativeImageGalleryHost } from './native-image-gallery-host';
 import {
+  assertNativeSender,
   registerNativeIpc,
   registerNativeModelPreferenceIpc,
   registerNativeStartupIpc,
@@ -220,6 +222,8 @@ let quitting = false,
   exitAllowed = false;
 let developmentReload: Promise<void> | undefined;
 let switchingService = false;
+let draftFlush: ReturnType<typeof createNativeDraftFlush> | undefined;
+let preparingQuit: Promise<void> | undefined;
 function setQuitting() {
   quitting = true;
   void scheduledTasks?.stop().catch(() => {});
@@ -433,6 +437,41 @@ function closeNativeResources(): Promise<void> {
   return closing;
 }
 function stopNativeProcess(code = 0): void {
+  if (exitAllowed || stoppingNativeProcess || preparingQuit) return;
+  if (!draftFlush?.required() || !window || window.isDestroyed()) {
+    finishNativeProcess(code);
+    return;
+  }
+  // Keep the original window, caller and Service alive until its latest draft is durable.
+  // The renderer is temporarily inert; normal execution requests are fenced at IPC.
+  preparingQuit = Promise.resolve()
+    .then(() => draftFlush?.flush() ?? true)
+    .then(
+      (saved) => {
+        preparingQuit = undefined;
+        if (exitAllowed || stoppingNativeProcess) return;
+        if (saved) {
+          finishNativeProcess(code);
+          return;
+        }
+        draftFlush?.release();
+        dialog.showErrorBox(
+          '草稿尚未确认保存',
+          '已取消退出。请保留当前窗口，核对草稿保存状态后重试。',
+        );
+      },
+      () => {
+        preparingQuit = undefined;
+        if (exitAllowed || stoppingNativeProcess) return;
+        draftFlush?.release();
+        dialog.showErrorBox(
+          '草稿尚未确认保存',
+          '已取消退出。请保留当前窗口，核对草稿保存状态后重试。',
+        );
+      },
+    );
+}
+function finishNativeProcess(code = 0): void {
   if (exitAllowed || stoppingNativeProcess) return;
   const deadlineAbort = new AbortController();
   // Start the hard deadline at the request, before presentation retirement.
@@ -491,7 +530,7 @@ function stopNativeProcess(code = 0): void {
     forceExit();
   }
 }
-const terminateNativeProcess = () => stopNativeProcess();
+const terminateNativeProcess = () => finishNativeProcess();
 process.on('SIGINT', terminateNativeProcess);
 process.on('SIGTERM', terminateNativeProcess);
 app.once('will-quit', () => {
@@ -552,7 +591,7 @@ if (development) {
           };
     sendStartup();
   };
-  parent.on('error', () => stopNativeProcess(1));
+  parent.on('error', () => finishNativeProcess(1));
   const stop = serveDevelopmentReload({
     stream: parent,
     reply: (line) => {
@@ -564,8 +603,8 @@ if (development) {
     stop();
     parent.destroy();
   });
-  parent.once('end', () => stopNativeProcess());
-  parent.once('close', (hadError) => stopNativeProcess(hadError ? 1 : 0));
+  parent.once('end', () => finishNativeProcess());
+  parent.once('close', (hadError) => finishNativeProcess(hadError ? 1 : 0));
 }
 void app
   .whenReady()
@@ -894,11 +933,40 @@ void app
         return true;
       },
     });
+    draftFlush = createNativeDraftFlush({
+      ipcMain,
+      window: () => window,
+      assertSender: (event) => assertNativeSender(event, window, rendererUrl),
+    });
     registerNativeIpc({
       ipcMain,
       window: () => window,
       rendererUrl,
       caller: openCaller,
+      assertRequestAllowed(request) {
+        if (quitting) throw Error('native_draining');
+        if (
+          preparingQuit &&
+          ![
+            'draft.read',
+            'draft.write',
+            'input.attachments.read',
+            'input.attachments.write',
+            'input.attachments.move',
+            // Let local preparation finish while Root input is inert.
+            // These bounded staging operations cannot submit a task or change selection.
+            'input.images.begin',
+            'input.images.append',
+            'input.images.finish',
+            'input.images.release',
+            'input.files.begin',
+            'input.files.append',
+            'input.files.finish',
+            'input.files.release',
+          ].includes(request.method)
+        )
+          throw Error('native_draining');
+      },
       openEditorUrl: (url) => shell.openExternal(url),
       ...(process.platform === 'win32'
         ? {

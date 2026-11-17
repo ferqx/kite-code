@@ -1,3 +1,7 @@
+## 会话搜索
+
+[Sidebar](src/desktop/Sidebar.tsx)通过宿主提供的 `sessionSearch` 范围和可用性接入[SessionSearch](src/desktop/SessionSearch.tsx)，搜索材料来自完整会话／项目展示目录。数量不完整或来源失效与无匹配分别展示；同名项目使用可选登记位置辨识。逐批50项只限制渲染，键盘可以继续向后选择。搜索期间原侧栏目录隐藏但保留挂载，取消恢复折叠状态与焦点，打开沿原宿主回调。[DOM回归](test/isolated/desktop-session-search.test.tsx)覆盖旧会话、重名、键盘／输入法、排序刷新后选中项滚动、范围变化、失效及恢复。当前 Native 数据边界和验证限制见[Desktop owner](../../apps/desktop/README.md#侧栏会话搜索)。
+
 `SessionPage.workspaceTab` 让宿主的受管网页内容进入原 `SessionTabs`：共用一条标签栏、同一个8项有界model和原可拖动分栏，不新增详情壳或放大／还原按钮。明确请求按scope／requestId去重并选择已有workspace标签；含该标签时首次调宽62%，后续tab切换保留用户拖动宽度。workspace内容保持挂载，只接收当前可见性；收起／切tab不赋予UI取消任务的权限。标签变更即时保留最新model容量，处理同一commit的并发打开；普通browser释放、child与变更读取仍遵循原owner。
 
 ## 操作错误反馈

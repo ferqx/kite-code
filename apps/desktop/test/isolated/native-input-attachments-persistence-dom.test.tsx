@@ -245,7 +245,10 @@ function durableHost() {
   };
 }
 
-async function fixture(main = durableHost()) {
+async function fixture(
+  main = durableHost(),
+  options: { localFileReferences?: boolean; generation?: number } = {},
+) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const previous = {
     window: globalThis.window,
@@ -277,7 +280,7 @@ async function fixture(main = durableHost()) {
   const root = createRoot(document.getElementById('root')!);
   let attachments!: ReturnType<typeof useNativeInputImages>;
   let currentScope = 'a',
-    generation = 1;
+    generation = options.generation ?? 1;
   let pendingSend: Promise<void> | undefined;
   const sends: { scope: string; revision: number | undefined; ids: string[]; text: string }[] = [];
   function Fixture() {
@@ -286,6 +289,7 @@ async function fixture(main = durableHost()) {
       main.host.bridge,
       generation,
       generation === 3 ? 'other-store' : 'store',
+      options.localFileReferences,
     );
     const scope = currentScope;
     return (
@@ -1594,6 +1598,495 @@ test('a transient recovery read failure can retry the same proof without resendi
     expect(attachmentIds(f)).toEqual([...proof.ids!].sort());
     expect(f.attachments.error('a')).toBeUndefined();
     expect(f.sends).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a retired attachment owner cannot consume a new generation receipt or suppress its read-back', async () => {
+  const f = await fixture();
+  try {
+    await act(async () => {
+      await f.attachments.restore('a', 'session-a');
+      f.attachments.addFiles('a', [reference('sent.txt')]);
+      await f.attachments.flush('a');
+    });
+    const retired = f.attachments;
+    const ids = retired.files('a').map((item) => item.id);
+    await f.render('a', 2);
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    expect(f.main.consume('session-a', 1)).toBe(true);
+    const before = f.main.calls.length;
+    await act(async () => retired.accepted('a', 1, ids));
+    expect(f.attachments.files('a').map((item) => item.id)).toEqual(ids);
+    expect(f.main.calls).toHaveLength(before);
+    await act(async () => {
+      f.attachments.accepted('a', 1, ids);
+      await f.attachments.flush('a');
+    });
+    expect(f.attachments.files('a')).toEqual([]);
+    expect(f.attachments.error('a')).toBeUndefined();
+    expect(f.main.read('session-a')).toEqual({
+      kind: 'input.attachments',
+      revision: 2,
+      attachments: [],
+    });
+    expect(
+      f.main.calls.slice(before).filter((input) => input.method === 'input.attachments.read'),
+    ).toHaveLength(1);
+    expect(
+      f.main.calls.slice(before).filter((input) => input.method === 'input.attachments.write'),
+    ).toEqual([]);
+    await act(async () => {
+      retired.accepted('a', undefined, ids);
+      f.attachments.accepted('a', 1, ids);
+      f.attachments.addFiles('a', [reference('newer.txt')]);
+      await f.attachments.flush('a');
+    });
+    expect(f.main.read('session-a').attachments.map((item) => item.name)).toEqual(['newer.txt']);
+    await f.remount();
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    expect(f.attachments.files('a').map((item) => item.name)).toEqual(['newer.txt']);
+    expect(f.sends).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a retired receipt cannot remove an identical attachment ID in another Store', async () => {
+  const f = await fixture();
+  const entry: NativePendingAttachment = {
+    id: 'same-id',
+    kind: 'reference',
+    name: 'other-store.txt',
+    uri: 'file:///other-store.txt',
+    state: 'ready',
+  };
+  try {
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    const retired = f.attachments;
+    f.main.seed('session-a', [entry], undefined, 3);
+    await f.render('a', 3);
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    const before = f.main.calls.length;
+    await act(async () => {
+      retired.accepted('a', 1, ['same-id']);
+      retired.accepted('a', undefined, ['same-id']);
+      await f.attachments.flush('a');
+    });
+    expect(f.attachments.files('a').map((item) => item.id)).toEqual(['same-id']);
+    expect(f.main.read('session-a', undefined, 3)).toEqual({
+      kind: 'input.attachments',
+      revision: 1,
+      attachments: [entry],
+    });
+    expect(f.main.calls.slice(before)).toEqual([]);
+    expect(f.attachments.error('a')).toBeUndefined();
+  } finally {
+    await f.close();
+  }
+});
+
+test('quit waits for a hidden workspace image preparation and saves every scope before cold restoration', async () => {
+  const f = await fixture();
+  const reached = deferred(),
+    release = deferred();
+  let preparing: ReturnType<typeof f.attachments.add> | undefined;
+  let quit: Promise<void> | undefined;
+  let done = false;
+  f.main.host.before = async (input) => {
+    if (input.method === 'input.images.finish') {
+      reached.resolve();
+      await release.promise;
+    }
+  };
+  try {
+    await act(async () => f.attachments.restore(pendingScope, 'new-conversation', 'workspace'));
+    await f.render(pendingScope);
+    await act(async () => {
+      preparing = f.attachments.add(pendingScope, [f.file()]);
+      await reached.promise;
+    });
+    await act(async () => {
+      await f.attachments.restore('b', 'session-b', 'workspace');
+      f.attachments.addFiles('b', [reference('B.txt')]);
+    });
+    await f.render('b');
+    await act(async () => {
+      quit = f.attachments.flushForQuit().then(() => {
+        done = true;
+      });
+    });
+    expect(done).toBe(false);
+    expect(f.attachments.get(pendingScope)[0]?.loading).toBe(true);
+    await act(async () => {
+      release.resolve();
+      await preparing;
+      await quit;
+    });
+    expect(done).toBe(true);
+    expect(
+      f.main.read('new-conversation', 'workspace').attachments.map((item) => item.name),
+    ).toEqual(['photo.png']);
+    expect(f.main.read('session-b', 'workspace').attachments.map((item) => item.name)).toEqual([
+      'B.txt',
+    ]);
+    await f.remount();
+    await act(async () => {
+      await f.attachments.restore(pendingScope, 'new-conversation', 'workspace');
+      await f.attachments.restore('b', 'session-b', 'workspace');
+    });
+    expect(f.attachments.get(pendingScope)).toHaveLength(1);
+    expect(f.attachments.files('b').map((item) => item.name)).toEqual(['B.txt']);
+    expect(f.sends).toEqual([]);
+  } finally {
+    release.resolve();
+    await preparing;
+    await quit;
+    await f.close();
+  }
+});
+
+for (const localFileReferences of [false, true]) {
+  test(`quit waits for ${localFileReferences ? 'local reference' : 'prepared file'} adoption and deduplication, not just preparation`, async () => {
+    const f = await fixture(undefined, { localFileReferences });
+    let quit: Promise<void> | undefined;
+    try {
+      await act(async () => f.attachments.restore('a', 'session-a'));
+      const refs = await f.attachments.fileReferences([f.file('chosen.txt', 'text/plain')]);
+      let done = false;
+      await act(async () => {
+        quit = f.attachments.flushForQuit().then(() => {
+          done = true;
+        });
+      });
+      expect(done).toBe(false);
+      await act(async () => {
+        f.attachments.addFiles('a', refs);
+        await quit;
+      });
+      expect(done).toBe(true);
+      const first = f.main.read('session-a');
+      expect(first.attachments.map((item) => item.name)).toEqual(['chosen.txt']);
+      const duplicate = await f.attachments.fileReferences([f.file('chosen.txt', 'text/plain')]);
+      done = false;
+      await act(async () => {
+        quit = f.attachments.flushForQuit().then(() => {
+          done = true;
+        });
+      });
+      expect(done).toBe(false);
+      await act(async () => {
+        f.attachments.addFiles('a', duplicate);
+        await quit;
+      });
+      expect(f.main.read('session-a')).toEqual(first);
+      expect(f.attachments.files('a')).toHaveLength(1);
+      await f.remount();
+      await act(async () => f.attachments.restore('a', 'session-a'));
+      expect(f.attachments.files('a')).toHaveLength(1);
+      expect(f.sends).toEqual([]);
+    } finally {
+      await quit;
+      await f.close();
+    }
+  });
+}
+
+test('quit accepts an explicitly cancelled unclaimed file handoff without saving or resurrecting it', async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  try {
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    const refs = await f.attachments.fileReferences(
+      [f.file('cancelled.txt', 'text/plain')],
+      abort.signal,
+    );
+    let done = false;
+    let quit!: Promise<void>;
+    await act(async () => {
+      quit = f.attachments.flushForQuit().then(() => {
+        done = true;
+      });
+    });
+    expect(done).toBe(false);
+    await act(async () => {
+      abort.abort();
+      await quit;
+    });
+    expect(done).toBe(true);
+    expect(f.main.read('session-a').attachments).toEqual([]);
+    expect(f.main.calls.filter((input) => input.method === 'input.files.release')).toContainEqual({
+      method: 'input.files.release',
+      generation: 1,
+      id: refs[0]!.id,
+    });
+    expect(f.attachments.files('a')).toEqual([]);
+  } finally {
+    abort.abort();
+    await f.close();
+  }
+});
+
+test('an image preparation failure cancels that quit, but its durable error does not permanently prevent closing', async () => {
+  const f = await fixture();
+  const reached = deferred(),
+    release = deferred();
+  let preparing: ReturnType<typeof f.attachments.add> | undefined;
+  let quit: Promise<void> | undefined;
+  f.main.host.before = async (input) => {
+    if (input.method === 'input.images.append') {
+      reached.resolve();
+      await release.promise;
+      throw Error('disk_unavailable');
+    }
+  };
+  try {
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    await act(async () => {
+      preparing = f.attachments.add('a', [f.file()]);
+      await reached.promise;
+    });
+    await act(async () => {
+      quit = f.attachments.flushForQuit();
+      void quit.catch(() => {});
+    });
+    await act(async () => {
+      release.resolve();
+      await preparing;
+      await expect(quit!).rejects.toThrow('attachment_preparation_failed');
+    });
+    expect(f.attachments.get('a')[0]?.error).toContain('图片准备失败');
+    expect(f.main.read('session-a').attachments[0]?.state).toBe('error');
+    await act(async () => f.attachments.flushForQuit());
+    await expect(f.attachments.flush('a')).rejects.toThrow('attachment_draft_unavailable');
+    await f.remount();
+    await act(async () => {
+      await f.attachments.restore('a', 'session-a');
+      await f.attachments.flushForQuit();
+    });
+    expect(f.attachments.get('a')[0]?.error).toContain('附件已失效');
+  } finally {
+    release.resolve();
+    await preparing;
+    await quit?.catch(() => {});
+    await f.close();
+  }
+});
+
+test('quit retries a hidden uncertain write only against known durable snapshots and never overwrites another window', async () => {
+  const f = await fixture();
+  try {
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    f.main.host.failure = 'disk_unavailable';
+    await act(async () => f.attachments.addFiles('a', [reference('unsaved.txt')]));
+    await f.render('b');
+    await act(async () => {
+      await f.attachments.restore('b', 'session-b');
+      await expect(f.attachments.flushForQuit()).rejects.toThrow('attachment_draft_unavailable');
+    });
+    f.main.host.failure = undefined;
+    f.main.seed('session-a', [
+      {
+        id: 'foreign',
+        kind: 'reference',
+        name: 'foreign.txt',
+        uri: 'file:///foreign.txt',
+        state: 'ready',
+      },
+    ]);
+    await act(async () => {
+      await expect(f.attachments.flushForQuit()).rejects.toThrow('attachment_draft_unavailable');
+    });
+    expect(f.main.read('session-a').attachments.map((item) => item.name)).toEqual(['foreign.txt']);
+    f.main.seed('session-a', []);
+    await act(async () => f.attachments.flushForQuit());
+    expect(f.main.read('session-a').attachments.map((item) => item.name)).toEqual(['unsaved.txt']);
+    expect(f.sends).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('quit preserves durable invalid attachments and tolerates an untouched read-only restore failure', async () => {
+  const main = durableHost();
+  main.seed('session-a', [
+    {
+      id: 'invalid',
+      kind: 'image',
+      name: 'invalid.png',
+      state: 'error',
+      error: 'expired',
+      size: 0,
+    },
+  ]);
+  const f = await fixture(main);
+  try {
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    main.host.before = async (input) => {
+      if (input.method === 'input.attachments.read' && input.sessionId === 'session-b')
+        throw Error('read_unavailable');
+    };
+    await act(async () => f.attachments.restore('b', 'session-b'));
+    const writes = main.calls.filter((input) => input.method === 'input.attachments.write').length;
+    await act(async () => f.attachments.flushForQuit());
+    expect(main.calls.filter((input) => input.method === 'input.attachments.write')).toHaveLength(
+      writes,
+    );
+    expect(main.read('session-a').attachments[0]?.state).toBe('error');
+    await expect(f.attachments.flush('a')).rejects.toThrow('attachment_draft_unavailable');
+    expect(f.attachments.error('b')).toContain('待发送附件未能恢复');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a removal while quit waits for image preparation stays removed through cold restore', async () => {
+  const f = await fixture();
+  const reached = deferred(),
+    release = deferred();
+  let preparing: ReturnType<typeof f.attachments.add> | undefined;
+  let quit: Promise<void> | undefined;
+  f.main.host.before = async (input) => {
+    if (input.method === 'input.images.finish') {
+      reached.resolve();
+      await release.promise;
+    }
+  };
+  try {
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    await act(async () => {
+      preparing = f.attachments.add('a', [f.file()]);
+      await reached.promise;
+    });
+    await act(async () => {
+      quit = f.attachments.flushForQuit();
+      f.attachments.removeIds([f.attachments.get('a')[0]!.id]);
+      release.resolve();
+      await preparing;
+      await quit;
+    });
+    expect(f.main.read('session-a').attachments).toEqual([]);
+    await f.remount();
+    await act(async () => f.attachments.restore('a', 'session-a'));
+    expect(f.attachments.get('a')).toEqual([]);
+  } finally {
+    release.resolve();
+    await preparing;
+    await quit;
+    await f.close();
+  }
+});
+
+for (const nextGeneration of [2, 3]) {
+  test(`quit waiting on an old image is cancelled by connection ${nextGeneration} without blocking its new owner`, async () => {
+    const f = await fixture();
+    const reached = deferred(),
+      release = deferred();
+    let preparing: ReturnType<typeof f.attachments.add> | undefined;
+    let quit: Promise<void> | undefined;
+    f.main.host.before = async (input) => {
+      if (input.method === 'input.images.finish') {
+        reached.resolve();
+        await release.promise;
+      }
+    };
+    try {
+      await act(async () => f.attachments.restore('a', 'session-a'));
+      await act(async () => {
+        preparing = f.attachments.add('a', [f.file()]);
+        await reached.promise;
+      });
+      await act(async () => {
+        quit = f.attachments.flushForQuit();
+        void quit.catch(() => {});
+      });
+      await f.render('b', nextGeneration);
+      await expect(quit!).rejects.toThrow('attachment_draft_inactive');
+      await act(async () => f.attachments.flushForQuit());
+      await act(async () => {
+        release.resolve();
+        await preparing;
+      });
+      expect(f.attachments.get('a')).toEqual([]);
+      expect(f.main.calls.filter((input) => input.method === 'input.attachments.write')).toEqual(
+        [],
+      );
+    } finally {
+      release.resolve();
+      await preparing;
+      await quit?.catch(() => {});
+      await f.close();
+    }
+  });
+}
+
+for (const laterEdit of [false, true]) {
+  test(`quit waits for an atomic move and preserves its unknown recovery path (later edit: ${laterEdit})`, async () => {
+    const f = await fixture();
+    const reached = deferred(),
+      release = deferred();
+    f.main.setSessionWorkspace('created-session', 'workspace');
+    let move: Promise<void> | undefined, quit: Promise<void> | undefined;
+    f.main.host.afterMove = async () => {
+      reached.resolve();
+      await release.promise;
+      throw Error('lost_move_response');
+    };
+    try {
+      await act(async () => {
+        await f.attachments.restore(pendingScope, 'new-conversation', 'workspace');
+        f.attachments.addFiles(pendingScope, [reference('moved.txt')]);
+        await f.attachments.flush(pendingScope);
+      });
+      await act(async () => {
+        move = f.attachments.move(pendingScope, createdScope);
+        await reached.promise;
+      });
+      let done = false;
+      await act(async () => {
+        quit = f.attachments.flushForQuit().then(() => {
+          done = true;
+        });
+        void quit.catch(() => {});
+      });
+      expect(done).toBe(false);
+      if (laterEdit)
+        await act(async () => f.attachments.addFiles(pendingScope, [reference('later.txt')]));
+      await act(async () => {
+        release.resolve();
+        await move;
+        if (laterEdit) await expect(quit!).rejects.toThrow('attachment_draft_unavailable');
+        else await quit;
+      });
+      expect(done).toBe(!laterEdit);
+      expect(
+        f.main.read('created-session', 'workspace').attachments.map((item) => item.name),
+      ).toEqual(['moved.txt']);
+      if (!laterEdit) {
+        await f.remount();
+        await act(async () => f.attachments.restore(createdScope, 'created-session'));
+        expect(f.attachments.files(createdScope).map((item) => item.name)).toEqual(['moved.txt']);
+      } else
+        expect(f.attachments.files(pendingScope).map((item) => item.name)).toContain('later.txt');
+      expect(f.sends).toEqual([]);
+    } finally {
+      release.resolve();
+      await move;
+      await quit?.catch(() => {});
+      await f.close();
+    }
+  });
+}
+
+test('an empty unattached owner may quit, but a local attachment without durable scope cannot', async () => {
+  const f = await fixture(undefined, { generation: 0 });
+  try {
+    await act(async () => f.attachments.flushForQuit());
+    await f.render('a', 1);
+    await act(async () => f.attachments.addFiles('unrestored', [reference('local.txt')]));
+    await expect(f.attachments.flushForQuit()).rejects.toThrow('attachment_draft_unavailable');
+    expect(f.main.calls.filter((input) => input.method === 'input.attachments.write')).toEqual([]);
   } finally {
     await f.close();
   }

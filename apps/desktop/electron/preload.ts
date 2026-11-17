@@ -37,6 +37,11 @@ import {
   nativeBrowserMenuChannel,
   nativeBrowserPresentationChannel,
 } from '../src/native-browser-bridge';
+import {
+  nativeDraftFlushChannel,
+  nativeDraftFlushReadyChannel,
+  nativeDraftFlushReplyChannel,
+} from '../src/native-draft-flush-bridge';
 import { nativeGlobalDialogActiveChannel } from '../src/native-global-dialog-bridge';
 import {
   isNativeImageDisplayId,
@@ -158,6 +163,54 @@ const bridge: NativeBridge &
   NativeWindowBridge &
   NativeWindowMenuBridge &
   NativeStartupBridge = {
+  registerDraftFlush(listener, onStateChange) {
+    const notifyState = (value: boolean) => {
+      try {
+        onStateChange?.(value);
+      } catch {
+        // Presentation observers cannot block draft persistence or cancellation.
+      }
+    };
+    let active = true;
+    let pending: string | undefined;
+    const receive = (_event: unknown, nonce: unknown) => {
+      if (active && nonce === null) {
+        // Retire this attempt, not its unsettled save promise. A later quit gets a fresh nonce.
+        pending = undefined;
+        setModalActive('draft-flush', false);
+        notifyState(false);
+        return;
+      }
+      if (!active || pending || typeof nonce !== 'string' || !/^[a-f0-9-]{36}$/.test(nonce)) return;
+      pending = nonce;
+      setModalActive('draft-flush', true);
+      notifyState(true);
+      void Promise.resolve()
+        .then(listener)
+        .then(
+          () => {
+            if (active && pending === nonce)
+              ipcRenderer.send(nativeDraftFlushReplyChannel, { nonce, saved: true });
+          },
+          () => {
+            if (active && pending === nonce)
+              ipcRenderer.send(nativeDraftFlushReplyChannel, { nonce, saved: false });
+          },
+        )
+        .finally(() => {
+          if (pending === nonce) pending = undefined;
+        });
+    };
+    ipcRenderer.on(nativeDraftFlushChannel, receive);
+    ipcRenderer.send(nativeDraftFlushReadyChannel, true);
+    return () => {
+      active = false;
+      setModalActive('draft-flush', false);
+      notifyState(false);
+      ipcRenderer.off(nativeDraftFlushChannel, receive);
+      ipcRenderer.send(nativeDraftFlushReadyChannel, false);
+    };
+  },
   trajectoryFiles: Object.freeze<NativeTrajectoryFileBridge>({
     async request(input) {
       const reply = (await ipcRenderer.invoke(

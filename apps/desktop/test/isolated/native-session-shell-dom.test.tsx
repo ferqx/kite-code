@@ -1214,3 +1214,124 @@ test('a Main withdrawal during cold preparation remains unavailable instead of r
     await f.close();
   }
 });
+
+test('session search opens the exact running session without sending or cancelling work and keeps both drafts', async () => {
+  const f = fixture({ active: true });
+  const search = async (text: string) => {
+    await act(async () => f.query<HTMLButtonElement>('[aria-label="搜索会话"]').click());
+    await act(async () => {
+      const input = f.query<HTMLInputElement>('[role="combobox"]');
+      Object.getOwnPropertyDescriptor(f.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        text,
+      );
+      input.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }));
+    });
+  };
+  const enter = async () => {
+    await act(async () =>
+      f.query('[role="combobox"]').dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    await act(async () => nextDesktopPresentation(f.dom));
+  };
+  try {
+    await f.render();
+    await f.edit('Unsent search draft A');
+    const original = f.query('.composer [role="textbox"]');
+    const before = f.requests.length;
+    await search('Session B');
+    expect(f.query('.breadcrumb strong').textContent).toBe('Session A');
+    expect(promptValue(original)).toBe('Unsent search draft A');
+    expect(
+      f.requests.slice(before).filter((request) => businessMethods.has(request.method)),
+    ).toEqual([]);
+    await enter();
+    await f.ready('b');
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Draft B');
+    await f.edit('Unsent search draft B');
+    await search('Session A');
+    await enter();
+    await f.ready('a');
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Unsent search draft A');
+    await search('Session B');
+    await enter();
+    await f.ready('b');
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Unsent search draft B');
+    expect(
+      f.requests.filter(
+        (request) => businessMethods.has(request.method) && request.method !== 'draft.write',
+      ),
+    ).toEqual([]);
+    const selected = f.requests.slice(before).filter((request) => request.method === 'select');
+    expect(selected.map((request) => request.sessionId)).toEqual(['b', 'a', 'b']);
+    const composer = f.query('.composer [role="textbox"]');
+    await search('not found');
+    await act(async () =>
+      f.query('[role="combobox"]').dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(f.query('.composer [role="textbox"]')).toBe(composer);
+    expect(promptValue(composer)).toBe('Unsent search draft B');
+    expect(f.dom.window.document.activeElement).toBe(f.query('[aria-label="搜索会话"]'));
+  } finally {
+    await f.close();
+  }
+});
+
+test('session search withdraws stale results after a direct directory failure without a Main notification and recovers the query', async () => {
+  const f = fixture({}, true);
+  try {
+    await f.render();
+    const original = f.bridge.request.bind(f.bridge);
+    let failing = true;
+    f.bridge.request = async (request) => {
+      if (failing && request.method === 'directory') throw Error('fixture_directory_failed');
+      return original(request);
+    };
+    const refresh = [...f.host.querySelectorAll('button')].find(
+      (button) => button.textContent === '重新读取目录',
+    )!;
+    expect(!!refresh).toBe(true);
+    await act(async () => refresh.click());
+    await act(async () => f.query<HTMLButtonElement>('[aria-label="搜索会话"]').click());
+    const input = f.query<HTMLInputElement>('[role="combobox"]');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(f.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
+        input,
+        'Session B',
+      );
+      input.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }));
+    });
+    expect(f.host.textContent).toContain('会话目录暂不可用');
+    expect(f.host.querySelectorAll('[role="option"]')).toHaveLength(0);
+    const before = f.requests.filter((request) => request.method === 'select').length;
+    await act(async () =>
+      input.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(before);
+    failing = false;
+    await act(async () => refresh.click());
+    await f.until(() => f.host.querySelectorAll('[role="option"]').length === 1);
+    expect(input.value).toBe('Session B');
+    expect(f.host.querySelector('[role="option"]')!.textContent).toContain('Session B');
+  } finally {
+    await f.close();
+  }
+});

@@ -9,10 +9,11 @@ import {
   Home03Icon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
+  Search01Icon,
   UserCircleIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Badge } from './components/ui/badge';
 import {
   DropdownMenu,
@@ -28,6 +29,7 @@ import {
 import { ScrollArea } from './components/ui/scroll-area';
 import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
+import { SessionSearch } from './SessionSearch';
 import { sessionStatusLabel } from './status';
 import type { WorkspaceSummary } from './types';
 import { Button } from './ui';
@@ -51,6 +53,7 @@ export function sessionTime(value?: string) {
 }
 
 export interface DirectoryProps {
+  sessionSearch?: { scope: string; available: boolean };
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
   selectedWorkspace?: string;
@@ -468,6 +471,16 @@ export function Sidebar({
   connectionLabel: string;
   activePage?: 'conversation' | 'newConversation' | 'workbench' | 'scheduledTasks';
 }) {
+  const [searchScope, setSearchScope] = useState<string>();
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const searchOpen = !!props.sessionSearch && searchScope === props.sessionSearch.scope;
+  useEffect(() => {
+    if (searchScope !== props.sessionSearch?.scope) setSearchScope(undefined);
+  }, [searchScope, props.sessionSearch?.scope]);
+  const closeSearch = (restoreFocus = true) => {
+    setSearchScope(undefined);
+    if (restoreFocus) searchTrigger.current?.focus();
+  };
   const newConversationSelected = activePage === 'newConversation' && !props.selectedWorkspace;
   const selectedSessionWorkspace = useMemo(
     () =>
@@ -520,6 +533,22 @@ export function Sidebar({
       )}
       <div className="nav-label">
         <span>空间</span>
+        {props.sessionSearch && (
+          <Button
+            ref={searchTrigger}
+            className="session-search-trigger"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="搜索会话"
+            title="搜索会话"
+            aria-expanded={searchOpen}
+            onClick={() =>
+              searchOpen ? closeSearch() : setSearchScope(props.sessionSearch?.scope)
+            }
+          >
+            <HugeiconsIcon icon={Search01Icon} />
+          </Button>
+        )}
         {actions.lookupSessionMutation && !!actions.sessionMutationResults?.length && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -594,8 +623,20 @@ export function Sidebar({
           </span>
         )}
       </div>
+      {searchOpen && props.sessionSearch && (
+        <SessionSearch
+          key={props.sessionSearch.scope}
+          workspaces={props.workspaces}
+          available={props.sessionSearch.available}
+          onOpen={props.onOpen}
+          onClose={closeSearch}
+        />
+      )}
       <TooltipProvider delayDuration={500} skipDelayDuration={300}>
-        <ScrollArea className="workspace-directory">
+        <ScrollArea
+          className="workspace-directory"
+          style={searchOpen ? { display: 'none' } : undefined}
+        >
           <div className="workspace-directory-content">
             {props.workspaces.map((workspace) => (
               <Workspace

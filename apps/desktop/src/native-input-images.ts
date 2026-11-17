@@ -58,6 +58,7 @@ type SavedScope = {
   changed: boolean;
   moving?: boolean;
   migrationUnknown?: boolean;
+  migrationSnapshot?: string;
   error?: string;
   queue: Promise<void>;
 };
@@ -77,13 +78,21 @@ export function useNativeInputImages(
 ) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: Derived content cannot cross a connection, generation or Store boundary.
   const previews = useMemo(() => new NativeImagePreviews(), [bridge, generation, storeId]);
+  // A quit waiter belongs to this exact renderer connection, not a later mount.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Every connection boundary retires its waiters.
+  const preparationOwner = useMemo(() => new AbortController(), [bridge, generation, storeId]);
   const drafts = useRef(new Map<string, (ImageDraft | FileDraft)[]>());
   // Retain original Files under the existing draft budgets, never original URLs.
   // Stale UI callbacks only hold the item, not the removed File's bytes.
   const originals = useRef(new Map<ImageDraft, { file: Blob; mediaType: string; blob?: Blob }>());
   const preparation = useRef(Promise.resolve());
+  const preparationFailures = useRef(0);
   const savedScopes = useRef(new Map<string, SavedScope>());
   const preparingFiles = useRef(new Set<AbortController>());
+  const pendingFileHandoffs = useRef(
+    new Map<AbortController, { promise: Promise<void>; finish: (error?: unknown) => void }>(),
+  );
+  const pendingMoves = useRef(new Set<Promise<void>>());
   const preparedFiles = useRef(new Set<string>());
   const fileHandoffs = useRef(new Map<string, () => void>());
   const [, redraw] = useReducer((value) => value + 1, 0);
@@ -93,9 +102,14 @@ export function useNativeInputImages(
   });
   useEffect(() => {
     return () => {
+      preparationOwner.abort();
+      preparation.current = Promise.resolve();
+      pendingMoves.current.clear();
       previews.clear();
       for (const controller of preparingFiles.current) controller.abort();
       preparingFiles.current.clear();
+      for (const handoff of pendingFileHandoffs.current.values()) handoff.finish();
+      pendingFileHandoffs.current.clear();
       if (bridge && generation)
         for (const id of preparedFiles.current)
           void bridge.request({ method: 'input.files.release', generation, id }).catch(() => {});
@@ -114,7 +128,7 @@ export function useNativeInputImages(
       drafts.current.clear();
       savedScopes.current.clear();
     };
-  }, [bridge, generation, storeId, previews]);
+  }, [bridge, generation, storeId, previews, preparationOwner]);
   function all(key: string) {
     return drafts.current.get(key)?.filter((image) => image.generation === generation) ?? [];
   }
@@ -123,6 +137,7 @@ export function useNativeInputImages(
       !!bridge &&
       !!generation &&
       !!storeId &&
+      !preparationOwner.signal.aborted &&
       current.current.bridge === bridge &&
       current.current.generation === generation &&
       current.current.storeId === storeId
@@ -458,6 +473,106 @@ export function useNativeInputImages(
       throw Error('attachment_draft_unavailable');
     return document(key).length ? scope.revision : undefined;
   }
+  /** Normal quit confirms durable drafts, not whether every retained item is sendable. */
+  async function flushForQuit(): Promise<void> {
+    if (!active()) {
+      if (
+        (!bridge || !generation || !storeId) &&
+        !drafts.current.size &&
+        !preparingFiles.current.size
+      )
+        return;
+      throw Error('attachment_draft_inactive');
+    }
+    const signal = preparationOwner.signal;
+    const failures = preparationFailures.current;
+    let rejectCancelled!: (error: Error) => void;
+    const cancelled = new Promise<never>((_, reject) => {
+      rejectCancelled = reject;
+    });
+    const cancel = () => rejectCancelled(Error('attachment_draft_inactive'));
+    signal.addEventListener('abort', cancel, { once: true });
+    const wait = (tasks: readonly Promise<unknown>[]) =>
+      Promise.race([Promise.all(tasks), cancelled]);
+    const assertActive = () => {
+      if (!active() || signal.aborted) throw Error('attachment_draft_inactive');
+    };
+    try {
+      for (;;) {
+        assertActive();
+        const preparing = preparation.current;
+        await wait([
+          preparing,
+          ...[...pendingFileHandoffs.current.values()].map((handoff) => handoff.promise),
+          ...pendingMoves.current,
+        ]);
+        assertActive();
+        if (
+          preparation.current !== preparing ||
+          pendingFileHandoffs.current.size ||
+          pendingMoves.current.size
+        )
+          continue;
+        const scopes = [...savedScopes.current];
+        for (const key of drafts.current.keys())
+          if (!savedScopes.current.has(key) && document(key).length)
+            throw Error('attachment_draft_unavailable');
+        const queues = new Map<string, Promise<void>>();
+        for (const [key, scope] of scopes) {
+          // A lost atomic move preserves the frozen batch in its source or target.
+          // With no later edits, cold restore is the existing recovery path.
+          if (scope.migrationUnknown) {
+            if (normalized(document(key)) !== scope.migrationSnapshot)
+              throw Error('attachment_draft_unavailable');
+            queues.set(key, scope.queue);
+            continue;
+          }
+          // A retry can read back our known snapshots, never rebase over another window.
+          if (scope.ready && scope.error) await wait([reconcile(key, scope)]);
+          persist(key);
+          for (;;) {
+            const pending = scope.queue;
+            await wait([pending]);
+            assertActive();
+            if (savedScopes.current.get(key) !== scope) throw Error('attachment_draft_inactive');
+            if (pending === scope.queue) break;
+          }
+          // A failed read with no local attachments has changed nothing on disk.
+          // It must not make an untouched, already durable scope impossible to close.
+          if (!scope.ready && !document(key).length) {
+            queues.set(key, scope.queue);
+            continue;
+          }
+          if (
+            !scope.ready ||
+            scope.error ||
+            scope.moving ||
+            scope.changed ||
+            get(key).some((item) => item.loading) ||
+            normalized(document(key)) !== scope.signature
+          )
+            throw Error('attachment_draft_unavailable');
+          queues.set(key, scope.queue);
+        }
+        assertActive();
+        if (preparationFailures.current !== failures) throw Error('attachment_preparation_failed');
+        if (
+          preparation.current !== preparing ||
+          pendingFileHandoffs.current.size ||
+          pendingMoves.current.size ||
+          scopes.length !== savedScopes.current.size ||
+          scopes.some(
+            ([key, scope]) =>
+              savedScopes.current.get(key) !== scope || scope.queue !== queues.get(key),
+          )
+        )
+          continue;
+        return;
+      }
+    } finally {
+      signal.removeEventListener('abort', cancel);
+    }
+  }
   function blocked(key: string) {
     const scope = savedScopes.current.get(key);
     return (
@@ -608,6 +723,9 @@ export function useNativeInputImages(
     redraw();
   }
   function accepted(key: string, revision: number | undefined, ids: readonly string[]) {
+    // A retired callback cannot mark a new owner's receipt consumed before its
+    // read-back, or prevent the current owner from reconciling the same receipt.
+    if (!active()) return;
     const scope = savedScopes.current.get(key);
     if (!scope || revision === undefined) {
       removeIds(ids);
@@ -670,8 +788,8 @@ export function useNativeInputImages(
       ...selected
         .filter((file) => {
           if (uris.has(file.uri)) {
+            if (file.id) fileHandoffs.current.get(file.id)?.();
             if (file.prepared && file.id && file.id !== uris.get(file.uri)) {
-              fileHandoffs.current.get(file.id)?.();
               preparedFiles.current.delete(file.id);
               void bridge
                 .request({ method: 'input.files.release', generation, id: file.id })
@@ -683,7 +801,7 @@ export function useNativeInputImages(
           return true;
         })
         .map((file) => {
-          if (file.prepared && file.id) fileHandoffs.current.get(file.id)?.();
+          if (file.id) fileHandoffs.current.get(file.id)?.();
           return { ...file, id: file.id ?? crypto.randomUUID(), generation };
         }),
     ]);
@@ -731,7 +849,16 @@ export function useNativeInputImages(
     }
     redraw();
   }
-  async function move(from: string, to: string) {
+  function move(from: string, to: string) {
+    const task = moveDraft(from, to);
+    pendingMoves.current.add(task);
+    void task.then(
+      () => pendingMoves.current.delete(task),
+      () => pendingMoves.current.delete(task),
+    );
+    return task;
+  }
+  async function moveDraft(from: string, to: string) {
     if (from === to || !drafts.current.has(from)) return;
     const source = savedScopes.current.get(from);
     let target = savedScopes.current.get(to);
@@ -753,6 +880,8 @@ export function useNativeInputImages(
         moved = all(from);
         transferredIds = new Set(moved.map((item) => item.id));
         source.moving = target.moving = true;
+        source.migrationSnapshot = normalized(document(from));
+        target.migrationSnapshot = normalized(document(to));
         redraw();
         moveDispatched = true;
         const value = await bridge!.request({
@@ -959,6 +1088,7 @@ export function useNativeInputImages(
         } catch (error) {
           void bridge.request({ method: 'input.images.release', generation, id }).catch(() => {});
           if (!alive()) return;
+          preparationFailures.current++;
           item.loading = false;
           if (item.url) URL.revokeObjectURL(item.url);
           item.url = '';
@@ -1010,12 +1140,21 @@ export function useNativeInputImages(
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
     preparingFiles.current.add(controller);
+    let finishHandoff!: (error?: unknown) => void;
+    const handedOff = new Promise<void>((resolve, reject) => {
+      finishHandoff = (error) => (error === undefined ? resolve() : reject(error));
+    });
+    // Rejections are observed by an active quit waiter and by fileReferences' caller.
+    void handedOff.catch(() => {});
+    pendingFileHandoffs.current.set(controller, { promise: handedOff, finish: finishHandoff });
     const ids: string[] = [];
     const unclaimed = new Set<string>();
     let ready = false;
-    const cleanup = () => {
+    const cleanup = (error?: unknown) => {
       signal?.removeEventListener('abort', abort);
       preparingFiles.current.delete(controller);
+      pendingFileHandoffs.current.delete(controller);
+      finishHandoff(error);
     };
     controller.signal.addEventListener(
       'abort',
@@ -1024,7 +1163,8 @@ export function useNativeInputImages(
         for (const id of unclaimed) {
           fileHandoffs.current.delete(id);
           preparedFiles.current.delete(id);
-          void bridge.request({ method: 'input.files.release', generation, id }).catch(() => {});
+          if (ids.includes(id))
+            void bridge.request({ method: 'input.files.release', generation, id }).catch(() => {});
         }
         unclaimed.clear();
         cleanup();
@@ -1086,7 +1226,7 @@ export function useNativeInputImages(
         }
         check();
         ready = true;
-        for (const id of ids) {
+        for (const { id } of result) {
           unclaimed.add(id);
           fileHandoffs.current.set(id, () => {
             fileHandoffs.current.delete(id);
@@ -1101,6 +1241,8 @@ export function useNativeInputImages(
         await Promise.allSettled(
           ids.map((id) => bridge.request({ method: 'input.files.release', generation, id })),
         );
+        if (!controller.signal.aborted) preparationFailures.current++;
+        cleanup(controller.signal.aborted ? undefined : error);
         throw error;
       } finally {
         if (!ready) cleanup();
@@ -1125,6 +1267,7 @@ export function useNativeInputImages(
     previews,
     restore,
     flush,
+    flushForQuit,
     blocked,
     error,
     accepted,

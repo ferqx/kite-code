@@ -254,6 +254,8 @@ export interface SessionSummary {
   readonly pendingInteractions?: number;
 }
 export interface WorkspaceSummary {
+  /** Registered location for distinguishing projects with the same display name. */
+  readonly rootUri?: string;
   readonly muted?: boolean;
   readonly id: string;
   readonly label: string;

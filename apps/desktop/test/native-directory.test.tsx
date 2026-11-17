@@ -844,3 +844,20 @@ test('Sidebar leaves unrelated workspace rows untouched while selection and call
     Object.assign(globalThis, prior);
   }
 });
+
+test('complete native directory projection keeps registered project locations current for same-name search results', () => {
+  const item = backgroundItem();
+  const directory: NativeDirectory = {
+    storeId: 'store',
+    workspaces: [{ id: 'w', name: 'Kite', rootUri: 'file:///one' }],
+    sessions: [item.rootSession],
+  };
+  const projection = new NativeDirectoryProjection();
+  expect(projection.project(directory)[0]!.rootUri).toBe('file:///one');
+  expect(
+    projection.project({
+      ...directory,
+      workspaces: [{ ...directory.workspaces[0]!, rootUri: 'file:///two' }],
+    })[0]!.rootUri,
+  ).toBe('file:///two');
+});

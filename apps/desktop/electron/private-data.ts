@@ -98,6 +98,7 @@ export type PrivateData = NativeScheduledTaskData &
     readTurns(storeId: string): [string, string][];
     markTurnRead(input: Extract<NativeRequest, { method: 'session.markRead' }>): void;
     read(scope: DraftScope): NativeDraft;
+    consumePreparation?(revision: number, target: NativeDraft, commandId: string): void;
     save(
       scope: DraftScope,
       revision: number,
@@ -1079,6 +1080,47 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           .run(record.request.commandId, JSON.stringify(record));
       });
     },
+    consumePreparation(revision, target, commandId) {
+      let consumed: DraftConsumption | undefined;
+      transaction(() => {
+        const scope = {
+          storeId: target.storeId,
+          workspaceId: 'new-conversation',
+          rootSessionId: 'new-conversation',
+        };
+        if (target.rootSessionId === scope.rootSessionId)
+          throw Error('draft_association_unavailable');
+        const retained = readDraft({
+          storeId: target.storeId,
+          workspaceId: target.workspaceId,
+          rootSessionId: target.rootSessionId,
+        });
+        if (
+          retained.id !== target.id ||
+          retained.revision !== target.revision ||
+          retained.content !== target.content ||
+          retained.browserAnnotations?.length ||
+          retained.outputFiles?.length
+        )
+          throw Error('draft_revision_conflict');
+        const source = readDraft(scope);
+        // Creation owns only the exact preparation. Later edits remain in their own revision.
+        if (source.revision !== revision) return;
+        if (
+          source.content !== target.content ||
+          source.browserAnnotations?.length ||
+          source.outputFiles?.length
+        )
+          throw Error('draft_content_mismatch');
+        if (!Number.isSafeInteger(revision + 1)) throw Error('draft_revision_conflict');
+        const changed = database()
+          .prepare('UPDATE drafts SET revision=?,content=? WHERE id=? AND revision=?')
+          .run(revision + 1, encodeDraft(''), source.id, revision);
+        if (Number(changed.changes) !== 1) throw Error('draft_revision_conflict');
+        consumed = { id: source.id, revision: revision + 1, from: { commandId, revision } };
+      });
+      rememberConsumption(consumed);
+    },
     save(scope, revision, content, browserAnnotations, annotationImageOffset, outputFiles) {
       if (Buffer.byteLength(content) > 1048576) throw Error('draft_capacity_exceeded');
       const result = transaction(() => {
@@ -1539,6 +1581,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     'draft_storage_unavailable',
     'draft_capacity_exceeded',
     'draft_revision_conflict',
+    'draft_content_mismatch',
+    'draft_association_unavailable',
     'browser_annotation_draft_required',
     'output_draft_required',
     'output_draft_invalid',

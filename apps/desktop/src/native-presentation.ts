@@ -79,6 +79,7 @@ export function desktopDirectory(
     return {
       id: workspace.id,
       label: workspace.name,
+      rootUri: workspace.rootUri,
       sessions: items,
       sessionCount: items.length,
       state: 'loaded',
@@ -169,6 +170,7 @@ export class NativeDirectoryProjection {
           previous && sameItems(previous.sessions, items) ? previous.sessions : items;
         return previous &&
           previous.label === workspace.label &&
+          previous.rootUri === workspace.rootUri &&
           previous.state === workspace.state &&
           previous.sessionCount === workspace.sessionCount &&
           sessions === previous.sessions

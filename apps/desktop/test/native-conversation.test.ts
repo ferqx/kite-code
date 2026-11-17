@@ -870,3 +870,178 @@ for (const mode of ['new', 'existing'] as const) {
     }
   });
 }
+
+test('single preparation draft follows workspace choices and allows no workspace selection', async () => {
+  const f = fixture();
+  try {
+    const originalWorkspaces = f.port.listAllWorkspaces;
+    f.port.listAllWorkspaces = async () => {
+      const rows = await originalWorkspaces();
+      return [...rows, { ...rows[0]!, id: 'w2' }];
+    };
+    await f.ready();
+    const request = {
+      method: 'draft.write' as const,
+      generation: 1,
+      sessionId: 'new-conversation',
+      workspaceId: 'w',
+      revision: 0,
+      content: '准备草稿 雪🙂',
+    };
+    expect(decodeNativeRequest(request)).toEqual(request);
+    const saved = await f.caller.invoke(request);
+    expect(saved).toMatchObject({
+      content: request.content,
+      revision: 1,
+      workspaceId: 'new-conversation',
+      rootSessionId: 'new-conversation',
+    });
+    expect(
+      await f.caller.invoke({
+        method: 'draft.read',
+        generation: 1,
+        sessionId: 'new-conversation',
+        workspaceId: 'w',
+      }),
+    ).toEqual(saved);
+    for (const workspaceId of [undefined, 'w2'])
+      expect(
+        await f.caller.invoke({
+          method: 'draft.read',
+          generation: 1,
+          sessionId: 'new-conversation',
+          workspaceId,
+        }),
+      ).toEqual(saved);
+    await expect(
+      f.caller.invoke({
+        method: 'draft.read',
+        generation: 1,
+        sessionId: 'new-conversation',
+        workspaceId: 'unobserved',
+      }),
+    ).rejects.toMatchObject({ code: 'draft_association_unavailable' });
+    f.port.listAllWorkspaces = async () => [];
+    await f.caller.invoke({ method: 'directory', generation: 1 });
+    expect(
+      await f.caller.invoke({ method: 'draft.read', generation: 1, sessionId: 'new-conversation' }),
+    ).toEqual(saved);
+    expect(
+      await f.caller.invoke({
+        ...request,
+        workspaceId: undefined,
+        revision: 1,
+        content: 'no selected workspace',
+      }),
+    ).toMatchObject({ revision: 2, content: 'no selected workspace' });
+    await expect(f.caller.invoke({ ...request, generation: 2 })).rejects.toThrow();
+    expect(f.counts()).toMatchObject({ creates: 0, starts: 0 });
+    for (const preparationRevision of [-1, 1.5, '1'])
+      expect(() => decodeNativeRequest({ ...f.request, preparationRevision })).toThrow(
+        'invalid_native_request',
+      );
+    expect(decodeNativeRequest({ ...f.request, preparationRevision: 1 })).toMatchObject({
+      preparationRevision: 1,
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test('first send binds the saved preparation and clears it only after confirmed creation', async () => {
+  const f = fixture();
+  const source = {
+    storeId: 'store',
+    workspaceId: 'new-conversation',
+    rootSessionId: 'new-conversation',
+  };
+  const consumed: string[] = [];
+  f.data.consumePreparation = (revision, target, commandId) => {
+    expect(f.counts().creates).toBe(1);
+    expect(f.data.readId(target.id)).toEqual(target);
+    const original = f.data.read(source);
+    if (original.revision === revision) f.data.save(source, revision, '');
+    consumed.push(commandId);
+  };
+  try {
+    await f.ready();
+    f.data.save(source, 0, text);
+    const invalid = await f.caller.invoke({ ...f.request, preparationRevision: 0 });
+    expect(invalid).toMatchObject({ phase: 'failed', code: 'draft_revision_conflict' });
+    expect(f.counts()).toMatchObject({ creates: 0, starts: 0 });
+    const result = await f.caller.invoke({
+      ...f.request,
+      intent: { ...f.request.intent, commandId: 'valid-preparation-send' },
+      preparationRevision: 1,
+    });
+    expect(result).toMatchObject({ phase: 'accepted' });
+    expect(consumed).toEqual(['valid-preparation-send']);
+    expect(f.data.read(source).content).toBe('');
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 1 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('unknown first creation retains the preparation and lookup never clears or resends it', async () => {
+  const f = fixture();
+  const source = {
+    storeId: 'store',
+    workspaceId: 'new-conversation',
+    rootSessionId: 'new-conversation',
+  };
+  let consumed = 0;
+  f.data.consumePreparation = () => {
+    consumed++;
+  };
+  try {
+    await f.ready();
+    f.data.save(source, 0, text);
+    f.loseCreate();
+    const result = await f.caller.invoke({ ...f.request, preparationRevision: 1 });
+    expect(result).toMatchObject({ phase: 'unknown', stage: 'create' });
+    expect(f.data.read(source).content).toBe(text);
+    expect(consumed).toBe(0);
+    await f.caller.invoke({
+      method: 'conversation.lookup',
+      generation: 1,
+      commandId: f.request.intent.commandId,
+    });
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 0 });
+    expect(f.data.read(source).content).toBe(text);
+    expect(consumed).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an edit during first creation owns a newer preparation and survives original handoff', async () => {
+  const f = fixture();
+  const source = {
+    storeId: 'store',
+    workspaceId: 'new-conversation',
+    rootSessionId: 'new-conversation',
+  };
+  f.data.consumePreparation = (revision, target) => {
+    expect(target.content).toBe(text);
+    const original = f.data.read(source);
+    if (original.revision === revision) f.data.save(source, revision, '');
+  };
+  try {
+    await f.ready();
+    f.data.save(source, 0, text);
+    f.holdCreate();
+    const sending = f.caller.invoke({ ...f.request, preparationRevision: 1 });
+    for (let i = 0; i < 50 && f.counts().creates === 0; i++)
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(f.counts().creates).toBe(1);
+    f.data.save(source, 1, 'later draft');
+    f.releaseCreate();
+    expect(await sending).toMatchObject({ phase: 'accepted' });
+    expect(f.data.read(source)).toMatchObject({ revision: 2, content: 'later draft' });
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 1 });
+  } finally {
+    f.releaseCreate();
+    await f.close();
+  }
+});

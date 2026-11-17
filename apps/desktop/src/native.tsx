@@ -405,6 +405,11 @@ function NativeDesktopContent({
   }
   const [newDraft, setNewDraft] = useState('');
   const newDraftRevision = useRef(0);
+  const preparationDrafts = useRef(new Map<string, { content: string }>());
+  const newDraftOwner = useRef<string | undefined>(undefined);
+  const [newDraftReady, setNewDraftReady] = useState('');
+  const [preparationHandoff, setPreparationHandoff] = useState(false);
+  const dirtyDrafts = useRef(new Set<string>());
   const [newWorkspace, setNewWorkspace] = useState('');
   const [newBranch, setNewBranch] = useState<NativeBranchFacts>();
   const [targetBranch, setTargetBranch] = useState<string>();
@@ -423,6 +428,8 @@ function NativeDesktopContent({
     text: string;
     draft: { content: string };
     preparationRevision: number;
+    savedPreparationRevision?: number;
+    preparationScope?: string;
     choice: NativeModelChoice;
     plan: boolean;
     permissionMode: 'accept_edits' | 'auto' | 'full';
@@ -437,6 +444,12 @@ function NativeDesktopContent({
     imageScope?: string;
     attachmentRevision?: number;
     result?: NativeConversationResult;
+  }>();
+  const [firstPreflightError, setFirstPreflightError] = useState<{
+    generation: number;
+    page: number;
+    scope: string;
+    message: string;
   }>();
   const firstRef = useRef(firstSubmission);
   firstRef.current = firstSubmission;
@@ -487,6 +500,8 @@ function NativeDesktopContent({
     directory?.storeId,
     state?.localFileReferences,
   );
+  const imageDraftsRef = useRef(imageDrafts);
+  imageDraftsRef.current = imageDrafts;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Prepared bytes must not cross a Store boundary.
   const browserNotes = useMemo(
     () => new BrowserAnnotationDrafts(bridge, state?.generation),
@@ -501,6 +516,8 @@ function NativeDesktopContent({
     new Map<
       string,
       {
+        id: string;
+        workspaceId: string;
         revision: number;
         signature?: string;
         consumedCommand?: string;
@@ -514,15 +531,35 @@ function NativeDesktopContent({
     key: '',
     message: '',
   });
-  function setNoteSaveError(message: string, key = draftOwner.current ?? '') {
-    setNoteSaveErrorState({ key, message });
-  }
-  const noteStateOwner = useRef(browserNotes);
-  if (noteStateOwner.current !== browserNotes) {
-    noteStateOwner.current = browserNotes;
+  const setNoteSaveError = useCallback((message: string, key = draftOwner.current ?? '') => {
+    setNoteSaveErrorState((previous) =>
+      message || previous.key === key ? { key, message } : previous,
+    );
+  }, []);
+  const noteStateOwner = useRef({ generation: state?.generation, storeId: directory?.storeId });
+  const nextNoteOwner = { generation: state?.generation, storeId: directory?.storeId };
+  if (
+    (noteStateOwner.current.generation !== undefined &&
+      nextNoteOwner.generation !== undefined &&
+      noteStateOwner.current.generation !== nextNoteOwner.generation) ||
+    (noteStateOwner.current.storeId !== undefined &&
+      nextNoteOwner.storeId !== undefined &&
+      noteStateOwner.current.storeId !== nextNoteOwner.storeId)
+  ) {
     noteDraftStates.current.clear();
+    if (
+      noteStateOwner.current.storeId !== undefined &&
+      nextNoteOwner.storeId !== undefined &&
+      noteStateOwner.current.storeId !== nextNoteOwner.storeId
+    ) {
+      dirtyDrafts.current.clear();
+      preparationDrafts.current.clear();
+    }
+    newDraftOwner.current = undefined;
   }
+  noteStateOwner.current = nextNoteOwner;
   const newImageScope = JSON.stringify([directory?.storeId, 'new-conversation', newWorkspace]);
+  const newTextScope = JSON.stringify([directory?.storeId, 'new-conversation']);
   // Restoring a draft is read-only; no restart path invokes submit.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Keys, not changing hook closures, own hydration.
   useEffect(() => {
@@ -670,7 +707,76 @@ function NativeDesktopContent({
       settingsOpen,
     ]),
   );
-  const currentToast = inputErrorMessage ?? operationMessage;
+  const draftFeedbackScope = JSON.stringify([
+    state?.generation ?? generation.current,
+    directory?.storeId,
+  ]);
+  const {
+    message: draftPersistenceMessage,
+    report: showDraftPersistenceError,
+    dismiss: dismissDraftPersistenceError,
+  } = useNativeErrorFeedback(draftFeedbackScope);
+  const draftFeedback = useMemo(
+    () => ({ scope: draftFeedbackScope, failures: new Set<string>(), shownKey: '' }),
+    [draftFeedbackScope],
+  );
+  const currentDraftFeedback = useRef(draftFeedback);
+  currentDraftFeedback.current = draftFeedback;
+  const quitFeedback = useRef({ active: false, epoch: 0 });
+  const reportDraftPersistenceError = useCallback(
+    (key: string, message: string, epoch: number, notify = true) => {
+      if (currentDraftFeedback.current !== draftFeedback) return;
+      const first = !draftFeedback.failures.has(key);
+      draftFeedback.failures.add(key);
+      if (!notify && draftFeedback.shownKey === key) {
+        draftFeedback.shownKey = '';
+        showDraftPersistenceError();
+      }
+      if (!first || !notify || quitFeedback.current.active || epoch !== quitFeedback.current.epoch)
+        return;
+      draftFeedback.shownKey = key;
+      showDraftPersistenceError(message);
+    },
+    [draftFeedback, showDraftPersistenceError],
+  );
+  const clearDraftPersistenceError = useCallback(
+    (key: string) => {
+      if (
+        currentDraftFeedback.current !== draftFeedback ||
+        dirtyDrafts.current.has(key) ||
+        noteDraftStates.current.get(key)?.uncertain
+      )
+        return;
+      draftFeedback.failures.delete(key);
+      setNoteSaveError('', key);
+      if (draftFeedback.shownKey !== key) return;
+      draftFeedback.shownKey = '';
+      showDraftPersistenceError();
+    },
+    [draftFeedback, showDraftPersistenceError, setNoteSaveError],
+  );
+  const onDraftFlushState = useRef<(active: boolean) => void>(() => {});
+  onDraftFlushState.current = (active) => {
+    quitFeedback.current.active = active;
+    if (!active) return;
+    // Main owns the blocking quit error. Retire this Toast and callbacks begun
+    // before the attempt, without treating their unsaved data as recovered.
+    quitFeedback.current.epoch++;
+    draftFeedback.shownKey = '';
+    showDraftPersistenceError();
+  };
+  useEffect(() => {
+    if (!firstPreflightError || firstSubmission) return;
+    setFirstPreflightError(undefined);
+    if (
+      preparing &&
+      firstPreflightError.generation === generation.current &&
+      firstPreflightError.page === pageIntent.current &&
+      firstPreflightError.scope === newTextScope
+    )
+      showInputError(firstPreflightError.message);
+  }, [firstPreflightError, firstSubmission, preparing, newTextScope, showInputError]);
+  const currentToast = inputErrorMessage ?? draftPersistenceMessage ?? operationMessage;
   const setError = useCallback(
     (message: string | undefined, operation?: string) =>
       showOperationMessage(
@@ -744,6 +850,22 @@ function NativeDesktopContent({
     ids: Set<string>;
   }>({ identity: '', ids: new Set() });
   const readLifecycle = useRef({ epoch: 0, quitting: false });
+  const searchStore = directory?.storeId;
+  const searchAvailable =
+    !!directory &&
+    !directory.unavailable &&
+    failedReads.directory !== JSON.stringify([generation.current, readLifecycle.current.epoch]);
+  const searchGeneration = state?.generation;
+  const sessionSearch = useMemo(
+    () =>
+      searchStore
+        ? {
+            scope: JSON.stringify([searchGeneration, searchStore]),
+            available: searchAvailable,
+          }
+        : undefined,
+    [searchStore, searchGeneration, searchAvailable],
+  );
   const selectionRead = useRef<
     | {
         sessionId: string;
@@ -870,7 +992,9 @@ function NativeDesktopContent({
             proof.sessionId === 'new-conversation'
               ? JSON.stringify([caller.scope.storeId, 'new-conversation', proof.workspaceId])
               : imageScope(caller.scope.storeId, proof.sessionId);
-          imageDrafts.accepted(attachmentKey, proof.revision, proof.ids);
+          // The connection watcher outlives render closures. Receipt reconciliation
+          // must use the current attachment owner, not its pre-attach generation.
+          imageDraftsRef.current.accepted(attachmentKey, proof.revision, proof.ids);
         }
       }
       for (const input of value.inputSubmissions)
@@ -1151,7 +1275,9 @@ function NativeDesktopContent({
   ) {
     if (!bridge || readLifecycle.current.quitting) return;
     setAgentBrowserOpen(false);
+    if (preparing) void persistPreparationDraft.current().catch(() => {});
     if (keepCurrentDraft) rememberDraft();
+    const savedDraft = keepCurrentDraft ? persistNoteDraft.current() : noteSaveQueue.current;
     const target = directory?.sessions.find(
       (session) => session.id === sessionId && !session.deletedAt && !session.parentSessionId,
     );
@@ -1202,6 +1328,10 @@ function NativeDesktopContent({
     }));
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
+    // Keep the target presentation immediate, but finish the old owner's local
+    // save before Main changes its selected authority. Never write it into the target.
+    await savedDraft.catch(() => {});
+    if (!isCurrentRead(current, epoch, nonce)) return;
     await readSelection(sessionId, current, nonce, epoch, {
       freshPresentation,
       admitted,
@@ -1431,7 +1561,15 @@ function NativeDesktopContent({
                 caller.phase,
               );
           const known = noteDraftStates.current.get(key);
-          let signature = known?.revision === saved.revision ? known.signature : undefined;
+          let signature =
+            known?.revision === saved.revision
+              ? known.signature
+              : JSON.stringify({
+                  content: saved.content,
+                  browserAnnotations: saved.browserAnnotations ?? [],
+                  annotationImageOffset: saved.annotationImageOffset ?? 0,
+                  outputFiles: saved.outputFiles ?? [],
+                });
           for (const caller of noteReceipts.current)
             if (
               caller.scope.storeId === saved.storeId &&
@@ -1458,10 +1596,15 @@ function NativeDesktopContent({
               });
             }
           noteDraftStates.current.set(key, {
+            id: saved.id,
+            workspaceId: saved.workspaceId,
             revision: saved.revision,
             signature,
             managed:
-              !!saved.browserAnnotations?.length || !!saved.outputFiles?.length || known?.managed,
+              !!saved.content ||
+              !!saved.browserAnnotations?.length ||
+              !!saved.outputFiles?.length ||
+              known?.managed,
           });
           draftRevision.current = saved.revision;
         }
@@ -1481,8 +1624,53 @@ function NativeDesktopContent({
           'generation' in value &&
           value.selection?.storeId === firstRef.current.creation.expectedStoreId
         ) {
-          // The target now owns the latest cached draft, including edits made
-          // after acceptance. Do not leave a copy in the next preparation page.
+          // Commit edits made during first-send handoff before retiring their
+          // preparation copy. Exact object/CAS ownership preserves later edits.
+          const first = firstRef.current;
+          const sourceKey = first.preparationScope;
+          if (sourceKey && first.savedPreparationRevision !== undefined) {
+            setPreparationHandoff(true);
+            try {
+              while (isCurrentRead(current, epoch, nonce)) {
+                const source = preparationDrafts.current.get(sourceKey);
+                const targetKey = imageScope(first.creation.expectedStoreId, sessionId);
+                const target = draftCache.current.get(targetKey);
+                const owns = () =>
+                  preparationDrafts.current.get(sourceKey) === source &&
+                  draftCache.current.get(targetKey) === target &&
+                  isCurrentRead(current, epoch, nonce);
+                await saveBrowserDraft(targetKey, sessionId, {
+                  content: target?.content ?? '',
+                  browserAnnotations: browserNotesRef.current.document(targetKey),
+                  annotationImageOffset: imageDrafts.get(targetKey).length,
+                  outputFiles: imageDrafts
+                    .files(targetKey)
+                    .flatMap((file) => (file.output ? [file.output] : [])),
+                });
+                if (!owns()) continue;
+                await saveBrowserDraft(
+                  sourceKey,
+                  'new-conversation',
+                  {
+                    content: '',
+                    browserAnnotations: [],
+                    annotationImageOffset: 0,
+                    outputFiles: [],
+                  },
+                  first.creation.workspaceId,
+                  owns,
+                );
+                if (!owns()) continue;
+                preparationDrafts.current.set(sourceKey, { content: '' });
+                dirtyDrafts.current.delete(sourceKey);
+                setDraft(target?.content ?? '');
+                break;
+              }
+            } finally {
+              setPreparationHandoff(false);
+            }
+          }
+          if (!isCurrentRead(current, epoch, nonce)) return;
           setNewDraft('');
           setPreparing(false);
         }
@@ -2569,6 +2757,7 @@ function NativeDesktopContent({
     if (draftCache.current.get(key) !== submitted.draft) return;
     const empty = { content: '' };
     draftCache.current.set(key, empty);
+    dirtyDrafts.current.delete(key);
     clearedInputDrafts.current.set(commandId, { ...submitted, empty });
     if (clearedInputDrafts.current.size > 256)
       clearedInputDrafts.current.delete(clearedInputDrafts.current.keys().next().value!);
@@ -2602,9 +2791,13 @@ function NativeDesktopContent({
     if (draftOwner.current !== key) return;
     // Publish edits synchronously so late saved reads cannot replace them.
     draftCache.current.set(key, { content });
+    dirtyDrafts.current.add(key);
     setDraft(content);
   }
   function changeNewDraft(content: string) {
+    if (newDraftOwner.current !== newTextScope) return;
+    preparationDrafts.current.set(newTextScope, { content });
+    dirtyDrafts.current.add(newTextScope);
     newDraftRevision.current++;
     setNewDraft(content);
     const original = firstRef.current;
@@ -2647,6 +2840,7 @@ function NativeDesktopContent({
         value.workspaceId !== workspaceId
       )
         throw Error('workspace_observation_unavailable');
+      if (workspaceId !== newWorkspace) void persistPreparationDraft.current().catch(() => {});
       setNewWorkspace(workspaceId);
       setNewBranch(value);
       setTargetBranch(undefined);
@@ -2670,10 +2864,12 @@ function NativeDesktopContent({
       setScheduledTasksView(false);
       return;
     }
+    if (preparing) void persistPreparationDraft.current().catch(() => {});
     setNewChoice({});
     setNewModelReady({ ready: false });
     setNewModelRevision((value) => value + 1);
     rememberDraft();
+    void persistNoteDraft.current().catch(() => {});
     pageIntent.current++;
     // The new preparation owns the composer before any older selection read settles.
     viewIntent.current++;
@@ -3026,6 +3222,12 @@ function NativeDesktopContent({
     // Do not turn an acknowledged submission back into unknown or stop handoff.
     void readDirectory().catch(() => {});
     if (value.creation?.phase === 'created') {
+      if (original.preparationScope && original.savedPreparationRevision !== undefined) {
+        const saved = noteDraftStates.current.get(original.preparationScope);
+        if (saved) saved.consumedCommand = original.commandId;
+        if (preparationDrafts.current.get(original.preparationScope) === original.draft)
+          preparationDrafts.current.set(original.preparationScope, { content: '' });
+      }
       if (value.phase === 'accepted') setNewPlanMode(false);
       const sessionId = value.creation.input.sessionId;
       if (value.phase === 'accepted')
@@ -3088,6 +3290,7 @@ function NativeDesktopContent({
       !newWorkspace ||
       newBranch?.workspaceId !== newWorkspace ||
       newBranch.storeId !== directory.storeId ||
+      newDraftReady !== newTextScope ||
       !newModelReady.ready ||
       !newModelReady.choice?.modelId ||
       (!newDraft.trim() &&
@@ -3102,7 +3305,10 @@ function NativeDesktopContent({
     const current = generation.current,
       page = pageIntent.current;
     firstOpenPage.current = page;
-    const original = {
+    const original: NonNullable<typeof firstSubmission> & {
+      imageScope: string;
+      preparationScope: string;
+    } = {
       creation: {
         expectedStoreId: directory.storeId,
         workspaceId: newWorkspace,
@@ -3112,9 +3318,10 @@ function NativeDesktopContent({
       },
       commandId: crypto.randomUUID(),
       text: promptTextForSend(newDraft),
-      draft: { content: newDraft },
+      draft: preparationDrafts.current.get(newTextScope) ?? { content: newDraft },
       preparationRevision: newDraftRevision.current,
       imageScope: newImageScope,
+      preparationScope: newTextScope,
       attachmentRevision: undefined as number | undefined,
       imageIds: imageDrafts.get(newImageScope).map((image) => image.id),
       images: imageDrafts.get(newImageScope).map(({ name }) => ({ name })),
@@ -3137,10 +3344,34 @@ function NativeDesktopContent({
     void writeInput(async () => {
       let dispatched = false;
       try {
+        await saveBrowserDraft(
+          original.preparationScope,
+          'new-conversation',
+          {
+            content: original.draft.content,
+            browserAnnotations: [],
+            annotationImageOffset: 0,
+            outputFiles: [],
+          },
+          original.creation.workspaceId,
+        );
+        original.savedPreparationRevision = noteDraftStates.current.get(
+          original.preparationScope,
+        )!.revision;
         original.attachmentRevision = await imageDrafts.flush(original.imageScope);
+        if (
+          generation.current !== current ||
+          pageIntent.current !== page ||
+          preparationDrafts.current.get(original.preparationScope) !== original.draft
+        )
+          throw Error('native_selection_changed');
+        // Only an exact committed source revision may be consumed by this first send.
+        noteDraftStates.current.get(original.preparationScope)!.consumedCommand =
+          original.commandId;
         dispatched = true;
         const value = await bridge.request({
           method: 'conversation.send',
+          preparationRevision: original.savedPreparationRevision,
           attachmentRevision: original.attachmentRevision,
           generation: current,
           creation: original.creation,
@@ -3167,6 +3398,23 @@ function NativeDesktopContent({
             if (newDraftRevision.current === original.preparationRevision)
               setNewDraft((draft) => draft || original.draft.content);
           }
+          // An explicit send that never left the local draft barrier still needs
+          // immediate failure feedback, not a later autosave warning or lookup.
+          if (noteDraftStates.current.get(original.preparationScope)?.uncertain)
+            reportDraftPersistenceError(
+              original.preparationScope,
+              '',
+              quitFeedback.current.epoch,
+              false,
+            );
+          const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+          if (code !== 'native_selection_changed')
+            setFirstPreflightError({
+              generation: current,
+              page,
+              scope: original.preparationScope,
+              message: nativeInputErrorText('failed', code),
+            });
           return;
         }
         const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
@@ -3195,55 +3443,91 @@ function NativeDesktopContent({
     key: string,
     sessionId: string,
     document: BrowserDraftDocument,
+    workspaceId?: string,
+    stillCurrent: () => boolean = () => true,
   ): Promise<void> {
     const serialized = JSON.stringify(document),
-      currentGeneration = generation.current;
+      currentGeneration = generation.current,
+      owner = noteDraftStates.current.get(key),
+      snapshot =
+        sessionId === 'new-conversation'
+          ? preparationDrafts.current.get(key)
+          : draftCache.current.get(key);
+    const ownsSnapshot = () =>
+      stillCurrent() &&
+      (sessionId === 'new-conversation'
+        ? preparationDrafts.current.get(key)
+        : draftCache.current.get(key)) === snapshot;
     const task = async () => {
       if (
         !bridge ||
         generation.current !== currentGeneration ||
-        selected.current !== sessionId ||
-        draftOwner.current !== key
+        noteDraftStates.current.get(key) !== owner
       )
         throw Error('native_selection_changed');
-      const saved = noteDraftStates.current.get(key);
+      if (!ownsSnapshot()) return;
+      const saved = owner;
       if (!saved || saved.uncertain) throw Error('browser_draft_save_unconfirmed');
-      if (saved.consumedCommand) {
+      if (saved.signature === serialized) {
+        if (snapshot?.content === document.content) dirtyDrafts.current.delete(key);
+        return;
+      }
+      const reconcile = async () => {
         const commandId = saved.consumedCommand;
+        if (!commandId) return false;
         const observed = await bridge.request({
           method: 'draft.read',
           generation: currentGeneration,
           sessionId,
+          ...(workspaceId ? { workspaceId } : {}),
         });
-        if (
-          generation.current !== currentGeneration ||
-          selected.current !== sessionId ||
-          draftOwner.current !== key ||
-          noteDraftStates.current.get(key) !== saved
-        )
+        if (generation.current !== currentGeneration || noteDraftStates.current.get(key) !== saved)
           throw Error('native_selection_changed');
         if (
           !observed ||
           !('revision' in observed) ||
           !('content' in observed) ||
-          imageScope(observed.storeId, observed.rootSessionId) !== key
+          observed.id !== saved.id ||
+          observed.workspaceId !== saved.workspaceId ||
+          (observed.revision !== saved.revision &&
+            (observed.content !== '' ||
+              observed.browserAnnotations?.length ||
+              observed.outputFiles?.length)) ||
+          (sessionId === 'new-conversation'
+            ? JSON.stringify([observed.storeId, 'new-conversation'])
+            : imageScope(observed.storeId, observed.rootSessionId)) !== key
         )
           throw Error('browser_draft_save_unconfirmed');
-        saved.revision = reconciledNoteRevision(saved.revision, commandId, observed);
-        if (saved.consumedCommand === commandId) saved.consumedCommand = undefined;
-      }
-      if (saved.signature === serialized) return;
-      const expectedRevision = saved.revision;
-      let result: NativeResult;
-      try {
-        result = await bridge.request({
+        const previous = saved.revision;
+        saved.revision = reconciledNoteRevision(previous, commandId, observed);
+        return saved.revision !== previous;
+      };
+      await reconcile();
+      if (!ownsSnapshot()) return;
+      let expectedRevision = saved.revision;
+      const write = () =>
+        bridge.request({
           method: 'draft.write',
           generation: currentGeneration,
           sessionId,
+          ...(workspaceId ? { workspaceId } : {}),
           revision: expectedRevision,
           ...document,
           browserAnnotations: document.browserAnnotations ?? [],
         });
+      let result: NativeResult;
+      try {
+        try {
+          result = await write();
+        } catch (cause) {
+          const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+          // An acknowledgement can consume the exact saved revision between our
+          // read and write. Only that proven local consumption allows one retry.
+          if (code !== 'draft_revision_conflict' || !(await reconcile())) throw cause;
+          if (!ownsSnapshot()) return;
+          expectedRevision = saved.revision;
+          result = await write();
+        }
       } catch (cause) {
         saved.uncertain = true;
         throw cause;
@@ -3252,33 +3536,45 @@ function NativeDesktopContent({
         !result ||
         !('revision' in result) ||
         !('content' in result) ||
-        result.revision !== expectedRevision + 1
+        result.revision !== expectedRevision + 1 ||
+        result.id !== saved.id ||
+        result.workspaceId !== saved.workspaceId ||
+        result.content !== document.content
       ) {
         saved.uncertain = true;
         throw Error('browser_draft_save_unconfirmed');
       }
+      saved.consumedCommand = undefined;
       saved.revision = result.revision;
       saved.managed = true;
       saved.signature = serialized;
+      if (ownsSnapshot() && snapshot?.content === document.content) dirtyDrafts.current.delete(key);
       if (generation.current === currentGeneration && selected.current === sessionId)
         draftRevision.current = result.revision;
     };
-    const pendingSave = noteSaveQueue.current.then(task, task);
+    const pendingSave = noteSaveQueue.current.then(task, task).catch((error) => {
+      dirtyDrafts.current.add(key);
+      throw error;
+    });
     noteSaveQueue.current = pendingSave.catch(() => {});
     return pendingSave;
   }
-  const persistNoteDraft = useRef(() => {});
-  persistNoteDraft.current = () => {
-    if (!selection || !bridge) return;
+  const persistNoteDraft = useRef<(notify?: boolean) => Promise<void>>(() => Promise.resolve());
+  persistNoteDraft.current = (notify = true) => {
+    if (!selection || !bridge || selection.session.parentSessionId) return noteSaveQueue.current;
     const key = imageScope(selection.storeId, selection.session.id);
+    const feedbackEpoch = quitFeedback.current.epoch;
     if (
       selected.current !== selection.session.id ||
+      draftOwner.current !== key ||
       browserNotes.blocked(key) ||
-      (!browserNotes.get(key).length &&
+      (!(draftCache.current.get(key)?.content ?? draft) &&
+        !dirtyDrafts.current.has(key) &&
+        !browserNotes.get(key).length &&
         !imageDrafts.files(key).some((file) => file.output) &&
         !noteDraftStates.current.get(key)?.managed)
     )
-      return;
+      return noteSaveQueue.current;
     try {
       const document = {
         content: draftCache.current.get(key)?.content ?? draft,
@@ -3286,12 +3582,21 @@ function NativeDesktopContent({
         annotationImageOffset: imageDrafts.get(key).length,
         outputFiles: imageDrafts.files(key).flatMap((file) => (file.output ? [file.output] : [])),
       };
-      void saveBrowserDraft(key, selection.session.id, document).then(
-        () => setNoteSaveError('', key),
-        () => setNoteSaveError('注释草稿尚未确认保存；保留当前内容，请重新打开会话核对。', key),
+      return saveBrowserDraft(key, selection.session.id, document).then(
+        () => clearDraftPersistenceError(key),
+        (error) => {
+          reportDraftPersistenceError(
+            key,
+            '草稿尚未确认保存。内容仍保留在窗口中，请重新打开原会话核对。',
+            feedbackEpoch,
+            notify,
+          );
+          throw error;
+        },
       );
-    } catch {
-      /* The next image-owner revision supplies its first verified hash. */
+    } catch (error) {
+      // Snapshot preparation has not completed; quit/send must not claim it is durable.
+      return Promise.reject(error);
     }
   };
   const noteSaveSignal = selection
@@ -3307,9 +3612,136 @@ function NativeDesktopContent({
     : '';
   useEffect(() => {
     if (!noteSaveSignal) return;
-    const timer = setTimeout(() => persistNoteDraft.current(), 500);
+    const timer = setTimeout(() => void persistNoteDraft.current().catch(() => {}), 500);
     return () => clearTimeout(timer);
   }, [noteSaveSignal]);
+  const persistPreparationDraft = useRef<(notify?: boolean) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
+  persistPreparationDraft.current = (notify = true) => {
+    const feedbackEpoch = quitFeedback.current.epoch;
+    const content = preparationDrafts.current.get(newTextScope)?.content;
+    if (!preparing || !bridge || newDraftOwner.current !== newTextScope || content === undefined)
+      return noteSaveQueue.current;
+    if (!noteDraftStates.current.has(newTextScope))
+      return Promise.reject(Error('draft_not_loaded'));
+    return saveBrowserDraft(
+      newTextScope,
+      'new-conversation',
+      {
+        content,
+        browserAnnotations: [],
+        annotationImageOffset: 0,
+        outputFiles: [],
+      },
+      newWorkspace,
+    ).then(
+      () => clearDraftPersistenceError(newTextScope),
+      (error) => {
+        reportDraftPersistenceError(
+          newTextScope,
+          '新对话草稿尚未确认保存。内容仍保留在窗口中，请重新打开新对话核对。',
+          feedbackEpoch,
+          notify,
+        );
+        throw error;
+      },
+    );
+  };
+  // The single preparation text is private Store data, independent of the chosen workspace.
+  useEffect(() => {
+    if (!preparing || !bridge || !directory?.storeId || !state?.generation) return;
+    let active = true;
+    const key = newTextScope,
+      storeId = directory.storeId,
+      current = state.generation,
+      feedbackEpoch = quitFeedback.current.epoch;
+    newDraftOwner.current = key;
+    setNewDraft(preparationDrafts.current.get(key)?.content ?? '');
+    setNewDraftReady('');
+    void (async () => {
+      await noteSaveQueue.current;
+      const saved = await bridge.request({
+        method: 'draft.read',
+        generation: current,
+        sessionId: 'new-conversation',
+      });
+      if (!active || generation.current !== current || newDraftOwner.current !== key) return;
+      if (
+        !saved ||
+        !('content' in saved) ||
+        !('revision' in saved) ||
+        saved.storeId !== storeId ||
+        saved.rootSessionId !== 'new-conversation'
+      )
+        throw Error('draft_not_loaded');
+      noteDraftStates.current.set(key, {
+        id: saved.id,
+        workspaceId: saved.workspaceId,
+        revision: saved.revision,
+        managed: !!saved.content,
+        signature: JSON.stringify({
+          content: saved.content,
+          browserAnnotations: [],
+          annotationImageOffset: 0,
+          outputFiles: [],
+        }),
+      });
+      if (!preparationDrafts.current.has(key))
+        preparationDrafts.current.set(key, { content: saved.content });
+      setNewDraft(preparationDrafts.current.get(key)!.content);
+      setNewDraftReady(key);
+      clearDraftPersistenceError(key);
+    })().catch(() => {
+      if (active)
+        reportDraftPersistenceError(
+          key,
+          '新对话草稿尚未确认读取。请保留当前窗口，重新打开新对话核对。',
+          feedbackEpoch,
+        );
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    bridge,
+    preparing,
+    directory?.storeId,
+    state?.generation,
+    newTextScope,
+    clearDraftPersistenceError,
+    reportDraftPersistenceError,
+  ]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Each edit restarts the debounce; the callback reads the latest synchronous snapshot.
+  useEffect(() => {
+    if (!preparing || newDraftReady !== newTextScope) return;
+    const timer = setTimeout(() => void persistPreparationDraft.current().catch(() => {}), 500);
+    return () => clearTimeout(timer);
+  }, [preparing, newDraft, newTextScope, newDraftReady]);
+  const flushDrafts = useRef<() => Promise<void>>(() => Promise.resolve());
+  flushDrafts.current = async () => {
+    await persistPreparationDraft.current(false);
+    await persistNoteDraft.current(false);
+    await imageDrafts.flushForQuit();
+    // Existing asynchronous handoffs may have delivered a newer draft while
+    // attachment preparation settled. Confirm the latest owner snapshot too.
+    await persistPreparationDraft.current(false);
+    await persistNoteDraft.current(false);
+    await noteSaveQueue.current;
+    if (
+      dirtyDrafts.current.size ||
+      [...noteDraftStates.current.values()].some((saved) => saved.uncertain)
+    )
+      throw Error('draft_save_unconfirmed');
+  };
+  useEffect(
+    () =>
+      bridge?.registerDraftFlush?.(
+        () => flushDrafts.current(),
+        (active) => onDraftFlushState.current(active),
+      ),
+    [bridge],
+  );
   function sendInput() {
     if (
       !bridge ||
@@ -3371,12 +3803,13 @@ function NativeDesktopContent({
         sessionId = selection.session.id,
         commandId = crypto.randomUUID();
       latestInputCommands.current.set(draftKey, commandId);
-      if (
-        noteBatch.entries.length ||
-        noteDocument.outputFiles?.length ||
-        noteDraftStates.current.get(draftKey)?.managed
-      )
+      try {
         await saveBrowserDraft(draftKey, sessionId, noteDocument);
+      } catch (error) {
+        if (noteDraftStates.current.get(draftKey)?.uncertain)
+          reportDraftPersistenceError(draftKey, '', quitFeedback.current.epoch, false);
+        throw error;
+      }
       const attachmentRevision = await imageDrafts.flush(draftKey);
       const submittedRevision = draftRevision.current;
       if (
@@ -3518,6 +3951,8 @@ function NativeDesktopContent({
           images: images.map(({ name }) => ({ name })),
         });
       });
+      const savedForSend = noteDraftStates.current.get(draftKey);
+      if (savedForSend) savedForSend.consumedCommand = commandId;
       let value: NativeResult;
       try {
         value = await bridge.request({
@@ -5493,6 +5928,7 @@ function NativeDesktopContent({
           );
       }}
       workspaces={workspaceModels}
+      sessionSearch={sessionSearch}
       sidebarSelected={firstDirectorySession?.id}
       selected={
         !scheduledTasksView &&
@@ -5672,10 +6108,16 @@ function NativeDesktopContent({
       beforeConversation={
         <>
           <NativeToast
-            key={inputErrorMessage ? 'input' : 'operation'}
+            key={inputErrorMessage ? 'input' : draftPersistenceMessage ? 'draft' : 'operation'}
             container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
             message={currentToast}
-            onDismiss={inputErrorMessage ? dismissInputError : dismissOperationMessage}
+            onDismiss={
+              inputErrorMessage
+                ? dismissInputError
+                : draftPersistenceMessage
+                  ? dismissDraftPersistenceError
+                  : dismissOperationMessage
+            }
           />
           <NativeApprovalFeedback
             scope={
@@ -6207,12 +6649,14 @@ function NativeDesktopContent({
             }
           : frame.preparation && !pendingReading && state && directory
             ? {
-                draft: newDraft,
+                draft: newDraftOwner.current === newTextScope ? newDraft : '',
                 scopeKey: newImageScope,
                 onFileReferences: imageDrafts.fileReferences,
                 imageLimit: inputImageCount,
                 files: imageDrafts.files(newImageScope),
-                imageError: imageDrafts.error(newImageScope),
+                imageError:
+                  (noteSaveError.key === newTextScope ? noteSaveError.message : '') ||
+                  imageDrafts.error(newImageScope),
                 onValidateAttachments: (images, files) =>
                   imageDrafts.validateAttachments(newImageScope, images, files),
                 onFilesSelected: (files) => imageDrafts.addFiles(newImageScope, files),
@@ -6227,8 +6671,16 @@ function NativeDesktopContent({
                 active: false,
                 stopping: false,
                 disabled: pending,
-                readOnly: !preparing,
-                readGate: { send: !newModelReady.ready || imageDrafts.blocked(newImageScope) },
+                readOnly:
+                  !preparing ||
+                  preparationHandoff ||
+                  (!!newWorkspace && newDraftReady !== newTextScope),
+                readGate: {
+                  send:
+                    !newModelReady.ready ||
+                    newDraftReady !== newTextScope ||
+                    imageDrafts.blocked(newImageScope),
+                },
                 sessionLoading: !preparing,
                 sending,
 
@@ -6293,7 +6745,10 @@ function NativeDesktopContent({
                         owner={browserNotes}
                         scope={imageScope(selection.storeId, selection.session.id)}
                         error={
-                          noteSaveError.key === imageScope(selection.storeId, selection.session.id)
+                          noteSaveError.key ===
+                            imageScope(selection.storeId, selection.session.id) &&
+                          browserNotes.get(imageScope(selection.storeId, selection.session.id))
+                            .length > 0
                             ? noteSaveError.message
                             : undefined
                         }
@@ -6338,9 +6793,12 @@ function NativeDesktopContent({
                   onFileReferences: imageDrafts.fileReferences,
                   imageLimit: inputImageCount,
                   files: imageDrafts.files(imageScope(selection.storeId, selection.session.id)),
-                  imageError: imageDrafts.error(
-                    imageScope(selection.storeId, selection.session.id),
-                  ),
+                  imageError:
+                    (noteSaveError.key === imageScope(selection.storeId, selection.session.id) &&
+                    !browserNotes.get(imageScope(selection.storeId, selection.session.id)).length
+                      ? noteSaveError.message
+                      : '') ||
+                    imageDrafts.error(imageScope(selection.storeId, selection.session.id)),
                   onValidateAttachments: (images, files) =>
                     imageDrafts.validateAttachments(
                       imageScope(selection.storeId, selection.session.id),
@@ -6577,8 +7035,23 @@ function NativeDesktopContent({
                                 generation.current === original.generation &&
                                 viewIntent.current === original.view &&
                                 selected.current === original.sessionId
-                              )
+                              ) {
                                 draftRevision.current = saved.revision;
+                                const key = imageScope(original.storeId, original.sessionId);
+                                const current = noteDraftStates.current.get(key);
+                                if (current) {
+                                  current.revision = saved.revision;
+                                  current.signature = JSON.stringify({
+                                    content: saved.content,
+                                    browserAnnotations: saved.browserAnnotations ?? [],
+                                    annotationImageOffset: saved.annotationImageOffset ?? 0,
+                                    outputFiles: saved.outputFiles ?? [],
+                                  });
+                                  current.managed = true;
+                                  current.uncertain = false;
+                                  current.consumedCommand = undefined;
+                                }
+                              }
                             }, false)
                           }
                         >

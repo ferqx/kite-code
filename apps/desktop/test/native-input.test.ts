@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { NativeSelection } from '../src/native-bridge';
-import { nativeTextIntent } from '../src/native-input';
+import { nativeInputErrorText, nativeTextIntent } from '../src/native-input';
 import { promptTextForSend } from '../src/prompt-text';
 
 test('submitted prompts remove every final LF or CRLF without trimming Markdown whitespace', () => {
@@ -179,4 +179,17 @@ test('Native unconfirmed ownership freezes queued follow-up identity and next mo
   expect(() =>
     nativeTextIntent({ ...selection, permissionUnavailable: true }, 'x', 'x', false, undefined),
   ).toThrow('session_view_unavailable');
+});
+
+test('local draft storage failures explain that no message was sent without blaming the model', () => {
+  for (const code of [
+    'draft_storage_unavailable',
+    'draft_revision_conflict',
+    'browser_draft_save_unconfirmed',
+    'draft_not_loaded',
+  ]) {
+    expect(nativeInputErrorText('failed', code)).toContain('消息没有发送');
+    expect(nativeInputErrorText('failed', code)).not.toContain('模型');
+    expect(nativeInputErrorText('unknown', code)).toBe('发送结果尚未确认，稍后将自动核对原提交。');
+  }
 });

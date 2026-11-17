@@ -47,31 +47,189 @@ test('search returns exact frozen definitions and complete schemas without invok
       serverId: 'actual-server',
       label: 'recoverable',
       tools: [remote],
-      names: new Map([[remote.id, 'actual remote name']]),
+      names: new Map([[remote.id, 'Upstream:FetchDocument']]),
       assertFresh: async () => {
         fresh++;
       },
     },
   ]);
-  const result = await tool.execute({ query: 'recoverable echo' }, context());
-  expect(result.outcome).toBe('succeeded');
-  expect(JSON.parse(result.content).items).toEqual([
-    {
-      serverId: 'actual-server',
-      serverName: 'recoverable',
-      remoteName: 'actual remote name',
-      modelName: remote.model!.name,
-      definitionId: remote.id,
-      definitionVersion: remote.version,
-      description: remote.description,
-      inputSchema: remote.inputSchema,
-    },
-  ]);
-  expect(fresh).toBe(1);
+  const queries = [
+    'recoverable echo',
+    remote.model!.name,
+    remote.id,
+    'Upstream:FetchDocument',
+    '  RECOVERABLE \t FETCHDOCUMENT \n ECHO  ',
+  ];
+  for (const query of queries) {
+    const result = await tool.execute({ query }, context());
+    expect(result.outcome).toBe('succeeded');
+    expect(JSON.parse(result.content).items).toEqual([
+      {
+        serverId: 'actual-server',
+        serverName: 'recoverable',
+        remoteName: 'Upstream:FetchDocument',
+        modelName: remote.model!.name,
+        definitionId: remote.id,
+        definitionVersion: remote.version,
+        description: remote.description,
+        inputSchema: remote.inputSchema,
+      },
+    ]);
+    expect(JSON.parse(tool.formatModelResult!({ result })!).items).toEqual([
+      {
+        server_id: 'actual-server',
+        server_name: 'recoverable',
+        name: remote.model!.name,
+        description: remote.description,
+        input_schema: remote.inputSchema,
+      },
+    ]);
+  }
+  expect(fresh).toBe(queries.length);
   expect(calls).toBe(0);
   expect(hostReadOnlyTool('builtin.mcp.discovery', 'mcp.tools.search')).toBe(true);
   expect(hostReadOnlyTool('external', 'mcp.tools.search')).toBe(false);
 });
+test('remote aliases keep same-named sources distinct and return the exact published callable names', async () => {
+  let invoked = 0;
+  const sources = ['first', 'second'].map((serverId) => {
+    const remote: ToolDefinition = {
+      id: `actual.${serverId}.definition`,
+      version: `fingerprint-${serverId}`,
+      model: { name: `mcp_${serverId}_shared_01234567` },
+      description: 'Read a record',
+      inputSchema: { type: 'object', properties: { [serverId]: { type: 'string' } } },
+      execute: async () => {
+        invoked++;
+        throw Error('must-not-call');
+      },
+    };
+    return {
+      serverId,
+      label: 'Same display label',
+      tools: [remote],
+      names: new Map([[remote.id, 'SharedRemoteName']]),
+      assertFresh: async () => {},
+    };
+  });
+  const tool = createMcpToolsSearchTool('store', 'session', sources);
+  const shared = await tool.execute({ query: 'SharedRemoteName' }, context());
+  expect(shared.outcome).toBe('succeeded');
+  expect(
+    JSON.parse(shared.content).items.map((item: { modelName: string }) => item.modelName),
+  ).toEqual(sources.map((source) => source.tools[0]!.model!.name));
+  const exact = await tool.execute(
+    { query: sources[1]!.tools[0]!.model!.name, limit: 1 },
+    context(),
+  );
+  expect(exact.outcome).toBe('succeeded');
+  expect(JSON.parse(exact.content).items).toEqual([JSON.parse(shared.content).items[1]]);
+  expect(invoked).toBe(0);
+});
+
+test('search matches complete remote aliases before limiting results and preserves optional name fallbacks', async () => {
+  const tools: ToolDefinition[] = Array.from({ length: 25 }, (_, index) => ({
+    id: `definition-${index}`,
+    version: '1',
+    ...(index < 24 ? { model: { name: `published_${index}` } } : {}),
+    description: 'Read a record',
+    inputSchema: { type: 'object' },
+    execute: async () => {
+      throw Error('must-not-call');
+    },
+  }));
+  const remoteName = `${'LongRemoteName'.repeat(12)}_末尾UniqueSuffix`;
+  const source = {
+    serverId: 'actual',
+    label: 'Source',
+    tools,
+    names: new Map([
+      [tools[23]!.id, remoteName],
+      ['not-a-selected-definition', 'UnselectedAlias'],
+    ]),
+    assertFresh: async () => {},
+  };
+  const tool = createMcpToolsSearchTool('store', 'session', [source]);
+  for (const limit of [undefined, 1, 20]) {
+    const result = await tool.execute(
+      { query: 'record', ...(limit === undefined ? {} : { limit }) },
+      context(),
+    );
+    expect(result.outcome).toBe('succeeded');
+    expect(
+      JSON.parse(result.content).items.map((item: { definitionId: string }) => item.definitionId),
+    ).toEqual(tools.slice(0, limit ?? 10).map((entry) => entry.id));
+  }
+  for (const query of [remoteName, '末尾uniquesuffix', tools[23]!.model!.name]) {
+    const result = await tool.execute({ query, limit: 1 }, context());
+    expect(result.outcome).toBe('succeeded');
+    expect(JSON.parse(result.content).items).toMatchObject([
+      { definitionId: tools[23]!.id, modelName: tools[23]!.model!.name, remoteName },
+    ]);
+  }
+  const fallback = createMcpToolsSearchTool('store', 'session', [{ ...source, names: undefined }]);
+  const result = await fallback.execute({ query: tools[24]!.id, limit: 1 }, context());
+  expect(result.outcome).toBe('succeeded');
+  expect(JSON.parse(result.content).items).toMatchObject([
+    { definitionId: tools[24]!.id, modelName: tools[24]!.id },
+  ]);
+  expect(JSON.parse(result.content).items[0]).not.toHaveProperty('remoteName');
+  expect(
+    JSON.parse((await tool.execute({ query: 'UnselectedAlias' }, context())).content).items,
+  ).toEqual([]);
+  expect(
+    JSON.parse((await tool.execute({ query: 'record nonexistent' }, context())).content).items,
+  ).toEqual([]);
+});
+
+test('name searches retain run scope and cancellation checks without exposing stale matches', async () => {
+  let fresh = 0;
+  const remote: ToolDefinition = {
+    id: 'actual.remote',
+    model: { name: 'published_only_name' },
+    version: '1',
+    description: 'Read a record',
+    inputSchema: { type: 'object' },
+    execute: async () => {
+      throw Error('must-not-call');
+    },
+  };
+  const controller = new AbortController();
+  const reason = Error('original-cancel-reason');
+  const tool = createMcpToolsSearchTool(
+    'store',
+    'session',
+    [
+      {
+        serverId: 'actual',
+        label: 'Source',
+        tools: [remote],
+        assertFresh: async () => {
+          fresh++;
+          controller.abort(reason);
+          throw Error('private-stale-error');
+        },
+      },
+    ],
+    'run',
+  );
+  const own = { ...(await context().getExecution('own'))!, runId: 'run' };
+  const scoped = context('mcp.tools.search', {
+    getExecution: async () => own,
+    signal: controller.signal,
+  });
+  const query = { query: remote.model!.name };
+  expect(await tool.execute(query, { ...scoped, runId: 'other' })).toEqual({
+    outcome: 'failed',
+    content: 'mcp_search_scope_unverifiable',
+  });
+  expect(fresh).toBe(0);
+  await expect(tool.execute(query, scoped)).rejects.toBe(reason);
+  expect(fresh).toBe(1);
+  await expect(tool.execute(query, scoped)).rejects.toBe(reason);
+  expect(fresh).toBe(1);
+});
+
 test('withdrawn source and foreign scope never promote cached definitions', async () => {
   let fresh = 0;
   const tool = createMcpToolsSearchTool('store', 'session', [
@@ -130,14 +288,16 @@ test('partial catalogue failure retains fresh matches and explains incomplete se
     },
     { serverId: 'fresh', label: 'Echo', tools: [remote], assertFresh: async () => {} },
   ]);
-  const result = await tool.execute({ query: 'echo' }, context());
-  expect(result.outcome).toBe('failed');
-  expect(JSON.parse(result.content)).toMatchObject({
-    complete: false,
-    items: [{ serverId: 'fresh', definitionId: remote.id }],
-    unavailableSources: [{ serverId: 'unavailable' }],
-  });
-  expect(result.content).not.toContain('PRIVATE_CATALOGUE_FAULT');
+  for (const query of ['echo', remote.id]) {
+    const result = await tool.execute({ query }, context());
+    expect(result.outcome).toBe('failed');
+    expect(JSON.parse(result.content)).toMatchObject({
+      complete: false,
+      items: [{ serverId: 'fresh', definitionId: remote.id }],
+      unavailableSources: [{ serverId: 'unavailable' }],
+    });
+    expect(result.content).not.toContain('PRIVATE_CATALOGUE_FAULT');
+  }
 });
 
 test('oversized matching schemas are explicitly omitted rather than reported as an empty complete search', async () => {
@@ -155,18 +315,20 @@ test('oversized matching schemas are explicitly omitted rather than reported as 
   const tool = createMcpToolsSearchTool('store', 'session', [
     { serverId: 'fresh', label: 'Echo', tools: [remote], assertFresh: async () => {} },
   ]);
-  const result = await tool.execute({ query: 'echo' }, context());
-  expect(result.outcome).toBe('failed');
-  expect(JSON.parse(result.content)).toMatchObject({
-    complete: false,
-    items: [],
-    unavailableSources: [],
-    omittedMatches: 1,
-    error: { code: 'mcp_search_incomplete' },
-  });
-  expect(result.content).toContain('descriptors exceed the search response budget');
-  expect(result.content).toContain('not proof that no matching tool exists');
-  expect(result.content).not.toContain('OVERSIZED_SCHEMA_BODY');
+  for (const query of ['echo', remote.id]) {
+    const result = await tool.execute({ query }, context());
+    expect(result.outcome).toBe('failed');
+    expect(JSON.parse(result.content)).toMatchObject({
+      complete: false,
+      items: [],
+      unavailableSources: [],
+      omittedMatches: 1,
+      error: { code: 'mcp_search_incomplete' },
+    });
+    expect(result.content).toContain('descriptors exceed the search response budget');
+    expect(result.content).toContain('not proof that no matching tool exists');
+    expect(result.content).not.toContain('OVERSIZED_SCHEMA_BODY');
+  }
   expect(invoked).toBe(0);
 });
 test('Later consumes actual provider choice once and retains the original uncertainty without replay or login', async () => {

@@ -169,6 +169,14 @@ export class NativeConversation {
   }
   send(request: Send): Promise<NativeConversationResult> {
     if (
+      request.preparationRevision !== undefined &&
+      (!Number.isSafeInteger(request.preparationRevision) ||
+        request.preparationRevision < 0 ||
+        request.draftDocument !== undefined ||
+        request.attachmentSessionId !== undefined)
+    )
+      throw new ClientError('invalid_native_request');
+    if (
       request.draftLineEndings !== undefined &&
       (typeof request.intent.content !== 'string' ||
         typeof request.draftLineEndings !== 'string' ||
@@ -248,6 +256,22 @@ export class NativeConversation {
               request.fileIds ?? [],
               request.intent.files ?? [],
             );
+      if (request.preparationRevision !== undefined) {
+        if (!this.data().consumePreparation || request.draftDocument || request.attachmentSessionId)
+          throw new ClientError('draft_association_unavailable');
+        const preparation = this.data().read({
+          storeId: scope.storeId,
+          workspaceId: 'new-conversation',
+          rootSessionId: 'new-conversation',
+        });
+        if (
+          preparation.revision !== request.preparationRevision ||
+          preparation.content !== request.intent.content + (request.draftLineEndings ?? '') ||
+          preparation.browserAnnotations?.length ||
+          preparation.outputFiles?.length
+        )
+          throw new ClientError('draft_revision_conflict');
+      }
       const savedCreation = this.data()
         .creations()
         .find((item) => item.input.commandId === request.creation.commandId);
@@ -345,6 +369,12 @@ export class NativeConversation {
         return structuredClone(entry.result);
       }
       this.check(scope);
+      if (request.preparationRevision !== undefined)
+        this.data().consumePreparation!(
+          request.preparationRevision,
+          draft,
+          request.intent.commandId,
+        );
       entry.result = { ...entry.result, stage: 'permission' };
       this.notify();
       await this.controller.selectSession(creation.input.sessionId);

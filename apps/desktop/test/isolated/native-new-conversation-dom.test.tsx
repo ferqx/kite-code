@@ -119,8 +119,10 @@ function fixture(
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   const restoreWorker = installImagePreviewWorker();
-  const host = dom.window.document,
-    root = createRoot(host.getElementById('root')!);
+  const host = dom.window.document;
+  let root = createRoot(host.getElementById('root')!);
+  let draftFlush: (() => Promise<void>) | undefined;
+  let draftFlushState: ((active: boolean) => void) | undefined;
   const calls: NativeRequest[] = [],
     messages: Message[] = [...(options.messages ?? [])],
     runs: Run[] = [...(options.runs ?? [])],
@@ -181,10 +183,11 @@ function fixture(
   let workspaceRemovalUnavailable = false;
   let releaseWorkspaceRemoval: ((result: NativeWorkspaceRemoval) => void) | undefined;
   let viewGeneration = 1;
+  let connectionGeneration = 1;
   const unavailableWorkspace = () =>
     options.workspaceUnavailable === true || options.workspaceUnavailable === selected;
   const state = (): NativeState => ({
-    generation: 1,
+    generation: connectionGeneration,
     creationSubmissions: [],
     inputSubmissions: [],
     permissionSubmissions,
@@ -237,7 +240,19 @@ function fixture(
       : undefined,
   });
   let watcher: Parameters<NativeBridge['watch']>[0] | undefined;
+  const draftRevisions = new Map<string, number>();
   const bridge: NativeBridge = {
+    registerDraftFlush(listener, onStateChange) {
+      draftFlush = listener;
+      draftFlushState = onStateChange;
+      return () => {
+        onStateChange?.(false);
+        if (draftFlush === listener) {
+          draftFlush = undefined;
+          draftFlushState = undefined;
+        }
+      };
+    },
     watch: (listener) => {
       watcher = listener;
       return () => {
@@ -382,15 +397,23 @@ function fixture(
           highWaterSeq: sessions.find((session) => session.id === input.sessionId)?.nextSeq ?? '0',
         };
       }
-      if (input.method === 'draft.read')
+      if (input.method === 'draft.read' || input.method === 'draft.write') {
+        const key = input.sessionId;
+        if (input.method === 'draft.write') {
+          const previous = draftRevisions.get(key) ?? 1;
+          if (input.revision !== previous) throw Error('draft_revision_conflict');
+          drafts.set(key, input.content);
+          draftRevisions.set(key, previous + 1);
+        }
         return {
-          id: input.sessionId,
+          id: key,
           storeId: fixtureStoreId,
-          workspaceId: 'w',
+          workspaceId: input.sessionId === 'new-conversation' ? 'new-conversation' : 'w',
           rootSessionId: input.sessionId,
-          revision: 1,
-          content: drafts.get(input.sessionId) ?? '',
+          revision: draftRevisions.get(key) ?? 1,
+          content: drafts.get(key) ?? '',
         };
+      }
       if (input.method === 'conversation.branch') {
         const result = {
           kind: 'conversation.branch' as const,
@@ -497,7 +520,7 @@ function fixture(
       return null;
     },
   };
-  Object.defineProperty(dom.window, 'kiteNative', { value: bridge });
+  Object.defineProperty(dom.window, 'kiteNative', { value: bridge, configurable: true });
   const find = (name: string) =>
     [...host.querySelectorAll<HTMLElement>('button,[role="menuitemradio"],[role="menuitem"]')].find(
       (item) => item.textContent === name || item.getAttribute('aria-label') === name,
@@ -519,8 +542,18 @@ function fixture(
     host.querySelector<HTMLElement>(`[role="textbox"][aria-label="${label}"]`);
   return {
     dom,
-    root,
+    get root() {
+      return root;
+    },
     host,
+    drafts,
+    flushDrafts: () => draftFlush!(),
+    draftFlushState: (active: boolean) => draftFlushState?.(active),
+    remount: async () => {
+      await act(async () => root.unmount());
+      root = createRoot(host.getElementById('root')!);
+      await act(async () => root.render(<NativeDesktop />));
+    },
     calls,
     publishWorkspaceRemovals: async (next: NativeWorkspaceRemoval[], unavailable = false) => {
       workspaceRemovalSubmissions = next;
@@ -620,6 +653,11 @@ function fixture(
     },
     releaseTrust: async () => {
       await act(async () => trustRelease?.());
+    },
+    reconnect: async () => {
+      connectionGeneration++;
+      Object.defineProperty(dom.window, 'kiteNative', { value: { ...bridge }, configurable: true });
+      await act(async () => root.render(<NativeDesktop />));
     },
     refreshFacts: async () => {
       await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
@@ -803,7 +841,7 @@ function worktreeNavigationFixture(unavailableSession?: string, unselectedModel 
       }
       return result;
     }
-    if (input.method === 'draft.read')
+    if (input.method === 'draft.read' || input.method === 'draft.write')
       return { ...(value as NativeDraft), workspaceId: input.sessionId === 'b' ? 'worktree' : 'w' };
     if (value && 'generation' in value) {
       const state = value as NativeState;
@@ -1357,7 +1395,7 @@ for (const callerOnly of [false, true])
     }
   });
 
-test('accepting unsaved input without saved-draft proof does not read or increment its CAS baseline', async () => {
+test('ordinary unsaved input is saved before submission and later edits use its consumed CAS baseline', async () => {
   const f = savedPromptFixture();
   try {
     await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
@@ -1367,8 +1405,8 @@ test('accepting unsaved input without saved-draft proof does not read or increme
     const reads = f.calls.filter((input) => input.method === 'draft.read').length;
     await f.edit('next unsent edit', '当前会话私有草稿');
     await f.click('保留草稿');
-    expect(f.writes().map((input) => input.revision)).toEqual([1]);
-    expect(f.calls.filter((input) => input.method === 'draft.read')).toHaveLength(reads);
+    expect(f.writes().map((input) => input.revision)).toEqual([1, 3]);
+    expect(f.calls.filter((input) => input.method === 'draft.read')).toHaveLength(reads + 1);
     expect(f.saved.get('a')?.content).toBe('next unsent edit');
   } finally {
     await f.close();
@@ -1485,13 +1523,15 @@ for (const returnToOriginal of [false, true])
       await f.click('Other B');
       if (returnToOriginal) await f.click('Original A');
       await act(async () => releaseRead?.());
-      expect(f.writes()).toHaveLength(0);
+      expect(f.writes().every((input) => input.sessionId === 'a')).toBe(true);
+      expect(f.writes()).toHaveLength(1);
       expect(promptValue(f.input('当前会话私有草稿'))).toBe(
         returnToOriginal ? 'A stays unsaved' : 'saved B',
       );
       await f.click('保留草稿');
       expect(f.writes().map((input) => [input.sessionId, input.revision])).toEqual([
-        [returnToOriginal ? 'a' : 'b', returnToOriginal ? 2 : 1],
+        ['a', 2],
+        [returnToOriginal ? 'a' : 'b', returnToOriginal ? 3 : 1],
       ]);
       expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
     } finally {
@@ -1526,7 +1566,8 @@ for (const next of ['other', 'return', 'quitting', 'cancelled-quit'] as const)
         if (next === 'cancelled-quit') await f.lifecycle('active');
       }
       await act(async () => rejectRead?.());
-      expect(f.writes()).toHaveLength(0);
+      expect(f.writes().every((input) => input.sessionId === 'a')).toBe(true);
+      expect(f.writes()).toHaveLength(next === 'other' || next === 'return' ? 1 : 0);
       expect(f.host.querySelector('[role="alertdialog"]') === null).toBe(true);
       expect(promptValue(f.input('当前会话私有草稿'))).toBe(
         next === 'other' ? 'saved B' : 'unsaved A survives the read',
@@ -1567,7 +1608,7 @@ test('a diagnostic draft write rejection preserves the newer view without a toas
   const request = bridge.request;
   let rejectWrite: (() => void) | undefined;
   bridge.request = async (input) => {
-    if (input.method !== 'draft.write') return request(input);
+    if (input.method !== 'draft.write' || rejectWrite) return request(input);
     f.calls.push(input);
     return new Promise((_resolve, reject) => {
       rejectWrite = () => reject(Error('draft_storage_unavailable'));
@@ -6866,6 +6907,679 @@ test('a rejected attachment recovery remains blocked with a reachable read-only 
       ),
     ).toBe(false);
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('ordinary private text automatically survives renderer cold restoration and clearing, without a diagnostic save or submission', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('冷恢复 plain text 雪🙂\n  keep indentation', '当前会话私有草稿');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    });
+    expect(f.drafts.get('a')).toBe('冷恢复 plain text 雪🙂\n  keep indentation');
+    await f.remount();
+    await f.click('Original A');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe(
+      '冷恢复 plain text 雪🙂\n  keep indentation',
+    );
+    await f.edit('', '当前会话私有草稿');
+    await act(async () => f.flushDrafts());
+    await f.remount();
+    await f.click('Original A');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+    expect(
+      f.calls.filter((call) => ['submit', 'conversation.send'].includes(call.method)),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('quit flush saves the latest synchronous text before debounce, while session switches preserve distinct drafts', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('latest A before debounce', '当前会话私有草稿');
+    await f.click('Other B');
+    expect(f.drafts.get('a')).toBe('latest A before debounce');
+    await f.edit('latest B before quit', '当前会话私有草稿');
+    await act(async () => f.flushDrafts());
+    expect(f.drafts.get('b')).toBe('latest B before quit');
+    await f.remount();
+    await f.click('Original A');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('latest A before debounce');
+    await f.click('Other B');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('latest B before quit');
+  } finally {
+    await f.close();
+  }
+});
+
+test('quit cannot report saved after a departed Session write failed, and reopening can recover without resending', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let fail = true;
+  bridge.request = async (input) => {
+    if (input.method === 'draft.write' && input.sessionId === 'a' && fail)
+      throw Error('draft_storage_unavailable');
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('A must not disappear', '当前会话私有草稿');
+    await f.click('Other B');
+    let error: unknown;
+    await act(async () => {
+      try {
+        await f.flushDrafts();
+      } catch (cause) {
+        error = cause;
+      }
+    });
+    expect(error).toBeDefined();
+    expect(f.drafts.get('a')).toBe('saved A');
+    fail = false;
+    await f.click('Original A');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('A must not disappear');
+    await act(async () => f.flushDrafts());
+    expect(f.drafts.get('a')).toBe('A must not disappear');
+    expect(
+      f.calls.filter((call) => ['submit', 'conversation.send'].includes(call.method)),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('preparation text cold-restores as one private draft across workspace changes, including no workspace', async () => {
+  for (const workspaceIds of [['w', 'empty'], []] as const) {
+    const f = fixture(false, true, 'accept_edits', { withoutSelection: true, workspaceIds });
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.edit('one preparation 雪🙂');
+      if (workspaceIds.length) await f.click('在 Ordinary directory 中新建对话');
+      expect(promptValue(f.input())).toBe('one preparation 雪🙂');
+      await act(async () => f.flushDrafts());
+      expect(f.drafts.get('new-conversation')).toBe('one preparation 雪🙂');
+      await f.remount();
+      expect(promptValue(f.input())).toBe('one preparation 雪🙂');
+      expect(
+        f.calls.filter((call) =>
+          ['submit', 'conversation.send', 'createSession'].includes(call.method),
+        ),
+      ).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('first-send handoff durably moves only the newer preparation edit and does not restore the sent text', async () => {
+  const f = fixture(false, true, 'accept_edits', { withoutSelection: true });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('original first message');
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    const send = f.calls.find((call) => call.method === 'conversation.send');
+    expect(send?.preparationRevision).toBeGreaterThan(1);
+    await f.edit('newer draft while first receipt is pending');
+    await f.resolve('accepted');
+    await f.until(() => !!f.input('当前会话私有草稿'));
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe(
+      'newer draft while first receipt is pending',
+    );
+    expect(f.drafts.get(send!.creation.sessionId)).toBe(
+      'newer draft while first receipt is pending',
+    );
+    expect(f.drafts.get('new-conversation')).toBe('');
+    await act(async () => f.flushDrafts());
+    await f.remount();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe(
+      'newer draft while first receipt is pending',
+    );
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    await f.click('新对话');
+    expect(promptValue(f.input())).toBe('');
+  } finally {
+    await f.close();
+  }
+});
+
+test('clearing a newly typed empty-baseline draft before debounce does not permanently block quit', async () => {
+  const f = fixture(true);
+  f.drafts.set('a', '');
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('temporary input', '当前会话私有草稿');
+    await f.edit('', '当前会话私有草稿');
+    await act(async () => f.flushDrafts());
+    expect(f.drafts.get('a')).toBe('');
+    expect(f.calls.filter((call) => call.method === 'draft.write')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('same-Store generation reconnect rehydrates preparation ownership without hiding or dropping its unsaved text', async () => {
+  const f = fixture(false, true, 'accept_edits', { withoutSelection: true });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('keep through connection generation');
+    await f.reconnect();
+    await f.until(() =>
+      f.calls.some(
+        (call) =>
+          call.method === 'draft.read' &&
+          call.sessionId === 'new-conversation' &&
+          call.generation === 2,
+      ),
+    );
+    expect(promptValue(f.input())).toBe('keep through connection generation');
+    await f.edit('editable after reconnect');
+    await act(async () => f.flushDrafts());
+    expect(f.drafts.get('new-conversation')).toBe('editable after reconnect');
+    expect(
+      f.calls.filter((call) => ['submit', 'conversation.send'].includes(call.method)),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an observed attachment receipt before a held submit response reconciles the current owner and permits quit', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  const saved: import('../../src/input-images-bridge').NativePendingAttachments = {
+    kind: 'input.attachments',
+    revision: 1,
+    attachments: [{ id: 'sent-file', kind: 'file', name: 'sent.txt', state: 'ready', size: 4 }],
+  };
+  let caller: NativeCallerMetadata | undefined;
+  let release: (() => void) | undefined;
+  let sends = 0;
+  const conflicts: NativeRequest[] = [];
+  bridge.request = async (input) => {
+    const value = await request(input);
+    if (input.method === 'input.attachments.read')
+      return input.sessionId === 'a'
+        ? structuredClone(saved)
+        : { kind: 'input.attachments', revision: 0, attachments: [] };
+    if (input.method === 'input.attachments.write') {
+      if (input.revision !== saved.revision) {
+        conflicts.push(input);
+        throw Error('attachment_revision_conflict');
+      }
+      saved.revision++;
+      saved.attachments = input.attachments.map((item) => ({ ...item, state: 'ready' }));
+      return structuredClone(saved);
+    }
+    if (input.method === 'submit') {
+      sends++;
+      expect(input.attachmentRevision).toBe(1);
+      if (sends === 1)
+        return {
+          sessionId: 'a',
+          intent: input.intent,
+          phase: 'failed',
+          error: 'input_preparation_failed',
+        };
+      saved.revision++;
+      saved.attachments = [];
+      caller = {
+        scope: { storeId: 'store', workspaceId: 'w', sessionId: 'a' },
+        request: { kind: 'run.start', expectedStoreId: 'store', commandId: input.intent.commandId },
+        subjectId: 'owner',
+        target: { kind: 'session', id: 'a' },
+        bodyDigest: 'digest',
+        requestDigest: 'digest',
+        phase: 'accepted',
+        attachmentDraft: { sessionId: 'a', workspaceId: 'w', revision: 1, ids: ['sent-file'] },
+      };
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { sessionId: 'a', intent: input.intent, phase: 'accepted' };
+    }
+    if (value && 'generation' in value)
+      return { ...value, pendingAttachmentDrafts: true, callerSubmissions: caller ? [caller] : [] };
+    return value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.until(
+      () => f.host.querySelector('.composer-attachment-name')?.textContent === 'sent.txt',
+    );
+    await f.edit('first attempt', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    await f.until(() => sends === 1);
+    expect(saved.revision).toBe(1);
+    await f.click('发送明确的新轮次');
+    await f.until(() => !!release);
+    await f.refreshWhileSelecting();
+    await f.until(() => f.host.querySelector('form .composer-attachments') === null);
+    await f.edit('NEW EDIT while original receipt pending 雪🙂', '当前会话私有草稿');
+    await act(async () => release!());
+    await act(async () => f.flushDrafts());
+    expect(conflicts).toEqual([]);
+    expect(f.host.body.textContent).not.toContain('附件草稿尚未确认保存');
+    expect(saved).toEqual({ kind: 'input.attachments', revision: 2, attachments: [] });
+    expect(promptValue(f.input('当前会话私有草稿')!)).toBe(
+      'NEW EDIT while original receipt pending 雪🙂',
+    );
+    expect(f.drafts.get('a')).toBe('NEW EDIT while original receipt pending 雪🙂');
+    expect(sends).toBe(2);
+    await f.remount();
+    await f.until(
+      () =>
+        promptValue(f.input('当前会话私有草稿')!) ===
+        'NEW EDIT while original receipt pending 雪🙂',
+    );
+    expect(f.host.querySelector('form .composer-attachments') === null).toBe(true);
+    expect(sends).toBe(2);
+  } finally {
+    release?.();
+    await f.close();
+  }
+});
+
+for (const hidden of [false, true]) {
+  test(`Native quit waits for ${hidden ? 'hidden workspace persistence' : 'file preparation and Composer adoption'} before confirming its latest draft`, async () => {
+    const f = fixture(false, true, 'accept_edits', { withoutSelection: true });
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    const saved = new Map<
+      string,
+      import('../../src/input-images-bridge').NativePendingAttachments
+    >();
+    let releaseFinish: (() => void) | undefined;
+    let releaseWrite: (() => void) | undefined;
+    let quit: Promise<void> | undefined;
+    let done = false;
+    bridge.fileReferences = (files) =>
+      files.map((file) => ({ name: file.name, uri: `file:///chosen/${file.name}` }));
+    bridge.request = async (input) => {
+      const value = await request(input);
+      if (input.method === 'input.attachments.read')
+        return structuredClone(
+          saved.get(input.workspaceId!) ?? {
+            kind: 'input.attachments',
+            revision: 0,
+            attachments: [],
+          },
+        );
+      if (input.method === 'input.files.finish' && !hidden)
+        await new Promise<void>((resolve) => {
+          releaseFinish = resolve;
+        });
+      if (input.method === 'input.attachments.write') {
+        const old = saved.get(input.workspaceId!) ?? {
+          kind: 'input.attachments' as const,
+          revision: 0,
+          attachments: [],
+        };
+        expect(input.revision).toBe(old.revision);
+        const next = {
+          kind: 'input.attachments' as const,
+          revision: old.revision + 1,
+          attachments: input.attachments.map((item) => ({
+            ...item,
+            state: 'ready' as const,
+            size: 8,
+            mediaType: 'text/plain',
+          })),
+        };
+        saved.set(input.workspaceId!, next);
+        await new Promise<void>((resolve) => {
+          releaseWrite = resolve;
+        });
+        return structuredClone(next);
+      }
+      if (value && 'generation' in value) return { ...value, pendingAttachmentDrafts: true };
+      return value;
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.edit('initial preparation text');
+      const queuedChange = captureQueuedPromptChange(f.input()!);
+      await act(async () =>
+        f.host.querySelector('[aria-label="添加附件"]')!.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+      await act(async () => f.host.querySelector<HTMLElement>('[aria-label="添加文件"]')!.click());
+      const picker = f.host.querySelector<HTMLInputElement>('input[aria-label="选择文件"]')!;
+      Object.defineProperty(picker, 'files', {
+        value: [new f.dom.window.File(['complete'], 'chosen.txt', { type: 'text/plain' })],
+      });
+      await act(async () =>
+        picker.dispatchEvent(new f.dom.window.Event('change', { bubbles: true })),
+      );
+      await f.until(() => (hidden ? !!releaseWrite : !!releaseFinish));
+      if (hidden) {
+        await f.until(
+          () => f.host.querySelector('.composer-attachment-name')?.textContent === 'chosen.txt',
+        );
+        await f.click('在 Ordinary directory 中新建对话');
+        expect(f.host.querySelector('.composer-attachment-name') === null).toBe(true);
+      }
+      await act(async () => {
+        quit = f.flushDrafts().then(() => {
+          done = true;
+        });
+      });
+      expect(done).toBe(false);
+      await act(async () => queuedChange('latest queued preparation 雪🙂'));
+      if (!hidden) {
+        await act(async () => releaseFinish!());
+        await f.until(() => !!releaseWrite);
+        expect(done).toBe(false);
+      }
+      await act(async () => {
+        releaseWrite!();
+        await quit;
+      });
+      expect(done).toBe(true);
+      expect(f.drafts.get('new-conversation')).toBe('latest queued preparation 雪🙂');
+      expect(saved.get('w')?.attachments.map((item) => item.name)).toEqual(['chosen.txt']);
+      expect(saved.get('empty')?.attachments ?? []).toEqual([]);
+      await f.remount();
+      await f.until(() => promptValue(f.input()) === 'latest queued preparation 雪🙂');
+      await f.until(
+        () => f.host.querySelector('.composer-attachment-name')?.textContent === 'chosen.txt',
+      );
+      expect(f.calls.filter((input) => input.method === 'input.attachments.write')).toHaveLength(1);
+      expect(
+        f.calls.some((input) => input.method === 'submit' || input.method === 'conversation.send'),
+      ).toBe(false);
+    } finally {
+      releaseFinish?.();
+      releaseWrite?.();
+      await quit?.catch(() => {});
+      await f.close();
+    }
+  });
+}
+
+for (const preparation of [false, true])
+  test(`draft feedback reports ${preparation ? 'preparation' : 'Session'} autosave failure once without inline errors, and resets only after durable recovery`, async () => {
+    const f = fixture(true, true, 'accept_edits', { withoutSelection: preparation });
+    const bridge = f.dom.window.kiteNative! as NativeBridge,
+      request = bridge.request;
+    const scope = preparation ? 'new-conversation' : 'a';
+    const label = preparation ? '新对话草稿' : '当前会话私有草稿';
+    let fail = true;
+    bridge.request = async (input) => {
+      if (input.method === 'draft.write' && input.sessionId === scope && fail)
+        throw Error('draft_storage_unavailable');
+      return request(input);
+    };
+    const debounce = () =>
+      act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 650));
+      });
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.edit('unsaved first 雪🙂', label);
+      await debounce();
+      expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('草稿尚未确认保存');
+      expect(f.host.querySelector('.composer-input-error')).toBeNull();
+      expect(f.host.querySelector('.browser-note-context [role="alert"]')).toBeNull();
+      await f.click('关闭提示');
+      await f.edit('unsaved latest 雪🙂', label);
+      await debounce();
+      expect(f.host.querySelector('.native-toast-card')).toBeNull();
+      expect(promptValue(f.input(label))).toBe('unsaved latest 雪🙂');
+      fail = false;
+      await f.click(preparation ? 'Original A' : 'Other B');
+      await f.click(preparation ? '新对话' : 'Original A');
+      await f.until(() => !!f.input(label) && !(f.input(label) as HTMLTextAreaElement).readOnly);
+      await act(async () => f.flushDrafts());
+      expect(f.drafts.get(scope)).toBe('unsaved latest 雪🙂');
+      fail = true;
+      await f.edit('a new failure after recovery', label);
+      await debounce();
+      expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('草稿尚未确认保存');
+      expect(f.host.querySelector('.composer-input-error')).toBeNull();
+      expect(
+        f.calls.filter((call) => ['submit', 'conversation.send'].includes(call.method)),
+      ).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('draft feedback leaves quit failure to Main and restores future background notifications after cancellation', async () => {
+  const f = fixture(true),
+    bridge = f.dom.window.kiteNative! as NativeBridge,
+    request = bridge.request;
+  let fail = true;
+  bridge.request = async (input) => {
+    if (input.method === 'draft.write' && fail) throw Error('draft_storage_unavailable');
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('quit must preserve this draft', '当前会话私有草稿');
+    let rejected = false;
+    await act(async () => {
+      f.draftFlushState(true);
+      try {
+        await f.flushDrafts();
+      } catch {
+        rejected = true;
+      }
+      f.draftFlushState(false);
+    });
+    expect(rejected).toBe(true);
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    expect(f.host.querySelector('.composer-input-error')).toBeNull();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('quit must preserve this draft');
+    expect((f.input('当前会话私有草稿') as HTMLTextAreaElement).readOnly).toBe(false);
+    await f.edit('still editable after failed quit', '当前会话私有草稿');
+    fail = false;
+    await f.click('Other B');
+    await f.click('Original A');
+    await f.until(
+      () => f.selected() === 'a' && !(f.input('当前会话私有草稿') as HTMLTextAreaElement)?.readOnly,
+    );
+    await act(async () => f.flushDrafts());
+    expect(f.drafts.get('a')).toBe('still editable after failed quit');
+    fail = true;
+    await f.edit('later distinct failure', '当前会话私有草稿');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    });
+    expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('草稿尚未确认保存');
+  } finally {
+    await f.close();
+  }
+});
+
+test('draft feedback retires a held autosave notice when quit starts, even after timeout cancellation and late failure', async () => {
+  const f = fixture(true),
+    bridge = f.dom.window.kiteNative! as NativeBridge,
+    request = bridge.request;
+  let rejectA: (() => void) | undefined;
+  bridge.request = async (input) => {
+    if (input.method === 'draft.write' && input.sessionId === 'a')
+      await new Promise<void>((_resolve, reject) => {
+        rejectA = () => reject(Error('draft_storage_unavailable'));
+      });
+    if (input.method === 'draft.write' && input.sessionId === 'b')
+      throw Error('draft_storage_unavailable');
+    return request(input);
+  };
+  let quit: Promise<void> | undefined;
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('held A', '当前会话私有草稿');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    });
+    expect(rejectA).toBeDefined();
+    await act(async () => {
+      f.draftFlushState(true);
+      quit = f.flushDrafts().catch(() => {});
+    });
+    await act(async () => f.draftFlushState(false));
+    await act(async () => {
+      rejectA!();
+      await quit;
+    });
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    expect(f.host.querySelector('.composer-input-error')).toBeNull();
+    await f.click('Other B');
+    await f.until(
+      () => f.selected() === 'b' && !(f.input('当前会话私有草稿') as HTMLTextAreaElement)?.readOnly,
+    );
+    await f.edit('new B failure must not be muted', '当前会话私有草稿');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    });
+    expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('草稿尚未确认保存');
+  } finally {
+    rejectA?.();
+    await quit;
+    await f.close();
+  }
+});
+
+for (const leave of [false, true])
+  test(`draft feedback for a delayed first-send local save rejection ${leave ? 'cannot retarget a later page' : 'appears immediately without sending or lookup'}`, async () => {
+    const f = fixture(true, true, 'accept_edits', { withoutSelection: true });
+    const bridge = f.dom.window.kiteNative! as NativeBridge,
+      request = bridge.request;
+    let rejectSave: (() => void) | undefined;
+    bridge.request = async (input) => {
+      if (input.method === 'draft.write' && input.sessionId === 'new-conversation')
+        await new Promise<void>((_resolve, reject) => {
+          rejectSave = () => reject(Error('draft_storage_unavailable'));
+        });
+      return request(input);
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.edit('first send remains unsent 雪🙂');
+      await f.chooseModel();
+      await f.click('发送首条消息');
+      await f.until(() => !!rejectSave);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      });
+      if (leave) await f.click('Original A');
+      await act(async () => {
+        rejectSave!();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      if (leave) {
+        expect(f.host.querySelector('.native-toast-card')).toBeNull();
+      } else {
+        expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('消息没有发送');
+        expect(promptValue(f.input())).toBe('first send remains unsent 雪🙂');
+        expect((f.input() as HTMLTextAreaElement).readOnly).toBe(false);
+      }
+      expect(f.host.querySelector('.composer-input-error')).toBeNull();
+      expect(
+        f.calls.filter((call) =>
+          ['conversation.send', 'submit', 'conversation.lookup', 'lookup'].includes(call.method),
+        ),
+      ).toHaveLength(0);
+    } finally {
+      rejectSave?.();
+      await f.close();
+    }
+  });
+
+test('draft feedback reports preparation read failure as a Toast without an inline placeholder and clears after confirmed recovery', async () => {
+  const f = fixture(true, true, 'accept_edits', { withoutSelection: true });
+  const bridge = f.dom.window.kiteNative! as NativeBridge,
+    request = bridge.request;
+  let fail = true;
+  bridge.request = async (input) => {
+    if (input.method === 'draft.read' && input.sessionId === 'new-conversation' && fail)
+      throw Error('draft_storage_unavailable');
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('草稿尚未确认读取');
+    expect(f.host.querySelector('.composer-input-error')).toBeNull();
+    expect((f.input() as HTMLTextAreaElement).readOnly).toBe(true);
+    fail = false;
+    await f.click('Original A');
+    await f.click('新对话');
+    await f.until(() => !!f.input() && !(f.input() as HTMLTextAreaElement).readOnly);
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    expect(
+      f.calls.filter((call) => ['conversation.send', 'submit'].includes(call.method)),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('draft feedback preserves existing annotation validation recovery after a confirmed save', async () => {
+  const { BrowserAnnotationDrafts } = await import('../../src/browser-annotation-drafts');
+  const capture = BrowserAnnotationDrafts.prototype.capture;
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('validation does not remove this text', '当前会话私有草稿');
+    BrowserAnnotationDrafts.prototype.capture = () => {
+      throw Error('browser_notes_not_ready');
+    };
+    await f.click('发送明确的新轮次');
+    expect(f.host.querySelector('.composer-input-error')?.textContent).toContain(
+      '注释快照尚未就绪',
+    );
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(0);
+    BrowserAnnotationDrafts.prototype.capture = capture;
+    await act(async () => f.flushDrafts());
+    expect(f.host.querySelector('.composer-input-error')).toBeNull();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('validation does not remove this text');
+    expect(f.drafts.get('a')).toBe('validation does not remove this text');
+  } finally {
+    BrowserAnnotationDrafts.prototype.capture = capture;
+    await f.close();
+  }
+});
+
+test('draft feedback does not replay an earlier autosave Toast after the explicit send failure is dismissed', async () => {
+  const f = fixture(true),
+    bridge = f.dom.window.kiteNative! as NativeBridge,
+    request = bridge.request;
+  bridge.request = async (input) => {
+    if (input.method === 'draft.write') throw Error('draft_storage_unavailable');
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('unsaved text remains', '当前会话私有草稿');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    });
+    expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('草稿尚未确认保存');
+    await f.click('发送明确的新轮次');
+    expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('消息没有发送');
+    await f.click('关闭提示');
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsaved text remains');
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(0);
   } finally {
     await f.close();
   }

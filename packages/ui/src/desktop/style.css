@@ -8369,3 +8369,61 @@ body {
   margin-left: 8px;
   text-decoration: underline;
 }
+
+.kite-client .nav-label .session-search-trigger {
+  margin-left: auto;
+}
+.kite-client .session-search {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+}
+.kite-client .session-search-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-inline: 8px;
+}
+.kite-client .session-search-feedback {
+  margin: 0;
+  padding-inline: 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .session-search-results {
+  flex: 1;
+  min-height: 0;
+}
+.kite-client .session-search-result {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 48px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  text-align: left;
+}
+.kite-client .session-search-result[aria-selected="true"] {
+  background: var(--control-hover);
+}
+.kite-client .session-search-result :is(strong, small) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .session-search-result strong {
+  font-weight: var(--font-weight-semibold);
+}
+.kite-client .session-search-result small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .session-search-more {
+  width: 100%;
+  font-size: 12px;
+}

@@ -228,6 +228,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'conversation.models.read': [],
   'conversation.branch': ['workspaceId'],
   'conversation.send': [
+    'preparationRevision',
     'attachmentRevision',
     'attachmentSessionId',
     'creation',
@@ -345,9 +346,10 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   cancelInput: ['commandId'],
   lookupPermission: ['commandId'],
   lookupInteraction: ['commandId'],
-  'draft.read': ['sessionId'],
+  'draft.read': ['sessionId', 'workspaceId'],
   'draft.write': [
     'sessionId',
+    'workspaceId',
     'revision',
     'content',
     'browserAnnotations',
@@ -1030,7 +1032,9 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     if (
       fields[method as NativeRequest['method']].includes(key) &&
       !(
-        method.startsWith('input.attachments.') &&
+        (method.startsWith('input.attachments.') ||
+          method === 'draft.read' ||
+          method === 'draft.write') &&
         key === 'workspaceId' &&
         input[key] === undefined
       ) &&
@@ -1358,6 +1362,14 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   if (method === 'permission.trust' && typeof input.trusted !== 'boolean')
     throw Error('invalid_native_request');
   if (method === 'conversation.send') {
+    if (
+      input.preparationRevision !== undefined &&
+      (!Number.isSafeInteger(input.preparationRevision) ||
+        Number(input.preparationRevision) < 0 ||
+        input.draftDocument !== undefined ||
+        input.attachmentSessionId !== undefined)
+    )
+      throw Error('invalid_native_request');
     const creation = record(input.creation);
     if (
       input.attachmentSessionId !== undefined &&
@@ -1766,6 +1778,7 @@ export function registerNativeIpc(options: {
   window: () => BrowserWindow | undefined;
   rendererUrl: string;
   caller: () => Promise<NativeCaller>;
+  assertRequestAllowed?: (request: NativeRequest) => void;
   confirmWorkspaceRemoval?: (label: string) => Promise<boolean>;
   confirmProviderRemoval?: (summary: { label: string; modelCount: number }) => Promise<boolean>;
   openEditor?: (editor: DesktopEditor, path: string, line?: number) => Promise<void>;
@@ -1819,11 +1832,13 @@ export function registerNativeIpc(options: {
     try {
       assertNativeSender(event, options.window(), options.rendererUrl);
       const request = decodeNativeRequest(payload);
+      options.assertRequestAllowed?.(request);
       if (request.method === 'outputs.preview.close') {
         preview?.closeOwned(request.previewId, request.generation);
         return { ok: true, value: null };
       }
       const caller = await options.caller();
+      options.assertRequestAllowed?.(request);
       // Recheck sender after startup/admission awaits; a replaced frame cannot submit work.
       assertNativeSender(event, options.window(), options.rendererUrl);
       if (

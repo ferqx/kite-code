@@ -6,7 +6,7 @@ Native 用户设置通过 [management-transport](management-transport.ts)使用�
 
 connect 只接受 `server_id`，宿主稳定意图绑定原连接。后续模型调用只复制 `connection_ref/resource_ref/prompt_ref`；引用为单个不透明短字符串，只定位原执行与原 descriptor 序号，不重复编码 server、连接 key、配置摘要和代次。当前 UUID 执行的连接引用26字符、资源／prompt引用31字符。Service 准入用原成功回执读取 server，再核当前选择；真正派发前仍由 leaf 核原 Store／Session／Run、实际 owner、结果修订、完整 binding 和准确 descriptor。其他 Tool 的同名业务字段不进入这条引用读取路径。动态 Tool 的 owner 以原已完成 Model 的冻结 `toolBindings` 为准，不因初始 Run 目录尚无该动态定义而误拒绝，也不借今日目录证明历史归属。原回执的派生 `modelBinding` 不授予权限；可信 Actions 继续使用其显式领域合同。
 
-[tools-search](tools-search.ts)只搜索本 Run 实际选入的冻结目录，供 Model 取得准确远端定义；不连接或重新发现，也不把 annotations 当权限。实际选中连接的[资源来源](resource-model-source.ts)只投影有限原身份及 generation，标明不是 authority；Model 动态选入原 resources.list/read，实际读取仍核完整目录 Execution、descriptor digest 和目标 URI。TUI 依据同 Scope 的不可变资源收据展示 URI，资源正文留在正式 Model 结果，不进入普通目录卡片。
+[tools-search](tools-search.ts)只搜索本 Run 实际选入的冻结目录，供 Model 取得准确远端定义；查询按空白分词、不区分大小写，所有词须出现在来源显示名、工具描述、准确可调用模型名、内部定义 ID 或该定义绑定的完整远端名称中。不从截短的模型名重建远端名称，同名远端工具保留各自来源、定义和可调用名。匹配先于原 10／20 项结果限制，256 KiB 响应预算、来源新鲜度、Run／Session 绑定和取消检查保持；[搜索回归](../../test/isolated/mcp/interactive-discovery.test.ts)覆盖上述名称、长名尾部、同名来源、结果限制与失败边界。不连接或重新发现，也不把 annotations 当权限。实际选中连接的[资源来源](resource-model-source.ts)只投影有限原身份及 generation，标明不是 authority；Model 动态选入原 resources.list/read，实际读取仍核完整目录 Execution、descriptor digest 和目标 URI。TUI 依据同 Scope 的不可变资源收据展示 URI，资源正文留在正式 Model 结果，不进入普通目录卡片。
 
 [provider-action](provider-action.ts)给真实父 Tool 提供普通 nested Action 的有限端口。Store 原子核父执行、Actor、root work、所属 Run 与取消关系，热装配保相同权限；冷记录仅观察、不得重建默认执行。OAuth 执行仍在正式 Action／HTTP port，连接、来源批准和认证各自独立核实。
 

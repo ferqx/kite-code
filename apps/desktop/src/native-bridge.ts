@@ -750,6 +750,7 @@ export type NativeRequest =
   | { method: 'conversation.branch'; generation: number; workspaceId: string }
   | {
       method: 'conversation.send';
+      preparationRevision?: number;
       attachmentRevision?: number;
       attachmentSessionId?: string;
       generation: number;
@@ -1098,9 +1099,10 @@ export type NativeRequest =
   | { method: 'draft.list'; generation: number; afterId?: string }
   | { method: 'draft.original'; generation: number; draftId: string }
   | { method: 'lookupCreation'; generation: number; commandId: string }
-  | { method: 'draft.read'; generation: number; sessionId: string }
+  | { method: 'draft.read'; generation: number; sessionId: string; workspaceId?: string }
   | {
       method: 'draft.write';
+      workspaceId?: string;
       outputFiles?: readonly OutputDraftFile[];
       generation: number;
       sessionId: string;
@@ -1221,6 +1223,10 @@ export type NativeResult =
   | null;
 export type NativeReply = { ok: true; value: NativeResult } | { ok: false; code: string };
 export interface NativeBridge {
+  registerDraftFlush?(
+    listener: () => Promise<void>,
+    onStateChange?: (active: boolean) => void,
+  ): () => void;
   presentPreviewLayout?(input: NativePreviewLayoutRequest): void;
   presentPreviewLayoutAsync?(
     input: NativePreviewLayoutRequest,

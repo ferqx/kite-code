@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import type { NativeBrowserTransport } from '@kite-ai/agent/browser';
 import type { AgentClient, SessionView } from '@kite-ai/client';
 import type { WebContents } from 'electron';
@@ -14,10 +15,21 @@ import { createBrowserGrantRequestId } from '../../../service/src/desktop-browse
 import type { BrowserGrantScope, NativeBrowserPageHost } from '../../electron/browser-page-host';
 import type { DevelopmentServiceReload } from '../../electron/development';
 import { createNativeCallerGenerationOwner, NativeCaller } from '../../electron/native-caller';
+import { assertNativeSender } from '../../electron/native-ipc';
 import type { ScheduledTaskClock, ScheduledTaskRunner } from '../../electron/scheduled-task-runner';
 import { createScheduledTaskData } from '../../electron/scheduled-tasks';
 import type { WindowsProfilePermissionIssue } from '../../electron/windows-access';
-import type { NativeCreation, NativeState } from '../../src/native-bridge';
+import type {
+  NativeBridge,
+  NativeCreation,
+  NativeRequest,
+  NativeState,
+} from '../../src/native-bridge';
+import {
+  nativeDraftFlushChannel,
+  nativeDraftFlushReadyChannel,
+  nativeDraftFlushReplyChannel,
+} from '../../src/native-draft-flush-bridge';
 import { memoryPrivateData } from '../private-data.fixture';
 
 type BrowserRegistration = {
@@ -91,6 +103,10 @@ async function mainFixture(
   const presentationFailures = new Set<string>();
   let windowOpenHandler!: Parameters<WebContents['setWindowOpenHandler']>[0];
   const windowMessages: string[] = [];
+  const flushRequests: unknown[] = [];
+  const ipc = new EventEmitter();
+  const rendererIpc = new EventEmitter();
+  let requestGate: ((request: NativeRequest) => void) | undefined;
   let workInspection: Promise<boolean> | undefined;
   let workspaceDecision: ReturnType<typeof deferred<boolean>> | undefined;
   let confirmWorkspaceRemoval!: (label: string) => Promise<boolean>;
@@ -179,6 +195,8 @@ async function mainFixture(
       isDestroyed: () => windowDestroyed,
       send: (channel: string, event?: { kind: string; phase: string }) => {
         windowMessages.push(channel);
+        rendererIpc.emit(channel, {}, event);
+        if (channel === nativeDraftFlushChannel) flushRequests.push(event);
         if (event?.kind === 'lifecycle') lifecyclePhases.push(event.phase);
       },
       setWindowOpenHandler: (handler: typeof windowOpenHandler) => {
@@ -262,6 +280,7 @@ async function mainFixture(
     }
   }
   const fixture = {
+    assertNativeSender,
     errors,
     observeConnection: (connection: Socket) => mainConnection.resolve(connection),
     electron: {
@@ -286,7 +305,12 @@ async function mainFixture(
           throw Error('unexpected_fixture_dialog');
         },
       },
-      ipcMain: {},
+      ipcMain: ipc,
+      session: {
+        fromPartition() {
+          throw Error('fixture_marketplace_not_requested');
+        },
+      },
       Menu: { buildFromTemplate: (template: unknown) => template, setApplicationMenu() {} },
       nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }),
       Tray: FixtureTray,
@@ -319,8 +343,10 @@ async function mainFixture(
     canonicalProtectedPath: (path: string) => path,
     registerNativeIpc: (options: {
       caller: typeof open;
+      assertRequestAllowed?: (request: NativeRequest) => void;
       confirmWorkspaceRemoval: typeof confirmWorkspaceRemoval;
     }) => {
+      requestGate = options.assertRequestAllowed;
       open = options.caller;
       confirmWorkspaceRemoval = options.confirmWorkspaceRemoval;
       registered.resolve();
@@ -512,6 +538,7 @@ async function mainFixture(
         'clipboard',
         'dialog',
         'ipcMain',
+        'session',
         'Menu',
         'nativeTheme',
         'shell',
@@ -533,6 +560,11 @@ async function mainFixture(
     ]),
     './native-caller': exports(['NativeCaller', 'createNativeCallerGenerationOwner']),
     './native-browser': exports(['registerNativeBrowserIpc']),
+    './output-preview': `${prefix}export const registerOutputPreviewScheme = f.register;`,
+    './trajectory-file-ipc': `${prefix}export const registerNativeTrajectoryFileIpc = f.register;`,
+    './trajectory-offline-window': `${prefix}export const createTrajectoryOfflineWindow = f.unused;`,
+    './image-display-host': `${prefix}export const createNativeImageDisplayHost = f.register;`,
+    './native-image-gallery-host': `${prefix}export const createNativeImageGalleryHost = () => ({prewarm() {}, syncTheme() {}, dismiss() {}, active: () => false});`,
     './native-root-window':
       prefix +
       'export const createNativeRootWindow = (...args) => new f.electron.BrowserWindow(...args); export const onNativeRootReady = (window, receive) => { window.once("ready-to-show", receive); return () => window.off("ready-to-show", receive); }; export const nativeRootWindowMenu = () => [];',
@@ -541,7 +573,7 @@ async function mainFixture(
     './windows-access': exports(['loadWindowsAccess']),
     './protected-path': exports(['canonicalProtectedPath']),
     './native-ipc':
-      exports(['registerNativeIpc']) +
+      exports(['registerNativeIpc', 'assertNativeSender']) +
       '\nexport const registerNativeStartupIpc = f.register, registerNativeThemeIpc = f.register, registerNativeModelPreferenceIpc = f.register, registerNativeWindowIpc = f.register;',
     './native-window-menu':
       prefix +
@@ -641,7 +673,56 @@ async function mainFixture(
     get open() {
       return open;
     },
+    requestGate: (method: NativeRequest['method']) => requestGate?.({ method } as NativeRequest),
     registered: registered.promise,
+    flushRequests,
+    async installDraftPreload(
+      listener: () => Promise<void>,
+      onStateChange?: (active: boolean) => void,
+    ) {
+      const built = await Bun.build({
+        entrypoints: [fileURLToPath(new URL('../../electron/preload.ts', import.meta.url))],
+        target: 'node',
+        format: 'cjs',
+        external: ['electron'],
+      });
+      if (!built.success) throw new AggregateError(built.logs, 'fixture_preload_build_failed');
+      const root = { inert: false };
+      let bridge!: NativeBridge;
+      Object.assign(rendererIpc, {
+        send(channel: string, value: unknown) {
+          const sender = windows[0]!.webContents;
+          ipc.emit(channel, { sender, senderFrame: sender.mainFrame }, value);
+        },
+      });
+      runInNewContext(await built.outputs[0]!.text(), {
+        exports: {},
+        module: { exports: {} },
+        document: { getElementById: () => root },
+        require: () => ({
+          ipcRenderer: rendererIpc,
+          webUtils: {},
+          contextBridge: {
+            exposeInMainWorld(name: string, value: NativeBridge) {
+              if (name === 'kiteNative') bridge = value;
+            },
+          },
+        }),
+      });
+      return { root, stop: bridge.registerDraftFlush!(listener, onStateChange) };
+    },
+    flushReady() {
+      const sender = windows[0]!.webContents;
+      ipc.emit(nativeDraftFlushReadyChannel, { sender, senderFrame: sender.mainFrame }, true);
+    },
+    flushReply(nonce: unknown, saved: boolean) {
+      const sender = windows[0]!.webContents;
+      ipc.emit(
+        nativeDraftFlushReplyChannel,
+        { sender, senderFrame: sender.mainFrame },
+        { nonce, saved },
+      );
+    },
     permissionEntered: permissionEntered.promise,
     answerPermission: (response: number) =>
       permissionResult.resolve({ response, checkboxChecked: false }),
@@ -1753,6 +1834,274 @@ for (const mode of ['agent', 'human', 'destroyed'] as const) {
       await transport?.close();
       removePage?.();
       await f.close(expectedExit);
+    }
+  }, 15000);
+}
+
+for (const saved of [true, false]) {
+  test(`Main waits for the exact draft save before quit and ${saved ? 'closes after success' : 'cancels quit on failure without retiring the window'}`, async () => {
+    const f = await mainFixture('none');
+    try {
+      await f.open();
+      f.readyToShow();
+      f.flushReady();
+      f.quit();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(f.windowVisible()).toBe(true);
+      expect(f.lifecyclePhases).toEqual([]);
+      expect(f.services[0]!.closed).toBe(false);
+      expect(f.flushRequests).toHaveLength(1);
+      f.quit();
+      f.flushReply('stale', true);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(f.services[0]!.closed).toBe(false);
+      f.flushReply(f.flushRequests[0], saved);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (saved) {
+        expect(await f.exited).toBe(0);
+        expect(f.lifecyclePhases).toEqual(['quitting']);
+        expect(f.errors).toEqual([]);
+      } else {
+        expect(f.windowVisible()).toBe(true);
+        expect(f.services[0]!.closed).toBe(false);
+        expect(f.lifecyclePhases).toEqual([]);
+        expect(f.exitCodes).toEqual([]);
+        expect(f.errors.splice(0)).toEqual([
+          ['草稿尚未确认保存', '已取消退出。请保留当前窗口，核对草稿保存状态后重试。'],
+        ]);
+        expect(f.flushRequests.at(-1)).toBeNull();
+        f.quit();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        f.flushReply(f.flushRequests.at(-1), true);
+        expect(await f.exited).toBe(0);
+      }
+    } finally {
+      await f.close();
+    }
+  }, 15000);
+}
+
+test('actual Main and preload allow a slow draft save beyond one second before retiring the window', async () => {
+  const f = await mainFixture('none');
+  const saving = deferred();
+  const states: boolean[] = [];
+  let preload: Awaited<ReturnType<typeof f.installDraftPreload>> | undefined;
+  try {
+    await f.open();
+    f.readyToShow();
+    preload = await f.installDraftPreload(
+      () => {
+        expect(states).toEqual([true]);
+        return saving.promise;
+      },
+      (active) => states.push(active),
+    );
+    f.quit();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(preload.root.inert).toBe(true);
+    expect(states).toEqual([true]);
+    expect(f.windowVisible()).toBe(true);
+    expect(f.lifecyclePhases).toEqual([]);
+    expect(f.errors).toEqual([]);
+    saving.resolve();
+    expect(await f.exited).toBe(0);
+    expect(f.lifecyclePhases).toEqual(['quitting']);
+    expect(states).toEqual([true]);
+  } finally {
+    preload?.stop();
+    if (preload) expect(states).toEqual([true, false]);
+    await f.close();
+  }
+}, 15000);
+
+for (const lateOriginal of [false, true]) {
+  test(`actual Main and preload retire a timed-out save attempt and retry safely with ${lateOriginal ? 'late old success then a failed newer save' : 'an original save that never settles'}`, async () => {
+    const f = await mainFixture('none');
+    const old = deferred();
+    const retry = deferred();
+    let calls = 0;
+    const states: boolean[] = [];
+    let preload: Awaited<ReturnType<typeof f.installDraftPreload>> | undefined;
+    try {
+      await f.open();
+      f.readyToShow();
+      preload = await f.installDraftPreload(
+        () => {
+          calls++;
+          return calls === 1
+            ? old.promise
+            : calls === 2 && lateOriginal
+              ? retry.promise
+              : Promise.resolve();
+        },
+        (active) => states.push(active),
+      );
+      f.quit();
+      await new Promise((resolve) => setTimeout(resolve, 5150));
+      expect(calls).toBe(1);
+      expect(states).toEqual([true, false]);
+      expect(preload.root.inert).toBe(false);
+      expect(f.windowVisible()).toBe(true);
+      expect(f.services[0]!.closed).toBe(false);
+      expect(f.lifecyclePhases).toEqual([]);
+      expect(f.errors.splice(0)).toEqual([
+        ['草稿尚未确认保存', '已取消退出。请保留当前窗口，核对草稿保存状态后重试。'],
+      ]);
+      f.quit();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toBe(2);
+      expect(states).toEqual([true, false, true]);
+      if (lateOriginal) {
+        old.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(f.exitCodes).toEqual([]);
+        expect(states).toEqual([true, false, true]);
+        expect(preload.root.inert).toBe(true);
+        expect(f.lifecyclePhases).toEqual([]);
+        retry.reject(Error('draft_revision_conflict'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(preload.root.inert).toBe(false);
+        expect(states).toEqual([true, false, true, false]);
+        expect(f.windowVisible()).toBe(true);
+        expect(f.errors.splice(0)).toEqual([
+          ['草稿尚未确认保存', '已取消退出。请保留当前窗口，核对草稿保存状态后重试。'],
+        ]);
+        f.quit();
+      }
+      expect(await f.exited).toBe(0);
+      expect(calls).toBe(lateOriginal ? 3 : 2);
+      expect(states).toEqual(lateOriginal ? [true, false, true, false, true] : [true, false, true]);
+      expect(f.lifecyclePhases).toEqual(['quitting']);
+    } finally {
+      preload?.stop();
+      if (preload)
+        expect(states).toEqual(
+          lateOriginal ? [true, false, true, false, true, false] : [true, false, true, false],
+        );
+      await f.close();
+    }
+  }, 15000);
+}
+
+for (const succeeds of [true, false]) {
+  test(`actual Main and preload admit bounded attachment preparation while saving but never business requests; ${succeeds ? 'success closes all admission' : 'failure preserves the original editable window'}`, async () => {
+    const f = await mainFixture('none');
+    const saving = deferred();
+    let preload: Awaited<ReturnType<typeof f.installDraftPreload>> | undefined;
+    const staging = [
+      'input.images.begin',
+      'input.images.append',
+      'input.images.finish',
+      'input.images.release',
+      'input.files.begin',
+      'input.files.append',
+      'input.files.finish',
+      'input.files.release',
+    ] as const;
+    const persistence = [
+      'draft.read',
+      'draft.write',
+      'input.attachments.read',
+      'input.attachments.write',
+      'input.attachments.move',
+    ] as const;
+    const business = [
+      'submit',
+      'conversation.send',
+      'select',
+      'input.files.fromOutput',
+      'input.attachments.preview',
+      'permission.mode',
+      'permission.trust',
+      'caller.submit',
+      'attach',
+    ] as const;
+    try {
+      await f.open();
+      f.readyToShow();
+      const postsBefore = [...f.posts];
+      preload = await f.installDraftPreload(() => saving.promise);
+      f.quit();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(preload.root.inert).toBe(true);
+      expect(f.windowVisible()).toBe(true);
+      expect(f.services[0]!.closed).toBe(false);
+      for (const method of [...staging, ...persistence])
+        expect(() => f.requestGate(method)).not.toThrow();
+      for (const method of business) expect(() => f.requestGate(method)).toThrow('native_draining');
+      expect(f.posts).toEqual(postsBefore);
+      if (succeeds) {
+        saving.resolve();
+        expect(await f.exited).toBe(0);
+        for (const method of [...staging, ...persistence, ...business])
+          expect(() => f.requestGate(method)).toThrow('native_draining');
+      } else {
+        saving.reject(Error('attachment_draft_unavailable'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(preload.root.inert).toBe(false);
+        expect(f.windowVisible()).toBe(true);
+        expect(f.services[0]!.closed).toBe(false);
+        expect(f.lifecyclePhases).toEqual([]);
+        expect(f.exitCodes).toEqual([]);
+        expect(f.errors.splice(0)).toEqual([
+          ['草稿尚未确认保存', '已取消退出。请保留当前窗口，核对草稿保存状态后重试。'],
+        ]);
+        for (const method of [...staging, ...persistence, ...business])
+          expect(() => f.requestGate(method)).not.toThrow();
+      }
+    } finally {
+      preload?.stop();
+      await f.close();
+    }
+  }, 15000);
+}
+
+for (const saved of [true, false]) {
+  test(`actual Main and preload isolate a throwing presentation observer from ${saved ? 'saving and success ACK' : 'failure ACK and cancellation release'}`, async () => {
+    const f = await mainFixture('none');
+    const saving = deferred();
+    const states: boolean[] = [];
+    let calls = 0;
+    let preload: Awaited<ReturnType<typeof f.installDraftPreload>> | undefined;
+    try {
+      await f.open();
+      f.readyToShow();
+      preload = await f.installDraftPreload(
+        () => {
+          calls++;
+          return saving.promise;
+        },
+        (active) => {
+          states.push(active);
+          throw Error('presentation_observer_failed');
+        },
+      );
+      f.quit();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toBe(1);
+      expect(states).toEqual([true]);
+      expect(preload.root.inert).toBe(true);
+      if (saved) {
+        saving.resolve();
+        expect(await f.exited).toBe(0);
+        expect(states).toEqual([true]);
+      } else {
+        saving.reject(Error('draft_save_failed'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(states).toEqual([true, false]);
+        expect(preload.root.inert).toBe(false);
+        expect(f.windowVisible()).toBe(true);
+        expect(f.exitCodes).toEqual([]);
+        expect(f.errors.splice(0)).toEqual([
+          ['草稿尚未确认保存', '已取消退出。请保留当前窗口，核对草稿保存状态后重试。'],
+        ]);
+      }
+      expect(() => preload!.stop()).not.toThrow();
+      expect(states).toEqual(saved ? [true, false] : [true, false, false]);
+      preload = undefined;
+    } finally {
+      preload?.stop();
+      await f.close();
     }
   }, 15000);
 }

@@ -80,12 +80,16 @@ export function createMcpToolsSearchTool(
           continue;
         }
         for (const tool of source.tools) {
-          if (
-            !words.every((word) =>
-              `${source.label} ${tool.description}`.toLocaleLowerCase('en-US').includes(word),
-            )
-          )
-            continue;
+          const searchable = [
+            source.label,
+            tool.description,
+            tool.model?.name ?? tool.id,
+            tool.id,
+            source.names?.get(tool.id) ?? '',
+          ]
+            .join(' ')
+            .toLocaleLowerCase('en-US');
+          if (!words.every((word) => searchable.includes(word))) continue;
           const row = {
             serverId: source.serverId,
             serverName: source.label,

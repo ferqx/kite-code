@@ -369,6 +369,73 @@ try {
   assert.equal(removed.revision, edited.revision + 1);
   assert.equal(composeBrowserDraft(removed), edited.content);
   checked.push('legacy-excel-draft-read-preserve-and-explicit-remove');
+  const preparationScope = {
+    storeId: 'store',
+    workspaceId: 'new-conversation',
+    rootSessionId: 'new-conversation',
+  };
+  const preparedText = '准备正文 雪🙂\r\n\n';
+  const preparation = data.save(preparationScope, 0, preparedText);
+  close();
+  data = await open();
+  assert.equal(data.read(preparationScope).content, preparedText);
+  assert.equal(data.read({ ...preparationScope, storeId: 'other-store' }).content, '');
+  checked.push('preparation-cold-single-composer-store-isolation');
+  const preparationTarget = data.save(
+    { ...preparationScope, workspaceId: 'actual-workspace', rootSessionId: 'preparation-target' },
+    0,
+    preparedText,
+  );
+  data.consumePreparation!(preparation.revision, preparationTarget, 'prepare-first');
+  assert.equal(data.read(preparationScope).content, '');
+  assert.deepEqual(data.read(preparationScope).consumedFrom, {
+    commandId: 'prepare-first',
+    revision: preparation.revision,
+  });
+  assert.equal(data.readId(preparationTarget.id).content, preparedText);
+  close();
+  data = await open();
+  assert.equal(data.read(preparationScope).content, '');
+  assert.equal(data.readId(preparationTarget.id).content, preparedText);
+  checked.push('preparation-exact-handoff-cold');
+  const nextPreparation = data.save(
+    preparationScope,
+    data.read(preparationScope).revision,
+    preparedText,
+  );
+  const laterPreparation = data.save(
+    preparationScope,
+    nextPreparation.revision,
+    'newer unsent edit',
+  );
+  data.consumePreparation!(nextPreparation.revision, preparationTarget, 'prepare-late');
+  assert.equal(data.read(preparationScope).content, laterPreparation.content);
+  assert.equal(data.read(preparationScope).revision, laterPreparation.revision);
+  checked.push('preparation-newer-edit-not-consumed');
+  const changedTarget = data.save(
+    { ...preparationScope, workspaceId: 'actual-workspace', rootSessionId: 'preparation-target' },
+    preparationTarget.revision,
+    'new target edit',
+  );
+  assert.throws(
+    () =>
+      data.consumePreparation!(
+        laterPreparation.revision,
+        preparationTarget,
+        'prepare-stale-target',
+      ),
+    /draft_revision_conflict/,
+  );
+  assert.equal(data.read(preparationScope).content, laterPreparation.content);
+  assert.equal(data.readId(changedTarget.id).content, changedTarget.content);
+  checked.push('preparation-stale-target-fails-without-clearing');
+  assert.throws(
+    () =>
+      data.consumePreparation!(laterPreparation.revision, changedTarget, 'prepare-wrong-content'),
+    /draft_content_mismatch/,
+  );
+  assert.equal(data.read(preparationScope).content, laterPreparation.content);
+  checked.push('preparation-content-mismatch-retains-source');
   console.log(JSON.stringify({ checked }));
 } finally {
   close();

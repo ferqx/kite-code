@@ -3791,8 +3791,45 @@ export class NativeCaller {
       }
       case 'draft.read':
       case 'draft.write': {
+        if (request.sessionId === 'new-conversation') {
+          const observed = this.workspaceObservation;
+          const storeId = this.client.serverInfo?.storeId;
+          if (
+            !storeId ||
+            this.observationUnavailable ||
+            observed?.generation !== generation ||
+            observed.storeId !== storeId ||
+            (request.workspaceId !== undefined &&
+              !observed.workspaces.some((workspace) => workspace.id === request.workspaceId))
+          )
+            throw new ClientError('draft_association_unavailable');
+          // Preparation text follows the composer across workspace choices; attachments
+          // retain their separate per-workspace owner and never share this draft scope.
+          const scope = {
+            storeId,
+            workspaceId: 'new-conversation',
+            rootSessionId: 'new-conversation',
+          };
+          if (
+            request.method === 'draft.write' &&
+            (request.browserAnnotations?.length ||
+              request.outputFiles?.length ||
+              request.annotationImageOffset)
+          )
+            throw new ClientError('draft_association_unavailable');
+          result =
+            request.method === 'draft.read'
+              ? this.requirePrivateData().read(scope)
+              : this.requirePrivateData().save(scope, request.revision, request.content);
+          break;
+        }
         const originalSelection = this.selection;
         const snapshot = this.writableScope(request.sessionId);
+        if (
+          request.workspaceId !== undefined &&
+          request.workspaceId !== snapshot.view.session.workspaceId
+        )
+          throw new ClientError('draft_association_unavailable');
         if (snapshot.view.session.deletedAt !== null)
           throw new ClientError('draft_association_unavailable');
         const scope = {
