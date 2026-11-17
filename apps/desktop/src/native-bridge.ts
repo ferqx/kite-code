@@ -108,6 +108,7 @@ import type {
 
 export type * from './background-bridge';
 export type * from './file-changes-bridge';
+export type * from './input-images-bridge';
 export type * from './input-queue-bridge';
 export type * from './interaction-history-bridge';
 export type * from './job-output-bridge';
@@ -204,6 +205,8 @@ export type NativeCallerRecord = {
   phase: 'submitting' | 'unknown' | 'accepted' | 'applied' | 'rejected';
 };
 export type NativeCallerMetadata = Omit<NativeCallerIntent, 'request'> & {
+  attachmentRecovery?: import('./input-images-bridge').NativeAttachmentRecovery;
+  attachmentDraft?: { sessionId: string; workspaceId: string; revision: number; ids: string[] };
   request: Pick<NativeCallerCommandRequest, 'kind' | 'commandId' | 'expectedStoreId'> & {
     queuedInputCommandId?: string;
   };
@@ -539,6 +542,7 @@ export type NativeWorkspaceRemoval = {
   error?: string;
 };
 export type NativeState = {
+  readonly pendingAttachmentDrafts?: boolean;
   /** Main-owned paired Service shares this computer; not a permission grant. */
   readonly localFileReferences?: boolean;
   readonly workspaceRemovalSubmissions?: readonly NativeWorkspaceRemoval[];
@@ -746,6 +750,8 @@ export type NativeRequest =
   | { method: 'conversation.branch'; generation: number; workspaceId: string }
   | {
       method: 'conversation.send';
+      attachmentRevision?: number;
+      attachmentSessionId?: string;
       generation: number;
       creation: NativeCreation['input'];
       intent: StartCommandRequest;
@@ -1053,6 +1059,7 @@ export type NativeRequest =
     }
   | {
       method: 'submit';
+      attachmentRevision?: number;
       officeDocument?: BrowserDraftDocument;
       generation: number;
       sessionId: string;

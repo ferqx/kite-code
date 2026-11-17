@@ -684,6 +684,26 @@ test('file picker explains an unloaded host, preserves the draft and keeps ordin
   expect(sends).toBe(0);
 });
 
+async function dismissAttachmentLimit(message: string, useEscape = false) {
+  const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]');
+  expect(dialog?.textContent).toContain('无法添加附件');
+  expect(dialog?.textContent).toContain(message);
+  const close = [...dialog!.querySelectorAll('button')].find(
+    (button) => button.textContent === '知道了',
+  )!;
+  expect(document.activeElement).toBe(close);
+  if (useEscape)
+    await act(async () =>
+      close.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+  else await act(async () => close.click());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  expect(document.activeElement).toBe(document.querySelector('[role="textbox"]'));
+}
+
 test('the unified entry limits image counts before dispatch, including mixed selections, repeated paste and drop; removing a picture restores capacity', async () => {
   let batches = 0,
     references = 0;
@@ -713,7 +733,7 @@ test('the unified entry limits image counts before dispatch, including mixed sel
   await selectFiles([...Array<File>(11).fill(image), pdf]);
   expect(batches).toBe(0);
   expect(references).toBe(0);
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('10 张');
+  await dismissAttachmentLimit('10 张');
   await chooseAttachment('添加文件');
   await selectFiles(Array<File>(10).fill(image));
   expect(batches).toBe(1);
@@ -729,14 +749,14 @@ test('the unified entry limits image counts before dispatch, including mixed sel
   Object.defineProperty(drop, 'dataTransfer', { value: { files: [image], types: ['Files'] } });
   await act(async () => editor.dispatchEvent(drop));
   expect(batches).toBe(1);
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('10 张');
+  await dismissAttachmentLimit('10 张');
   await render(<Composer {...props} images={images.slice(1)} />);
   await act(async () => editor.dispatchEvent(new Clipboard('', [image])));
   expect(batches).toBe(2);
   expect(editor.value).toBe('原文');
 });
 
-test('attachment system failures go only to the chosen host while size validation and draft remain local', async () => {
+test('attachment system failures use host feedback while size limits open a dismissible dialog and retain the draft', async () => {
   const inherited: string[] = [],
     explicit: string[] = [];
   let code = 'file_picker_restart_required';
@@ -773,9 +793,8 @@ test('attachment system failures go only to the chosen host while size validatio
   code = 'input_file_too_large';
   await chooseAttachment('添加文件');
   await selectFiles([file]);
-  expect(document.querySelector('[role="alert"]')?.textContent).toBe(
-    '文件超过 256 MiB，请缩小后重试。',
-  );
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+  await dismissAttachmentLimit('文件超过 256 MiB，请缩小后重试。');
   expect(explicit).toHaveLength(2);
   expect(document.querySelector<HTMLTextAreaElement>('[role="textbox"]')?.value).toBe('原草稿');
 });
@@ -856,4 +875,126 @@ test.each([
   expect(document.querySelector('[role="alert"]')).toBeNull();
   await render(<Composer {...props} />);
   expect(document.querySelector<HTMLTextAreaElement>('[role="textbox"]')?.value).toBe('保留草稿');
+});
+
+test('mixed selection preflights every file before preparation and repeats host checks before adoption', async () => {
+  const errors: string[] = [];
+  let references = 0,
+    adopted = 0,
+    images = 0,
+    checks = 0;
+  let rejectLater = false;
+  const props = {
+    scopeKey: 'preflight',
+    draft: '保留草稿',
+    disabled: false,
+    active: false,
+    stopping: false,
+    onChange: () => {},
+    onError: (message: string) => errors.push(message),
+    onImageFiles: () => {
+      images++;
+    },
+    onFilesSelected: () => {
+      adopted++;
+    },
+    onFileReferences: async () => {
+      references++;
+      rejectLater = true;
+      return [{ name: 'a.txt', uri: 'file:///a.txt' }];
+    },
+    onValidateAttachments: () => {
+      checks++;
+      if (rejectLater)
+        throw Object.assign(Error('budget'), {
+          validationMessage: '待发送图片总量超过 64 MiB，请移除部分图片后重试。',
+        });
+    },
+  };
+  const image = new dom.window.File(['png'], 'a.png', { type: 'image/png' }) as unknown as File;
+  const file = new dom.window.File(['txt'], 'a.txt') as unknown as File;
+  const large = new dom.window.File(['txt'], 'large.txt') as unknown as File;
+  Object.defineProperty(large, 'size', { value: 256 * 1024 * 1024 + 1 });
+  await render(<Composer {...props} />);
+  await chooseAttachment('添加文件');
+  await selectFiles([image, file, large]);
+  expect(references).toBe(0);
+  expect(adopted).toBe(0);
+  expect(images).toBe(0);
+  await dismissAttachmentLimit('256 MiB', false);
+  const hugeImage = new dom.window.File(['png'], 'large.png', {
+    type: 'image/png',
+  }) as unknown as File;
+  Object.defineProperty(hugeImage, 'size', { value: 16 * 1024 * 1024 + 1 });
+  const editor = document.querySelector<HTMLTextAreaElement>('[role="textbox"]')!;
+  await act(async () => editor.dispatchEvent(new Clipboard('', [file, hugeImage])));
+  await dismissAttachmentLimit('16 MiB', true);
+  expect(references).toBe(0);
+  const drop = new dom.window.Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(drop, 'dataTransfer', {
+    value: { files: [image, large], types: ['Files'] },
+  });
+  await act(async () => editor.dispatchEvent(drop));
+  await dismissAttachmentLimit('256 MiB', false);
+  expect(references).toBe(0);
+  await chooseAttachment('添加文件');
+  await selectFiles([image, file]);
+  expect(errors).toEqual([]);
+  expect(checks).toBe(2);
+  expect(references).toBe(1);
+  expect(adopted).toBe(0);
+  expect(images).toBe(0);
+  await dismissAttachmentLimit('64 MiB', false);
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+  expect(editor.value).toBe('保留草稿');
+  await render(
+    <Composer
+      {...props}
+      files={Array.from({ length: 128 }, (_, i) => ({
+        id: String(i),
+        name: `${i}.txt`,
+        uri: `file:///${i}.txt`,
+      }))}
+    />,
+  );
+  await chooseAttachment('添加文件');
+  await selectFiles([image, file]);
+  await dismissAttachmentLimit('128', false);
+  expect(references).toBe(1);
+  expect(adopted).toBe(0);
+  expect(images).toBe(0);
+  expect(document.querySelectorAll('.composer-attachment-remove')).toHaveLength(0);
+});
+
+test('attachment validation dialog is retired on scope change or hiding without carrying its error or moving focus', async () => {
+  const props = {
+    scopeKey: 'a',
+    draft: '原草稿',
+    disabled: false,
+    active: false,
+    stopping: false,
+    onChange: () => {},
+    onImageFiles: () => {
+      throw Error('must not adopt');
+    },
+  };
+  const image = new dom.window.File(['png'], 'large.png', { type: 'image/png' }) as unknown as File;
+  Object.defineProperty(image, 'size', { value: 16 * 1024 * 1024 + 1 });
+  await render(<Composer {...props} />);
+  await chooseAttachment('添加文件');
+  await selectFiles([image]);
+  expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  await render(<Composer {...props} scopeKey="b" draft="另一个草稿" />);
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  const editor = document.querySelector<HTMLTextAreaElement>('[role="textbox"]')!;
+  expect(editor.value).toBe('另一个草稿');
+  expect(document.activeElement).not.toBe(editor);
+  await chooseAttachment('添加文件');
+  await selectFiles([image]);
+  expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  await render(<Composer {...props} scopeKey="b" promptHidden />);
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  await render(<Composer {...props} scopeKey="b" />);
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
 });

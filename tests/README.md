@@ -1,5 +1,7 @@
 # 测试体系
 
+[客户端交互验收适用项](../docs/development/subsystems/clients.md#交互变更验收)。
+
 ## 类型检查
 
 `bun run typecheck` 使用 Bun 1.4.4，以 `bun check -b -p tsconfig.typecheck.json` 单进程检查原根和精确十 workspace；[聚合配置](../tsconfig.typecheck.json)不覆盖项目设置，各包独立检查与[原 runner](../scripts/run-runtime-workspace-script.ts)保留。开发要求见[本地开发](../docs/development/local-development.md)。此前 2026-11-04，Windows x64、源码基线 `4f29be4e0` 加上一轮迁移改动，逐配置对照 `tsc --listFilesOnly -p <config>` 与 `bun check --listFilesOnly -p <config>`：排除外部依赖和检查器自带标准库后，仓库文件及本地声明的导入闭包完全相同。原九份 tsconfig 与严格选项未修改；相同文件范围不表示 TypeScript 5.9.3 和 Bun 内置 7.0.2 的标准库或诊断语义完全相同。

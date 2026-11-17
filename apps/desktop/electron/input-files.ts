@@ -121,6 +121,51 @@ export class NativeInputFiles {
       throw new ClientError('native_file_incomplete');
     draft.hash ??= draft.digest.digest('hex');
   }
+  snapshot(id: string) {
+    const draft = this.drafts.get(id);
+    if (!draft?.hash) throw new ClientError('native_file_missing');
+    return {
+      id,
+      kind: 'file' as const,
+      name: draft.name,
+      mediaType: draft.mediaType,
+      size: draft.size,
+      hash: draft.hash,
+      state: 'ready' as const,
+      chunks: draft.chunks,
+    };
+  }
+  restore(
+    item: { id: string; name: string; mediaType: string; size: number; hash: string },
+    chunks: readonly Uint8Array[],
+  ) {
+    const existing = this.drafts.get(item.id);
+    if (existing) {
+      if (
+        !existing.hash ||
+        existing.hash !== item.hash ||
+        existing.size !== item.size ||
+        existing.name !== item.name ||
+        existing.mediaType !== item.mediaType
+      )
+        throw new ClientError('native_file_invalid');
+      return;
+    }
+    this.begin({ id: item.id, name: item.name, mediaType: item.mediaType, size: item.size });
+    try {
+      let offset = 0;
+      for (const chunk of chunks) {
+        this.append(item.id, offset, chunk);
+        offset += chunk.byteLength;
+      }
+      this.finish(item.id);
+      if (this.drafts.get(item.id)?.hash !== item.hash)
+        throw new ClientError('native_file_invalid');
+    } catch (error) {
+      this.release(item.id);
+      throw error;
+    }
+  }
   async publish(
     client: AgentClient,
     storeId: string,

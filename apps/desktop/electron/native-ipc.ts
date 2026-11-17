@@ -108,6 +108,10 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'input.queue.reorder': ['observationId', 'commandIds'],
   'input.queue.lookup': ['commandId'],
   'input.queue.ack': ['commandId'],
+  'input.attachments.read': ['sessionId', 'workspaceId'],
+  'input.attachments.move': ['sessionId', 'workspaceId', 'revision', 'targetRevision'],
+  'input.attachments.write': ['sessionId', 'workspaceId', 'revision', 'attachments'],
+  'input.attachments.preview': ['sessionId', 'workspaceId', 'id', 'offset'],
   'input.images.begin': ['id', 'name', 'mediaType', 'size', 'hash'],
   'input.files.begin': ['id', 'name', 'mediaType', 'size'],
   'input.files.append': ['id', 'offset', 'data'],
@@ -224,6 +228,8 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'conversation.models.read': [],
   'conversation.branch': ['workspaceId'],
   'conversation.send': [
+    'attachmentRevision',
+    'attachmentSessionId',
     'creation',
     'intent',
     'draftLineEndings',
@@ -316,7 +322,15 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'messages.close': ['readId'],
   'messages.text': ['viewSelection', 'historyEpoch', 'messageId', 'offset'],
   'execution.result': ['viewSelection', 'historyEpoch', 'executionId', 'resultRevision'],
-  submit: ['sessionId', 'intent', 'draft', 'imageIds', 'fileIds', 'officeDocument'],
+  submit: [
+    'sessionId',
+    'intent',
+    'draft',
+    'imageIds',
+    'fileIds',
+    'officeDocument',
+    'attachmentRevision',
+  ],
   'caller.prepare': ['sessionId', 'intent', 'draft'],
   'caller.submit': ['commandId'],
   'caller.lookup': ['commandId'],
@@ -540,6 +554,69 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     !isSkillMarketplaceUninstallSelection(input.selection)
   )
     throw Error('invalid_skill_marketplace_selection');
+  const resourceId = (value: unknown) =>
+    typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+  if (
+    input.attachmentRevision !== undefined &&
+    (!['submit', 'conversation.send'].includes(method) ||
+      !Number.isSafeInteger(input.attachmentRevision) ||
+      Number(input.attachmentRevision) < 0)
+  )
+    throw Error('invalid_native_request');
+  if (method.startsWith('input.attachments.')) {
+    if (
+      method === 'input.attachments.move' &&
+      (input.sessionId === 'new-conversation' ||
+        !resourceId(input.workspaceId) ||
+        !Number.isSafeInteger(input.targetRevision) ||
+        Number(input.targetRevision) < 0)
+    )
+      throw Error('invalid_native_request');
+    if (input.sessionId === 'new-conversation' && !resourceId(input.workspaceId))
+      throw Error('invalid_native_request');
+    if (
+      method === 'input.attachments.preview' &&
+      (!resourceId(input.id) || !Number.isSafeInteger(input.offset) || Number(input.offset) < 0)
+    )
+      throw Error('invalid_native_request');
+    if (method === 'input.attachments.write') {
+      if (!Array.isArray(input.attachments) || input.attachments.length > 128)
+        throw Error('invalid_native_request');
+      const ids = new Set();
+      for (const raw of input.attachments) {
+        const item = record(raw);
+        exact(item, ['id', 'kind', 'name', 'state', 'mediaType', 'size', 'hash', 'uri', 'error']);
+        if (
+          !resourceId(item.id) ||
+          ids.has(item.id) ||
+          !['image', 'file', 'reference'].includes(String(item.kind)) ||
+          typeof item.name !== 'string' ||
+          !item.name ||
+          item.name.length > 512 ||
+          (item.state !== undefined && !['ready', 'error'].includes(String(item.state))) ||
+          (item.mediaType !== undefined &&
+            (typeof item.mediaType !== 'string' || item.mediaType.length > 256)) ||
+          (item.size !== undefined &&
+            (!Number.isSafeInteger(item.size) ||
+              Number(item.size) < 0 ||
+              Number(item.size) > 256 * 1024 * 1024)) ||
+          (item.hash !== undefined &&
+            (typeof item.hash !== 'string' || !/^[a-f0-9]{64}$/.test(item.hash))) ||
+          (item.error !== undefined && (typeof item.error !== 'string' || item.error.length > 1024))
+        )
+          throw Error('invalid_native_request');
+        if (item.kind === 'reference') {
+          try {
+            if (typeof item.uri !== 'string' || item.uri.length > 32768 || !fileURLToPath(item.uri))
+              throw Error();
+          } catch {
+            throw Error('invalid_native_request');
+          }
+        } else if (item.uri !== undefined) throw Error('invalid_native_request');
+        ids.add(item.id);
+      }
+    }
+  }
   if (method.startsWith('input.files.')) {
     if (typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.id))
       throw Error('invalid_native_request');
@@ -953,6 +1030,11 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     if (
       fields[method as NativeRequest['method']].includes(key) &&
       !(
+        method.startsWith('input.attachments.') &&
+        key === 'workspaceId' &&
+        input[key] === undefined
+      ) &&
+      !(
         method === 'messages' &&
         (key === 'readId' || key === 'expectedStoreId') &&
         input[key] === undefined
@@ -1020,8 +1102,6 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     !['diff', 'snapshot'].includes(String(input.view))
   )
     throw Error('invalid_native_request');
-  const resourceId = (value: unknown) =>
-    typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
   if (
     (method === 'fileChanges.list' ||
       method === 'fileTargets.list' ||
@@ -1279,6 +1359,11 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (method === 'conversation.send') {
     const creation = record(input.creation);
+    if (
+      input.attachmentSessionId !== undefined &&
+      (input.attachmentSessionId !== creation.sessionId || input.attachmentRevision === undefined)
+    )
+      throw Error('invalid_native_request');
     if (input.draftLineEndings !== undefined) {
       const intent = record(input.intent);
       if (

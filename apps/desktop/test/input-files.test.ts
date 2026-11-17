@@ -146,3 +146,25 @@ test('Native file IPC accepts only bounded byte chunks; release retains in-fligh
   ).not.toThrow();
   await files.close();
 });
+
+test('cold file restore streams bytes before assigning the verified completed digest', () => {
+  const source = new NativeInputFiles();
+  const restored = new NativeInputFiles();
+  const bytes = Uint8Array.from([1, 2, 3, 4]);
+  source.begin({ id: 'restored-file', name: 'original.txt', mediaType: 'text/plain', size: 4 });
+  source.append('restored-file', 0, bytes);
+  source.finish('restored-file');
+  const { chunks, ...saved } = source.snapshot('restored-file');
+  restored.restore(saved, chunks);
+  expect(restored.snapshot('restored-file')).toEqual({ ...saved, chunks });
+  restored.restore(saved, chunks);
+  expect(() => restored.restore({ ...saved, hash: '0'.repeat(64) }, chunks)).toThrow(
+    'native_file_invalid',
+  );
+  const empty = new NativeInputFiles();
+  source.begin({ id: 'empty-file', name: 'empty.txt', mediaType: 'text/plain', size: 0 });
+  source.finish('empty-file');
+  const { chunks: none, ...zero } = source.snapshot('empty-file');
+  empty.restore(zero, none);
+  expect(empty.snapshot('empty-file')).toEqual({ ...zero, chunks: [] });
+});

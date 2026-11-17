@@ -61,6 +61,11 @@ import {
   parseNativeQueueRecord,
 } from './native-input-queue-journal';
 import {
+  createPendingAttachments,
+  type NativePendingAttachmentData,
+  pendingAttachmentSchemas,
+} from './pending-attachments';
+import {
   attachDesktopProfileAccess,
   type DesktopProfileAccess,
   prepareWindowsPrivateUi,
@@ -87,6 +92,7 @@ export type PrivateData = NativeScheduledTaskData &
   WorkspaceRemovalData &
   NativeFileRecoveryJournal &
   NativeAnswerData & {
+    attachments?: NativePendingAttachmentData;
     officeEditorRoot?(): string;
     officeEditorStorage?(): WindowsOfficeStorage | undefined;
     readTurns(storeId: string): [string, string][];
@@ -222,7 +228,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       version !== 9 &&
       version !== 10 &&
       version !== 11 &&
-      version !== 12
+      version !== 12 &&
+      version !== 13
     )
       failure();
     if (
@@ -279,6 +286,14 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         ...(version >= 11 ? ['input_queue_intents'] : []),
         'mcp_intents',
         'model_routes',
+        ...(version >= 13
+          ? [
+              'pending_attachment_chunks',
+              'pending_attachment_commands',
+              'pending_attachment_deleted_sessions',
+              'pending_attachment_drafts',
+            ]
+          : []),
         'recovery_intents',
         ...(version >= 10 ? ['scheduled_task_runs', 'scheduled_tasks'] : []),
         ...(version >= 12 ? ['session_read_turns'] : []),
@@ -343,6 +358,15 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           failure();
       }
     }
+    if (version >= 13)
+      for (const schema of pendingAttachmentSchemas) {
+        const name = schema.split(' ')[2]!.split('(')[0]!;
+        if (
+          db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(name)
+            ?.sql !== schema
+        )
+          failure();
+      }
     db.prepare('SELECT command_id,state FROM recovery_intents LIMIT 0').all();
     if (
       db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='mcp_intents'").get()
@@ -818,7 +842,27 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     rememberConsumption(consumed);
     return withConsumption(result);
   };
+  const attachments = createPendingAttachments(database, transaction, () => {
+    const version = Number(database().prepare('PRAGMA user_version').get()!.user_version);
+    if (version >= 13) return;
+    if (version < 8)
+      database().exec(
+        'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+      );
+    if (version < 10) for (const schema of scheduledTaskSchemas) database().exec(schema);
+    if (version < 11)
+      database().exec(
+        'CREATE TABLE input_queue_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+      );
+    if (version < 12)
+      database().exec(
+        'CREATE TABLE session_read_turns(store_id TEXT NOT NULL,session_id TEXT NOT NULL,run_id TEXT NOT NULL,status TEXT NOT NULL,PRIMARY KEY(store_id,session_id))',
+      );
+    for (const schema of pendingAttachmentSchemas) database().exec(schema);
+    database().exec('PRAGMA user_version=13');
+  });
   const port: PrivateData = {
+    attachments,
     officeEditorStorage() {
       database();
       return process.platform === 'win32' ? windowsOfficeStorage(access) : undefined;
@@ -1340,6 +1384,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         if (!old) throw Error('caller_intent_missing');
         if (['applied', 'rejected'].includes(old.phase)) {
           consumed = consumeDraft(old);
+          attachments.consume(old);
           return old;
         }
         const value = validateCallerRecord({ ...old, phase });
@@ -1360,6 +1405,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           .prepare('UPDATE caller_intents SET state=? WHERE command_id=?')
           .run(JSON.stringify(value), commandId);
         consumed = consumeDraft(value);
+        attachments.consume(value);
         return value;
       });
       rememberConsumption(consumed);
@@ -1371,6 +1417,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         if (!old || !['applied', 'rejected'].includes(old.phase))
           throw Error('caller_clear_unconfirmed');
         database().prepare('DELETE FROM caller_intents WHERE command_id=?').run(commandId);
+        attachments.clearCommand(commandId);
       });
     },
     async fileRecoveries() {

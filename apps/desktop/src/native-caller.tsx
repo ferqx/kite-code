@@ -181,7 +181,9 @@ export function NativeCallerView({
               <>原申请：{row.phase}</>
             )}
           </p>
-          {(diagnostics || ['submitting', 'unknown', 'accepted'].includes(row.phase)) && (
+          {(diagnostics ||
+            (row.attachmentRecovery && row.attachmentRecovery.phase !== 'not_needed') ||
+            ['submitting', 'unknown', 'accepted'].includes(row.phase)) && (
             <button type="button" disabled={busy} onClick={() => void action('caller.lookup', row)}>
               只查原申请{diagnostics ? ` · ${row.request.commandId}` : ''}
             </button>
@@ -204,11 +206,17 @@ export function NativeCallerView({
                 取消原申请{diagnostics ? ` · ${row.request.commandId}` : ''}
               </button>
             )}
-          {(diagnostics || showRecords) && ['applied', 'rejected'].includes(row.phase) && (
-            <button type="button" disabled={busy} onClick={() => void action('caller.clear', row)}>
-              {diagnostics ? `清除已核实申请 · ${row.request.commandId}` : '清理已核实提交记录'}
-            </button>
-          )}
+          {(diagnostics || showRecords) &&
+            row.attachmentRecovery?.phase !== 'unavailable' &&
+            ['applied', 'rejected'].includes(row.phase) && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void action('caller.clear', row)}
+              >
+                {diagnostics ? `清除已核实申请 · ${row.request.commandId}` : '清理已核实提交记录'}
+              </button>
+            )}
         </div>
       ))}
       {reading && (

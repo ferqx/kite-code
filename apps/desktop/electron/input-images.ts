@@ -63,6 +63,58 @@ export class NativeInputImages {
       draft.chunks = [];
     }
   }
+  snapshot(id: string) {
+    const draft = this.drafts.get(id);
+    if (!draft?.bytes) throw new ClientError('native_image_missing');
+    const chunks: Uint8Array[] = [];
+    for (let offset = 0; offset < draft.bytes.length; offset += 65536)
+      chunks.push(draft.bytes.subarray(offset, offset + 65536));
+    return {
+      id,
+      kind: 'image' as const,
+      name: draft.name,
+      mediaType: draft.mediaType,
+      size: draft.size,
+      hash: draft.hash,
+      state: 'ready' as const,
+      chunks,
+    };
+  }
+  restore(
+    item: { id: string; name: string; mediaType: string; size: number; hash: string },
+    chunks: readonly Uint8Array[],
+  ) {
+    const existing = this.drafts.get(item.id);
+    if (existing) {
+      if (
+        !existing.bytes ||
+        existing.hash !== item.hash ||
+        existing.size !== item.size ||
+        existing.name !== item.name ||
+        existing.mediaType !== item.mediaType
+      )
+        throw new ClientError('native_image_invalid');
+      return;
+    }
+    this.begin({ ...item, mediaType: item.mediaType as Draft['mediaType'] });
+    try {
+      let offset = 0;
+      for (const chunk of chunks) {
+        this.append(item.id, offset, Buffer.from(chunk).toString('base64'));
+        offset += chunk.byteLength;
+      }
+      this.finish(item.id);
+    } catch (error) {
+      this.release(item.id);
+      throw error;
+    }
+  }
+  preview(id: string, offset: number) {
+    const draft = this.drafts.get(id);
+    if (!draft?.bytes || !Number.isSafeInteger(offset) || offset < 0 || offset > draft.size)
+      throw new ClientError('native_image_missing');
+    return draft.bytes.subarray(offset, offset + 65536);
+  }
   async publish(
     client: AgentClient,
     storeId: string,

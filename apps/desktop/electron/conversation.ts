@@ -231,6 +231,23 @@ export class NativeConversation {
     const request = entry.request;
     try {
       const path = this.path(request.creation.workspaceId);
+      const attachmentData = this.data().attachments;
+      if (request.attachmentRevision !== undefined && !attachmentData)
+        throw new ClientError('attachment_storage_unavailable');
+      const bindAttachments =
+        request.attachmentRevision === undefined
+          ? undefined
+          : attachmentData!.capture(
+              {
+                storeId: scope.storeId,
+                workspaceId: request.creation.workspaceId,
+                rootSessionId: request.attachmentSessionId ?? 'new-conversation',
+              },
+              request.attachmentRevision,
+              request.imageIds ?? [],
+              request.fileIds ?? [],
+              request.intent.files ?? [],
+            );
       const savedCreation = this.data()
         .creations()
         .find((item) => item.input.commandId === request.creation.commandId);
@@ -399,6 +416,7 @@ export class NativeConversation {
         intent,
         nativeDraftProof(draft),
       );
+      bindAttachments?.(request.intent.commandId);
       this.check(scope);
       if (request.intent.modelId)
         this.data().rememberModelRoute(

@@ -50,6 +50,8 @@
 
 ## 文档与验证维护
 
+[客户端状态反馈与交互验收](subsystems/clients.md#状态反馈规范)。
+
 [Windows 工作树清理](worktree-safety.md)说明依赖联接风险、只读检查及归档前后文件保全。
 
 [文档同步](documentation.md) · [有效计划](../plans/README.md) · [Agent Notes](../../.agents/notes/README.md) · [测试体系](../../tests/README.md)。

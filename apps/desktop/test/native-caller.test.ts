@@ -5245,3 +5245,88 @@ test('workspace changes resolve the selected session root and reset only its roo
     await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const kind of ['image', 'file'] as const)
+  test(`a fresh ${kind} preparation failure returns a definite unsent receipt without creating a caller or Run`, async () => {
+    const port = client(),
+      data = memoryPrivateData();
+    const caller = new NativeCaller(port, () => {}, data);
+    const owner =
+      kind === 'image'
+        ? (await import('../electron/input-images')).NativeInputImages.prototype
+        : (await import('../electron/input-files')).NativeInputFiles.prototype;
+    const failed = spyOn(owner, 'publish').mockRejectedValue(
+      new ClientError('file_native_unavailable'),
+    );
+    try {
+      const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+      await caller.invoke({ method: 'select', generation, sessionId: 's' });
+      const intent = {
+        kind: 'run.start' as const,
+        expectedStoreId: 'store',
+        commandId: `unsent-${kind}`,
+        content: 'Keep this draft',
+      };
+      const result = await caller.invoke({
+        method: 'submit',
+        generation,
+        sessionId: 's',
+        intent,
+        ...(kind === 'image' ? { imageIds: ['image'] } : { fileIds: ['file'] }),
+      });
+      expect(result).toMatchObject({
+        sessionId: 's',
+        intent: { kind: 'run.start', expectedStoreId: 'store', commandId: intent.commandId },
+        phase: 'failed',
+        error: 'file_native_unavailable',
+      });
+      expect(port.writes).toBe(0);
+      expect(data.callers()).toEqual([]);
+      expect(caller.state().inputSubmissions).toEqual([]);
+      expect(caller.state().selection?.runs).toEqual([]);
+    } finally {
+      failed.mockRestore();
+      await caller.close();
+    }
+  });
+
+test('a prior unknown dispatch is not reclassified as unsent when a later attachment preparation fails', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  let dispatched = 0;
+  port.startRun = async () => {
+    dispatched++;
+    throw Error('lost_response_after_dispatch');
+  };
+  const caller = new NativeCaller(port, () => {}, data);
+  const owner = (await import('../electron/input-files')).NativeInputFiles.prototype;
+  const failed = spyOn(owner, 'publish').mockRejectedValue(
+    new ClientError('file_native_unavailable'),
+  );
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    const intent = {
+      kind: 'run.start' as const,
+      expectedStoreId: 'store',
+      commandId: 'already-dispatched',
+      content: 'Original uncertain message',
+    };
+    expect(
+      await caller.invoke({ method: 'submit', generation, sessionId: 's', intent }),
+    ).toMatchObject({ phase: 'unknown' });
+    await expect(
+      caller.invoke({ method: 'submit', generation, sessionId: 's', intent, fileIds: ['file'] }),
+    ).rejects.toThrow('file_native_unavailable');
+    expect(dispatched).toBe(1);
+    expect(caller.state().inputSubmissions).toHaveLength(1);
+    expect(caller.state().inputSubmissions[0]).toMatchObject({
+      phase: 'unknown',
+      intent: { commandId: intent.commandId },
+    });
+    expect(data.callers()).toHaveLength(1);
+  } finally {
+    failed.mockRestore();
+    await caller.close();
+  }
+});

@@ -263,6 +263,20 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 ## Markdown 与附件输入
 
+### 待发送附件的本机恢复
+
+[输入附件 hook](src/native-input-images.ts)在准备完成、移除及接纳发送回执后维护会话草稿；[闭合 IPC](src/input-images-bridge.ts)只传受限附件描述与 Main 已准备的 ID，原图预览按有界块读取，blob URL 不落盘。[Main 附件存储](electron/pending-attachments.ts)沿[私有 UI SQLite](electron/private-data.ts)保存原字节块及本机引用描述，继承固定 profile、生命周期租约、私有目录／文件、拒绝符号／硬链接、FULL 同步及事务边界。既有本机路径引用不复制内容、不借恢复读取任意路径；实际读取仍走原 Agent 权限。
+
+草稿严格绑定 Store／Workspace／根 Session；新对话使用工作区独立的准备范围。后台保存重新核当前会话身份、未删除及根会话，不因界面切走而改投。保存采用修订 CAS，已删除会话的独立墓碑拒绝首次保存的迟到写；未知写仅在读回内容与本窗口已知版本一致时恢复，不覆盖其他窗口的新内容。恢复不发业务 POST。Main 将发送的准确条目版本与原 command 绑定，在同一私有事务处理 accepted／applied 回执时核销，仅移除相同 ID、内容 hash／URI 及描述的原条目，保留后加附件或同 ID 的新内容。冷查回使用原 command，不重新上传或提交来清草稿。首发创建会话后明确失败时，准备范围与已建会话通过私库原子迁移交接；迁移响应丢失不把旧准备内容自动写回，保留错误并要求完全重开应用按两端真实状态核对。迁移期间新添加／移除的附件仍按后继修订处理。
+
+每草稿最多10张图片、每图16MiB、图片合计64MiB；普通文件副本每个及每草稿合计256MiB。私有库全部未发送字节合计320MiB、描述合计16MiB，最多4096份范围、65536个删除墓碑及256份待保留发送绑定；容量满明确拒绝新保存，不淘汰未知请求或旧草稿。移除、精确发送核销及会话删除清理相应字节块，调用者 journal 清理同步清理其绑定。缺失／坏hash按单附件标为不可发送，名称可见；临时窗口预算不足保持持久字节完好并提示，不能写成损坏附件。
+
+选择确认、拖放和粘贴共用整批数量／大小准入，核既有草稿与窗口在途预算；普通文件准备后采用前再次核最新预算。可预知超限不开始传输、不新增失败卡，保留原草稿并弹出说明限制的提示框；后置拒绝释放本次未采用资源。原命令尚不存在且图片／文件发布块在 journal.prepare 和 input.start 前失败时，返回准确失败回执，撤下临时发送占位并保草稿；已开始请求但结果未知仍保原身份只读核对，已受理后的执行失败不撤销真实消息。迟到的旧状态不能把新失败改回已发送。既有错误反馈归属见[客户端规范](../../docs/development/subsystems/clients.md#状态反馈规范)。
+
+accepted 后若原 Command 最终被权威拒绝，且完整冻结历史与 Run 核验确认未应用，[拒绝恢复 helper](electron/pending-attachment-recovery.ts)只从持久原申请的不可变 Artifact 引用按 Store、身份、大小和 hash 读回；同事务按新准备 ID 接回原会话，保留后来的附件，避免重用已经绑定旧 command 的普通文件 import。恢复成功标记与新 ID 持久幂等，用户后续移除不会因再次查回而复活；不自动重发。无法核实、完整历史被清理或超过有界读取、Artifact／容量不可用时保留原证据，显示未恢复并提供“重新恢复附件”只查原申请；未解决前不能清掉唯一恢复依据。真实已应用 Message／Run 不回滚。
+
+[真实 Node 私有库回归](test/isolated/native-pending-attachment-store.test.ts)覆盖冷开、精确版本核销、回执前新增项与同ID换内容、容量及删除墓碑。[附件 DOM 回归](test/isolated/native-input-attachments-persistence-dom.test.tsx)覆盖重挂恢复、scope隔离、零自动发送、失效提示、保存／移除／迟到回执及读回冲突。[完整 Native 输入回归](test/isolated/native-new-conversation-dom.test.tsx)另核首发已创建会话后失败的附件重试，以及本地保存确定失败不能变成未知业务提交。[隔离 Electron 冷启动夹具](test/isolated/pending-attachments-electron.test.ts)使用实际产品 renderer、Main 与私有 SQLite；本轮实际执行结果与平台限制在交付中区分，不以仅存在测试文件冒称通过。
+
 对话的公开思考来源由 [Native 投影](src/native-transcript.ts)按原模型输出来源及 reasoning 字节事实单独生成，正文仍用实际 content 通道。[思考 reader](src/native-model-output.ts)只返回准确输出快照的 reasoning；[NativeReasoning](src/native-reasoning.tsx)在所属思考子项与父过程均展开时读取，收起释放读取，不将原模型正文替换成思考。首条思考也由共享 UI 的独立 disclosure 承载，流式、工具到达、重连和历史使用同一边界。[实窗夹具](test/native-reasoning-render-electron.fixture.ts)新增每个思考正文与独立按钮的 ARIA 归属、Enter／Space 操作断言；本次修补的实际窗口验收须在最终集成版本运行，既有实窗结果不自动覆盖新布局。
 
 桌面主会话的 [Native 内容样式](src/native-content-theme.css)为用户与 Agent 消息共用 14px 正文、430 字重、1.625 倍行高、12px 正文块间距和 2px 同组列表项间距。标题沿各级比例排版，表格内容沿用正文行高。表格由共享滚动容器绘制 1px 圆角外框，Native 内容样式控制透明表头和横向分隔线。`NativeDesktop` 从当前 Store 的项目目录向共享正文传递 `fileRootUri`，供文件引用提示显示路径。引用激活仍复用原 `messageFile.open`，由 Main 核实当前消息、项目和文件。格式规则见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。

@@ -56,6 +56,37 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     const file = new dom.window.File([new Uint8Array([1, 2, 3])], 'original.png', {
       type: 'image/png',
     }) as unknown as File;
+    const oversized = new dom.window.File(['small'], 'oversized.png', {
+      type: 'image/png',
+    }) as unknown as File;
+    Object.defineProperty(oversized, 'size', { value: 16 * 1024 * 1024 + 1 });
+    await act(async () =>
+      images.addFiles(
+        'full-files',
+        Array.from({ length: 128 }, (_, i) => ({ name: `${i}.txt`, uri: `file:///${i}.txt` })),
+      ),
+    );
+    expect(() => images.validateAttachments('full-files', [file], [{ name: 'new.txt' }])).toThrow(
+      'input_file_count_limit',
+    );
+    expect(() =>
+      images.validateAttachments('full-files', [], [{ name: '0.txt', uri: 'file:///0.txt' }]),
+    ).not.toThrow();
+    expect(images.get('full-files')).toEqual([]);
+    expect(images.files('full-files')).toHaveLength(128);
+    const before = calls.length;
+    await expect(images.add('invalid-batch', [file, oversized])).rejects.toThrow(
+      'input_image_too_large',
+    );
+    expect(images.get('invalid-batch')).toEqual([]);
+    expect(calls).toHaveLength(before);
+    await expect(
+      images.add('invalid-batch', [
+        file,
+        new dom.window.File(['svg'], 'bad.svg', { type: 'image/svg+xml' }) as unknown as File,
+      ]),
+    ).rejects.toThrow('input_image_type');
+    expect(images.get('invalid-batch')).toEqual([]);
     await act(async () => images.add('a', [file]));
     const draft = images.get('a')[0]!;
     expect(draft.loading).toBe(false);
@@ -195,10 +226,10 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     let preparing!: ReturnType<typeof images.add>;
     await act(async () => {
       preparing = images.add('batch', [large, large, large, large]);
-      await images.add('other-scope', [file]);
+      await expect(images.add('other-scope', [file])).rejects.toThrow('input_image_total_limit');
     });
     expect(images.get('batch')).toHaveLength(4);
-    expect(images.get('other-scope')[0]?.error).toContain('64 MiB');
+    expect(images.get('other-scope')).toEqual([]);
     for (
       let i = 0;
       i < 100 &&

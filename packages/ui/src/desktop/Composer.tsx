@@ -21,6 +21,15 @@ import {
   useState,
 } from 'react';
 import { AttachmentFileCard } from './AttachmentFileCard';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './components/ui/alert-dialog';
 import { Button as ShadcnButton } from './components/ui/button';
 import {
   DropdownMenu,
@@ -132,8 +141,13 @@ export interface ComposerProps {
     files: readonly File[],
     signal?: AbortSignal,
   ) => Promise<readonly { name: string; uri: string }[]> | readonly { name: string; uri: string }[];
+  /** Synchronous host budget check, repeated immediately before adopting a mixed batch. */
+  onValidateAttachments?: (
+    images: readonly File[],
+    files: readonly { name: string; uri?: string }[],
+  ) => void;
   onFilesSelected?: (files: readonly { name: string; uri: string }[]) => void;
-  files?: readonly { id: string; name: string; uri: string }[];
+  files?: readonly { id: string; name: string; uri: string; error?: string }[];
   onRemoveFile?: (id: string) => void;
   /** Async hosts may return one scoped system error; ordinary callbacks remain supported. */
   onImageFiles?:
@@ -278,6 +292,11 @@ export function Composer(props: ComposerProps) {
   const [pickingFiles, setPickingFiles] = useState(false);
   const [preparingFiles, setPreparingFiles] = useState(false);
   const [fileError, setFileError] = useState<string>();
+  const attachmentValidationScope = useRef<string | undefined>(undefined);
+  const [attachmentValidation, setAttachmentValidation] = useState<{
+    scopeKey?: string;
+    message: string;
+  } | null>(null);
   const [previewImageId, setPreviewImageId] = useState<string | null>(null);
   useLayoutEffect(() => {
     if (current.current.scopeKey !== props.scopeKey) {
@@ -287,9 +306,12 @@ export function Composer(props: ComposerProps) {
       setPickingFiles(false);
       setPreparingFiles(false);
       setFileError(undefined);
+      setAttachmentValidation(null);
     }
-    if (current.current.scopeKey !== props.scopeKey || props.promptHidden)
+    if (current.current.scopeKey !== props.scopeKey || props.promptHidden) {
       setAttachmentMenuOpen(false);
+      setAttachmentValidation(null);
+    }
     if (!canConfirmFull(props) || !samePermissionContext(current.current, props)) {
       const wasConfirming = !!fullConfirmation.current || confirmingFullScope !== null;
       fullConfirmation.current?.abort();
@@ -399,22 +421,31 @@ export function Composer(props: ComposerProps) {
         /\.(?:png|jpe?g|webp|gif|avif|bmp|heic|heif|svg|tiff?|ico)$/i.test(file.name);
       const images = selected.filter(isImage);
       const ordinary = selected.filter((file) => !isImage(file));
-      if ((current.current.images?.length ?? 0) + images.length > (original.imageLimit ?? 10))
-        throw Object.assign(Error('input_image_count_limit'), { code: 'input_image_count_limit' });
+      const validate = (files: readonly { name: string; uri?: string }[]) => {
+        const latest = current.current;
+        if ((latest.images?.length ?? 0) + images.length > (latest.imageLimit ?? 10))
+          throw Error('input_image_count_limit');
+        const uris = new Set((latest.files ?? []).map((file) => file.uri));
+        const additions = new Set(
+          files
+            .filter((file) => !file.uri || !uris.has(file.uri))
+            .map((file, index) => file.uri ?? `selected:${index}`),
+        );
+        if (uris.size + additions.size > 128) throw Error('input_file_count_limit');
+        if (ordinary.some((file) => file.size > 256 * 1024 * 1024))
+          throw Error('input_file_too_large');
+        if (images.some((file) => !file.size || file.size > 16 * 1024 * 1024))
+          throw Error('input_image_too_large');
+        latest.onValidateAttachments?.(images, files);
+      };
+      validate(ordinary);
       if (ordinary.length && !original.onFileReferences) throw Error('file_reference_unavailable');
       if (images.length && !original.onImageFiles) throw Error('image_input_unavailable');
       setPreparingFiles(ordinary.length > 0);
       const files = ordinary.length ? await original.onFileReferences!(ordinary, token.signal) : [];
-      const latest = current.current;
       if (filePick.current !== token || !active()) return;
       setPreparingFiles(false);
-      if (
-        new Set([...(latest.files ?? []).map((file) => file.uri), ...files.map((file) => file.uri)])
-          .size > 128
-      ) {
-        setFileError('文件附件最多 128 个，请移除部分后重试。');
-        return;
-      }
+      validate(files);
       if (images.length) {
         const preparing = original.onImageFiles!(images);
         if (files.length) original.onFilesSelected?.(files);
@@ -430,15 +461,23 @@ export function Composer(props: ComposerProps) {
       if (filePick.current === token && active()) {
         const code = (error as { code?: string })?.code ?? (error as Error)?.message;
         const validation =
-          code === 'input_image_count_limit'
-            ? `每条消息最多添加 ${original.imageLimit ?? 10} 张图片，请减少数量后重试。`
-            : code === 'input_image_window_count_limit'
-              ? '当前窗口待发送图片过多，请移除其他会话中的部分图片后重试。'
-              : code === 'input_file_too_large'
-                ? '文件超过 256 MiB，请缩小后重试。'
-                : undefined;
-        if (validation) setFileError(validation);
-        else {
+          (error as { validationMessage?: string })?.validationMessage ??
+          (code === 'input_file_count_limit'
+            ? '文件附件最多 128 个，请移除部分后重试。'
+            : code === 'input_image_too_large'
+              ? '图片为空或超过 16 MiB，请缩小后重试。'
+              : code === 'input_image_count_limit'
+                ? `每条消息最多添加 ${original.imageLimit ?? 10} 张图片，请减少数量后重试。`
+                : code === 'input_image_window_count_limit'
+                  ? '当前窗口待发送图片过多，请移除其他会话中的部分图片后重试。'
+                  : code === 'input_file_too_large'
+                    ? '文件超过 256 MiB，请缩小后重试。'
+                    : undefined);
+        if (validation) {
+          setAttachmentMenuOpen(false);
+          attachmentValidationScope.current = original.scopeKey;
+          setAttachmentValidation({ scopeKey: original.scopeKey, message: validation });
+        } else {
           const message =
             code === 'file_picker_restart_required'
               ? '文件选择功能尚未加载，请完全退出并重新打开应用。'
@@ -522,6 +561,7 @@ export function Composer(props: ComposerProps) {
     !props.sending &&
     !pickingFiles &&
     !props.images?.some((image) => image.loading || image.error) &&
+    !props.files?.some((file) => file.error) &&
     (!!props.draft.trim() ||
       !!props.images?.length ||
       !!props.files?.length ||
@@ -764,6 +804,11 @@ export function Composer(props: ComposerProps) {
           <section className="composer-attachments" aria-label="待发送附件">
             {props.files?.map((file) => (
               <AttachmentFileCard name={file.name} key={file.id}>
+                {file.error && (
+                  <span className="composer-input-error" role="alert">
+                    {file.error}
+                  </span>
+                )}
                 {props.onRemoveFile && (
                   <Button
                     className="composer-attachment-remove"
@@ -1079,6 +1124,33 @@ export function Composer(props: ComposerProps) {
         </div>
       </form>
       {fullPermissionDialog}
+      <AlertDialog
+        open={!!attachmentValidation}
+        onOpenChange={(open) => {
+          if (!open) setAttachmentValidation(null);
+        }}
+      >
+        <AlertDialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (
+              attachmentValidationScope.current === current.current.scopeKey &&
+              !current.current.promptHidden &&
+              !current.current.disabled &&
+              !current.current.readOnly
+            )
+              editor.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>无法添加附件</AlertDialogTitle>
+            <AlertDialogDescription>{attachmentValidation?.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>知道了</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {props.submitStatus && (
         <span className="sr-only" aria-live="polite">
           {props.submitStatus}

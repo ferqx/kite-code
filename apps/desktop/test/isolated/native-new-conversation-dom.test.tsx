@@ -6192,3 +6192,576 @@ test('the first Native send includes the displayed medium default without touchi
     await f.close();
   }
 });
+
+test('Native restores persisted attachments by Session, never auto-sends, and sends the confirmed attachment revision', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  const saved = new Map([
+    [
+      'a',
+      {
+        revision: 3,
+        attachments: [
+          {
+            id: 'pending-a',
+            kind: 'reference' as const,
+            name: 'draft-a.pdf',
+            uri: 'file:///original/draft-a.pdf',
+            state: 'ready' as const,
+          },
+        ],
+      },
+    ],
+    [
+      'b',
+      {
+        revision: 7,
+        attachments: [
+          {
+            id: 'pending-b',
+            kind: 'reference' as const,
+            name: 'draft-b.pdf',
+            uri: 'file:///original/draft-b.pdf',
+            state: 'ready' as const,
+          },
+        ],
+      },
+    ],
+  ]);
+  bridge.request = async (input) => {
+    const value = await request(input);
+    if (input.method === 'input.attachments.read')
+      return {
+        kind: 'input.attachments',
+        ...(saved.get(input.sessionId) ?? { revision: 0, attachments: [] }),
+      };
+    if (input.method === 'input.attachments.write') {
+      const previous = saved.get(input.sessionId) ?? { revision: 0, attachments: [] };
+      expect(input.revision).toBe(previous.revision);
+      const next = {
+        revision: input.revision + 1,
+        attachments: input.attachments.map((item) => ({ ...item, state: 'ready' as const })),
+      };
+      saved.set(input.sessionId, next as typeof previous);
+      return { kind: 'input.attachments', ...next };
+    }
+    if (input.method === 'submit') {
+      expect(input.attachmentRevision).toBe(saved.get(input.sessionId)!.revision);
+      saved.set(input.sessionId, { revision: input.attachmentRevision! + 1, attachments: [] });
+      return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+    }
+    if (value && 'generation' in value) return { ...value, pendingAttachmentDrafts: true };
+    return value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.until(
+      () => f.host.querySelector('.composer-attachment-name')?.textContent === 'draft-a.pdf',
+    );
+    expect(
+      f.calls.some((call) => call.method === 'submit' || call.method === 'conversation.send'),
+    ).toBe(false);
+    await f.click('Other B');
+    await f.until(
+      () => f.host.querySelector('.composer-attachment-name')?.textContent === 'draft-b.pdf',
+    );
+    expect(f.host.querySelector('.composer-attachments')?.textContent).not.toContain('draft-a.pdf');
+    await f.click('Original A');
+    await f.until(
+      () => f.host.querySelector('.composer-attachment-name')?.textContent === 'draft-a.pdf',
+    );
+    await f.edit('Send this original reference', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    await f.until(() => f.calls.some((call) => call.method === 'submit'));
+    expect(f.calls.find((call) => call.method === 'submit')).toMatchObject({
+      attachmentRevision: 3,
+      sessionId: 'a',
+      intent: { files: [{ name: 'draft-a.pdf', uri: 'file:///original/draft-a.pdf' }] },
+    });
+    await f.until(() => f.host.querySelector('form .composer-attachments') === null);
+    expect(saved.get('b')!.attachments).toHaveLength(1);
+    await f.click('Other B');
+    await f.until(
+      () => f.host.querySelector('.composer-attachment-name')?.textContent === 'draft-b.pdf',
+    );
+    await f.click('移除附件 draft-b.pdf');
+    await f.until(() => saved.get('b')!.attachments.length === 0);
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a created first-send failure retries attachments from that Session, not a different preparation draft', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge,
+    request = bridge.request;
+  const saved = new Map<string, import('../../src/input-images-bridge').NativePendingAttachments>([
+    [
+      'new-conversation',
+      {
+        kind: 'input.attachments',
+        revision: 2,
+        attachments: [
+          {
+            id: 'first-pending',
+            kind: 'reference',
+            name: 'first.pdf',
+            uri: 'file:///original/first.pdf',
+            state: 'ready',
+          },
+        ],
+      },
+    ],
+  ]);
+  bridge.request = async (input) => {
+    const value = await request(input);
+    if (input.method === 'input.attachments.read')
+      return (
+        saved.get(input.sessionId) ?? { kind: 'input.attachments', revision: 0, attachments: [] }
+      );
+    if (input.method === 'input.attachments.move') {
+      const source = saved.get('new-conversation')!;
+      const target = saved.get(input.sessionId) ?? {
+        kind: 'input.attachments' as const,
+        revision: 0,
+        attachments: [],
+      };
+      expect(input.revision).toBe(source.revision);
+      expect(input.targetRevision).toBe(target.revision);
+      const next = {
+        ...target,
+        revision: target.revision + 1,
+        attachments: [...target.attachments, ...source.attachments],
+      };
+      saved.set(input.sessionId, next);
+      saved.set('new-conversation', { ...source, revision: source.revision + 1, attachments: [] });
+      return { ...next, sourceRevision: source.revision + 1 };
+    }
+    if (input.method === 'input.attachments.write') {
+      expect(input.revision).toBe(saved.get(input.sessionId)?.revision ?? 0);
+      const next = {
+        kind: 'input.attachments' as const,
+        revision: input.revision + 1,
+        attachments: input.attachments.map((item) => ({
+          ...item,
+          state: item.state ?? ('ready' as const),
+        })),
+      };
+      saved.set(input.sessionId, next);
+      return next;
+    }
+    if (
+      input.method === 'conversation.send' &&
+      value &&
+      'phase' in value &&
+      value.phase === 'accepted'
+    ) {
+      const key = input.attachmentSessionId ?? 'new-conversation',
+        previous = saved.get(key)!;
+      expect(input.attachmentRevision).toBe(previous.revision);
+      saved.set(key, { ...previous, revision: previous.revision + 1, attachments: [] });
+    }
+    if (value && 'generation' in value) return { ...value, pendingAttachmentDrafts: true };
+    return value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.until(
+      () => f.host.querySelector('form .composer-attachment-name')?.textContent === 'first.pdf',
+    );
+    await f.chooseModel();
+    await f.edit('First request');
+    await f.click('发送首条消息');
+    await f.until(() => f.calls.some((call) => call.method === 'conversation.send'));
+    const first = f.calls.find((call) => call.method === 'conversation.send')!;
+    if (first.method !== 'conversation.send') throw Error('missing_first_send');
+    expect(first.attachmentRevision).toBe(2);
+    expect(first.attachmentSessionId).toBeUndefined();
+    await f.resolve('failed');
+    await f.until(() => !!f.input('当前会话私有草稿'));
+    await f.until(() => (saved.get(first.creation.sessionId)?.attachments.length ?? 0) === 1);
+    await f.edit('Explicit retry', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    await f.until(() => f.calls.filter((call) => call.method === 'conversation.send').length === 2);
+    const retry = f.calls.filter((call) => call.method === 'conversation.send').at(-1)!;
+    expect(retry).toMatchObject({
+      attachmentSessionId: first.creation.sessionId,
+      attachmentRevision: saved.get(first.creation.sessionId)!.revision,
+      intent: { files: [{ name: 'first.pdf', uri: 'file:///original/first.pdf' }] },
+    });
+    await f.resolve('accepted');
+    await f.until(() => f.host.querySelector('form .composer-attachments') === null);
+    expect(saved.get(first.creation.sessionId)?.attachments).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a first attachment save failure retains editable input without inventing an unknown submission', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge,
+    request = bridge.request;
+  let rejectSave!: (error: Error) => void;
+  bridge.fileReferences = () => [{ name: 'new.txt', uri: 'file:///original/new.txt' }];
+  bridge.request = async (input) => {
+    const value = await request(input);
+    if (input.method === 'input.attachments.read')
+      return { kind: 'input.attachments', revision: 0, attachments: [] };
+    if (input.method === 'input.attachments.write')
+      return await new Promise((_, reject) => {
+        rejectSave = reject;
+      });
+    if (value && 'generation' in value)
+      return { ...value, pendingAttachmentDrafts: true, localFileReferences: true };
+    return value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.chooseModel();
+    await f.edit('Keep my unsent request');
+    await act(async () =>
+      f.host.querySelector('[aria-label="添加附件"]')!.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    await act(async () => f.host.querySelector<HTMLElement>('[aria-label="添加文件"]')!.click());
+    const picker = f.host.querySelector<HTMLInputElement>('input[aria-label="选择文件"]')!;
+    Object.defineProperty(picker, 'files', {
+      value: [new f.dom.window.File(['text'], 'new.txt', { type: 'text/plain' })],
+    });
+    await act(async () =>
+      picker.dispatchEvent(new f.dom.window.Event('change', { bubbles: true })),
+    );
+    await f.until(() => !!rejectSave);
+    await f.click('发送首条消息');
+    await act(async () => rejectSave(Error('disk_full')));
+    await f.until(() => promptValue(f.input()!) === 'Keep my unsent request');
+    expect(
+      f.calls.some((call) =>
+        ['conversation.send', 'conversation.lookup', 'submit'].includes(call.method),
+      ),
+    ).toBe(false);
+    expect(f.host.querySelector('form .composer-attachment-name')?.textContent).toBe('new.txt');
+    expect(f.host.querySelector('[aria-label="发送首条消息"]')?.getAttribute('aria-busy')).not.toBe(
+      'true',
+    );
+    expect(f.host.body.textContent).not.toContain('发送结果待确认');
+    await f.edit('Still editable after save failure');
+    expect(promptValue(f.input()!)).toBe('Still editable after save failure');
+  } finally {
+    await f.close();
+  }
+});
+
+for (const prior of ['submitting', 'unknown', 'accepted'] as const)
+  test(`a definite unsent receipt removes its bubble despite an older ${prior} metadata snapshot and preserves a later draft`, async () => {
+    const f = fixture(true),
+      bridge = f.dom.window.kiteNative! as NativeBridge,
+      request = bridge.request;
+    let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined;
+    let release!: () => void;
+    bridge.request = async (input) => {
+      const value = await request(input);
+      if (input.method === 'submit') {
+        submitted = input;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return {
+          sessionId: input.sessionId,
+          intent: input.intent,
+          phase: 'failed',
+          error: 'file_native_unavailable',
+        };
+      }
+      if (value && 'generation' in value && submitted)
+        return {
+          ...value,
+          inputSubmissions: [
+            { sessionId: submitted.sessionId, intent: submitted.intent, phase: prior },
+          ],
+        };
+      return value;
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.edit('Definitely unsent attachment message', '当前会话私有草稿');
+      await f.click('发送明确的新轮次');
+      await f.until(() => !!submitted);
+      await f.refreshFacts();
+      await f.edit('Later draft must stay', '当前会话私有草稿');
+      await act(async () => release());
+      await f.until(
+        () => f.host.querySelector('.composer-action')?.getAttribute('aria-busy') !== 'true',
+      );
+      expect(
+        [...f.host.querySelectorAll('.message.user')].some((node) =>
+          node.textContent?.includes('Definitely unsent attachment message'),
+        ),
+      ).toBe(false);
+      expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('发送失败');
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('Later draft must stay');
+      expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+    } finally {
+      await act(async () => release?.());
+      await f.close();
+    }
+  });
+
+for (const source of ['input', 'caller'] as const)
+  for (const later of [undefined, '', 'Newer edited input'])
+    test(`a later ${source} rejection removes an accepted placeholder, while persisted failed-Run history remains (${later ?? 'untouched draft'})`, async () => {
+      const f = fixture(true),
+        bridge = f.dom.window.kiteNative! as NativeBridge,
+        request = bridge.request;
+      let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined,
+        rejected = false;
+      bridge.request = async (input) => {
+        const value = await request(input);
+        if (input.method === 'submit') {
+          submitted = input;
+          return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+        }
+        if (value && 'generation' in value && submitted && rejected) {
+          if (source === 'input')
+            return {
+              ...value,
+              inputSubmissions: [
+                { sessionId: submitted.sessionId, intent: submitted.intent, phase: 'rejected' },
+              ],
+            };
+          return {
+            ...value,
+            callerSubmissions: [
+              {
+                scope: { storeId: 'store', workspaceId: 'w', sessionId: 'a' },
+                request: submitted.intent,
+                subjectId: 'owner',
+                target: { kind: 'session', id: 'a' },
+                bodyDigest: 'digest',
+                requestDigest: 'digest',
+                phase: 'rejected',
+              },
+            ],
+          };
+        }
+        return value;
+      };
+      try {
+        await act(async () => f.root.render(<NativeDesktop />));
+        await f.edit('Accepted but not applied yet', '当前会话私有草稿');
+        await f.click('发送明确的新轮次');
+        expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+        if (later === '') await f.edit('A later draft to clear', '当前会话私有草稿');
+        if (later !== undefined) await f.edit(later, '当前会话私有草稿');
+        rejected = true;
+        await f.refreshFacts();
+        expect(f.host.querySelectorAll('.message.user')).toHaveLength(0);
+        expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('发送失败');
+        expect(promptValue(f.input('当前会话私有草稿'))).toBe(
+          later ?? 'Accepted but not applied yet',
+        );
+        const commandId = submitted!.intent.commandId;
+        await f.publishMessages(
+          [
+            {
+              id: 'proven-input',
+              sessionId: 'a',
+              runId: 'proven-run',
+              seq: '1',
+              role: 'user',
+              status: 'complete',
+              content: 'Persisted actual input',
+              originCommandId: commandId,
+              sourceIds: [commandId],
+            },
+          ],
+          [
+            {
+              id: 'proven-run',
+              sessionId: 'a',
+              originStoreId: 'store',
+              originCommandId: commandId,
+              configuration: chatRunConfiguration(),
+              status: 'failed',
+              isActive: false,
+              createdAt: 1,
+              finishedAt: 2,
+              reason: 'model_failed',
+            } as Run,
+          ],
+        );
+        expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+        expect(f.host.querySelector('.message.user')?.textContent).toContain(
+          'Persisted actual input',
+        );
+        expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+      } finally {
+        await f.close();
+      }
+    });
+
+test('an unknown ordinary send blocks a new command until its exact caller receipt is confirmed', async () => {
+  const f = fixture(true),
+    bridge = f.dom.window.kiteNative! as NativeBridge,
+    request = bridge.request;
+  let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined,
+    confirmed = false;
+  bridge.request = async (input) => {
+    const value = await request(input);
+    if (input.method === 'submit') {
+      submitted = input;
+      return { sessionId: input.sessionId, intent: input.intent, phase: 'unknown' };
+    }
+    if (value && 'generation' in value && submitted && confirmed)
+      return {
+        ...value,
+        callerSubmissions: [
+          {
+            scope: { storeId: 'store', workspaceId: 'w', sessionId: 'a' },
+            request: submitted.intent,
+            subjectId: 'owner',
+            target: { kind: 'session', id: 'a' },
+            bodyDigest: 'digest',
+            requestDigest: 'digest',
+            phase: 'accepted',
+          },
+        ],
+      };
+    return value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('Unknown original must not be duplicated', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('发送结果尚未确认');
+    expect(
+      f.host.querySelector<HTMLButtonElement>('[aria-label="发送明确的新轮次"]')?.disabled,
+    ).toBe(true);
+    await f.click('发送明确的新轮次');
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+    await f.edit('Newer text while original is unknown', '当前会话私有草稿');
+    confirmed = true;
+    await f.refreshFacts();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('Newer text while original is unknown');
+    expect(
+      f.host.querySelector<HTMLButtonElement>('[aria-label="发送明确的新轮次"]')?.disabled,
+    ).toBe(false);
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a rejected attachment recovery remains blocked with a reachable read-only retry and preserves the current draft', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let restored = false;
+  const caller: NativeCallerMetadata = {
+    scope: { storeId: 'store', workspaceId: 'w', sessionId: 'a' },
+    request: { kind: 'run.start', expectedStoreId: 'store', commandId: 'rejected-recovery' },
+    subjectId: 'owner',
+    target: { kind: 'session', id: 'a' },
+    bodyDigest: 'digest',
+    requestDigest: 'digest',
+    phase: 'rejected',
+  };
+  bridge.request = async (input) => {
+    if (input.method === 'caller.lookup') {
+      expect(input.commandId).toBe('rejected-recovery');
+      restored = true;
+      f.calls.push(input);
+      return {
+        ...caller,
+        attachmentRecovery: {
+          phase: 'restored',
+          sessionId: 'a',
+          workspaceId: 'w',
+          revision: 1,
+          ids: ['retry-file'],
+        },
+      };
+    }
+    if (input.method === 'input.attachments.read') {
+      f.calls.push(input);
+      return {
+        kind: 'input.attachments',
+        revision: restored ? 1 : 0,
+        attachments: restored
+          ? [
+              {
+                id: 'retry-file',
+                kind: 'file',
+                name: 'restored-rejected.txt',
+                state: 'ready',
+                size: 3,
+                mediaType: 'text/plain',
+                hash: 'a'.repeat(64),
+              },
+            ]
+          : [],
+      };
+    }
+    const value = await request(input);
+    if (value && 'generation' in value)
+      return {
+        ...value,
+        pendingAttachmentDrafts: true,
+        callerSubmissions: [
+          {
+            ...caller,
+            attachmentRecovery: {
+              phase: restored ? 'restored' : 'unavailable',
+              sessionId: 'a',
+              workspaceId: 'w',
+              ...(restored
+                ? { revision: 1, ids: ['retry-file'] }
+                : { error: 'artifact_unavailable' }),
+            },
+          },
+        ],
+      };
+    return value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('Later text remains mine', '当前会话私有草稿');
+    await f.until(
+      () =>
+        !![...f.host.querySelectorAll('button')].find(
+          (node) => node.textContent === '重新恢复附件',
+        ),
+    );
+    expect(f.host.body.textContent).toContain('原附件尚未恢复');
+    expect(
+      f.host.querySelector<HTMLButtonElement>('[aria-label="发送明确的新轮次"]')?.disabled,
+    ).toBe(true);
+    await f.click('重新恢复附件');
+    await f.until(
+      () =>
+        !!f.host
+          .querySelector('.composer-attachment-name')
+          ?.textContent?.includes('restored-rejected.txt'),
+    );
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('Later text remains mine');
+    expect(f.host.body.textContent).not.toContain('原附件尚未恢复');
+    expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
+    expect(
+      f.calls.some((input) =>
+        ['submit', 'conversation.send', 'caller.submit'].includes(input.method),
+      ),
+    ).toBe(false);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});

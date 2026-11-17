@@ -22,6 +22,7 @@ import type {
   NativeCallerRecord,
   NativeDraft,
 } from '../src/native-bridge';
+import { recoverRejectedAttachments } from './pending-attachment-recovery';
 import type { PrivateData } from './private-data';
 export const callerCanonical = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(callerCanonical).join(',')}]`;
@@ -457,7 +458,9 @@ export class NativeCallerJournal {
           throw Error('caller_receipt_unavailable');
       }
     }
-    this.data.finishCaller(r.commandId, command.status);
+    const saved = this.data.finishCaller(r.commandId, command.status);
+    if (saved.phase === 'rejected' && command.status === 'rejected')
+      await recoverRejectedAttachments(this.client, this.data, saved, command, view);
     return command;
   }
   async lookup(commandId: string) {

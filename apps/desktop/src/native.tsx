@@ -435,6 +435,7 @@ function NativeDesktopContent({
       prepared?: boolean;
     }[];
     imageScope?: string;
+    attachmentRevision?: number;
     result?: NativeConversationResult;
   }>();
   const firstRef = useRef(firstSubmission);
@@ -447,6 +448,12 @@ function NativeDesktopContent({
   const draftOwner = useRef<string | undefined>(undefined);
   const submittedDrafts = useRef(
     new Map<string, { storeId: string; sessionId: string; draft: { content: string } }>(),
+  );
+  const clearedInputDrafts = useRef(
+    new Map<
+      string,
+      { storeId: string; sessionId: string; draft: { content: string }; empty: { content: string } }
+    >(),
   );
   const consumedDraft = useRef<
     | {
@@ -515,7 +522,39 @@ function NativeDesktopContent({
     noteStateOwner.current = browserNotes;
     noteDraftStates.current.clear();
   }
-  const newImageScope = imageScope(directory?.storeId, 'new-conversation');
+  const newImageScope = JSON.stringify([directory?.storeId, 'new-conversation', newWorkspace]);
+  // Restoring a draft is read-only; no restart path invokes submit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Keys, not changing hook closures, own hydration.
+  useEffect(() => {
+    if (!state?.pendingAttachmentDrafts) return;
+    if (preparing && directory?.storeId && newWorkspace)
+      void imageDrafts.restore(newImageScope, 'new-conversation', newWorkspace);
+    else if (state.selection && !state.selection.session.parentSessionId)
+      void imageDrafts.restore(
+        imageScope(state.selection.storeId, state.selection.session.id),
+        state.selection.session.id,
+      );
+    for (const caller of state.callerSubmissions ?? []) {
+      if (caller.phase === 'rejected' && caller.attachmentRecovery)
+        imageDrafts.recovery(
+          imageScope(caller.scope.storeId, caller.attachmentRecovery.sessionId),
+          caller.request.commandId,
+          caller.attachmentRecovery,
+        );
+    }
+    // The hook owns same-scope deduplication and connection-generation cancellation.
+  }, [
+    state?.pendingAttachmentDrafts,
+    state?.callerSubmissions,
+    state?.generation,
+    state?.selection?.storeId,
+    state?.selection?.session.id,
+    state?.selection?.session.parentSessionId,
+    preparing,
+    directory?.storeId,
+    newWorkspace,
+    newImageScope,
+  ]);
   const [messages, setMessages] = useState<Message[]>([]);
   const childTabSequence = useRef(0);
   const [childTabRequest, setChildTabRequest] = useState<
@@ -825,6 +864,14 @@ function NativeDesktopContent({
             caller.phase,
           );
         browserNotesRef.current.settle(caller.request.commandId, caller.phase, key);
+        if (caller.attachmentDraft && ['accepted', 'applied'].includes(caller.phase)) {
+          const proof = caller.attachmentDraft;
+          const attachmentKey =
+            proof.sessionId === 'new-conversation'
+              ? JSON.stringify([caller.scope.storeId, 'new-conversation', proof.workspaceId])
+              : imageScope(caller.scope.storeId, proof.sessionId);
+          imageDrafts.accepted(attachmentKey, proof.revision, proof.ids);
+        }
       }
       for (const input of value.inputSubmissions)
         if (['accepted', 'applied', 'terminal'].includes(input.phase))
@@ -2520,7 +2567,11 @@ function NativeDesktopContent({
       savedState.signature = undefined;
     }
     if (draftCache.current.get(key) !== submitted.draft) return;
-    draftCache.current.set(key, { content: '' });
+    const empty = { content: '' };
+    draftCache.current.set(key, empty);
+    clearedInputDrafts.current.set(commandId, { ...submitted, empty });
+    if (clearedInputDrafts.current.size > 256)
+      clearedInputDrafts.current.delete(clearedInputDrafts.current.keys().next().value!);
     if (draftOwner.current === key && selected.current === sessionId) setDraft('');
   }
   function rememberConsumedDraft(
@@ -2978,12 +3029,12 @@ function NativeDesktopContent({
       if (value.phase === 'accepted') setNewPlanMode(false);
       const sessionId = value.creation.input.sessionId;
       if (value.phase === 'accepted')
-        imageDrafts.removeIds([
+        imageDrafts.accepted(original.imageScope ?? '', original.attachmentRevision, [
           ...(original.imageIds ?? []),
           ...(original.files?.map((file) => file.id) ?? []),
         ]);
-      else if (original.imageScope)
-        imageDrafts.move(
+      else if (original.imageScope && value.phase === 'failed')
+        await imageDrafts.move(
           original.imageScope,
           imageScope(value.creation.input.expectedStoreId, sessionId),
         );
@@ -3043,6 +3094,8 @@ function NativeDesktopContent({
         !imageDrafts.get(newImageScope).length &&
         !imageDrafts.files(newImageScope).length) ||
       imageDrafts.get(newImageScope).some((image) => image.loading || image.error) ||
+      imageDrafts.files(newImageScope).some((file) => file.error) ||
+      imageDrafts.blocked(newImageScope) ||
       firstSubmission?.result?.phase === 'unknown'
     )
       return;
@@ -3062,6 +3115,7 @@ function NativeDesktopContent({
       draft: { content: newDraft },
       preparationRevision: newDraftRevision.current,
       imageScope: newImageScope,
+      attachmentRevision: undefined as number | undefined,
       imageIds: imageDrafts.get(newImageScope).map((image) => image.id),
       images: imageDrafts.get(newImageScope).map(({ name }) => ({ name })),
       files: imageDrafts.files(newImageScope),
@@ -3081,9 +3135,13 @@ function NativeDesktopContent({
     );
     setNewDraft('');
     void writeInput(async () => {
+      let dispatched = false;
       try {
+        original.attachmentRevision = await imageDrafts.flush(original.imageScope);
+        dispatched = true;
         const value = await bridge.request({
           method: 'conversation.send',
+          attachmentRevision: original.attachmentRevision,
           generation: current,
           creation: original.creation,
           intent: firstIntent(original.commandId, original.text, original.files),
@@ -3101,6 +3159,16 @@ function NativeDesktopContent({
           throw Error('conversation_response_unknown');
         await acceptFirstResult(value, original, current, page, true);
       } catch (cause) {
+        // No command exists when the local durable draft barrier failed. Do not query or label it unknown.
+        if (!dispatched) {
+          if (firstRef.current?.commandId === original.commandId) {
+            firstRef.current = undefined;
+            setFirstSubmission(undefined);
+            if (newDraftRevision.current === original.preparationRevision)
+              setNewDraft((draft) => draft || original.draft.content);
+          }
+          return;
+        }
         const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
         const value: NativeConversationResult = {
           kind: 'conversation',
@@ -3243,7 +3311,14 @@ function NativeDesktopContent({
     return () => clearTimeout(timer);
   }, [noteSaveSignal]);
   function sendInput() {
-    if (!bridge || !selection || worktreeExitRead.current || waitingForAskUserRef.current) return;
+    if (
+      !bridge ||
+      !selection ||
+      worktreeExitRead.current ||
+      waitingForAskUserRef.current ||
+      sendContentBlocked
+    )
+      return;
     const images = imageDrafts.get(imageScope(selection.storeId, selection.session.id));
     const files = imageDrafts.files(imageScope(selection.storeId, selection.session.id));
     const draftKey = imageScope(selection.storeId, selection.session.id);
@@ -3276,7 +3351,12 @@ function NativeDesktopContent({
       return;
     }
     if (!submittedText.trim() && !images.length && !files.length) return;
-    if (images.some((image) => image.loading || image.error)) return;
+    if (
+      images.some((image) => image.loading || image.error) ||
+      files.some((file) => file.error) ||
+      imageDrafts.blocked(draftKey)
+    )
+      return;
     const imageIds = [
       ...images.map((image) => image.id),
       ...noteBatch.entries.map((item) => item.imageId),
@@ -3297,6 +3377,7 @@ function NativeDesktopContent({
         noteDraftStates.current.get(draftKey)?.managed
       )
         await saveBrowserDraft(draftKey, sessionId, noteDocument);
+      const attachmentRevision = await imageDrafts.flush(draftKey);
       const submittedRevision = draftRevision.current;
       if (
         current !== generation.current ||
@@ -3330,6 +3411,7 @@ function NativeDesktopContent({
           text: submittedText,
           draft: submittedDraft,
           imageScope: imageScope(selection.storeId, sessionId),
+          attachmentRevision,
           imageIds,
           files,
           images: images.map(({ name }) => ({ name })),
@@ -3351,6 +3433,8 @@ function NativeDesktopContent({
         try {
           const value = await bridge.request({
             method: 'conversation.send',
+            attachmentSessionId: sessionId,
+            attachmentRevision,
             generation: current,
             creation: original.creation,
             intent,
@@ -3438,6 +3522,7 @@ function NativeDesktopContent({
       try {
         value = await bridge.request({
           method: 'submit',
+          attachmentRevision,
           generation: current,
           sessionId,
           intent,
@@ -3497,7 +3582,11 @@ function NativeDesktopContent({
       browserNotes.settle(commandId, value && 'phase' in value ? value.phase : 'unknown', draftKey);
       const accepted =
         value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase);
-      if (accepted) imageDrafts.removeIds([...imageIds, ...files.map((file) => file.id)]);
+      if (accepted)
+        imageDrafts.accepted(draftKey, attachmentRevision, [
+          ...imageIds,
+          ...files.map((file) => file.id),
+        ]);
       if (accepted && current === generation.current) {
         if (value && 'draft' in value)
           rememberConsumedDraft(
@@ -3834,15 +3923,37 @@ function NativeDesktopContent({
             row.sessionId === input.sessionId &&
             row.intent.expectedStoreId === input.storeId,
         );
-        const phase = metadata
-          ? ['accepted', 'applied', 'terminal'].includes(metadata.phase)
-            ? 'accepted'
-            : ['failed', 'rejected'].includes(metadata.phase)
-              ? 'failed'
-              : metadata.phase === 'unknown'
+        const caller = state?.callerSubmissions?.find(
+          (row) =>
+            row.request.commandId === id &&
+            row.scope.sessionId === input.sessionId &&
+            row.scope.storeId === input.storeId,
+        );
+        const observedPhases = [metadata?.phase, caller?.phase];
+        // Promise receipts and observation snapshots arrive independently. A stale
+        // submitting/accepted snapshot cannot revive an explicitly rejected send.
+        // Persisted messages already took over above; their execution failures stay visible.
+        const started =
+          input.kind !== 'input.steer' &&
+          selection.runs.some(
+            (run) =>
+              run.originCommandId === id &&
+              run.originStoreId === input.storeId &&
+              run.sessionId === input.sessionId,
+          );
+        const phase = started
+          ? 'accepted'
+          : input.phase === 'failed' ||
+              observedPhases.some((phase) => phase === 'failed' || phase === 'rejected')
+            ? 'failed'
+            : input.phase === 'accepted' ||
+                observedPhases.some(
+                  (phase) => phase === 'accepted' || phase === 'applied' || phase === 'terminal',
+                )
+              ? 'accepted'
+              : input.phase === 'unknown' || observedPhases.includes('unknown')
                 ? 'unknown'
-                : 'sending'
-          : input.phase;
+                : 'sending';
         if (
           input.kind === 'input.follow_up' &&
           phase === 'accepted' &&
@@ -3900,6 +4011,39 @@ function NativeDesktopContent({
         rejected.set(input.intent.commandId, input.error);
     return rejected;
   }, [selection, state?.callerSubmissions, state?.inputSubmissions]);
+  useEffect(() => {
+    if (!selection) return;
+    for (const [id, cleared] of clearedInputDrafts.current) {
+      if (cleared.storeId !== selection.storeId || cleared.sessionId !== selection.session.id)
+        continue;
+      const saved = displayMessages.some((message) =>
+        savedNativeInput(message, id, cleared, selection),
+      );
+      const started = selection.runs.some(
+        (run) =>
+          run.originCommandId === id &&
+          run.originStoreId === cleared.storeId &&
+          run.sessionId === cleared.sessionId,
+      );
+      if (saved || started) {
+        clearedInputDrafts.current.delete(id);
+        continue;
+      }
+      if (
+        !rejectedInputs.has(id) &&
+        !pendingInputModels.some((input) => input.id === id && input.delivery === 'failed')
+      )
+        continue;
+      clearedInputDrafts.current.delete(id);
+      const key = imageScope(cleared.storeId, cleared.sessionId);
+      // Restore only the empty draft produced by this exact acknowledgment. Even
+      // an intentional later empty edit owns a different object and must survive.
+      if (draftCache.current.get(key) !== cleared.empty) continue;
+      draftCache.current.set(key, cleared.draft);
+      if (draftOwner.current === key && selected.current === cleared.sessionId)
+        setDraft(cleared.draft.content);
+    }
+  }, [selection, displayMessages, rejectedInputs, pendingInputModels, setDraft]);
   const firstRun =
     firstVisible &&
     !preparing &&
@@ -4028,7 +4172,7 @@ function NativeDesktopContent({
     }
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
-      if (input.delivery === 'failed') continue;
+      if (input.delivery === 'failed' || (rejectedInputs.has(input.id) && !input.turnId)) continue;
       // Run observation can arrive before persisted user history. Keep the
       // original input ahead of its own status, tool output and reply throughout.
       const delivery = inputDeliveries.get(input.id)!;
@@ -5324,6 +5468,7 @@ function NativeDesktopContent({
     );
   const sendContentBlocked =
     !selection ||
+    pendingInputModels.some((input) => input.delivery === 'unknown') ||
     browserNotes.blocked(imageScope(selection.storeId, selection.session.id)) ||
     browserNotes
       .get(imageScope(selection.storeId, selection.session.id))
@@ -6067,6 +6212,9 @@ function NativeDesktopContent({
                 onFileReferences: imageDrafts.fileReferences,
                 imageLimit: inputImageCount,
                 files: imageDrafts.files(newImageScope),
+                imageError: imageDrafts.error(newImageScope),
+                onValidateAttachments: (images, files) =>
+                  imageDrafts.validateAttachments(newImageScope, images, files),
                 onFilesSelected: (files) => imageDrafts.addFiles(newImageScope, files),
                 onRemoveFile: (id) => imageDrafts.removeIds([id]),
                 images: imageDrafts.get(newImageScope),
@@ -6080,7 +6228,7 @@ function NativeDesktopContent({
                 stopping: false,
                 disabled: pending,
                 readOnly: !preparing,
-                readGate: { send: !newModelReady.ready },
+                readGate: { send: !newModelReady.ready || imageDrafts.blocked(newImageScope) },
                 sessionLoading: !preparing,
                 sending,
 
@@ -6140,15 +6288,49 @@ function NativeDesktopContent({
                     browserNotes.get(imageScope(selection.storeId, selection.session.id)).length >
                     0,
                   context: (
-                    <BrowserAnnotationCards
-                      owner={browserNotes}
-                      scope={imageScope(selection.storeId, selection.session.id)}
-                      error={
-                        noteSaveError.key === imageScope(selection.storeId, selection.session.id)
-                          ? noteSaveError.message
-                          : undefined
-                      }
-                    />
+                    <>
+                      <BrowserAnnotationCards
+                        owner={browserNotes}
+                        scope={imageScope(selection.storeId, selection.session.id)}
+                        error={
+                          noteSaveError.key === imageScope(selection.storeId, selection.session.id)
+                            ? noteSaveError.message
+                            : undefined
+                        }
+                      />
+                      {imageDrafts.recoveryFailed(
+                        imageScope(selection.storeId, selection.session.id),
+                      ).length > 0 && (
+                        <button
+                          type="button"
+                          disabled={
+                            pending || historyState.phase !== 'complete' || !!selection.viewLoading
+                          }
+                          onClick={() =>
+                            void write(async () => {
+                              const originalGeneration = state.generation;
+                              for (const commandId of imageDrafts.recoveryFailed(
+                                imageScope(selection.storeId, selection.session.id),
+                              )) {
+                                if (
+                                  generation.current !== originalGeneration ||
+                                  selected.current !== selection.session.id
+                                )
+                                  return;
+                                await bridge.request({
+                                  method: 'caller.lookup',
+                                  generation: originalGeneration,
+                                  commandId,
+                                });
+                              }
+                              await refresh();
+                            }, false)
+                          }
+                        >
+                          重新恢复附件
+                        </button>
+                      )}
+                    </>
                   ),
                   queue: inputQueue.queue,
                   queueFocusKey,
@@ -6156,6 +6338,15 @@ function NativeDesktopContent({
                   onFileReferences: imageDrafts.fileReferences,
                   imageLimit: inputImageCount,
                   files: imageDrafts.files(imageScope(selection.storeId, selection.session.id)),
+                  imageError: imageDrafts.error(
+                    imageScope(selection.storeId, selection.session.id),
+                  ),
+                  onValidateAttachments: (images, files) =>
+                    imageDrafts.validateAttachments(
+                      imageScope(selection.storeId, selection.session.id),
+                      images,
+                      files,
+                    ),
                   onFilesSelected: (files) =>
                     imageDrafts.addFiles(
                       imageScope(selection.storeId, selection.session.id),
@@ -6191,6 +6382,7 @@ function NativeDesktopContent({
                   readGate: {
                     send:
                       worktreeExitPending ||
+                      imageDrafts.blocked(imageScope(selection.storeId, selection.session.id)) ||
                       (!nextModelReady && !localWorktreeExit) ||
                       historyState.phase !== 'complete' ||
                       !!selection.viewLoading,

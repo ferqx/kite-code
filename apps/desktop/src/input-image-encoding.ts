@@ -33,7 +33,7 @@ function read(blob: Blob, mode: 'buffer' | 'base64', signal: AbortSignal) {
   });
 }
 
-export async function hashInputImage(file: File, signal: AbortSignal): Promise<string> {
+export async function hashInputImage(file: Blob, signal: AbortSignal): Promise<string> {
   const buffer = (await read(file, 'buffer', signal)) as ArrayBuffer;
   const digest = await crypto.subtle.digest('SHA-256', buffer);
   signal.throwIfAborted();

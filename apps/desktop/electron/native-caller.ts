@@ -24,6 +24,7 @@ import {
 import type { DesktopEditor } from '../src/file-changes-bridge';
 import { DesktopInput, inputMetadata } from '../src/input';
 import type {
+  NativeCallerRecord,
   NativeCreation,
   NativeDirectory,
   NativeEvent,
@@ -66,8 +67,9 @@ import { NativeOfficeEditor } from './office-editor';
 import { NativeOutputDisplayVersions } from './output-display-versions';
 import { saveOutputFile } from './output-files';
 import { NativeOutputSources } from './output-sources';
+import type { StoredPendingAttachment } from './pending-attachments';
 import { NativePermissionGrants } from './permission-grants';
-import type { PrivateData } from './private-data';
+import type { DraftScope, PrivateData } from './private-data';
 import { NativeProviderSettings } from './provider-settings';
 import { NativeRecovery } from './recovery';
 import type { ScheduledTaskRunner } from './scheduled-task-runner';
@@ -1370,6 +1372,11 @@ export class NativeCaller {
               )
                 this.outputFilesRevision++;
               if (change.type === 'session.delete_requested') {
+                if (change.sessionId)
+                  this.privateData?.attachments?.deleteSession(
+                    this.client.serverInfo!.storeId!,
+                    change.sessionId,
+                  );
                 this.outputSources.reset();
                 this.outputFilesRevision++;
               }
@@ -1480,7 +1487,9 @@ export class NativeCaller {
   private callerState() {
     try {
       return {
-        callerSubmissions: this.requireCaller().records().map(callerMetadata),
+        callerSubmissions: this.requireCaller()
+          .records()
+          .map((row) => this.callerMetadata(row)),
       };
     } catch {
       return { callerSubmissions: [], callerUnavailable: true };
@@ -1602,6 +1611,7 @@ export class NativeCaller {
     return {
       generation: this.generation,
       localFileReferences: this.localFileReferences,
+      pendingAttachmentDrafts: !!this.privateData?.attachments,
       environmentRevision: this.environmentRevision,
       selectedEnvironmentRevision: this.selectedEnvironmentRevision,
       outputFilesRevision: this.outputFilesRevision,
@@ -2034,7 +2044,7 @@ export class NativeCaller {
         const row = journal
           .records()
           .find((item) => item.intent.request.commandId === intent.commandId)!;
-        result = callerMetadata(row);
+        result = this.callerMetadata(row);
         break;
       }
       case 'input.queue.lookup':
@@ -2152,6 +2162,131 @@ export class NativeCaller {
             this.inputFiles.release(request.id);
             this.inlineOfficeFiles.delete(request.id);
           }
+        }
+        break;
+      }
+      case 'input.attachments.move': {
+        const target = await this.attachmentScope(
+          generation,
+          request.sessionId,
+          request.workspaceId,
+        );
+        const source = await this.attachmentScope(
+          generation,
+          'new-conversation',
+          request.workspaceId,
+        );
+        this.assertGeneration(generation);
+        result = this.requireAttachments().move(
+          source,
+          request.revision,
+          target,
+          request.targetRevision,
+        );
+        break;
+      }
+      case 'input.attachments.read':
+      case 'input.attachments.write':
+      case 'input.attachments.preview': {
+        const scope = await this.attachmentScope(
+          generation,
+          request.sessionId,
+          request.workspaceId,
+        );
+        const data = this.requireAttachments();
+        if (request.method === 'input.attachments.write') {
+          const entries: StoredPendingAttachment[] = request.attachments.map((item) => {
+            if (item.kind === 'reference') {
+              if (!this.localFileReferences) throw new ClientError('attachment_scope_unavailable');
+              return { ...item, state: item.state ?? 'ready' };
+            }
+            if (item.state === 'error') return { ...item, state: 'error' };
+            try {
+              const prepared =
+                item.kind === 'image'
+                  ? this.images.snapshot(item.id)
+                  : this.inputFiles.snapshot(item.id);
+              if (prepared.name !== item.name) throw new ClientError('attachment_metadata_invalid');
+              return prepared;
+            } catch (error) {
+              if (
+                !(error instanceof ClientError) ||
+                !['native_image_missing', 'native_file_missing'].includes(error.code)
+              )
+                throw error;
+              const previous = data
+                .read(scope, false)
+                .attachments.find(
+                  (saved) =>
+                    saved.id === item.id &&
+                    saved.kind === item.kind &&
+                    saved.name === item.name &&
+                    saved.state === 'ready',
+                );
+              if (!previous) throw error;
+              return { ...previous, chunks: data.readBytes(scope, item.id) };
+            }
+          });
+          result = data.save(scope, request.revision, entries);
+          break;
+        }
+        const saved = data.read(scope, request.method !== 'input.attachments.preview');
+        if (request.method === 'input.attachments.preview') {
+          const item = saved.attachments.find(
+            (item) => item.id === request.id && item.kind === 'image' && item.state === 'ready',
+          );
+          if (!item) throw new ClientError('attachment_bytes_unavailable');
+          const prepared = this.images.snapshot(item.id);
+          if (prepared.hash !== item.hash || prepared.size !== item.size)
+            throw new ClientError('attachment_bytes_unavailable');
+          const bytes = this.images.preview(item.id, request.offset);
+          result = {
+            kind: 'input.image.chunk',
+            readId: item.id,
+            offset: request.offset,
+            nextOffset: request.offset + bytes.length,
+            data: bytes.toString('base64'),
+            done: request.offset + bytes.length === item.size,
+          };
+          break;
+        }
+        const restored: { id: string; kind: 'image' | 'file' }[] = [];
+        try {
+          result = {
+            ...saved,
+            attachments: saved.attachments.map((item) => {
+              if (item.state !== 'ready' || item.kind === 'reference') return item;
+              const owner = item.kind === 'image' ? this.images : this.inputFiles;
+              let existing = false;
+              try {
+                owner.snapshot(item.id);
+                existing = true;
+              } catch {}
+              try {
+                owner.restore(
+                  {
+                    id: item.id,
+                    name: item.name,
+                    size: item.size!,
+                    hash: item.hash!,
+                    mediaType: item.mediaType!,
+                  },
+                  data.readBytes(scope, item.id),
+                );
+                if (!existing) restored.push({ id: item.id, kind: item.kind });
+                return item;
+              } catch (error) {
+                // Owner capacity/identity failures are transient preparation failures,
+                // never evidence that the durable original bytes are damaged.
+                if (error instanceof ClientError) throw error;
+                return { ...item, state: 'error' as const, error: 'attachment_bytes_unavailable' };
+              }
+            }),
+          };
+        } catch (error) {
+          for (const item of restored)
+            (item.kind === 'image' ? this.images : this.inputFiles).release(item.id);
+          throw error;
         }
         break;
       }
@@ -3206,7 +3341,9 @@ export class NativeCaller {
       case 'caller.list':
         result = {
           kind: 'caller.directory',
-          records: this.requireCaller().records().map(callerMetadata),
+          records: this.requireCaller()
+            .records()
+            .map((row) => this.callerMetadata(row)),
         };
         break;
       case 'caller.prepare': {
@@ -3227,7 +3364,7 @@ export class NativeCaller {
             request.sessionId,
             request.intent.modelId,
           );
-        result = callerMetadata(row);
+        result = this.callerMetadata(row);
         break;
       }
       case 'caller.submit':
@@ -3263,7 +3400,7 @@ export class NativeCaller {
           .find((r) => r.intent.request.commandId === request.commandId);
         if (!row) throw new ClientError('caller_intent_missing');
         result = {
-          ...callerMetadata(row),
+          ...this.callerMetadata(row),
           ...(!verified ? { phase: 'unknown' as const } : {}),
         };
         break;
@@ -3339,6 +3476,20 @@ export class NativeCaller {
         const snapshot = this.availableWorkspaceScope(request.sessionId);
         if (request.intent.expectedStoreId !== snapshot.view.storeId)
           throw new ClientError('store_identity_mismatch');
+        const bindAttachments =
+          request.attachmentRevision === undefined
+            ? undefined
+            : this.requireAttachments().capture(
+                {
+                  storeId: snapshot.view.storeId,
+                  workspaceId: snapshot.view.session.workspaceId,
+                  rootSessionId: request.sessionId,
+                },
+                request.attachmentRevision,
+                request.imageIds ?? [],
+                request.fileIds ?? [],
+                request.intent.files ?? [],
+              );
         if (snapshot.permissions) {
           const before = this.controller.permissionSubmissions.length;
           const preparation = this.controller.prepareWorkspaceAccess(
@@ -3384,39 +3535,62 @@ export class NativeCaller {
         }
         if (localSourceCheck) await localSourceCheck();
         let intent = request.intent;
-        if (request.imageIds?.length) {
-          const images = await this.images.publish(
-            this.client,
-            snapshot.view.storeId,
-            request.sessionId,
-            request.imageIds,
-          );
-          this.assertGeneration(generation);
-          if (originalSelection !== this.selection || this.selected !== request.sessionId)
-            throw new ClientError('native_selection_changed');
-          intent = { ...request.intent, images };
-        }
-        if (request.fileIds?.length) {
-          const files = await this.inputFiles.publish(
-            this.client,
-            snapshot.view.storeId,
-            request.sessionId,
-            request.fileIds,
-            (target) => this.admitOutputTarget(generation, target),
-          );
-          this.assertGeneration(generation);
-          if (originalSelection !== this.selection || this.selected !== request.sessionId)
-            throw new ClientError('native_selection_changed');
-          await this.client.prepareWorkingInputs({
-            expectedStoreId: snapshot.view.storeId,
-            targetSessionId: request.sessionId,
-            commandId: request.intent.commandId,
-            files,
+        try {
+          if (request.imageIds?.length) {
+            const images = await this.images.publish(
+              this.client,
+              snapshot.view.storeId,
+              request.sessionId,
+              request.imageIds,
+            );
+            this.assertGeneration(generation);
+            if (originalSelection !== this.selection || this.selected !== request.sessionId)
+              throw new ClientError('native_selection_changed');
+            intent = { ...request.intent, images };
+          }
+          if (request.fileIds?.length) {
+            const files = await this.inputFiles.publish(
+              this.client,
+              snapshot.view.storeId,
+              request.sessionId,
+              request.fileIds,
+              (target) => this.admitOutputTarget(generation, target),
+            );
+            this.assertGeneration(generation);
+            if (originalSelection !== this.selection || this.selected !== request.sessionId)
+              throw new ClientError('native_selection_changed');
+            await this.client.prepareWorkingInputs({
+              expectedStoreId: snapshot.view.storeId,
+              targetSessionId: request.sessionId,
+              commandId: request.intent.commandId,
+              files,
+            });
+            this.assertGeneration(generation);
+            if (originalSelection !== this.selection || this.selected !== request.sessionId)
+              throw new ClientError('native_selection_changed');
+            intent = { ...intent, files: [...(intent.files ?? []), ...files] };
+          }
+        } catch (error) {
+          // Attachment preparation has not reached caller.prepare or input.start.
+          // A prior identity can nevertheless own an earlier dispatch: preserve its
+          // unknown outcome instead of turning a retry's local failure into rejection.
+          if (
+            this.input.submissions.some(
+              (row) => row.intent.commandId === request.intent.commandId,
+            ) ||
+            this.requireCaller()
+              .records()
+              .some((row) => row.intent.request.commandId === request.intent.commandId)
+          )
+            throw error;
+          const code = (error as { code?: string })?.code ?? (error as Error)?.message;
+          result = inputMetadata({
+            sessionId: request.sessionId,
+            intent: request.intent,
+            phase: 'failed',
+            error: /^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code : 'input_preparation_failed',
           });
-          this.assertGeneration(generation);
-          if (originalSelection !== this.selection || this.selected !== request.sessionId)
-            throw new ClientError('native_selection_changed');
-          intent = { ...intent, files: [...(intent.files ?? []), ...files] };
+          break;
         }
         let draftProof = request.draft;
         if (!request.officeDocument && !localSourceCheck) {
@@ -3448,6 +3622,7 @@ export class NativeCaller {
           draftProof,
           localSourceCheck,
         );
+        bindAttachments?.(intent.commandId);
         if (intent.kind !== 'input.steer' && intent.modelId)
           this.requirePrivateData().rememberModelRoute(
             intent.expectedStoreId,
@@ -3503,7 +3678,7 @@ export class NativeCaller {
         } catch {}
         const row = journal.records().find((r) => r.intent.request.commandId === id);
         if (!row) throw new ClientError('caller_intent_missing');
-        result = callerMetadata(row);
+        result = this.callerMetadata(row);
         break;
       }
       case 'lookupInput':
@@ -4017,6 +4192,66 @@ export class NativeCaller {
     this.invalidateDirectory();
     this.changed();
   }
+  private callerMetadata(row: NativeCallerRecord) {
+    const attachmentDraft = this.privateData?.attachments?.proof(row.intent.request.commandId);
+    // Older interrupted clients may have committed rejection before recording the
+    // recovery marker. The persisted consumed binding is still an unresolved proof.
+    const attachmentRecovery =
+      attachmentDraft?.recovery ??
+      (row.phase === 'rejected' &&
+      this.privateData?.attachments?.recoveryItems(row.intent.request.commandId)?.length
+        ? {
+            phase: 'unavailable' as const,
+            sessionId: row.intent.scope.sessionId,
+            workspaceId: row.intent.scope.workspaceId,
+            error: 'attachment_recovery_pending',
+          }
+        : undefined);
+    return {
+      ...callerMetadata(row),
+      ...(attachmentDraft ? { attachmentDraft } : {}),
+      ...(attachmentRecovery ? { attachmentRecovery } : {}),
+    };
+  }
+  private requireAttachments() {
+    const data = this.requirePrivateData().attachments;
+    if (!data) throw new ClientError('attachment_storage_unavailable');
+    return data;
+  }
+  private async attachmentScope(
+    generation: number,
+    sessionId: string,
+    workspaceId?: string,
+  ): Promise<DraftScope> {
+    const storeId = this.client.serverInfo!.storeId!;
+    if (sessionId === 'new-conversation') {
+      const observed = this.workspaceObservation;
+      if (
+        !workspaceId ||
+        this.observationUnavailable ||
+        observed?.generation !== generation ||
+        observed.storeId !== storeId ||
+        !observed.workspaces.some((workspace) => workspace.id === workspaceId)
+      )
+        throw new ClientError('attachment_scope_unavailable');
+      return { storeId, workspaceId, rootSessionId: sessionId };
+    }
+    if (this.observationUnavailable) throw new ClientError('attachment_scope_unavailable');
+    const view = await this.client.getView(sessionId);
+    this.assertGeneration(generation);
+    if (view.session.deletedAt !== null)
+      this.requireAttachments().deleteSession(storeId, sessionId);
+    if (
+      this.client.serverInfo?.storeId !== storeId ||
+      view.storeId !== storeId ||
+      view.session.id !== sessionId ||
+      view.session.parentSessionId !== null ||
+      view.session.deletedAt !== null ||
+      (workspaceId !== undefined && workspaceId !== view.session.workspaceId)
+    )
+      throw new ClientError('attachment_scope_unavailable');
+    return { storeId, workspaceId: view.session.workspaceId, rootSessionId: sessionId };
+  }
   private acceptDirectorySessionMutation(result: NativeSessionSubmission) {
     if (
       result.phase !== 'applied' ||
@@ -4025,6 +4260,8 @@ export class NativeCaller {
     )
       return;
     const receipt = result.session;
+    if (result.kind === 'delete')
+      this.privateData?.attachments?.deleteSession(result.intent.expectedStoreId, result.sessionId);
     const directory = this.directory;
     if (directory?.storeId === result.intent.expectedStoreId) {
       const row = directory.sessions.find(({ id }) => id === receipt.id);

@@ -28,6 +28,8 @@ Kite 桌面会话手动展开思考时，读取已观察到的原会话消息及
 
 ## 数据与启用边界
 
+Native 待发送图片、文件副本与路径引用是私有草稿，由 [Desktop 附件 owner](../../apps/desktop/README.md#待发送附件的本机恢复)按准确范围与容量保存在固定 profile 的受保护存储中。恢复不调用模型、不扩大本机路径权限；正文、文件名、路径、原始字节和自由异常不得进入 metric、health、诊断日志或外发 Trace。删除与核销只影响准确对应条目，不授予请求重放权限。
+
 现有 `~/.kite-code/kite-code.jsonc` 的 provider.apiKey 仅由 Service 用户源在私有宿主解析，列表不访问凭据后端，公开配置与模型/Run snapshot 只使用 opaque reference。替换 key 写入用户级 `user-models` OS namespace 后保存引用，未修改明文不自动迁移。paired launcher 的有限环境只补充宿主 HOME（Windows 同时 USERPROFILE）以保持用户目录一致，仍不继承模型凭据环境变量。用户目录、key、endpoint 与原配置正文不得进入下述 metric、health/status、诊断 stderr 或运营 artifact。
 
 `observabilityMetrics=false`，普通 CLI/TUI 入口没有 artifact telemetry authority 或默认网络 transport。
