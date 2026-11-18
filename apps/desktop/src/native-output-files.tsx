@@ -258,6 +258,9 @@ export function useNativeOutputFiles(input: {
     },
     turnLabel: input.turnLabel,
   };
+  const hasCards = (sessionId: string | undefined, runId: string) =>
+    cache.valid(rootKey) &&
+    !!cache.peek<FilePage>(`window/${outputWindowKey(rootKey, sessionId, runId)}`)?.items.length;
   return {
     closeFile: (file: SessionFileTarget) => {
       if ('handleId' in file)
@@ -300,30 +303,39 @@ export function useNativeOutputFiles(input: {
     ),
     renderTurnOutputs: ({ turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, input.sessionId);
-      return runId ? (
-        <TurnOutputSlot key={`${key}/${turnId}`}>
+      if (!runId) return null;
+      const childSources = sources.filter((source) => source.parentRunId === runId);
+      return (
+        <TurnOutputSlot
+          key={`${key}/${turnId}`}
+          hasCards={() =>
+            hasCards(input.sessionId, runId) ||
+            childSources.some((source) => hasCards(source.sessionId, source.runId))
+          }
+        >
           <OutputFileReader {...input} {...reader} runId={runId} actions={actions} />
-          {sources
-            .filter((source) => source.parentRunId === runId)
-            .map((source) => (
-              <OutputFileReader
-                key={`${key}/${source.sessionId}/${source.runId}`}
-                {...input}
-                {...reader}
-                sessionId={source.sessionId}
-                runId={source.runId}
-                sourceLabel={`来自子 Agent · ${source.name} · ${input.turnLabel(source.runId)}`}
-                actions={actions}
-              />
-            ))}
+          {childSources.map((source) => (
+            <OutputFileReader
+              key={`${key}/${source.sessionId}/${source.runId}`}
+              {...input}
+              {...reader}
+              sessionId={source.sessionId}
+              runId={source.runId}
+              sourceLabel={`来自子 Agent · ${source.name} · ${input.turnLabel(source.runId)}`}
+              actions={actions}
+            />
+          ))}
         </TurnOutputSlot>
-      ) : null;
+      );
     },
     renderChildTurnOutputs: (sessionId: string, { turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, sessionId);
       return runId &&
         sources.some((source) => source.sessionId === sessionId && source.runId === runId) ? (
-        <TurnOutputSlot key={`${key}/${sessionId}/${runId}`}>
+        <TurnOutputSlot
+          key={`${key}/${sessionId}/${runId}`}
+          hasCards={() => hasCards(sessionId, runId)}
+        >
           <OutputFileReader
             {...input}
             {...reader}
@@ -363,7 +375,7 @@ export function useNativeOutputFiles(input: {
 const turnObservers = new WeakMap<Element, IntersectionObserver>();
 const turnReaders = new WeakMap<Element, (nearby: boolean) => void>();
 const TurnOutputReadContext = createContext(true);
-function TurnOutputSlot({ children }: { children: ReactNode }) {
+function TurnOutputSlot({ children, hasCards }: { children: ReactNode; hasCards: () => boolean }) {
   const turn = useContext(ConversationTurnElementContext);
   // Undefined until the first visit. Afterwards retain the cards while new reads follow visibility.
   const [nearby, setNearby] = useState<boolean>();
@@ -396,8 +408,12 @@ function TurnOutputSlot({ children }: { children: ReactNode }) {
       turnReaders.delete(target);
     };
   }, [active, turn]);
-  if (nearby === undefined) return null;
-  return <TurnOutputReadContext value={nearby}>{children}</TurnOutputReadContext>;
+  // A remount can display covered cards before either fresh reads or visibility are admitted.
+  if (nearby === undefined && !hasCards()) return null;
+  return <TurnOutputReadContext value={nearby === true}>{children}</TurnOutputReadContext>;
+}
+function outputWindowKey(rootKey: string, sessionId?: string, runId?: string) {
+  return JSON.stringify([rootKey, sessionId, runId]);
 }
 type FilePage = Pick<OutputFilesPage, 'items' | 'nextCursor' | 'revision'>;
 type OutputReadState = {
@@ -425,7 +441,7 @@ function OutputFileReader(input: OutputReaderInput) {
   const readActive = active && nearby;
   useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
   const scopeValid = input.cache.valid(input.rootKey);
-  const windowKey = JSON.stringify([input.rootKey, input.sessionId, input.runId]);
+  const windowKey = outputWindowKey(input.rootKey, input.sessionId, input.runId);
   const [saved, savePage] = useState(() => ({
     key: windowKey,
     cache: input.cache,

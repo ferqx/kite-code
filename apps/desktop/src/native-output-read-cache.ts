@@ -47,6 +47,11 @@ export class NativeOutputReadCache {
     return this.selectionEpoch;
   }
 
+  /** A visibility probe is not a read and must not promote an offscreen window in the LRU. */
+  peek<T>(key: string): T | undefined {
+    return this.values.get(key)?.value as T | undefined;
+  }
+
   get<T>(key: string): T | undefined {
     const entry = this.values.get(key);
     if (!entry) return undefined;

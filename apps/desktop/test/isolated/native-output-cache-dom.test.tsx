@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
-import { act, type ReactNode } from 'react';
+import { act, type ReactNode, useRef } from 'react';
 import { NativeOutputDisplayVersions } from '../../electron/output-display-versions';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
 import { sessionChange } from '../native-change.fixture';
@@ -27,6 +27,34 @@ test('shared output views restore unchanged turns immediately while invalidating
       value: key === 'IS_REACT_ACT_ENVIRONMENT' ? true : Reflect.get(dom.window, key),
     });
   const { createRoot } = await import('react-dom/client');
+  const { ConversationActivityContext, ConversationTurnElementContext } = await import(
+    '@kite-ai/ui/desktop'
+  );
+  const intersections = new Map<Element, (nearby: boolean) => void>();
+  Object.defineProperty(dom.window, 'IntersectionObserver', {
+    value: class {
+      private notify: (entries: { target: Element; isIntersecting: boolean }[]) => void;
+      constructor(notify: (entries: { target: Element; isIntersecting: boolean }[]) => void) {
+        this.notify = notify;
+      }
+      observe(target: Element) {
+        const publish = (isIntersecting: boolean) => this.notify([{ target, isIntersecting }]);
+        intersections.set(target, publish);
+        publish(!target.hasAttribute('data-cold'));
+      }
+      unobserve(target: Element) {
+        intersections.delete(target);
+      }
+    },
+  });
+  function Entry({ kind, children }: { kind: 'turn' | 'child' | 'cold'; children: ReactNode }) {
+    const ref = useRef<HTMLDivElement>(null);
+    return (
+      <div ref={ref} {...{ [`data-${kind}`]: '' }}>
+        <ConversationTurnElementContext value={ref}>{children}</ConversationTurnElementContext>
+      </div>
+    );
+  }
   const { useNativeOutputFiles } = await import('../../src/native-output-files');
   const root = createRoot(document.getElementById('root')!);
   const versions = new NativeOutputDisplayVersions();
@@ -38,7 +66,8 @@ test('shared output views restore unchanged turns immediately while invalidating
     childPresent = true,
     fail = false;
   let content = 'old';
-  let freeze = false;
+  let freeze = false,
+    showCold = true;
   let retainedView: ReactNode;
   const source = {
     sessionId: 'a-child',
@@ -110,15 +139,27 @@ test('shared output views restore unchanged turns immediately while invalidating
     const view = (
       <>
         {outputs.references}
-        <section data-turn>{outputs.renderTurnOutputs({ turnId: turn(session, 'run') })}</section>
-        <section data-child>
-          {outputs.renderChildTurnOutputs('a-child', { turnId: turn('a-child', 'child-run') })}
-        </section>
+        <div className="conversation-viewport">
+          <Entry kind="turn">{outputs.renderTurnOutputs({ turnId: turn(session, 'run') })}</Entry>
+          <Entry kind="child">
+            {outputs.renderChildTurnOutputs('a-child', { turnId: turn('a-child', 'child-run') })}
+          </Entry>
+          {showCold && (
+            <Entry kind="cold">
+              {outputs.renderTurnOutputs({ turnId: turn(session, 'cold') })}
+            </Entry>
+          )}
+        </div>
         <output>{JSON.stringify(outputs.request?.target)}</output>
       </>
     );
     if (session === 'a' && !freeze) retainedView = view;
-    return freeze ? retainedView : view;
+    // The host may restore a covered reading before admitting new reads for that selection.
+    return (
+      <ConversationActivityContext value={{ readActive: !pending, resume: 0 }}>
+        {freeze ? retainedView : view}
+      </ConversationActivityContext>
+    );
   }
   const render = async (session: string, revision = 1, pending?: string) => {
     await act(async () =>
@@ -172,6 +213,16 @@ test('shared output views restore unchanged turns immediately while invalidating
         .click(),
     );
     expect(latest!.request?.target).toMatchObject({ sessionId: 'a-child', fileId: 'file' });
+    // A covered sibling cannot authorize a cold turn, even after history reads resume.
+    const coldQueries = () =>
+      calls.filter((r) => r.method === 'outputs.query' && r.runId === 'cold');
+    expect(coldQueries()).toHaveLength(0);
+    await act(async () => intersections.get(document.querySelector('[data-cold]')!)!(true));
+    await settle();
+    expect(coldQueries()).toHaveLength(1);
+    expect(document.querySelector('[data-cold] .output-file-card')).not.toBeNull();
+    showCold = false;
+    await render('a');
     // SessionPage may retain the original React elements while a new selection is pending.
     // Their old props must observe invalidation, not revive a prior revision on activation.
     freeze = true;
@@ -250,7 +301,7 @@ test('shared output views restore unchanged turns immediately while invalidating
       else Reflect.deleteProperty(globalThis, key);
     }
   }
-});
+}, 10_000);
 
 test('warm file lists hide collection status while Main rechecks child collection admission', async () => {
   const { NativeCaller } = await import('../../electron/native-caller');
