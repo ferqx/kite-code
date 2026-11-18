@@ -63,7 +63,32 @@ function imageMetadata(message: { content: string }) {
   expect(receipt.outcome).toBe('succeeded');
   return JSON.parse(receipt.content);
 }
-type Call = { id: string; path?: string; paths?: string[] };
+// A fork keeps every original field and pixel, but its selectable message IDs are fork-local.
+async function expectForkVisuals(
+  f: Awaited<ReturnType<typeof fixture>>,
+  sessionId: string,
+  expected: ModelMessage[],
+  actual: ModelMessage[],
+) {
+  const selected = (await f.runtime.getView(sessionId)).messages;
+  expect(actual).toEqual(
+    expected.map((m) => {
+      const wrapper = JSON.parse(m.content),
+        availability = wrapper.imageAvailability;
+      const projected = selected.find(
+        (row) =>
+          row.role === 'tool' &&
+          row.seq === availability.locator.seq &&
+          row.toolCallId === m.toolCallId,
+      );
+      expect(projected).toBeDefined();
+      expect(projected!.id).not.toBe(availability.locator.messageId);
+      availability.locator.messageId = projected!.id;
+      return { ...m, content: JSON.stringify(wrapper) };
+    }),
+  );
+}
+type Call = { id: string; path?: string; paths?: string[]; reinspection?: Record<string, unknown> };
 async function wireRequest(request: ModelRequest, protocol: 'responses' | 'chat-completions') {
   let wire: Record<string, unknown> = {};
   const fetcher = Object.assign(
@@ -120,8 +145,8 @@ async function fixture() {
           yield {
             type: 'tool_call',
             id: call.id,
-            name: 'view_images',
-            arguments: JSON.stringify({ path: call.path, paths: call.paths }),
+            name: call.reinspection ? 'reinspect_images' : 'view_images',
+            arguments: JSON.stringify(call.reinspection ?? { path: call.path, paths: call.paths }),
           };
         yield { ...finish, reason: 'tool_calls' };
       } else {
@@ -143,7 +168,7 @@ async function fixture() {
             allowed: !(
               denied &&
               request.kind === 'tool' &&
-              request.definitionId === 'files.view_images'
+              ['files.view_images', 'files.reinspect_images'].includes(request.definitionId)
             ),
             revision: 'fixture',
           };
@@ -315,7 +340,12 @@ test('default view_images publishes execution PNGs and preserves paired visual h
       title: 'fork',
     });
     const forked = await f.run([], 'fork');
-    expect(forked.requests[0]!.messages.filter((m) => m.images?.length)).toEqual(visuals);
+    await expectForkVisuals(
+      f,
+      'fork',
+      visuals,
+      forked.requests[0]!.messages.filter((m) => m.images?.length),
+    );
     for (const protocol of ['responses', 'chat-completions'] as const) {
       const wire = await wireRequest(result.requests[1]!, protocol);
       const serialized = JSON.stringify(wire);
@@ -405,11 +435,12 @@ test('default one-call ten-image batch reaches both protocols in order and survi
       commandId: 'fork-batch',
       title: 'batch',
     });
-    expect(
-      (await f.run([], 'fork-batch')).requests[0]!.messages.filter(
-        (message) => message.images?.length,
-      ),
-    ).toEqual(visuals);
+    await expectForkVisuals(
+      f,
+      'fork-batch',
+      visuals,
+      (await f.run([], 'fork-batch')).requests[0]!.messages.filter((m) => m.images?.length),
+    );
   } finally {
     await f.close();
   }
@@ -457,3 +488,88 @@ test('default assembly binds saved originals and refuses private paths, wrong-se
     await f.close();
   }
 }, 30000);
+
+test('default Service registers archive lookup only through an authorized read tool; SDK visuals follow selected original ordinals without rerunning the source', async () => {
+  const f = await fixture();
+  const paths = [1, 2, 3, 4].map((n) => join(f.workspace, 'archived-' + n + '.png'));
+  for (const [i, p] of paths.entries()) writeFileSync(p, png(i === 3));
+  try {
+    const orig = await f.run([{ id: 'origin-img', paths }]);
+    expect(orig.run.status).toBe('completed');
+    const bytes = orig.requests.at(-1)?.messages.find((m) => m.toolCallId === 'origin-img')
+      ?.images?.[3];
+    expect(bytes).toBeDefined();
+    expect(
+      orig.requests.at(-1)?.messages.find((m) => m.toolCallId === 'origin-img')?.images?.[0],
+    ).not.toEqual(bytes);
+    for (const p of paths) unlinkSync(p);
+    await f.restart();
+    const list = await f.run([{ id: 'ls-archive', reinspection: { list: true } }]);
+    expect(list.run.status).toBe('completed');
+    const get = async (id: string) => {
+      const e = (await f.store.listExecutions('s')).find((e) => e.callId === id);
+      expect(e).toBeDefined();
+      return e!;
+    };
+    const le = await get('ls-archive');
+    expect(le.status).toBe('succeeded');
+    const sources = JSON.parse(String((le.result as { content: string }).content)).sources;
+    expect(sources).toHaveLength(1);
+    expect(sources[0].sourceCount).toBe(4);
+    const inspect = await f.run([
+      { id: 'read-archive', reinspection: { locator: sources[0].locator, ordinals: [4] } },
+    ]);
+    expect((await get('read-archive')).status).toBe('succeeded');
+    const r = inspect.requests.at(-1)!;
+    expect(r.messages.find((m) => m.toolCallId === 'read-archive')?.images).toEqual([bytes!]);
+    const actual = await wireRequest(r, 'responses');
+    expect(JSON.stringify(actual)).toContain(bytes!.data);
+    const delivery = JSON.parse(
+      r.messages.find((m) => m.toolCallId === 'read-archive')!.content,
+    ).imageAvailability;
+    expect(delivery).toMatchObject({ locator: sources[0].locator, ordinals: [4], sourceCount: 4 });
+    const repeat = await f.run([
+      {
+        id: 'read-four-again',
+        reinspection: { locator: delivery.locator, ordinals: delivery.ordinals },
+      },
+    ]);
+    const again = repeat.requests.at(-1)!.messages.find((m) => m.toolCallId === 'read-four-again')!;
+    expect(again.images).toEqual([bytes!]);
+    expect(JSON.parse(again.content).imageAvailability).toMatchObject({
+      locator: sources[0].locator,
+      ordinals: [4],
+      sourceCount: 4,
+    });
+    const history = (await f.runtime.getView('s')).messages;
+    for (const prior of ['read-archive', 'ls-archive']) {
+      const row = history.find((m) => m.role === 'tool' && m.toolCallId === prior)!;
+      const locator = { messageId: row.id, seq: row.seq, executionId: (await get(prior)).id };
+      const rejected = await f.run([
+        { id: 'reject-' + prior, reinspection: { locator, ordinals: [1] } },
+      ]);
+      const message = rejected.requests
+        .at(-1)!
+        .messages.find((m) => m.toolCallId === 'reject-' + prior)!;
+      expect(message.images).toBeUndefined();
+      expect(message.content).toContain('image_source_unverified');
+      expect(message.content).not.toContain(locator.executionId);
+    }
+    const denied = await f.run(
+      [{ id: 'foreign-archive', reinspection: { locator: sources[0].locator, ordinals: [1] } }],
+      'other',
+    );
+    const msg = denied.requests.at(-1)!.messages.find((m) => m.toolCallId === 'foreign-archive');
+    expect(msg?.images).toBeUndefined();
+    expect(msg?.content).not.toContain(sources[0].locator.executionId);
+    expect(msg?.content).toContain('image_source_unverified');
+    f.deny();
+    await f.run([{ id: 'permission-denied', reinspection: { list: true } }]);
+    expect((await get('permission-denied')).status).not.toBe('succeeded');
+    expect(
+      (await f.store.listExecutions('s')).filter((e) => e.definitionId === 'files.view_images'),
+    ).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+}, 45000);

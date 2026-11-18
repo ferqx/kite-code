@@ -756,6 +756,9 @@ export interface Store {
     },
   ): Promise<ExtensionRecord>;
   getRun(id: string): Promise<RunRecord | null>;
+  readLatestBusinessModelPreference(
+    input: WriteContext & { sessionId: string; subjectId: string },
+  ): Promise<{ modelId: string; runId: string; executionId: string } | null>;
   readFirstSessionRun(input: WriteContext & { sessionId: string }): Promise<{
     storeId: string;
     session: SessionRecord;
@@ -808,6 +811,38 @@ export interface Store {
   }): Promise<ExecutionOutputPage>;
   finishExecution(input: FinishExecutionInput): Promise<ExecutionRecord>;
   getExecution(id: string): Promise<ExecutionRecord | null>;
+  /** Historical compression qualification only; never current route delivery or authorization. */
+  readHistoricallyConfirmedImageMembers(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    subjectId: string;
+    selectionId: string;
+    runId: string;
+    executionIds: readonly string[];
+  }): Promise<{ executionId: string; ordinal: number; hash: string; size: number }[]>;
+  readImageWindowFacts(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    subjectId: string;
+    selectionId: string;
+    route: string;
+    executionIds: readonly string[];
+    runId: string;
+  }): Promise<{
+    confirmed: {
+      executionId: string;
+      ordinal: number;
+      hash: string;
+      size: number;
+      note?: string;
+      noteSources?: readonly string[];
+    }[];
+    rejected: {
+      attemptId: string;
+      kind: 'observation' | 'business';
+      members: readonly { executionId: string; ordinal: number; hash: string; size: number }[];
+    }[];
+  }>;
   listExecutions(sessionId: string, limit?: number): Promise<ExecutionRecord[]>;
   getSessionTokenUsage(input: {
     expectedStoreId: string;
@@ -1248,6 +1283,15 @@ export interface Store {
   getModelContext(
     input: Parameters<Store['getSelectedContext']>[0],
   ): Promise<SelectedContextPage & { retainedInputMessageIds: string[] }>;
+  /** Selected complete Tool message identities only. No prompt, configuration, or model/image body is read. */
+  readSelectedToolLocators(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    subjectId: string;
+    selectionId: string;
+    lo: string;
+    hi: string;
+  }): Promise<{ id: string; seq: string }[]>;
   getExpandedContext(
     input: Parameters<Store['getSelectedContext']>[0],
   ): Promise<SelectedContextPage & { retainedInputMessageIds: string[] }>;

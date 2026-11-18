@@ -17,6 +17,7 @@ import {
 import type { Json, ModelAdapter, ModelRequest, ModelUsage } from './index';
 import { isModelImage } from './index';
 import { ModelAttemptError, modelConnectionDetail } from './model-attempt';
+import { ModelRequestLimitError } from './model-request-limit';
 import {
   type ModelAdapterSnapshot,
   type ReasoningEffort,
@@ -536,6 +537,7 @@ export function createSdkModelAdapter(options: {
         signal.throwIfAborted();
         if (ModelAttemptError.isInstance(error)) throw error;
         if (APICallError.isInstance(error)) {
+          if (error.statusCode === 413) throw new ModelRequestLimitError();
           if (error.statusCode === 401 || error.statusCode === 403)
             throw new Error('model_transport_failed');
           throw new ModelAttemptError(

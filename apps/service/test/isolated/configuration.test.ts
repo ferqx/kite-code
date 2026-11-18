@@ -539,6 +539,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       'web_fetch',
       'read_file',
       'view_images',
+      'reinspect_images',
       'write_file',
       'edit_file',
       'spawn_agent',

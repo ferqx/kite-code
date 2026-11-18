@@ -2,7 +2,11 @@
 
 ## 工具视觉结果
 
-`files.view_images@1` 复用同一合同，准确版本的单个结果最多10张、每张8MiB、整批16MiB，数组顺序对应原请求；其他工具仍最多4张／16MiB。执行接纳和历史展开共用[视觉引用校验](../tool-images.ts)。Runtime 对所选历史中这个准确版本的 PNG 引用先累计 size，合计超过32MiB时在读取越界正文前返回 `image_context_too_large`；不更改既有用户、PDF或浏览器图片预算，不在容量失败时静默丢图。[真实预算回归](../../test/isolated/artifacts/tool-image-budget.test.ts)核完整已发布 PNG、越界正文零读取及零后继模型请求。
+`files.view_images@1` 复用同一合同，准确版本的单个结果最多10张、每张8MiB、整批16MiB，数组顺序对应原请求；其他工具仍最多4张／16MiB。执行接纳和历史展开共用[视觉引用校验](../tool-images.ts)。所选本地图的 32 MiB 是单帧原 PNG 预算，而不是整个会话的历史上限。普通请求只携尚未确认的完整工具组；单工具多图也可按序位在独立只读 Model Execution 中分组观察，不拆原工具回执，不重复文件调用。成功业务响应或完整、无工具的独立观察才提交覆盖；规划、派发、413、断连和不完整观察均不记成功。重复像素保留各自来源及序位，跨源观察的笔记只有全部来源均可见时才能使用；笔记不是授权或精确识别保证。历史明细可重新选择原归档序位。用户附件、PDF 和浏览器沿各自原合同。[Runtime 与 SQLite 预算回归](../../test/isolated/artifacts/tool-image-budget.test.ts)和[单图探测回归](../../test/isolated/artifacts/image-replan.test.ts)分别覆盖整链交付与自适应边界。
+
+供应商明确 HTTP 413 时仅在同次 Run／路由中有限重排；推算预算不是单图硬限。富业务请求单图被拒时允许单独观察一次，紧凑单图仍被明确拒绝则停止，不裁缩替换原图。网络未确认不作为 413，也不自动对此图像请求重发。所有工具决策、普通消息和成功覆盖仍由原 Store/Execution 保存。热重选、派发前与收据提交前复核主体、选择、路由与原来源；SQLite 能验证的持久控制在成功事务内再验，不承诺撤回已传给远端的内容。观察输出的私有段链头只保存在原模型执行上，不创建聊天消息；即使 SDK 返回不透明 continuation，普通输出链与观察回执仍能同时验证。未派发观察的[真实 SIGKILL 回归](../../test/isolated/recovery/image-observer-cold.test.ts)验证同一请求恢复一次且不占业务最终答复。详细取舍见[图片分帧决定](../../../../.agents/notes/implemented/architecture/2026-11-18-image-delivery-windows.md)。
+
+macOS 原生桌面、隔离 Profile 与正式配对 Service，在 2026-11-18 用合成九图（37,201,483 B）、已配置的 OpenAI Responses 模型完成了两种调度。自然顺序读取的单 Run 完成，模型主动复看三次，成功帧共 18 图次、128,592 个成功模型调用所报告的 tokens。另一次自然同轮并行在官方 413 后不重做原工具，四个只读观察按 3+3+2+1 接收九个成功图次；原同一批第三组确实拆为 2+1，另 6 个被拒图次不计确收；72.1 秒、43,071 个成功调用所报告的 tokens。移除合成源路径后，后续问题仅复看原指定序位。两组的模型决策和输入不同，不能把一次费用差异当通用节省比例。首次并行曾因短观察携带供应商 continuation 而在本地结算冲突，HTTP 200 没被算作已见；[私有观察输出链回归](../../test/isolated/artifacts/tool-image-budget.test.ts)与修正后的新 Run 分别验证该问题。以上不是其他供应商、系统或安装包的发布资格，也不是视觉语义准确率承诺。
 
 `ToolResult.modelImages` 只声明本次结果已列入 `artifactRefs` 的有限 PNG 引用，完整合同由 [tool-images](../tool-images.ts)校验。Runtime 只从准确原 succeeded Tool Execution、完成消息及一致 Run／出处展开图片，保留原调用与结果配对；Fork 和恢复按原来源读取。实际完整图像字节进入中立 ModelInput 的 tool 消息，AI 的 Responses／Chat Completions 编码见 [AI owner](../../../ai/README.md)。图片是低信任工具数据，不产生人类消息、命令或审批。PDF 缓存不是历史图片来源；损坏、引用不符或取消会阻止该 Model 请求。Native 预览沿同一原消息／执行读取，不能由 renderer 自报任意 Artifact。
 

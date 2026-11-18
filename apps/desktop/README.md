@@ -1,5 +1,11 @@
 # Desktop 与 Native 制品
 
+## 图片交付失败反馈
+
+[图片失败投影](src/native-image-failure.ts)仅对白名单中的持久 Run reason 提供原轮次 `turn_failure` 文案，沿用[会话投影](src/native-transcript.ts)和现有错误块；不新增客户端操作或自动重试。旧 `image_context_too_large` 单列为此前累计超限：提示发送文字继续按需读取归档图片，不要求先缩图或重跑原工具；旧失败轮次与新成功轮次各自保留，归档缺失及当前权限／服务限制仍单独处理。未确认、明确请求限制、受管副本缺失、来源不可核验及压缩待交付分别说明下一步，未知代码仍使用原未知原因提示。展示不读取供应商正文、文件路径或 hash，也不从无响应推断 413；原已保存回复和工具记录不变。
+
+2026-11-18，macOS arm64／Bun 1.4.4，`237b0983` 加本任务工作树：[Native DOM 回归](test/isolated/native-transcript-dom.test.tsx)整文件 34 项通过，共 840 断言；新增图片失败用例覆盖九种 reason、冷重投影、原轮次顺序、一个错误块及未知代码回退。Desktop 类型检查 1,685 文件与三个变更源码／测试文件的 Biome 检查通过。此为真实组件 DOM 验证，不代替原生窗口／供应商故障验收。
+
 ## 侧栏会话搜索
 
 [NativeCaller](electron/native-caller.ts)原目录读取穷尽工作区与会话分页，完整成功后发布，失败不发布前缀目录。[NativeDesktop](src/native.tsx)据连接代次／Store、目录状态与当前代次的直接读取失败接入共享侧栏搜索，没有新增 Workbench 路由、后端搜索或消息正文读取。[目录投影](src/native-presentation.ts)保留登记 `rootUri` 以辨识同名项目；打开结果复用原 `onOpen/select`。

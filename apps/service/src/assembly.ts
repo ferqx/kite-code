@@ -25,7 +25,7 @@ import type { InstalledUserSkill } from './installed-user-skills';
 import { createConfiguredSkillSource } from './skill-source';
 
 const fileIds = ['files.read', 'files.write', 'files.edit'];
-const optionalFileIds = ['files.view_images'];
+const optionalFileIds = ['files.view_images', 'files.reinspect_images'];
 const skillIds = ['skills.load', 'skills.resource'];
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 function source(id: string, kind: string, content: string): ContextSource {
@@ -57,6 +57,10 @@ export async function createWorkspaceAssembly(options: {
   /** Trusted globally registered definitions, kept in the actual selected facts. */
   externallyRegisteredExtensions?: readonly Extension[];
 }) {
+  // Do not advertise archive access when the parent image capability was deselected.
+  const selectedToolIds = options.toolIds.filter(
+    (id) => id !== 'files.reinspect_images' || options.toolIds.includes('files.view_images'),
+  );
   const root = await realpath(options.workspaceRoot);
   const stat = await lstat(options.workspaceRoot);
   if (!stat.isDirectory() || stat.isSymbolicLink())
@@ -70,7 +74,7 @@ export async function createWorkspaceAssembly(options: {
     ...(options.knownToolIds ?? []),
     ...externalExtensions.flatMap((extension) => (extension.tools ?? []).map((tool) => tool.id)),
   ]);
-  if (options.toolIds.some((id) => !known.has(id)))
+  if (selectedToolIds.some((id) => !known.has(id)))
     throw new AgentError('tool_definition_unavailable');
   if (
     externalFiles &&
@@ -80,7 +84,7 @@ export async function createWorkspaceAssembly(options: {
   )
     throw new AgentError('file_registration_conflict');
   for (const selected of options.toolConfigurations ?? []) {
-    if (!options.toolIds.includes(String(selected.id))) continue;
+    if (!selectedToolIds.includes(String(selected.id))) continue;
     if (
       selected.options !== undefined &&
       (!selected.options ||
@@ -91,7 +95,7 @@ export async function createWorkspaceAssembly(options: {
       throw new AgentError('unsupported_tool_options');
   }
   const files =
-    !externalFiles && options.toolIds.some((id) => fileIds.includes(id))
+    !externalFiles && selectedToolIds.some((id) => fileIds.includes(id))
       ? createWorkspaceFiles({ root })
       : undefined;
   let skills: ReturnType<typeof createConfiguredSkillSource> | undefined;
@@ -183,7 +187,7 @@ export async function createWorkspaceAssembly(options: {
     const loaded = new Set<string>();
     const loadedResources = new Map<string, { skillId: string; path: string }>();
     const allowed = [...(options.allowedCapabilities ?? [])].filter((id) =>
-      options.toolIds.includes(id),
+      selectedToolIds.includes(id),
     );
     async function catalogue() {
       const current = await skillSource.list();
@@ -394,7 +398,7 @@ export async function createWorkspaceAssembly(options: {
     if (
       configured.length ||
       selectedEntries.length ||
-      options.toolIds.some((id) => skillIds.includes(id))
+      selectedToolIds.some((id) => skillIds.includes(id))
     )
       extensions.push(defineExtension({ id: 'builtin.skills', version: '1', apiMajor: 1, tools }));
     const actualTools = new Map([
@@ -404,7 +408,7 @@ export async function createWorkspaceAssembly(options: {
       ),
     ]);
     for (const selected of options.toolConfigurations ?? []) {
-      if (!options.toolIds.includes(String(selected.id))) continue;
+      if (!selectedToolIds.includes(String(selected.id))) continue;
       if (
         selected.definitionVersion !== undefined &&
         actualTools.has(String(selected.id)) &&
@@ -415,7 +419,7 @@ export async function createWorkspaceAssembly(options: {
     const snapshotFacts = {
       tools: [
         ...(externalFiles ?? [])
-          .filter((tool) => options.toolIds.includes(tool.id))
+          .filter((tool) => selectedToolIds.includes(tool.id))
           .map((tool) => ({
             id: tool.id,
             definitionVersion: tool.version,
@@ -424,7 +428,7 @@ export async function createWorkspaceAssembly(options: {
         ...[...extensions, ...externalExtensions].flatMap(
           (extension) =>
             extension.tools
-              ?.filter((tool) => options.toolIds.includes(tool.id))
+              ?.filter((tool) => selectedToolIds.includes(tool.id))
               .map((tool) => ({
                 id: tool.id,
                 definitionVersion: tool.version,
@@ -441,7 +445,7 @@ export async function createWorkspaceAssembly(options: {
     };
     return {
       extensions,
-      toolIds: [...options.toolIds],
+      toolIds: [...selectedToolIds],
       sources,
       knowledgeScope: skillSource.knowledgeScope,
       skillConfigurations: [

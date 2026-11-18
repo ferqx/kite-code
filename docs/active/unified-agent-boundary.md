@@ -4,7 +4,7 @@ Native 的只读执行观察沿原 bounded View／snapshotCursor 独立发布，
 
 本地图片读取由[Files owner](../../packages/agent/src/tools/files/README.md#图片读取)的 `files.view_images@1` 承担：原权限／路径／附件选择先约束全字节读取，固定严格解码程序只收字节，不收用户路径或 Provider 状态；明确空 Bun/tsconfig 防止目录 preload／别名改变入口。Windows 原 Job owner 提供512MiB和单进程限制，取消后核原 wait／tree；退出无法确认时结算 unknown、保 owner／图片名额并拒绝后续读取，不无限等待缺失证明。监督进程隔离崩溃与资源，不把它称为文件／网络 OS 沙箱。Service 保护实际处理资产及 native 依赖根；其他平台资格独立核实。
 
-图片结果保存原 Execution 的不可变 Artifact，沿既有 `modelImages` 与两协议交接，当前运行、历史、Fork和冷读保原出处；单次批次只对该准确版本接纳最多10张／每张8MiB／整批16MiB，其他工具仍为4张；批次先约束完整有序路径及输入原件revision，串行读取并在全部解码成功后才交付视觉结果，容量继续只对该准确新工具版本累计32MiB，并在越界图片展开前失败，不修改其他图片入口。Native 的计数、缩略图和折叠从准确原成功回执派生，窗口预览缓存不承担历史保存或授权。上传原件与实际视觉结果均沿原 Blob／引用／显式无引用 GC，不新增会过期的历史图片缓存；原协议和既有工具版本保持。
+图片结果保存原 Execution 的不可变 Artifact，沿既有 `modelImages` 与两协议交接，当前运行、历史、Fork和冷读保原出处；单次批次只对该准确版本接纳最多10张／每张8MiB／整批16MiB，其他工具仍为4张；批次先约束完整有序路径及输入原件revision，串行读取并在全部解码成功后才交付视觉结果，已归档本地图及其授权复看按 32 MiB 原 PNG 单帧预算交付，不再以会话总量拒绝；分段不伪造原工具调用或重复其效果。当前权限、未知投递、供应商明确拒绝与可恢复证据见[完整正文 owner](../../packages/agent/src/model-body/README.md#工具视觉结果)。不修改其他图片入口。Native 的计数、缩略图和折叠从准确原成功回执派生，窗口预览缓存不承担历史保存或授权。上传原件与实际视觉结果均沿原 Blob／引用／显式无引用 GC，不新增会过期的历史图片缓存；原协议和既有工具版本保持。
 
 Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desktop/README.md#native-项目会话目录)保存，Store／Session／Run 与终态仅作本机呈现依据，不是业务 receipt 或执行 authority。renderer 的 `session.markRead` 仍须原主 frame／generation、准确选择与 Main 已观察终态，写入不修改 Runtime、会话消息时间、Run、审批或命令，不授予 Service 写权；原业务 Store／公开工具协议版本保持。
 

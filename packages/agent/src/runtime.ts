@@ -1,5 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { ModelAdapter, ModelMessage, ModelRequest } from '@kite-ai/ai';
+import {
+  type ModelAdapter,
+  type ModelMessage,
+  type ModelRequest,
+  ModelRequestLimitError,
+} from '@kite-ai/ai';
 import { trajectoryAttributesSchemas } from '@kite-ai/trajectory';
 import type { ArtifactContentStore, ArtifactReadInput } from './artifact-port';
 import { authorizationCheckInput, authorizationReadBodies } from './authorization-check-input';
@@ -50,6 +55,7 @@ import {
   interruptsBrowserContinuation,
   isBrowserRevocation,
 } from './execution/host-control';
+import { type ImageWindowScope, imageWindowScope } from './execution/image-window';
 import type { WorkspaceSerialLocks } from './execution/resource-port';
 import { ExecutionResources } from './execution/resources';
 import { resolveExecutionRun } from './execution/task-origin';
@@ -107,6 +113,28 @@ import {
 } from './model-attempt';
 import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './model-body';
 import { semanticDigestBytes } from './model-body/digest';
+import {
+  assertImageReceipt,
+  businessProjection,
+  deliveryFacts,
+  deliveryPlan,
+  historicalArchiveForCompression,
+  imageArchiveSummaryText,
+  imagePayload,
+  isArchiveDirectorySummary,
+  type LocalImageSource,
+  managedImageResult,
+  observationRequest,
+  orderedImageSources,
+  verifyImageSources,
+} from './model-body/image-delivery';
+import {
+  listSelectedImageSources,
+  readSelectedImageMembers,
+  resolveSelectedImageCarrier,
+  type SelectedImageRead,
+  type SourceListing,
+} from './model-body/selected-image-source';
 import {
   assembleModelContext,
   childAgentRoleSource,
@@ -375,6 +403,8 @@ export interface AfterTurnPolicy {
   }>;
 }
 export interface RunConfiguration {
+  /** Host verified current destination against the selected ordinary Run; never a permission or receipt. */
+  readonly verifiedSessionCompressionTarget?: true;
   readonly compressor?: ContextCompressor;
   readonly afterTurn?: AfterTurnPolicy;
   readonly authorizationCheck?: AuthorizationCheckBinding;
@@ -419,6 +449,7 @@ function sealSources(sources: ContextSources | undefined): ContextSources | unde
 }
 
 type RunBinding = {
+  verifiedSessionCompressionTarget?: true;
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
   authorizationCheck?: AuthorizationCheckBinding;
@@ -2647,6 +2678,15 @@ export class AgentRuntime {
             parent.command.originStoreId,
             undefined,
             parent.command.subjectId,
+            false,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            this.tools,
+            undefined,
+            undefined,
+            new Map<string, LocalImageSource>(),
           );
         } catch (error) {
           // A failed child may have an incomplete/unreadable frontier. Preserve its
@@ -3428,6 +3468,11 @@ export class AgentRuntime {
   }
   getMetadata() {
     return this.options.store.getMetadata();
+  }
+  readLatestBusinessModelPreference(
+    input: Parameters<Store['readLatestBusinessModelPreference']>[0],
+  ) {
+    return this.options.store.readLatestBusinessModelPreference(input);
   }
   readFirstSessionRun(input: Parameters<Store['readFirstSessionRun']>[0]) {
     return this.options.store.readFirstSessionRun(input);
@@ -4262,6 +4307,12 @@ export class AgentRuntime {
     });
     return inputImages([{ name: input.name, reference }])[0]!;
   }
+  listSelectedImageSources(input: SourceListing, signal?: AbortSignal) {
+    return listSelectedImageSources(this.options.store, input, signal);
+  }
+  readSelectedImageMembers(input: SelectedImageRead, signal?: AbortSignal) {
+    return readSelectedImageMembers(this.options.store, (r) => this.readArtifact(r), input, signal);
+  }
   async readArtifact(input: ArtifactReadInput) {
     const { signal, ...referenceInput } = input;
     signal?.throwIfAborted();
@@ -4434,6 +4485,7 @@ export class AgentRuntime {
       if (recordedTools.has(id)) throw new AgentError('context_estimate_unavailable');
       recordedTools.set(id, message);
     }
+    const estimateImages = new Map<string, LocalImageSource>();
     const history = await this.modelMessages(
       input.sessionId,
       input.expectedStoreId,
@@ -4450,7 +4502,21 @@ export class AgentRuntime {
       definitions,
       recordedTools,
       frozenModelInputLimit(run.configuration, saved.request.modelId),
+      estimateImages,
     );
+    // Forecast only the sealed image projection. New images without a corresponding
+    // sealed request cannot be assigned a fabricated zero-image/token baseline.
+    // This observation path never dispatches an image worker or reads PNG bodies.
+    for (const [index, message] of history.entries()) {
+      const id =
+        message.role === 'tool' && message.sourceIds?.length === 1
+          ? message.sourceIds[0]
+          : undefined;
+      if (!id || !estimateImages.has(id)) continue;
+      const sealed = recordedTools.get(id);
+      if (!sealed) throw new AgentError('context_estimate_unavailable');
+      if (sealed.images) history[index] = { ...message, images: structuredClone(sealed.images) };
+    }
     // Step-selected capabilities may add presentation beyond the initial Run
     // catalogue. Original sealed requests are the comparison evidence, not a
     // reason to resolve configuration or execute a fresh capability reader.
@@ -5265,7 +5331,12 @@ export class AgentRuntime {
     // Earlier interpretation rows remain audit history, not a recovery barrier.
     if (source.humanInputInterpretation !== undefined)
       throw new AgentError('input_processing_removed');
+    const windowRecovery = (await import('./execution/image-window-recovery')).imageWindowRecovery(
+      last,
+      source,
+    );
     const freshModel =
+      windowRecovery.rebuild ||
       Boolean(source.compressionId) ||
       // Store recovery proves that a cancelled Model was never dispatched and
       // was superseded by this Run's proven applied steer. Rebuild its history.
@@ -5375,7 +5446,7 @@ export class AgentRuntime {
           // Preparation alone is not consumption. A succeeded business Model
           // proves dispatch and complete output; the normal resume checks below
           // still verify its original input/output before this checkpoint is used.
-          if (last.status === 'succeeded' && !source.compressionId) {
+          if (last.status === 'succeeded' && !source.compressionId && !windowRecovery.observation) {
             const prior = delivered.find((entry) => entry.extensionId === pending.extensionId);
             if (prior) prior.key = pending.key;
             else delivered.push({ extensionId: pending.extensionId, key: pending.key });
@@ -5438,6 +5509,11 @@ export class AgentRuntime {
         const priorExecution = await executionForResume(item.executionId);
         if (
           (priorExecution?.decisionSource as Record<string, Json> | null)?.compressionId ||
+          (
+            (priorExecution?.decisionSource as Record<string, Json> | null)?.imageWindow as
+              | Record<string, Json>
+              | undefined
+          )?.kind === 'observation' ||
           (priorExecution?.status === 'failed' &&
             (priorExecution.result as Record<string, Json> | null)?.incomplete === true)
         )
@@ -5518,7 +5594,7 @@ export class AgentRuntime {
     result.sourceRequests = [...requests.values()];
     result.toolFailureStreak = streak;
     if (freshModel) {
-      if (!source.compressionId && last.status !== 'cancelled') {
+      if (!source.compressionId && !source.imageWindow && last.status !== 'cancelled') {
         const previousRetry = source.retry as unknown as ModelRetrySource | undefined;
         if (
           previousRetry &&
@@ -7963,6 +8039,7 @@ export class AgentRuntime {
     let initializeRequirements = this.options.initializeRunRequirements;
     let afterTurn = this.options.afterTurn;
     let compressor = sealCompressor(this.options.compressor);
+    let verifiedSessionCompressionTarget: true | undefined;
     let readStepCapabilities: StepCapabilitiesReader | undefined;
     let dispose: (() => Promise<void>) | undefined;
     let run: RunRecord;
@@ -8088,6 +8165,8 @@ export class AgentRuntime {
         readStepCapabilities = resolved.readStepCapabilities;
         afterTurn = resolved.afterTurn ?? afterTurn;
         compressor = sealCompressor(resolved.compressor ?? compressor);
+        if (command.kind === 'context.compress')
+          verifiedSessionCompressionTarget = resolved.verifiedSessionCompressionTarget;
         snapshot = structuredClone(resolved.snapshot);
         modelHiddenToolIds =
           resolved.modelHiddenToolIds && Object.freeze([...resolved.modelHiddenToolIds]);
@@ -8155,6 +8234,7 @@ export class AgentRuntime {
     }
     command = (await this.options.store.getCommand(command.id))!;
     await this.executeRun(command, owner, run, {
+      verifiedSessionCompressionTarget,
       model,
       modelId,
       definitions,
@@ -8827,6 +8907,7 @@ export class AgentRuntime {
         capturedRequests = new Map(sourceRequests);
         return capture(capturedRequests.values());
       };
+      let archiveDirectoryHandoff = false;
       let lastAutomaticFailure: string | undefined;
       let retainedInputMessages: ModelMessage[] = [];
       let compressionSummaryMessages: ModelMessage[] = [];
@@ -8836,6 +8917,22 @@ export class AgentRuntime {
       ) => {
         if (!selectedCompressor || (trigger === 'automatic' && !selectedCompressor.shouldCompress))
           return false;
+        const imageSources = orderedImageSources(originalMessages, localImages);
+        const imageScope = imageSources.length ? await windowQuery() : undefined;
+        const checkCompressionFreshness = async () => {
+          await checkFreshness();
+          if (imageScope) {
+            if ((await windowQuery()).route !== imageScope.route)
+              throw new AgentError('capability_refresh_required');
+            await verifyImageSources(
+              this.options.store,
+              imageScope,
+              imageSources,
+              controller.signal,
+            );
+          }
+        };
+        await checkCompressionFreshness();
         const focus =
           command.kind === 'context.compress'
             ? ((command.request as { focus?: string }).focus ?? null)
@@ -8971,12 +9068,22 @@ export class AgentRuntime {
             },
             executeModel: async (request, stepId) => {
               progress.phase = 'summarizing';
+              const preserveDirectory =
+                archiveDirectoryHandoff ||
+                compressionSummaryMessages.some(isArchiveDirectorySummary);
               const response = await this.execution.model(
                 {
                   ...scope,
                   compressionId: pending.id,
+                  ...(preserveDirectory ? { imageArchiveDirectory: true as const } : {}),
                   decisionSources: captured,
-                  checkFreshness,
+                  checkFreshness: checkCompressionFreshness,
+                  ...(imageScope
+                    ? {
+                        imageAvailabilityProjection: true as const,
+                        imageAvailabilityRoute: imageScope.route,
+                      }
+                    : {}),
                   continuation: await continuationState(),
                 },
                 compressionModel,
@@ -8987,7 +9094,11 @@ export class AgentRuntime {
                 throw new AgentError('compression_summary_invalid');
               stage = 'pure';
               progress.phase = 'validating';
-              const validationInput = Object.freeze({ ...input, summary: response.content });
+              const validationInput = Object.freeze({
+                ...input,
+                summary: response.content,
+                renderedSummary: imageArchiveSummaryText(response.content, preserveDirectory),
+              });
               if (
                 !response.toolCalls.length &&
                 selectedCompressor.validateSummary &&
@@ -9004,7 +9115,7 @@ export class AgentRuntime {
           });
           stage = 'store';
           progress.phase = 'validating';
-          await checkFreshness();
+          await checkCompressionFreshness();
           await this.options.store.commitCompression({
             expectedStoreId: run.originStoreId,
             owner,
@@ -9075,7 +9186,33 @@ export class AgentRuntime {
             this.compressionProgress.delete(session.id);
         }
       };
+      // This map is an assembly product, not authorization or evidence of delivery.
+      // Reading history, estimates or UI state never starts a Model execution.
+      const localImages = new Map<string, LocalImageSource>();
+      const windowQuery = async () => {
+        const probe = { requestId: 'image-route', modelId, messages: [], tools: [] };
+        const described = model?.describeRequest?.(probe);
+        return {
+          expectedStoreId: run.originStoreId,
+          sessionId: run.sessionId,
+          subjectId: command.subjectId,
+          selectionId: run.contextSelectionId,
+          runId: run.id,
+          route: await semanticDigest(
+            JSON.parse(
+              JSON.stringify([
+                run.configuration,
+                modelId,
+                described,
+                described?.provider.availability === 'available' ? null : { opaqueRun: run.id },
+              ]),
+            ) as Json,
+          ),
+        };
+      };
+      const protectedImages = true;
       const messages = async () => {
+        localImages.clear();
         await receivePendingInputs();
         await this.consumeJobResults(run, owner, controller.signal);
         await selectCapabilities();
@@ -9101,13 +9238,54 @@ export class AgentRuntime {
             scope.bindings.tools,
             undefined,
             frozenModelInputLimit(run.configuration, modelId),
+            protectedImages ? localImages : undefined,
           ),
         );
+        // Do not compress a newly captured, still-undelivered image out of the selected history.
+        // For confirmed history the compressor sees the same bounded, source-attributed notes.
+        let compressible = assembled;
+        if (localImages.size) {
+          const src = orderedImageSources(assembled, localImages);
+          const facts = await deliveryFacts(this.options.store, await windowQuery(), src);
+          const plan = deliveryPlan(src, facts);
+          if (plan.business.length || plan.observe.length) {
+            if (command.kind === 'context.compress') {
+              // No paid observation, no cross-route receipts/notes. The original
+              // selected archive directory is independent of the generated summary.
+              if (
+                !binding.verifiedSessionCompressionTarget ||
+                !scope.bindings.tools.has('files.reinspect_images') ||
+                !scope.bindings.tools.has('files.view_images')
+              )
+                throw new AgentError('image_delivery_pending');
+              const query = await windowQuery();
+              await verifyImageSources(this.options.store, query, src, controller.signal);
+              const metadataOnly = await historicalArchiveForCompression(
+                this.options.store,
+                query,
+                assembled,
+                localImages,
+                src,
+              );
+              archiveDirectoryHandoff = true;
+              return metadataOnly;
+            }
+            return assembled;
+          }
+          compressible = businessProjection(
+            { requestId: 'compress-preview', modelId, messages: assembled, tools: [] },
+            localImages,
+            [],
+            facts.confirmed,
+            [],
+          ).messages as ModelMessage[];
+        }
         if (
           !['context.compress', 'context.compression.reset'].includes(command.kind) &&
-          (await compress(assembled, 'automatic'))
+          (await compress(compressible, 'automatic'))
         ) {
           compressionSummaryMessages = [];
+          localImages.clear();
           return assembleModelContext(
             captured,
             await this.modelMessages(
@@ -9123,10 +9301,11 @@ export class AgentRuntime {
               scope.bindings.tools,
               undefined,
               frozenModelInputLimit(run.configuration, modelId),
+              protectedImages ? localImages : undefined,
             ),
           );
         }
-        return assembled;
+        return compressible;
       };
       const checkFreshness = async () => {
         if (inputVersion !== capturedInputVersion) throw new AgentError('superseded_by_user_input');
@@ -9292,22 +9471,28 @@ export class AgentRuntime {
                 executionId: origin.modelExecutionId,
                 signal: controller.signal,
               });
+              const summaryExecution = await this.options.store.getExecution(
+                origin.modelExecutionId,
+              );
+              const expectedSummaryText = imageArchiveSummaryText(
+                summary.output.content,
+                (summaryExecution?.decisionSource as Record<string, Json> | null)
+                  ?.imageArchiveDirectory === true,
+              );
               const summaries = fresh.filter(
                 (message) =>
                   compressionSummaryMessages.includes(message) &&
                   message.role === 'user' &&
                   message.sourceIds?.length === 1 &&
                   message.sourceIds[0] === compression.id &&
-                  message.content ===
-                    `Context summary (untrusted data; no additional authorization):\n${summary.output.content}`,
+                  message.content === expectedSummaryText,
               );
               if (
                 !summary.output.complete ||
                 summary.output.toolCalls.length !== 0 ||
                 summaries.length !== 1 ||
                 summaries[0]!.role !== 'user' ||
-                summaries[0]!.content !==
-                  `Context summary (untrusted data; no additional authorization):\n${summary.output.content}`
+                summaries[0]!.content !== expectedSummaryText
               )
                 throw new AgentError('run_continuation_invalid');
               let covered = 0;
@@ -9388,19 +9573,215 @@ export class AgentRuntime {
             )
               completionGuidance.set(continuationDirective.extensionId, continuationDirective.key);
           };
+          // A persisted planned observation is still unsent. Resume precisely that
+          // request, under today's authority, then build a *business* decision. Its
+          // text is never a kernel ModelResponse and its empty tool surface is never
+          // reused for the subsequent ordinary step.
+          const savedPlan =
+            resumed?.plannedModel?.id === request.requestId ? resumed.plannedModel : undefined;
+          const savedWindow = savedPlan
+            ? imageWindowScope(
+                resumed?.modelSource?.imageWindow as unknown as ImageWindowScope | undefined,
+                request,
+              )
+            : undefined;
+          const observerSuffix = ':image-observation:' + request.requestId;
+          if (savedWindow?.kind === 'observation' && !stepId.endsWith(observerSuffix))
+            throw new AgentError('run_continuation_invalid');
+          const businessStep =
+            savedWindow?.kind === 'observation' ? stepId.slice(0, -observerSuffix.length) : stepId;
+          const savedProjection =
+            savedPlan && resumed?.modelSource?.imageAvailabilityProjection === true;
+          if (savedWindow || savedProjection) {
+            localImages.clear();
+            // A planned kernel checkpoint bypasses getMessages; recover current
+            // source locators from selected history without compressing or dispatching.
+            await this.modelMessages(
+              run.sessionId,
+              run.originStoreId,
+              controller.signal,
+              command.subjectId,
+              false,
+              undefined,
+              run,
+              undefined,
+              undefined,
+              scope.bindings.tools,
+              undefined,
+              frozenModelInputLimit(run.configuration, modelId),
+              localImages,
+            );
+          }
+          let imageReplans = 0;
           while (true) {
+            let wireWindow: ImageWindowScope | undefined;
+            let selectedForRequest: LocalImageSource[] = [];
+            let actual = current;
+            const query = localImages.size ? await windowQuery() : undefined;
+            const freshImageScope = async () => {
+              await checkFreshness();
+              if (query) {
+                if ((await windowQuery()).route !== query.route)
+                  throw new AgentError('capability_refresh_required');
+                await verifyImageSources(
+                  this.options.store,
+                  query,
+                  selectedForRequest,
+                  controller.signal,
+                );
+              }
+            };
             try {
+              if (attempt === 0 && savedProjection && !savedWindow) {
+                // This sealed business request contains notes rather than pixels.
+                // Never infer access to the source again from a historical note.
+                if (!query || resumed?.modelSource?.imageAvailabilityRoute !== query.route)
+                  throw new AgentError('image_source_unverified');
+                selectedForRequest = orderedImageSources(request.messages, localImages);
+                if (!selectedForRequest.length) throw new AgentError('image_source_unverified');
+                await freshImageScope();
+              }
+              if (attempt === 0 && savedWindow) {
+                if (!query || query.route !== savedWindow.route)
+                  throw new AgentError('image_source_unverified');
+                const ids = new Set(savedWindow.members.map((m) => m.executionId));
+                const archived = [...localImages.values()].filter((s) =>
+                  ids.has(s.locator.executionId),
+                );
+                if (archived.length !== ids.size) throw new AgentError('image_source_unverified');
+                selectedForRequest = savedProjection
+                  ? orderedImageSources(request.messages, localImages)
+                  : archived;
+                await freshImageScope();
+                // The sealed provider input is authoritative, but no longer grants
+                // access when a selected source or its immutable member is missing.
+                for (const member of savedWindow.members)
+                  await imagePayload(
+                    localImages,
+                    [member],
+                    (r) => this.readBody(r, controller.signal, run.originStoreId),
+                    controller.signal,
+                  );
+                wireWindow = savedWindow;
+                if (savedWindow.kind === 'observation') {
+                  await this.execution.model(
+                    {
+                      ...scope,
+                      decisionSources: captured,
+                      checkFreshness: freshImageScope,
+                      imageWindow: savedWindow,
+                      continuation: await continuationState(),
+                    },
+                    model!,
+                    request,
+                    stepId,
+                    savedPlan,
+                  );
+                  await freshImageScope();
+                  const next = await deliveryFacts(this.options.store, query, selectedForRequest);
+                  assertImageReceipt(savedWindow.members, next.confirmed);
+                  current = {
+                    ...request,
+                    requestId: crypto.randomUUID(),
+                    messages: await retryMessages(),
+                    tools: modelTools(),
+                  };
+                  attempt++;
+                  continue;
+                }
+              } else if (query && !(attempt === 0 && savedPlan)) {
+                const src = orderedImageSources(current.messages, localImages);
+                for (;;) {
+                  const facts = await deliveryFacts(this.options.store, query, src);
+                  const plan = deliveryPlan(src, facts);
+                  const fragment = plan.observe[0];
+                  // Only one bounded detached payload is materialized at once.
+                  const members = fragment ?? plan.business;
+                  const selectedIds = new Set(members.map((m) => m.executionId));
+                  // Notes projected into a business tool result require the same
+                  // current source authority as pixels, even when none are resent.
+                  selectedForRequest = fragment
+                    ? src.filter((x) => selectedIds.has(x.locator.executionId))
+                    : src;
+                  await freshImageScope();
+                  const pixels = await imagePayload(
+                    localImages,
+                    members,
+                    (r) => this.readBody(r, controller.signal, run.originStoreId),
+                    controller.signal,
+                  );
+                  if (!fragment) {
+                    actual = businessProjection(
+                      current,
+                      localImages,
+                      members,
+                      facts.confirmed,
+                      pixels,
+                    );
+                    wireWindow = members.length
+                      ? { version: 1, kind: 'business', route: query.route, members }
+                      : undefined;
+                    break;
+                  }
+                  wireWindow = { version: 1, kind: 'observation', route: query.route, members };
+                  const task =
+                    command.request &&
+                    typeof command.request === 'object' &&
+                    !Array.isArray(command.request) &&
+                    typeof command.request.content === 'string'
+                      ? command.request.content
+                      : 'Describe the selected visual sources.';
+                  const rq = observationRequest(
+                    crypto.randomUUID(),
+                    modelId,
+                    task,
+                    localImages,
+                    members,
+                    pixels,
+                  );
+                  actual = rq;
+                  const observation = await this.execution.model(
+                    {
+                      ...scope,
+                      decisionSources: captured,
+                      checkFreshness: freshImageScope,
+                      imageWindow: wireWindow,
+                      continuation: await continuationState(),
+                    },
+                    model!,
+                    rq,
+                    businessStep + ':image-observation:' + rq.requestId,
+                  );
+                  await freshImageScope();
+                  if (
+                    observation.finishReason !== 'stop' ||
+                    observation.toolCalls.length ||
+                    !observation.content.trim()
+                  )
+                    throw new AgentError('image_observation_invalid');
+                  // The Store's completed execution, not this return value, advances coverage.
+                  const next = await deliveryFacts(this.options.store, query, selectedForRequest);
+                  assertImageReceipt(members, next.confirmed);
+                }
+              }
               const response = await this.execution.model(
                 {
                   ...scope,
                   decisionSources: captured,
-                  checkFreshness,
+                  checkFreshness: query ? freshImageScope : checkFreshness,
+                  ...(wireWindow ? { imageWindow: wireWindow } : {}),
+                  ...(selectedForRequest.length
+                    ? {
+                        imageAvailabilityProjection: true as const,
+                        imageAvailabilityRoute: query!.route,
+                      }
+                    : {}),
                   ...(modelRetry ? { modelRetry } : {}),
                   continuation: await continuationState(),
                 },
                 model!,
-                current,
-                attempt === 0 ? stepId : `${stepId}:refresh:${attempt}`,
+                actual,
+                attempt === 0 ? stepId : `${businessStep}:refresh:${attempt}`,
                 attempt === 0 && resumed?.plannedModel?.id === request.requestId
                   ? resumed.plannedModel
                   : undefined,
@@ -9408,7 +9789,32 @@ export class AgentRuntime {
               rememberGuidanceDelivery();
               return response;
             } catch (error) {
+              if (wireWindow && ModelRequestLimitError.isInstance(error)) {
+                const failed = await this.options.store.getExecution(actual.requestId);
+                if (
+                  !failed ||
+                  failed.kind !== 'model' ||
+                  failed.runId !== run.id ||
+                  failed.status !== 'failed' ||
+                  (failed.result as Record<string, Json> | null)?.code !==
+                    'model_request_body_too_large'
+                )
+                  throw error;
+                if (wireWindow.members.length === 1 && wireWindow.kind === 'observation')
+                  throw new AgentError('image_member_provider_limit');
+                if (++imageReplans > 8) throw new AgentError('image_delivery_limit');
+                controller.signal.throwIfAborted();
+                current = {
+                  ...current,
+                  requestId: crypto.randomUUID(),
+                  messages: await retryMessages(),
+                  tools: modelTools(),
+                };
+                attempt++;
+                continue;
+              }
               const retryReason = modelRetryReason(error);
+              if (wireWindow && retryReason) throw new AgentError('image_delivery_outcome_unknown');
               if (retryReason) {
                 controller.signal.throwIfAborted();
                 const previous = await this.options.store.getExecution(current.requestId);
@@ -9652,8 +10058,12 @@ export class AgentRuntime {
       if (resumed?.modelRequest && resumed.modelSource) {
         await selectCapabilities(resumed.modelSource.capabilitySnapshot ?? null);
         if (
-          canonicalJson(modelTools() as unknown as Json) !==
-            canonicalJson(resumed.modelRequest.tools as unknown as Json) ||
+          canonicalJson(
+            ((resumed.modelSource.imageWindow as Record<string, Json> | undefined)?.kind ===
+            'observation'
+              ? []
+              : modelTools()) as unknown as Json,
+          ) !== canonicalJson(resumed.modelRequest.tools as unknown as Json) ||
           canonicalJson((scope.bindings.capabilitySnapshot ?? null) as Json) !==
             canonicalJson(resumed.modelSource.capabilitySnapshot ?? null) ||
           (resumed.modelSource.toolBehaviorBindings !== undefined &&
@@ -9693,7 +10103,8 @@ export class AgentRuntime {
               byteLimit: 8 * 1024 * 1024,
             })
           ).highWaterSeq;
-          const expanded = await this.modelMessages(
+          const resetImages = new Map<string, LocalImageSource>();
+          let expanded = await this.modelMessages(
             run.sessionId,
             run.originStoreId,
             controller.signal,
@@ -9706,7 +10117,26 @@ export class AgentRuntime {
             scope.bindings.tools,
             undefined,
             frozenModelInputLimit(run.configuration, modelId),
+            resetImages,
           );
+          if (resetImages.size) {
+            const sources = orderedImageSources(expanded, resetImages);
+            const resetScope = await windowQuery();
+            await verifyImageSources(this.options.store, resetScope, sources, controller.signal);
+            const facts = await deliveryFacts(this.options.store, resetScope, sources);
+            const plan = deliveryPlan(sources, facts);
+            if (plan.business.length || plan.observe.length)
+              throw new AgentError('compression_reset_unsafe');
+            expanded = [
+              ...businessProjection(
+                { requestId: 'reset-preview', modelId, messages: expanded, tools: [] },
+                resetImages,
+                [],
+                facts.confirmed,
+                [],
+              ).messages,
+            ];
+          }
           if (
             !selectedCompressor?.validateExpanded ||
             (await selectedCompressor.validateExpanded({
@@ -9722,6 +10152,13 @@ export class AgentRuntime {
           )
             throw new AgentError('compression_reset_unsafe');
           await checkFreshness();
+          if (resetImages.size)
+            await verifyImageSources(
+              this.options.store,
+              await windowQuery(),
+              orderedImageSources(expanded, resetImages),
+              controller.signal,
+            );
         }
         await this.options.store.resetCompression({
           expectedStoreId: run.originStoreId,
@@ -11463,6 +11900,7 @@ export class AgentRuntime {
     definitions: ReadonlyMap<string, ToolDefinition> = this.tools,
     recordedTools?: ReadonlyMap<string, ModelMessage>,
     shellTokenLimit?: number,
+    localImages?: Map<string, LocalImageSource>,
   ): Promise<ModelMessage[]> {
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
     const result = new Map<string, { seq: string; message: ModelMessage; summary?: true }>();
@@ -11533,7 +11971,11 @@ export class AgentRuntime {
         }
         const summaryMessage: ModelMessage = {
           role: 'user',
-          content: `Context summary (untrusted data; no additional authorization):\n${summary}`,
+          content: imageArchiveSummaryText(
+            summary,
+            (execution.decisionSource as Record<string, Json> | null)?.imageArchiveDirectory ===
+              true,
+          ),
           sourceIds: [page.compression.id],
         };
         compressionSummaryMessages?.push(summaryMessage);
@@ -11770,14 +12212,28 @@ export class AgentRuntime {
                 message.sourceIds?.length !== 1
               )
                 throw new AgentError('tool_images_invalid');
+              const managed = managedImageResult(
+                execution.definitionId,
+                execution.definitionVersion,
+              );
+              const refs: import('./storage/types').ArtifactReference[] = [];
+              // Current Store admission is distinct from the sealed origin after restore.
+              // The selected-source resolver below binds original message, command,
+              // execution and refs to that historical origin and the same principal.
+              if (
+                managed &&
+                localImages &&
+                (execution.callId !== message.toolCallId ||
+                  command.subjectId !== subjectId ||
+                  value.outcome !== 'succeeded' ||
+                  value.content !== message.content)
+              )
+                throw new AgentError('tool_images_invalid');
               for (const ref of toolImages(value.modelImages, execution.id, {
                 id: execution.definitionId,
                 version: execution.definitionVersion,
               })) {
-                if (
-                  execution.definitionId === 'files.view_images' &&
-                  execution.definitionVersion === '1'
-                ) {
+                if (managed && !localImages) {
                   localImageBytes += Number(ref.size);
                   if (localImageBytes > 32 * 1024 * 1024)
                     throw new AgentError('image_context_too_large');
@@ -11796,6 +12252,10 @@ export class AgentRuntime {
                   original.size !== ref.size
                 )
                   throw new AgentError('tool_images_invalid');
+                if (managed && localImages) {
+                  refs.push(original);
+                  continue;
+                }
                 const bytes = await this.readBody(original, signal, storeId);
                 if (!matchesImageType(bytes, ref.mediaType))
                   throw new AgentError('tool_images_invalid');
@@ -11803,6 +12263,33 @@ export class AgentRuntime {
                   mediaType: 'image/png',
                   data: Buffer.from(bytes).toString('base64'),
                 });
+              }
+              if (managed && localImages && refs.length) {
+                if (localImages.has(execution.id)) throw new AgentError('tool_images_invalid');
+                if (!subjectId || !contextSelectionId)
+                  throw new AgentError('image_source_unverified');
+                const locator = {
+                  executionId: execution.id,
+                  messageId: selectedMessage.id,
+                  seq: selectedMessage.seq,
+                };
+                const carrier = await resolveSelectedImageCarrier(
+                  this.options.store,
+                  {
+                    expectedStoreId: storeId,
+                    sessionId,
+                    subjectId,
+                    selectionId: contextSelectionId,
+                  },
+                  locator,
+                  execution.definitionId,
+                );
+                if (
+                  canonicalJson(carrier.refs as unknown as Json) !==
+                  canonicalJson(refs as unknown as Json)
+                )
+                  throw new AgentError('image_source_unverified');
+                localImages.set(execution.id, carrier);
               }
             }
             if (execution && value && typeof value === 'object' && !Array.isArray(value)) {

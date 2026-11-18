@@ -27,6 +27,7 @@ export function ordinaryHostConfigurationDefaults(
       ...[
         'files.read',
         'files.view_images',
+        'files.reinspect_images',
         'files.write',
         'files.edit',
         ...(shellAvailable

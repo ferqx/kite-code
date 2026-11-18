@@ -2,6 +2,7 @@ import type { Database, Statement } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { isImageObservation } from '../../execution/image-window';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
 import { recordedTokenUsage } from '../../token-usage';
@@ -109,7 +110,8 @@ import {
   readForkSourceProjection,
 } from './fork-readonly-sources';
 import { readForkRecordSources } from './fork-record-sources';
-import { verifyHostControlDispatch } from './host-control-dispatch';
+import { readHistoricallyConfirmedImageMembers } from './historical-image-members';
+import { verifyHostControlDispatch, verifyHostControlReads } from './host-control-dispatch';
 import { callHostMutation } from './host-mutation-operations';
 import { humanInputDisplay } from './human-input-display';
 import {
@@ -196,6 +198,7 @@ import { callSessionExport } from './session-export';
 import { readFirstSessionRun } from './session-first-run';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
 import { manageSession } from './session-management-operations';
+import { readLatestBusinessModelPreference } from './session-model-preference';
 import { reconcileSession } from './session-reconciliation';
 import { claimAutomaticSessionTitle } from './session-title-operations';
 import {
@@ -1816,6 +1819,11 @@ export class SqliteOperations {
           this.event(String(command.session_id), id, 'run.started');
           return this.runRecord(this.row('SELECT * FROM run WHERE id=?', id)!);
         });
+      case 'readLatestBusinessModelPreference':
+        return readLatestBusinessModelPreference(
+          this,
+          args[0] as Parameters<Store['readLatestBusinessModelPreference']>[0],
+        );
       case 'readFirstSessionRun':
         return readFirstSessionRun(this, args[0] as Parameters<Store['readFirstSessionRun']>[0]);
       case 'getRun': {
@@ -1967,6 +1975,7 @@ export class SqliteOperations {
       case 'includeResult':
       case 'getModelContext':
       case 'getExpandedContext':
+      case 'readSelectedToolLocators':
       case 'getSelectedContext':
       case 'readOriginalRunSelection':
       case 'listPendingJobResults':
@@ -2190,9 +2199,78 @@ export class SqliteOperations {
               throw new AgentError('invalid_runless_execution');
             assertCurrentExecutionPurpose(this, execution);
           }
+          const imageDecision = parse(execution.decision_source_json) as Record<
+            string,
+            Json
+          > | null;
+          const imageScope =
+            imageDecision?.imageWindow || imageDecision?.imageAvailabilityProjection === true;
+          if (input.status === 'succeeded' && imageScope && execution.state !== 'succeeded') {
+            // This transaction fences local publication, not a physical retraction
+            // of bytes that may already have reached the external provider.
+            try {
+              if (
+                execution.kind !== 'model' ||
+                execution.run_id === null ||
+                !['dispatching', 'running'].includes(String(execution.state)) ||
+                execution.cancel_requested
+              )
+                throw new AgentError('image_window_outcome_unknown');
+              this.active(
+                input.owner,
+                String(execution.origin_command_id),
+                String(execution.run_id),
+              );
+              this.ancestors(input.owner, String(execution.id));
+              const run = this.row(
+                'SELECT context_selection_id FROM run WHERE id=?',
+                String(execution.run_id),
+              );
+              const session = this.row(
+                'SELECT context_selection_id FROM session WHERE id=?',
+                String(execution.session_id),
+              );
+              if (!run || !session || run.context_selection_id !== session.context_selection_id)
+                throw new AgentError('image_window_outcome_unknown');
+              const auth = parse(execution.dispatch_authorization_json) as Record<
+                string,
+                Json
+              > | null;
+              if (!auth || auth.allowed !== true)
+                throw new AgentError('image_window_outcome_unknown');
+              verifyHostControlReads(
+                this,
+                execution,
+                input.expectedStoreId,
+                auth.controlReads as unknown as
+                  | import('../port').PermissionControlRead[]
+                  | undefined,
+              );
+            } catch {
+              throw new AgentError('image_window_outcome_unknown');
+            }
+          }
           let status = input.status;
           let result = input.result;
           let message = input.message;
+          if (isImageObservation(parse(execution.decision_source_json))) {
+            message = undefined;
+            if (status === 'succeeded') {
+              const rr = result as Record<string, Json> | null;
+              const ds = parse(execution.decision_source_json) as Record<string, Json>;
+              if (
+                !rr ||
+                rr.finishReason !== 'stop' ||
+                !Array.isArray(rr.toolCalls) ||
+                rr.toolCalls.length ||
+                canonicalJson(rr.imageWindow ?? null) !== canonicalJson(ds.imageWindow ?? null) ||
+                !rr.observation ||
+                typeof rr.observation !== 'object' ||
+                (rr.observation as Record<string, Json>).trust !== 'untrusted'
+              )
+                throw new AgentError('image_observation_incomplete');
+            }
+          }
           if (
             input.cancelledBeforeAdapter &&
             execution.kind === 'tool' &&
@@ -2291,7 +2369,14 @@ export class SqliteOperations {
               `partial_${input.executionId}`,
               execution.session_id!,
             );
-            const checkpoint = partial ? modelOutputOf(parse(partial.source_json)) : undefined;
+            // Tools-free observer output (including opaque provider continuation)
+            // is journaled on its original execution, never in a conversation message.
+            const checkpoint = isImageObservation(imageDecision)
+              ? (parse(execution.result_json) as Record<string, Json> | null)
+                  ?.imageObservationPartial
+              : partial
+                ? modelOutputOf(parse(partial.source_json))
+                : undefined;
             if (
               checkpoint === undefined ||
               canonicalJson({ ...output, complete: false } as unknown as Json) !==
@@ -2501,6 +2586,117 @@ export class SqliteOperations {
           String(args[0]),
           limit(args[1]),
         ).map((row) => this.execution(row));
+      case 'readHistoricallyConfirmedImageMembers':
+        return readHistoricallyConfirmedImageMembers(
+          this,
+          args[0] as Parameters<Store['readHistoricallyConfirmedImageMembers']>[0],
+        );
+      case 'readImageWindowFacts':
+        return this.tx(() => {
+          const input = args[0] as Parameters<Store['readImageWindowFacts']>[0];
+          this.identity(input.expectedStoreId);
+          if (
+            !Array.isArray(input.executionIds) ||
+            input.executionIds.length > 128 ||
+            new Set(input.executionIds).size !== input.executionIds.length
+          )
+            throw new AgentError('image_window_scope_invalid');
+          const run = this.row(
+            'SELECT r.* FROM run r JOIN command c ON c.id=r.origin_command_id WHERE r.id=? AND r.session_id=? AND c.subject_id=? AND c.origin_store_id=?',
+            input.runId,
+            input.sessionId,
+            input.subjectId,
+            input.expectedStoreId,
+          );
+          const sess = this.row('SELECT * FROM session WHERE id=?', input.sessionId);
+          if (
+            !run ||
+            !sess ||
+            run.context_selection_id !== input.selectionId ||
+            sess.context_selection_id !== input.selectionId
+          )
+            throw new AgentError('image_window_scope_invalid');
+          const confirmed: Awaited<ReturnType<Store['readImageWindowFacts']>>['confirmed'] = [];
+          const rejected: Awaited<ReturnType<Store['readImageWindowFacts']>>['rejected'] = [];
+          // Bound candidate selection by session, original principal, route and requested source IDs; never recent-N history.
+          for (const row of this.rows(
+            `SELECT e.* FROM execution e JOIN run r ON r.id=e.run_id JOIN command c ON c.id=e.origin_command_id
+            WHERE e.session_id=? AND e.kind='model' AND c.subject_id=? AND e.origin_store_id=?
+            AND r.context_selection_id=? AND json_extract(e.decision_source_json,'$.imageWindow.route')=?
+            AND ((e.state='succeeded' AND EXISTS (SELECT 1 FROM json_each(e.decision_source_json,'$.imageWindow.members') m JOIN json_each(?) ids ON json_extract(m.value,'$.executionId')=ids.value))
+              OR (e.state='failed' AND e.run_id=? AND json_extract(e.result_json,'$.code')='model_request_body_too_large'))`,
+            input.sessionId,
+            input.subjectId,
+            input.expectedStoreId,
+            input.selectionId,
+            input.route,
+            JSON.stringify(input.executionIds),
+            input.runId,
+          )) {
+            const ds = parse(row.decision_source_json) as Record<string, Json>;
+            const iw = ds?.imageWindow as unknown as
+              | import('../../execution/image-window').ImageWindowScope
+              | undefined;
+            if (
+              !iw ||
+              iw.version !== 1 ||
+              iw.route !== input.route ||
+              !Array.isArray(iw.members) ||
+              !iw.members.length ||
+              iw.members.length > 128
+            )
+              continue;
+            const result = parse(row.result_json) as Record<string, Json> | null;
+            if (row.state === 'failed' && result?.code === 'model_request_body_too_large') {
+              if (iw.members.some((m) => input.executionIds.includes(m.executionId)))
+                rejected.push({ attemptId: String(row.id), kind: iw.kind, members: iw.members });
+              continue;
+            }
+            if (
+              row.state !== 'succeeded' ||
+              !result ||
+              canonicalJson(result.imageWindow ?? null) !== canonicalJson(ds.imageWindow ?? null)
+            )
+              continue;
+            const observer = iw.kind === 'observation';
+            if (
+              !(observer
+                ? result.finishReason === 'stop' &&
+                  Array.isArray(result.toolCalls) &&
+                  !result.toolCalls.length
+                : ['stop', 'tool_calls'].includes(String(result.finishReason)))
+            )
+              continue;
+            const ob = result.observation as Record<string, Json> | undefined;
+            const note =
+              observer &&
+              ob?.trust === 'untrusted' &&
+              typeof ob.note === 'string' &&
+              Buffer.byteLength(ob.note) <= 16384
+                ? ob.note
+                : undefined;
+            if (observer && !note) continue;
+            for (const m of iw.members)
+              if (
+                input.executionIds.includes(m.executionId) &&
+                Number.isSafeInteger(m.ordinal) &&
+                m.ordinal >= 1 &&
+                Number.isSafeInteger(m.size) &&
+                m.size > 0 &&
+                /^[a-f0-9]{64}$/.test(m.hash)
+              )
+                confirmed.push({
+                  ...m,
+                  ...(note
+                    ? {
+                        note,
+                        noteSources: [...new Set(iw.members.map((member) => member.executionId))],
+                      }
+                    : {}),
+                });
+          }
+          return { confirmed, rejected };
+        });
       case 'persistModelPartial':
         return this.tx(() => {
           this.identity(input.expectedStoreId);
@@ -2519,8 +2715,19 @@ export class SqliteOperations {
             const output = verifyModelOutput(this, input.modelOutput, execution);
             if (output.complete) throw new AgentError('model_output_invalid');
           }
+          const privateObservation = isImageObservation(parse(execution.decision_source_json));
+          if (privateObservation && !input.modelOutput) return;
+          if (privateObservation && !['dispatching', 'running'].includes(String(execution.state)))
+            throw new AgentError('execution_not_active');
           const id = `partial_${input.executionId}`;
-          const prior = this.row('SELECT * FROM message WHERE id=?', id);
+          const priorHead = privateObservation
+            ? (parse(execution.result_json) as Record<string, Json> | null)?.imageObservationPartial
+            : undefined;
+          const prior = privateObservation
+            ? priorHead
+              ? { source_json: canonicalJson({ modelOutput: priorHead }) }
+              : undefined
+            : this.row('SELECT * FROM message WHERE id=?', id);
           const previousSource = prior ? (parse(prior.source_json) as Record<string, Json>) : null;
           const firstOutput = modelFirstOutput(previousSource, input.firstOutput);
           const messageBody = {
@@ -2555,6 +2762,17 @@ export class SqliteOperations {
             } else if (input.modelOutput.seq !== '1') throw new AgentError('model_output_conflict');
           } else if (input.modelOutput !== undefined && input.modelOutput.seq !== '1')
             throw new AgentError('model_output_conflict');
+          if (privateObservation) {
+            // Only the immutable output head is persisted, after the very same
+            // owner/sequence/monotonicity checks as an ordinary partial. This is
+            // not a finished output, a delivery receipt or a user-visible event.
+            this.run(
+              'UPDATE execution SET result_json=? WHERE id=?',
+              canonicalJson({ imageObservationPartial: input.modelOutput as unknown as Json }),
+              execution.id!,
+            );
+            return;
+          }
           if (!prior)
             this.appendMessage(
               String(execution.session_id),

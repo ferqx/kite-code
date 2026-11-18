@@ -11,6 +11,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
+import { hasCompressionArchiveTools } from '../../src/session-compression-model';
 import { runModelProtocol } from '../../src/session-model-protocol';
 import { encodeFrames, responseFrames } from '../fixtures/responses-wire';
 
@@ -24,7 +25,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean) {
   }
 }
 
-async function fixture(existingRoot?: string) {
+async function fixture(existingRoot?: string, hostModelId?: string, imageTools = false) {
   const root = existingRoot ?? temporaryDirectory('kite-session-model-protocol-');
   const workspace = join(root, 'workspace');
   const home = join(root, 'user');
@@ -94,7 +95,7 @@ async function fixture(existingRoot?: string) {
         protocol: 'responses',
       },
     ],
-    tools: [],
+    tools: imageTools ? [{ id: 'files.view_images' }, { id: 'files.reinspect_images' }] : [],
   };
   // Cold fixtures keep the first Run's model/protocol, but use the new local mock transport.
   if (existingRoot) {
@@ -112,6 +113,7 @@ async function fixture(existingRoot?: string) {
   const host = createDefaultProcessConfiguration({
     profile,
     userConfigurationPath: file,
+    ...(hostModelId ? { hostConfiguration: { configuration: { modelId: hostModelId } } } : {}),
     credentialBackend: {
       kind: 'temporary',
       put: async () => {},
@@ -126,8 +128,16 @@ async function fixture(existingRoot?: string) {
     },
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
+  const compressionTargets: (true | undefined)[] = [];
+  const originalResolver = host.resolveRunConfiguration!;
   const runtime = createRuntime({
     ...host,
+    resolveRunConfiguration: async (input) => {
+      const resolved = await originalResolver(input);
+      if (input.command.kind === 'context.compress')
+        compressionTargets.push(resolved.verifiedSessionCompressionTarget);
+      return resolved;
+    },
     store,
     artifacts: createArtifactStore({ profile, store }),
     permissions: host.permissions!,
@@ -174,6 +184,7 @@ async function fixture(existingRoot?: string) {
   return {
     root,
     file,
+    compressionTargets,
     config,
     host,
     runtime,
@@ -181,6 +192,24 @@ async function fixture(existingRoot?: string) {
     requests,
     storeId,
     createSession,
+    async compress(commandId: string, sessionId = 's') {
+      const session = (await store.getSession(sessionId))!;
+      await client.compressContext(sessionId, {
+        expectedStoreId: storeId,
+        commandId,
+        expectedContextSelectionId: session.contextSelectionId,
+      });
+      return until(
+        async () => ({
+          command: await client.getCommand(commandId),
+          view: await client.getView(sessionId),
+        }),
+        ({ command, view }) =>
+          command.status === 'rejected' ||
+          (command.status === 'applied' &&
+            !view.runs.some((run) => run.originCommandId === commandId && run.isActive)),
+      ).then(({ command }) => command);
+    },
     get credentialReads() {
       return credentialReads;
     },
@@ -190,7 +219,7 @@ async function fixture(existingRoot?: string) {
     async run(
       commandId: string,
       modelId?: string,
-      options: { sessionId?: string; followUp?: boolean; reasoningEffort?: 'high' } = {},
+      options: { sessionId?: string; followUp?: boolean; reasoningEffort?: 'high' | 'xhigh' } = {},
     ) {
       const sessionId = options.sessionId ?? 's';
       const identity = {
@@ -386,4 +415,126 @@ test('a failed Provider attempt still belongs to the first actual Run and keeps 
   } finally {
     await f.close();
   }
+});
+
+test('manual compression re-resolves the last successful business model and effort, not the changed default', async () => {
+  const f = await fixture();
+  try {
+    await f.run('chosen-response', 'response-b', { reasoningEffort: 'xhigh' });
+    const before = f.requests.length;
+    await f.compress('compact-response');
+    expect(f.requests.length).toBe(before + 1);
+    expect(f.requests.at(-1)).toMatchObject({
+      path: '/b/v1/responses',
+      body: { model: 'response-second', reasoning: { effort: 'xhigh' } },
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+for (const change of ['endpoint', 'provider', 'protocol', 'model', 'missing'] as const)
+  test(`manual compression refuses changed historical target: ${change}`, async () => {
+    const f = await fixture();
+    try {
+      await f.run('chosen-response', 'response-b', { reasoningEffort: 'xhigh' });
+      const target = f.config.models.find((model) => model.id === 'response-b')!;
+      if (change === 'endpoint') target.baseURL += '/changed';
+      if (change === 'provider') target.provider = 'openai';
+      if (change === 'protocol') target.protocol = 'chat-completions';
+      if (change === 'model') target.model = 'other';
+      if (change === 'missing')
+        f.config.models = f.config.models.filter((model) => model.id !== target.id);
+      writeFileSync(f.file, JSON.stringify(f.config));
+      const before = f.requests.length;
+      const result = await f.compress('compact-changed').then(
+        (value) => value,
+        (error) => error,
+      );
+      expect(result.status === 'rejected' || result.code !== undefined).toBe(true);
+      expect(f.requests.length).toBe(before);
+      expect(f.credentialReads).toBe(0);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('manual compression preserves explicit host selection and first-protocol lock', async () => {
+  const f = await fixture(undefined, 'chat-a');
+  try {
+    await f.run('selected-responses', 'response-b', { reasoningEffort: 'xhigh' });
+    const before = f.requests.length;
+    expect(await f.compress('explicit-chat-compress')).toMatchObject({
+      status: 'rejected',
+      receipt: { reason: 'session_model_protocol_locked' },
+    });
+    expect(f.requests.length).toBe(before);
+  } finally {
+    await f.close();
+  }
+});
+
+test('empty session manual compression invents neither a historical model nor a provider request', async () => {
+  const f = await fixture();
+  try {
+    await f.compress('empty-compress');
+    expect(f.requests).toHaveLength(0);
+    expect(
+      await f.store.readLatestBusinessModelPreference({
+        expectedStoreId: f.storeId,
+        sessionId: 's',
+        subjectId: 'owner',
+      }),
+    ).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+for (const imageTools of [true, false])
+  test(`formal builtin Files registration grants compression target only with both selected tools: ${imageTools}`, async () => {
+    const f = await fixture(undefined, undefined, imageTools);
+    try {
+      await f.run('business-before-compress', 'response-b', { reasoningEffort: 'xhigh' });
+      await f.compress('registered-compress');
+      expect(f.compressionTargets).toEqual([imageTools ? true : undefined]);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('removing archive reinspection from current assembly withholds compression target', async () => {
+  const f = await fixture(undefined, undefined, true);
+  try {
+    await f.run('business-before-removal', 'response-b', { reasoningEffort: 'xhigh' });
+    f.config.tools = [{ id: 'files.view_images' }];
+    writeFileSync(f.file, JSON.stringify(f.config));
+    await f.compress('without-reinspection');
+    expect(f.compressionTargets).toEqual([undefined]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('archive target rejects hidden, unselected, wrong-owner and wrong-version tools', () => {
+  const tools = [
+    { id: 'files.view_images', version: '1' },
+    { id: 'files.reinspect_images', version: '1' },
+  ];
+  const extension = { id: 'builtin.files', version: '1', tools };
+  const ids = tools.map((tool) => tool.id);
+  expect(hasCompressionArchiveTools([extension], ids, [])).toBe(true);
+  expect(hasCompressionArchiveTools([extension], ids, [ids[1]!])).toBe(false);
+  expect(hasCompressionArchiveTools([extension], [ids[0]!], [])).toBe(false);
+  expect(hasCompressionArchiveTools([{ ...extension, id: 'untrusted.files' }], ids, [])).toBe(
+    false,
+  );
+  expect(hasCompressionArchiveTools([{ ...extension, version: 'other' }], ids, [])).toBe(false);
+  expect(
+    hasCompressionArchiveTools(
+      [{ ...extension, tools: [tools[0]!, { ...tools[1]!, version: 'other' }] }],
+      ids,
+      [],
+    ),
+  ).toBe(false);
 });

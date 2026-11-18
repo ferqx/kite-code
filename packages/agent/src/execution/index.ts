@@ -1,4 +1,9 @@
-import { type ModelAdapter, ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
+import {
+  type ModelAdapter,
+  ModelAttemptError,
+  type ModelRequest,
+  ModelRequestLimitError,
+} from '@kite-ai/ai';
 import type { ContextSource, ContextSources } from '../context';
 import { frozenModelInputLimit } from '../context-estimate';
 import type {
@@ -54,6 +59,7 @@ import {
   modeControlsChanged,
 } from './authorization-refresh';
 import { hostRevocationAuthorization } from './host-control';
+import { type ImageWindowScope, imageWindowScope } from './image-window';
 import {
   type AcceptedAuthorization,
   AuthorizationCheckRejectedError,
@@ -178,6 +184,11 @@ export interface RequirementRegistrationTransition {
   readonly after: readonly RequirementRef[];
 }
 export interface ExecutionScope {
+  imageWindow?: ImageWindowScope;
+  imageAvailabilityProjection?: true;
+  imageAvailabilityRoute?: string;
+  /** Durable bounded hint only: the selected archive remains discoverable after compaction. */
+  imageArchiveDirectory?: true;
   /** Core-owned interpretation of one durable human input, never a business grant. */
   humanInputInterpretation?: { inputCommandId: string; inputDigest: string };
   toolAdmission?: ToolDispatchAdmission;
@@ -1143,6 +1154,14 @@ export class UnifiedExecution {
     stepId: string,
     planned?: ExecutionRecord,
   ): Promise<ModelResponse> {
+    const windowScope = imageWindowScope(scope.imageWindow, request);
+    const observation = windowScope?.kind === 'observation';
+    if (
+      planned &&
+      JSON.stringify((planned.decisionSource as Record<string, Json>)?.imageWindow) !==
+        JSON.stringify(windowScope)
+    )
+      throw new AgentError('image_window_scope_invalid');
     const surface = createModelToolSurface(request, scope.bindings?.tools ?? new Map());
     const executionId = request.requestId;
     const input = planned
@@ -1154,11 +1173,23 @@ export class UnifiedExecution {
       ? structuredClone(planned.decisionSource)
       : {
           kind: 'model_request',
+          ...(scope.imageAvailabilityProjection
+            ? {
+                imageAvailabilityProjection: true,
+                imageAvailabilityRoute: scope.imageAvailabilityRoute!,
+              }
+            : {}),
+          ...(windowScope ? { imageWindow: windowScope as unknown as Json } : {}),
           ...(scope.humanInputInterpretation
             ? { humanInputInterpretation: { ...scope.humanInputInterpretation } }
             : {}),
           ...(scope.modelRetry ? { retry: { ...scope.modelRetry } } : {}),
-          ...(scope.compressionId ? { compressionId: scope.compressionId } : {}),
+          ...(scope.compressionId
+            ? {
+                compressionId: scope.compressionId,
+                ...(scope.imageArchiveDirectory ? { imageArchiveDirectory: true } : {}),
+              }
+            : {}),
           ...(scope.continuation ? { continuation: scope.continuation } : {}),
           requestId: executionId,
           sourceIds: request.messages.flatMap((message) => message.sourceIds ?? []),
@@ -1217,6 +1248,8 @@ export class UnifiedExecution {
     }
     let release: (() => void) | undefined;
     let dispatched = false;
+    let modelInvoked = false;
+    let windowFenceFailed = false;
     let cancelledByStoreAdmission = false;
     let content = '';
     let reasoning = '';
@@ -1258,6 +1291,7 @@ export class UnifiedExecution {
       const actualRequest = this.options.openModelInput
         ? await this.options.openModelInput(scope, input)
         : request;
+      if (windowScope) imageWindowScope(windowScope, actualRequest);
       scope.signal.throwIfAborted();
       const acquired = await this.acquireDispatch(
         scope,
@@ -1289,6 +1323,18 @@ export class UnifiedExecution {
         tools: surface.tools,
         messages: modelToolMessages(actualRequest.messages),
       };
+      // Admission/slot acquisition can wait. Recheck at the final local send boundary.
+      if (windowScope || scope.imageAvailabilityProjection) {
+        try {
+          scope.signal.throwIfAborted();
+          await scope.checkFreshness?.();
+          scope.signal.throwIfAborted();
+        } catch (error) {
+          windowFenceFailed = true;
+          throw error;
+        }
+      }
+      modelInvoked = true;
       for await (const event of model.stream(modelRequest, { signal: scope.signal })) {
         if (finish) throw new AgentError('model_event_after_finish');
         const contentStarted =
@@ -1306,6 +1352,7 @@ export class UnifiedExecution {
           reasoning += event.text;
           if (output) await output.text('reasoning', event.text);
         } else if (event.type === 'tool_call') {
+          if (observation) throw new AgentError('image_observation_tool_forbidden');
           firstOutput ??= 'tool_calls';
           const call = surface.decode(event);
           calls.push(call);
@@ -1347,6 +1394,15 @@ export class UnifiedExecution {
           savedAt = Date.now();
         }
       }
+      if (
+        observation &&
+        (!finish ||
+          finish.reason !== 'stop' ||
+          calls.length ||
+          !content.trim() ||
+          Buffer.byteLength(content) > 16384)
+      )
+        throw new AgentError('image_observation_incomplete');
       if (!finish || finish.reason === 'cancelled')
         throw new AgentError('model_response_incomplete');
       if (finish.reason === 'length' && scope.compressionId)
@@ -1380,6 +1436,18 @@ export class UnifiedExecution {
           modelToolCalls.push({ id: call.id, name: call.name, inputDigest });
         }
       }
+      // A finished network response cannot be retracted; a changed authority must
+      // still prevent publication and confirmed image delivery at local commit.
+      if (windowScope || scope.imageAvailabilityProjection) {
+        try {
+          scope.signal.throwIfAborted();
+          await scope.checkFreshness?.();
+          scope.signal.throwIfAborted();
+        } catch (error) {
+          windowFenceFailed = true;
+          throw error;
+        }
+      }
       const settled = await this.options.store.finishExecution({
         expectedStoreId: scope.run.originStoreId,
         owner: scope.owner,
@@ -1395,6 +1463,8 @@ export class UnifiedExecution {
             : {}),
           usage: finish.usage,
           finishReason: finish.reason,
+          ...(windowScope ? { imageWindow: windowScope as unknown as Json } : {}),
+          ...(observation ? { observation: { trust: 'untrusted', note: content } } : {}),
           ...(input &&
           typeof input === 'object' &&
           !Array.isArray(input) &&
@@ -1402,14 +1472,18 @@ export class UnifiedExecution {
             ? { modelInputBodyHash: bodyReference(input.body)!.reference.hash }
             : {}),
         },
-        message: {
-          role: 'assistant',
-          ...(firstOutput ? { firstOutput } : {}),
-          content: output ? preview() : content,
-          toolCalls: output ? [] : calls,
-          sourceIds: [executionId],
-          ...(output ? { modelOutput: output.descriptor(true)! } : {}),
-        },
+        ...(observation
+          ? {}
+          : {
+              message: {
+                role: 'assistant',
+                ...(firstOutput ? { firstOutput } : {}),
+                content: output ? preview() : content,
+                toolCalls: output ? [] : calls,
+                sourceIds: [executionId],
+                ...(output ? { modelOutput: output.descriptor(true)! } : {}),
+              },
+            }),
       });
       this.modelSettled(scope, settled);
       return {
@@ -1439,13 +1513,23 @@ export class UnifiedExecution {
           executionId,
           status: scope.signal.aborted || cancelledByStoreAdmission ? 'cancelled' : 'failed',
           result: {
-            code:
-              error instanceof AgentError
-                ? error.code
-                : ModelAttemptError.isInstance(error)
-                  ? error.message
-                  : 'model_failed',
+            code: windowFenceFailed
+              ? modelInvoked
+                ? 'image_window_outcome_unknown'
+                : 'image_window_not_dispatched'
+              : ModelRequestLimitError.isInstance(error)
+                ? 'model_request_body_too_large'
+                : observation && ModelAttemptError.isInstance(error)
+                  ? 'image_observation_outcome_unknown'
+                  : error instanceof AgentError
+                    ? error.code
+                    : ModelAttemptError.isInstance(error)
+                      ? error.message
+                      : 'model_failed',
             incomplete: true,
+            ...((windowScope || scope.imageAvailabilityProjection) && !modelInvoked
+              ? { dispatchCommitted: false }
+              : {}),
             ...(ModelAttemptError.isInstance(error) && error.detail
               ? { modelFailure: { detail: error.detail } }
               : {}),
@@ -1464,6 +1548,12 @@ export class UnifiedExecution {
         })
         .catch(() => {});
       if (settled) this.modelSettled(scope, settled);
+      if (windowFenceFailed)
+        throw new AgentError(
+          modelInvoked ? 'image_window_outcome_unknown' : 'image_window_not_dispatched',
+        );
+      if (observation && ModelAttemptError.isInstance(error))
+        throw new AgentError('image_observation_outcome_unknown');
       throw error;
     } finally {
       release?.();

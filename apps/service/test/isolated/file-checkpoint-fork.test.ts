@@ -244,6 +244,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
           'interrupt_agent',
           'list_agents',
           'read_file',
+          'reinspect_images',
           'send_agent_message',
           'spawn_agent',
           'view_images',

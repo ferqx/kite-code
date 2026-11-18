@@ -26,9 +26,15 @@
 
 [监督器](../images/processor.ts)启动固定校验摘要的程序，stdin 只传字节，不传路径、URL、Provider 配置或凭据。入口显式选择系统空设备作为 Bun config 和 tsconfig，禁用自动 env／安装；[Bun 的目录 preload](https://bun.sh/docs/runtime/bunfig)不能在已核程序前执行或改写 Sharp 解析。单宿主只允许一个处理进程，30秒取消预算；Windows 使用原 Job owner，512MiB Job 内存和单进程限制，核原 HANDLE wait 与 Job tree 停止后才释放名额。退出／关闭无法确认时保 owner、返回 unknown 并停止新的图片处理；停止证明失败独立于 stdout／exit Promise 结算，不无限等待已经缺失的证明。普通失败确认退出后允许下一次读取。POSIX 使用固定单程序、原 ChildProcess 与管道 close 收口，操作错误与 close 证明分开等待，无 PID 时不发送 kill；stdin 的结束回调拒绝写入失败，error 监听保留至管道 close，避免随后 EPIPE 成为未处理异常。输出越限先发起停止并退出迭代器关闭溢出管道，再等原退出证明，避免等待 close 与未消费管道相互阻塞。当前 Linux 的监督器、严格解码和 Service 链路验证见下文，没有硬内存资格。合作取消不对单次慢磁盘调用承诺实时上限。
 
-成功结果发布当前 Execution 的 PNG `artifactRefs/modelImages`，沿[完整模型正文链](../../model-body/README.md)进入下一次模型请求，保原 Tool 来源、调用顺序和完整 Artifact 校验；历史／冷重开／Fork 不重读源路径。所选历史中的新工具图片累计超过32MiB时，在展开越界图片前明确 `image_context_too_large`，不静默丢图；用户图片、PDF 和浏览器原预算保持。AI 两协议编码和版本保持，真实视觉能力由 Provider 决定。
+成功结果发布当前 Execution 的 PNG `artifactRefs/modelImages`，沿[完整模型正文链](../../model-body/README.md)进入下一次模型请求，保原 Tool 来源、调用顺序和完整 Artifact 校验；历史／冷重开／Fork 不重读源路径。所选历史超出单请求图片预算时，由模型正文层选择原图、安排独立只读观察并核对投递回执，不静默丢图。用户图片、PDF 和浏览器原预算保持。AI 两协议编码和版本保持，真实视觉能力由 Provider 决定。
 
 Core只为准确`files.view_images@1`接纳最多10张、每张8MiB、整批16MiB；其他工具的4张／16MiB合同保持。Native同样按原Execution读取1至10张，并保持每张尺寸和总量校验，不依赖renderer上报计数。
+
+### 从已选历史复看
+
+`builtin.files/files.reinspect_images@1` 是独立只读工具，不重跑原 `files.view_images@1`。[来源读取](../../model-body/selected-image-source.ts)按当前 store、主体、活动 Run 和选中历史找回原 Decision、原 Tool、原引用与顺序；路径、哈希和 callId 均不能单独授权。当前真实决策还须启用同一 builtin.files 的两个工具。`{list:true,beforeSeq?}` 从近期倒序分页，只读元数据（每页最多16个序号、返回最多8项）；没有结果但仍有游标时可以继续。`{locator:{messageId,seq,executionId},ordinals:[1,3]}` 选择1至4个严格递增、从1起算的原始序位。同内容不同序位不合并。复看结果在当前分支继续标记原父工具定位与原序位（例如原第4张仍是第4张），不会将派生工具的第1项冒充新来源，也不接受以派生工具为父递归读取。复看的是已归档的规范化 PNG，并非读取已变更的磁盘原件。成功执行工具不等于模型已确认收图。
+
+若选中的某个受管文件可证缺失，已授权的来源才返回可用／缺失序位，本次整组零发图；定位、权限、内容完整性或读取原因不可核实则不给来源细节。[隔离测试](../../../test/isolated/artifacts/selected-image-source.test.ts)覆盖原路径移除、重复内容、Fork 和冷重开。
 
 ### 本地保存与缓存目录
 
@@ -56,7 +62,7 @@ Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存
 
 2026-11-04，Windows x64／Bun1.4.3，修复前基准的[严格解码回归](../../../test/isolated/files/images.test.ts)覆盖真实像素、透明、EXIF、动画首帧、截断与伪装、尺寸和字节预算、排队／在途取消、超时、原生崩溃、输出超量、Job 内存耗尽及随后正常读取。[源码树外闭包](../../../test/isolated/files/images-packaged.test.ts)物理复制 Sharp 和 native 依赖，空 PATH/NODE_PATH、禁止自动安装，核资产删除／摘要篡改及每次恢复；正式 Agent build 已产出 child、摘要与原生文件资产。
 
-[默认 Service 联验](../../../../../apps/service/test/isolated/image-reading.test.ts)通过真实 SQLite/Artifact、两个不同像素调用的结果／来源配对、外部文件／有效原件、跨会话拒绝、冷重开和 Fork，并将实际请求交给两种 SDK 编码。[累计预算回归](../../../test/isolated/artifacts/tool-image-budget.test.ts)核最后越界图片未读正文、零后继模型请求。原 PDF、外部读取、异步完整读取、Windows Job 和 Artifact 原门禁继续通过。
+[默认 Service 联验](../../../../../apps/service/test/isolated/image-reading.test.ts)通过真实 SQLite/Artifact、两个不同像素调用的结果／来源配对、外部文件／有效原件、跨会话拒绝、冷重开和 Fork，并将实际请求交给两种 SDK 编码。[累计预算回归](../../../test/isolated/artifacts/tool-image-budget.test.ts)使用真实看图工具核超预算自动分窗、已知413降档和未知网络失败不盲重试；完整单图的交付不以哈希去重或重开工作区文件。原 PDF、外部读取、异步完整读取、Windows Job 和 Artifact 原门禁继续通过。
 
 源码树外的合成 `bunfig` preload／`tsconfig`别名先实际复现 `image_process_failed`，封闭配置后解码与资产恢复通过。[退出未知回归](../../../test/isolated/files/image-process-unknown.test.ts)先复现等待旧 exit Promise 挂起，修后在原真实合成进程已物理清理、但 adapter 证明被保留的故障下，原调用和排队调用均结算 `image_process_exit_unconfirmed`，后续不再读取字节或启动进程。该用例不把模拟证明缺失当真实OS无法停止资格。
 

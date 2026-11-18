@@ -1,6 +1,7 @@
 import type { ModelAdapterSnapshot } from './request-snapshot';
 
 export { ModelAttemptError } from './model-attempt';
+export { ModelRequestLimitError } from './model-request-limit';
 
 export {
   type ModelAdapterSnapshot,

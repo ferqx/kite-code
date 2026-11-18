@@ -14,6 +14,7 @@ import {
   createFileCheckpointing,
   createFileToolBehaviors,
   createImageFileReads,
+  createReinspectImagesTool,
   createScopedFileCheckpointing,
   createWorkspaceFiles,
   type EditablePlanFile,
@@ -790,7 +791,73 @@ export function createDefaultFileCheckpointConfiguration(options: {
     'files.edit':
       'Replace exact non-overlapping literal text using the exact base_ref returned by read_file or a successful mutation of this path. expected_matches defaults to 1; multiple matches require the explicit exact positive count. Supply each of old_text/new_text or its corresponding immutable old_text_ref/new_text_ref, never both text and reference for the same field. Preserve the exact target and intended change. A conflict does not reveal current contents or roll back other operations; read the authorized current file and use its fresh base_ref before a separately authorized corrected edit.',
   };
-  const tools = [...planFiles.tools!, images.tool].map((tool) => {
+  const reinspectionScope = async (ctx: ToolContext) => {
+    const runtime = options.runtime(),
+      e = await runtime.getExecution(ctx.executionId);
+    const metadata = await runtime.getMetadata(),
+      cmd = e && (await runtime.getCommand(e.originCommandId));
+    if (
+      !e ||
+      !cmd ||
+      !ctx.runId ||
+      e.runId !== ctx.runId ||
+      e.sessionId !== ctx.sessionId ||
+      cmd.sessionId !== ctx.sessionId ||
+      e.originStoreId !== metadata.storeId ||
+      cmd.originStoreId !== metadata.storeId ||
+      e.kind !== 'tool' ||
+      e.definitionId !== 'files.reinspect_images' ||
+      e.definitionVersion !== '1'
+    )
+      fail('image_source_unverified');
+    // Archive lookup is a companion, not an independently privileged path around tool selection.
+    const decision = object(e.decisionSource);
+    const model =
+      decision?.kind === 'model_decision' && typeof decision.modelExecutionId === 'string'
+        ? await runtime.getExecution(decision.modelExecutionId)
+        : null;
+    const binding = model && object(model.decisionSource);
+    if (
+      model?.kind !== 'model' ||
+      model.status !== 'succeeded' ||
+      model.runId !== ctx.runId ||
+      model.sessionId !== ctx.sessionId ||
+      model.originStoreId !== metadata.storeId ||
+      binding?.kind !== 'model_request' ||
+      binding.requestId !== model.id ||
+      !Array.isArray(binding.toolBindings) ||
+      !['files.view_images', 'files.reinspect_images'].every((id) =>
+        (binding.toolBindings as Json[]).some((t) => {
+          const v = object(t);
+          return v?.id === id && v.version === '1' && v.extensionId === 'builtin.files';
+        }),
+      )
+    )
+      fail('image_source_unverified');
+    return {
+      expectedStoreId: metadata.storeId,
+      subjectId: cmd.subjectId,
+      sessionId: ctx.sessionId,
+      runId: ctx.runId,
+    };
+  };
+  const reinspect = createReinspectImagesTool(
+    async (ctx, locator, ordinals) =>
+      options
+        .runtime()
+        .readSelectedImageMembers(
+          { ...(await reinspectionScope(ctx)), locator, ordinals },
+          ctx.signal,
+        ),
+    async (ctx, beforeSeq) =>
+      options
+        .runtime()
+        .listSelectedImageSources(
+          { ...(await reinspectionScope(ctx)), ...(beforeSeq ? { beforeSeq } : {}) },
+          ctx.signal,
+        ),
+  );
+  const tools = [...planFiles.tools!, images.tool, reinspect].map((tool) => {
     const description = descriptions[tool.id];
     if (!description) return tool;
     return {

@@ -553,6 +553,32 @@ export function callContextSelection(
       return db.rollback(error);
     }
   }
+  if (method === 'readSelectedToolLocators') {
+    const i = args[0] as Parameters<Store['readSelectedToolLocators']>[0];
+    return db.db.transaction(() => {
+      db.identity(i.expectedStoreId);
+      const current = session(db, i.sessionId);
+      if (
+        subject(db, i.sessionId) !== i.subjectId ||
+        current.context_selection_id !== i.selectionId
+      )
+        throw new AgentError('context_scope_denied');
+      const hi = decimal(i.hi),
+        lo = decimal(i.lo);
+      if (lo < 1n || lo > hi || hi - lo >= 16n || hi > BigInt(current.next_seq!))
+        throw new AgentError('invalid_context_cursor');
+      const mf = filter(selected(db, current), 'seq');
+      return db
+        .rows(
+          `SELECT id,seq FROM message WHERE session_id=? AND seq>=? AND seq<=? AND role='tool' AND status='complete' AND ${mf.sql} ORDER BY seq DESC LIMIT 16`,
+          i.sessionId,
+          lo,
+          hi,
+          ...mf.args,
+        )
+        .map((r) => ({ id: String(r.id), seq: String(r.seq) }));
+    })();
+  }
   if (['getSelectedContext', 'getExpandedContext', 'getModelContext'].includes(method)) {
     const input = args[0] as Parameters<Store['getSelectedContext']>[0];
     db.db.run('BEGIN');

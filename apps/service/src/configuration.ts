@@ -94,6 +94,7 @@ import {
 } from './mcp-source-configuration';
 import { parseModelPreset } from './model-options';
 import { isSupportedModelProvider, modelProtocol, providerModelFetch } from './model-providers';
+import { modelRequestCompression } from './model-request-compression';
 import { resolveModelTransport } from './model-transport';
 import {
   createDefaultPermissionConfiguration,
@@ -105,6 +106,11 @@ import {
   readBusinessRunInputs,
   readPlanningIntent,
 } from './planning-configuration';
+import {
+  assertCompressionModelPreference,
+  compressionModelPreference,
+  hasCompressionArchiveTools,
+} from './session-compression-model';
 import { resolveSessionExecutionRoot } from './session-execution-root';
 import { assertSessionModelProtocol } from './session-model-protocol';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
@@ -759,7 +765,14 @@ export function createDefaultProcessConfiguration(options: {
       baseURL: selected.baseURL!,
       modelId: selected.model,
       apiKey,
-      fetch: providerModelFetch(selected.baseURL!, sessionId, transport.fetch),
+      fetch: modelRequestCompression(
+        {
+          provider: selected.provider,
+          protocol: modelProtocol(selected.provider, selected.protocol),
+          baseURL: selected.baseURL!,
+        },
+        providerModelFetch(selected.baseURL!, sessionId, transport.fetch),
+      ),
     });
     const preset = parseModelPreset(selected.options);
     return createRunModelAdapters({
@@ -865,6 +878,33 @@ export function createDefaultProcessConfiguration(options: {
         throw new ConfigurationError('browser_configuration_host_owned');
       const current = explicitConfiguration(explicit);
       const request = command.request as { modelId?: string; reasoningEffort?: ReasoningEffort };
+      let compressionPreference: ReturnType<typeof compressionModelPreference> | undefined;
+      let historicalCompressionTarget: ReturnType<typeof compressionModelPreference> | undefined;
+      const implicitCompressionModel =
+        current.modelId === undefined && request.modelId === undefined;
+      if (
+        !selection &&
+        !recovery &&
+        (command.kind === 'context.compress' || command.kind === 'context.compression.reset')
+      ) {
+        if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+        const metadata = await policyRuntime.getMetadata();
+        const preference = await policyRuntime.readLatestBusinessModelPreference({
+          expectedStoreId: metadata.storeId,
+          sessionId: session.id,
+          subjectId: command.subjectId,
+        });
+        if (preference) {
+          const run = await policyRuntime.getRun(preference.runId);
+          if (!run || run.sessionId !== session.id || run.status !== 'completed')
+            throw new AgentError('session_model_preference_unavailable');
+          historicalCompressionTarget = compressionModelPreference(run, preference.modelId);
+          if (implicitCompressionModel) {
+            compressionPreference = historicalCompressionTarget;
+            current.modelId = compressionPreference.modelId;
+          }
+        }
+      }
       if (selection) current.modelId = selection.modelId;
       else if (request.modelId !== undefined) current.modelId = request.modelId;
       const explicitBrowser = [user, project, current]
@@ -905,6 +945,7 @@ export function createDefaultProcessConfiguration(options: {
       const selected = effective.models?.find((model) => model.id === effective.modelId);
       if (!selected || selected.enabled === false)
         throw new ConfigurationError('model_unavailable');
+      if (compressionPreference) assertCompressionModelPreference(compressionPreference, selected);
       if (!isSupportedModelProvider(selected.provider))
         throw new ConfigurationError('model_provider_unsupported');
       if (!selected.baseURL || !selected.model)
@@ -924,6 +965,14 @@ export function createDefaultProcessConfiguration(options: {
       ) {
         selected.options = { ...selected.options, reasoningEffort: request.reasoningEffort };
       }
+      if (
+        compressionPreference?.reasoningEffort !== undefined &&
+        request.reasoningEffort === undefined
+      )
+        selected.options = {
+          ...selected.options,
+          reasoningEffort: compressionPreference.reasoningEffort,
+        };
       const actualOptions = parseModelPreset(selected.options);
       // Preserve the non-Skill credential/shape preflight before constructing any
       // adapters. Skill rows are validated locally by discovery, then the exact
@@ -1530,6 +1579,11 @@ export function createDefaultProcessConfiguration(options: {
         };
         return {
           ...runPermissions,
+          ...(command.kind === 'context.compress' &&
+          historicalCompressionTarget?.bindingDigest === modelBindingDigest(selected) &&
+          hasCompressionArchiveTools(runExtensions, assembly.toolIds, modelHiddenToolIds)
+            ? { verifiedSessionCompressionTarget: true as const }
+            : {}),
           ...(permissionConfiguration.afterTurn
             ? { afterTurn: permissionConfiguration.afterTurn }
             : {}),

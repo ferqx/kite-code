@@ -78,6 +78,8 @@ export interface CompressionInput {
    * These are already present in messages; include their cost in the replacement context.
    * Retention is context, not a new submission or authorization. */
   readonly retainedMessages?: readonly import('@kite-ai/ai').ModelMessage[];
+  /** During actual-output validation: exact neutral summary text later projected into context. */
+  readonly renderedSummary?: string;
   readonly modelId?: string;
   readonly tools?: readonly import('@kite-ai/ai').ModelTool[];
   readonly tokenBaseline?: import('./context-estimate').ContextTokenBaseline;

@@ -362,6 +362,7 @@ test('pure default Files metadata does not resolve Runtime or filesystem assets 
     'files.write',
     'files.edit',
     'files.view_images',
+    'files.reinspect_images',
   ]);
   const actual = sqliteStorageAssets();
   expect(actual.worker.pathname.endsWith('/storage/worker/main.ts')).toBe(true);

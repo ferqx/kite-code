@@ -415,3 +415,9 @@ Runtime 从已提交的完整模型回复取得原调用，Store 在 `finishRun`
 内部 Model 与通用子 Agent 分开建模：`authorization.check` 和 `session.title` 仅保存原 Session 的准确 Command／无 Run Model，分别由[权限检查](sqlite/authorization-check.ts)与[标题内部模型](sqlite/internal-model.ts)封闭写入。通用 planExecution 仍拒绝任意 runless Model。[独立基线](migrations/0001-baseline.sql)直接定义当前 execution 约束、索引和恢复触发器；Worker 资产只复制该 reviewed SQL 和明确列出的 `0002-trajectory-facts.sql`；不自动发现目录迁移。历史未受支持格式在只读 preflight 即拒绝，不执行旧迁移／清空或转换。
 
 2026-11-07 本轮编号统一回归：20个相关整文件206项／2718断言通过，覆盖 Store build／preflight、维护备份恢复、真实历史 major 1 归档拒绝且全文件／sidecar不变、新版完整 v1 回执与旧同编号形状拒绝、非内置工具及冷恢复。伪造当前清单指纹的旧 schema 仍拒绝，未放宽最终校验。真实开发入口整文件10项／177断言含原 Main 三场景，TUI工作区信任1项／28断言通过；6545文件／9项目类型检查通过。当前本机开发库在独占、完整旧／新 schema 相同及原checksum确认后，只重标版本／准确checksum／清单指纹，26张表其他事实与Store ID不变；原 `bun run desktop:dev` 随后5.11秒就绪，准确原生窗口已实际核对。旧实模及历史报告保原来源与当时编号，这组验证不重授其他平台或发行资格。
+
+## 会话模型路由偏好
+
+`readLatestBusinessModelPreference` 只读返回当前选择内同主体最近成功普通业务 Run 的模型注册 ID 与原 Run／Execution ID，不返回连接地址、凭据或历史授权。只接纳同源 Store 身份链、成功模型及完整 stop／tool_calls，跳过压缩、标题、观察、失败和缺失事实。恢复后旧身份链一致的记录只作偏好；调用方必须用当前配置重新解析并授权，历史不是派发许可。新会话和无可核验记录返回 null；读取不写库或推进事件游标。
+
+`readHistoricallyConfirmedImageMembers` is a read-only manual-compression qualification query. It requires a caller Run in the current Store/session/selection/subject, and returns only validated member identity (source execution, 1-based ordinal, SHA-256 and size) from successful model executions in that same scope. Sealed request/result manifests must agree; observations require complete stop, no tools and a bounded low-trust note. Unknown outcomes and explicit rejection are not confirmation. No note, route, image bytes or authorization is returned. This historical evidence does not assert that the currently selected model has seen an image: the caller must separately validate destination equivalence and current authority. Ordinary route-bound delivery facts retain their existing semantics.

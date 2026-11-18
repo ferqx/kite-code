@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isImageObservation } from '../../execution/image-window';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import {
@@ -263,6 +264,7 @@ function originalScope(
     throw new AgentError('run_initialization_incomplete');
   const boundary: RunResumeCheckpoint['boundary'] =
     last?.state !== 'succeeded' ||
+    isImageObservation(parse(last.decision_source_json)) ||
     (parse(last.decision_source_json) as Record<string, Json>)?.compressionId
       ? 'before_model_dispatch'
       : (parse(last.result_json) as Record<string, Json>).finishReason === 'tool_calls'

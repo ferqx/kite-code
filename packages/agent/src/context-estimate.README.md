@@ -25,3 +25,13 @@ Runtime 在普通 Loop 安全边界由最近已完成的 assistant 原 Execution
 [通用工具结果冷读](../test/isolated/context/result-presentation-estimate.test.ts)覆盖任意Run／step工具无注册器冷读、当前格式器变化不重解释原正文、原结果正文／终态／来源冲突拒绝，以及metadata字段不变和冷读前后计数相等；[子Loop](../../../apps/service/test/isolated/child-configuration.test.ts)核每步使用子会话实际工具与预算，完成后只读估算不增加Provider调用。
 
 [纯投影与累计反例](../test/context/context-projection.test.ts)核插入、来源／历史／工具／模型失效、零、缺失和溢出；[真实 Core、SQLite、HTTP 与冷只读](../../../apps/service/test/isolated/context-token-estimate.test.ts)核实测改变压缩决策、零防止旧全量估算误触发、未知模型、缺失统计、三种数值及 205 次真实本地模型调用超过有限 View 后的完整累计。付费 Provider 与其他平台资格不由这些夹具推导。
+
+### 受管图片窗口的只读边界
+
+所选 `view_images`／`reinspect_images` 历史在统计时只核原 Artifact metadata，不重新读取 PNG，不派发观察 Model，也不写投递回执。只读预测沿准确已封存请求的真实图片投影；后续历史出现尚无对应封存投影的图片时返回 `context_estimate_unavailable`，不把未知图像当成零输入。已记录的请求及其累计统计仍按原 Execution 读取，不把分片请求的用量相加后称为单次上下文。
+
+手工压缩不启动额外视觉调用。同一路由可使用已确认图片的来源定位与可见的低信任观察资料。如果当前传输没有这些回执，只有在 Service 重新解析并核实同一摘要目标、两项内建图片工具均可用、当前所选每个原序位都有本 Store／会话／主体／选择下完整成功的历史交付证明、且不会经此分支发送其他图像时，才允许纯文本摘要。此时只给出已选历史及受权归档定位，不传原像素、旧路由、私有观察笔记，也不写当前路由的视觉回执。归档目录的出处标记随已提交的压缩保留；即使模型的摘要没写定位，后续显式视觉问题仍可在当前权限下列目录，再按原序位单独复看。缺少任一成员的成功证明时仍以 `image_delivery_pending` 停止，不把未知交付变成已见。自动压缩在未交付图片时延后。摘要准备、派发和发布前重新核当前来源权限与选定范围。恢复压缩前历史也先纯投影并经原 validator 检查；不能证明成员已投递时保持原压缩，不擅自把缺少像素的投影当安全展开。子任务结果归集只需原消息及工具证据，不重读受管像素。
+
+[图片上下文回归](../test/isolated/artifacts/image-context-projection.test.ts)使用真实 Runtime／SQLite／Artifact 与受控模型，核统计、手工压缩、reset 的零额外图片读取和请求，以及未知投递不能经压缩变成已确认；不代表真实供应商或原生客户端资格。[跨传输纯文本压缩回归](../test/isolated/artifacts/cross-transport-text-compression.test.ts)另核没有授权或未确收序位时不发摘要、带直接附件不走例外，以及冷重开、二次摘要后仍可从目录取回唯一指定原件。
+
+[新 Store 恢复回归](../test/isolated/artifacts/restored-image-window.test.ts)实际执行 backup／restore：当前 Store 仅用于访问准入，原消息、工具／模型决策和图片 Artifact 保留原 Store 出处及主体。原件可由当前明确任务重新交付，不重执行原工具。旧 Store 的投递回执不自动提升为新 Store 的当前已确认记录；在当前任务确认前，手工压缩保持 `image_delivery_pending`。归档缺少原 builtin tool 绑定时，即使当前存在同名工具也拒绝补造历史授权，保持 `image_source_unverified`，不派发模型。恢复历史的 Inspector 仍可查看已封存真实请求；不能从新的配置补出原快照缺失信息。

@@ -3,6 +3,7 @@ import { completeRunReplies } from '@kite-ai/ui';
 import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeResult, NativeSelection } from './native-bridge';
+import { nativeImageFailure } from './native-image-failure';
 import { nativeModelConnections } from './native-model-connections';
 import {
   COMPRESSION_RUNNING_TITLE,
@@ -723,7 +724,8 @@ export function desktopTranscript({
       });
     if (!run.isActive && (run.status === 'failed' || run.status === 'interrupted')) {
       const failure =
-        run.reason === 'context_source_unavailable'
+        nativeImageFailure(run.reason) ??
+        (run.reason === 'context_source_unavailable'
           ? {
               summary: '工作区上下文读取失败',
               text: '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。',
@@ -741,7 +743,7 @@ export function desktopTranscript({
               : {
                   summary: '本轮异常结束',
                   text: '本轮未能生成最终回复，当前记录未提供可核实的错误原因。请检查模型连接和配置；重新发送前，先核对本轮工具执行结果，避免重复操作。',
-                };
+                });
       let last = -1;
       for (let index = 0; index < modeled.length; index++) {
         const message = modeled[index]!;

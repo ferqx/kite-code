@@ -1169,3 +1169,9 @@ MCP Agent 工具权限由 `permission-configuration.ts` 在准确宿主注册或
 [实际 SDK 回归](test/isolated/mcp-configuration.test.ts)核默认 Auto 任务投影中的名称／描述／结构、准确 Tool id/version/参数、原系统提示、首次 HTTP 408 超时后的原输入重试和只执行一次远端效果，以及仅有不完整流 EOF 时不重试且零远端效果；重复读取原 Model input 不重新连接或重放工具。[生命周期回归](../../packages/agent/test/isolated/mcp/lifecycle.test.ts)核真实对象绑定、跨 Store／Session／未选 server 不发布、目录失效及冷历史不恢复。以上受控模型回答证明材料与执行链，不证明模型对任意远端语义的判断质量；实际客户端与真实模型资格分别验收。
 
 默认 Files 的可信 `prepareTool` 只在 Core 完整权限硬门禁与必要条件通过后私有预读普通外部文本，不在描述能力时读正文；特殊输入／计划／图片适配与独立人工上限保原合同。私有 metadata 绑定准确 Store／Session／root work／Run／Execution／attempt／owner／输入，根身份另由原子 `workspaceScope` 回调参与绑定；描述器只读取 metadata，缺失只调整自身默认 safeRead 分类，不覆写父子权限决定。正文仅在单次闭包中，最终 `markDispatching` 后生成原 ToolResult／Artifact，拒绝／取消／失败清理，已有审核的冷恢复不重建快照。实现与测试归 [Files owner](../../packages/agent/src/tools/files/README.md)。
+
+官方 OpenAI Responses 的较大 JSON 请求可在实际传输前无损编码为 zstd；仅限准确官方目的地址、体积实际变小时启用，取消或失败不自动改成 identity 重发，不修改模型请求语义或图像。远端明确 HTTP 413 与未知网络失败由 AI/Core 区分；Core 的[本地图窗口](../../packages/agent/src/model-body/README.md#工具视觉结果)不把传输压缩率当作供应商接收阈值。权限与原归档序位由 Core 验证，Service 负责把归档复看接入当前授权的 Files 工具面。
+
+手动 `context.compress`／`context.compression.reset` 在 Host 未显式选择模型时，只把当前上下文选择、同主体最近成功普通业务 Run 的模型 ID 和 effort 当偏好；由当前配置重新解析。旧配置只用于核对 provider、协议、endpoint 和远端模型身份，身份改变或模型撤销时拒绝，不静默改投全局默认。原凭据、权限、transport、图片交付回执不继承；首 Run 协议锁仍独立检查，无可用历史时保留原默认行为。传输路由变化后旧图片回执仍可能不可用，这是保守隔离而非可由偏好解除的限制。
+
+仅手动压缩，若历史和当前完整模型绑定摘要一致，并且当前装配同时启用且未隐藏 Files 原看图／归档复看工具，Service 可提供不持久化的受信目标核验标识。它只供 Core 在独立重核当前权限和原来源后判断无图摘要资格，不是图片交付证明；显式不同模型、目标变化、无历史或复看能力缺失均不给此标识，JSON 配置不能自行授予。

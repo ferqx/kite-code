@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { trajectoryEventSchema, trajectoryIdentityPayload } from '@kite-ai/trajectory';
+import { isImageObservation } from '../../execution/image-window';
 import { canonicalJson } from '../../json';
 import type { Json } from '../types';
 import type { SqliteOperations } from './operations';
@@ -283,6 +284,7 @@ export function trajectoryMessage(
           !decision ||
           contributor.origin_command_id !== run.origin_command_id ||
           decision.compressionId !== undefined ||
+          isImageObservation(decision) ||
           decision.humanInputInterpretation !== undefined
         )
           return null;
@@ -310,6 +312,7 @@ export function trajectoryMessage(
       if (
         !command ||
         decisionSource?.compressionId !== undefined ||
+        isImageObservation(decisionSource) ||
         command.kind === 'session.title'
       )
         return null;

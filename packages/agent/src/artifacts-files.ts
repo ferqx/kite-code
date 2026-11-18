@@ -1,10 +1,11 @@
 import { constants as bufferConstants } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { assertNoSymlinkPath } from './platform/profile-identity';
 import { readWindowsArtifactChunks } from './platform/windows-artifact-files';
+import { markMissingPublishedImage } from './published-blob-missing';
 import { AgentError } from './storage/types';
 
 export const artifactChunkBytes = 64 * 1024;
@@ -39,7 +40,21 @@ function* readPosixArtifact(
 ): Generator<Uint8Array, Uint8Array | undefined> {
   const path = artifactPath(profilePath, hash);
   assertNoSymlinkPath(path);
-  const before = lstatSync(path, { bigint: true });
+  const before = (() => {
+    try {
+      return lstatSync(path, { bigint: true });
+    } catch (error) {
+      const e = error as NodeJS.ErrnoException;
+      if (e.code === 'ENOENT' && e.path === path && e.syscall === 'lstat') {
+        try {
+          if (lstatSync(dirname(path)).isDirectory()) markMissingPublishedImage(e, hash);
+        } catch {
+          /* parent itself unavailable: do not infer missing content */
+        }
+      }
+      throw error;
+    }
+  })();
   if (!before.isFile() || before.size !== expected || (Number(before.mode) & 0o222) !== 0)
     throw new AgentError('artifact_content_mismatch');
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);

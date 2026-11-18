@@ -661,6 +661,154 @@ test('unmet completion conditions preserve saved output and show the known failu
   }
 });
 
+test('image delivery failures remain source-free in their original Turn across cold reads', async () => {
+  const f = fixture();
+  const cases = [
+    ['image_delivery_outcome_unknown', '图片处理结果未确认', '已停止自动重发'],
+    ['image_observation_outcome_unknown', '图片处理结果未确认', '是否完整完成'],
+    ['image_window_outcome_unknown', '图片处理结果未确认', '核对本轮'],
+    ['image_member_provider_limit', '单张图片仍超出模型服务限制', '包含单张图片的请求'],
+    ['image_delivery_limit', '图片请求仍被模型服务拒绝', '不表示图片已成功交付'],
+    ['image_source_missing', '历史图片副本不可用', '受管图片副本缺失'],
+    ['image_source_unverified', '图片来源无法核验', '当前访问资格'],
+    ['image_window_not_dispatched', '图片请求未发送', '本次图片请求未发送'],
+    ['image_delivery_pending', '图片尚未处理完成', '暂不能压缩'],
+  ];
+  try {
+    for (const [reason, summary, detail] of cases) {
+      for (const cold of [false, true]) {
+        if (cold) await act(async () => f.root.render(null));
+        const transcript = desktopTranscript({
+          messages: [
+            message('u', 'user', '1', '检查图片'),
+            message('saved', 'assistant', '2', '已保存的阶段回复'),
+            { ...message('next', 'user', '3', '下一轮'), runId: 'r2' },
+          ],
+          runs: [{ ...run(), status: 'failed', reason: reason! }, run('r2')],
+          tools: [],
+          storeId: 'store',
+          sessionId: 's',
+        });
+        const failures = transcript.messages.filter((m) => m.systemKind === 'turn_failure');
+        expect(failures).toHaveLength(1);
+        expect(failures[0]!.failure?.reasonCode).toBe(reason);
+        expect(failures[0]!.text).not.toContain(reason!);
+        expect(transcript.messages.findIndex((m) => m.systemKind === 'turn_failure')).toBeLessThan(
+          transcript.messages.findIndex((m) => m.id === 'next'),
+        );
+        await act(async () =>
+          f.root.render(
+            <Conversation
+              {...transcript}
+              loading={false}
+              selected
+              connected
+              saveReading={() => {}}
+            />,
+          ),
+        );
+        const notice = f.host.querySelector('.turn-failure')!;
+        expect(notice.getAttribute('role')).toBe('alert');
+        expect(notice.getAttribute('aria-label')).toBe(summary!);
+        expect(notice.textContent).toContain(detail!);
+        expect(notice.textContent).not.toContain('原文件已丢失');
+        expect(notice.textContent).not.toContain('32 MiB');
+        expect(f.host.querySelectorAll('.turn-failure')).toHaveLength(1);
+      }
+    }
+    const unknown = desktopTranscript({
+      messages: [message('u', 'user', '1', 'test')],
+      runs: [{ ...run(), status: 'failed', reason: 'unrecognized_reason' }],
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+    expect(unknown.messages.find((m) => m.systemKind === 'turn_failure')!.text).toContain(
+      '未提供可核实的错误原因',
+    );
+    const running = desktopTranscript({
+      messages: [message('u', 'user', '1', 'test')],
+      runs: [
+        { ...run(), status: 'running', isActive: true, reason: 'image_delivery_outcome_unknown' },
+      ],
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+    expect(running.messages.some((m) => m.systemKind === 'turn_failure')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('legacy cumulative image failure stays failed while a new successful continuation survives cold projection', async () => {
+  const f = fixture();
+  const records: NativeRunFact[] = [
+    { ...run(), status: 'failed', reason: 'image_context_too_large' },
+    run('r2'),
+  ];
+  const saved = [
+    message('old-input', 'user', '1', '查看这些图片'),
+    message('old-progress', 'assistant', '2', '已读取图片'),
+    { ...message('continue-input', 'user', '3', '请继续查看归档图片'), runId: 'r2' },
+    { ...message('continue-final', 'assistant', '4', '已完成本次图片任务'), runId: 'r2' },
+  ];
+  const frozenRecords = JSON.stringify(records);
+  try {
+    for (const cold of [false, true]) {
+      if (cold) await act(async () => f.root.render(null));
+      const transcript = desktopTranscript({
+        messages: saved,
+        runs: records,
+        tools: [],
+        storeId: 'store',
+        sessionId: 's',
+      });
+      const failure = transcript.messages.filter((m) => m.systemKind === 'turn_failure');
+      expect(failure).toHaveLength(1);
+      expect(failure[0]!.failure?.reasonCode).toBe('image_context_too_large');
+      expect(failure[0]!.turnId).toBe(
+        transcript.messages.find((m) => m.id === 'old-input')!.turnId,
+      );
+      expect(failure[0]!.turnId).not.toBe(
+        transcript.messages.find((m) => m.id === 'continue-final')!.turnId,
+      );
+      expect(transcript.messages.indexOf(failure[0]!)).toBeLessThan(
+        transcript.messages.findIndex((m) => m.id === 'continue-input'),
+      );
+      expect(transcript.messages.find((m) => m.id === 'continue-final')!.finalReply).toBe(true);
+      expect(transcript.messages.find((m) => m.id === 'old-progress')!.finalReply).toBeUndefined();
+      expect(
+        transcript.messages
+          .filter((m) => m.systemKind === 'turn_terminal')
+          .map((m) => m.turnTerminalStatus),
+      ).toEqual(['failed', 'completed']);
+      await act(async () =>
+        f.root.render(
+          <Conversation
+            {...transcript}
+            loading={false}
+            selected
+            connected
+            saveReading={() => {}}
+          />,
+        ),
+      );
+      const notice = f.host.querySelector('.turn-failure')!;
+      expect(f.host.querySelectorAll('.turn-failure')).toHaveLength(1);
+      expect(notice.getAttribute('aria-label')).toBe('此前图片累计超限');
+      expect(notice.textContent).toContain('先发送文字继续请求');
+      expect(notice.textContent).toContain('无需先缩图或重跑原工具');
+      expect(notice.textContent).toContain('若归档副本不可用');
+      expect(notice.textContent).toContain('当前访问权限和模型服务限制');
+      expect(notice.textContent).not.toContain('请指定较小的图片副本');
+      expect(JSON.stringify(records)).toBe(frozenRecords);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test('five failed reconnections expose one expandable human-readable error in the original Turn and survive cold reads', async () => {
   const f = fixture();
   const attempts: NativeToolExecution[] = Array.from({ length: 6 }, (_, index) => ({
