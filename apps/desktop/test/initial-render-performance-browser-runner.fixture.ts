@@ -327,13 +327,66 @@ async function windowJourney(page: Page, folder: string) {
   const source = (await page.evaluate(() => window.initialRenderFixture.sourceMessages())).filter(
     (id) => /^[um]-large-[0-9]+$/.test(id),
   );
+  const turnCount = source.length / 2;
+  const waitForTurnFiles = (index: number) =>
+    page.waitForFunction(
+      (id) =>
+        window.initialRenderFixture.events.some(
+          (event) =>
+            event.kind === 'outputs.query' && event.sessionId === 'large' && event.runId === id,
+        ),
+      `run-large-${index}`,
+    );
+  if (turnCount > 20) {
+    await waitForTurnFiles(turnCount - 1);
+    const turnQueries = await page.evaluate(() =>
+      window.initialRenderFixture.events
+        .filter(
+          (event) => event.kind === 'outputs.query' && event.sessionId === 'large' && event.runId,
+        )
+        .map((event) => event.runId!),
+    );
+    assert.ok(
+      !turnQueries.includes('run-large-0'),
+      'cold open queried files for the oldest offscreen turn',
+    );
+    assert.ok(
+      new Set(turnQueries).size < turnCount / 2,
+      'opening the tail queried files for most of the history',
+    );
+    steps.push({ phase: 'files-at-tail', turnQueries });
+  }
   steps.push({ phase: 'initial', snapshot: initial, selection: await checkLoadedSelection(page) });
   assert.deepEqual(initial.messageIds, source);
   await page.screenshot({ path: path.join(folder, 'window-initial.png') });
+  if (turnCount > 20) {
+    const index = Math.floor(turnCount / 2);
+    const marker = page.getByRole('button', {
+      name: new RegExp(`^第 ${index + 1} 条已加载的用户消息`),
+    });
+    await marker.click();
+    await frames(page, 6);
+    const position = await page.locator(`[data-message-id="u-large-${index}"]`).evaluate((node) => {
+      const viewport = node.closest('.conversation-viewport')!.getBoundingClientRect();
+      const message = node.getBoundingClientRect();
+      return {
+        top: message.top - viewport.top,
+        bottom: message.bottom - viewport.top,
+        height: viewport.height,
+      };
+    });
+    assert.ok(
+      position.bottom > 0 && position.top < position.height,
+      'navigation missed an offscreen message',
+    );
+    assert.equal(await marker.getAttribute('aria-current'), 'location');
+    steps.push({ phase: 'jump-to-middle', index, position });
+  }
   await page.evaluate(() => {
     document.querySelector<HTMLElement>('.conversation-viewport')!.scrollTop = 0;
   });
   await frames(page, 6);
+  if (turnCount > 20) await waitForTurnFiles(0);
   const first = await page.evaluate(() => window.initialRenderFixture.windowSnapshot());
   assert.deepEqual(first.entryKeys, initial.entryKeys);
   assert.equal(first.top, 0);
@@ -535,7 +588,24 @@ try {
       const colors: number[][] = [];
       for (let stage = 0; stage < 4; stage++) {
         await page.evaluate((value) => window.initialRenderFixture.calibrate(value), stage);
-        colors.push(await pixel(await page.screenshot()));
+        await frames(page, 2);
+        // Screenshots and compositor frames can have different color profiles on macOS.
+        const frame = new Promise<Buffer>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(Error('compositor calibration deadline')), 5000);
+          cdp.once('Page.screencastFrame', (event) => {
+            clearTimeout(timeout);
+            void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId });
+            resolve(Buffer.from(event.data, 'base64'));
+          });
+        });
+        await cdp.send('Page.startScreencast', {
+          format: 'png',
+          everyNthFrame: 1,
+          maxWidth: 1440,
+          maxHeight: 800,
+        });
+        colors.push(await pixel(await frame));
+        await cdp.send('Page.stopScreencast');
       }
       await page.evaluate(() => window.initialRenderFixture.calibrate());
       const caseName = `${turns}-${blocks}-${lateNavigation ? 'late-navigation' : windowChecks ? 'window-journey' : churnMode ? 'churn' : cancel ? 'cancel' : 'initial'}`;

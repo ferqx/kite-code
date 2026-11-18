@@ -106,47 +106,71 @@ export function NativeReasoning({
   }));
   const displayed = useRef(result.body);
   displayed.current = result.body;
-  // A transport epoch can retire the read while the same source remains readable.
+  const reading = useRef<{
+    signal: AbortSignal;
+    busy: boolean;
+    next?: { revision: string; settled: boolean };
+  }>(undefined);
+  // A newer output revision can wait. Leaving the disclosure or losing admission must cancel immediately.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: These values define one reader's lifetime independently of output revisions.
   useEffect(() => {
     if (!open) return;
-    const cached = settled ? cache.get(revision) : undefined;
-    if (cached && (!displayed.current || cached.readEpoch === readEpoch)) {
-      if (displayed.current?.text !== cached.text) setResult({ body: cached });
-      if (cached.readEpoch === readEpoch) return;
-    }
-    if (!readActive || !available) return;
     const controller = new AbortController();
+    reading.current = { signal: controller.signal, busy: false };
+    return () => {
+      controller.abort();
+      reading.current = undefined;
+    };
+  }, [open, readActive, available, cache, readEpoch]);
+  useEffect(() => {
+    const current = reading.current;
+    if (!open || !current) return;
+    current.next = { revision, settled };
+    if (current.busy) return;
+    current.busy = true;
+    const { signal } = current;
     const failed = () => {
-      if (!controller.signal.aborted)
+      if (!signal.aborted)
         setResult((previous) =>
-          controller.signal.aborted || previous.body || previous.failed
-            ? previous
-            : { failed: true },
+          signal.aborted || previous.body || previous.failed ? previous : { failed: true },
         );
     };
-    void (async () => {
-      const text = await reader.current?.(controller.signal);
-      if (text === undefined || controller.signal.aborted) return;
+    async function readVersion(target: { revision: string; settled: boolean }) {
+      const cached = target.settled ? cache.get(target.revision) : undefined;
+      if (cached && (!displayed.current || cached.readEpoch === readEpoch)) {
+        if (displayed.current?.text !== cached.text) setResult({ body: cached });
+        if (cached.readEpoch === readEpoch) return;
+      }
+      if (!readActive || !available) return;
+      const text = await reader.current?.(signal);
+      if (text === undefined || signal.aborted) return;
       if (!text) return failed();
       const previous = displayed.current;
       if (previous?.text === text) {
-        if (settled) cache.set(revision, { ...previous, readEpoch });
+        if (target.settled) cache.set(target.revision, { ...previous, readEpoch });
         return;
       }
       const prepared =
         text.length >= 32768 && typeof Worker !== 'undefined'
-          ? await prepareNativeMarkdown(text, controller.signal).catch(() => undefined)
+          ? await prepareNativeMarkdown(text, signal).catch(() => undefined)
           : undefined;
-      if (controller.signal.aborted) return;
+      if (signal.aborted) return;
       const body = { text, prepared, readEpoch };
-      if (settled) cache.set(revision, body);
+      if (target.settled) cache.set(target.revision, body);
       startTransition(() =>
         setResult((previous) =>
-          controller.signal.aborted || previous.body?.text === text ? previous : { body },
+          signal.aborted || previous.body?.text === text ? previous : { body },
         ),
       );
-    })().catch(failed);
-    return () => controller.abort();
+    }
+    void (async () => {
+      while (current.next && !signal.aborted) {
+        const target = current.next;
+        current.next = undefined;
+        await readVersion(target).catch(failed);
+      }
+      current.busy = false;
+    })();
   }, [open, readActive, available, cache, revision, readEpoch, settled]);
   return (
     <>

@@ -34,19 +34,27 @@ export const PromptMarkdown = memo(function PromptMarkdown({
       setOverflow(false);
       return;
     }
-    const measure = () => {
+    const measure = (height: number) => {
       // The controls retain the CSS crop limit even while the prose is expanded.
       const limit = Number.parseFloat(getComputedStyle(toggle).maxHeight);
-      setOverflow(content.getBoundingClientRect().height > limit + 1);
+      setOverflow(height > limit + 1);
     };
-    measure();
+    const resize = () => {
+      if (content.checkVisibility?.({ contentVisibilityAuto: true }) === false) return;
+      measure(content.getBoundingClientRect().height);
+    };
+    const view = element.ownerDocument.defaultView!;
     const observer =
-      typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
-    observer?.observe(content);
-    window.addEventListener('resize', measure);
+      view.ResizeObserver &&
+      new view.ResizeObserver(([entry]) => {
+        if (entry) measure(entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height);
+      });
+    if (observer) observer.observe(content);
+    else resize();
+    view.addEventListener('resize', resize);
     return () => {
       observer?.disconnect();
-      window.removeEventListener('resize', measure);
+      view.removeEventListener('resize', resize);
     };
   }, [text, readActive]);
   useLayoutEffect(() => {

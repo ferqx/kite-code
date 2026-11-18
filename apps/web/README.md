@@ -6,7 +6,11 @@
 
 `WebController` 仅轮询可见的所选活动会话，默认 2000ms，同一次读取为 single flight。切换 Session 和 document 可见性取消所属读取，迟到 success/error 不能覆盖新选择。失败保留同一选择的完整旧 snapshot 和内部 stale/error 事实；活动与空闲会话的失败读均在页面可见时持续退避重试，最高间隔30秒，不在消息区外显示旧快照／历史不可用等文案，也不把失败伪装为空历史。状态依据真实 `Run.isActive`，不从字符串标签猜运行权。
 
-每次 History 用 Session 已分配上界和最多 200 项页面读取完整前缀，核对准确 Session、Decimal64 顺序、分页推进和最终 Store/selection/control revision/snapshot cursor。冲突时不发布 partial ready。当前便利 snapshot 返回整份消息数组，每次完整重读，且最终 global snapshot cursor 变化会要求再次读取；大历史、并发活动和内存性能资格尚未由本地小规模回归证明。没有持久离线缓存或第二业务状态机。
+首次打开会话时，Web 按 Session 的序号上界读取完整历史。完整页和增量页都从每页 200 项开始。响应超出字节预算时，在同一游标和消息位置减半页长重试，后续页沿用缩小后的页长。单项仍然超限时保留已有快照并报告读取失败。
+
+页面最多暂存三个已核实的会话快照，每个估算上限 4 MiB。取得新 View 后，Web 根据缓存消息数和新增序号估算完整分页及收尾 View 的请求数。当追赶全库游标所需的最少请求更多时，重新读取当前会话。范围一致且游标可用时，可以按原消息 ID 合并变更。上下文、控制版本改变或游标过期时重新读取完整历史。两条路径都核对 Store、Session、上下文和控制版本，并补齐固定目标游标才发布。旧网关沿用前后快照游标一致的完整分页。
+
+[双活动会话 Chrome 回归](test/live-session-switch-browser-runner.fixture.ts)连接真实 Cookie 网关与 SQLite。A 展开失败工具并选中结果文字，B 展开同名工具的成功结果并恢复跟随末尾。两边持续输出带代码块和表格的回复，经过静态会话并反复互切，B 先在后台结束。回归核对展开项、阅读位置和工具执行次数，并逐项比较 A、B 最终正文与各自输出端的完整片段序列。`--slow-history` 为历史响应增加 320 毫秒延迟，并将 A 的一次增量响应保留到静态会话出现后才释放。
 
 [控制器测试](test/controller.test.ts)使用 fake Browser 公共 port，验证 200+1 完整页、最后分配序号、scope/快照冲突、可见性/活动/单飞、迟到身份和 stale；[DOM 页面测试](test/page.test.tsx)通过 React/JSDOM 验证目录导航、全部历史、真实 cancelled/outcome_unknown、旧快照保留、页面可见性、后退/根导航、迟到响应与拒绝身份。它们不是原生浏览器资格。[真实 Service 测试](../service/test/isolated/development-web.test.ts)使用固定 Model、临时 SQLite、真实 partial、Cookie Gateway 与 HTTP，验证零业务写和页面关闭时原工作继续。当前为本机 macOS 证据，不代表安装或三平台发行。
 
@@ -54,6 +58,8 @@ History 每条消息在生产 CSS 中拥有自己的定位容器，复制按钮�
 2026-10-13 本机实际编译资产／Cookie／SQLite／固定模型预览中，修前两个助手按钮同时定位 x1256/y694，均不在自己的 article 内；修后两按钮各属于自己的 final article，长正文滚动和两次真实 Tab 聚焦保持 inside／focus-visible／opacity1。user／final 的生产布局 padding32已在浏览器核实，过程8和Tool→final16及全文开关身份在注入真实 `/app.css` 的便携 DOM 核实；不把 JSDOM 称为原生像素证据。观察仍为3次固定模型调用、4条消息、2个Run、4个Execution、cursor45，两次自有预览正常退出0。截图 `/private/tmp/kite-web-reply-layout-green-20261013.png` 仅证明当前定位与焦点，不代 OS 剪贴板原文字节；助手 OS 字节仍未直接观测，不记为通过。再次由用户人工粘贴不是原产品合同指定的独立验收方法，不再作为额外功能推进条件，见[门禁收束](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13回到原退出条件收束额外诊断依赖)。必要组合为全部11个Web文件及原真实恢复整例，共12文件62pass／739断言，详细范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13正式-web-复制定位与阅读间距)。
 
 [run-facts](src/run-facts.ts)只为完整已读 History 中准确的未封存 Run 补 metadata。有限 View 已核项优先；超出最近200项时经具名 Browser `getRun(sessionId,runId)` GET 核当前 Store／准确 Run／Session，保合法恢复后的原 originStoreId。cache 只属于当前 Client／Store／Session／controller generation，completed／failed／cancelled 非活动事实可复用，active／interrupted／读取失败在新实际 snapshot 刷新时重核；View 新事实覆盖此前缓存。关闭、隐藏、页面暂停或不可读状态 abort 所属 GET；读取不提供执行、配置或凭据权。错误保原消息并说明整轮范围尚不可核，可沿原 Refresh history 重试。
+
+同一选择最多同时补读 4 个历史 Run，每核实 32 项或读完余项后更新页面。重试接续待核实的身份。整轮复制按 Run 归集原消息，工具详情在展开时挂载 Markdown，收起后释放正文节点。回到已读会话时按已保存的展开项恢复。[轮次补读与复制回归](test/isolated/assistant-copy.test.tsx)及[阅读位置与工具展开回归](test/page.test.tsx)覆盖这些交接。
 
 [整轮页面用例](test/isolated/assistant-copy.test.tsx)覆盖201条完整历史、有限 View 外 Run、中间 Tool call 的普通正文、每段已加载全文与切换迟到隔离；[原真实恢复整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)保原完整断言，并核实际 Cookie／Store A→B、原大正文加 inline 最终段的准确整轮复制、sealed 零按钮与切换撤销。便携 DOM clipboard 使用内存端口，不能替代本机 OS 剪贴板字节或其他平台资格。
 

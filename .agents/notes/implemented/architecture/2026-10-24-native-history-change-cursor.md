@@ -12,7 +12,9 @@ Native首次打开、重开、暂停恢复、观察epoch变化及变更凭据失
 
 每批最多200个全局事件，正文事件按消息ID定位；其他元数据事件保守重投影展示依赖候选，包含原用户消息、解释/压缩消息和result_ref。首个候选页取得位置上界，后页固定；全部候选页完成后Native原子合并upsert/removedIds并推进变更游标，空批也前进。未变化对象保原引用；增量失败不提交半批，实际失败撤销准入。历史回收和过期刷新View/epoch后重新建立完整基线。所有消息仍由原Runtime/Service公开投影，SSE目标和读取缓存不变成ACK或执行权限。
 
-本决定仅替代[此前完整刷新](../bug-fix/2026-10-08-native-observation-output-refresh.md)中“每个同scope修订均完整扫描”的部分；完整基线、固定上界、页预算、发布快照、迟到隔离及[reset保正文](../bug-fix/2026-10-16-native-history-reset-reading.md)的理由继续适用。缺少新能力的旧Service仍沿兼容全读路径，Web/TUI不切换。
+本决定仅替代[此前完整刷新](../bug-fix/2026-10-08-native-observation-output-refresh.md)中“每个同scope修订均完整扫描”的部分；完整基线、固定上界、页预算、发布快照、迟到隔离及[reset保正文](../bug-fix/2026-10-16-native-history-reset-reading.md)的理由继续适用。缺少新能力的旧 Service 仍沿兼容全读路径。该决定最初限于 Native。
+
+2026-11-18，两个会话并发输出时，Web 原先要求分页前后的全库游标相等。一次回读期间只要另一会话继续写，当前会话就可能一直无法显示。Web 现在通过 Cookie 网关协商同一只读能力，先取得所选会话的新 View，再把完整基线补到这个固定目标。返回会话时，可复用同一页面和 Store 内的有限已核实历史。由于该游标包含其他会话的事件，追赶所需请求多于重新读取当前历史的估算请求数时，Web 从新 View 建立完整基线。Control revision 或上下文变化、游标过期均走完整读取。这样保留原 ID、完整分页和晚到结果隔离，无需在浏览器订阅所有会话或持久保存正文。Web 的轮询和两个活动会话的真实浏览器验证归 [Web owner](../../../../apps/web/README.md)。
 
 ## Alternatives considered
 

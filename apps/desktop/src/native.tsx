@@ -4274,7 +4274,7 @@ function NativeDesktopContent({
         const body = verifiedReplyBodies.current.get(
           JSON.stringify([replyDisplayScope, message.id]),
         );
-        return body?.identity === nativeReplyKey(replyDisplayScope, message)
+        return body && body.identity === nativeReplyKey(replyDisplayScope, message)
           ? body.text
           : undefined;
       },
@@ -4290,36 +4290,61 @@ function NativeDesktopContent({
     replyDisplayScope,
     verifiedReplyRevision,
   ]);
-  const transcript = transcriptDisplay.current.project({
-    bridge,
-    boundary: JSON.stringify([state?.generation, directory?.storeId ?? selection?.storeId]),
-    key:
-      readingParent && selection
-        ? JSON.stringify([
-            state?.generation,
-            selection.storeId,
-            selection.session.id,
-            selection.session.workspaceId,
-            state?.historyEpoch ?? 0,
-          ])
-        : undefined,
-    messages: displayMessages,
-    replies: displayMessages.map((message) =>
-      verifiedReplyBodies.current.get(JSON.stringify([replyDisplayScope, message.id])),
-    ),
-    transcript: freshTranscript,
-    loading: historyMetadataLoading || historyState.phase !== 'complete',
-    unavailable:
-      !!runMessages.error ||
-      !!toolMessages.error ||
-      !!fileTargets.error ||
-      !!(selection?.permissionUnavailable && !selection.viewLoading),
-    complete:
-      historyState.phase === 'complete' &&
-      !!selection &&
-      !selection.viewLoading &&
-      !selection.permissionUnavailable,
-  });
+  const transcriptBoundary = JSON.stringify([
+    state?.generation,
+    directory?.storeId ?? selection?.storeId,
+  ]);
+  const transcriptKey =
+    readingParent && selection
+      ? JSON.stringify([
+          state?.generation,
+          selection.storeId,
+          selection.session.id,
+          selection.session.workspaceId,
+          state?.historyEpoch ?? 0,
+        ])
+      : undefined;
+  const transcriptLoading = historyMetadataLoading || historyState.phase !== 'complete';
+  const transcriptUnavailable = !!(
+    runMessages.error ||
+    toolMessages.error ||
+    fileTargets.error ||
+    (selection?.permissionUnavailable && !selection.viewLoading)
+  );
+  const transcriptComplete =
+    historyState.phase === 'complete' &&
+    !!selection &&
+    !selection.viewLoading &&
+    !selection.permissionUnavailable;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Verified reads and retirement advance the revision of the body map.
+  const transcript = useMemo(
+    () =>
+      transcriptDisplay.current.project({
+        bridge,
+        boundary: transcriptBoundary,
+        key: transcriptKey,
+        messages: displayMessages,
+        replies: displayMessages.map((message) =>
+          verifiedReplyBodies.current.get(JSON.stringify([replyDisplayScope, message.id])),
+        ),
+        transcript: freshTranscript,
+        loading: transcriptLoading,
+        unavailable: transcriptUnavailable,
+        complete: transcriptComplete,
+      }),
+    [
+      bridge,
+      transcriptBoundary,
+      transcriptKey,
+      displayMessages,
+      replyDisplayScope,
+      verifiedReplyRevision,
+      freshTranscript,
+      transcriptLoading,
+      transcriptUnavailable,
+      transcriptComplete,
+    ],
+  );
   useEffect(() => {
     if (!displayMessages.length || !selection) return;
     setInputDeliveries((previous) => {
@@ -5708,8 +5733,9 @@ function NativeDesktopContent({
           fileRootUri={messageFileRootUri}
           onContent={(text) => {
             const key = JSON.stringify([replyDisplayScope, message.id]);
-            const before = verifiedReplyBodies.current.get(key),
-              identity = nativeReplyKey(replyDisplayScope, message);
+            const before = verifiedReplyBodies.current.get(key);
+            if (text === undefined && !before) return;
+            const identity = nativeReplyKey(replyDisplayScope, message);
             if (text === undefined) verifiedReplyBodies.current.delete(key);
             else verifiedReplyBodies.current.set(key, { identity, text });
             if (before?.text !== text || (before && before.identity !== identity))
@@ -6035,7 +6061,8 @@ function NativeDesktopContent({
           original,
           open,
           cache: reasoningBodies.current,
-          revision: !model.settled && !original.outputBody ? historyState.cursor : undefined,
+          // A settled thinking label can still receive reasoning from the same streaming Model.
+          revision: history.current?.inlineReasoningRevision(original),
           read: readable
             ? (signal) =>
                 readNativeReasoning({

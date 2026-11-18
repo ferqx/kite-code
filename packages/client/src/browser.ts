@@ -15,7 +15,9 @@ import type {
   BrowserSessionExportPageQuery,
   BrowserSessionExportTextQuery,
   BrowserVerifySessionExportQuery,
+  MessageChangesQuery,
 } from './generated/api';
+import { validateMessageChangesQuery, verifyMessageChangesPage } from './message-changes';
 import { readModelInputResponse, verifyModelInputPage } from './model-input';
 import { readModelOutputResponse } from './model-output';
 import {
@@ -550,6 +552,31 @@ export class BrowserClient {
     );
   }
 
+  async listMessageChanges(
+    sessionId: string,
+    input: Omit<MessageChangesQuery, 'storeId' | 'previews'>,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.require('message_changes');
+    if ('storeId' in input || 'previews' in input) throw new ClientError('invalid_request');
+    const generation = this.networkGeneration;
+    const frozen = { ...structuredClone(input), storeId: this.info!.storeId! };
+    validateMessageChangesQuery(frozen);
+    const query = new URLSearchParams(
+      Object.entries(frozen)
+        .filter(([key, value]) => key !== 'storeId' && value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    const page = await this.read(
+      `/browser/v1/sessions/${encodeURIComponent(sessionId)}/message-changes?${query}`,
+      'MessageChangesPage',
+      options.signal,
+    );
+    if (generation !== this.networkGeneration || this.info?.storeId !== frozen.storeId)
+      throw new ClientError('browser_identity_mismatch');
+    return verifyMessageChangesPage(sessionId, frozen, page);
+  }
+
   /** Current selected history/sources; this is not a particular Model's actual request. */
   getContext(
     sessionId: string,
@@ -812,7 +839,11 @@ export class BrowserClient {
       cache: 'no-store',
       redirect: 'error',
       signal,
-      headers: { accept: 'application/json', 'x-kite-web-identity': this.pageIdentity },
+      headers: {
+        accept: 'application/json',
+        'x-kite-web-identity': this.pageIdentity,
+        ...(path === '/browser/v1/server' ? { 'x-kite-web-history': 'message_changes' } : {}),
+      },
     });
     if (signal?.aborted) {
       await response.body?.cancel();

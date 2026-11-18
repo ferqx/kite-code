@@ -21,6 +21,8 @@ const network = {
   holdHistory: false,
   held: false,
   releaseHistory: undefined as (() => void) | undefined,
+  holdRename: false,
+  releaseRename: undefined as (() => void) | undefined,
 };
 Object.assign(globalThis, { __nativeHistoryNetwork: network });
 const instrumented: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> = async (
@@ -30,6 +32,13 @@ const instrumented: (input: RequestInfo | URL, init?: RequestInit) => Promise<Re
   const request = new Request(input, init),
     url = new URL(request.url);
   if (request.method === 'POST') network.posts.push(url.pathname);
+  if (network.holdRename && request.method === 'POST' && url.pathname === '/v1/sessions/s/rename') {
+    network.holdRename = false;
+    await new Promise<void>((resolve) => {
+      network.releaseRename = resolve;
+    });
+    network.releaseRename = undefined;
+  }
   if (url.pathname.endsWith('/messages') || url.pathname.endsWith('/message-changes')) {
     const reading = {
       kind: url.pathname.endsWith('/messages') ? ('full' as const) : ('changes' as const),

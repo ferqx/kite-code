@@ -62,12 +62,17 @@ function port(
   options: {
     getView?: BrowserClient['getView'];
     listMessages?: BrowserClient['listMessages'];
+    listMessageChanges?: BrowserClient['listMessageChanges'];
   } = {},
 ) {
   const counters = { views: 0, pages: 0, close: 0, dispose: 0, cancel: 0 };
   const signals: AbortSignal[] = [];
   const client = {
-    serverInfo: { storeId: 'original' },
+    serverInfo: {
+      storeId: 'original',
+      capabilities: options.listMessageChanges ? ['message_changes'] : [],
+    },
+    listMessageChanges: options.listMessageChanges,
     getView: async (id: string, input: { signal?: AbortSignal } = {}) => {
       counters.views++;
       if (input.signal) signals.push(input.signal);
@@ -89,6 +94,258 @@ function port(
   } as unknown as BrowserClient;
   return { client, counters, signals };
 }
+
+test('a busy Store covers all scoped change pages, reuses A on return and discards a late older A generation', async () => {
+  const baselines: string[] = [];
+  const pending = gate(),
+    entered = gate();
+  let cursor = 10,
+    hold = false,
+    expired = false,
+    oldSignal: AbortSignal | undefined;
+  const p = port({
+    async getView(id) {
+      return { ...view(id, id !== 'static', '4'), snapshotCursor: String(cursor) };
+    },
+    async listMessages(id) {
+      baselines.push(id);
+      if (cursor === 10) cursor = 11;
+      return [message(1, id), message(2, id)];
+    },
+    async listMessageChanges(id, input, options) {
+      const page = {
+        storeId: 'original',
+        sessionId: id,
+        afterCursor: input.afterCursor,
+        upperCursor: input.upperCursor,
+        nextCursor: input.upperCursor,
+        highWaterSeq: '4',
+        nextAfterSeq: null,
+        messages: [] as Message[],
+        removedIds: [] as string[],
+      };
+      if (expired) {
+        expired = false;
+        throw new ClientError('cursor_expired');
+      }
+      if (hold) {
+        hold = false;
+        oldSignal = options?.signal;
+        entered.release();
+        await pending.wait;
+        return { ...page, messages: [{ ...message(1, id), content: 'late stale A' }] };
+      }
+      if (input.afterCursor === '10' && !input.afterSeq)
+        return {
+          ...page,
+          nextAfterSeq: '2',
+          messages: [message(1, id)],
+          removedIds: ['message-2'],
+        };
+      return {
+        ...page,
+        messages: [{ ...message(4, id), content: `covered ${input.upperCursor}` }],
+      };
+    },
+  });
+  const controller = new WebController({
+    admittedClient: p.client,
+    onUpdate() {},
+    initiallyVisible: false,
+  });
+  try {
+    const first = await controller.selectSession('a');
+    expect(first?.messages.map((m) => m.content)).toEqual(['body-1', 'covered 11']);
+    await controller.selectSession('static');
+    cursor++;
+    hold = true;
+    const old = controller.selectSession('a');
+    await entered.wait;
+    await controller.selectSession('b');
+    cursor++;
+    const fresh = await controller.selectSession('a');
+    expect(oldSignal?.aborted).toBe(true);
+    pending.release();
+    expect(await old).toBeUndefined();
+    expect(controller.snapshot).toEqual(fresh);
+    expect(fresh?.messages.map((m) => m.content)).toEqual(['body-1', 'covered 13']);
+    expect(baselines).toEqual(['a', 'static', 'b']);
+    cursor++;
+    expired = true;
+    expect((await controller.refresh())?.messages.map((m) => m.id)).toEqual([
+      'message-1',
+      'message-2',
+    ]);
+    expect(baselines).toEqual(['a', 'static', 'b', 'a']);
+  } finally {
+    pending.release();
+    controller.disposeObserver();
+  }
+});
+
+test('oversized history pages shrink at the same cursor and publish only after all candidates are covered', async () => {
+  const rows = Array.from({ length: 202 }, (_, index) => message(index + 1));
+  const fullReads: [string | undefined, number][] = [];
+  const changes: [string | undefined, number][] = [];
+  const phases: string[] = [];
+  let cursor = '10';
+  let unreadable = false;
+  const p = port({
+    getView: async (id) => ({ ...view(id, false, '202'), snapshotCursor: cursor }),
+    async listMessages(_id, { afterSeq, limit = 200 } = {}) {
+      fullReads.push([afterSeq, limit]);
+      if (limit > 100) throw new ClientError('response_too_large');
+      const start = Number(afterSeq ?? 0);
+      return rows.slice(start, start + limit);
+    },
+    async listMessageChanges(id, { afterCursor, upperCursor, upperSeq, afterSeq, limit = 200 }) {
+      expect(upperSeq).toBe('202');
+      expect(upperCursor).toBe(cursor);
+      expect(afterCursor).toBe(cursor === '11' ? '10' : '11');
+      changes.push([afterSeq, limit]);
+      const start = Number(afterSeq ?? 0);
+      if (limit > 100 || (start === 100 && (limit > 50 || unreadable)))
+        throw new ClientError('response_too_large');
+      const candidates = rows.slice(start, start + limit);
+      return {
+        storeId: 'original',
+        sessionId: id,
+        afterCursor,
+        upperCursor,
+        nextCursor: upperCursor,
+        highWaterSeq: '202',
+        nextAfterSeq: candidates.length === limit ? candidates.at(-1)!.seq : null,
+        messages: candidates
+          .filter((row) => row.seq !== '150')
+          .map((row) => ({ ...row, content: `updated ${cursor}/${row.seq}` })),
+        removedIds: candidates.filter((row) => row.seq === '150').map((row) => row.id),
+      };
+    },
+  });
+  const controller = new WebController({
+    admittedClient: p.client,
+    initiallyVisible: false,
+    onUpdate: (update) => phases.push(update.phase),
+  });
+  try {
+    await controller.selectSession('a');
+    expect(fullReads).toEqual([
+      [undefined, 200],
+      [undefined, 100],
+      ['100', 100],
+      ['200', 100],
+    ]);
+    cursor = '11';
+    const complete = await controller.refresh();
+    expect(changes).toEqual([
+      [undefined, 200],
+      [undefined, 100],
+      ['100', 100],
+      ['100', 50],
+      ['150', 50],
+      ['200', 50],
+    ]);
+    expect(complete?.messages.map((row) => row.content)).toEqual(
+      rows.filter((row) => row.seq !== '150').map((row) => `updated 11/${row.seq}`),
+    );
+    expect(phases).toEqual(['loading', 'ready', 'ready']);
+
+    cursor = '12';
+    unreadable = true;
+    changes.length = 0;
+    await expect(controller.refresh()).rejects.toThrow('response_too_large');
+    expect(changes.at(-1)).toEqual(['100', 1]);
+    expect(controller.snapshot).toEqual(complete);
+    expect(phases.at(-1)).toBe('stale');
+  } finally {
+    controller.disposeObserver();
+  }
+});
+
+test('returning to a short history rebases a large global cursor gap and covers new changes during that scan', async () => {
+  let cursor = 9007199254740993n;
+  const afterGap = cursor + 20000n;
+  const baselines: string[] = [];
+  const changes: string[] = [];
+  const p = port({
+    getView: async (id) => ({ ...view(id), snapshotCursor: String(cursor) }),
+    async listMessages(id) {
+      baselines.push(id);
+      if (cursor === afterGap) cursor++;
+      return [message(1, id)];
+    },
+    async listMessageChanges(id, { afterCursor, upperCursor }) {
+      changes.push(afterCursor);
+      return {
+        storeId: 'original',
+        sessionId: id,
+        afterCursor,
+        upperCursor,
+        nextCursor: upperCursor,
+        highWaterSeq: '1',
+        nextAfterSeq: null,
+        messages: [{ ...message(1, id), content: 'caught up' }],
+        removedIds: [],
+      };
+    },
+  });
+  const controller = new WebController({
+    admittedClient: p.client,
+    initiallyVisible: false,
+    onUpdate() {},
+  });
+  try {
+    await controller.selectSession('a');
+    await controller.selectSession('b');
+    cursor = afterGap;
+    const result = await controller.selectSession('a');
+    expect(baselines).toEqual(['a', 'b', 'a']);
+    expect(changes).toEqual([String(afterGap)]);
+    expect(result?.view.snapshotCursor).toBe(String(afterGap + 1n));
+    expect(result?.messages[0]?.content).toBe('caught up');
+  } finally {
+    controller.disposeObserver();
+  }
+});
+
+test('returning only reuses a bounded history under the same fresh selection and control revision', async () => {
+  const reads: string[] = [];
+  let revision = '1';
+  const p = port({
+    async getView(id) {
+      const result = view(id);
+      result.session.controlRevision = revision;
+      return result;
+    },
+    async listMessages(id) {
+      reads.push(id);
+      return [{ ...message(1, id), content: id === 'large' ? 'x'.repeat(2 * 1024 * 1024) : id }];
+    },
+    async listMessageChanges() {
+      throw Error('the view cursor is unchanged');
+    },
+  });
+  const controller = new WebController({
+    admittedClient: p.client,
+    initiallyVisible: false,
+    onUpdate() {},
+  });
+  try {
+    for (const id of ['a', 'b', 'a', 'large', 'b', 'large', 'a'])
+      await controller.selectSession(id);
+    expect(reads).toEqual(['a', 'b', 'large', 'large']);
+    revision = '2';
+    await controller.selectSession('b');
+    expect(reads.at(-1)).toBe('b');
+    for (const id of ['c', 'd', 'e', 'f', 'b']) await controller.selectSession(id);
+    expect(reads.slice(-5)).toEqual(['c', 'd', 'e', 'f', 'b']);
+    controller.clearSelection();
+    await controller.selectSession('f');
+    expect(reads.at(-1)).toBe('f');
+  } finally {
+    controller.disposeObserver();
+  }
+});
 
 test('only selected visible actual activity polls; status text alone never starts polling', async () => {
   let active = true;

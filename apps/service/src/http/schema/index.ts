@@ -1264,6 +1264,7 @@ export const schemas = {
     role: z.enum(['system', 'user', 'assistant', 'tool']),
     content: z.string(),
     firstOutput: z.enum(['content', 'reasoning', 'tool_calls']).optional(),
+    inlineReasoningBytes: sequence.optional(),
     images: z.array(inputImage).optional(),
     files: inputFiles.optional(),
     humanInput: z
@@ -1745,6 +1746,7 @@ export const BrowserInfoSchema = z.object({
       'runs',
       'session_directory_activity',
       'history',
+      'message_changes',
       'context',
       'execution_output',
       'model_inputs',

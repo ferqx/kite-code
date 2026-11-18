@@ -23537,6 +23537,10 @@
             "type": "string",
             "enum": ["content", "reasoning", "tool_calls"]
           },
+          "inlineReasoningBytes": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
           "images": {
             "type": "array",
             "items": {
@@ -27368,6 +27372,7 @@
                 "runs",
                 "session_directory_activity",
                 "history",
+                "message_changes",
                 "context",
                 "execution_output",
                 "model_inputs",
@@ -28416,6 +28421,10 @@
                 "firstOutput": {
                   "type": "string",
                   "enum": ["content", "reasoning", "tool_calls"]
+                },
+                "inlineReasoningBytes": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
                 },
                 "images": {
                   "type": "array",
@@ -30942,6 +30951,10 @@
               "type": "string",
               "enum": ["content", "reasoning", "tool_calls"]
             },
+            "inlineReasoningBytes": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
             "images": {
               "type": "array",
               "items": {
@@ -31751,6 +31764,10 @@
                 "firstOutput": {
                   "type": "string",
                   "enum": ["content", "reasoning", "tool_calls"]
+                },
+                "inlineReasoningBytes": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
                 },
                 "images": {
                   "type": "array",
@@ -32885,6 +32902,10 @@
                 "firstOutput": {
                   "type": "string",
                   "enum": ["content", "reasoning", "tool_calls"]
+                },
+                "inlineReasoningBytes": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
                 },
                 "images": {
                   "type": "array",

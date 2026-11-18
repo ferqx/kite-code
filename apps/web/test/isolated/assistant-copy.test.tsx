@@ -2,8 +2,11 @@ import { expect, test } from 'bun:test';
 import type { BrowserView, Message, ModelOutputSnapshot } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
-import { act } from 'react';
+import { act, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
 import { createTrustedAssets } from '../../src/assets';
+import type { WebSnapshot } from '../../src/controller';
+import { useRunFacts } from '../../src/run-facts';
 import { installGlobals } from '../globals.fixture';
 
 const first = 'First raw paragraph 🌿e\u0301\r\nEXACT first';
@@ -48,6 +51,72 @@ function view(id: string): BrowserView {
     executions: [],
   };
 }
+test('historical Run reads publish in batches and late concurrent results stay in their original selection', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>');
+  const restore = installGlobals({
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  const held = new Map<string, { signal: AbortSignal; release: () => void }>();
+  const reads = new Set<string>();
+  const publications: string[][] = [];
+  const client = {
+    serverInfo: { capabilities: ['runs'] },
+    async getRun(session: string, id: string, { signal }: { signal: AbortSignal }) {
+      reads.add(id);
+      await new Promise<void>((release) => held.set(id, { signal, release }));
+      held.delete(id);
+      return { storeId: 'store', run: run(id, session) };
+    },
+  } as unknown as BrowserClient;
+  const snapshot = (sessionId: string, count: number): WebSnapshot => ({
+    generation: 1,
+    sessionId,
+    view: view(sessionId),
+    messages: Array.from({ length: count }, (_, i) => ({
+      id: `m-${i}`,
+      sessionId,
+      runId: `${sessionId}-${i}`,
+      seq: String(i + 1),
+      status: 'complete',
+      role: 'assistant',
+      content: 'reply',
+    })),
+  });
+  function Facts({ value }: { value: WebSnapshot }) {
+    const { runs } = useRunFacts(client, value, true);
+    useEffect(() => {
+      publications.push(runs.map((item) => item.id));
+    }, [runs]);
+    return null;
+  }
+  try {
+    await act(async () => root.render(<Facts value={snapshot('a', 70)} />));
+    for (let wave = 0; wave < 9; wave++) {
+      expect(held.size).toBe(4);
+      await act(async () => {
+        for (const request of [...held.values()]) request.release();
+      });
+    }
+    expect(publications.filter((ids) => ids.length > 0).map((ids) => ids.length)).toEqual([32]);
+    const stale = [...held.values()];
+    await act(async () => root.render(<Facts value={snapshot('b', 1)} />));
+    expect(stale.every((request) => request.signal.aborted)).toBe(true);
+    await act(async () => {
+      for (const request of [...held.values()]) request.release();
+    });
+    expect(publications.at(-1)).toEqual(['b-0']);
+    expect(reads.has('a-40')).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    for (const request of held.values()) request.release();
+    restore();
+    dom.window.close();
+  }
+});
+
 async function fixture(bodyMode = false) {
   const dom = new JSDOM(
     '<!doctype html><html><head><meta name="kite-web-identity" content="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"></head><body><div id="root"></div></body></html>',

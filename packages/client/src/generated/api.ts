@@ -3656,6 +3656,7 @@ export type Message = {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+  inlineReasoningBytes?: string;
   images?: Array<{
     name: string;
     reference: {
@@ -4305,6 +4306,7 @@ export type BrowserInfo = {
     | 'runs'
     | 'session_directory_activity'
     | 'history'
+    | 'message_changes'
     | 'context'
     | 'execution_output'
     | 'model_inputs'
@@ -4514,6 +4516,7 @@ export type SelectedContextPage = {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
     firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+    inlineReasoningBytes?: string;
     images?: Array<{
       name: string;
       reference: {
@@ -4927,6 +4930,7 @@ export type MessageList = Array<{
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+  inlineReasoningBytes?: string;
   images?: Array<{
     name: string;
     reference: {
@@ -5055,6 +5059,7 @@ export type MessageChangesPage = {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
     firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+    inlineReasoningBytes?: string;
     images?: Array<{
       name: string;
       reference: {
@@ -5262,6 +5267,7 @@ export type SessionView = {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
     firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+    inlineReasoningBytes?: string;
     images?: Array<{
       name: string;
       reference: {

@@ -16,6 +16,8 @@ import {
   BrowserWorkspaceDirectoryPageSchema,
   BrowserWorkspaceDirectoryQuerySchema,
   BrowserWorkspaceListSchema,
+  MessageChangesPageSchema,
+  MessageChangesQuerySchema,
   SelectedContextPageSchema,
   SessionDirectoryPageSchema,
   schemas,
@@ -150,7 +152,7 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
       throw new ClientError('browser_identity_mismatch');
     return current;
   }
-  function info(fileCheckpoints = false) {
+  function info(fileCheckpoints = false, includeMessageChanges = false) {
     return BrowserInfoSchema.parse({
       instanceId: original.instanceId,
       buildId: original.buildId,
@@ -168,6 +170,11 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
           ? ['session_directory_activity']
           : []),
         ...(original.capabilities.includes('history') ? ['history'] : []),
+        ...(includeMessageChanges &&
+        original.capabilities.includes('history') &&
+        original.capabilities.includes('message_changes')
+          ? ['message_changes']
+          : []),
         ...(original.capabilities.includes('context') ? ['context'] : []),
         ...(original.capabilities.includes('model_inputs') ? ['model_inputs'] : []),
         ...(original.capabilities.includes('model_outputs') ? ['model_outputs'] : []),
@@ -270,7 +277,7 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
           url.pathname,
         );
       const viewMatch =
-        /^\/browser\/v1\/sessions\/([^/]+)\/(view|messages|context|model-inputs|logs)$/.exec(
+        /^\/browser\/v1\/sessions\/([^/]+)\/(view|messages|message-changes|context|model-inputs|logs)$/.exec(
           url.pathname,
         );
       const runMatch = /^\/browser\/v1\/sessions\/([^/]+)\/runs\/([^/]+)$/.exec(url.pathname);
@@ -380,7 +387,10 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
         if (url.pathname === '/browser/v1/server') {
           query(url, []);
           return json(
-            info(await supportsFileCheckpoints(options.admittedClient, controller.signal)),
+            info(
+              await supportsFileCheckpoints(options.admittedClient, controller.signal),
+              request.headers.get('x-kite-web-history') === 'message_changes',
+            ),
           );
         }
         if (original.dataAvailability !== 'available') return problem('data_unavailable', 503);
@@ -735,6 +745,27 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
               executions: view.executions.map(({ result: _result, ...execution }) => execution),
             }),
           );
+        }
+        if (viewMatch?.[2] === 'message-changes') {
+          if (
+            !original.capabilities.includes('history') ||
+            !original.capabilities.includes('message_changes')
+          )
+            throw new ClientError('capability_unavailable');
+          query(url, ['afterCursor', 'upperCursor', 'upperSeq', 'afterSeq', 'limit']);
+          const input = MessageChangesQuerySchema.safeParse({
+            ...Object.fromEntries(url.searchParams),
+            limit: url.searchParams.has('limit')
+              ? Number(url.searchParams.get('limit'))
+              : undefined,
+            storeId: original.storeId,
+          });
+          if (!input.success) throw new ClientError('invalid_query');
+          const page = await options.admittedClient.listMessageChanges(sessionId, input.data, {
+            signal: controller.signal,
+          });
+          await identity(controller.signal);
+          return json(MessageChangesPageSchema.parse(page));
         }
         query(url, ['afterSeq', 'upperSeq', 'limit']);
         const afterSeq = url.searchParams.get('afterSeq') ?? undefined;

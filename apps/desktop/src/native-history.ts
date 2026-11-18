@@ -29,6 +29,7 @@ export class NativeHistory {
   private revision?: number;
   private baselineReady = false;
   private entries = new Map<string, Message>();
+  private readonly inlineReasoningVersions = new WeakMap<Message, string>();
   private cached = new NativeHistoryCache();
   private disposed = false;
   state: HistoryState = { messages: [], phase: 'loading', baselineReady: false };
@@ -234,7 +235,7 @@ export class NativeHistory {
         afterSeq = page.nextAfterSeq;
       }
       // EOF proves the complete reading, including removal or replacement of older records.
-      this.replace(scanned);
+      this.replace(scanned, run.readId);
       this.baselineReady = true;
       this.cursor = target.baselineCursor;
       if (target.cursor !== target.baselineCursor) this.wanted ??= target;
@@ -266,11 +267,27 @@ export class NativeHistory {
       if (!run.canceled && this.scope === scope && this.wanted) void this.drain();
     }
   }
-  private replace(messages: Map<string, Message>) {
+  inlineReasoningRevision(message: Message) {
+    return message.inlineReasoningBytes === undefined
+      ? this.inlineReasoningVersions.get(message)
+      : `bytes:${message.inlineReasoningBytes}`;
+  }
+  private replace(messages: Map<string, Message>, revision: string) {
     for (const [id, message] of messages) {
       const previous = this.entries.get(id);
-      if (previous && previous !== message && JSON.stringify(previous) === JSON.stringify(message))
-        messages.set(id, previous);
+      if (previous === message) continue;
+      const retained =
+        previous && JSON.stringify(previous) === JSON.stringify(message) ? previous : message;
+      if (retained !== message) messages.set(id, retained);
+      // Older Services omit the byte count. A returned row may then have new reasoning
+      // even when all its public fields stayed the same.
+      if (
+        retained.status === 'incomplete' &&
+        retained.firstOutput === 'reasoning' &&
+        !retained.outputBody &&
+        retained.inlineReasoningBytes === undefined
+      )
+        this.inlineReasoningVersions.set(retained, revision);
     }
     this.entries = messages;
   }
@@ -349,7 +366,7 @@ export class NativeHistory {
       const merged = new Map(this.entries);
       for (const id of removed) merged.delete(id);
       for (const [id, message] of updates) merged.set(id, message);
-      this.replace(merged);
+      this.replace(merged, nextCursor!);
       this.cursor = nextCursor;
       this.publish(
         this.state.phase !== 'complete' && (this.cursor !== target.cursor || this.wanted)

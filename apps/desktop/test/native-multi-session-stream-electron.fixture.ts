@@ -16,6 +16,7 @@ import type { MixedShellLedger } from '../../service/test/isolated/multi-session
 import type { NativeBackgroundPage } from '../src/background-bridge';
 import type { NativeJobOutputPage } from '../src/job-output-bridge';
 import type { NativeState } from '../src/native-bridge';
+import { exerciseLiveSessionSwitches } from './live-session-switch.fixture';
 import { collectNativeGpuMemory } from './native-gpu-memory.fixture';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
 import { nativeRootPage } from './native-root-page.fixture';
@@ -37,14 +38,24 @@ type Metrics = {
   };
   observe: { total: number; active: number; peak: number };
   held: boolean;
+  trackedModelReads: number;
 };
-const [outdir, root, executablePath, control, measurement, workload, memoryDirectory] =
-  process.argv.slice(2) as string[];
+const [
+  outdir,
+  root,
+  executablePath,
+  control,
+  measurement,
+  workload,
+  memoryDirectory,
+  switchDirectory,
+] = process.argv.slice(2) as string[];
 const mixed = workload === 'mixed';
 const gpuEnabled = Boolean(memoryDirectory);
-const evidence = memoryDirectory
-  ? join(memoryDirectory, 'report')
-  : join(tmpdir(), `kite-native-multi-session-${mixed ? 'shell-' : ''}stream`);
+const evidence =
+  memoryDirectory || switchDirectory
+    ? join((memoryDirectory || switchDirectory)!, 'report')
+    : join(tmpdir(), `kite-native-multi-session-${mixed ? 'shell-' : ''}stream`);
 const app = await _electron.launch({
   executablePath,
   args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
@@ -203,7 +214,7 @@ try {
       await page.getByRole('button', { name: `Live Root ${index}`, exact: true }).click();
       await page
         .locator('.session-header')
-        .getByTitle(`Live Root ${index}`, { exact: true })
+        .getByText(`Live Root ${index}`, { exact: true })
         .waitFor();
       return until(
         state,
@@ -324,18 +335,178 @@ try {
         .getByTitle(`Live Root ${index}`, { exact: true })
         .waitFor();
     }
+    async function send(index: number) {
+      await page
+        .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
+        .fill(`MULTI_ROOT_${index}`);
+      await selectNativeFixtureModel(page, 'fixture');
+      const button = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
+      await until(() => button.isEnabled(), Boolean, 'root send enabled');
+      await button.click();
+    }
+    if (workload === 'switching') {
+      phase = 'two-streams-and-static-history';
+      let toolTransition: { observations: number; lost: boolean } | undefined;
+      for (const index of [2, 0, 1]) {
+        await select(index);
+        if (index !== 2) await authorize();
+        await send(index);
+        if (index === 1) {
+          const pane = page.locator('.history-panel .conversation-viewport');
+          const trace = pane.locator('.conversation-trace > button');
+          await trace.click();
+          const thought = pane
+            .locator('.conversation-reasoning-body')
+            .getByText('ROOT_1_THOUGHT_INITIAL', { exact: true });
+          await thought.waitFor();
+          await select(0);
+          await pane.getByText('ROOT_0_INITIAL_TAIL', { exact: true }).waitFor();
+          await select(1);
+          await thought.waitFor();
+          await page.screenshot({ path: join(switchDirectory!, 'before-tools-b.png') });
+          const continuity = await thought.evaluateHandle((node) => {
+            let observations = 0,
+              lost = false;
+            const viewport = node.closest<HTMLElement>('.conversation-viewport')!;
+            const sample = () => {
+              observations++;
+              if (
+                !node.isConnected ||
+                !node.checkVisibility() ||
+                viewport.innerText.includes('ROOT_0')
+              )
+                lost = true;
+            };
+            const observer = new MutationObserver(sample);
+            observer.observe(viewport, {
+              subtree: true,
+              childList: true,
+              characterData: true,
+              attributes: true,
+            });
+            return () => {
+              sample();
+              observer.disconnect();
+              return { observations, lost };
+            };
+          });
+          assert.ok((await fetch(`${control}/continue-tools`)).ok);
+          await pane
+            .locator('button.tool-activity-summary', { hasText: 'ROOT_1-missing.txt' })
+            .waitFor();
+          await pane.getByText('ROOT_1_INITIAL_TAIL', { exact: true }).waitFor();
+          toolTransition = await continuity.evaluate((stop) => stop());
+          await continuity.dispose();
+          assert.ok(
+            toolTransition.observations > 1 && !toolTransition.lost,
+            'grouping Tools replaced the open thinking step',
+          );
+          await thought.scrollIntoViewIfNeeded();
+          await page.screenshot({ path: join(switchDirectory!, 'after-tools-b.png') });
+          await pane.locator('.conversation-reasoning > button').first().press('Enter');
+          await trace.click();
+          await pane.evaluate((element) => {
+            element.scrollTop = 0;
+          });
+          await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
+        }
+        await page
+          .locator('.history-panel .conversation')
+          .getByText(`ROOT_${index}_${index === 2 ? 'FINAL' : 'INITIAL_TAIL'}`, { exact: false })
+          .last()
+          .waitFor();
+      }
+      await select(0);
+      const live = await until(
+        provider,
+        (value) => value.active.length === 2 && value.active.every((row) => row.tick > 0),
+        'both Model streams are active',
+      );
+      const models = (await state()).selection!.executions.filter((row) => row.kind === 'model');
+      const initialModel = models.find((row) => row.status === 'succeeded');
+      assert.ok(initialModel, 'A has a settled model execution with the original reasoning');
+      const activeModel = models.find((row) => ['dispatching', 'running'].includes(row.status));
+      assert.ok(activeModel, 'A is streaming from its second model execution');
+      await app.evaluate((_electron, path) => {
+        (
+          globalThis as unknown as { multiStreamMetrics: { trackedModelPath: string } }
+        ).multiStreamMetrics.trackedModelPath = path;
+      }, `/v1/sessions/root-0/executions/${activeModel.id}/model-output`);
+      let aborts = 0;
+      const report = await exerciseLiveSessionSwitches(
+        page,
+        {
+          client: 'desktop',
+          reasoningReads: async () => (await metrics()).trackedModelReads,
+          async appendReasoning() {
+            assert.ok((await fetch(`${control}/more-reasoning`)).ok);
+          },
+          pendingRead: {
+            async arm() {
+              await app.evaluate((_electron, path) => {
+                (
+                  globalThis as unknown as { multiStreamMetrics: { holdPath: string } }
+                ).multiStreamMetrics.holdPath = path;
+              }, `/v1/sessions/root-0/executions/${initialModel.id}/model-output`);
+            },
+            async waitHeld() {
+              const held = await until(
+                metrics,
+                (value) => value.held,
+                'original A reasoning read is in flight',
+              );
+              aborts = held.finite.aborted;
+            },
+            async afterSwitch() {
+              await until(
+                metrics,
+                (value) => !value.held && value.finite.aborted > aborts,
+                'switching to static history retires the held reasoning reader',
+              );
+            },
+          },
+        },
+        switchDirectory!,
+        async () => (await provider()).active,
+        async (id) => {
+          assert.deepEqual((await provider()).calls, live.calls);
+          const response = await fetch(`${control}/finish?marker=ROOT_${id}`);
+          assert.ok(response.ok);
+          const end = (await response.json()) as { marker: string; tick: number };
+          assert.equal(end.marker, `ROOT_${id}`);
+          return end.tick;
+        },
+      );
+      const end = await provider();
+      assert.deepEqual(live.calls, [
+        'ROOT_2:initial',
+        'ROOT_0:initial',
+        'ROOT_0:after-tools',
+        'ROOT_1:initial',
+        'ROOT_1:after-tools',
+      ]);
+      assert.deepEqual(end.calls, live.calls);
+      assert.deepEqual(end.aborted, []);
+      writeFileSync(
+        `${evidence}.json`,
+        JSON.stringify({ ...report, toolTransition, calls: end.calls, diagnostics }, null, 2),
+      );
+      console.log(
+        JSON.stringify({
+          evidence,
+          frames: report.frames.length,
+          visits: report.visits,
+          calls: end.calls,
+        }),
+      );
+      return;
+    }
     phase = 'start-four-roots';
     console.log(JSON.stringify({ phase, time: Date.now() }));
     for (let index = 0; index < 4; index++) {
       await select(index);
       await authorize();
-      await page
-        .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
-        .fill(`MULTI_ROOT_${index}`);
-      await selectNativeFixtureModel(page, 'fixture');
-      const send = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
-      await until(() => send.isEnabled(), Boolean, 'root send enabled');
-      await send.click();
+      await send(index);
       const observed = await until(
         state,
         (value) => value.selection!.executions.filter((row) => !!row.childSessionId).length === 3,

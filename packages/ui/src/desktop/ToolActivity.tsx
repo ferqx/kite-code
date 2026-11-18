@@ -1148,12 +1148,13 @@ export function ToolActivity({
         ))}
       </div>
     );
-  let projectedChildren: ReactNode[] | undefined;
+  let projectedChildren: ReactNode;
   const getChildren = () => {
-    projectedChildren ??=
-      agent || grouped || summaryOnly
-        ? []
-        : messages.map((item) => renderChildren(item.id.slice(5), !shell || open, item.id));
+    if (projectedChildren === undefined)
+      projectedChildren =
+        agent || grouped || summaryOnly
+          ? null
+          : (renderChildren(message.id.slice(5), !shell || open, message.id) ?? null);
     return projectedChildren;
   };
   const approval = grouped ? undefined : approvalLabel(message);
@@ -1192,7 +1193,7 @@ export function ToolActivity({
       message.toolName === 'task' ||
       !!message.text ||
       (imageOnly && !!renderImages) ||
-      getChildren().some(Boolean));
+      Boolean(getChildren()));
   const ownSummaryTitle = canExpand && !directTraceDetails ? traceSummaryTitle : undefined;
   const label =
     ownSummaryTitle ??
@@ -1485,7 +1486,7 @@ export function ToolActivity({
                     <ShellOutput
                       message={message}
                       metadataPending={metadataPending}
-                      originalContent={children.some(Boolean) ? children : undefined}
+                      originalContent={children || undefined}
                     />
                   )}
                   {!grouped && !shell && !ask && status && status !== '成功' && (
@@ -1568,7 +1569,7 @@ export function ToolActivity({
                         </pre>
                       </ScrollArea>
                     )}
-                  {!shell && children.some(Boolean) && (
+                  {!shell && Boolean(children) && (
                     <div className="tool-activity-children">
                       {unverified || !message.toolName ? (
                         <ScrollArea

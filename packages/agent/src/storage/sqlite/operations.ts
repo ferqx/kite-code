@@ -1065,6 +1065,13 @@ export class SqliteOperations {
       status: row.status as MessageRecord['status'],
       role: row.role as MessageRecord['role'],
       content,
+      ...(row.role === 'assistant' &&
+      row.status === 'incomplete' &&
+      source.firstOutput === 'reasoning' &&
+      !source.modelOutput &&
+      typeof source.reasoning === 'string'
+        ? { inlineReasoningBytes: String(Buffer.byteLength(source.reasoning)) }
+        : {}),
       ...(typeof source.createdAt === 'number' &&
       Number.isSafeInteger(source.createdAt) &&
       source.createdAt >= 0

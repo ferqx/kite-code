@@ -1,4 +1,10 @@
-import { type BrowserView, ClientError, type Message, parseCursorSequence } from '@kite-ai/client';
+import {
+  type BrowserView,
+  ClientError,
+  estimateSnapshotBytes,
+  type Message,
+  parseCursorSequence,
+} from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 
 export interface WebSnapshot {
@@ -21,6 +27,143 @@ export interface WebOptions {
   readonly pollIntervalMs?: number;
 }
 
+function sameHistoryScope(left: BrowserView, right: BrowserView) {
+  return (
+    left.storeId === right.storeId &&
+    left.session.id === right.session.id &&
+    left.session.contextSelectionId === right.session.contextSelectionId &&
+    left.session.controlRevision === right.session.controlRevision
+  );
+}
+
+const historyPageSize = 200;
+// The Store covers up to 200 global change events per cursor batch, independently of page size.
+const eventsPerChangeBatch = 200n;
+
+function baselineCostsLess(saved: WebSnapshot, view: BrowserView) {
+  const addedSlots = BigInt(view.session.nextSeq) - BigInt(saved.view.session.nextSeq);
+  if (addedSlots < 0n) return false; // Let coverChanges reject a regressed View.
+  const rows = BigInt(saved.messages.length) + addedSlots;
+  const pageSize = BigInt(historyPageSize);
+  const pages = rows === 0n ? 1n : (rows + pageSize - 1n) / pageSize;
+  const events = BigInt(view.snapshotCursor) - BigInt(saved.view.snapshotCursor);
+  // A fresh scan also needs a closing View. Both paths still verify their full target.
+  return events > (pages + 1n) * eventsPerChangeBatch;
+}
+
+function historyPageReader(signal: AbortSignal) {
+  let limit = historyPageSize;
+  return async function readPage<T>(load: (limit: number) => Promise<T>) {
+    for (;;) {
+      signal.throwIfAborted();
+      try {
+        return { page: await load(limit), limit };
+      } catch (error) {
+        if (!(error instanceof ClientError && error.code === 'response_too_large') || limit === 1)
+          throw error;
+        limit = Math.max(1, Math.floor(limit / 2));
+      }
+    }
+  };
+}
+
+async function readBaseline(client: BrowserClient, view: BrowserView, signal: AbortSignal) {
+  const sessionId = view.session.id;
+  // The Store's nextSeq is the last allocated Session sequence (commands share this ledger).
+  const upperSeq = parseCursorSequence(view.session.nextSeq).toString();
+  const messages: Message[] = [];
+  const ids = new Set<string>();
+  const readPage = historyPageReader(signal);
+  let afterSeq: string | undefined;
+  while (BigInt(upperSeq) > 0n) {
+    const { page, limit } = await readPage((limit) =>
+      client.listMessages(sessionId, { afterSeq, upperSeq, limit, signal }),
+    );
+    let previous = afterSeq === undefined ? -1n : parseCursorSequence(afterSeq);
+    for (const message of page) {
+      const seq = parseCursorSequence(message.seq);
+      if (
+        message.sessionId !== sessionId ||
+        ids.has(message.id) ||
+        seq <= previous ||
+        seq > BigInt(upperSeq)
+      )
+        throw new ClientError('history_page_conflict');
+      previous = seq;
+      ids.add(message.id);
+      messages.push(message);
+    }
+    if (page.length < limit || previous === BigInt(upperSeq)) break;
+    afterSeq = previous.toString();
+  }
+  return messages;
+}
+
+/** Reconcile to a fixed target even if more events arrive while these pages are in flight. */
+async function coverChanges(
+  client: BrowserClient,
+  source: readonly Message[],
+  from: BrowserView,
+  to: BrowserView,
+  signal: AbortSignal,
+): Promise<readonly Message[]> {
+  const upperCursor = to.snapshotCursor;
+  const upperSeq = to.session.nextSeq;
+  if (
+    !sameHistoryScope(from, to) ||
+    BigInt(from.snapshotCursor) > BigInt(upperCursor) ||
+    BigInt(from.session.nextSeq) > BigInt(upperSeq)
+  )
+    throw new ClientError('history_snapshot_changed');
+  if (from.snapshotCursor === upperCursor) {
+    if (from.session.nextSeq !== upperSeq) throw new ClientError('history_snapshot_changed');
+    return source;
+  }
+  if (!client.serverInfo?.capabilities?.includes('message_changes'))
+    throw new ClientError('history_snapshot_changed');
+
+  let rows: Map<string, Message> | undefined;
+  const readPage = historyPageReader(signal);
+  let afterCursor = from.snapshotCursor;
+  while (afterCursor !== upperCursor) {
+    const seen = new Set<string>();
+    let afterSeq: string | undefined, nextCursor: string | undefined;
+    do {
+      const { page } = await readPage((limit) =>
+        client.listMessageChanges(
+          to.session.id,
+          { afterCursor, upperCursor, upperSeq, afterSeq, limit },
+          { signal },
+        ),
+      );
+      if (nextCursor !== undefined && nextCursor !== page.nextCursor)
+        throw new ClientError('history_page_cursor_mismatch');
+      nextCursor = page.nextCursor;
+      afterSeq = page.nextAfterSeq ?? undefined;
+      if (!page.removedIds.length && !page.messages.length) continue;
+      rows ??= new Map(source.map((message) => [message.id, message]));
+      for (const id of page.removedIds) {
+        if (seen.has(id)) throw new ClientError('history_page_conflict');
+        seen.add(id);
+        rows.delete(id);
+      }
+      for (const message of page.messages) {
+        const previous = rows.get(message.id);
+        if (seen.has(message.id) || (previous && previous.seq !== message.seq))
+          throw new ClientError('history_page_conflict');
+        seen.add(message.id);
+        rows.set(message.id, message);
+      }
+    } while (afterSeq !== undefined);
+    afterCursor = nextCursor;
+  }
+  if (!rows) return source;
+  const sorted = [...rows.values()].sort((a, b) => Number(BigInt(a.seq) - BigInt(b.seq)));
+  if (sorted.some((message, index) => index > 0 && sorted[index - 1]!.seq === message.seq))
+    throw new ClientError('history_page_conflict');
+  return sorted;
+}
+
 /** Selected visible activity only: one read at a time, no SSE or execution ownership. */
 export class WebController {
   private readonly options: WebOptions;
@@ -31,6 +174,8 @@ export class WebController {
   private visible: boolean;
   private disposed = false;
   private current: WebSnapshot | undefined;
+  // Only verified History/View data. No Model body reader or observer survives a switch.
+  private readonly retained = new Map<string, WebSnapshot>();
   private activity: { sessionId: string; generation: number; active: boolean } | undefined;
   private pending:
     | { controller: AbortController; promise: Promise<WebSnapshot | undefined> }
@@ -50,6 +195,19 @@ export class WebController {
   }
   async selectSession(sessionId: string): Promise<WebSnapshot | undefined> {
     if (this.disposed) throw new ClientError('controller_disposed');
+    const previous = this.current;
+    if (
+      previous &&
+      !this.failures &&
+      this.options.admittedClient.serverInfo?.capabilities?.includes('message_changes')
+    ) {
+      const perSessionBytes = 4 * 1024 * 1024;
+      this.retained.delete(previous.sessionId);
+      if (estimateSnapshotBytes(previous, perSessionBytes) <= perSessionBytes) {
+        this.retained.set(previous.sessionId, previous);
+        if (this.retained.size > 3) this.retained.delete(this.retained.keys().next().value!);
+      }
+    }
     this.stopRead();
     this.generation++;
     this.failures = 0;
@@ -66,6 +224,7 @@ export class WebController {
     this.failures = 0;
     this.selected = undefined;
     this.current = undefined;
+    this.retained.clear();
     this.activity = undefined;
   }
   refresh(): Promise<WebSnapshot | undefined> {
@@ -102,44 +261,28 @@ export class WebController {
       )
         return undefined;
       this.activity = { sessionId, generation, active: view.runs.some((run) => run.isActive) };
-      // The Store's nextSeq is the last allocated Session sequence (commands share this ledger).
-      const upperSeq = parseCursorSequence(view.session.nextSeq).toString();
-      const messages: Message[] = [];
-      let afterSeq: string | undefined;
-      while (BigInt(upperSeq) > 0n) {
-        signal.throwIfAborted();
-        const page = await client.listMessages(sessionId, {
-          afterSeq,
-          upperSeq,
-          limit: 200,
-          signal,
-        });
-        let previous = afterSeq === undefined ? -1n : parseCursorSequence(afterSeq);
-        for (const message of page) {
-          const seq = parseCursorSequence(message.seq);
-          if (message.sessionId !== sessionId || seq <= previous || seq > BigInt(upperSeq))
-            throw new ClientError('history_page_conflict');
-          previous = seq;
-          messages.push(message);
+      let latest = view;
+      let messages: readonly Message[] | undefined;
+      const saved = this.current ?? this.retained.get(sessionId);
+      if (
+        saved &&
+        sameHistoryScope(saved.view, view) &&
+        client.serverInfo?.capabilities?.includes('message_changes') &&
+        !baselineCostsLess(saved, view)
+      ) {
+        try {
+          messages = await coverChanges(client, saved.messages, saved.view, view, signal);
+        } catch (error) {
+          if (!(error instanceof ClientError && error.code === 'cursor_expired')) throw error;
         }
-        if (page.length < 200 || previous === BigInt(upperSeq)) break;
-        afterSeq = previous.toString();
       }
-      const latest = await client.getView(sessionId, { signal });
-      if (
-        !this.disposed &&
-        generation === this.generation &&
-        sessionId === this.selected &&
-        !signal.aborted
-      )
+      if (messages === undefined) {
+        const baseline = await readBaseline(client, view, signal);
+        latest = await client.getView(sessionId, { signal });
+        signal.throwIfAborted();
         this.activity = { sessionId, generation, active: latest.runs.some((run) => run.isActive) };
-      if (
-        latest.storeId !== view.storeId ||
-        latest.session.contextSelectionId !== view.session.contextSelectionId ||
-        latest.session.controlRevision !== view.session.controlRevision ||
-        latest.snapshotCursor !== view.snapshotCursor
-      )
-        throw new ClientError('history_snapshot_changed');
+        messages = await coverChanges(client, baseline, view, latest, signal);
+      }
       if (
         this.disposed ||
         generation !== this.generation ||
@@ -148,6 +291,7 @@ export class WebController {
       )
         return undefined;
       this.current = { sessionId, generation, view: latest, messages };
+      this.retained.delete(sessionId);
       this.failures = 0;
       this.publish('ready');
       return this.snapshot;
@@ -218,5 +362,6 @@ export class WebController {
     this.disposed = true;
     this.stopRead();
     this.current = undefined;
+    this.retained.clear();
   }
 }

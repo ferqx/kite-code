@@ -26,6 +26,76 @@ function until(predicate: () => boolean) {
     poll();
   });
 }
+test('inline reasoning uses its own byte count and retains cursor fallback for older Services', async () => {
+  const thought = {
+    id: 'thought',
+    sessionId: 's',
+    seq: '1',
+    role: 'assistant',
+    status: 'incomplete',
+    firstOutput: 'reasoning',
+    content: 'Reply already started',
+  } as Message;
+  let currentThought = thought;
+  const tool = {
+    id: 'tool',
+    sessionId: 's',
+    seq: '2',
+    role: 'tool',
+    status: 'complete',
+    content: 'Receipt',
+  } as Message;
+  const reader = new NativeHistory(
+    {
+      async request(request) {
+        if (request.method === 'messages.close') return null;
+        if (request.method !== 'messages') throw Error('unexpected');
+        const changes = request.changes;
+        return {
+          messages: structuredClone(
+            changes
+              ? changes.upperCursor === '2'
+                ? [tool]
+                : [currentThought]
+              : [currentThought, tool],
+          ),
+          highWaterSeq: '2',
+          nextAfterSeq: null,
+          ...(changes
+            ? { changes: { ...changes, nextCursor: changes.upperCursor, removedIds: [] } }
+            : {}),
+        };
+      },
+    } as NativeBridge,
+    () => {},
+  );
+  try {
+    reader.select(1, incrementalSelection(1));
+    await until(() => reader.state.cursor === '1');
+    const original = reader.state.messages[0]!;
+    const version = reader.inlineReasoningRevision(original);
+    expect(version).toBeDefined();
+    reader.select(1, incrementalSelection(2));
+    await until(() => reader.state.cursor === '2');
+    expect(reader.inlineReasoningRevision(original)).toBe(version);
+    reader.select(1, incrementalSelection(3));
+    await until(() => reader.state.cursor === '3');
+    expect(reader.state.messages[0]).toBe(original);
+    expect(reader.inlineReasoningRevision(original)).not.toBe(version);
+    const publishThought = async (cursor: number, update: Partial<Message>) => {
+      currentThought = { ...currentThought, ...update };
+      reader.select(1, incrementalSelection(cursor));
+      await until(() => reader.state.cursor === String(cursor));
+      return reader.inlineReasoningRevision(reader.state.messages[0]!);
+    };
+    const first = await publishThought(4, { inlineReasoningBytes: '13' });
+    expect(first).toBeDefined();
+    expect(await publishThought(5, { content: 'More reply text' })).toBe(first);
+    expect(await publishThought(6, { inlineReasoningBytes: '19' })).not.toBe(first);
+  } finally {
+    reader.dispose();
+  }
+});
 test('Native normal streaming merges same-seq changes without rescanning, loading flashes or replacing stable message objects', async () => {
   const saved = { id: 'saved', sessionId: 's', seq: '1', content: 'saved' } as Message;
   const active = { id: 'active', sessionId: 's', seq: '2', content: 'first' } as Message;

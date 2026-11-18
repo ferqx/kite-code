@@ -1,5 +1,6 @@
 import type { OutputFilesPage, OutputFileTarget } from '@kite-ai/client';
 import {
+  ConversationTurnElementContext,
   type OutputFileSummary,
   OutputFiles,
   type OutputFilesProps,
@@ -9,7 +10,10 @@ import {
   useConversationReadActive,
 } from '@kite-ai/ui/desktop';
 import {
+  createContext,
+  type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -297,14 +301,8 @@ export function useNativeOutputFiles(input: {
     renderTurnOutputs: ({ turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, input.sessionId);
       return runId ? (
-        <>
-          <OutputFileReader
-            key={`${key}/${turnId}`}
-            {...input}
-            {...reader}
-            runId={runId}
-            actions={actions}
-          />
+        <TurnOutputSlot key={`${key}/${turnId}`}>
+          <OutputFileReader {...input} {...reader} runId={runId} actions={actions} />
           {sources
             .filter((source) => source.parentRunId === runId)
             .map((source) => (
@@ -318,21 +316,22 @@ export function useNativeOutputFiles(input: {
                 actions={actions}
               />
             ))}
-        </>
+        </TurnOutputSlot>
       ) : null;
     },
     renderChildTurnOutputs: (sessionId: string, { turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, sessionId);
       return runId &&
         sources.some((source) => source.sessionId === sessionId && source.runId === runId) ? (
-        <OutputFileReader
-          key={`${key}/${sessionId}/${runId}`}
-          {...input}
-          {...reader}
-          sessionId={sessionId}
-          runId={runId}
-          actions={actions}
-        />
+        <TurnOutputSlot key={`${key}/${sessionId}/${runId}`}>
+          <OutputFileReader
+            {...input}
+            {...reader}
+            sessionId={sessionId}
+            runId={runId}
+            actions={actions}
+          />
+        </TurnOutputSlot>
       ) : null;
     },
     renderFile: ({ target: source }: { target: SessionFileTarget }) =>
@@ -360,6 +359,46 @@ export function useNativeOutputFiles(input: {
       ),
   };
 }
+// Share an observer for the existing turn boxes within this reading viewport.
+const turnObservers = new WeakMap<Element, IntersectionObserver>();
+const turnReaders = new WeakMap<Element, (nearby: boolean) => void>();
+const TurnOutputReadContext = createContext(true);
+function TurnOutputSlot({ children }: { children: ReactNode }) {
+  const turn = useContext(ConversationTurnElementContext);
+  // Undefined until the first visit. Afterwards retain the cards while new reads follow visibility.
+  const [nearby, setNearby] = useState<boolean>();
+  const active = useConversationReadActive();
+  useEffect(() => {
+    if (!active) return;
+    const target = turn?.current;
+    const viewport = target?.closest('.conversation-viewport');
+    const Observer = target?.ownerDocument.defaultView?.IntersectionObserver;
+    if (!target || !viewport || !Observer) {
+      setNearby(true);
+      return;
+    }
+    let observer = turnObservers.get(viewport);
+    if (!observer) {
+      observer = new Observer(
+        (entries) => {
+          for (const entry of entries) turnReaders.get(entry.target)?.(entry.isIntersecting);
+        },
+        { root: viewport, rootMargin: '300px 0px' },
+      );
+      turnObservers.set(viewport, observer);
+    }
+    turnReaders.set(target, (visible) =>
+      setNearby((previous) => (visible || previous !== undefined ? visible : undefined)),
+    );
+    observer.observe(target);
+    return () => {
+      observer.unobserve(target);
+      turnReaders.delete(target);
+    };
+  }, [active, turn]);
+  if (nearby === undefined) return null;
+  return <TurnOutputReadContext value={nearby}>{children}</TurnOutputReadContext>;
+}
 type FilePage = Pick<OutputFilesPage, 'items' | 'nextCursor' | 'revision'>;
 type OutputReadState = {
   page?: FilePage;
@@ -381,7 +420,9 @@ type OutputReaderInput = {
   actions: Omit<OutputFilesProps, 'items'>;
 };
 function OutputFileReader(input: OutputReaderInput) {
-  const readActive = useConversationReadActive();
+  const active = useConversationReadActive();
+  const nearby = useContext(TurnOutputReadContext);
+  const readActive = active && nearby;
   useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
   const scopeValid = input.cache.valid(input.rootKey);
   const windowKey = JSON.stringify([input.rootKey, input.sessionId, input.runId]);

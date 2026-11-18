@@ -508,8 +508,10 @@ test('session reading keeps original position and tool expansion; visible copy a
     await settle(() => f.dom.window.document.querySelectorAll('[data-message-id]').length === 202);
     expect(history.scrollTop).toBe(125);
     const details = history.querySelector('details')!;
+    expect(details.querySelector('.message-markdown')).toBeNull();
     details.open = true;
     await act(async () => details.dispatchEvent(new f.dom.window.Event('toggle')));
+    expect(details.querySelector('.message-markdown')?.textContent).toContain('Tool output');
     await f.click(f.button('Copy conversation'));
     expect(f.state.copied).toContain('a body 1');
     expect(f.state.copied).toContain('# Tool output');
@@ -544,6 +546,7 @@ test('session reading keeps original position and tool expansion; visible copy a
     ) as HTMLElement;
     expect(restoredHistory.scrollTop).toBe(125);
     expect(restoredHistory.querySelector('details')!.open).toBe(true);
+    expect(restoredHistory.querySelector('details .message-markdown')).not.toBeNull();
     Object.defineProperties(restoredHistory, {
       scrollHeight: { configurable: true, value: 1000 },
       clientHeight: { configurable: true, value: 200 },
@@ -556,6 +559,7 @@ test('session reading keeps original position and tool expansion; visible copy a
     );
     await f.click(f.button('Copy conversation'));
     expect(f.state.copied).not.toContain('Full detail');
+    expect(restoredHistory.querySelector('details .message-markdown')).toBeNull();
   } finally {
     await f.close();
   }

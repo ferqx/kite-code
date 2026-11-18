@@ -314,6 +314,12 @@ export function nativeReplyKey(scope: string, message: Message) {
   ]);
 }
 
+function indexEntry<T>(groups: Map<string, T[]>, key: string, value: T) {
+  const group = groups.get(key);
+  if (group) group.push(value);
+  else groups.set(key, [value]);
+}
+
 /** Original Conversation presentation from exact public Run ownership and confirmed tool receipts. */
 export function desktopTranscript({
   messages: history,
@@ -399,6 +405,24 @@ export function desktopTranscript({
     fullContent: fullReply,
     copyScope: 'final',
   });
+  const toolsByMessage = new Map<string, NativeToolMessageFact[]>();
+  for (const fact of tools) indexEntry(toolsByMessage, fact.messageId, fact);
+  const executionsById = new Map<string, NativeToolExecution[]>();
+  for (const execution of executions) indexEntry(executionsById, execution.id, execution);
+  const callsById = new Map<
+    string,
+    {
+      call: NonNullable<Message['toolCalls']>[number];
+      message: Message;
+    }[]
+  >();
+  for (const message of messages) {
+    if (message.role !== 'assistant' || message.sessionId !== sessionId) continue;
+    for (const call of message.toolCalls ?? []) {
+      const key = JSON.stringify([message.runId, call.id]);
+      indexEntry(callsById, key, { call, message });
+    }
+  }
   const modeled = desktopMessages(messages, true).map((model, index) => {
     const message = messages[index]!,
       run =
@@ -411,78 +435,59 @@ export function desktopTranscript({
       message.role === 'user' && !message.originMessage && message.sessionId === sessionId
         ? (message.humanInput?.publicCommandId ?? message.originCommandId)
         : undefined;
-    const fact = tools.find(
-      (entry) =>
-        entry.messageId === message.id &&
-        message.sourceIds?.length === 1 &&
-        entry.executionId === message.sourceIds[0],
-    );
+    const fact = toolsByMessage
+      .get(message.id)
+      ?.find(
+        (entry) => message.sourceIds?.length === 1 && entry.executionId === message.sourceIds[0],
+      );
     // The current View can establish a tool's display classification before
     // the receipt metadata GET returns. It does not establish its result.
     const execution =
       !fact && run && message.role === 'tool' && message.sourceIds?.length === 1
-        ? executions.find(
-            (entry) =>
-              entry.id === message.sourceIds![0] &&
-              entry.kind === 'tool' &&
-              entry.originStoreId === storeId &&
-              entry.sessionId === sessionId &&
-              entry.runId === run.id,
-          )
+        ? executionsById
+            .get(message.sourceIds[0]!)
+            ?.find(
+              (entry) =>
+                entry.kind === 'tool' &&
+                entry.originStoreId === storeId &&
+                entry.sessionId === sessionId &&
+                entry.runId === run.id,
+            )
         : undefined;
     const liveInput =
       run && message.role === 'tool' && message.sourceIds?.length === 1
-        ? tools.find(
-            (entry) =>
-              entry.messageId === `native-execution:${message.sourceIds![0]}` &&
-              entry.executionId === message.sourceIds![0] &&
-              entry.inputSource?.storeId === storeId &&
-              entry.inputSource.sessionId === sessionId &&
-              entry.inputSource.runId === run.id &&
-              entry.inputSource.toolCallId === message.toolCallId &&
-              (!execution ||
-                (execution.definitionId === entry.definitionId &&
-                  execution.definitionVersion === entry.definitionVersion)) &&
-              (!fact ||
-                (fact.definitionId === entry.definitionId &&
-                  fact.definitionVersion === entry.definitionVersion)),
-          )
+        ? toolsByMessage
+            .get(`native-execution:${message.sourceIds[0]}`)
+            ?.find(
+              (entry) =>
+                entry.executionId === message.sourceIds![0] &&
+                entry.inputSource?.storeId === storeId &&
+                entry.inputSource.sessionId === sessionId &&
+                entry.inputSource.runId === run.id &&
+                entry.inputSource.toolCallId === message.toolCallId &&
+                (!execution ||
+                  (execution.definitionId === entry.definitionId &&
+                    execution.definitionVersion === entry.definitionVersion)) &&
+                (!fact ||
+                  (fact.definitionId === entry.definitionId &&
+                    fact.definitionVersion === entry.definitionVersion)),
+            )
         : undefined;
     const originalCalls = liveInput
-      ? messages.flatMap((candidate) =>
-          candidate.role === 'assistant' &&
-          candidate.sessionId === sessionId &&
-          candidate.runId === run?.id &&
-          BigInt(candidate.seq) < BigInt(message.seq)
-            ? (candidate.toolCalls?.filter((call) => call.id === message.toolCallId) ?? [])
-            : [],
-        )
-      : [];
-    const readableCalls = liveInput
-      ? messages
-          .filter(
-            (candidate) =>
-              candidate.role === 'assistant' &&
-              candidate.sessionId === sessionId &&
-              candidate.runId === run?.id &&
-              BigInt(candidate.seq) < BigInt(message.seq) &&
-              candidate.status === 'complete' &&
-              candidate.contentFormat !== 'unsupported',
-          )
-          .flatMap(
-            (candidate) =>
-              candidate.toolCalls?.filter((call) => call.id === message.toolCallId) ?? [],
-          )
+      ? (callsById
+          .get(JSON.stringify([run!.id, message.toolCallId]))
+          ?.filter((source) => BigInt(source.message.seq) < BigInt(message.seq)) ?? [])
       : [];
     let inputCompatible = originalCalls.length === 0;
     const inputPresentation = liveInput ? nativeShellInputPresentation(liveInput) : undefined;
     if (
       originalCalls.length === 1 &&
-      readableCalls.length === 1 &&
-      originalCalls[0]!.name === liveInput?.definitionId
+      originalCalls[0]!.message.status === 'complete' &&
+      originalCalls[0]!.message.contentFormat !== 'unsupported' &&
+      originalCalls[0]!.call.name === liveInput?.definitionId
     ) {
       try {
-        const args = JSON.parse(originalCalls[0]!.arguments);
+        const args = JSON.parse(originalCalls[0]!.call.arguments);
         const input = liveInput!.shellInput;
         inputCompatible =
           input?.command !== undefined

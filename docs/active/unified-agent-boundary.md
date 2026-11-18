@@ -24,7 +24,7 @@ Native异常提示沿已观察的原Run生成展示Alert，不写入聊天历史
 
 Native MCP／Skills 全局设置沿[独立用户 API](../../apps/service/README.md#http-oauth-与原认证结果)读取用户配置，不获取当前 Session／Workspace、扫描项目或创建隐藏实体。Skills 目录读取 metadata，Skills.sh 安装与用户安装项卸载由桌面 Main 在固定用户目录内处理；MCP 使用现有 HostMutation 的闭合 user marker 与明确 user transport owner 管理认证和设置连接，协议白名单不执行工具。原 Session Action、来源批准与实际 Tool／Job 权限保持，DB7 以显式记录版本保原 ID 的只读恢复，冷启动不重 POST。当前产品范围归[桌面手册](../handbook/clients/desktop/README.md)，长期理由归[用户级设置决定](../../.agents/notes/implemented/architecture/2026-10-24-user-global-extension-settings.md)。
 
-Native消息历史在完整基线之后，可按`message_changes`能力用持久`change_event`游标接续，`Message.seq`不成为正文版本。SSE只唤醒读取，领先View的目标游标不能冒充同View基线或ACK；每批候选页完成后按原ID原子合并，失败、回收、重连和冷重开保原失效/恢复边界。正常正文事件跳过View全读，Run/权限/执行事实仍独立核验；稳定历史不重传，元数据变化仍覆盖展示依赖。新协议不增加执行authority，不改变Web/TUI读取路径，完整合同和实际证据归[Store](../../packages/agent/src/storage/README.md#消息历史变更读取)、[Client](../../packages/client/README.md#消息历史增量)及[Native owner](../../apps/desktop/README.md)。
+Native消息历史在完整基线之后，可按`message_changes`能力用持久`change_event`游标接续，`Message.seq`不成为正文版本。SSE只唤醒读取，领先View的目标游标不能冒充同View基线或ACK；每批候选页完成后按原ID原子合并，失败、回收、重连和冷重开保原失效/恢复边界。正常正文事件跳过View全读，Run/权限/执行事实仍独立核验；稳定历史不重传，元数据变化仍覆盖展示依赖。消息可带内联思考的字节数，思考详情仍按原执行身份读取。Web 可经原 Cookie 网关读取同一会话的有界消息变更，或在完整读取预计请求更少时重新建立基线。两条路径均在核实当前 View、范围及全部分页后发布。旧网关沿用完整分页校验。TUI 保持原读取路径。完整合同和实际证据归[Store](../../packages/agent/src/storage/README.md#消息历史变更读取)、[Client](../../packages/client/README.md#消息历史增量)及[Native owner](../../apps/desktop/README.md)。
 
 支持 `session_state` 时，Native 从轻量快照取得历史观察水位，独立分批读取完整时间线和后继持久变更。Renderer 后台自动恢复同一会话的读取，当前权限、停止与提交仍由原准入读取决定。超大旧正文通过原消息的分块读取。Web／TUI 继续使用各自的读取路径。
 

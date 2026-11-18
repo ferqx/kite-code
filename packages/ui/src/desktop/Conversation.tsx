@@ -6,10 +6,14 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
+  type ComponentProps,
+  createContext,
   Fragment,
   memo,
   type ReactNode,
+  type RefObject,
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -580,6 +584,19 @@ const MessageItem = memo(function MessageItem({
   );
 });
 
+export const ConversationTurnElementContext = createContext<
+  RefObject<HTMLDivElement | null> | undefined
+>(undefined);
+
+function ConversationTurnEntry({ children, ...props }: ComponentProps<'div'>) {
+  const ref = useRef<HTMLDivElement>(null);
+  return (
+    <div {...props} ref={ref}>
+      <ConversationTurnElementContext value={ref}>{children}</ConversationTurnElementContext>
+    </div>
+  );
+}
+
 export function Conversation({
   messages: incomingMessages,
   loading: historyLoading,
@@ -644,13 +661,21 @@ export function Conversation({
   renderReasoning?: (message: Message, open: boolean) => ReactNode;
 }) {
   const presented = useRef(false);
+  // Keep the first large tree interruptible by a later navigation. Once shown,
+  // history and streaming changes always reconcile against the current reading.
+  const largeHistory = incomingMessages.length > 100;
+  const largeTreeReady = useDeferredValue(
+    largeHistory && !initialPresentationPending && !historyLoading,
+    false,
+  );
+  const preparing =
+    !presented.current && (initialPresentationPending || (largeHistory && !largeTreeReady));
   useLayoutEffect(() => {
-    if (!historyLoading && !initialPresentationPending) presented.current = true;
-  }, [historyLoading, initialPresentationPending]);
+    if (!historyLoading && !preparing) presented.current = true;
+  }, [historyLoading, preparing]);
   useLayoutEffect(() => {
-    if (!historyLoading && !initialPresentationPending) onPresentationReady?.();
+    if (!historyLoading && !initialPresentationPending && !preparing) onPresentationReady?.();
   });
-  const preparing = initialPresentationPending && !presented.current;
   const messages = preparing ? [] : incomingMessages;
   const loading = historyLoading || preparing;
   const turnActivity = preparing ? undefined : incomingTurnActivity;
@@ -1713,8 +1738,9 @@ export function Conversation({
             (message.hasAttachments ? '附件' : ''),
         });
       if (!preserveReadingAnchor && !isMarker) return projection.renderEntry(entry, openTurns);
+      const Entry = entry.turnId ? ConversationTurnEntry : 'div';
       return (
-        <div
+        <Entry
           key={entry.key}
           className="conversation-entry"
           data-conversation-entry-key={preserveReadingAnchor ? entry.key : undefined}
@@ -1724,7 +1750,7 @@ export function Conversation({
           data-conversation-message-marker={isMarker ? entry.key : undefined}
         >
           {projection.renderEntry(entry, openTurns)}
-        </div>
+        </Entry>
       );
     });
     return { entryContent, openTurns, markers };
@@ -1825,7 +1851,11 @@ export function Conversation({
               syncMessageNavigation(element);
             }}
           >
-            <div ref={content} className="reading-column">
+            <div
+              ref={content}
+              className="reading-column"
+              data-large-history={largeHistory || undefined}
+            >
               {!loading &&
                 (empty && !entryContent.length && emptyState !== null ? (
                   <div className="welcome">

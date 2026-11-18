@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -21,6 +22,7 @@ import {
   writeMixedShellScript,
 } from '../../../service/test/isolated/multi-session-shell-load.shared';
 import { buildNativeDesktop } from '../../scripts/build-native';
+import { liveSwitchDelta, liveSwitchReply } from '../live-session-switch.fixture';
 import { NativeMemoryCensus } from '../native-memory-census.fixture';
 import { NativeOwnedProcesses } from '../native-owned-processes.fixture';
 
@@ -37,9 +39,11 @@ const metrics = globalThis.multiStreamMetrics = {
   finite: { total: 0, active: 0, peak: 0, aborted: 0, bytes: 0, durations: [] },
   observe: { total: 0, active: 0, peak: 0 },
   holdNextModel: false, holdNextOutput: false, held: false,
+  trackedModelReads: 0,
 };
 globalThis.fetch = Object.assign(async (...args) => {
   const pathname = new URL(String(args[0])).pathname;
+  if (pathname === metrics.trackedModelPath) metrics.trackedModelReads++;
   const event = pathname === '/v1/events';
   const finite = /\/messages$|\/model-output$|\/background-executions$|\/output$/.test(pathname);
   const counters = event ? metrics.observe : finite ? metrics.finite : undefined;
@@ -63,8 +67,8 @@ globalThis.fetch = Object.assign(async (...args) => {
     if (!response.body || !counters) { close(); return response; }
     const body = response.body;
     const getReader = body.getReader.bind(body);
-    const hold = (metrics.holdNextModel && pathname.endsWith('/model-output')) || (metrics.holdNextOutput && pathname.endsWith('/output'));
-    if (hold) { metrics.holdNextModel = false; metrics.holdNextOutput = false; }
+    const hold = pathname === metrics.holdPath || (metrics.holdNextModel && pathname.endsWith('/model-output')) || (metrics.holdNextOutput && pathname.endsWith('/output'));
+    if (hold) { metrics.holdNextModel = false; metrics.holdNextOutput = false; metrics.holdPath = undefined; }
     Reflect.set(body, 'getReader', (...options) => {
       const reader = Reflect.apply(getReader, body, options);
       const read = reader.read.bind(reader), cancel = reader.cancel.bind(reader);
@@ -154,12 +158,30 @@ const revealCostInstrumentation = String.raw`
 })();
 `;
 
-test.skipIf(process.platform !== 'darwin')(
-  workerProbeOnly
-    ? 'ordinary Native packaged Markdown Worker asset probe'
-    : `ordinary Native ${mixedShell ? 'mixed real Shell and Model load' : 'Model load'} switches among four live roots and twelve live children without replay, scope leakage or growing readers`,
-  async () => {
+const scenarios = [
+  {
+    name: workerProbeOnly
+      ? 'ordinary Native packaged Markdown Worker asset probe'
+      : `ordinary Native ${mixedShell ? 'mixed real Shell and Model load' : 'Model load'} switches among four live roots and twelve live children without replay, scope leakage or growing readers`,
+    switching: false,
+  },
+];
+if (!workerProbeOnly && !mixedShell && process.env.KITE_NATIVE_MULTI_PROFILE !== '1')
+  scenarios.push({
+    name: 'ordinary Native switches between two streaming sessions and a static history',
+    switching: true,
+  });
+
+test.skipIf(process.platform !== 'darwin').each(scenarios)(
+  '$name',
+  async ({ switching }) => {
     const root = realpathSync(temporaryDirectory('kite-native-multi-stream-'));
+    let switchDirectory: string | undefined;
+    if (switching) {
+      const cache = resolve(import.meta.dir, '../../../../.cache');
+      mkdirSync(cache, { recursive: true });
+      switchDirectory = mkdtempSync(join(cache, 'native-live-switch-'));
+    }
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' });
     const memoryDirectory = memoryTag
       ? resolve(
@@ -176,6 +198,9 @@ test.skipIf(process.platform !== 'darwin')(
       : undefined;
     const workspace = join(root, 'workspace');
     mkdirSync(workspace);
+    if (switching)
+      for (const id of [0, 1])
+        writeFileSync(join(workspace, `ROOT_${id}-record.txt`), `ROOT_${id}_TOOL_OK\n`);
     const shell = mixedShell ? writeMixedShellScript(workspace) : undefined;
     const shellOptions = shell
       ? mixedShellConfiguration(profile, await buildMixedShellSupervisor(root))
@@ -189,7 +214,7 @@ test.skipIf(process.platform !== 'darwin')(
       name: 'Multi-session streams',
       rootUri: pathToFileURL(workspace).href,
     });
-    for (let index = 0; index < 4; index++)
+    for (let index = 0; index < (switching ? 3 : 4); index++)
       await store.createSession({
         expectedStoreId: storeId,
         subjectId: 'local-user',
@@ -205,27 +230,36 @@ test.skipIf(process.platform !== 'darwin')(
     >();
     const calls: string[] = [],
       aborted: string[] = [];
+    let releaseToolCalls: (() => void) | undefined;
     let finishing = false,
       shellProcessesCaptured = false;
     const frame = (delta: unknown, reason: string | null = null) =>
       `data: ${JSON.stringify({ id: 'multi-stream', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
     const encode = (value: string) => new TextEncoder().encode(value);
-    const finishStreams = () => {
+    const finishStreams = (only?: string) => {
       for (const [marker, stream] of streams) {
+        if (only && only !== marker) continue;
         try {
           stream.controller.enqueue(
             encode(`${frame({ content: `\n${marker}_DONE` }, 'stop')}data: [DONE]\n\n`),
           );
           stream.controller.close();
         } catch {}
+        streams.delete(marker);
       }
-      streams.clear();
     };
     const timer = setInterval(() => {
       for (const [marker, stream] of streams) {
         try {
+          const tick = ++stream.tick;
           stream.controller.enqueue(
-            encode(frame({ content: `\n\n${marker}_TICK_${++stream.tick}\n\n` })),
+            encode(
+              frame({
+                content: switching
+                  ? liveSwitchDelta(marker, tick)
+                  : `\n\n${marker}_TICK_${tick}\n\n`,
+              }),
+            ),
           );
         } catch {
           streams.delete(marker);
@@ -293,7 +327,28 @@ test.skipIf(process.platform !== 'darwin')(
             shells,
           });
         }
+        if (switching && url.pathname === '/continue-tools') {
+          if (!releaseToolCalls) return new Response('inactive', { status: 409 });
+          releaseToolCalls();
+          releaseToolCalls = undefined;
+          return new Response('ok');
+        }
+        if (switching && url.pathname === '/more-reasoning') {
+          const stream = streams.get('ROOT_0');
+          if (!stream) return new Response('inactive', { status: 409 });
+          stream.controller.enqueue(
+            encode(frame({ reasoning_content: '\n\nROOT_0_THOUGHT_MORE' })),
+          );
+          return new Response('ok');
+        }
         if (url.pathname === '/finish') {
+          const marker = url.searchParams.get('marker');
+          if (switching && marker) {
+            const stream = streams.get(marker);
+            if (!stream) return new Response('inactive', { status: 409 });
+            finishStreams(marker);
+            return Response.json({ marker, tick: stream.tick });
+          }
           if (shell) writeFileSync(shell.finishPath, 'finish');
           finishing = true;
           finishStreams();
@@ -318,19 +373,62 @@ test.skipIf(process.platform !== 'darwin')(
             (row) =>
               row.role === 'user' &&
               typeof row.content === 'string' &&
-              originalTasks.some((task) => task.source === row.content),
+              originalTasks.some(
+                (task) =>
+                  task.source === row.content || task.source.replaceAll('\\', '') === row.content,
+              ),
           );
         const original =
-          originalTasks.find((task) => task.source === input?.content)?.original ?? '';
+          originalTasks.find(
+            (task) =>
+              task.source === input?.content || task.source.replaceAll('\\', '') === input?.content,
+          )?.original ?? '';
         if (!/^(ROOT_\d|CHILD_\d_\d)$/.test(original)) throw Error('provider_marker_missing');
         const tools = body.messages.filter((row) => row.role === 'tool').length;
         calls.push(`${original}:${tools ? 'after-tools' : 'initial'}`);
-        if (finishing)
+        if (finishing || (switching && original === 'ROOT_2'))
           return new Response(
             `${frame({ content: `${original}_FINAL` })}${frame({}, 'stop')}data: [DONE]\n\n`,
             { headers: { 'content-type': 'text/event-stream' } },
           );
-        if (!tools && (original.startsWith('ROOT_') || shell)) {
+        if (switching && !tools) {
+          const tool_calls = ['record', 'missing'].map((file, index) => ({
+            index,
+            id: `${original}-read-${index}`,
+            type: 'function',
+            function: {
+              name: 'read_file',
+              arguments: JSON.stringify({ path: `${original}-${file}.txt` }),
+            },
+          }));
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(
+                  encode(frame({ reasoning_content: `${original}_THOUGHT_INITIAL` })),
+                );
+                const sendTools = () => {
+                  controller.enqueue(
+                    encode(`${frame({ tool_calls }, 'tool_calls')}data: [DONE]\n\n`),
+                  );
+                  controller.close();
+                };
+                if (original === 'ROOT_1') releaseToolCalls = sendTools;
+                else sendTools();
+              },
+            }),
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
+        if (
+          switching &&
+          (tools !== 2 ||
+            !body.messages.some(
+              (row) => row.role === 'tool' && String(row.content).includes(`${original}_TOOL_OK`),
+            ))
+        )
+          throw Error(`missing original tool receipts for ${original}`);
+        if (!switching && !tools && (original.startsWith('ROOT_') || shell)) {
           const rootIndex = Number(original.slice(5));
           const delta = {
             tool_calls: [
@@ -375,9 +473,17 @@ test.skipIf(process.platform !== 'darwin')(
           new ReadableStream<Uint8Array>({
             start(controller) {
               streams.set(original, { controller, tick: 0 });
+              if (switching)
+                controller.enqueue(
+                  encode(frame({ reasoning_content: `${original}_THOUGHT_LIVE` })),
+                );
               controller.enqueue(
                 encode(
-                  frame({ content: `# ${original}\n\n${padding}\n\n${original}_INITIAL_TAIL` }),
+                  frame({
+                    content: switching
+                      ? liveSwitchReply(original)
+                      : `# ${original}\n\n${padding}\n\n${original}_INITIAL_TAIL`,
+                  }),
                 ),
               );
             },
@@ -408,10 +514,11 @@ test.skipIf(process.platform !== 'darwin')(
               modelCapabilities: { contextWindowTokens: 1_000_000 },
             },
           ],
-          tools: [
-            'task.spawn',
-            ...(shell ? ['shell.execute', 'shell.read', 'shell.stop'] : []),
-          ].map((id) => ({ id, definitionVersion: '1' })),
+          tools: switching
+            ? [{ id: 'files.read', definitionVersion: '5' }]
+            : ['task.spawn', ...(shell ? ['shell.execute', 'shell.read', 'shell.stop'] : [])].map(
+                (id) => ({ id, definitionVersion: '1' }),
+              ),
         }),
       );
       const serviceOutdir = join(root, 'apps/service/dist');
@@ -430,7 +537,9 @@ test.skipIf(process.platform !== 'darwin')(
 import { createDefaultProcessConfiguration } from ${JSON.stringify(resolve(import.meta.dir, '../../../service/src/configuration.ts'))};
 import { selectProfile } from '@kite-ai/agent/profile';
 await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProcessConfiguration({ ordinaryHostTools: true, profile: selectProfile(startup.profile), observerSubjectId: host.subjectId, hostConfiguration: startup.hostConfiguration, shell: ${JSON.stringify(shellOptions)} }), modelConcurrency: 16, processConcurrency: 16 }) });`
-          : `import { runServiceProcess } from ${JSON.stringify(resolve(import.meta.dir, '../../../service/src/main.ts'))}; await runServiceProcess({ decorateConfiguration: configuration => ({ ...configuration, modelConcurrency: 16 }) });`,
+          : switching
+            ? `import { runServiceProcess } from ${JSON.stringify(resolve(import.meta.dir, '../../../service/src/main.ts'))}; await runServiceProcess();`
+            : `import { runServiceProcess } from ${JSON.stringify(resolve(import.meta.dir, '../../../service/src/main.ts'))}; await runServiceProcess({ decorateConfiguration: configuration => ({ ...configuration, modelConcurrency: 16 }) });`,
       );
       const built = await Bun.build({
         entrypoints: [serviceSource],
@@ -484,6 +593,10 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
           'utf8',
         )
           .replace(
+            "'./live-session-switch.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../live-session-switch.fixture.ts')),
+          )
+          .replace(
             "'../../../tests/fixtures/loopback-model-environment'",
             JSON.stringify(
               resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
@@ -535,8 +648,9 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
             : process.env.KITE_NATIVE_MULTI_PROFILE === '1'
               ? 'profile'
               : 'normal',
-          mixedShell ? 'mixed' : 'model',
+          switching ? 'switching' : mixedShell ? 'mixed' : 'model',
           memoryDirectory ?? '',
+          switchDirectory ?? '',
         ],
         {
           stdin: 'ignore',

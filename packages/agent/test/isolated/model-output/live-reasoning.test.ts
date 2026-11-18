@@ -110,11 +110,16 @@ test('small live reasoning prefix is publicly readable before finish without rel
       status: 'dispatching',
       reasoningBytes: String(Buffer.byteLength(reasoning)),
     });
-    expect(
+    const originalMessage = async () =>
       (await runtime.listMessages('session')).find((message) =>
         message.sourceIds?.includes(executionId),
-      )?.firstOutput,
-    ).toBe('reasoning');
+      );
+    const firstMessage = await originalMessage();
+    expect(firstMessage).toMatchObject({
+      firstOutput: 'reasoning',
+      inlineReasoningBytes: first.reasoningBytes,
+    });
+    expect(firstMessage).not.toHaveProperty('reasoning');
     expect(effects).toBe(0);
     releaseFirst();
     await ready;
@@ -129,11 +134,10 @@ test('small live reasoning prefix is publicly readable before finish without rel
     expect(prefix.status).toBe('dispatching');
     expect(active).toBe(1);
     expect(effects).toBe(0);
-    expect(
-      (await runtime.listMessages('session')).find((message) =>
-        message.sourceIds?.includes(executionId),
-      )?.firstOutput,
-    ).toBe('reasoning');
+    expect(await originalMessage()).toMatchObject({
+      firstOutput: 'reasoning',
+      inlineReasoningBytes: prefix.reasoningBytes,
+    });
     release();
     await runtime.waitForCommand('work');
     expect((await runtime.readModelOutput({ ...scope, executionId })).output).toMatchObject({
@@ -143,11 +147,9 @@ test('small live reasoning prefix is publicly readable before finish without rel
       toolCalls: [{ id: 'original-call' }],
     });
     expect(effects).toBe(1);
-    expect(
-      (await runtime.listMessages('session')).find((message) =>
-        message.sourceIds?.includes(executionId),
-      )?.firstOutput,
-    ).toBe('reasoning');
+    const finalMessage = await originalMessage();
+    expect(finalMessage?.firstOutput).toBe('reasoning');
+    expect(finalMessage).not.toHaveProperty('inlineReasoningBytes');
     expect(active).toBe(0);
   } finally {
     releaseFirst();

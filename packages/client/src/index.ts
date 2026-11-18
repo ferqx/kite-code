@@ -95,6 +95,7 @@ import type {
   WithdrawPendingInputRequest,
   WorkspaceRemoval,
 } from './generated/api';
+import { validateMessageChangesQuery, verifyMessageChangesPage } from './message-changes';
 import {
   canonicalModelBody,
   digestModelBody,
@@ -142,6 +143,7 @@ export { type ApprovalOptionView, readApprovalOptions } from './approval-options
 export { type CallerCommandRequest, canonicalCallerCommandRequest } from './command-request';
 export type { OrdinaryCommandApplication, OrdinaryCommandObservation } from './ordinary-command';
 export { readOrdinaryCommandApplication } from './ordinary-command';
+export { estimateSnapshotBytes } from './snapshot-size';
 export { type TrajectorySource, verifyTrajectorySnapshot } from './trajectory';
 export {
   createTrajectoryBundle,
@@ -3351,11 +3353,7 @@ export class AgentClient {
     this.requireCapability('message_changes');
     const generation = this.connectionGeneration,
       frozen = structuredClone(input);
-    validateRequest('MessageChangesQuery', frozen);
-    for (const value of [frozen.afterCursor, frozen.upperCursor, frozen.upperSeq, frozen.afterSeq])
-      if (value !== undefined) parseCursorSequence(value);
-    if (BigInt(frozen.afterCursor) > BigInt(frozen.upperCursor))
-      throw new ClientError('invalid_cursor');
+    validateMessageChangesQuery(frozen);
     if (this.serverInfo?.storeId !== frozen.storeId)
       throw new ClientError('store_identity_mismatch');
     const query = new URLSearchParams(
@@ -3369,41 +3367,7 @@ export class AgentClient {
       options,
     );
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
-    if (
-      page.storeId !== frozen.storeId ||
-      page.sessionId !== sessionId ||
-      page.afterCursor !== frozen.afterCursor ||
-      page.upperCursor !== frozen.upperCursor ||
-      (frozen.upperSeq !== undefined && page.highWaterSeq !== frozen.upperSeq) ||
-      BigInt(page.nextCursor) < BigInt(frozen.afterCursor) ||
-      BigInt(page.nextCursor) > BigInt(frozen.upperCursor) ||
-      (page.nextCursor === frozen.afterCursor && page.nextCursor !== frozen.upperCursor)
-    )
-      throw new ClientError('history_page_identity_mismatch');
-    let last = BigInt(frozen.afterSeq ?? '0');
-    const ids = new Set<string>();
-    for (const message of page.messages) {
-      if (
-        message.sessionId !== sessionId ||
-        ids.has(message.id) ||
-        BigInt(message.seq) <= last ||
-        BigInt(message.seq) > BigInt(page.highWaterSeq)
-      )
-        throw new ClientError('history_page_sequence_mismatch');
-      ids.add(message.id);
-      last = BigInt(message.seq);
-    }
-    if (
-      page.messages.length + page.removedIds.length > (frozen.limit ?? 100) ||
-      new Set(page.removedIds).size !== page.removedIds.length ||
-      page.removedIds.some((id) => ids.has(id)) ||
-      (page.nextAfterSeq !== null &&
-        (BigInt(page.nextAfterSeq) <= BigInt(frozen.afterSeq ?? '0') ||
-          BigInt(page.nextAfterSeq) < last ||
-          BigInt(page.nextAfterSeq) > BigInt(page.highWaterSeq)))
-    )
-      throw new ClientError('history_page_cursor_mismatch');
-    return page;
+    return verifyMessageChangesPage(sessionId, frozen, page);
   }
   async listBackgroundExecutions(
     input: import('./generated/api').BackgroundExecutionQuery,

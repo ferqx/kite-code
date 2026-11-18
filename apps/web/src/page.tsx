@@ -25,6 +25,8 @@ import { navigationCSS, useNavigation } from './navigation';
 import { useRunFacts } from './run-facts';
 import { RuntimeLogs } from './runtime-logs';
 
+const noExpandedTools: ReadonlySet<string> = new Set();
+
 function outputKey(scope: string, message: Message) {
   return JSON.stringify([
     scope,
@@ -65,7 +67,7 @@ export function WebPage({
   const [pageVisible, setPageVisible] = useState(browser.document.visibilityState !== 'hidden');
   const visibleOutput = useRef(new Map<string, { key: string; text: string }>());
   const currentOutputs = useRef(new Map<string, string>());
-  const [, outputChanged] = useState(0);
+  const [outputRevision, outputChanged] = useState(0);
   const outputTarget = useRef('');
   const paused = useRef(suspended);
   paused.current = suspended;
@@ -86,11 +88,21 @@ export function WebPage({
     revision: number;
   }>();
   const viewport = useRef<HTMLElement | null>(null);
+  const historyContent = useRef<HTMLDivElement>(null);
+  const currentReading = useRef<string | undefined>(undefined);
+  const scrollWrite = useRef<{ sessionId?: string; top: number; following: boolean } | undefined>(
+    undefined,
+  );
+  const positionHistory = useCallback((element: HTMLElement, top: number, following: boolean) => {
+    element.scrollTop = top;
+    scrollWrite.current = { sessionId: currentReading.current, top: element.scrollTop, following };
+  }, []);
   const reading = useRef(
     new Map<string, { top: number; latest: boolean; expanded: Set<string> }>(),
   );
-  const currentReading = useRef<string | undefined>(undefined);
-  const [toolExpanded, setToolExpanded] = useState<Set<string>>(new Set());
+  const [, expansionChanged] = useState(0);
+  const toolExpanded =
+    (update && reading.current.get(update.sessionId)?.expanded) ?? noExpandedTools;
   const [atLatest, setAtLatest] = useState(true);
   const [copyStatus, setCopyStatus] = useState('');
   const saveReading = useCallback(() => {
@@ -98,10 +110,16 @@ export function WebPage({
     const element = viewport.current;
     if (!id || !element) return;
     const prior = reading.current.get(id);
+    const written = scrollWrite.current;
+    const sameWrite = written?.sessionId === id && Math.abs(written.top - element.scrollTop) < 1;
+    const latest = sameWrite
+      ? written.following
+      : element.scrollHeight - element.clientHeight - element.scrollTop <= 24;
+    if (!sameWrite) scrollWrite.current = undefined;
     reading.current.delete(id);
     reading.current.set(id, {
       top: element.scrollTop,
-      latest: element.scrollHeight - element.clientHeight - element.scrollTop <= 24,
+      latest,
       expanded: prior?.expanded ?? new Set(),
     });
     while (reading.current.size > 32) reading.current.delete(reading.current.keys().next().value!);
@@ -287,25 +305,38 @@ export function WebPage({
     visibleOutput.current.clear();
     outputTarget.current = outputIdentity;
   }
-  currentOutputs.current = new Map(
-    snapshot?.messages.map((message) => [message.id, outputKey(outputIdentity, message)]) ?? [],
-  );
+  const outputKeys = useMemo(() => {
+    const keys = new Map<string, string>();
+    for (const message of snapshot?.messages ?? [])
+      if (message.outputBody && message.role !== 'tool')
+        keys.set(message.id, outputKey(outputIdentity, message));
+    return keys;
+  }, [snapshot?.messages, outputIdentity]);
+  currentOutputs.current = outputKeys;
   const runFacts = useRunFacts(
     client,
     snapshot,
     update?.phase === 'ready' && !suspended && pageVisible,
   );
-  const fullContent = (message: Message) => {
-    const entry = visibleOutput.current.get(message.id);
-    return entry?.key === outputKey(outputIdentity, message) ? entry.text : undefined;
-  };
-  const replies = completeRunReplies({
-    messages: snapshot?.messages ?? [],
-    runs: runFacts.runs,
-    sessionId: update?.sessionId ?? '',
-    fullContent,
-    copyScope: 'run',
-  });
+  const fullContent = useCallback(
+    (message: Message) => {
+      const entry = visibleOutput.current.get(message.id);
+      return entry && entry.key === outputKeys.get(message.id) ? entry.text : undefined;
+    },
+    [outputKeys],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A verified body update changes the contents behind fullContent.
+  const replies = useMemo(
+    () =>
+      completeRunReplies({
+        messages: snapshot?.messages ?? [],
+        runs: runFacts.runs,
+        sessionId: update?.sessionId ?? '',
+        fullContent,
+        copyScope: 'run',
+      }),
+    [snapshot?.messages, runFacts.runs, update?.sessionId, fullContent, outputRevision],
+  );
   // The Cookie/Core reader proves the original Execution chain under the current
   // admitted Store. A restored origin remains read-only and keeps its original IDs.
   const readModelOutput = useCallback(
@@ -320,23 +351,39 @@ export function WebPage({
     }) => client.getModelOutput(sessionId, executionId, { signal }),
     [client],
   );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Expanding a tool changes the height of the reading viewport.
   useLayoutEffect(() => {
     if (!snapshot || !update) return;
     const id = update.sessionId;
     const element = viewport.current;
     if (!element) return;
-    const changed = currentReading.current !== id;
+    currentReading.current = id;
     const saved = reading.current.get(id);
-    if (changed) {
-      currentReading.current = id;
-      const restored = new Set(saved?.expanded ?? []);
-      if (restored.size !== toolExpanded.size || [...restored].some((id) => !toolExpanded.has(id)))
-        setToolExpanded(restored);
-    }
     const latest = saved?.latest ?? true;
-    element.scrollTop = latest ? element.scrollHeight : (saved?.top ?? 0);
+    positionHistory(element, latest ? element.scrollHeight : (saved?.top ?? 0), latest);
     setAtLatest(latest);
-  }, [snapshot, update, toolExpanded]);
+  }, [snapshot, update, toolExpanded, positionHistory]);
+  const readingSession = snapshot?.sessionId;
+  useLayoutEffect(() => {
+    const element = viewport.current,
+      content = historyContent.current;
+    const Observer = element?.ownerDocument.defaultView?.ResizeObserver;
+    if (!readingSession || !element || !content || !Observer) return;
+    // Model bodies and the surrounding panels can change size after the history commit.
+    const observer = new Observer(() => {
+      if (
+        currentReading.current !== readingSession ||
+        viewport.current !== element ||
+        reading.current.get(readingSession)?.latest === false
+      )
+        return;
+      if (element.scrollHeight - element.clientHeight - element.scrollTop > 1)
+        positionHistory(element, element.scrollHeight, true);
+    });
+    observer.observe(element);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [readingSession, positionHistory]);
   useEffect(() => {
     const selectConversation = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'a') return;
@@ -677,7 +724,7 @@ export function WebPage({
                       type="button"
                       onClick={() => {
                         const element = viewport.current;
-                        if (element) element.scrollTop = element.scrollHeight;
+                        if (element) positionHistory(element, element.scrollHeight, true);
                         saveReading();
                         setAtLatest(true);
                       }}
@@ -696,113 +743,126 @@ export function WebPage({
                       );
                     }}
                   >
-                    {snapshot.messages.length === 0 && <p>No messages</p>}
-                    {snapshot.messages.map((message, index) => (
-                      <article
-                        key={JSON.stringify([snapshot.view.storeId, update.sessionId, message.id])}
-                        data-message-id={message.id}
-                        data-message-role={message.role}
-                        data-final-reply={replies.has(message.id) || undefined}
-                        data-message-gap={
-                          message.role === 'user' || replies.has(message.id)
-                            ? 'turn'
-                            : message.role === 'tool' &&
-                                replies.has(snapshot.messages[index + 1]?.id ?? '')
-                              ? 'final'
-                              : 'process'
-                        }
-                      >
-                        {message.role === 'tool' ? (
-                          <details
-                            open={toolExpanded.has(message.id)}
-                            onToggle={(event) => {
-                              const id = update.sessionId;
-                              if (currentReading.current !== id) return;
-                              const open = event.currentTarget.open;
-                              setToolExpanded((previous) => {
-                                const next = new Set(previous);
-                                if (open) next.add(message.id);
-                                else next.delete(message.id);
-                                // Only retain bounded expansion identities, never message bodies.
-                                if (next.size > 256) next.delete(next.values().next().value!);
-                                const saved = reading.current.get(id) ?? {
+                    <div ref={historyContent}>
+                      {snapshot.messages.length === 0 && <p>No messages</p>}
+                      {snapshot.messages.map((message, index) => (
+                        <article
+                          key={JSON.stringify([
+                            snapshot.view.storeId,
+                            update.sessionId,
+                            message.id,
+                          ])}
+                          data-message-id={message.id}
+                          data-message-role={message.role}
+                          data-final-reply={replies.has(message.id) || undefined}
+                          data-message-gap={
+                            message.role === 'user' || replies.has(message.id)
+                              ? 'turn'
+                              : message.role === 'tool' &&
+                                  replies.has(snapshot.messages[index + 1]?.id ?? '')
+                                ? 'final'
+                                : 'process'
+                          }
+                        >
+                          {message.role === 'tool' ? (
+                            <details
+                              open={toolExpanded.has(message.id)}
+                              onToggle={(event) => {
+                                const id = update.sessionId;
+                                if (currentReading.current !== id) return;
+                                const open = event.currentTarget.open;
+                                const saved = reading.current.get(id);
+                                const previous = saved?.expanded ?? noExpandedTools;
+                                if (previous.has(message.id) === open) return;
+                                const expanded = new Set(previous);
+                                if (open) expanded.add(message.id);
+                                else expanded.delete(message.id);
+                                if (expanded.size > 256)
+                                  expanded.delete(expanded.values().next().value!);
+                                reading.current.set(id, {
                                   top: 0,
                                   latest: true,
-                                  expanded: new Set<string>(),
-                                };
-                                reading.current.set(id, { ...saved, expanded: next });
-                                return next;
-                              });
-                            }}
-                          >
-                            <summary>
-                              Tool · {message.status} · {message.seq}
-                            </summary>
-                            <SafeMessageMarkdown content={message.content} />
-                          </details>
-                        ) : (
-                          <>
-                            {message.status !== 'complete' && <small>{message.status}</small>}
-                            <ModelOutputMessage
-                              autoRead
-                              autoReadRetry
-                              message={message}
-                              terminalObserved={modelOutputTerminalObserved(
-                                message,
-                                snapshot.view.executions,
-                                runFacts.runs,
-                              )}
-                              storeId={snapshot.view.storeId}
-                              suspended={suspended || !pageVisible}
-                              canReadRestoredOrigin={client.serverInfo?.capabilities?.includes(
-                                'model_outputs',
-                              )}
-                              onRead={
-                                client.serverInfo?.capabilities?.includes('model_outputs')
-                                  ? readModelOutput
-                                  : undefined
-                              }
-                              onContent={(content) => {
-                                if (outputTarget.current !== outputIdentity) return;
-                                const key = outputKey(outputIdentity, message);
-                                if (currentOutputs.current.get(message.id) !== key) return;
-                                const previous = visibleOutput.current.get(message.id);
-                                if (content === undefined) {
-                                  if (previous?.key !== key) return;
-                                  visibleOutput.current.delete(message.id);
-                                } else {
-                                  if (previous?.key === key && previous.text === content) return;
-                                  visibleOutput.current.set(message.id, { key, text: content });
-                                }
-                                outputChanged((revision) => revision + 1);
+                                  ...saved,
+                                  expanded,
+                                });
+                                expansionChanged((version) => version + 1);
                               }}
-                            />
-                            {message.role === 'user' &&
-                              message.status === 'complete' &&
-                              message.content && (
+                            >
+                              <summary>
+                                Tool · {message.status} · {message.seq}
+                              </summary>
+                              {toolExpanded.has(message.id) && (
+                                <SafeMessageMarkdown content={message.content} />
+                              )}
+                            </details>
+                          ) : (
+                            <>
+                              {message.status !== 'complete' && <small>{message.status}</small>}
+                              <ModelOutputMessage
+                                autoRead
+                                autoReadRetry
+                                message={message}
+                                terminalObserved={modelOutputTerminalObserved(
+                                  message,
+                                  snapshot.view.executions,
+                                  runFacts.runs,
+                                )}
+                                storeId={snapshot.view.storeId}
+                                suspended={suspended || !pageVisible}
+                                canReadRestoredOrigin={client.serverInfo?.capabilities?.includes(
+                                  'model_outputs',
+                                )}
+                                onRead={
+                                  client.serverInfo?.capabilities?.includes('model_outputs')
+                                    ? readModelOutput
+                                    : undefined
+                                }
+                                onContent={(content) => {
+                                  if (outputTarget.current !== outputIdentity) return;
+                                  const key = outputKeys.get(message.id);
+                                  if (
+                                    key === undefined ||
+                                    currentOutputs.current.get(message.id) !== key
+                                  )
+                                    return;
+                                  const previous = visibleOutput.current.get(message.id);
+                                  if (content === undefined) {
+                                    if (previous?.key !== key) return;
+                                    visibleOutput.current.delete(message.id);
+                                  } else {
+                                    if (previous?.key === key && previous.text === content) return;
+                                    visibleOutput.current.set(message.id, { key, text: content });
+                                  }
+                                  outputChanged((revision) => revision + 1);
+                                }}
+                              />
+                              {message.role === 'user' &&
+                                message.status === 'complete' &&
+                                message.content && (
+                                  <MessageCopyButton
+                                    text={message.content}
+                                    copyRole="user"
+                                    disabled={suspended || !pageVisible}
+                                    writeClipboardText={(text) =>
+                                      browser.navigator.clipboard.writeText(text)
+                                    }
+                                  />
+                                )}
+                              {message.role === 'assistant' && replies.get(message.id)?.text && (
                                 <MessageCopyButton
-                                  text={message.content}
-                                  copyRole="user"
-                                  disabled={suspended || !pageVisible}
+                                  text={replies.get(message.id)!.text!}
+                                  copyRole="assistant"
+                                  disabled={suspended || !pageVisible || update.phase !== 'ready'}
                                   writeClipboardText={(text) =>
                                     browser.navigator.clipboard.writeText(text)
                                   }
                                 />
                               )}
-                            {message.role === 'assistant' && replies.get(message.id)?.text && (
-                              <MessageCopyButton
-                                text={replies.get(message.id)!.text!}
-                                copyRole="assistant"
-                                disabled={suspended || !pageVisible || update.phase !== 'ready'}
-                                writeClipboardText={(text) =>
-                                  browser.navigator.clipboard.writeText(text)
-                                }
-                              />
-                            )}
-                          </>
-                        )}
-                      </article>
-                    ))}
+                            </>
+                          )}
+                        </article>
+                      ))}
+                    </div>
                   </section>
                 </>
               )}

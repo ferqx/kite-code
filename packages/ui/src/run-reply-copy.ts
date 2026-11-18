@@ -18,6 +18,7 @@ export function completeRunReplies({
   copyScope?: 'run' | 'final';
 }): ReadonlyMap<string, { runId: string; text?: string }> {
   const replies = new Map<string, { runId: string; text?: string }>();
+  const messagesByRun = new Map<string, Message[]>();
   for (const run of runs) {
     if (
       run.sessionId !== sessionId ||
@@ -26,12 +27,16 @@ export function completeRunReplies({
       run.isActive
     )
       continue;
-    const own = messages
-      .filter(
-        (message) =>
-          message.sessionId === sessionId && !message.originMessage && message.runId === run.id,
-      )
-      .sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : BigInt(a.seq) > BigInt(b.seq) ? 1 : 0));
+    messagesByRun.set(run.id, []);
+  }
+  for (const message of messages) {
+    if (message.sessionId === sessionId && !message.originMessage && message.runId !== null)
+      messagesByRun.get(message.runId)?.push(message);
+  }
+  for (const [runId, own] of messagesByRun) {
+    own.sort((a, b) =>
+      BigInt(a.seq) < BigInt(b.seq) ? -1 : BigInt(a.seq) > BigInt(b.seq) ? 1 : 0,
+    );
     const assistant = own.filter((message) => message.role === 'assistant' && !message.compression);
     const last = assistant.at(-1);
     if (
@@ -65,7 +70,7 @@ export function completeRunReplies({
       if (text.length) parts.push(text);
     }
     const text = complete ? parts.join('\n\n') : undefined;
-    replies.set(last.id, { runId: run.id, ...(text ? { text } : {}) });
+    replies.set(last.id, { runId, ...(text ? { text } : {}) });
   }
   return replies;
 }

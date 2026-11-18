@@ -1,4 +1,4 @@
-import type { Message } from '@kite-ai/client';
+import { estimateSnapshotBytes, type Message } from '@kite-ai/client';
 
 const MAX_ENTRIES = 12;
 const MAX_BYTES = 64 * 1024 * 1024;
@@ -47,28 +47,6 @@ export class NativeHistoryCache {
   }
 }
 
-/** Conservative retained-payload estimate, not a JavaScript heap measurement. */
-export function estimateNativeSnapshotBytes(value: unknown, limit = MAX_ENTRY_BYTES): number {
-  if (typeof value === 'string') return 16 + value.length * 2;
-  if (value === null || typeof value !== 'object') return 8;
-  let bytes = 32;
-  if (Array.isArray(value)) {
-    for (const child of value) {
-      bytes += 16 + estimateNativeSnapshotBytes(child, limit - bytes - 16);
-      if (bytes > limit) break;
-    }
-  } else {
-    for (const key in value) {
-      if (!Object.hasOwn(value, key)) continue;
-      const overhead = 16 + key.length * 2;
-      bytes +=
-        overhead +
-        estimateNativeSnapshotBytes(
-          (value as Record<string, unknown>)[key],
-          limit - bytes - overhead,
-        );
-      if (bytes > limit) break;
-    }
-  }
-  return bytes;
+export function estimateNativeSnapshotBytes(value: unknown, limit = MAX_ENTRY_BYTES) {
+  return estimateSnapshotBytes(value, limit);
 }

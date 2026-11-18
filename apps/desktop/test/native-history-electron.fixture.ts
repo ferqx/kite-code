@@ -2,10 +2,21 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+}
+
+async function readLastStoredSegment(page: import('playwright').Page) {
+  const message = page.locator('article[data-message-id="stored-5051"]');
+  const tail = message.getByText('LARGE_HISTORY_TAIL_5051', { exact: false }).first();
+  const next = message.getByRole('button', { name: '下一段', exact: true });
+  await message.scrollIntoViewIfNeeded();
+  await tail.or(next).first().waitFor();
+  while (!(await tail.isVisible()) && (await next.isEnabled())) await next.click();
+  await tail.waitFor();
 }
 
 async function openCompletedProcess(page: import('playwright').Page) {
@@ -75,11 +86,11 @@ function eq(actual: unknown, expected: unknown) {
   assertions++;
 }
 try {
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 10000);
   page.setDefaultTimeout(10000);
   phase('initial_read_begin');
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByText('LARGE_HISTORY_TAIL_5051', { exact: false }).first().waitFor();
+  await readLastStoredSegment(page);
   await page
     .locator('[role="status"]')
     .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
@@ -168,7 +179,7 @@ try {
   }
   phase('history_page_held');
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
-  await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await page.locator('.session-header').getByText('Native B', { exact: true }).waitFor();
   await openSessionTools(page);
   await app.evaluate('globalThis.__historyRelease();globalThis.fetch=globalThis.__historyOriginal');
   await page
@@ -177,7 +188,7 @@ try {
     .waitFor();
   eq(await page.locator('article').count(), 0);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
-  await page.getByText('LARGE_HISTORY_TAIL_5051', { exact: false }).first().waitFor();
+  await readLastStoredSegment(page);
   await page
     .locator('[role="status"]')
     .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
@@ -193,7 +204,7 @@ try {
     ready: number;
     changes: number;
     posts: string[];
-    messages: { session: string; after: string; upper: string }[];
+    messages: { kind: string; session: string; after: string; upper: string; status?: number }[];
     paused: boolean;
     held: boolean;
   };
@@ -231,11 +242,23 @@ try {
     const before = await network();
     const gap = switchDuringRead ? 'sse_two' : 'sse_one';
     phase(`${gap}_reset_begin`);
+    // Submit while the selected view can write, then let the real HTTP mutation
+    // reach the Service while its SSE socket is disconnected.
+    await app.evaluate('globalThis.__nativeHistoryNetwork.holdRename=true');
+    const renameRequest = rename(switchDuringRead ? 'Native A gap two' : 'Native A gap one');
+    await Promise.race([
+      until('!!globalThis.__nativeHistoryNetwork.releaseRename'),
+      renameRequest.then(() => {
+        throw Error('gap_rename_was_not_held');
+      }),
+    ]);
     await app.evaluate(
       `(()=>{const n=globalThis.__nativeHistoryNetwork;n.pause=true;n.release=undefined;n.held=false;n.abort.abort();})()`,
     );
     await until('!!globalThis.__nativeHistoryNetwork.release');
-    await rename(switchDuringRead ? 'Native A gap two' : 'Native A gap one');
+    eq((await network()).ready, before.ready);
+    await app.evaluate('globalThis.__nativeHistoryNetwork.releaseRename()');
+    await renameRequest;
     const floor = await (await fetch(`${control}/expire-history-cursor`)).json();
     eq(floor.store_id, _storeId);
     eq(floor.replay_floor, floor.last_change_cursor);
@@ -248,13 +271,12 @@ try {
     phase(`${gap}_reset_410`);
     if (switchDuringRead) {
       await until('globalThis.__nativeHistoryNetwork.held');
-      const held = await network();
-      eq(held.ready, before.ready);
+      eq(await app.evaluate('typeof globalThis.__nativeHistoryNetwork.releaseHistory'), 'function');
       eq(await page.locator('article').count(), 5051);
       eq((await page.locator('main').textContent())!.includes('LARGE_HISTORY_TAIL_5051'), true);
       eq(await page.getByRole('button', { name: '发送明确的新轮次' }).isEnabled(), false);
       await page.getByRole('button', { name: 'Native B', exact: true }).click();
-      await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+      await page.locator('.session-header').getByText('Native B', { exact: true }).waitFor();
       await openSessionTools(page);
       await app.evaluate('globalThis.__nativeHistoryNetwork.releaseHistory()');
     }
@@ -269,7 +291,7 @@ try {
       eq(await page.locator('article').count(), 0);
       eq((await page.locator('main').textContent())!.includes('LARGE_HISTORY_TAIL_5051'), false);
       await page.getByRole('button', { name: 'Native A gap two', exact: true }).click();
-      await page.getByText('LARGE_HISTORY_TAIL_5051', { exact: false }).first().waitFor();
+      await readLastStoredSegment(page);
       await page
         .locator('[role="status"]')
         .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })
@@ -292,6 +314,11 @@ try {
       1,
     );
     phase(`${gap}_history_complete_5051`);
+    // The retained reading remains complete while a new baseline is in flight.
+    // Wait for this reconnect's final stored page before inspecting its transport facts.
+    await until(
+      `globalThis.__nativeHistoryNetwork.messages.slice(${before.messages.length}).some(r=>r.kind==='full' && r.session==='s' && Number(r.after)>=5001 && Number(r.upper)>=5051 && r.status===200)`,
+    );
     const after = await network();
     eq(after.posts.length, before.posts.length + 1);
     const expired = after.events.slice(before.events.length).find((event) => event.status === 410)!;
@@ -308,13 +335,13 @@ try {
     });
     const reads = after.messages
       .slice(before.messages.length)
-      .filter((read) => read.session === 's');
+      .filter((read) => read.kind === 'full' && read.session === 's' && read.status === 200);
     eq(
       reads.some((read) => read.after === '0'),
       true,
     );
     eq(
-      reads.some((read) => Number(read.after) > 5001),
+      reads.some((read) => Number(read.after) >= 5001 && Number(read.upper) >= 5051),
       true,
     );
     gapFacts.push({
@@ -332,7 +359,7 @@ try {
   await until(`globalThis.__nativeHistoryNetwork.changes>${beforeLive.changes}`);
   await page
     .locator('.session-header')
-    .getByTitle('Native A after physical gap', { exact: true })
+    .getByText('Native A after physical gap', { exact: true })
     .waitFor();
   await openSessionTools(page);
   await page
@@ -390,6 +417,7 @@ try {
 } catch (error) {
   phase('failure_catch');
   console.error(error);
+  const page = await nativeRootPage(app, 1000).catch(() => undefined);
   console.error(
     'physical_network',
     await app
@@ -400,8 +428,7 @@ try {
   );
   console.error(
     'history_last_article',
-    await app
-      .windows()[0]
+    await page
       ?.locator('article')
       .last()
       .textContent()
@@ -410,8 +437,7 @@ try {
   );
   console.error(
     'history_has_tail',
-    await app
-      .windows()[0]
+    await page
       ?.locator('main')
       .textContent()
       .then((text) => text?.includes('LARGE_HISTORY_TAIL_5051'))
@@ -419,8 +445,7 @@ try {
   );
   console.error(
     'history_dom',
-    await app
-      .windows()[0]
+    await page
       ?.locator('main')
       .innerText()
       .then((text) => text.slice(0, 1200))
@@ -428,16 +453,14 @@ try {
   );
   console.error(
     'history_status',
-    await app
-      .windows()[0]
+    await page
       ?.getByRole('status')
       .allTextContents()
       .catch(() => []),
   );
   console.error(
     'history_articles',
-    await app
-      .windows()[0]
+    await page
       ?.locator('article')
       .count()
       .catch(() => -1),

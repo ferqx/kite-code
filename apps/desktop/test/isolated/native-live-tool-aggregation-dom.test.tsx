@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import type { Execution, Message, Run } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
@@ -546,6 +546,7 @@ test('Native mixed tool activity keeps its first shell through receipt eviction 
 for (const expanded of [false, true])
   test(`Native retains ${expanded ? 'an expanded' : 'a collapsed'} Trace beside a standalone child operation`, async () => {
     const f = fixture();
+    const errors = spyOn(console, 'error');
     try {
       await f.render();
       const first = tool(1);
@@ -604,7 +605,11 @@ for (const expanded of [false, true])
       expect(summary.textContent).toBe('读取了');
       expect(summary.querySelector('[data-status="running"]')).toBeNull();
       expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
+      expect(
+        errors.mock.calls.some(([message]) => String(message).includes('unique "key" prop')),
+      ).toBe(false);
     } finally {
+      errors.mockRestore();
       await f.close();
     }
   });

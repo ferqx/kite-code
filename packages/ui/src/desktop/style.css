@@ -830,6 +830,13 @@ body {
   .conversation-entry {
     min-width: 0;
   }
+  .reading-column[data-large-history] > .conversation-entry {
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 160px;
+  }
+  .reading-column[data-large-history] > .conversation-entry[data-entry-kind="user"] {
+    contain-intrinsic-block-size: auto 64px;
+  }
   .conversation-message-navigation {
     --navigation-top: 12px;
     --navigation-bottom: 12px;

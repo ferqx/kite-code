@@ -16,7 +16,7 @@ export {
   BackgroundExecutions,
   type BackgroundExecutionsProps,
 } from './BackgroundExecutions';
-export { Conversation } from './Conversation';
+export { Conversation, ConversationTurnElementContext } from './Conversation';
 export { Alert, AlertDescription, AlertTitle } from './components/ui/alert';
 export {
   AlertDialog,

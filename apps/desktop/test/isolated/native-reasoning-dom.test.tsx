@@ -310,6 +310,21 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
     expect(host.textContent).toContain('VERIFIED_STREAM_PREFIX');
     revision = '2';
     await render();
+    const slow = pending.at(-1)!;
+    const reading = reads;
+    for (const update of ['3', '4', '5']) {
+      revision = update;
+      await render();
+    }
+    expect(slow.signal.aborted).toBe(false);
+    expect(reads).toBe(reading);
+    const verified = 'VERIFIED_STREAM_PREFIX AFTER_SLOW_READ';
+    await act(async () => slow.resolve(verified));
+    expect(host.textContent).toBe(verified);
+    expect(reads).toBe(reading + 1);
+    await finish(verified);
+    revision = '6';
+    await render();
     const oldRead = pending.at(-1)!;
     active = false;
     available = false;
@@ -317,22 +332,22 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
     await render();
     expect(oldRead.signal.aborted).toBe(true);
     expect(host.querySelector('p')).toBe(paragraph);
-    expect(host.textContent).toBe('VERIFIED_STREAM_PREFIX');
+    expect(host.textContent).toBe(verified);
     expect(host.querySelector('[role="status"]')).toBeNull();
     await act(async () => oldRead.resolve('STALE_OFFLINE_OUTPUT'));
-    expect(host.textContent).toBe('VERIFIED_STREAM_PREFIX');
+    expect(host.textContent).toBe(verified);
     const pausedReads = reads;
     epoch++;
     await render();
     expect(reads).toBe(pausedReads);
-    expect(host.textContent).toBe('VERIFIED_STREAM_PREFIX');
+    expect(host.textContent).toBe(verified);
 
     active = true;
     available = true;
     await render();
     expect(reads).toBe(pausedReads + 1);
-    expect(host.textContent).toBe('VERIFIED_STREAM_PREFIX');
-    await finish('VERIFIED_STREAM_PREFIX AND_RECONNECTED_SUFFIX');
+    expect(host.textContent).toBe(verified);
+    await finish(`${verified} AND_RECONNECTED_SUFFIX`);
     expect(host.textContent).toContain('AND_RECONNECTED_SUFFIX');
     message = { ...message, status: 'complete' };
     await render();

@@ -279,6 +279,27 @@ test('development Browser reads actual Service/SQLite without Native credential,
       (await f.browser.listSessions({ workspaceId: 'w' })).map((session) => session.id).sort(),
     ).toEqual(['other', 's']);
     const before = await f.store.getMetadata();
+    expect(f.browser.serverInfo?.capabilities).toContain('message_changes');
+    const legacyInfo = await (await f.raw('/browser/v1/server')).json();
+    expect(legacyInfo.capabilities).not.toContain('message_changes');
+    const cursor = (await f.browser.getView('s')).snapshotCursor;
+    const changes = await f.browser.listMessageChanges('s', {
+      afterCursor: cursor,
+      upperCursor: cursor,
+    });
+    expect([changes.storeId, changes.sessionId, changes.nextCursor]).toEqual([
+      f.storeId,
+      's',
+      cursor,
+    ]);
+    expect(changes.messages).toEqual([]);
+    for (const extra of ['storeId=foreign', 'previews=true']) {
+      const refused = await f.raw(
+        `/browser/v1/sessions/s/message-changes?afterCursor=0&upperCursor=1&${extra}`,
+      );
+      expect(refused.status).toBe(400);
+      await refused.body?.cancel();
+    }
     for (const path of [
       '/v1/sessions/s/commands',
       '/browser/v1/sessions/s/commands',

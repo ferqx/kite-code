@@ -171,6 +171,7 @@ type Event = {
   kind: string;
   at: number;
   sessionId?: string;
+  runId?: string;
   count?: number;
   version?: number;
   messageIds?: string[];
@@ -244,7 +245,18 @@ const bridge: NativeBridge = {
       kind: request.method,
       at: now(),
       sessionId: 'sessionId' in request ? request.sessionId : selected,
+      ...(request.method === 'outputs.query'
+        ? { sessionId: request.scope.sessionId, runId: request.runId }
+        : {}),
     });
+    // Empty output-file lists are legitimate metadata, including in the closed-tool scenario.
+    if (request.method === 'outputs.query')
+      return {
+        kind: 'outputs.page',
+        page: { scope: request.scope, revision: '1', items: [], collections: [] },
+      };
+    if (request.method === 'outputs.sources')
+      return { kind: 'outputs.sources', scope: request.scope, sources: [] };
     if (
       toolsPerTurn &&
       /(?:input|output|body|source)/i.test(request.method) &&
