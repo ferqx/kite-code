@@ -265,6 +265,14 @@ const modelRequest = z.object({
     z.object({
       role: z.enum(['system', 'user', 'assistant', 'tool']),
       content: z.string(),
+      images: z
+        .array(
+          z.strictObject({
+            mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+            data: z.string().min(1),
+          }),
+        )
+        .optional(),
       toolCalls: z.array(toolCall).optional(),
       toolCallId: z.string().optional(),
       sourceIds: z.array(z.string()).optional(),

@@ -14,7 +14,7 @@ import {
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 
-test('uncertain effects require this call’s human approval in every mode', async () => {
+test('an explicit per-call human requirement remains binding in every mode', async () => {
   const capability = {
     kind: 'tool' as const,
     definitionId: 'shell.execute',

@@ -11,7 +11,7 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   removeTemporaryDirectory,
@@ -168,7 +168,7 @@ windows(
     const runtime = await windowsShellFixture();
     const config = join(root, 'empty.toml');
     writeFileSync(config, '# empty\n');
-    const gitPath = join(dirname(runtime.fullShell), '../../mingw64/bin/git.exe');
+    const gitPath = runtime.fullGit;
     const sha = createHash('sha256').update(readFileSync(gitPath)).digest('hex');
     const gitModule = pathToFileURL(
       join(import.meta.dir, '../../../../src/tools/git-worktree/git.ts'),

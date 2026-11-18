@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Word、Excel 和 PowerPoint 的随包内容已由 [OfficeCLI 技能决定](2026-11-16-officecli-skills.md)替换。本记录关于稳定格式 ID、同名用户项、PDF 来源和独立预览的取舍仍适用。
+
 ## Problem
 
 Kite 已能直接预览办公原件并提交选区。用户希望四种格式都能直接选用相应的内置 Skill，同时继续使用自行安装的工具和 Skill。

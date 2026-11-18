@@ -2094,7 +2094,10 @@ export async function startService(options: ServiceOptions) {
     );
     return context.json(
       schemas.Session.parse(
-        await runtime.createSession({ ...request, subjectId }, options.desktopShell?.automatic),
+        await runtime.createSession(
+          { ...request, subjectId },
+          await options.desktopShell?.selection(),
+        ),
       ),
       201,
     );
@@ -2387,7 +2390,7 @@ export async function startService(options: ServiceOptions) {
       ForkSessionResponseSchema.parse(
         await runtime.forkSession(
           { ...request, sourceSessionId: context.req.param('id'), subjectId },
-          options.desktopShell?.automatic,
+          await options.desktopShell?.selection(),
         ),
       ),
     );

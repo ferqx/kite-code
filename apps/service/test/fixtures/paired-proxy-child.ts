@@ -52,6 +52,10 @@ await runServiceProcess({
           process.env.CODEX_HOME === undefined
             ? null
             : createHash('sha256').update(process.env.CODEX_HOME).digest('hex'),
+        toolDirectoriesDigest:
+          process.env.KITE_SHELL_TOOL_DIRS === undefined
+            ? null
+            : createHash('sha256').update(process.env.KITE_SHELL_TOOL_DIRS).digest('hex'),
         forbiddenPresent: forbidden.filter((key) => process.env[key] !== undefined),
         startupContainsProxyCredential: JSON.stringify(startup).includes('fixture-proxy-password'),
         responses,

@@ -16,6 +16,8 @@ Word、Excel 和 PPT 的渲染初始化可能在隐藏视图中等待动画帧�
 
 Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)从当前用户 Skills 目录读取“修改 Skill”选项。同名可用项带各自的 ID。显式选择通过现有 `selectedSkills` 随原修改申请提交，Main 继续复核原版本和选区。OOXML 预览在独立 sandbox 中执行构建期脚本，页面自身禁止执行脚本，`kite-preview` 清单仅提供当前原件和固定空页面。Word 禁止加载嵌入 HTML，PPT 禁止外部媒体。用户安装的 Skill 可通过受管 Shell 使用所需编辑工具。原文件的读取、选区定位和请求表单均由 Desktop 负责。内置 Skill 的资源边界见 [Office owner](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
 
+内置 `docx`、`xlsx` 和 `pptx` 使用 OfficeCLI 技能，同一目录提供 OfficeCLI 通用项和专项项。编辑时 `officecli` 由当前受管 Shell 解析。`pdf` 沿用原内置来源。下方记录保留切换前针对原技能的 Windows 实测。 [当前 Skill 资产](../../packages/agent/src/tools/documents/README.md#内置-office-skills)
+
 2026-11-16 在 Windows x64 隔离 Native 与真实 Service 中验证。Anthropic 的 docx、pptx、pdf、xlsx Skill 取自同一提交 `1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064`，由受控本地模型经 `load_skill` 读取。真实文件卡打开后，鼠标框选 `预算!B2:C3`，可信输入显示同一范围，持久请求绑定 `user-skill.xlsx`。受管 Windows Shell 运行 openpyxl 修改工作副本并归档新版，重启后从原会话打开新版。独立读取原件与新版，确认这四格为 1700、25、2700、39，其余工作表、值、边框、数值格式、合并格和冻结位置一致。原件与导入工作副本摘要一致。同一制品也打开了 PDF。真实预览 View 与交互分阶段采样，验证范围为本机隔离制品和受控模型。
 
 窄窗 224 CSS px 的实际网格复验了适应窗口、100% 横向滚动、恢复适应、拖选及 Esc 取消未发送请求，取消期间模型请求数保持不变。大表在适应窗口模式保留 50% 最小比例与横向滚动，限制缩小后同时渲染的单元格数量。
@@ -945,7 +947,17 @@ Windows x64／Chrome 157 运行 `bun apps/desktop/test/markdown-content-browser-
 
 ### Windows 集成终端 Shell
 
-Windows 的[集成终端 Shell](src/native-shell-settings.tsx)复用设置下拉组件，显示自动、Git Bash 与 Windows PowerShell 5.1 和已核实的可用性。Main 从根窗口和当前调用者代次接收封闭枚举，由原配套 Service 保存至当前 Store。界面在已确认后更新选中值，读取或保存异常在同一行提示。重开可读取实际保存状态。保存后由新会话创建时生效，具体绑定见 [Service owner](../service/README.md#默认-shell-装配)。
+Windows 的[集成终端 Shell](src/native-shell-settings.tsx)复用设置下拉组件，只显示 Git Shell 和 PowerShell，默认优先 Git Shell。PowerShell 标签显示本机已核验的最高可用版本，只有系统版本时显示该版本，不再拆分版本选项。Main 从根窗口和当前调用者代次接收封闭枚举，由原配套 Service 保存至当前 Store。界面在已确认后更新选中值，读取或保存异常在同一行提示；不可用的类型禁用。重开可读取实际保存状态，旧枚举只保留兼容。类型改变仅影响新会话，后续 PowerShell 装配重新核验最高版本；已派发执行继续沿原资产。具体绑定见 [Service owner](../service/README.md#默认-shell-装配)。
+
+2026-11-18，Windows x64／Bun 1.4.4／Electron 44.3.0 的隔离 Native 开发制品使用真实 Service、SQLite、原 Shell Job 与本地受控 Provider，观察了两类选项、默认 Git Shell、选择 PowerShell 后的新会话执行、原 Git 会话继续及冷重开。设置标签、模型描述与 Job 输出均为 7.6.9；移除夹具启动环境的独立运行时路径后，同一 PowerShell 类型使用 5.1.26100.10066。设置读取→保存→确认与冷读的过程记录中未见重复消息或回复，已观察阶段草稿为空、阅读位置保持。四个 Run 均完成，四个 Job 返回 0 并确认清理／进程树停止，未生成工具审批。窗口过程、版本及冷读证据位于本机 `.cache/kite-shell-families-window-3da39ba4/`。早期读取过快的夹具失败已改为等待原控件就绪；随后发现旧 `agent/dist` 导致版本与源码不一致，按原构建入口重建后通过，未增加发现特例。该证据不代替真实远程模型、安装发行或其他机器版本资格。
+
+同日进一步用现有 OpenAI `gpt-6-luna`／high／完全访问，在上述两类 Shell 分别执行原五页 PPT 任务。观察提交前模型与权限、单条用户消息接管、执行与失败后自行恢复、最终回复及文件卡；17／8 条变化记录中没有重复用户消息、重复最终回复或 alert，两个会话冷读均保留准确成品。PowerShell 成品首开约 2 秒显示五页；Git Shell 成品首开 22 秒内未显示五页，原因尚未确认。冷重开后两份均约 2 秒显示五页，实际观察了各自预览与工具栏，未增加模型请求；两份还经 PowerPoint 逐页核验。该首开缺口与 4 条模型输入快照核验限制继续保留，不将整段体验写成无异常通过。进程、文件占用、Shell 退出码及证据位置归 [Shell owner](../../packages/agent/src/jobs/README.md#类型统一后的真实模型复测)；本轮未改客户端实现或审批。
+
+同日通用 Shell 退出状态与 Service 图片响应修复后，再以相同提供商、模型、high、完全访问及两类 Shell 执行原任务。PowerShell 首次因模型把参数命名为自动变量 `$Args` 而反复调用 CLI 帮助、未生成成品；随后模型生成的 `$code:` 字符串插值语法错误被原检查拒绝，未派发 Job，也未产生人工审批。这两项在原生 5.1／7 对照中同样复现，未改审批以放行。原会话收到一次明确继续请求后，模型修正脚本，新增一个成功 Job 并交付五页。Git Shell 两次真实失败分别为不支持的帮助命令、跨已结束 Job 复用未保存状态；模型自行在单个命令内保存、关闭、重建后交付。首次失败与恢复分别保留，不能称为两类 Shell 首次均无错误。
+
+最终两份文件均经公开成品端口冷导出、可编辑文本结构核验，以及 PowerPoint 16.0 只读打开和全部十页导出／逐页检查；原件摘要不变。两份成品首次实际预览约 0.8 秒显示五页，冷重开也均约 0.8 秒；保存的加载轨迹、界面过程及实际 Git 预览／工具栏已核对。没有修改预览实现或产品超时；测试延长了诊断等待，但本轮实际完成均早于原 22 秒窗口，所以原先的首开延迟仍为未复现、根因未确认。14 个真实 Shell Job 均确认清理及进程树停止，无所属残留、文件独占读取失败或工具审批。23 条业务 Model 输入均完整核验为 OpenAI／Responses／`gpt-6-luna`／high，包含带图请求与真实方言；其中两条准确保存了最终通用的进程作用域结束反馈。最初失败、恢复、加载与冷读零重放证据位于本机 `.cache/kite-shell-ppt-retest-20261118-afb18de4/evidence/` 和 `evidence-recovery/`。最终恢复窗口观察期间负责目录 919 份文件摘要无变化；仅覆盖本机 Windows x64 开发制品，不代表安装发布或模型首次成功率。
+
+同日接续两个全新会话复验，仍为真实 OpenAI `gpt-6-luna`／high／完全访问，各一次用户提交即由模型自行完成任务。PowerShell 10 个 Job 全部成功；Git 13 个 Job 中保留三次失败并自行恢复，其中一次文件替换异常尚未定位，详细因果与隔离对照归 [Shell owner](../../packages/agent/src/jobs/README.md#类型统一后的真实模型复测)。实际观察首条提交与执行、Git 失败工具结果、最终文件卡和冷 Git 预览／工具栏；过程记录两会话均一条用户消息、一条最终回复，无工具审批或 alert。两份最终五页可编辑 PPTX 经公开端口冷导出并由 PowerPoint 打开、导出十页后逐页检查，原件摘要不变；首开与冷预览均约 0.8 秒，冷读无模型重放，32 条实际请求完整核验。原首开延迟本轮仍未复现，未修改预览或超时；保留文件替换失败，不能据成品交付通过称 Shell 全程无异常。证据在本机 `.cache/kite-shell-ppt-retest-20261118-8ca63a9e/evidence/`，开发制品与发布资格边界保持。
 
 打开新对话时同步撤销旧会话尚未完成的选择读取。先前读取即使在新草稿输入后才返回，也只属于原选择，不能接管准备页输入区。[新对话回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖该时序。
 

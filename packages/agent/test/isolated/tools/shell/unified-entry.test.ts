@@ -79,6 +79,7 @@ async function fixture(
     { type: 'output', stream: 'stdout', content: 'original durable output\n' },
   ],
   contextWindowTokens?: number,
+  terminalDetails?: Json,
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-shell-unified-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
@@ -134,13 +135,14 @@ async function fixture(
       yield* output;
       if (hold) await gate;
       const cancelled = signals.get(handle)!.aborted;
+      const details = terminalDetails ?? (cancelled ? undefined : { exitCode: 0 });
       yield {
         type: 'terminal',
         supervision: 'ended',
         result: {
           outcome: cancelled ? 'cancelled' : 'succeeded',
           content: 'original Shell ended',
-          ...(cancelled ? {} : { details: { exitCode: 0 } }),
+          ...(details ? { details } : {}),
         },
       };
     },
@@ -313,6 +315,39 @@ async function fixture(
   };
 }
 
+test('confirmed process cleanup tells the next model to continue from saved files without changing the original receipt', async () => {
+  for (const cleanupConfirmed of [false, true]) {
+    const details = {
+      exitCode: 0,
+      cleanupConfirmed,
+      processTreeStopped: true,
+    };
+    const f = await fixture(
+      [calls(['shell_execute', { command: 'start and use a local helper' }]), [finish]],
+      false,
+      false,
+      undefined,
+      undefined,
+      details,
+    );
+    try {
+      await f.run();
+      const feedback = f.model.requests[1]!.messages.find((message) => message.role === 'tool')!;
+      expect(feedback.content.includes('Any state held only in those processes')).toBe(
+        cleanupConfirmed,
+      );
+      expect(f.started).toHaveLength(1);
+      const original = (await f.store.listExecutions('s')).find(
+        (execution) => execution.definitionId === 'shell.command',
+      )!;
+      expect(original.result).toMatchObject({ details });
+      expect(JSON.stringify(original.result)).not.toContain('Any state held only');
+    } finally {
+      await f.close();
+    }
+  }
+});
+
 test('the current Shell model surface has four tools and rejects hidden legacy parameters before execution', async () => {
   const f = await fixture([[finish]]);
   try {
@@ -364,6 +399,39 @@ test('the current Shell model surface has four tools and rejects hidden legacy p
       'shell_wait',
       'shell_stop',
     ]);
+    const lifecycle = 'Kite stops remaining child processes when the command exits';
+    expect(surface.tools[0]!.description).not.toContain(lifecycle);
+    for (const dialect of ['powershell', 'git-bash'] as const) {
+      const windows = createShellExtension({
+        job: f.job,
+        permissionsSchema,
+        dialect,
+        powerShellVersion: '7.6.9',
+        gitBashVersion: '5.3.15(2)-release',
+        windowsUserLocale: 'zh-CN',
+      });
+      const tool = windows.tools!.find((tool) => tool.id === 'shell.execute')!;
+      const { description } = tool;
+      const version = dialect === 'powershell' ? 'PowerShell 7.6.9' : 'Git Bash 5.3.15(2)-release';
+      expect(description).toContain(version);
+      expect(description).toContain('Windows user locale is zh-CN.');
+      expect(description).toContain('Kite reads stdout and stderr as UTF-8.');
+      expect(tool.inputSchema.properties).toMatchObject({
+        command: { description: expect.stringContaining(version) },
+      });
+      expect(description).toContain(`${lifecycle}, including with background:true.`);
+      expect(description).toContain('flush their changes and close them before it exits');
+      expect(description).toContain(
+        'Default local named pipes can deny bidirectional access under workspace_write',
+      );
+      expect(description).toContain(
+        'supported single-process or standalone batch mode before execution',
+      );
+      expect(description).toContain(
+        'request filesystem:full_access for that command through the existing authorization flow',
+      );
+      expect(description).toContain('Keep network:none for IPC that uses only local named pipes.');
+    }
     expect(surface.request.messages[0]!.toolCalls).toEqual([
       {
         id: historical[0]!.id,

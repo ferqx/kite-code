@@ -10,6 +10,28 @@ const object = (value: unknown): Record<string, Json> | undefined =>
     ? (value as Record<string, Json>)
     : undefined;
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'outcome_unknown']);
+const commandCandidateSources = new Map([
+  ['path', 'Job PATH'],
+  ['user_app_paths', 'user Windows App Paths'],
+  ['machine_app_paths', 'machine Windows App Paths'],
+  ['configured_directory', 'configured tool directory'],
+]);
+
+function appendCommandLookup(lines: string[], value: Json | undefined) {
+  const lookup = object(value);
+  if (typeof lookup?.name !== 'string' || lookup.name.length > 128) return;
+  lines.push(`A command lookup in this Shell call did not resolve ${JSON.stringify(lookup.name)}.`);
+  const candidates = Array.isArray(lookup.candidates) ? lookup.candidates : [];
+  for (const value of candidates.slice(0, 8)) {
+    const item = object(value);
+    const source = typeof item?.source === 'string' && commandCandidateSources.get(item.source);
+    if (source && typeof item?.path === 'string' && item.path.length <= 1024)
+      lines.push(`Candidate from ${source}: ${JSON.stringify(item.path)}.`);
+  }
+  lines.push(
+    'If the program is still required, check the executable and its runtime in a separate Shell call before considering installation. Use the absolute path for any candidate you check.',
+  );
+}
 
 /** Model presentation only. Callers must verify the frozen builtin registration.
  * Match the exact original operation before using its authorization observations.
@@ -152,8 +174,18 @@ export function formatShellResult(input: {
       lines.push('The wait timed out. This wait did not stop the command.');
     if (Number.isSafeInteger(originalDetails?.exitCode))
       lines.push(`Exit code: ${originalDetails!.exitCode}.`);
+    if (sameTerminal && (status === 'succeeded' || status === 'failed'))
+      appendCommandLookup(lines, originalDetails?.commandLookup);
     if (sameTerminal && originalDetails?.processTreeStopped === true)
       lines.push('The command and its supervised processes have stopped.');
+    if (
+      sameTerminal &&
+      originalDetails?.cleanupConfirmed === true &&
+      originalDetails.processTreeStopped === true
+    )
+      lines.push(
+        'This command’s process scope has ended. Any state held only in those processes is no longer available. Complete each dependent edit, save and close sequence within one running command. Reopen the saved workspace file from disk in the next call before further edits or delivery.',
+      );
     const policy = operation.authorization?.policy;
     if (sameTerminal && policy?.reason === 'timeout_continue')
       lines.push(

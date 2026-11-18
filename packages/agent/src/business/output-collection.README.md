@@ -16,6 +16,8 @@
 
 宿主在平台准备开始前以 `prepareOutputStaging` 创建 Profile coordination 下私有持久 base。每个真实 `shell.command` Job 在 spawn 前创建 `out`，登记原 producer、准确父 Tool/Run 和目录身份，再注入 `KITE_OUTPUT_DIR`。平台仅移交已登记暂存目录的递归删除责任，进程、supervisor、IPC 和真实停止证明不变。
 
+Shell 向模型说明 `KITE_OUTPUT_DIR` 归本次 Job。跨调用复用的中间文件留在工作区，验证后再把成品写入交付 Job 的目录。失败的生产 Job 中即使已有文件，也没有成功归档所需的终态证明。
+
 目录身份区分两个 owner：producer 的 `allocation.identity` 保持原 LaunchIdentity，供平台启动与清理；`allocation.outputIdentity` 的 device/inode 在准备时从正式 Files native 持有的 root 采集，后续收集使用同一 native 身份域完整比较。Windows 保留全部64位 volume 与128位 FileID，不把 Bun lstat 的较窄设备号当成相同格式，不截断或仅比较低位。原 path/canonical、目录类型、无链接检查和 native root/逐组件句柄验证仍分别执行；身份不依赖内存缓存，句柄不进入持久记录。
 
 主、子 Agent 共用 Profile coordination 的 staging 基目录，但每条真实 Shell Job 各自持有私有目录与 `out`，物理路径不嵌套于父会话缓存。归属由原 Store／Session／Run／producer 和目录身份登记；不能据同一父目录合并产物或扫描普通 Workspace 文件。

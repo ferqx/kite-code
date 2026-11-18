@@ -14,6 +14,8 @@ Windows Auto 将无法静态确认效果的 PowerShell 调用直接转人工。�
 
 这部分取代了 [PowerShell 回退](../architecture/2026-11-12-windows-desktop-powershell-fallback.md)在 Auto 中将未知效果直接转人工的决定。原系统委托拒绝、受限执行及其他审批模式继续适用。
 
+Full 的静态未知转人工规则后由 [PowerShell Full 审批修复](2026-11-18-powershell-full-uncertain-approval.md)取代；本篇 Auto 风险审核与准确父子复用的决定保持。
+
 ## Alternatives considered
 
 - 仅把常用命令名称列为免审。名称无法证明参数、解析出的程序和外部助手的实际效果，因此使用有限语法、固定程序及原生范围。

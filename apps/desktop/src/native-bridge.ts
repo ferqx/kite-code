@@ -316,14 +316,16 @@ export type NativeConversationResult = {
 };
 export type NativeGrantFacts = { observationId: number; page: PermissionGrantPage };
 export type NativeRecommendedModel = { modelId: string; reasoningEffort?: NativeReasoningEffort };
-export type NativeShellPreference = 'auto' | 'git-bash' | 'powershell';
+export type NativeShellPreference = 'auto' | 'git-bash' | 'powershell' | 'powershell-7';
 export type NativeShellSettingsFacts = {
   kind: 'settings.general.shell';
   storeId: string;
   preference: NativeShellPreference;
-  automatic: Exclude<NativeShellPreference, 'auto'> | null;
+  automatic: 'git-bash' | 'powershell' | null;
   gitBashAvailable: boolean;
   powerShellAvailable: boolean;
+  powerShellVersion: string | null;
+  powerShell7Version: string | null;
 };
 
 export type NativeModelSettingsFacts = {

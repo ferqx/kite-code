@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRuntime } from '@kite-ai/agent';
+import { createRuntime, prepareOutputDirectory } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { withBundledRipgrep } from '@kite-ai/agent/jobs/shell';
@@ -183,12 +183,16 @@ native(
     };
     const workspaceSerialLocks = createWorkspaceSerialLocks(profile);
     host.bindWorkspaceSerialLocks?.(workspaceSerialLocks);
-    const runtime = createRuntime({
+    let runtime: ReturnType<typeof createRuntime>;
+    runtime = createRuntime({
       ...host,
       store,
       permissions: host.permissions!,
       workspaceSerialLocks,
       artifacts: createArtifactStore({ profile, store }),
+      outputCollections: {
+        prepare: (context, identity) => prepareOutputDirectory(runtime, context, identity),
+      },
       resolveRunConfiguration: async (input) => ({
         ...(await host.resolveRunConfiguration!(input)),
         model:
@@ -306,9 +310,8 @@ native(
           expect(carrier.childSessionId).toBeTruthy();
           const executions = await store.listExecutions(carrier.childSessionId!);
           expect(executions.filter((e) => e.definitionId === 'shell.command')).toHaveLength(4);
-          expect(executions.find((e) => e.definitionId === 'shell.command')?.status).toBe(
-            'succeeded',
-          );
+          const search = executions.find((e) => e.definitionId === 'shell.command');
+          expect(search?.status, JSON.stringify(search?.result)).toBe('succeeded');
           const tools = executions.filter((e) => e.definitionId === 'shell.execute');
           expect(tools.map((e) => e.status)).toEqual([
             'succeeded',

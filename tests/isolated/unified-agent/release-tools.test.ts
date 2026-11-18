@@ -1,6 +1,14 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -8,6 +16,7 @@ import {
   assertSqliteReleaseIdentity,
   parseSqliteReleaseIdentity,
 } from '@kite-ai/service/sqlite-release-assets';
+import { signMacosTerminalCode } from '../../../scripts/release/macos-dmg/terminal-signing';
 import { runNativeRelease } from '../../../scripts/release/native';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { runUnifiedRelease } from '../../../scripts/release/unified';
@@ -18,6 +27,47 @@ import {
 } from '../../fixtures/unified-agent/release-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
+test('macOS Terminal signing seals the final OfficeCLI digest and retains its upstream digest', () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-signed-shell-tools-'));
+  try {
+    const agent = join(root, 'agent');
+    const files = join(agent, 'native/files');
+    const tools = join(agent, 'platform/process/tools');
+    for (const directory of [files, tools]) mkdirSync(directory, { recursive: true });
+    const bun = join(root, 'bun');
+    const officecli = join(tools, 'officecli');
+    const program = Buffer.from('feedfacf00000000', 'hex');
+    const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+    const unsigned = sha(program);
+    for (const file of [bun, join(files, 'files.node'), join(tools, 'rg'), officecli])
+      writeFileSync(file, program);
+    writeFileSync(join(files, 'manifest.json'), JSON.stringify({ sha256: unsigned }));
+    writeFileSync(
+      join(tools, 'manifest.json'),
+      JSON.stringify({
+        rg: { sha256: unsigned },
+        officecli: { upstreamSha256: unsigned, sha256: unsigned },
+      }),
+    );
+    const signed = Buffer.concat([program, Buffer.from('signature')]);
+    const roles = new Map<string, string>();
+    signMacosTerminalCode(root, bun, agent, {
+      sign(path, role) {
+        roles.set(path, role);
+        writeFileSync(path, signed);
+      },
+    });
+    expect(roles.get(officecli)).toBe('code');
+    expect(roles.get(bun)).toBe('bun');
+    expect(JSON.parse(readFileSync(join(tools, 'manifest.json'), 'utf8'))).toMatchObject({
+      rg: { sha256: sha(signed) },
+      officecli: { upstreamSha256: unsigned, sha256: sha(signed) },
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('registered frontdoor preserves bounded business codes without exposing error details', async () => {
   const entry = pathToFileURL(
     join(repositoryRoot, 'scripts/release/entrypoints/registered-entry.ts'),

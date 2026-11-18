@@ -37,6 +37,7 @@ export {
   decodeLinuxShellProcessEvidence,
   type LinuxShellProcessEvidence,
 } from './linux-shell-process-evidence';
+export { bundledOfficeCliAsset } from './officecli-runtime';
 export type { ShellOutputCollection } from './output-collection';
 export { ripgrepAsset, withBundledRipgrep } from './ripgrep';
 export {
@@ -47,6 +48,7 @@ export {
   shellProcessEvidenceEnded,
 } from './shell-process-evidence';
 export { stageWindowsGitBash } from './windows-git-bash';
+export { verifyWindowsPowerShell } from './windows-powershell';
 export { createWindowsShellJob, windowsShellAssets } from './windows-shell';
 
 /** Host-only launch profile. Command payloads cannot provide environment or Bun flags. */

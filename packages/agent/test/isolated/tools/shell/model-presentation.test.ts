@@ -118,6 +118,36 @@ function lifecycle(
   return f;
 }
 
+test.each([
+  ['failed', 127],
+  ['failed', 2],
+  ['succeeded', 0],
+] as const)('presents the original Windows lookup for a %s Job with exit %d', (status, exitCode) => {
+  const f = fixture(status);
+  const path = 'C:\\Local Tools\\portable-cli.exe';
+  const lookup = { name: 'portable-cli', candidates: [{ path, source: 'configured_directory' }] };
+  f.operation.result = {
+    outcome: status,
+    content: 'Shell completed',
+    details: { exitCode, commandLookup: lookup },
+  };
+  f.observed.result = f.operation.result;
+  f.details.stderr = 'Original lookup error';
+  const body = render(f);
+  expect(body).toContain('did not resolve "portable-cli"');
+  expect(body).toContain(`Exit code: ${exitCode}.`);
+  expect(body).toContain(`Candidate from configured tool directory: ${JSON.stringify(path)}`);
+  expect(body).toContain('If the program is still required, check the executable and its runtime');
+  expect(body).toContain('Original lookup error');
+
+  f.observed.result = {
+    outcome: status,
+    content: 'Shell completed',
+    details: { exitCode, commandLookup: { ...lookup, name: 'other-cli' } },
+  };
+  expect(render(f)).not.toContain('Candidate from');
+});
+
 for (const name of [
   'shell.execute',
   'shell.launch',

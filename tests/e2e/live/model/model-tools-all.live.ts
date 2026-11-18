@@ -966,9 +966,7 @@ try {
     'Read image.png with exactly one view_images call and inspect the actual image. Reply only IMAGE: followed by the six characters printed in it. Do not use file reading, Shell or OCR as a substitute.',
   );
   if (selected.has('worktree-list') || selected.has('worktree-mutation-observe')) {
-    const git = assets
-      ? join(dirname(assets.fullShell), '../../mingw64/bin/git.exe')
-      : '/usr/bin/git';
+    const git = assets ? assets.fullGit : '/usr/bin/git';
     const gitEnvironment = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(([name]) =>

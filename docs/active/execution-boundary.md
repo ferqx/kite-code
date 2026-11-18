@@ -21,7 +21,7 @@ Linux 默认 Service 与调用 Shell 的 Task 接入[原 PID namespace 后端](.
 
 原 Profile Skill verifier 的准确来源投影及历史 native 验证保留为旧机制证据；当前普通 Skill 只有知识读取，不执行验证或补偿代码。普通 Shell 没有该来源例外，显式 POSIX 与固定 confined 工厂分别保各自合同。
 
-Windows 当前普通 Job 已接无账户受限 Git Bash 与明确绕过沙箱的 Full，见 [Windows active](windows-shell-sandbox.md)。Linux 实机与 installed 资格沿原证据范围；macOS 或局部测试不外推三平台、全部资源指标及 production release qualification。
+Windows 的普通 Shell Job 支持受限 Git Bash、Windows PowerShell 5.1 和已核实的本机 PowerShell 7。权限及令牌范围见 [Windows active](windows-shell-sandbox.md)。Linux 实机与 installed 资格沿原证据范围。各平台运行、资源指标及正式发行资格分别核验。
 
 [当前platform/execution workflow](../../tests/integration/scripts/unified-ci.test.ts)核新 owner paths、实际 source-free probe 与 formal verifier；不再调用下方旧 builtin/App 测试。当前宿主开放范围由上述实现和运行证据界定；下文保历史投影、威胁模型及仍适用的安全约束，未知/未完成范围继续拒绝。
 

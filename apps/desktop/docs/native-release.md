@@ -69,7 +69,7 @@ Windows x64 离线 `.exe` 接受 `--desktop-only true` 生成的 Native 归档�
 
 桌面服务在 Bun 解析依赖时把保留的模块导入和 `require` 指向 `code/package.json` 的私有包内映射。映射目标都是制品中的相对路径，拆分文件可共享同一个模块。制品检查验证输出引用和文件存在性。[搬迁回归](../../../tests/isolated/unified-agent/windows-desktop-runtime.test.ts)核编译后从仓库外加载共享模块，完整安装验证从仓库外的正式入口观察 Service 握手和首屏。
 
-Windows x64 桌面制品由同次构建封装 Service 和 Runner V7。包内 Shell 清单固定原生 Runner 及 Git Bash 所需辅助文件。Git Bash 使用本机完整安装，回退使用 Windows 自带的 PowerShell 5.1。两条路径的进程边界、权限和证据见 [Windows Shell 沙箱](../../../docs/active/windows-shell-sandbox.md)。
+Windows x64 桌面制品由同次构建封装 Service 和 Runner V7。包内 Shell 清单固定原生 Runner 及 Git Bash 所需辅助文件。Git Bash 使用本机完整安装，PowerShell 使用本机已核实的 PowerShell 7 或系统自带的 Windows PowerShell 5.1。进程边界、权限和证据见 [Windows Shell 沙箱](../../../docs/active/windows-shell-sandbox.md)。
 
 安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。[Win32 安装窗口](../../../scripts/release/windows-setup/location-dialog.cc)用准备、校验、写入、移除和收尾对应的进度区间显示总进度。区间内由实际计数推进，字节、文件或条目数单独显示。等待或重试保留已达到的进度。应用登记、快捷方式及清理处理完毕后，直接切换到结果页，隐藏百分比和进度条。构建需要 MSVC x64 Build Tools、Git for Windows、Bun 和 [Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
 

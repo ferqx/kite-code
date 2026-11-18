@@ -56,10 +56,12 @@ test('General keeps the Windows Shell choice through failed preparation and upda
   let settings: NativeShellSettingsFacts = {
     kind: 'settings.general.shell',
     storeId: 'store',
-    preference: 'auto',
-    automatic: 'powershell',
-    gitBashAvailable: false,
+    preference: 'git-bash',
+    automatic: 'git-bash',
+    gitBashAvailable: true,
     powerShellAvailable: true,
+    powerShellVersion: '7.6.9',
+    powerShell7Version: '7.6.9',
   };
   let saving = Promise.withResolvers<void>();
   let failInitialRead = true;
@@ -105,7 +107,7 @@ test('General keeps the Windows Shell choice through failed preparation and upda
     )!;
     await act(async () => retry.click());
     const select = f.host.querySelector('[role="combobox"][aria-label="集成终端 Shell"]')!;
-    expect(select.textContent).toBe('自动（推荐）');
+    expect(select.textContent).toBe('Git Shell');
     expect(f.host.textContent).toContain('仅对新会话生效');
     async function choosePowerShell() {
       await act(async () =>
@@ -115,17 +117,16 @@ test('General keeps the Windows Shell choice through failed preparation and upda
       );
       const options = [...f.dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')];
       expect(options.map((option) => option.textContent)).toEqual([
-        '自动（推荐）',
-        'Git Bash（不可用）',
-        'Windows PowerShell 5.1',
+        'Git Shell',
+        'PowerShell 7.6.9',
       ]);
-      expect(options[1]?.getAttribute('aria-disabled')).toBe('true');
+      expect(options[1]?.getAttribute('aria-disabled')).not.toBe('true');
       await act(async () =>
-        options[2]!.dispatchEvent(
+        options[1]!.dispatchEvent(
           new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
         ),
       );
-      expect(select.textContent).toBe('自动（推荐）');
+      expect(select.textContent).toBe('Git Shell');
       expect(f.host.querySelector('[role="status"]')?.textContent).toBe('正在保存…');
     }
     const read: NativeRequest = { method: 'settings.general.shell.read', generation: 1 };
@@ -138,7 +139,7 @@ test('General keeps the Windows Shell choice through failed preparation and upda
       requests.filter(({ method }) => method.startsWith('settings.general.shell.'));
     await choosePowerShell();
     await act(async () => saving.reject(Error('windows_shell_asset_changed')));
-    expect(select.textContent).toBe('自动（推荐）');
+    expect(select.textContent).toBe('Git Shell');
     expect(f.host.querySelector('[role="status"]')?.textContent).toBeUndefined();
     expect(f.host.querySelector('[role="alert"]')?.textContent).toBe('未确认这次选择，请重试。');
     expect(shellRequests()).toEqual([read, read, save, read]);
@@ -147,9 +148,29 @@ test('General keeps the Windows Shell choice through failed preparation and upda
     await choosePowerShell();
     expect(f.host.querySelector('[role="alert"]')?.textContent).toBeUndefined();
     await act(async () => saving.resolve());
-    expect(select.textContent).toBe('Windows PowerShell 5.1');
+    expect(select.textContent).toBe('PowerShell 7.6.9');
     expect(f.host.querySelector('[role="status"]')?.textContent).toBeUndefined();
     expect(shellRequests()).toEqual([read, read, save, read, save]);
+
+    await render(false);
+    settings = { ...settings, powerShellVersion: '5.1.26100.10066', powerShell7Version: null };
+    await render(true);
+    const afterUninstall = f.host.querySelector('[role="combobox"][aria-label="集成终端 Shell"]')!;
+    expect(afterUninstall.textContent).toBe('PowerShell 5.1.26100.10066');
+    expect(f.host.textContent).toContain('PowerShell 使用本机最高可用版本');
+    await act(async () =>
+      afterUninstall.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      ),
+    );
+    const unavailable = [...f.dom.window.document.querySelectorAll('[role="option"]')].at(-1);
+    expect(unavailable?.getAttribute('aria-disabled')).not.toBe('true');
+    await act(async () => {
+      unavailable?.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   } finally {
     await f.close();
   }

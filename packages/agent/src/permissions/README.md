@@ -32,6 +32,12 @@ Windows [Shell 权限装配](shell.ts)从实际 PowerShell AST 或 Bash 字面�
 
 Windows Auto 将未能静态确认效果的 PowerShell 交给同一 Shell 风险审核。单一字面量路径的 PowerShell 脚本调用可提供有界正文。原 Tool 与准确自身 Job 共用经核实的风险审核与高风险人答，派发时复核工作目录、范围和已审核文件。 [Windows 原生 Service 回归](../../../../apps/service/test/isolated/windows-shell-auto.test.ts)
 
+2026-11-18 Full 修复在 Windows x64 的 PowerShell 5.1.26100.10066、PowerShell 7.6.9 上通过两种执行身份和三种模式的回归。权限、约束、派发范围、运行中模式及 Shell 准确批准复用用例共 51 项通过，7,673 个文件类型检查通过。隔离 Kite Native 开发制品使用受控本地模型，三条会话分别在 5.1、7 和 Git Bash 中执行含变量／条件及本地文件写入的命令，PowerShell 还包含函数与动态原生调用。三条 Run 均 completed，原 Tool 与 Job 均成功、零工具审批卡，3 个原生 Job 均确认清理和进程树停止；窗口保单个用户消息和最终回复，无页面错误。过程、截图与 SQLite 核验在本机 `.cache/kite-full-shell-window-961ffb17/`。此范围不代替真实模型 PPT 复测或安装发布资格。
+
+后续在 Shell 类型统一后的隔离 Kite Native 开发制品，真实 OpenAI `gpt-6-luna`／high 的 PowerShell 7.6.9 与 Git Shell PPT 任务均在提交前通过普通 UI 确认 Full。12 个原 Shell Job 的持久派发权限叶均为 `full`，工具审批记录和待批卡为零；两份 PPT 均完成交付。Git 的未保存驻留状态失败及 PowerShell 复合脚本退出码误判由 [Shell owner](../jobs/README.md#类型统一后的真实模型复测)定位，均非审批等待。范围、模型快照限制及客户端首开问题保持各自事实；本轮未修改权限决定或审批实现。
+
+补充检查保留两组既有失败。`windows-shell-auto.test.ts` 的两种后端仍按旧断言预期超时审核只调用一次，当前会执行三次有界重试；修复前代码对照同样失败，修复后首轮 PowerShell 另受 40 秒等待窗口影响。`shell-risk-review.test.ts` 的 20 个用例在 Windows Profile 初始化阶段被 `windows_path_security_denied` 拒绝，修复前也全部复现，尚未进入待审 Shell。原断言、时限和 ACL 均未修改。对照日志分别为本机 `.cache/powershell-full-approval-auto-baseline.log`／`powershell-full-approval-auto-regression.log` 与 `.cache/powershell-full-approval-risk-baseline.log`／`powershell-full-approval-risk-regression.log`，不将这些结果计为通过或扩大本次 Full 修复的资格。
+
 AND 合成后若领域解释器未被共同选择，沿独立 generic checker 的合同检查；注册工具原有领域材料限制仍保留，不能因此取得跨调用 `reused_approval` 资格。准确 Auto 父链与历史超时继续按各自原证明核验；新审批模型检查技术失败一律停止，不用风险解释器替代独立 checker。
 
 会话文件不放开整个 Profile。[输入文件适配器](../tools/input-files.ts)仅允许所选消息引用的准确原件读取；[输出适配器](../tools/session-outputs.ts)仅允许当前会话的登记文件或准确输出目录中的 create-only 新文件；[方案适配器](../tools/plan-files.ts)只接受 Planning 当前登记的准确目标。各适配器在原授权与派发链核全部父子 policy leaves、能力定义／版本、原输入及目标 revision，仍保真实工作区信任、取消和 native 身份核验。Plan 模式的草稿写例外仅限可信宿主识别的当前方案目的；普通项目／输出写入不享受例外，文件存在和 Markdown 中的“已批准”也不授执行权。
@@ -152,7 +158,7 @@ Shell 与私有文件适配器的最终证明共用内部 [dispatch-scope](dispa
 
 [原策略测试](../../test/isolated/permissions/policy.test.ts)、[独立解析与资产篡改测试](../../test/isolated/permissions/shell-command-policy.test.ts)、[独立范围测试](../../test/isolated/permissions/shell-scoped-permissions.test.ts)从原 Service owner 迁入，原用例及断言保持；策略测试另通过真实 Core 核同名扩展不能借只读权限、Workflow Job 不降格。实际 macOS [Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[网络审批](../../../../apps/service/test/isolated/web-permissions.test.ts)继续验证正式调用链。边界检查沿公开导出和 barrel 拒绝本模块反向依赖 Service、Service 直接解析依赖或重新实现原工厂。
 
-Windows 桌面回退使用[系统 5.1 AST 分析](powershell-command-policy.ts)。解析器只接收脚本文本，识别默认别名、字面命令与路径、输出重定向和已知网络操作。只有不带路径的名称和对应系统模块限定的 cmdlet 可按已知 PowerShell 命令分析；`rg` 识别不带路径的 `rg`／`rg.exe` 或固定的包内路径，`-f` 与 `--file` 的模式文件也参与范围检查。已识别的系统委托无法通过 Shell 准入。字面联网和工作区外写入必须有各自范围。请求批准和 Full 对未确认的作用范围要求本次人工审批。效果判定和命令摘要使用同一份分析和目录身份。批准绑定当前解释器、分析资产、命令、目录与请求范围，派发时独立复核，并与最终批准的身份及父子范围核对。实际执行、审批与取消证据归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
+Windows 桌面 PowerShell 使用[所选安装的 AST 解析器](powershell-command-policy.ts)，配合 5.1 或 7 的语言语法。解析器只接收脚本文本，识别默认别名、字面命令与路径、输出重定向和已知网络操作。只有不带路径的名称和对应系统模块限定的 cmdlet 可按已知 PowerShell 命令分析。`rg` 识别不带路径的 `rg`／`rg.exe` 或固定的包内路径，`-f` 与 `--file` 的模式文件也参与范围检查。已识别的系统委托无法通过 Shell 准入。字面联网和工作区外写入必须有各自范围。请求批准模式对未确认的作用范围要求本次人工审批；Auto 沿风险审核，Full 不因静态分析不确定增加人工审批。Tool 与自身 Job 各自核验当前有效模式，Full 的两层检查均可正常放行。通用权限层的独立人工要求、父子上限、硬拒绝和系统限制保持。效果判定和命令摘要使用同一份分析和目录身份。批准绑定当前解释器、分析资产、命令、目录与请求范围，派发时独立复核，并与最终批准的身份及父子范围核对。模式取舍见 [Full 修复](../../../../.agents/notes/implemented/bug-fix/2026-11-18-powershell-full-uncertain-approval.md)，实际执行、审批与取消证据归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
 
 [真实 pending approval SIGKILL 回归](../../test/isolated/recovery/live-approval-crash.test.ts)在审批卡和原 planned Tool 已耐久后杀死自有进程（核 SIGKILL/137），只读重开保持原卡/Run/执行和 cursor、模型 ledger 不增长。随后持久根模式由请求批准改为 Full，冷 Runtime 观察仍不准备 Provider；错误主体显式恢复被拒，准确原 Run 显式恢复才读取当前 applied control revision、同事务失效旧卡并派发原 Tool。外置 ledger 核原效果一次、已成功原 Model 不重放、重复同一恢复不增效果；原 request/source 不变、answer 仍 null，唯一失效回执保准确原revision/当前controls。该 fixture只验证这一实际进程丢失与模式变化边界，不替代其他平台或所有自动审核崩溃场景。
 

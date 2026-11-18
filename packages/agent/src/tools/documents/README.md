@@ -2,9 +2,11 @@
 
 ## 内置 Office Skills
 
-Kite 随包提供 `docx`、`xlsx`、`pptx` 和 `pdf` 的正文、脚本、模板与许可。各项沿原 Apache 2.0 许可分发。Word 脚本的默认批注作者为 Kite，该脚本注明了修改。 [随包资源](../../../assets/office) · [上游提交 1780c5e5](https://github.com/anthropics/skills/tree/1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064/skills)
+Kite 从 OfficeCLI 上游提交 `5fbf766` 改编三个办公技能。随包的 `docx`、`xlsx` 和 `pptx` 与 `pdf` 位于同一级，分别对应配置 ID `office.docx`、`office.xlsx`、`office.pptx` 和 `office.pdf`。OfficeCLI 技能标注修改，办公资源根目录收录上游 `LICENSE`、`NOTICE` 和 `THIRD-PARTY-NOTICES.txt`。 [OfficeCLI 上游技能](https://github.com/iOfficeAI/OfficeCLI/tree/5fbf766408a9d55f02dc94874e48634999c854c2/skills) · [PDF 上游](https://github.com/anthropics/skills/tree/1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064/skills/pdf)
 
-构建逐项核校清单里的字节和摘要，将资源复制到 `skills/office`。知识源按 `builtin:office.<格式>` 提供固定正文与清单内资源，并在正文补充只读资源目录、原件工作副本及 `KITE_OUTPUT_DIR` 的用法。用户选定的 Skill 使用受管 Shell 中已授权的工具和依赖。 [资源清单](../../skills/office-manifest.json) · [构建](build-assets.ts) · [知识源](../../skills/office-source.ts)
+构建核对清单里的字节数与摘要，将资源复制到 `skills/office`。知识源按 `builtin:office.<配置后缀>` 提供校验后的正文和声明的文本资源。四个技能目录直接位于只读的 `KITE_OFFICE_SKILLS_DIR` 下。技能直接调用随包工具目录中的 `officecli`，编辑、保存和收集产物沿当前 Shell 的授权、进程监督和 `KITE_OUTPUT_DIR`。 [资源清单](../../skills/office-manifest.json) · [构建](build-assets.ts) · [知识源](../../skills/office-source.ts) · [随包运行时取舍](../../../../../.agents/notes/implemented/architecture/2026-11-18-bundled-officecli-runtime.md)
+
+改编后的技能按 Shell 工具报告的环境执行，提供 PowerShell 和 Git Shell 示例。常规编辑通过 OfficeCLI 的单进程批处理落盘，跨调用复用工作区副本和 UTF-8 操作文件。成品在工作区核验后，由当前成功 Shell 调用复制到 `KITE_OUTPUT_DIR`。可用的预览或查看器用于版面复核，结构校验读取退出状态和 JSON 结果。 [Shell 约定](../shell.README.md) · [交付约定](../../business/output-collection.README.md)
 
 ## PDF 制作与交付
 
@@ -24,13 +26,21 @@ Kite 随包提供 `docx`、`xlsx`、`pptx` 和 `pdf` 的正文、脚本、模板
 
 ## 固定资产与执行边界
 
-标准 Terminal 和 Native 构建生成 PDF.js 分页 worker、PDF helper、固定 Noto Sans SC 字体和字体许可。构建将四个内置 Skill 的只读资源放入同一制品库存。Service 核过 helper 摘要后才登记 helper 与 Bun 路径，运行时读取字体时再核其 SHA-256。 [构建](build-assets.ts) · [运行时校验](document-runtime.ts)
+标准 Terminal 和 Native 构建生成 PDF.js 分页 worker、PDF helper、固定 Noto Sans SC 字体和字体许可。构建将内置 OfficeCLI 与 PDF 技能的只读资源放入同一制品库存。Service 核过 helper 摘要后才登记 helper 与 Bun 路径，运行时读取字体时再核其 SHA-256。 [构建](build-assets.ts) · [运行时校验](document-runtime.ts)
 
 Desktop 使用各格式的独立原件预览。PDF 页面与文字层由已核验的分页 worker 读取。 [Desktop 预览与验证](../../../../../apps/desktop/README.md#办公输出文件) · [PDF 分页缓存](pdf.ts)
 
 ## 验证
 
 内置 Skill、源文件边界和排他导出由隔离测试覆盖。构建资源后运行 PDF 脚本可检查中文字符实际栅格、合并、页面操作、叠加、表单及溢出拒绝。 [隔离测试](../../../test/isolated/tools/documents/office.test.ts) · [PDF 实际文件冒烟](../../../scripts/pdf-documents-smoke.ts)
+
+2026-11-18 直接运行三个改编技能的 Quick Start 脚本和 JSON 操作数组。系统 PowerShell 5.1、PowerShell 7.6.9 与 Git Shell 的九组用例均通过，涵盖工作区落盘、中文内容回读、Excel 公式结果和单独调用复制成品。并行构建期间一次 XLSX 批处理报告内存不足，串行复验通过。记录在本机 `.cache/kite-format-skill-examples-62b9-2heTLV/proof.json`。
+
+2026-11-16 在 Windows x64 与 Bun 1.4.4 下，单独构建办公资源后，用上游 Git 对象核对源码和构建产物中的 124 个文件，11 个 OfficeCLI 正文加载与对应文件一致。受控模型在真实 Service 中分别选择基础技能，经受管 PowerShell 调用 OfficeCLI 1.0.161，完成 DOCX、XLSX、PPTX 的生成、归档和回读，并修改和归档了 PPT 的工作副本。该验证覆盖本机技能选择和文件交付。 [技能与资源回归](../../../test/isolated/tools/documents/office.test.ts) · [Desktop 选择回归](../../../../../apps/desktop/test/isolated/native-office-toolbar-dom.test.tsx)
+
+同日在 Windows x64 隔离 Kite Service 实测 `gpt-6-luna`。模型请求均使用 `reasoning.effort=high`，受管 PowerShell 通过临时 PATH 解析 OfficeCLI 1.0.161。PPT 原始轮加载 `office.pptx`，先后遇到跨 Shell 暂存路径失效、OfficeCLI 驻留启动和文件占用问题、PowerShell JSON 参数与脚本作用域错误。模型改用工作区副本和标准输入的 `officecli batch` 完成五页演示稿，验证后复制到最终 Shell 的输出目录。对照轮在测试 Shell 设置 `OFFICECLI_NO_AUTO_RESIDENT=1`，并在请求中明确工作副本与最终交付位置，单条 `add` 成功落盘，也完成五页交付。两份归档分别经新 Client 连接回读，核对 ZIP 内容并在隔离 Kite 原生预览中逐页切换。两轮的 OfficeCLI `screenshot` 均在受管 Shell 因 Chromium Crashpad 启动失败。日志、产物与预览图保存在本机 `.cache/officecli-luna-high-20261116/`。
+
+Word 原始轮在输出目录和工作区的两次单条 `set` 均遇到文件占用，未交付修改稿。关闭自动驻留后直接对工作副本执行 `set`，归档修改稿并在原生预览读到目标文字。原件 SHA-256 一致，ZIP 差异只包括目标文字、对应段落的文本修订 ID 和 OfficeCLI 修改时间。Excel 原始轮在写入失败前归档了同名副本，最终回读摘要与未编辑的原件相同。关闭自动驻留且跳过显式 `open` 后，归档的 `Sheet1!B2` 为 12，`B4` 保留 `SUM(B2:B3)`。OfficeCLI 读取时算出 15，但归档 XML 缺少 `B4` 的缓存值。Kite 原生预览中的 ExcelJS 对该归档的 `x:` 工作簿标签解析失败，改为等价默认命名空间后仍在 `ap:` 扩展属性处失败。诊断副本规范化两处命名空间写法后可以打开，原缓存仍显示“计算结果不可用”。用 OfficeCLI 在另一个诊断副本重新写入同一条公式得到 `<v>15</v>`，规范化命名空间后 Kite 预览显示 15。六个完整会话的 94 次模型请求均返回 HTTP 200。 [Excel 原生预览](../../../../../apps/desktop/electron/xlsx-preview.tsx)
 
 ~~~sh
 bun packages/agent/scripts/pdf-documents-smoke.ts

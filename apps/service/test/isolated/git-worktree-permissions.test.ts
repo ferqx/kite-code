@@ -111,9 +111,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
     target = join(root, 'target');
   mkdirSync(source);
   const windows = process.platform === 'win32' ? await windowsShellFixture() : undefined;
-  const gitExecutable = windows
-    ? join(dirname(windows.fullShell), '../../mingw64/bin/git.exe')
-    : '/usr/bin/git';
+  const gitExecutable = windows ? windows.fullGit : '/usr/bin/git';
   const environment = windows
     ? Object.fromEntries(
         Object.entries(process.env).filter(

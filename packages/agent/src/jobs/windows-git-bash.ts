@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { constants, copyFile, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { acquireFileLock, type FileLock, LockBusyError } from '../platform/locks';
 import { privateDirectory } from '../platform/windows-path-security';
 import {
@@ -45,7 +45,7 @@ export async function captureWindowsGitBashRuntime(
   shell: string,
   fullShell: string,
   signal?: AbortSignal,
-): Promise<(full: boolean, signal?: AbortSignal) => Promise<void>> {
+) {
   const root = join(dirname(shell), '../..');
   const manifestPath = join(root, 'manifest.json');
   const manifestIdentity = await launchIdentityAsync(manifestPath, true, signal);
@@ -88,21 +88,33 @@ export async function captureWindowsGitBashRuntime(
     names.add(file.name.toLowerCase());
     files.push({ name: file.name, sha256: file.sha256, sourceSha256: file.sourceSha256 });
   }
-  if (![...gitBashFiles, 'ktipc.dll'].every((name) => names.has(`usr/bin/${name}`)))
+  const programs = files.filter(({ name }) => {
+    const layout = /^([^/]+)\/bin\/git\.exe$/iu.exec(name)?.[1];
+    return layout && files.some((file) => file.name.startsWith(`${layout}/libexec/git-core/`));
+  });
+  if (
+    programs.length !== 1 ||
+    ![...gitBashFiles, 'ktipc.dll'].every((name) => names.has(`usr/bin/${name}`))
+  )
     throw Error('windows_git_bash_asset_invalid');
-  return async (full, signal) => {
-    await verifyLaunchIdentitiesAsync(roots, signal);
-    const base = full ? join(root, 'full') : root;
-    await mapAssetVerification(
-      files,
-      async (file, signal) => {
-        const fact = await launchIdentityAsync(join(base, file.name), true, signal);
-        if (fact.digest !== (full ? file.sourceSha256 : file.sha256))
-          throw Error('windows_git_bash_asset_changed');
-      },
-      signal,
-    );
-    await verifyLaunchIdentitiesAsync(roots, signal);
+  const program = programs[0]!.name;
+  return {
+    git: join(root, program),
+    fullGit: join(root, 'full', program),
+    async verify(full: boolean, signal?: AbortSignal) {
+      await verifyLaunchIdentitiesAsync(roots, signal);
+      const base = full ? join(root, 'full') : root;
+      await mapAssetVerification(
+        files,
+        async (file, signal) => {
+          const fact = await launchIdentityAsync(join(base, file.name), true, signal);
+          if (fact.digest !== (full ? file.sourceSha256 : file.sha256))
+            throw Error('windows_git_bash_asset_changed');
+        },
+        signal,
+      );
+      await verifyLaunchIdentitiesAsync(roots, signal);
+    },
   };
 }
 /** Redirect only the private MSYS image's import descriptor, without changing
@@ -169,13 +181,49 @@ export class WindowsGitBashUnavailable extends Error {
   }
 }
 
-/** Git for Windows also ships small PATH launchers which spawn the actual Git. */
+/** Search only the installation containing the PATH result. Git for Windows
+ * launchers are separate from the Git executable and its helper directory. */
+function discoverGitInstallation(executable: string) {
+  const parent = dirname(executable);
+  const installation = [parent, dirname(parent), dirname(dirname(parent))].find((root) => {
+    const stat = lstatSync(join(root, 'usr/bin/bash.exe'), { throwIfNoEntry: false });
+    if (!stat) return false;
+    if (!stat.isFile()) throw Error('windows_git_bash_asset_invalid');
+    return true;
+  });
+  if (!installation) return undefined;
+
+  const isDirectory = (path: string) => lstatSync(path, { throwIfNoEntry: false })?.isDirectory();
+  const hasProgram = (root: string) => {
+    const helpers = join(root, 'libexec/git-core');
+    return (
+      isDirectory(join(root, 'bin')) &&
+      lstatSync(join(root, 'bin/git.exe'), { throwIfNoEntry: false })?.isFile() &&
+      isDirectory(join(root, 'libexec')) &&
+      isDirectory(helpers) &&
+      readdirSync(helpers, { withFileTypes: true }).some((entry) => entry.isFile())
+    );
+  };
+  const direct = dirname(parent);
+  if (
+    basename(parent).toLowerCase() === 'bin' &&
+    dirname(direct) === installation &&
+    hasProgram(direct)
+  )
+    return { installation, programRoot: direct };
+
+  const candidates = readdirSync(installation, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(installation, entry.name))
+    .filter(hasProgram);
+  if (candidates.length === 1) return { installation, programRoot: candidates[0]! };
+  return undefined;
+}
+
 export function windowsGitProgram(executable: string): string {
   const selected = realpathSync.native(executable);
-  if (/[\\/]mingw64[\\/]bin[\\/]git\.exe$/iu.test(selected)) return selected;
-  const install = dirname(dirname(selected));
-  const program = join(install, 'mingw64/bin/git.exe');
-  return existsSync(program) && existsSync(join(install, 'usr/bin/bash.exe')) ? program : selected;
+  const discovered = discoverGitInstallation(selected);
+  return discovered ? join(discovered.programRoot, 'bin/git.exe') : selected;
 }
 
 /** Copy Git for Windows to an immutable, content-addressed runtime. */
@@ -185,19 +233,9 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
   const git = Bun.which('git');
   if (!git) throw new WindowsGitBashUnavailable();
   const gitExecutable = realpathSync.native(git);
-  const gitParent = dirname(gitExecutable);
-  const installation = [dirname(gitParent), dirname(dirname(gitParent))].find((root) => {
-    let stat: ReturnType<typeof lstatSync>;
-    try {
-      stat = lstatSync(join(root, 'usr/bin/bash.exe'));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-      throw error;
-    }
-    if (!stat.isFile() || stat.isSymbolicLink()) throw Error('windows_git_bash_asset_invalid');
-    return true;
-  });
-  if (!installation) throw new WindowsGitBashUnavailable(gitExecutable);
+  const discovered = discoverGitInstallation(gitExecutable);
+  if (!discovered) throw new WindowsGitBashUnavailable(gitExecutable);
+  const { installation, programRoot } = discovered;
   const source = join(installation, 'usr/bin');
   for (const name of gitBashFiles) {
     const stat = lstatSync(join(source, name));
@@ -215,22 +253,18 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
     }
     return result;
   };
-  const paths = [
+  const paths = new Set([
     ...readdirSync(source)
       .filter((name) => /\.(dll|exe)$/i.test(name) && name.toLowerCase() !== 'ktipc.dll')
       .sort()
       .map((name) => join(source, name)),
-    ...[
-      'mingw64/bin',
-      'mingw64/libexec/git-core',
-      'mingw64/share/git-core',
-      'mingw64/etc',
-      'usr/lib',
-      'etc/ssl',
-    ].flatMap((path) => collect(join(installation, path))),
+    ...['bin', 'libexec/git-core', 'share/git-core', 'etc'].flatMap((path) =>
+      collect(join(programRoot, path)),
+    ),
+    ...['usr/lib', 'etc/ssl'].flatMap((path) => collect(join(installation, path))),
     compatibility,
-  ];
-  const files = paths.map((path) => {
+  ]);
+  const files = Array.from(paths, (path) => {
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.isSymbolicLink()) throw Error('windows_git_bash_asset_invalid');
     const original = readFileSync(path);

@@ -10,12 +10,16 @@ Windows 桌面即使在普通目录运行文件检索，也会因为启动时找
 
 桌面 Service 在启动时优先固定完整 Git Bash。只有发现阶段确认缺少该入口时才定位系统 Windows PowerShell 5.1，并将选择的方言交给模型。每条命令固定原解释器、资产、工作目录和权限，已派发命令留在原 Job。Service 和原生 Runner 在同一制品同步使用内部 V7，沿用现有模型工具和持久记录。
 
+PowerShell 7 通过本机安装自动发现并提供为可选后端。与运行同一版本的宿主 AST 解析依赖受信任的 Windows 安装来源，因此探测从本机安装登记和系统程序目录选择候选，固定真实运行时及关键依赖。Runner 使用 V7 已有字段启动本机程序，模型得到经实际探测的版本。安装、升级和分发由 PowerShell 自身渠道负责。
+
 PowerShell 使用独立 AST 分析、受限令牌、目录 ACL 和 Job Object。已知联网与外部写入分别要求对应范围。首版在无法确定效果时申请本次人工批准。已识别且无法纳入原 Job 的委托在准入阶段拒绝。当前离线范围沿 Windows 环境约束，系统级断网作为单独的 AppContainer 兼容与隔离工作。
 
 ## Alternatives considered
 
 - 找不到 Git 后直接运行未受管 PowerShell。会丢失当前目录写入和后代进程边界，所以 PowerShell 直接进入原生 Runner，并使用与方言匹配的审批分析。
 - 首版要求系统级断网。它需要单独核验 AppContainer 与 PowerShell 的兼容性，首版保留已确认的 Windows 网络环境语义。
+- 为本地命名管道兼容性把宿主账户 SID 加入工作区令牌的限制列表，会连带扩大普通宿主文件的写权限。工作区授予 `WRITE_DAC` 也会允许命令修改目录权限。两个方言均沿用原权限，统一说明辅助进程的生命周期和单进程模式的适用条件。[实际边界与验证](../../../../packages/agent/src/jobs/README.md#默认-windows-git-bash)
+- 由宿主补改默认命名管道的 ACL。实机确认复制现有普通服务器句柄无法取得 `WRITE_DAC`，按名称或重新打开现有句柄又会消耗一次客户端连接。辅助进程需要默认双向管道时，可按原授权请求完整文件范围。本地任务可保持 `network:none`。
 
 ## Consequences
 
@@ -25,6 +29,10 @@ PowerShell 使用独立 AST 分析、受限令牌、目录 ACL 和 Job Object。
 
 [按会话选择 Shell](2026-11-12-windows-desktop-shell-preference.md)取代全桌面 Service 固定一个解释器的选择方式。启动时的自动发现顺序、两种后端的安全边界和 Runner V7 继续适用。
 
+[Shell 类型与版本分开](2026-11-18-windows-shell-families.md)进一步取代独立 PowerShell 7 选项、首个可用候选和系统 5.1 优先规则。当前界面只有 Git Shell／PowerShell，PowerShell 自动选择最高已核验本机版本。Git 优先的默认发现、可信安装来源、原生资产布局、安全边界及 V7 继续适用。
+
 Git Bash 的随附命令和运行时资产取舍见[使用 Git Bash 随附命令](../simplification/2026-11-12-use-git-bash-utilities.md)。
 
 [Windows Shell Auto 审批](../bug-fix/2026-11-14-windows-shell-auto-read-and-approval.md)取代了 Auto 中无法确定效果时直接转人工的规则。原系统委托拒绝、受限执行及其他审批模式继续适用。
+
+[PowerShell Full 审批修复](../bug-fix/2026-11-18-powershell-full-uncertain-approval.md)进一步取代 Full 中静态未知即转人工的规则。请求批准模式、系统委托拒绝、原生执行边界及独立人工上限继续适用。

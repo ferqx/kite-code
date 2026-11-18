@@ -50,6 +50,7 @@ test.each([
 ] as const)('paired child inherits only supported %s proxy inputs and honors NO_PROXY without publishing credentials', async (casing) => {
   const root = mkdtempSync(join(tmpdir(), 'kite-paired-proxy-'));
   const codexHome = join(root, 'explicit codex home');
+  const toolDirectories = `"${join(root, '便携 工具')}";${join(root, 'more tools')}`;
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'disposable' });
   const requests: { url: string; authorization?: string }[] = [];
   const tunnels: { host: string; authorization?: string }[] = [];
@@ -99,6 +100,7 @@ test.each([
         all_proxy: 'http://fixture-unused-lower-all-proxy.invalid',
         ...selected,
         CODEX_HOME: codexHome,
+        KITE_SHELL_TOOL_DIRS: toolDirectories,
       },
       async () => {
         // Windows may expose both spellings for one case-insensitive host key.
@@ -133,6 +135,9 @@ test.each([
     );
     expect(report.forbiddenPresent).toEqual([]);
     expect(report.codexHomeDigest).toBe(digest(codexHome));
+    expect(report.toolDirectoriesDigest).toBe(
+      process.platform === 'win32' ? digest(toolDirectories) : null,
+    );
     expect(report.startupContainsProxyCredential).toBe(false);
     expect(report.responses[0]).toEqual({ url: httpUrl, status: 200, text: 'proxy-response' });
     expect(report.responses[1].url).toBe(httpsUrl);
@@ -163,10 +168,14 @@ test.each([
           ...(process.platform === 'win32' ? ['USERPROFILE'] : []),
           ...Object.keys(expectedProxies),
           'CODEX_HOME',
+          ...(process.platform === 'win32' ? ['KITE_SHELL_TOOL_DIRS'] : []),
         ].sort(),
       );
       for (const [key, value] of Object.entries(expectedProxies)) expect(captured[key]).toBe(value);
       expect(captured.CODEX_HOME).toBe(codexHome);
+      expect(captured.KITE_SHELL_TOOL_DIRS).toBe(
+        process.platform === 'win32' ? toolDirectories : undefined,
+      );
     }
     await service!.close();
     expect(await service!.exited).toBe(0);

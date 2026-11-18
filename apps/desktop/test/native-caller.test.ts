@@ -3017,19 +3017,25 @@ test('Shell settings IPC checks sender and generation without projecting convers
           automatic: 'git-bash',
           gitBashAvailable: true,
           powerShellAvailable: true,
+          powerShellVersion: '7.6.9',
+          powerShell7Version: '7.6.9',
         };
       },
     });
     try {
       const read = { method: 'settings.general.shell.read', generation };
-      const save = { method: 'settings.general.shell.save', generation, preference: 'powershell' };
+      const save = {
+        method: 'settings.general.shell.save',
+        generation,
+        preference: 'powershell-7',
+      };
       expect(await handler(auth.event, read)).toMatchObject({
         ok: true,
         value: { storeId: 'store', preference: 'auto' },
       });
       expect(await handler(auth.event, save)).toMatchObject({
         ok: true,
-        value: { storeId: 'store', preference: 'powershell' },
+        value: { storeId: 'store', preference: 'powershell-7', powerShell7Version: '7.6.9' },
       });
       expect(await handler(auth.event, { ...save, generation: generation + 1 })).toEqual({
         ok: false,
@@ -3037,7 +3043,7 @@ test('Shell settings IPC checks sender and generation without projecting convers
       });
       replaceOnAdmission = true;
       expect(await handler(auth.event, save)).toEqual({ ok: false, code: 'native_sender_denied' });
-      expect(requests).toEqual([undefined, 'powershell']);
+      expect(requests).toEqual([undefined, 'powershell-7']);
       expect(state).not.toHaveBeenCalled();
     } finally {
       unregister();

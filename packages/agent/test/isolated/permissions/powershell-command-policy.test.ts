@@ -12,15 +12,233 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { type AuthorizationRequest, JobStartError } from '../../../src/extensions';
+import {
+  type AuthorizationRequest,
+  type JobContext,
+  JobStartError,
+  type ToolResult,
+} from '../../../src/extensions';
+import { compareInstalledShellVersions } from '../../../src/jobs/installed-shell-version';
 import { ripgrepAsset } from '../../../src/jobs/ripgrep';
-import { discoverWindowsPowerShell } from '../../../src/jobs/windows-powershell';
+import {
+  discoverPreferredWindowsPowerShell,
+  discoverWindowsPowerShell,
+  discoverWindowsPowerShell7,
+} from '../../../src/jobs/windows-powershell';
+import { createWindowsShellJob } from '../../../src/jobs/windows-shell';
 import { createPermissionPolicy } from '../../../src/permissions';
 import {
   createPowerShellCommandPolicy,
   powerShellScopeDenial,
 } from '../../../src/permissions/powershell-command-policy';
 import { createShellConfiguration } from '../../../src/permissions/shell';
+
+const installedPowerShell7 =
+  process.platform === 'win32' && process.arch === 'x64'
+    ? await discoverWindowsPowerShell7().catch((error: unknown) => {
+        if (error instanceof Error && error.message === 'windows_powershell7_unavailable')
+          return undefined;
+        throw error;
+      })
+    : undefined;
+
+test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
+  'the PowerShell family selects the highest verified local installation',
+  async () => {
+    const system = await discoverWindowsPowerShell();
+    const selected = await discoverPreferredWindowsPowerShell();
+    const versions = [
+      system.version,
+      ...(installedPowerShell7 ? [installedPowerShell7.version] : []),
+    ];
+    expect(selected.version).toBe(versions.sort(compareInstalledShellVersions).at(-1)!);
+    expect(selected.edition).toBe(selected.installation ? 'Core' : 'Desktop');
+  },
+  15000,
+);
+
+test.skipIf(!installedPowerShell7)(
+  'installed PowerShell 7 supplies its parser and model version and runs in the original native Job',
+  async () => {
+    const powerShell = installedPowerShell7!;
+    const root = mkdtempSync(join(tmpdir(), 'kite-pwsh-job-'));
+    try {
+      const workspaceRoot = join(root, 'workspace');
+      const stateRoot = join(root, 'sandbox');
+      const controlBase = join(root, 'control');
+      for (const path of [workspaceRoot, stateRoot, controlBase]) mkdirSync(path, { mode: 0o700 });
+      const assets = {
+        supervisorPath: resolve(
+          import.meta.dir,
+          '../../../dist/platform/process/windows-shell/kite-windows-runner.exe',
+        ),
+        shellExecutable: powerShell.executable.canonical,
+        env: { PATH: powerShell.systemDirectory, USERPROFILE: root },
+      };
+      const windows = { kind: 'powershell' as const, stateRoot, powerShell };
+      const config = await createShellConfiguration({
+        workspaceRoot,
+        toolIds: ['shell.execute'],
+        options: {
+          ...assets,
+          windows,
+          platform: 'win32',
+          configurationId: 'powershell-7-fixture',
+          bunExecutable: process.execPath,
+          host: { controlBase, protectedRoots: [], readonlyAssets: [], runtimeReadOnlyRoots: [] },
+        },
+      });
+      const tool = config.extensions
+        .flatMap((extension) => extension.tools ?? [])
+        .find((tool) => tool.id === 'shell.execute');
+      expect(tool?.description).toContain(
+        `The command language is PowerShell ${powerShell.version}.`,
+      );
+
+      const command = 'Get-Location && [Console]::WriteLine($PSVersionTable.PSVersion.ToString())';
+      const policy = createPowerShellCommandPolicy(powerShell, workspaceRoot, ripgrepAsset());
+      expect(await policy.assess(command)).toMatchObject({ denial: null, uncertain: true });
+      const job = await createWindowsShellJob({
+        ...assets,
+        ...windows,
+        cwd: workspaceRoot,
+        workspaceRoot,
+        controlBase,
+        executionScope: () => ({ filesystem: 'workspace_write', network: 'none' }),
+      });
+      const handle = await job.start({ command }, {
+        sessionId: 'powershell-7',
+        executionId: 'powershell-7-native',
+        signal: AbortSignal.timeout(10_000),
+      } as JobContext);
+      let output = '';
+      let errors = '';
+      let result: ToolResult | undefined;
+      try {
+        for await (const event of job.observe(handle)) {
+          if (event.type === 'output' && event.stream === 'stdout') output += event.content;
+          if (event.type === 'output' && event.stream === 'stderr') errors += event.content;
+          if (event.type === 'terminal') result = event.result;
+        }
+      } finally {
+        await job.dispose(handle);
+      }
+      expect(result, errors).toMatchObject({
+        outcome: 'succeeded',
+        details: { exitCode: 0, cleanupConfirmed: true, processTreeStopped: true },
+      });
+      expect(output.trim().split(/\r?\n/u)).toContain(powerShell.version);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  25000,
+);
+
+test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
+  'PowerShell 5.1 and 7 keep uncertain Tool and Job commands on the selected permission-mode path',
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-powershell-full-policy-'));
+    const workspace = join(root, 'workspace');
+    const controlBase = join(root, 'control');
+    const stateRoot = join(root, 'sandbox');
+    try {
+      for (const path of [workspace, controlBase, stateRoot]) mkdirSync(path, { mode: 0o700 });
+      const shells = [
+        await discoverWindowsPowerShell(),
+        ...(installedPowerShell7 ? [installedPowerShell7] : []),
+      ];
+      const capabilities = [
+        { kind: 'tool', definitionId: 'shell.execute', definitionVersion: '1' },
+        { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
+      ] as const;
+      for (const powerShell of shells) {
+        const configuration = await createShellConfiguration({
+          workspaceRoot: workspace,
+          toolIds: ['shell.execute'],
+          options: {
+            platform: 'win32',
+            configurationId: `powershell-full-${powerShell.version}`,
+            supervisorPath: resolve(
+              import.meta.dir,
+              '../../../dist/platform/process/windows-shell/kite-windows-runner.exe',
+            ),
+            bunExecutable: process.execPath,
+            shellExecutable: powerShell.executable.canonical,
+            env: { PATH: powerShell.systemDirectory, USERPROFILE: root },
+            windows: { kind: 'powershell', powerShell, stateRoot },
+            host: { controlBase, protectedRoots: [], readonlyAssets: [], runtimeReadOnlyRoots: [] },
+          },
+        });
+        for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+          const policy = createPermissionPolicy({
+            readPolicy: () => ({
+              mode,
+              workspaceTrust: true,
+              revision: 'fixture',
+              allowed: capabilities,
+            }),
+            async describeCapability(request, snapshot) {
+              const description = await configuration.describeRequest(request, snapshot);
+              return {
+                ...configuration.describe(request.definitionId),
+                ...description,
+                kind: request.kind,
+                definitionId: request.definitionId,
+                definitionVersion: request.definitionVersion,
+                revision: 'fixture',
+                hardAllowed: description?.hardAllowed === true,
+              };
+            },
+          });
+          for (const capability of capabilities) {
+            const request = {
+              ...capability,
+              sessionId: 'session',
+              runId: null,
+              executionId: 'powershell-full',
+              input: {
+                command:
+                  "function Invoke-Local { param([string]$Value) Write-Output $Value }; $value = 'done'; if ($value) { Invoke-Local $value }",
+              },
+              signal: AbortSignal.timeout(15000),
+            };
+            const decision = await policy.authorize(request);
+            if (mode === 'full') {
+              expect(decision, powerShell.version).toMatchObject({ allowed: true });
+              expect(decision.approval).toBeUndefined();
+              expect(decision.check).toBeUndefined();
+            } else {
+              expect(decision).toMatchObject({
+                allowed: false,
+                reason: mode === 'auto' ? 'auto_check_required' : 'approval_required',
+              });
+              expect(!!decision.check).toBe(mode === 'auto');
+            }
+            for (const [command, reason] of [
+              ["Write-Output 'unterminated", 'shell_command_syntax_invalid'],
+              ["Start-Process -FilePath 'some.exe'", 'shell_powershell_delegation_unsupported'],
+              [
+                `Remove-Item -Force '${join(powerShell.systemDirectory, '*')}'`,
+                'shell_command_hard_denied',
+              ],
+            ] as const) {
+              const denied = await policy.authorize({ ...request, input: { command } });
+              expect(denied).toMatchObject({ allowed: false, reason });
+              expect(denied.approval).toBeUndefined();
+              expect(denied.check).toBeUndefined();
+            }
+          }
+        }
+      }
+      expect(readdirSync(controlBase)).toEqual([]);
+      expect(readdirSync(stateRoot)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  60000,
+);
 
 test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
   'Windows PowerShell 5.1 classifies exact effects without executing the input',
@@ -41,11 +259,15 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
       );
       expect(read).toMatchObject({
         readOnly: true,
-        pinRipgrep: true,
+        pinRipgrep: 'script',
         network: false,
         uncertain: false,
         outsideWrite: false,
         denial: null,
+      });
+      expect(await policy.assess("rg.exe --no-config '你好' '中文文件.txt'")).toMatchObject({
+        readOnly: true,
+        pinRipgrep: 'command',
       });
 
       expect(
@@ -195,6 +417,12 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
           },
         },
       });
+      const tool = configuration.extensions
+        .flatMap((extension) => extension.tools ?? [])
+        .find((tool) => tool.id === 'shell.execute');
+      expect(tool?.description).toContain(
+        `The command language is Windows PowerShell ${powerShell.version}.`,
+      );
       const job = configuration.extensions
         .flatMap((extension) => extension.jobs ?? [])
         .find((definition) => definition.id === 'shell.command')!;

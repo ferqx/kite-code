@@ -10,16 +10,24 @@ use std::io::Read;
 
 /// Build the Windows command line for `bash --noprofile --norc -c <command>`
 /// using the CommandLineToArgvW quoting rules so the entire user command is
-/// delivered to bash as a single argument.
-pub fn build_bash_command_line(bash_path: &str, command: &str) -> String {
-    let parts = [
-        quote_argument(bash_path),
-        "--noprofile".to_string(),
-        "--norc".to_string(),
-        "-c".to_string(),
-        quote_argument(command),
-    ];
-    parts.join(" ")
+/// delivered to bash as a single argument when it fits. A longer command
+/// must be sent through stdin, followed by a NUL, before Bash executes it.
+pub fn build_bash_command_line(bash_path: &str, command: &str) -> (String, bool) {
+    // Git for Windows Bash can truncate its -c argument near 8 KiB even when
+    // CreateProcessW accepts it. Bound the entire quoted line in UTF-8 bytes.
+    const MAX_ARGV_BYTES: usize = 8 * 1024;
+    const BOOTSTRAP: &str = r#"
+IFS= read -r -d '' __kite_command || exit 126
+eval "unset -v __kite_command
+$__kite_command"
+"#;
+    let prefix = format!("{} --noprofile --norc -c", quote_argument(bash_path));
+    let command_line = format!("{} {}", prefix, quote_argument(command));
+    if command_line.len() < MAX_ARGV_BYTES {
+        (command_line, false)
+    } else {
+        (format!("{} {}", prefix, quote_argument(BOOTSTRAP)), true)
+    }
 }
 
 /// The exact user script arrives over the owned pipe as UTF-8. This keeps its
@@ -36,8 +44,76 @@ $ProgressPreference = 'SilentlyContinue'
 $length = [int]::Parse([Console]::In.ReadLine(), [Globalization.CultureInfo]::InvariantCulture)
 $source = [Console]::In.ReadToEnd()
 if ($source.Length -ne $length) { throw 'Incomplete PowerShell script' }
-& ([scriptblock]::Create($source))
-if (!$?) { exit 1 }
+$script = [scriptblock]::Create($source)
+$ast = $script.Ast
+$application = $false
+# A compound script can deliberately handle a nonzero native exit.
+if (!$ast.ScriptRequirements -and !$ast.ParamBlock -and !$ast.BeginBlock -and !$ast.ProcessBlock -and
+    !$ast.DynamicParamBlock -and !$ast.UsingStatements.Count -and $ast.EndBlock.Unnamed -and
+    !$ast.EndBlock.Traps.Count -and $ast.EndBlock.Statements.Count -eq 1) {
+  $pipeline = $ast.EndBlock.Statements[0]
+  if ($pipeline -is [System.Management.Automation.Language.PipelineAst] -and $pipeline.PipelineElements.Count -eq 1) {
+    $invocation = $pipeline.PipelineElements[0]
+    if ($invocation -is [System.Management.Automation.Language.CommandAst] -and
+        $invocation.InvocationOperator -ne [System.Management.Automation.Language.TokenKind]::Dot) {
+      $name = $invocation.GetCommandName()
+      if ($name) {
+        $selected = $ExecutionContext.InvokeCommand.GetCommand($name, [System.Management.Automation.CommandTypes]::All)
+        if ($selected -is [System.Management.Automation.AliasInfo]) { $selected = $selected.ResolvedCommand }
+        $application = $selected -is [System.Management.Automation.ApplicationInfo]
+      }
+    }
+  }
+}
+try {
+  if (!$application) {
+    # Match PowerShell's top-level -Command scope for inline scripts.
+    # A child scope makes a function's $script: variables resolve elsewhere.
+    # A script-block invocation itself resets $?. Capture it inside each root
+    # block before returning, including return paths, without replacing an
+    # explicit exit or treating a handled native failure as an unhandled one.
+    $__kite_status_name = '__kite_execution_status_' + [Guid]::NewGuid().ToString('N')
+    $ExecutionContext.SessionState.PSVariable.Set($__kite_status_name, $true)
+    $__kite_source_with_status = $source
+    $__kite_blocks = @($ast.DynamicParamBlock, $ast.BeginBlock, $ast.ProcessBlock, $ast.EndBlock)
+    if ($ast.PSObject.Properties['CleanBlock']) { $__kite_blocks += $ast.CleanBlock }
+    $__kite_blocks = $__kite_blocks | Where-Object { $_ } | Sort-Object { $_.Extent.StartOffset } -Descending
+    foreach ($__kite_block in $__kite_blocks) {
+      $__kite_nodes = @($__kite_block.Statements) + @($__kite_block.Traps) | Where-Object { $_ }
+      if (!$__kite_nodes.Count) { continue }
+      $__kite_start = ($__kite_nodes | Sort-Object { $_.Extent.StartOffset } | Select-Object -First 1).Extent.StartOffset
+      $__kite_end = if ($__kite_block.Unnamed) { $source.Length } else { $__kite_block.Extent.EndOffset - 1 }
+      $__kite_source_with_status = $__kite_source_with_status.Insert($__kite_end, "`n} finally { `${$__kite_status_name} = `$? }`n")
+      $__kite_source_with_status = $__kite_source_with_status.Insert($__kite_start, "try {`n")
+    }
+    . ([scriptblock]::Create($__kite_source_with_status))
+    if (!$ExecutionContext.SessionState.PSVariable.GetValue($__kite_status_name)) { exit 1 }
+    exit 0
+  }
+  & $script
+  $succeeded = $?
+} catch [System.Management.Automation.CommandNotFoundException], [System.Management.Automation.ApplicationFailedException] {
+  [Console]::Error.WriteLine("{0}: {1}", $_.Exception.GetType().Name, $_.Exception.Message)
+  if ($_.Exception -is [System.Management.Automation.CommandNotFoundException]) { exit 127 }
+  exit 126
+} finally {
+  # SilentlyContinue still records an actual lookup error. Report that
+  # observation even on an explicit exit, without changing the script status.
+  try {
+    for ($__kite_index = 0; $__kite_index -lt [Math]::Min(16, $global:Error.Count); $__kite_index++) {
+      $__kite_error = $global:Error[$__kite_index]
+      if ($__kite_error.Exception -is [System.Management.Automation.CommandNotFoundException] -and
+          $__kite_error.Exception.CommandName -match '^[^\p{Cc}\p{Cf}]{1,128}$') {
+        [Console]::Error.WriteLine("Kite could not resolve command: {0}", $__kite_error.Exception.CommandName)
+        break
+      }
+    }
+  } catch {
+    # Optional diagnostics must not replace the exit selected by the script.
+  }
+}
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
+if (!$succeeded) { exit 1 }
 "#;
     format!(
         "{} -NoLogo -NoProfile -NonInteractive -OutputFormat Text -Command {}",
@@ -272,10 +348,27 @@ mod tests {
     }
     #[test]
     fn build_command_line_contains_single_dash_c() {
-        let line = build_bash_command_line("C:\\vendor\\bash.exe", "echo hi");
+        let (line, from_stdin) = build_bash_command_line("C:\\vendor\\bash.exe", "echo hi");
         assert!(line.contains("--noprofile"));
         assert!(line.contains("--norc"));
         assert!(line.contains(" -c \"echo hi\""));
+        assert!(!from_stdin);
+    }
+
+    #[test]
+    fn bash_uses_stdin_at_the_quoted_command_line_byte_limit() {
+        let path = "C:\\vendor path\\bash.exe";
+        let prefix = format!("{} --noprofile --norc -c ", quote_argument(path));
+        let available = 8191 - prefix.len();
+        let (line, from_stdin) = build_bash_command_line(path, &"a".repeat(available));
+        assert_eq!(line.len(), 8191);
+        assert!(!from_stdin);
+        let (line, from_stdin) = build_bash_command_line(path, &"a".repeat(available + 1));
+        assert!(from_stdin);
+        assert!(line.contains("read -r -d ''"));
+        assert!(line.len() < 8192);
+        assert!(build_bash_command_line(path, &"中".repeat(3000)).1);
+        assert!(build_bash_command_line(path, &"\"".repeat(5000)).1);
     }
 
     #[test]

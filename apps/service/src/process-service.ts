@@ -12,6 +12,7 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { verifyDocumentHelper } from '@kite-ai/agent/documents';
 import { createWorkingInputFiles } from '@kite-ai/agent/files';
 import {
+  bundledOfficeCliAsset,
   linuxShellInitAsset,
   shellSupervisorAsset,
   windowsShellAssets,
@@ -221,7 +222,7 @@ export async function assembleProcessService(
           ),
         );
     if (windowsDesktop)
-      desktopShell = createDesktopShellEnvironments(shell, (backend) =>
+      desktopShell = createDesktopShellEnvironments((backend) =>
         packagedShellAssets(selected, backend),
       );
     configuration = await measureServiceStartup('configuration', async () => {
@@ -469,6 +470,7 @@ async function packagedShellAssets(
         'windows_shell_asset_unavailable',
         'windows_git_bash_unavailable',
         'windows_powershell_unavailable',
+        'windows_powershell7_unavailable',
       ].includes(error.message)
     )
       throw error;
@@ -478,6 +480,7 @@ async function packagedShellAssets(
   if (process.platform === 'linux' && !bubblewrap) return;
   const helper = await verifyDocumentHelper().catch(() => undefined);
   const officeSkills = bundledOfficeSkillDirectory();
+  const officeCli = bundledOfficeCliAsset();
   const ownedKeys = new Set([
     'KITE_DOCUMENTS_BUN',
     'KITE_DOCUMENTS_HELPER',
@@ -495,7 +498,7 @@ async function packagedShellAssets(
     platform: process.platform as 'linux' | 'darwin' | 'win32',
     configurationId: windows
       ? windows.windows.kind === 'powershell'
-        ? 'default.windows-powershell-5.1'
+        ? 'default.windows-powershell'
         : 'default.windows-host-shell-v1'
       : process.platform === 'linux'
         ? 'default.linux-host-shell-v1'
@@ -517,6 +520,7 @@ async function packagedShellAssets(
       protectedRoots: [],
       readonlyAssets: [],
       runtimeReadOnlyRoots: [
+        ...(officeCli ? [dirname(officeCli)] : []),
         ...(helper ? [dirname(helper)] : []),
         ...(officeSkills ? [officeSkills] : []),
       ],

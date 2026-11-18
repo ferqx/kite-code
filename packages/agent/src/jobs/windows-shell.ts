@@ -31,16 +31,98 @@ import { prepareShellOutputCollection, type ShellOutputCollection } from './outp
 import { ripgrepAsset } from './ripgrep';
 import type { TrustedWorkerLaunch } from './shell';
 import type { HostShellExecutionScopeResolver } from './shell-scope';
+import { windowsCommandLookup } from './windows-command-lookup';
 import {
   captureWindowsGitBashRuntime,
   stageWindowsGitBash,
   WindowsGitBashUnavailable,
 } from './windows-git-bash';
-import { discoverWindowsPowerShell, type WindowsPowerShell } from './windows-powershell';
+import {
+  discoverPreferredWindowsPowerShell,
+  powerShellLaunchIdentities,
+  type WindowsPowerShell,
+} from './windows-powershell';
 
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const protocol = 7;
 const maximumFrame = 16 * 1024 * 1024;
+const cleanupDiagnosticPrefix = 'kite-windows-runner[cleanup]: ';
+const cleanupDiagnosticLimit = 4096;
+const lookupOutputLimit = 4096;
+const cleanupHresultKeys = [
+  'exitCodeQuery',
+  'initialJobQuery',
+  'terminateJob',
+  'lastJobQuery',
+  'stdinReadClose',
+  'stdinWriteClose',
+  'stdoutWriteClose',
+  'stderrWriteClose',
+  'stdoutRead',
+  'stderrRead',
+  'stdoutReadClose',
+  'stderrReadClose',
+  'jobClose',
+] as const;
+const record = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+const nullableInteger = (value: unknown, min: number, max: number) =>
+  value === null ||
+  (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max);
+
+function validPipeDiagnostic(value: unknown): boolean {
+  const pipe = record(value);
+  return (
+    !!pipe &&
+    Object.keys(pipe).length === 2 &&
+    ['eof', 'read_failed', 'forward_failed', 'timed_out', 'panicked'].includes(
+      pipe.state as string,
+    ) &&
+    (pipe.state === 'timed_out'
+      ? pipe.handleClosed === null
+      : typeof pipe.handleClosed === 'boolean')
+  );
+}
+
+/** Retain only a bounded observation on the original runner's private stderr. */
+async function readNativeCleanup(stream: AsyncIterable<Uint8Array>): Promise<Json | undefined> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of stream) {
+    size += chunk.byteLength;
+    if (size <= cleanupDiagnosticLimit) chunks.push(Buffer.from(chunk));
+  }
+  if (size > cleanupDiagnosticLimit) return;
+  const lines = Buffer.concat(chunks).toString('utf8').split(/\r?\n/u);
+  const matches = lines.filter((line) => line.startsWith(cleanupDiagnosticPrefix));
+  if (matches.length !== 1) return;
+  try {
+    const value = record(JSON.parse(matches[0]!.slice(cleanupDiagnosticPrefix.length)));
+    const hresults = record(value?.hresults);
+    if (
+      !value ||
+      Object.keys(value).length !== 9 ||
+      !['process_exited', 'timed_out', 'cancelled'].includes(value.waitReason as string) ||
+      ![value.rootExitCode, value.activeBefore, value.activeAfter].every((number) =>
+        nullableInteger(number, 0, 0xffffffff),
+      ) ||
+      !validPipeDiagnostic(value.stdout) ||
+      !validPipeDiagnostic(value.stderr) ||
+      typeof value.jobHandleClosed !== 'boolean' ||
+      typeof value.aclCleanupConfirmed !== 'boolean' ||
+      !hresults ||
+      Object.keys(hresults).length !== cleanupHresultKeys.length ||
+      !cleanupHresultKeys.every((key) => nullableInteger(hresults[key], -0x80000000, 0x7fffffff))
+    )
+      return;
+    return value as Json;
+  } catch {
+    return;
+  }
+}
+
 const capabilitySid = () =>
   `S-1-5-21-${Array.from({ length: 4 }, () => randomBytes(4).readUInt32LE()).join('-')}`;
 const canonical = (value: unknown): string =>
@@ -54,7 +136,7 @@ const canonical = (value: unknown): string =>
       : JSON.stringify(value);
 
 export type WindowsShellBackend =
-  | { kind?: 'bash'; fullShellExecutable: string }
+  | { kind?: 'bash'; fullShellExecutable: string; bashVersion?: string }
   | {
       kind: 'powershell';
       powerShell: WindowsPowerShell;
@@ -89,7 +171,7 @@ export async function windowsShellAssets(
     if (digest(join(root, file)) !== hash) throw Error('windows_shell_asset_changed');
   const runner = join(root, 'kite-windows-runner.exe');
   const powerShellAssets = async (gitExecutable?: string) => {
-    const powerShell = await discoverWindowsPowerShell();
+    const powerShell = await discoverPreferredWindowsPowerShell();
     privateDirectory(stateRoot);
     return {
       runner,
@@ -97,7 +179,7 @@ export async function windowsShellAssets(
       windows: { kind: 'powershell' as const, stateRoot, powerShell, gitExecutable },
     };
   };
-  if (preference === 'powershell') {
+  if (preference === 'powershell' || preference === 'powershell-7') {
     const git = Bun.which('git');
     return powerShellAssets(
       git && isAbsolute(git) && /^git\.exe$/i.test(basename(git)) ? git : undefined,
@@ -112,11 +194,83 @@ export async function windowsShellAssets(
         kind: 'bash',
         stateRoot,
         fullShellExecutable: bash.fullShell,
+        bashVersion: await inspectGitBashVersion(runner, stateRoot, bash),
       },
     };
   } catch (error) {
     if (preference !== 'auto' || !(error instanceof WindowsGitBashUnavailable)) throw error;
     return powerShellAssets(error.gitExecutable);
+  }
+}
+
+/** Read the staged interpreter through the same restricted Job used for commands. */
+async function inspectGitBashVersion(
+  supervisorPath: string,
+  stateRoot: string,
+  bash: { shell: string; fullShell: string },
+): Promise<string | undefined> {
+  const signal = AbortSignal.timeout(5000);
+  const job = await createWindowsShellJob(
+    {
+      cwd: dirname(bash.shell),
+      controlBase: stateRoot,
+      stateRoot,
+      shellExecutable: bash.shell,
+      fullShellExecutable: bash.fullShell,
+      supervisorPath,
+      env: { LANG: 'C.UTF-8' },
+      executionScope: () => ({ filesystem: 'read_only', network: 'none' }),
+    },
+    signal,
+  ).catch((error: unknown) => {
+    if (error !== signal.reason) throw error;
+  });
+  if (!job) return;
+  let handle: JobHandle | undefined;
+  try {
+    handle = await job.start(
+      { command: `builtin printf '%s\\n' "$BASH_VERSION"` },
+      { sessionId: 'windows-shell-runtime', executionId: randomBytes(16).toString('hex'), signal },
+    );
+    let stdout = '';
+    for await (const event of job.observe(handle)) {
+      if (event.type === 'output_dropped' && event.stream === 'stdout') return;
+      if (event.type === 'output' && event.stream === 'stdout') {
+        stdout += event.content;
+        if (stdout.length > 128) return;
+      }
+      if (event.type === 'terminal' && event.result.outcome === 'succeeded' && !signal.aborted) {
+        const version = stdout.trim();
+        if (version.length <= 64 && /^\d+\.\d+\.\d+\(\d+\)-[a-z0-9-]+$/iu.test(version))
+          return version;
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof JobStartError)) throw error;
+    handle = error.handle;
+  } finally {
+    if (handle) await job.dispose(handle);
+  }
+  return undefined;
+}
+
+export function windowsUserLocale(): string | undefined {
+  try {
+    const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
+    const kernel = dlopen('kernel32.dll', {
+      GetUserDefaultLocaleName: { args: ['ptr', 'i32'], returns: 'i32' },
+    });
+    try {
+      const buffer = new Uint16Array(85); // LOCALE_NAME_MAX_LENGTH
+      const length = kernel.symbols.GetUserDefaultLocaleName(ptr(buffer), buffer.length);
+      if (length <= 1 || length > buffer.length) return;
+      const locale = Buffer.from(buffer.buffer, 0, (length - 1) * 2).toString('utf16le');
+      return /^[a-z0-9][a-z0-9_-]*$/iu.test(locale) ? locale : undefined;
+    } finally {
+      kernel.close();
+    }
+  } catch {
+    return undefined;
   }
 }
 interface State {
@@ -144,10 +298,11 @@ export type WindowsShellOptions = WindowsShellBackend & {
       };
   maxQueuedBytes?: number;
   /** Host-verified read execution details, never taken from Job input. */
-  readOnlyLaunch?: (
-    context: JobContext,
-  ) =>
-    | { pinRipgrep?: true; git?: { path: string; digest: string; argv?: readonly string[] } }
+  readOnlyLaunch?: (context: JobContext) =>
+    | {
+        pinRipgrep?: 'command' | 'script';
+        git?: { path: string; digest: string; argv?: readonly string[] };
+      }
     | undefined;
   trustedWorkerLaunch?: (
     command: string,
@@ -195,7 +350,7 @@ export async function createWindowsShellJob(
     (path, signal) => launchIdentityAsync(path, false, signal),
     signal,
   );
-  const verifyRuntime =
+  const bashRuntime =
     options.kind === 'powershell'
       ? undefined
       : await captureWindowsGitBashRuntime(
@@ -214,7 +369,7 @@ export async function createWindowsShellJob(
   return {
     id: 'shell.command',
     version: '1',
-    description: `${powerShell ? 'Windows PowerShell 5.1' : 'Git Bash'} with unelevated write-restricted filesystem access and owned Job supervision`,
+    description: `${powerShell ? `PowerShell ${powerShell.version}` : 'Git Bash'} with unelevated write-restricted filesystem access and owned Job supervision`,
     resources: { slot: 'process' },
     inputSchema: {
       type: 'object',
@@ -237,17 +392,13 @@ export async function createWindowsShellJob(
           )
             throw Error('invalid_shell_input');
           await verifyLaunchIdentitiesAsync(
-            [
-              ...assets,
-              ...roots,
-              ...(powerShell ? [powerShell.executable, powerShell.engine] : []),
-            ],
+            [...assets, ...roots, ...(powerShell ? powerShellLaunchIdentities(powerShell) : [])],
             context.signal,
           );
           const scope = options.executionScope(context);
           const readOnly =
             scope.filesystem === 'read_only' ? options.readOnlyLaunch?.(context) : undefined;
-          await verifyRuntime?.(scope.filesystem === 'full_access', context.signal);
+          await bashRuntime?.verify(scope.filesystem === 'full_access', context.signal);
           if (readOnly?.git) {
             const git = readOnly.git;
             const current = await launchIdentityAsync(git.path, true, context.signal);
@@ -290,6 +441,8 @@ export async function createWindowsShellJob(
           'COMSPEC',
           'PATHEXT',
           'PSMODULEPATH',
+          'POWERSHELL_TELEMETRY_OPTOUT',
+          'POWERSHELL_UPDATECHECK',
           'RIPGREP_CONFIG_PATH',
         ])
           replaced.add(key);
@@ -300,9 +453,15 @@ export async function createWindowsShellJob(
         HOME: env.HOME ?? env.USERPROFILE ?? temp,
         PATH: [
           dirname(search),
-          ...(powerShell
-            ? [powerShell.systemDirectory]
-            : [dirname(shell.canonical), join(dirname(shell.canonical), '../../mingw64/bin')]),
+          ...(bashRuntime
+            ? [
+                dirname(shell.canonical),
+                dirname(scope.filesystem === 'full_access' ? bashRuntime.fullGit : bashRuntime.git),
+              ]
+            : [
+                ...(powerShell!.installation ? [powerShell!.installation.root] : []),
+                powerShell!.systemDirectory,
+              ]),
           inheritedPath ?? '',
         ].join(';'),
       });
@@ -313,6 +472,8 @@ export async function createWindowsShellJob(
           ComSpec: join(powerShell.systemDirectory, 'cmd.exe'),
           PATHEXT: '.COM;.EXE;.BAT;.CMD',
           PSModulePath: join(dirname(shell.canonical), 'Modules'),
+          POWERSHELL_TELEMETRY_OPTOUT: '1',
+          POWERSHELL_UPDATECHECK: 'Off',
           TMPDIR: temp,
         });
       else env.TMPDIR = temp.replaceAll('\\', '/');
@@ -355,10 +516,13 @@ export async function createWindowsShellJob(
             ].join('\n')
           : undefined;
       const powerShellCommand = readOnly?.pinRipgrep
-        ? ['rg', 'rg.exe']
-            .map((name) => `Set-Alias -Name ${name} -Value ${shellLiteral(search)}`)
-            .concat(command)
-            .join('\n')
+        ? [
+            ...['rg', 'rg.exe'].map(
+              (name) => `Set-Alias -Name ${name} -Value ${shellLiteral(search)}`,
+            ),
+            command,
+            ...(readOnly.pinRipgrep === 'command' ? ['exit $LASTEXITCODE'] : []),
+          ].join('\n')
         : command;
       const request = {
         version: protocol,
@@ -379,7 +543,9 @@ export async function createWindowsShellJob(
         runtimeRoot: temp,
         shellRuntime: powerShell ? 'powershell' : 'bash',
         shellRuntimeDigest: `sha256:${shell.digest}`,
-        ...(!powerShell ? { shellRuntimeRoot: dirname(shell.canonical) } : {}),
+        ...(!powerShell || powerShell.installation
+          ? { shellRuntimeRoot: dirname(shell.canonical) }
+          : {}),
         // PowerShell and Windows MSYS exec both retain the interpreter while
         // the pinned Git runs. Its configured helpers have no third slot.
         maxProcesses: git ? 2 : 64,
@@ -484,6 +650,7 @@ export async function createWindowsShellJob(
         protocolFailed = true;
         void owner.stop({ graceMs: 0 }).catch(() => {});
       }, 5000);
+      let lookupOutput = '';
       const protocolReader = (async () => {
         let pending = Buffer.alloc(0);
         for await (const chunk of owner.stdout) {
@@ -545,7 +712,13 @@ export async function createWindowsShellJob(
                 outputInvalid = true;
                 void cancel().catch(() => {});
               }
-              if (content) enqueue({ type: 'output', stream: frame.type, content });
+              if (content) {
+                if (stream === 'stderr' && !trusted)
+                  lookupOutput = (lookupOutput + content.slice(-lookupOutputLimit)).slice(
+                    -lookupOutputLimit,
+                  );
+                enqueue({ type: 'output', stream: frame.type, content });
+              }
             } else if (frame.type === 'exit') {
               if (
                 payload.version !== protocol ||
@@ -564,15 +737,12 @@ export async function createWindowsShellJob(
         protocolFailed = true;
         void owner.stop({ graceMs: 0 }).catch(() => {});
       });
-      // Native diagnostics are not command output; drain without exposing private paths.
-      const diagnostics = (async () => {
-        for await (const _ of owner.stderr) {
-        }
-      })();
+      // Never interpret diagnostics as command output or as a completion proof.
+      const diagnostics = readNativeCleanup(owner.stderr).catch(() => undefined);
       void owner.exited.finally(() => clearTimeout(startupTimer)).catch(() => {});
       const done = (async () => {
         const code = await owner.exited;
-        await Promise.all([protocolReader, diagnostics]);
+        const [, nativeCleanup] = await Promise.all([protocolReader, diagnostics]);
         let evidence = await owner.stop({ graceMs: 0 });
         let confirmed =
           evidence.job.treeStopped &&
@@ -604,6 +774,26 @@ export async function createWindowsShellJob(
             outputInvalid = true;
           }
         }
+        const commandLookup =
+          released &&
+          confirmed &&
+          !trusted &&
+          !outputInvalid &&
+          !context.signal.aborted &&
+          terminal &&
+          terminal.error !== 'process_exit_status_unconfirmed' &&
+          !terminal.cancelled
+            ? windowsCommandLookup(
+                {
+                  stderr: lookupOutput,
+                  powerShell: !!powerShell,
+                  command,
+                  exitCode: terminal.exitCode as number,
+                  emptyStdout: terminal.stdoutBytes === 0,
+                },
+                env,
+              )
+            : undefined;
         const result: ToolResult = {
           outcome: !confirmed
             ? 'outcome_unknown'
@@ -622,10 +812,15 @@ export async function createWindowsShellJob(
                 ? 'Shell completed'
                 : 'windows_shell_not_dispatched',
           details: {
-            exitCode: (terminal?.exitCode ?? code) as Json,
+            exitCode:
+              terminal?.error === 'process_exit_status_unconfirmed'
+                ? null
+                : ((terminal?.exitCode ?? code) as Json),
             cleanupConfirmed: confirmed,
             processTreeStopped: evidence.job.treeStopped,
             ownedProcesses: evidence as unknown as Json,
+            ...(released && nativeCleanup ? { nativeCleanup } : {}),
+            ...(commandLookup ? { commandLookup } : {}),
           },
         };
         enqueue({ type: 'terminal', result, supervision: confirmed ? 'ended' : 'unknown' });

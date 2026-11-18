@@ -44,16 +44,20 @@ await prepareDocumentFont(destination);
 
 const skillsSource = resolve(import.meta.dir, '../../../assets/office');
 const skillsDestination = resolve(destination, '../../skills/office');
-for (const [name, skill] of Object.entries(officeSkills.skills)) {
-  for (const file of skill.files) {
-    const bytes = readFileSync(resolve(skillsSource, name, file.path));
-    if (
-      bytes.length !== file.bytes ||
-      createHash('sha256').update(bytes).digest('hex') !== file.sha256
-    )
-      throw Error(`office_skill_asset_mismatch:${name}/${file.path}`);
-    const output = resolve(skillsDestination, name, file.path);
-    mkdirSync(dirname(output), { recursive: true });
-    writeFileSync(output, bytes);
-  }
+const skillFiles = [
+  ...officeSkills.sharedFiles,
+  ...Object.values(officeSkills.skills).flatMap(({ directory, files }) =>
+    files.map((file) => ({ ...file, path: `${directory}/${file.path}` })),
+  ),
+];
+for (const file of skillFiles) {
+  const bytes = readFileSync(resolve(skillsSource, file.path));
+  if (
+    bytes.length !== file.bytes ||
+    createHash('sha256').update(bytes).digest('hex') !== file.sha256
+  )
+    throw Error(`office_skill_asset_mismatch:${file.path}`);
+  const output = resolve(skillsDestination, file.path);
+  mkdirSync(dirname(output), { recursive: true });
+  writeFileSync(output, bytes);
 }

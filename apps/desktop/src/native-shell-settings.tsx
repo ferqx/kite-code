@@ -8,9 +8,8 @@ import type {
 import { NativeSettingsSelect } from './native-settings-select';
 
 const names = {
-  auto: '自动（推荐）',
-  'git-bash': 'Git Bash',
-  powershell: 'Windows PowerShell 5.1',
+  'git-bash': 'Git Shell',
+  powershell: 'PowerShell',
 };
 
 export function NativeShellSettings({
@@ -68,13 +67,18 @@ export function NativeShellSettings({
     return () => observation.current?.abort();
   }, [refresh]);
 
+  const choices = ['git-bash', 'powershell'] as const;
   const options =
     facts &&
-    (['auto', 'git-bash', 'powershell'] as const).map((value) => {
+    choices.map((value) => {
       const disabled =
         (value === 'git-bash' && !facts.gitBashAvailable) ||
         (value === 'powershell' && !facts.powerShellAvailable);
-      return { value, label: disabled ? `${names[value]}（不可用）` : names[value], disabled };
+      const name =
+        value === 'powershell' && facts.powerShellVersion
+          ? `PowerShell ${facts.powerShellVersion}`
+          : names[value];
+      return { value, label: disabled ? `${name}（不可用）` : name, disabled };
     });
   async function save(preference: string) {
     const choice = options?.find((option) => option.value === preference && !option.disabled);
@@ -114,11 +118,7 @@ export function NativeShellSettings({
           <strong>集成终端 Shell</strong>
         </label>
         <small id={`${id}-hint`}>
-          更改后仅对新会话生效。
-          {facts?.preference === 'auto' &&
-            facts.automatic &&
-            ` 自动当前使用 ${names[facts.automatic]}。`}
-          {facts?.preference === 'auto' && !facts.automatic && ' 自动当前没有可用的 Shell。'}
+          更改类型后仅对新会话生效。PowerShell 使用本机最高可用版本。
           {selectedUnavailable && ' 所选 Shell 当前不可用，请选择其他环境。'}
         </small>
         {pending && <small role="status">正在保存…</small>}

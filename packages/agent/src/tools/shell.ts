@@ -26,6 +26,11 @@ export interface ShellToolsOptions {
   /** Only trusted scope-aware host assembly registers this optional request. */
   readonly permissionsSchema?: Json;
   readonly dialect?: 'git-bash' | 'powershell';
+  readonly powerShellVersion?: string;
+  readonly powerShellEdition?: 'Desktop' | 'Core';
+  readonly gitBashVersion?: string;
+  readonly windowsUserLocale?: string;
+  readonly outputCollection?: true;
   readonly classifyPresentation?: (command: string) => Promise<'exploration' | 'standalone'>;
   /** Internal workers consume a machine-readable frame rather than a Shell preview. */
   readonly preserveJobOutput?: (input: Json) => boolean;
@@ -126,12 +131,36 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
   const scopeGuidance = options.permissionsSchema
     ? ' filesystem and network are independent requested scopes, not authorization results. Omitted filesystem requests workspace_write; omitted network requests none. network:internet includes localhost, 127.0.0.1, ::1, LAN and Internet access. Risk approval does not grant networking to a network:none request. filesystem:full_access requests outside-workspace writes; it does not select Full approval mode or remove protected-path restrictions. In Request Approval and Auto, policy must authorize the requested scope. Ordinary Full sets its effective scope by mode; hard ceilings still apply. A failed command is never automatically rerun with wider permissions.'
     : '';
+  const powerShellVersion = options.powerShellVersion ?? '(version not reported)';
+  const windowsPowerShell = options.powerShellEdition === 'Desktop';
+  const gitBashVersion = options.gitBashVersion ? ` ${options.gitBashVersion}` : '';
+  const locale = options.windowsUserLocale
+    ? ` Windows user locale is ${options.windowsUserLocale}.`
+    : '';
+  const windowsTextGuidance = options.dialect
+    ? `${locale} Kite reads stdout and stderr as UTF-8. Command messages, regional formats, and output encoding can vary by program. Prefer exit codes and structured output. Use the program's language or locale option when the task specifies one.`
+    : '';
   const dialectGuidance =
     options.dialect === 'powershell'
-      ? ' The command language is Windows PowerShell 5.1. Use PowerShell cmdlets and Windows paths, for example Get-ChildItem -Name, Get-Content -LiteralPath and rg.exe --files. Use PowerShell 5.1 statement and pipeline syntax. Supply -UseBasicParsing for Invoke-WebRequest and request internet scope for network commands.'
+      ? ` The command language is ${windowsPowerShell ? 'Windows ' : ''}PowerShell ${powerShellVersion}. Use PowerShell cmdlets and Windows paths, for example Get-ChildItem -Name, Get-Content -LiteralPath and rg.exe --files. For each required native step in a compound script or dynamic invocation, check $LASTEXITCODE immediately and exit with it on failure. Pass structured data by stdin or file when the program supports it.${windowsPowerShell ? ' Supply -UseBasicParsing for Invoke-WebRequest.' : ''} Request internet scope for network commands.`
       : options.dialect === 'git-bash'
-        ? ' The command language is Git Bash on Windows.'
+        ? ` The command language is Git Bash${gitBashVersion} on Windows. Check required steps before continuing. Use pipefail when every stage of a pipeline must succeed.`
         : '';
+  const environmentGuidance =
+    ' Each execution starts a fresh process in the session execution root or requested workdir. Directory changes and environment assignments do not carry across calls. Keep intermediate files needed by later Jobs in the workspace.';
+  const lookupGuidance = options.dialect
+    ? ` To check an uncertain executable, run ${options.dialect === 'powershell' ? 'Get-Command NAME' : 'type NAME'} as a standalone probe and keep its diagnostics. If the result gives an absolute candidate path, check it with the program's supported version probe before considering installation.`
+    : ' If a required program is uncertain, check command resolution and a supported version probe in the same Job before using it.';
+  const windowsProcessGuidance = options.dialect
+    ? ' On Windows, Kite stops remaining child processes when the command exits, including with background:true. Before splitting a stateful workflow, identify where each step will save its data to disk. Start and use local helpers within the same running command, then flush their changes and close them before it exits. Reopen the saved file from disk in the next call before further edits or delivery. Default local named pipes can deny bidirectional access under workspace_write. When available, select the CLI’s supported single-process or standalone batch mode before execution. After a sharing violation, verify what was saved and wait for the process holding the file to release it before retrying.'
+    : '';
+  const windowsPipeScopeGuidance =
+    options.dialect && options.permissionsSchema
+      ? ' If an operation requires bidirectional access to a local named pipe denied under workspace_write, request filesystem:full_access for that command through the existing authorization flow. Keep network:none for IPC that uses only local named pipes.'
+      : '';
+  const outputGuidance = options.outputCollection
+    ? ' KITE_OUTPUT_DIR belongs to the current Job. Put only verified final files there in the delivery call. Use $env:KITE_OUTPUT_DIR in PowerShell and $KITE_OUTPUT_DIR in POSIX shells. Files from a failed Job are not delivered.'
+    : '';
   const searchGuidance =
     'Prefer rg for text search and rg --files for file discovery. Use alternatives when rg is unavailable.';
   const outputTokens = {
@@ -152,7 +181,9 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           type: 'string',
           minLength: 1,
           maxLength: 262144,
-          ...(dialectGuidance ? { description: dialectGuidance.trim() } : {}),
+          ...(dialectGuidance
+            ? { description: (dialectGuidance + windowsTextGuidance).trim() }
+            : {}),
         },
         workdir: {
           type: 'string',
@@ -317,7 +348,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           omitParameters: ['key', 'permissions', 'cancellation', 'timeoutMs'],
         },
         version: '1',
-        description: `Execute one supervised command.${dialectGuidance} ${searchGuidance} Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
+        description: `Execute one supervised command.${dialectGuidance}${windowsTextGuidance}${environmentGuidance}${lookupGuidance}${windowsProcessGuidance}${outputGuidance} ${searchGuidance} Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}${windowsPipeScopeGuidance}`,
         inputSchema: schema(true),
         async execute(input, context) {
           const parsed = parseShellCommandInput(input, 'execute', !!options.permissionsSchema);
@@ -358,7 +389,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         id: 'shell.launch',
         model: { name: 'shell_launch', snakeCase: true, hidden: true },
         version: '1',
-        description: `Start one supervised command.${dialectGuidance} Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion. execution_id identifies the original Tool call for evidence and plan progress; shell_id is its compact handle for shell_read, shell_wait and shell_stop. Copy returned identities exactly.${scopeGuidance}`,
+        description: `Start one supervised command.${dialectGuidance}${windowsTextGuidance} Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion. execution_id identifies the original Tool call for evidence and plan progress; shell_id is its compact handle for shell_read, shell_wait and shell_stop. Copy returned identities exactly.${scopeGuidance}`,
         inputSchema: schema(false),
         async execute(input, context) {
           const launched = await launch(input, context, 'launch');

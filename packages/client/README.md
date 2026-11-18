@@ -169,6 +169,8 @@ Browser 可选 `runs` 提供 `getRun(sessionId,runId,{signal?})`，固定 GET `/
 
 公开 `verifyModelInputSnapshot(value,signal?)` 和 `verifyModelOutputSnapshot(value,signal?)` 可供有限 IPC 的正文交接使用：先克隆原对象，静态校验 DTO、Decimal64 root work/cursor、canonical bytes/hash 和完整身份，再检查取消；调用者在 hash 等待期间修改原 alias 不能改写返回值。流读取也调用同一 verifier，不产生 renderer 专用宽松验证或 Runtime 权威。共享 [ModelInputs](../../packages/ui/src/model-input.tsx)只依赖这个公共 port，Native/Browser 均先确认敏感正文再读取。
 
+Model 输入消息的可选 `images` 保留原 `mediaType/data`，参加完整请求的 canonical size/SHA 校验。2026-11-18 的带图历史读取失败通过补全 Service 响应 schema 和生成 DTO 修复，未放宽完整性检查。实际图片经 Core 与 Service 投影后的保真及图片篡改拒绝由 [Service 图片回归](../../apps/service/test/isolated/image-reading.test.ts)验证。
+
 `getModelOutput(sessionId,executionId,{expectedStoreId?,signal?})` 在 Native 与 Browser 需要 `model_outputs`；Browser 只使用原准入 Store。公开 `Message.outputBody` 标明完整或不完整预览与实际字节量，全文返回原目标的 `ModelOutputSnapshot`，不会暴露内部 Artifact head。reader 复用完整 wire 验证，并通过 [model-output.ts](src/model-output.ts) 的公开 `verifyModelOutputSnapshot` 核实 canonical output hash/size、content/reasoning UTF-8 字节、状态与完整性；完整 Tool calls 只出现在成功输出，不完整前缀保持 `complete=false`。Node main/preload 可有限分块传输同一公开 snapshot，再由 renderer 用同一 verifier 完整核验，不能靠 IPC chunk 自报成功。 内部权限检查和标题 Model 没有聊天 Message，完整原输出仍由相同 reader 读取；Core 另核原用途、封存输入和完成结果证明，客户端不能按 `runId:null` 自行授予读取或执行资格。
 
 局部取消、dispose 与关闭展示只释放所属 GET，不提交业务取消或推进 SSE cursor。[输出 Client 测试](test/isolated/model-output.test.ts) 3/31 覆盖完整正文、reasoning/calls、错误 EOF/hash/byte accounting/身份、停住的 producer 释放与零 POST；[实际 Core/Native/Cookie](../../tests/isolated/unified-agent/model-output.test.ts) 1/39 证明 17MiB 原文与冷历史只读。输入、输出和实际 settings/controls HTTP 组合 12/173 通过；这些证据不代替正式客户端与平台资格。

@@ -1,12 +1,16 @@
 import { lstat } from 'node:fs/promises';
 import { win32 } from 'node:path';
 import { verifyLaunchIdentitiesAsync } from '../jobs/launch-identity';
-import { runWindowsPowerShellInspection, type WindowsPowerShell } from '../jobs/windows-powershell';
+import {
+  powerShellLaunchIdentities,
+  runWindowsPowerShellInspection,
+  type WindowsPowerShell,
+} from '../jobs/windows-powershell';
 import { AgentError } from '../storage/types';
 import { readOnlyRipgrepPaths } from './shell-search';
 import { windowsGitQuery } from './windows-git-read';
 
-// ParseInput is the 5.1 parser from the selected system executable. The helper
+// ParseInput comes from the same PowerShell installation as the job. The helper
 // projects syntax only. It never resolves a model-supplied name by importing a module.
 const inspectAst = `
 function Get-Literal($node, $allowNumber = $false) {
@@ -439,7 +443,7 @@ export interface PowerShellAssessment {
 
 export interface PowerShellClassification extends PowerShellAssessment {
   readonly entryScript?: string;
-  readonly pinRipgrep?: true;
+  readonly pinRipgrep?: 'command' | 'script';
   readonly gitQuery?: readonly string[];
 }
 
@@ -449,7 +453,7 @@ export function createPowerShellCommandPolicy(
   rg: string,
   gitAvailable = false,
 ) {
-  const identities = [shell.executable, shell.engine];
+  const identities = powerShellLaunchIdentities(shell);
   const cache = new Map<string, Syntax>();
   const systemRoot = win32.dirname(shell.systemDirectory);
   const bundledRg = rg.toLowerCase().replaceAll('/', '\\');
@@ -598,7 +602,14 @@ export function createPowerShellCommandPolicy(
         denial,
         readOnly,
         ...(syntax.entryScript ? { entryScript: syntax.entryScript } : {}),
-        ...(readOnly && pinRipgrep ? { pinRipgrep: true } : {}),
+        ...(readOnly && pinRipgrep
+          ? {
+              pinRipgrep:
+                syntax.commands.length === 1 && syntax.commands[0]?.bareStatement
+                  ? ('command' as const)
+                  : ('script' as const),
+            }
+          : {}),
         ...(readOnly && gitQuery ? { gitQuery } : {}),
       };
     },

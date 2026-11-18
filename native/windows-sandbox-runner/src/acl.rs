@@ -11,7 +11,7 @@ use windows::Win32::Security::{
     AclSizeInformation, AddAccessAllowedAceEx, AddAccessDeniedAceEx, AddAce, GetAce,
     GetAclInformation, GetLengthSid, GetSecurityDescriptorLength, InitializeAcl, IsValidAcl,
     IsValidSid, SetFileSecurityW, ACE_FLAGS, ACL, ACL_REVISION, ACL_SIZE_INFORMATION,
-    CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
+    CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, INHERIT_ONLY_ACE, OBJECT_INHERIT_ACE,
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
 };
 
@@ -19,6 +19,8 @@ pub const ACCESS_ALLOWED_ACE_TYPE: u8 = 0x00;
 pub const ACCESS_DENIED_ACE_TYPE: u8 = 0x01;
 
 pub const CONTAINER_AND_OBJECT_INHERIT: u32 = CONTAINER_INHERIT_ACE.0 | OBJECT_INHERIT_ACE.0;
+const FILE_WRITE_DAC: u32 = 0x0004_0000;
+const FILE_ONLY_INHERIT: u32 = OBJECT_INHERIT_ACE.0 | INHERIT_ONLY_ACE.0;
 
 #[derive(Debug)]
 pub struct AclError {
@@ -217,6 +219,24 @@ pub fn restore_dacl_snapshot(snapshot: &DaclSnapshot) -> Result<(), AclError> {
 /// DACL writes complete, and ACL edits made later by the trusted host require
 /// explicit repair/reinitialization.
 pub fn has_ace_for_sid(path: &str, sid: PSID, ace_type: u8) -> Result<bool, AclError> {
+    let target_sid = sid_bytes(sid);
+    has_ace(path, |ace| {
+        ace_matches_sid_and_type(ace, &target_sid, ace_type)
+    })
+}
+
+/// The file-only ACE is also the upgrade marker for existing Workspace ledgers.
+/// Its fixed WRITE_DAC bit is unchanged by Windows' generic-access mapping.
+pub fn has_workspace_file_write_dac(path: &str, sid: PSID) -> Result<bool, AclError> {
+    let target_sid = sid_bytes(sid);
+    has_ace(path, |ace| {
+        ace_matches_sid_and_type(ace, &target_sid, ACCESS_ALLOWED_ACE_TYPE)
+            && u32::from(ace[1]) & FILE_ONLY_INHERIT == FILE_ONLY_INHERIT
+            && u32::from_le_bytes(ace[4..8].try_into().unwrap()) & FILE_WRITE_DAC == FILE_WRITE_DAC
+    })
+}
+
+fn has_ace(path: &str, matches: impl Fn(&[u8]) -> bool) -> Result<bool, AclError> {
     unsafe {
         let (dacl, _, _, descriptor) = get_path_dacl(path)?;
         if dacl.is_null() {
@@ -233,7 +253,6 @@ pub fn has_ace_for_sid(path: &str, sid: PSID, ace_type: u8) -> Result<bool, AclE
                     message: "unable to read DACL state".to_string(),
                 })?
                 .ace_count;
-            let target_sid = sid_bytes(sid);
             for index in 0..count {
                 let mut ace: *mut core::ffi::c_void = std::ptr::null_mut();
                 GetAce(dacl, index, &mut ace).map_err(|error| AclError {
@@ -241,7 +260,7 @@ pub fn has_ace_for_sid(path: &str, sid: PSID, ace_type: u8) -> Result<bool, AclE
                     message: format!("GetAce failed: {error}"),
                 })?;
                 let bytes = std::slice::from_raw_parts(ace as *const u8, ace_size_bytes(ace));
-                if ace_matches_sid_and_type(bytes, &target_sid, ace_type) {
+                if matches(bytes) {
                     return Ok(true);
                 }
             }
@@ -284,6 +303,22 @@ fn write_dacl_with_ace(
     security_information: windows::Win32::Security::OBJECT_SECURITY_INFORMATION,
     cancel: Option<&dyn Fn() -> bool>,
 ) -> Result<(), AclError> {
+    write_dacl_with_aces(
+        path,
+        sid,
+        &[(access, flags, ace_type)],
+        security_information,
+        cancel,
+    )
+}
+
+fn write_dacl_with_aces(
+    path: &str,
+    sid: PSID,
+    grants: &[(u32, u32, u8)],
+    security_information: windows::Win32::Security::OBJECT_SECURITY_INFORMATION,
+    cancel: Option<&dyn Fn() -> bool>,
+) -> Result<(), AclError> {
     unsafe {
         let (existing_dacl, owner, group, descriptor) = get_path_dacl(path)?;
         if existing_dacl.is_null() {
@@ -296,8 +331,9 @@ fn write_dacl_with_ace(
         let state = read_dacl_state(existing_dacl).unwrap_or_default();
         let sid_length = GetLengthSid(sid) as usize;
         let new_ace_size = 8 + align4(sid_length) as usize;
-        let total_size =
-            state.acl_bytes_in_use as usize + new_ace_size + std::mem::size_of::<ACL>();
+        let total_size = state.acl_bytes_in_use as usize
+            + new_ace_size * grants.len()
+            + std::mem::size_of::<ACL>();
         let mut buffer = vec![0u8; total_size];
         let new_dacl = buffer.as_mut_ptr() as *mut ACL;
         if let Err(error) = InitializeAcl(new_dacl, total_size as u32, ACL_REVISION) {
@@ -308,7 +344,10 @@ fn write_dacl_with_ace(
             });
         }
 
-        if ace_type == ACCESS_DENIED_ACE_TYPE {
+        for &(access, flags, ace_type) in grants {
+            if ace_type != ACCESS_DENIED_ACE_TYPE {
+                continue;
+            }
             if let Err(error) =
                 AddAccessDeniedAceEx(new_dacl, ACL_REVISION, ACE_FLAGS(flags), access, sid)
             {
@@ -335,7 +374,7 @@ fn write_dacl_with_ace(
                     .map(|bytes| bytes == target_sid)
                     .unwrap_or(false);
                 // The invocation SID is unique; remove any stale ACE for it
-                // before adding the one canonical grant below.
+                // before adding the canonical grants below.
                 if matches {
                     continue;
                 }
@@ -343,22 +382,18 @@ fn write_dacl_with_ace(
             }
         }
 
-        let result = if ace_type == ACCESS_ALLOWED_ACE_TYPE {
-            AddAccessAllowedAceEx(new_dacl, ACL_REVISION, ACE_FLAGS(flags), access, sid)
-        } else {
-            Ok(())
-        };
-        if let Err(error) = result {
-            let _ = LocalFree(descriptor);
-            let operation = if ace_type == ACCESS_ALLOWED_ACE_TYPE {
-                "AddAccessAllowedAceEx"
-            } else {
-                "AddAccessDeniedAceEx"
-            };
-            return Err(AclError {
-                path: path.to_string(),
-                message: format!("{operation} failed: {error}"),
-            });
+        for &(access, flags, ace_type) in grants {
+            if ace_type == ACCESS_ALLOWED_ACE_TYPE {
+                if let Err(error) =
+                    AddAccessAllowedAceEx(new_dacl, ACL_REVISION, ACE_FLAGS(flags), access, sid)
+                {
+                    let _ = LocalFree(descriptor);
+                    return Err(AclError {
+                        path: path.to_string(),
+                        message: format!("AddAccessAllowedAceEx failed: {error}"),
+                    });
+                }
+            }
         }
 
         let mut progress = cancel.map(|cancel| TreeProgress {
@@ -431,6 +466,30 @@ pub fn grant_access_cancellable(
         access,
         CONTAINER_AND_OBJECT_INHERIT,
         ACCESS_ALLOWED_ACE_TYPE,
+        DACL_SECURITY_INFORMATION,
+        Some(cancel),
+    )
+}
+
+/// Preserve the directory grant while letting Workspace files retain their
+/// destination ACL during ReplaceFileW. Directories receive no effective WRITE_DAC.
+pub fn grant_workspace_access_cancellable(
+    path: &str,
+    sid: PSID,
+    access: u32,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), AclError> {
+    write_dacl_with_aces(
+        path,
+        sid,
+        &[
+            (
+                access,
+                CONTAINER_AND_OBJECT_INHERIT,
+                ACCESS_ALLOWED_ACE_TYPE,
+            ),
+            (FILE_WRITE_DAC, FILE_ONLY_INHERIT, ACCESS_ALLOWED_ACE_TYPE),
+        ],
         DACL_SECURITY_INFORMATION,
         Some(cancel),
     )

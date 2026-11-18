@@ -204,10 +204,11 @@ pub fn prepare_direct_workspace(
                             source.to_string(),
                         )
                     })?;
-                acl::grant_access(
+                acl::grant_workspace_access_cancellable(
                     &workspace_root,
                     workspace_capability.as_psid(),
                     WORKSPACE_ALLOW,
+                    cancel,
                 )
                 .map_err(|source| error("restricted_token_acl_grant_failed", source.to_string()))?;
                 for path in existing_workspace_protected_paths(&workspace_root, protected_paths) {
@@ -440,12 +441,9 @@ fn ensure_persistent_workspace_capability_at(
             write_ledger(&path, &ledger)?;
         }
 
-        let workspace_grant_present = acl::has_ace_for_sid(
-            workspace_root,
-            capability.as_psid(),
-            acl::ACCESS_ALLOWED_ACE_TYPE,
-        )
-        .map_err(|source| error("restricted_token_acl_grant_failed", source.to_string()))?;
+        let workspace_grant_present =
+            acl::has_workspace_file_write_dac(workspace_root, capability.as_psid())
+                .map_err(|source| error("restricted_token_acl_grant_failed", source.to_string()))?;
         // A root ACE can survive an interrupted propagation. It is not proof
         // that existing descendants inherited it; replay every incomplete setup.
         if !workspace_grant_present || !ledger.setup_complete {
@@ -453,7 +451,7 @@ fn ensure_persistent_workspace_capability_at(
                 ledger.setup_complete = false;
                 write_ledger(&path, &ledger)?;
             }
-            let granted = acl::grant_access_cancellable(
+            let granted = acl::grant_workspace_access_cancellable(
                 workspace_root,
                 capability.as_psid(),
                 WORKSPACE_ALLOW,
@@ -813,6 +811,79 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn ready_legacy_workspace_upgrades_file_replacement_grant_once() {
+        use std::cell::Cell;
+        let parent = fs::canonicalize(std::env::temp_dir()).unwrap();
+        let root = parent.join(format!(
+            "kite-file-replacement-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let workspace = root.join("workspace");
+        let nested = workspace.join("existing");
+        fs::create_dir_all(&nested).unwrap();
+        let file = nested.join("source.txt");
+        fs::write(&file, b"original").unwrap();
+        for index in 0..64 {
+            fs::write(nested.join(format!("existing-{index}.txt")), b"original").unwrap();
+        }
+        let workspace = fs::canonicalize(workspace)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let ledger_path = root.join("state.json");
+        let original =
+            ensure_persistent_workspace_capability_at(&workspace, &[], &|| false, &ledger_path)
+                .unwrap();
+
+        // A ready ledger from an earlier binary has only the ordinary write grant.
+        acl::grant_access(&workspace, original.as_psid(), WORKSPACE_ALLOW).unwrap();
+        assert!(
+            load_ledger(&ledger_path, &workspace)
+                .unwrap()
+                .setup_complete
+        );
+        assert!(!acl::has_workspace_file_write_dac(&workspace, original.as_psid()).unwrap());
+
+        let checks = Cell::new(0);
+        let cancelled = || {
+            checks.set(checks.get() + 1);
+            checks.get() >= 16
+        };
+        let interrupted =
+            ensure_persistent_workspace_capability_at(&workspace, &[], &cancelled, &ledger_path)
+                .err()
+                .unwrap();
+        assert_eq!(interrupted.code, PREPARATION_CANCELLED);
+        let incomplete = load_ledger(&ledger_path, &workspace).unwrap();
+        assert!(!incomplete.setup_complete);
+        assert_eq!(incomplete.capability_sid, original.to_string());
+
+        let upgraded =
+            ensure_persistent_workspace_capability_at(&workspace, &[], &|| false, &ledger_path)
+                .unwrap();
+        assert_eq!(upgraded.to_string(), original.to_string());
+        assert!(acl::has_workspace_file_write_dac(&workspace, upgraded.as_psid()).unwrap());
+        assert!(
+            acl::has_workspace_file_write_dac(&nested.to_string_lossy(), upgraded.as_psid(),)
+                .unwrap()
+        );
+        assert_eq!(fs::read(&file).unwrap(), b"original");
+        let ready_ledger = fs::read(&ledger_path).unwrap();
+        let ready_dacl = acl::snapshot_dacl(&workspace).unwrap().descriptor;
+
+        ensure_persistent_workspace_capability_at(&workspace, &[], &|| false, &ledger_path)
+            .unwrap();
+        assert_eq!(fs::read(&ledger_path).unwrap(), ready_ledger);
+        assert_eq!(
+            acl::snapshot_dacl(&workspace).unwrap().descriptor,
+            ready_dacl
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn interrupted_inheritance_with_a_root_ace_is_resumed_before_setup_completes() {

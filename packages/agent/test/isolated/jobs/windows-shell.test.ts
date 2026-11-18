@@ -43,13 +43,14 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {existsSync,mkdirSync,mkdtempSync,readdirSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 const root=mkdtempSync(join(tmpdir(),'kite-windows-admission-'));
 const control=join(root,'control');mkdirSync(control);
 writeFileSync(join(root,'runner.exe'),'fixture');
-const files=['bash.exe','ls.exe','msys-2.0.dll','ktipc.dll'].map(name=>({name:'usr/bin/'+name,
+const files=['usr/bin/bash.exe','usr/bin/ls.exe','usr/bin/msys-2.0.dll','usr/bin/ktipc.dll',
+ 'runtime/bin/git.exe','runtime/libexec/git-core/git-remote-http.exe'].map(name=>({name,
  sourceSha256:createHash('sha256').update('fixture').digest('hex'),sha256:createHash('sha256').update('fixture').digest('hex')}));
-for(const base of [root,join(root,'full')]){mkdirSync(join(base,'usr/bin'),{recursive:true});for(const file of files)writeFileSync(join(base,file.name),'fixture');}
+for(const base of [root,join(root,'full')])for(const file of files){mkdirSync(join(base,dirname(file.name)),{recursive:true});writeFileSync(join(base,file.name),'fixture');}
 writeFileSync(join(root,'manifest.json'),JSON.stringify({identity:createHash('sha256').update(JSON.stringify(files)).digest('hex'),files}));
 let request,finish,unblock,lateFrame,closed=0,stopCalls=0;
 const writes=[];
@@ -135,6 +136,7 @@ native(
         command: string,
         filesystem: 'read_only' | 'workspace_write' | 'full_access',
         cwd = workspace,
+        pinRipgrep?: 'command' | 'script',
       ) => {
         const job = await createWindowsShellJob({
           kind: 'powershell',
@@ -150,6 +152,7 @@ native(
           ),
           env: { PATH: powerShell.systemDirectory, USERPROFILE: root },
           executionScope: () => ({ filesystem, network: 'none' }),
+          readOnlyLaunch: () => (pinRipgrep ? { pinRipgrep } : undefined),
         });
         const context = {
           executionId: crypto.randomUUID(),
@@ -159,14 +162,16 @@ native(
         const handle = await job.start({ command }, context as JobContext);
         let result: ToolResult | undefined;
         let output = '';
+        let stderr = '';
         for await (const event of job.observe(handle)) {
           if (event.type === 'output' && event.stream === 'stdout') output += event.content;
+          if (event.type === 'output' && event.stream === 'stderr') stderr += event.content;
           if (event.type === 'terminal') result = event.result;
         }
         await job.dispose(handle);
         expect(result?.details).toMatchObject({ cleanupConfirmed: true, processTreeStopped: true });
         expect(readdirSync(controlBase)).toEqual([]);
-        return { result, output };
+        return { result, output, stderr };
       };
       const wrote = await run(
         "Set-Content -LiteralPath '中文.txt' -Value '你好' -Encoding utf8; rg.exe --no-config '你好' '中文.txt'",
@@ -174,6 +179,69 @@ native(
       );
       expect(wrote.result?.outcome).toBe('succeeded');
       expect(wrote.output).toContain('你好');
+      const scriptText = [
+        '$messages = [System.Collections.Generic.List[string]]::new()',
+        'function Add-Message { $script:messages.Add("script scope") }',
+        'Add-Message',
+        '$application = $true',
+        '$succeeded = $false',
+        'cmd.exe /d /c "exit 7"',
+        'Write-Output $messages[0]',
+      ].join('\n');
+      const systemShell = spawnSync(
+        powerShell.executable.canonical,
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-EncodedCommand',
+          Buffer.from(scriptText, 'utf16le').toString('base64'),
+        ],
+        { encoding: 'utf8', windowsHide: true },
+      );
+      expect(systemShell.status, systemShell.stderr).toBe(0);
+      expect(systemShell.stdout.trim()).toBe('script scope');
+      const scopedScript = await run(scriptText, 'workspace_write');
+      expect(scopedScript.result, scopedScript.stderr).toMatchObject({
+        outcome: 'succeeded',
+        details: { exitCode: 0 },
+      });
+      expect(scopedScript.output.trim()).toBe(systemShell.stdout.trim());
+      const direct = await run('cmd.exe /d /c "exit 7"', 'workspace_write');
+      expect(direct.result).toMatchObject({ outcome: 'failed', details: { exitCode: 7 } });
+      const handled = await run(
+        'cmd.exe /d /c "exit 7"; if ($LASTEXITCODE -eq 7) { Write-Output "handled" }',
+        'workspace_write',
+      );
+      expect(handled.result).toMatchObject({ outcome: 'succeeded', details: { exitCode: 0 } });
+      expect(handled.output).toContain('handled');
+      const explicit = await run(
+        'cmd.exe /d /c "exit 7"; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output "unreachable"',
+        'workspace_write',
+      );
+      expect(explicit.result).toMatchObject({ outcome: 'failed', details: { exitCode: 7 } });
+      expect(explicit.output).not.toContain('unreachable');
+      const missing = await run('kite-native-command-unavailable-fixture.exe', 'workspace_write');
+      expect(missing.result).toMatchObject({ outcome: 'failed', details: { exitCode: 127 } });
+      expect(missing.stderr).toContain('CommandNotFoundException');
+      writeFileSync(join(workspace, '无法启动 文件.exe'), 'not a PE executable');
+      const invalid = await run("& '.\\无法启动 文件.exe'", 'workspace_write');
+      expect(invalid.result).toMatchObject({ outcome: 'failed', details: { exitCode: 126 } });
+      expect(invalid.stderr).toContain('ApplicationFailedException');
+      const pinned = await run(
+        "rg.exe --no-config '不存在' '中文.txt'",
+        'read_only',
+        workspace,
+        'command',
+      );
+      expect(pinned.result).toMatchObject({ outcome: 'failed', details: { exitCode: 1 } });
+      const pipeline = await run(
+        "rg.exe --no-config '不存在' '中文.txt' | Out-String",
+        'read_only',
+        workspace,
+        'script',
+      );
+      expect(pipeline.result).toMatchObject({ outcome: 'failed', details: { exitCode: 1 } });
       const read = await run(
         "Get-Content -LiteralPath '中文.txt'; Set-Content -LiteralPath 'blocked.txt' -Value blocked",
         'read_only',
@@ -204,7 +272,7 @@ native(
       removeTemporaryDirectory(root);
     }
   },
-  25000,
+  40000,
 );
 native(
   'Windows unelevated Git Bash runs bundled rg, forks and pipelines with empty ambient PATH while external writes require Full',
@@ -333,6 +401,35 @@ native(
         ownedProcesses: { closed: true, closeUnknown: false },
       });
       expect(ordinary.output).toContain('2\n');
+      const heredocBody = '中文 🪁 $literal "quoted" \\path\n'.repeat(640);
+      const heredoc = await execute(
+        `set -e\nwc -c <<'EOF'\n${heredocBody}EOF\nprintf 'heredoc-end\\n'`,
+      );
+      expect(heredoc.result, heredoc.output).toMatchObject({
+        outcome: 'succeeded',
+        details: { exitCode: 0, cleanupConfirmed: true, processTreeStopped: true },
+      });
+      expect(heredoc.output.trim().split(/\s+/u)).toEqual([
+        String(Buffer.byteLength(heredocBody)),
+        'heredoc-end',
+      ]);
+      const longScript = await execute(
+        [
+          'set -e -o pipefail',
+          `# ${'脚本🪁'.repeat(10_000)}`,
+          'if IFS= read -r unexpected; then exit 39; fi',
+          'cat > "长脚本 输入.txt" <<\'EOF\'',
+          '中文 🪁 $literal \\path',
+          'EOF',
+          'cat -- "长脚本 输入.txt"',
+          'exit 27',
+        ].join('\n'),
+      );
+      expect(longScript.result, longScript.output).toMatchObject({
+        outcome: 'failed',
+        details: { exitCode: 27, cleanupConfirmed: true, processTreeStopped: true },
+      });
+      expect(longScript.output).toBe('中文 🪁 $literal \\path\n');
       const absent = await execute('rg --no-config absent-needle source.txt');
       expect(absent.result?.details).toMatchObject({ exitCode: 1, cleanupConfirmed: true });
       expect(absent.output).toBe('');

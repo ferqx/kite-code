@@ -8,14 +8,16 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import type { ModelAdapter, ModelEvent, ModelMessage, ModelRequest } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { verifyModelInputSnapshot } from '@kite-ai/client';
 import {
   privateDirectory,
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { modelInputResponse } from '../../src/model-input-response';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function png(reverse = false) {
@@ -56,6 +58,11 @@ const finish: ModelEvent = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
+function imageMetadata(message: { content: string }) {
+  const receipt = JSON.parse(message.content);
+  expect(receipt.outcome).toBe('succeeded');
+  return JSON.parse(receipt.content);
+}
 type Call = { id: string; path?: string; paths?: string[] };
 async function wireRequest(request: ModelRequest, protocol: 'responses' | 'chat-completions') {
   let wire: Record<string, unknown> = {};
@@ -260,6 +267,22 @@ test('default view_images publishes execution PNGs and preserves paired visual h
     expect(visuals[0]!.images![0]!.data).not.toBe(visuals[1]!.images![0]!.data);
     expect(visuals.map((m) => m.toolCallId).sort()).toEqual(['external', 'local']);
     expect(visuals.every((m) => m.role === 'tool' && m.sourceIds?.length === 1)).toBe(true);
+    const originalInput = await f.runtime.readModelInput({
+      ...f.scope,
+      executionId: result.requests[1]!.requestId,
+    });
+    const response = modelInputResponse(originalInput, new AbortController().signal);
+    const publicInput = await verifyModelInputSnapshot(await response.json());
+    expect<readonly ModelMessage[]>(
+      publicInput.request.messages.filter((message) => message.images?.length),
+    ).toEqual(visuals);
+    expect(publicInput.bodyHash).toBe(originalInput.bodyHash);
+    const corruptedInput = structuredClone(publicInput);
+    corruptedInput.request.messages.find((message) => message.images?.length)!.images![0]!.data =
+      'AAAA';
+    await expect(verifyModelInputSnapshot(corruptedInput)).rejects.toThrow(
+      'model_input_hash_mismatch',
+    );
     const executions = (await f.store.listExecutions('s')).filter(
       (x) => x.definitionId === 'files.view_images',
     );
@@ -267,7 +290,7 @@ test('default view_images publishes execution PNGs and preserves paired visual h
     for (const visual of visuals) {
       const execution = executions.find((item) => item.callId === visual.toolCallId)!;
       expect(visual.sourceIds).toEqual([execution.id]);
-      expect(JSON.parse(visual.content).path).toBe(visual.toolCallId === 'local' ? first : second);
+      expect(imageMetadata(visual).path).toBe(visual.toolCallId === 'local' ? first : second);
     }
     for (const execution of executions)
       expect(execution.result).toMatchObject({
@@ -352,9 +375,9 @@ test('default one-call ten-image batch reaches both protocols in order and survi
     expect(visuals).toHaveLength(1);
     expect(visuals[0]!.toolCallId).toBe('batch');
     expect(visuals[0]!.images).toHaveLength(10);
-    expect(
-      JSON.parse(visuals[0]!.content).images.map((image: { path: string }) => image.path),
-    ).toEqual(paths);
+    expect(imageMetadata(visuals[0]!).images.map((image: { path: string }) => image.path)).toEqual(
+      paths,
+    );
     const execution = (await f.store.listExecutions('s')).find((item) => item.callId === 'batch')!;
     expect(execution.status).toBe('succeeded');
     expect(visuals[0]!.sourceIds).toEqual([execution.id]);

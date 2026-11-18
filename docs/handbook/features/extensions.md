@@ -16,7 +16,9 @@ MCP Server 可提供工具、资源和提示。Skills 提供可发现的知识�
 
 Native 的 `computer-use` 是内置全局技能，目录发现不依赖项目安装；它描述内置浏览器的操作规范。使用时仍须具备并选中受控执行能力，技能正文和资源不授予页面或敏感业务操作权限。当前候选与验收边界见[桌面浏览器](../clients/desktop/README.md#agent-浏览器)。
 
-Office 提供四个内置 Skill，分别显示为 `docx`、`xlsx`、`pptx` 和 `pdf`。可在支持 Skill 的客户端选用，也可在 Desktop 交付文件的预览中指定本次修改用哪个 Skill。安装在用户目录中的其他 Skill 同样可以选用，包括同名 Skill。默认安装包含 Office Skills 和预览所需资源。Skill 可按任务使用 Shell 中可用的工具，依赖安装与脚本执行遵循当前任务的工具权限。 [办公文件基础操作](../clients/desktop/README.md#办公文件基础操作)
+内置的 `docx`、`xlsx` 和 `pptx` 使用 OfficeCLI 的技能。`pdf` 使用 Kite 的 PDF 技能。可在支持 Skill 的客户端选用，也可在 Desktop 交付文件的预览中为本次修改选择技能。用户安装的技能可与内置同名技能共存。 [办公文件基础操作](../clients/desktop/README.md#办公文件基础操作)
+
+Kite 的各平台制品随包提供对应版本的 OfficeCLI。内置办公技能在受管 Shell 中直接使用 `officecli`，可以从文档操作开始。文件与联网范围沿当前任务的授权。 [OfficeCLI 发行页](https://github.com/iOfficeAI/OfficeCLI/releases/tag/v1.0.161)
 
 Agent 调用 MCP 工具（包括目录、连接、资源、提示与远端工具）时，工作区写入模式每次请求用户审批，自动模式交由审批模型，完全模式按实际有效权限直接执行；远端只读注解不豁免审批。审批模型超时或断连最多内部重试两次，拒绝、取消或重试耗尽不执行工具，也不重放已派发的调用。设置中的连接管理和内部连接维护不因此新增工具审批。父子权限交集、来源与认证检查继续生效。
 

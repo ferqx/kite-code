@@ -20,7 +20,7 @@ Linux 默认 Shell 已接 Bubblewrap／固定 C init／原 PID namespace 源码�
 
 Linux 实现、限定原生证据与剩余资格归[Jobs owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。2026-11-11 的 x64 非root／Bubblewrap0.12.0 整文件通过覆盖本次 mount namespace owner 修复及其列明文件、网络、全树、PTY边界；[原生 Shell 验收](../../packages/agent/test/isolated/jobs/linux-native-shell.test.ts)通过不代表其他架构、root、安装产品完整链或 production qualification。init 只在 P 接纳后复制既有 mount view到当前user namespace所有的新mount namespace，再保原seal和清cap，失败仍unknown且不启动业务；不移除 `--dev`、不忽略EPERM、不扩大Full权限。[正式 Workflow 历史整例](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/service/test/isolated/skill-workflow-profile-host.test.ts)不成为已退役入口的新资格。Linux缺compiler／Bubblewrap或真实失败必须失败，不能availability skip；formal门禁、空production support set和RSS／完整观测门禁保持。
 
-Windows Job 使用无账户受限令牌与原生 Job。桌面 Service 优先完整 Git Bash，明确未发现时选择系统 Windows PowerShell 5.1。安装及发布验证的实际范围见 [Windows active](windows-shell-sandbox.md)。上述 Workflow verifier／补偿保留历史证据。
+Windows Job 使用无账户受限令牌与原生 Job。桌面 Service 自动优先完整 Git Bash，明确未发现时选择系统 Windows PowerShell 5.1。核验可用的本机 PowerShell 7 可在桌面设置中选择。安装及发布验证的实际范围见 [Windows active](windows-shell-sandbox.md)。上述 Workflow verifier／补偿保留历史证据。
 
 新[平台 probe](../../scripts/release/unified-platform-probe.ts)实际运行 Source 外的完整 candidate，核 Files、准确 SQLite、实际 PID、两个独立 SH、原 Run 及 cleanup；macOS 另核真实默认 Shell 的原 execution/output hash、全树停止和 cold 同结果/零重放。diagnostic 通过只证明列明范围；资源与跨平台仍缺资格，formal verifier 继续拒 `default_effectful_platform_not_qualified`，productionQualified/effectfulQualified 保持 false。新三 OS workflow 保 actual producer、原 head/clean-source、固定 Bun/actions 与失败上传；用户已确认 Win/Linux 验证留到重构完成后的 GitHub Actions，本机不再等待或安装这两个环境，也未 dispatch workflow。未在对应 OS 执行不取得其资格。
 
@@ -34,7 +34,7 @@ Linux stdio MCP 的同一正式 Source／connection Job／SDK Tool 已接[独立
 
 [transport workflow](../../.github/workflows/runtime-transport-qualification.yml)已接入这五项强制后端案例，并与 release 共用[预装 MSVC/SDK 准备](../../scripts/release/prepare-windows-native-ci.ts)；准确 source head、固定 x64 编译器、环境字节及准备早于消费由[CI反例](../../tests/integration/scripts/unified-ci.test.ts)和[纯准备合同](../../tests/isolated/unified-agent/windows-native-ci.test.ts)核验。缺后端、编译器或 ABI 在 Windows 上失败，只有非 Windows 平台条件才跳过其原生案例。这是接线与本机负例证据，仍不宣称实际 Windows syscall、Native 启动或三平台资格。
 
-正式 Shell 共用三策略与独立 filesystem/network 请求语义。macOS 的 Seatbelt 已实际验证，Linux 源码接到 Bubblewrap 与 C socket/socketpair filter。Windows x64 Service 使用 Runner V7，Git Bash 与 Windows PowerShell 5.1 分别使用对应语法解析器。平台 workflow 包含原/native Shell、共享审批/解析和真实 `web_fetch` 准入测试。执行、审批及生命周期验证范围见 [Windows active](windows-shell-sandbox.md)。各平台安装、RSS、完整观测和正式阶段门禁分别核验。
+正式 Shell 共用三策略与独立 filesystem/network 请求语义。macOS 的 Seatbelt 已实际验证，Linux 源码接到 Bubblewrap 与 C socket/socketpair filter。Windows x64 Service 使用 Runner V7，Git Bash、Windows PowerShell 5.1 与已核实的本机 PowerShell 7 使用对应语法解析器。平台 workflow 包含原/native Shell、共享审批/解析和真实 `web_fetch` 准入测试。执行、审批及生命周期验证范围见 [Windows active](windows-shell-sandbox.md)。各平台安装、RSS、完整观测和正式阶段门禁分别核验。
 
 TUI 的 Workspace 文件候选现分派到私有 POSIX FD／Windows HANDLE 只读端口；公共 scope、完整分页、实际 `.gitignore`、取消和不读候选正文保持。它不使用 Shell 执行权限，也不导出 Agent 的私有 Files I/O。[CLI owner](../../apps/cli/README.md#开发-tui-workspace-文件候选)记录实际平台范围；完整候选、目录记录和平台原生测试在 transport 中分别运行，早于 Shell 权限例。源码与本机 POSIX 结果不改变 Windows/Linux 原生、RSS、完整观测或正式阶段门禁。
 

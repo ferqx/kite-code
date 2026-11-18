@@ -1,10 +1,15 @@
 import { AgentError } from '@kite-ai/agent';
 import type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
-import type { DesktopShellBackend, DesktopShellPreference, Store } from '@kite-ai/agent/storage';
+import type { DesktopShellPreference, DesktopShellSelection, Store } from '@kite-ai/agent/storage';
 import { z } from 'zod';
 
 export const desktopShellSettingsPath = '/internal/desktop/shell';
-export const desktopShellPreferenceSchema = z.enum(['auto', 'git-bash', 'powershell']);
+export const desktopShellPreferenceSchema = z.enum([
+  'auto',
+  'git-bash',
+  'powershell',
+  'powershell-7',
+]);
 export const desktopShellSettingsSchema = z.strictObject({
   kind: z.literal('settings.general.shell'),
   storeId: z.string().min(1).max(128),
@@ -12,6 +17,8 @@ export const desktopShellSettingsSchema = z.strictObject({
   automatic: z.enum(['git-bash', 'powershell']).nullable(),
   gitBashAvailable: z.boolean(),
   powerShellAvailable: z.boolean(),
+  powerShellVersion: z.string().min(1).max(64).nullable(),
+  powerShell7Version: z.string().min(1).max(64).nullable(),
 });
 export const desktopShellSaveSchema = z.strictObject({
   expectedStoreId: desktopShellSettingsSchema.shape.storeId,
@@ -19,50 +26,58 @@ export const desktopShellSaveSchema = z.strictObject({
 });
 export type DesktopShellSettings = z.infer<typeof desktopShellSettingsSchema>;
 export type DesktopShellSettingsPort = {
-  automatic: DesktopShellBackend;
+  selection(): Promise<DesktopShellSelection>;
   read(storeId: string): Promise<DesktopShellSettings>;
   save(storeId: string, preference: DesktopShellPreference): Promise<DesktopShellSettings>;
 };
 
-/** Cache the two finite, host-prepared backends. A failed alternate never substitutes for a pin. */
+type ShellBackend = Exclude<DesktopShellPreference, 'auto'>;
+
+/** Join concurrent discovery, but recheck installed versions for a new assembly. */
 export function createDesktopShellEnvironments(
-  initial: ShellConfigurationOptions | undefined,
-  load: (
-    backend: Exclude<DesktopShellPreference, 'auto'>,
-  ) => Promise<ShellConfigurationOptions | undefined>,
+  load: (backend: ShellBackend) => Promise<ShellConfigurationOptions | undefined>,
 ) {
-  const automatic = initial
-    ? initial.windows?.kind === 'powershell'
-      ? 'powershell'
-      : 'git-bash'
-    : null;
   const assets = new Map<
     'git-bash' | 'powershell',
     Promise<ShellConfigurationOptions | undefined>
   >();
-  if (automatic) assets.set(automatic, Promise.resolve(initial));
-  // An automatically selected PowerShell already established the absence of full Git Bash.
-  if (automatic === 'powershell') assets.set('git-bash', Promise.resolve(undefined));
   function get(backend: 'git-bash' | 'powershell') {
     let result = assets.get(backend);
     if (!result) {
-      result = load(backend).catch((error) => {
+      result = load(backend).finally(() => {
         assets.delete(backend);
-        throw error;
       });
       assets.set(backend, result);
     }
     return result;
   }
   async function availability() {
-    const [gitBash, powerShell] = await Promise.all([get('git-bash'), get('powershell')]);
-    return { gitBashAvailable: !!gitBash, powerShellAvailable: !!powerShell };
+    const results = await Promise.allSettled([get('git-bash'), get('powershell')]);
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
+    const gitBash = results[0].status === 'fulfilled' ? results[0].value : undefined;
+    const powerShell = results[1].status === 'fulfilled' ? results[1].value : undefined;
+    const selected =
+      powerShell?.windows?.kind === 'powershell' ? powerShell.windows.powerShell : undefined;
+    return {
+      automatic: gitBash ? ('git-bash' as const) : powerShell ? ('powershell' as const) : null,
+      gitBash,
+      powerShell,
+      gitBashAvailable: !!gitBash,
+      powerShellAvailable: !!powerShell,
+      powerShellVersion: selected?.version ?? null,
+      // Compatibility for older private settings consumers; no separate backend.
+      powerShell7Version: selected?.installation ? selected.version : null,
+    };
   }
   return {
     async forSession(store: Store, rootSessionId: string) {
       const backend = await store.readSessionDesktopShell(rootSessionId);
-      if (backend === null) return initial;
+      if (backend === null) {
+        const available = await availability();
+        return available.gitBash ?? available.powerShell;
+      }
       if (backend === 'unavailable') return undefined;
+      if (backend === 'powershell-7') return get('powershell');
       return get(backend);
     },
     settings(store: Store): DesktopShellSettingsPort {
@@ -74,13 +89,23 @@ export function createDesktopShellEnvironments(
         return {
           kind: 'settings.general.shell',
           storeId,
-          preference,
-          automatic,
-          ...choices,
+          preference:
+            preference === 'auto'
+              ? (choices.automatic ?? 'git-bash')
+              : preference === 'powershell-7'
+                ? 'powershell'
+                : preference,
+          automatic: choices.automatic,
+          gitBashAvailable: choices.gitBashAvailable,
+          powerShellAvailable: choices.powerShellAvailable,
+          powerShellVersion: choices.powerShellVersion,
+          powerShell7Version: choices.powerShell7Version,
         };
       }
       return {
-        automatic: automatic ?? 'unavailable',
+        async selection() {
+          return (await availability()).automatic ?? 'unavailable';
+        },
         async read(storeId) {
           // Finish loading the choices before reading the persisted preference.
           const choices = await availability();
@@ -90,7 +115,8 @@ export function createDesktopShellEnvironments(
           const choices = await availability();
           if (
             (preference === 'git-bash' && !choices.gitBashAvailable) ||
-            (preference === 'powershell' && !choices.powerShellAvailable)
+            (preference === 'powershell' && !choices.powerShellAvailable) ||
+            (preference === 'powershell-7' && !choices.powerShellAvailable)
           )
             throw new AgentError('desktop_shell_backend_unavailable');
           await store.saveDesktopShellPreference(storeId, preference);

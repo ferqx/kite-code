@@ -11,6 +11,21 @@ import { startService } from '../../src';
 import { createDefaultSkillCatalogueSource } from '../../src/skill-catalogue';
 import { createUserConfiguration } from '../../src/user-configuration';
 
+const officeEntries = [
+  ['docx', 'docx'],
+  ['pdf', 'pdf'],
+  ['pptx', 'pptx'],
+  ['xlsx', 'xlsx'],
+].map(([key, name]) => ({
+  id: `office.${key}`,
+  name,
+  source: null,
+  state: 'available',
+  reason: null,
+  requiredCapabilities: [],
+  missingCapabilities: [],
+}));
+
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-user-skills-')));
   const userRoot = join(root, 'user');
@@ -281,13 +296,7 @@ test('global Skills reads only merged user configuration and trusted user/Profil
       });
       all.push(...page.entries);
     }
-    const builtinIds = new Set([
-      'computer-use',
-      'office.docx',
-      'office.pdf',
-      'office.pptx',
-      'office.xlsx',
-    ]);
+    const builtinIds = new Set(['computer-use', ...officeEntries.map(({ id }) => id)]);
     expect(all.filter((row) => builtinIds.has(row.id)).map((row) => row.id)).toEqual([
       ...builtinIds,
     ]);
@@ -369,15 +378,7 @@ test('global user source lists builtins without creating a missing configuration
           requiredCapabilities: ['browser.execute'],
           missingCapabilities: ['browser.execute'],
         },
-        ...['docx', 'pdf', 'pptx', 'xlsx'].map((name) => ({
-          id: `office.${name}`,
-          name,
-          source: null,
-          state: 'available',
-          reason: null,
-          requiredCapabilities: [],
-          missingCapabilities: [],
-        })),
+        ...officeEntries,
       ],
       complete: true,
       nextAfterId: null,

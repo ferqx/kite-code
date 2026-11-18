@@ -28,6 +28,8 @@ API中的close只缩减当前准确页面控制；固定浏览器能力均免审
 
 加载 `.sh` 等文本仅返回内容，不执行脚本；需要执行时仍由宿主通过获准工具及 UnifiedExecution。Skill 文本和依赖字段不能改变文件、网络、Shell 或凭据权限。
 
+[内置 Office 来源](office-source.ts)按固定清单核对正文和声明资源的字节。内置目录包含 OfficeCLI 的 Word、Excel 和 PPT 基础技能以及独立的 PDF 技能。知识资源接口返回清单中声明的文本。 [Office 资产和执行条件](../tools/documents/README.md#内置-office-skills)
+
 实际文件资源由 Agent 的[知识读取作用域](../platform/knowledge-reads.ts)保有，factory 本身仍无 I/O。具体 Skill／项目 factory 提供 `dispose()`，可信宿主可显式传入同一 `knowledgeScope`；关闭封新操作、等待已准入的完整正文／资源读取，并缓存同一次结果。只有原 FileHandle／fd 关闭确认成功才释放，失败保原读取错误、关闭错误和全部原资源；`KnowledgeReadCleanupError` 不能降为目录局部错误或取消成功，不自动重试关闭。普通坏文本等错误在关闭成功后仍按原合同局部不可用。`ContextSources` 和持久来源身份不增加生命周期或取消字段。
 
 [真实临时文件测试](../../test/isolated/skills/skills.test.ts)覆盖摘要/正文分离、版本变化、引用哈希、未执行脚本、缺能力局部错误、symlink 逃逸、穿越、文本和数量上限。Skill Workflow 执行已退役。

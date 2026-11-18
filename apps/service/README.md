@@ -226,6 +226,8 @@ Context 提供 `POST /v1/sessions/{id}/context/compress` 和 `/context/compressi
 
 实际 Model 输入读取入口为 `GET /v1/sessions/{id}/model-inputs?storeId=...` 和 `GET /v1/sessions/{id}/executions/{executionId}/model-input?storeId=...`。主体只由 Service 宿主提供，闭合 query 不接受 path、Artifact ref/hash 或 renderer 主体。目录需要准确 Session，每页最多 200 项的固定上界 keyset 可以取得第 201 次之后的调用；正文使用 Core 的原请求读取，不捕获现在来源、读取现在配置或调用 Model。大正文由 [model-input-response.ts](src/model-input-response.ts) 在原内容核实后分为 64KiB wire chunks，带完整 size/SHA，保留 no-store；Client 成功 EOF 核实后才发布全文，不以便利 JSON 大小静默裁剪。
 
+响应 schema 保留原消息可选的 `images` 数组，每项原 `mediaType` 与 `data` 均完整传递；支持 PNG、JPEG、WebP、GIF，不以当前附件或重新读取工作区重建图片。2026-11-18 定位的 `model_input_hash_mismatch` 是响应投影漏掉此字段而删除了原图字节，并非原始记录损坏。修复后原 PPT 复测的 19 条历史输入全部通过完整性核验，其中四条带图，读取前后 Model 总数均为 19。生成的 OpenAPI／Client 类型和验证器同步，API major 不变；Client 的哈希与身份守卫保持严格。[真实图片回归](test/isolated/image-reading.test.ts)覆盖实际 Core 工具图片经过响应投影后的字节保真，以及篡改图片后仍准确拒绝。
+
 Gateway 将 `model_inputs` 作为有限只读 capability，固定原 Store 和 Session/Execution，读取前后核实原 admitted identity，再传输同份公开 snapshot；Native token、profile 路径、内部 Artifact 标识和 Provider 授权不进入响应。Web 在用户确认后读取敏感内容；成功回执与未确认的已准备请求分别呈现。每个新请求封存实际 adapter/provider family、模型与已支持 settings、实际扩展/工具版本、来源顺序与摘要，并记录最后派发使用的授权与控制 revision。opaque adapter、未记录或未来格式明确 unavailable，不以当前配置替代。[实际 Core→Native→Gateway→Browser](../../tests/isolated/unified-agent/model-input.test.ts) 1/27 证明超过 17MiB 的原输入、后续 Rewind/新来源后的原历史、错误 scope/Store/query 拒绝与冷重开只读零 Model/来源捕获/重放；[真实默认 SDK 元数据](test/isolated/model-metadata.test.ts) 1/18 证明实际 wire settings、权限修改与后来配置变化不改写原请求。完整 Runtime logs 和正式客户端迁移仍按进度记录。
 
 `model_outputs` 提供 `GET /v1/sessions/{id}/executions/{executionId}/model-output?storeId=...` 及对应 Cookie-only Browser GET。公开消息只携有限 `outputBody` 摘要，不携私有 linked-segment head。Core 按原 Store/Session/主体/Execution 的一致快照展开已持久前缀或完整正文，核实链、字节和 hash；成功结果有完整 Tool calls，未完成前缀永远 `complete=false` 且不派发截断参数。全文以同一 64KiB response writer 传输，Client 核完 EOF、wire/body hash 和目标才发布。纯读取不消费结果、不创建 Model、命令或取消。[实际 17MiB Core/Native/Cookie](../../tests/isolated/unified-agent/model-output.test.ts) 1/39 覆盖下一 Model 的完整正文与原来源、历史 Rewind、冷读取及公共投影不泄私有引用；输入、输出、Client 和 production metadata 组合 12 tests/173 assertions 通过。
@@ -311,7 +313,7 @@ heap／external／ArrayBuffer明显回落，但RSS仍较高，不能仅据此判
 
 2026-11-05 Windows x64／Bun1.4.4：计时完整文件2项14断言通过，包含真实开发 builder 的冷启动和普通源码保持零阶段日志／空 stderr；原 paired 完整文件6项68断言通过。扩展执行的 [preparation cleanup](test/isolated/preparation-cleanup-ownership.test.ts)在数据不可用后提前退出并于父清理报 EPIPE，同一用例在 Git HEAD 原 Service 装配实现中复现；保留为既有 Windows 夹具失败，不计为本轮通过或完整恢复资格。
 
-paired 环境在原 PATH／LANG／HOME（Windows另含USERPROFILE）之外，只继承可信父进程的大小写 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 和 `CODEX_HOME`，保留原值、空值和大小写，由 Bun 解释代理优先级、Codex owner 校验路径。模型 key／token、任意秘密和 NODE_OPTIONS／BUN_OPTIONS 等运行注入仍不继承，代理凭据不进入 bootstrap、serverInfo 或诊断。[实际代理回归](test/isolated/paired-proxy.test.ts)分别经默认 child 与显式 spawn port 验证 HTTP、HTTPS CONNECT、NO_PROXY 绕过、含空格的 Codex 路径与秘密过滤；只使用 loopback 和合成凭据。
+paired 环境在原 PATH／LANG／HOME（Windows另含USERPROFILE）之外，只继承可信父进程的大小写 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 和 `CODEX_HOME`，保留原值、空值和大小写。Windows 也按原值传递显式 `KITE_SHELL_TOOL_DIRS`，供 [Shell 候选查找](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)使用。Bun 解释代理优先级，Codex owner 校验路径。模型 key／token、任意秘密和 NODE_OPTIONS／BUN_OPTIONS 等运行注入仍不继承，代理凭据不进入 bootstrap、serverInfo 或诊断。[配对回归](test/isolated/paired-proxy.test.ts)经默认 child 与显式 spawn port 检查 HTTP、HTTPS CONNECT、NO_PROXY 绕过、含空格的目录配置与秘密过滤，只使用 loopback 和合成凭据。
 
 模型连接由 [model-transport.ts](src/model-transport.ts)补齐系统代理自动发现：有显式代理环境时继续由 Bun 解释原值、认证和 NO_PROXY；无环境代理时复用 [系统设置读取](src/web-fetch-proxy.ts)，选择 Windows HKCU／macOS 手动 HTTP(S) 代理及绕过名单，支持主机通配符、端口、IPv6 与 `<local>`。每个绑定复制系统设置并显式传给 fetch，不改写进程环境、不探测常用端口、不执行 PAC/WPAD、不在失败后直连重发。普通 Chat Completions／Responses、Codex 认证包装和显式提供商目录查询均消费该传输；`webFetch` 用户配置仍仅属于网页工具，MCP 的网络准入保持原边界。
 
@@ -657,9 +659,9 @@ Shell 请求描述按准确 kind／定义／版本限定，合法同名 Model �
 
 macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 装配可信 `shell.host`。[Agent Shell 工厂](../../packages/agent/src/permissions/shell.ts)为每个 Run 读取真实 Store Workspace，选择对应平台后端。JSONC 只选择现有工具，不能指定解释器或执行边界。
 
-Windows x64 桌面的自动选项在 Service 启动时校验 Runner V7 与包内资产，优先完整 Git Bash，只有明确未发现 Git Bash 才探测系统 Windows PowerShell 5.1。资产校验和运行环境准备失败沿原错误返回。Main 通过已准入的配套 Service [私有设置入口](src/desktop-shell.ts)读取选项并保存当前 Store 的偏好。每次设置请求使用同一份可用性结果；准备失败时保留原偏好，后续请求可以重试。新建和 Fork 在创建事务中读取偏好并封存实际后端。重试原创建返回原会话。子任务与后续轮次读取所属根会话的绑定，已有无绑定会话继续使用自动基线。普通 Terminal Service 使用 Git Bash。
+Windows x64 桌面在 Service 启动时校验 Runner V7 与包内资产，默认优先完整 Git Bash，未发现时使用已核验的 PowerShell。Main 通过已准入的配套 Service [私有设置入口](src/desktop-shell.ts)读取两类选项 Git Shell／PowerShell，并保存当前 Store 的类型偏好。PowerShell 每次新装配重新发现本机最高可用版本；并发调用只共享同一在途发现，结果不作为永久版本缓存。新建和 Fork 在创建事务中读取偏好并封存类型，重试原创建返回原会话。子任务与后续轮次读取所属根会话的类型绑定，无绑定旧会话沿当前默认发现。旧 `auto` 与 `powershell-7` 记录兼容读取，旧原始记录不重写，新设置及绑定归一到两类。准备失败沿原错误返回。普通 Terminal Service 使用 Git Bash。
 
-模型的 `shell_execute` 定义、规划只读证明、权限与 Git 工作树装配均使用实际会话后端。冷恢复核原 Shell 绑定与资产摘要。两条路径共享原 Job 和监督。显式后端不可用时，其会话不会换用其他解释器。Windows 当前执行范围见 [Windows active](../../docs/active/windows-shell-sandbox.md)，偏好、会话创建重试、Fork 与冷读的验证见[设置回归](test/isolated/desktop-shell-settings.test.ts)。
+模型的 `shell_execute` 定义、规划只读证明、权限与 Git 工作树装配均使用实际会话类型和本次核验资产。PowerShell 使用统一 `default.windows-powershell` 配置标识，实际版本、edition、解析器和资产摘要仍封存到准确 Run。已派发 Job 和冻结 Run 保留原解释器，冷恢复核原配置与资产，不能以新版本替换未知执行。两类共享原 Job 和监督，不按固定版本分叉审批。显式类型不可用时，其会话不会换用另一类型。Windows 当前执行范围见 [Windows active](../../docs/active/windows-shell-sandbox.md)，偏好、会话创建重试、Fork、版本变化与冷读的验证见[设置回归](test/isolated/desktop-shell-settings.test.ts)。
 
 Linux 正式装配已接 `createLinuxHostShellJob`：同一 ProcessService 定位已构建包内 native init及实际 Bubblewrap，固定解释器／env／原 runtimeAssets与保护根；四份可执行资产及独立解析资产分别封存摘要，在普通派发前重核，最终根／Task父子AND策略按同一真实Job定义求交。缺 Bubblewrap、init或明确 host配置局部拒绝，无旧 group降级；其原 namespace所有权、完整输出和unknown fencing归[Linux Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。[纯正式调用者测试](test/isolated/linux-shell-configuration.test.ts)实际核配置、摘要和scope接线，工厂start由spy接收，FFI0，不计Linux运行资格。Windows 受限与 Full 已接原 Job/HANDLE 后端；Linux实机、installed维护／版本链及全部资源门禁继续pending。
 
@@ -854,9 +856,9 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 配置 Skill 继续沿原真实配置解析。禁用项不读文件；缺文件、路径越界、重复物理位置、digest 变化、不支持 options 与缺能力按配置 ID 标记局部不可用。默认 Run 只绑定实际可用项并保存相同配置子集，显式名称/ID选择基于全部已知条目消歧，不能因坏项而悄悄改选同名可用项。child 只在父快照准确 ID 范围内选择；父 `requested:null` 的默认项，在子目录明确标记 `skill_capability_missing` 时可省略，不给子角色补工具。显式选择、空数组、未知／禁用／损坏项和绑定后的 canonical 文件目标变化继续按准确原选择处理，冻结恢复不以新目录改写旧事实。单命令 requested 最多256项保持公开契约，默认解析出的 resolvedIds 不套此请求数量限制。[能力继承回归](test/isolated/child-skill-capability-inheritance.test.ts)核真实默认浏览器知识、分析角色的能力交集、普通 worker 保留、显式缺依赖与坏项拒绝；持久理由归[子配置修正](../../.agents/notes/implemented/bug-fix/2026-11-05-child-preparation-acceptance.md)。
 
-四个内置 Office Skill 的配置 ID 使用 `office.docx`、`office.xlsx`、`office.pptx` 和 `office.pdf`，可与用户同名 Skill 共存。目录和运行快照按配置 ID 绑定，`load_skill` 解析到 `builtin:office.<格式>`。默认受管 Shell 从[进程装配](src/process-service.ts)获得指向内置资源根的 `KITE_OFFICE_SKILLS_DIR` 及对应只读范围。Skill 读操作沿原知识接口，Shell 对脚本、依赖和编辑请求继续执行当前审核及约束。参见 [Office 资源](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
+内置 Office Skill 的目录和运行快照按 `office.*` 配置 ID 绑定，`load_skill` 将其解析到对应的 `builtin:office.*` 来源。OfficeCLI 的三个基础技能沿用 `office.docx`、`office.xlsx` 和 `office.pptx`，其他 OfficeCLI 技能各有独立 ID，`office.pdf` 沿用 PDF 来源。内置项可与用户同名 Skill 共存。默认受管 Shell 从[进程装配](src/process-service.ts)取得 `KITE_OFFICE_SKILLS_DIR` 及对应只读范围，OfficeCLI 命令从当前 Shell 环境解析并沿原权限执行。参见 [Office 资源](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
 
-Service 校验 PDF helper 的摘要，并通过 `KITE_DOCUMENTS_HELPER` 和 `KITE_DOCUMENTS_BUN` 将路径交给受管 Shell。四个内置 Office Skill 的随包资源经 `KITE_OFFICE_SKILLS_DIR` 只读提供。 [固定资产与执行边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
+Service 校验 PDF helper 的摘要，并通过 `KITE_DOCUMENTS_HELPER` 和 `KITE_DOCUMENTS_BUN` 将路径交给受管 Shell。 [固定资产与执行边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
 
 每次发现仍重新读取全部启用位置及内容版本；独立位置的 I/O 每批最多四项并发，结果按原配置顺序汇总后才发布绑定。完成顺序不决定重复物理位置的配置身份，原首项即使 digest 不匹配也保留其 ID，并将双方标为重复不可用。分页不缓存发现结果，后续页仍核当前字节与完整 revision。[目录测试](test/isolated/skill-catalogue.test.ts)覆盖同批别名、跨批重复、禁用项及新版本拒绝旧绑定；[Run 选择测试](test/isolated/skill-selection.test.ts)核准确 root/child 继承。
 

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { persistentWorktreeDirectory } from '../../../../../../tests/fixtures/worktree-filesystem';
@@ -85,7 +85,7 @@ for (const mode of [
       const forbiddenFile = join(forbiddenDirectory, 'must-not-create.txt');
       mkdirSync(forbiddenDirectory);
       const shell = await windowsShellFixture();
-      const git = join(dirname(shell.fullShell), '../../mingw64/bin/git.exe');
+      const git = shell.fullGit;
       const env = environment(root);
       const setupGit = (...args: string[]) =>
         execFileSync(git, args, {

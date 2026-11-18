@@ -16,7 +16,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_BROKEN_PIPE, HANDLE};
 
 use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
@@ -174,6 +174,10 @@ fn run() -> i32 {
         );
         return 2;
     }
+    if matches!(request.shell_runtime, ShellRuntime::Bash) && request.command_line.contains('\0') {
+        eprintln!("kite-windows-runner: Bash command contains a NUL character");
+        return 2;
+    }
     runner_debug("request frame decoded");
 
     let shell = match validate_runtime(&request) {
@@ -283,6 +287,11 @@ fn validate_runtime(request: &InvocationRequest) -> Result<PinnedExecutable, (i3
             Path::new(root).join("bash.exe"),
             &request.shell_runtime_digest,
             "Git Bash",
+        ),
+        (ShellRuntime::PowerShell, Some(root)) if Path::new(root).is_absolute() => pin_executable(
+            Path::new(root).join("pwsh.exe"),
+            &request.shell_runtime_digest,
+            "PowerShell 7",
         ),
         (ShellRuntime::PowerShell, None) => {
             let mut system = vec![0; 32768];
@@ -613,13 +622,10 @@ fn execute_restricted_token_invocation(
     } else {
         build_env_block(&request.env)
     };
-    let shell_path = shell
-        .path
-        .to_str()
-        .ok_or("shell runtime path invalid")?;
-    let command_line = match request.shell_runtime {
+    let shell_path = shell.path.to_str().ok_or("shell runtime path invalid")?;
+    let (command_line, bash_from_stdin) = match request.shell_runtime {
         ShellRuntime::Bash => build_bash_command_line(shell_path, &request.command_line),
-        ShellRuntime::PowerShell => build_powershell_command_line(shell_path),
+        ShellRuntime::PowerShell => (build_powershell_command_line(shell_path), false),
     };
     let child = if let Some(token) = token.as_ref() {
         let expected_capabilities = if approved_filesystem {
@@ -660,94 +666,148 @@ fn execute_restricted_token_invocation(
     // The child inherited its write handles; close the parent's copies so the
     // forwarders observe EOF after the Job becomes empty.
     cleanup.forget_handles(&[stdin_read, stdin_write, stdout_write, stderr_write]);
-    unsafe {
-        let _ = CloseHandle(stdin_read);
-        let _ = CloseHandle(stdout_write);
-        let _ = CloseHandle(stderr_write);
-    }
+    let stdin_read_close_error = close_handle_error(stdin_read);
+    let stdout_write_close_error = close_handle_error(stdout_write);
+    let stderr_write_close_error = close_handle_error(stderr_write);
 
     let stdout_forwarder =
         drain_and_forward(stdout_read, OutboundKind::Stdout, output_writer.clone());
     let stderr_forwarder =
         drain_and_forward(stderr_read, OutboundKind::Stderr, output_writer.clone());
-    let script_writer = if matches!(request.shell_runtime, ShellRuntime::PowerShell) {
+    let streams_script =
+        bash_from_stdin || matches!(request.shell_runtime, ShellRuntime::PowerShell);
+    let mut stdin_write_close_error = None;
+    let script_writer = if streams_script {
         let mut input = unsafe { File::from_raw_handle(stdin_write.0) };
         let script = request.command_line.clone();
         Some(std::thread::spawn(move || {
-            writeln!(input, "{}", script.encode_utf16().count())?;
-            input.write_all(script.as_bytes())
+            if bash_from_stdin {
+                input.write_all(script.as_bytes())?;
+                input.write_all(&[0])
+            } else {
+                writeln!(input, "{}", script.encode_utf16().count())?;
+                input.write_all(script.as_bytes())
+            }
         }))
     } else {
-        unsafe {
-            let _ = CloseHandle(stdin_write);
-        }
+        stdin_write_close_error = close_handle_error(stdin_write);
         None
     };
     let (timed_out, cancelled) =
         job::wait_for_process(child.process_handle(), cancel_event, request.timeout_ms)
             .map_err(|error| error.to_string())?;
-    runner_debug("process wait returned");
-    let cleanup_confirmed =
-        job::terminate_job_and_confirm(job, 2_000).map_err(|error| error.to_string())?;
+    let root_exit = if timed_out || cancelled {
+        Ok(None)
+    } else {
+        job::child_exit_code(child.process_handle()).map(Some)
+    };
+    let termination = job::terminate_job_and_confirm(job, 2_000);
     let script_sent = script_writer.is_none_or(|writer| {
-        (cleanup_confirmed || writer.is_finished()) && matches!(writer.join(), Ok(Ok(())))
+        (termination.confirmed() || writer.is_finished()) && matches!(writer.join(), Ok(Ok(())))
     });
-    runner_debug("job cleanup confirmed");
-    let (stdout_bytes, stdout_forced_closed) =
-        join_forwarder(stdout_forwarder, stdout_read, "stdout")?;
-    let (stderr_bytes, stderr_forced_closed) =
-        join_forwarder(stderr_forwarder, stderr_read, "stderr")?;
+    let stdout = join_forwarder(stdout_forwarder);
+    let stderr = join_forwarder(stderr_forwarder);
     let exit_code = if timed_out {
         124
     } else if cancelled {
         130
     } else {
-        job::child_exit_code(child.process_handle())
+        // V7 requires a numeric field even when the operating system could
+        // not read the exit status. Keep such a receipt explicitly unknown.
+        root_exit.ok().flatten().unwrap_or(1)
     };
     let peak_processes = job::job_peak_processes(job);
 
-    // The Job has no active children. Revoke the unique runtime ACL before
-    // emitting the receipt; a failure stays fail-closed and the adapter can
-    // retry `--cleanup` with the same capability SID after a runner crash.
+    // Revoke the unique runtime ACL before emitting the receipt. Unknown
+    // shutdown or revocation stays fail-closed; the adapter owns recovery.
     let acl_cleanup = cleanup.finish_security();
-    runner_debug("runtime ACLs revoked");
     cleanup.forget_handles(&[stdout_read, stderr_read]);
     cleanup.forget_job();
-    unsafe {
-        if !stdout_forced_closed {
-            let _ = CloseHandle(stdout_read);
-        }
-        if !stderr_forced_closed {
-            let _ = CloseHandle(stderr_read);
-        }
-        let _ = CloseHandle(job);
-    }
+    let stdout_close =
+        (stdout.state != DrainState::TimedOut).then(|| close_handle_error(stdout_read));
+    let stderr_close =
+        (stderr.state != DrainState::TimedOut).then(|| close_handle_error(stderr_read));
+    let job_close_error = close_handle_error(job);
     drop(child);
     cleanup.disarm();
 
-    let error = acl_cleanup
-        .err()
-        .map(|error| error.code.to_string())
-        .or_else(|| (!cleanup_confirmed).then(|| "process_tree_cleanup_unconfirmed".to_string()))
+    let handle_close_failed = [
+        stdin_read_close_error,
+        stdin_write_close_error,
+        stdout_write_close_error,
+        stderr_write_close_error,
+        stdout_close.flatten(),
+        stderr_close.flatten(),
+        job_close_error,
+    ]
+    .iter()
+    .any(Option::is_some);
+    let acl_cleanup_confirmed = acl_cleanup.is_ok();
+    let error = root_exit
+        .is_err()
+        .then(|| "process_exit_status_unconfirmed".to_string())
+        .or_else(|| acl_cleanup.err().map(|error| error.code.to_string()))
         .or_else(|| {
-            (exit_code == 0 && !script_sent)
-                .then(|| "powershell_script_delivery_failed".to_string())
+            (!termination.confirmed()).then(|| "process_tree_cleanup_unconfirmed".to_string())
         })
-        .or_else(|| stdout_forced_closed.then(|| "stdout_forwarder_unconfirmed".to_string()))
-        .or_else(|| stderr_forced_closed.then(|| "stderr_forwarder_unconfirmed".to_string()));
+        .or_else(|| handle_close_failed.then(|| "native_handle_close_unconfirmed".to_string()))
+        .or_else(|| {
+            (exit_code == 0 && !script_sent).then(|| {
+                if bash_from_stdin {
+                    "bash_script_delivery_failed"
+                } else {
+                    "powershell_script_delivery_failed"
+                }
+                .to_string()
+            })
+        })
+        .or_else(|| {
+            (stdout.state != DrainState::Eof).then(|| "stdout_forwarder_unconfirmed".to_string())
+        })
+        .or_else(|| {
+            (stderr.state != DrainState::Eof).then(|| "stderr_forwarder_unconfirmed".to_string())
+        });
+    // The runner's stderr is a distinct owned pipe. Keep paths, shells and
+    // command text out of this bounded diagnostic and leave the V7 frames intact.
+    let diagnostic = serde_json::json!({
+        "rootExitCode": root_exit.ok().flatten(),
+        "waitReason": if timed_out { "timed_out" } else if cancelled { "cancelled" } else { "process_exited" },
+        "activeBefore": termination.active_before,
+        "activeAfter": termination.active_after,
+        "stdout": { "state": stdout.state, "handleClosed": stdout_close.map(|error| error.is_none()) },
+        "stderr": { "state": stderr.state, "handleClosed": stderr_close.map(|error| error.is_none()) },
+        "jobHandleClosed": job_close_error.is_none(),
+        "aclCleanupConfirmed": acl_cleanup_confirmed,
+        "hresults": {
+            "exitCodeQuery": root_exit.err(),
+            "initialJobQuery": termination.initial_query_error,
+            "terminateJob": termination.terminate_error,
+            "lastJobQuery": termination.last_query_error,
+            "stdinReadClose": stdin_read_close_error,
+            "stdinWriteClose": stdin_write_close_error,
+            "stdoutWriteClose": stdout_write_close_error,
+            "stderrWriteClose": stderr_write_close_error,
+            "stdoutRead": stdout.read_error,
+            "stderrRead": stderr.read_error,
+            "stdoutReadClose": stdout_close.flatten(),
+            "stderrReadClose": stderr_close.flatten(),
+            "jobClose": job_close_error,
+        },
+    });
+    let _ = writeln!(
+        std::io::stderr().lock(),
+        "kite-windows-runner[cleanup]: {diagnostic}"
+    );
     let receipt = ExecutionReceipt {
         version: PROTOCOL_VERSION,
         exit_code,
         timed_out,
         cancelled,
-        stdout_bytes,
-        stderr_bytes,
+        stdout_bytes: stdout.bytes,
+        stderr_bytes: stderr.bytes,
         peak_processes,
         active_process_limit: request.max_processes,
-        cleanup_confirmed: error.is_none()
-            && cleanup_confirmed
-            && !stdout_forced_closed
-            && !stderr_forced_closed,
+        cleanup_confirmed: error.is_none(),
         // The runner protocol carries the adapter-generated invocation identity.
         invocation_name: name.to_string(),
         error,
@@ -851,42 +911,85 @@ const _: fn() = || {
     let _ = std::mem::size_of::<SendHandle>();
 };
 
+fn close_handle_error(handle: HANDLE) -> Option<i32> {
+    unsafe { CloseHandle(handle) }
+        .err()
+        .map(|error| error.code().0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DrainState {
+    Eof,
+    ReadFailed,
+    ForwardFailed,
+    TimedOut,
+    Panicked,
+}
+
+struct OutputDrain {
+    bytes: u64,
+    state: DrainState,
+    read_error: Option<i32>,
+}
+
 fn drain_and_forward(
     handle: HANDLE,
     kind: OutboundKind,
     writer: ControlFrameWriter,
-) -> std::thread::JoinHandle<u64> {
+) -> std::thread::JoinHandle<OutputDrain> {
     let wrapped = SendHandle(handle);
     std::thread::spawn(move || {
         // Move the whole Send wrapper into the closure first; a direct
         // `wrapped.0` access would disjoint-capture the HANDLE itself.
         let taken = wrapped;
         let handle = taken.0;
-        let mut total = 0u64;
+        let mut bytes = 0u64;
+        let mut forward_failed = false;
         let mut buffer = [0u8; 8192];
-        unsafe {
-            loop {
-                let mut read = 0u32;
-                let result = windows::Win32::Storage::FileSystem::ReadFile(
+        let frame_type = match kind {
+            OutboundKind::Stdout => "stdout",
+            OutboundKind::Stderr => "stderr",
+        };
+        loop {
+            let mut read = 0u32;
+            if let Err(error) = unsafe {
+                windows::Win32::Storage::FileSystem::ReadFile(
                     handle,
                     Some(&mut buffer),
                     Some(&mut read),
                     None,
-                );
-                if result.is_err() || read == 0 {
-                    break;
+                )
+            } {
+                // An anonymous pipe reaches EOF when its last writer closes.
+                if error.code() == ERROR_BROKEN_PIPE.to_hresult() {
+                    return OutputDrain {
+                        bytes,
+                        state: if forward_failed {
+                            DrainState::ForwardFailed
+                        } else {
+                            DrainState::Eof
+                        },
+                        read_error: None,
+                    };
                 }
+                return OutputDrain {
+                    bytes,
+                    state: DrainState::ReadFailed,
+                    read_error: Some(error.code().0),
+                };
+            }
+            if read == 0 {
+                continue;
+            }
+            bytes += u64::from(read);
+            // Keep draining the child even if its output can no longer be sent.
+            if !forward_failed {
                 let data =
                     base64::engine::general_purpose::STANDARD.encode(&buffer[..read as usize]);
-                total += read as u64;
-                let frame_type = match kind {
-                    OutboundKind::Stdout => "stdout",
-                    OutboundKind::Stderr => "stderr",
-                };
-                let _ = writer.write(frame_type, &OutputPayload { data });
+                forward_failed = writer.write(frame_type, &OutputPayload { data }).is_err();
             }
         }
-        total
     })
 }
 
@@ -895,27 +998,27 @@ fn drain_and_forward(
 /// longer allowed to hold up the control plane: detach the thread, leave its
 /// handle for process-exit cleanup, and deliberately downgrade the receipt.
 /// This avoids relying on cross-thread CloseHandle cancellation semantics.
-fn join_forwarder(
-    forwarder: std::thread::JoinHandle<u64>,
-    _read_handle: HANDLE,
-    label: &str,
-) -> Result<(u64, bool), String> {
+fn join_forwarder(forwarder: std::thread::JoinHandle<OutputDrain>) -> OutputDrain {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while !forwarder.is_finished() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    let forced_closed = !forwarder.is_finished();
-    if forced_closed {
+    if !forwarder.is_finished() {
         // Dropping JoinHandle detaches. The runner exits immediately after
         // emitting an unconfirmed receipt, so Windows closes this process's
         // pipe handles and terminates the detached thread.
         drop(forwarder);
-        return Ok((0, true));
+        return OutputDrain {
+            bytes: 0,
+            state: DrainState::TimedOut,
+            read_error: None,
+        };
     }
-    let bytes = forwarder
-        .join()
-        .map_err(|_| format!("{label} forwarder panicked"))?;
-    Ok((bytes, forced_closed))
+    forwarder.join().unwrap_or(OutputDrain {
+        bytes: 0,
+        state: DrainState::Panicked,
+        read_error: None,
+    })
 }
 
 struct CancelWatcher {
@@ -1181,6 +1284,24 @@ fn merge_network_authorized_environment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distinguishes_pipe_eof_from_read_failure() {
+        let (read, write) = create_pipe_pair().unwrap();
+        let writer = ControlFrameWriter::new("pipe-test");
+        let failed = join_forwarder(drain_and_forward(
+            write,
+            OutboundKind::Stdout,
+            writer.clone(),
+        ));
+        assert_eq!(failed.state, DrainState::ReadFailed);
+        assert!(failed.read_error.is_some());
+        assert_eq!(close_handle_error(write), None);
+        let eof = join_forwarder(drain_and_forward(read, OutboundKind::Stdout, writer));
+        assert_eq!(eof.state, DrainState::Eof);
+        assert_eq!(eof.read_error, None);
+        assert_eq!(close_handle_error(read), None);
+    }
 
     #[test]
     fn approved_network_execution_does_not_install_an_ineffective_filesystem_guard() {

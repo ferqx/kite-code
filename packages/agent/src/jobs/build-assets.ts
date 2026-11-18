@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { prepareBundledOfficeCli } from './prepare-officecli';
 import { ripgrepAsset } from './ripgrep';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'platform/process');
@@ -23,9 +24,10 @@ copyFileSync(
 );
 for (const name of ['LICENSE-MIT.txt', 'LICENSE-PCRE2.txt', 'LICENSE-SLJIT.txt'])
   copyFileSync(resolve(import.meta.dir, 'ripgrep-licenses', name), join(searchDirectory, name));
+const officecli = await prepareBundledOfficeCli(searchDirectory);
 writeFileSync(
   join(searchDirectory, 'manifest.json'),
-  `${JSON.stringify({ platform: process.platform, arch: process.arch, rg: { version: '15.0.0', package: '@vscode/ripgrep', packageVersion: '1.18.0', sha256: createHash('sha256').update(readFileSync(sourceRg)).digest('hex') } }, null, 2)}\n`,
+  `${JSON.stringify({ platform: process.platform, arch: process.arch, rg: { version: '15.0.0', package: '@vscode/ripgrep', packageVersion: '1.18.0', sha256: createHash('sha256').update(readFileSync(sourceRg)).digest('hex') }, officecli }, null, 2)}\n`,
 );
 
 if (process.platform === 'win32') {

@@ -22,8 +22,9 @@ import type {
 } from '../extensions';
 import { JobStartError } from '../extensions';
 import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
-import { windowsGitProgram } from '../jobs/windows-git-bash';
-import type { WindowsShellBackend } from '../jobs/windows-shell';
+import { captureWindowsGitBashRuntime, windowsGitProgram } from '../jobs/windows-git-bash';
+import { powerShellLaunchIdentities } from '../jobs/windows-powershell';
+import { type WindowsShellBackend, windowsUserLocale } from '../jobs/windows-shell';
 import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
 import type { GitWorktreeHost } from '../tools/git-worktree';
@@ -179,7 +180,7 @@ function commandRequest(request: AuthorizationRequest, scoped: boolean) {
 type ShellAsset = Awaited<ReturnType<typeof asset>>;
 type WindowsRead = {
   command: string;
-  pinRipgrep?: true;
+  pinRipgrep?: 'command' | 'script';
   git?: ShellAsset & { argv?: readonly string[] };
 };
 export async function inspectShellAssets(
@@ -187,17 +188,20 @@ export async function inspectShellAssets(
   signal?: AbortSignal,
 ): Promise<ShellAsset[]> {
   assertShellConfiguration(options);
+  const powerShell =
+    options.windows?.kind === 'powershell' ? options.windows.powerShell : undefined;
+  const powerShellAssets = powerShell ? powerShellLaunchIdentities(powerShell) : [];
   const paths: [string, boolean][] = [
     [options.supervisorPath, options.platform !== 'darwin'],
     [options.bunExecutable, true],
     [options.shellExecutable, true],
   ];
   if (options.linux) paths.push([options.linux.bubblewrapPath, true]);
-  if (options.windows?.kind === 'powershell') {
-    if (options.shellExecutable !== options.windows.powerShell.executable.canonical)
+  if (powerShell) {
+    if (options.shellExecutable !== powerShell.executable.canonical)
       throw new AgentError('windows_powershell_asset_invalid');
-    paths.push([options.windows.powerShell.engine.canonical, false]);
-  } else if (options.windows)
+    for (const dependency of powerShellAssets.slice(1)) paths.push([dependency.canonical, false]);
+  } else if (options.windows && options.windows.kind !== 'powershell')
     paths.push(
       [options.windows.fullShellExecutable, true],
       [`${dirname(options.shellExecutable)}/../../manifest.json`, true],
@@ -208,11 +212,7 @@ export async function inspectShellAssets(
     ([path, executable], signal) => asset(path, executable, signal),
     signal,
   );
-  if (
-    options.windows?.kind === 'powershell' &&
-    (assets[2]?.digest !== options.windows.powerShell.executable.digest ||
-      assets[3]?.digest !== options.windows.powerShell.engine.digest)
-  )
+  if (powerShellAssets.some((identity, index) => assets[2 + index]?.digest !== identity.digest))
     throw new AgentError('shell_asset_changed');
   return assets;
 }
@@ -365,6 +365,7 @@ async function worktreeAssets(
   options: ShellConfigurationOptions,
   cwd: string,
   bun: ShellAsset,
+  windowsGitPath: string | undefined,
   signal?: AbortSignal,
 ) {
   const root = gitWorktreeAssetDirectory();
@@ -422,11 +423,9 @@ async function worktreeAssets(
       throw new AgentError('worktree_asset_changed');
     const candidates =
       options.platform === 'win32'
-        ? options.windows?.kind === 'powershell'
-          ? options.windows.gitExecutable
-            ? [options.windows.gitExecutable]
-            : []
-          : [join(dirname(options.windows!.fullShellExecutable!), '../../mingw64/bin/git.exe')]
+        ? windowsGitPath
+          ? [windowsGitPath]
+          : []
         : options.platform === 'darwin'
           ? await macosGitCandidates()
           : ['/usr/bin/git', '/bin/git'];
@@ -543,14 +542,16 @@ export async function createShellConfiguration(input: {
     if (!supervisor || !bun || !shell) throw new AgentError('shell_asset_unavailable');
     // PowerShell may have a standalone Git installation. Git Bash uses the
     // real binary inside the same staged closure as its interpreter.
-    const gitPath =
-      options.windows?.kind === 'powershell'
-        ? options.windows.gitExecutable
-        : options.windows && join(dirname(shell.path), '../../mingw64/bin/git.exe');
+    const windows = options.windows;
+    const bashRuntime =
+      windows && windows.kind !== 'powershell'
+        ? await captureWindowsGitBashRuntime(shell.path, windows.fullShellExecutable, input.signal)
+        : undefined;
+    const gitPath = windows?.kind === 'powershell' ? windows.gitExecutable : bashRuntime?.git;
     let git: ShellAsset | undefined;
     if (gitPath) {
       try {
-        git = await asset(windowsGitProgram(gitPath), true, input.signal);
+        git = await asset(bashRuntime ? gitPath : windowsGitProgram(gitPath), true, input.signal);
       } catch {
         input.signal?.throwIfAborted();
       }
@@ -564,7 +565,7 @@ export async function createShellConfiguration(input: {
     });
     const searchAsset = await asset(ripgrepAsset(), true, input.signal);
     const worktree = selected.includes('git.worktree')
-      ? await worktreeAssets(options, cwd, bun, input.signal)
+      ? await worktreeAssets(options, cwd, bun, bashRuntime?.fullGit ?? git?.path, input.signal)
       : undefined;
     const worktreeRequest = (request: AuthorizationRequest) => {
       if (request.definitionVersion !== '1') return undefined;
@@ -649,7 +650,7 @@ export async function createShellConfiguration(input: {
       if (ps?.readOnly)
         return ps.gitQuery
           ? git && { command: source, git: { ...git, argv: ps.gitQuery } }
-          : { command: source, ...(ps.pinRipgrep ? { pinRipgrep: true } : {}) };
+          : { command: source, ...(ps.pinRipgrep ? { pinRipgrep: ps.pinRipgrep } : {}) };
       const read =
         classified.windowsRead && windowsBashRead(classified.windowsRead, shell!.path, git?.path);
       return read && { command: read.command, ...(read.gitQuery && git ? { git } : {}) };
@@ -817,8 +818,20 @@ export async function createShellConfiguration(input: {
     const handleOwners = new WeakMap<JobHandle, JobDefinition>();
     const extension = createShellExtension({
       ...(host ? { permissionsSchema } : {}),
-      ...(options.platform === 'win32'
-        ? { dialect: powerShell ? ('powershell' as const) : ('git-bash' as const) }
+      ...(outputCollection ? { outputCollection: true } : {}),
+      ...(windows
+        ? {
+            windowsUserLocale: windowsUserLocale(),
+            ...(windows.kind === 'powershell'
+              ? {
+                  dialect: 'powershell' as const,
+                  powerShellVersion: windows.powerShell.version,
+                  powerShellEdition:
+                    windows.powerShell.edition ??
+                    (windows.powerShell.installation ? ('Core' as const) : ('Desktop' as const)),
+                }
+              : { dialect: 'git-bash' as const, gitBashVersion: windows.bashVersion }),
+          }
         : {}),
       ...(worktree
         ? {
@@ -1259,7 +1272,7 @@ export async function createShellConfiguration(input: {
                   ...(ps.network ? ['network' as const] : []),
                   ...(ps.outsideWrite ? ['external' as const] : []),
                 ],
-                ...(ps.uncertain && policy?.mode !== 'auto'
+                ...(ps.uncertain && policy?.mode !== 'auto' && policy?.mode !== 'full'
                   ? { requiresApproval: true as const }
                   : {}),
               }

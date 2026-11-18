@@ -22,17 +22,20 @@ export function signMacosTerminalCode(
   const searchManifest = join(search, 'manifest.json');
   const filesBinary = join(files, 'files.node');
   const searchBinary = join(search, 'rg');
+  const officeBinary = join(search, 'officecli');
   const filesMetadata = JSON.parse(readFileSync(filesManifest, 'utf8')) as { sha256: string };
   const searchMetadata = JSON.parse(readFileSync(searchManifest, 'utf8')) as {
     rg: { sha256: string };
+    officecli: { sha256: string };
   };
   if (
     filesMetadata?.sha256 !== sha(filesBinary) ||
-    searchMetadata?.rg?.sha256 !== sha(searchBinary)
+    searchMetadata?.rg?.sha256 !== sha(searchBinary) ||
+    searchMetadata?.officecli?.sha256 !== sha(officeBinary)
   )
     throw Error('terminal_macos_signing_asset_changed');
 
-  const required = new Set([executable, filesBinary, searchBinary]);
+  const required = new Set([executable, filesBinary, searchBinary, officeBinary]);
   function walk(directory: string) {
     for (const name of readdirSync(directory).sort()) {
       const path = join(directory, name);
@@ -50,6 +53,7 @@ export function signMacosTerminalCode(
 
   filesMetadata.sha256 = sha(filesBinary);
   searchMetadata.rg.sha256 = sha(searchBinary);
+  searchMetadata.officecli.sha256 = sha(officeBinary);
   writeFileSync(filesManifest, JSON.stringify(filesMetadata));
   writeFileSync(searchManifest, `${JSON.stringify(searchMetadata, null, 2)}\n`);
 }

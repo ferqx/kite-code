@@ -104,7 +104,7 @@ try {
   const [staged, duplicate] = await Promise.all([first, second]);
   if (duplicate && JSON.stringify(duplicate) !== JSON.stringify(staged))
     throw Error('runtime_mismatch');
-  const verify = await captureWindowsGitBashRuntime(staged.shell, staged.fullShell);
+  const { verify } = await captureWindowsGitBashRuntime(staged.shell, staged.fullShell);
   await verify(false);
   await verify(true);
   process.stdout.write(`result:${JSON.stringify(staged)}\n`);

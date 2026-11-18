@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createBuiltinSkillSources } from '@kite-ai/agent/skills';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
@@ -66,6 +67,27 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
   const saves: string[] = [];
   let inlineRequest: OfficePreviewInteraction['inlineRequest'];
   const prompts: string[] = [];
+  const selectedSkills: Array<string | undefined> = [];
+  const officeSkills = await Promise.all(
+    createBuiltinSkillSources()
+      .filter(({ id }) => id.startsWith('office.'))
+      .map(async ({ id, source }) => {
+        const { name, version, description } = (await source.list()).entries[0]!;
+        await source.dispose();
+        return {
+          id,
+          name,
+          version,
+          description,
+          source: null,
+          enabled: true,
+          state: 'available' as const,
+          reason: null,
+          requiredCapabilities: [],
+          missingCapabilities: [],
+        };
+      }),
+  );
   let holdSend = false;
   let failReceipt = true;
   let resolveSend: ((outcome: { status: 'accepted' }) => void) | undefined;
@@ -93,7 +115,7 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     slideCount: 3,
     notes,
     selection,
-    ...(inlineRequest ? { inlineRequest } : {}),
+    ...(inlineRequest ? { inlineRequest, requestOpen: true } : {}),
   });
   dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
     x: viewportX,
@@ -119,6 +141,24 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     async request(request: NativeRequest) {
       requests.push(request);
       if (request.method.startsWith('outputs.office.')) throw Error('removed_local_edit_IPC');
+      if (request.method === 'settings.skills.open') {
+        return {
+          kind: 'settings.skills.page',
+          readId: request.readId,
+          scope: { generation: request.generation, storeId: target.storeId },
+          page: {
+            version: 1,
+            scope: 'user',
+            storeId: target.storeId,
+            revision: 'b'.repeat(64),
+            availability: 'available',
+            reason: null,
+            entries: officeSkills,
+            nextAfterId: null,
+            complete: true,
+          },
+        };
+      }
       if (request.method === 'outputs.info') {
         currentFile = request.target.fileId;
         return {
@@ -168,9 +208,10 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
           target={{ ...target, fileId }}
           onSave={(file) => saves.push(file.fileId)}
           onEdit={(_, context) => edits.push(context)}
-          onRequestEdit={async (_, context, prompt) => {
+          onRequestEdit={async (_, context, prompt, skillId) => {
             edits.push(context);
             prompts.push(prompt);
+            selectedSkills.push(skillId);
             if (holdSend)
               return new Promise((resolve) => {
                 resolveSend = resolve;
@@ -195,6 +236,15 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
   };
   try {
     await render();
+    const skill = document.querySelector<HTMLSelectElement>('select[aria-label="修改 Skill"]')!;
+    expect([...skill.options].map((option) => option.value)).toEqual([
+      '',
+      ...officeSkills.map(({ id }) => id),
+    ]);
+    await act(async () => {
+      skill.value = 'office.pptx';
+      skill.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    });
     expect(document.body.textContent).not.toContain('来源：Run run');
     expect(document.querySelector('.native-office-toolbar')?.getAttribute('title')).toBe(
       '来源：Run run。只读预览，排版可能与 Office 不同；复杂 3D 与动画不受支持。',
@@ -241,11 +291,15 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
       await new Promise((r) => setTimeout(r, 250));
     });
     expect(prompts).toEqual(['精简选中标题']);
+    expect(selectedSkills).toEqual(['office.pptx']);
     await act(async () => {
       await new Promise((r) => setTimeout(r, 250));
     });
     expect(requests.filter((r) => r.method === 'outputs.preview.request.result')).toHaveLength(2);
     expect(prompts).toHaveLength(1);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
     expect(document.body.textContent).not.toContain('预览回执暂时不可用');
     expect(edits[0]).toEqual({ sourceHash: 'a'.repeat(64), selection });
     expect(edits[0]).not.toHaveProperty('editor');

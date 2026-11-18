@@ -17460,6 +17460,24 @@
                     "content": {
                       "type": "string"
                     },
+                    "images": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "mediaType": {
+                            "type": "string",
+                            "enum": ["image/png", "image/jpeg", "image/webp", "image/gif"]
+                          },
+                          "data": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["mediaType", "data"],
+                        "additionalProperties": false
+                      }
+                    },
                     "toolCalls": {
                       "type": "array",
                       "items": {

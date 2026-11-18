@@ -544,7 +544,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     method === 'settings.general.shell.save' &&
     input.preference !== 'auto' &&
     input.preference !== 'git-bash' &&
-    input.preference !== 'powershell'
+    input.preference !== 'powershell' &&
+    input.preference !== 'powershell-7'
   )
     throw Error('invalid_native_request');
   if (method === 'settings.skills.search' && !isSkillMarketplaceQuery(input.query))

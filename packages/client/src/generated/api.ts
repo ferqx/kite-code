@@ -2620,6 +2620,10 @@ export type ModelInputSnapshot = {
     messages: Array<{
       role: 'system' | 'user' | 'assistant' | 'tool';
       content: string;
+      images?: Array<{
+        mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+        data: string;
+      }>;
       toolCalls?: Array<{ id: string; name: string; arguments: string }>;
       toolCallId?: string;
       sourceIds?: Array<string>;

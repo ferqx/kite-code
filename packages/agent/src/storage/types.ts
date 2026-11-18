@@ -59,8 +59,16 @@ export interface WorkspaceRemoval {
   outcome: 'workspace_removed';
   stopConfirmed: false;
 }
-export type DesktopShellBackend = 'git-bash' | 'powershell' | 'unavailable';
+/** powershell-7 remains readable for historical host records; new bindings use powershell. */
+export type DesktopShellBackend = 'git-bash' | 'powershell' | 'powershell-7' | 'unavailable';
+/** auto is the legacy/default discovery sentinel, not a separate settings choice. */
 export type DesktopShellPreference = 'auto' | Exclude<DesktopShellBackend, 'unavailable'>;
+export type DesktopShellSelection =
+  | DesktopShellBackend
+  | {
+      automatic: Exclude<DesktopShellBackend, 'powershell-7'>;
+      powerShell7Available: boolean;
+    };
 
 export interface SessionRecord {
   id: string;

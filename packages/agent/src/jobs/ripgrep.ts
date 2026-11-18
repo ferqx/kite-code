@@ -4,15 +4,20 @@ import { createRequire } from 'node:module';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+export function packagedToolDirectory(): string | undefined {
+  if (!import.meta.url.endsWith('.js')) return;
+  const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+  const root = ['jobs', 'permissions'].includes(basename(moduleDirectory))
+    ? dirname(moduleDirectory)
+    : moduleDirectory;
+  return join(root, 'platform/process/tools');
+}
+
 /** The fixed platform dependency ships the executable; never search the user's PATH or download. */
 export function ripgrepAsset(): string {
   const name = process.platform === 'win32' ? 'rg.exe' : 'rg';
-  if (import.meta.url.endsWith('.js')) {
-    const moduleDirectory = dirname(fileURLToPath(import.meta.url));
-    const root = ['jobs', 'permissions'].includes(basename(moduleDirectory))
-      ? dirname(moduleDirectory)
-      : moduleDirectory;
-    const directory = join(root, 'platform/process/tools');
+  const directory = packagedToolDirectory();
+  if (directory) {
     const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
     const executable = realpathSync.native(join(directory, name));
     if (

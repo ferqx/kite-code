@@ -422,6 +422,6 @@ Store 的锁与事务见[存储 owner](src/storage/README.md)。[Runtime 实测]
 
 ## 办公制作与交付
 
-内置[Office Skill与运行时](src/tools/documents/README.md)通过既有Shell制作/修改DOCX、XLSX、PPTX和有限PDF，不增加模型工具或版本。[Shell输出收集](src/business/output-collection.README.md)在生产者确实结束后独立归档不可变文件，保原Run及稳定身份；列举、预览、保存与继续修改不消耗额外模型轮次。原Files文本结果和Fork兼容读取保持。
+内置[办公技能与资源](src/tools/documents/README.md)提供 OfficeCLI 的 Word、Excel、PPT 技能以及现有 PDF 技能。任务通过既有 Shell 使用当前环境的 `officecli` 或 PDF helper，沿原模型工具定义。[Shell 输出收集](src/business/output-collection.README.md)在生产者确实结束后独立归档不可变文件，保留原 Run 和文件身份。列举、预览、保存与继续修改沿现有文件接口。
 
 输入继续使用原合法input import；[宿主工作副本](src/tools/input-working-files.ts)在命令提交前复制到工作区，Store登记映射并在原输入绑定事务标记bound。模型只看到该工作路径；同command/import重入复用原记录，不覆盖已绑定副本，历史Blob始终只读。此端口由宿主注入，Runtime不导入native文件实现。[安全回归](test/isolated/tools/input-working-files.test.ts)验证路径/链接、Unicode名称、partial/hash失败与绑定后保留编辑。

@@ -28,6 +28,8 @@ function installation() {
   pe.writeUInt32LE(0x1100, 524);
   pe.write('ntdll.dll\0', 768);
   write('git/cmd/git.exe', 'git');
+  write('git/mingw64/bin/git.exe', 'git');
+  write('git/mingw64/libexec/git-core/git-remote-http.exe', 'helper');
   write('git/usr/bin/bash.exe', 'bash');
   write('git/usr/bin/ls.exe', 'ls');
   write('git/usr/bin/msys-2.0.dll', pe);
@@ -87,7 +89,7 @@ for (const target of [
       expect(readFileSync(join(runtime, 'usr/bin/bash.exe'), 'utf8')).toBe('bash');
       expect(readFileSync(join(runtime, 'full/usr/bin/bash.exe'), 'utf8')).toBe('bash');
       expect(JSON.parse(readFileSync(join(runtime, 'manifest.json'), 'utf8')).files).toHaveLength(
-        4,
+        6,
       );
     } finally {
       owner.child.kill();

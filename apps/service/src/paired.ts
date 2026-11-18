@@ -176,7 +176,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
     HOME: home,
     ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
   };
-  // Preserve the trusted host's proxy policy and explicit Codex auth directory.
+  // Preserve the trusted host's proxy policy, Codex auth and Windows tool directories.
   // Keep raw values for the owning readers; inherit no other host inputs.
   for (const key of [
     'HTTP_PROXY',
@@ -186,6 +186,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
     'NO_PROXY',
     'no_proxy',
     'CODEX_HOME',
+    ...(process.platform === 'win32' ? ['KITE_SHELL_TOOL_DIRS'] : []),
   ]) {
     const value = process.env[key];
     if (value !== undefined) env[key] = value;

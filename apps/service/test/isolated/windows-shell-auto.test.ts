@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRuntime } from '@kite-ai/agent';
+import { createRuntime, prepareOutputDirectory } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { withBundledRipgrep } from '@kite-ai/agent/jobs/shell';
@@ -216,12 +216,16 @@ for (const backend of ['powershell', 'git-bash'] as const) {
         const expectedStoreId = (await store.getMetadata()).storeId;
         const workspaceSerialLocks = createWorkspaceSerialLocks(profile);
         host.bindWorkspaceSerialLocks?.(workspaceSerialLocks);
-        const runtime = createRuntime({
+        let runtime: ReturnType<typeof createRuntime>;
+        runtime = createRuntime({
           ...host,
           store,
           permissions: host.permissions!,
           workspaceSerialLocks,
           artifacts: createArtifactStore({ profile, store }),
+          outputCollections: {
+            prepare: (context, identity) => prepareOutputDirectory(runtime, context, identity),
+          },
           resolveRunConfiguration: async (input) => {
             const selected = await host.resolveRunConfiguration!(input);
             if (!selected.authorizationCheck) throw Error('missing reviewer');

@@ -95,7 +95,7 @@ try {
       throw Error('direct_bash_measurement_failed');
     direct.push(performance.now() - at);
   }
-  const verify = await captureWindowsGitBashRuntime(runtime.shell, runtime.fullShell);
+  const { verify } = await captureWindowsGitBashRuntime(runtime.shell, runtime.fullShell);
   for (let index = 0; index < 3; index++) {
     const at = performance.now();
     await verify(false);

@@ -23,12 +23,17 @@ export function bundledOfficeSkillDirectory(): string | undefined {
   return undefined;
 }
 
-function createOfficeSkillSource(name: OfficeSkill) {
-  const { description, files } = upstream.skills[name];
-  const byPath = new Map(files.map((file) => [file.path, file]));
-  const appendix = `\n\n## Kite runtime\n\nThe bundled copies of this skill and its support files are read-only. Resolve this skill's relative paths from the \`${name}\` directory under \`KITE_OFFICE_SKILLS_DIR\`. In PowerShell this is \`$env:KITE_OFFICE_SKILLS_DIR\`. Use the Shell and file operations already authorized for your run. Work from the attached source copy. When the user requests a revised file, write the completed new file to the current Shell's \`KITE_OUTPUT_DIR\`. Use dependencies available to that Shell.\n`;
-  const id = `builtin:office.${name}`;
-  const version = hash(JSON.stringify([upstream.revision, name, files, appendix]));
+function createOfficeSkillSource(key: OfficeSkill) {
+  const { name, directory, description, files } = upstream.skills[key];
+  const textFiles = files.filter((file) => !('binary' in file && file.binary));
+  const byPath = new Map(textFiles.map((file) => [file.path, file]));
+  const appendix =
+    key === 'pdf'
+      ? `\n\n## Kite runtime\n\nThe bundled copies of this skill and its support files are read-only. Resolve this skill's relative paths from the \`${directory}\` directory under \`KITE_OFFICE_SKILLS_DIR\`. In PowerShell this is \`$env:KITE_OFFICE_SKILLS_DIR\`. Use the Shell and file operations already authorized for your run. Work from the attached source copy. When the user requests a revised file, write the completed new file to the current Shell's \`KITE_OUTPUT_DIR\`. Use dependencies available to that Shell.\n`
+      : '';
+  const revision = key === 'pdf' ? upstream.pdfRevision : upstream.officeCliRevision;
+  const id = `builtin:office.${key}`;
+  const version = hash(JSON.stringify([revision, key, files, appendix]));
   const summary: SkillSummary = {
     id,
     version,
@@ -51,7 +56,7 @@ function createOfficeSkillSource(name: OfficeSkill) {
   async function read(file: File) {
     const root = bundledOfficeSkillDirectory();
     if (!root) throw new SkillError('skill_unavailable');
-    const bytes = await readFile(join(root, name, file.path)).catch(() => {
+    const bytes = await readFile(join(root, directory, file.path)).catch(() => {
       throw new SkillError('skill_unavailable');
     });
     if (bytes.length !== file.bytes || hash(bytes) !== file.sha256)
@@ -73,7 +78,7 @@ function createOfficeSkillSource(name: OfficeSkill) {
       check(input.id, input.version);
       return {
         ...(await document()),
-        resources: files
+        resources: textFiles
           .filter((file) => file.path !== 'SKILL.md')
           .map(({ path }) => ({ id: resourceId(path), path })),
       };

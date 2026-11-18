@@ -58,17 +58,39 @@ Windows 在原 Job 停止、runner 回执和原 HANDLE 关闭均确认后，等�
 
 [原 Job owner](../platform/process/windows-owned-child.ts)与原生 runner 的受限／完整文件启动均使用 `CREATE_NO_WINDOW` 和隐藏窗口的 `STARTUPINFO`，标准流仍走原管道。Windows 可能保留不可见的 console host，它也必须纳入原 Job 的完整成员观察与停止证明，不能因没有可见窗口而省略回收。[真实 Windows 回归](../../test/isolated/jobs/windows-owned-child.test.ts)核隐藏启动、输出、成员身份和完整关闭。
 
+原生 Runner 在解释器自然退出后先读取实际退出码，再终止 Job 中剩余的进程，并查询活动数直到确认归零或达到现有清理期限。标准输出和错误分别确认读至 EOF。Runner 通过原私有 stderr 发出一条有界诊断，适配器保存为原 Job 的 `details.nativeCleanup`。记录含等待原因、实际退出码、终止前后活动进程数、读取状态、直接关闭的管道与 Job 句柄结果、ACL 清理结果和对应 HRESULT。命令双流继续通过 V7 帧传递，终态依据原 V7 回执及外层原 HANDLE 的停止与关闭证明。无法读取实际退出码时保存空退出码和结果未知，输出读取或转发未确认时也保留结果未知。取消及超时沿用公开回执的退出码约定，诊断中的实际退出码为空。 [原生 Runner](../../../../native/windows-sandbox-runner/src/main.rs) [跨 Job 持锁回归](../../test/isolated/jobs/windows-shell-cleanup.test.ts)
+
 全部命令共用原生启动和监督链路。适配器把权限层已核实的默认范围只读调用映射到 `read_only`，只准备本次临时权限，不进入工作区 ACL 账本或互斥锁。Windows `Path`／`PATH` 在附加固定工具路径前合并为一个 `PATH`，避免大小写重复键让 Bash 丢失工具目录。
+
+已结算的 Windows Shell Job 从有限 stderr 尾部读取可识别的命令查找诊断。PowerShell 从命令未找到的异常记录报告具体名称，包含 `SilentlyContinue` 后仍有记录的探测。Git Bash 使用执行或 `type` 的原查找报错，也可用独立字面量 `command -v NAME`（含尾随 `|| true`）的空输出和结束状态识别未命中。脚本最终状态和退出码保持原值，单靠退出码或任意复合脚本的空输出不推断未命中。路径核对基于本次启动 PATH、Windows 用户／系统 App Paths 的默认值和 `KITE_SHELL_TOOL_DIRS` 中按分号声明的绝对目录。只检查精确文件名与常见可执行扩展，读取本地固定磁盘的文件属性，遇到重解析点即停止该路径的检查。原 Job 保存至多八个候选及来源，后续调用沿当前 Shell 授权。 [查找实现](windows-command-lookup.ts) [Windows 原生回归](../../test/isolated/jobs/windows-command-lookup.test.ts)
+
+OfficeCLI 1.0.161 与 `rg` 同放在包内 `platform/process/tools`。构建按当前原生目标选择并核对官方资产大小和 SHA-256。Service 校验包内文件，在既有工具目录 PATH 生效的同一 Shell 中运行。Windows x64、macOS arm64／x64、Linux glibc x64／arm64 分别选择自己的程序。macOS 签名后将实际摘要写回同一清单。 [运行时](officecli-runtime.ts) [构建准备](prepare-officecli.ts) [随包工具回归](../../test/isolated/jobs/ripgrep-package.test.ts)
+
+Runner 按完整转义命令行的 UTF-8 字节数选择 Git Bash 启动方式。实机 Git Bash 的 `-c` 参数在约 8 KiB 时已经出现截断。完整命令行小于 8 KiB 的脚本作为 `bash -c` 参数，其余脚本先通过本次私有标准输入管道完整接收，再由 Bash 执行。启动路径会核实脚本已送达。进入用户脚本时，标准输入已到 EOF，用户脚本可使用重定向、管道或 here-document 给子程序传入数据。实机回归覆盖低于 Win32 上限的多字节 here-document，以及超长脚本中的引号、退出码和原 Job 清理。 [Windows Job 回归](../../test/isolated/jobs/windows-shell.test.ts)
 
 可写工作区范围仍由 [原生准备层](../../../../native/windows-sandbox-runner/src/direct_workspace.rs) 使用 [Windows 可回调的继承传播](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-treesetnamedsecurityinfow)。工作区锁等待和传播均可取消。首次在同一工作区锁内持久写入一次未完成账本，传播后再写完成标记。涉及保护路径快照的修改仍先持久保存快照，根 ACE 已存在也不能代替后代准备完成。取消时未创建业务进程且本次临时 ACL 已撤销，才返回原协议的已取消／清理确认回执，撤销不确定仍保 unknown。首次完整传播随文件数增长，完成后复用原账本，下一条命令补全准备时只运行自身。
 
-[准备层](windows-git-bash.ts)固定本机 Git 的私有运行时闭包。仓库 [IPC 兼容层](../../../../native/windows-msys-compat/README.md)修复 MSYS 对象 ACL；Full／完整文件范围保另一份未修改映像，避免并发共享区冲突，不修改安装 Git。两份映像共用复制与校验流程，[准备层回归](../../test/isolated/jobs/windows-git-bash.test.ts)核冷创建、复用、缺失文件恢复和变更文件保留。Windows Shell 构建携带 runner、兼容 DLL 与内置 rg。Git Bash 启动时依次查找内置 rg、所选副本的 `usr/bin` 和 `mingw64/bin`，然后才查找继承路径。未知关闭保 owner，冷读取不从 PID 重建或重跑。
+[准备层](windows-git-bash.ts)从宿主 `PATH` 选中的 `git.exe` 定位安装，在该安装内识别 Bash、真实 Git 和配套 `libexec/git-core`。若 `PATH` 指向启动器，安装内须有唯一完整的程序树。运行时清单从实际文件记录程序布局。Git Bash 启动时依次查找内置 rg、所选副本的 `usr/bin`、由清单确认的 Git `bin` 和继承路径。仓库 [IPC 兼容层](../../../../native/windows-msys-compat/README.md)修复 MSYS 对象 ACL；Full／完整文件范围保另一份未修改映像，避免并发共享区冲突，不修改安装 Git。两份映像共用复制与校验流程，[准备层回归](../../test/isolated/jobs/windows-git-bash.test.ts)核常见及自定义目录名、冷创建、复用、缺失文件恢复和变更文件保留。Windows Shell 构建携带 runner、兼容 DLL 与内置 rg。未知关闭保 owner，冷读取不从 PID 重建或重跑。
 
 `stageWindowsGitBash`／`windowsShellAssets` 是异步准备入口，调用者须等待完成后才能装配 Shell。源文件仍每次完整读取校验；未修改映像复用同次源 SHA，目标父目录去重，副本复制与完整内容校验最多并行8个文件。同一摘要目录的两套副本和清单由一个跨进程独占文件锁保护；竞争者最多等待30秒，取得锁后才读取目标文件，避免把尚未完成的复制误判为损坏。锁文件保持原身份、不删除；不同摘要目录互不阻塞。已有文件不覆盖，缺失文件使用排他创建；失败先等待已开始的文件操作全部结算，不发布新清单或提前交出可执行资产，随后释放准备锁；既有损坏文件仍失败而不修写。两套副本与派发前完整重核保持，不用 mtime 缓存或链接替代内容验证。[并发回归](../../test/isolated/jobs/windows-git-bash-race.test.ts)用精确半写同步点核跨进程复制／补丁映像／Full／清单发布、同进程竞争、失败全结算和 owner 强杀后的锁释放；POSIX 只证明合成 Git 资产与本机 OS 锁，不代替 Windows 原生资格。
+
+`windowsShellAssets` 准备 Git Bash 后在有时限的 `read_only` 原生 Job 中读取已选副本的 `$BASH_VERSION`。只有成功结算并校验的版本才进入模型目录。版本未读到且原 Job 已确认关闭时，方言仍可用。模型目录在装配时读取 Windows 用户默认区域，双流由 Job 适配器按 UTF-8 解码。 [Windows 用户区域 API](https://learn.microsoft.com/en-us/windows/win32/api/winnls/nf-winnls-getuserdefaultlocalename)
 
 [原生测试](../../test/isolated/jobs/windows-shell.test.ts)与 [Service 集成](../../../../apps/service/test/isolated/shell-search-configuration.test.ts)覆盖检索、Git／fork／管道、范围与审批、并发、取消／宿主死亡、准确关闭和冷零重放；事实及安装资格范围归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
 
 每次 Windows Shell 仍创建独立 runner、Bash、原 Job、临时目录和双流，下一条命令从原 Workspace／宿主环境开始，不继承前一条的 `cd`／`export`。共享的是已准备的摘要运行时及工作区 ACL 账本；ACL mutex 只串行准备，Shell 本身仅申请 process slot，没有工作区执行串行锁。[真实 Service 跨会话回归](../../../../apps/service/test/isolated/shell-concurrency-configuration.test.ts)在实际 Windows／Runtime／SQLite、两个 process slot 下核两个会话并行、第三个排队、准确取消一个时另一原 HANDLE 仍存活、同／不同工作区与受限／Full、输出和 temp 分离及后续命令状态重置。它也确定性证明同一 Workspace 的文件可被另一会话覆盖；执行隔离不提供文件副本或 Git 索引隔离。
+
+两个 Windows 方言共用同一份 Shell 模型指引。前台或 `background:true` 命令的解释器退出后，原生 runner 停止同一 Job 中的剩余后代。需要本地辅助进程时，应在解释器仍运行时完成使用、落盘与关闭。Windows 默认命名管道 DACL 允许 World 读取，双向连接还需要写入权限。实机探针在两个方言的 `workspace_write` 下双向连接都收到 Win32 5，显式授予当前登录 SID 的管道和已批准的 `filesystem:full_access` 加 `network:none` 都能连接。可脱离辅助进程的调用优先使用程序支持的单进程模式。 [Shell 模型指引](../tools/shell.ts) [Windows 命名管道权限](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
+
+同一实机对照核实了文件替换的两类失败。已有句柄不允许共享删除时，`ReplaceFileW` 在普通进程及原 Job 中均返回 Win32 32。保留 ACL 的替换还需对替换源取得 `WRITE_DAC`。工作区准备层在原 capability 的内容写入与删除权限外，加入仅对文件生效的继承 ACE，允许工作区文件完成这种替换。目录只传递文件 ACE，区外文件和只读 Job 仍受原范围约束。工作区锁内核对这项文件继承权限，旧账本缺少时先保存未完成标记、补齐已有后代，再标完成；取消后沿原账本恢复。 [ReplaceFileW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew) [原生准备层](../../../../native/windows-sandbox-runner/src/direct_workspace.rs)
+
+2026-11-18 在 PowerShell 5.1.26100.10066、PowerShell 7.6.9 和 Git Bash 的真实 Job 中，已存在和新创建的工作区文件均可用 `.NET File.Replace` 完成保留 ACL 的替换。夹具核对目标 ACL 字节、源文件消费、持有句柄时的 Win32 32、目录和区外文件的 `WRITE_DAC` 拒绝，以及下一只读 Job 的拒绝。原生 Cargo 还核实已完成旧账本的原 SID 复用与升级后热路径免重写。 [文件替换回归](../../test/isolated/jobs/windows-file-replace.test.ts) [文件权限取舍](../../../../.agents/notes/implemented/bug-fix/2026-11-18-windows-workspace-file-replacement.md)
+
+同日以当前 Runner 在隔离 Kite Native 开发制品中，用已有 OpenAI 连接的 `gpt-6-luna`／high 和完全访问复测五页中文「新品上市计划」。PowerShell 7.6.9 与 Git Bash（Git for Windows 2.56.1）分别执行 7／16 个 Shell Job，各有一次跨命令丢失未保存驻留修改而报 `Slide 1 not found`，随后模型自行完成保存与交付。23 个 Job 均确认清理和进程树停止，轮次结束及冷导出时均无所属 OfficeCLI 残留，PPTX 独占读取通过；未出现管道拒绝或共享冲突。`locale 'zh-CN' inferred from OS user culture` 是 CLI 的信息提示，未造成该命令失败。
+
+两份归档文件经 ZIP／可编辑文本结构核对，并由 Microsoft PowerPoint 16.0 只读打开、导出全部五页且原件摘要不变。Kite 冷重开均显示五页且无模型重放；PowerShell 首次预览在 22 秒内未显示五页，冷重开恢复，首开原因尚未确认。原始 Job、进程、模型与成品证据分别位于本机 `.cache/kite-ps7-ppt-retest-20261117-d152d6f6/evidence/` 和 `.cache/kite-ps7-ppt-retest-20261117-ac6e702c/evidence/`。
+
+22 条可核验业务输入快照均为 OpenAI／Responses／`gpt-6-luna`／high，并携带实际方言与通用进程指引；另 9 条输入快照读取返回 `model_input_hash_mismatch`，保留为独立核验限制，不计为 Shell 执行失败。本轮未改审批、执行审核或客户端，核对的 1,704 个已跟踪文件内容哈希保持一致。以上仅覆盖本机 Windows x64 开发制品与完全访问，不扩大工作区受限管道或安装发布资格。
 
 每个 Runtime 默认4个 process 任务名额，覆盖派发准备及实际执行，超额任务可取消地等待；同一 Shell 可有多个子进程，名额不是 OS 进程总数。进程内8路完整资产读取与该名额分开，既不按会话各分8路，也不串行全部命令。Run 配置捕获、权限与扩展装配并不全部受 process 名额限制，不能由4槽或8个校验缓冲推导整个 Service 的 CPU／RSS／响应延迟上限。32会话的真实排队、实际32条并发、关闭证明及秒级心跳缺口见 [Service 压测](../../../../apps/service/README.md#默认-shell-装配)。
 
@@ -78,11 +100,39 @@ Windows 在原 Job 停止、runner 回执和原 HANDLE 关闭均确认后，等�
 
 ## Windows 桌面 PowerShell 回退
 
-Windows 桌面明确选择 PowerShell，或自动选项明确未发现 Git Bash 时，[系统 PowerShell 探测](windows-powershell.ts)从 `GetSystemDirectoryW` 定位 Windows PowerShell 5.1，固定实际 EXE 和 AST 引擎身份。每个命令由 [Windows Job 适配器](windows-shell.ts)固定解释器、范围和资产，再由 [原生 Runner](../../../../native/windows-sandbox-runner/src/main.rs)校验系统路径和 EXE 摘要，保持原读句柄直到进程创建。只有 Git Bash 请求携带运行时目录。按会话装配归 [Service owner](../../../../apps/service/README.md#默认-shell-装配)。
+Windows 桌面的 [PowerShell 探测](windows-powershell.ts)从 `GetSystemDirectoryW` 定位系统版本，同时枚举本机 `PowerShellCore/InstalledVersions` 的 32／64 位安装登记、系统 `Program Files/PowerShell` 的实际子目录及系统程序目录内的启动 `PATH` 项。候选不固定安装 ID、目录版本或主版本号；逐个核对实际 `pwsh.exe`、引擎和主要 .NET 启动资产，以无 Profile 的固定命令读取真实版本、edition 和解析器位置。系统版本与全部可用独立运行时按[数值版本](installed-shell-version.ts)比较，选择最高版本；同一数字版本的正式版高于预发布版。安装目录与关键文件经解析后须仍位于原路径，工作区、仅位于用户目录的命令别名和未登记的用户目录解压版不参加宿主解释器探测。旧 `discoverWindowsPowerShell7` 导出名仅为兼容，发现逻辑不限于 7。[PowerShell 的 Windows 安装方式](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-windows)
+
+候选无法启动、安装不完整或版本核验失败时，继续检查其余候选。探测进程一旦启动，超时由原进程所有者关闭。关闭结果未知时将错误返回给设置与装配调用方。并发发现等待全部已启动探测结算，不能以回退掩盖关闭未知。设置和新 PowerShell 装配重新发现本机版本，不复用过期结果；版本排序和本机最高选择见[排序回归](../../test/isolated/jobs/installed-shell-version.test.ts)与[原生策略回归](../../test/isolated/permissions/powershell-command-policy.test.ts)。
+
+每个命令由 [Windows Job 适配器](windows-shell.ts)固定解释器、范围和资产。Git Bash 与独立 PowerShell 运行时使用 V7 已有的运行时目录字段，来自对应本机环境准备结果；系统 Desktop 运行时由 [原生 Runner](../../../../native/windows-sandbox-runner/src/main.rs)定位系统路径。布局差异依据已核验的安装描述处理，不按固定版本拆分授权或 Job 生命周期。Runner 核对选中的 EXE 摘要并保持原读句柄到进程创建。模型配置使用同次探测的版本与 edition，审批分析从所选安装取得 AST。按会话装配归 [Service owner](../../../../apps/service/README.md#默认-shell-装配)。
 
 Runner 以非交互、无 Profile 方式直接启动 PowerShell。脚本经所属 stdin 管道按 UTF-8 与长度传递，双流继续由原 Job 收集。可证明的只读命令在受限范围下使用 `read_only`，工作区与完整文件写入使用各自令牌。取消、有限超时、父退出和清理复用原监督与回执。网络约束、审批和安装证据归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
 
-两个后端的独立 Git 查询均固定 Git 可执行文件，并沿原 Runner 请求把活动进程数限制为解释器和一个 Git 进程。Git Bash 使用同一 staged 资产闭包，PowerShell 优先使用已发现 Git for Windows 的真实程序，避免 PATH 包装器引入额外进程。适配器移除继承的 Git 环境选项，再关闭 Git 协议和交互提示。项目配置要求运行外部 clean filter 等助手时，Git 可能报告助手启动失败。原 stdout、stderr 和退出码照常保存。
+复合脚本按 PowerShell `-Command` 的顶层作用域执行，脚本里的函数能访问本次调用的 `$script:` 变量。Runner 在原 AST 的各根执行块内部通过 `finally` 捕获结束时的 `$?`，避免 dot-source 调用返回后重置成功状态；保持原参数、顶层作用域、提前 `return` 和显式 `exit`。根块按实际 AST 能力识别，不按版本号分支。末尾未处理的原生失败及管道失败按 PowerShell 语义返回 1；后续语句主动处理非零可正常成功，独立原生命令仍透传实际退出码。 [PowerShell 作用域](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_scopes?view=powershell-5.1) [Windows Job 回归](../../test/isolated/jobs/windows-shell.test.ts) [安装版本退出码对照](../../test/isolated/jobs/windows-powershell-exit.test.ts)
+
+Runner 从 PowerShell AST 识别独立命令，再按实际 Job 内的命令解析确认原生应用。原生应用的非零码进入原 Job 回执。固定内置 `rg` 的单条调用也显式传递 `$LASTEXITCODE`。未捕获的命令找不到和应用启动异常分别返回 127 和 126，并记录原错误类型及消息。复合脚本和动态调用可检查 `$LASTEXITCODE` 并显式决定退出状态。成品继续按原 Job 的成功终态归档。见 [Windows Job 回归](../../test/isolated/jobs/windows-shell.test.ts)和[文件交付](../business/output-collection.README.md)。
+
+各后端的独立 Git 查询均固定 Git 可执行文件，并沿原 Runner 请求把活动进程数限制为解释器和一个 Git 进程。Git Bash 查询与工作树操作使用运行时清单提供的真实 Git 路径，PowerShell 优先使用已发现 Git for Windows 的真实程序，避免 PATH 包装器引入额外进程。适配器移除继承的 Git 环境选项，再关闭 Git 协议和交互提示。项目配置要求运行外部 clean filter 等助手时，Git 可能报告助手启动失败。原 stdout、stderr 和退出码照常保存。
+
+### 类型统一后的真实模型复测
+
+2026-11-18，在 Windows x64／Bun 1.4.4／Electron 44.3.0 的隔离 Kite Native 开发制品，用现有 OpenAI 连接的 `gpt-6-luna`／high／完全访问复测同一五页中文「新品上市计划」任务。PowerShell 类型自动选中 7.6.9，Git Shell 使用 Git for Windows 2.56.1；OfficeCLI 仍为同一字节的 1.0.161。两个 Run 均完成，分别执行 5／7 个 Shell Job，12 个 Job 的派发权限叶均为 Full，均确认清理及进程树停止，工具审批为零。持续进程观察、任务结束及冷导出后的检查均无所属 OfficeCLI 残留；两份交付原件独占读取通过，未见命名管道拒绝或共享冲突。
+
+Git Shell 有一个真实失败 Job：先前命令 `create/open/add slide/get` 未保存就退出，原 Job 正常停止驻留进程，下一命令报告 `previous session ... without flushing` 和 `Slide 1 not found (total: 0)`。模型自行改为同一命令内批量编辑、保存及关闭，成功重建并交付。`locale 'zh-CN' inferred from OS user culture` 在两类 Shell 都出现，仍为信息提示。
+
+PowerShell 的 5 个 Job 虽均记录 exit 0，逐行检查仍发现 `officecli help pptx view screenshot` 报 `unknown verb 'view'`。同字节 CLI 独立执行返回 1，原生 PowerShell 5.1.26100.10066 和 7.6.9 执行原复合命令也均返回 1，Kite 却结算为成功。进一步用不依赖 OfficeCLI 的 `Write-Output 'before'; cmd.exe /d /c exit 23`，两版本原生 `-Command` 均返回 1，原 Kite Job 均为 0；追加显式 `exit $LASTEXITCODE` 时两边均为 23，主动用后续输出处理错误时两边均为 0。修前差异位于 [PowerShell 启动包装](../../../../native/windows-sandbox-runner/src/lib.rs)的 `build_powershell_command_line` 复合脚本分支；不能据成功 Job 数断言全部内部命令成功，也不能把此问题归于 CLI 或审批。修复同时保留显式退出及脚本主动处理非零结果的语义，验证见下文。
+
+两份冷导出 PPTX 均为五页、按指定顺序包含可编辑文本，后四页各有两条可执行要点。Microsoft PowerPoint 16.0 只读打开并导出全部十页，逐页检查文字与排版，原件摘要未变。Kite 的首开及冷读差异归 [Desktop owner](../../../../apps/desktop/README.md#windows-集成终端-shell)。19 次业务模型请求中，15 份可读输入快照确认 OpenAI／Responses／`gpt-6-luna`／high、实际方言和通用进程指引，另 4 份读取返回 `model_input_hash_mismatch`，仍是独立核验限制。原始命令、双流、权限、过程、成品、版本对照与最小复现位于本机 `.cache/kite-shell-ppt-retest-20261118-46d1f9c1/evidence/`。本轮只复测和定位，测试期间所核对负责目录的 919 个文件摘要未变，未改 Shell、审批或 OfficeCLI 实现；这不构成安装发布或其他机器的资格。
+
+同日后续修复上述通用包装错误。PowerShell 5.1.26100.10066 和本机最高 7.6.9 各以 14 组原生 `-Command` 对照真实受管 Job，覆盖末尾失败、主动处理、显式退出、管道、提前返回、参数与 begin/end、函数／类及 `$script:` 作用域；28 个 Job 全部按预期结算并确认清理。原 `rg | Out-String` 用例也按原生管道失败语义核对为 1。原生 Runner 45 项测试通过，协议仍为 V7，未修改审批或 OfficeCLI。工具描述明确进程内未保存状态不能跨调用保留，已确认清理的终态还向后续模型说明从落盘文件继续；原 stdout／stderr 与回执不被改写。相关验证及通用反馈归 [Shell 工具](../tools/shell.README.md)。原四条输入读取失败由 Service 响应 schema 漏保留图片造成，补全后同一历史 19 条全部完整核验，模型调用总数仍为 19；实现与完整性边界归 [Service owner](../../../../apps/service/README.md)。首次复测的失败事实保留为修前证据。
+
+最终退出状态回归进一步覆盖 trap、using namespace、`#requires`，并按真实 AST 能力在支持的安装上核 clean 根块，合计 37 个受管 Job 与 37 次原生对照通过。原错误帮助复合命令和三组最小命令另在两种安装各重放一次，八组退出码、清理与停止均一致，原错误命令现在准确返回 1。本机缓存中一次构建目录清理与测试并发导致的资产缺失属于验证夹具竞态，先完成正常构建后串行重跑通过，未放宽资产核验。
+
+修后真实模型三段 Run 共执行 14 个 Shell Job：PowerShell 首次未交付，原生对照确认是模型参数和语法错误；原会话一次继续后只新增一个成功 Job 并交付。Git Shell 保留一次不支持的帮助命令失败和一次未保存状态丢失，模型自行恢复。所有 Job 均确认清理／进程树停止，Full 工具审批为零；最终两份可编辑五页 PPTX 均可打开。23 条实际请求完整核验，其中两条含最终进程作用域反馈；真实模型和最终窗口范围见 [Desktop owner](../../../../apps/desktop/README.md#windows-集成终端-shell)。没有为 CLI 保活已结束 Job 或隐式保存；原命令仍在运行时的后台监督和取消关系保持。原始与恢复证据分别在本机 `.cache/kite-shell-ppt-retest-20261118-afb18de4/evidence/`、`evidence-recovery/`。
+
+同日接续复验使用两个全新会话和相同任务、OpenAI `gpt-6-luna`／high／Full，PowerShell 7.6.9 与 Git Shell 分别执行 10／13 个 Job，均在一次用户提交内自行交付。PowerShell 无失败 Job；Git 有三次准确上报的失败：把本次 Job 的 `KITE_OUTPUT_DIR` 跨调用复用导致文件不存在、未保存幻灯片导致后续批处理读取零页，以及开启 CLI 的 `OFFICECLI_RESIDENT_FLUSH=each` 后一次批处理报「无法删除要被替换的文件」。后者的原派发为 `windows-full-job / full_access / internet`，原 Job 清理与进程树停止均确认；错误不能记成审批拒绝。模型随后自行恢复并交付。23 个 Job 的派发模式均为 Full，工具审批为零，结束与冷导出检查未发现所属驻留残留或持续文件占用。
+
+文件替换异常仍未定位：保存的文件副本来自后续恢复后，不能冒称故障发生前的原件。对同字节 CLI，在该恢复后副本上直接启动驻留程序，分别以 each／auto 执行原 50 项批处理、保存及关闭均成功；同副本的受管 PowerShell Full Job 也成功并确认清理。这些对照未复现原文件／启动状态，不能据此归因于 CLI、Job 生命周期或权限，也不能将本轮 Shell 执行写成全绿。两份最终 PPTX 均通过五页可编辑结构、PowerPoint 16.0 十页导出／逐页检查及原件摘要核对；首次与冷预览均约 0.8 秒，32 条实际模型输入完整核验。证据沿用本机 `.cache/kite-shell-ppt-retest-20261118-8ca63a9e/evidence/`，包含原三次失败、进程与独占读取、加载轨迹、输入读取和文件替换隔离对照。复验期间 919 份负责文件摘要无变化，未修改实现、审批或 OfficeCLI；本机开发制品与原首开延迟未定位的边界保持。
 
 ## 默认 macOS 宿主 Shell
 

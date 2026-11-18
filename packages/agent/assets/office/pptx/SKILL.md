@@ -1,271 +1,555 @@
 ---
 name: pptx
-description: "Use this skill any time a .pptx or .potx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx or .potx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates (.potx), layouts, speaker notes, or comments. Trigger whenever the user mentions \"deck,\" \"slides,\" \"presentation,\" or references a .pptx or .potx filename, regardless of what they plan to do with the content afterward. If a .pptx or .potx file needs to be opened, created, or touched, use this skill."
-license: Complete terms in LICENSE.txt
+description: "Create, inspect, or revise editable PowerPoint presentations (.pptx) in Kite. Use for slide decks, presentation layouts, templates, speaker notes, charts, and edits to slides or selected shapes."
 ---
 
-# PPTX creation, editing, and analysis
+<!-- Modified by Kite from the upstream OfficeCLI skill. -->
 
-A `.pptx` is a ZIP archive of XML files. Choose your approach by task:
+# PowerPoint presentations (PPTX)
 
-| Task | Approach |
-|---|---|
-| **Create** a new deck | Write a `pptxgenjs` script — see gotchas below — and build it as a [structured deck](#structured-decks) unless the user asks for a quick throwaway |
-| **Edit** an existing deck, or build from a template | unzip → edit `ppt/slides/slideN.xml` → zip |
-| **Read** content | `python scripts/slide_text.py deck.pptx` (one block per slide under `<!-- Slide number: N -->` markers); visual grid: `python scripts/thumbnail.py deck.pptx` |
+## Kite runtime
 
-## Scripts
+Kite provides the bundled `officecli` on the Shell PATH. Start with the document operation. Use the actual Shell dialect and version shown in the Shell tool description.
 
-Paths are relative to this skill's directory. Everything else is plain Python, `node`, or shell.
+- **Use a workspace copy for edits.** Inspect the supplied file and honor the requested selection and template. Create a separate named copy in the workspace for changes. Keep intermediate documents and operation files there. Each Shell call starts with fresh process state, so define variables again and reopen the saved copy by path.
+- **Use standalone commands by default.** Set `$env:OFFICECLI_NO_AUTO_RESIDENT = '1'` in PowerShell or `export OFFICECLI_NO_AUTO_RESIDENT=1` in Git Shell and other POSIX shells in each call that edits the file. Group related edits in the default atomic mode with `officecli batch "$FILE" --input "$OPS" --json` and a UTF-8 JSON operation file. This avoids native argument quoting issues with multiline text, non-ASCII text and formulas. If a task explicitly requires a resident session, open, edit, save and close it in the same Shell call. Check the exit status and batch result before proceeding.
+- **Use the current call for delivery.** Inspect and validate the saved workspace file. Put only the verified final file in this call's `KITE_OUTPUT_DIR` with `Copy-Item -LiteralPath $FILE -Destination $env:KITE_OUTPUT_DIR -ErrorAction Stop` in PowerShell or `cp "$FILE" "$KITE_OUTPUT_DIR/"` in Git Shell and POSIX shells. A successful delivery call publishes a file card in Kite. Keep previews, operation files and drafts in the workspace.
+- **Check what is available.** Use `officecli help` for uncertain flags and check exit status or JSON instead of matching localized messages. Match the requested document language and formats. Use the available preview or viewer when visual verification is needed. Report the checks you actually ran.
+- **Verify recovery before retrying.** If a call times out or encounters a file lock, inspect the original Shell result. Resume from the last confirmed workspace file once the process tree has stopped and the file is available.
 
-| Script | What it does |
-|---|---|
-| `scripts/slide_text.py deck.pptx` | Every slide's title, text, tables, chart data (scatter and bubble charts: series names only), picture alt text and speaker notes, as markdown. Reads `.potx` too |
-| `scripts/thumbnail.py deck.pptx [prefix]` | Labeled grid of every slide, for picking template layouts. `.pptx` only. Pass `prefix` — it defaults to `thumbnails`, which overwrites the grids of any other deck done in the same directory |
-| `scripts/add_slide.py unpacked/ slide2.xml [--after slideN.xml]` | Duplicate a slide (or a `slideLayoutN.xml`) with all the package bookkeeping. Also takes a `.pptx` directly with `-o out.pptx` |
-| `scripts/clean.py unpacked/` | Delete slides, media, and rels no longer referenced. Run **after** `<p:sldIdLst>` is final |
-| `scripts/apply_theme.js` | Node module: `const { applyTheme } = require("<this skill's directory>/scripts/apply_theme.js")`. `await applyTheme("deck.pptx", THEME)` after `pres.writeFile()` writes `THEME`'s colors and name (escaped for XML) into the deck's theme, for [structured decks](#structured-decks). Also a CLI: `node scripts/apply_theme.js deck.pptx theme.json` |
-| `scripts/office/validate.py deck.pptx [--original src.pptx]` | Schema, relationship, content-type, chart and slide checks; each failure names its fix. Pass `--original` for any template-derived deck — it baselines the schema checks against the template, so the template's own XSD errors don't read as yours |
-| `scripts/office/soffice.py --headless --convert-to pdf deck.pptx` | LibreOffice wrapper — bare `soffice` hangs in this sandbox |
+  If a batch returns `io_error` during save or file replacement, reopen the saved deck to check which edits landed. To replay the entire batch, start from a fresh workspace copy of the last verified pre-batch deck. If that version was blank, create a fresh blank file.
 
-## Creating with pptxgenjs — gotchas
+  If recovery calls for `--best-effort`, run `officecli batch "$FILE" --input "$OPS" --best-effort --json` on that fresh copy. Successful items can be written even if the batch fails. Check each JSON result and verify the saved deck's schema, slide count, order and content before delivery.
 
-`pptxgenjs` is preinstalled — do not run `npm install` first; write the script and `require('pptxgenjs')` directly. Only if that require fails: `npm install pptxgenjs`. The model knows the API; these are the footguns:
+## ⚠️ Help-First Rule
 
-- **Set `pres.layout` before adding slides.** The default canvas is `LAYOUT_16x9` = **10" × 5.625"**, not 13.3" wide. Coordinates past the edge are written, not clamped — the shape just isn't on the slide. (`LAYOUT_WIDE` is 13.3" × 7.5".)
-- **Hex colors: never `#`, never 8 digits.** `color: "FF0000"`. Both `"#FF0000"` and alpha baked into the hex (`"00000020"`) **corrupt the file**. For translucency: `transparency: 0-100` on fills and images, `opacity: 0.0-1.0` on shadows — each is silently ignored on the other.
-- **pptxgenjs mutates option objects in place** (converts values to EMU on first use). Never share one `shadow`/options object across two `add*` calls — build a fresh object each time.
-- **Shadow `offset` must be ≥ 0** — a negative offset corrupts the file. To cast a shadow upward, use `angle: 270` with a positive offset.
-- **`letterSpacing` is silently ignored** — the real option is `charSpacing`.
-- **Lists:** `bullet: true` on each item, never a literal `•` (renders double bullets). Set `breakLine: true` on every array item except the last. Space bulleted paragraphs with `paraSpaceAfter`, not `lineSpacing` (huge gaps).
-- **One `new pptxgen()` per output file** — never reuse an instance.
-- **`rectRadius` only works on `ROUNDED_RECTANGLE`**, not `RECTANGLE`.
-- **Gradient fills aren't supported** — use a gradient image as the background instead.
-- **Every `addText` call without a `placeholder` needs `isTextBox: true`** — without it the shape lacks `txBox="1"`, so screen readers announce the text as a "graphic" instead of a text box. No visual change.
-- **Text boxes have built-in internal padding** — set `margin: 0` whenever text must align with a shape, line, or icon at the same x.
-- **Speaker notes go in `slide.addNotes("...")`** (plain text, once per slide), never in a text box on the slide.
-- **Keep charts native.** Use `addChart()` for everything PowerPoint can chart (pass an array of `{type, data, options}` for combos). For PowerPoint-native features the library doesn't expose (trendlines, error bars), compute the extra series yourself or post-process the generated OOXML — do not fall back to a rendered image. Only chart types PowerPoint has no native form for (Sankey, network, chord) go in as images.
-- **Default charts render bare** — no title, no data labels, dated palette. Set `showTitle` + `title`, `showValue: true` + `dataLabelPosition`, `chartColors: [...]` from your palette, and quiet the frame (`catAxisLabelColor`/`valAxisLabelColor`, `valGridLine: { color, size }`, `catGridLine: { style: "none" }`, `showLegend: false` for a single series).
-- **On a stacked bar or column chart, `dataLabelPosition` must be `ctr`, `inEnd`, or `inBase`.** `outEnd` **corrupts the file**.
-- **A combo series using `secondaryValAxis`/`secondaryCatAxis` needs both `valAxes` and `catAxes` on the chart options, two entries each.** Without them pptxgenjs writes axis *ids* it never declares, and PowerPoint **discards that chart** and reports the file as corrupt. Supplying only `valAxes` is not enough.
-- **After `writeFile()`, run `python scripts/office/validate.py deck.pptx`.** It reports many of the chart and slide-XML faults PowerPoint refuses or repairs, the two above among them, and names the fix for each. Fix them in your generator, not by hand-editing the packed XML.
-- **Never reorder the children of `<p:presentation>`.** pptxgenjs writes `<p:notesMasterIdLst>` right after `<p:sldIdLst>` and points both masters at one theme part. PowerPoint reads that happily — move the element and the same deck becomes unopenable.
-- **Icons:** render `react-icons` to SVG (`ReactDOMServer.renderToStaticMarkup`), rasterize with `sharp` at ≥256px, and insert via `addImage({ data: "image/png;base64," + buf.toString("base64") })` — the `image/png;base64,` prefix is required (`react-icons`, `react`, `react-dom`, and `sharp` are preinstalled — `npm install react-icons react react-dom sharp` only if a require fails).
-- **`defineSlideMaster()` creates a slide *layout*, not a master** — one `slideLayoutN.xml` per call, under a single master you cannot change. Call them layouts when talking to the user.
-- **`pres.company` and a `defineSlideMaster()` `title` are written into the XML unescaped** — an `&` in either (`"Harrow & Sons"`) leaves `docProps/app.xml` or the layout unparseable, and `validate.py` fails. Write `&amp;` there, and in the matching `masterName`. `title`, `subject`, `author`, section titles, `objectName`, notes and slide text are escaped for you.
-
-### Structured decks
-
-A deck built on a theme, layouts, placeholders and sections can be restyled in one place and edited in PowerPoint without fighting it. Build every new deck this way unless the user asks for a quick throwaway.
-
-1. **Theme first:** `const THEME = { name, headFontFace, bodyFontFace, colors: { dk1, lt1, dk2, lt2, accent1 … accent6, hlink, folHlink } }`, colors in hex. `pres.theme` takes the two fonts and nothing else. Name no font after that — titles get the heading font, other text the body font — except on chart text, which is hard-coded Arial: give its `*FontFace` options `"+mn-lt"` (theme body font; `"+mj-lt"` is the heading font).
-2. **`const C = pres.SchemeColor` for every color** — `C.text1`/`C.text2` are `dk1`/`dk2`, `C.background1`/`C.background2` are `lt1`/`lt2`. These take hex only, read from `THEME`: `valGridLine.color`, `catGridLine.color`, `shadow.color`, and on a one-series bar chart `invertedColors` or more than one `chartColors`. A scheme color there is written as `<a:srgbClr val="bg2"/>` without complaint, and being hex, these will not follow a later change of theme.
-3. **Sections:** `pres.addSection({ title })` just before that section's first slide, then `sectionTitle` on every `addSlide`. A slide without one — or, when sections are all declared up front, a table's auto-paged continuation slides — lands in a stray "Default-N" section.
-4. **One layout per slide frame** (`defineSlideMaster()`): title, section divider, title only, chart + commentary, table; dark and light variants if the design alternates. Text regions are named placeholders carrying position, size, weight and `color` — chart, image and table placeholders need a `color` too, or prompt text and arrays of runs come out hard-coded `000000`. Footer text, logo and `slideNumber` go on the layout, never on a slide.
-5. **Fill by name:** `addSlide({ masterName, sectionTitle })`, then `addText("…", { placeholder: "title" })` with no position, size or color — the placeholder's own options win, and anything it doesn't set (italic, `align`, `fontFace`) still applies; style one run with `[{ text, options }]`. A misspelt `placeholder` or `masterName` fails silently (a stray text box at 0,0; the blank layout). Only `title`, `body` and `chart` placeholders fill by name alone: `addImage({ placeholder })` takes the placeholder's x and y but not its size (a 1" × 1" picture) — pass `w`/`h` too. `addTable({ placeholder })` takes its x and y only — always pass `w`; when it auto-pages it ignores the placeholder and runs off the slide, so also pass `x`, `y` and `autoPageSlideStartY` (same as `y`, or continuation pages are laid out from the top margin), give the layout a `margin` whose bottom clears the footer, and fill the continuation slides' titles through `slide.newAutoPagedSlides`.
-6. **A layout is the frame, not the "layout" Design Ideas means.** Cards, icons, stat callouts and images are still composed slide by slide on top of it, in scheme colors, each with an `objectName` — every Design Idea applies, and most content slides sit on the title-only layout.
-7. **Write, then apply the theme:** `await pres.writeFile({ fileName: "deck.pptx" })`, then `await applyTheme("deck.pptx", THEME)`. pptxgenjs cannot write theme colors: until this runs, scheme colors resolve to Office's stock palette. It throws, changing nothing, on a scheme color in a hex-only option — fix what it names and rebuild.
-
-## Editing existing decks and templates
-
-Pick layouts first: `python scripts/thumbnail.py template.pptx template-thumbs` writes a labeled grid of every slide and prints the file(s) it created — `template-thumbs.jpg`, split into `template-thumbs-N.jpg` past 12 slides. **Always pass that second argument, named after the deck.** It defaults to `thumbnails`, so two decks thumbnailed in one directory silently overwrite each other's grids — the first deck's are simply gone (template analysis only — visual QA needs the full-resolution renders from [Converting to Images](#converting-to-images); it only accepts `.pptx`, so copy a `.potx` to a `.pptx` name first). Use it with `slide_text.py` to map each content section onto a template slide, and vary the layouts — don't put every section on the same title-and-bullets slide.
+**This skill teaches what good slides look like, not every command flag. When a property name, enum value, or alias is uncertain, consult help BEFORE guessing.**
 
 ```bash
-python3 -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall('unpacked')" deck.pptx
-python scripts/add_slide.py unpacked/ slide2.xml --after slide2.xml   # duplicate a slide (or slideLayoutN.xml); prints the new slide's path
-# reorder / delete slides = edit <p:sldIdLst> in ppt/presentation.xml
-python scripts/clean.py unpacked/                                     # after deletions: removes orphaned slides, media, rels
-# edit slide content in ppt/slides/slideN.xml
-(cd unpacked && rm -f ../out.pptx && zip -XrD ../out.pptx .)          # zip from INSIDE the dir; rm first or deleted parts survive
-python scripts/office/validate.py out.pptx --original deck.pptx
+officecli help pptx                         # List all pptx elements
+officecli help pptx <element>               # Full element schema (e.g. shape, chart, animation, connector, zoom, group)
+officecli help pptx <verb> <element>        # Verb-scoped (e.g. add shape, set slide)
+officecli help pptx <element> --json        # Machine-readable schema
 ```
 
-- **Do all structural work — add, delete, reorder — before editing any slide's content.** `add_slide.py` copies a slide file verbatim, so duplicating after you edit clones the edited content; and `clean.py` deletes any slide missing from `<p:sldIdLst>`, including one you just wrote.
-- **Never copy a slide file by hand** — `add_slide.py` does every registration a new slide needs and reports what it made (`Created ppt/slides/slide17.xml from slide2.xml`). It also works directly on a file: `add_slide.py deck.pptx slide2.xml -o out.pptx` — **pass `-o`, or it rewrites the input deck in place.** A duplicated slide still *references* its source's chart/SmartArt/embedded-object parts rather than cloning them, so editing one slide's chart changes the other's.
-- **If you use `python-pptx`**, three things it won't do: duplicate a slide (its only entry point is `add_slide(layout)`), preserve formatting through `text_frame.text = "..."` (that collapses the paragraph to a single unstyled run — assign `run.text` instead), or read the SVG/EMF most template art uses (`add_picture` raises `UnidentifiedImageError`).
-- Legacy `.ppt` must be converted first: `python scripts/office/soffice.py --headless --convert-to pptx file.ppt`. `.potx` templates unpack and pack identically — keep the `.potx` extension on the output.
-- To reuse a template icon or image, duplicate a slide or layout that already contains it.
+Help reflects the installed CLI version. When skill and help disagree, **help is authoritative**. Triggers to run help immediately: `UNSUPPORTED props:` warning, unknown animation preset, `connector.shape=` enum drifts, prop-vs-alias (`lineWidth` vs `line.width`, `color` vs `font.color`).
 
-When filling in a template:
+## Shell & Execution Discipline
 
-- If you script an XML transform, parse with `defusedxml.minidom` — round-tripping OOXML through `xml.etree.ElementTree` rewrites namespace prefixes and corrupts the deck.
-- **Template slots ≠ source items.** If the template shows 4 team members and you have 3, delete the 4th member's entire group (image + text boxes), not just its text — then check for orphaned visuals in QA.
-- One `<a:p>` per list item — never concatenate items into a single paragraph. Copy the sibling `<a:pPr>` to preserve spacing, and put `b="1"` on the `<a:rPr>` of titles, section headers, and inline labels (`Status:`, `Owner:`).
-- Let bullets inherit from the layout; only add `<a:buChar>`, `<a:buAutoNum>` (numbered), or `<a:buNone>` to override — never a literal `•` in the text.
-- Text with leading or trailing spaces needs `xml:space="preserve"` on its `<a:t>`.
+Quote OfficeCLI element paths such as `"/slide[1]/shape[2]"` and protect literal currency with single quotes in plain arguments. In the Bash recipes below, translate any continuations or heredocs for the active Shell. Prefer a UTF-8 operation file with `batch --input` when text includes currency, quotation marks or line breaks. Use `view text` to confirm the saved characters and `get` after adding a structural element that later commands depend on.
 
-## Deck content and flow
+## Requirements for Outputs
 
-- **One message per slide.** A deck goes theme by theme, message by message.
-- **A common structure is the pyramid:** the main message up front, an executive summary that previews the sections, the sections themselves, then a conclusion, usually with next steps that act on the findings.
-- **Match the structure to the size of the deck.** A short deck might not need an introduction and a conclusion; a long deck might need dividers between topics.
-- **Build toward what the deck is for:** a decision, consensus, a celebration, resolving a disagreement, or opening a discussion.
-- **Build for how it will be used.** A live deck gets narration and possibly discussion; a pre-read has to carry the whole narrative itself. An executive audience in a live meeting needs few words and highly visual slides. Detailed, word-heavy slides are sometimes right for subject-matter experts or for a deck read offline. Analytical reports lean on charts and tables.
-- **Size a live deck to the talk:** about 1.5 to 2 minutes per slide, with time left for questions if there will be any.
+Follow the requested slide count, order, contents and template. Apply the following layout guidance to design choices the user leaves open.
 
-## Design Ideas
+### All decks
 
-**Don't create boring slides.** Plain bullets on a white background won't impress anyone. Consider ideas from this list for each slide.
+**One idea per slide.** If a slide needs a second title to explain what it covers, split it. Dense "everything about X" slides lose the audience inside 3 seconds. Use a section divider to group related one-idea slides, not a mega-slide.
 
-### Before Starting
+**Explicit type hierarchy — do NOT rely on theme defaults.** Theme defaults drift between masters. Set sizes explicitly on every text shape.
 
-- **Pick a bold, content-informed color palette**: The palette should feel designed for THIS topic. If swapping your colors into a completely different presentation would still "work," you haven't made specific enough choices.
-- **Dominance over equality**: One color should dominate (60-70% visual weight), with 1-2 supporting tones and one sharp accent. Never give all colors equal weight.
-- **Dark/light contrast**: Dark backgrounds for title + conclusion slides, light for content ("sandwich" structure). Or commit to dark throughout for a premium feel.
-- **Commit to a visual motif**: Pick ONE distinctive element and repeat it — rounded image frames, icons in colored circles. Carry it across every slide. **Do not use a color bar or accent stripe as your motif** (see Avoid list).
+| Element | Minimum | Typical | Min shape height |
+|---|---|---|---|
+| Slide title | **≥ 36pt** bold | 36–44pt | ≥ 2cm |
+| Section / subtitle | ≥ 20pt | 20–24pt | ≥ 1.2cm |
+| Body text | **≥ 18pt** | 18–22pt | ≥ 1cm |
+| Caption / axis label | ≥ 10pt muted | 10–12pt | ≥ 0.6cm |
 
-### Color Palettes
+Rule of thumb: **min shape height ≈ font_pt × 0.05cm**. An 18pt sublabel in a 0.8cm-tall box will overflow — `view annotated` catches this.
 
-Choose colors that match your topic — don't default to generic blue. Use these palettes as inspiration:
+Title must be **≥ 2× body size** (36pt over 20pt works; 28pt over 20pt looks timid). Four legit exceptions to body ≥ 18pt: chart axis labels, legends, footer / page number, and ≤ 5-word KPI sublabels (e.g. "Active users"). Descriptive sentences must be ≥ 18pt. Left-align body; center only titles and hero numbers. If "the cards won't fit", drop cards instead of shrinking font.
 
-| Theme | Primary | Secondary | Accent |
-|-------|---------|-----------|--------|
-| **Midnight Executive** | `1E2761` (navy) | `CADCFC` (ice blue) | `FFFFFF` (white) |
-| **Forest & Moss** | `2C5F2D` (forest) | `97BC62` (moss) | `F5F5F5` (cream) |
-| **Coral Energy** | `F96167` (coral) | `F9E795` (gold) | `2F3C7E` (navy) |
-| **Warm Terracotta** | `B85042` (terracotta) | `E7E8D1` (sand) | `A7BEAE` (sage) |
-| **Ocean Gradient** | `065A82` (deep blue) | `1C7293` (teal) | `21295C` (midnight) |
-| **Charcoal Minimal** | `36454F` (charcoal) | `F2F2F2` (off-white) | `212121` (black) |
-| **Teal Trust** | `028090` (teal) | `00A896` (seafoam) | `02C39A` (mint) |
-| **Berry & Cream** | `6D2E46` (berry) | `A26769` (dusty rose) | `ECE2D0` (cream) |
-| **Sage Calm** | `84B59F` (sage) | `69A297` (eucalyptus) | `50808E` (slate) |
-| **Cherry Bold** | `990011` (cherry) | `FCF6F5` (off-white) | `2F3C7E` (navy) |
+**Two fonts max, one palette.** One heading font + one body font (e.g. Georgia + Calibri) — a third *display* face is fine only for big numerals or the cover title, as long as that heading+body pair stays intact. One dominant brand color (60–70% weight) + one supporting + one accent. Never mix 4+ colors in body content. **The palettes and font pairings in Design Principles are a floor, not a menu:** if the user gave brand colors/fonts or an existing template, match those first; otherwise the named sets are calibrated seeds — blend or diverge freely, as long as the result isn't *worse* than them and still clears the contrast floor.
 
-### For Each Slide
+**Every slide carries a non-text visual — one that informs.** Shape, chart, icon, gradient band that carries meaning, not decoration. A bullet-only deck is interchangeable with a Word doc. Exceptions: literal quote slides, code blocks, a single summary-table slide.
 
-**Every slide needs a visual element** — image, chart, icon, or shape. Text-only slides are forgettable.
+**Less is more — every element earns its place.** The visual rule above guards against bullet-walls; it is not licence to clutter. Don't pad with decorative stats, icons, or filler sections that don't inform ("data slop"). If a slide feels empty, fix it with layout and whitespace, not invented content — cut scope rather than bulk it up, and flag a larger addition instead of making it unprompted.
 
-**Layout options:**
-- Two-column (text left, illustration on right)
-- Icon + text rows (icon in colored circle, bold header, description below)
-- 2x2 or 2x3 grid (image on one side, grid of content blocks on other)
-- Half-bleed image (full left or right side) with content overlay
+Add speaker notes with `--type notes --prop text="..."` when the request or presenting context calls for them.
 
-**Data display:**
-- Large stat callouts (big numbers 60-72pt with small labels below)
-- Comparison columns (before/after, pros/cons, side-by-side options)
-- Timeline or process flow (numbered steps, arrows)
+**Copy reads human, not AI.** Titles orient on content, not punchline. No "It's not X. It's Y.", no manufactured tension, no faux-insight ("The magic moment"), no one-word drama ("Momentum."). Cut hype adjectives (seamless, robust, game-changing) — let the number carry it.
 
-**Visual polish:**
-- Icons in small colored circles next to section headers
-- Italic accent text for key stats or taglines
+**Preserve existing templates.** When a file already has a theme and masters, match them. Existing conventions override these guidelines.
 
-### Typography
+### Visual delivery floor (applies to EVERY deck)
 
-**Font names you write into the .pptx are rendered by the user's PowerPoint, not by this environment.** Your visual QA renders via LibreOffice, which substitutes fonts it doesn't have — and for some fonts the substitute has different widths, so your QA preview can show text overflow (or fit) that the real deck won't have. To keep your QA trustworthy:
+Review the slides against the following checks in an available preview or viewer.
 
-- **Safe fonts** (render true-to-width in QA *and* ship with Office): **Arial, Calibri, Cambria, Times New Roman, Courier New, Bookman Old Style, Century Schoolbook**. Use these for body text and anything where fit matters.
-- **Headers with personality at zero QA risk**: pair a safe-list serif header (Cambria, Bookman Old Style, Century Schoolbook) with a safe-list sans body (Calibri or Arial). You get visual contrast without giving up reliable overflow checks.
-- **If the user asks for a font outside the safe list** (e.g. Georgia or Trebuchet MS): use it where the user asked, but size those containers with extra slack (~10%) and don't trust QA text-fit on those elements — the preview of that font is approximate. If the user hasn't specified, prefer safe-list fonts for body text.
-- **QA-unreliable fonts** (substitute has different widths — overflow checks can be wrong): Georgia, Trebuchet MS, Impact, Arial Black, Garamond, Consolas, Palatino Linotype. Calibri Light substitution varies by environment; treat as QA-unreliable. Fine for titles/accents with slack; don't trust QA text-fit on these.
-- **Never default to Aptos** — Office's post-2023 default has no metric-compatible substitute here *and* is missing from older Office installs, so it's unreliable on both ends.
+- **No placeholder tokens rendered as content.** `{{name}}`, `$fy$24`, `<TODO>`, `lorem`, `xxxx`, empty `()`/`[]` in chart titles never appear.
+- **No overflow off-edge, no clipped text in shapes.** `view issues` flags both (`shape_off_slide` + a text-fit hint). To fix a clip: grow the box or shorten the value — never trim content to fit.
+- **Cover fits the brief.** Use the requested title and any supplied presenter, date or subtitle details. Leave space around these elements.
+- **Contrast.** `view issues` auto-flags the common case — opaque dark text on a shape's own dark fill (`low_contrast`). It can't see the rest: icon / chart-series fills, scheme/inherited colors, or text over a *separate* background shape. So on any fill with brightness < 30% (`1E2761`, `36454F`, deep forest / berry / cherry), still confirm every body run, card body, chart series, and icon is `FFFFFF` or brightness > 80% — mid-gray (`6B7B8D` ≈ 44%) reads on a laptop and vanishes on projection. Spot-check via `view html` after the dark-fill pass.
 
-| Element | Size |
-|---------|------|
-| Slide title | 36-44pt bold |
-| Section header | 20-24pt bold |
-| Body text | 14-16pt |
-| Captions | 10-12pt muted |
+If any fails, STOP and fix before declaring done.
 
-### Spacing
+## Design Principles
 
-- 0.5" minimum margins
-- 0.3-0.5" between content blocks
-- Leave breathing room—don't fill every inch
+A deck is not a document. The audience has 3 seconds to get each slide. Before adding anything, ask: "If the audience reads only the biggest element and glances once, do they get the point?" If they have to read the bullets, the biggest element is wrong.
 
-### Avoid (Common Mistakes)
+### Grid, margins, negative space
 
-- **Don't repeat the same layout** — vary columns, cards, and callouts across slides
-- **Don't end a slide title with a period**
-- **Don't let titles drift between slides of the same type** — content slides with the title at the top put it at the same position, font, size, and alignment on every slide; a different slide type (a section divider with the title mid-slide) can place it differently
-- **Don't change how chart labels look from chart to chart** — axis and data labels use the same color, font, and size on every chart in the deck; vary one only where a chart needs it (a second axis, a highlighted series, a label sitting on a dark bar)
-- **Don't center body text** — left-align paragraphs and lists; center only titles
-- **Don't skimp on size contrast** — titles need 36pt+ to stand out from 14-16pt body
-- **Don't default to blue** — pick colors that reflect the specific topic
-- **Don't mix spacing randomly** — choose 0.3" or 0.5" gaps and use consistently
-- **Don't style one slide and leave the rest plain** — commit fully or keep it simple throughout
-- **Don't create text-only slides** — add images, icons, charts, or visual elements; avoid plain title + bullets
-- **Don't forget text box padding** — when aligning lines or shapes with text edges, set `margin: 0` on the text box or offset the shape to account for padding
-- **Don't use low-contrast elements** — icons AND text need strong contrast against the background; avoid light text on light backgrounds or dark text on dark backgrounds
-- **NEVER use accent lines under titles** — these are a hallmark of AI-generated slides; use whitespace or background color instead
-- **NEVER add decorative color bars or accent stripes** — this includes: header/footer bars spanning the slide width, vertical sidebar stripes down one edge of the slide, thin accent stripes along one edge of a card or content block, and "single-side borders" on rectangles. These read as AI-generated filler. If you want to set a card apart, use a subtle background tint, a drop shadow, or an icon — not an edge stripe.
-- **Don't default to cream/beige backgrounds** — when no background is specified, use white (`FFFFFF`) or the user's brand palette; avoid warm-neutral defaults like `F5F5DC`, `FAF0E6`, `FAEBD7`, `FFF8E1`
-- **Don't ship text that overflows its shape** — if text doesn't fit, reduce font size, split across slides, or enlarge the container; never leave content cut off or spilling past bounds. **Don't shrink below the sizes in the Typography table** (body text 14pt, captions 10pt) in a deck you create — once you reach that floor, cut words, enlarge the container, or split the slide instead; when editing an existing deck or template, match its sizes
+Standard widescreen is **33.87 × 19.05cm**. Treat it as a 12-column grid internally:
+
+- **Edge margin ≥ 1.27cm** (0.5") on all sides.
+- **Inter-block gap ≥ 0.76cm** (0.3") between cards / columns / rows — pick one value (0.76 or 1.27cm) and use it everywhere; mixed gaps look unfinished.
+- **≥ 20% negative space per slide.** Filling every pixel reads as amateur.
+- **Compose, don't web-center.** Whitespace is structural: a slide top-weighted with open space in the lower third is correct composition, not an empty defect. Intentional asymmetry (content left, breathing room right) reads more designed than centering everything — don't fill a gap just because it's there.
+- For card grids: `usable = 33.87 − 2·margin − (N−1)·gap`, then `col_width = usable / N`. Don't hand-pick x coordinates.
+
+### Font pairings
+
+Pair by document register, not by novelty. "Best For" is a prompt, not a decree; a pairing outside this table is fine if it fits — these 8 are seeds, not the set.
+
+| Header | Body | Best For |
+|---|---|---|
+| Georgia | Calibri | Formal business, finance, executive reports |
+| Arial Black | Arial | Bold marketing, product launches |
+| Calibri | Calibri Light | Clean corporate, minimal design |
+| Cambria | Calibri | Traditional professional, legal, academic |
+| Trebuchet MS | Calibri | Friendly tech, startups, SaaS |
+| Impact | Arial | Bold headlines, event decks, keynotes |
+| Palatino | Garamond | Elegant editorial, luxury, nonprofit |
+| Consolas | Calibri | Developer tools, technical / engineering |
+
+Set both fonts explicitly on every shape (`--prop font=Georgia` on titles, `--prop font=Calibri` on body), not via theme inheritance.
+
+### Color and contrast
+
+The columns: **Primary** (dominant — 60–70% of weight, the color you see first), **Secondary** (supporting tone), **Accent** (sparing, one-hit emphasis), **Text** (body on light fills), **Muted** (captions / axis labels / footer).
+
+| Theme | Primary | Secondary | Accent | Text | Muted |
+|---|---|---|---|---|---|
+| Coral Energy | `F96167` | `F9E795` | `2F3C7E` | `333333` | `8B7E6A` |
+| Midnight Executive | `1E2761` | `CADCFC` | `FFFFFF` | `333333` | `8899BB` |
+| Forest & Moss | `2C5F2D` | `97BC62` | `F5F5F5` | `2D2D2D` | `6B8E6B` |
+| Charcoal Minimal | `36454F` | `F2F2F2` | `212121` | `333333` | `7A8A94` |
+| Warm Terracotta | `B85042` | `E7E8D1` | `A7BEAE` | `3D2B2B` | `8C7B75` |
+| Berry & Cream | `6D2E46` | `A26769` | `ECE2D0` | `3D2233` | `8C6B7A` |
+| Ocean Gradient | `065A82` | `1C7293` | `21295C` | `2B3A4E` | `6B8FAA` |
+| Teal Trust | `028090` | `00A896` | `02C39A` | `2D3B3B` | `5E8C8C` |
+| Sage Calm | `84B59F` | `69A297` | `50808E` | `2D3D35` | `7A9488` |
+| Cherry Bold | `990011` | `FCF6F5` | `2F3C7E` | `333333` | `8B6B6B` |
+
+Pick by topic, not by default — finance reads Midnight Executive, a product launch reads Coral Energy, safety / LOTO reads Cherry Bold. If the closest named theme is not quite right, blend (e.g. Forest primary + gold `D4A843` accent). Use **Text** on light fills, **Muted** for captions / axis / footer, `FFFFFF` or Secondary for body on dark fills.
+
+On dark backgrounds, text and chart series follow the Hard rules contrast floor above.
+
+### Chart-choice decision table
+
+Wrong chart type kills the 3-second test:
+
+| Data shape | Use | Avoid |
+|---|---|---|
+| Category comparison (A vs B vs C) | `column` (vertical) / `bar` (≥ 6 categories, horizontal) | pie (slices merge), line (no time axis) |
+| Time series, 1–3 series | `line` | area (occlusion), bar (implies discrete) |
+| Part-of-whole, 2–5 slices | `pie` / `doughnut` | pie with 8+ slices (unreadable) |
+| Correlation / distribution | `scatter` | line (implies ordering) |
+| Multiple categories × metrics, dense | stacked `column` or heatmap | one chart per metric — consolidate |
+| KPI snapshot (single big number) | **Large-text shape** (60–72pt + ≤ 5-word sublabel), NOT a chart | gauge chart, tiny bar |
+
+Rule of thumb: if > 3 series and > 8 categories, split into two charts or switch to a table.
+
+### Animation
+
+Use as much or as little as the brand and content call for — a formal finance deck trends to near-zero, a product launch can be more expressive. Animation is a tool, not décor. Three floors keep it from hurting the deck (none caps how much you use):
+
+- **Purposeful** — each one reveals or emphasizes (progressive bullet reveal, a build-up chart), never decorates. If it doesn't aid comprehension, cut it.
+- **Degrades gracefully** — pptx animation renders inconsistently across viewers (Keynote / Slides / web / mobile) and may not play at all, so every slide must read correctly as a *static* frame. Never hide essential content behind a reveal.
+- **Verify live** — animation is runtime-only; `view html` and screenshots can't see it, so confirm in a real presentation viewer before shipping.
+
+Taste steer (not a ban): `fade` / `appear` / a single `zoom-entrance` with snappy durations (~hundreds of ms) fit most decks; `bounce` / `swivel` / `spin` / `fly-from-edge` / dense multi-object choreography usually read amateur — reach for them only when the brand is deliberately playful.
+
+### Layout patterns & data display
+
+Vary layout across slides — repeating the same pattern makes every slide feel identical. These are common building blocks, not the full set — pick one per slide, or build a layout outside the table when the content calls for it:
+
+| Pattern | When to use | Key measurement |
+|---|---|---|
+| **Two-column** (text left, visual right) | Concept + evidence; feature + screenshot | Each col ≈ 14-15cm; gap 1cm |
+| **Icon rows** (icon in filled circle + bold header + description) | Feature lists, benefits, team roles | Icon circle 1.5-2cm; 3-4 rows max |
+| **2×2 or 2×3 grid** (card tiles) | Quadrant analysis, SWOT, option comparison | Gap ≥ 0.76cm; consistent card height |
+| **Half-bleed image** (full left or right half, content overlay on other side) | Hero moments, case study openers | Image 16-17cm wide; content column ≥ 14cm |
+| **Large stat callout** (60-72pt number + ≤5-word sublabel below) | Single KPI, milestone, market size | Use shape, NOT a chart; sublabel 14-16pt muted |
+
+**Data display quick rules:**
+- Comparison columns (before/after, A vs B) beat a table for 2-3 options.
+- Timelines and process flows: numbered step shapes + connectors, not a bullet list.
+
+### Image treatment (only when a slide uses a photo / screenshot / logo)
+
+**Read the image first** (open the file) and choose treatment from what you see — don't place blind from a filename.
+
+- **Full-bleed photo** → size to COVER the region (crop edges), no border.
+- **Screenshot / diagram / logo** → size to FIT (never crop content). A transparent or fit image sits on a contrasting fill — drop a colored rectangle behind it, don't let it float on white.
+- **Text over a photo** → never raw on the image. Put it on a card, or lay a protection scrim between image and text (a dark rectangle at ~50–60% opacity, or a gradient fading from the text edge).
+- Never stretch (distort the aspect ratio); don't overlay text on a busy screenshot.
+- Prefer user-provided images / brand assets; no emoji or self-drawn art unless asked.
+
+### Visual motif commitment
+
+Pick ONE distinctive element (rounded image frames, section numbers in filled circles, single-side border band, diagonal accent strips) and carry it to every slide — commit across the whole deck; styling one slide and leaving the rest plain reads as abandoned. A secondary motif is fine only if it doesn't compete with the primary. Declare it in your build plan first: `## Motif: numbered circles in brand color`.
+
+### Visual AI-tells to avoid
+
+- **No decorative underline under slide titles.** A stripe / rule below a heading is the single most common AI-slide tell — use whitespace or a background-color change instead.
+- **No rounded-corner card with a colored left-border accent stripe.** The other classic AI-slide tell — use a solid fill, a top accent band, or whitespace separation instead.
+- **No emoji as iconography** unless the brand uses them — use a shape or a real icon asset.
+
+Copy-level tells live in "Copy reads human".
+
+## Common Workflow
+
+1. Create a new workspace deck with `officecli create "$FILE"` or copy the supplied file for editing.
+2. Inspect an existing deck with `officecli view "$FILE" outline` and identify the slides or selected shapes to revise.
+3. **Title sequence first (plan, don't build yet).** Before creating any slide or shape, write out the full ordered list of slide titles. If someone reading ONLY the titles can't follow the argument, fix the arc now — cheaper in a list than after 14 slides. Pick ONE title grammar — all topic noun-phrases or all action statements, never a mix — and hold it throughout (see "Copy reads human").
+4. Add slides in the requested order. Verify the count, titles and sequence in the saved file.
+5. **Incremental per slide.** Create slide + background, then title, then supporting shapes / charts / connectors. Always `layout=blank` for custom designs. After each structural op, `get /slide[N] --depth 1` to confirm shape IDs.
+6. **Format to spec.** Per the Requirements table; formatting is deliverable, not polish.
+7. Reopen the saved deck and verify its text, structure and layout. Use the target viewer when requirements depend on fonts, animations or slide transitions.
+8. Place the checked `.pptx` in the current delivery call's `KITE_OUTPUT_DIR`.
+
+## Quick Start
+
+Save this UTF-8 operation array as `pptx-ops.json` in the workspace. Adapt the slide content and append related operations as needed.
+
+```json
+[
+  {"command":"add","parent":"/","type":"slide","props":{"layout":"blank","background":"1E2761"}},
+  {"command":"add","parent":"/slide[1]","type":"shape","props":{"text":"新品上市计划","x":"2cm","y":"6cm","width":"28cm","height":"3cm","size":"44","bold":"true","color":"FFFFFF","align":"center"}}
+]
+```
+
+In PowerShell, check the exit code after each OfficeCLI command.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$env:OFFICECLI_NO_AUTO_RESIDENT = '1'
+$FILE = 'launch-plan.pptx'
+officecli create $FILE
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+officecli batch $FILE --input pptx-ops.json --json
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+officecli validate $FILE --json
+exit $LASTEXITCODE
+```
+
+In Git Shell or another POSIX shell, chain the successful steps.
+
+```bash
+export OFFICECLI_NO_AUTO_RESIDENT=1
+FILE="launch-plan.pptx"
+officecli create "$FILE" &&
+  officecli batch "$FILE" --input pptx-ops.json --json &&
+  officecli validate "$FILE" --json
+```
+
+Confirm the batch results and reopen the saved deck with `officecli view "$FILE" outline` before delivery.
+
+## Reading & Analysis
+
+Start wide, then narrow. `outline` first, `view text` / `get` / `query` once you know where to look.
+
+```bash
+officecli view "$FILE" outline          # slide count + titles
+officecli view "$FILE" annotated        # complete per-slide breakdown with fonts, sizes, tables, charts
+officecli view "$FILE" text --start 1 --end 5   # text dump (includes table cell text)
+officecli view "$FILE" issues           # empty slides, overflow hints
+officecli view "$FILE" stats            # counts + totals (incl. pictures missing alt)
+```
+
+**Inspect one element.** XPath-style paths, 1-based. ALWAYS quote. Prefer `@name=` / `@id=` selectors over positional `[N]` (stable across reorderings). `[last()]` works. Add `--json` for machine output.
+
+```bash
+officecli get "$FILE" "/slide[1]" --depth 1              # shape list with IDs and names
+officecli get "$FILE" "/slide[1]/shape[@name=Title]"
+officecli get "$FILE" "/slide[1]/table[1]" --depth 3     # table rows / cells
+```
+
+**Query across the deck.** CSS-like selectors; operators `=`, `!=`, `~=`, `>=`, `<=`, `[attr]`, `:contains()`, `:no-alt`. `help pptx query` lists queryable element types.
+
+```bash
+officecli query "$FILE" 'shape:contains("Revenue")'
+officecli query "$FILE" 'picture:no-alt'                 # accessibility gap
+officecli query "$FILE" 'shape[fill=1E2761]'             # color match
+officecli query "$FILE" 'shape[width>=10cm]'             # numeric
+```
+
+`query --json` returns items under `.data.results`. In each item, read the shape name from `name` and the shape ID, fill and text color from `format.id`, `format.fill` and `format.textColor`.
+
+**Visual preview (LEAD).**
+
+```bash
+officecli view "$FILE" html                # prints an HTML preview path; Read it for per-slide visual audit (best structural ground truth)
+officecli view "$FILE" svg --start 3 --end 3   # single slide SVG (charts + gradients do NOT render in SVG)
+```
+
+**Reading the output — an expected non-defect:**
+- **`layout=blank` has no title placeholder.** Titles are plain `shape` elements, so `view outline` reporting `(untitled)` is **expected**, not a defect. Use `layout=title` + `placeholder[title]` only when screen-reader outline compatibility matters.
+
+## Creating & Editing
+
+Verbs: `add` / `set` / `remove` / `move` / `swap` / `batch` / `raw-set`. Ninety percent of a deck is slides, shapes, text, a few charts, pictures, connectors.
+
+### Slides and backgrounds
+
+A slide is `/slide[N]`. Always pass `layout=blank` for custom designs. Background: solid, gradient, or image.
+
+```bash
+officecli add "$FILE" / --type slide --prop layout=blank --prop background=1E2761                 # solid
+officecli add "$FILE" / --type slide --prop layout=blank --prop "background=1E2761-CADCFC-180"   # gradient (start-end-angle)
+officecli add "$FILE" / --type slide --prop layout=blank --prop background=image:/path/to/hero.jpg  # image background (LEAD)
+```
+
+### Shapes
+
+A `shape` holds text, fill, border, position, and optional animation / link.
+
+```bash
+officecli add "$FILE" /slide[2] --type shape --prop name=Title --prop text="Key Insight" \
+  --prop x=2cm --prop y=2cm --prop width=20cm --prop height=3cm \
+  --prop font=Georgia --prop size=36 --prop bold=true --prop color=1E2761 --prop fill=none
+```
+
+Positioning is explicit — no layout engine, you own the grid math. `--prop preset=` picks geometry (`rect`, `roundRect`, `ellipse`, `triangle`, `arrow`, `star5`, ...); custom `M...Z` paths are not supported — pick a preset. **Name shapes at creation** (`--prop name=HeroTitle`) and address later with `"/slide[N]/shape[@name=HeroTitle]"` — names survive z-order / remove-then-add, whereas positional `/shape[3]` (and even `@id=`) shift. Re-`get --depth 1` after any structural change before using positional indexes.
+
+### Text inside shapes (paragraphs, runs, styling)
+
+A shape has paragraphs (`paragraph[K]`) and runs (`run[K]`). For one-line text, `--prop text=` on the shape is enough; a `\n` in the text makes a paragraph break, `\t` a tab (see Shell & Execution Discipline; double `\\n` for a literal). `add --type paragraph` takes the same style props as a shape (text, align, bold, italic, size, color, font). For mixed styling *within* a line, append a styled run:
+
+```bash
+officecli add "$FILE" "/slide[2]/shape[@name=Card1]/paragraph[1]" --type run \
+  --prop text=" (inline detail)" --prop size=14 --prop italic=true --prop color=8899BB
+```
+
+### Charts
+
+Pick chart type per the Design Principles chart-choice table. Full prop list (chartType enum, `seriesN.*`, `data=`/`categories=`, axis options): `help pptx add chart`. Typical multi-series with brand colors:
+
+```bash
+officecli add "$FILE" /slide[3] --type chart --prop chartType=column \
+  --prop series1.name=Revenue --prop series1.values="42,45,48" --prop series1.color=1E2761 \
+  --prop series2.name=Growth  --prop series2.values="2,7,7"    --prop series2.color=CADCFC \
+  --prop categories="Q1,Q2,Q3" \
+  --prop x=2cm --prop y=4cm --prop width=20cm --prop height=10cm
+```
+
+Gotchas: (1) chart titles with `()`, `[]`, `TBD` ship as literal text. (2) some viewers normalize chart colors to theme defaults — verify in the target viewer. Series can be added after creation (`add --type series`).
+
+### Pictures
+
+```bash
+officecli add "$FILE" /slide[4] --type picture --prop src=hero.jpg \
+  --prop x=1cm --prop y=1cm --prop width=32cm --prop height=18cm \
+  --prop alt="Product hero, gradient lit from right"
+```
+
+Confirm with `officecli query "$FILE" 'picture:no-alt'` — must be empty before delivery.
+
+### Connectors (LEAD — flowcharts / decision trees first-class)
+
+Draws a line between two shapes or free coordinates. Full prop / enum reference (`shape`, `headEnd`/`tailEnd` values, `from`/`to` ref forms): `help pptx add connector`.
+
+```bash
+officecli add "$FILE" /slide[5] --type connector \
+  --prop "from=/slide[5]/shape[@name=BoxA]" --prop "to=/slide[5]/shape[@name=BoxB]" \
+  --prop shape=elbow --prop color=333333 --prop tailEnd=triangle
+```
+
+**Every flow connector needs an arrowhead.** Without one, `bentConnector3` renders as a directionless line. `preset=rightArrow` overlay only works for horizontal flows; diamonds / decision trees with diverging edges need `tailEnd=`.
+
+### Animations (LEAD)
+
+Use per the Animation floors above (purposeful, degrades gracefully, verify live). Preset names + duration syntax: `help pptx animation`.
+
+```bash
+officecli set "$FILE" "/slide[2]/shape[@name=HeroCard]" --prop animation=fade-entrance-400
+officecli set "$FILE" "/slide[2]/shape[@name=HeroCard]" --prop animation=none    # clear all
+```
+
+### Hyperlinks, tooltips, slide-jump
+
+`--prop link=slide[N]` for an in-deck jump (1-based; target slide must exist), `link=nextslide` / `firstslide` / `lastslide` / `previousslide` / `endshow` for named navigation, `link=https://...` for a URL, `--prop tooltip="..."` for hover text.
+
+### Tables, placeholders, groups, zoom — one-liners
+
+- **Tables** — `--type table --prop rows=N --prop cols=M`. Row-level `set` supports `height` and `c1/c2/c3` (seed cell text). Header-row styling is table-level (`firstRow=true` / `headerFill=`), not a row prop. Cell formatting lives on the cell paragraph / run. Populate rows BEFORE setting table-level font (font cascade gets reset by row ops).
+- **Placeholders** — `"/slide[N]/placeholder[title]"` / `placeholder[body]`. Available only when the slide uses a layout with placeholders (not `layout=blank`).
+- **Groups** (LEAD) — address children via `"/slide[N]/group[@name=G]/shape[1]"`. Survives reordering better than positional indexes.
+- **Zoom slide** (LEAD) — `--type zoom --prop target=N` (one link per target; alias `slide`). Emit N separate zoom shapes for a multi-target nav hub. Zoom is a runtime feature — `view html` shows the static geometry; the zoom interaction runs only in a live presentation viewer.
+- **Slide comments** — reviewer annotations anchored at `/slide[N]/comment[M]`. Full lifecycle (`add / set / get / query / remove`). Props: `text`, `author`, `initials` (auto-derived), `date` (ISO 8601, defaults to UtcNow), `x` / `y` (length anchor).
+  ```bash
+  officecli add "$FILE" "/slide[2]" --type comment --prop author="Alice" --prop text="Tighten this bullet" --prop x=20cm --prop y=3cm
+  officecli query "$FILE" 'comment' --json                               # inspect review comments
+  officecli remove "$FILE" "/slide[2]/comment[1]"                           # resolve after addressing
+  ```
+
+### Deck-level recipes
+
+Patterns not obvious from the primitives. Each gives the **visual outcome** first, then a runnable block. `$FILE` = your filename. Use `/slide[last()]` to address the slide you just added. The recipes demonstrate **structure and coordinate math** — swap in the palette / fonts you chose for this topic; the navy `1E2761` + Georgia is just the example's theme, not a house style to copy verbatim.
+
+**Z-order.** Later-added shapes are on top. Add background decoration FIRST, titles LAST. To fix after the fact: `--prop zorder=back/front` (renumbers siblings — re-`get --depth 1` before stacking more).
+
+#### (a) Cover (and section divider)
+
+**Visual outcome.** Dark navy fill, centered 44pt title, 18pt ice-blue meta line.
+
+```bash
+officecli add "$FILE" / --type slide --prop layout=blank --prop background=1E2761
+officecli add "$FILE" "/slide[last()]" --type shape --prop text="Strategic Growth Review" \
+  --prop x=2cm --prop y=7cm --prop width=29.87cm --prop height=3cm \
+  --prop font=Georgia --prop size=44 --prop bold=true --prop color=FFFFFF --prop align=center
+officecli add "$FILE" "/slide[last()]" --type shape --prop text="Prepared for Acme Leadership — FY26 Outlook" \
+  --prop x=2cm --prop y=11cm --prop width=29.87cm --prop height=1.2cm \
+  --prop font=Calibri --prop size=18 --prop color=CADCFC --prop align=center
+```
+
+**Section divider** = same cover, plus a giant translucent number (`size=120`, `opacity=0.15`) added FIRST so it sits behind the section title.
+
+#### (b) Data slide (chart + commentary block)
+
+**Visual outcome.** Left two-thirds: column chart with brand series colors. Right one-third: "Key Insight" card with 20pt heading + 18pt body — audience reads the takeaway before parsing the bars.
+
+```bash
+officecli add "$FILE" / --type slide --prop layout=blank --prop background=FFFFFF
+officecli add "$FILE" "/slide[last()]" --type shape --prop text="FY26 Revenue Beat Plan by 18%" \
+  --prop x=1.5cm --prop y=1cm --prop width=30cm --prop height=1.8cm \
+  --prop font=Georgia --prop size=36 --prop bold=true --prop color=1E2761
+
+# Chart — left 2/3 (single-quote the title because of `$`)
+officecli add "$FILE" "/slide[last()]" --type chart --prop chartType=column \
+  --prop series1.name=Actual --prop series1.values="42,45,48,55" --prop series1.color=1E2761 \
+  --prop series2.name=Plan --prop series2.values="40,42,45,48" --prop series2.color=CADCFC \
+  --prop categories="Q1,Q2,Q3,Q4" --prop x=1.5cm --prop y=3.5cm --prop width=20cm --prop height=14cm --prop title='FY26 Revenue ($M)'
+
+# Commentary card — right 1/3: background + heading + body
+officecli add "$FILE" "/slide[last()]" --type shape --prop preset=roundRect --prop fill=F5F7FA --prop line=none \
+  --prop x=22.5cm --prop y=3.5cm --prop width=9.8cm --prop height=14cm
+officecli add "$FILE" "/slide[last()]" --type shape --prop text="Key Insight" \
+  --prop x=23cm --prop y=4cm --prop width=9cm --prop height=1.2cm \
+  --prop font=Georgia --prop size=20 --prop bold=true --prop color=1E2761
+officecli add "$FILE" "/slide[last()]" --type shape --prop text="EMEA launch + NRR at 118% drove 12pp of the 18pp beat." \
+  --prop x=23cm --prop y=5.5cm --prop width=9cm --prop height=11cm \
+  --prop font=Calibri --prop size=18 --prop color=333333
+```
+
+#### (c) Flowchart / process diagram (boxes + connectors)
+
+**Visual outcome.** Four rounded boxes across at y=8cm, each 6×3cm, alternating navy/iceblue, joined by elbow connectors with triangle arrowheads.
+
+Grid math (4 boxes, 33.87cm slide, 1.5cm margins): `gap = (33.87 − 3 − 24) / 3 = 2.29cm`. x-positions: `1.5, 9.79, 18.08, 26.37`.
+
+Each box carries its own label via `valign=middle` (no separate overlay shape needed). Use `batch` heredoc for portable coordinate arithmetic — no `bc`, no bash arrays.
+
+```bash
+cat <<EOF | officecli batch "$FILE"
+[
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"name":"Step1","preset":"roundRect","fill":"1E2761","line":"none","x":"1.5cm","y":"8cm","width":"6cm","height":"3cm","text":"Step 1","font":"Georgia","size":"20","bold":"true","color":"FFFFFF","align":"center","valign":"middle"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"name":"Step2","preset":"roundRect","fill":"CADCFC","line":"none","x":"9.79cm","y":"8cm","width":"6cm","height":"3cm","text":"Step 2","font":"Georgia","size":"20","bold":"true","color":"1E2761","align":"center","valign":"middle"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"name":"Step3","preset":"roundRect","fill":"1E2761","line":"none","x":"18.08cm","y":"8cm","width":"6cm","height":"3cm","text":"Step 3","font":"Georgia","size":"20","bold":"true","color":"FFFFFF","align":"center","valign":"middle"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"name":"Step4","preset":"roundRect","fill":"CADCFC","line":"none","x":"26.37cm","y":"8cm","width":"6cm","height":"3cm","text":"Step 4","font":"Georgia","size":"20","bold":"true","color":"1E2761","align":"center","valign":"middle"}}
+]
+EOF
+
+# Connector pattern — reuse for any box-to-box graph.
+for pair in "Step1 Step2" "Step2 Step3" "Step3 Step4"; do
+  A=${pair% *}; B=${pair#* }
+  officecli add "$FILE" "/slide[$SLIDE]" --type connector \
+    --prop "from=/slide[$SLIDE]/shape[@name=$A]" \
+    --prop "to=/slide[$SLIDE]/shape[@name=$B]" \
+    --prop shape=elbow --prop color=333333 --prop tailEnd=triangle
+done
+```
+
+`shape=elbow` is canonical (`bentConnector2` / `bentConnector3` also accepted).
+
+#### (d) Multi-slide deck skeletons
+
+No code block — it's a rhythm. The sequences below are **illustrations of one working cadence (alternating dark dividers with white content), not required running orders** — derive your actual arc from the content first (see "Title sequence first"), then borrow whatever divider/content rhythm fits:
+
+- **10-slide review:** Cover · Agenda · 3 KPI · Div01 · Chart · Chart · Div02 · Flow · Timeline · Close
+- **20-slide pitch:** same rhythm × 2, sectioned Problem · Solution · Market · Product · Traction · Model · Team · Financials · Ask
+- Confirm that each divider precedes its section content in the saved deck.
+- Cover/divider = (a); chart pages = (b); process pages = (c); KPI pages = (e); decision pages = (f)
+
+#### (e) KPI callouts — giant-number card grid
+
+**Visual outcome.** Three or four giant numbers across a row; each card = unit sublabel + small percent-change chip + one-line takeaway. The single most common exec-deck element.
+
+**Sizing rule.** 60pt Georgia bold fits ~5 chars in a 9.78cm card (`$84.2`, `118%`, `24.5`). For longer values (`$84.2M`), split: `$84.2` as the big number, `USD millions` as the sublabel — never shrink the font to chase a unit suffix, it just wraps.
+
+Grid math (3 cards, 1.5cm margins, 0.76cm gap): `col_width = (33.87 − 3 − 1.52) / 3 = 9.78cm`. x-positions: `1.5, 12.04, 22.58`. Use accent color on a single "watch" card so risk reads in one second.
+
+```bash
+# Two cards: navy standard + terracotta watch. Each = bg + big number + sublabel + chip.
+cat <<EOF | officecli batch "$FILE"
+[
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"preset":"roundRect","fill":"1E2761","line":"none","x":"1.5cm","y":"4cm","width":"9.78cm","height":"7cm"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"text":"84.2","x":"1.5cm","y":"4.8cm","width":"9.78cm","height":"2.8cm","font":"Georgia","size":"60","bold":"true","color":"FFFFFF","align":"center"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"text":"USD millions · ARR","x":"1.5cm","y":"8cm","width":"9.78cm","height":"0.8cm","font":"Calibri","size":"14","color":"CADCFC","align":"center"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"text":"+24% YoY","x":"1.5cm","y":"9cm","width":"9.78cm","height":"0.8cm","font":"Calibri","size":"14","bold":"true","color":"CADCFC","align":"center"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"preset":"roundRect","fill":"B85042","line":"none","x":"22.58cm","y":"4cm","width":"9.78cm","height":"7cm"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"text":"\$1.42","x":"22.58cm","y":"4.8cm","width":"9.78cm","height":"2.8cm","font":"Georgia","size":"60","bold":"true","color":"FFFFFF","align":"center"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"text":"CAC payback (yrs)","x":"22.58cm","y":"8cm","width":"9.78cm","height":"0.8cm","font":"Calibri","size":"14","color":"FFFFFF","align":"center"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"text":"+8% — watch","x":"22.58cm","y":"9cm","width":"9.78cm","height":"0.8cm","font":"Calibri","size":"14","bold":"true","color":"FFFFFF","align":"center"}}
+]
+EOF
+```
+
+#### (f) Decision tree — YES/NO branching
+
+**Visual outcome.** Diamond at top-center; YES/NO child boxes diverging left-right; both converge into a shared terminal box. Layout: diamond at `x=13.94, y=2cm, 6×3cm`; YES at `3cm, 7.5cm`; NO at `22.87cm, 7.5cm`; terminal at `13.94cm, 13cm`. Convention: red = stop/escalate, blue = standard, green = safe terminal. **Every connector needs an arrowhead** — readers misparse direction otherwise.
+
+```bash
+cat <<EOF | officecli batch "$FILE"
+[
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"name":"Decide","preset":"diamond","fill":"1E2761","line":"none","x":"13.94cm","y":"2cm","width":"6cm","height":"3cm","text":"Hazardous energy present?","font":"Calibri","size":"14","bold":"true","color":"FFFFFF","align":"center","valign":"middle"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"name":"YesBox","preset":"roundRect","fill":"B85042","line":"none","x":"3cm","y":"7.5cm","width":"8cm","height":"3cm","text":"Lockout + Tagout + Verify","font":"Calibri","size":"16","bold":"true","color":"FFFFFF","align":"center","valign":"middle"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"name":"NoBox","preset":"roundRect","fill":"CADCFC","line":"none","x":"22.87cm","y":"7.5cm","width":"8cm","height":"3cm","text":"Proceed with standard PPE","font":"Calibri","size":"16","bold":"true","color":"1E2761","align":"center","valign":"middle"}},
+  {"command":"add","parent":"/slide[$SLIDE]","type":"shape","props":{"name":"Done","preset":"roundRect","fill":"2C5F2D","line":"none","x":"13.94cm","y":"13cm","width":"6cm","height":"2.5cm","text":"Begin service","font":"Calibri","size":"16","bold":"true","color":"FFFFFF","align":"center","valign":"middle"}}
+]
+EOF
+```
+
+Then 4 connectors (`Decide→YesBox`, `Decide→NoBox`, `YesBox→Done`, `NoBox→Done`) using the connector loop pattern from (c).
 
 ## QA (Required)
 
-Your first render usually has a few real issues — overlaps, overflow, misalignment. Find and fix those, re-render only the slides you changed, and stop.
+### Check the saved deck
 
-### Content QA (required)
+1. Run `officecli validate "$FILE" --json` and inspect the result.
+2. Read `officecli view "$FILE" outline` to check slide order and count.
+3. Read `officecli view "$FILE" text` to check the requested content and any leftover placeholders. Review the diagnostics from `officecli view "$FILE" issues` and fix genuine layout or content problems.
 
-```bash
-python scripts/slide_text.py output.pptx
-```
+### Visual review when a viewer is available
 
-Check for missing content, typos, wrong order.
+Review each affected slide in an available preview or presentation viewer. If OfficeCLI's screenshot renderer is available, use the slide count from the outline and keep any preview images in the workspace. If the renderer is unavailable, use `officecli view "$FILE" html` to inspect the structure and report the layout details that still need visual review.
 
-**When using templates, check for leftover placeholder text:**
+**Per-slide checklist**
 
-```bash
-python scripts/slide_text.py output.pptx | grep -iE "\bx{3,}\b|lorem|ipsum|\bTODO|\[insert|this.*(page|slide).*layout"
-```
+- **overlap** — shapes / charts / giant decorative numbers (01/02/03 100pt+) colliding
+- **text overflow** — clipped at slide or shape boundary (KPI cards, narrow boxes)
+- **narrow text box** — content fits technically but wraps to many short lines (1–2 words each); long sublabel in a 3cm KPI card, body line in a too-tight column
+- **dark-on-dark** — fill brightness < 30% with text/icon brightness < 80% (incl. dark icons on dark without a contrasting circle)
+- **image treatment** — photo stretched/distorted, text raw on a busy image (no card/scrim), screenshot or logo cropped, transparent image floating on white
+- **missing arrowheads** — flowchart connectors as plain lines
+- **decorative-line / title mismatch** — accent bar sized for one-line title but title wrapped to two (or vice versa)
+- **footer / citation collision** — source line, page number, or footnote touching content above
+- **tight margin / gap** — element within ~0.5" of slide edge, or two cards within ~0.3"
+- **uneven gaps** — large empty area on one side, cramped on another (broken rhythm)
+- **column / repeat-element misalignment** — KPI cards / icons off baseline or inconsistent width
+- **order sanity** — sequence matches narrative (cover → agenda → dividers-before-sections → closing)
 
-If grep returns results, fix them before declaring success.
+Fix problems in the workspace copy and reopen the saved file for verification. Publish the checked editable deck through Kite and describe any remaining rendering limits.
 
-### File QA (required)
+## Common Pitfalls
 
-```bash
-python scripts/office/validate.py output.pptx                      # built from scratch
-python scripts/office/validate.py output.pptx --original src.pptx  # built from a template
-```
+Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
 
-**If the deck came from a template, always pass `--original`.** A template may itself
-contain parts the XSD rejects, so a bare run can report failures you never caused — and
-a genuine regression can hide among them. `--original` baselines
-the schema and slide checks against the template, suppressing errors it already had.
-The structural checks — relationships, content types, charts — ignore `--original` and
-report template-inherited problems either way, so read those on their own merits.
-
-pptxgenjs emits chart XML PowerPoint refuses to open, and every other tool
-accepts: python-pptx opens those decks, LibreOffice renders them, the XSD
-passes them. Every failure names its fix. Fix it in the generator and rebuild.
-
-**A pass is not proof of a valid file:** `validate.py` does not catch everything PowerPoint repairs (a chart element repeated past its limit passes); when you delete an animated shape from a template slide, delete the slide's `<p:timing>` element too (its animations go with it), or PowerPoint offers to repair the deck.
-
-### Visual QA (required)
-
-Convert the slides to images (see [Converting to Images](#converting-to-images)) and inspect every one. After staring at the generating code you tend to see what you expect rather than what rendered, so look at the images fresh (a subagent works well for this if you have one). User-visible defects to look for:
-
-- **Text overflow or text cut off at a box or slide boundary — check this first.** It is the most common defect and always user-visible. (For a font the previewer renders unreliably per Typography, the preview is approximate: trust the ~10% slack you left, not its apparent fit.)
-- Overlapping elements (text through shapes, lines through words, stacked elements)
-- Source citations or footers colliding with content above
-- Elements too close (< 0.3" gaps) or cards/sections nearly touching
-- Uneven gaps (large empty area in one place, cramped in another)
-- Insufficient margin from slide edges (< 0.5")
-- Columns or similar elements not aligned consistently
-- Low-contrast text (e.g., light gray text on cream-colored background)
-- Template decoration mispositioned after text replacement — e.g., a title underline positioned for one line, but the replaced title wrapped to two
-- Low-contrast icons (e.g., dark icons on dark backgrounds without a contrasting circle)
-- Text boxes too narrow causing excessive wrapping
-- Titles at different heights, or chart labels that look different from chart to chart, across slides of the same type — compare slides with each other, not only each slide with itself
-- A word or number broken across two lines — a word split mid-word, or a figure separated from its unit ("26" on one line, "M" on the next)
-- Leftover placeholder content
-
-## Converting to Images
-
-Convert presentations to individual slide images for visual inspection:
-
-```bash
-python scripts/office/soffice.py --headless --convert-to pdf output.pptx
-rm -f slide-*.jpg
-pdftoppm -jpeg -r 150 output.pdf slide
-ls -1 "$PWD"/slide-*.jpg
-```
-
-**Pass the absolute paths printed above directly to the view tool.** The `rm` clears stale images from prior runs. `pdftoppm` zero-pads based on page count: `slide-1.jpg` for decks under 10 pages, `slide-01.jpg` for 10-99, `slide-001.jpg` for 100+.
-
-**After fixes, rerun all four commands above** — the PDF must be regenerated from the edited `.pptx` before `pdftoppm` can reflect your changes.
-
-## Dependencies
-
-`pptxgenjs` (npm, preinstalled — install only if `require('pptxgenjs')` fails) · `python-pptx`, `Pillow`, `defusedxml`, `lxml` (pip — slide_text, thumbnail, clean, validate) · LibreOffice (`soffice`, auto-configured for sandboxed environments via `scripts/office/soffice.py`) · `pdftoppm` (Poppler)
+| Pitfall | Correct approach |
+|---|---|
+| Unquoted `[N]` in zsh/bash | Always quote paths: `"/slide[1]"`. zsh globs unquoted `[1]` → `no matches found` — #1 first-use stumble |
+| `--name "foo"` | All attributes go through `--prop`: `--prop name="foo"` |
+| `/shape[myname]` (bare name in brackets) | Use `@name=` selector: `/shape[@name=myname]` or `/shape[@id=10007]` |
+| Paths 1-based vs `--index` 0-based | `/slide[1]` = first slide; `--index 0` = first position |
+| `$` in `--prop text=` | Single-quote: `--prop text='$15M'`. Double-quoted `"$15M"` gets shell-expanded to `M` |
+| `\n` / `\t` in `--prop text=` | Interpreted by the CLI: `\n` = paragraph break, `\t` = tab. Double `\\n` for a literal |
