@@ -1,0 +1,46 @@
+diff --git a/dist/exceljs.js b/dist/exceljs.js
+--- a/dist/exceljs.js
++++ b/dist/exceljs.js
+@@ -4642,17 +4642,36 @@
+     error = err;
+   });
+   let events = [];
+-  saxesParser.on('opentag', value => events.push({
+-    eventType: 'opentag',
+-    value
+-  }));
++  // Kite preview: ExcelJS xforms expect lexical names without a prefix for
++  // SpreadsheetML and Extended Properties. Resolve only these element names;
++  // preserve attributes, foreign extensions and the SAX parser's original tag.
++  const namespaces = [Object.create(null)];
++  const tagView = (tag, scope) => {
++    const colon = tag.name.indexOf(':');
++    return colon > 0 && scope[tag.name.slice(0, colon)] === true
++      ? { ...tag, name: tag.name.slice(colon + 1) }
++      : tag;
++  };
++  saxesParser.on('opentag', tag => {
++    const parent = namespaces[namespaces.length - 1];
++    let scope = parent;
++    for (const name of Object.keys(tag.attributes)) {
++      if (!name.startsWith('xmlns:')) continue;
++      if (scope === parent) scope = Object.create(parent);
++      const uri = tag.attributes[name];
++      scope[name.slice(6)] = uri === 'http://schemas.openxmlformats.org/spreadsheetml/2006/main' ||
++        uri === 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties';
++    }
++    namespaces.push(scope);
++    events.push({ eventType: 'opentag', value: tagView(tag, scope) });
++  });
+   saxesParser.on('text', value => events.push({
+     eventType: 'text',
+     value
+   }));
+-  saxesParser.on('closetag', value => events.push({
++  saxesParser.on('closetag', tag => events.push({
+     eventType: 'closetag',
+-    value
++    value: tagView(tag, namespaces.pop())
+   }));
+   for await (const chunk of iterable) {
+     saxesParser.write(bufferToString(chunk));

@@ -24,6 +24,8 @@ Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)�
 
 内置 `docx`、`xlsx` 和 `pptx` 使用 OfficeCLI 技能，同一目录提供 OfficeCLI 通用项和专项项。编辑时 `officecli` 由当前受管 Shell 解析。`pdf` 沿用原内置来源。下方记录保留切换前针对原技能的 Windows 实测。 [当前 Skill 资产](../../packages/agent/src/tools/documents/README.md#内置-office-skills)
 
+XLSX 预览使用固定 ExcelJS 浏览器包，将 SpreadsheetML 和扩展属性的合法命名空间前缀解析到原有元素读取器。OfficeCLI 创建的文件、修改过的现有文件和无前缀工作簿使用相同的原件、归档准入和选区逻辑；不重写或重新打包用户文件。[真实 OfficeCLI 产物回归](test/isolated/officecli-xlsx-preview.test.ts)
+
 2026-11-16 在 Windows x64 隔离 Native 与真实 Service 中验证。Anthropic 的 docx、pptx、pdf、xlsx Skill 取自同一提交 `1780c5e5a552fd4d1c9d6a7b0cab26b0c2bef064`，由受控本地模型经 `load_skill` 读取。真实文件卡打开后，鼠标框选 `预算!B2:C3`，可信输入显示同一范围，持久请求绑定 `user-skill.xlsx`。受管 Windows Shell 运行 openpyxl 修改工作副本并归档新版，重启后从原会话打开新版。独立读取原件与新版，确认这四格为 1700、25、2700、39，其余工作表、值、边框、数值格式、合并格和冻结位置一致。原件与导入工作副本摘要一致。同一制品也打开了 PDF。真实预览 View 与交互分阶段采样，验证范围为本机隔离制品和受控模型。
 
 窄窗 224 CSS px 的实际网格复验了适应窗口、100% 横向滚动、恢复适应、拖选及 Esc 取消未发送请求，取消期间模型请求数保持不变。大表在适应窗口模式保留 50% 最小比例与横向滚动，限制缩小后同时渲染的单元格数量。

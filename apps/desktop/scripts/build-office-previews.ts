@@ -2,6 +2,9 @@ import { copyFile, cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 
+// The fixed UMD carries our namespace-aware SAX adapter (see patchedDependencies).
+export const xlsxPreviewRuntime = 'exceljs/dist/exceljs.js';
+
 export async function buildOfficePreviews(outdir: string) {
   const result = await Bun.build({
     entrypoints: ['docx-preview.ts', 'xlsx-preview.tsx', 'pptx-preview.ts'].map((entry) =>
@@ -37,7 +40,7 @@ export async function buildOfficePreviews(outdir: string) {
   // Evaluate the published browser UMD wrappers unchanged in the isolated world.
   // Bundling their CommonJS fallback can introduce an unresolved require().
   const require = createRequire(import.meta.url);
-  const excel = require.resolve('exceljs/dist/exceljs.min.js');
+  const excel = require.resolve(xlsxPreviewRuntime);
   const zip = require.resolve('jszip/dist/jszip.min.js');
   const docx = dirname(dirname(require.resolve('docx-preview')));
   const pptx = dirname(dirname(require.resolve('@aiden0z/pptx-renderer/browser')));
