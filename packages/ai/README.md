@@ -77,7 +77,7 @@ Codex 的文件认证和固定 endpoint 适配由[Service 本机来源](../../ap
 
 ## 原生 Web Search
 
-Service/Agent 冻结实际路由并在授权后才向中立请求附上 `nativeWebSearch`。适配器再校验精确官方 OpenAI API 端点、显式 API key、Responses、模型及所需推理设置。已记录的协议组合仅为官方指南所举的 `gpt-6.2-astra` 与默认／low／medium／high 的 `gpt-5`；本地 fixture 不证明用户账户额度、真实联网或发布资格。非官方网关、Codex 登录和未识别模型不会据名启用原生搜索。逐查询审批不使用服务端路线。
+Service/Agent 冻结实际路由并在授权后才向中立请求附上 `nativeWebSearch`。适配器再校验精确官方 OpenAI API 端点、显式 API key、Responses、模型及所需推理设置。适配器接受 `gpt-6.2-astra`、默认／low／medium／high 的 `gpt-5`，以及未指定推理强度的 `gpt-6-luna`。Luna 的其他强度或相似模型名保留未知状态；使用原生搜索仍需在当前连接完成观察到搜索的资格测试。非官方网关、Codex 登录和未识别模型不会据名启用原生搜索。逐查询审批不使用服务端路线。
 
 真实 SDK 以 `store:false` 宣告服务端工具，本地同名函数独立改名、复原；只有本地调用交回 Agent。搜索开始、结束、已检索 URL 和正文引用分别观察，失败／不完整不是成功。正文位置必须对应实际输出块；两个可能的字符单位产生不同可行锚点时只保留链接。原生 v2 私有历史按输出索引保存，并把工具 dialect、回传序列化器和原有连接身份一起散列；存储、账户、模型、搜索模式或文本投影不匹配时使用普通对话。它不是 ModelOutput 或 Trajectory 的新格式。
 

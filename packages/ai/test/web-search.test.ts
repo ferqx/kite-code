@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ModelAttemptError, type ModelEvent, type ModelRequest } from '../src';
+import { reasoningEfforts } from '../src/request-snapshot';
 import {
   createCompatibleModelBinding,
   createSdkModelAdapter,
@@ -149,6 +150,17 @@ test('native declaration is opt-in and exact to endpoint, family, authentication
     [{ apiKey: '' }, 'unknown'],
     [{ headers: { authorization: 'Bearer fixture' } }, 'unknown'],
     [{ modelId: 'gpt-6.2-astra-new' }, 'unknown'],
+    [{ modelId: 'gpt-6-luna' }, 'supported'],
+    [{ modelId: 'gpt-6-luna-preview' }, 'unknown'],
+    [{ modelId: 'gpt-6-luna', baseURL: 'https://unverified.example/v1' }, 'unknown'],
+    [
+      {
+        modelId: 'gpt-6-luna',
+        name: 'codex',
+        continuationIdentity: { kind: 'codex-local-auth', value: 'a'.repeat(64) },
+      },
+      'unknown',
+    ],
     [{ protocol: 'chat-completions' }, 'unsupported'],
   ] as const) {
     let n = 0;
@@ -177,6 +189,29 @@ test('native declaration is opt-in and exact to endpoint, family, authentication
       await expect(collect(adapter)).rejects.toThrow('native_web_search_unavailable');
       expect(n).toBe(0);
     }
+  }
+});
+test('explicit Luna reasoning efforts cannot dispatch native search', async () => {
+  const f = await fixture(() => {
+    throw new Error('unexpected native search request');
+  });
+  try {
+    const model = createCompatibleModelBinding({
+      ...options,
+      modelId: 'gpt-6-luna',
+      fetch: f.transport,
+    });
+    for (const reasoningEffort of reasoningEfforts) {
+      const adapter = createSdkModelAdapter({
+        models: new Map([['bound', model]]),
+        presets: new Map([['bound', { reasoningEffort }]]),
+      });
+      expect(adapter.nativeWebSearchCapability?.('bound')).toBe('unknown');
+      await expect(collect(adapter)).rejects.toThrow('native_web_search_unavailable');
+    }
+    expect(f.bodies).toHaveLength(0);
+  } finally {
+    await f.close();
   }
 });
 test('real SDK: native search, multiple text blocks and local name collision round-trip once after cold restore', async () => {

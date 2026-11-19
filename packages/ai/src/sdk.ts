@@ -318,6 +318,7 @@ export function openAIWebSearchModelCapability(
   effort?: ReasoningEffort,
 ): NativeWebSearchCapability {
   if (modelId === 'gpt-6.2-astra') return 'supported';
+  if (modelId === 'gpt-6-luna' && effort === undefined) return 'supported';
   if (modelId === 'gpt-5')
     return !effort || ['low', 'medium', 'high'].includes(effort) ? 'supported' : 'unsupported';
   return 'unknown';

@@ -59,7 +59,7 @@ function response(model: string, count: number, searched: boolean) {
   return new Response(encodeFrames(frames), { headers: { 'content-type': 'text/event-stream' } });
 }
 
-test('default Service qualifies an exact OpenAI connection using an owned Test command and submits native search only while authorized', async () => {
+async function verifyNativeBinding(selectedModel: string, effort?: 'high') {
   const root = temporaryDirectory('kite-native-search-binding-');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
   privateDirectory(profile.profilePath);
@@ -81,8 +81,8 @@ test('default Service qualifies an exact OpenAI connection using an owned Test c
             protocol: 'responses',
             baseURL: 'https://api.openai.com/v1',
             credentialRef: api.id,
-            effort: 'high',
-            models: ['gpt-5', 'unqualified-model'],
+            ...(effort === undefined ? {} : { effort }),
+            models: [selectedModel, 'unqualified-model'],
           },
           fallback: {
             type: 'deepseek',
@@ -105,7 +105,7 @@ test('default Service qualifies an exact OpenAI connection using an owned Test c
       }),
       { mode: 0o600 },
     );
-  write('gpt-5');
+  write(selectedModel);
   const wire: {
     lane: string;
     model: string;
@@ -270,8 +270,8 @@ test('default Service qualifies an exact OpenAI connection using an owned Test c
     });
     expect(wire.at(-1)).toMatchObject({
       lane: '/test',
-      model: 'gpt-5',
-      effort: 'high',
+      model: selectedModel,
+      effort,
       native: true,
       forced: true,
     });
@@ -281,8 +281,8 @@ test('default Service qualifies an exact OpenAI connection using an owned Test c
     expect(native?.kind).toBe('native');
     expect(wire.at(-1)).toMatchObject({
       lane: '/model',
-      model: 'gpt-5',
-      effort: 'high',
+      model: selectedModel,
+      effort,
       native: true,
       ordinary: false,
     });
@@ -328,4 +328,16 @@ test('default Service qualifies an exact OpenAI connection using an owned Test c
       removeTemporaryDirectory(root);
     }
   }
-}, 60000);
+}
+
+test(
+  'default Service qualifies an exact OpenAI connection using an owned Test command and submits native search only while authorized',
+  () => verifyNativeBinding('gpt-5', 'high'),
+  60000,
+);
+
+test(
+  'official Luna with omitted effort keeps the original qualified account and sends no effort for its probe or business request',
+  () => verifyNativeBinding('gpt-6-luna'),
+  60000,
+);
