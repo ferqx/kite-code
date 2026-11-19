@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
+import { runInNewContext } from 'node:vm';
 import { type AgentClient, ClientError } from '@kite-ai/client';
+import { readVisitedIcon, VisitedSiteIcons } from '../electron/visited-site-icons';
 import { NativeWebSearch, projectSearchEvidence } from '../electron/web-search';
 import { validateSearchOperation } from '../electron/web-search-ipc';
 
@@ -351,4 +353,83 @@ test('actual evidence schema: searching and unknown are not success; native anch
       ids,
     ),
   ).toMatchObject({ status: 'unknown', citations: [{ url }], blocks: [] });
+});
+
+test('favicon projection only accepts bounded visited pixels for this store, session and HTTPS origin', () => {
+  const icons = new VisitedSiteIcons(),
+    px = Buffer.alloc(1024, 142).toString('base64');
+  const s = { storeId: 's', sessionId: 'a', executionId: 'exec' };
+  const url = 'https://source.example/guide',
+    off = 'https://other.example';
+  const packet = {
+    schema: 'kite.web-search',
+    schemaVersion: 1,
+    ...s,
+    revision: 1,
+    blocks: [
+      {
+        status: 'completed',
+        route: 'provider',
+        sources: [
+          { url, siteIconPixels: 'https://evil.example/icon.svg' },
+          { url: off, siteIconPixels: px },
+        ],
+      },
+    ],
+  };
+  icons.record(s, url, 'https://evil.example/pixel');
+  icons.record(s, url, 'data:image/svg+xml,<svg/>');
+  expect(icons.get(s, url)).toBeUndefined();
+  expect(projectSearchEvidence(packet, s, icons)?.sources[1]?.siteIconPixels).toBeUndefined();
+  icons.record(s, url, px);
+  expect(projectSearchEvidence(packet, s, icons)?.sources[0]?.siteIconPixels).toBe(px);
+  expect(icons.get({ ...s, storeId: 'other' }, url)).toBeUndefined();
+  expect(icons.get({ ...s, sessionId: 'other' }, url)).toBeUndefined();
+  expect(icons.get(s, 'https://source.example:8443')).toBeUndefined();
+  expect(icons.get(s, 'http://source.example')).toBeUndefined();
+  expect(icons.get(s, 'https://user@source.example')).toBeUndefined();
+});
+
+test('the browser sampler accepts document-owned PNG bytes and does no lookup for linked icons', async () => {
+  const png =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+XDbkAAAAASUVORK5CYII=';
+  const pixels = Buffer.alloc(1024, 255);
+  let closed = 0,
+    reads = 0;
+  const decoded: string[] = [];
+  const lookup = () => {
+    reads++;
+    throw Error('external image access');
+  };
+  const sample = (protocol: string, hrefs: string[]) =>
+    runInNewContext(readVisitedIcon, {
+      location: { protocol },
+      document: { querySelectorAll: () => hrefs.map((href) => ({ href })) },
+      caches: { match: lookup },
+      fetch: lookup,
+      Image: lookup,
+      atob,
+      btoa,
+      Blob,
+      createImageBitmap: async (blob: Blob) => {
+        decoded.push(Buffer.from(await blob.arrayBuffer()).toString('base64'));
+        return { width: 1, height: 1, close: () => closed++ };
+      },
+      OffscreenCanvas: class {
+        getContext() {
+          return { drawImage() {}, getImageData: () => ({ data: pixels }) };
+        }
+      },
+    });
+  const inline = 'data:image/png;base64,' + png;
+  expect(await sample('http:', [inline])).toBeUndefined();
+  expect(
+    await sample('https:', ['https://a.example/favicon.png', 'https://b.example/favicon.png']),
+  ).toBeUndefined();
+  expect(await sample('https:', ['data:image/png;base64,AAAA', inline])).toBe(
+    pixels.toString('base64'),
+  );
+  expect(decoded).toEqual([png]);
+  expect(closed).toBe(1);
+  expect(reads).toBe(0);
 });

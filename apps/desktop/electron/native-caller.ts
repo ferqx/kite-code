@@ -80,6 +80,7 @@ import { NativeToolMessages } from './tool-messages';
 import { invokeNativeTrace } from './trace-extensions';
 import { NativeTrajectory } from './trajectory';
 import { NativeUserMcpSettings } from './user-mcp-settings';
+import { VisitedSiteIcons } from './visited-site-icons';
 import { NativeWebSearch } from './web-search';
 import { NativeWorkspaceChanges } from './workspace-changes';
 import { NativeWorkspaceRemovalPort } from './workspace-removal';
@@ -160,6 +161,7 @@ export class NativeCaller {
     promise: Promise<NativeDirectory>;
   };
   private readonly providers: NativeProviderSettings;
+  readonly visitedSiteIcons = new VisitedSiteIcons();
   private readonly webSearch: NativeWebSearch;
   private readonly images = new NativeInputImages();
   private readonly inputFiles = new NativeInputFiles();
@@ -655,20 +657,24 @@ export class NativeCaller {
             ...(this.selected ? { sessionId: this.selected } : {}),
           }
         : undefined;
-    this.webSearch = new NativeWebSearch(client, () => {
-      const scope = configurationScope();
-      return scope
-        ? {
-            ...scope,
-            readOnly:
-              !!scope.sessionId &&
-              (!this.controller.snapshot ||
-                this.controller.snapshot.sessionId !== scope.sessionId ||
-                this.controller.snapshot.view.session.parentSessionId !== null ||
-                this.controller.snapshot.workspaceUnavailable),
-          }
-        : undefined;
-    });
+    this.webSearch = new NativeWebSearch(
+      client,
+      () => {
+        const scope = configurationScope();
+        return scope
+          ? {
+              ...scope,
+              readOnly:
+                !!scope.sessionId &&
+                (!this.controller.snapshot ||
+                  this.controller.snapshot.sessionId !== scope.sessionId ||
+                  this.controller.snapshot.view.session.parentSessionId !== null ||
+                  this.controller.snapshot.workspaceUnavailable),
+            }
+          : undefined;
+      },
+      this.visitedSiteIcons,
+    );
     this.inputConfiguration = new NativeConfiguration(client, configurationScope);
     this.providers = new NativeProviderSettings(
       client,

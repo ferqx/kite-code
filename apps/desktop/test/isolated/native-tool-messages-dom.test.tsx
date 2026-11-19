@@ -2318,6 +2318,78 @@ test('MCP live metadata, original receipt and cold history keep one named row wi
   }
 });
 
+test('mixed Trace keeps first-seen search, Skill, MCP category order and both search details independently addressable', async () => {
+  const f = fixture();
+  const mk = (messageId: string, definitionId: string, target?: string): NativeToolMessageFact => ({
+    messageId,
+    executionId: `exec-${messageId}`,
+    definitionId,
+    definitionVersion: '1',
+    status: 'succeeded',
+    resultRevision: '1',
+    target,
+  });
+  const facts = [
+    mk('a', 'web.search', '查询 A'),
+    mk('skill', 'skills.load', 'S'),
+    mk('b', 'web.search', '查询 B'),
+    mk('mcp', 'mcp.tools.search'),
+  ];
+  const models = facts.map((f) => ({ ...desktopToolMessage(f, f.messageId, ''), turnId: 'mixed' }));
+  try {
+    await act(async () =>
+      f.root.render(
+        <Conversation
+          traceTurns
+          selected
+          connected
+          loading={false}
+          messages={models}
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'mixed', status: 'completed' }}
+          initialReading={{ top: 0, follow: false, expanded: { 'turn:mixed:complete': true } }}
+          renderToolActivity={(group, controls) =>
+            renderNativeToolGroup(group, controls, {
+              tools: facts,
+              retainedFact: () => undefined,
+              liveTools: [],
+              executionUnconfirmed: false,
+              observationUnavailable: false,
+              diagnostics: false,
+              renderOriginal: () => null,
+              hasDeferredText: () => false,
+              renderSearch: (_m, id) => <span>sources:{id}</span>,
+            })
+          }
+        />,
+      ),
+    );
+    const group = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
+    expect(group.textContent).toBe('搜索了 · 加载了 · 运行了');
+    expect(f.host.textContent).not.toContain('sources:exec-');
+    await act(async () => group.click());
+    const find = (q: string) =>
+      Array.from(
+        f.host.querySelectorAll<HTMLButtonElement>(
+          '.conversation-trace-steps button.tool-activity-summary',
+        ),
+      ).find((x) => x.textContent?.includes(q))!;
+    expect(find('查询 A')).toBeDefined();
+    expect(find('查询 B')).toBeDefined();
+    await act(async () => find('查询 B').click());
+    expect(f.host.textContent).toContain('sources:exec-b');
+    expect(f.host.textContent).not.toContain('sources:exec-a');
+    await act(async () => find('查询 A').click());
+    expect(f.host.textContent).toContain('sources:exec-a');
+    await act(async () => find('查询 B').click());
+    expect(f.host.textContent).toContain('sources:exec-a');
+    expect(f.host.textContent).not.toContain('sources:exec-b');
+    expect(group.textContent).toBe('搜索了 · 加载了 · 运行了');
+  } finally {
+    await f.close();
+  }
+});
+
 test('Native verified and original-reader single Trace rows receive only the completed summary copy and retain results', async () => {
   const f = fixture();
   try {
@@ -2386,6 +2458,60 @@ test('Native verified and original-reader single Trace rows receive only the com
             expect(f.host.querySelector('[data-status="error"]')).not.toBeNull();
         }
       }
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('a single ordinary search keeps one stop notice until its execution settles', async () => {
+  const f = fixture();
+  try {
+    for (const status of ['running', 'succeeded'] as const) {
+      const fact: NativeToolMessageFact = {
+        definitionId: 'web.search',
+        definitionVersion: '1',
+        status,
+        target: 'fixture',
+        executionId: 'execution',
+        messageId: 'search',
+        resultRevision: '1',
+      };
+      const model = {
+        ...desktopToolMessage(fact, fact.messageId, ''),
+        turnId: 'run',
+        toolStopping: status === 'running',
+      };
+      await act(async () =>
+        f.root.render(
+          <Conversation
+            traceTurns
+            selected
+            connected
+            loading={false}
+            messages={[model]}
+            saveReading={() => {}}
+            renderToolActivity={(group, controls) =>
+              renderNativeToolGroup(group, controls, {
+                tools: [fact],
+                retainedFact: () => undefined,
+                liveTools: [],
+                executionUnconfirmed: false,
+                observationUnavailable: false,
+                diagnostics: false,
+                renderOriginal: () => null,
+                hasDeferredText: () => false,
+              })
+            }
+            turnActivity={{ turnId: 'run', status: status === 'running' ? 'running' : 'completed' }}
+            initialReading={{ top: 0, follow: false, expanded: { 'turn:run:complete': true } }}
+          />,
+        ),
+      );
+      const notices = [...f.host.querySelectorAll('.conversation-turn-notice')].filter(
+        (el) => el.textContent === '已请求停止，等待执行结果。',
+      );
+      expect(notices).toHaveLength(status === 'running' ? 1 : 0);
     }
   } finally {
     await f.close();

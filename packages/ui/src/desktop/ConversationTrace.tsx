@@ -80,7 +80,9 @@ export function ConversationTrace({
   const firstReasoning = first?.role === 'thinking';
   const firstHasOwnDisclosure =
     first?.role === 'tool' &&
-    (first.toolName === 'edit_file' || first.toolName === 'wait_agent_events');
+    (first.toolName === 'edit_file' ||
+      first.toolName === 'wait_agent_events' ||
+      (first.webSearchReceipt && first.toolName === 'web_search'));
   const useOwnDisclosure = !grouped && firstHasOwnDisclosure;
   const summarizedTool =
     summarizeTools && first?.role === 'tool' && label === completedToolCategory(first);
@@ -172,7 +174,10 @@ export function ConversationTrace({
                             false,
                             processOpen,
                             toggle,
-                            (summarizeTools && completedToolActions([step])) || undefined,
+                            (!step.webSearchReceipt &&
+                              summarizeTools &&
+                              completedToolActions([step])) ||
+                              undefined,
                           )
                         : renderTool(
                             step,

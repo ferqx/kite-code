@@ -85,13 +85,16 @@ export function useNativeSearchEvidence(reader?: NativeSearchReader) {
 export function NativeWebSearchToolDetails({
   reader,
   unsupported,
+  headingQuery,
 }: {
   reader?: NativeSearchReader;
   unsupported?: boolean;
+  headingQuery?: string;
 }) {
   const [retry, setRetry] = useState(0),
     { evidence, phase } = useNativeSearchReading(reader, retry);
-  if (evidence?.route === 'provider') return <WebSearchSources evidence={evidence} toolReceipt />;
+  if (evidence?.route === 'provider')
+    return <WebSearchSources evidence={evidence} toolReceipt headingQuery={headingQuery} />;
   if (unsupported) return <small>此连接不支持查看搜索来源。</small>;
   if (reader && phase === 'unavailable')
     return (

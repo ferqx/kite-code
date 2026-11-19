@@ -1,5 +1,10 @@
 /** Presentation DTO. Never infer a source, block boundary, or citation from answer text. */
-export type WebSearchSource = { url: string; title?: string; snippet?: string };
+export type WebSearchSource = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  siteIconPixels?: string;
+};
 export type WebSearchBlock = { index: number; offset: number; length: number; sha256: string };
 export type WebSearchCitation = WebSearchSource & {
   blockIndex?: number;
@@ -45,6 +50,9 @@ export function webSearchLabel(value: unknown, max = 256): string {
         .trim()
     : '';
 }
+/** Fixed raw samples painted on canvas; remote URLs, data URLs and compressed images never qualify. */
+export const isSearchSiteIcon = (v: unknown): v is string =>
+  typeof v === 'string' && v.length === 1368 && /^[A-Za-z0-9+/]{1366}==$/.test(v);
 export function webSearchLinks(items: readonly WebSearchSource[]) {
   const seen = new Set<string>();
   return items.slice(0, limit).flatMap((item) => {
@@ -57,6 +65,7 @@ export function webSearchLinks(items: readonly WebSearchSource[]) {
         url,
         title: webSearchLabel(item.title) || new URL(url).hostname,
         ...(snippet ? { snippet } : {}),
+        ...(isSearchSiteIcon(item.siteIconPixels) ? { siteIconPixels: item.siteIconPixels } : {}),
       },
     ];
   });

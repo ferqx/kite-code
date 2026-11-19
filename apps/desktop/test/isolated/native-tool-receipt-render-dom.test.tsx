@@ -44,6 +44,7 @@ type Mode =
   | 'web-search-missing'
   | 'web-search-retry'
   | 'web-search-trace'
+  | 'web-search-many'
   | 'write-diff'
   | 'write-error-diff'
   | 'write-unavailable-diff'
@@ -341,15 +342,22 @@ function fixture(mode: Mode, testDiagnostics = false) {
               route: 'provider',
               status: 'completed',
               query: 'fixture',
-              sources: [
-                {
-                  url: 'https://example.test/source',
-                  title: '<img src=x>',
-                  snippet: '甲'.repeat(600),
-                },
-                { url: 'javascript:alert(1)', title: 'BAD_LINK' },
-                { url: 'https://example.test/source', title: 'duplicate' },
-              ],
+              sources:
+                mode === 'web-search-many'
+                  ? Array.from({ length: 9 }, (_, i) => ({
+                      url: `https://safe.example/${i}`,
+                      title: `资料 ${i + 1}`,
+                      snippet: `摘要 ${i + 1}`,
+                    }))
+                  : [
+                      {
+                        url: 'https://example.test/source',
+                        title: '<img src=x>',
+                        snippet: '甲'.repeat(600),
+                      },
+                      { url: 'javascript:alert(1)', title: 'BAD_LINK' },
+                      { url: 'https://example.test/source', title: 'duplicate' },
+                    ],
               citations: [],
               blocks: [],
             },
@@ -589,6 +597,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
                           messageId: 'receipt',
                           executionId: 'execution',
                           definitionId: 'web.search',
+                          target: 'fixture',
                           definitionVersion: '1',
                           status: 'succeeded',
                           resultRevision: '1',
@@ -926,11 +935,18 @@ for (const mode of ['web-search', 'web-search-legacy', 'web-search-wrong-owner']
           },
         ]);
         const a = f.host.querySelector<HTMLAnchorElement>('.web-search-sources a')!;
-        expect(a.textContent).toBe('<img src=x>');
+        expect(a.querySelector('.search-source-title')?.textContent).toBe('<img src=x>');
         expect(a.href).toBe('https://example.test/source');
         expect(a.rel).toContain('noopener');
         expect(f.host.querySelectorAll('.web-search-sources a')).toHaveLength(1);
         expect(f.host.querySelector('.web-search-sources img, .tool-activity pre')).toBeNull();
+        expect(f.host.querySelector('.web-search-snippet')).toBeNull();
+        const toggle = [...f.host.querySelectorAll('button')].find(
+          (b) => b.textContent === '来源详情',
+        )!;
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        await act(async () => toggle.click());
+        expect(toggle.getAttribute('aria-expanded')).toBe('true');
         expect(f.host.querySelector('.web-search-snippet')?.textContent).toHaveLength(320);
         expect(f.host.textContent).toContain('example.test');
         expect(f.host.textContent).not.toContain('BAD_LINK');
@@ -971,8 +987,12 @@ for (const mode of ['web-search-missing', 'web-search-retry', 'web-search-trace'
       if (mode === 'web-search-trace') {
         await f.openTurn();
         expect(reads()).toHaveLength(0);
-        const trigger = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
-        expect(trigger.textContent).toBe('搜索了');
+        const trigger = f.host.querySelector<HTMLButtonElement>(
+          '.conversation-trace .tool-activity-summary',
+        )!;
+        expect(f.host.querySelector('.conversation-trace-trigger')).toBeNull();
+        expect(trigger.textContent).toContain('搜索了');
+        expect(trigger.textContent).toContain('fixture');
         await act(async () => trigger.click());
       } else await f.toggle();
       await f.until(() => reads().length === 1);
@@ -989,6 +1009,12 @@ for (const mode of ['web-search-missing', 'web-search-retry', 'web-search-trace'
       }
       if (mode === 'web-search-trace') {
         expect(f.host.querySelector('.conversation-trace .web-search-sources a')).not.toBeNull();
+        expect(
+          f.host.querySelector('.conversation-trace')!.textContent!.match(/搜索了/g),
+        ).toHaveLength(1);
+        expect(
+          f.host.querySelector('.conversation-trace')!.textContent!.match(/fixture/g),
+        ).toHaveLength(1);
         expect(reads()[0]).toMatchObject({ executionId: 'execution', sessionId: 'root' });
       }
       expect(f.host.textContent).not.toContain(sentinel);
@@ -997,6 +1023,34 @@ for (const mode of ['web-search-missing', 'web-search-retry', 'web-search-trace'
       await f.close();
     }
   });
+test('many verified search results: eight wrapping sources first; showing more or abstracts is local and reversible', async () => {
+  const f = fixture('web-search-many');
+  try {
+    await f.render();
+    await f.flush();
+    await f.toggle();
+    await f.until(() => !!f.host.querySelector('.search-source-link'));
+    const sources = () => Array.from(f.host.querySelectorAll('.search-source-link'));
+    const button = (t: string) =>
+      Array.from(f.host.querySelectorAll('button')).find((b) => b.textContent === t)!;
+    expect(sources()).toHaveLength(8);
+    expect(f.host.querySelector('.search-receipt-list')?.getAttribute('aria-label')).toContain(
+      '9 个来源',
+    );
+    expect(f.host.querySelector('.search-source-index, .search-source-domain')).toBeNull();
+    await act(async () => button('显示其余 1 个来源').click());
+    expect(sources()).toHaveLength(9);
+    expect(sources().at(-1)?.getAttribute('href')).toBe('https://safe.example/8');
+    await act(async () => button('来源详情').click());
+    expect(f.host.querySelectorAll('.web-search-snippet')).toHaveLength(9);
+    await act(async () => button('收起更多来源').click());
+    expect(f.host.querySelectorAll('.web-search-snippet')).toHaveLength(8);
+    expect(f.requests.filter((r) => r.method === 'webSearch.evidence')).toHaveLength(1);
+    expect(f.requests.some((r) => r.method === 'webSearch.settings.test')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
 for (const count of [1, 10] as const)
   test(`actual NativeDesktop renders ${count} verified view_images thumbnails in its counted disclosure and removes them on session switch`, async () => {
     const f = fixture(count === 1 ? 'image' : 'image-batch');

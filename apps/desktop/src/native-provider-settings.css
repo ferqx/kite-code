@@ -31,6 +31,139 @@
 .kite-client .web-search-sources a {
   text-decoration: underline;
 }
+
+/* Ordinary search is an inline reading trail, not a second results panel. */
+.kite-client .web-search-receipt {
+  margin: 0.13rem 0 0.32rem;
+  color: var(--foreground);
+}
+.kite-client .search-receipt-query,
+.kite-client .search-receipt-status {
+  display: block;
+  margin: 0 0 0.32rem;
+  color: var(--muted-foreground);
+}
+.kite-client .web-search-receipt .search-receipt-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.32rem 0.42rem;
+  max-inline-size: 40rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.kite-client .web-search-receipt .search-receipt-list > li {
+  min-width: 0;
+  margin: 0;
+}
+.kite-client .web-search-receipt .search-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.33rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0.13rem 0.52rem;
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  color: color-mix(in srgb, var(--foreground) 48%, var(--muted-foreground));
+  text-decoration: none;
+  font-size: 0.8rem;
+  line-height: 1.23rem;
+  font-weight: 400;
+}
+.kite-client .web-search-receipt .search-source-link:hover,
+.kite-client .web-search-receipt .search-source-link:focus-visible {
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  color: var(--foreground);
+}
+.kite-client .search-source-mark {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.kite-client .search-source-mark canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.kite-client .search-source-title {
+  min-width: 0;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .search-receipt-options {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0.18rem 0 0;
+  color: var(--muted-foreground);
+}
+.kite-client .search-receipt-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 24px;
+  border: 0;
+  padding: 0.12rem 0.18rem;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.73rem;
+  cursor: pointer;
+}
+.kite-client .search-receipt-control svg {
+  width: 0.73rem;
+  height: 0.73rem;
+}
+.kite-client .search-receipt-control[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.kite-client .search-receipt-control:hover {
+  color: var(--foreground);
+}
+.kite-client .search-receipt-control:focus-visible,
+.kite-client .web-search-receipt .search-source-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.kite-client .web-search-receipt .search-receipt-list[data-details] {
+  display: grid;
+  gap: 0.28rem;
+}
+.kite-client .search-receipt-list[data-details] .search-source-link {
+  flex-wrap: wrap;
+  background: transparent;
+  padding: 0.1rem 0;
+}
+.kite-client .search-receipt-list[data-details] .search-source-title {
+  max-width: none;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.kite-client .search-source-domain,
+.kite-client .search-receipt-options small {
+  font-size: 0.73rem;
+  color: var(--muted-foreground);
+}
+.kite-client .web-search-receipt .web-search-snippet {
+  margin: 0 0 0.25rem 1.12rem;
+  font-size: 0.79rem;
+  line-height: 1.45;
+}
+@media (forced-colors: active) {
+  .kite-client .web-search-receipt .search-source-link {
+    color: LinkText;
+    text-decoration: underline;
+  }
+}
+
 /* Native provider settings: presentation only; connection and credential intent stays in the host. */
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) {
   container: provider-settings / inline-size;

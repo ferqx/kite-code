@@ -67,11 +67,15 @@ const mcpSummaryTools = new Set([
 export function desktopToolPresentation(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion'> &
     Pick<Partial<NativeToolMessageFact>, 'label'>,
-): Pick<DesktopMessage, 'toolName' | 'toolSummaryCategory' | 'title' | 'presentation' | 'shell'> {
+): Pick<
+  DesktopMessage,
+  'toolName' | 'toolSummaryCategory' | 'webSearchReceipt' | 'title' | 'presentation' | 'shell'
+> {
   const label = labels[fact.definitionId];
   const known = label?.[0].includes(fact.definitionVersion);
   const mcp = /^mcp\.([A-Za-z0-9_-]{1,128})\.[a-f0-9]{32}$/.test(fact.definitionId);
   return {
+    ...(known && fact.definitionId === 'web.search' ? { webSearchReceipt: true as const } : {}),
     // Classification follows the original definition, not a remote display name.
     // It changes only completed Trace summaries, not versioned result rendering.
     ...(mcp || mcpSummaryTools.has(fact.definitionId)

@@ -4,6 +4,7 @@ const versions: Readonly<Record<string, readonly string[]>> = {
   'files.write': ['2', '3'],
   'files.edit': ['2'],
   web_fetch: ['1'],
+  'web.search': ['1'],
   'shell.execute': ['1'],
   'shell.launch': ['1'],
   'shell.read': ['1'],
@@ -82,6 +83,16 @@ export function nativeToolRequestTarget(
     case 'files.write':
     case 'files.edit':
       return text('path');
+    case 'web.search': {
+      const query = text('query');
+      return (
+        query
+          ?.slice(0, 256)
+          .replace(/[\uD800-\uDBFF]$/u, '')
+          .replace(/[\p{Cf}\p{Cc}]/gu, ' ')
+          .trim() || undefined
+      );
+    }
     case 'web_fetch':
       if (Array.isArray(request.urls))
         return !Object.hasOwn(request, 'url') &&

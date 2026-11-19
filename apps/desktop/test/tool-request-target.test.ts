@@ -2,6 +2,9 @@ import { expect, test } from 'bun:test';
 import { nativeToolRequestTarget } from '../src/tool-request-target';
 
 test.each([
+  ['web.search', '1', { query: '网页\u202E导航' }, '网页 导航'],
+  ['web.search', '2', { query: 'ignored' }, undefined],
+  ['mcp.fake-search', '1', { query: 'ignored' }, undefined],
   ['browser.execute', '1', { code: 'PRIVATE CODE', description: '读取北京天气' }, '读取北京天气'],
   ['skills.load', '1', { id: 'computer-use', description: '查看天气' }, 'computer-use'],
   [

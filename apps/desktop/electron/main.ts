@@ -851,6 +851,7 @@ void app
       // Renderer attachment opens the paired Service/channel lazily, after this
       // registration. Bind the existing Main owner rather than its future listener.
       automation: process.platform !== 'win32' ? browserPages : undefined,
+      visitedSiteIcons: () => caller?.visitedSiteIcons,
       grantScope() {
         return caller?.browserScope('presentation');
       },

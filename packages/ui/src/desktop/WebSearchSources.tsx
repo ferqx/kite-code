@@ -1,7 +1,10 @@
-import { useContext } from 'react';
+import { ArrowDown01Icon, Globe02Icon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { useContext, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useConversationReadActive } from '../conversation-activity';
 import { WebLinkContext } from './MessageContent';
 import {
+  isSearchSiteIcon,
   type WebSearchDisplay,
   type WebSearchSource,
   webSearchLabel,
@@ -16,63 +19,156 @@ const statusText = {
   cancelled: '搜索已取消',
   unknown: '搜索结果未知',
 };
-function SourceList({
-  sources,
-  label,
-  expanded = false,
-}: {
-  sources: readonly WebSearchSource[];
-  label: string;
-  expanded?: boolean;
-}) {
+function useSourceClick() {
   const open = useContext(WebLinkContext),
-    active = useConversationReadActive(),
+    active = useConversationReadActive();
+  return (event: React.MouseEvent<HTMLAnchorElement>, url: string) => {
+    if (open || !active) event.preventDefault();
+    if (active) open?.(url);
+  };
+}
+/** Secondary sources in model output stay separate from the ordinary tool receipt. */
+function SourceList({ sources, label }: { sources: readonly WebSearchSource[]; label: string }) {
+  const visit = useSourceClick(),
     links = webSearchLinks(sources);
   if (!links.length) return null;
-  const list = (
-    <ul aria-label={label}>
-      {links.map(({ url, title, snippet }) => (
-        <li key={url}>
-          <a
-            href={url}
-            rel="noopener noreferrer"
-            target="_blank"
-            onClick={(e) => {
-              if (open || !active) e.preventDefault();
-              if (active) open?.(url);
-            }}
-          >
-            {title}
-          </a>{' '}
-          <small>{new URL(url).hostname}</small>
-          {expanded && snippet && <p className="web-search-snippet">{snippet}</p>}
-        </li>
-      ))}
-    </ul>
-  );
-  return expanded ? (
-    <div>
-      <small>
-        {label}（{links.length}）
-      </small>
-      {list}
-    </div>
-  ) : (
+  return (
     <details>
       <summary>
         {label}（{links.length}）
       </summary>
-      {list}
+      <ul aria-label={label}>
+        {links.map(({ url, title }) => (
+          <li key={url}>
+            <a href={url} rel="noopener noreferrer" target="_blank" onClick={(e) => visit(e, url)}>
+              {title}
+            </a>{' '}
+            <small>{new URL(url).hostname}</small>
+          </li>
+        ))}
+      </ul>
     </details>
+  );
+}
+function SiteMark({ pixels }: { pixels?: string }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    if (!isSearchSiteIcon(pixels) || !canvas.current) return;
+    const ctx = canvas.current.getContext('2d');
+    if (!ctx) return;
+    const data = ctx.createImageData(16, 16);
+    data.data.set(Uint8Array.from(atob(pixels), (c) => c.charCodeAt(0)));
+    ctx.putImageData(data, 0, 0);
+  }, [pixels]);
+  return isSearchSiteIcon(pixels) ? (
+    <span className="search-source-mark" aria-hidden="true">
+      <canvas ref={canvas} width={16} height={16} />
+    </span>
+  ) : (
+    <HugeiconsIcon icon={Globe02Icon} aria-hidden="true" className="search-source-mark" />
+  );
+}
+const initialCount = 8;
+function SearchReceipt({
+  evidence,
+  headingQuery,
+}: {
+  evidence: WebSearchDisplay;
+  headingQuery?: string;
+}) {
+  const [details, setDetails] = useState(false),
+    [all, setAll] = useState(false),
+    listId = useId(),
+    visit = useSourceClick();
+  const links = webSearchLinks(evidence.sources),
+    query = webSearchLabel(evidence.query),
+    provider = webSearchLabel(evidence.provider),
+    visible = all ? links : links.slice(0, initialCount);
+  const state = evidence.status === 'completed' ? undefined : statusText[evidence.status];
+  return (
+    <section className="web-search-sources web-search-receipt" aria-label="网页搜索来源">
+      {query && query !== webSearchLabel(headingQuery) && (
+        <p className="search-receipt-query">{query}</p>
+      )}
+      {state && (
+        <span role="status" className="search-receipt-status">
+          {state}
+        </span>
+      )}
+      {links.length > 0 && (
+        <>
+          <ul
+            className="search-receipt-list"
+            data-details={details || undefined}
+            id={listId}
+            aria-label={`检索来源（${links.length} 个来源）`}
+          >
+            {visible.map(({ url, title, snippet, siteIconPixels }) => {
+              const domain = new URL(url).hostname;
+              return (
+                <li key={url}>
+                  <a
+                    className="search-source-link"
+                    href={url}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                    onClick={(e) => visit(e, url)}
+                    title={`${title} · ${domain}`}
+                    aria-label={title === domain ? title : `${title}，${domain}`}
+                  >
+                    <SiteMark pixels={siteIconPixels} />
+                    <span className="search-source-title">{title}</span>
+                    {details && title !== domain && (
+                      <small className="search-source-domain">{domain}</small>
+                    )}
+                  </a>
+                  {details && snippet && <p className="web-search-snippet">{snippet}</p>}
+                </li>
+              );
+            })}
+          </ul>
+          <div className="search-receipt-options">
+            {links.length > initialCount && (
+              <button
+                type="button"
+                className="search-receipt-control"
+                aria-controls={listId}
+                aria-expanded={all}
+                onClick={() => setAll(!all)}
+              >
+                {all ? '收起更多来源' : `显示其余 ${links.length - initialCount} 个来源`}
+              </button>
+            )}
+            <button
+              type="button"
+              className="search-receipt-control"
+              aria-expanded={details}
+              aria-controls={listId}
+              onClick={() => setDetails(!details)}
+            >
+              {details ? '收起详情' : '来源详情'}
+              <HugeiconsIcon icon={ArrowDown01Icon} aria-hidden="true" />
+            </button>
+            {details && provider && <small>搜索服务：{provider}</small>}
+          </div>
+        </>
+      )}
+      {evidence.status === 'completed' && !links.length && <p>未返回可展示的来源。</p>}
+      <SourceList sources={evidence.citations} label="搜索服务引用" />
+      {evidence.truncated && <small>仅显示部分搜索材料。</small>}
+    </section>
   );
 }
 export function WebSearchSources({
   evidence,
   toolReceipt = false,
+  headingQuery,
 }: {
   evidence: WebSearchDisplay;
   toolReceipt?: boolean;
+  headingQuery?: string;
 }) {
+  if (toolReceipt) return <SearchReceipt evidence={evidence} headingQuery={headingQuery} />;
   const query = webSearchLabel(evidence.query);
   return (
     <section className="web-search-sources" aria-label="网页搜索">
@@ -87,10 +183,7 @@ export function WebSearchSources({
         sources={evidence.citations}
         label={evidence.route === 'provider' ? '搜索服务引用' : '正文引用'}
       />
-      <SourceList sources={evidence.sources} label="检索来源" expanded={toolReceipt} />
-      {toolReceipt &&
-        evidence.status === 'completed' &&
-        !webSearchLinks(evidence.sources).length && <p>未返回可展示的来源。</p>}
+      <SourceList sources={evidence.sources} label="检索来源" />
       {evidence.truncated && <small>仅显示部分搜索材料。</small>}
     </section>
   );

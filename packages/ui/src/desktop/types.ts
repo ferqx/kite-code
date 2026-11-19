@@ -167,6 +167,8 @@ export interface Message {
   readonly toolName?: string;
   /** Host-confirmed category for completed Trace summaries only; never inferred from a title. */
   readonly toolSummaryCategory?: 'mcp' | 'skill';
+  /** Host has a verified, dedicated results reader for this ordinary search tool. */
+  readonly webSearchReceipt?: true;
   /** A verified write receipt establishes creation of a new file. */
   readonly fileCreated?: true;
   readonly toolStopping?: boolean;

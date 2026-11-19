@@ -36,6 +36,12 @@ import { waitForNativeFrame } from './native-frame-readiness';
 import { assertNativeSender } from './native-ipc';
 import { addNativeWindowView } from './native-overlay-layer';
 import { type NativeRootWindow as BrowserWindow, onNativeRootWillShow } from './native-root-window';
+import {
+  isSiteIconPixels,
+  readVisitedIcon,
+  sourceIconOrigin,
+  type VisitedSiteIcons,
+} from './visited-site-icons';
 
 type BrowserTab = {
   view: WebContentsView;
@@ -44,6 +50,15 @@ type BrowserTab = {
   documentNavigation: number;
   documentGeneration: number;
   stoppedDocument?: number;
+  sourceIconVisit?: {
+    origin: string;
+    url: string;
+    document: number;
+    selection: BrowserPageScope & { generation?: number; viewSelection?: number };
+    cache: WeakRef<VisitedSiteIcons>;
+    attempts: number;
+    busy: boolean;
+  };
   notification?: ReturnType<typeof setTimeout>;
   unregister?: () => void;
   disposeDocument?: () => void;
@@ -117,6 +132,7 @@ export function registerNativeBrowserIpc(options: {
   readonly selectedScope?: () =>
     | (BrowserPageScope & { generation?: number; viewSelection?: number })
     | undefined;
+  readonly visitedSiteIcons?: () => VisitedSiteIcons | undefined;
   readonly grantScope?: () =>
     | (BrowserPageScope & { generation?: number; viewSelection?: number })
     | undefined;
@@ -533,8 +549,13 @@ export function registerNativeBrowserIpc(options: {
     };
     tabs.set(id, tab);
     const contents = view.webContents;
-    contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+    contents.on('did-start-navigation', (_event, url, inPlace, mainFrame) => {
       if (!mainFrame || inPlace) return;
+      if (
+        tab.sourceIconVisit?.document !== tab.documentGeneration + 1 ||
+        tab.sourceIconVisit.url !== url
+      )
+        delete tab.sourceIconVisit;
       cancelPaint(tab);
       delete tab.drawable;
       tab.documentNavigation++;
@@ -598,7 +619,10 @@ export function registerNativeBrowserIpc(options: {
       }
     });
     contents.on('did-redirect-navigation', (_event, url, inPlace, mainFrame) => {
-      if (mainFrame && !inPlace) documentUrl = url;
+      if (mainFrame && !inPlace) {
+        documentUrl = url;
+        if (sourceIconOrigin(url) !== tab.sourceIconVisit?.origin) delete tab.sourceIconVisit;
+      }
     });
     contents.on('did-navigate', (_event, url) => {
       documentUrl = url;
@@ -1203,6 +1227,47 @@ export function registerNativeBrowserIpc(options: {
     };
     contents.on('did-navigate', location);
     contents.on('did-navigate-in-page', location);
+    const observeIcon = () => {
+      const visit = tab.sourceIconVisit;
+      if (!visit || visit.busy || visit.attempts >= 3) return;
+      const cache = visit.cache.deref();
+      const current = () => {
+        const selected = options.selectedScope?.();
+        return (
+          !!selected &&
+          tabs.get(id) === tab &&
+          tab.sourceIconVisit === visit &&
+          tab.documentGeneration === visit.document &&
+          !contents.isDestroyed() &&
+          contents.mainFrame === committedFrame &&
+          sourceIconOrigin(contents.getURL()) === visit.origin &&
+          options.visitedSiteIcons?.() === cache &&
+          tab.scope?.storeId === selected.storeId &&
+          tab.scope.sessionId === selected.sessionId &&
+          selected.storeId === visit.selection.storeId &&
+          selected.sessionId === visit.selection.sessionId &&
+          selected.generation === visit.selection.generation &&
+          selected.viewSelection === visit.selection.viewSelection &&
+          (automation?.state(id)?.phase ?? 'human') === 'human'
+        );
+      };
+      if (!cache || !current()) return;
+      visit.attempts++;
+      visit.busy = true;
+      void contents
+        .executeJavaScriptInIsolatedWorld(1004, [{ code: readVisitedIcon }])
+        .then((pixels) => {
+          if (!isSiteIconPixels(pixels) || !current()) return;
+          cache.record(visit.selection, visit.origin, pixels);
+          delete tab.sourceIconVisit;
+        })
+        .catch(() => {})
+        .finally(() => {
+          visit.busy = false;
+        });
+    };
+    contents.on('did-finish-load', observeIcon);
+    contents.on('page-favicon-updated', observeIcon);
     contents.on('page-title-updated', (_event, title) => {
       tab.state = {
         ...tab.state,
@@ -1900,6 +1965,7 @@ export function registerNativeBrowserIpc(options: {
           throw Error('browser_page_scope_denied');
         if (request.action === 'grant') {
           if (!tab || !selected || !automation) throw Error('browser_page_unavailable');
+          delete tab.sourceIconVisit;
           automation.arm(tab.state.id, selected);
           publish(tab);
         }
@@ -1913,6 +1979,20 @@ export function registerNativeBrowserIpc(options: {
         if (request.action === 'navigate') {
           const url = browserAddress(request.input);
           tab ??= create(request.id, undefined, draft);
+          const origin = sourceIconOrigin(url);
+          const cache = options.visitedSiteIcons?.();
+          tab.sourceIconVisit =
+            !draft && selected && origin && cache && (!phase || phase === 'human')
+              ? {
+                  origin,
+                  url,
+                  document: tab.documentGeneration + 1,
+                  selection: { ...selected },
+                  cache: new WeakRef(cache),
+                  attempts: 0,
+                  busy: false,
+                }
+              : undefined;
           navigate(tab, url);
         } else if (request.action === 'present') {
           admitLayout(request);

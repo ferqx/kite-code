@@ -22,6 +22,7 @@ import type {
   SearchService,
   SearchView,
 } from '../src/web-search-settings-model';
+import type { VisitedSiteIcons } from './visited-site-icons';
 
 const bases: Record<SearchAdapter, string> = {
   'deepseek-search': 'https://api.deepseek.com',
@@ -73,6 +74,7 @@ const sources = (v: unknown, includeSnippet = false): WebSearchSource[] =>
 export function projectSearchEvidence(
   packet: unknown,
   scope: { storeId: string; sessionId: string; executionId: string },
+  icons?: VisitedSiteIcons,
 ): WebSearchDisplay | undefined {
   const p = rec(packet);
   if (
@@ -168,7 +170,13 @@ export function projectSearchEvidence(
       selected.route === 'native' || selected.route === 'provider' ? selected.route : undefined,
     provider: clean(selected.provider),
     query: clean(selected.query),
-    sources: found,
+    sources:
+      !icons || selected.route !== 'provider'
+        ? found
+        : found.map((s) => {
+            const siteIconPixels = icons.get(scope, s.url);
+            return siteIconPixels ? { ...s, siteIconPixels } : s;
+          }),
     citations: cites,
     blocks: blocks.sort((a, b) => a.index - b.index),
     truncated,
@@ -194,9 +202,11 @@ export class NativeWebSearch {
   private submit = false;
   private readonly client: AgentClient;
   private readonly current: () => Scope | undefined;
-  constructor(client: AgentClient, current: () => Scope | undefined) {
+  private readonly icons?: VisitedSiteIcons;
+  constructor(client: AgentClient, current: () => Scope | undefined, icons?: VisitedSiteIcons) {
     this.client = client;
     this.current = current;
+    this.icons = icons;
   }
   private checked(scope: Scope) {
     if (!unchanged(scope, this.current())) throw new ClientError('native_selection_changed');
@@ -273,11 +283,15 @@ export class NativeWebSearch {
       return {
         kind: 'webSearch.evidence',
         evidence:
-          projectSearchEvidence(value, {
-            storeId: scope.storeId,
-            sessionId: req.sessionId,
-            executionId: req.executionId,
-          }) ?? null,
+          projectSearchEvidence(
+            value,
+            {
+              storeId: scope.storeId,
+              sessionId: req.sessionId,
+              executionId: req.executionId,
+            },
+            this.icons,
+          ) ?? null,
       };
     }
     if (req.method === 'webSearch.settings.read')

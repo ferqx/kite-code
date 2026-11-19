@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import type { BrowserPagePort, NativeBrowserPageHost } from '../../electron/browser-page-host';
+import { readVisitedIcon, VisitedSiteIcons } from '../../electron/visited-site-icons';
 import {
   type NativeBrowserBounds,
   type NativeBrowserLayout,
@@ -359,7 +360,13 @@ function nativeFrame(width: number, height: number): Electron.NativeImage {
   } as Electron.NativeImage;
 }
 function fixture(
-  config: { initialPage?: boolean; ready?: boolean; automation?: boolean; draft?: string } = {},
+  config: {
+    initialPage?: boolean;
+    ready?: boolean;
+    automation?: boolean;
+    draft?: string;
+    visitedSiteIcons?: () => VisitedSiteIcons;
+  } = {},
 ) {
   views.length = 0;
   let page!: BrowserPagePort;
@@ -437,6 +444,7 @@ function fixture(
     } as unknown as IpcMain,
     ...(config.automation === false ? {} : { automation }),
     selectedScope: () => (selected ? scope : undefined),
+    visitedSiteIcons: config.visitedSiteIcons,
     rendererUrl: 'http://localhost/',
   });
   const invokeFromFrame = (input: unknown, frame = owner.mainFrame, sender = owner) =>
@@ -3484,6 +3492,60 @@ test('an explicit withdrawal after Root replacement retires its reveal intent ac
     expect(restored.value.reveal).toBeUndefined();
     expect(f.contents.closes).toBe(0);
     expect(f.view.visible).toBe(false);
+  } finally {
+    f.close();
+  }
+});
+
+test('site icons belong to one manually opened document and its original caller and selection', async () => {
+  let icons = new VisitedSiteIcons();
+  const f = fixture({ initialPage: false, automation: false, visitedSiteIcons: () => icons });
+  const pixels = Buffer.alloc(1024, 200).toString('base64');
+  const calls: ReturnType<typeof deferred<string>>[] = [];
+  const navigate = (url: string) => {
+    expect(f.invoke({ action: 'navigate', id: 'page', input: url })).toMatchObject({ ok: true });
+  };
+  try {
+    const first = 'https://one.example/start';
+    navigate(first);
+    const contents = f.contents;
+    const execute = contents.executeJavaScriptInIsolatedWorld.bind(contents);
+    contents.executeJavaScriptInIsolatedWorld = async (world, scripts) => {
+      if (world !== 1004) return execute(world, scripts);
+      expect(scripts).toEqual([{ code: readVisitedIcon }]);
+      const call = deferred<string>();
+      calls.push(call);
+      return call.promise;
+    };
+    const loaded = (url: string) => {
+      f.completeDocument(f.view, url);
+      contents.emit('did-finish-load');
+      contents.emit('page-favicon-updated');
+    };
+    loaded(first);
+    expect(calls).toHaveLength(1);
+    calls[0]!.resolve(pixels);
+    await turn();
+    expect(icons.get(f.scope, first)).toBe(pixels);
+    loaded('https://one.example/later');
+    expect(calls).toHaveLength(1);
+    for (const change of ['document', 'selection', 'caller'] as const) {
+      const url = `https://${change}.example/page`;
+      const original = icons;
+      navigate(url);
+      loaded(url);
+      const callCount = calls.length;
+      if (change === 'document') loaded(`${url}/other`);
+      if (change === 'selection') f.scope.viewSelection++;
+      if (change === 'caller') icons = new VisitedSiteIcons();
+      calls.at(-1)!.resolve(pixels);
+      await turn();
+      contents.emit('page-favicon-updated');
+      expect(calls).toHaveLength(callCount);
+      expect(original.get(f.scope, url)).toBeUndefined();
+      expect(icons.get(f.scope, url)).toBeUndefined();
+    }
+    expect(calls).toHaveLength(4);
   } finally {
     f.close();
   }

@@ -5983,6 +5983,7 @@ function NativeDesktopContent({
           <WebLinkContext.Provider value={openNativeWebLink}>
             <NativeWebSearchToolDetails
               key={reader?.scope ?? executionId}
+              headingQuery={model.target}
               reader={reader}
               unsupported={!selection?.canReadWebSearchEvidence}
             />
