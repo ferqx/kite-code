@@ -238,6 +238,18 @@ test('formal retained growth and sustained slope are rejected even when packet i
   expect(verifyUnifiedSoakReport(reseal(report), null, true)).toContain('attempts_missing');
 });
 
+test('the packaged soak probe has no runtime import of the build-time TypeScript compiler', async () => {
+  const build = await Bun.build({
+    entrypoints: [resolve(import.meta.dir, '../../../scripts/runtime/unified-soak-probe.ts')],
+    target: 'bun',
+    packages: 'external',
+  });
+  expect(build.success).toBe(true);
+  const probe = await build.outputs[0]!.text();
+  const imports = new Bun.Transpiler({ loader: 'js' }).scanImports(probe);
+  expect(imports.map((entry) => entry.path)).not.toContain('typescript');
+});
+
 test.skipIf(process.platform === 'win32')(
   'source-free candidate runs actual Service/Client completion cancellation reconnect and SIGKILL original recovery',
   async () => {

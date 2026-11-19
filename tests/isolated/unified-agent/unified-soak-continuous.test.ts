@@ -350,6 +350,10 @@ test('schedule refuses pre-stopped work and unsupported formal before Profile I/
         ? 'continuous_schedule_stopped'
         : 'continuous_qualified_background_shell_required',
     );
+    if (['darwin', 'linux'].includes(process.platform))
+      await expect(runContinuousSchedule(formalRoot, 'formal')).rejects.toThrow(
+        'continuous_candidate_required',
+      );
     expect(existsSync(formalRoot)).toBe(false);
     const stopRoot = join(root, 'stopped');
     await expect(

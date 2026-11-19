@@ -101,7 +101,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       else if (step === 1) {
         const serverId = JSON.stringify(body.messages).match(/mcp-[a-f0-9]{64}/)?.[0];
         if (!serverId) throw Error('mcp_stdio_source_missing');
-        call = { name: 'connect_mcp_server', input: { server_id: serverId, key: 'owned-stdio' } };
+        call = { name: 'connect_mcp_server', input: { server_id: serverId } };
       } else if (step === 2) {
         await callGate;
         const tools = body.tools as { function: { name: string; description?: string } }[];

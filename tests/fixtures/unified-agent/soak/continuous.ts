@@ -359,6 +359,7 @@ export async function runContinuousSchedule(
   if (mode === 'formal') {
     if (!['darwin', 'linux'].includes(process.platform))
       throw Error('continuous_qualified_background_shell_required');
+    if (!candidateRoot) throw Error('continuous_candidate_required');
     const { openDefaultShellContinuousFixture } = await import('./continuous-default-shell');
     const fixture = await openDefaultShellContinuousFixture(root, candidateRoot);
     try {
