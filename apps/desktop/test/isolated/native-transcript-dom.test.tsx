@@ -661,6 +661,22 @@ test('unmet completion conditions preserve saved output and show the known failu
   }
 });
 
+test('ordinary model request limits explain the rejection without claiming an image failed', () => {
+  const transcript = desktopTranscript({
+    messages: [message('u', 'user', '1', '纯文字长任务')],
+    runs: [{ ...run(), status: 'failed', reason: 'model_request_body_too_large' }],
+    tools: [],
+    storeId: 'store',
+    sessionId: 's',
+  });
+  const failed = transcript.messages.filter((m) => m.systemKind === 'turn_failure');
+  expect(failed).toHaveLength(1);
+  expect(failed[0]!.failure?.summary).toBe('请求超出模型服务限制');
+  expect(failed[0]!.text).toContain('未自动重发');
+  expect(failed[0]!.text).not.toContain('图片');
+  expect(failed[0]!.text).not.toContain('model_request_body_too_large');
+});
+
 test('image delivery failures remain source-free in their original Turn across cold reads', async () => {
   const f = fixture();
   const cases = [

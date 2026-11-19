@@ -27,8 +27,12 @@ export function nativeImageFailure(
         summary: '图片超出本次可处理范围',
         text: '当前图片无法放入本次请求的图片预算，未自动缩小或丢弃。请指定较小的图片副本，或减少本次需要查看的图片后继续。',
       };
-    case 'image_delivery_limit':
     case 'model_request_body_too_large':
+      return {
+        summary: '请求超出模型服务限制',
+        text: '模型服务拒绝了体积超限的请求，未自动重发。请减少本次输入或附件，或选择可接收该请求的模型后继续。',
+      };
+    case 'image_delivery_limit':
       return {
         summary: '图片请求仍被模型服务拒绝',
         text: '模型服务拒绝了本次请求，已停止进一步自动重试。请减少本次请求的内容，或更换模型后继续；这不表示图片已成功交付。',

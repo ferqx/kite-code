@@ -9813,6 +9813,8 @@ export class AgentRuntime {
                 attempt++;
                 continue;
               }
+              if (ModelRequestLimitError.isInstance(error))
+                throw new AgentError('model_request_body_too_large');
               const retryReason = modelRetryReason(error);
               if (wireWindow && retryReason) throw new AgentError('image_delivery_outcome_unknown');
               if (retryReason) {

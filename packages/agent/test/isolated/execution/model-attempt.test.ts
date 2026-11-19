@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { type ModelAdapter, ModelAttemptError } from '@kite-ai/ai';
+import { type ModelAdapter, ModelAttemptError, ModelRequestLimitError } from '@kite-ai/ai';
 import { waitForModelRetry } from '../../../src/model-attempt';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -76,6 +76,41 @@ async function fixture(model: ModelAdapter) {
     },
   };
 }
+
+test('an explicit 413 without an image window preserves the Run reason and does not resend', async () => {
+  let attempts = 0;
+  const f = await fixture({
+    async *stream(request) {
+      attempts++;
+      expect(request.messages.every((message) => !message.images?.length)).toBe(true);
+      throw new ModelRequestLimitError();
+    },
+  });
+  try {
+    await f.runtime.submitCommand({
+      ...f.input,
+      commandId: 'oversized',
+      request: { kind: 'run.start', content: 'an ordinary text task' },
+    });
+    await f.runtime.waitForCommand('oversized');
+    const view = await f.runtime.getView('session');
+    expect(attempts).toBe(1);
+    expect(f.effects).toBe(0);
+    expect(view.runs[0]).toMatchObject({
+      status: 'failed',
+      reason: 'model_request_body_too_large',
+      isActive: false,
+    });
+    const models = view.executions.filter((execution) => execution.kind === 'model');
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({
+      status: 'failed',
+      result: { code: 'model_request_body_too_large' },
+    });
+  } finally {
+    await f.close();
+  }
+});
 
 test('each safe transport attempt is a separate failed/successful execution with exact predecessor and no partial tool effect', async () => {
   let attempts = 0;
