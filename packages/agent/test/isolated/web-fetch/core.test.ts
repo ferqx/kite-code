@@ -909,7 +909,7 @@ for (const disposition of ['cancel', 'timeout'] as const) {
         });
       const { execution, model } = await pending;
       await closed.promise;
-      expect(started).toEqual(['/a', '/b']);
+      expect([...started].sort()).toEqual(['/a', '/b']);
       expect(f.admissions.some((u) => urls.slice(2).includes(u))).toBe(false);
       if (disposition === 'cancel') {
         expect(execution?.status).toBe('cancelled');
