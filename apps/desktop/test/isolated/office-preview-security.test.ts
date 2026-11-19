@@ -115,7 +115,8 @@ test.skipIf(process.platform !== 'win32')(
       expect(receipt.viewsDestroyed).toBe(true);
       expect(receipt.normalSandbox).toBe(true);
       expect(receipt.windowWasHidden).toBe(true);
-      expect(receipt.checks).toHaveLength(5);
+      expect(receipt.checks).toHaveLength(6);
+      expect(receipt.checks).toContain('late-file-admission-cannot-replace-a-reopened-preview');
       passed = true;
     } finally {
       // Only an owned, canonical tree after actual child close and successful view teardown.

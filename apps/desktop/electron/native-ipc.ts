@@ -1803,7 +1803,12 @@ export function registerNativeIpc(options: {
     caller: NativeCaller,
   ) => Promise<undefined | { workspaceId: string }>;
 }) {
+  type PreviewOpen = Extract<
+    NativeRequest,
+    { method: 'localPreview.open' | 'outputs.preview.open' | 'outputs.office.preview' }
+  >;
   let preview: NativeOutputPreview | undefined;
+  const openingPreviews = new Map<number, PreviewOpen>();
   const localFiles = new Map<string, LocalFilePreview>();
   const localSubmissions = new LocalPreviewSubmissions<NativeResult>();
   const releaseLocalFiles = () => {
@@ -1812,9 +1817,30 @@ export function registerNativeIpc(options: {
     localSubmissions.clear();
   };
   const closePreview = () => {
+    openingPreviews.clear();
     releaseLocalFiles();
     preview?.dispose();
     preview = undefined;
+  };
+  const checkPreviewOpening = (request: PreviewOpen) => {
+    if (openingPreviews.get(request.generation) !== request) throw Error('preview_replaced');
+  };
+  const openPreview = async (
+    request: PreviewOpen,
+    input: Parameters<NativeOutputPreview['open']>[0],
+  ) => {
+    if (!preview) {
+      const { NativeOutputPreview } = await import('./output-preview');
+      checkPreviewOpening(request);
+      preview = new NativeOutputPreview();
+      input.window.once('closed', closePreview);
+      input.window.webContents.once('render-process-gone', closePreview);
+      input.window.webContents.once('did-start-navigation', closePreview);
+    }
+    checkPreviewOpening(request);
+    input.check();
+    openingPreviews.delete(request.generation);
+    return preview.open(input);
   };
 
   const presentLayout = (event: IpcMainInvokeEvent, payload: unknown): NativePreviewLayoutReply => {
@@ -1839,23 +1865,41 @@ export function registerNativeIpc(options: {
   options.ipcMain.handle(nativePreviewLayoutChannel, presentLayout);
 
   options.ipcMain.handle(nativeChannel, async (event, payload: unknown): Promise<NativeReply> => {
+    let opening: PreviewOpen | undefined;
     try {
       assertNativeSender(event, options.window(), options.rendererUrl);
       const request = decodeNativeRequest(payload);
       options.assertRequestAllowed?.(request);
       if (request.method === 'outputs.preview.close') {
+        if (openingPreviews.get(request.generation)?.previewId === request.previewId)
+          openingPreviews.delete(request.generation);
         preview?.closeOwned(request.previewId, request.generation);
         return { ok: true, value: null };
+      }
+      if (
+        request.method === 'localPreview.open' ||
+        request.method === 'outputs.preview.open' ||
+        request.method === 'outputs.office.preview'
+      ) {
+        // The renderer can close or replace this request while its file is still being admitted.
+        opening = request;
+        openingPreviews.set(request.generation, request);
       }
       const caller = await options.caller();
       options.assertRequestAllowed?.(request);
       // Recheck sender after startup/admission awaits; a replaced frame cannot submit work.
       assertNativeSender(event, options.window(), options.rendererUrl);
+      if (opening) {
+        caller.assertGeneration(opening.generation);
+        checkPreviewOpening(opening);
+      }
       if (
         request.method === 'select' ||
         request.method === 'attach' ||
         request.method === 'detach'
       ) {
+        if (request.method !== 'attach') caller.assertGeneration(request.generation);
+        openingPreviews.clear();
         preview?.close();
         releaseLocalFiles();
       }
@@ -1876,13 +1920,7 @@ export function registerNativeIpc(options: {
         const window = options.window();
         if (!file || !window) throw Error('local_preview_unavailable');
         file.check();
-        if (!preview) {
-          preview = new (await import('./output-preview')).NativeOutputPreview();
-          window.once('closed', closePreview);
-          window.webContents.once('render-process-gone', closePreview);
-          window.webContents.once('did-start-navigation', closePreview);
-        }
-        value = await preview.open({
+        value = await openPreview(request, {
           id: request.previewId,
           generation: request.generation,
           localHandleId: file.id,
@@ -1910,13 +1948,8 @@ export function registerNativeIpc(options: {
       ) {
         const window = options.window();
         if (!window) throw Error('native_window_unavailable');
-        if (!preview) {
-          preview = new (await import('./output-preview')).NativeOutputPreview();
-          window.once('closed', closePreview);
-          window.webContents.once('render-process-gone', closePreview);
-          window.webContents.once('did-start-navigation', closePreview);
-        }
         await caller.admitOutputTarget(request.generation, request.target);
+        checkPreviewOpening(request);
         const access = caller.outputTargetCheck(request.generation, request.target);
         const check = () => {
           assertNativeSender(event, options.window(), options.rendererUrl);
@@ -1924,9 +1957,12 @@ export function registerNativeIpc(options: {
         };
         const edited =
           request.method === 'outputs.office.preview'
-            ? await caller.officeRevision(request, check)
+            ? await caller.officeRevision(request, () => {
+                checkPreviewOpening(request);
+                check();
+              })
             : undefined;
-        value = await preview.open({
+        value = await openPreview(request, {
           renderPdfPage: async (page, signal) => {
             check();
             const result = await caller.renderPreviewPdf(
@@ -2228,6 +2264,9 @@ export function registerNativeIpc(options: {
         ok: false,
         code: /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : 'native_request_failed',
       };
+    } finally {
+      if (opening && openingPreviews.get(opening.generation) === opening)
+        openingPreviews.delete(opening.generation);
     }
   });
   return () => {

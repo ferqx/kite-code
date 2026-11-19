@@ -24,6 +24,10 @@
 
 文件预览先在未附加到窗口的视图中完成首次导航，再以隐藏状态附加；打开相邻文件不因此改变键盘焦点。Word、Excel 和 PPT 的渲染初始化可能在隐藏视图中等待动画帧或定时任务。[Main](electron/output-preview.ts)在等待 Office 渲染就绪期间暂停该视图的后台节流，结束时恢复。预览仍由当前窗口几何和有效原生首帧准入显示。Windows x64／Electron 44.3.0 的[真实 Office 窗口回归](test/isolated/office-readonly-host.test.ts)覆盖 Word 与 Excel 等待动画帧、隐藏初始化、恢复节流、失败重试与原件切换。[PPT 回归](test/isolated/office-preview-security.test.ts)使用悬挂标点触发同一路径。原故障附件在隔离窗口从文件卡打开后呈现五页，实测切到第 4 页、关闭重开、读取失败后重试，以及加载中关闭时晚到的结果未重新显示。同机在 125% 和 150% 缩放核实交付文件或原路径的 Word、Excel、PPT、PDF、PNG、Markdown 和文本样本取得有效首帧。
 
+[Main](electron/native-ipc.ts)按连接代次跟踪待核验的打开请求。关闭操作按原预览 ID 和连接代次撤销对应请求。切换或断开会话前先核实请求所属的连接，当前打开请求完成原文件的来源与权限核验后才取得视图。交付文件、原路径和已有 Office 副本共用这个顺序。[Windows Electron 回归](test/isolated/office-preview-security.test.ts)控制同一文件重开的回执顺序，并在核验期间投递其他连接代次的请求，检查当前预览内容和视图释放。
+
+2026-11-19 在 Windows x64／Electron 44.3.0 的普通窗口用已归档的五页 PPT 做修前修后对照。预览读取被控制为旧请求晚于新请求。基线 `6b59a1bd9` 关闭新预览并显示「预览失败」。修后新请求从加载直接进入可见的五页预览，关闭后再次打开也显示五页。原会话保持 10 次模型调用。窗口过程保存在本机 `.cache/preview-reopen-fix-51d97050/`。
+
 Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)从当前用户 Skills 目录读取“修改 Skill”选项。同名可用项带各自的 ID。显式选择通过现有 `selectedSkills` 随原修改申请提交，Main 继续复核原版本和选区。OOXML 预览在独立 sandbox 中执行构建期脚本，页面自身禁止执行脚本，`kite-preview` 清单仅提供当前原件和固定空页面。Word 禁止加载嵌入 HTML，PPT 禁止外部媒体。用户安装的 Skill 可通过受管 Shell 使用所需编辑工具。原文件的读取、选区定位和请求表单均由 Desktop 负责。内置 Skill 的资源边界见 [Office owner](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
 
 内置 `docx`、`xlsx` 和 `pptx` 使用 OfficeCLI 技能，同一目录提供 OfficeCLI 通用项和专项项。编辑时 `officecli` 由当前受管 Shell 解析。`pdf` 沿用原内置来源。下方记录保留切换前针对原技能的 Windows 实测。 [当前 Skill 资产](../../packages/agent/src/tools/documents/README.md#内置-office-skills)

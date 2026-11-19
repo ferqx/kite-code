@@ -1,13 +1,24 @@
 /** Isolated hostile-render fixture: production Chromium/session/IPC boundaries, no converter or user files. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BaseWindow, WebContentsView, webContents } from 'electron';
+import {
+  app,
+  BaseWindow,
+  type IpcMain,
+  type IpcMainInvokeEvent,
+  WebContentsView,
+  webContents,
+} from 'electron';
 import JSZip from 'jszip';
+import type { NativeCaller } from '../electron/native-caller';
+import { registerNativeIpc } from '../electron/native-ipc';
 import type { NativeRootWindow } from '../electron/native-root-window';
 import { NativeOutputPreview, registerOutputPreviewScheme } from '../electron/output-preview';
+import { type NativeReply, type NativeRequest, nativeChannel } from '../src/native-bridge';
 
 const root = resolve(process.argv[2]!);
 registerOutputPreviewScheme();
@@ -38,6 +49,178 @@ function webPreferences(contents: unknown) {
 }
 const hash = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 const pause = () => new Promise((resolve) => setTimeout(resolve, 60));
+function latch() {
+  let release!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { opened, release };
+}
+async function checkPreviewReopen(
+  window: NativeRootWindow,
+  body: Buffer,
+  target: NonNullable<Parameters<NativeOutputPreview['open']>[0]['target']>,
+) {
+  const generation = 2;
+  const oldAdmission = latch();
+  const oldArrived = latch();
+  const newAdmission = latch();
+  const newAdmissionArrived = latch();
+  const newMaterialization = latch();
+  const newArrived = latch();
+  const closingAdmission = latch();
+  const closingArrived = latch();
+  let admissions = 0;
+  let copies = 0;
+  const handlers = new Map<
+    string,
+    (event: IpcMainInvokeEvent, request: NativeRequest) => Promise<NativeReply>
+  >();
+  const origin = window.webContents;
+  const assertGeneration = (value: number) => {
+    if (value !== generation) throw Error('native_generation_changed');
+  };
+  const cleanup = registerNativeIpc({
+    ipcMain: {
+      handle: (
+        channel: string,
+        handler: (event: IpcMainInvokeEvent, request: NativeRequest) => Promise<NativeReply>,
+      ) => {
+        handlers.set(channel, handler);
+      },
+      removeHandler: (channel: string) => handlers.delete(channel),
+    } as unknown as IpcMain,
+    window: () => window,
+    rendererUrl: origin.getURL(),
+    caller: async () =>
+      ({
+        assertGeneration,
+        async invoke(request: NativeRequest) {
+          if ('generation' in request) assertGeneration(request.generation);
+          assert.fail('Unexpected caller operation');
+        },
+        async admitOutputTarget(value: number) {
+          assertGeneration(value);
+          const admission = ++admissions;
+          if (admission === 1) {
+            oldArrived.release();
+            await oldAdmission.opened;
+          } else if (admission === 2) {
+            newAdmissionArrived.release();
+            await newAdmission.opened;
+          } else if (admission === 3) {
+            closingArrived.release();
+            await closingAdmission.opened;
+          }
+        },
+        outputTargetCheck: () => () => {},
+        async materializeOutput(
+          _generation: number,
+          _target: typeof target,
+          path: string,
+          check: () => void,
+        ) {
+          if (++copies === 1) {
+            newArrived.release();
+            await newMaterialization.opened;
+          }
+          check();
+          await writeFile(path, body, { flag: 'wx' });
+          return {
+            name: 'same-file.pptx',
+            mediaType: 'application/octet-stream',
+            size: String(body.length),
+            sourceHash: hash(body),
+          };
+        },
+      }) as unknown as NativeCaller,
+  });
+  const dispatch = (request: NativeRequest) =>
+    handlers.get(nativeChannel)!(
+      { sender: origin, senderFrame: origin.mainFrame } as IpcMainInvokeEvent,
+      request,
+    );
+  const open = (previewId: string, connection = generation) =>
+    dispatch({
+      method: 'outputs.preview.open',
+      generation: connection,
+      previewId,
+      target,
+      bounds: { x: 0, y: 0, width: 900, height: 600 },
+    });
+  const close = (previewId: string, connection = generation) =>
+    dispatch({ method: 'outputs.preview.close', generation: connection, previewId });
+  try {
+    const earlier = open('earlier');
+    await Promise.race([
+      oldArrived.opened,
+      earlier.then(() => assert.fail('Old read did not reach admission')),
+    ]);
+    assert.deepEqual(await close('earlier'), { ok: true, value: null });
+    const later = open('later');
+    await Promise.race([
+      newAdmissionArrived.opened,
+      later.then(() => assert.fail('New read did not reach admission')),
+    ]);
+    const invalid = { ok: false, code: 'native_generation_changed' };
+    assert.deepEqual(await open('previous-generation', generation - 1), invalid);
+    assert.deepEqual(await open('unattached-generation', generation + 1), invalid);
+    assert.deepEqual(
+      await dispatch({ method: 'select', generation: generation - 1, sessionId: target.sessionId }),
+      invalid,
+    );
+    assert.deepEqual(await dispatch({ method: 'detach', generation: generation - 1 }), invalid);
+    assert.deepEqual(await close('later', generation - 1), { ok: true, value: null });
+    newAdmission.release();
+    await Promise.race([
+      newArrived.opened,
+      later.then((reply) =>
+        assert.fail(`New read did not reach materialization: ${JSON.stringify(reply)}`),
+      ),
+    ]);
+    // A closed request returns from admission while the same file is already opening again.
+    oldAdmission.release();
+    const earlierReply = await earlier;
+    newMaterialization.release();
+    assert.deepEqual(await later, {
+      ok: true,
+      value: { kind: 'outputs.preview', status: 'ready' },
+    });
+    assert.deepEqual(earlierReply, { ok: false, code: 'preview_replaced' });
+    assert.equal(copies, 1);
+    const page = window.contentView.children.at(-1) as WebContentsView;
+    const contents = page.webContents;
+    assert.notEqual(contents, origin);
+    assert.match(await contents.executeJavaScript('document.body.textContent'), /示例（中文标点）/);
+    await close('earlier');
+    assert.equal(contents.isDestroyed(), false);
+    const destroyed = once(contents, 'destroyed');
+    assert.deepEqual(await close('later'), { ok: true, value: null });
+    assert.equal(window.contentView.children.includes(page), false);
+    await destroyed;
+    assert.equal(contents.isDestroyed(), true);
+
+    const closing = open('closed-before-admission');
+    await Promise.race([
+      closingArrived.opened,
+      closing.then(() => assert.fail('Pending read did not reach admission')),
+    ]);
+    assert.deepEqual(await close('closed-before-admission'), { ok: true, value: null });
+    closingAdmission.release();
+    assert.deepEqual(await closing, { ok: false, code: 'preview_replaced' });
+    assert.equal(copies, 1);
+    assert.deepEqual(
+      window.contentView.children.map((child) => (child as WebContentsView).webContents),
+      [origin],
+    );
+  } finally {
+    oldAdmission.release();
+    newAdmission.release();
+    newMaterialization.release();
+    closingAdmission.release();
+    cleanup();
+  }
+}
 async function hostileDeck() {
   const archive = new JSZip();
   const p = 'http://schemas.openxmlformats.org/presentationml/2006/main';
@@ -274,6 +457,9 @@ void app
       checks.push('replacement-retires-old-document-input-resource-and-request');
       assert.equal(await readFile(privateFile, 'utf8'), 'fixture-private-marker');
       assert.deepEqual(await readdir(join(root, 'downloads')), []);
+      preview.close();
+      await checkPreviewReopen(window as NativeRootWindow, body, target);
+      checks.push('late-file-admission-cannot-replace-a-reopened-preview');
       passed = true;
     } catch (error) {
       console.error(error);
