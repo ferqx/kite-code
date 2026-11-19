@@ -1,4 +1,5 @@
 import type { OutputFileSummary, OutputFilesPage, OutputFileTarget } from '@kite-ai/client';
+import type { ImageZoomControl, ImageZoomState } from './image-zoom';
 import type { InputRequest } from './input';
 /** Live observation versions for display reuse only, never a read or operation grant. */
 export type NativeOutputDisplayState = {
@@ -131,7 +132,7 @@ export type NativeOutputRequest =
       method: 'outputs.preview.control';
       generation: number;
       previewId: string;
-      control: OfficePreviewControl;
+      control: OfficePreviewControl | ImageZoomControl;
     }
   | {
       method: 'outputs.office.preview';
@@ -214,6 +215,7 @@ export type NativeOutputResult =
       kind: 'outputs.pdf.page';
       pdf: { page: number; totalPages: number; mediaType: 'image/png'; data: string };
     }
+  | { kind: 'outputs.preview.imageZoom'; zoom: ImageZoomState }
   | { kind: 'outputs.info'; file: OutputFileSummary }
   | { kind: 'outputs.page'; page: OutputFilesPage }
   | { kind: 'outputs.saved'; cancelled: boolean }

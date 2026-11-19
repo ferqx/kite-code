@@ -4,8 +4,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OutputFileSummary, OutputFileTarget } from '@kite-ai/client';
-import { app, protocol, screen, session, WebContentsView } from 'electron';
+import { app, protocol, screen, session, WebContentsView, webContents } from 'electron';
 import { filePreviewFormat } from '../src/file-preview-format';
+import { type ImageZoomControl, validateImageZoom } from '../src/image-zoom';
 import {
   assertPanelMeasurement,
   type NativeBrowserBounds,
@@ -30,6 +31,7 @@ import {
 } from './image-display-document';
 import { createImageDisplayRegionResource } from './image-display-region-resource';
 import { renderImageDisplay } from './image-display-service';
+import { imageDisplayViewportScript } from './image-display-viewport';
 import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
 import { waitForNativeFrame } from './native-frame-readiness';
 import { addNativeWindowView, focusNativeWindowContent } from './native-overlay-layer';
@@ -94,6 +96,7 @@ export class NativeOutputPreview {
     presentation?: { bounds: NativeBrowserBounds; layout?: NativeBrowserLayout };
     projection?: { bounds: NativeBrowserBounds; layout: NativeBrowserLayout };
     sourceHash?: string;
+    hostedImage?: boolean;
     pdf?: boolean;
     pdfPageCount?: number;
     pdfLayers?: Map<number, PdfTextLayer>;
@@ -182,6 +185,7 @@ export class NativeOutputPreview {
       active.officeKind = kind;
       const office = kind ? officePreviews[kind] : undefined;
       let files: Resource[], entry: string;
+      let hostedImageScript: string | undefined;
       let imageSource:
         | { mediaType: NativeImageDisplayMediaType; width: number; height: number }
         | undefined;
@@ -317,7 +321,9 @@ export class NativeOutputPreview {
         const image = join(active.directory, 'display-image');
         await writeFile(image, display.bytes, { flag: 'wx', mode: 0o600 });
         current();
-        const html = Buffer.from(imageDisplayDocument(display));
+        active.hostedImage = !!active.target;
+        if (active.hostedImage) hostedImageScript = imageDisplayViewportScript(display, true);
+        const html = Buffer.from(imageDisplayDocument(display, active.hostedImage));
         const path = join(active.directory, 'index.html');
         await writeFile(path, html, { flag: 'wx', mode: 0o600 });
         files = [
@@ -605,6 +611,7 @@ export class NativeOutputPreview {
         if (projected) active.projection = projected;
         const cssBounds = anchor?.layout ? projected?.bounds : anchor?.bounds;
         const next = cssBounds && nativeContentBounds(cssBounds, zoom, width, height);
+        const withdrawing = !next && !!active.nativeBounds;
         active.nativeBounds = next;
         if (next) {
           const previous = view.getBounds();
@@ -628,6 +635,20 @@ export class NativeOutputPreview {
         if (!next) cancelPaint();
         if (!(paint && covered())) view.setVisible(visible);
         active.request?.view.visible(visible);
+        if (withdrawing) {
+          // AppKit can drop the child responder before the resize callback. Only
+          // repair a vacant key window, after both native views have withdrawn.
+          setImmediate(() => {
+            if (
+              this.active === active &&
+              !active.nativeBounds &&
+              !input.window.isDestroyed() &&
+              input.window.isFocused() &&
+              !webContents.getFocusedWebContents()
+            )
+              focusNativeWindowContent(input.window, input.window.webContents);
+          });
+        }
         if (next && !drawable) prepareFrame();
       };
       const hide = () => {
@@ -667,6 +688,12 @@ export class NativeOutputPreview {
       addNativeWindowView(input.window, view);
       await view.webContents.loadURL(`${origin}/${entry}`);
       current();
+      if (hostedImageScript) {
+        await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
+          { code: hostedImageScript },
+        ]);
+        current();
+      }
       if (active.pdf)
         await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
           { code: pdfPreviewInstallScript() },
@@ -770,7 +797,8 @@ export class NativeOutputPreview {
           this.active === active &&
           !active.abort.signal.aborted &&
           active.window.isFocused() &&
-          active.view
+          active.nativeBounds &&
+          active.view?.getVisible()
         )
           focusNativeWindowContent(active.window, active.view.webContents);
       },
@@ -1022,8 +1050,7 @@ export class NativeOutputPreview {
     const active = this.active;
     return !!active && active.id === id && active.generation === generation && !active.target;
   }
-  async control(id: string, generation: number, command: OfficePreviewControl) {
-    const code = officeInteractionControlScript(command);
+  async control(id: string, generation: number, command: OfficePreviewControl | ImageZoomControl) {
     const active = this.active;
     if (
       !active ||
@@ -1034,6 +1061,36 @@ export class NativeOutputPreview {
     )
       throw Error('preview_replaced');
     active.check?.();
+    if (command.kind === 'image-zoom') {
+      if (!active.target || !active.hostedImage) throw Error('preview_control_invalid');
+      validateImageZoom(command);
+      const state = await active.view.webContents.executeJavaScriptInIsolatedWorld(
+        officeInteractionWorld,
+        [{ code: `globalThis.kiteImageZoom(${JSON.stringify(command.value)})` }],
+      );
+      if (this.active !== active || active.abort.signal.aborted) throw Error('preview_replaced');
+      active.check?.();
+      if (
+        typeof state?.fit !== 'boolean' ||
+        !Number.isFinite(state.scale) ||
+        state.scale <= 0 ||
+        state.scale > 8 ||
+        !Number.isFinite(state.minimum) ||
+        state.minimum <= 0 ||
+        state.minimum > 0.01
+      )
+        throw Error('preview_control_invalid');
+      return {
+        kind: 'outputs.preview.imageZoom' as const,
+        zoom: {
+          fit: state.fit as boolean,
+          scale: state.scale as number,
+          minimum: state.minimum as number,
+        },
+      };
+    }
+    if (active.hostedImage !== undefined) throw Error('preview_control_invalid');
+    const code = officeInteractionControlScript(command);
     if (!active.target && !(active.pdf && active.localHandleId) && command.kind !== 'zoom')
       throw Error('local_preview_readonly');
     if (active.pdf && !['zoom', 'request-edit'].includes(command.kind))
@@ -1065,6 +1122,7 @@ export class NativeOutputPreview {
       },
     ]);
     if (this.active !== active || active.abort.signal.aborted) throw Error('preview_replaced');
+    return undefined;
   }
   dispose() {
     this.close();

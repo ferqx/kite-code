@@ -9,9 +9,28 @@ const dom = new JSDOM('<!doctype html><div id="root"></div>', {
   pretendToBeVisual: true,
 });
 class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  static byTarget = new Map<Element, Set<ResizeObserverStub>>();
+  readonly callback: (entries: Partial<ResizeObserverEntry>[]) => void;
+  constructor(callback: ResizeObserverStub['callback']) {
+    this.callback = callback;
+  }
+  observe(target: Element) {
+    const observers = ResizeObserverStub.byTarget.get(target) ?? new Set();
+    observers.add(this);
+    ResizeObserverStub.byTarget.set(target, observers);
+  }
+  unobserve(target: Element) {
+    const observers = ResizeObserverStub.byTarget.get(target);
+    observers?.delete(this);
+    if (!observers?.size) ResizeObserverStub.byTarget.delete(target);
+  }
+  disconnect() {
+    for (const target of ResizeObserverStub.byTarget.keys()) this.unobserve(target);
+  }
+  static resize(target: Element) {
+    for (const observer of [...(ResizeObserverStub.byTarget.get(target) ?? [])])
+      observer.callback([{ target, contentRect: target.getBoundingClientRect() }]);
+  }
 }
 const matchMedia = (query: string) =>
   Object.assign(new dom.window.EventTarget(), { matches: false, media: query });
@@ -76,6 +95,7 @@ function fixture(nativeChanges = true) {
     offset = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, 'offsetWidth')!,
     left = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, 'offsetLeft')!;
   let serial = 0;
+  let groupWidth = 3000;
   globalThis.requestAnimationFrame = (callback) => {
     frames.set(++serial, callback);
     return serial;
@@ -83,14 +103,16 @@ function fixture(nativeChanges = true) {
   globalThis.cancelAnimationFrame = (id) => frames.delete(id);
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
     return ['client-layout', 'content-layout'].includes(this.id)
-      ? new dom.window.DOMRect(0, 0, 3000, 800)
+      ? new dom.window.DOMRect(0, 0, this.id === 'content-layout' ? groupWidth : 3000, 800)
       : rect.call(this);
   };
   Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
     configurable: true,
     get() {
-      if (['client-layout', 'content-layout'].includes(this.id)) return 3000;
-      if (['navigation', 'workspace', 'content', 'details'].includes(this.id)) return 1500;
+      if (this.id === 'content-layout') return groupWidth;
+      if (this.id === 'client-layout') return 3000;
+      if (['content', 'details'].includes(this.id)) return groupWidth / 2;
+      if (['navigation', 'workspace'].includes(this.id)) return 1500;
       return offset.get!.call(this);
     },
   });
@@ -183,6 +205,17 @@ function fixture(nativeChanges = true) {
     frame,
     changes,
     selectTab,
+    groupWidth: (width: number, duringDrag = false) =>
+      act(() => {
+        groupWidth = width;
+        // A resize may reach the panel library before our observer has committed.
+        if (duringDrag)
+          contentLayout?.onLayoutChanged?.(
+            { content: 100, details: 0 },
+            { isUserInteraction: true },
+          );
+        ResizeObserverStub.resize(host.querySelector('#content-layout')!);
+      }),
     width: () => Number(host.querySelector<HTMLElement>('#details')!.style.flexGrow),
     resize: (size: string) => act(() => panel().resize(size)),
     userResized: () =>
@@ -218,7 +251,7 @@ test('first changes opening prepares 62%, permits up to 85%, and retains the con
     await f.open();
     await f.frame();
     expect(f.width()).toBeCloseTo(62, 5);
-    expect(f.constraints()).toMatchObject({ minSize: '240px', maxSize: '85%' });
+    expect(f.constraints()).toMatchObject({ minSize: '320px', maxSize: '85%' });
     await f.resize('90%');
     expect(f.width()).toBeCloseTo(85, 5);
     await f.resize('48%');
@@ -270,13 +303,13 @@ for (const interruption of ['close', 'scope', 'covered', 'tab'] as const)
     }
   });
 
-test('ordinary browser-only details retain their original constraints and never receive the changes initial width', async () => {
+test('browser-only details share the preview minimum and retain their own maximum and user width', async () => {
   const f = fixture(false);
   try {
     await f.show();
     await f.click('标签页');
     await f.frame();
-    expect(f.constraints()).toMatchObject({ minSize: '300px', maxSize: '640px' });
+    expect(f.constraints()).toMatchObject({ minSize: '320px', maxSize: '640px' });
     expect(f.width()).not.toBeCloseTo(62, 5);
     await f.resize('500px');
     const width = f.width();
@@ -308,6 +341,72 @@ test('an explicit user resize before the initial changes frame wins over automat
     await f.click('标签页');
     await f.frame();
     expect(f.width()).toBeCloseTo(48, 5);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a selected tab waits for enough room, survives resizing during a drag, and honors explicit dismissal', async () => {
+  const f = fixture(false);
+  try {
+    await f.show();
+    await f.click('标签页');
+    await f.frame();
+    const toggle = f.host.querySelector<HTMLButtonElement>('button[aria-label="标签页"]')!;
+    const browserId = f.host.querySelector<HTMLElement>('[data-browser-id]')!.dataset.browserId;
+    const handle = f.host.querySelector<HTMLElement>('#details-resize')!;
+    await act(() => handle.focus());
+    expect(document.activeElement).toBe(handle);
+    await f.groupWidth(679, true);
+    await f.frame();
+    expect(f.width()).toBe(0);
+    expect(f.constraints()).toMatchObject({ minSize: '0px', maxSize: '0px' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(toggle);
+    await f.click('标签页');
+    await f.groupWidth(680);
+    await f.frame();
+    await f.frame();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(f.width() * 6.8).toBeCloseTo(320, 1);
+    expect(f.host.querySelector<HTMLElement>('[data-browser-id]')!.dataset.browserId).toBe(
+      browserId,
+    );
+    expect(document.activeElement).toBe(toggle);
+    await f.groupWidth(599);
+    await f.frame();
+    await act(() => {
+      window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    await f.groupWidth(1200);
+    await f.frame();
+    expect(f.width()).toBe(0);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  } finally {
+    await f.close();
+  }
+});
+
+test('the user-selected dock width recovers through narrow and clamped window sizes', async () => {
+  const f = fixture(false);
+  try {
+    await f.show();
+    await f.groupWidth(1000);
+    await f.click('标签页');
+    await f.frame();
+    await f.resize('48%');
+    await f.userResized();
+    for (const [available, expected] of [
+      [630, 0],
+      [720, 360],
+      [865, 480],
+      [1000, 480],
+    ] as const) {
+      await f.groupWidth(available);
+      await f.frame();
+      await f.frame();
+      expect((f.width() * available) / 100).toBeCloseTo(expected, 1);
+    }
   } finally {
     await f.close();
   }

@@ -239,7 +239,7 @@ void app
           async () =>
             initialAttempts === attempt &&
             (await primary.webContents.executeJavaScript(`(() => {
-              const viewport = document.querySelector('.native-file-preview > div[style]');
+              const viewport = document.querySelector('.native-file-preview > .native-file-preview-viewport');
               const icons = viewport?.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]');
               if (icons?.length !== 1 || viewport.textContent.trim()) return false;
               const frame = viewport.getBoundingClientRect(), icon = icons[0].getBoundingClientRect();
@@ -255,7 +255,7 @@ void app
       await until(
         () =>
           primary.webContents.executeJavaScript(`(() => {
-            const viewport = document.querySelector('.native-file-preview > div[style]');
+            const viewport = document.querySelector('.native-file-preview > .native-file-preview-viewport');
             const error = viewport?.querySelector('.native-file-preview-error');
             if (error?.querySelector('p[role="status"]')?.textContent !== '预览失败' ||
                 error.querySelector('button')?.textContent !== '重试') return false;
@@ -273,13 +273,13 @@ void app
         async () =>
           doc()?.getVisible() &&
           (await primary.webContents.executeJavaScript(
-            '!!document.querySelector(".native-excel-readonly")',
+            '!!document.querySelector(".native-office-toolbar") && !document.querySelector(".native-excel-readonly,textarea")',
           )),
         Boolean,
       ).catch(async (error: unknown) => {
         previewDiagnostic = {
           host: await primary.webContents.executeJavaScript(
-            `({text:document.body.innerText.slice(0,400),hidden:document.hidden,viewport:document.querySelector('.native-file-preview > div[style]')?.getBoundingClientRect().toJSON()})`,
+            `({text:document.body.innerText.slice(0,400),hidden:document.hidden,viewport:document.querySelector('.native-file-preview > .native-file-preview-viewport')?.getBoundingClientRect().toJSON()})`,
           ),
           child: doc()?.webContents.getURL(),
           layoutReports,
@@ -303,7 +303,7 @@ void app
       await pause();
       const geometry = async (label: string) => {
         const state = await primary.webContents.executeJavaScript(
-          `(()=>{const bar=document.querySelector('.native-excel-readonly').getBoundingClientRect(); const viewport=document.querySelector('.native-file-preview > div[style]')?.getBoundingClientRect();return {bar:{bottom:bar.bottom,left:bar.left,top:bar.top,right:bar.right},viewport:viewport?{x:viewport.x,y:viewport.y,width:viewport.width,height:viewport.height}:null,hit:document.elementFromPoint(bar.left+20,bar.top+12)?.closest('.native-excel-readonly')!==null}})()`,
+          `(()=>{const toolbar=document.querySelector('.native-office-toolbar').getBoundingClientRect(); const bottom=(document.querySelector('.native-excel-details') ?? document.querySelector('.native-excel-readonly') ?? document.querySelector('.native-office-toolbar')).getBoundingClientRect().bottom; const viewport=document.querySelector('.native-file-preview > .native-file-preview-viewport')?.getBoundingClientRect();return {bar:{bottom,left:toolbar.left,top:toolbar.top,right:toolbar.right},viewport:viewport?{x:viewport.x,y:viewport.y,width:viewport.width,height:viewport.height}:null,hit:!!document.elementFromPoint(toolbar.left+20,toolbar.top+12)?.closest('.native-office-toolbar')}})()`,
         );
         const bounds = doc().getBounds();
         geometries.push({ label, state, bounds });
@@ -324,7 +324,7 @@ void app
         );
         return bounds;
       };
-      const drag = async (start: Point, end: Point) => {
+      const drag = async (start: Point, end: Point, whileHeld?: () => Promise<void>) => {
         window.focus();
         const view = doc().webContents;
         view.focus();
@@ -338,6 +338,11 @@ void app
           ...end,
         });
         await pause();
+        if (whileHeld) {
+          // Cross the host's selection poll with a real captured pointer still held.
+          await new Promise((resolve) => setTimeout(resolve, 450));
+          await whileHeld();
+        }
         view.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...end });
       };
       const initial = await geometry('initial');
@@ -367,11 +372,22 @@ void app
       await contents.executeJavaScript(
         `(()=>{window.fixturePointer=[];for(const name of ['pointerdown','pointermove','pointerup'])document.addEventListener(name,e=>window.fixturePointer.push({name,x:e.clientX,y:e.clientY,target:e.target?.className,buttons:e.buttons,isTrusted:e.isTrusted}),{capture:true})})()`,
       );
-      await drag(start, end);
+      await drag(start, end, async () => {
+        const current = await preview.readInteraction(currentId, currentGeneration, false);
+        assert.equal(current.selection, null);
+        assert.equal(current.excelSelection, undefined);
+        assert.deepEqual(doc().getBounds(), initial);
+        assert.ok(await contents.executeJavaScript("!!document.querySelector('.xlsx-highlight')"));
+        assert.ok(
+          await primary.webContents.executeJavaScript(
+            "!document.querySelector('.native-excel-readonly')",
+          ),
+        );
+      });
       await until(
         () =>
           primary.webContents.executeJavaScript(
-            'document.querySelector(".native-excel-value textarea").value',
+            'document.querySelector(".native-excel-value textarea")?.value',
           ),
         (v) => v === '=SUM(B2:C3)',
       ).catch(async (error: unknown) => {
@@ -401,7 +417,7 @@ void app
       );
       await writeFile(join(root, 'collapsed-height.json'), JSON.stringify(collapsed, null, 2));
       assert.equal(collapsed.rows, 1);
-      assert.equal(Math.round(collapsed.height), 28);
+      assert.equal(Math.round(collapsed.height), 24);
       const paint = await contents.executeJavaScript(
         `(()=>{const cell=document.querySelector('.xlsx-cell[data-row="1"][data-col="1"]');const shade=cell?.querySelector('.xlsx-highlight');return {author:getComputedStyle(cell).backgroundColor,shade:shade?.getAttribute('aria-hidden'),hit:shade&&getComputedStyle(shade).pointerEvents}})()`,
       );
@@ -411,7 +427,7 @@ void app
       await pause();
       const expanded = await geometry('expanded');
       const expandedHeight = await primary.webContents.executeJavaScript(
-        "(()=>{const e=document.querySelector('.native-excel-value textarea');return {rows:e.rows,height:e.getBoundingClientRect().height}})()",
+        "(()=>{const e=document.querySelector('.native-excel-details textarea');return {rows:e.rows,height:e.getBoundingClientRect().height}})()",
       );
       assert.equal(expandedHeight.rows, 5);
       assert.equal(Math.round(expandedHeight.height), 100);
@@ -430,7 +446,7 @@ void app
         join(root, 'dark-style.json'),
         JSON.stringify(
           await primary.webContents.executeJavaScript(
-            "[...document.querySelectorAll('.native-office-toolbar,.native-office-pill,.native-excel-readonly,.native-excel-readonly button,.native-excel-readonly textarea')].map(e=>({tag:e.tagName,cls:e.className,color:getComputedStyle(e).color,font:getComputedStyle(e).font,background:getComputedStyle(e).backgroundColor,foreground:getComputedStyle(e).getPropertyValue('--foreground'),disabled:e.disabled}))",
+            "[...document.querySelectorAll('.native-office-toolbar,.native-excel-readonly,.native-excel-readonly button,.native-excel-readonly textarea,.native-excel-details textarea')].map(e=>({tag:e.tagName,cls:e.className,color:getComputedStyle(e).color,font:getComputedStyle(e).font,background:getComputedStyle(e).backgroundColor,foreground:getComputedStyle(e).getPropertyValue('--foreground'),disabled:e.disabled}))",
           ),
           null,
           2,
@@ -438,9 +454,25 @@ void app
       );
       await primary.webContents.executeJavaScript("document.documentElement.dataset.theme='light'");
       checks.push('narrow-zoom-layer-bounds-hit');
-      const againStart = await point('D4'),
-        againEnd = await point('B2');
-      await drag(againStart, againEnd);
+      await drag(await point('C3'), await point('B2'), async () => {
+        const pending = await preview.readInteraction(currentId, currentGeneration, false);
+        assert.deepEqual(pending.selection, selected.selection);
+        assert.deepEqual(pending.excelSelection, selected.excelSelection);
+        contents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+        contents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+        await until(
+          () => preview.readInteraction(currentId, currentGeneration, false),
+          (value) => value.selection === null,
+        );
+      });
+      await until(
+        () =>
+          primary.webContents.executeJavaScript(
+            "!document.querySelector('.native-excel-readonly,.native-excel-details')",
+          ),
+        Boolean,
+      );
+      await drag(await point('D4'), await point('B2'));
       await pause();
       await preview.control(currentId, currentGeneration, { kind: 'request-edit' });
       await preview.readInteraction(currentId, currentGeneration, true);
@@ -470,9 +502,9 @@ void app
       await until(
         () =>
           primary.webContents.executeJavaScript(
-            'document.querySelector(".native-excel-value textarea").value',
+            '!document.querySelector(".native-excel-readonly, .native-excel-details, textarea")',
           ),
-        (v) => v === '',
+        Boolean,
       );
       checks.push('target-replacement-clears-readonly-and-request');
       await capture('replacement');

@@ -31,11 +31,65 @@ const page = await app.firstWindow();
 const errors: string[] = [];
 page.on('pageerror', (error) => errors.push(String(error)));
 const checks: unknown[] = [];
+const disclosureChecks: unknown[] = [];
+async function checkNarrowDisclosure() {
+  const button = page.locator('.native-excel-expand');
+  const value = page.getByLabel('单元格公式（只读）', { exact: true });
+  const style = () =>
+    button.evaluate((el) => ({
+      background: getComputedStyle(el).backgroundColor,
+      radius: getComputedStyle(el).borderRadius,
+      outline: getComputedStyle(el).outlineStyle,
+      focus: el.matches(':focus-visible'),
+      rotation: getComputedStyle(el.querySelector('svg')!).transform,
+    }));
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.theme = value;
+    }, theme);
+    await page.mouse.move(10, 160);
+    const collapsed = await style();
+    assert.equal(collapsed.radius, '50%');
+    assert.equal(collapsed.background, 'rgba(0, 0, 0, 0)');
+    assert.equal(collapsed.rotation, 'none');
+    await button.hover();
+    const hover = await style();
+    assert.notEqual(hover.background, collapsed.background);
+    await button.click();
+    await page.mouse.move(10, 160);
+    const opened = await style();
+    assert.equal(
+      opened.background,
+      collapsed.background,
+      'open alone must not paint the disclosure',
+    );
+    assert.notEqual(opened.rotation, collapsed.rotation);
+    await page.screenshot({ path: join(root, `xlsx-320-${theme}-expanded.png`) });
+    await value.focus();
+    await page.keyboard.press('Tab');
+    const focused = await style();
+    assert.equal(focused.focus, true);
+    assert.equal(focused.radius, '50%');
+    assert.notEqual(focused.outline, 'none');
+    assert.notEqual(focused.background, opened.background);
+    await page.screenshot({ path: join(root, `xlsx-320-${theme}-keyboard.png`) });
+    await page.keyboard.press('Enter');
+    assert.equal(await button.getAttribute('aria-expanded'), 'false');
+    assert.equal(await page.locator('.native-excel-details').count(), 0);
+    await value.focus();
+    disclosureChecks.push({ theme, collapsed, hover, opened, focused });
+  }
+  await page.evaluate(() => {
+    delete document.documentElement.dataset.theme;
+  });
+}
+
 try {
   for (const kind of ['docx', 'xlsx', 'pptx', 'pdf']) {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(`file://${join(root, 'index.html')}?kind=${kind}`);
     await page.getByRole('button', { name: '请求修改', exact: true }).waitFor();
-    for (const width of [240, 280, 320, 480, 640]) {
+    for (const width of kind === 'xlsx' ? [320, 420, 550, 640] : [240, 280, 320, 480, 640]) {
       await app.evaluate(
         ({ BrowserWindow }, value) => BrowserWindow.getAllWindows()[0]!.setContentSize(value, 560),
         width,
@@ -52,20 +106,35 @@ try {
         const rect = toolbar.getBoundingClientRect();
         const controls = [
           ...document.querySelectorAll<HTMLElement>(
-            '.native-office-toolbar button, .native-office-toolbar select, .native-excel-readonly button, .native-excel-readonly textarea, .native-office-notes summary',
+            '.native-office-toolbar button, .native-office-toolbar select, .native-excel-readonly textarea, .native-excel-readonly button, .native-office-notes summary',
           ),
-        ].map((el) => {
-          const r = el.getBoundingClientRect();
-          return {
-            label: el.getAttribute('aria-label') || el.textContent,
-            left: r.left,
-            right: r.right,
-            width: r.width,
-            top: r.top,
-            bottom: r.bottom,
-          };
-        });
+        ]
+          .filter((el) => el.getBoundingClientRect().width > 0)
+          .map((el) => {
+            const r = el.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            return {
+              border: style.borderTopWidth,
+              opacity: style.opacity,
+              label: el.getAttribute('aria-label') || el.textContent,
+              left: r.left,
+              right: r.right,
+              width: r.width,
+              top: r.top,
+              bottom: r.bottom,
+            };
+          });
+        const strip = document.querySelector('.native-excel-readonly')?.getBoundingClientRect();
         return {
+          strip: strip
+            ? {
+                left: strip.left,
+                width: strip.width,
+                top: strip.top,
+                bottom: strip.bottom,
+                height: strip.height,
+              }
+            : null,
           width: innerWidth,
           scrollWidth: document.documentElement.scrollWidth,
           toolbarHeight: rect.height,
@@ -80,8 +149,52 @@ try {
         geometry.contentTop >= geometry.toolbarBottom,
         'toolbar must reserve content space',
       );
-      if (width >= 320)
+      if (width >= 320 && kind !== 'xlsx')
         assert.ok(geometry.toolbarWidth < width - 40, 'floating controls do not span the pane');
+      assert.equal(geometry.toolbarHeight, 34, 'one row; the document keeps all remaining height');
+      if (kind === 'xlsx') {
+        const strip = geometry.strip!;
+        assert.ok(
+          strip.top >= geometry.toolbarBottom,
+          'selection belongs below the stable command row',
+        );
+        assert.equal(strip.left, 0);
+        assert.equal(strip.width, width);
+        assert.equal(strip.height, 32);
+        assert.equal(strip.bottom, geometry.contentTop, 'the formula strip meets the grid');
+        const toggle = geometry.controls.find(({ label }) => label === '展开单元格内容')!;
+        assert.deepEqual([toggle.width, toggle.bottom - toggle.top], [30, 30]);
+        if (width === 320) {
+          const formula = geometry.controls.find(({ label }) => label === '单元格公式（只读）')!;
+          assert.ok(
+            formula.width >= width * 0.6,
+            `the value takes most of the full-width strip even in the narrow pane: ${formula.width}px of ${width}px`,
+          );
+          await checkNarrowDisclosure();
+          const locate = page.getByRole('button', { name: '定位当前选区' });
+          assert.equal(
+            await locate.innerText(),
+            'AA10000',
+            'a narrow range names the actual anchor',
+          );
+          assert.ok(await locate.evaluate((button) => button.scrollWidth <= button.clientWidth));
+          assert.match((await locate.getAttribute('title')) ?? '', /AA10000:AZ10099/);
+        }
+      }
+      const save = geometry.controls.find(({ label }) => label === '另存为')!;
+      const edit = geometry.controls.find(({ label }) => label === '请求修改')!;
+      const zoom = geometry.controls.find(({ label }) => label === '预览缩放')!;
+      assert.equal(save.width, 34);
+      assert.equal(save.bottom - save.top, 34);
+      assert.equal(edit.width, 30);
+      assert.equal(zoom.width, 54);
+      assert.equal(zoom.border, '0px', 'a closed native select is not an additional pill');
+      const skill = geometry.controls.find(({ label }) => label === '修改 Skill')!;
+      assert.equal(skill.opacity, '0', 'the More icon replaces the closed native value');
+      assert.ok(
+        zoom.right < edit.left && edit.right < save.left,
+        'reading, editing, then separate save',
+      );
       assert.ok(geometry.scrollWidth <= width, JSON.stringify({ kind, geometry }));
       for (const control of geometry.controls) {
         assert.ok(
@@ -99,8 +212,22 @@ try {
             JSON.stringify({ overlap: [a, b], kind, width }),
           );
         }
+      if (width === 240 && kind === 'pptx') {
+        const more = page.getByLabel('修改 Skill', { exact: true });
+        await more.selectOption({ label: '非常长的修改 Skill 名称不应挤占工具栏' });
+        await page.getByRole('button', { name: '放映', exact: true }).click();
+        const stop = page.getByRole('button', { name: '退出放映', exact: true });
+        await stop.waitFor();
+        // Starting a presentation is not a Skill change. The active stop remains directly reachable.
+        assert.equal(
+          await page.getByLabel('修改 Skill', { exact: true }).inputValue(),
+          'office.review',
+        );
+        await stop.click();
+        assert.equal(await more.inputValue(), 'office.review');
+      }
       checks.push({ kind, ...geometry });
-      if (width === 240 || width === 640)
+      if (width === 240 || width === 320 || width === 640)
         await page.screenshot({ path: join(root, `${kind}-${width}.png`) });
     }
     const beforeZoom = await page.locator('.native-office-toolbar').boundingBox();
@@ -120,21 +247,26 @@ try {
     }
     if (kind === 'xlsx') {
       await page.getByRole('button', { name: '展开单元格内容' }).click();
-      assert.equal(await page.locator('textarea').getAttribute('rows'), '5');
+      assert.equal(await page.locator('.native-excel-details textarea').getAttribute('rows'), '5');
       await page.getByRole('button', { name: '收起单元格内容' }).click();
       await page.getByRole('button', { name: '定位当前选区' }).click();
     }
     const events = JSON.parse((await page.locator('#events').textContent()) ?? '[]') as string[];
-    assert.deepEqual(events.slice(0, 3), ['edit', 'zoom:2', 'save']);
-    if (kind === 'pptx') assert.deepEqual(events.slice(3), ['presentation', 'presentation']);
-    if (kind === 'xlsx') assert.deepEqual(events.slice(3), ['locate']);
+    assert.deepEqual(events, [
+      ...(kind === 'pptx' ? ['presentation', 'presentation'] : []),
+      'edit',
+      'zoom:2',
+      'save',
+      ...(kind === 'pptx' ? ['presentation', 'presentation'] : []),
+      ...(kind === 'xlsx' ? ['locate'] : []),
+    ]);
   }
   assert.deepEqual(errors, []);
   await writeFile(
     join(root, 'result.json'),
-    JSON.stringify({ passed: true, checks, errors }, null, 2),
+    JSON.stringify({ passed: true, checks, disclosureChecks, errors }, null, 2),
   );
-  console.log(root, '20 layout cases passed');
+  console.log(root, `${checks.length} layout cases passed`);
 } finally {
   await app.close();
 }

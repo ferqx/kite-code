@@ -1,4 +1,7 @@
 import type { OfficeRequestOutcome } from '../src/output-files-bridge';
+import { isolatedPreviewChromeCss as officeChromeCss } from './isolated-preview-chrome';
+
+export { officeChromeCss };
 
 /** Runs only in a separate trusted, script-free input view, never the Office document. */
 function installOfficeRequest(label: string) {
@@ -98,44 +101,6 @@ export const officeRequestInstallScript = (label: string) =>
 export const officeRequestReadScript = 'globalThis.kiteOfficeRequest?.read()';
 export const officeRequestSettleScript = (serial: number, outcome: OfficeRequestOutcome) =>
   `globalThis.kiteOfficeRequest?.settle(${JSON.stringify(serial)},${JSON.stringify(outcome)})`;
-/** Small, static mirror of the desktop content tokens for sandboxed Office chrome.
- * NativeTheme.themeSource already drives prefers-color-scheme in every view.
- * Keep the values paired with native-content-theme.css and the shared UI tokens.
- */
-export const officeChromeCss = `
-.kite-office-chrome {
-  color-scheme: light dark;
-  --office-background: light-dark(#fafafa, #181818);
-  --office-card: light-dark(#fff, #222);
-  --office-composer: light-dark(#fff, #262626);
-  --office-composer-border: light-dark(rgb(0 0 0 / 10%), #333);
-  --office-foreground: light-dark(#222, #ededed);
-  --office-muted: light-dark(#666, #c6c6c6);
-  --office-border: light-dark(#e7e7e7, #282828);
-  --office-primary: light-dark(#252525, #ededed);
-  --office-primary-hover: light-dark(#414141, #ccc);
-  --office-primary-foreground: light-dark(#fff, #1c1c1c);
-  --office-hover: color-mix(in srgb, var(--office-foreground) 5%, transparent);
-  --office-selected: color-mix(in srgb, var(--office-foreground) 7%, transparent);
-  --office-pressed: color-mix(in srgb, var(--office-foreground) 9%, transparent);
-  --office-font: ${
-    process.platform === 'win32'
-      ? '"Segoe WPC", "Segoe UI", "Microsoft YaHei", sans-serif'
-      : process.platform === 'darwin'
-        ? '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif'
-        : 'system-ui, "Ubuntu", "Droid Sans", sans-serif'
-  };
-  font: 13px/1.4 var(--office-font);
-  color: var(--office-foreground);
-}
-@media (prefers-color-scheme: dark) {
-  .kite-office-chrome {
-    --office-hover: color-mix(in srgb, var(--office-foreground) 7%, transparent);
-    --office-selected: color-mix(in srgb, var(--office-foreground) 11%, transparent);
-    --office-pressed: color-mix(in srgb, var(--office-foreground) 13%, transparent);
-  }
-}
-`;
 export const officeRequestHtml = `<!doctype html><html class="kite-office-chrome"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'"><style>
 ${officeChromeCss}
 :root{background:transparent}*{box-sizing:border-box}body{margin:0;padding:5px;background:transparent}

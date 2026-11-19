@@ -1,6 +1,6 @@
 import { Button, Spinner } from '@kite-ai/ui/desktop';
 
-type PreviewFailure = { message: string; retry?: boolean };
+type PreviewFailure = { message: string; retry?: boolean; sourceUnavailable?: true };
 export type FilePreviewState = 'loading' | 'ready' | PreviewFailure;
 
 export function filePreviewFailure(error?: unknown): PreviewFailure {
@@ -13,6 +13,11 @@ export function filePreviewFailure(error?: unknown): PreviewFailure {
   if (typeof code === 'string' && code.startsWith('local_preview_'))
     return { message: '文件或访问权限已变化，请关闭后重新打开' };
   switch (code) {
+    case 'output_file_not_found':
+    case 'output_source_unavailable':
+    case 'output_scope_unavailable':
+    case 'output_source_observation_changed':
+      return { message: '无法读取文件信息', retry: true, sourceUnavailable: true };
     case 'preview_format_unavailable':
       return { message: '二进制文件无法打开' };
     case 'preview_text_budget':
@@ -33,9 +38,11 @@ export function filePreviewFailure(error?: unknown): PreviewFailure {
 export function NativeFilePreviewStatus({
   state,
   onRetry,
+  onEditWholeFile,
 }: {
   state: FilePreviewState;
   onRetry(): void;
+  onEditWholeFile?(): void;
 }) {
   if (state === 'ready') return null;
   return (
@@ -48,6 +55,11 @@ export function NativeFilePreviewStatus({
           {state.retry && (
             <Button variant="secondary" size="sm" onClick={onRetry}>
               重试
+            </Button>
+          )}
+          {onEditWholeFile && (
+            <Button variant="secondary" size="sm" onClick={onEditWholeFile}>
+              继续修改整个文件
             </Button>
           )}
         </div>

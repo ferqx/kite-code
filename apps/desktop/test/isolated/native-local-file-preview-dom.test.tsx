@@ -62,14 +62,22 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     name: 'document.pdf',
     mediaType: 'application/pdf',
   };
-  const show = async () =>
+  const show = async (withPdfEdit = false) =>
     act(async () =>
-      root.render(<NativeLocalFilePreview bridge={bridge} generation={1} target={target} />),
+      root.render(
+        <NativeLocalFilePreview
+          bridge={bridge}
+          generation={1}
+          target={target}
+          onRequestEdit={withPdfEdit ? async () => ({ status: 'accepted' }) : undefined}
+        />,
+      ),
     );
   try {
     await show();
     expect(document.querySelector('[aria-label="预览缩放"]')).not.toBeNull();
-    expect(document.body.textContent).not.toContain('请求修改');
+    expect(document.querySelector('[aria-label="请求修改"]')).toBeNull();
+    expect(document.querySelector('[aria-label="修改 Skill"]')).toBeNull();
     expect(document.querySelector('[aria-label="另存为"]')).toBeNull();
     expect(requests.filter((r) => r.method === 'localPreview.open')).toHaveLength(1);
     await act(async () => root.render(null));
@@ -103,13 +111,18 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     expect(document.querySelector('.native-file-preview-error button')).toBeNull();
     await act(async () => root.render(null));
     failure = 'file_read_failed';
-    await show();
+    await show(true);
+    expect(document.querySelector('[aria-label="请求修改"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('继续修改整个文件');
     expect(document.querySelector('.native-file-preview-error p')?.textContent).toBe('预览失败');
     expect(document.querySelector('.native-file-preview-error button')?.textContent).toBe('重试');
     await act(async () => root.render(null));
     failure = undefined;
     hold = true;
-    await show();
+    await show(true);
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="请求修改"]')!.disabled).toBe(
+      true,
+    );
     expect(
       document.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]'),
     ).toHaveLength(1);
@@ -117,6 +130,26 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     await act(async () => root.render(null));
     await act(async () => resolve?.({ kind: 'outputs.preview', status: 'ready' }));
     expect(document.body.textContent).toBe('');
+    hold = false;
+    await act(async () =>
+      root.render(
+        <NativeLocalFilePreview
+          bridge={bridge}
+          generation={1}
+          target={{
+            ...target,
+            handleId: 'local-xlsx',
+            name: 'budget.xlsx',
+            mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          }}
+        />,
+      ),
+    );
+    expect(document.querySelector('[aria-label="预览缩放"]')).not.toBeNull();
+    expect(
+      document.querySelector('.native-excel-readonly,.native-preview-file-actions,textarea'),
+    ).toBeNull();
+    expect(requests.some((request) => request.method === 'localPreview.interaction')).toBe(false);
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
@@ -170,6 +203,7 @@ test('local PDF Enter dispatches each frozen request once while only receipts re
             previewId: request.previewId,
             handleId: 'handle',
             selection: null,
+            requestOpen: true,
             sourceHash: 'a'.repeat(64),
             inlineRequest: {
               requestId: 'request',
@@ -222,6 +256,12 @@ test('local PDF Enter dispatches each frozen request once while only receipts re
     });
     expect(edits).toBe(1);
     expect(receipts).toBe(3);
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="请求修改"]')!.disabled).toBe(
+      true,
+    );
+    expect(document.querySelector<HTMLSelectElement>('[aria-label="预览缩放"]')!.disabled).toBe(
+      true,
+    );
     expect(document.body.textContent).toContain('不会重复发送');
     await act(async () => root.render(null));
     await act(async () => {

@@ -1,13 +1,14 @@
 /** Production toolbar components; synthetic document state only, no Service or model requests. */
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { NativeExcelReadonlyBar, NativeOfficeToolbar } from '../src/native-office-toolbar';
+import { NativeOfficeToolbar } from '../src/native-office-toolbar';
 import '../../../packages/ui/src/desktop/style.css';
 
 const kind = new URLSearchParams(location.search).get('kind') ?? 'docx';
 function Fixture() {
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const [presentation, setPresentation] = useState(false);
+  const [skillId, setSkillId] = useState('');
   const [events, setEvents] = useState<string[]>([]);
   const record = (event: string) => setEvents((old) => [...old, event]);
   return (
@@ -17,6 +18,27 @@ function Fixture() {
           name={`非常长的办公文件名称用于确保工具条不会因标题而挤出窗口.${kind}`}
           source="来源：布局测试"
           powerpoint={kind === 'pptx'}
+          excel={
+            kind === 'xlsx'
+              ? {
+                  selection: {
+                    kind: 'excel',
+                    sheet: '预算',
+                    range: 'AA10000:AZ10099',
+                    cells: [
+                      {
+                        path: '/预算/AA10000',
+                        address: 'AA10000',
+                        value: '长内容 '.repeat(30),
+                        formula: '=SUM(A1:A10)',
+                      },
+                    ],
+                  },
+                  view: { selectionSerial: 1, activeAddress: 'AA10000' },
+                  onLocate: () => record('locate'),
+                }
+              : undefined
+          }
           ready
           zoom={zoom}
           presentation={presentation}
@@ -30,27 +52,12 @@ function Fixture() {
           }}
           onEdit={() => record('edit')}
           onSave={() => record('save')}
+          skill={{
+            id: skillId,
+            options: [{ id: 'office.review', name: '非常长的修改 Skill 名称不应挤占工具栏' }],
+            select: setSkillId,
+          }}
         />
-        {kind === 'xlsx' && (
-          <NativeExcelReadonlyBar
-            ready
-            selection={{
-              kind: 'excel',
-              sheet: '预算',
-              range: 'AA10000:AZ10099',
-              cells: [
-                {
-                  path: '/预算/AA10000',
-                  address: 'AA10000',
-                  value: '长内容 '.repeat(30),
-                  formula: 'SUM(A1:A10)',
-                },
-              ],
-            }}
-            view={{ selectionSerial: 1, activeAddress: 'AA10000' }}
-            onLocate={() => record('locate')}
-          />
-        )}
         {kind === 'pptx' && (
           <details className="native-office-notes">
             <summary>演讲者备注</summary>

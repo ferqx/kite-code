@@ -149,7 +149,10 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
   const request = useRef<Request | undefined>(undefined);
   const anchor = useRef<SheetPosition | undefined>(undefined);
   const end = useRef<SheetPosition | undefined>(undefined);
-  const drag = useRef<number | undefined>(undefined);
+  // Paint the live gesture in the grid, but publish only settled selection geometry to the host.
+  const drag = useRef<
+    { pointerId: number; previous: Range | undefined; previousSerial: number } | undefined
+  >(undefined);
   const offsetsBySheet = useRef(new Map<number, { x: number; y: number }>());
   const totalWidth = cols.at(-1)!;
   const fitScale = Math.max(1, box.width - rowHeader - 1) / Math.max(1, totalWidth);
@@ -199,6 +202,10 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
   }, [sheet]);
 
   function clear() {
+    const pointerId = drag.current?.pointerId;
+    drag.current = undefined;
+    if (pointerId !== undefined && viewport.current?.hasPointerCapture(pointerId))
+      viewport.current.releasePointerCapture(pointerId);
     rangeRef.current = undefined;
     anchor.current = undefined;
     end.current = undefined;
@@ -253,7 +260,8 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
   useLayoutEffect(() => {
     const controller = {
       read(consume = true): OfficeInteraction {
-        const selection = rangeRef.current;
+        const gesture = drag.current;
+        const selection = gesture ? gesture.previous : rangeRef.current;
         const current = request.current;
         const report = current && !current.consumed;
         if (current && consume) current.consumed = true;
@@ -263,7 +271,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
           ...(selection
             ? {
                 excelSelection: {
-                  selectionSerial: selectionSerial.current,
+                  selectionSerial: gesture?.previousSerial ?? selectionSerial.current,
                   activeAddress: selection.activeAddress,
                 },
               }
@@ -280,6 +288,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
         if (command.kind === 'zoom') setZoom(command.value);
         else if (
           command.kind === 'locate-selection' &&
+          !drag.current &&
           command.selectionSerial === selectionSerial.current &&
           anchor.current
         ) {
@@ -296,7 +305,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
     Object.assign(globalThis, { kiteOfficeInteraction: controller });
     const keys = (event: KeyboardEvent) => {
       if (!event.isTrusted || request.current) return;
-      if (event.key === 'Escape' && (rangeRef.current || menu)) {
+      if (event.key === 'Escape' && (rangeRef.current || menu || drag.current)) {
         event.preventDefault();
         setMenu(undefined);
         clear();
@@ -353,6 +362,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
             !event.nativeEvent.isTrusted ||
             event.button !== 0 ||
             event.pointerType === 'touch' ||
+            drag.current ||
             request.current
           )
             return;
@@ -363,26 +373,31 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
             return;
           }
           event.preventDefault();
-          drag.current = event.pointerId;
+          drag.current = {
+            pointerId: event.pointerId,
+            previous: rangeRef.current,
+            previousSerial: selectionSerial.current,
+          };
           event.currentTarget.setPointerCapture(event.pointerId);
           select(event.shiftKey && anchor.current ? anchor.current : hit, hit);
         }}
         onPointerMove={(event) => {
-          if (!event.nativeEvent.isTrusted || drag.current !== event.pointerId) return;
+          if (!event.nativeEvent.isTrusted || drag.current?.pointerId !== event.pointerId) return;
           const hit = cellPosition(event.clientX, event.clientY, viewport.current);
           if (anchor.current && hit) select(anchor.current, hit);
         }}
         onPointerUp={(event) => {
-          if (!event.nativeEvent.isTrusted || drag.current !== event.pointerId) return;
+          if (!event.nativeEvent.isTrusted || drag.current?.pointerId !== event.pointerId) return;
           drag.current = undefined;
           const hit = cellPosition(event.clientX, event.clientY, viewport.current);
           if (anchor.current && hit) select(anchor.current, hit);
           else if (!hit) clear();
         }}
-        onLostPointerCapture={() => {
-          if (drag.current === undefined) return;
-          drag.current = undefined;
-          clear();
+        onPointerCancel={(event) => {
+          if (event.nativeEvent.isTrusted && drag.current?.pointerId === event.pointerId) clear();
+        }}
+        onLostPointerCapture={(event) => {
+          if (event.nativeEvent.isTrusted && drag.current?.pointerId === event.pointerId) clear();
         }}
       >
         <table

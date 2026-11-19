@@ -22,7 +22,11 @@ import {
   NewConversationWelcome,
 } from './NewConversation';
 import type { PromptEditorHandle } from './PromptEditor';
-import { RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH, RightSidebar } from './RightSidebar';
+import {
+  RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
+  RIGHT_SIDEBAR_MIN_WIDTH,
+  RightSidebar,
+} from './RightSidebar';
 import { ReadingStateCache } from './reading-state';
 import {
   ScheduledTaskEditor,
@@ -51,6 +55,9 @@ import { Workbench } from './Workbench';
 const SESSION_HEADER_LABEL_LIMIT = 10;
 export const NAVIGATION_MIN_WIDTH = 200;
 const NAVIGATION_MAX_WIDTH = 420;
+const SESSION_CONTENT_MIN_WIDTH = 360;
+// The content Group's right resize handle has zero layout width (its seam is painted).
+const SESSION_DOCK_MIN_WIDTH = SESSION_CONTENT_MIN_WIDTH + RIGHT_SIDEBAR_MIN_WIDTH;
 const NAVIGATION_WIDTH_STORAGE_KEY = 'kite.client.navigationWidth';
 // Match the centered column and gutters in the docked safe-area CSS. Automatic
 // opening must fit in the right gutter without narrowing or shifting the input.
@@ -432,6 +439,39 @@ function SessionPageContent({
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
   const workspaceDetails = !!props.workspaceTab || !!props.fileChangesContent;
+  const rightSidebarFormOpen = !!scheduledEditor && !!props.scheduledTasks && !hostDetailsOpen;
+  const tabsToggle = useRef<HTMLButtonElement>(null);
+  const [dockFits, setDockFits] = useState(true);
+  const dockWidth = useRef<
+    { scope: string; groupWidth: number; pixels: number; restoring: boolean } | undefined
+  >(undefined);
+  useLayoutEffect(() => {
+    // A new dock intent must not inherit a queued width restoration.
+    if (!tabsOpen || dockWidth.current?.scope !== tabsScopeKey) dockWidth.current = undefined;
+  }, [tabsScopeKey, tabsOpen]);
+  useLayoutEffect(() => {
+    const group = contentGroupElement.current;
+    if (!group) return;
+    const measure = () => {
+      const width = group.getBoundingClientRect().width;
+      if (width <= 0) return; // A hidden window cannot establish its available space.
+      const fits = width >= SESSION_DOCK_MIN_WIDTH;
+      if (!fits && !rightSidebarFormOpen) {
+        if (dockWidth.current) dockWidth.current.restoring = true;
+        const focused = group.ownerDocument.activeElement;
+        if (focused?.closest('#details, #details-resize')) tabsToggle.current?.focus();
+      }
+      setDockFits(fits);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(group);
+    return () => observer.disconnect();
+  }, [rightSidebarFormOpen]);
+  // The scheduled form already overlays the list in narrow windows. Ordinary
+  // tabs stay selected while the dock is unavailable; never squeeze both panes.
+  const canShowDetails = rightSidebarFormOpen || dockFits;
   // Native child views use the same actual Panel constraints during window resize.
   const navigationSizing = {
     minSize: sidebarOpen ? `${NAVIGATION_MIN_WIDTH}px` : '0px',
@@ -446,16 +486,21 @@ function SessionPageContent({
     collapsible: false,
   };
   const contentSizing = {
-    minSize: '360px',
+    minSize: `${SESSION_CONTENT_MIN_WIDTH}px`,
     maxSize: '100%',
     groupResizeBehavior: 'preserve-relative-size' as const,
     collapsible: false,
   };
   const detailsSizing = {
-    minSize: workspaceDetails ? '240px' : '300px',
-    maxSize:
-      workspaceDetails ||
-      tabModel.tabs.some((tab) => tab.id === tabModel.active && tab.kind === 'trajectory')
+    minSize: !canShowDetails
+      ? '0px'
+      : rightSidebarFormOpen
+        ? '300px'
+        : `${RIGHT_SIDEBAR_MIN_WIDTH}px`,
+    maxSize: !canShowDetails
+      ? '0px'
+      : workspaceDetails ||
+          tabModel.tabs.some((tab) => tab.id === tabModel.active && tab.kind === 'trajectory')
         ? '85%'
         : '640px',
     groupResizeBehavior: props.scheduledTasks
@@ -463,9 +508,7 @@ function SessionPageContent({
       : ('preserve-relative-size' as const),
     collapsible: true,
   };
-  const rightSidebarOpen =
-    hostDetailsOpen || tabsOpen || (!!scheduledEditor && !!props.scheduledTasks);
-  const rightSidebarFormOpen = !!scheduledEditor && !!props.scheduledTasks && !hostDetailsOpen;
+  const rightSidebarOpen = canShowDetails && (hostDetailsOpen || tabsOpen || rightSidebarFormOpen);
   const startDetailsAnimation = useCallback((scope: string | undefined) => {
     setDetailsAnimation({ scope });
     if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
@@ -502,16 +545,17 @@ function SessionPageContent({
     hasTabs &&
     !rightSidebarOpen &&
     !props.covered;
-  const tabsVisible = (tabsOpen || closingTabsVisible) && detailsCollapsed !== true;
+  const tabsVisible =
+    canShowDetails && (tabsOpen || closingTabsVisible) && detailsCollapsed !== true;
   const tabsPresent =
-    tabsVisible ||
-    (!rightSidebarOpen && detailsAnimating && presentedTabsKey.current === tabsScopeKey);
+    canShowDetails &&
+    (tabsVisible ||
+      (!rightSidebarOpen && detailsAnimating && presentedTabsKey.current === tabsScopeKey));
   useLayoutEffect(() => {
     if (tabsVisible) presentedTabsKey.current = tabsScopeKey;
     else if (!detailsAnimating || hostDetailsOpen || props.covered)
       presentedTabsKey.current = undefined;
   }, [tabsVisible, detailsAnimating, hostDetailsOpen, props.covered, tabsScopeKey]);
-  const tabsToggle = useRef<HTMLButtonElement>(null);
   const scheduledEditorToggle = useRef<HTMLButtonElement | null>(null);
   const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
     queueMicrotask(() => control.current?.focus());
@@ -550,6 +594,17 @@ function SessionPageContent({
         if (!target) return;
         const openingWidth =
           open && panel === detailsPanel ? detailsOpeningWidth.current : undefined;
+        const saved = open && panel === detailsPanel ? dockWidth.current : undefined;
+        if (saved?.restoring && openingWidth === undefined) {
+          const available = group.getBoundingClientRect().width;
+          if (available < SESSION_DOCK_MIN_WIDTH) return;
+          const width = Math.min(saved.pixels, available - SESSION_CONTENT_MIN_WIDTH);
+          // A temporarily clamped allocation is not a new user preference.
+          if (available >= saved.groupWidth && width >= saved.pixels) saved.restoring = false;
+          if (target.isCollapsed() || Math.abs(target.getSize().inPixels - width) > 1)
+            target.resize(`${width}px`);
+          return;
+        }
         if (
           panel !== navigationPanel &&
           target.isCollapsed() !== open &&
@@ -1016,13 +1071,15 @@ function SessionPageContent({
     if (!detailsScope.current.settling) return;
     // The old owner's queued panel action must never run on the new owner.
     // Pending selection/restore is not an empty target or a user-close intent.
-    const open = rightSidebarOpen || (tabsIntent.current.key === tabsScopeKey && hasTabs);
+    const open =
+      canShowDetails && (rightSidebarOpen || (tabsIntent.current.key === tabsScopeKey && hasTabs));
     if (!open && detailsPending) return;
     settleDetails(open);
     detailsScope.current.settling = false;
   }, [
     tabsScopeKey,
     rightSidebarOpen,
+    canShowDetails,
     hasTabs,
     detailsPending,
     stopDetailsAnimation,
@@ -1143,7 +1200,7 @@ function SessionPageContent({
         document.querySelector('[role="dialog"]')
       )
         return;
-      if (rightSidebarOpen) {
+      if (rightSidebarOpen || tabsOpen) {
         detailClose.current?.();
         if (tabsOpen) changeTabsOpen(false);
         else collapseDetails();
@@ -1474,9 +1531,27 @@ function SessionPageContent({
                   setDetailsCollapsed(collapsed);
               }}
               onLayoutChanged={(layout, meta) => {
+                const groupWidth = contentGroupElement.current?.getBoundingClientRect().width ?? 0;
+                if (
+                  meta.isUserInteraction &&
+                  tabsOpen &&
+                  groupWidth >= SESSION_DOCK_MIN_WIDTH &&
+                  (layout.details ?? 0) > 0
+                )
+                  dockWidth.current = {
+                    scope: tabsScopeKey,
+                    groupWidth,
+                    pixels: (groupWidth * layout.details!) / 100,
+                    restoring: false,
+                  };
                 if (meta.isUserInteraction && hasChangesWorkspace && activeChanges && tabsOpen)
                   changesLayout.current = { scope: tabsScopeKey, prepared: true };
-                if (meta.isUserInteraction && rightSidebarOpen && (layout.details ?? 0) === 0)
+                if (
+                  meta.isUserInteraction &&
+                  rightSidebarOpen &&
+                  (layout.details ?? 0) === 0 &&
+                  groupWidth >= SESSION_DOCK_MIN_WIDTH
+                )
                   closeRightSidebar();
               }}
             >
@@ -1536,17 +1611,18 @@ function SessionPageContent({
                       <Button
                         ref={tabsToggle}
                         className="ghost"
-                        aria-expanded={tabsOpen}
+                        aria-expanded={tabsOpen && canShowDetails}
                         size="icon-sm"
                         aria-label="标签页"
-                        title="标签页"
+                        title={dockFits ? '标签页' : '拉宽窗口或收起左栏以显示标签页'}
                         aria-controls="session-tabs"
                         onClick={() => {
-                          if (!tabsOpen) {
+                          const open = !tabsOpen || !dockFits;
+                          if (open) {
                             if (tabModel.tabs.length === 0) tabModel.addBrowser();
                             props.detailPanel?.onClose();
                           }
-                          changeTabsOpen(!tabsOpen);
+                          changeTabsOpen(open);
                         }}
                       >
                         <HugeiconsIcon icon={BrowserIcon} />
@@ -1728,12 +1804,9 @@ function SessionPageContent({
                 <div
                   className="collapsible-sidebar-content"
                   style={{
-                    minWidth:
-                      scheduledEditor && props.scheduledTasks
-                        ? 'min(300px, 100cqi)'
-                        : workspaceDetails
-                          ? '240px'
-                          : '300px',
+                    minWidth: rightSidebarFormOpen
+                      ? 'min(300px, 100cqi)'
+                      : `${RIGHT_SIDEBAR_MIN_WIDTH}px`,
                   }}
                   aria-hidden={!rightSidebarOpen && !closingTabsVisible}
                   inert={!rightSidebarOpen && !closingTabsVisible}
@@ -1751,6 +1824,7 @@ function SessionPageContent({
                           : undefined
                       }
                       visible={tabsVisible && !props.covered && !props.detailPanel}
+                      retainSelectedFile={tabsOpen && !props.covered && !hostDetailsOpen}
                       present={tabsPresent && !props.covered && !props.detailPanel}
                       renderBrowser={props.renderBrowser}
                       renderChildSession={props.renderChildSession}

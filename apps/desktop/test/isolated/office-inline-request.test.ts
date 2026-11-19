@@ -222,14 +222,7 @@ test('isolated Office chrome follows the client palette and platform font withou
       value(dark, 'composer-border-color') +
       ')',
   );
-  const platformFont =
-    process.platform === 'win32'
-      ? '"Segoe WPC", "Segoe UI", "Microsoft YaHei", sans-serif'
-      : process.platform === 'darwin'
-        ? '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif'
-        : 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
-  expect(desktop).toContain(platformFont);
-  expect(officeChromeCss).toContain(platformFont);
+  expect(officeChromeCss).toContain(`--office-font: ${value(shared, 'font-ui')};`);
   expect(officeChromeCss).toContain('prefers-color-scheme: dark');
   expect(officeRequestHtml).not.toMatch(/<script|<link|url\(/i);
   expect(officeRequestHtml).toContain(`border-radius:${value(shared, 'radius')}`);
@@ -266,7 +259,8 @@ test('Office toolbar keeps shared neutral states and compact client control metr
     '[aria-pressed="true"]',
   ])
     expect(css).toContain(state);
-  expect(css).toContain('min-height: 28px');
+  expect(css).toContain('height: 30px');
+  expect(css).toContain('height: 24px');
   expect(css).not.toMatch(/#[0-9a-f]{3,8}|border-radius: (22|24)px/i);
 });
 

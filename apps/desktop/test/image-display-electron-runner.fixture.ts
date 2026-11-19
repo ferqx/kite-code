@@ -385,14 +385,33 @@ try {
       assert.ok(image.src.startsWith('kite-preview:'));
       assert.ok(!image.src.includes('/source'));
       await checkpoint(`04-${local ? 'local' : 'output'}-${source.split('/').pop()}`, page);
+      const localZoom = page.getByRole('combobox', { name: '图片缩放' });
+      assert.equal(await localZoom.count(), local ? 1 : 0);
+      const choose = async (value: import('../src/image-zoom').ImageZoomChoice) =>
+        local
+          ? localZoom.selectOption(value)
+          : application.evaluate((_, v) => globalThis.imageDisplayMain.zoom(v), value);
       if (source === widePath) {
         const fitted = await page.evaluate(() => ({
           viewport: innerWidth,
           width: document.getElementById('image-stage')!.getBoundingClientRect().width,
-          label: document.getElementById('image-zoom-label')!.textContent,
         }));
-        assert.deepEqual(fitted, { viewport: 320, width: 320, label: '0.8%' });
-        await page.getByRole('button', { name: '缩小', exact: true }).click();
+        assert.deepEqual(fitted, { viewport: 320, width: 320 });
+        if (local) {
+          assert.equal(await localZoom.getAttribute('title'), '适合宽度（0.8%）');
+          assert.equal(await localZoom.locator('option[value="out"]').getAttribute('disabled'), '');
+        } else {
+          assert.deepEqual(
+            await application.evaluate(() => globalThis.imageDisplayMain.zoom('state')),
+            { fit: true, scale: 0.008, minimum: 0.008 },
+          );
+          assert.equal(
+            await page.locator('#image-stage').evaluate((el) => el.getBoundingClientRect().top),
+            0,
+          );
+        }
+        await choose('in');
+        await choose('out');
         assert.equal(
           await page.locator('#image-stage').evaluate((node) => node.getBoundingClientRect().width),
           320,
@@ -400,11 +419,11 @@ try {
         await checkpoint(`04-${local ? 'local' : 'output'}-wide-fit-320`, page);
       }
       if (source === longPath) {
-        await page.getByRole('button', { name: '原始大小', exact: true }).click();
+        await choose('1');
         await page.evaluate(() => scrollTo(0, 20000));
         await page.waitForFunction(() => {
           const image = document.querySelector<HTMLImageElement>('[data-image-region="current"]');
-          const region = image && (Reflect.get(image, 'region') as { top: number } | undefined);
+          const region = image && { top: parseFloat(image.style.top) };
           return (
             !!image?.complete &&
             image.naturalWidth === Math.min(innerWidth, 1000) &&
@@ -420,7 +439,7 @@ try {
         });
         await page.waitForFunction(() => {
           const image = document.querySelector<HTMLImageElement>('[data-image-region="current"]');
-          const region = image && (Reflect.get(image, 'region') as { top: number } | undefined);
+          const region = image && { top: parseFloat(image.style.top) };
           return !!image?.complete && !!region && region.top >= 29000;
         });
         assert.equal(await page.locator('img').count(), 2);

@@ -1,13 +1,15 @@
 import type { OutputFileTarget } from '@kite-ai/client';
-import { Button, type OutputFileSummary } from '@kite-ai/ui/desktop';
+import type { OutputFileSummary } from '@kite-ai/ui/desktop';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { filePreviewFormat } from './file-preview-format';
 import type { NativeBridge } from './native-bridge';
 import {
   type FilePreviewState,
   filePreviewFailure,
   NativeFilePreviewStatus,
 } from './native-file-preview-status';
-import { NativeExcelReadonlyBar, NativeOfficeToolbar } from './native-office-toolbar';
+import { NativeImageZoom } from './native-image-zoom';
+import { NativeOfficeToolbar, NativePreviewToolbar } from './native-office-toolbar';
 import { presentNativePreview } from './native-preview-presentation';
 import { readNativeSkillCatalogue } from './native-skills';
 import type {
@@ -56,6 +58,16 @@ function FilePreview(props: Props) {
   const isPdf = !!file && (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name));
   const isPpt = !!file && /\.pptx$/i.test(file.name);
   const isOffice = isPdf || (!!file && /\.(pptx|docx|xlsx)$/i.test(file.name));
+  const selectionReady = status === 'ready' && !interaction?.requestOpen;
+  // Only this attempt’s verified output can become a whole-file draft.
+  const failedOfficeFile =
+    isOffice &&
+    fileRead?.retry === retry &&
+    typeof status === 'object' &&
+    !status.sourceUnavailable &&
+    !interaction?.requestOpen
+      ? file
+      : undefined;
   useEffect(() => {
     const bridge = props.bridge;
     if (!isOffice || !bridge) return;
@@ -116,6 +128,7 @@ function FilePreview(props: Props) {
     const { file } = fileRead;
     let cancelled = false;
     setStatus('loading');
+    setIssue('');
     setInteraction(undefined);
     setPresentation(false);
     const previewId = crypto.randomUUID();
@@ -241,7 +254,10 @@ function FilePreview(props: Props) {
       bridge,
       props.generation,
       previewId,
-      (message) => setStatus(message ? { message } : 'ready'),
+      (message) => {
+        if (message) setIssue('');
+        setStatus(message ? { message } : 'ready');
+      },
     );
     void bridge
       .request({
@@ -304,7 +320,7 @@ function FilePreview(props: Props) {
         setInteraction((old) => (old ? { ...old, currentSlide: command.value } : old));
       setIssue('');
     } catch {
-      if (alive.current)
+      if (alive.current && preview.current === id)
         setIssue(
           interaction?.requestOpen
             ? '请先发送或关闭当前修改输入，再调整预览。'
@@ -313,7 +329,7 @@ function FilePreview(props: Props) {
     }
   }
   async function requestEdit() {
-    if (!file || editPending.current) return;
+    if (!file || !selectionReady || editPending.current) return;
     editPending.current = true;
     try {
       let current: OfficePreviewInteraction | undefined;
@@ -336,11 +352,12 @@ function FilePreview(props: Props) {
             current = result.interaction;
           else throw Error('selection_unavailable');
         } catch {
-          if (alive.current) setIssue('无法读取当前选区，请重试；尚未发送修改请求。');
+          if (alive.current && preview.current === id)
+            setIssue('无法读取当前选区，请重试；尚未发送修改请求。');
           return;
         }
       }
-      if (!alive.current) return;
+      if (!alive.current || preview.current !== id || current?.requestOpen) return;
       if (isOffice) {
         if (!id || !current || (!current.selection && !isPpt)) {
           setIssue('请先选择需要修改的文字或单元格。');
@@ -353,21 +370,28 @@ function FilePreview(props: Props) {
     }
   }
   return (
-    <section
-      className="native-file-preview"
-      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
-    >
+    <section className="native-file-preview" aria-label={file ? `预览 ${file.name}` : '文件预览'}>
       {isOffice && file ? (
         <NativeOfficeToolbar
           name={file.name}
           source={`来源：Run ${file.ownerRunId}`}
           powerpoint={isPpt}
-          ready={status === 'ready' && !interaction?.requestOpen}
+          excel={
+            /\.xlsx$/i.test(file.name)
+              ? {
+                  selection: interaction?.selection ?? null,
+                  view: interaction?.excelSelection,
+                  onLocate: (selectionSerial) =>
+                    void control({ kind: 'locate-selection', selectionSerial }),
+                }
+              : undefined
+          }
+          ready={selectionReady}
           zoom={zoom}
           presentation={presentation}
           onZoom={(value) => void control({ kind: 'zoom', value })}
           onPresentation={() => void control({ kind: 'presentation', value: !presentation })}
-          onEdit={() => void requestEdit()}
+          onEdit={typeof status === 'object' ? undefined : () => void requestEdit()}
           onSave={() => props.onSave(file)}
           skill={
             skills.length
@@ -382,41 +406,39 @@ function FilePreview(props: Props) {
               : undefined
           }
         />
-      ) : (
-        <header>
-          {file?.name ?? '已保存的文件'}
-          {file && (
-            <>
-              <Button onClick={() => props.onSave(file)}>另存为</Button>
-              <Button onClick={() => props.onEdit(file)}>继续修改</Button>
-            </>
-          )}
-        </header>
-      )}
+      ) : file ? (
+        <NativePreviewToolbar
+          name={file.name}
+          reading={
+            filePreviewFormat(file.name, file.mediaType) === 'image' ? (
+              <NativeImageZoom
+                bridge={props.bridge}
+                generation={props.generation}
+                previewId={status === 'ready' ? preview.current : undefined}
+                onIssue={setIssue}
+              />
+            ) : undefined
+          }
+          editLabel="继续修改"
+          onEdit={() => props.onEdit(file)}
+          onSave={() => props.onSave(file)}
+        />
+      ) : null}
       {isPpt && interaction?.notes?.trim() && status === 'ready' && (
         <details className="native-office-notes" key={interaction.currentSlide}>
           <summary>演讲者备注</summary>
           <p>{interaction.notes}</p>
         </details>
       )}
-      {file && /\.xlsx$/i.test(file.name) && (
-        <NativeExcelReadonlyBar
-          selection={interaction?.selection ?? null}
-          view={interaction?.excelSelection}
-          ready={status === 'ready' && !interaction?.requestOpen}
-          onLocate={(selectionSerial) =>
-            void control({ kind: 'locate-selection', selectionSerial })
-          }
-        />
-      )}
-      {issue && (
+      {status === 'ready' && issue && (
         <div className="native-office-status" role="status">
           {issue}
         </div>
       )}
-      <div ref={viewport} style={{ flex: 1, minHeight: 80, overflow: 'auto' }}>
+      <div ref={viewport} className="native-file-preview-viewport native-file-preview-output">
         <NativeFilePreviewStatus
           state={status}
+          onEditWholeFile={failedOfficeFile ? () => props.onEdit(failedOfficeFile) : undefined}
           onRetry={() => {
             setStatus('loading');
             setRetry((value) => value + 1);

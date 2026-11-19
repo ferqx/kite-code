@@ -1,4 +1,5 @@
 import { parseDesktopMarkdown } from '@kite-ai/ui/desktop/markdown';
+import { isolatedPreviewChromeCss } from './isolated-preview-chrome';
 
 export function escapePreviewText(text: string): string {
   return text
@@ -72,10 +73,30 @@ export function markdownPreview(text: string): string {
         return content();
     }
   };
-  return previewDocument(render(tree as Node));
+  return previewDocument(render(tree as Node), 'markdown');
 }
-export function previewDocument(body: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:15px/1.65 system-ui,sans-serif;color:#202124;margin:0;padding:24px;overflow-wrap:anywhere}h1,h2,h3{line-height:1.3}pre{white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:6px}code{font-size:.9em}table{border-collapse:collapse;max-width:100%;display:block;overflow:auto}td{border:1px solid #ddd;padding:6px 10px}blockquote{border-left:3px solid #ccc;margin-left:0;padding-left:16px;color:#666}</style></head><body>${body}</body></html>`;
+export function previewDocument(body: string, kind: 'text' | 'markdown' = 'text'): string {
+  return `<!doctype html><html class="kite-file-preview-chrome"><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>
+${isolatedPreviewChromeCss}
+html{background:var(--office-background)}
+body{box-sizing:border-box;margin:0 auto;padding:clamp(12px,4vw,26px);font:14px/1.65 var(--office-font);overflow-wrap:anywhere}
+.markdown{max-width:76ch}
+body>:first-child,blockquote>:first-child,li>:first-child{margin-block-start:0}
+body>:last-child,blockquote>:last-child,li>:last-child{margin-block-end:0}
+:where(p,pre,ul,ol,table,blockquote,hr){margin-block:0 12px}
+:where(h1,h2,h3,h4,h5,h6){margin-block:20px 8px;font-weight:600;line-height:1.35}
+h1{font-size:1.5em}h2{font-size:1.25em}h3{font-size:1.125em}
+:where(h1,h2):not(:last-child){padding-block-end:.3em;border-block-end:1px solid var(--office-border)}
+ul,ol{padding-inline-start:1.5em}li+li{margin-block-start:2px}
+pre,code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
+pre{white-space:pre-wrap;tab-size:4}
+:not(pre)>code{padding:1px 4px;border-radius:4px;background:var(--office-selected)}
+pre:has(>code),blockquote{padding:9px 12px;background:var(--office-card);border:1px solid var(--office-border);border-radius:6px}
+blockquote{margin-inline:0;border-inline-start:3px solid var(--office-muted)}
+table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}
+td{border-block-end:1px solid var(--office-border);padding:6px 10px;text-align:start}tr:first-child{font-weight:600}
+hr{border:0;border-block-start:1px solid var(--office-border)}
+</style></head><body class="${kind}">${body}</body></html>`;
 }
 export function previewUtf8(bytes: Uint8Array): string | undefined {
   try {

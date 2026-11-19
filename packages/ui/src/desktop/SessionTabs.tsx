@@ -89,6 +89,8 @@ export interface SessionTabsProps {
   readonly model: SessionTabsModel;
   readonly visible: boolean;
   readonly present?: boolean;
+  /** An open dock can be temporarily unallocated while the window resizes. */
+  readonly retainSelectedFile?: boolean;
   readonly changes: ReactNode;
   readonly renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
   readonly renderChildSession?: (props: SessionChildPageProps) => ReactNode;
@@ -626,26 +628,73 @@ export function useSessionTabs(
   };
 }
 
-function SessionTabsHeader({ data, dispatch }: SessionTabsHeaderPresentation) {
+function SessionTabsHeader({
+  data,
+  dispatch,
+  visible,
+}: SessionTabsHeaderPresentation & { visible: boolean }) {
+  const activeTab = useRef<HTMLDivElement>(null);
+  const keyboardClose = useRef<HTMLButtonElement | null>(null);
+  useLayoutEffect(() => {
+    const closed = keyboardClose.current;
+    if (!closed) return;
+    keyboardClose.current = null;
+    if (!visible || closed.isConnected) return;
+    // The focused close button was removed. Leave newer focus and pointer actions alone.
+    if (closed.ownerDocument.activeElement === closed.ownerDocument.body)
+      activeTab.current
+        ?.querySelector<HTMLButtonElement>('[role="tab"]')
+        ?.focus({ preventScroll: true });
+  });
+  useLayoutEffect(() => {
+    const tab = activeTab.current;
+    const strip = tab?.parentElement;
+    if (!visible || !data.active || !tab || !strip) return;
+    // Opening a file can select a tab without moving keyboard focus. Reveal the
+    // whole chip, including its close button, without scrolling its ancestors.
+    const reveal = () => {
+      if (strip.scrollWidth <= strip.clientWidth) return;
+      const viewport = strip.getBoundingClientRect();
+      const item = tab.getBoundingClientRect();
+      if (item.left < viewport.left) strip.scrollLeft += item.left - viewport.left;
+      else if (item.right > viewport.right) strip.scrollLeft += item.right - viewport.right;
+    };
+    reveal();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(strip);
+    observer.observe(tab);
+    return () => observer.disconnect();
+  }, [visible, data.active]);
   return (
     <header className="right-sidebar-heading session-tabs-heading">
       <TabsList aria-label="右侧栏标签页" className="session-tabs-list">
         {data.tabs.map((tab) => (
-          <div className="session-tab" data-active={tab.id === data.active} key={tab.id}>
+          <div
+            className="session-tab"
+            data-active={tab.id === data.active}
+            key={tab.id}
+            ref={tab.id === data.active ? activeTab : undefined}
+          >
             <TabsTrigger value={tab.id} title={tab.title}>
               {tab.kind === 'child' && tab.childAgentIdentity ? (
                 <ChildAgentIcon identity={tab.childAgentIdentity} />
               ) : (
                 <HugeiconsIcon icon={tabIcons[tab.kind]} aria-hidden="true" />
               )}
-              <span>{tab.title}</span>
+              <span className="session-tab-label">{tab.title}</span>
             </TabsTrigger>
             <Button
               className="ghost session-tab-close"
               size="icon-xs"
               aria-label={`关闭标签页：${tab.title}`}
               title={`关闭标签页：${tab.title}`}
-              onClick={() => {
+              onClick={(event) => {
+                keyboardClose.current =
+                  event.detail === 0 &&
+                  event.currentTarget.ownerDocument.activeElement === event.currentTarget
+                    ? event.currentTarget
+                    : null;
                 dispatch({ type: 'close', id: tab.id });
               }}
             >
@@ -730,6 +779,7 @@ export function SessionTabs({
   model,
   visible,
   present = true,
+  retainSelectedFile = false,
   changes,
   renderBrowser,
   renderChildSession,
@@ -740,6 +790,15 @@ export function SessionTabs({
   onClose,
 }: SessionTabsProps) {
   const { tabs, active, title, openChanges } = model;
+  const selected = tabs.find((tab) => tab.id === active);
+  const selectedFile = selected?.kind === 'file' ? selected : undefined;
+  // Do not open a new file in the background or retain an inactive file. Keep
+  // only the already-presented owner until its still-open dock can draw again.
+  const lastFile = useRef<SessionFileTarget | undefined>(undefined);
+  const showFile = visible || (retainSelectedFile && selectedFile?.target === lastFile.current);
+  useLayoutEffect(() => {
+    lastFile.current = showFile ? selectedFile?.target : undefined;
+  }, [showFile, selectedFile]);
   const localChrome: SessionTabsHeaderPresentation = {
     data: model,
     dispatch: (action) => dispatchTabsAction({ model, onClose, workspace }, action),
@@ -801,13 +860,13 @@ export function SessionTabs({
       inert={!visible}
     >
       <Tabs className="session-tabs-root" value={active} onValueChange={model.select}>
-        <SessionTabsHeader {...localChrome} />
+        <SessionTabsHeader {...localChrome} visible={present && visible} />
         <SessionTabsRestoreStatus {...localChrome} />
         {tabs.map((tab) => (
           <TabsContent className="session-tab-content" value={tab.id} key={tab.id} forceMount>
             {tab.kind === 'file' ? (
-              visible && active === tab.id ? (
-                renderFile?.({ target: tab.target, visible: true })
+              showFile && active === tab.id ? (
+                renderFile?.({ target: tab.target, visible })
               ) : null
             ) : tab.kind === 'workspace' ? (
               <div className="session-tab-workspace">

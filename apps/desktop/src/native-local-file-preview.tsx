@@ -30,6 +30,7 @@ export function NativeLocalFilePreview({
   requestEdit.current = onRequestEdit;
   const pdf = filePreviewFormat(target.name, target.mediaType) === 'pdf';
   const [issue, setIssue] = useState('');
+  const [requestOpen, setRequestOpen] = useState(false);
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const paged = ['office', 'pdf'].includes(filePreviewFormat(target.name, target.mediaType));
   const [status, setStatus] = useState<FilePreviewState>('loading');
@@ -66,6 +67,7 @@ export function NativeLocalFilePreview({
       setIssue,
     );
     setStatus('loading');
+    setRequestOpen(false);
     setIssue('');
     void bridge
       .request({
@@ -140,6 +142,7 @@ export function NativeLocalFilePreview({
           value.handleId !== target.handleId
         )
           return;
+        setRequestOpen(!!value.requestOpen);
         const request = value.inlineRequest;
         if (!request || request.context.sourceHash !== value.sourceHash) return;
         if (submitted.has(request.requestId)) {
@@ -205,22 +208,18 @@ export function NativeLocalFilePreview({
     };
   }, [bridge, generation, target.handleId, retry, pdf]);
   return (
-    <section
-      className="native-file-preview"
-      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
-      aria-label={`预览 ${target.name}`}
-    >
+    <section className="native-file-preview" aria-label={`预览 ${target.name}`}>
       {paged && (
         <NativeOfficeToolbar
           name={target.name}
           source={pdf && onRequestEdit ? '本地文件，原路径引用' : '本地文件，只读预览'}
           powerpoint={false}
-          ready={status === 'ready'}
+          ready={status === 'ready' && !requestOpen}
           zoom={zoom}
           presentation={false}
           onPresentation={() => {}}
           onEdit={
-            pdf && onRequestEdit
+            pdf && onRequestEdit && typeof status !== 'object'
               ? () => {
                   const id = preview.current;
                   if (!id || !bridge) return;
@@ -231,7 +230,9 @@ export function NativeLocalFilePreview({
                       previewId: id,
                       control: { kind: 'request-edit' },
                     })
-                    .catch(() => setIssue('无法读取当前选区，请重新选择。'));
+                    .catch(() => {
+                      if (preview.current === id) setIssue('无法读取当前选区，请重新选择。');
+                    });
                 }
               : undefined
           }
@@ -257,12 +258,12 @@ export function NativeLocalFilePreview({
           }}
         />
       )}
-      {issue && <div role="status">{issue}</div>}
-      <div
-        ref={viewport}
-        className="native-file-preview-viewport"
-        style={{ flex: 1, minHeight: 0 }}
-      >
+      {status === 'ready' && issue && (
+        <div className="native-office-status" role="status">
+          {issue}
+        </div>
+      )}
+      <div ref={viewport} className="native-file-preview-viewport">
         <NativeFilePreviewStatus state={status} onRetry={() => setRetry((value) => value + 1)} />
       </div>
     </section>

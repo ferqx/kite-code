@@ -5,6 +5,7 @@ import { ScrollArea } from './components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Button } from './ui';
 
+export const RIGHT_SIDEBAR_MIN_WIDTH = 320;
 export const RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH = 420;
 
 export interface RightSidebarTab {

@@ -1,4 +1,7 @@
 .native-file-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   container-type: inline-size;
@@ -7,6 +10,14 @@
   color: var(--foreground);
   font-family: var(--font-ui);
   font-size: 13px;
+}
+.native-file-preview-viewport {
+  flex: 1;
+  min-height: 0;
+}
+.native-file-preview-output {
+  min-height: 80px;
+  overflow: auto;
 }
 .native-file-preview-state {
   display: grid;
@@ -26,115 +37,157 @@
 .native-file-preview-error p {
   margin: 0;
 }
-.native-office-toolbar {
-  align-self: center;
-  width: fit-content;
-  max-width: calc(100% - 16px);
-  margin: 8px auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--card, var(--page-background));
-  box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
-  padding: 3px;
-  flex-shrink: 0;
-  min-width: 0;
-}
-.native-office-button-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
+.native-preview-toolbar,
+.native-preview-toolbar fieldset {
+  min-inline-size: 0;
+  margin: 0;
   padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
+  border: 0;
+}
+.native-preview-toolbar,
+.native-preview-file-actions,
+.native-preview-capsule {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+.native-preview-toolbar {
+  align-self: center;
+  width: max-content;
+  max-width: calc(100% - 8px);
+  margin: 6px auto;
+  gap: 12px;
   white-space: nowrap;
 }
-.native-office-edit-actions {
-  flex-shrink: 0;
-  max-width: 100%;
-  min-width: 0;
+.native-preview-toolbar[data-align="end"] {
+  align-self: flex-end;
+  margin-inline: 4px 6px;
 }
-.native-office-edit-actions select {
-  max-width: min(120px, calc(100cqw - 56px));
-  min-width: 0;
+.native-preview-file-actions {
+  gap: 8px;
 }
-.native-office-view-actions {
-  margin-left: 0;
-  min-width: 0;
+.native-preview-toolbar .native-preview-capsule,
+.native-preview-toolbar button.native-preview-save {
+  border: 1px solid var(--composer-border-color);
+  background-color: var(--control-hover);
 }
-.native-office-file-actions {
-  flex-shrink: 0;
-  border-left: 1px solid var(--border);
-  padding-left: 4px;
+.native-preview-toolbar .native-preview-capsule {
+  box-sizing: border-box;
+  gap: 4px;
+  padding: 1px 4px;
+  border-radius: 999px;
 }
-.native-office-pill .native-office-icon-button {
+.native-preview-toolbar button,
+.native-preview-toolbar select {
+  box-sizing: border-box;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
   display: grid;
   place-items: center;
-  padding: 4px;
-  width: 28px;
-  flex: 0 0 28px;
-}
-.native-office-icon-button svg {
-  width: 18px;
-  height: 18px;
-}
-.native-office-pill {
-  display: flex;
-  align-items: center;
-  gap: var(--control-gap, 4px);
-}
-.native-office-pill button,
-.native-office-pill select {
-  min-height: 28px;
-  border: 0;
+  appearance: none;
   background: transparent;
   color: inherit;
-  padding: 4px 8px;
-  border-radius: var(--button-radius, 8px);
   font: inherit;
-  font-size: 13px;
-  line-height: 18px;
   cursor: pointer;
-  transition:
-    background-color 100ms,
-    color 100ms;
 }
-.native-office-pill button:hover:not(:disabled),
-.native-office-pill select:hover:not(:disabled),
-.native-office-notes summary:hover {
-  background: var(--control-hover);
+.native-preview-toolbar button.native-preview-save {
+  width: 34px;
+  height: 34px;
 }
-.native-office-pill button[aria-pressed="true"] {
-  background: var(--control-selected);
+.native-preview-toolbar :is(button, select):hover:not(:disabled),
+.native-preview-toolbar button[aria-pressed="true"] {
+  background-color: var(--control-selected);
 }
-.native-office-pill button:active:not(:disabled),
-.native-office-pill select:active:not(:disabled),
-.native-office-notes summary:active {
-  background: var(--control-pressed);
+.native-preview-toolbar :is(button, select):active:not(:disabled) {
+  background-color: var(--control-pressed);
 }
-.native-office-pill button:focus-visible,
-.native-office-pill select:focus-visible,
-.native-office-notes summary:focus-visible {
+.native-preview-toolbar :is(button, select):focus-visible {
   outline: 1px solid var(--foreground);
   outline-offset: -2px;
+  background-color: var(--control-selected);
 }
-.native-office-pill button:disabled,
-.native-office-pill select:disabled {
+.native-preview-toolbar :is(button, select):disabled {
   opacity: 0.5;
   cursor: default;
 }
-.native-office-pill select {
-  width: 106px;
-  max-width: 100%;
-  min-width: 0;
+.native-preview-toolbar svg {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
 }
-.native-office-pill option {
+.native-preview-zoom,
+.native-preview-more {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.native-preview-zoom select {
+  display: block;
+  text-align: center;
+  width: 54px;
+  padding: 0 15px 0 3px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.native-preview-zoom svg {
+  position: absolute;
+  right: 4px;
+  width: 10px;
+  height: 10px;
+}
+/* Keep the system menu and its option colors native. Only its closed trigger
+   is visually replaced; pointer input, keyboard focus and the accessible value stay on select. */
+.native-preview-more {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+}
+.native-preview-more select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.native-preview-more:has(select:hover:not(:disabled)),
+.native-preview-more:has(select:focus-visible) {
+  background-color: var(--control-selected);
+}
+.native-preview-more:has(select:active:not(:disabled)) {
+  background-color: var(--control-pressed);
+}
+.native-preview-more:has(select:focus-visible) {
+  outline: 1px solid var(--foreground);
+  outline-offset: -2px;
+}
+.native-preview-toolbar .native-preview-more select:disabled {
+  opacity: 0;
+}
+.native-preview-more svg {
+  position: absolute;
+}
+.native-preview-toolbar option,
+.native-preview-toolbar optgroup {
   background: var(--card);
   color: var(--foreground);
+}
+.native-preview-toolbar select:disabled + svg {
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .native-preview-toolbar :is(button, select) {
+    transition:
+      background-color 100ms,
+      color 100ms;
+  }
+}
+.native-office-notes summary:hover {
+  background: var(--control-hover);
+}
+.native-office-notes summary:active {
+  background: var(--control-pressed);
 }
 .native-office-status {
   padding: 4px 12px;
@@ -162,105 +215,130 @@
   max-height: 140px;
   overflow: auto;
 }
-@media (prefers-reduced-motion: reduce) {
-  .native-office-pill button,
-  .native-office-pill select {
-    transition: none;
-  }
-}
 .native-excel-readonly {
-  flex-shrink: 0;
-  min-width: 0;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  flex: none;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  height: 32px;
+  padding: 0 2px;
+  margin: 0;
+  border: 0;
+  border-block: 1px solid var(--border);
+  background: var(--page-background);
 }
-.native-excel-readonly-row {
-  align-items: flex-start;
+.native-excel-readonly button {
+  flex: none;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
-.native-excel-readonly-row > button:first-child {
-  min-width: 72px;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.native-excel-readonly button:hover:not(:disabled),
+.native-excel-readonly button:focus-visible {
+  background-color: var(--control-selected);
 }
-.native-excel-dimensions {
-  font-size: 12px;
-  line-height: 28px;
-  white-space: nowrap;
+.native-excel-readonly button:active:not(:disabled) {
+  background-color: var(--control-pressed);
+}
+.native-excel-readonly button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.native-excel-range {
+  min-width: 54px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font: 500 12px / 1 var(--font-mono);
+  text-align: start;
 }
 .native-excel-value {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
   flex: 1;
   min-width: 0;
+  gap: 5px;
+  padding-inline: 6px 2px;
+  border-inline-start: 1px solid var(--composer-border-color);
 }
-.native-excel-value > span {
-  line-height: 28px;
-  white-space: nowrap;
+.native-excel-value i {
+  flex: none;
+  font:
+    italic 13px Georgia,
+    serif;
+  color: var(--muted-foreground);
+}
+.native-excel-value textarea,
+.native-excel-details textarea {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  resize: none;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: 12px / 18px var(--font-mono);
 }
 .native-excel-value textarea {
-  min-height: 0;
-  max-height: none;
-  height: 28px;
   flex: 1;
+  width: 0;
+  height: 24px;
+  padding: 3px 0;
+  overflow: hidden;
+}
+.native-excel-readonly .native-excel-expand {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--muted-foreground);
+}
+.native-excel-expand svg {
+  width: 12px;
+  height: 12px;
+}
+.native-excel-expand[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.native-excel-details {
+  display: block;
+  flex: none;
+  margin: 0 6px 6px;
+  padding: 5px 8px;
   min-width: 0;
-  box-sizing: border-box;
-  resize: none;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 8px;
-  color: var(--foreground);
-  background: var(--page-background);
-  font: inherit;
-  line-height: 18px;
+  border-radius: var(--button-radius, 8px);
+  background: var(--card);
 }
-.native-excel-value textarea[rows="5"] {
+.native-excel-details span {
+  display: block;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.native-excel-details textarea {
+  width: 100%;
   height: 100px;
+  padding: 4px 0;
 }
+.native-excel-readonly button:focus-visible,
 .native-excel-value textarea:focus-visible,
+.native-excel-details textarea:focus-visible,
 .native-office-notes summary:focus-visible {
   outline: 1px solid var(--foreground);
   outline-offset: -2px;
 }
-
 @container office-preview (max-width: 260px) {
-  .native-office-toolbar {
-    gap: 2px;
-    max-width: calc(100% - 8px);
-    margin: 6px auto;
+  .native-preview-toolbar {
+    gap: 6px;
   }
-  .native-office-pill select {
-    width: 92px;
-    padding-inline: 4px;
-  }
-  .native-office-file-actions {
-    padding-left: 2px;
-  }
-}
-@container office-preview (max-width: 480px) {
-  .native-excel-readonly {
-    padding-inline: 8px;
-  }
-  .native-excel-readonly-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    gap: 4px 8px;
-  }
-  .native-excel-readonly-row > button:first-child {
-    min-width: 0;
-    max-width: none;
-  }
-  .native-excel-dimensions {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .native-excel-value {
-    grid-area: 2 / 1 / 3 / -1;
-  }
-  .native-excel-readonly-row > button:last-child {
-    grid-area: 1 / 3;
+  .native-preview-file-actions {
+    gap: 4px;
   }
 }

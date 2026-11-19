@@ -1064,6 +1064,62 @@ test('the original tab header retains document panel associations and keyboard s
   expect(document.querySelectorAll('.session-tab-content')).toHaveLength(2);
 });
 
+test('keyboard close focuses the surviving selected tab but pointer and unrelated closes do not', async () => {
+  const f = closeFixture();
+  await f.render();
+  for (let i = 0; i < 3; i++) await f.mutate((model) => model.addBrowser());
+  const [a, b, c] = f.model().tabs;
+  const close = (i: number) =>
+    document.querySelectorAll<HTMLButtonElement>('.session-tab-close')[i]!;
+  const active = () =>
+    document.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')!;
+  await f.mutate((model) => model.select(b!.id));
+  close(1).focus();
+  await act(() => close(1).click()); // button activation by keyboard/assistive tech (detail 0)
+  expect(f.model().active).toBe(c!.id);
+  expect(document.activeElement).toBe(active());
+  close(1).focus();
+  await act(() => close(1).click()); // rightmost tab falls back to the left
+  expect(f.model().active).toBe(a!.id);
+  expect(document.activeElement).toBe(active());
+  await f.mutate((model) => model.addBrowser());
+  close(1).focus();
+  await act(() => {
+    close(1).dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, detail: 1 }));
+  });
+  expect(document.activeElement).not.toBe(active());
+  await f.mutate((model) => model.addBrowser());
+  const add = document.querySelector<HTMLButtonElement>('.session-tab-add')!;
+  add.focus();
+  await act(() => close(1).click());
+  expect(document.activeElement).toBe(add);
+});
+
+test('selection reveals the whole chip in an overflowing strip without stealing focus', async () => {
+  const fixture = closeFixture();
+  await fixture.render();
+  await fixture.mutate((model) => model.addBrowser());
+  await fixture.mutate((model) => model.addBrowser());
+  const [first, last] = fixture.model().tabs;
+  const strip = document.querySelector<HTMLElement>('[aria-label="右侧栏标签页"]')!;
+  const chips = [...strip.querySelectorAll<HTMLElement>('.session-tab')];
+  Object.defineProperties(strip, { clientWidth: { value: 160 }, scrollWidth: { value: 200 } });
+  strip.getBoundingClientRect = () => new dom.window.DOMRect(20, 0, 160, 44);
+  for (const [index, chip] of chips.entries()) {
+    chip.getBoundingClientRect = () =>
+      new dom.window.DOMRect(20 + index * 100 - strip.scrollLeft, 0, 100, 32);
+  }
+  const add = document.querySelector<HTMLButtonElement>('[aria-label="新建标签页"]')!;
+  add.focus();
+  await fixture.mutate((model) => model.select(first!.id));
+  await fixture.mutate((model) => model.select(last!.id));
+  expect(strip.scrollLeft).toBe(40);
+  expect(document.activeElement).toBe(add);
+  await fixture.mutate((model) => model.select(first!.id));
+  expect(strip.scrollLeft).toBe(0);
+  expect(document.activeElement).toBe(add);
+});
+
 test('trajectory is one ordinary bounded tab; hiding and switching release only its reader', async () => {
   let model!: SessionTabsModel;
   let mounts = 0,
@@ -1504,6 +1560,66 @@ test('file tabs deduplicate full Store Session file identity and share the eight
   });
   expect(document.querySelectorAll('[data-file]')).toHaveLength(1);
   expect(document.querySelector('[data-file]')?.getAttribute('data-file')).toBe('file');
+});
+
+test('a width-hidden dock retains only its previously visible file, until retirement', async () => {
+  let model!: SessionTabsModel;
+  function Harness({ visible, retain }: { visible: boolean; retain: boolean }) {
+    model = useSessionTabs('outputs');
+    return (
+      <SessionTabs
+        model={model}
+        visible={visible}
+        present={visible}
+        retainSelectedFile={retain}
+        changes={null}
+        onClose={() => {}}
+        renderFile={({ visible: shown }) => <input aria-label="draft" data-visible={shown} />}
+      />
+    );
+  }
+  root = createRoot(document.body);
+  const render = (visible: boolean, retain: boolean) =>
+    act(() => root!.render(<Harness visible={visible} retain={retain} />));
+  const target = {
+    storeId: 'store',
+    sessionId: 's',
+    fileId: 'a',
+    locator: { kind: 'delivery' as const, key: 'a' },
+  };
+  const input = () => document.querySelector<HTMLInputElement>('[aria-label="draft"]');
+  await render(true, true);
+  await act(() => {
+    model.openFile(target, 'a.xlsx');
+  });
+  const original = input()!;
+  original.value = 'unsent';
+  await render(false, true);
+  expect(input()).toBe(original);
+  expect(input()?.closest('[hidden][inert]')).not.toBeNull();
+  expect(input()?.dataset.visible).toBe('false');
+  await render(true, true);
+  expect(input()).toBe(original);
+  expect(input()?.value).toBe('unsent');
+  await render(false, true);
+  await act(() => {
+    model.openFile({ ...target, fileId: 'b' }, 'b.xlsx');
+  });
+  expect(input()).toBeNull();
+  await act(() => {
+    model.openFile(target, 'a.xlsx');
+  });
+  expect(input()).toBeNull();
+  await render(true, true);
+  expect(input()).not.toBe(original);
+  await render(false, false);
+  expect(input()).toBeNull();
+  await render(true, true);
+  await render(false, true);
+  await act(() => {
+    model.closeTab(model.active);
+  });
+  expect(input()).toBeNull();
 });
 
 test('local read handles remain distinct from deliveries and release only on explicit tab close', async () => {

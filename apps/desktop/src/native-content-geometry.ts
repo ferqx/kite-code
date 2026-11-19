@@ -151,6 +151,15 @@ export function projectNativeBrowserLayout(
     const available = parentWidth - group.left - group.right - group.gap;
     if (available <= 0) return undefined;
     const panels = group.panels;
+    // SessionPage withdraws the right dock when the two open minima cannot
+    // coexist. Do not expose a squeezed native view before Renderer catches up.
+    if (
+      width !== layout.windowWidth &&
+      panels[1].collapsible &&
+      panels.every((panel) => panel.minUnit === 'px') &&
+      available < panels[0].min + panels[1].min
+    )
+      return undefined;
     const total = panels[0].size + panels[1].size;
     const relative = panels
       .filter((panel) => panel.preserve === 'relative')

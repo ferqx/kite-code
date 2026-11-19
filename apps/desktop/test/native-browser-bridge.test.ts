@@ -439,6 +439,53 @@ test('draft restore returns only its bounded manual page inventory without a Cor
     expect(isNativeBrowserDraftRestoreResult(value)).toBe(false);
 });
 
+test('native prediction withdraws a dock that cannot fit instead of displaying a subminimum interactive sliver', () => {
+  const px = {
+    size: 320,
+    min: 320,
+    max: 85,
+    minUnit: 'px',
+    maxUnit: '%',
+    preserve: 'relative',
+    collapsible: true,
+  } as const;
+  const layout: NativeBrowserLayout = {
+    windowWidth: 1101,
+    windowHeight: 800,
+    insetLeft: 1,
+    insetRight: 0,
+    groups: [
+      {
+        left: 0,
+        right: 0,
+        gap: 1,
+        panels: [
+          {
+            ...px,
+            size: 200,
+            min: 200,
+            max: 420,
+            maxUnit: 'px',
+            preserve: 'pixel',
+            collapsible: false,
+          },
+          { ...px, size: 900, min: 200, max: 100, collapsible: false },
+        ],
+      },
+      {
+        left: 0,
+        right: 0,
+        gap: 0,
+        panels: [{ ...px, size: 580, min: 360, max: 100, collapsible: false }, px],
+      },
+    ],
+  };
+  const bounds = { x: 782, y: 100, width: 319, height: 700, radius: 0 };
+  expect(projectNativeBrowserBounds(bounds, layout, 880, 800)).toBeUndefined();
+  expect(projectNativeBrowserBounds(bounds, layout, 881, 800)?.width).toBeCloseTo(319, 1);
+  expect(projectNativeBrowserBounds(bounds, layout, 1101, 800)).toEqual(bounds);
+});
+
 test('presentation layout accepts only the current bounded two-panel contract', () => {
   const panel = {
     size: 400,

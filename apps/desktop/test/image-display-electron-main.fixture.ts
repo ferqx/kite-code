@@ -102,6 +102,9 @@ void app.whenReady().then(async () => {
           bounds: { x: 420, y: 70, width, height: 780, radius: 0 },
         });
       },
+      async zoom(value: import('../src/image-zoom').ImageZoomControl['value']) {
+        return (await preview.control('image', 1, { kind: 'image-zoom', value }))?.zoom;
+      },
       revoke() {
         allowed = false;
       },
@@ -141,6 +144,9 @@ declare global {
   var imageDisplayMain: {
     window: ReturnType<typeof createNativeRootWindow>;
     output(path: string, localSource: boolean, width?: number): Promise<void>;
+    zoom(
+      value: import('../src/image-zoom').ImageZoomControl['value'],
+    ): Promise<import('../src/image-zoom').ImageZoomState | undefined>;
     revoke(): void;
     close(): void;
     views(): { url: string; id: number; pid: number; visible: boolean }[];

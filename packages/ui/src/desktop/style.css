@@ -6254,59 +6254,84 @@ body {
 }
 .kite-client .session-tabs .session-tabs-heading {
   min-height: var(--app-header-height, 48px);
-  padding: 6px 8px;
+  padding: 2px 8px;
   gap: 4px;
 }
 .kite-client .session-tabs .session-tabs-heading > [data-slot="tabs-list"] {
   flex: 1;
   min-width: 0;
-  height: 36px;
+  height: auto;
+  align-self: stretch;
   justify-content: flex-start;
   padding: 0;
-  gap: 4px;
+  gap: 3px;
   overflow-x: auto;
+  overflow-y: hidden;
   border-radius: 0;
   background: transparent;
-  scrollbar-width: thin;
+  /* Keep the full row on systems with non-overlay scrollbars; the strip still scrolls. */
+  scrollbar-width: none;
+}
+.kite-client .session-tabs-heading > .session-tabs-list::-webkit-scrollbar {
+  display: none;
 }
 .kite-client .session-tab {
   display: flex;
   flex: none;
   align-items: center;
-  min-width: 90px;
-  max-width: 180px;
+  min-width: min(100%, 96px);
+  max-width: min(100%, 192px);
+  height: 32px;
+  padding-inline-end: 3px;
   border: 1px solid transparent;
   border-radius: var(--button-radius);
+  color: var(--muted-foreground);
+}
+.kite-client .session-tab:hover {
+  background: var(--control-hover);
+  color: var(--foreground);
 }
 .kite-client .session-tab[data-active="true"] {
-  border-color: var(--border);
-  background: var(--control-hover);
+  border-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+  background: var(--control-selected);
+  color: var(--foreground);
 }
 .kite-client .session-tabs .session-tabs-heading [data-slot="tabs-trigger"] {
   flex: 1;
   min-width: 0;
-  max-width: 150px;
-  min-height: 30px;
+  height: 100%;
+  min-height: 0;
   justify-content: flex-start;
-  padding: 4px 6px;
+  padding: 0 4px 0 8px;
   gap: 6px;
   background: transparent;
   box-shadow: none;
-  color: var(--foreground);
+  color: inherit;
+  transition: none;
 }
-.kite-client .session-tab [data-slot="tabs-trigger"] > span {
+.kite-client .session-tab-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .kite-client .session-tab [data-slot="tabs-trigger"] svg {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
 }
 .kite-client .session-tab .session-tab-close {
   flex: none;
-  margin-right: 4px;
+  color: var(--muted-foreground);
+}
+.kite-client .session-tab .session-tab-close:is(:hover, :focus-visible) {
+  background: var(--control-hover);
+  color: var(--foreground);
+}
+.kite-client .session-tabs-heading :is([role="tab"], button):focus-visible {
+  outline: 2px solid var(--ring, var(--foreground));
+  outline-offset: -2px;
+  box-shadow: none;
 }
 .kite-client .session-tabs .session-tab-add {
   flex: none;

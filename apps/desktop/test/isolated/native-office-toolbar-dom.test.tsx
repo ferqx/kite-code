@@ -222,7 +222,9 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
       ),
     );
   const button = (text: string) =>
-    [...document.querySelectorAll('button')].find((b) => b.textContent === text)!;
+    [...document.querySelectorAll('button')].find(
+      (b) => (b.getAttribute('aria-label') ?? b.textContent) === text,
+    )!;
   const click = async (text: string) => act(async () => button(text).click());
   const expectControl = async (
     control: OfficePreviewControl,
@@ -390,6 +392,11 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
       expect(edits.at(-1)).toEqual({ sourceHash: 'a'.repeat(64), selection });
       expect(document.querySelector('[aria-label="放映"]')).toBeNull();
     }
+    // The host closed the preceding inline request; wait for its next interaction snapshot.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    expect(button('请求修改').disabled).toBe(false);
     fail = true;
     await click('请求修改');
     expect(edits).toHaveLength(3);
@@ -406,6 +413,20 @@ test('Read-only Office keeps source selections, viewport movement and late-resul
     await act(async () => {
       await new Promise((r) => setTimeout(r, 250));
     });
+    expect(document.querySelector<HTMLSelectElement>('[aria-label="预览缩放"]')!.disabled).toBe(
+      true,
+    );
+    expect(document.querySelector<HTMLSelectElement>('[aria-label="修改 Skill"]')!.disabled).toBe(
+      true,
+    );
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="另存为"]')!.disabled).toBe(
+      false,
+    );
+    const pendingEdit = document.querySelector<HTMLButtonElement>('[aria-label="请求修改"]')!;
+    expect(pendingEdit.disabled).toBe(true);
+    const requestsBeforeClick = editControls().length;
+    await act(() => pendingEdit.click());
+    expect(editControls()).toHaveLength(requestsBeforeClick);
     const readsDuringSend = requests.filter(
       (r) => r.method === 'outputs.preview.interaction',
     ).length;
@@ -452,7 +473,7 @@ test('trusted Excel bar preserves drag anchor, text-only formula and local expan
       value: key === 'IS_REACT_ACT_ENVIRONMENT' ? true : Reflect.get(dom.window, key),
     });
   const { createRoot } = await import('react-dom/client');
-  const { NativeExcelReadonlyBar } = await import('../../src/native-office-toolbar');
+  const { NativeOfficeToolbar } = await import('../../src/native-office-toolbar');
   const root = createRoot(document.getElementById('bar')!);
   const calls: number[] = [];
   const selection: OfficeSelection = {
@@ -469,46 +490,101 @@ test('trusted Excel bar preserves drag anchor, text-only formula and local expan
       },
     ],
   };
-  const render = async (ready: boolean, serial = 7) =>
+  const render = async (ready: boolean, serial = 7, selected: OfficeSelection | null = selection) =>
     act(async () =>
       root.render(
-        <NativeExcelReadonlyBar
-          selection={selection}
-          view={{ selectionSerial: serial, activeAddress: 'C2' }}
+        <NativeOfficeToolbar
+          name="budget.xlsx"
+          source="交付文件"
+          powerpoint={false}
+          presentation={false}
+          zoom="fit"
+          onZoom={() => {}}
+          onPresentation={() => {}}
           ready={ready}
-          onLocate={(id) => calls.push(id)}
+          excel={{
+            selection: selected,
+            view: { selectionSerial: serial, activeAddress: 'C2' },
+            onLocate: (id) => calls.push(id),
+          }}
         />,
       ),
     );
+  const click = async (label: string) =>
+    act(async () => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click());
   try {
+    await render(true, 1, null);
+    expect(document.querySelector('.native-excel-readonly,textarea')).toBeNull();
     await render(true);
-    const area = document.querySelector('textarea')!;
+    expect(document.querySelector('.native-office-toolbar .native-excel-readonly')).toBeNull();
+    expect(
+      document.querySelector('.native-office-toolbar + .native-excel-readonly'),
+    ).not.toBeNull();
+    const area = document.querySelector<HTMLTextAreaElement>('.native-excel-readonly textarea')!;
+    expect(area.rows).toBe(1);
     expect(area.readOnly).toBe(true);
     expect(area.value).toBe('<img src=x onerror=alert(1)>');
     expect(document.querySelector('img')).toBeNull();
-    expect(document.body.textContent).toContain('C2 · fx');
-    expect(document.body.textContent).toContain('1 行 × 2 列');
+    expect(area.getAttribute('aria-description')).toContain('起选格 C2');
+    expect(area.getAttribute('aria-description')).toContain('1 行 × 2 列');
+    expect(document.querySelector('.native-excel-range')?.textContent).toBe('C2');
     area.select();
     expect(area.selectionEnd - area.selectionStart).toBe(area.value.length);
-    await act(async () =>
-      (document.querySelector('[aria-label="展开单元格内容"]') as HTMLButtonElement).click(),
-    );
-    expect(area.rows).toBe(5);
+    await click('展开单元格内容');
+    const details = document.querySelector<HTMLTextAreaElement>('.native-excel-details textarea')!;
+    expect(details.rows).toBe(5);
+    expect(details.readOnly).toBe(true);
+    expect(details.value).toBe(area.value);
+    expect(document.querySelector('img')).toBeNull();
     expect(calls).toEqual([]);
-    await act(async () =>
-      (document.querySelector('[aria-label="定位当前选区"]') as HTMLButtonElement).click(),
-    );
+    const toggle = document.querySelector<HTMLButtonElement>('.native-excel-expand')!;
+    const escapeEvent = () =>
+      new dom.window.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+    details.focus();
+    const nested = escapeEvent();
+    await act(() => {
+      details.dispatchEvent(nested);
+    });
+    expect(nested.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('.native-excel-details')).toBeNull();
+    const outer = escapeEvent();
+    await act(() => {
+      toggle.dispatchEvent(outer);
+    });
+    expect(outer.defaultPrevented).toBe(false);
+    expect(area.value).toBe('<img src=x onerror=alert(1)>');
+    await click('展开单元格内容');
+    await click('定位当前选区');
     expect(calls).toEqual([7]);
     await render(false, 8);
-    await act(async () =>
-      (document.querySelector('[aria-label="定位当前选区"]') as HTMLButtonElement).click(),
-    );
+    expect(document.querySelector('.native-excel-details')).toBeNull();
+    await click('定位当前选区');
     expect(calls).toEqual([7]);
     await render(true, 8);
-    await act(async () =>
-      (document.querySelector('[aria-label="定位当前选区"]') as HTMLButtonElement).click(),
-    );
+    await click('定位当前选区');
     expect(calls).toEqual([7, 8]);
+    await click('展开单元格内容');
+    await render(true, 9, { kind: 'excel', scope: 'sheet', sheet: 'Sheet1' });
+    expect(
+      document.querySelector('.native-excel-details,.native-excel-readonly,textarea'),
+    ).toBeNull();
+    // A new native preview can restart its selection serial after the previous one disappeared.
+    await render(true, 8);
+    expect(document.querySelector('.native-excel-details')).toBeNull();
+    await render(true, 10, {
+      kind: 'excel',
+      sheet: 'Sheet1',
+      range: 'C2',
+      cells: [{ address: 'C2', path: '/Sheet1/C2', value: '' }],
+    });
+    expect(document.querySelector('.native-excel-range')?.textContent).toBe('C2');
+    expect(document.querySelector('textarea,[aria-expanded]')).toBeNull();
     expect(document.querySelector('.native-excel-help')).toBeNull();
   } finally {
     await act(async () => root.unmount());

@@ -15,6 +15,7 @@ import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import { composeBrowserDraft, readBrowserAnnotations } from '../src/browser-annotation-content';
 import type { DesktopEditor } from '../src/file-changes-bridge';
 import { filePreviewFormat } from '../src/file-preview-format';
+import { type ImageZoomControl, validateImageZoom } from '../src/image-zoom';
 import { inputImageCount } from '../src/input-images-bridge';
 import {
   type NativeReply,
@@ -454,10 +455,14 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     )
       throw Error('invalid_native_request');
   }
-  if (method === 'outputs.preview.control')
-    officeInteractionControlScript(
-      input.control as import('../src/output-files-bridge').OfficePreviewControl,
-    );
+  if (method === 'outputs.preview.control') {
+    const control = record(input.control);
+    if (control.kind === 'image-zoom') validateImageZoom(control as ImageZoomControl);
+    else
+      officeInteractionControlScript(
+        control as import('../src/output-files-bridge').OfficePreviewControl,
+      );
+  }
   if (method === 'outputs.office.preview') {
     if (input.initialSlide !== undefined)
       officeInteractionControlScript({ kind: 'slide', value: input.initialSlide as number });
@@ -2098,8 +2103,8 @@ export function registerNativeIpc(options: {
           false,
         );
         caller.checkOutputScope(request.generation, interaction.target);
-        await preview.control(request.previewId, request.generation, request.control);
-        value = null;
+        value =
+          (await preview.control(request.previewId, request.generation, request.control)) ?? null;
       } else if (request.method === 'outputs.preview.bounds') {
         caller.checkOutputGeneration(request.generation);
         preview?.bounds(request.previewId, request.bounds);
