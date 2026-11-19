@@ -58,7 +58,10 @@ export async function runUnifiedPlatformProbe(
   candidatePath: string,
 ): Promise<Record<string, unknown>> {
   const { acquireArtifactAccess } = await import('@kite-ai/agent/artifact-access');
-  const { verifyTerminalRuntimeBundle } = await import('@kite-ai/service/runtime-assets');
+  const { privateDirectory } = await import('@kite-ai/agent/windows-path-security');
+  const { terminalEmptyAssetDirectories, verifyTerminalRuntimeBundle } = await import(
+    '@kite-ai/service/runtime-assets'
+  );
   const sourceScriptSha256 = sha(readFileSync(import.meta.path));
   const helperPath = resolve(
     import.meta.dir,
@@ -122,6 +125,8 @@ export async function runUnifiedPlatformProbe(
       copyFileSync(join(candidate.root, file.path), destination);
       chmodSync(destination, file.mode);
     }
+    for (const directory of terminalEmptyAssetDirectories(candidate.manifest))
+      privateDirectory(join(relocated, directory));
     for (const link of candidate.manifest.links) {
       const destination = join(relocated, link.path);
       mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });

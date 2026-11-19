@@ -43,6 +43,6 @@
 
 - 基线 [Required #537](https://github.com/ferqx/kite-code/actions/runs/44472063151) 有 8 项失败、2 项成功、1 项按条件跳过且没有 artifacts；当时最近二十次为 18 次失败、2 次取消。压缩、workspace_changes 和 TUI 清理需分别重放、定位并修复，原检查继续报告结果。八分片的时间预算和 hosted 运行成本要在实际 PR 上量测。
 - 检查名与平台权限是两件事。2026-11-19 公开 [el-refactor 元数据](https://api.github.com/repos/ferqx/kite-code/branches/el-refactor) 显示未受保护、必需状态上下文为空，详细保护接口对本次审查返回 403。管理者以后可依据实际 settings 选取原聚合名；本次无配置变更。
-- [平台验证器](../scripts/release/unified-platform-verify.ts) 在 formal 模式始终记录 `default_effectful_platform_not_qualified`，当前 probe 的 effectful/production 均为 false。要推进资格需提交准确 OS、backend、已安装产品、默认能力和进程树的真实证据，处理诊断中非 Darwin 默认 Shell 假设与 Service 条件后端的差异。
+- [平台验证器](../scripts/release/unified-platform-verify.ts) 在 formal 模式始终记录 `default_effectful_platform_not_qualified`，当前 probe 的 effectful/production 均为 false。要推进资格需提交准确 OS、backend、已安装产品、默认能力和进程树的真实证据，处理诊断中非 Darwin 默认 Shell 假设与 Service 条件后端的差异。本次 Linux 搬迁保留清单要求的空 Git hooks 目录后，实际子进程到达原 Shell 断言，仍报 `default_shell_gate_not_closed`。该机尚无通过的平台诊断。
 - [长跑数据模型](../scripts/runtime/unified-soak-report.ts)保留 `descendant_identity_qualification_not_implemented`，Linux 尚缺活动资源、句柄、后代身份、后台 Shell 及平台工作负载证据。完整时长内未观察到故障仍会按[收集器](../scripts/runtime/unified-soak.ts)给出 inconclusive。先实现平台观测与身份核对，再按原阈值收集。
 - 性能用专用、可信的手动运行记录相同候选、主机、模型、并发度、预算和输入的延迟分位数、吞吐、错误及内存。现有 [Provider load](e2e/live/model/provider-load.live.ts)、[审批复用](e2e/live/model/approval-reuse.benchmark.ts)和[图片读取](e2e/live/model/image-reading.benchmark.ts)是独立入口；尚无经过校准的跨机基线或自动性能放行。Office 交付、全工具预算、真实桌面交互优先沿上表已有入口补证。
