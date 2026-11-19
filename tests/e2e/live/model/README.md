@@ -775,13 +775,15 @@ KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-nat
 
 ## 输入、审批、标题与竞争
 
-[协作 live 驱动](collaboration.live.ts)从正式 Service/Client HTTP 进入当前 Runtime/SQLite，逐次只运行一个准确用例：
+[协作 live 驱动](collaboration.live.ts)的大部分用例从正式 Service/Client HTTP 进入 Runtime/SQLite，逐次只运行一个准确用例。下面示例走正式默认审批；各组的实际边界见表。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=inputs --case=I09 --output=/absolute/owned-directory/report.json
+KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=permissions --case=permissions-approve --output=/absolute/owned-directory/report.json
 ```
 
-| group | 可选 case | 实际驱动边界 |
+旧输入分类、自然语言控制预处理和 selected-work 屏障已退役。驱动仍接受部分旧参数，但参数可解析不等于用例仍适用，部分可能启动付费模型。旧 `inputs`（含 I09）、依赖旧澄清的 S01/S02，以及 `work-scope`、`work-controls`、`untrusted-results` 等旧夹具中依赖旧工作选择或暂停／续作的分支，仅用于追溯原证据，不按整组重跑或视作当前验收。权限、低信任来源、准确停止和标题 CAS 仍按[测试 owner](../../../README.md#子-agent-协作-v11-验证)及现行用例核验。
+
+| group | case（含历史参数） | 实际驱动边界 |
 | --- | --- | --- |
 | inputs | I01、I02、I03、I03-active、I04、I04-result-first、I05、I06、I07、I08-queued、I08-running、I09、I09-clarified、I09-dual-clarified、I09-dual-active-clarified、I09-dual-active-question-clarified、I10、I11、I11-retrieved-record、I11-current-control、I11-contradictory-control | active/idle补充和进度、B选择期间问A、输入与结果双顺序、queued/running B取消与准确续A、单/双工作待决澄清、真实解释在途改变selection、原文引文及实际Files检索资料与当前控制；实际资料工具与安全边界gate |
 | permissions | permissions-approve / deny / relax / tighten / untrusted | 正式默认持久策略的根任务批准/拒绝、等待中放宽、派发前收紧与未信任负例 |
@@ -823,14 +825,12 @@ KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=inpu
 
 执行时优先复用可准确绑定的原证据，共用提示和schema保持稳定，新增调用集中于未闭合分支。缓存命中率按原SDK/Provider已报告的`cachedInputTokens/inputTokens`加权统计，缺少缓存字段或失败请求usage时保未知；不把native成功用量当所有物理尝试的账单，也不由命中率推费用。需要自动压缩或独立随机资料的测试保留原来源和阈值，用减少无效重复控制开销，不改写响应或来源来制造缓存。
 
-[report 崩溃 runner](collaboration-report-crash.live.ts)与[输入解释崩溃 runner](collaboration-input-crash.live.ts)分别测明确的真实 SIGKILL 窗口：原 idle report 登记后、首次 apply/ack 前；原解释 Model 成功后、决定提交前；以及原决定已提交、业务仍queued且处理轮未收束。它们以自有子进程句柄杀进程，冷进程 readonly Store 且没有 Model port，显式恢复须复用原报告或成功解释，原完整 inspector 与同键重放事实保持。每例跨进程合计40次HTTP、600秒，4096/medium不变；其他提交后窗口仍须独立执行。
+[report 崩溃 runner](collaboration-report-crash.live.ts)覆盖原 idle job.report 登记后、首次 apply/ack 前的真实 SIGKILL 窗口；不代证当前默认 Task 最终结果邮箱。冷读 Store 无 Model port，显式恢复核原报告、同键事实与零效果重放。该例跨进程合计最多 40 次 HTTP、600 秒，4096/medium 不变。旧 [输入解释 C04](collaboration-input-crash.live.ts) 的两种窗口已退役，入口在调用 Provider 前明确拒绝；不再作为当前执行命令。普通 Run 恢复走[测试 owner](../../../README.md#子-agent-协作-v11-验证)的当前路径。
 
-report恢复比较原child业务事实，Store全局cursor及root owner接管/释放投影另按当前值核对；不要求恢复后全局元数据停留在强杀前。有限cold/resume阶段先保存实际exit、signal、stderr与失败，再做退出分类。决定提交窗口使用明确的新有限业务请求；模型合法解释成progress时记未进入目标窗口，不改写为已提交业务。
+report恢复比较原child业务事实，Store全局cursor及root owner接管/释放投影另按当前值核对；不要求恢复后全局元数据停留在强杀前。有限 cold/resume 阶段先保存实际 exit、signal、stderr 与失败，再做退出分类。
 
 ```bash
 KITE_RUN_LIVE_REPORT_CRASH=1 bun tests/e2e/live/model/collaboration-report-crash.live.ts run /absolute/owned-directory/C03.json
-KITE_RUN_LIVE_INPUT_CRASH=1 bun tests/e2e/live/model/collaboration-input-crash.live.ts run /absolute/owned-directory/C04.json
-KITE_RUN_LIVE_INPUT_CRASH=1 bun tests/e2e/live/model/collaboration-input-crash.live.ts run /absolute/owned-directory/C04-decision.json decision
 ```
 
 [有限邮箱 runner](collaboration-agent-events.live.ts)的`A03-finite-mailbox`使用真实child读取、发给parent的邮件与完成事件，验证正式Store端口`limit:1`分页、准确`nextSeq`及重复只读。隔离SQL retention-floor对照不删除事件，结束时恢复原值；核`cursor_expired`、准确恢复边界、从0不假装恢复，以及全业务表、Source和实际Model请求零新增。当前六工具没有`limit`，小页属于Host观察端口；该对照不授自然生产保留清理、模型在缺口后采用边界或断线重连资格。

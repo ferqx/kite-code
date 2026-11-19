@@ -2,7 +2,7 @@
 
 2026-10-22 范围说明：本文保留移除前 V1.1 的真实模型运行历史。用户确认移除独立输入归属分类、自然语言控制预处理和 selected-work 屏障；相关 I/C04 分类验收不再适用，C04 入口在调用 Provider 前拒绝。当前行为归[直接会话输入决定](../../../../.agents/notes/implemented/architecture/2026-10-22-direct-conversation-input.md)和[测试 owner](../../../README.md#子-agent-协作-v11-验证)。过去的通过／失败不改签为当前结果。
 
-2026-10-19 整理并开始真实执行。状态按本文末尾的实际变体记录；69 个主用例及各变体不能由局部通过整体升级。本文是测试执行依据，不是产品实现计划，也不把既有受控 Provider 回归计为真实模型通过。
+2026-10-19 整理并开始真实执行。状态按本文末尾的实际变体记录；69 个主用例及各变体不能由局部通过整体升级。本文保留原判据和证据；仍适用的行为按当前测试 owner 和套件入口核对，不把旧计划或既有受控 Provider 回归计为真实模型通过。
 
 范围对应外部《Kite 子 Agent 协作优化方案 V1.1 · 实施补充版》第 1–9 节、最新 §6.5.1 的 80 项合同；原文 SHA256 为 cce7a0760637c0517831ee8fdcf89476e717d5d0dc87f392d5ae5640f2a0280b。合同编号及现有确定性断言入口归[测试 owner](../../../README.md#子-agent-协作-v11-验证)。另补[会话手册](../../../../docs/handbook/features/sessions.md)中用户确认的标题规则，不虚挂原 80 项编号。
 
@@ -22,10 +22,12 @@
 
 ~~~bash
 KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=/absolute/owned-directory/report.json
-KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=inputs --case=I09 --output=/absolute/owned-directory/input.json
+KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=permissions --case=permissions-approve --output=/absolute/owned-directory/approval.json
 ~~~
 
 它读取现有用户默认 modelId/models 和凭据引用，没有当前专用 API key、baseURL 或 model 覆盖变量；历史 KITE_LIVE_MODEL_* / KITE_LIVE_DEEPSEEK_* 不能写成当前前置。工具 smoke 保持 20 次实际 HTTP、240 秒总时限；协作单例最多40次HTTP、600秒，取消模块另有限制。单请求60秒和输出上限4096保持；不把这些预算套用于整张矩阵或改变产品时限。当前驱动只提供已列具体交错，没有通用故障注入或普通客户端调试开关。
+
+以下原前置、判据与用例包含历史输入分类及工作选择语义，仅在现行合同仍适用时复用；不从本矩阵整组重跑。
 
 ## 共用前置、输入与时点
 
