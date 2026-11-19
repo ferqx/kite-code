@@ -16,7 +16,7 @@ import {
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createPermissionManagement } from '../../src/permission-management';
-import { webSearchCredentialScope } from '../../src/web-search-configuration';
+import { createSearchBindings } from '../../src/web-search-bindings';
 import {
   inheritedSearchRoute,
   nativeSearchIdentity,
@@ -35,7 +35,7 @@ const model = {
 };
 const provider: Extract<SearchRoute, { kind: 'provider' }> = {
   kind: 'provider',
-  adapter: 'perplexity-search',
+  adapter: 'deepseek-search',
   providerId: 'papers',
   bindingDigest: 'a'.repeat(64),
 };
@@ -51,7 +51,14 @@ test('search freezes exactly one route before dispatch, observes policy and narr
   expect(selectSearchRoute({ ...options, native: undefined })).toEqual(provider);
   expect(
     selectSearchRoute({ ...options, settings: { mode: 'provider', providerId: 'papers' } }),
-  ).toEqual(provider);
+  ).toEqual(native);
+  expect(
+    selectSearchRoute({
+      ...options,
+      native: undefined,
+      provider: { ...provider, adapter: 'perplexity-search' },
+    }),
+  ).toEqual({ kind: 'none', reason: 'unavailable' });
   expect(selectSearchRoute({ ...options, settings: { mode: 'disabled' } })).toEqual({
     kind: 'none',
     reason: 'disabled',
@@ -106,7 +113,7 @@ test('native eligibility and parent reconstruction keep official account binding
   expect(JSON.stringify(native)).not.toContain(credentialRef);
 });
 
-test('a default Service Run calls its frozen dedicated provider once and exposes evidence through the Client', async () => {
+test('a default Service Run derives DeepSeek from the user model provider, sends once and exposes original evidence through the Client', async () => {
   const root = temporaryDirectory('kite-search-default-');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
@@ -114,19 +121,8 @@ test('a default Service Run calls its frozen dedicated provider once and exposes
   mkdirSync(workspace);
   const credentialBackend = createTemporaryCredentialBackend();
   const vault = createCredentialVault({ backend: credentialBackend });
-  const search = {
-    id: 'research',
-    name: 'Research',
-    adapter: 'perplexity-search' as const,
-    maxResults: 3,
-    connection: {
-      kind: 'dedicated' as const,
-      baseURL: 'https://api.perplexity.ai',
-      credentialRef: `credential:${crypto.randomUUID()}`,
-    },
-  };
   const secret = `fixture-${crypto.randomUUID()}`;
-  await vault.writeOwned(webSearchCredentialScope(profile.profileAccessKey, search), secret);
+  const credential = await vault.put(secret);
   type Chat = {
     messages: { role: string; content: string }[];
     tools?: { function: { name: string; parameters: unknown } }[];
@@ -165,17 +161,20 @@ test('a default Service Run calls its frozen dedicated provider once and exposes
   writeFileSync(
     path,
     JSON.stringify({
-      modelId: 'local',
-      models: [
-        {
-          id: 'local',
-          provider: 'compatible',
-          model: 'local',
+      model: 'local:local',
+      provider: {
+        local: {
+          type: 'openai-compatible',
+          models: ['local'],
           baseURL: `http://127.0.0.1:${main.port}/v1`,
         },
-      ],
-      webSearch: { mode: 'provider', providerId: search.id },
-      searchProviders: [search],
+        research: {
+          type: 'deepseek',
+          name: 'Research',
+          baseURL: 'https://api.deepseek.com',
+          credentialRef: credential.id,
+        },
+      },
       tools: [{ id: 'web.search', definitionVersion: '1' }],
     }),
     { mode: 0o600 },
@@ -286,8 +285,8 @@ test('a default Service Run calls its frozen dedicated provider once and exposes
     expect(tool).toMatchObject({ definitionId: 'web.search', status: 'succeeded' });
     expect(wire).toEqual([
       {
-        url: 'https://api.perplexity.ai/search',
-        body: { query: 'local integration', max_results: 3 },
+        url: 'https://api.deepseek.com/v1/tools/search',
+        body: { query: 'local integration', count: 5, need_content: false },
         authorized: true,
       },
     ]);
@@ -321,3 +320,119 @@ test('a default Service Run calls its frozen dedicated provider once and exposes
     removeTemporaryDirectory(root);
   }
 }, 25000);
+
+test('derived routes bind without probing, and a changed credential or disabled account cannot reopen a frozen Run', async () => {
+  const vault = createCredentialVault({ backend: createTemporaryCredentialBackend() });
+  const original = await vault.put('fixture-original');
+  const replacement = await vault.put('fixture-replacement');
+  const readIds: string[] = [];
+  const sent: boolean[] = [];
+  const binding = createSearchBindings({
+    runtime() {
+      throw Error('unexpected model dispatch');
+    },
+    profileAccessKey: 'fixture-profile',
+    modelVault: {
+      resolve: async (ref) => {
+        readIds.push(typeof ref === 'string' ? ref : ref.id);
+        return vault.resolve(ref);
+      },
+    },
+    allowNative: async () => true,
+    qualified: async () => true,
+    fetch: Object.assign(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        sent.push(new Headers(init?.headers).get('authorization') === 'Bearer fixture-replacement');
+        return Response.json({ results: [] });
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  });
+  const scope = { expectedStoreId: 'store', subjectId: 'owner', sessionId: 's', workspaceId: 'w' };
+  const legacy = {
+    webSearch: { mode: 'provider', providerId: 'old' },
+    searchProviders: [
+      {
+        id: 'old',
+        name: 'Legacy',
+        adapter: 'deepseek-search',
+        connection: {
+          kind: 'dedicated',
+          baseURL: 'https://api.deepseek.com',
+          credentialRef: original.id,
+        },
+      },
+    ],
+  };
+  const input = (ref: string, enabled = true) => {
+    const model = {
+      id: 'alias:model',
+      model: 'deepseek-v4-flash',
+      provider: 'deepseek',
+      providerName: 'alias',
+      baseURL: 'https://api.deepseek.com',
+      credentialRef: ref,
+      enabled,
+    };
+    return {
+      user: { ...legacy, modelId: model.id, models: [model] },
+      model,
+      scope,
+      enabled: true,
+      nativeAllowed: false,
+    };
+  };
+  const first = input(original.id);
+  const originalRun = await binding.bind(first);
+  expect(originalRun.route).toMatchObject({
+    kind: 'provider',
+    providerId: 'alias',
+    adapter: 'deepseek-search',
+  });
+  expect(originalRun.extension).toBeDefined();
+  const restore = { route: originalRun.route };
+  expect((await binding.bind({ ...first, restore })).route).toEqual(originalRun.route);
+  const eligibleOpenAI = { ...model, providerName: 'official' };
+  const reopened = await binding.bind({
+    ...first,
+    model: eligibleOpenAI,
+    nativeAllowed: true,
+    restore,
+    user: { ...first.user, models: [...first.user.models, eligibleOpenAI] },
+  });
+  expect(reopened.route).toEqual(originalRun.route);
+  expect(reopened.nativeWebSearch).toBeUndefined();
+  const initialProbe = binding.test(first.user, first.model, scope);
+  const next = input(replacement.id);
+  const rotated = await binding.bind(next);
+  expect(rotated.route).toMatchObject({ kind: 'provider', providerId: 'alias' });
+  expect(rotated.route).not.toEqual(originalRun.route);
+  await expect(binding.bind({ ...next, restore })).rejects.toThrow('Original binding changed');
+  await expect(binding.bind({ ...input(original.id, false), restore })).rejects.toThrow(
+    'Original binding changed',
+  );
+  const off = await binding.bind({ ...next, enabled: false });
+  expect(off.route).toEqual({ kind: 'none', reason: 'policy' });
+  expect(
+    (await binding.bind({ ...next, restore: { route: off.route } })).extension,
+  ).toBeUndefined();
+  expect((await binding.bind({ ...next, parent: originalRun.route })).extension).toBeUndefined();
+  expect((await binding.bind({ ...next, user: legacy })).extension).toBeUndefined();
+  expect(readIds).toEqual([]);
+  expect(sent).toEqual([]);
+
+  await vault.revoke(original);
+  const signal = new AbortController().signal;
+  await expect(initialProbe.search('fixture query', signal, 'old-test')).rejects.toThrow(
+    'search_credential_unavailable',
+  );
+  const nextProbe = binding.test(next.user, next.model, scope);
+  await expect(
+    nextProbe.search('fixture query', AbortSignal.abort(), 'cancelled-test'),
+  ).rejects.toThrow('search_cancelled');
+  expect(readIds).toEqual([original.id]);
+  expect(sent).toEqual([]);
+  await nextProbe.search('fixture query', signal, 'new-test');
+  expect(readIds).toEqual([original.id, replacement.id]);
+  expect(sent).toEqual([true]);
+});

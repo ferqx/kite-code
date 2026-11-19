@@ -691,14 +691,12 @@ export function createDefaultProcessConfiguration(options: {
       profile: options.profile,
       runtime,
       vault: modelVault,
-      webSearchVault: vault,
       persistence: options.credentialBackend?.kind ?? 'os',
       explicit: () => explicitConfiguration(explicit),
     });
   const search = createSearchBindings({
     runtime: runtimeForSearch,
     modelVault,
-    searchVault: vault,
     profileAccessKey: options.profile.profileAccessKey,
     fetch: options.webSearchFetch,
     allowNative: (scope) => permissionConfiguration.nativeSearchAllowed(scope),

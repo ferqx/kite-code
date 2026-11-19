@@ -158,41 +158,34 @@ test('paired Client reads owned evidence, saves redacted settings and submits on
       expectedStoreId,
       expectedReadSet: before.readSet!,
       commandId: 'save',
-      webSearch: { mode: 'provider' as const, providerId: 'example' },
-      searchProviders: [
-        {
-          id: 'example',
-          name: 'Example',
-          adapter: 'perplexity-search' as const,
-          connection: { kind: 'dedicated' as const, baseURL: 'https://api.perplexity.ai' },
-        },
-      ],
-      credential: { providerId: 'example', secret },
+      webSearch: { mode: 'auto' as const },
+      searchProviders: [],
     };
-    const invalidProvider = {
-      ...input.searchProviders[0]!,
-      connection: { kind: 'dedicated' as const, baseURL: 'http://127.0.0.1/' },
-    };
+    expect(before.derivedDeepSeek).toEqual({ status: 'unavailable' });
     await expect(
       client.saveWebSearchSettings({
         ...input,
-        commandId: 'invalid-endpoint',
-        searchProviders: [invalidProvider],
+        commandId: 'invalid-account',
+        webSearch: { mode: 'provider', providerId: 'old' },
+        searchProviders: [
+          {
+            id: 'old',
+            name: 'Old',
+            adapter: 'perplexity-search',
+            connection: { kind: 'dedicated', baseURL: 'https://api.perplexity.ai' },
+          },
+        ],
+        credential: { providerId: 'old', secret },
       }),
-    ).rejects.toMatchObject({
-      code: 'web_search_connection_invalid',
-      status: 400,
-    });
-    expect(testCalls).toEqual([]);
+    ).rejects.toMatchObject({ code: 'web_search_configuration_invalid', status: 400 });
     const saved = await client.saveWebSearchSettings(input);
     expect(saved.state).toBe('applied');
     expect(await client.saveWebSearchSettings(input)).toEqual(saved);
     const after = await client.getWebSearchSettings({ storeId: expectedStoreId });
-    expect(after.searchProviders[0]?.connection).toMatchObject({
-      kind: 'dedicated',
-      credentialRef: expect.stringMatching(/^credential:/),
-    });
-    expect(JSON.stringify([saved, after])).not.toContain(secret);
+    expect(after.searchProviders).toEqual([]);
+    expect(after.derivedDeepSeek).toEqual({ status: 'unavailable' });
+    expect(JSON.stringify([saved, after]).includes(secret)).toBe(false);
+    expect(testCalls).toEqual([]);
     const testInput = {
       commandId: 'explicit-test',
       expectedStoreId,

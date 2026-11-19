@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import {
   ConfigurationError,
@@ -13,7 +14,10 @@ import { openAIWebSearchModelCapability, runOpenAIWebSearch } from '@kite-ai/ai/
 import { parseModelPreset } from './model-options';
 import { modelRequestCompression } from './model-request-compression';
 import { resolveModelTransport } from './model-transport';
-import { freezeWebSearchProvider, parseWebSearchConfiguration } from './web-search-configuration';
+import {
+  automaticWebSearchConfiguration,
+  freezeWebSearchProvider,
+} from './web-search-configuration';
 import { createWebSearchProviderPort, type WebSearchProviderOptions } from './web-search-providers';
 import {
   inheritedSearchRoute,
@@ -36,7 +40,30 @@ export function createSearchBindings(
   },
 ) {
   function candidates(user: JsonObject, model: ModelConfiguration | undefined, scope: Scope) {
-    const { webSearch: settings, searchProviders } = parseWebSearchConfiguration(user);
+    const selectedUserModel =
+      model &&
+      typeof model.providerName === 'string' &&
+      Array.isArray(user.models) &&
+      user.models.some(
+        (row) =>
+          row &&
+          typeof row === 'object' &&
+          !Array.isArray(row) &&
+          row.enabled !== false &&
+          row.id === model.id &&
+          row.providerName === model.providerName &&
+          row.credentialRef === model.credentialRef &&
+          row.baseURL === model.baseURL &&
+          row.provider === model.provider &&
+          (row.protocol ?? 'chat-completions') === (model.protocol ?? 'chat-completions') &&
+          row.model === model.model,
+      )
+        ? model.providerName
+        : undefined;
+    const { webSearch: settings, searchProviders } = automaticWebSearchConfiguration(
+      user,
+      model?.provider === 'deepseek' ? selectedUserModel : undefined,
+    );
     if (settings.mode === 'disabled') return { settings };
     const provider = searchProviders.find((entry) => settings.providerId === entry.id);
     const freeze = (item: Parameters<typeof freezeWebSearchProvider>[0]) => {
@@ -68,28 +95,13 @@ export function createSearchBindings(
         : undefined;
     // An official URL alone cannot authorize an arbitrary user-model credential reference.
     const owner =
-      candidate &&
-      model &&
-      typeof model.providerName === 'string' &&
-      Array.isArray(user.models) &&
-      user.models.some(
-        (row) =>
-          row &&
-          typeof row === 'object' &&
-          !Array.isArray(row) &&
-          row.id === model.id &&
-          row.providerName === model.providerName &&
-          row.credentialRef === model.credentialRef &&
-          row.baseURL === model.baseURL &&
-          row.provider === model.provider &&
-          row.model === model.model,
-      )
+      candidate && model && selectedUserModel
         ? freeze({
             id: 'native-test',
             name: 'OpenAI',
             adapter: 'openai-search',
             modelId: model.model,
-            connection: { kind: 'provider', providerAlias: model.providerName },
+            connection: { kind: 'provider', providerAlias: selectedUserModel },
           })
         : undefined;
     return { settings, external, configured, native: owner ? candidate : undefined, owner };
@@ -138,13 +150,15 @@ export function createSearchBindings(
       restore?: { route: SearchRoute | null };
       nativeAllowed: boolean;
     }) {
-      const c = candidates(input.user, input.model, input.scope);
       // An old manifest had no search permission. A frozen off route persists across restarts.
       if (input.restore && (!input.restore.route || input.restore.route.kind === 'none'))
         return {
           route: input.restore.route ?? { kind: 'none' as const, reason: 'disabled' as const },
         };
+      const c = candidates(input.user, input.model, input.scope);
+      const frozen = input.restore?.route;
       const native =
+        frozen?.kind !== 'provider' &&
         c.native &&
         input.enabled &&
         input.nativeAllowed &&
@@ -159,6 +173,8 @@ export function createSearchBindings(
         native,
         provider: c.external,
       });
+      if (frozen && !isDeepStrictEqual(frozen, route))
+        throw new AgentError('recovery_configuration_changed', 'Original binding changed: search.');
       if (route.kind === 'provider' && c.configured) {
         const extension = createWebSearchExtension({
           provider: route.providerId,

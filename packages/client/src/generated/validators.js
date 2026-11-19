@@ -327725,6 +327725,15 @@ var schema687 = {
         ],
       },
     },
+    derivedDeepSeek: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['configured', 'unavailable', 'ambiguous'] },
+        label: { type: 'string', minLength: 1, maxLength: 120 },
+      },
+      required: ['status'],
+      additionalProperties: false,
+    },
     eligibleConnections: {
       maxItems: 128,
       type: 'array',
@@ -327800,6 +327809,7 @@ function validate347(
               key0 === 'readSet' ||
               key0 === 'webSearch' ||
               key0 === 'searchProviders' ||
+              key0 === 'derivedDeepSeek' ||
               key0 === 'eligibleConnections' ||
               key0 === 'errors'
             )
@@ -330656,305 +330666,145 @@ function validate347(
                   var valid0 = true;
                 }
                 if (valid0) {
-                  if (data.eligibleConnections !== undefined) {
-                    let data34 = data.eligibleConnections;
+                  if (data.derivedDeepSeek !== undefined) {
+                    let data34 = data.derivedDeepSeek;
                     const _errs106 = errors;
                     if (errors === _errs106) {
-                      if (Array.isArray(data34)) {
-                        if (data34.length > 128) {
+                      if (data34 && typeof data34 == 'object' && !Array.isArray(data34)) {
+                        let missing11;
+                        if (data34.status === undefined && (missing11 = 'status')) {
                           validate347.errors = [
                             {
-                              instancePath: instancePath + '/eligibleConnections',
-                              schemaPath: '#/properties/eligibleConnections/maxItems',
-                              keyword: 'maxItems',
-                              params: { limit: 128 },
-                              message: 'must NOT have more than 128 items',
+                              instancePath: instancePath + '/derivedDeepSeek',
+                              schemaPath: '#/properties/derivedDeepSeek/required',
+                              keyword: 'required',
+                              params: { missingProperty: missing11 },
+                              message: "must have required property '" + missing11 + "'",
                             },
                           ];
                           return false;
                         } else {
-                          var valid18 = true;
-                          const len1 = data34.length;
-                          for (let i1 = 0; i1 < len1; i1++) {
-                            let data35 = data34[i1];
-                            const _errs108 = errors;
-                            if (errors === _errs108) {
-                              if (data35 && typeof data35 == 'object' && !Array.isArray(data35)) {
-                                let missing11;
-                                if (
-                                  (data35.providerAlias === undefined &&
-                                    (missing11 = 'providerAlias')) ||
-                                  (data35.name === undefined && (missing11 = 'name')) ||
-                                  (data35.adapter === undefined && (missing11 = 'adapter'))
-                                ) {
-                                  validate347.errors = [
-                                    {
-                                      instancePath: instancePath + '/eligibleConnections/' + i1,
-                                      schemaPath: '#/properties/eligibleConnections/items/required',
-                                      keyword: 'required',
-                                      params: { missingProperty: missing11 },
-                                      message: "must have required property '" + missing11 + "'",
-                                    },
-                                  ];
-                                  return false;
-                                } else {
-                                  const _errs110 = errors;
-                                  for (const key11 in data35) {
-                                    if (
-                                      !(
-                                        key11 === 'providerAlias' ||
-                                        key11 === 'name' ||
-                                        key11 === 'adapter'
-                                      )
-                                    ) {
-                                      validate347.errors = [
-                                        {
-                                          instancePath: instancePath + '/eligibleConnections/' + i1,
-                                          schemaPath:
-                                            '#/properties/eligibleConnections/items/additionalProperties',
-                                          keyword: 'additionalProperties',
-                                          params: { additionalProperty: key11 },
-                                          message: 'must NOT have additional properties',
-                                        },
-                                      ];
-                                      return false;
-                                      break;
-                                    }
-                                  }
-                                  if (_errs110 === errors) {
-                                    if (data35.providerAlias !== undefined) {
-                                      let data36 = data35.providerAlias;
-                                      const _errs111 = errors;
-                                      if (errors === _errs111) {
-                                        if (typeof data36 === 'string') {
-                                          if (func1(data36) > 128) {
-                                            validate347.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath +
-                                                  '/eligibleConnections/' +
-                                                  i1 +
-                                                  '/providerAlias',
-                                                schemaPath:
-                                                  '#/properties/eligibleConnections/items/properties/providerAlias/maxLength',
-                                                keyword: 'maxLength',
-                                                params: { limit: 128 },
-                                                message: 'must NOT have more than 128 characters',
-                                              },
-                                            ];
-                                            return false;
-                                          } else {
-                                            if (func1(data36) < 1) {
-                                              validate347.errors = [
-                                                {
-                                                  instancePath:
-                                                    instancePath +
-                                                    '/eligibleConnections/' +
-                                                    i1 +
-                                                    '/providerAlias',
-                                                  schemaPath:
-                                                    '#/properties/eligibleConnections/items/properties/providerAlias/minLength',
-                                                  keyword: 'minLength',
-                                                  params: { limit: 1 },
-                                                  message: 'must NOT have fewer than 1 characters',
-                                                },
-                                              ];
-                                              return false;
-                                            } else {
-                                              if (!pattern1746.test(data36)) {
-                                                validate347.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/eligibleConnections/' +
-                                                      i1 +
-                                                      '/providerAlias',
-                                                    schemaPath:
-                                                      '#/properties/eligibleConnections/items/properties/providerAlias/pattern',
-                                                    keyword: 'pattern',
-                                                    params: {
-                                                      pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*$',
-                                                    },
-                                                    message:
-                                                      'must match pattern "' +
-                                                      '^[A-Za-z0-9][A-Za-z0-9_.-]*$' +
-                                                      '"',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
-                                            }
-                                          }
-                                        } else {
-                                          validate347.errors = [
-                                            {
-                                              instancePath:
-                                                instancePath +
-                                                '/eligibleConnections/' +
-                                                i1 +
-                                                '/providerAlias',
-                                              schemaPath:
-                                                '#/properties/eligibleConnections/items/properties/providerAlias/type',
-                                              keyword: 'type',
-                                              params: { type: 'string' },
-                                              message: 'must be string',
-                                            },
-                                          ];
-                                          return false;
-                                        }
-                                      }
-                                      var valid19 = _errs111 === errors;
-                                    } else {
-                                      var valid19 = true;
-                                    }
-                                    if (valid19) {
-                                      if (data35.name !== undefined) {
-                                        let data37 = data35.name;
-                                        const _errs113 = errors;
-                                        if (errors === _errs113) {
-                                          if (typeof data37 === 'string') {
-                                            if (func1(data37) > 120) {
-                                              validate347.errors = [
-                                                {
-                                                  instancePath:
-                                                    instancePath +
-                                                    '/eligibleConnections/' +
-                                                    i1 +
-                                                    '/name',
-                                                  schemaPath:
-                                                    '#/properties/eligibleConnections/items/properties/name/maxLength',
-                                                  keyword: 'maxLength',
-                                                  params: { limit: 120 },
-                                                  message: 'must NOT have more than 120 characters',
-                                                },
-                                              ];
-                                              return false;
-                                            } else {
-                                              if (func1(data37) < 1) {
-                                                validate347.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/eligibleConnections/' +
-                                                      i1 +
-                                                      '/name',
-                                                    schemaPath:
-                                                      '#/properties/eligibleConnections/items/properties/name/minLength',
-                                                    keyword: 'minLength',
-                                                    params: { limit: 1 },
-                                                    message:
-                                                      'must NOT have fewer than 1 characters',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
-                                            }
-                                          } else {
-                                            validate347.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath +
-                                                  '/eligibleConnections/' +
-                                                  i1 +
-                                                  '/name',
-                                                schemaPath:
-                                                  '#/properties/eligibleConnections/items/properties/name/type',
-                                                keyword: 'type',
-                                                params: { type: 'string' },
-                                                message: 'must be string',
-                                              },
-                                            ];
-                                            return false;
-                                          }
-                                        }
-                                        var valid19 = _errs113 === errors;
-                                      } else {
-                                        var valid19 = true;
-                                      }
-                                      if (valid19) {
-                                        if (data35.adapter !== undefined) {
-                                          let data38 = data35.adapter;
-                                          const _errs115 = errors;
-                                          if (typeof data38 !== 'string') {
-                                            validate347.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath +
-                                                  '/eligibleConnections/' +
-                                                  i1 +
-                                                  '/adapter',
-                                                schemaPath:
-                                                  '#/properties/eligibleConnections/items/properties/adapter/type',
-                                                keyword: 'type',
-                                                params: { type: 'string' },
-                                                message: 'must be string',
-                                              },
-                                            ];
-                                            return false;
-                                          }
-                                          if (
-                                            !(
-                                              data38 === 'deepseek-search' ||
-                                              data38 === 'perplexity-search' ||
-                                              data38 === 'openai-search'
-                                            )
-                                          ) {
-                                            validate347.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath +
-                                                  '/eligibleConnections/' +
-                                                  i1 +
-                                                  '/adapter',
-                                                schemaPath:
-                                                  '#/properties/eligibleConnections/items/properties/adapter/enum',
-                                                keyword: 'enum',
-                                                params: {
-                                                  allowedValues:
-                                                    schema687.properties.eligibleConnections.items
-                                                      .properties.adapter.enum,
-                                                },
-                                                message:
-                                                  'must be equal to one of the allowed values',
-                                              },
-                                            ];
-                                            return false;
-                                          }
-                                          var valid19 = _errs115 === errors;
-                                        } else {
-                                          var valid19 = true;
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              } else {
+                          const _errs108 = errors;
+                          for (const key11 in data34) {
+                            if (!(key11 === 'status' || key11 === 'label')) {
+                              validate347.errors = [
+                                {
+                                  instancePath: instancePath + '/derivedDeepSeek',
+                                  schemaPath: '#/properties/derivedDeepSeek/additionalProperties',
+                                  keyword: 'additionalProperties',
+                                  params: { additionalProperty: key11 },
+                                  message: 'must NOT have additional properties',
+                                },
+                              ];
+                              return false;
+                              break;
+                            }
+                          }
+                          if (_errs108 === errors) {
+                            if (data34.status !== undefined) {
+                              let data35 = data34.status;
+                              const _errs109 = errors;
+                              if (typeof data35 !== 'string') {
                                 validate347.errors = [
                                   {
-                                    instancePath: instancePath + '/eligibleConnections/' + i1,
-                                    schemaPath: '#/properties/eligibleConnections/items/type',
+                                    instancePath: instancePath + '/derivedDeepSeek/status',
+                                    schemaPath:
+                                      '#/properties/derivedDeepSeek/properties/status/type',
                                     keyword: 'type',
-                                    params: { type: 'object' },
-                                    message: 'must be object',
+                                    params: { type: 'string' },
+                                    message: 'must be string',
                                   },
                                 ];
                                 return false;
                               }
+                              if (
+                                !(
+                                  data35 === 'configured' ||
+                                  data35 === 'unavailable' ||
+                                  data35 === 'ambiguous'
+                                )
+                              ) {
+                                validate347.errors = [
+                                  {
+                                    instancePath: instancePath + '/derivedDeepSeek/status',
+                                    schemaPath:
+                                      '#/properties/derivedDeepSeek/properties/status/enum',
+                                    keyword: 'enum',
+                                    params: {
+                                      allowedValues:
+                                        schema687.properties.derivedDeepSeek.properties.status.enum,
+                                    },
+                                    message: 'must be equal to one of the allowed values',
+                                  },
+                                ];
+                                return false;
+                              }
+                              var valid18 = _errs109 === errors;
+                            } else {
+                              var valid18 = true;
                             }
-                            var valid18 = _errs108 === errors;
-                            if (!valid18) {
-                              break;
+                            if (valid18) {
+                              if (data34.label !== undefined) {
+                                let data36 = data34.label;
+                                const _errs111 = errors;
+                                if (errors === _errs111) {
+                                  if (typeof data36 === 'string') {
+                                    if (func1(data36) > 120) {
+                                      validate347.errors = [
+                                        {
+                                          instancePath: instancePath + '/derivedDeepSeek/label',
+                                          schemaPath:
+                                            '#/properties/derivedDeepSeek/properties/label/maxLength',
+                                          keyword: 'maxLength',
+                                          params: { limit: 120 },
+                                          message: 'must NOT have more than 120 characters',
+                                        },
+                                      ];
+                                      return false;
+                                    } else {
+                                      if (func1(data36) < 1) {
+                                        validate347.errors = [
+                                          {
+                                            instancePath: instancePath + '/derivedDeepSeek/label',
+                                            schemaPath:
+                                              '#/properties/derivedDeepSeek/properties/label/minLength',
+                                            keyword: 'minLength',
+                                            params: { limit: 1 },
+                                            message: 'must NOT have fewer than 1 characters',
+                                          },
+                                        ];
+                                        return false;
+                                      }
+                                    }
+                                  } else {
+                                    validate347.errors = [
+                                      {
+                                        instancePath: instancePath + '/derivedDeepSeek/label',
+                                        schemaPath:
+                                          '#/properties/derivedDeepSeek/properties/label/type',
+                                        keyword: 'type',
+                                        params: { type: 'string' },
+                                        message: 'must be string',
+                                      },
+                                    ];
+                                    return false;
+                                  }
+                                }
+                                var valid18 = _errs111 === errors;
+                              } else {
+                                var valid18 = true;
+                              }
                             }
                           }
                         }
                       } else {
                         validate347.errors = [
                           {
-                            instancePath: instancePath + '/eligibleConnections',
-                            schemaPath: '#/properties/eligibleConnections/type',
+                            instancePath: instancePath + '/derivedDeepSeek',
+                            schemaPath: '#/properties/derivedDeepSeek/type',
                             keyword: 'type',
-                            params: { type: 'array' },
-                            message: 'must be array',
+                            params: { type: 'object' },
+                            message: 'must be object',
                           },
                         ];
                         return false;
@@ -330965,53 +330815,306 @@ function validate347(
                     var valid0 = true;
                   }
                   if (valid0) {
-                    if (data.errors !== undefined) {
-                      let data39 = data.errors;
-                      const _errs117 = errors;
-                      if (errors === _errs117) {
-                        if (Array.isArray(data39)) {
-                          var valid20 = true;
-                          const len2 = data39.length;
-                          for (let i2 = 0; i2 < len2; i2++) {
-                            let data40 = data39[i2];
-                            const _errs119 = errors;
-                            if (errors === _errs119) {
-                              if (typeof data40 === 'string') {
-                                if (!pattern300.test(data40)) {
+                    if (data.eligibleConnections !== undefined) {
+                      let data37 = data.eligibleConnections;
+                      const _errs113 = errors;
+                      if (errors === _errs113) {
+                        if (Array.isArray(data37)) {
+                          if (data37.length > 128) {
+                            validate347.errors = [
+                              {
+                                instancePath: instancePath + '/eligibleConnections',
+                                schemaPath: '#/properties/eligibleConnections/maxItems',
+                                keyword: 'maxItems',
+                                params: { limit: 128 },
+                                message: 'must NOT have more than 128 items',
+                              },
+                            ];
+                            return false;
+                          } else {
+                            var valid19 = true;
+                            const len1 = data37.length;
+                            for (let i1 = 0; i1 < len1; i1++) {
+                              let data38 = data37[i1];
+                              const _errs115 = errors;
+                              if (errors === _errs115) {
+                                if (data38 && typeof data38 == 'object' && !Array.isArray(data38)) {
+                                  let missing12;
+                                  if (
+                                    (data38.providerAlias === undefined &&
+                                      (missing12 = 'providerAlias')) ||
+                                    (data38.name === undefined && (missing12 = 'name')) ||
+                                    (data38.adapter === undefined && (missing12 = 'adapter'))
+                                  ) {
+                                    validate347.errors = [
+                                      {
+                                        instancePath: instancePath + '/eligibleConnections/' + i1,
+                                        schemaPath:
+                                          '#/properties/eligibleConnections/items/required',
+                                        keyword: 'required',
+                                        params: { missingProperty: missing12 },
+                                        message: "must have required property '" + missing12 + "'",
+                                      },
+                                    ];
+                                    return false;
+                                  } else {
+                                    const _errs117 = errors;
+                                    for (const key12 in data38) {
+                                      if (
+                                        !(
+                                          key12 === 'providerAlias' ||
+                                          key12 === 'name' ||
+                                          key12 === 'adapter'
+                                        )
+                                      ) {
+                                        validate347.errors = [
+                                          {
+                                            instancePath:
+                                              instancePath + '/eligibleConnections/' + i1,
+                                            schemaPath:
+                                              '#/properties/eligibleConnections/items/additionalProperties',
+                                            keyword: 'additionalProperties',
+                                            params: { additionalProperty: key12 },
+                                            message: 'must NOT have additional properties',
+                                          },
+                                        ];
+                                        return false;
+                                        break;
+                                      }
+                                    }
+                                    if (_errs117 === errors) {
+                                      if (data38.providerAlias !== undefined) {
+                                        let data39 = data38.providerAlias;
+                                        const _errs118 = errors;
+                                        if (errors === _errs118) {
+                                          if (typeof data39 === 'string') {
+                                            if (func1(data39) > 128) {
+                                              validate347.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/eligibleConnections/' +
+                                                    i1 +
+                                                    '/providerAlias',
+                                                  schemaPath:
+                                                    '#/properties/eligibleConnections/items/properties/providerAlias/maxLength',
+                                                  keyword: 'maxLength',
+                                                  params: { limit: 128 },
+                                                  message: 'must NOT have more than 128 characters',
+                                                },
+                                              ];
+                                              return false;
+                                            } else {
+                                              if (func1(data39) < 1) {
+                                                validate347.errors = [
+                                                  {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/eligibleConnections/' +
+                                                      i1 +
+                                                      '/providerAlias',
+                                                    schemaPath:
+                                                      '#/properties/eligibleConnections/items/properties/providerAlias/minLength',
+                                                    keyword: 'minLength',
+                                                    params: { limit: 1 },
+                                                    message:
+                                                      'must NOT have fewer than 1 characters',
+                                                  },
+                                                ];
+                                                return false;
+                                              } else {
+                                                if (!pattern1746.test(data39)) {
+                                                  validate347.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/eligibleConnections/' +
+                                                        i1 +
+                                                        '/providerAlias',
+                                                      schemaPath:
+                                                        '#/properties/eligibleConnections/items/properties/providerAlias/pattern',
+                                                      keyword: 'pattern',
+                                                      params: {
+                                                        pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*$',
+                                                      },
+                                                      message:
+                                                        'must match pattern "' +
+                                                        '^[A-Za-z0-9][A-Za-z0-9_.-]*$' +
+                                                        '"',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                }
+                                              }
+                                            }
+                                          } else {
+                                            validate347.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath +
+                                                  '/eligibleConnections/' +
+                                                  i1 +
+                                                  '/providerAlias',
+                                                schemaPath:
+                                                  '#/properties/eligibleConnections/items/properties/providerAlias/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                        }
+                                        var valid20 = _errs118 === errors;
+                                      } else {
+                                        var valid20 = true;
+                                      }
+                                      if (valid20) {
+                                        if (data38.name !== undefined) {
+                                          let data40 = data38.name;
+                                          const _errs120 = errors;
+                                          if (errors === _errs120) {
+                                            if (typeof data40 === 'string') {
+                                              if (func1(data40) > 120) {
+                                                validate347.errors = [
+                                                  {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/eligibleConnections/' +
+                                                      i1 +
+                                                      '/name',
+                                                    schemaPath:
+                                                      '#/properties/eligibleConnections/items/properties/name/maxLength',
+                                                    keyword: 'maxLength',
+                                                    params: { limit: 120 },
+                                                    message:
+                                                      'must NOT have more than 120 characters',
+                                                  },
+                                                ];
+                                                return false;
+                                              } else {
+                                                if (func1(data40) < 1) {
+                                                  validate347.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/eligibleConnections/' +
+                                                        i1 +
+                                                        '/name',
+                                                      schemaPath:
+                                                        '#/properties/eligibleConnections/items/properties/name/minLength',
+                                                      keyword: 'minLength',
+                                                      params: { limit: 1 },
+                                                      message:
+                                                        'must NOT have fewer than 1 characters',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                }
+                                              }
+                                            } else {
+                                              validate347.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/eligibleConnections/' +
+                                                    i1 +
+                                                    '/name',
+                                                  schemaPath:
+                                                    '#/properties/eligibleConnections/items/properties/name/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                          }
+                                          var valid20 = _errs120 === errors;
+                                        } else {
+                                          var valid20 = true;
+                                        }
+                                        if (valid20) {
+                                          if (data38.adapter !== undefined) {
+                                            let data41 = data38.adapter;
+                                            const _errs122 = errors;
+                                            if (typeof data41 !== 'string') {
+                                              validate347.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/eligibleConnections/' +
+                                                    i1 +
+                                                    '/adapter',
+                                                  schemaPath:
+                                                    '#/properties/eligibleConnections/items/properties/adapter/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                            if (
+                                              !(
+                                                data41 === 'deepseek-search' ||
+                                                data41 === 'perplexity-search' ||
+                                                data41 === 'openai-search'
+                                              )
+                                            ) {
+                                              validate347.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/eligibleConnections/' +
+                                                    i1 +
+                                                    '/adapter',
+                                                  schemaPath:
+                                                    '#/properties/eligibleConnections/items/properties/adapter/enum',
+                                                  keyword: 'enum',
+                                                  params: {
+                                                    allowedValues:
+                                                      schema687.properties.eligibleConnections.items
+                                                        .properties.adapter.enum,
+                                                  },
+                                                  message:
+                                                    'must be equal to one of the allowed values',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                            var valid20 = _errs122 === errors;
+                                          } else {
+                                            var valid20 = true;
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                } else {
                                   validate347.errors = [
                                     {
-                                      instancePath: instancePath + '/errors/' + i2,
-                                      schemaPath: '#/properties/errors/items/pattern',
-                                      keyword: 'pattern',
-                                      params: { pattern: '^[a-z0-9_]{1,128}$' },
-                                      message: 'must match pattern "' + '^[a-z0-9_]{1,128}$' + '"',
+                                      instancePath: instancePath + '/eligibleConnections/' + i1,
+                                      schemaPath: '#/properties/eligibleConnections/items/type',
+                                      keyword: 'type',
+                                      params: { type: 'object' },
+                                      message: 'must be object',
                                     },
                                   ];
                                   return false;
                                 }
-                              } else {
-                                validate347.errors = [
-                                  {
-                                    instancePath: instancePath + '/errors/' + i2,
-                                    schemaPath: '#/properties/errors/items/type',
-                                    keyword: 'type',
-                                    params: { type: 'string' },
-                                    message: 'must be string',
-                                  },
-                                ];
-                                return false;
                               }
-                            }
-                            var valid20 = _errs119 === errors;
-                            if (!valid20) {
-                              break;
+                              var valid19 = _errs115 === errors;
+                              if (!valid19) {
+                                break;
+                              }
                             }
                           }
                         } else {
                           validate347.errors = [
                             {
-                              instancePath: instancePath + '/errors',
-                              schemaPath: '#/properties/errors/type',
+                              instancePath: instancePath + '/eligibleConnections',
+                              schemaPath: '#/properties/eligibleConnections/type',
                               keyword: 'type',
                               params: { type: 'array' },
                               message: 'must be array',
@@ -331020,9 +331123,71 @@ function validate347(
                           return false;
                         }
                       }
-                      var valid0 = _errs117 === errors;
+                      var valid0 = _errs113 === errors;
                     } else {
                       var valid0 = true;
+                    }
+                    if (valid0) {
+                      if (data.errors !== undefined) {
+                        let data42 = data.errors;
+                        const _errs124 = errors;
+                        if (errors === _errs124) {
+                          if (Array.isArray(data42)) {
+                            var valid21 = true;
+                            const len2 = data42.length;
+                            for (let i2 = 0; i2 < len2; i2++) {
+                              let data43 = data42[i2];
+                              const _errs126 = errors;
+                              if (errors === _errs126) {
+                                if (typeof data43 === 'string') {
+                                  if (!pattern300.test(data43)) {
+                                    validate347.errors = [
+                                      {
+                                        instancePath: instancePath + '/errors/' + i2,
+                                        schemaPath: '#/properties/errors/items/pattern',
+                                        keyword: 'pattern',
+                                        params: { pattern: '^[a-z0-9_]{1,128}$' },
+                                        message:
+                                          'must match pattern "' + '^[a-z0-9_]{1,128}$' + '"',
+                                      },
+                                    ];
+                                    return false;
+                                  }
+                                } else {
+                                  validate347.errors = [
+                                    {
+                                      instancePath: instancePath + '/errors/' + i2,
+                                      schemaPath: '#/properties/errors/items/type',
+                                      keyword: 'type',
+                                      params: { type: 'string' },
+                                      message: 'must be string',
+                                    },
+                                  ];
+                                  return false;
+                                }
+                              }
+                              var valid21 = _errs126 === errors;
+                              if (!valid21) {
+                                break;
+                              }
+                            }
+                          } else {
+                            validate347.errors = [
+                              {
+                                instancePath: instancePath + '/errors',
+                                schemaPath: '#/properties/errors/type',
+                                keyword: 'type',
+                                params: { type: 'array' },
+                                message: 'must be array',
+                              },
+                            ];
+                            return false;
+                          }
+                        }
+                        var valid0 = _errs124 === errors;
+                      } else {
+                        var valid0 = true;
+                      }
                     }
                   }
                 }

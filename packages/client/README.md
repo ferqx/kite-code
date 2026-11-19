@@ -321,3 +321,5 @@ Cookie Browser 也提供 `listBackgroundExecutions` / `listAllBackgroundExecutio
 `readOutputFileStream` 使用认证 Artifact HTTP 二进制流，核全部响应头和总长；调用方必须只写临时文件、增量核完整 SHA/size 后发布，并在失败、提前退出或取消时调用 cancel。SDK 不把文件整体塞进 JSON/base64，也不将 Blob 路径交给 Renderer。`prepareInputFromOutput` 复制精确选择到新合法 input import，`prepareWorkingInputs` 在命令提交前创建独立工作副本。POST 不自动重试或更换 ID，未知结果按原身份查询与重入。实际闭环与不覆写编辑行为由[真实 HTTP 回归](../../apps/service/test/isolated/output-files.test.ts)验证。
 
 Native 本地 PDF 只读预览使用 `renderLocalPdfSnapshot`，仅允许明确回环 IP endpoint，沿现有认证、禁止重定向、连接代际与 OutputPdfPage 响应检查。快照请求不包含磁盘路径、写回授权或产物身份；服务端仍验证有界 bytes/hash、会话与 Store。它是 UI 读取适配，不是新增 Agent 工具或协议版本。
+
+`getWebSearchSettings` 的可选 `derivedDeepSeek` 返回已配置、未配置或无法唯一确定三种状态。显示名称用于说明设置中的提供商，不能用作凭据或 Run 的原生搜索资格。新写入只保存自动或停用模式，并沿用原 readSet 和命令幂等约束。[设置与 HTTP 验证](../../apps/service/test/isolated/web-search-http.test.ts)

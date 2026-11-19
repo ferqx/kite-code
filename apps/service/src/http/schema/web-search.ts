@@ -107,6 +107,12 @@ export function webSearchSchemas<I extends z.ZodType, R extends z.ZodType>(id: I
       readSet: readSet.nullable(),
       webSearch: settings,
       searchProviders: providers(z.union([providerConnection, dedicatedConnection])),
+      derivedDeepSeek: z
+        .strictObject({
+          status: z.enum(['configured', 'unavailable', 'ambiguous']),
+          label: z.string().min(1).max(120).optional(),
+        })
+        .optional(),
       eligibleConnections: z
         .array(
           z.strictObject({

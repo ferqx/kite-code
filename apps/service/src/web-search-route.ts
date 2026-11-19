@@ -127,14 +127,13 @@ export function selectSearchRoute(input: {
   if (input.parent === null || input.parent?.kind === 'none')
     return { kind: 'none', reason: 'parent' };
   if (
-    input.settings.mode === 'auto' &&
     input.native &&
     (input.parent === undefined ||
       (input.parent.kind === 'native' && input.parent.accountDigest === input.native.accountDigest))
   )
     return input.native;
   if (
-    input.provider &&
+    input.provider?.adapter === 'deepseek-search' &&
     input.settings.providerId === input.provider.providerId &&
     (input.parent === undefined ||
       (input.parent.kind === 'provider' &&

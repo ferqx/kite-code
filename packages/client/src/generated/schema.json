@@ -33408,6 +33408,22 @@
           ]
         }
       },
+      "derivedDeepSeek": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["configured", "unavailable", "ambiguous"]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        "required": ["status"],
+        "additionalProperties": false
+      },
       "eligibleConnections": {
         "maxItems": 128,
         "type": "array",

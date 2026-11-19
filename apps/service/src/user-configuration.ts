@@ -90,6 +90,7 @@ export function createUserConfiguration(
     return {
       provider: family,
       providerName: alias,
+      ...(family === 'deepseek' && provider.enabled === false ? { enabled: false } : {}),
       ...(typeof provider.name === 'string' ? { providerLabel: provider.name } : {}),
       ...(provider.protocol === undefined ? {} : { protocol: provider.protocol }),
       ...(endpoint === undefined ? {} : { baseURL: endpoint }),

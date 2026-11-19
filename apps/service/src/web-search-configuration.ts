@@ -206,40 +206,99 @@ function aliasBinding(
     return fail('web_search_connection_invalid');
   return { baseURL, credentialRef: first.credentialRef };
 }
-export function eligibleWebSearchConnections(user: JsonObject) {
+function connectionLabel(entry: JsonObject, alias: string) {
+  const label = entry.providerLabel;
+  return typeof label === 'string' &&
+    label.trim() &&
+    label.length <= 120 &&
+    !/[\p{Cc}\p{Cf}]/u.test(label) &&
+    Buffer.from(label, 'utf8').toString('utf8') === label
+    ? label.trim()
+    : alias;
+}
+
+type DerivedDeepSeek =
+  | { status: 'configured'; label: string }
+  | { status: 'unavailable' | 'ambiguous'; label?: never };
+
+/** Derive paid search only from an enabled official user-owned model account. Discovery never opens the vault. */
+export function automaticWebSearchConfiguration(
+  user: JsonObject,
+  preferredProviderAlias?: string,
+): WebSearchConfiguration & { derivedDeepSeek: DerivedDeepSeek } {
+  const settings = record(user.webSearch === undefined ? { mode: 'auto' } : user.webSearch, [
+    'mode',
+    'providerId',
+  ]);
+  if (settings.mode !== 'auto' && settings.mode !== 'provider' && settings.mode !== 'disabled')
+    return fail();
   const connections = userConnections(user);
-  const result: { providerAlias: string; name: string; adapter: Adapter }[] = [];
-  for (const [providerAlias, group] of connections.aliases) {
-    const first = group[0]!;
-    const service = first.provider;
-    if (service !== 'openai' && service !== 'deepseek' && service !== 'perplexity') continue;
-    const adapter = `${service}-search` as const;
+  const modelRows = new Set(Array.isArray(user.models) ? user.models : []);
+  const declarations = new Set(
+    Array.isArray(user._providerConnections) ? user._providerConnections : [],
+  );
+  const choices = new Map<string, SearchProviderConfig>();
+  const defaultAliases = new Set<string>();
+  for (const [alias, group] of connections.aliases) {
+    if (
+      group[0]!.provider !== 'deepseek' ||
+      group.some(
+        (entry) => entry.protocol !== undefined && entry.protocol !== 'chat-completions',
+      ) ||
+      group.some(
+        (entry) => declarations.has(entry) && (entry.enabled === false || entry.remove === true),
+      )
+    )
+      continue;
+    const models = group.filter((entry) => modelRows.has(entry));
+    const enabled = models.filter(
+      (model) =>
+        (model.enabled === undefined || model.enabled === true) &&
+        model.remove !== true &&
+        typeof model.id === 'string' &&
+        model.id.length > 0 &&
+        typeof model.model === 'string' &&
+        model.model.trim(),
+    );
+    // An explicit connection needs no selected model; an account whose models are all disabled is dormant.
+    if (models.length && !enabled.length) continue;
     try {
-      aliasBinding(providerAlias, adapter, connections);
+      aliasBinding(alias, 'deepseek-search', connections);
     } catch (error) {
       if (error instanceof ConfigurationError) continue;
       throw error;
     }
-    const label = first.providerLabel;
-    const name =
-      typeof label === 'string' &&
-      label.trim() &&
-      label.length <= 120 &&
-      !Array.from(label).some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
-        ? label.trim()
-        : providerAlias;
-    result.push({ providerAlias, name, adapter });
-    if (result.length === 128) break;
+    if (enabled.some((model) => model.id === user.modelId)) defaultAliases.add(alias);
+    choices.set(alias, {
+      id: alias,
+      name: connectionLabel(group[0]!, alias),
+      adapter: 'deepseek-search',
+      connection: { kind: 'provider', providerAlias: alias },
+    });
   }
-  return result;
+  // Do not choose between independent payment accounts by declaration order or display name.
+  const selected =
+    choices.get(preferredProviderAlias ?? '') ??
+    (defaultAliases.size === 1 ? choices.get([...defaultAliases][0]!) : undefined) ??
+    (choices.size === 1 ? choices.values().next().value : undefined);
+  return {
+    webSearch:
+      settings.mode === 'disabled'
+        ? { mode: 'disabled' }
+        : { mode: 'auto', ...(selected ? { providerId: selected.id } : {}) },
+    searchProviders: selected ? [selected] : [],
+    derivedDeepSeek: selected
+      ? { status: 'configured', label: selected.name }
+      : { status: choices.size > 1 ? 'ambiguous' : 'unavailable' },
+  };
 }
+
 export function freezeWebSearchProvider(
   configured: SearchProviderConfig,
   options: {
     user: JsonObject;
     profileAccessKey: string;
     modelVault: Pick<Vault, 'resolve'>;
-    searchVault: Pick<Vault, 'readOwned'>;
   },
 ): Readonly<{
   bindingDigest: string;
@@ -249,25 +308,15 @@ export function freezeWebSearchProvider(
   modelId?: string;
   resolveApiKey(): Promise<string>;
 }> {
-  const { profileAccessKey, modelVault, searchVault } = options;
+  const { profileAccessKey, modelVault } = options;
   const item = provider(configured);
   const connection = item.connection;
-  let baseURL: string;
-  let credentialRef: string;
-  let read: () => Promise<string | null>;
-  if (connection.kind === 'dedicated') {
-    const scope = webSearchCredentialScope(profileAccessKey, item);
-    baseURL = connection.baseURL;
-    credentialRef = connection.credentialRef;
-    read = () => searchVault.readOwned(scope);
-  } else {
-    ({ baseURL, credentialRef } = aliasBinding(
-      connection.providerAlias,
-      item.adapter,
-      userConnections(options.user),
-    ));
-    read = () => modelVault.resolve(credentialRef);
-  }
+  if (connection.kind !== 'provider') return fail('web_search_connection_invalid');
+  const { baseURL, credentialRef } = aliasBinding(
+    connection.providerAlias,
+    item.adapter,
+    userConnections(options.user),
+  );
   return Object.freeze({
     bindingDigest: createHash('sha256')
       .update(
@@ -278,7 +327,7 @@ export function freezeWebSearchProvider(
           item.adapter,
           baseURL,
           connection.kind,
-          connection.kind === 'provider' ? connection.providerAlias : null,
+          connection.providerAlias,
           credentialRef,
           item.adapter === 'openai-search' ? item.modelId : (item.maxResults ?? 5),
         ]),
@@ -291,7 +340,7 @@ export function freezeWebSearchProvider(
       : { maxResults: item.maxResults ?? 5 }),
     async resolveApiKey(): Promise<string> {
       try {
-        const secret = await read();
+        const secret = await modelVault.resolve(credentialRef);
         if (isWebSearchApiKey(secret)) return secret;
       } catch {
         /* Keep backend and credential diagnostics private. */

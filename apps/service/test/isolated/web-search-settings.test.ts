@@ -17,10 +17,7 @@ import {
 } from '../../../../tests/fixtures/test-filesystem';
 import { createConfigurationManagement } from '../../src/configuration-management';
 import { createUserConfiguration } from '../../src/user-configuration';
-import {
-  freezeWebSearchProvider,
-  webSearchCredentialScope,
-} from '../../src/web-search-configuration';
+import { webSearchCredentialScope } from '../../src/web-search-configuration';
 
 async function rejected(promise: Promise<unknown>, expected: string) {
   const error = await promise.then(
@@ -30,7 +27,7 @@ async function rejected(promise: Promise<unknown>, expected: string) {
   expect(error instanceof Error ? error.message : null).toBe(expected);
 }
 
-async function fixture() {
+async function fixture(explicit: () => JsonObject = () => ({})) {
   const root = temporaryDirectory('kite-web-search-settings-');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
@@ -38,16 +35,13 @@ async function fixture() {
   writeFileSync(file, '// keep this comment\n{"unrelated":17}\n', { mode: 0o600 });
   const user = createUserConfiguration(file);
   const backend = createTemporaryCredentialBackend();
-  let onWrite: (() => void) | undefined;
-  let failRemove = false;
   const counts = { writes: 0, reads: 0, removes: 0 };
-  const searchVault = createCredentialVault({
+  const vault = createCredentialVault({
     backend: {
       kind: 'temporary',
       async put(key, value) {
         counts.writes++;
         await backend.put(key, value);
-        onWrite?.();
       },
       async resolve(key) {
         counts.reads++;
@@ -55,12 +49,10 @@ async function fixture() {
       },
       async remove(key) {
         counts.removes++;
-        if (failRemove) throw Error('fixture cleanup failure');
         await backend.remove(key);
       },
     },
   });
-  const modelVault = createCredentialVault({ backend });
   const open = async () =>
     createRuntime({
       store: await openSqliteStore(profile),
@@ -72,10 +64,9 @@ async function fixture() {
       profile,
       runtime,
       userConfiguration: user,
-      vault: modelVault,
-      webSearchVault: searchVault,
+      vault,
       persistence: 'temporary',
-      explicit: () => ({}),
+      explicit,
     });
   const expectedStoreId = (await runtime.getMetadata()).storeId;
   const identity = (commandId: string) => ({ expectedStoreId, commandId, subjectId: 'owner' });
@@ -83,8 +74,7 @@ async function fixture() {
     file,
     profile,
     counts,
-    modelVault,
-    searchVault,
+    vault,
     user,
     identity,
     manager,
@@ -93,12 +83,6 @@ async function fixture() {
     async reopen() {
       await runtime.close();
       runtime = await open();
-    },
-    setWriteHook(hook: () => void) {
-      onWrite = hook;
-    },
-    failCleanup() {
-      failRemove = true;
     },
     async close() {
       await runtime.close();
@@ -117,242 +101,242 @@ const dedicated = {
 const selected = { mode: 'provider', providerId: dedicated.id } as const;
 const syntheticKey = () => `owned-${randomUUID()}`;
 
-test('search settings creation and rotation bind fresh credentials and survive cold command recovery', async () => {
+test('automatic and disabled preferences survive cold replay and preserve dormant legacy account data', async () => {
   const f = await fixture();
   try {
+    const credentialRef = `credential:${randomUUID()}`;
+    const old = { ...dedicated, connection: { ...dedicated.connection, credentialRef } };
+    const scope = webSearchCredentialScope(f.profile.profileAccessKey, old);
+    const key = syntheticKey();
+    await f.vault.writeOwned(scope, key);
+    writeFileSync(
+      f.file,
+      '// keep this comment\n' +
+        JSON.stringify({
+          unrelated: 17,
+          webSearch: selected,
+          searchProviders: [old],
+        }),
+    );
     const initial = await f.read();
-    expect(initial).toMatchObject({ webSearch: { mode: 'auto' }, searchProviders: [], errors: [] });
-    const firstKey = syntheticKey();
+    expect(initial).toMatchObject({
+      webSearch: { mode: 'auto' },
+      searchProviders: [],
+      derivedDeepSeek: { status: 'unavailable' },
+      errors: [],
+    });
+    expect(JSON.stringify(initial).includes(credentialRef)).toBe(false);
     const input = {
-      ...f.identity('create-search'),
+      ...f.identity('disable'),
       expectedReadSet: initial.readSet!,
-      webSearch: selected,
-      searchProviders: [dedicated],
-      credential: { providerId: dedicated.id, secret: firstKey },
+      webSearch: { mode: 'disabled' as const },
+      searchProviders: [],
     };
     const saved = await f.manager().updateWebSearch(input);
     expect(saved).toMatchObject({ state: 'applied', kind: 'config.patch' });
-    const firstView = await f.read();
-    expect(firstView.webSearch).toEqual(selected);
-    const first = firstView.searchProviders[0]!;
-    const firstBinding = freezeWebSearchProvider(first, {
-      user: f.user.read().value,
-      profileAccessKey: f.profile.profileAccessKey,
-      modelVault: f.modelVault,
-      searchVault: f.searchVault,
-    });
-    expect((await firstBinding.resolveApiKey()) === firstKey).toBe(true);
-    const before = { ...f.counts };
     await f.reopen();
     expect(await f.manager().getMutation(input)).toEqual(saved);
     expect(await f.manager().updateWebSearch(input)).toEqual(saved);
-    expect(f.counts).toEqual(before);
-    const rotatedKey = syntheticKey();
     await rejected(
-      f.manager().updateWebSearch({
-        ...input,
-        credential: { providerId: dedicated.id, secret: rotatedKey },
-      }),
+      f.manager().updateWebSearch({ ...input, webSearch: { mode: 'auto' } }),
       'host_mutation_conflict',
     );
     await rejected(
-      f.manager().updateWebSearch({ ...input, ...f.identity('stale-search') }),
+      f.manager().updateWebSearch({ ...input, ...f.identity('stale') }),
       'configuration_read_set_conflict',
     );
-    expect(f.counts.writes).toBe(1);
-    await f.manager().updateWebSearch({
-      ...input,
-      ...f.identity('rotate-search'),
-      expectedReadSet: firstView.readSet!,
-      credential: { providerId: dedicated.id, secret: rotatedKey },
-    });
     const after = await f.read();
-    await rejected(
-      f.manager().updateWebSearch({
-        ...f.identity('old-ref'),
-        expectedReadSet: after.readSet!,
-        webSearch: selected,
-        searchProviders: [first],
-      }),
-      'web_search_credential_unavailable',
-    );
-    const latest = after.searchProviders[0]!;
-    expect(latest.connection).not.toEqual(first.connection);
-    const binding = freezeWebSearchProvider(latest, {
-      user: f.user.read().value,
-      profileAccessKey: f.profile.profileAccessKey,
-      modelVault: f.modelVault,
-      searchVault: f.searchVault,
-    });
-    expect((await binding.resolveApiKey()) === rotatedKey).toBe(true);
-    expect((await firstBinding.resolveApiKey()) === firstKey).toBe(true);
-    const disk = readFileSync(f.file, 'utf8');
-    expect(disk.includes('// keep this comment')).toBe(true);
+    expect(after.webSearch).toEqual({ mode: 'disabled' });
+    expect(after.searchProviders).toEqual([]);
+    expect(f.user.read().value.searchProviders).toEqual([old]);
+    expect(readFileSync(f.file, 'utf8')).toContain('// keep this comment');
     expect(f.user.read().value.unrelated).toBe(17);
-    const observed = JSON.stringify([
-      disk,
-      after,
-      saved,
-      await f.journal('create-search'),
-      await f.journal('rotate-search'),
-    ]);
-    expect([firstKey, rotatedKey].some((secret) => observed.includes(secret))).toBe(false);
+    expect(f.counts).toEqual({ writes: 1, reads: 0, removes: 0 });
+    expect((await f.vault.readOwned(scope)) === key).toBe(true);
   } finally {
     await f.close();
   }
 });
 
-test('save rejects generic, foreign-profile and wrong-account refs; invalid settings never enter the journal', async () => {
+test('new search account, copied secrets, foreign references and legacy provider selectors are rejected before journaling', async () => {
   const f = await fixture();
   try {
     const { readSet } = await f.read();
-    const generic = await f.modelVault.put(syntheticKey());
+    const base = {
+      ...f.identity('bad'),
+      expectedReadSet: readSet!,
+      webSearch: { mode: 'auto' as const },
+      searchProviders: [],
+    };
+    const generic = await f.vault.put(syntheticKey());
     const withRef = {
       ...dedicated,
       connection: { ...dedicated.connection, credentialRef: generic.id },
     };
-    const base = { expectedReadSet: readSet!, webSearch: selected, searchProviders: [withRef] };
-    await rejected(
-      f.manager().updateWebSearch({ ...f.identity('generic'), ...base }),
-      'web_search_credential_unavailable',
-    );
-    await f.searchVault.writeOwned(
-      webSearchCredentialScope('other-profile', withRef),
-      syntheticKey(),
-    );
-    await rejected(
-      f.manager().updateWebSearch({ ...f.identity('foreign'), ...base }),
-      'web_search_credential_unavailable',
-    );
-    await f.searchVault.writeOwned(
-      webSearchCredentialScope(f.profile.profileAccessKey, { ...withRef, id: 'other-account' }),
-      syntheticKey(),
-    );
-    await rejected(
-      f.manager().updateWebSearch({ ...f.identity('other-account'), ...base }),
-      'web_search_credential_unavailable',
-    );
-    await rejected(
-      f.manager().updateWebSearch({
-        ...f.identity('mismatched'),
+    const before = { ...f.counts };
+    for (const input of [
+      { ...base, webSearch: selected },
+      { ...base, webSearch: { mode: 'auto' as const, providerId: dedicated.id } },
+      { ...base, searchProviders: [dedicated] },
+      { ...base, searchProviders: [withRef] },
+      {
         ...base,
-        credential: { providerId: 'wrong', secret: syntheticKey() },
-      }),
-      'web_search_connection_invalid',
-    );
-    const inline = { ...withRef, connection: { ...withRef.connection, apiKey: syntheticKey() } };
-    await rejected(
-      f.manager().updateWebSearch({ ...f.identity('inline'), ...base, searchProviders: [inline] }),
-      'web_search_configuration_invalid',
-    );
-    expect(await f.journal('inline')).toBeNull();
-    await rejected(
-      f.manager().updateWebSearch({
-        ...f.identity('masked'),
+        searchProviders: [
+          { ...withRef, connection: { kind: 'provider' as const, providerAlias: 'other' } },
+        ],
+      },
+      { ...base, credential: { providerId: dedicated.id, secret: syntheticKey() } },
+      {
         ...base,
-        searchProviders: [dedicated],
-        credential: { providerId: dedicated.id, secret: 'REDACTED' },
-      }),
-      'web_search_credential_unavailable',
-    );
-    expect(await f.journal('masked')).toBeNull();
+        searchProviders: [withRef],
+        credential: { providerId: dedicated.id, secret: '*****' },
+      },
+    ]) {
+      await rejected(f.manager().updateWebSearch(input), 'web_search_configuration_invalid');
+      expect(await f.journal('bad')).toBeNull();
+    }
+    for (const value of [
+      { webSearch: selected, searchProviders: [withRef] },
+      { webSearch: null, searchProviders: [] },
+      { webSearch: { mode: 'auto' }, searchProviders: null },
+    ]) {
+      await rejected(
+        f.manager().repair({
+          ...f.identity('bad-repair'),
+          scope: 'user',
+          ifMatch: readSet!.userEtag,
+          value,
+        }),
+        'web_search_configuration_invalid',
+      );
+      expect(await f.journal('bad-repair')).toBeNull();
+    }
+    expect(f.counts).toEqual(before);
     expect((await f.read()).readSet).toEqual(readSet);
-    expect(f.counts.writes).toBe(2);
   } finally {
     await f.close();
   }
 });
 
-test('save validates existing provider account locally and preserves a model-free account declaration', async () => {
+test('derived status follows the enabled official provider, configuration rotation and disablement without a vault or network read', async () => {
   const f = await fixture();
   try {
-    const ref = await f.modelVault.put(syntheticKey());
-    const config: JsonObject = {
+    const ref = await f.vault.put(syntheticKey());
+    const official = {
+      type: 'deepseek',
+      name: 'Research model',
+      baseURL: 'https://api.deepseek.com',
+      credentialRef: ref.id,
+      models: ['deepseek-flash'],
+    };
+    const configuration = {
       provider: {
-        research: {
-          type: 'deepseek',
-          name: 'Research account',
-          baseURL: 'https://api.deepseek.com',
-          credentialRef: ref.id,
-          models: [],
-        },
-        wrongOrigin: {
-          type: 'deepseek',
-          baseURL: 'https://unrelated.invalid',
+        research: official,
+        gateway: {
+          ...official,
+          baseURL: 'https://gateway.invalid',
           credentialRef: `credential:${randomUUID()}`,
-          models: [],
-        },
-        localCodex: {
-          type: 'codex',
-          baseURL: 'https://api.openai.com/v1',
-          credentialRef: `credential:${randomUUID()}`,
-          models: [],
         },
       },
+      model: 'research:deepseek-flash',
     };
-    writeFileSync(f.file, JSON.stringify(config));
+    writeFileSync(f.file, JSON.stringify(configuration));
     const first = await f.read();
-    expect(first.eligibleConnections).toEqual([
-      { providerAlias: 'research', name: 'Research account', adapter: 'deepseek-search' },
-    ]);
+    expect(first).toMatchObject({
+      webSearch: { mode: 'auto' },
+      searchProviders: [],
+      derivedDeepSeek: { status: 'configured', label: 'Research model' },
+      errors: [],
+    });
     expect(JSON.stringify(first).includes(ref.id)).toBe(false);
-    const provider = {
-      ...dedicated,
-      adapter: 'deepseek-search' as const,
-      connection: { kind: 'provider' as const, providerAlias: 'research' },
-    };
-    const input = {
-      ...f.identity('alias'),
-      expectedReadSet: first.readSet!,
-      webSearch: selected,
-      searchProviders: [provider],
-    };
-    expect((await f.manager().updateWebSearch(input)).state).toBe('applied');
-    const after = await f.read();
-    expect(after.searchProviders).toEqual([provider]);
-    expect(f.counts.writes).toBe(0);
-    expect(f.user.read().value.models).toEqual([]);
-    await rejected(
-      f.manager().updateWebSearch({
-        ...input,
-        ...f.identity('mismatch'),
-        expectedReadSet: after.readSet!,
-        searchProviders: [{ ...provider, adapter: 'perplexity-search' }],
+    const newRef = await f.vault.put(syntheticKey());
+    writeFileSync(
+      f.file,
+      JSON.stringify({
+        ...configuration,
+        provider: {
+          ...configuration.provider,
+          research: { ...official, credentialRef: newRef.id },
+        },
       }),
-      'web_search_connection_invalid',
     );
-    expect((await f.read()).readSet).toEqual(after.readSet);
+    const rotated = await f.read();
+    expect(rotated.derivedDeepSeek).toEqual(first.derivedDeepSeek);
+    expect(rotated.readSet).not.toEqual(first.readSet);
+    expect(JSON.stringify(rotated).includes(newRef.id)).toBe(false);
+    writeFileSync(
+      f.file,
+      JSON.stringify({
+        ...configuration,
+        disabledModels: ['research:deepseek-flash', 'gateway:deepseek-flash'],
+      }),
+    );
+    const disabled = await f.read();
+    expect(disabled.derivedDeepSeek).toEqual({ status: 'unavailable' });
+    expect(f.counts).toEqual({ writes: 2, reads: 0, removes: 0 });
   } finally {
     await f.close();
   }
 });
 
-for (const failCleanup of [false, true])
-  test(`stale publication ${failCleanup ? 'reports uncertain cleanup' : 'removes only the new unpublished credential'}`, async () => {
-    const f = await fixture();
-    try {
-      const read = await f.read();
-      f.setWriteHook(() => writeFileSync(f.file, '{"unrelated":19}'));
-      if (failCleanup) f.failCleanup();
-      const input = {
-        ...f.identity('concurrent-write'),
-        expectedReadSet: read.readSet!,
-        webSearch: selected,
-        searchProviders: [dedicated],
-        credential: { providerId: dedicated.id, secret: syntheticKey() },
-      };
-      await rejected(
-        f.manager().updateWebSearch(input),
-        failCleanup ? 'web_search_credential_outcome_unknown' : 'configuration_conflict',
-      );
-      const receipt = await f.manager().getMutation(input);
-      expect(receipt?.state).toBe(failCleanup ? 'outcome_unknown' : 'failed');
-      expect(f.counts).toEqual({ writes: 1, reads: 1, removes: 1 });
-      expect(await f.manager().updateWebSearch(input)).toEqual(receipt!);
-      expect(f.counts.writes).toBe(1);
-      expect(f.user.read().value.unrelated).toBe(19);
-      expect((await f.read()).searchProviders).toEqual([]);
-    } finally {
-      await f.close();
-    }
-  });
+test('trusted explicit disable narrows search without introducing a host account or overriding a user disable', async () => {
+  let override: JsonObject = {};
+  const f = await fixture(() => override);
+  try {
+    const declared = {
+      provider: {
+        mine: {
+          type: 'deepseek',
+          name: 'My model',
+          models: ['deepseek-flash'],
+          credentialRef: `credential:${randomUUID()}`,
+        },
+      },
+      webSearch: { mode: 'auto' },
+    };
+    writeFileSync(f.file, JSON.stringify(declared));
+    const before = await f.read();
+    override = { webSearch: { mode: 'disabled' } };
+    const current = await f.read();
+    expect(current.webSearch).toEqual({ mode: 'disabled' });
+    expect(current.derivedDeepSeek).toEqual({ status: 'configured', label: 'My model' });
+    expect(current.errors).toEqual([]);
+    expect(current.readSet!.explicitDigest).not.toBe(before.readSet!.explicitDigest);
+    const save = {
+      ...f.identity('enable-host-disabled'),
+      expectedReadSet: current.readSet!,
+      webSearch: { mode: 'auto' as const },
+      searchProviders: [],
+    };
+    await rejected(f.manager().updateWebSearch(save), 'web_search_settings_override');
+    await rejected(
+      f.manager().updateWebSearch({
+        ...save,
+        ...f.identity('stale-external'),
+        expectedReadSet: before.readSet!,
+      }),
+      'configuration_read_set_conflict',
+    );
+    expect(f.user.read().value.webSearch).toEqual({ mode: 'auto' });
+    const foreign = `credential:${randomUUID()}`;
+    override = {
+      webSearch: { mode: 'provider', providerId: 'foreign' },
+      searchProviders: [
+        {
+          ...dedicated,
+          id: 'foreign',
+          connection: { ...dedicated.connection, credentialRef: foreign },
+        },
+      ],
+    };
+    writeFileSync(f.file, JSON.stringify({ webSearch: { mode: 'disabled' } }));
+    const dormant = await f.read();
+    expect(dormant.webSearch).toEqual({ mode: 'disabled' });
+    expect(dormant.searchProviders).toEqual([]);
+    expect(dormant.derivedDeepSeek).toEqual({ status: 'unavailable' });
+    expect(JSON.stringify(dormant).includes(foreign)).toBe(false);
+    expect(f.counts).toEqual({ writes: 0, reads: 0, removes: 0 });
+  } finally {
+    await f.close();
+  }
+});

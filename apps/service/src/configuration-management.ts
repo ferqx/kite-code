@@ -35,12 +35,8 @@ import {
 } from './model-providers';
 import { type UserConfiguration, withoutProjectModels } from './user-configuration';
 import {
-  eligibleWebSearchConnections,
-  freezeWebSearchProvider,
-  isWebSearchApiKey,
-  parseWebSearchConfiguration,
+  automaticWebSearchConfiguration,
   type WebSearchConfiguration,
-  webSearchCredentialScope,
 } from './web-search-configuration';
 
 export type ConfigurationScope = 'user' | 'workspace';
@@ -118,7 +114,13 @@ interface MutationIdentity {
   subjectId: string;
 }
 export type WebSearchSettingsView = WebSearchConfiguration & {
-  eligibleConnections?: ReturnType<typeof eligibleWebSearchConnections>;
+  /** Previous Services may still return this list. New reads report derivedDeepSeek. */
+  eligibleConnections?: {
+    providerAlias: string;
+    name: string;
+    adapter: WebSearchConfiguration['searchProviders'][number]['adapter'];
+  }[];
+  derivedDeepSeek?: ReturnType<typeof automaticWebSearchConfiguration>['derivedDeepSeek'];
   storeId: string;
   readSet: ModelSettingsReadSet | null;
   errors: string[];
@@ -348,12 +350,22 @@ function publicError(error: unknown): AgentError {
         error instanceof ConfigurationError ? error.code : 'configuration_unavailable',
       );
 }
-function validatedSearchConfiguration(raw: unknown): WebSearchConfiguration {
-  try {
-    return parseWebSearchConfiguration(raw);
-  } catch (error) {
-    throw publicError(error);
-  }
+function writableWebSearchMode(
+  settings: unknown,
+  providers: unknown,
+): { mode: 'auto' | 'disabled' } {
+  if (
+    !settings ||
+    typeof settings !== 'object' ||
+    Array.isArray(settings) ||
+    Object.keys(settings).length !== 1 ||
+    !('mode' in settings) ||
+    (settings.mode !== 'auto' && settings.mode !== 'disabled') ||
+    !Array.isArray(providers) ||
+    providers.length !== 0
+  )
+    throw new AgentError('web_search_configuration_invalid');
+  return { mode: settings.mode };
 }
 function stableKey(profile: ProfileSelection): Buffer {
   const path = join(profile.coordinationPath, 'host-mutation-key.jsonc');
@@ -404,29 +416,12 @@ export function createConfigurationManagement(options: {
   userConfiguration: UserConfiguration;
   runtime?: AgentRuntime;
   vault: ReturnType<typeof createCredentialVault>;
-  webSearchVault?: ReturnType<typeof createCredentialVault>;
   persistence: 'os' | 'temporary';
   explicit: () => JsonObject;
 }): ConfigurationManagementPort &
   Required<Pick<ConfigurationManagementPort, 'readWebSearch' | 'updateWebSearch'>> {
   const userConfiguration = options.userConfiguration;
   const userPath = userConfiguration.path;
-  const searchVault = options.webSearchVault ?? options.vault;
-  async function checkSearchConnections(
-    configuration: WebSearchConfiguration,
-    user: JsonObject,
-    newProviderId?: string,
-  ) {
-    for (const provider of configuration.searchProviders) {
-      const binding = freezeWebSearchProvider(provider, {
-        user,
-        profileAccessKey: options.profile.profileAccessKey,
-        modelVault: options.vault,
-        searchVault,
-      });
-      if (provider.id !== newProviderId) await binding.resolveApiKey();
-    }
-  }
   async function pathFor(input: ConfigurationLocation): Promise<string> {
     if (input.scope === 'user') {
       if (input.workspaceId !== undefined) throw new AgentError('invalid_configuration_scope');
@@ -589,7 +584,6 @@ export function createConfigurationManagement(options: {
           (error.credentialState === 'outcome_unknown' ||
             error.configurationState === 'outcome_unknown')) ||
         failure.code === 'configuration_publication_uncertain' ||
-        failure.code === 'web_search_credential_outcome_unknown' ||
         (kind.startsWith('credential.') && failure.code === 'credential_unavailable');
       const final = await options.runtime.finishHostMutation({
         expectedStoreId: input.expectedStoreId,
@@ -774,11 +768,21 @@ export function createConfigurationManagement(options: {
       try {
         const state = rawModels();
         readSet = state.readSet;
+        const { webSearch, derivedDeepSeek } = automaticWebSearchConfiguration(state.user.value);
+        const policy = state.explicit.webSearch;
+        const disabled =
+          webSearch.mode === 'disabled' ||
+          (policy !== null &&
+            typeof policy === 'object' &&
+            !Array.isArray(policy) &&
+            policy.mode === 'disabled');
+
         return {
           storeId: input.expectedStoreId,
           readSet,
-          ...validatedSearchConfiguration(state.effective),
-          eligibleConnections: eligibleWebSearchConnections(state.user.value),
+          webSearch: { mode: disabled ? 'disabled' : 'auto' },
+          searchProviders: [],
+          derivedDeepSeek,
           errors: [],
         };
       } catch (error) {
@@ -787,14 +791,13 @@ export function createConfigurationManagement(options: {
           readSet,
           webSearch: { mode: 'auto' },
           searchProviders: [],
-          eligibleConnections: [],
+          derivedDeepSeek: { status: 'unavailable' },
           errors: [publicError(error).code],
         };
       }
     },
     async updateWebSearch(input) {
-      // Capture the original intent for idempotency. The host-generated reference is never part of its digest.
-      const { webSearch, searchProviders, credential, expectedReadSet } = structuredClone(input);
+      const { webSearch, searchProviders, expectedReadSet } = structuredClone(input);
       if (
         Object.keys(input).some(
           (key) =>
@@ -805,11 +808,8 @@ export function createConfigurationManagement(options: {
               'expectedReadSet',
               'webSearch',
               'searchProviders',
-              'credential',
             ].includes(key),
         ) ||
-        !webSearch ||
-        !Array.isArray(searchProviders) ||
         !expectedReadSet ||
         Object.keys(expectedReadSet).sort().join(',') !==
           'effectiveDigest,explicitDigest,userEtag,workspaceEtag' ||
@@ -821,108 +821,37 @@ export function createConfigurationManagement(options: {
         ].every((digest) => typeof digest === 'string' && /^[a-f0-9]{64}$/.test(digest))
       )
         throw new AgentError('web_search_configuration_invalid');
-      if (
-        credential !== undefined &&
-        (!credential ||
-          Object.keys(credential).sort().join(',') !== 'providerId,secret' ||
-          !isWebSearchApiKey(credential.secret))
-      )
-        throw new AgentError('web_search_credential_unavailable');
-      const replacement =
-        credential && searchProviders.find((provider) => provider?.id === credential.providerId);
-      if (
-        credential &&
-        (replacement?.connection?.kind !== 'dedicated' ||
-          Object.hasOwn(replacement.connection, 'credentialRef'))
-      )
-        throw new AgentError('web_search_connection_invalid');
-      const configuration = validatedSearchConfiguration({
-        webSearch,
-        searchProviders: searchProviders.map((provider) =>
-          replacement && provider === replacement
-            ? {
-                ...provider,
-                connection: {
-                  ...provider.connection,
-                  credentialRef: `credential:${crypto.randomUUID()}`,
-                },
-              }
-            : provider,
-        ),
-      });
-      const newProvider =
-        credential &&
-        configuration.searchProviders.find((provider) => provider.id === credential.providerId);
-      const scope =
-        newProvider && webSearchCredentialScope(options.profile.profileAccessKey, newProvider);
+      const setting = writableWebSearchMode(webSearch, searchProviders);
       const ifMatch = expectedReadSet.userEtag;
+      const prior = await options.runtime?.getHostMutation(input);
+      // Existing mode-only Commands also recorded a write of the empty provider list.
+      const operationCount =
+        prior?.kind === 'config.user.write' &&
+        (prior.safeRequest as JsonObject).operationCount === 2
+          ? 2
+          : 1;
       return mutate(
         input,
         'config.patch',
         'user',
-        { scope: 'user', ifMatch, operationCount: 2 },
-        {
-          webSearch,
-          searchProviders,
-          credential: credential ?? null,
-          expectedReadSet,
-        } as unknown as Json,
+        { scope: 'user', ifMatch, operationCount },
+        { webSearch, searchProviders, credential: null, expectedReadSet } as unknown as Json,
         async () => {
           const state = assertReadSet(expectedReadSet);
-          const effective = validatedSearchConfiguration({ ...configuration, ...state.explicit });
-          if (canonical(effective) !== canonical(configuration))
+          if (
+            state.explicit.webSearch !== undefined &&
+            canonical(state.explicit.webSearch) !== canonical(setting)
+          )
             throw new AgentError('web_search_settings_override');
-          // Old bindings remain usable by frozen Runs; a new save can retain only its current account.
-          const retained = configuration.searchProviders.filter(
-            (provider) =>
-              provider.id !== newProvider?.id && provider.connection.kind === 'dedicated',
-          );
-          if (retained.length) {
-            const previous = validatedSearchConfiguration(state.effective);
-            for (const provider of retained) {
-              const prior = previous.searchProviders.find((item) => item.id === provider.id);
-              if (
-                prior?.connection.kind !== 'dedicated' ||
-                webSearchCredentialScope(options.profile.profileAccessKey, prior).ownerDigest !==
-                  webSearchCredentialScope(options.profile.profileAccessKey, provider).ownerDigest
-              )
-                throw new AgentError('web_search_credential_unavailable');
-            }
-          }
-          await checkSearchConnections(configuration, state.user.value, newProvider?.id);
-          assertReadSet(expectedReadSet);
-          try {
-            if (scope && credential) {
-              await searchVault.writeOwned(scope, credential.secret);
-              if ((await searchVault.readOwned(scope)) !== credential.secret)
-                throw new AgentError('web_search_credential_unavailable');
-            }
-            const result = userConfiguration.update({
-              ifMatch,
-              operations: [
-                { kind: 'set', path: ['webSearch'], value: configuration.webSearch as Json },
-                {
-                  kind: 'set',
-                  path: ['searchProviders'],
-                  value: configuration.searchProviders as Json,
-                },
-              ],
-              validatePublication() {
-                assertReadSet(expectedReadSet);
-              },
-            });
-            return { etag: result.etag };
-          } catch (error) {
-            // An indeterminate file publication might already reference the new credential.
-            if (scope && publicError(error).code !== 'configuration_publication_uncertain') {
-              try {
-                await searchVault.removeOwned(scope);
-              } catch {
-                throw new AgentError('web_search_credential_outcome_unknown');
-              }
-            }
-            throw error;
-          }
+          const result = userConfiguration.update({
+            ifMatch,
+            // Old search provider declarations and vault entries remain dormant.
+            operations: [{ kind: 'set', path: ['webSearch'], value: setting }],
+            validatePublication() {
+              assertReadSet(expectedReadSet);
+            },
+          });
+          return { etag: result.etag };
         },
       );
     },
@@ -1453,7 +1382,11 @@ export function createConfigurationManagement(options: {
         Object.hasOwn(input.value, 'webSearch') || Object.hasOwn(input.value, 'searchProviders');
       if (input.scope === 'workspace' && repairsSearch)
         throw new AgentError('web_search_settings_user_scope_required');
-      const search = repairsSearch ? validatedSearchConfiguration(input.value) : undefined;
+      if (repairsSearch)
+        writableWebSearchMode(
+          input.value.webSearch === undefined ? { mode: 'auto' } : input.value.webSearch,
+          input.value.searchProviders === undefined ? [] : input.value.searchProviders,
+        );
       if (
         input.scope === 'workspace' &&
         ['models', 'modelId', 'provider', 'model', 'disabledModels', 'modelOptions'].some((key) =>
@@ -1478,8 +1411,6 @@ export function createConfigurationManagement(options: {
           value: input.value,
         },
         async () => {
-          if (search)
-            await checkSearchConnections(search, userConfiguration.normalize(input.value));
           const result = repairConfigurationFile({
             path,
             windowsPathPolicy: input.scope === 'user' ? 'private' : 'scope',

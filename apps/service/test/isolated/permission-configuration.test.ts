@@ -174,19 +174,6 @@ async function fixture(
         : []),
     ],
     tools: scenario ? [{ id: 'files.read' }, { id: 'files.write' }] : [{ id: 'files.write' }],
-    ...(options.ordinarySearch
-      ? {
-          webSearch: { mode: 'provider', providerId: 'owned' },
-          searchProviders: [
-            {
-              id: 'owned',
-              name: 'Owned search',
-              adapter: 'deepseek-search',
-              connection: { kind: 'provider', providerAlias: 'owned-search' },
-            },
-          ],
-        }
-      : {}),
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
   let policy: PermissionPolicySnapshot = {

@@ -93,15 +93,6 @@ async function verifyNativeBinding(selectedModel: string, effort?: 'high') {
         model: `official:${model}`,
         tools: [],
         skills: [],
-        webSearch: { mode: 'auto', providerId: 'fallback-search' },
-        searchProviders: [
-          {
-            id: 'fallback-search',
-            name: 'Owned fallback',
-            adapter: 'deepseek-search',
-            connection: { kind: 'provider', providerAlias: 'fallback' },
-          },
-        ],
       }),
       { mode: 0o600 },
     );

@@ -500,7 +500,7 @@ Desktop Main在应用存续期内触发本地定时任务，调度元数据属de
 
 ### 显式模型协议与私有 continuation
 
-Web Search 的原生搜索由现有模型请求执行，普通搜索沿 Tool 审批链执行；一次请求绑定一个已获准的账户和路线。可以证明发送前未派发时才沿原规则重试，已交给服务端但结果未确认的查询不会自动改用其他提供商或在重开时补发。富证据使用原 Execution 的 Artifact 权限，`web_search_evidence` 读取重新核主体、Session 与 Store；公开 ModelOutput 和 Trajectory 使用原合同。各项 SDK、SQLite、Service、客户端与真实账户验收分别见 [Web Search 流程](../development/flows/web-queries.md)。
+Web Search 的原生搜索由现有模型请求执行，普通搜索沿 Tool 审批链执行；一次请求绑定一个已获准的账户和路线。可以证明发送前未派发时才沿原规则重试，已交给服务端但结果未确认的查询不会自动改用其他提供商或在重开时补发。富证据使用原 Execution 的 Artifact 权限，`web_search_evidence` 读取重新核主体、Session 与 Store；公开 ModelOutput 和 Trajectory 使用原合同。各项 SDK、SQLite、Service、客户端与真实账户验收分别见 [Web Search 流程](../development/flows/web-queries.md)。 普通搜索基于用户已有的官方 DeepSeek 模型连接选择，绑定原账户来源和凭据引用；旧独立搜索配置不提供新派发权限。
 
 默认宿主的 OpenAI/compatible 连接可显式选择 Responses；旧配置缺省仍为 Chat Completions。协议冻结在实际 Run 绑定与公开非秘密 metadata 中；定时任务继续复用同一选择和 Agent Loop，不另建模型执行器。Responses 由官方 SDK 传输，单次零内部重试、`store:false`，错误不回退其他协议。
 

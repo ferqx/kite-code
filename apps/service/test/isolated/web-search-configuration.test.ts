@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
-import { withoutProjectModels } from '../../src/user-configuration';
+import { createUserConfiguration, withoutProjectModels } from '../../src/user-configuration';
 import {
+  automaticWebSearchConfiguration,
   freezeWebSearchProvider,
   parseWebSearchConfiguration,
   type SearchProviderConfig,
@@ -140,33 +141,172 @@ test('a frozen provider alias reuses only its original, matching API account', a
   expect(reads).toBe(1);
 });
 
-test('dedicated references require the original profile, account, adapter and endpoint binding', async () => {
+test('legacy dedicated credentials stay dormant and are never read or removed', async () => {
   const options = owned();
-  const generic = await options.modelVault.put('test-generic');
-  const connection = { ...dedicated.connection, credentialRef: generic.id };
-  const p = { ...dedicated, connection };
-  const frozen = freezeWebSearchProvider(p, options);
-  await expect(frozen.resolveApiKey()).rejects.toThrow('web_search_credential_unavailable');
-  const scope = webSearchCredentialScope(options.profileAccessKey, p);
-  await options.searchVault.writeOwned(scope, 'test-owned-search');
-  expect((await frozen.resolveApiKey()) === 'test-owned-search').toBe(true);
-  const otherProfile = freezeWebSearchProvider(p, { ...options, profileAccessKey: 'different' });
-  const otherAccount = freezeWebSearchProvider({ ...p, id: 'another' }, options);
-  const otherAdapter = freezeWebSearchProvider(
-    {
-      ...p,
-      adapter: 'deepseek-search',
-      connection: { ...connection, baseURL: 'https://api.deepseek.com' },
-    },
-    options,
+  const scope = webSearchCredentialScope(options.profileAccessKey, dedicated);
+  await options.searchVault.writeOwned(scope, 'test-legacy-untouched');
+  const read = spyOn(options.searchVault, 'readOwned');
+  expect(() => freezeWebSearchProvider(dedicated, options)).toThrow(
+    'web_search_connection_invalid',
   );
-  for (const candidate of [otherProfile, otherAccount, otherAdapter])
-    await expect(candidate.resolveApiKey()).rejects.toThrow('web_search_credential_unavailable');
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: An environment reference in stored material is literal.
-  for (const masked of ['*****', '[redacted]', '${SEARCH_KEY}']) {
-    await options.searchVault.writeOwned(scope, masked);
-    await expect(frozen.resolveApiKey()).rejects.toThrow('web_search_credential_unavailable');
+  expect(read).not.toHaveBeenCalled();
+  read.mockRestore();
+  expect(await options.searchVault.readOwned(scope)).toBe('test-legacy-untouched');
+  expect(
+    automaticWebSearchConfiguration({
+      webSearch: { mode: 'provider', providerId: dedicated.id },
+      searchProviders: [dedicated],
+    }),
+  ).toEqual({
+    webSearch: { mode: 'auto' },
+    searchProviders: [],
+    derivedDeepSeek: { status: 'unavailable' },
+  });
+});
+
+test('official normalized DeepSeek account supplies a fallback without a manual search account or credential read', async () => {
+  const config = createUserConfiguration('unused-synthetic-config');
+  const source = {
+    provider: {
+      'team-ds': {
+        type: 'deepseek',
+        name: 'Team account',
+        apiKey: 'test-deepseek-original',
+        models: ['chat'],
+      },
+    },
+    searchProviders: [dedicated],
+    webSearch: { mode: 'provider', providerId: dedicated.id },
+  };
+  const user = config.normalize(source);
+  const derived = automaticWebSearchConfiguration(user);
+  expect(derived).toEqual({
+    webSearch: { mode: 'auto', providerId: 'team-ds' },
+    derivedDeepSeek: { status: 'configured', label: 'Team account' },
+    searchProviders: [
+      {
+        id: 'team-ds',
+        name: 'Team account',
+        adapter: 'deepseek-search',
+        connection: { kind: 'provider', providerAlias: 'team-ds' },
+      },
+    ],
+  });
+  const noModels = config.normalize({
+    provider: { 'team-ds': { ...source.provider['team-ds'], models: [] } },
+  });
+  expect(automaticWebSearchConfiguration(noModels)).toEqual(derived);
+  for (const models of [[], ['chat']]) {
+    const disabledAccount = config.normalize({
+      provider: { 'team-ds': { ...source.provider['team-ds'], models, enabled: false } },
+    });
+    expect(automaticWebSearchConfiguration(disabledAccount)).toEqual({
+      webSearch: { mode: 'auto' },
+      searchProviders: [],
+      derivedDeepSeek: { status: 'unavailable' },
+    });
   }
-  await options.searchVault.removeOwned(scope);
-  await expect(frozen.resolveApiKey()).rejects.toThrow('web_search_credential_unavailable');
+  const disabled = config.normalize({
+    ...source,
+    disabledModels: [{ provider: 'team-ds', name: 'chat' }],
+  });
+  expect(automaticWebSearchConfiguration(disabled).derivedDeepSeek.status).toBe('unavailable');
+  expect(
+    automaticWebSearchConfiguration({ ...user, webSearch: { mode: 'disabled' } }).webSearch,
+  ).toEqual({ mode: 'disabled' });
+  const rotated = config.normalize({
+    provider: { 'team-ds': { ...source.provider['team-ds'], apiKey: 'test-deepseek-next' } },
+  });
+  let reads = 0;
+  const vaults = {
+    ...owned(),
+    modelVault: {
+      async resolve() {
+        reads++;
+        return 'test-ephemeral';
+      },
+    },
+  };
+  const first = freezeWebSearchProvider(derived.searchProviders[0]!, { ...vaults, user });
+  const later = freezeWebSearchProvider(derived.searchProviders[0]!, { ...vaults, user: rotated });
+  expect(first.bindingDigest).not.toBe(later.bindingDigest);
+  expect(reads).toBe(0);
+  expect(await first.resolveApiKey()).toBe('test-ephemeral');
+  expect(reads).toBe(1);
+});
+
+test('current eligible alias then user default wins; independent unselected payment accounts stay ambiguous', () => {
+  const connection = (providerName: string) => ({
+    providerName,
+    provider: 'deepseek',
+    baseURL: 'https://api.deepseek.com/v1',
+    credentialRef: `credential:${crypto.randomUUID()}`,
+  });
+  const a = connection('z-actual'),
+    b = connection('a-actual');
+  const models = [
+    { ...a, id: 'z-model', model: 'chat' },
+    { ...b, id: 'a-model', model: 'chat' },
+  ];
+  for (const listings of [models, [...models].reverse()]) {
+    const user = { models: listings, _providerConnections: [a, b] };
+    expect(automaticWebSearchConfiguration(user)).toEqual({
+      webSearch: { mode: 'auto' },
+      searchProviders: [],
+      derivedDeepSeek: { status: 'ambiguous' },
+    });
+    expect(
+      automaticWebSearchConfiguration({ ...user, modelId: 'a-model' }, a.providerName)
+        .searchProviders[0]?.id,
+    ).toBe(a.providerName);
+    expect(
+      automaticWebSearchConfiguration({ ...user, modelId: 'a-model' }, 'ineligible')
+        .searchProviders[0]?.id,
+    ).toBe(b.providerName);
+    expect(
+      automaticWebSearchConfiguration({
+        ...user,
+        models: [{ ...models[0]!, enabled: false }, models[1]!],
+      }).searchProviders[0]?.id,
+    ).toBe(b.providerName);
+  }
+  for (const _providerConnections of [
+    [{ ...a, enabled: false }],
+    [{ ...a, remove: true }],
+    [{ ...a, provider: 'compatible' }],
+    [{ ...a, baseURL: 'https://gateway.example' }],
+    [{ ...a, protocol: 'responses' }],
+    [{ ...a, credentialRef: 'invalid' }],
+    [a, { ...a, providerName: b.providerName }],
+  ])
+    expect(automaticWebSearchConfiguration({ _providerConnections }).derivedDeepSeek.status).toBe(
+      'unavailable',
+    );
+  expect(
+    automaticWebSearchConfiguration({
+      _providerConnections: [{ ...a, enabled: false }],
+      models: [models[0]!],
+    }).derivedDeepSeek.status,
+  ).toBe('unavailable');
+  const disabledDeclaration = { ...models[0]!, enabled: false };
+  expect(
+    automaticWebSearchConfiguration({
+      _providerConnections: [disabledDeclaration],
+      models: [disabledDeclaration, models[0]!],
+    }).derivedDeepSeek.status,
+  ).toBe('unavailable');
+  expect(
+    automaticWebSearchConfiguration({
+      _providerConnections: [{ ...a, providerLabel: 'Research model' }],
+    }).derivedDeepSeek,
+  ).toEqual({ status: 'configured', label: 'Research model' });
+  expect(
+    automaticWebSearchConfiguration({
+      _providerConnections: [{ ...a, providerLabel: 'Untrusted\u202elabel' }],
+    }).derivedDeepSeek,
+  ).toEqual({ status: 'configured', label: a.providerName });
+  const { providerName: _alias, ...unnamed } = models[0]!;
+  expect(automaticWebSearchConfiguration({ models: [unnamed] }).derivedDeepSeek.status).toBe(
+    'unavailable',
+  );
 });

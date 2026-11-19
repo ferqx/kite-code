@@ -6328,6 +6328,7 @@ export type WebSearchSettingsView = {
         modelId: string;
       }
   >;
+  derivedDeepSeek?: { status: 'configured' | 'unavailable' | 'ambiguous'; label?: string };
   eligibleConnections?: Array<{
     providerAlias: string;
     name: string;
