@@ -14,7 +14,7 @@
 
 五个专用验证工具和自动检查文件变更、强制验证完成、waiver 机制已退役。Agent 使用普通 Shell 运行测试，并按实际输出报告结果。`request_plan_review` 和原计划审批继续保留。已退役工具在历史会话中以原工具 ID、状态和原结果通用显示，不再显示旧专属动作名称、推断目标或提供文件操作；历史记录不会因此删除。
 
-Windows x64 桌面端按会话使用「集成终端 Shell」选定的命令方言。[常规设置](../clients/desktop/README.md#在-windows-上安装更新和卸载)只显示 Git Shell 和 PowerShell，默认优先 Git Shell。从 Kite 启动环境的 `PATH` 定位 Git 并识别同一安装的 Git Bash，未发现完整安装时使用已核验的 PowerShell。PowerShell 自动选择本机最高可用版本；只有系统版本时使用系统版本。保存失败后，设置页会重新读取当前选项。Shell 工具向模型标注实际方言、已核验的解释器版本和 Windows 用户区域，并说明 Kite 按 UTF-8 解码命令输出。工具自身的语言和区域格式取决于各程序。Git Shell 的 `ls`、`cp` 等命令由本机 Git for Windows 提供，可用命令和参数取决于所安装的版本。所有解释器均可使用内置 `rg`。分支和工作树操作需要 Git。实际运行与发布范围见 [Windows 状态](../../active/windows-shell-sandbox.md)。
+Windows x64 桌面端按会话使用「集成终端 Shell」选定的命令方言。[常规设置](../clients/desktop/README.md#在-windows-上安装更新和卸载)只显示 Git Shell 和 PowerShell，默认优先 Git Shell。从 Kite 启动环境的 `PATH` 定位 Git 并识别同一安装的 Git Bash，未发现完整安装时使用已核验的 PowerShell。PowerShell 自动选择本机最高可用版本；只有系统版本时使用系统版本。保存失败后，设置页会重新读取当前选项。Shell 工具向模型标注实际方言、已核验的解释器版本和 Windows 用户区域，并说明 Kite 按 UTF-8 解码命令输出。工具自身的语言和区域格式取决于各程序。Git Shell 的 `ls`、`cp` 等命令由本机 Git for Windows 提供，可用命令和参数取决于所安装的版本。完整文件权限下，Git Shell 直接从原安装启动，并读取该安装的共享数据。所有解释器均可使用内置 `rg`。分支和工作树操作需要 Git。实际运行与发布范围见 [Windows 状态](../../active/windows-shell-sandbox.md)。
 
 Windows Shell 在后台执行，不弹出额外终端窗口。可核实的只读命令使用只读范围，可在首次可写执行准备工作区权限前运行。首次可写准备可能随文件数增长而耗时，等待或准备期间也可停止。再次执行会补全未完成准备，随后执行本次命令，已取消命令不会重跑。
 
@@ -24,7 +24,7 @@ Windows Shell 确认具体命令查找未命中时，Kite 从本次启动 PATH�
 
 Windows Shell 命令退出时会停止它启动的剩余进程，后台执行也遵循同一规则。需要本地辅助进程时，在同一条命令中启动、使用、保存修改并关闭它。跨命令继续编辑时，下一条命令从磁盘重新打开文件核对已保存的内容。工作区权限可能拒绝双向访问按默认权限创建的命名管道。可以独立完成任务的 CLI，应优先使用它支持的单进程或独立批处理模式。确需双向访问受拒的本地管道时，可按现有授权流程为该条命令申请完整文件范围。仅以本地命名管道通信时，可保持 `network:none`。
 
-内置技能和自装技能使用相同的 Shell 环境。需要核实本机依赖时，Agent 可在实际 Job 内检查命令解析和版本。PowerShell 会保留可确定的单条原生命令退出码，并报告未捕获的命令找不到和程序启动失败。多步脚本应显式检查关键步骤的退出状态。把后续 Job 还需要的中间文件放在工作区，验证后的成品放进本次成功 Job 的 `KITE_OUTPUT_DIR` 交付。
+内置技能和自装技能使用相同的 Shell 环境。需要核实本机依赖时，Agent 可在实际 Job 内检查命令解析和版本。PowerShell 会保留可确定的单条原生命令退出码，并报告未捕获的命令找不到和程序启动失败。多步脚本应显式检查关键步骤的退出状态。中间文件留在工作区。验证成品后，交付命令可同时返回已保存文件的绝对路径并复制成品到本次成功 Job 的 `KITE_OUTPUT_DIR`。Agent 在回复中引用实际保存位置。
 
 PowerShell 的复合脚本在本次执行的顶层作用域运行，函数可读取本次脚本定义的 `$script:` 变量。脚本末尾未处理的失败按实际 PowerShell 语义报告；主动处理非零结果、提前返回及显式退出保持相应行为。Git Bash 支持超过 Windows 启动参数长度的脚本，脚本仍可通过管道和 here-document 给程序传入数据。
 
@@ -110,6 +110,8 @@ macOS Shell 启动时等待监督进程认证、执行资产核验和命令就�
 `shell_execute` 只要求完整 `command`，可选 `description` 以简短目的辅助展示，省略时显示命令预览；描述不替代命令和审批，不作为风险或用户授权依据。默认前台执行；`background:true` 返回原执行句柄和受理状态，后台受理不等于成功或完成。模型无需生成 key，重复发起同一命令仍是新执行；找回旧结果应使用原 shell_id。普通模型前后台都随原父执行取消，历史内部独立取消关系保持。
 
 文件和网络申请使用顶层 `filesystem`、`network`，省略分别为 `workspace_write`、`none`。`network:internet` 包括本机 localhost、127.0.0.1、::1、局域网和互联网；审核通过不会把 `network:none` 请求改成联网。`filesystem:full_access` 是外部写入申请，不代表切换 Full 模式或解除路径保护。实际范围仍由现有审批策略及执行边界决定。新模型不提供旧 permissions、key、cancellation 或 shell_launch；旧执行记录、引用及受限恢复仍按原合同解释。
+
+Agent 在任务允许时为当前技能所需的命令显式申请 `filesystem:full_access`，包括验证和交付，遵守用户指定的较窄范围。普通工作区命令使用 `workspace_write`。Windows 本地辅助程序启动或双向管道确需完整文件范围时，可为该命令申请。文件和本地命名管道操作使用 `network:none`，每次实际执行由现有授权流程决定。
 
 前台 Shell 的执行时限不包含尚未派发时的审批和资源等待；进入执行后的超时仍针对原 Job 申请停止，并等待原停止结果。主 Agent 与子 Agent 使用同一规则。`execution_timeout_ms` 为1～3600000毫秒，省略不设期限；`background:true` 不接受该期限，错误在启动前返回。
 

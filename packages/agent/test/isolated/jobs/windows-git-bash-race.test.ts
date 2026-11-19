@@ -1,6 +1,14 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,12 +71,7 @@ function start(root: string, role: string, target = '', failure = '') {
   return { child, exited, wait, output: () => output, stderr: () => stderr };
 }
 
-for (const target of [
-  '/usr/bin/bash.exe',
-  '/usr/bin/msys-2.0.dll',
-  '/full/usr/bin/bash.exe',
-  '/manifest.json',
-]) {
+for (const target of ['/usr/bin/bash.exe', '/usr/bin/msys-2.0.dll', '/manifest.json']) {
   test(`same-directory preparations wait for the complete ${target} publication`, async () => {
     const root = installation();
     const owner = start(root, 'owner', target);
@@ -87,7 +90,8 @@ for (const target of [
       expect(waiter.output().split('result:')[1]).toBe(owner.output().split('result:')[1]);
       const runtime = join(root, 'state/runtime', readdirSync(join(root, 'state/runtime'))[0]!);
       expect(readFileSync(join(runtime, 'usr/bin/bash.exe'), 'utf8')).toBe('bash');
-      expect(readFileSync(join(runtime, 'full/usr/bin/bash.exe'), 'utf8')).toBe('bash');
+      expect(existsSync(join(runtime, 'full'))).toBe(false);
+      expect(readFileSync(join(root, 'git/usr/bin/bash.exe'), 'utf8')).toBe('bash');
       expect(JSON.parse(readFileSync(join(runtime, 'manifest.json'), 'utf8')).files).toHaveLength(
         6,
       );

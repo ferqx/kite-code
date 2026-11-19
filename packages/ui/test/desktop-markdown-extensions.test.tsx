@@ -5,6 +5,27 @@ import { MessageContent } from '../src/desktop/MessageContent';
 import { diagramRestriction, isClosedDiagramFence } from '../src/desktop/markdown-diagram';
 import { parseDesktopMarkdown } from '../src/desktop/markdown-parser';
 
+test('explicit absolute Markdown links use native file actions without filename matching', () => {
+  const text = [
+    '[saved](<D:/Projects/终稿 #1 %2523.pptx>)',
+    '[drive](D:/Projects/win.pptx)',
+    '[unix](</home/kite/发布计划 #1.pdf>)',
+    '[old](sandbox:/mnt/data/legacy.pptx)',
+    '[file URI](file:///D:/Projects/a.pptx)',
+    '[hosted](file://server/share/a.pptx)',
+    '[drive-relative](D:a.pptx)',
+    '[control](D:/Projects/a%00.pptx)',
+  ].join('\n\n');
+  const document = new JSDOM(
+    renderToStaticMarkup(<MessageContent text={text} openFile={() => {}} />),
+  ).window.document;
+  expect(
+    [...document.querySelectorAll('.absolute-file-link')].map((node) => node.textContent),
+  ).toEqual(['saved', 'drive', 'unix']);
+  expect(document.querySelector('a[href]')).toBeNull();
+  expect(document.body.textContent).toContain('old');
+});
+
 test('Chinese punctuation beside emphasis parses identically in direct, cached and prepared Desktop rendering', () => {
   const text =
     '**下周如何调整：**如果没有新的训练反馈，就先重复本周安排，不自动加量。若你反馈本周大多数训练都轻松完成、无异常不适且恢复良好，下周只小幅增加一项：例如步行多 **5 分钟**，或某个力量动作每组多 **1–2 次**；不要同时增加时长、组数和强度。';

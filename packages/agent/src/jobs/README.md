@@ -48,7 +48,7 @@ Ordinary builtin Shell publishes its stable prefix live and buffers a bounded su
 
 `start` 仅在原 runner READY 核验与 GO 写入确认后返回；此前不进入 Core running。失败准入通过 `JobStartError` 交回原 handle，Core 观察原终态并清理，未知清理仍保 handle、资源及 binding，不能丢失后仅保一个无法停止的空引用。已确认零派发的准备失败携带无 handle 的明确事实，Core 保存失败并释放资源。原协议与版本不变。
 
-运行时清单是两份 Git Bash 副本的唯一闭包目录。每次派发核清单原身份与所选副本全部文件摘要，包含 `ls.exe` 等 Git Bash 自带命令、MSYS、兼容 DLL、Git helper 和证书。权限快照固定同一清单摘要，损坏闭包在原生进程创建前失败。[回归](../../test/isolated/jobs/windows-git-bash.test.ts)实际变更两份闭包的命令、DLL、helper、证书与清单，核零 native 派发。
+Git Bash 运行时清单绑定本机安装与受限副本。每次派发核清单身份及所选路径上已登记资产的摘要。受限副本保留 `ls.exe` 等随附命令、MSYS、兼容 DLL、Git helper、证书和 `usr/share/misc` 的原相对布局。完整文件范围直接启动原安装的 `usr/bin/bash.exe`，按安装自身布局读取资源。权限快照固定解释器和清单摘要，资产变化在原生进程创建前失败。 [准备与变更回归](../../test/isolated/jobs/windows-git-bash.test.ts)
 
 `createWindowsShellJob`、`captureWindowsGitBashRuntime` 的初始捕获和每次派发复核均异步等待。完整文件校验共用进程内8个读取名额，每个原 FD 独占至多1MiB缓冲，读到实际 EOF 并核前后身份、大小与时间，最后复核原路径；不缓存内容证明。SHA 分块之间按8ms／64步预算主动交还事件循环，避免已完成 I/O 的连续微任务继续阻塞其他会话。排队与读取检查点接受原取消信号；失败停止领取新文件、取消兄弟读取，等待已开始 I/O 和原 FD 关闭后才返回。关闭无法确认时保原 FileHandle 及名额，不把它当已释放；进程池和 Shell 状态复用均未引入。[异步校验回归](../../test/isolated/jobs/launch-identity-async.test.ts)核短读、空文件、尾部变更、增长／截断／替换、读取失败、排队／读取中取消、失败批次收尾、关闭未知的全局上限，以及连续完成的读取确实交还事件循环。
 
@@ -70,9 +70,9 @@ Runner 按完整转义命令行的 UTF-8 字节数选择 Git Bash 启动方式�
 
 可写工作区范围仍由 [原生准备层](../../../../native/windows-sandbox-runner/src/direct_workspace.rs) 使用 [Windows 可回调的继承传播](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-treesetnamedsecurityinfow)。工作区锁等待和传播均可取消。首次在同一工作区锁内持久写入一次未完成账本，传播后再写完成标记。涉及保护路径快照的修改仍先持久保存快照，根 ACE 已存在也不能代替后代准备完成。取消时未创建业务进程且本次临时 ACL 已撤销，才返回原协议的已取消／清理确认回执，撤销不确定仍保 unknown。首次完整传播随文件数增长，完成后复用原账本，下一条命令补全准备时只运行自身。
 
-[准备层](windows-git-bash.ts)从宿主 `PATH` 选中的 `git.exe` 定位安装，在该安装内识别 Bash、真实 Git 和配套 `libexec/git-core`。若 `PATH` 指向启动器，安装内须有唯一完整的程序树。运行时清单从实际文件记录程序布局。Git Bash 启动时依次查找内置 rg、所选副本的 `usr/bin`、由清单确认的 Git `bin` 和继承路径。仓库 [IPC 兼容层](../../../../native/windows-msys-compat/README.md)修复 MSYS 对象 ACL；Full／完整文件范围保另一份未修改映像，避免并发共享区冲突，不修改安装 Git。两份映像共用复制与校验流程，[准备层回归](../../test/isolated/jobs/windows-git-bash.test.ts)核常见及自定义目录名、冷创建、复用、缺失文件恢复和变更文件保留。Windows Shell 构建携带 runner、兼容 DLL 与内置 rg。未知关闭保 owner，冷读取不从 PID 重建或重跑。
+[准备层](windows-git-bash.ts)从宿主 `PATH` 选中的 `git.exe` 定位安装，在该安装内识别 Bash、真实 Git 和配套 `libexec/git-core`。若 `PATH` 指向启动器，安装内须有唯一完整的程序树。Git Bash 启动时依次查找内置 rg、所选 Bash 目录、对应 Git `bin` 和继承路径。只读及工作区写入进程使用采用 [IPC 兼容层](../../../../native/windows-msys-compat/README.md)的副本，以满足受限令牌下的 MSYS 信号管道访问。完整文件范围使用原安装，其 MSYS 对象空间与受限副本分开。Windows Shell 构建携带 Runner、兼容 DLL 与内置 rg。未知关闭保 owner，冷读取不从 PID 重建或重跑。
 
-`stageWindowsGitBash`／`windowsShellAssets` 是异步准备入口，调用者须等待完成后才能装配 Shell。源文件仍每次完整读取校验；未修改映像复用同次源 SHA，目标父目录去重，副本复制与完整内容校验最多并行8个文件。同一摘要目录的两套副本和清单由一个跨进程独占文件锁保护；竞争者最多等待30秒，取得锁后才读取目标文件，避免把尚未完成的复制误判为损坏。锁文件保持原身份、不删除；不同摘要目录互不阻塞。已有文件不覆盖，缺失文件使用排他创建；失败先等待已开始的文件操作全部结算，不发布新清单或提前交出可执行资产，随后释放准备锁；既有损坏文件仍失败而不修写。两套副本与派发前完整重核保持，不用 mtime 缓存或链接替代内容验证。[并发回归](../../test/isolated/jobs/windows-git-bash-race.test.ts)用精确半写同步点核跨进程复制／补丁映像／Full／清单发布、同进程竞争、失败全结算和 owner 强杀后的锁释放；POSIX 只证明合成 Git 资产与本机 OS 锁，不代替 Windows 原生资格。
+`stageWindowsGitBash`／`windowsShellAssets` 是异步准备入口。源文件读取所得的摘要用于核实同一安装，受限副本准备和完整内容校验最多并行 8 个文件。一个跨进程独占文件锁保护同一摘要目录内的副本和清单，竞争者最多等待 30 秒。准备保留已有文件，排他创建缺失文件，失败时等待已开始的读写结算后释放锁。此前已绑定到旧 Full 副本的低层调用继续核对原路径和摘要。 [准备并发与失败回归](../../test/isolated/jobs/windows-git-bash-race.test.ts)
 
 `windowsShellAssets` 准备 Git Bash 后在有时限的 `read_only` 原生 Job 中读取已选副本的 `$BASH_VERSION`。只有成功结算并校验的版本才进入模型目录。版本未读到且原 Job 已确认关闭时，方言仍可用。模型目录在装配时读取 Windows 用户默认区域，双流由 Job 适配器按 UTF-8 解码。 [Windows 用户区域 API](https://learn.microsoft.com/en-us/windows/win32/api/winnls/nf-winnls-getuserdefaultlocalename)
 

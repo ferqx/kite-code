@@ -410,12 +410,19 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
   } as const;
   expect(decodeNativeRequest(valid)).toEqual(valid);
   expect(decodeNativeRequest(clicked)).toEqual(clicked);
+  for (const path of ['C:/Project/新品 #1 终稿.pptx', 'C:\\Project\\新品 #1 终稿.pptx']) {
+    const absolute = { ...clicked, path };
+    if (process.platform === 'win32') expect(decodeNativeRequest(absolute)).toEqual(absolute);
+    else expect(() => decodeNativeRequest(absolute)).toThrow();
+  }
   for (const invalid of [
     { ...valid, path: '/arbitrary' },
     { ...valid, editor: '/bin/sh' },
     { ...valid, workspaceId: 'w' },
     { ...clicked, root: '/arbitrary' },
     { ...clicked, path: 'file:///outside' },
+    { ...clicked, path: 'C:relative.pptx' },
+    { ...clicked, path: 'x://server/shared.pptx' },
     { ...clicked, path: 'line\nfile' },
     { ...clicked, line: 0 },
     { ...clicked, line: 2.5 },

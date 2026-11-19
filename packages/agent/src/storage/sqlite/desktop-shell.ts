@@ -1,4 +1,4 @@
-import { AgentError, type DesktopShellPreference, type DesktopShellSelection } from '../types';
+import { AgentError, type DesktopShellBackend, type DesktopShellPreference } from '../types';
 import type { SqliteOperations } from './operations';
 
 // Private host records are outside the session extension and Fork namespaces.
@@ -52,12 +52,11 @@ export function bindDesktopShell(
   db: SqliteOperations,
   storeId: string,
   rootSessionId: string,
-  selection: DesktopShellSelection | undefined,
+  selection: DesktopShellBackend | undefined,
 ) {
   if (selection === undefined) return;
   const preference = readDesktopShellPreference(db, storeId);
-  const automatic = typeof selection === 'string' ? selection : selection.automatic;
-  const selected = preference === 'auto' ? automatic : preference;
+  const selected = preference === 'auto' ? selection : preference;
   const value = selected === 'powershell-7' ? 'powershell' : selected;
   if (!isBackend(value) && value !== 'unavailable')
     throw new AgentError('desktop_shell_state_invalid');

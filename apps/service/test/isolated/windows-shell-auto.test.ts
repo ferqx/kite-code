@@ -130,9 +130,10 @@ for (const backend of ['powershell', 'git-bash'] as const) {
             },
           },
         });
+        // The fixture has one match. Select-Object -First can stop rg early in PowerShell 5.1.
         const reads = [
           powerShell
-            ? 'rg.exe -n -g "*.txt" search-needle . | Select-Object -First 1'
+            ? 'rg.exe -n -g "*.txt" search-needle . | Select-Object -Last 1'
             : 'rg -n -g "*.txt" search-needle . | head -1',
           powerShell ? 'Get-Content -LiteralPath input.txt -TotalCount 1' : 'head -n 1 input.txt',
           'git status --short',
@@ -320,7 +321,11 @@ for (const backend of ['powershell', 'git-bash'] as const) {
           }
           expect((await store.getView(sessionId)).runs.every((run) => !run.isActive)).toBeTrue();
           expect(answered).toEqual(highRisk.map((step) => step.command));
-          expect(reviews).toEqual(scripts.map((step) => step.name));
+          expect(reviews.slice(0, scripts.length)).toEqual(scripts.map((step) => step.name));
+          // Review preparation shares the deadline, so fewer than two retries may fit.
+          const retries = reviews.slice(scripts.length);
+          expect(retries.length).toBeLessThanOrEqual(2);
+          expect(retries.every((name) => name === 'timed-out')).toBeTrue();
           expect(readFileSync(join(workspace, 'ordinary.txt'), 'utf8').trim()).toBe('ordinary');
           expect(existsSync(join(workspace, 'approved.txt'))).toBeTrue();
           expect(existsSync(join(workspace, 'denied.txt'))).toBeFalse();

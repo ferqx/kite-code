@@ -16,6 +16,8 @@ Status: implemented
 
 reset仍先重新读取原事实和完整历史；ready高水位等于重新读取的baseline时无需再读同一观察，不确认snapshot为已应用事件游标。[Native renderer](../../../../apps/desktop/src/native.tsx)在同一选择范围刷新时保留消息组件，只在没有可展示消息或正在切换范围时使用整页历史loading。全文组件按attach generation／viewSelection／history epoch／原消息ID封存生命周期，真实范围变化仍清正文；历史loading期间仍撤除写资格。
 
+2026-11-19 的 Windows 实测中，正文绝对路径链接在交付收尾刷新时失效。刷新暂时清空 `controller.snapshot`，预览复核将这一状态判定为选择变化。正文文件改为沿用同一会话已核验的消息读取身份，并继续核原选择、历史代际、真实工作区及文件。等待文件卡归档会推迟已就绪源文件的预览，因此两种入口各沿原来源接纳。 [桌面实现](../../../../apps/desktop/README.md#markdown-与附件输入)
+
 [NativeHistory](../../../../apps/desktop/src/native-history.ts)继续逐页核固定高水位、原 Session、序号与游标，合并全部合法记录；仅在本次扫描 EOF 或实际失败时发布阅读快照。后台扫描期间展示上次已发布正文，切换缓存和同会话新 scope 复用也只取 state.messages，避免未发布前缀经切走／切回提前展示。实际失败仍发布已合法读到的前缀。Main 只在同一 generation／selection／Session／Store／highWater／readId 内保留经过原身份和 4MiB IPC 校验的有效 limit，后页仍完整 GET 及全部校验；学习值单调缩小，旧或取消读取不能回写，范围变化、关闭和新读取重置。不新增正文缓存或协议字段。
 
 共享 [MessageContent](../../../../packages/ui/src/desktop/MessageContent.tsx)在 layout effect 更新当前已提交的宿主文件回调，稳定派发函数读取该值，内层 Markdown 仅在正文变化时重渲染。私有 Context 将当前回调能力交给独立链接组件，历史校准的撤销／恢复不重新解析未变化正文；Context 更新仍穿过正文 memo，即时改变链接展示。撤销和卸载清回调，普通回调更新使用最新已提交值。该优化不改变原路径判断、外链、HTML和图片规则，也不取得文件操作权限。

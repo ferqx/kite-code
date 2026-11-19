@@ -6,19 +6,24 @@ Kite 从 OfficeCLI 上游提交 `5fbf766` 改编三个办公技能。随包的 `
 
 构建核对清单里的字节数与摘要，将资源复制到 `skills/office`。知识源按 `builtin:office.<配置后缀>` 提供校验后的正文和声明的文本资源。四个技能目录直接位于只读的 `KITE_OFFICE_SKILLS_DIR` 下。技能直接调用随包工具目录中的 `officecli`，编辑、保存和收集产物沿当前 Shell 的授权、进程监督和 `KITE_OUTPUT_DIR`。 [资源清单](../../skills/office-manifest.json) · [构建](build-assets.ts) · [知识源](../../skills/office-source.ts) · [随包运行时取舍](../../../../../.agents/notes/implemented/architecture/2026-11-18-bundled-officecli-runtime.md)
 
-改编后的技能按 Shell 工具报告的环境执行，提供 PowerShell 和 Git Shell 示例。常规编辑通过 OfficeCLI 的单进程批处理落盘，跨调用复用工作区副本和 UTF-8 操作文件。成品在工作区核验后，由当前成功 Shell 调用复制到 `KITE_OUTPUT_DIR`。可用的预览或查看器用于版面复核，结构校验读取退出状态和 JSON 结果。 [Shell 约定](../shell.README.md) · [交付约定](../../business/output-collection.README.md)
+改编后的技能按 Shell 工具报告的环境执行，提供 PowerShell 和 Git Shell 示例。常规编辑通过 OfficeCLI 的单进程批处理落盘，跨调用复用工作区副本和 UTF-8 操作文件。可用的预览或查看器用于版面复核，结构校验读取退出状态和 JSON 结果。 [Shell 约定](../shell.README.md) · [交付约定](../../business/output-collection.README.md)
+
+## 成品路径与交付
+
+在工作区或用户指定的已授权位置保存并核验成品后，调用 `kite-documents stage --input <文件>`。该命令支持任何可交付的普通文件，排他复制到当前 Job 的 `KITE_OUTPUT_DIR`，并通过 stdout 返回 JSON。`absolutePath` 是实际源文件的规范绝对路径，`markdownTarget` 是同一路径的 Markdown 表示，使用正斜杠并转义有语法含义的字符。模型从本次 Shell 结果直接取得路径，将原样的 `markdownTarget` 写入 `[文件名](<路径>)`。暂存目录在归档后清理。原保存位置仍可由桌面按现有权限打开，文件卡提供归档快照。
 
 ## PDF 制作与交付
 
 受管 Shell 可用已有 Bun 调用 PDF helper。`--input -` 可从标准输入读入 JSON。
 
 ~~~sh
-"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf --input spec.json --out "$KITE_OUTPUT_DIR/report.pdf"
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf --input spec.json --out report.pdf
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" stage --input report.pdf
 ~~~
 
 成功结束的 Shell 将当前输出目录交给现有收集器。非零退出按原 Shell 结果处理，结果未知时先核原执行。需要重新导出时，从已核实的可用源文件出发，使用当前 Shell 的输出目录。 [交付 owner](../../business/output-collection.README.md)
 
-[稳定导出](document-export.ts)用打开的 regular-file 身份、固定字节上限、读前后 size/mtime/ctime 核验和目标父目录下私有临时子目录中的排他临时文件；fsync 完成后排他 link 到最终名称，不覆盖同名输出。避免跨 Shell 临时目录与工作区进行硬链接；失败或取消清理本次临时文件与目录，不删除目标。工作区中的新路径可作中间副本，最终交付使用 KITE_OUTPUT_DIR 中的新路径。源文件始终不修改。当前执行成功结束后的自动归档由 Shell 输出 owner 负责；helper 本身不保存 Artifact，不重试生成。
+[稳定导出](document-export.ts)用打开的普通文件身份、固定字节上限、读前后 size/mtime/ctime 核验和目标父目录下私有临时子目录中的排他临时文件。fsync 后复查原路径身份，再在同一目标文件系统排他发布，已有同名目标保持原内容。失败或取消清理本次临时文件与目录。当前执行成功结束后的自动归档由 Shell 输出 owner 负责。
 
 [PDF adapter](pdf-command.ts)固定 pdf-lib 1.17.1 与 fontkit 1.1.0。create 使用 A4、固定字号、随包 Noto SansSC 的 wght=400 实例子集、真实字宽换行和显式页面，超限返回 layout_overflow。merge 和 edit 支持页面选择（拆分、删除、重排）、旋转、文字/PNG/JPEG 叠加及 text/checkbox/dropdown/option-list 表单；页面重组与表单填写不能同时指定。不支持任意正文原位编辑、自动重排、HTML 转 PDF 或复杂跨页表格。
 
@@ -33,6 +38,8 @@ Desktop 使用各格式的独立原件预览。PDF 页面与文字层由已核�
 ## 验证
 
 内置 Skill、源文件边界和排他导出由隔离测试覆盖。构建资源后运行 PDF 脚本可检查中文字符实际栅格、合并、页面操作、叠加、表单及溢出拒绝。 [隔离测试](../../../test/isolated/tools/documents/office.test.ts) · [PDF 实际文件冒烟](../../../scripts/pdf-documents-smoke.ts)
+
+2026-11-19 在 Windows Kite 桌面以 PowerShell 7.6.9 和 OpenAI `gpt-6-luna` 中等思考交付已有的五页 PPT。最终模型请求含交付回执，回复写入回执中的盘符路径。重开同一轮后分别从正文链接和文件卡显示五页，归档与保存文件的 SHA-256 相同。证据位于本机 `.cache/kite-native-path-live-d7d7b979/evidence/`。
 
 2026-11-18 直接运行三个改编技能的 Quick Start 脚本和 JSON 操作数组。系统 PowerShell 5.1、PowerShell 7.6.9 与 Git Shell 的九组用例均通过，涵盖工作区落盘、中文内容回读、Excel 公式结果和单独调用复制成品。并行构建期间一次 XLSX 批处理报告内存不足，串行复验通过。记录在本机 `.cache/kite-format-skill-examples-62b9-2heTLV/proof.json`。
 

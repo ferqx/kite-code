@@ -158,6 +158,13 @@ test('execution observation progresses while an admission permission read is hel
     const start = performance.now();
     await caller.invoke({ method: 'attach' });
     await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    const selection = caller.state();
+    const messageOrigin = {
+      viewSelection: selection.selection!.viewSelection!,
+      historyEpoch: selection.historyEpoch!,
+    };
+    const previewScope = caller.messagePreviewScope(1, messageOrigin);
+    expect(previewScope).toEqual({ storeId: 'store', sessionId: 's' });
     const activationMs = performance.now() - start;
     await Bun.sleep(120);
     hold = true;
@@ -172,6 +179,7 @@ test('execution observation progresses while an admission permission read is hel
     await observe.onChange?.(event);
     expect(caller.state().outputFilesRevision).toBe(outputRevision + 1);
     await terminalReady;
+    expect(caller.messagePreviewScope(1, messageOrigin)).toEqual(previewScope);
     expect(views).toBeGreaterThan(before);
     expect(caller.state().executionObservation).toMatchObject({
       observedCursor: '3',
@@ -217,6 +225,8 @@ test('execution observation progresses while an admission permission read is hel
       status: 'interrupted',
       isActive: false,
     });
+    await observe.onReset?.('transport_reset');
+    expect(() => caller.messagePreviewScope(1, messageOrigin)).toThrow('native_selection_changed');
     console.log(
       JSON.stringify({
         measurement: 'native-held-admission',

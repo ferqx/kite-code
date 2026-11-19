@@ -926,7 +926,9 @@ native(
       expect(
         created.executions.find((row) => row.definitionId === 'git.worktree')?.result,
       ).toMatchObject({ outcome: 'succeeded' });
-      writeFileSync(join(f.target, 'tracked.txt'), 'local dirty contents\n');
+      const tracked = join(f.target, 'tracked.txt');
+      const checkedOut = readFileSync(tracked);
+      writeFileSync(tracked, 'local dirty contents\n');
       const dirty = await f.run('dirty-remove', 'auto');
       expect(
         dirty.executions.find((row) => row.definitionId === 'git.worktree')?.result,
@@ -934,8 +936,8 @@ native(
         outcome: 'failed',
         details: { code: 'worktree_dirty', mutation: 'not_started' },
       });
-      expect(readFileSync(join(f.target, 'tracked.txt'), 'utf8')).toBe('local dirty contents\n');
-      writeFileSync(join(f.target, 'tracked.txt'), readFileSync(join(f.source, 'tracked.txt')));
+      expect(readFileSync(tracked, 'utf8')).toBe('local dirty contents\n');
+      writeFileSync(tracked, checkedOut);
       await f.runtime.createWorkspace({
         expectedStoreId: (await f.store.getMetadata()).storeId,
         id: 'registered-target',

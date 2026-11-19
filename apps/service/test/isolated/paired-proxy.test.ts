@@ -30,9 +30,10 @@ const secretEnvironment = {
 async function environment<T>(values: Record<string, string | undefined>, run: () => Promise<T>) {
   const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
   try {
+    // Windows treats uppercase and lowercase spellings as the same environment key.
+    for (const key of Object.keys(values)) delete process.env[key];
     for (const [key, value] of Object.entries(values)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+      if (value !== undefined) process.env[key] = value;
     }
     return await run();
   } finally {

@@ -1,13 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { link, mkdtemp, open, rmdir, unlink } from 'node:fs/promises';
+import { link, mkdtemp, open, realpath, rmdir, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 /** Shell allocation owns helper temporaries; standalone developer fixtures use OS temp. */
 export function documentTemporaryRoot() {
   const output = process.env.KITE_OUTPUT_DIR;
   if (output && !isAbsolute(output)) throw Error('document_output_directory_invalid');
   return output ? dirname(output) : tmpdir();
+}
+
+/** The receipt names the actual saved source, whose delivery copy is collected separately. */
+export async function stageDocument(source: string, signal?: AbortSignal) {
+  const configuredOutput = process.env.KITE_OUTPUT_DIR;
+  if (!configuredOutput || !isAbsolute(configuredOutput))
+    throw Error('document_output_directory_invalid');
+  const [absolutePath, output] = await Promise.all([realpath(source), realpath(configuredOutput)]);
+  const fromJob = relative(dirname(output), absolutePath);
+  if (!isAbsolute(fromJob) && fromJob !== '..' && !fromJob.startsWith(`..${sep}`))
+    throw Error('document_requires_saved_source');
+  await exportDocument(absolutePath, join(output, basename(absolutePath)), signal);
+  const linkPath = process.platform === 'win32' ? absolutePath.replaceAll('\\', '/') : absolutePath;
+  const markdownTarget = linkPath.replace(/[%<>&\\]/g, (character) =>
+    encodeURIComponent(character),
+  );
+  return { success: true, absolutePath, markdownTarget };
 }
 
 const maximum = 256 * 1024 * 1024;
@@ -86,6 +103,16 @@ export async function exportDocument(source: string, out: string, signal?: Abort
     await target.sync();
     await target.close();
     target = undefined;
+    signal?.throwIfAborted();
+    const atPath = await stat(source, { bigint: true });
+    if (
+      before.dev !== atPath.dev ||
+      before.ino !== atPath.ino ||
+      before.size !== atPath.size ||
+      before.mtimeNs !== atPath.mtimeNs ||
+      before.ctimeNs !== atPath.ctimeNs
+    )
+      throw Error('document_source_changed');
     signal?.throwIfAborted();
     await link(temporary, out);
   } finally {

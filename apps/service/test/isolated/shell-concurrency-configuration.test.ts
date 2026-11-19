@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRuntime } from '@kite-ai/agent';
+import { createRuntime, prepareOutputDirectory } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -75,20 +75,23 @@ test.skipIf(process.platform !== 'win32')(
     const store = await openSqliteStore(profile),
       expectedStoreId = (await store.getMetadata()).storeId;
     const commands = {
-      a: 'set -e; export KITE_SHELL_CONCURRENCY_PROBE=a; umask 077; cd sub-a; printf "A-READY\\nA-TEMP:%s\\n" "$TMPDIR"; printf from-a > ../shared.txt; printf ready > ../a.ready; sleep 60 & wait; printf forbidden > ../a-after',
-      b: 'set -e; test -z "$KITE_SHELL_CONCURRENCY_PROBE"; export KITE_SHELL_CONCURRENCY_PROBE=b; cd sub-b; printf "B-READY\\nB-TEMP:%s\\n" "$TMPDIR"; printf ready > ../b.ready; until test -f ../allow-b-write; do sleep 0.05; done; printf from-b > ../shared.txt; printf ready > ../b-overwrote; until test -f ../release-b; do sleep 0.05; done; printf B-DONE; printf done > ../b-result',
-      c: 'set -e; test -z "$KITE_SHELL_CONCURRENCY_PROBE"; printf "C-READY\\nC-TEMP:%s\\n" "$TMPDIR"; printf c-workspace > c-result; printf c-full > ../c-external; printf C-DONE',
+      a: 'set -e; export KITE_SHELL_CONCURRENCY_PROBE=a; umask 077; cd sub-a; printf "A-READY\\nA-TEMP:%s\\n" "$(cygpath -aw "$TMPDIR")"; printf from-a > ../shared.txt; printf ready > ../a.ready; sleep 60 & wait; printf forbidden > ../a-after',
+      b: 'set -e; test -z "$KITE_SHELL_CONCURRENCY_PROBE"; export KITE_SHELL_CONCURRENCY_PROBE=b; cd sub-b; printf "B-READY\\nB-TEMP:%s\\n" "$(cygpath -aw "$TMPDIR")"; printf ready > ../b.ready; until test -f ../allow-b-write; do sleep 0.05; done; printf from-b > ../shared.txt; printf ready > ../b-overwrote; until test -f ../release-b; do sleep 0.05; done; printf B-DONE; printf done > ../b-result',
+      c: 'set -e; test -z "$KITE_SHELL_CONCURRENCY_PROBE"; cygpath -aw /usr/bin/bash.exe; printf "C-READY\\nC-TEMP:%s\\n" "$(cygpath -aw "$TMPDIR")"; printf c-workspace > c-result; printf c-full > ../c-external; printf C-DONE',
     };
     let fresh = false;
     const workspaceSerialLocks = createWorkspaceSerialLocks(profile);
     host.bindWorkspaceSerialLocks?.(workspaceSerialLocks);
-    const runtime = createRuntime({
+    const runtime: ReturnType<typeof createRuntime> = createRuntime({
       ...host,
       store,
       permissions: host.permissions!,
       workspaceSerialLocks,
       processConcurrency: 2,
       artifacts: createArtifactStore({ profile, store }),
+      outputCollections: {
+        prepare: (context, identity) => prepareOutputDirectory(runtime, context, identity),
+      },
       async resolveRunConfiguration(input) {
         const configuration = await host.resolveRunConfiguration!(input);
         const key = fresh && input.session.id === 'b' ? 'fresh' : 'work';
@@ -196,8 +199,8 @@ test.skipIf(process.platform !== 'win32')(
       expect(aOutput).not.toContain('B-READY');
       expect(bOutput).toContain('B-READY');
       expect(bOutput).not.toContain('A-READY');
-      const aTemp = /^A-TEMP:(.+)$/m.exec(aOutput)![1],
-        bTemp = /^B-TEMP:(.+)$/m.exec(bOutput)![1];
+      const aTemp = /^A-TEMP:(.+)$/m.exec(aOutput)![1]!,
+        bTemp = /^B-TEMP:(.+)$/m.exec(bOutput)![1]!;
       expect(aTemp).not.toBe(bTemp);
       // Separate process state does not isolate the shared Workspace's bytes.
       expect(readFileSync(join(workspace, 'shared.txt'), 'utf8')).toBe('from-a');
@@ -234,10 +237,12 @@ test.skipIf(process.platform !== 'win32')(
       expect(readFileSync(join(root, 'c-external'), 'utf8')).toBe('c-full');
       expect(existsSync(join(workspace, 'c-result'))).toBe(false);
       const cOutput = await output(c.id),
-        cTemp = /^C-TEMP:(.+)$/m.exec(cOutput)![1];
+        cTemp = /^C-TEMP:(.+)$/m.exec(cOutput)![1]!;
       expect(cOutput).toContain('C-DONE');
+      expect(cOutput).toContain(assets.fullShell);
       expect(cOutput).not.toContain('B-READY');
       expect([aTemp, bTemp]).not.toContain(cTemp);
+      for (const temp of [aTemp, bTemp, cTemp]) expect(dirname(temp)).toBe(control);
       writeFileSync(join(workspace, 'release-b'), 'release');
       await until(async () => {
         const row = await store.getExecution(b.id);
@@ -267,7 +272,12 @@ test.skipIf(process.platform !== 'win32')(
       const bFinal = await output(b.id);
       expect(bFinal).toContain('B-DONE');
       expect(bFinal).not.toContain('C-DONE');
-      expect(readdirSync(control)).toEqual([]);
+      // The cancelled producer's staging remains owned by output collection.
+      const retained = await until(async () => {
+        const entries = readdirSync(control);
+        return entries.length === 1 ? entries : undefined;
+      });
+      expect(retained).toEqual([basename(aTemp)]);
     } finally {
       writeFileSync(join(workspace, 'release-b'), 'release');
       await runtime.close();

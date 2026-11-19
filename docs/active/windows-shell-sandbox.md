@@ -40,9 +40,19 @@ Windows 的通用命令查找使用原 Job 中可核实的查找结果，候选�
 
 2026-11-17 Windows x64 的独立 Kite 开发制品与本地受控 Provider 观察了设置读取、保存、首条消息接管、原会话继续和冷重开。启动环境中的 PowerShell 7.6.9 可选，保存后新会话执行 7.6.9，原会话继续执行 5.1.26100.10066。移除测试启动环境中的 7 路径后，设置提示回退，新会话执行 5.1.26100.10066。Provider 收到四个 Run 对应的实际版本，四条原生 Job 都返回 0 并确认进程树停止和清理。实际窗口与 SQLite 冷读证据位于本机 `.cache/kite-powershell-discovery-window-d9a5dd82/`。7 专属语法、实际版本输出和受限 Job 的[原生回归](../../packages/agent/test/isolated/permissions/powershell-command-policy.test.ts)独立通过。
 
-Git Bash 准备入口异步等待两套副本完整校验，最多8个文件并发，未修改映像只复用本次读取所得的源摘要。现存资产不覆盖，排他创建缺失文件。失败等待所有已开始的读写结算后拒绝返回。所选副本每次派发前完整核验。常用命令来自该副本的 `usr/bin`，只读目录查询也固定使用同一副本的 `ls.exe`。构建与 Runner 使用当前 V7 的解释器路径及摘要，移除独立 Coreutils 资产与临时命令链接。实现、回归与本机耗时范围归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)和 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+Git Bash 准备入口核实本机安装并异步准备一份受限运行时。只读与工作区写入使用该副本，完整文件范围直接使用原安装的 Bash。V7 Runner 按所选路径和解释器摘要启动。派发前核实所选路径的登记资产。实现与本机回归归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。
 
-Git Bash 根据宿主 `PATH` 的 Git 和同一安装内的实际运行时确定程序目录，派发使用清单确认的 `bin`。PowerShell 将可确定的独立原生调用非零码及未捕获的查找、启动异常交给现有 Job 结果。模型依赖检查在该 Job 环境内执行。两种 Shell 的技能交付均以准确 producer 的成功终态为依据。实现见 [Shell owner](../../packages/agent/src/jobs/README.md#windows-桌面-powershell-回退)和[文件交付](../../packages/agent/src/business/output-collection.README.md)。
+2026-11-19，Windows x64／Bun 1.4.4／Git for Windows 2.56.1，分别通过构建后的 `windowsShellAssets` 和原生 Job 检查只读、工作区写入和完整文件范围下的两种联网设置。实际 Shell 映射证实完整文件范围启动原安装，受限范围使用私有副本。`file` 四次均能识别 PNG，区外写入仅在完整文件范围成功，四个 Job 均确认原进程树停止。以同一 V7 Runner 对照，两个原安装入口均在受限令牌下报 MSYS 信号管道 Win32 5。`bash.exe` 和原 MSYS DLL 的源摘要保持一致。证据为本地 `.cache/managed-installed-bash.json` 和 `.cache/installed-bash-probe.json`。 [实际 Job 回归](../../packages/agent/test/isolated/jobs/windows-shell.test.ts)
+
+同一构建通过 [Service 并发回归](../../apps/service/test/isolated/shell-concurrency-configuration.test.ts)。核对完整文件范围的原安装路径、各 Job 实际映射的独立临时目录、工作区写入和定点取消。成功 Job 的交付暂存归档后移除，取消的 producer 暂存由原收集记录持有。 [交付与暂存生命周期](../../packages/agent/src/business/output-collection.README.md#生命周期)
+
+2026-11-19 合入工作区后，以 Kite Native 的 Windows x64 源码开发制品在默认 Git Shell 和完全权限下复测《新品上市计划》。原 OpenAI 连接的 `gpt-6-luna`／medium 完成 6 次模型调用。实际进程观察逐一匹配 4 个 Shell Job 的 Runner，均启动已安装的 `usr/bin/bash.exe`。3 次命令成功，1 次 OfficeCLI batch 因模型传入 `target` 字段返回 `invalid_input`／退出 1，模型改用 `path` 后完成交付。4 个 Job 均确认进程树归零和清理，工具审批为零。
+
+最终回复引用实际绝对路径，首次点击约 686ms 在右侧显示 5 页。模型先后归档两个同名版本，首次夹具按原始记录数等待超时。重开原会话后，按实际成品摘要核对归档，界面呈现一张成品卡，附件点击约 772ms 在右侧显示 5 页。冷重开后仍只有一条用户消息和一张成品卡，模型调用数保持为 6。PowerPoint 16.0 以只读权限打开同一份文件并逐页导出，标题与正文可编辑，后四页各两项。第 2、4 页各有一个句号单独换行。成品前后摘要一致，独占读取成功。证据位于本机 `.cache/kite-installed-bash-live-ppt-3cc07f62/evidence/`，包含首次过程、冷重开、进程观察和 PowerPoint 证据。
+
+整合远端桌面改动后，以新建的 Native 开发制品重开同一测试会话。正文链接和成品卡分别在约 820ms、806ms 打开右侧 5 页预览。再次冷重开仍显示一条回复和一张成品卡，原 Run 与 6 次模型调用保持同一组记录。复验证据位于上述目录的 `merge-review-preview/`。
+
+Git Bash 根据宿主 `PATH` 的 Git 和同一安装内的实际运行时确定程序目录，派发使用对应的 `bin`。受限副本按原相对路径保留共享系统数据，完整文件范围可访问原安装布局。PowerShell 将可确定的独立原生调用非零码及未捕获的查找、启动异常交给现有 Job 结果。模型依赖检查在该 Job 环境内执行。两种 Shell 的技能交付均以准确 producer 的成功终态为依据。实现见 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)和[文件交付](../../packages/agent/src/business/output-collection.README.md)。
 
 2026-11-16 在 Windows x64／Git for Windows 2.56.1 用真实 Git Bash Job 核实继承 PATH 为空时仍可运行 Git。准备层夹具覆盖 `mingw64`、`ucrt64` 和自定义目录名。源码开发配对 Service 通过正常客户端接口和固定本地模型响应，对内置 PPTX 技能和从用户技能目录安装的非办公技能分别运行 PowerShell／Git Bash。四组均在原 Job 探测到 Python 3.12.10，按顺序观察到命令缺失 127、已写暂存文件的进程退出 7、成功交付和冷读。失败暂存未发布，独立 Job 复用工作区中间文件，客户端读取并核对了成功文件字节。Service 证据在本机 `.cache/shell-stability-desktop-70be0a58/timeline.jsonl`。
 
@@ -66,7 +76,7 @@ Job 只有在 READY 核验与 GO 写入确认后进入 running。失败准入仍
 
 业务允许／拒绝只由统一权限与计划／角色上限决定。Tool 和真实 Job 按各自原身份授权；runner 只消费最终 markDispatching 接纳的父／子范围交集，不按默认范围覆盖批准，也不再安装独立命令拒绝脚本。范围外的 OS 访问失败、坏协议／资产身份及清理未知仍按执行事实报告，不构成新的业务审批。批准外部写入后，完整文件范围可实际执行；不因它位于 Workspace 外在 Shell 层再拒一次。
 
-[运行时准备](../../packages/agent/src/jobs/windows-git-bash.ts)从本机 Git for Windows 生成私有摘要闭包。MSYS 用户信号管道的 [IPC 支持](../../native/windows-msys-compat/README.md)在工作区限制 SID 下保留同登录会话的必要权限。完整文件范围使用未修改的独立 MSYS 副本，避免并发共享区冲突。制品内置 Runner、Git Bash 所需的辅助文件和 rg。PowerShell 由 Windows 提供并直接进入相同的令牌、ACL 和 Job 路径。联网范围独立于文件范围。`network:none` 的环境约束和已知联网意图检查属于本次交付，系统级断网需独立验证 AppContainer。
+[运行时准备](../../packages/agent/src/jobs/windows-git-bash.ts)从本机 Git for Windows 准备受限副本。MSYS 用户信号管道的 [IPC 支持](../../native/windows-msys-compat/README.md)在工作区限制 SID 下保留同登录会话的必要权限。完整文件范围使用原安装，与受限副本各有自己的 MSYS 对象空间。制品内置 Runner、兼容 DLL 和 rg。PowerShell 由 Windows 提供并直接进入相同的令牌、ACL 和 Job 路径。联网范围独立于文件范围。`network:none` 的环境约束和已知联网意图检查属于本次交付，系统级断网需独立验证 AppContainer。
 
 生命周期与其他平台共用普通 Job：准备／READY 后由原 owner 放行 GO，READY 最多等待5秒，超时后的迟到 READY 不再放行。持续排空双流，取消作用于原 Job；根退出后清理剩余后代。正常 ended 须原 runner 回执、外层 Job 空树、进程 wait、句柄关闭和 temp 清理均确认。GO 前取消有原空树和未派发证明；关闭未知继续保原 owner 和 binding，不回收成成功。宿主 EOF／强杀由 kill-on-close 清整个嵌套 Job；冷读取只保原结果，不用 PID 重建控制或重放。
 

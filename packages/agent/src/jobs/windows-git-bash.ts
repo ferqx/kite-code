@@ -18,6 +18,7 @@ import {
 } from './launch-identity';
 
 const gitBashFiles = ['bash.exe', 'ls.exe', 'msys-2.0.dll'];
+const compatibilityName = 'usr/bin/ktipc.dll';
 
 /** Keep file I/O bounded, and settle every in-flight write before reporting failure. */
 async function prepareFiles<T>(items: readonly T[], prepare: (item: T) => Promise<void>) {
@@ -39,14 +40,15 @@ async function prepareFiles<T>(items: readonly T[], prepare: (item: T) => Promis
   const failure = workers.find((worker) => worker.status === 'rejected');
   if (failure?.status === 'rejected') throw failure.reason;
 }
-/** The staging manifest is the sole inventory for both runtime copies. Pin it
- * once; verify the selected copy against its digests before every dispatch. */
+/** Pin the manifest that binds the restricted copy to its installed source. */
 export async function captureWindowsGitBashRuntime(
   shell: string,
   fullShell: string,
   signal?: AbortSignal,
 ) {
   const root = join(dirname(shell), '../..');
+  const fullRoot = join(dirname(fullShell), '../..');
+  const legacyFullCopy = fullRoot === join(root, 'full');
   const manifestPath = join(root, 'manifest.json');
   const manifestIdentity = await launchIdentityAsync(manifestPath, true, signal);
   const bytes = await readFile(manifestPath, { encoding: 'utf8', signal });
@@ -60,19 +62,19 @@ export async function captureWindowsGitBashRuntime(
     manifest.identity !==
       createHash('sha256').update(JSON.stringify(manifest.files)).digest('hex') ||
     shell !== join(root, 'usr/bin/bash.exe') ||
-    fullShell !== join(root, 'full/usr/bin/bash.exe')
+    fullShell.toLowerCase() !== join(fullRoot, 'usr/bin/bash.exe').toLowerCase()
   )
     throw Error('windows_git_bash_asset_invalid');
   const names = new Set<string>();
   const roots = [
     manifestIdentity,
     ...(await mapAssetVerification(
-      [root, join(root, 'full')],
+      [root, fullRoot],
       (path, signal) => launchIdentityAsync(path, false, signal),
       signal,
     )),
   ];
-  const files: { name: string; sha256: string; sourceSha256: string }[] = [];
+  const files: { name: string; sha256: string; sourceSha256: string; source?: string }[] = [];
   for (const file of manifest.files) {
     if (
       !file ||
@@ -86,7 +88,12 @@ export async function captureWindowsGitBashRuntime(
     )
       throw Error('windows_git_bash_asset_invalid');
     names.add(file.name.toLowerCase());
-    files.push({ name: file.name, sha256: file.sha256, sourceSha256: file.sourceSha256 });
+    files.push({
+      name: file.name,
+      sha256: file.sha256,
+      sourceSha256: file.sourceSha256,
+      source: typeof file.source === 'string' ? file.source : undefined,
+    });
   }
   const programs = files.filter(({ name }) => {
     const layout = /^([^/]+)\/bin\/git\.exe$/iu.exec(name)?.[1];
@@ -94,21 +101,27 @@ export async function captureWindowsGitBashRuntime(
   });
   if (
     programs.length !== 1 ||
-    ![...gitBashFiles, 'ktipc.dll'].every((name) => names.has(`usr/bin/${name}`))
+    !gitBashFiles.every((name) => names.has(`usr/bin/${name}`)) ||
+    !names.has(compatibilityName) ||
+    (!legacyFullCopy && files.find(({ name }) => name === 'usr/bin/bash.exe')?.source !== fullShell)
   )
     throw Error('windows_git_bash_asset_invalid');
   const program = programs[0]!.name;
+  const fullFiles = legacyFullCopy ? files : files.filter(({ name }) => name !== compatibilityName);
   return {
     git: join(root, program),
-    fullGit: join(root, 'full', program),
+    fullGit: join(fullRoot, program),
     async verify(full: boolean, signal?: AbortSignal) {
       await verifyLaunchIdentitiesAsync(roots, signal);
-      const base = full ? join(root, 'full') : root;
+      const base = full ? fullRoot : root;
       await mapAssetVerification(
-        files,
+        full ? fullFiles : files,
         async (file, signal) => {
           const fact = await launchIdentityAsync(join(base, file.name), true, signal);
-          if (fact.digest !== (full ? file.sourceSha256 : file.sha256))
+          if (
+            fact.digest !== (full ? file.sourceSha256 : file.sha256) ||
+            (full && !legacyFullCopy && fact.canonical !== file.source)
+          )
             throw Error('windows_git_bash_asset_changed');
         },
         signal,
@@ -226,7 +239,7 @@ export function windowsGitProgram(executable: string): string {
   return discovered ? join(discovered.programRoot, 'bin/git.exe') : selected;
 }
 
-/** Copy Git for Windows to an immutable, content-addressed runtime. */
+/** Prepare the private runtime needed by the restricted token. */
 export async function stageWindowsGitBash(stateRoot: string, compatibility: string) {
   if (process.platform !== 'win32' || process.arch !== 'x64' || !isAbsolute(stateRoot))
     throw Error('windows_shell_unqualified');
@@ -261,7 +274,10 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
     ...['bin', 'libexec/git-core', 'share/git-core', 'etc'].flatMap((path) =>
       collect(join(programRoot, path)),
     ),
-    ...['usr/lib', 'etc/ssl'].flatMap((path) => collect(join(installation, path))),
+    // Preserve shared system data at the runtime's original relative paths.
+    ...['usr/lib', 'usr/share/misc', 'etc/ssl'].flatMap((path) =>
+      collect(join(installation, path)),
+    ),
     compatibility,
   ]);
   const files = Array.from(paths, (path) => {
@@ -273,7 +289,7 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
       source: realpathSync.native(path),
       name:
         path === compatibility
-          ? 'usr/bin/ktipc.dll'
+          ? compatibilityName
           : relative(installation, path).replaceAll('\\', '/'),
       sourceSha256,
       sha256: path.toLowerCase().endsWith('msys-2.0.dll')
@@ -285,16 +301,14 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
   privateDirectory(stateRoot);
   const runtime = join(stateRoot, 'runtime', identity);
   privateDirectory(runtime);
-  const bin = join(runtime, 'usr/bin');
-  const installRuntime = async (root: string, compatible: boolean) => {
+  const installRuntime = async () => {
     // Create each parent once, rather than issuing recursive mkdir for every file.
     const directories = [...new Set(['tmp', ...files.map((file) => dirname(file.name))])];
     await prepareFiles(directories, async (directory) => {
-      await mkdir(join(root, directory), { recursive: true });
+      await mkdir(join(runtime, directory), { recursive: true });
     });
     await prepareFiles(files, async (file) => {
-      const target = join(root, file.name);
-      const expected = compatible ? file.sha256 : file.sourceSha256;
+      const target = join(runtime, file.name);
       const stat = await lstat(target).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== 'ENOENT') throw error;
         return undefined;
@@ -304,7 +318,7 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
       if (!stat) {
         // A racing preparation may create this same file; never overwrite its bytes.
         try {
-          if (compatible && file.name.toLowerCase() === 'usr/bin/msys-2.0.dll')
+          if (file.name.toLowerCase() === 'usr/bin/msys-2.0.dll')
             await writeFile(target, msysCompatibilityImage(await readFile(file.source)), {
               flag: 'wx',
             });
@@ -319,12 +333,12 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
         current.isSymbolicLink() ||
         createHash('sha256')
           .update(await readFile(target))
-          .digest('hex') !== expected
+          .digest('hex') !== file.sha256
       )
         throw Error('windows_git_bash_asset_changed');
     });
   };
-  // Both runtime copies and the manifest share one cross-process publication owner.
+  // The private runtime and its manifest share one cross-process publication owner.
   // A waiter must never hash a file while another preparation is still writing it.
   const deadline = performance.now() + 30000;
   let preparation: FileLock;
@@ -338,18 +352,15 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
     }
   }
   try {
-    await installRuntime(runtime, true);
-    // Full and Workspace need separate MSYS shared-memory namespaces. Keep
-    // Full's image unchanged instead of widening its object ACLs.
-    await installRuntime(join(runtime, 'full'), false);
+    await installRuntime();
     const manifest = join(runtime, 'manifest.json');
     const bytes = JSON.stringify({ identity, files });
     if (existsSync(manifest)) {
       if (readFileSync(manifest, 'utf8') !== bytes) throw Error('windows_git_bash_asset_changed');
     } else writeFileSync(manifest, bytes, { flag: 'wx' });
     return {
-      shell: join(bin, 'bash.exe'),
-      fullShell: join(runtime, 'full/usr/bin/bash.exe'),
+      shell: join(runtime, 'usr/bin/bash.exe'),
+      fullShell: realpathSync.native(join(source, 'bash.exe')),
       stateRoot,
     };
   } finally {

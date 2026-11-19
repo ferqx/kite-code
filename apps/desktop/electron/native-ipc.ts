@@ -1182,7 +1182,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       (input.line !== undefined && (!Number.isSafeInteger(input.line) || Number(input.line) < 1)) ||
       Buffer.byteLength(input.path) > 8192 ||
       Buffer.from(input.path).toString('utf8') !== input.path ||
-      /^[a-z][a-z\d+.-]*:|^#/i.test(input.path) ||
+      (/^[a-z][a-z\d+.-]*:|^#/i.test(input.path) &&
+        !(process.platform === 'win32' && /^[a-z]:[/\\][^/\\]/i.test(input.path))) ||
       [...input.path].some(
         (character) => (character.codePointAt(0) ?? 0) <= 0x1f || character.codePointAt(0) === 0x7f,
       ))
@@ -2187,12 +2188,12 @@ export function registerNativeIpc(options: {
         else if (filePreviewFormat(request.path) === 'code')
           await caller.openMessageFile(request, perform);
         else {
-          const scope = caller.messagePreviewScope(request.generation);
+          const scope = caller.messagePreviewScope(request.generation, request);
           const file = await LocalFilePreview.create(
             (consume) => caller.openMessageFile(request, async (_editor, path) => consume(path)),
             () => {
               assertNativeSender(event, options.window(), options.rendererUrl);
-              const current = caller.messagePreviewScope(request.generation);
+              const current = caller.messagePreviewScope(request.generation, request);
               if (current.storeId !== scope.storeId || current.sessionId !== scope.sessionId)
                 throw Error('local_preview_replaced');
             },

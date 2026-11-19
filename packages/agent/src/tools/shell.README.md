@@ -10,6 +10,8 @@
 
 `shell_execute` 指导模型优先使用 `rg` 和 `rg --files`。普通 Shell 的 [输出采集](shell-output.ts) 共用 Store 的 1 MiB JSON／记录预算，在运行中发布稳定前缀，随后有界保留最近输出，在原终态前按顺序发布省略量和尾部。标准输出和错误输出共用预算；两个流的省略字节分别保存。Git 工作树的受信 worker 继续使用完整帧读取。Store 和旧记录合同见 [Jobs owner](../jobs/README.md)。
 
+交付成品时，随包文档 helper 的 `stage` 将已保存的文件复制到当前 Job 的 `KITE_OUTPUT_DIR`，并通过标准输出向模型提供实际绝对路径和可直接用于 Markdown 的路径。随后的模型请求沿现有工具结果读取回执，归档沿原 Job 终态独立执行。 [交付命令](documents/README.md#成品路径与交付)
+
 Windows Shell 工具描述和命令参数说明使用宿主装配实际选中的方言和已核验版本，并注明已读到的 Windows 用户区域及 UTF-8 输出解码。PowerShell 的版本来自本次安装发现，Desktop／Core 指引依据真实 edition 或安装布局；缺少版本时明确未报告，不补造 5.1。权限与 Job 生命周期不按固定版本分叉。诊断指引优先采用退出状态和结构化输出。任务指定语言或区域时，使用实际程序提供的选项。 [Windows Job 运行环境](../jobs/README.md#默认-windows-git-bash)
 
 原 Windows Job 的已结算查找失败回执可携带命令名与候选路径。模型展示核对原 Job 和终态身份后，提供候选绝对路径、来源及单独核验可执行文件和运行时的提示。原命令退出码、双流内容和授权证据继续归该次执行回执。依赖本地进程状态的工作先选定磁盘保存点，同次调用完成修改、保存和关闭，后续调用从磁盘重新打开核对。 [模型结果回归](../../test/isolated/tools/shell/model-presentation.test.ts)
@@ -28,7 +30,7 @@ Windows 辅助进程指引要求在原 Job 内保存并关闭，提示提前选�
 
 前台期限省略时不设置执行截止时限。显式 `execution_timeout_ms` 从首次观察原 Job 进入 `dispatching/running` 起计算，审批和资源排队的 `planned` 等待不消耗执行预算；主／子 Agent 使用同一前台完成路径。观察派发使用短段等待，会有轮询与宿主调度延迟，不承诺从原生进程实际启动瞬间精确计时或毫秒级硬实时保证。时钟启动后不因后续等待或状态观察而重置；期限到达仍只取消同一原 Job，并继续等待其真实停止证据。未派发就终态拒绝或取消的 Job 直接保留原结果，不误标执行超时。用户取消仍在等待期间生效，不因尚未派发而失去响应。[前台回归](../../test/isolated/tools/shell/foreground.test.ts)使用真实 Runtime／SQLite／POSIX Shell，核人工等待超过执行预算后批准仍只执行一次，以及派发后超预算仍取消并确认原进程组停止；该 POSIX 证据不代替其他平台或完整原生进程树资格。
 
-支持范围请求的宿主为前台／后台入口提供相同指引：默认请求工作区写入／无网络，外部写入或联网须显式申请；审批不扩张申请范围，失败不自动扩权重跑。普通 Full 的有效范围仍由现行模式及硬上限决定。
+支持范围请求的宿主在工具说明开头和参数中要求 Agent 先选范围。当前技能所需的执行、验证和交付步骤在任务允许时显式申请 `filesystem:full_access`，遵守用户指定的较窄范围。普通工作区命令使用 `workspace_write`。Windows 本地辅助进程的启动和双向管道可能需要完整文件范围，即使源文件在工作区内。本地文件和管道操作使用 `network:none`。Windows 工作区命令失败且原 Job 确认已清理时，模型反馈标明原实际范围，提示先核实受限原因和落盘效果再申请新调用。执行范围由本次授权、当前模式和硬上限决定。
 
 新默认 Auto 的调用事实和直接脚本读取复用[权限 owner](../permissions/README.md)的 Shell 领域实现；[Shell 行为工厂](shell-approval.ts)随准确执行定义提供审核材料、指引、风险输出解释和同命令候选，再由可信宿主登记。材料保完整命令与执行事实，模型 description 不成为风险依据。ordinary/high/critical 由 Shell owner 映射为统一 approve_once/ask_user/reject；核心和 SQLite 不重新解析领域风险文本。显式自定义 checker 不被替换为该风险解释器。
 

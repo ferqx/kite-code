@@ -116,6 +116,17 @@ function projectFilePath(rootUri: string | undefined, path: string): string {
 }
 export const WebLinkContext = createContext<((url: string) => void) | undefined>(undefined);
 
+function absoluteMarkdownPath(href: string): string | undefined {
+  try {
+    const path = decodeURIComponent(href);
+    if (/\p{Cc}/u.test(path)) return;
+    if (/^(?:[a-z]:[/\\][^/\\]|\/[^/])/i.test(path)) return path;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 const alertIcons = new Map([
   ['note', InformationCircleIcon],
   ['tip', BulbIcon],
@@ -186,6 +197,13 @@ function MarkdownLink({
   const path = decodeMarkdownHref(href);
   const reference = markdownFileLineReference(path);
   if (reference) return <MarkdownFileLink {...reference}>{children}</MarkdownFileLink>;
+  const absolute = absoluteMarkdownPath(href);
+  if (absolute)
+    return (
+      <MarkdownFileLink path={absolute} className="absolute-file-link">
+        {children}
+      </MarkdownFileLink>
+    );
   if (/^[a-z][a-z\d+.-]*:/i.test(href)) return <span>{children}</span>;
   return <MarkdownFileLink path={path}>{children}</MarkdownFileLink>;
 }
@@ -201,10 +219,12 @@ function decodeMarkdownHref(href: string): string {
 function MarkdownFileLink({
   path,
   line,
+  className,
   children,
 }: {
   path: string;
   line?: number;
+  className?: string;
   children: ReactNode;
 }) {
   const openFile = useContext(FileLinkContext);
@@ -223,7 +243,7 @@ function MarkdownFileLink({
   return (
     <button
       type="button"
-      className="file-link"
+      className={className ? `file-link ${className}` : 'file-link'}
       aria-disabled={!readActive || !openFile || undefined}
       onClick={activate}
     >
@@ -424,7 +444,8 @@ const MarkdownDocument = memo(
         ]}
         skipHtml
         urlTransform={(url, key) =>
-          key === 'href' && markdownFileLineReference(decodeMarkdownHref(url))
+          key === 'href' &&
+          (absoluteMarkdownPath(url) || markdownFileLineReference(decodeMarkdownHref(url)))
             ? url
             : defaultUrlTransform(url)
         }

@@ -37,6 +37,11 @@ async function checkFileReference(page: import('playwright').Page, width: number
   const noteTitle = page.locator('.markdown-alert[data-alert="note"] .markdown-alert-title');
   const tooltip = page.getByRole('tooltip');
   const calls = page.getByLabel('文件打开记录');
+  const delivery = page.getByRole('region', { name: '绝对文件路径预览' });
+  const deliveryLink = delivery.getByRole('button', {
+    name: 'D:\\演示项目\\新品 #1 终稿 %23.pptx',
+    exact: true,
+  });
   const iconOffset = (reference: typeof link) =>
     reference.evaluate((node) => {
       const icon = node.querySelector('.file-reference-icon')!.getBoundingClientRect();
@@ -116,9 +121,17 @@ async function checkFileReference(page: import('playwright').Page, width: number
       };
     });
   assert.equal(await link.count(), 0);
+  assert.equal(await deliveryLink.count(), 0);
   assert.equal(await region.textContent(), `同一文件（\`${text}`);
   await page.getByRole('button', { name: '闭合文件引用', exact: true }).click();
   await link.waitFor();
+  await deliveryLink.waitFor();
+  assert.equal(await delivery.locator('a[href]').count(), 0);
+  assert.equal(await delivery.getByText('旧引用', { exact: true }).count(), 1);
+  assert.equal(
+    await deliveryLink.evaluate((node) => getComputedStyle(node).textDecorationLine),
+    'underline',
+  );
   assert.deepEqual(await region.locator('code').allTextContents(), [text, plainPath, 'waitMs: 0']);
   await region.getByText('waitMs: 0', { exact: true }).waitFor();
   const original = await link.elementHandle();
@@ -163,7 +176,9 @@ async function checkFileReference(page: import('playwright').Page, width: number
   await page.getByRole('button', { name: '暂停读取', exact: true }).click();
   await tooltip.waitFor({ state: 'hidden' });
   assert.equal(await link.getAttribute('aria-disabled'), 'true');
+  assert.equal(await deliveryLink.getAttribute('aria-disabled'), 'true');
   await link.click({ force: true });
+  await deliveryLink.click({ force: true });
   assert.equal(await calls.textContent(), JSON.stringify([text]));
   await page.getByRole('button', { name: '暂停读取', exact: true }).click();
   await page.getByRole('button', { name: '切换会话', exact: true }).click();
@@ -207,6 +222,14 @@ async function checkFileReference(page: import('playwright').Page, width: number
   await tooltip.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: '切换主题', exact: true }).click();
   await region.screenshot({ path: path.join(artifact, `file-reference-light-${width}.png`) });
+  await deliveryLink.press('Enter');
+  assert.deepEqual(JSON.parse((await calls.textContent())!), [
+    text,
+    text,
+    plainPath,
+    plainPath + ':802',
+    'D:/演示项目/新品 #1 终稿 %23.pptx',
+  ]);
 }
 
 async function checkTypography(page: import('playwright').Page) {
@@ -447,12 +470,16 @@ async function checkMessageStyles(page: import('playwright').Page) {
   );
   const link = page.getByRole('link', { name: '外部文档', exact: true }).first();
   await page.mouse.move(0, 0);
-  assert.equal(await link.evaluate((node) => getComputedStyle(node).textDecorationLine), 'none');
-  assert.notEqual(await link.evaluate((node) => getComputedStyle(node).color), styles.foreground);
-  await link.hover();
+  const idleUnderline = await link.evaluate((node) => getComputedStyle(node).textDecorationColor);
   assert.equal(
     await link.evaluate((node) => getComputedStyle(node).textDecorationLine),
     'underline',
+  );
+  assert.notEqual(await link.evaluate((node) => getComputedStyle(node).color), styles.foreground);
+  await link.hover();
+  assert.notEqual(
+    await link.evaluate((node) => getComputedStyle(node).textDecorationColor),
+    idleUnderline,
   );
   await page.mouse.move(0, 0);
   await page.keyboard.press('Tab');
@@ -728,6 +755,7 @@ if (process.argv.includes('--serve')) {
         path: path.join(artifact, `stream-complete-${width}.png`),
         fullPage: true,
       });
+      await page.getByRole('button', { name: '切换主题', exact: true }).click();
       await checkFileReference(page, width);
       assert.deepEqual(external, []);
       assert.deepEqual(errors, []);

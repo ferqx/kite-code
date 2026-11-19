@@ -3152,6 +3152,14 @@ body {
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
 }
+.kite-client .typeset-chat :is(a[href], .absolute-file-link) {
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 60%, transparent);
+}
+.kite-client .typeset-chat .absolute-file-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
 .kite-client .typeset-chat :is(a, .file-link):is(:hover, :focus-visible) {
   text-decoration-line: underline;
   text-decoration-color: currentColor;

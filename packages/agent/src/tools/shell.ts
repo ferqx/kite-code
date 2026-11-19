@@ -129,7 +129,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
   });
   if (job.id !== 'shell.command') throw new AgentError('invalid_shell_job');
   const scopeGuidance = options.permissionsSchema
-    ? ' filesystem and network are independent requested scopes, not authorization results. Omitted filesystem requests workspace_write; omitted network requests none. network:internet includes localhost, 127.0.0.1, ::1, LAN and Internet access. Risk approval does not grant networking to a network:none request. filesystem:full_access requests outside-workspace writes; it does not select Full approval mode or remove protected-path restrictions. In Request Approval and Auto, policy must authorize the requested scope. Ordinary Full sets its effective scope by mode; hard ceilings still apply. A failed command is never automatically rerun with wider permissions.'
+    ? ' Choose the filesystem request before composing the command. For a step required by the skill you are executing, explicitly pass filesystem:"full_access" on this call if the task allows it. Set network separately. Current authorization and hard limits determine the effective scope. Before retrying with wider scope, confirm that it addresses the error and check which effects already occurred.'
     : '';
   const powerShellVersion = options.powerShellVersion ?? '(version not reported)';
   const windowsPowerShell = options.powerShellEdition === 'Desktop';
@@ -142,7 +142,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     : '';
   const dialectGuidance =
     options.dialect === 'powershell'
-      ? ` The command language is ${windowsPowerShell ? 'Windows ' : ''}PowerShell ${powerShellVersion}. Use PowerShell cmdlets and Windows paths, for example Get-ChildItem -Name, Get-Content -LiteralPath and rg.exe --files. For each required native step in a compound script or dynamic invocation, check $LASTEXITCODE immediately and exit with it on failure. Pass structured data by stdin or file when the program supports it.${windowsPowerShell ? ' Supply -UseBasicParsing for Invoke-WebRequest.' : ''} Request internet scope for network commands.`
+      ? ` The command language is ${windowsPowerShell ? 'Windows ' : ''}PowerShell ${powerShellVersion}. Use PowerShell cmdlets and Windows paths, for example Get-ChildItem -Name, Get-Content -LiteralPath and rg.exe --files. For each required native step in a compound script or dynamic invocation, check $LASTEXITCODE immediately and exit with it on failure. Pass structured data by stdin or file when the program supports it.${windowsPowerShell ? ' Supply -UseBasicParsing for Invoke-WebRequest.' : ''}`
       : options.dialect === 'git-bash'
         ? ` The command language is Git Bash${gitBashVersion} on Windows. Check required steps before continuing. Use pipefail when every stage of a pipeline must succeed.`
         : '';
@@ -154,12 +154,11 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
   const windowsProcessGuidance = options.dialect
     ? ' On Windows, Kite stops remaining child processes when the command exits, including with background:true. Before splitting a stateful workflow, identify where each step will save its data to disk. Start and use local helpers within the same running command, then flush their changes and close them before it exits. Reopen the saved file from disk in the next call before further edits or delivery. Default local named pipes can deny bidirectional access under workspace_write. When available, select the CLI’s supported single-process or standalone batch mode before execution. After a sharing violation, verify what was saved and wait for the process holding the file to release it before retrying.'
     : '';
-  const windowsPipeScopeGuidance =
-    options.dialect && options.permissionsSchema
-      ? ' If an operation requires bidirectional access to a local named pipe denied under workspace_write, request filesystem:full_access for that command through the existing authorization flow. Keep network:none for IPC that uses only local named pipes.'
-      : '';
+  const windowsFilesystemGuidance = options.dialect
+    ? ' On Windows, request full_access for a required native helper when its startup or bidirectional local named pipe needs that scope, even for a workspace file.'
+    : '';
   const outputGuidance = options.outputCollection
-    ? ' KITE_OUTPUT_DIR belongs to the current Job. Put only verified final files there in the delivery call. Use $env:KITE_OUTPUT_DIR in PowerShell and $KITE_OUTPUT_DIR in POSIX shells. Files from a failed Job are not delivered.'
+    ? ' KITE_OUTPUT_DIR belongs to the current Job. Keep the verified final file in the workspace or user-requested destination. If KITE_DOCUMENTS_BUN and KITE_DOCUMENTS_HELPER are available, run the helper with stage --input <saved-file>. It copies the saved file into KITE_OUTPUT_DIR and returns its actual absolutePath and a Markdown-ready absolute path in markdownTarget. Report the saved location with [filename](<markdownTarget>), using that value exactly. Otherwise resolve the actual absolute path in Shell before reporting it and copy the saved file to KITE_OUTPUT_DIR. Files from a failed Job are not delivered.'
     : '';
   const searchGuidance =
     'Prefer rg for text search and rg --files for file discovery. Use alternatives when rg is unavailable.';
@@ -233,13 +232,12 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
               permissions: options.permissionsSchema,
               filesystem: {
                 enum: ['workspace_write', 'full_access'],
-                description:
-                  'Requested write scope; defaults to workspace_write. full_access requests external writes, not Full approval mode, and never removes protected-path limits.',
+                description: `Set "full_access" explicitly for commands required by the active skill, including its validation and delivery steps, when the user and task allow it. Use "workspace_write" for ordinary workspace commands and when the task limits you to that scope. Other external writes require task authorization and an explicit "full_access" request.${windowsFilesystemGuidance}`,
               },
               network: {
                 enum: ['none', 'internet'],
                 description:
-                  'Requested network scope; defaults to none. internet includes localhost, 127.0.0.1, ::1, LAN and Internet access. Risk approval alone does not widen this request.',
+                  'Set "none" for local file work and local named-pipe IPC, including when requesting full_access. Set "internet" for required, authorized network access, including localhost, 127.0.0.1, ::1, LAN and the Internet.',
               },
             }
           : {}),
@@ -348,7 +346,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           omitParameters: ['key', 'permissions', 'cancellation', 'timeoutMs'],
         },
         version: '1',
-        description: `Execute one supervised command.${dialectGuidance}${windowsTextGuidance}${environmentGuidance}${lookupGuidance}${windowsProcessGuidance}${outputGuidance} ${searchGuidance} Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}${windowsPipeScopeGuidance}`,
+        description: `Execute one supervised command.${scopeGuidance}${dialectGuidance}${windowsTextGuidance}${environmentGuidance}${lookupGuidance}${windowsProcessGuidance}${outputGuidance} ${searchGuidance} Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.`,
         inputSchema: schema(true),
         async execute(input, context) {
           const parsed = parseShellCommandInput(input, 'execute', !!options.permissionsSchema);

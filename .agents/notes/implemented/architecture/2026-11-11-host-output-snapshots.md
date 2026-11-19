@@ -16,6 +16,8 @@ Status: implemented
 
 交付按准确 Store、Session、producer 和相对路径取得稳定身份，以不可变 Artifact 保存；文件列表与来源轮次通过索引独立读取，不进入模型正文。部分成功重试只补首次冻结集合，不重新执行生产者，不把后来新增文件混入旧结果。继续编辑必须经过合法 input import 和绑定 command 的工作副本；命令受理后不能以重试或恢复覆盖已修改的副本。
 
+2026-11-19，交付命令在把已保存的成品复制到当前 Job 暂存后，把实际源文件的绝对路径与可直接用于 Markdown 的路径通过 stdout 提供给下一次模型请求。独立归档可以晚于正文。模型引用它收到的路径，桌面沿现有本地文件入口检查实际地址和权限。不可变快照由文件卡读取，保留当次交付的内容。 [交付回执](../../../../packages/agent/src/tools/documents/README.md#成品路径与交付) · [Desktop Markdown](../../../../apps/desktop/README.md#markdown-与附件输入)
+
 桌面定位产物在用户明确点击后从准确快照创建下载副本。副本使用独立目录，资源管理器定位和本地修改作用于该副本。 [Desktop owner](../../../../apps/desktop/README.md#办公输出文件)
 
 原生目录枚举具有独立的有界能力。旧同 ABI addon 没有该能力时明确拒绝收集，不能退回先枚举完整目录的兼容路径。旧无限额 Files 调用保持原合同，未为局部实现升级 Tool 或 native 协议版本。

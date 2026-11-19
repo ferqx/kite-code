@@ -702,7 +702,7 @@ export interface Store {
       title: string;
       subjectId: string;
     },
-    desktopShell?: import('./types').DesktopShellSelection,
+    desktopShell?: import('./types').DesktopShellBackend,
   ): Promise<SessionRecord>;
   readDesktopShellPreference(
     expectedStoreId: string,
@@ -1365,7 +1365,7 @@ export interface Store {
       newSessionId: string;
       title: string;
     },
-    desktopShell?: import('./types').DesktopShellSelection,
+    desktopShell?: import('./types').DesktopShellBackend,
   ): Promise<{
     command: CommandRecord;
     session: SessionRecord;

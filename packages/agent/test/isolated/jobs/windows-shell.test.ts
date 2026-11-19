@@ -444,10 +444,11 @@ native(
       expect(repo.output).toContain('git-child-shell');
       expect(existsSync(join(cwd, '.git', 'HEAD'))).toBe(true);
       const full = await execute(
-        'set -e; test "$(type -P cat)" -ef /usr/bin/cat.exe; cat private/secret.txt; cat ../external.txt; printf full-write > ../outside.txt',
+        'set -e; cygpath -aw /usr/bin/bash.exe; test "$(type -P cat)" -ef /usr/bin/cat.exe; cat private/secret.txt; cat ../external.txt; printf full-write > ../outside.txt',
         true,
       );
       expect(full.result?.outcome).toBe('succeeded');
+      expect(full.output).toContain(realpathSync.native(runtime.fullShell));
       expect(full.output).toContain('private-needle');
       expect(full.output).toContain('external-needle');
       expect(readFileSync(join(root, 'outside.txt'), 'utf8')).toBe('full-write');

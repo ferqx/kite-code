@@ -13,7 +13,7 @@ Kite provides the bundled `officecli` on the Shell PATH. Start with the document
 
 - **Use a workspace copy for edits.** Inspect the supplied file and honor the requested selection and template. Create a separate named copy in the workspace for changes. Keep intermediate documents and operation files there. Each Shell call starts with fresh process state, so define variables again and reopen the saved copy by path.
 - **Use standalone commands by default.** Set `$env:OFFICECLI_NO_AUTO_RESIDENT = '1'` in PowerShell or `export OFFICECLI_NO_AUTO_RESIDENT=1` in Git Shell and other POSIX shells in each call that edits the file. Group related edits with `officecli batch "$FILE" --input "$OPS" --json` and a UTF-8 JSON operation file. This avoids native argument quoting issues with multiline text, non-ASCII text and formulas. If a task explicitly requires a resident session, open, edit, save and close it in the same Shell call. Check the exit status and batch result before proceeding.
-- **Use the current call for delivery.** Inspect and validate the saved workspace file. Put only the verified final file in this call's `KITE_OUTPUT_DIR` with `Copy-Item -LiteralPath $FILE -Destination $env:KITE_OUTPUT_DIR -ErrorAction Stop` in PowerShell or `cp "$FILE" "$KITE_OUTPUT_DIR/"` in Git Shell and POSIX shells. A successful delivery call publishes a file card in Kite. Keep previews, operation files and drafts in the workspace.
+- **Deliver the verified file.** Keep the saved final file in the workspace or at the user's requested location. Run `& $env:KITE_DOCUMENTS_BUN --no-install $env:KITE_DOCUMENTS_HELPER stage --input $FILE` in PowerShell or `"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" stage --input "$FILE"` in Git Shell and POSIX shells. The successful call queues the file card and returns `absolutePath` and `markdownTarget` for the saved file. Write `[filename](<markdownTarget>)` using the returned Markdown path verbatim. If the helper is unavailable, follow the Shell delivery instructions. Keep previews, operation files and drafts in the workspace.
 - **Check what is available.** Use `officecli help` for uncertain flags and check exit status or JSON instead of matching localized messages. Match the requested document language and formats. Use the available preview or viewer when visual verification is needed. Report the checks you actually ran.
 - **Verify recovery before retrying.** If a call times out or encounters a file lock, inspect the original Shell result. Resume from the last confirmed workspace file once the process has stopped and the file is available.
 
@@ -461,7 +461,7 @@ Borders use the format `style;size;color;space`: `single;4;FF0000;1`. Hex colors
 
 - Read the text around the change and check for unintended placeholders, unexpected backslashes and missing content.
 - Confirm the live `PAGE` field if pagination was requested. For a TOC, check its field and `updateFields` setting because Word may need to refresh the displayed entries.
-- Use the final Shell call to copy the checked file to `KITE_OUTPUT_DIR`.
+- Deliver the checked file and use the returned absolute path in the reply.
 
 ### Field / cached-value spot-check
 

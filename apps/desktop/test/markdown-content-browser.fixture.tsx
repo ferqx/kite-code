@@ -221,6 +221,19 @@ function Fixture() {
                   />
                 </section>
               )}
+              {identity === 'first' && (
+                <section aria-label="绝对文件路径预览">
+                  <MessageContent
+                    text={
+                      referenceClosed
+                        ? '[D:\\演示项目\\新品 #1 终稿 %23.pptx](<D:/演示项目/新品 #1 终稿 %2523.pptx>) · [旧引用](sandbox:/mnt/data/新品.pptx)'
+                        : '已核验成品。'
+                    }
+                    streaming={!referenceClosed}
+                    openFile={(path) => setFileOpens((opens) => [...opens, path])}
+                  />
+                </section>
+              )}
             </ClipboardWriteContext.Provider>
           </ConversationCache>
           <section aria-label="输入样式预览" style={{ marginTop: 32 }}>

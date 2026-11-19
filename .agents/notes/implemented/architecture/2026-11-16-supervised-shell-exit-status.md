@@ -22,6 +22,8 @@ Windows 命令查找的恢复线索属于观测到查找未命中的原 Job，�
 
 Git Bash 从 Kite 进程 `PATH` 已解析的 Git 定位安装，按实际程序和 helper 布局生成两套私有运行时。Job、只读查询和工作树操作使用同一清单定位所需副本，派发时重新核验实际资产。独立 Git 继续用于 PowerShell 的 Git 操作。见 [原 PowerShell 回退决定](2026-11-12-windows-desktop-powershell-fallback.md)。
 
+完整文件范围的副本后来由[原位使用已安装 Git Bash](2026-11-19-windows-installed-bash-full-access.md)部分替代。程序布局发现与 Runner 所有权继续适用。
+
 ## Alternatives considered
 
 - 按技能或依赖的名字修补环境。故障涉及任何原生程序和技能，采用共用 Runner 与工具说明才能覆盖用户自装技能。

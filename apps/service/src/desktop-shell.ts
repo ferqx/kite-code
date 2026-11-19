@@ -1,6 +1,6 @@
 import { AgentError } from '@kite-ai/agent';
 import type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
-import type { DesktopShellPreference, DesktopShellSelection, Store } from '@kite-ai/agent/storage';
+import type { DesktopShellBackend, DesktopShellPreference, Store } from '@kite-ai/agent/storage';
 import { z } from 'zod';
 
 export const desktopShellSettingsPath = '/internal/desktop/shell';
@@ -26,7 +26,7 @@ export const desktopShellSaveSchema = z.strictObject({
 });
 export type DesktopShellSettings = z.infer<typeof desktopShellSettingsSchema>;
 export type DesktopShellSettingsPort = {
-  selection(): Promise<DesktopShellSelection>;
+  selection(): Promise<DesktopShellBackend>;
   read(storeId: string): Promise<DesktopShellSettings>;
   save(storeId: string, preference: DesktopShellPreference): Promise<DesktopShellSettings>;
 };

@@ -174,6 +174,21 @@ export function formatShellResult(input: {
       lines.push('The wait timed out. This wait did not stop the command.');
     if (Number.isSafeInteger(originalDetails?.exitCode))
       lines.push(`Exit code: ${originalDetails!.exitCode}.`);
+    const confinement = object(object(operation.reference)?.confinement);
+    if (
+      sameTerminal &&
+      status === 'failed' &&
+      !denied &&
+      Number.isSafeInteger(originalDetails?.exitCode) &&
+      originalDetails?.cleanupConfirmed === true &&
+      originalDetails.processTreeStopped === true &&
+      confinement?.backend === 'windows-restricted-token-job' &&
+      confinement.filesystem === 'workspace_write' &&
+      (confinement.network === 'none' || confinement.network === 'internet')
+    )
+      lines.push(
+        `The command ran with filesystem:"workspace_write" and network:"${confinement.network}". If the diagnostics confirm that this scope blocked a required local helper or IPC, check saved effects before explicitly requesting filesystem:"full_access" for the necessary step. Keep network:"none" for local-only work.`,
+      );
     if (sameTerminal && (status === 'succeeded' || status === 'failed'))
       appendCommandLookup(lines, originalDetails?.commandLookup);
     if (sameTerminal && originalDetails?.processTreeStopped === true)

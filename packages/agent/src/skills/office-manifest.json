@@ -26,8 +26,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 41072,
-          "sha256": "f1167c9e7d5e1f250992009e9dbfda5e962fc710529c0ecba4276b2c2879d929"
+          "bytes": 41289,
+          "sha256": "8353b5c7f1ea10749475567e067fdefd8f5a4e8e6689d4354b5524bb182c3ad5"
         }
       ]
     },
@@ -105,8 +105,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 42121,
-          "sha256": "7ef47f2015e65b818e8266bff3626d6fc888b583492c893c780717344154a3fe"
+          "bytes": 42337,
+          "sha256": "17c391a2c96cb347e859f3afb0fe84551bf5540a05a3d88a1ccb8548f039b502"
         }
       ]
     },
@@ -117,8 +117,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 33649,
-          "sha256": "796e5a034efd1898a310aca9b85c1bbb6c4f6459a6f0b04335f6cb1176ee00f4"
+          "bytes": 33864,
+          "sha256": "cb639d75e75da948f75fb946e263428dc482069f94e080476552c9f0f465b7f4"
         }
       ]
     }

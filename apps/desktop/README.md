@@ -285,6 +285,10 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 ## Markdown 与附件输入
 
+正文可以引用 Shell 交付回执提供的本机绝对路径。共享 Markdown 识别盘符路径和以斜杠开头的本机路径，保留模型给出的标签。Windows 的准确盘符路径由 `messageFile.open` 识别，再校验原会话、工作区、实际文件与当前读取权限。链接使用实际保存位置，能在输出归档前打开。文件卡读取固定快照，提供预览和另存。普通网页与明确的绝对文件链接有下划线，历史虚拟路径保留为文字。 [交付回执](../../packages/agent/src/tools/documents/README.md#成品路径与交付) · [浏览器回归](test/markdown-content-browser-runner.fixture.ts) · [桌面入口回归](test/native-file-changes.test.ts)
+
+同会话收尾刷新期间，正文链接和预览复核沿用已验证的消息读取身份。预览仍绑定原选择和历史代际，按原消息和实际磁盘文件校验每次读取。连接重置、切换会话、工作区失效和实际文件变更继续使旧句柄失效。 [收尾刷新回归](test/native-caller.test.ts)
+
 ### 待发送附件的本机恢复
 
 [输入附件 hook](src/native-input-images.ts)在准备完成、移除及接纳发送回执后维护会话草稿；[闭合 IPC](src/input-images-bridge.ts)只传受限附件描述与 Main 已准备的 ID，原图预览按有界块读取，blob URL 不落盘。[Main 附件存储](electron/pending-attachments.ts)沿[私有 UI SQLite](electron/private-data.ts)保存原字节块及本机引用描述，继承固定 profile、生命周期租约、私有目录／文件、拒绝符号／硬链接、FULL 同步及事务边界。既有本机路径引用不复制内容、不借恢复读取任意路径；实际读取仍走原 Agent 权限。

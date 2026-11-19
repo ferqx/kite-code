@@ -29,7 +29,7 @@ function createOfficeSkillSource(key: OfficeSkill) {
   const byPath = new Map(textFiles.map((file) => [file.path, file]));
   const appendix =
     key === 'pdf'
-      ? `\n\n## Kite runtime\n\nThe bundled copies of this skill and its support files are read-only. Resolve this skill's relative paths from the \`${directory}\` directory under \`KITE_OFFICE_SKILLS_DIR\`. In PowerShell this is \`$env:KITE_OFFICE_SKILLS_DIR\`. Use the Shell and file operations already authorized for your run. Work from the attached source copy. When the user requests a revised file, write the completed new file to the current Shell's \`KITE_OUTPUT_DIR\`. Use dependencies available to that Shell.\n`
+      ? `\n\n## Kite runtime\n\nThe bundled copies of this skill and its support files are read-only. Resolve this skill's relative paths from the \`${directory}\` directory under \`KITE_OFFICE_SKILLS_DIR\`. In PowerShell this is \`$env:KITE_OFFICE_SKILLS_DIR\`. Use the Shell and file operations already authorized for your run. Work from the attached source copy. Save the verified final PDF in the workspace or at the user's requested location and use the Shell delivery instructions for \`KITE_OUTPUT_DIR\` to publish it and report its actual absolute path. Use dependencies available to that Shell.\n`
       : '';
   const revision = key === 'pdf' ? upstream.pdfRevision : upstream.officeCliRevision;
   const id = `builtin:office.${key}`;

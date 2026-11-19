@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 for (const layout of ['mingw64', 'ucrt64', 'alternate-runtime']) {
   test.skipIf(process.platform !== 'win32')(
-    `Git Bash stages and verifies both ${layout} runtimes`,
+    `Git Bash verifies the restricted copy and the original ${layout} installation`,
     () => {
       const module = fileURLToPath(
         new URL('../../../src/jobs/windows-git-bash.ts', import.meta.url),
@@ -26,6 +26,7 @@ import {captureWindowsGitBashRuntime,stageWindowsGitBash,windowsGitProgram} from
 const layout = ${JSON.stringify(layout)};
 const program = layout + '/bin/git.exe';
 const helper = layout + '/libexec/git-core/git-remote-http.exe';
+const sharedData = 'usr/share/misc/signatures/formats.dat';
 const gitParent = dirname(realpathSync.native(Bun.which('git')));
 const source = [dirname(gitParent), dirname(dirname(gitParent))]
   .map(root => join(root, 'usr/bin/msys-2.0.dll')).find(existsSync);
@@ -44,6 +45,7 @@ try {
   write(join(installation, helper), 'helper');
   write(join(installation, 'incomplete/bin/git.exe'), 'not an installed runtime');
   write(join(installation, 'etc/ssl/certs/ca-bundle.crt'), 'certificate');
+  write(join(installation, sharedData), 'format signatures');
   write(compatibility, 'compatibility');
   Bun.which = command => { assert.equal(command, 'git'); return join(installation, 'cmd/git.exe'); };
   assert.equal(windowsGitProgram(Bun.which('git')), join(installation, program));
@@ -51,8 +53,10 @@ try {
   const state = join(root, 'state');
   const staged = await stageWindowsGitBash(state, compatibility);
   const runtime = join(dirname(staged.shell), '../..');
-  const fullRuntime = join(dirname(staged.fullShell), '../..');
+  const fullRuntime = installation;
   const manifest = readFileSync(join(runtime, 'manifest.json'));
+  assert.equal(staged.fullShell, realpathSync.native(join(installation, 'usr/bin/bash.exe')));
+  assert.equal(existsSync(join(runtime, 'full')), false);
   assert.equal(readFileSync(staged.shell, 'utf8'), 'bash');
   assert.equal(readFileSync(staged.fullShell, 'utf8'), 'bash');
   assert.deepEqual(readFileSync(join(fullRuntime, 'usr/bin/msys-2.0.dll')), msys);
@@ -62,23 +66,25 @@ try {
     assert.equal(readFileSync(join(base, program), 'utf8'), 'git');
     assert.equal(readFileSync(join(base, helper), 'utf8'), 'helper');
     assert.equal(readFileSync(join(base, 'etc/ssl/certs/ca-bundle.crt'), 'utf8'), 'certificate');
+    assert.equal(readFileSync(join(base, sharedData), 'utf8'), 'format signatures');
     assert.equal(readFileSync(join(base, 'usr/bin/ls.exe'), 'utf8'), 'ls');
   }
   assert.deepEqual(await stageWindowsGitBash(state, compatibility), staged);
-  rmSync(staged.fullShell);
+  rmSync(staged.shell);
   assert.deepEqual(await stageWindowsGitBash(state, compatibility), staged);
-  assert.equal(readFileSync(staged.fullShell, 'utf8'), 'bash');
-  for (const path of [staged.shell, staged.fullShell]) {
-    writeFileSync(path, 'changed');
-    await assert.rejects(stageWindowsGitBash(state, compatibility), /windows_git_bash_asset_changed/);
-    assert.equal(readFileSync(path, 'utf8'), 'changed');
-    writeFileSync(path, 'bash');
-  }
+  assert.equal(readFileSync(staged.shell, 'utf8'), 'bash');
+  writeFileSync(staged.shell, 'changed');
+  await assert.rejects(stageWindowsGitBash(state, compatibility), /windows_git_bash_asset_changed/);
+  assert.equal(readFileSync(staged.shell, 'utf8'), 'changed');
+  writeFileSync(staged.shell, 'bash');
   assert.deepEqual(await stageWindowsGitBash(state, compatibility), staged);
   assert.deepEqual(readFileSync(join(runtime, 'manifest.json')), manifest);
   const { git, fullGit, verify } = await captureWindowsGitBashRuntime(staged.shell, staged.fullShell);
   assert.equal(git, join(runtime, program));
   assert.equal(fullGit, join(fullRuntime, program));
+  const otherBash = join(root, 'other/usr/bin/bash.exe');
+  write(otherBash, 'bash');
+  await assert.rejects(captureWindowsGitBashRuntime(staged.shell, otherBash), /windows_git_bash_asset_invalid/);
   await verify(false); await verify(true);
   let starts=0,full=false;
   mock.module(${JSON.stringify(owner)},()=>({WindowsOwnedChildStartError:class extends Error{},
@@ -88,15 +94,19 @@ try {
   const job=await createWindowsShellJob({cwd:root,controlBase:control,env:{},stateRoot:state,
     supervisorPath:compatibility,shellExecutable:staged.shell,fullShellExecutable:staged.fullShell,
     executionScope:()=>({filesystem:full?'full_access':'workspace_write',network:'none'})});
-  for (const base of [runtime, fullRuntime]) for (const name of ['usr/bin/ls.exe', 'usr/bin/msys-2.0.dll', 'usr/bin/ktipc.dll', program, helper, 'etc/ssl/certs/ca-bundle.crt']) {
-    const path = join(base, name), original = readFileSync(path);
-    writeFileSync(path, 'changed after capture');
-    await assert.rejects(verify(base === fullRuntime), /windows_git_bash_asset_changed/);
-    full=base===fullRuntime;
-    await assert.rejects(job.start({command:'printf forbidden'},{signal:new AbortController().signal,sessionId:'s',executionId:'tampered'}),/windows_git_bash_asset_changed/);
-    assert.equal(starts,0,'changed runtime closure must fail before native dispatch');
-    writeFileSync(path, original);
-    await verify(base === fullRuntime);
+  for (const base of [runtime, fullRuntime]) {
+    const assets = ['usr/bin/ls.exe', 'usr/bin/msys-2.0.dll', program, helper, 'etc/ssl/certs/ca-bundle.crt', sharedData];
+    if (base === runtime) assets.push('usr/bin/ktipc.dll');
+    for (const name of assets) {
+      const path = join(base, name), original = readFileSync(path);
+      writeFileSync(path, 'changed after capture');
+      await assert.rejects(verify(base === fullRuntime), /windows_git_bash_asset_changed/);
+      full=base===fullRuntime;
+      await assert.rejects(job.start({command:'printf forbidden'},{signal:new AbortController().signal,sessionId:'s',executionId:'tampered'}),/windows_git_bash_asset_changed/);
+      assert.equal(starts,0,'changed runtime closure must fail before native dispatch');
+      writeFileSync(path, original);
+      await verify(base === fullRuntime);
+    }
   }
   writeFileSync(join(runtime, 'manifest.json'), '{}');
   await assert.rejects(verify(false), /confined_launch_changed/);

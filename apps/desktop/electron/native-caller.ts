@@ -452,17 +452,7 @@ export class NativeCaller {
     this.trajectory = new NativeTrajectory(client, current);
     const messageScope = () => {
       const scope = current(),
-        fresh = this.controller.snapshot;
-      // An ordinary observation refresh temporarily clears the controller snapshot.
-      // The same verified reading identity remains valid; reset/selection still releases it.
-      const snapshot = scope
-        ? fresh?.sessionId === scope.sessionId
-          ? fresh
-          : this.lastView?.selection === scope.selection &&
-              this.lastView.snapshot.sessionId === scope.sessionId
-            ? this.lastView.snapshot
-            : undefined
-        : undefined;
+        snapshot = this.messageReadSnapshot();
       return scope &&
         !this.observationUnavailable &&
         snapshot?.sessionId === scope.sessionId &&
@@ -839,6 +829,18 @@ export class NativeCaller {
     const snapshot = this.writableScope(sessionId);
     if (snapshot.workspaceUnavailable) throw new ClientError('workspace_identity_unavailable');
     return snapshot;
+  }
+  private messageReadSnapshot() {
+    const snapshot = this.controller.snapshot;
+    if (!this.selected || this.observationUnavailable) return undefined;
+    if (snapshot) return snapshot.sessionId === this.selected ? snapshot : undefined;
+    // Ordinary refresh can clear the current snapshot within the same selection.
+    if (
+      this.lastView?.selection === this.selection &&
+      this.lastView.snapshot.sessionId === this.selected
+    )
+      return this.lastView.snapshot;
+    return undefined;
   }
   private releaseReads(includeGlobalSettings = true) {
     this.selectionActivation = undefined;
@@ -1782,8 +1784,7 @@ export class NativeCaller {
     perform: (editor: DesktopEditor, target: string, line?: number) => Promise<void>,
   ) {
     await this.drainRefresh();
-    this.assertGeneration(request.generation);
-    this.availableWorkspaceScope(this.selected ?? '');
+    this.messagePreviewScope(request.generation, request);
     await this.fileChanges.openMessageFile(request, perform);
     this.assertGeneration(request.generation);
   }
@@ -3890,12 +3891,25 @@ export class NativeCaller {
     this.assertGeneration(generation);
     return result;
   }
-  messagePreviewScope(generation: number) {
+  messagePreviewScope(
+    generation: number,
+    original?: { viewSelection: number; historyEpoch: number },
+  ) {
     this.assertGeneration(generation);
+    if (
+      original &&
+      (original.viewSelection !== this.selection || original.historyEpoch !== this.historyEpoch)
+    )
+      throw new ClientError('native_selection_changed');
     const storeId = this.client.serverInfo?.storeId;
     const sessionId = this.selected;
-    if (!storeId || !sessionId) throw new ClientError('output_scope_unavailable');
-    this.availableWorkspaceScope(sessionId);
+    const snapshot = this.messageReadSnapshot();
+    if (!storeId || !sessionId || this.permissionUnavailable || snapshot?.view.storeId !== storeId)
+      throw new ClientError('output_scope_unavailable');
+    if (snapshot.view.session.parentSessionId !== null)
+      throw new ClientError('child_session_readonly');
+    if (snapshot.view.session.deletedAt !== null || snapshot.workspaceUnavailable)
+      throw new ClientError('workspace_identity_unavailable');
     return { storeId, sessionId };
   }
   checkOutputGeneration(generation: number) {

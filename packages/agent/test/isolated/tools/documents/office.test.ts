@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { bundledOfficeSkillDirectory } from '../../../../src/skills/office-source';
 import { createBuiltinSkillSources } from '../../../../src/skills/registry';
 
@@ -29,14 +29,15 @@ test.each(officeSkills)('packaged %s skill loads its pinned document', async (ke
   const loaded = await source.load({ id, version: entry!.version });
   if (key === 'pdf') {
     expect(loaded.body).toContain('KITE_OFFICE_SKILLS_DIR');
-    expect(loaded.body).toContain('KITE_OUTPUT_DIR');
+    expect(loaded.body).toContain('report its actual absolute path');
   } else {
     const path = join(bundledOfficeSkillDirectory()!, key, 'SKILL.md');
     expect(loaded.body).toBe(await readFile(path, 'utf8'));
     expect(loaded.body).toContain('Kite provides the bundled `officecli` on the Shell PATH.');
     expect(loaded.body).toContain('<!-- Modified by Kite from the upstream OfficeCLI skill. -->');
     expect(loaded.body).toContain('OFFICECLI_NO_AUTO_RESIDENT');
-    expect(loaded.body).toContain('KITE_OUTPUT_DIR');
+    expect(loaded.body).toContain('stage --input');
+    expect(loaded.body).toContain('absolutePath');
     expect(loaded.body).not.toMatch(/d\.officecli\.ai\/install|officecli\s+--version/u);
   }
   expect(
@@ -89,6 +90,48 @@ test('stable exporter bounds bytes, denies links and leaves no partial output on
     await exportDocument(source, out);
     expect(await readFile(out, 'utf8')).toBe('12345');
     expect((await readdir(root)).some((name) => name.startsWith('.kite-export-'))).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('staging reports the saved absolute path and Markdown target before collection', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'document-delivery-'));
+  try {
+    const workspace = join(root, 'workspace');
+    const staging = join(root, 'staging', 'job', 'out');
+    await mkdir(workspace);
+    await mkdir(staging, { recursive: true });
+    const name = '新品 #1 终稿 %23 &amp;.pptx';
+    const saved = join(workspace, name);
+    await writeFile(saved, 'verified draft');
+    const helper = join(import.meta.dir, '../../../../src/tools/documents/kite-documents.ts');
+    const stage = (input: string) =>
+      Bun.spawnSync([process.execPath, '--no-install', helper, 'stage', '--input', input], {
+        cwd: workspace,
+        env: { ...process.env, KITE_OUTPUT_DIR: staging },
+      });
+    const receipt = stage(name);
+    expect(receipt.stderr.toString()).toBe('');
+    expect(receipt.exitCode).toBe(0);
+    const absolutePath = await realpath(saved);
+    const directory = dirname(absolutePath);
+    const parent = process.platform === 'win32' ? directory.replaceAll('\\', '/') : directory;
+    expect(JSON.parse(receipt.stdout.toString())).toEqual({
+      success: true,
+      absolutePath,
+      markdownTarget: `${parent}/新品 #1 终稿 %2523 %26amp;.pptx`,
+    });
+    const staged = join(staging, name);
+    expect(await readFile(staged, 'utf8')).toBe('verified draft');
+    for (const input of [name, staged, 'missing.pptx']) {
+      const failed = stage(input);
+      expect(failed.exitCode).toBe(1);
+      expect(failed.stdout.toString()).toBe('');
+      expect(JSON.parse(failed.stderr.toString())).toMatchObject({ success: false });
+    }
+    await rm(staged);
+    expect(await readFile(absolutePath, 'utf8')).toBe('verified draft');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
