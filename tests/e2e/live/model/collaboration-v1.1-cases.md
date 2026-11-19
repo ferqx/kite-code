@@ -18,7 +18,7 @@
 | [公网 MCP smoke](../../../../scripts/runtime/unified-mcp-live-smoke.ts)，根命令 test:mcp:live | 正式 Client→Service→Runtime→远端 MCP，但使用 createFixedModel | 只证明公网 MCP 链路；真实模型读取工具目录、选择及理解 MCP 需另按 P09 配对核验 |
 | 本目录旧 background、context-compaction 及旧 MCP live 文件 | 旧 App Server/Host/Kernel 路径；若干根 alias 已退出 | 保留历史范围，不作为当前 V1.1 的执行入口 |
 
-工具 smoke 和逐条协作用例命令如下；它们都不是整张矩阵的一键验收命令：
+工具 smoke 和逐条协作用例命令如下；第二条需要 macOS 上已合格的原生 Shell。它们都不是整张矩阵的一键验收命令：
 
 ~~~bash
 KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=/absolute/owned-directory/report.json

@@ -775,7 +775,7 @@ KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-nat
 
 ## 输入、审批、标题与竞争
 
-[协作 live 驱动](collaboration.live.ts)的大部分用例从正式 Service/Client HTTP 进入 Runtime/SQLite，逐次只运行一个准确用例。下面示例走正式默认审批；各组的实际边界见表。
+[协作 live 驱动](collaboration.live.ts)的大部分用例从正式 Service/Client HTTP 进入 Runtime/SQLite，逐次只运行一个准确用例。下面示例走正式默认审批，需要 macOS 上已合格的原生 Shell；其他平台不要运行该示例。各组的实际边界见表。
 
 ```bash
 KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=permissions --case=permissions-approve --output=/absolute/owned-directory/report.json
