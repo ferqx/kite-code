@@ -38,6 +38,12 @@ const original = JSON.stringify({
   nested: { preserved: true },
 });
 type Mode =
+  | 'web-search'
+  | 'web-search-legacy'
+  | 'web-search-wrong-owner'
+  | 'web-search-missing'
+  | 'web-search-retry'
+  | 'web-search-trace'
   | 'write-diff'
   | 'write-error-diff'
   | 'write-unavailable-diff'
@@ -63,9 +69,11 @@ type Mode =
   | 'mail-failed'
   | 'mail-unknown';
 function fixture(mode: Mode, testDiagnostics = false) {
+  const webSearch = mode.startsWith('web-search');
   const isDiff = mode.endsWith('-diff');
   const groupedDiff = mode === 'group-diff';
-  const inTurn = groupedDiff || mode === 'edit-diff' || mode === 'mixed';
+  const inTurn =
+    mode === 'web-search-trace' || groupedDiff || mode === 'edit-diff' || mode === 'mixed';
   const diffIds = groupedDiff ? ['receipt', 'receipt-edit'] : ['receipt'];
   const confirmedDiff = isDiff && !['failed-diff', 'unknown-diff'].includes(mode);
   const isMail = mode.startsWith('mail');
@@ -159,6 +167,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
       storeId: 'store',
       viewGeneration: revision,
       viewSelection: 1,
+      canReadWebSearchEvidence: webSearch && mode !== 'web-search-legacy',
       canReadModelOutput: false,
       session: {
         ...session,
@@ -198,15 +207,17 @@ function fixture(mode: Mode, testDiagnostics = false) {
             toolCalls: [
               {
                 id: 'call',
-                name: deferredShell
-                  ? 'shell.execute'
-                  : isMail
-                    ? 'task.message'
-                    : isImage
-                      ? 'files.view_images'
-                      : mode === 'mixed'
-                        ? 'files.write'
-                        : 'files.read',
+                name: webSearch
+                  ? 'web_search'
+                  : deferredShell
+                    ? 'shell.execute'
+                    : isMail
+                      ? 'task.message'
+                      : isImage
+                        ? 'files.view_images'
+                        : mode === 'mixed'
+                          ? 'files.write'
+                          : 'files.read',
                 arguments: JSON.stringify({ path: 'MODEL_ARGS_SENTINEL' }),
               },
               ...(mode === 'mixed'
@@ -224,7 +235,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
             role: 'tool',
             status: 'complete',
             runId: inTurn ? 'grouped-run' : null,
-            sourceIds: ['execution'],
+            sourceIds: [mode === 'web-search-wrong-owner' ? 'unrelated' : 'execution'],
             toolCallId: 'call',
             content: receiptContent,
             ...(deferredShell
@@ -303,6 +314,45 @@ function fixture(mode: Mode, testDiagnostics = false) {
             messages: selected === 'root' && !published ? [] : messages(),
             nextAfterSeq: null,
             highWaterSeq: request.upperSeq,
+          };
+        case 'webSearch.evidence':
+          if (mode === 'web-search-missing') return { kind: 'webSearch.evidence', evidence: null };
+          if (mode === 'web-search-retry') {
+            if (requests.filter((r) => r.method === 'webSearch.evidence').length === 1)
+              throw Error('PRIVATE_TRANSPORT_ERROR');
+            return {
+              kind: 'webSearch.evidence',
+              evidence: {
+                executionId: request.executionId,
+                revision: 1,
+                route: 'provider',
+                status: 'completed',
+                sources: [],
+                citations: [],
+                blocks: [],
+              },
+            };
+          }
+          return {
+            kind: 'webSearch.evidence',
+            evidence: {
+              executionId: request.executionId,
+              revision: 1,
+              route: 'provider',
+              status: 'completed',
+              query: 'fixture',
+              sources: [
+                {
+                  url: 'https://example.test/source',
+                  title: '<img src=x>',
+                  snippet: '甲'.repeat(600),
+                },
+                { url: 'javascript:alert(1)', title: 'BAD_LINK' },
+                { url: 'https://example.test/source', title: 'duplicate' },
+              ],
+              citations: [],
+              blocks: [],
+            },
           };
         case 'messages.text':
           throw Error('unexpected_shell_read');
@@ -532,7 +582,20 @@ function fixture(mode: Mode, testDiagnostics = false) {
                   viewSelection: request.viewSelection,
                   historyEpoch: request.historyEpoch,
                 },
-                entries,
+                entries: webSearch
+                  ? request.method === 'toolMessages.list'
+                    ? [
+                        {
+                          messageId: 'receipt',
+                          executionId: 'execution',
+                          definitionId: 'web.search',
+                          definitionVersion: '1',
+                          status: 'succeeded',
+                          resultRevision: '1',
+                        },
+                      ]
+                    : []
+                  : entries,
               } as NativeResult);
             }),
           );
@@ -832,6 +895,108 @@ for (const mode of ['known', 'mixed', 'image'] as const)
     }
   });
 
+for (const mode of ['web-search', 'web-search-legacy', 'web-search-wrong-owner'] as const)
+  test(`actual NativeDesktop ordinary non-deferred ${mode} shows only original bounded sources after opening, without querying`, async () => {
+    const f = fixture(mode);
+    const reads = () => f.requests.filter((r) => r.method === 'webSearch.evidence');
+    try {
+      await f.render();
+      await f.flush();
+      if (mode === 'web-search-wrong-owner') {
+        await f.settlePresentation();
+        expect(f.host.querySelector('.tool-activity')).toBeNull();
+        expect(reads()).toHaveLength(0);
+        return;
+      }
+      await f.until(() => !!f.host.querySelector('button.tool-activity-summary'));
+      expect(f.host.querySelector('button.tool-activity-summary')?.textContent).toContain('搜索了');
+      expect(reads()).toHaveLength(0);
+      await f.toggle();
+      await f.settlePresentation();
+      if (mode === 'web-search') {
+        await f.until(() => !!f.host.querySelector('.web-search-sources a'));
+        expect(reads()).toEqual([
+          {
+            method: 'webSearch.evidence',
+            generation: 1,
+            viewSelection: 1,
+            expectedStoreId: 'store',
+            sessionId: 'root',
+            executionId: 'execution',
+          },
+        ]);
+        const a = f.host.querySelector<HTMLAnchorElement>('.web-search-sources a')!;
+        expect(a.textContent).toBe('<img src=x>');
+        expect(a.href).toBe('https://example.test/source');
+        expect(a.rel).toContain('noopener');
+        expect(f.host.querySelectorAll('.web-search-sources a')).toHaveLength(1);
+        expect(f.host.querySelector('.web-search-sources img, .tool-activity pre')).toBeNull();
+        expect(f.host.querySelector('.web-search-snippet')?.textContent).toHaveLength(320);
+        expect(f.host.textContent).toContain('example.test');
+        expect(f.host.textContent).not.toContain('BAD_LINK');
+        expect(f.host.textContent).not.toContain('正文引用');
+        expect(f.host.textContent).not.toContain(sentinel);
+        await f.toggle();
+        await f.settlePresentation();
+        expect(reads()).toHaveLength(1);
+        await f.toggle();
+        await f.until(() => reads().length === 2);
+        await f.selectOther();
+        expect(f.host.querySelector('.web-search-sources')).toBeNull();
+      } else {
+        expect(reads()).toHaveLength(0);
+        expect(f.host.textContent).not.toContain(sentinel);
+        if (mode === 'web-search-legacy')
+          expect(f.host.textContent).toContain('不支持查看搜索来源');
+      }
+      expect(
+        f.requests.filter(
+          (r) => r.method === 'webSearch.settings.test' || r.method === 'messages.text',
+        ),
+      ).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const mode of ['web-search-missing', 'web-search-retry', 'web-search-trace'] as const)
+  test(`actual NativeDesktop ${mode}: absent vs failed vs verified sources; collapsed prior trace never reads by model ID`, async () => {
+    const f = fixture(mode),
+      reads = () => f.requests.filter((r) => r.method === 'webSearch.evidence');
+    try {
+      await f.render();
+      await f.flush();
+      await f.settlePresentation();
+      expect(reads()).toHaveLength(0);
+      if (mode === 'web-search-trace') {
+        await f.openTurn();
+        expect(reads()).toHaveLength(0);
+        const trigger = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
+        expect(trigger.textContent).toBe('搜索了');
+        await act(async () => trigger.click());
+      } else await f.toggle();
+      await f.until(() => reads().length === 1);
+      if (mode === 'web-search-missing') expect(f.host.textContent).toContain('此执行未记录');
+      if (mode === 'web-search-retry') {
+        expect(f.host.textContent).not.toContain('PRIVATE_TRANSPORT_ERROR');
+        expect(f.host.textContent).toContain('暂时无法读取');
+        const retry = Array.from(f.host.querySelectorAll('button')).find(
+          (x) => x.textContent === '重新读取来源',
+        )!;
+        await act(async () => retry.click());
+        await f.until(() => reads().length === 2);
+        expect(f.host.textContent).toContain('未返回可展示的来源');
+      }
+      if (mode === 'web-search-trace') {
+        expect(f.host.querySelector('.conversation-trace .web-search-sources a')).not.toBeNull();
+        expect(reads()[0]).toMatchObject({ executionId: 'execution', sessionId: 'root' });
+      }
+      expect(f.host.textContent).not.toContain(sentinel);
+      expect(f.requests.some((r) => r.method === 'webSearch.settings.test')).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
 for (const count of [1, 10] as const)
   test(`actual NativeDesktop renders ${count} verified view_images thumbnails in its counted disclosure and removes them on session switch`, async () => {
     const f = fixture(count === 1 ? 'image' : 'image-batch');

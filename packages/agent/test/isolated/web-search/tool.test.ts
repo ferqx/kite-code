@@ -302,6 +302,7 @@ test('forwards original cancellation; closed input and disabled child budget dis
   c.abort(new Error('cancelled'));
   await expect(pending).rejects.toThrow('cancelled');
   expect(evidence).toMatchObject([
+    { callId: 'running', status: 'searching', sources: [] },
     {
       status: 'outcome_unknown',
       errorCode: 'web_search_cancelled',
@@ -514,4 +515,67 @@ test('history from an earlier ordinary catalogue is re-encoded when a native rou
     'tool_not_available',
   );
   expect(() => surface([original], [], true)).toThrow('conflicting_search_routes');
+});
+
+test('ordinary search publishes its exact in-flight evidence before its only dispatch', async () => {
+  const events: unknown[] = [];
+  let sends = 0;
+  const port: SearchPort = {
+    async search(input, scope) {
+      sends++;
+      expect(events).toMatchObject([
+        {
+          callId: scope.executionId,
+          provider: 'fixture',
+          route: 'provider',
+          query: input.query,
+          status: 'searching',
+          sources: [],
+          citations: [],
+        },
+      ]);
+      return empty.search(input, scope);
+    },
+  };
+  const result = await create(port, {
+    publishEvidence: async (block) => {
+      events.push(block);
+      return artifact;
+    },
+  }).execute({ query: ' Q ' }, context('exec'));
+  expect(sends).toBe(1);
+  expect(result.outcome).toBe('succeeded');
+  expect(events).toMatchObject([{ status: 'searching' }, { status: 'completed' }]);
+  const blocked = create(port, {
+    publishEvidence: async () => {
+      throw new Error('fixture-evidence-unavailable');
+    },
+  });
+  const durable = records();
+  await expect(blocked.execute({ query: 'Q' }, context('blocked', durable))).rejects.toThrow(
+    'fixture-evidence-unavailable',
+  );
+  const replay = await blocked.execute({ query: 'Q' }, context('blocked', durable));
+  expect(replay).toMatchObject({
+    outcome: 'outcome_unknown',
+    content: 'web_search_already_reserved',
+  });
+  expect(sends).toBe(1);
+  const stop = new AbortController();
+  const cancelled: unknown[] = [];
+  const cancel = create(port, {
+    publishEvidence: async (block) => {
+      cancelled.push(block);
+      if (block.status === 'searching') stop.abort(new Error('owned stop'));
+      return artifact;
+    },
+  });
+  await expect(
+    cancel.execute({ query: 'Q' }, context('cancel', records(), stop.signal)),
+  ).rejects.toThrow('owned stop');
+  expect(cancelled).toMatchObject([
+    { status: 'searching' },
+    { status: 'incomplete', errorCode: 'web_search_cancelled' },
+  ]);
+  expect(sends).toBe(1);
 });

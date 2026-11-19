@@ -1,5 +1,5 @@
 /** Presentation DTO. Never infer a source, block boundary, or citation from answer text. */
-export type WebSearchSource = { url: string; title?: string };
+export type WebSearchSource = { url: string; title?: string; snippet?: string };
 export type WebSearchBlock = { index: number; offset: number; length: number; sha256: string };
 export type WebSearchCitation = WebSearchSource & {
   blockIndex?: number;
@@ -40,6 +40,7 @@ export function webSearchLabel(value: unknown, max = 256): string {
   return typeof value === 'string'
     ? value
         .slice(0, max)
+        .replace(/[\uD800-\uDBFF]$/u, '')
         .replace(/[\p{Cc}\p{Cf}]/gu, ' ')
         .trim()
     : '';
@@ -50,7 +51,14 @@ export function webSearchLinks(items: readonly WebSearchSource[]) {
     const url = webSearchHref(item.url);
     if (!url || seen.has(url)) return [];
     seen.add(url);
-    return [{ url, title: webSearchLabel(item.title) || new URL(url).hostname }];
+    const snippet = webSearchLabel(item.snippet, 320);
+    return [
+      {
+        url,
+        title: webSearchLabel(item.title) || new URL(url).hostname,
+        ...(snippet ? { snippet } : {}),
+      },
+    ];
   });
 }
 const integer = (n: unknown): n is number =>

@@ -16,38 +16,63 @@ const statusText = {
   cancelled: '搜索已取消',
   unknown: '搜索结果未知',
 };
-function SourceList({ sources, label }: { sources: readonly WebSearchSource[]; label: string }) {
+function SourceList({
+  sources,
+  label,
+  expanded = false,
+}: {
+  sources: readonly WebSearchSource[];
+  label: string;
+  expanded?: boolean;
+}) {
   const open = useContext(WebLinkContext),
     active = useConversationReadActive(),
     links = webSearchLinks(sources);
   if (!links.length) return null;
-  return (
+  const list = (
+    <ul aria-label={label}>
+      {links.map(({ url, title, snippet }) => (
+        <li key={url}>
+          <a
+            href={url}
+            rel="noopener noreferrer"
+            target="_blank"
+            onClick={(e) => {
+              if (open || !active) e.preventDefault();
+              if (active) open?.(url);
+            }}
+          >
+            {title}
+          </a>{' '}
+          <small>{new URL(url).hostname}</small>
+          {expanded && snippet && <p className="web-search-snippet">{snippet}</p>}
+        </li>
+      ))}
+    </ul>
+  );
+  return expanded ? (
+    <div>
+      <small>
+        {label}（{links.length}）
+      </small>
+      {list}
+    </div>
+  ) : (
     <details>
       <summary>
         {label}（{links.length}）
       </summary>
-      <ul>
-        {links.map(({ url, title }) => (
-          <li key={url}>
-            <a
-              href={url}
-              rel="noopener noreferrer"
-              target="_blank"
-              onClick={(e) => {
-                if (open || !active) e.preventDefault();
-                if (active) open?.(url);
-              }}
-            >
-              {title}
-            </a>{' '}
-            <small>{new URL(url).hostname}</small>
-          </li>
-        ))}
-      </ul>
+      {list}
     </details>
   );
 }
-export function WebSearchSources({ evidence }: { evidence: WebSearchDisplay }) {
+export function WebSearchSources({
+  evidence,
+  toolReceipt = false,
+}: {
+  evidence: WebSearchDisplay;
+  toolReceipt?: boolean;
+}) {
   const query = webSearchLabel(evidence.query);
   return (
     <section className="web-search-sources" aria-label="网页搜索">
@@ -62,7 +87,10 @@ export function WebSearchSources({ evidence }: { evidence: WebSearchDisplay }) {
         sources={evidence.citations}
         label={evidence.route === 'provider' ? '搜索服务引用' : '正文引用'}
       />
-      <SourceList sources={evidence.sources} label="检索来源" />
+      <SourceList sources={evidence.sources} label="检索来源" expanded={toolReceipt} />
+      {toolReceipt &&
+        evidence.status === 'completed' &&
+        !webSearchLinks(evidence.sources).length && <p>未返回可展示的来源。</p>}
       {evidence.truncated && <small>仅显示部分搜索材料。</small>}
     </section>
   );

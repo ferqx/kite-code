@@ -33,6 +33,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'git.worktree': [['1'], 'Git 工作树'],
   ask_user: [['1'], '询问用户'],
   web_fetch: [['1'], '读取网页'],
+  'web.search': [['1'], '网页搜索'],
   'task.spawn': [['1'], '创建子 Agent'],
   'task.follow_up': [['1'], '继续子 Agent'],
   'task.message': [['1'], '发送 Agent 消息'],
@@ -81,6 +82,7 @@ export function desktopToolPresentation(
     toolName: known
       ? ((
           {
+            'web.search': 'web_search',
             'files.read': 'read_file',
             'files.write': 'write_file',
             'files.edit': 'edit_file',

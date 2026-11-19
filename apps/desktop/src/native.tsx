@@ -176,7 +176,11 @@ import {
 import { NativeTranscriptDisplay } from './native-transcript-display';
 import { useNativeTurnNotifications } from './native-turn-notifications';
 import { NativePendingAttachments, NativeUserImages } from './native-user-images';
-import { type NativeSearchReader, NativeWebSearchActivity } from './native-web-search-evidence';
+import {
+  type NativeSearchReader,
+  NativeWebSearchActivity,
+  NativeWebSearchToolDetails,
+} from './native-web-search-evidence';
 import { NativeBoundWebSearchSettings } from './native-web-search-settings';
 import { NativeWindowFrame } from './native-window-frame';
 import { NativeWorkspaceChanges } from './native-workspace-changes';
@@ -5705,6 +5709,24 @@ function NativeDesktopContent({
     selection && directory?.storeId === selection.storeId && !directory.unavailable
       ? directory.workspaces.find(({ id }) => id === selection.session.workspaceId)?.rootUri
       : undefined;
+  const openNativeWebLink = (url: string) => {
+    if (
+      !state ||
+      !selection ||
+      selection.viewLoading ||
+      historyState.phase !== 'complete' ||
+      selected.current !== selection.session.id ||
+      !/^https?:\/\//i.test(url)
+    )
+      return;
+    setWebLinkRequest({
+      requestId: ++webLinkSequence.current,
+      generation: state.generation,
+      sessionId: selection.session.id,
+      viewIntent: viewIntent.current,
+      url,
+    });
+  };
   function searchReader(id: string | undefined, live: boolean): NativeSearchReader | undefined {
     if (
       !id ||
@@ -5862,26 +5884,7 @@ function NativeDesktopContent({
     )
       return null;
     return (
-      <WebLinkContext.Provider
-        value={(url) => {
-          if (
-            !state ||
-            !selection ||
-            selection.viewLoading ||
-            historyState.phase !== 'complete' ||
-            selected.current !== selection.session.id ||
-            !/^https?:\/\//i.test(url)
-          )
-            return;
-          setWebLinkRequest({
-            requestId: ++webLinkSequence.current,
-            generation: state.generation,
-            sessionId: selection.session.id,
-            viewIntent: viewIntent.current,
-            url,
-          });
-        }}
-      >
+      <WebLinkContext.Provider value={openNativeWebLink}>
         <NativeModelOutputMessage
           key={JSON.stringify([
             state.generation,
@@ -5892,9 +5895,7 @@ function NativeDesktopContent({
           message={message}
           storeId={selection.storeId}
           searchReader={
-            !message.originMessage &&
-            (message.role === 'assistant' ||
-              (message.role === 'tool' && model.toolName === 'web_search'))
+            !message.originMessage && message.role === 'assistant'
               ? searchReader(
                   message.outputBody?.executionId ??
                     (message.sourceIds?.length === 1 ? message.sourceIds[0] : undefined),
@@ -5962,6 +5963,32 @@ function NativeDesktopContent({
       diagnostics,
       metadataPending: toolMessages.pendingMessageIds,
       renderOriginal: renderNativeMessage,
+      renderSearch: (model, executionId, live) => {
+        const message = messagesById.get(model.id);
+        const exact = message
+          ? !message.originMessage &&
+            message.role === 'tool' &&
+            message.sessionId === selection?.session.id &&
+            message.sourceIds?.length === 1 &&
+            message.sourceIds[0] === executionId
+          : liveTools.some(
+              ({ execution, message: row }) =>
+                row.id === model.id &&
+                execution.id === executionId &&
+                execution.originStoreId === selection?.storeId &&
+                execution.sessionId === selection?.session.id,
+            );
+        const reader = exact ? searchReader(executionId, live) : undefined;
+        return (
+          <WebLinkContext.Provider value={openNativeWebLink}>
+            <NativeWebSearchToolDetails
+              key={reader?.scope ?? executionId}
+              reader={reader}
+              unsupported={!selection?.canReadWebSearchEvidence}
+            />
+          </WebLinkContext.Provider>
+        );
+      },
       hasDeferredText: (model) => !!messagesById.get(model.id)?.deferredText,
       agentProps: (model, fact) => {
         const activity = nativeAgentActivityForTool(

@@ -244,6 +244,24 @@ export function createWebSearchExtension(options: {
             };
           context.signal.throwIfAborted();
           const base = { callId: context.executionId, route: 'provider' as const, provider, query };
+          await publishEvidence(
+            { ...base, status: 'searching', sources: [], citations: [], truncated: false },
+            context,
+          );
+          if (context.signal.aborted) {
+            await publishEvidence(
+              {
+                ...base,
+                status: 'incomplete',
+                errorCode: 'web_search_cancelled',
+                sources: [],
+                citations: [],
+                truncated: false,
+              },
+              context,
+            );
+            context.signal.throwIfAborted();
+          }
           let response: SearchResult;
           try {
             response = await port.search(

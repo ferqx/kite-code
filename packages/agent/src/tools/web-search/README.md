@@ -7,3 +7,5 @@
 源列表和正文引用分开保存。模型材料最多 16 KiB UTF-8；截断结果或后端回答的规范化响应可经普通 Artifact 查看。后端回答中的位置属于原回答，不能作为主模型正文的引用位置。执行证据通过当前工具执行的原始 scope 发布，已知请求数与未知用量分开保留。远端错误正文及凭据不进入返回材料。
 
 [工具、权限和 SQLite 重开测试](../../../test/isolated/web-search/tool.test.ts) · [默认 Service 路由测试](../../../../../apps/service/test/isolated/web-search-routing.test.ts)
+
+普通搜索在工具获准并预留本 Run 请求额度后，以原 Tool Execution、提供方和查询发布 `searching` 证据，再调用提供方；后续状态在同一调用下读取。预写失败时不会发出请求。[工具测试](../../../test/isolated/web-search/tool.test.ts)

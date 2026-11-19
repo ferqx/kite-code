@@ -20,6 +20,7 @@ type Options = {
   observationUnavailable: boolean;
   diagnostics: boolean;
   metadataPending?: ReadonlySet<string>;
+  renderSearch?: (model: DesktopMessage, executionId: string, live: boolean) => ReactNode;
   renderOriginal: (message: DesktopMessage, open: boolean) => ReactNode;
   hasDeferredText?: (message: DesktopMessage) => boolean;
   agentProps?: (
@@ -223,6 +224,27 @@ export function renderNativeToolGroup(
         aggregate={aggregate}
         unverified={unverified.size > 0}
         messages={models}
+        receiptDetails={
+          options.renderSearch
+            ? (model) => {
+                const fact = displayTools.find((e) => e.messageId === model.id),
+                  live = options.liveTools.find((e) => e.message.id === model.id)?.execution,
+                  owner = fact ?? live;
+                if (owner?.definitionId !== 'web.search' || owner.definitionVersion !== '1') return;
+                const id = fact?.executionId ?? live?.id;
+                if (!id) return;
+                return () =>
+                  options.renderSearch!(
+                    model,
+                    id,
+                    !!live &&
+                      live.id === id &&
+                      live.status === 'running' &&
+                      !options.executionUnconfirmed,
+                  );
+              }
+            : undefined
+        }
         renderItem={
           aggregate
             ? (model) =>

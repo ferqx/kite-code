@@ -205,6 +205,35 @@ test('unsupported capability or mismatched execution/session/revision cannot exp
     ),
   ).toBeUndefined();
 });
+test('ordinary result projection permits bounded plain snippets only on sources, never provider body or citation offsets', () => {
+  const ids = { storeId: 's', sessionId: 'a', executionId: 'ex' },
+    link = {
+      url: 'https://example.test',
+      title: 'T',
+      snippet: `${'x'.repeat(319)}\u{1F642}`,
+      fullPage: 'RAW_PRIVATE',
+    };
+  const result = projectSearchEvidence(
+    {
+      schema: 'kite.web-search',
+      schemaVersion: 1,
+      ...ids,
+      revision: 1,
+      blocks: [
+        {
+          status: 'completed',
+          route: 'provider',
+          sources: [link],
+          citations: [{ ...link, startUtf16: 0, endUtf16: 1 }],
+        },
+      ],
+    },
+    ids,
+  );
+  expect(result?.sources).toEqual([{ url: link.url, title: 'T', snippet: 'x'.repeat(319) }]);
+  expect(result?.citations).toEqual([{ url: link.url, title: 'T' }]);
+  expect(JSON.stringify(result)).not.toContain('RAW_PRIVATE');
+});
 test('IPC rejects arbitrary vault references, arbitrary endpoints, cross-provider secrets and duplicate ids', () => {
   const draft = {
     mode: 'provider',

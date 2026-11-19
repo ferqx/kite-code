@@ -46,17 +46,26 @@ const clean = (v: unknown, n = 256) =>
   typeof v === 'string'
     ? v
         .slice(0, n)
+        .replace(/[\uD800-\uDBFF]$/u, '')
         .replace(/[\p{Cc}\p{Cf}]/gu, ' ')
         .trim()
     : '';
 const integer = (v: unknown): v is number =>
   typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
-const sources = (v: unknown): WebSearchSource[] =>
+const sources = (v: unknown, includeSnippet = false): WebSearchSource[] =>
   Array.isArray(v)
     ? v.slice(0, 64).flatMap((x) => {
         const item = rec(x);
         return item && typeof item.url === 'string' && item.url.length <= 2048
-          ? [{ url: item.url, title: clean(item.title) }]
+          ? [
+              {
+                url: item.url,
+                title: clean(item.title),
+                ...(includeSnippet && typeof item.snippet === 'string'
+                  ? { snippet: clean(item.snippet, 320) }
+                  : {}),
+              },
+            ]
           : [];
       })
     : [];
@@ -111,7 +120,7 @@ export function projectSearchEvidence(
     if (!b) continue;
     if (Array.isArray(b.sources)) {
       truncated ||= b.sources.length > 64 - found.length;
-      found.push(...sources(b.sources).slice(0, 64 - found.length));
+      found.push(...sources(b.sources, true).slice(0, 64 - found.length));
     }
     truncated ||= b.truncated === true;
     if (!Array.isArray(b.citations)) continue;
@@ -155,7 +164,8 @@ export function projectSearchEvidence(
     executionId: scope.executionId,
     revision: p.revision,
     status: truncated && p.blocks.length > 64 && status === 'completed' ? 'unknown' : status,
-    route: selected.route === 'native' ? 'native' : 'provider',
+    route:
+      selected.route === 'native' || selected.route === 'provider' ? selected.route : undefined,
     provider: clean(selected.provider),
     query: clean(selected.query),
     sources: found,

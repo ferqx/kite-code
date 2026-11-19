@@ -68,12 +68,24 @@ const TOOL_LABELS: Record<string, string> = {
   tool_search: '搜索工具',
   update_plan: '更新计划',
   web_fetch: '读取网页',
+  web_search: '网页搜索',
   write_file: '写入',
   write_plan: '编写计划',
 };
 
 function toolTitle(message: Message): string {
   const label = toolActionTitle(message);
+  if (
+    message.toolName === 'web_search' &&
+    message.approval?.state !== 'rejected' &&
+    !message.toolStopping &&
+    message.dispatchCommitted !== false &&
+    !message.decisionRefresh &&
+    !executionUnconfirmed(message)
+  ) {
+    if (message.status === 'completed') return '搜索了';
+    if (message.status === 'running' && message.dispatchCommitted === true) return '正在搜索';
+  }
   if (
     !message.toolName ||
     !TOOL_LABELS[message.toolName] ||
@@ -370,6 +382,7 @@ export function toolIcon(message: Message) {
     case 'write_file':
       return Edit02Icon;
     case 'browser_execute':
+    case 'web_search':
     case 'web_fetch':
       return Globe02Icon;
     case 'task':
@@ -497,6 +510,7 @@ const COMPLETED_TRACE_ACTIONS: ReadonlyMap<string, string> = new Map(
     write_file: '运行了',
     edit_file: '运行了',
     web_fetch: '读取了',
+    web_search: '搜索了',
     browser_execute: '运行了',
     tool_search: '搜索了',
     skill: '运行了',
@@ -1023,6 +1037,7 @@ export function ToolActivity({
   openFile,
   openFileForMessage,
   renderChildren,
+  receiptDetails,
   renderItem,
   renderImages,
   renderFileChange,
@@ -1057,6 +1072,8 @@ export function ToolActivity({
   onToggle: (open: boolean) => void;
   openFile?: (path: string) => void;
   openFileForMessage?: (message: Message) => ((path: string) => void) | undefined;
+  /** Confirmed receipt replaces generic raw output; only invoke when the owning tool is expanded. */
+  receiptDetails?: (message: Message) => (() => ReactNode) | undefined;
   renderChildren: (toolCallId: string, expanded: boolean, messageId: string) => ReactNode;
   /** Keep a host's original per-item reader inside the aggregate's disclosure. */
   renderItem?: (message: Message) => ReactNode | undefined;
@@ -1148,11 +1165,15 @@ export function ToolActivity({
         ))}
       </div>
     );
+  const receipt = !grouped ? receiptDetails?.(message) : undefined;
   let projectedChildren: ReactNode;
   const getChildren = () => {
     if (projectedChildren === undefined)
-      projectedChildren =
-        agent || grouped || summaryOnly
+      projectedChildren = receipt
+        ? open && parentDisclosureOpen
+          ? receipt()
+          : null
+        : agent || grouped || summaryOnly
           ? null
           : (renderChildren(message.id.slice(5), !shell || open, message.id) ?? null);
     return projectedChildren;
@@ -1191,6 +1212,7 @@ export function ToolActivity({
       hasDiff ||
       !!ask ||
       message.toolName === 'task' ||
+      !!receipt ||
       !!message.text ||
       (imageOnly && !!renderImages) ||
       Boolean(getChildren()));
@@ -1472,6 +1494,7 @@ export function ToolActivity({
                                   openFile={openFile}
                                   openFileForMessage={openFileForMessage}
                                   childDetail={childDetailForMessage?.(item)}
+                                  receiptDetails={receiptDetails}
                                   renderChildren={renderChildren}
                                   renderImages={imageOnly ? undefined : renderImages}
                                   renderFileChange={renderFileChange}
@@ -1538,7 +1561,8 @@ export function ToolActivity({
                       )}
                     </div>
                   )}
-                  {!grouped &&
+                  {!receipt &&
+                    !grouped &&
                     !waitFailure &&
                     (!ask || itemIssue) &&
                     !shell &&

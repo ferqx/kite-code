@@ -780,3 +780,5 @@ Desktop `MessageContent` 的 `WebLinkContext` 由Native宿主注入，仅在当�
 ## 网页搜索证据展示
 
 [WebSearchSources](src/desktop/WebSearchSources.tsx) 区分检索来源与正文引用，不把检索过的页面当成答案引用。宿主只能在原执行的完整已验证正文上装饰链接：按原文本块的显式 UTF-16 起点核对 SHA-256、边界和 Markdown 文本节点。锚点缺失、文本不符、跨标记或协议不兼容时保留普通来源链接，不改写 Markdown。不加载远端图片或解释来源标题里的 HTML。[引用回归](test/isolated/desktop-web-search-citations.test.tsx) 覆盖中文、emoji、多块、危险链接和改写降级。
+
+普通网页搜索的工具行复用同一来源列表。宿主确认执行身份后用 `receiptDetails` 提供展开内容，不渲染原始传输文本；展开时展示可打开的标题、域名和已有的有限摘要。工具来源不成为模型正文的引用。
