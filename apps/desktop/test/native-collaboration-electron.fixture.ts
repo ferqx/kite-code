@@ -274,7 +274,7 @@ try {
     (count) => count === 2,
     'exactly two ordinary children while checks run',
   );
-  assert.equal(await group.locator('.background-execution-count').textContent(), '2');
+  assert.equal(await group.locator('h3').textContent(), '子智能体');
   assert.deepEqual(
     (
       await group

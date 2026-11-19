@@ -198,11 +198,7 @@ test('parent and child reference lists preserve source identity through late res
       document.querySelector('[data-testid="child"]')?.querySelectorAll('.output-file-card'),
     ).toHaveLength(1);
     expect(first().textContent).toContain('来自子 Agent · 制表');
-    const references = document.querySelector('[aria-label="参考"]')!;
-    expect(references.querySelectorAll('li')).toHaveLength(5);
-    await act(async () => {
-      [...references.querySelectorAll('button')].find((b) => b.textContent === '展开更多')!.click();
-    });
+    const references = document.querySelector('[aria-label="输出"]')!;
     expect(references.querySelectorAll('li')).toHaveLength(6);
     expect(
       calls

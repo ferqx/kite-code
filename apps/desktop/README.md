@@ -16,6 +16,10 @@
 
 ## 办公输出文件
 
+文件卡和「输出」列表的更多菜单提供「在资源管理器中显示」。Main 使用原产物引用重新准入，沿用另存的流式校验，再从系统下载目录的 `Kite Outputs` 中选中该次创建的独立副本。每次写入独立子目录，保留原产物和之前的副本。失败时清理本次副本，通过现有 Toast 反馈。 [NativeCaller](electron/native-caller.ts) · [文件复制](electron/output-files.ts) · [定位回归](test/native-caller.test.ts)
+
+2026-11-19 在 Windows x64／Electron 44.3.0 的隔离窗口验证了两处入口、复制期间的进行中状态和失败反馈。聊天文件卡从两份同名样本中选择第二份，检查了副本的实际字节与资源管理器的选中项。输出列表使用损坏流复验失败提示和本次副本清理。当前开发窗口重启后载入新的 Main。 [客户端回归](test/isolated/native-output-files-dom.test.tsx)
+
 三个 OOXML 格式在[隔离预览 View](electron/output-preview.ts)直接读取当前清单中的已校验原文件快照。Word 用 [docx-preview](electron/docx-preview.ts)渲染，将可定位段落和表格文字对到源 XML。PPT 用 [PPTX Renderer](electron/pptx-preview.ts)保留渲染页与原部件关系，按演示顺序绑定页码，并用原幻灯片的 `cNvPr` ID 定位对象。Excel 的[虚拟网格](electron/xlsx-preview.tsx)用 ExcelJS、SSF 和 TanStack Virtual 解析数据与公式缓存，按工作表和源单元格生成选区。PDF 使用现有 PDF.js worker。
 
 Word、Excel 和 PPT 的渲染初始化可能在隐藏视图中等待动画帧或定时任务。[Main](electron/output-preview.ts)在等待 Office 渲染就绪期间暂停该视图的后台节流，结束时恢复。预览仍由当前窗口几何和有效原生首帧准入显示。Windows x64／Electron 44.3.0 的[真实 Office 窗口回归](test/isolated/office-readonly-host.test.ts)覆盖 Word 与 Excel 等待动画帧、隐藏初始化、恢复节流、失败重试与原件切换。[PPT 回归](test/isolated/office-preview-security.test.ts)使用悬挂标点触发同一路径。原故障附件在隔离窗口从文件卡打开后呈现五页，实测切到第 4 页、关闭重开、读取失败后重试，以及加载中关闭时晚到的结果未重新显示。同机在 125% 和 150% 缩放核实交付文件或原路径的 Word、Excel、PPT、PDF、PNG、Markdown 和文本样本取得有效首帧。
@@ -40,15 +44,15 @@ XLSX 预览使用固定 ExcelJS 浏览器包，将 SpreadsheetML 和扩展属性
 
 ### 子 Agent 文件归属与父会话呈现
 
-[Main 产物来源](electron/output-sources.ts)从原授权后台目录核实 carrier、父 Run、child Session／Run 与根关系，将子 Agent 明确导出的 Shell 文件投影到原父轮末尾和会话“参考项”；[子详情](src/native-child-detail.tsx)显示相同历史产物。仍以原 child `OutputFileTarget` 查询、预览和另存，不复制为父产物，不扫描 Workspace，不根据结果邮件接收时间、同名或最新 child 工作猜归属。相同 child 的后继工作分别关联原父轮；历史多层来源仅在完整原 Run 链可证时投影。单来源查询与分页保留原 Service 合同，既有串行修订规则不扩展为跨 Session 去重。
+[Main 产物来源](electron/output-sources.ts)从原授权后台目录核实 carrier、父 Run、child Session／Run 与根关系，将子 Agent 明确导出的 Shell 文件投影到原父轮末尾和会话「输出」栏；[子详情](src/native-child-detail.tsx)显示相同历史产物。仍以原 child `OutputFileTarget` 查询、预览和另存，不复制为父产物，不扫描 Workspace，不根据结果邮件接收时间、同名或最新 child 工作猜归属。相同 child 的后继工作分别关联原父轮；历史多层来源仅在完整原 Run 链可证时投影。单来源查询与分页保留原 Service 合同，既有串行修订规则不扩展为跨 Session 去重。
 
-[Native 调用者](electron/native-caller.ts)和 [IPC](electron/native-ipc.ts)使用准确父选中代次、Store、主体、原 child 来源及不可变 target 的读取准入。来源目录只读且有界，同 scope 倒序响应不能覆盖新目录。目录或单来源文件页读取失败时，在当前准入与来源修订仍有效的范围内保留已核实的列表，后台按有界退避重读。会话中的文件卡展示交付文件及对应操作。环境信息的「参考」栏只显示文件链接和分页。另存或添加待修改附件失败时，使用现有 Toast 反馈。
+[Native 调用者](electron/native-caller.ts)和 [IPC](electron/native-ipc.ts)使用准确父选中代次、Store、主体、原 child 来源及不可变 target 的读取准入。来源目录只读且有界，同 scope 倒序响应不能覆盖新目录。目录或单来源文件页读取失败时，在当前准入与来源修订仍有效的范围内保留已核实的列表，后台按有界退避重读。会话中的文件卡展示交付文件及对应操作。环境信息的「输出」栏只显示文件链接和分页。另存或添加待修改附件失败时，使用现有 Toast 反馈。
 
-[产物展示版本](electron/output-display-versions.ts)按主体、Store、连接 epoch 和已核来源维护有界失效范围；[共享读取缓存](src/native-output-read-cache.ts)由[轮次文件卡与参考项](src/native-output-files.tsx)共同消费。切回已读会话时，选中交接期间保留仍受 Main 展示版本覆盖的文件列表，目标选中后恢复当前读取和操作准入。同键读取共享在途结果。存储层的[持久列表索引](../../packages/agent/src/business/output-collection.README.md#同任务同路径的当前产物)在原写事务内更新，冷开仍重新核实来源准入后读取。后台及 child 变更只更新已核实归属的原父轮；尚无准确来源关系的创建事件先使可能受影响的展示失效，再读取来源，不猜父轮。
+[产物展示版本](electron/output-display-versions.ts)按主体、Store、连接 epoch 和已核来源维护有界失效范围；[共享读取缓存](src/native-output-read-cache.ts)由[轮次文件卡与输出栏](src/native-output-files.tsx)共同消费。切回已读会话时，选中交接期间保留仍受 Main 展示版本覆盖的文件列表，目标选中后恢复当前读取和操作准入。同键读取共享在途结果。存储层的[持久列表索引](../../packages/agent/src/business/output-collection.README.md#同任务同路径的当前产物)在原写事务内更新，冷开仍重新核实来源准入后读取。后台及 child 变更只更新已核实归属的原父轮；尚无准确来源关系的创建事件先使可能受影响的展示失效，再读取来源，不猜父轮。
 
 这些缓存只保留展示数据。主体、Store、连接、权限或来源失效时撤销旧展示。选择 ABA 丢弃旧在途读取，预览与保存也捕获原选择。打开、另存和继续修改仍走当前 Main 准入。`outputs.retry` IPC 调用单独核对准确 child collection、revision 与当前准入，沿用 Store 原期限、权限及 unknown 规则。相关静态及受控回归入口为[共享缓存测试](test/native-output-read-cache.test.ts)、[来源权限测试](test/native-output-sources.test.ts)和[热返回与撤销 DOM 测试](test/isolated/native-output-cache-dom.test.tsx)。
 
-“继续修改”保留 child 来源引用，加入当前父输入草稿；发送前后重新核来源，明确提交后才通过原 InputFile import／工作副本链交给父轮，不覆盖子快照或自动续作 child。参考项合并仍默认五项，重复名称保留，来源标签使用子名称和原轮次，所有打开操作沿准确 target。
+从文件预览发起的「继续修改」保留 child 来源引用，加入当前父输入草稿；发送前后重新核来源，明确提交后才通过原 InputFile import／工作副本链交给父轮，不覆盖子快照或自动续作 child。输出列表允许滚动查看所有已合并文件，各来源通过原游标读取后续页。重复名称分别展示，来源标签使用子名称和原轮次，打开操作沿准确 target。
 
 2026-11-16，Windows x64／Chrome 157 通过受控宿主核对「参考」栏。首次等待时隐藏空栏，读取失败时保留原文件链接，后台恢复后加入新文件。点击链接提交准确的文件目标，切换会话后显示新会话的文件，切回已读会话从缓存恢复。各阶段均无参考栏状态提示或整理重试请求。阶段截图及记录位于本机 `.cache/desktop-reference-verification-xB2kTG/`。
 
@@ -1206,7 +1210,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 桌面会话在一个滚动区呈现完整时间线。Native 沿固定水位在后台读取，长正文使用原消息的有界预览和分块读取。思维链首次展开时才构造工具与思考明细，已读正文在后台读取恢复期间保留。旧窗口和轮次占位的性能数据保留为历史记录。
 
-长会话首次构建允许新的侧栏选择打断。消息节点保留在同一正文区，浏览器按阅读位置布局离屏条目，支持原生全选、跳转到任意已读消息和恢复锚点。工具匹配先按消息、执行和原调用身份建立索引，再核对来源与版本。轮次接近阅读区时开始查询该轮产物，已读卡片随原页面保留；重新挂载时，当前来源仍有效的父轮和子来源卡片可在历史校验期间从缓存显示，不发起轮次查询。离开阅读区后暂停新的轮次查询。「参考」栏仍独立读取会话及获准子来源。相关实现见[会话展示](../../packages/ui/src/desktop/Conversation.tsx)、[工具与轮次投影](src/native-transcript.ts)和[产物读取](src/native-output-files.tsx)。
+长会话首次构建允许新的侧栏选择打断。消息节点保留在同一正文区，浏览器按阅读位置布局离屏条目，支持原生全选、跳转到任意已读消息和恢复锚点。工具匹配先按消息、执行和原调用身份建立索引，再核对来源与版本。轮次接近阅读区时开始查询该轮产物，已读卡片随原页面保留；重新挂载时，当前来源仍有效的父轮和子来源卡片可在历史校验期间从缓存显示，不发起轮次查询。离开阅读区后暂停新的轮次查询。「输出」栏独立读取会话及获准子来源。相关实现见[会话展示](../../packages/ui/src/desktop/Conversation.tsx)、[工具与轮次投影](src/native-transcript.ts)和[产物读取](src/native-output-files.tsx)。
 
 2026-11-18，M4 Pro 上的生产 Electron 44.3 隔离夹具从点击测到合成器首个可读帧，180 轮由 599 ms 降至 225 ms，600 轮由 1,848 ms 降至 576 ms。构建 600 轮时再次选择小会话，点击排队由 1,749 ms 降至 8 ms，新目标在这次点击后 27 ms 可读。小会话缓存命中的 100 次切换 P95 为 31.22 ms。冷切换报告在本机 `.cache/initial-render-prod-ywaSlR`，缓存切换报告在 `.cache/session-cache-performance-production-85r4pH`。[真实 Service 与 SQLite 回归](test/isolated/native-history-electron.test.ts)另核对 5,051 条历史、超长回复分段阅读、迟到分页和两次物理断线后的恢复。
 
@@ -1605,6 +1609,8 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 [环境信息卡](src/native-environment.tsx)按原 Store／子 Session 汇总子 Agent，依已核实目录的顺序用最新执行更新原行，状态、详情与停止操作绑定该执行。目录和消息详情仍使用准确的执行标识。[环境卡回归](test/native-background-panel.test.tsx)覆盖同一子 Agent 的后续执行更新、同名不同子 Agent 及准确详情打开。
 
+共享 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx) 将有内容的列表同级展示。Shell 列表、子智能体和输出的标题都使用图标和名称。Shell 区以执行目录投影的 `running` 为成员条件，提交期间用原停止控件表达忙碌。目录出现 `stopping` 或终态后移除该行，执行记录继续提供实际停止和清理结果。环境卡子智能体行通过现有入口打开右侧会话标签。
+
 环境行将原 Store／子 Session 组合交给共享 `ChildAgentIcon`，与工具消息及审批使用相同稳定身份，不按标题、状态或本次 carrier 重新分配。恢复历史沿原 Store 保持外观；无法导航的已知子会话仍显示图标，缺身份时使用通用子 Agent 图标。显示、点击与停止资格仍分别由原 metadata 和回调决定。
 
 环境行、工具消息和子结果入口打开详情时，同步把该原身份交给共享SessionTabs的`childAgentIdentity`，标签图标使用同一分配；结果历史沿原消息Store，环境恢复历史沿原Execution Store。该装饰字段不参与Session／Execution去重或读取准入，标签改名仍保留同一图标节点，SVG沿共享14px尺寸。
@@ -1685,7 +1691,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 2026-11-15 Windows x64，基于 `65ce50cec` 对照本次修复。Chrome 隔离夹具使用正式 SessionPage、样式与环境 hook，在打开子详情后模拟三轮执行权待核实、目录失联、挂起重读和恢复，最后发布任务完成。修复前停止按钮消失、运行状态右移 58 CSS px，失联时 Shell「空闲」改为「状态未知」。修复后 126 个渲染帧采样中，终态发布前卡片、行、按钮、参考区及草稿几何稳定，父阅读滚动位置保持，子详情保留原节点。阶段截图核对了文案和最终「已完成」。该范围使用受控观察数据和 Chrome 渲染，未覆盖真实模型或 Electron 窗口合成。
 
-正式 [页面](src/native.tsx)将现有后台目录接到原 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx)环境卡和 SessionPage 的 `environmentInformation` slot，保留原 300px 卡、宽窄窗口停靠／浮层与开关行为。[适配器](src/native-environment.tsx)仅将来源为 `shell.launch@1` 且父工具身份匹配的 `shell.command` 展示为后台 Shell，子 Agent 仍按准确 child Session 展示，名称取公开 child title；自动命名扩展的 `agent/session-title` 按公开 `definitionId` 从环境卡的行与 child 入口映射中排除，不按可变名称判断，同名普通委派任务仍显示。原后台目录、执行历史、取消和 unknown 事实保留；回归见[环境展示测试](test/native-background-panel.test.tsx)。Shell 沿原 currentOnly 契约只列运行／停止中，按原准入提供准确停止。环境卡的子列表保留全部记录及 queued／starting／unknown／restored 状态和只读详情入口；共享展示层接收原 `stoppingExecutionId/onStop`，仅对当前新鲜完整目录中已核实的准确可停止 carrier 提供操作。旧状态、unknown、恢复历史或缺少资格时禁用停止，不凭稳定 child Session 转向后来一轮；原 task／Run 范围及 Main 的准入前后复核保持。不把终态或受理回执当作进程清理证明。
+正式 [页面](src/native.tsx)将现有后台目录接到原 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx)环境卡和 SessionPage 的 `environmentInformation` slot，保留原 300px 卡、宽窄窗口停靠／浮层与开关行为。[适配器](src/native-environment.tsx)仅将来源为 `shell.launch@1` 且父工具身份匹配的 `shell.command` 展示为后台 Shell，子 Agent 仍按准确 child Session 展示，名称取公开 child title；自动命名扩展的 `agent/session-title` 按公开 `definitionId` 从环境卡的行与 child 入口映射中排除，不按可变名称判断，同名普通委派任务仍显示。原后台目录、执行历史、取消和 unknown 事实保留；回归见[环境展示测试](test/native-background-panel.test.tsx)。Shell 列表只展示当前投影为运行中的执行，对经准入核实的执行提供准确停止。环境卡的子列表保留全部记录及 queued／starting／unknown／restored 状态和只读详情入口；共享展示层接收原 `stoppingExecutionId/onStop`，仅对当前新鲜完整目录中已核实的准确可停止 carrier 提供操作。旧状态、unknown、恢复历史或缺少资格时禁用停止，不凭稳定 child Session 转向后来一轮；原 task／Run 范围及 Main 的准入前后复核保持。不把终态或受理回执当作进程清理证明。
 
 环境卡的 Main 目录读取和准确停止复核显式请求 `includeSourceTool:true`，消费原父工具的只读 ID／定义／版本；`shell.execute` 的前台命令、来源缺失或身份不匹配的记录均不进入 Shell 分组，不按 `cancelWithParent` 推断前后台。来源在原后台目录事务内核同 Session／origin Store／root work，普通总览默认响应保持。相关元数据与兼容边界见[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)，取舍见[来源过滤决定](../../.agents/notes/implemented/architecture/2026-10-20-background-shell-origin-filter.md)。
 
@@ -3454,7 +3460,7 @@ PDF 文件预览沿受校验的逐页接口按需读取，在独立 `kite-previe
 
 本地 PDF 读取授权仍由 Main 持有，只把已校验的有限快照字节交给经过连接身份核验的回环 Service（拒绝远程 endpoint 与 HTTP 重定向）。PDF 页解析复用 Bun 的原有隔离 worker/严格缓存 IO，不在 Electron 中加载 Bun 原生运行依赖；Service 不接受源路径、不登记输出或 Artifact。返回页面前再次核原句柄授权及文件身份。Word 只读导航监听渲染器分页状态与代次，不依赖编辑交互轮询后才显示缩略图。
 
-选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照。每轮产物查询失败不插入提示，空列表不挂载占位；主动整理操作的实际失败仍在原位置反馈。环境信息的“参考”在原区域提示列表读取失败。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。
+选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照。每轮产物查询失败不插入提示，空列表不挂载占位；主动整理操作的实际失败仍在原位置反馈。「输出」列表读取失败时保留仍可核实的文件，并在后台重读。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。
 
 办公预览工具栏共用小型居中胶囊：请求修改改图标并保留aria-label/title，缩放、PPT放映及另存回调和安全校验不变。主renderer不跨WebContentsView伪装overlay；胶囊正常流只占必需顶部空间，正文bounds继续由原observer测量，无全宽分隔线或新增footer。窄栏紧凑／必要换行，hover和focus反馈保持。独立冷构建Electron组件布局回归覆盖DOCX/XLSX/PPTX/PDF各240、280、320、480、640像素，核边界、内容无覆盖、缩放不改变按钮几何、键盘保存及PPT放映；此合成组件证据不代替全客户端正文预览。
 

@@ -94,6 +94,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'outputs.sources': ['scope'],
   'outputs.query': ['scope', 'runId', 'beforeKey', 'collectionBeforeKey', 'limit'],
   'outputs.save': ['target'],
+  'outputs.reveal': ['target'],
   'outputs.info': ['target'],
   'outputs.preview.open': ['target', 'bounds', 'previewId'],
   'outputs.preview.close': ['previewId'],
@@ -420,6 +421,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       'outputs.office.preview',
       'outputs.office.save',
       'outputs.save',
+      'outputs.reveal',
       'outputs.info',
       'outputs.pdf.page',
       'outputs.preview.open',
@@ -1784,6 +1786,7 @@ export function registerNativeIpc(options: {
   confirmProviderRemoval?: (summary: { label: string; modelCount: number }) => Promise<boolean>;
   openEditor?: (editor: DesktopEditor, path: string, line?: number) => Promise<void>;
   openEditorUrl?: (url: string) => Promise<void>;
+  outputReveal?: { downloadsDirectory: () => string; showItemInFolder: (path: string) => void };
   vscodeExecutable?: () => Promise<string>;
   desktopShell?: (
     caller: NativeCaller,
@@ -2100,6 +2103,13 @@ export function registerNativeIpc(options: {
       } else if (request.method === 'outputs.preview.bounds') {
         caller.checkOutputGeneration(request.generation);
         preview?.bounds(request.previewId, request.bounds);
+        value = null;
+      } else if (request.method === 'outputs.reveal') {
+        if (!options.outputReveal) throw Error('native_host_operation_unavailable');
+        await caller.revealOutput(request, options.outputReveal, () => {
+          assertNativeSender(event, options.window(), options.rendererUrl);
+          options.assertRequestAllowed?.(request);
+        });
         value = null;
       } else if (request.method === 'outputs.save') {
         value = await caller.saveOutput(

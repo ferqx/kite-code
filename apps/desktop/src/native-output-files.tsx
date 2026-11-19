@@ -252,11 +252,23 @@ export function useNativeOutputFiles(input: {
         ?.request({ method: 'outputs.save', generation: input.generation, target: target(file) })
         .catch(() => input.onError?.('另存失败，请重试'));
     },
+    onReveal: async (file: OutputFileSummary) => {
+      if (currentKey.current !== key || !cache.valid(rootKey)) return;
+      try {
+        await input.bridge?.request({
+          method: 'outputs.reveal',
+          generation: input.generation,
+          target: target(file),
+        });
+      } catch {
+        if (currentKey.current === key && cache.valid(rootKey))
+          input.onError?.('无法在资源管理器中显示文件，请重试');
+      }
+    },
     onEdit: (file: OutputFileSummary, context?: OfficeEditContext) => {
       if (currentKey.current !== key || !cache.valid(rootKey)) return;
       void input.onEdit(file, context).catch(() => input.onError?.('无法附加文件，请重试'));
     },
-    turnLabel: input.turnLabel,
   };
   const hasCards = (sessionId: string | undefined, runId: string) =>
     cache.valid(rootKey) &&
@@ -416,6 +428,7 @@ function outputWindowKey(rootKey: string, sessionId?: string, runId?: string) {
   return JSON.stringify([rootKey, sessionId, runId]);
 }
 type FilePage = Pick<OutputFilesPage, 'items' | 'nextCursor' | 'revision'>;
+
 type OutputReadState = {
   page?: FilePage;
   loading: boolean;
@@ -626,7 +639,12 @@ function OutputFileReader(input: OutputReaderInput) {
   );
   return (
     <>
-      <OutputFiles {...input.actions} items={items} />
+      <OutputFiles
+        items={items}
+        onOpen={input.actions.onOpen}
+        onSave={input.actions.onSave}
+        onReveal={input.actions.onReveal}
+      />
       {nextCursor && (
         <button type="button" disabled={loading} onClick={more}>
           加载更多文件
@@ -663,6 +681,7 @@ function outputPageMatches(
 function OutputReferenceReaders(
   input: OutputReaderInput & {
     sources: readonly NativeOutputSource[];
+    turnLabel: (runId: string) => string;
   },
 ) {
   useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
@@ -673,7 +692,7 @@ function OutputReferenceReaders(
     ...input.sources.map((source) => ({
       sessionId: source.sessionId,
       runId: source.runId,
-      sourceLabel: `来自子 Agent · ${source.name} · ${input.actions.turnLabel?.(source.runId) ?? source.runId}`,
+      sourceLabel: `来自子 Agent · ${source.name} · ${input.turnLabel(source.runId)}`,
     })),
   ].map((source) => ({ ...source, key: JSON.stringify([source.sessionId, source.runId]) }));
   const unique = [...new Map(readers.map((source) => [source.key, source])).values()];
@@ -717,6 +736,7 @@ function OutputReferenceReaders(
       ))}
       <OutputReferences
         onOpen={input.actions.onOpen}
+        onReveal={input.actions.onReveal}
         items={scopeValid ? items : []}
         onMore={next?.state.more}
         moreDisabled={active.length < unique.length || active.some(({ state }) => state.loading)}

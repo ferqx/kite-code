@@ -1,7 +1,56 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { type FileHandle, open, rename, rm } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import {
+  type FileHandle,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  realpath,
+  rename,
+  rm,
+} from 'node:fs/promises';
+import { dirname, extname, join } from 'node:path';
 import type { AgentClient, OutputFileTarget } from '@kite-ai/client';
+
+function truncateFilenamePart(part: string, maxBytes: number) {
+  const bytes = Buffer.from(part);
+  if (bytes.length <= maxBytes) return part;
+  let end = maxBytes;
+  while ((bytes.readUInt8(end) & 0xc0) === 0x80) end--;
+  return bytes.toString('utf8', 0, end);
+}
+
+function outputRevealName(name: string) {
+  let cleaned = Array.from(name, (character) =>
+    character.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(character) ? '_' : character,
+  )
+    .join('')
+    .trim()
+    .replace(/[. ]+$/u, '');
+  const maxBytes = 200;
+  if (Buffer.byteLength(cleaned) > maxBytes) {
+    const suffix = extname(cleaned);
+    const extension = truncateFilenamePart(suffix, 32);
+    const stem = truncateFilenamePart(
+      cleaned.slice(0, cleaned.length - suffix.length),
+      maxBytes - Buffer.byteLength(extension),
+    );
+    cleaned = (stem + extension).replace(/[. ]+$/u, '');
+  }
+  const reserved = /^(CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])$/iu;
+  const firstPart = cleaned.split('.', 1)[0]?.trimEnd() ?? '';
+  if (reserved.test(firstPart)) return `_${cleaned}`;
+  return cleaned || 'output';
+}
+
+/** Reserve a private destination so reveals cannot replace a user's previous copy. */
+export async function createOutputRevealPath(downloadsDirectory: string, name: string) {
+  await mkdir(downloadsDirectory, { recursive: true });
+  const root = join(await realpath(downloadsDirectory), 'Kite Outputs');
+  await mkdir(root, { recursive: true });
+  if (!(await lstat(root)).isDirectory()) throw Error('output_reveal_directory_invalid');
+  return join(await mkdtemp(join(root, 'file-')), outputRevealName(name));
+}
 
 /** A destination is host-selected, never supplied by the renderer. EOF + integrity precede rename. */
 export async function saveOutputFile(

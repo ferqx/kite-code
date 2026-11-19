@@ -1,4 +1,6 @@
 import {
+  ArrowRight01Icon,
+  Attachment01Icon,
   File01Icon,
   FileImageIcon,
   FilePenIcon,
@@ -15,10 +17,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+import { Spinner } from './components/ui/spinner';
 import type { SessionOutputFileTarget } from './SessionTabs';
 import { Button } from './ui';
 
@@ -35,8 +36,7 @@ export interface OutputFilesProps {
   items: readonly OutputFileSummary[];
   onOpen: (file: OutputFileSummary) => void;
   onSave: (file: OutputFileSummary) => void;
-  onEdit: (file: OutputFileSummary) => void;
-  turnLabel?: (runId: string) => string;
+  onReveal?: (file: OutputFileSummary) => Promise<void>;
 }
 function fileType(file: OutputFileSummary) {
   const extension = file.name.split('.').pop()?.toLowerCase();
@@ -127,6 +127,49 @@ function collectionTime(value: string) {
   const pad = (n: number, width = 2) => String(n).padStart(width, '0');
   return `收集于 ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
 }
+function OutputFileMenu({
+  file,
+  onSave,
+  onReveal,
+}: Partial<Pick<OutputFilesProps, 'onSave' | 'onReveal'>> & { file: OutputFileSummary }) {
+  const [revealing, setRevealing] = useState(false);
+  const label = `${file.name} 的更多操作`;
+  async function reveal() {
+    if (!onReveal || revealing) return;
+    setRevealing(true);
+    try {
+      await onReveal(file);
+    } finally {
+      setRevealing(false);
+    }
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={label}
+          aria-busy={revealing || undefined}
+        >
+          {revealing ? (
+            <Spinner aria-hidden="true" className="motion-reduce:animate-none" />
+          ) : (
+            <HugeiconsIcon icon={MoreHorizontalIcon} aria-hidden="true" />
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" aria-label={label}>
+        {onSave && <DropdownMenuItem onSelect={() => onSave(file)}>另存为</DropdownMenuItem>}
+        {onReveal && (
+          <DropdownMenuItem disabled={revealing} onSelect={() => void reveal()}>
+            在资源管理器中显示
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 function FileRow({
   file,
   distinguish = false,
@@ -163,21 +206,7 @@ function FileRow({
       >
         打开
       </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-xs" aria-label={`${file.name} 的更多操作`}>
-            <HugeiconsIcon icon={MoreHorizontalIcon} aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" aria-label={`${file.name} 的更多操作`}>
-          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-            {file.size} 字节{props.turnLabel ? ` · ${props.turnLabel(file.ownerRunId)}` : ''}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => props.onSave(file)}>另存为</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => props.onEdit(file)}>继续修改</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <OutputFileMenu file={file} onSave={props.onSave} onReveal={props.onReveal} />
     </li>
   );
 }
@@ -201,47 +230,55 @@ export function OutputFiles(props: OutputFilesProps) {
 }
 
 export function OutputReferences(
-  props: Pick<OutputFilesProps, 'items' | 'onOpen'> & {
+  props: Pick<OutputFilesProps, 'items' | 'onOpen' | 'onReveal'> & {
     onMore?: () => void;
     moreDisabled?: boolean;
   },
 ) {
-  const [expanded, setExpanded] = useState(false);
   if (!props.items.length && !props.onMore) return null;
-  const items = expanded ? props.items : props.items.slice(0, 5);
-  const repeated = duplicateNames(items);
+  const repeated = duplicateNames(props.items);
   return (
-    <section className="output-references" aria-label="参考">
-      <h4>
-        <HugeiconsIcon icon={File01Icon} aria-hidden="true" />
-        参考
-      </h4>
+    <section className="output-references background-execution-group" aria-label="输出">
+      <h3>
+        <HugeiconsIcon icon={Attachment01Icon} aria-hidden="true" />
+        <span>输出</span>
+      </h3>
       <ul>
-        {items.map((file) => (
-          <li key={fileIdentity(file)}>
-            <button
-              type="button"
-              className="output-reference-link"
-              title={[file.name, file.sourceLabel].filter(Boolean).join(' · ')}
-              aria-label={`打开 ${file.name}${file.sourceLabel ? `，${file.sourceLabel}` : ''}${repeated.has(file.name) ? `，${collectionTime(file.publishedAt)}，${file.size} 字节` : ''}`}
-              onClick={() => props.onOpen(file)}
-            >
-              <HugeiconsIcon icon={referenceIcon(file)} aria-hidden="true" />
-              <span>
-                {file.name}
-                {file.sourceLabel ? ` · ${file.sourceLabel}` : ''}
-              </span>
-            </button>
-          </li>
-        ))}
+        {props.items.map((file) => {
+          const dot = file.name.lastIndexOf('.');
+          return (
+            <li key={fileIdentity(file)}>
+              <button
+                type="button"
+                className="output-reference-link"
+                title={[file.name, file.sourceLabel].filter(Boolean).join(' · ')}
+                aria-label={`打开 ${file.name}${file.sourceLabel ? `，${file.sourceLabel}` : ''}${repeated.has(file.name) ? `，${collectionTime(file.publishedAt)}，${file.size} 字节` : ''}`}
+                onClick={() => props.onOpen(file)}
+              >
+                <HugeiconsIcon icon={referenceIcon(file)} aria-hidden="true" />
+                <span className="output-reference-name">
+                  <span>{dot > 0 ? file.name.slice(0, dot) : file.name}</span>
+                  {dot > 0 && (
+                    <span className="output-reference-extension">{file.name.slice(dot)}</span>
+                  )}
+                  {file.sourceLabel && (
+                    <span className="output-reference-source">{` · ${file.sourceLabel}`}</span>
+                  )}
+                </span>
+                {!props.onReveal && <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />}
+              </button>
+              {props.onReveal && <OutputFileMenu file={file} onReveal={props.onReveal} />}
+            </li>
+          );
+        })}
       </ul>
-      {props.items.length > 5 && !expanded && (
-        <Button variant="ghost" onClick={() => setExpanded(true)}>
-          展开更多
-        </Button>
-      )}
-      {(expanded || props.items.length <= 5) && props.onMore && (
-        <Button variant="ghost" disabled={props.moreDisabled} onClick={props.onMore}>
+      {props.onMore && (
+        <Button
+          className="output-reference-more"
+          variant="ghost"
+          disabled={props.moreDisabled}
+          onClick={props.onMore}
+        >
           加载更多
         </Button>
       )}

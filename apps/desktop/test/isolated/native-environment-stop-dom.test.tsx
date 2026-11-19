@@ -224,7 +224,7 @@ test('environment names hide internal IDs outside diagnostics and keep unconfirm
         const identity = f.host.querySelector('.background-execution-identity')!;
         const name = diagnostics && !entry.childTitle ? 'job-1' : entry.name;
         expect(identity.textContent).toBe(name);
-        const detail = identity.querySelector('button');
+        const detail = identity.closest('button');
         if (entry.childTitle !== undefined) {
           expect(detail?.getAttribute('title')).toBe(name);
           expect(detail?.getAttribute('aria-label')).toBe(`查看子 Agent 详情：${name}`);
@@ -344,7 +344,7 @@ test('a verified empty environment does not insert loading text during a backgro
     await f.render();
     const card = f.host.querySelector('[aria-label="环境信息"]')!;
     const text = card.textContent;
-    expect(card.querySelector('[aria-label="子智能体"]')?.textContent).toContain('暂无');
+    expect(card.childElementCount).toBe(0);
     held = f.holdDirectory();
     await f.render();
     expect(card.textContent).toBe(text);

@@ -1,8 +1,9 @@
 import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type {
   AgentClient,
@@ -5162,6 +5163,105 @@ test('parent output IPC preserves child identity, refreshes late files and rejec
     expect(caller.state().outputFilesDisplay).toBeUndefined();
   } finally {
     await caller.close();
+  }
+});
+
+test('output reveal IPC selects only a verified local copy and preserves earlier copies', async () => {
+  const auth = authority();
+  const port = client();
+  const downloads = await realpath(await mkdtemp(join(tmpdir(), 'kite-reveal-output-')));
+  const target = {
+    storeId: 'store',
+    sessionId: 'root',
+    fileId: 'file',
+    locator: { kind: 'delivery' as const, key: 'delivery/00000000000000000001/producer/file' },
+  };
+  const bytes = Buffer.from('exact bytes');
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  const name = '验收附件.txt';
+  const size = String(bytes.length);
+  port.resolveOutputFile = async (request) => {
+    expect(request).toEqual(target);
+    return {
+      summary: {
+        ...target,
+        name,
+        size,
+        ownerRunId: 'run',
+        mediaType: 'text/plain',
+        publishedAt: '2026-11-19T00:00:00Z',
+      },
+      reference: { hash, size },
+    } as never;
+  };
+  let corrupt = false;
+  let replaceWindowAfterWrite = false;
+  let activeWindow = true;
+  port.readOutputFileStream = async (request) => {
+    expect(request).toEqual(target);
+    return {
+      reference: { hash, size },
+      content: (async function* () {
+        yield corrupt ? Buffer.alloc(bytes.length) : bytes;
+      })(),
+      async cancel() {
+        if (replaceWindowAfterWrite) activeWindow = false;
+      },
+    } as never;
+  };
+  const caller = new NativeCaller(port, () => {}, memoryPrivateData());
+  const revealed: string[] = [];
+  const handlers = new Map<string, (event: IpcMainInvokeEvent, value: unknown) => unknown>();
+  const stop = registerNativeIpc({
+    ipcMain: {
+      handle(channel: string, handler: (event: IpcMainInvokeEvent, value: unknown) => unknown) {
+        handlers.set(channel, handler);
+      },
+      removeHandler(channel: string) {
+        handlers.delete(channel);
+      },
+    } as unknown as IpcMain,
+    window: () => (activeWindow ? auth.window : undefined),
+    rendererUrl: auth.frame.url,
+    caller: async () => caller,
+    outputReveal: {
+      downloadsDirectory: () => downloads,
+      showItemInFolder(path) {
+        expect(readFileSync(path)).toEqual(bytes);
+        revealed.push(path);
+      },
+    },
+  });
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: target.sessionId });
+    const request = { method: 'outputs.reveal', generation, target };
+    const reveal = () => handlers.get(nativeChannel)!(auth.event, request);
+    const root = join(downloads, 'Kite Outputs');
+    expect(await reveal()).toEqual({ ok: true, value: null });
+    expect(revealed).toHaveLength(1);
+    const first = revealed[0]!;
+    expect(basename(first)).toBe(name);
+    expect(dirname(dirname(first))).toBe(root);
+    await writeFile(first, 'user-edited copy');
+
+    expect(await reveal()).toEqual({ ok: true, value: null });
+    expect(revealed).toHaveLength(2);
+    expect(revealed[1]).not.toBe(first);
+    expect(readFileSync(first, 'utf8')).toBe('user-edited copy');
+    const folders = await readdir(root);
+
+    corrupt = true;
+    expect(await reveal()).toEqual({ ok: false, code: 'output_file_integrity_failed' });
+    corrupt = false;
+    replaceWindowAfterWrite = true;
+    expect(await reveal()).toEqual({ ok: false, code: 'native_sender_denied' });
+    expect(revealed).toHaveLength(2);
+    expect(await readdir(root)).toEqual(folders);
+  } finally {
+    stop();
+    await caller.close();
+    await rm(downloads, { force: true, recursive: true });
   }
 });
 

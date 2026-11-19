@@ -968,6 +968,10 @@ void app
           throw Error('native_draining');
       },
       openEditorUrl: (url) => shell.openExternal(url),
+      outputReveal: {
+        downloadsDirectory: () => app.getPath('downloads'),
+        showItemInFolder: (path) => shell.showItemInFolder(path),
+      },
       ...(process.platform === 'win32'
         ? {
             vscodeExecutable: async () =>

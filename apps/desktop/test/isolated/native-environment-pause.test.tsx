@@ -176,26 +176,24 @@ const stops = (host: HTMLElement) => [
 
 test('a cold environment distinguishes loading and failed reads from a confirmed empty directory', async () => {
   const f = await fixture();
-  const group = (name: string) => f.host.querySelector(`[aria-label="${name}"]`)!.textContent;
+  const card = () => f.host.querySelector('[aria-label="环境信息"]')!;
+  const headings = () => [...card().querySelectorAll('h3')].map((heading) => heading.textContent);
   try {
     await f.render({ nextRead: 'hold' });
-    expect(group('Shell')).toContain('读取中');
-    expect(group('Shell')).not.toContain('空闲');
-    expect(group('子智能体')).toContain('读取中');
-    expect(group('子智能体')).not.toContain('暂无');
+    expect(card().getAttribute('aria-busy')).toBe('true');
+    expect(headings()).toEqual([]);
     expect(stops(f.host)).toHaveLength(0);
     await f.resolve();
     expect(stops(f.host)).toHaveLength(2);
-    expect(group('Shell')).not.toContain('读取中');
+    expect(headings()).toEqual(['Shell 列表', '子智能体']);
     await f.render({ generation: 2, nextRead: 'error' });
-    expect(group('Shell')).toContain('状态未知');
-    expect(group('Shell')).not.toContain('空闲');
-    expect(group('子智能体')).toContain('状态未知');
+    expect(card().getAttribute('data-stale')).toBe('true');
+    expect(headings()).toEqual([]);
     expect(stops(f.host)).toHaveLength(0);
     await f.render({ generation: 3, empty: true });
-    expect(group('Shell')).toContain('空闲');
-    expect(group('子智能体')).toContain('暂无');
-    expect(group('Shell')).not.toContain('状态未知');
+    expect(card().hasAttribute('data-stale')).toBe(false);
+    expect(card().hasAttribute('aria-busy')).toBe(false);
+    expect(card().childElementCount).toBe(0);
   } finally {
     await f.close();
   }

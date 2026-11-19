@@ -167,7 +167,11 @@ export type NativeOutputRequest =
       collectionBeforeKey?: string;
       limit?: number;
     }
-  | { method: 'outputs.save' | 'outputs.info'; generation: number; target: OutputFileTarget }
+  | {
+      method: 'outputs.save' | 'outputs.reveal' | 'outputs.info';
+      generation: number;
+      target: OutputFileTarget;
+    }
   | {
       method: 'outputs.preview.open';
       generation: number;

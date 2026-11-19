@@ -951,7 +951,6 @@ export function useNativeEnvironment({
             }
             references={references}
             currentOnly
-            hasSnapshot={!!display}
             stale={stale}
             busy={busy}
             stoppingExecutionId={stopping}

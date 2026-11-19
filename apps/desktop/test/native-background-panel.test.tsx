@@ -431,8 +431,8 @@ test('retained environment card separates Shell and named children, exact stop, 
       // The shared fixture mounts the real hook and retained card; no effect is created by navigation.
       await render(port);
       const region = host.querySelector('[aria-label="环境信息"]')!;
-      expect(region.querySelector('[aria-label="Shell"]')).not.toBeNull();
-      expect(region.querySelector('header button')).toBeNull();
+      expect(region.querySelector('[aria-label="Shell 列表"] h3')?.textContent).toBe('Shell 列表');
+      expect(region.querySelector('header')).toBeNull();
       const children = region.querySelector('[aria-label="子智能体"]')!;
       expect(children.textContent).toContain('运行中');
       expect(children.querySelector('.background-execution-stop')).not.toBeNull();
@@ -459,15 +459,17 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect((host.querySelector('[aria-label="父草稿"]') as HTMLInputElement).value).toBe(
         '原父会话草稿',
       );
+      const activeShellRow = () =>
+        host.querySelector(`[aria-label="Shell 列表"] [data-execution-id="${shell.execution.id}"]`);
       await act(async () => {
-        const stop = [
-          ...host.querySelectorAll<HTMLButtonElement>('[aria-label="Shell"] button'),
-        ].find((button) => button.textContent === '停止')!;
+        const stop = activeShellRow()!.querySelector<HTMLButtonElement>('[aria-label="停止"]')!;
         stop.click();
         stop.click();
       });
       expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(1);
-      expect(host.textContent).toContain('正在停止');
+      expect(activeShellRow()).toBeNull();
+      expect(host.querySelector('[aria-label="Shell 列表"]')).toBeNull();
+      expect(host.querySelector('[aria-label="子智能体"] h3')?.textContent).toBe('子智能体');
       failed = true;
       revision++;
       // Stale technical details and retry controls belong to the diagnostic fixture.
@@ -478,7 +480,7 @@ test('retained environment card separates Shell and named children, exact stop, 
       const stop = host.querySelector<HTMLButtonElement>(
         '[aria-label="子智能体"] .background-execution-stop',
       )!;
-      expect(stop.textContent).toBe('停止');
+      expect(stop.getAttribute('aria-label')).toBe('停止');
       expect(stop.disabled).toBe(true);
       await act(async () => stop.click());
       expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(1);
@@ -712,12 +714,12 @@ test('environment updates one row per child while exact historical details remai
       await render(bridge);
       const group = host.querySelector('[aria-label="子智能体"]')!;
       const originalRow = group.querySelector('[data-execution-id="job-1"]')!;
-      expect(group.querySelector('.background-execution-count')?.textContent).toBe('2');
+      expect(group.querySelector('h3')?.textContent).toBe('子智能体');
+      expect(group.querySelectorAll('[data-execution-id]')).toHaveLength(2);
       expect(originalRow.querySelector('.background-execution-status')?.textContent).toBe('已完成');
       (originalRow.querySelector('button') as HTMLButtonElement).focus();
       items.push(second);
       await click(host, '刷新目录');
-      expect(group.querySelector('.background-execution-count')?.textContent).toBe('2');
       expect(originalRow.getAttribute('data-execution-id')).toBe('job-3');
       expect(host.ownerDocument.activeElement === originalRow.querySelector('button')).toBe(true);
       expect(

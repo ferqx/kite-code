@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { open, rename, rm } from 'node:fs/promises';
+import { open, rename, rm, rmdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { OutputFileTarget } from '@kite-ai/client';
@@ -65,7 +65,7 @@ import { NativeInputQueue } from './native-input-queue';
 import { NativeProcessOwner } from './native-processes';
 import { NativeOfficeEditor } from './office-editor';
 import { NativeOutputDisplayVersions } from './output-display-versions';
-import { saveOutputFile } from './output-files';
+import { createOutputRevealPath, saveOutputFile } from './output-files';
 import { NativeOutputSources } from './output-sources';
 import type { StoredPendingAttachment } from './pending-attachments';
 import { NativePermissionGrants } from './permission-grants';
@@ -2103,6 +2103,7 @@ export class NativeCaller {
       case 'outputs.preview.interaction':
       case 'outputs.preview.control':
       case 'outputs.save':
+      case 'outputs.reveal':
       case 'localPreview.open':
       case 'localPreview.release':
       case 'localPreview.check':
@@ -4132,6 +4133,7 @@ export class NativeCaller {
     request: { generation: number; target: OutputFileTarget },
     pick: (name: string) => Promise<string | undefined>,
     checkSender: () => void,
+    onSaved?: (path: string) => void,
   ) {
     const resolved = await this.admitOutputTarget(request.generation, request.target);
     const access = this.outputTargetCheck(request.generation, request.target);
@@ -4144,7 +4146,35 @@ export class NativeCaller {
     current();
     if (!destination) return { kind: 'outputs.saved' as const, cancelled: true };
     await saveOutputFile(this.client, request.target, destination, current);
+    if (onSaved) {
+      current();
+      onSaved(destination);
+    }
     return { kind: 'outputs.saved' as const, cancelled: false };
+  }
+  async revealOutput(
+    request: { generation: number; target: OutputFileTarget },
+    host: { downloadsDirectory: () => string; showItemInFolder: (path: string) => void },
+    checkSender: () => void,
+  ) {
+    let destination: string | undefined;
+    try {
+      await this.saveOutput(
+        request,
+        async (name) => {
+          destination = await createOutputRevealPath(host.downloadsDirectory(), name);
+          return destination;
+        },
+        checkSender,
+        (path) => host.showItemInFolder(path),
+      );
+    } catch (error) {
+      if (destination) {
+        await rm(destination, { force: true }).catch(() => {});
+        await rmdir(dirname(destination)).catch(() => {});
+      }
+      throw error;
+    }
   }
   detach() {
     if (this.selected && this.client.serverInfo?.storeId)

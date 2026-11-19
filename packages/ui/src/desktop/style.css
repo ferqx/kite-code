@@ -5343,6 +5343,8 @@ body {
   color: var(--muted-foreground);
 }
 .background-executions.environment-information {
+  --environment-row-height: 32px;
+  --environment-list-indent: 24px;
   position: absolute;
   z-index: 2;
   top: 0;
@@ -5364,6 +5366,9 @@ body {
     opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing),
     transform var(--sidebar-motion-duration) var(--sidebar-motion-easing),
     visibility 0s linear var(--sidebar-motion-duration);
+}
+.background-executions.environment-information:empty {
+  display: none;
 }
 .kite-client .session-view:has(> .environment-information) {
   --environment-information-safe-area: var(--conversation-inline-padding);
@@ -5432,15 +5437,8 @@ body {
   > .notice {
   transition: margin-right var(--sidebar-motion-duration) var(--sidebar-motion-easing);
 }
-.kite-client .environment-information > header {
-  min-height: 24px;
-  margin-bottom: 6px;
-  font-size: inherit;
-  line-height: inherit;
-  color: var(--muted-foreground);
-}
-.kite-client .environment-information > header {
-  font-weight: 400;
+.kite-client .environment-information > .background-stale {
+  margin: 0 0 6px;
 }
 .kite-client .environment-information button {
   font-weight: 400;
@@ -5456,82 +5454,77 @@ body {
   .button:disabled:not([data-read-gated="true"]):hover {
   background: var(--control-hover);
 }
-.kite-client .environment-information .background-execution-group + .background-execution-group {
-  margin-top: 4px;
-}
-.kite-client
-  .environment-information
-  .background-execution-group:has(ul)
-  + .background-execution-group {
-  margin-top: 10px;
-  padding-top: 10px;
+.kite-client .environment-information > .background-execution-group + .background-execution-group {
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--border);
 }
-.kite-client .environment-information .background-execution-group h3 {
+.kite-client .environment-information .background-execution-group > h3 {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 0;
-  min-height: 28px;
-  font-size: inherit;
+  min-height: 20px;
+  color: var(--muted-foreground);
+  font-size: 13px;
   line-height: inherit;
-  font-weight: 400;
+  font-weight: 500;
 }
-.kite-client .environment-information .background-execution-group h3 svg {
-  width: 18px;
-  height: 18px;
-  color: var(--muted-foreground);
+.kite-client .environment-information .background-execution-group > h3 svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
 }
-.kite-client .environment-information .background-execution-count,
-.kite-client .environment-information .background-execution-empty {
-  margin-left: auto;
-  color: var(--muted-foreground);
-  font-weight: 400;
+.kite-client .environment-information .background-execution-group > ul {
+  --scrollbar-thumb: color-mix(in srgb, var(--foreground) 30%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 42%, transparent);
+  margin: 4px 0 0 var(--environment-list-indent);
+  max-height: calc(4 * var(--environment-row-height));
+  overflow: hidden auto;
+  scrollbar-gutter: stable;
 }
-.kite-client .environment-information .background-execution-group ul {
-  margin-top: 6px;
+.kite-client .environment-information .background-execution-group > ul > li {
+  gap: 4px;
+  min-width: 0;
+  min-height: var(--environment-row-height);
+  margin: 0;
 }
-.kite-client .environment-information .background-execution-group li {
-  min-height: 30px;
-  padding-left: 26px;
+.kite-client .environment-information :is(.background-execution-row, .output-reference-link) {
+  min-width: 0;
+  min-height: var(--environment-row-height);
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 0 4px;
+  font: inherit;
+  text-align: left;
 }
 .kite-client .environment-information .background-execution-identity {
   min-width: 0;
   flex: 1;
   display: flex;
-  flex-direction: column;
-}
-.kite-client .environment-information .background-execution-detail {
-  min-width: 0;
-  width: 100%;
-  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 0;
-  border: 0;
-  border-radius: var(--radius);
-  background: none;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-.kite-client .environment-information .background-execution-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
+  gap: 6px;
 }
 .kite-client .environment-information .background-execution-identity svg {
   width: 14px;
   height: 14px;
   flex: none;
 }
-.kite-client .environment-information .background-execution-detail > svg {
+.kite-client
+  .environment-information
+  :is(.background-execution-detail, .output-reference-link)
+  > svg:last-child {
+  width: 14px;
+  height: 14px;
   color: var(--muted-foreground);
 }
-.kite-client .environment-information .background-execution-detail:hover {
-  text-decoration: underline;
+.kite-client
+  .environment-information
+  :is(.background-execution-detail, .output-reference-link):hover:not(:disabled) {
+  background: var(--control-hover);
 }
 
 .kite-client .environment-information .background-execution-error {
@@ -5550,12 +5543,40 @@ body {
   line-height: inherit;
   color: var(--muted-foreground);
 }
-.kite-client .environment-information .background-execution-status,
+.kite-client .environment-information .background-execution-status {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.kite-client .environment-information .background-execution-running {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--info-foreground);
+}
+.kite-client .environment-information .background-execution-status svg {
+  width: 13px;
+  height: 13px;
+  color: var(--success-foreground);
+}
 .kite-client .environment-information .background-execution-stop {
   color: var(--muted-foreground);
-  font-size: inherit;
-  line-height: inherit;
-  white-space: nowrap;
+}
+.kite-client .environment-information .background-execution-stop:hover:not(:disabled) {
+  color: var(--destructive);
+}
+@media (pointer: coarse) {
+  .background-executions.environment-information {
+    --environment-row-height: 44px;
+  }
+  .kite-client .environment-information .background-execution-stop {
+    width: 44px;
+    height: 44px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .background-executions.environment-information,
@@ -7966,16 +7987,10 @@ body {
   overflow-wrap: anywhere;
 }
 
-.turn-output-files,
-.output-references {
+.turn-output-files {
   margin-block: 12px;
 }
-.output-references h4 {
-  margin: 4px 0;
-  font-size: inherit;
-}
-.turn-output-files ul,
-.output-references ul {
+.turn-output-files ul {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -8032,31 +8047,8 @@ body {
   flex-shrink: 0;
 }
 
-/* The environment card reuses the authoritative file list, not a second inventory. */
-.kite-client .environment-information .output-references {
-  margin: 12px 0 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-.kite-client .environment-information .output-references h4 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 8px;
-  font-weight: 400;
-}
-.kite-client .environment-information .output-references h4 svg {
-  width: 18px;
-  height: 18px;
-}
-.kite-client .environment-information .output-references > ul {
-  gap: 4px;
-  max-height: 280px;
-  overflow-y: auto;
-}
-.kite-client .environment-information .output-references li {
-  min-width: 0;
-  margin: 0;
+.kite-client .environment-information .output-reference-more {
+  margin: 4px 0 0 var(--environment-list-indent);
 }
 .output-reference-link {
   display: flex;
@@ -8066,6 +8058,7 @@ body {
   max-width: 100%;
   padding: 4px 0;
   border: 0;
+  border-radius: var(--button-radius);
   background: transparent;
   color: var(--foreground);
   font: inherit;
@@ -8075,19 +8068,29 @@ body {
   text-overflow: ellipsis;
   cursor: pointer;
 }
-.output-reference-link > svg {
+.output-reference-link > svg:first-child {
   width: 16px;
   height: 16px;
   flex: none;
 }
-.output-reference-link > span {
+.output-reference-name {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.output-reference-link .output-reference-name > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.output-reference-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+.output-reference-name .output-reference-extension {
+  flex: none;
+  max-width: 45%;
+}
+.output-reference-source {
+  max-width: 50%;
+  color: var(--muted-foreground);
+  white-space: pre;
 }
 .output-reference-link:focus-visible {
   outline: 2px solid var(--ring);

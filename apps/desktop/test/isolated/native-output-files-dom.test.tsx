@@ -11,6 +11,7 @@ test('file references show only files across reads, pagination, and scope change
     'document',
     'navigator',
     'HTMLElement',
+    'HTMLInputElement',
     'Node',
     'Element',
     'NodeFilter',
@@ -61,7 +62,6 @@ test('file references show only files across reads, pagination, and scope change
   };
   let late: ((value: NativeResult) => void) | undefined;
   let hold = false;
-  let edits = 0;
   let queryPage:
     | ((request: Extract<NativeRequest, { method: 'outputs.query' }>) => OutputFilesPage)
     | undefined;
@@ -72,6 +72,7 @@ test('file references show only files across reads, pagination, and scope change
       if (request.method === 'outputs.sources')
         return { kind: 'outputs.sources', scope: request.scope, sources: [] };
       if (request.method === 'outputs.save') throw Error('output_save_failed');
+      if (request.method === 'outputs.reveal') throw Error('output_reveal_failed');
       if (request.method === 'outputs.query') {
         if (queryPage) return { kind: 'outputs.page', page: queryPage(request) };
         if (hold && request.scope.sessionId === 'old')
@@ -110,9 +111,7 @@ test('file references show only files across reads, pagination, and scope change
       revision,
       onError: feedback.report,
       turnLabel: () => '第 1 轮',
-      async onEdit() {
-        edits++;
-      },
+      async onEdit() {},
     });
     return (
       <>
@@ -136,42 +135,33 @@ test('file references show only files across reads, pagination, and scope change
     await act(async () => {
       await Bun.sleep(130);
     });
-    const references = () => document.querySelector('[aria-label="参考"]');
-    expect(references()?.querySelectorAll('li')).toHaveLength(5);
-    const more = [...document.querySelectorAll('button')].find(
-      (button) => button.textContent === '展开更多',
-    )!;
-    await act(() => more.click());
+    const references = () => document.querySelector('[aria-label="输出"]');
     expect(references()?.querySelectorAll('li')).toHaveLength(7);
     const link = references()!.querySelector<HTMLButtonElement>(
       '[aria-label="打开 session-report-0.docx"]',
     )!;
     await act(() => link.click());
     expect(document.querySelector('[data-testid="opened-file"]')?.textContent).toBe('file-0');
-    const moreAction = document.querySelector<HTMLButtonElement>(
-      '[aria-label="session-report-0.docx 的更多操作"]',
-    )!;
-    const openFileActions = () =>
+    const moreLabel = '[aria-label="session-report-0.docx 的更多操作"]';
+    const openFileActions = (moreAction: HTMLButtonElement) =>
       act(() => {
         moreAction.focus();
         moreAction.dispatchEvent(
           new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
         );
       });
-    await openFileActions();
-    const edit = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-      (button) => button.textContent === '继续修改',
-    )!;
-    await act(() => edit.click());
-    expect(edits).toBe(1);
+    await openFileActions(
+      document.querySelector<HTMLButtonElement>(`.output-file-card ${moreLabel}`)!,
+    );
+    const menu = document.querySelector('[role="menu"]')!;
+    expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(
+      ['另存为', '在资源管理器中显示'],
+    );
     expect(calls.every((call) => call.method.startsWith('outputs.'))).toBe(true);
     expect(calls.some((call) => call.method === 'outputs.query' && call.runId === 'run')).toBe(
       true,
     );
-    await openFileActions();
-    const save = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-      (button) => button.textContent === '另存为',
-    )!;
+    const save = menu.querySelector<HTMLElement>('[role="menuitem"]')!;
     await act(async () => save.click());
     expect(document.querySelector('.native-toast-card')?.textContent).toContain('另存失败');
     expect(references()?.textContent).not.toContain('另存失败');
@@ -180,6 +170,25 @@ test('file references show only files across reads, pagination, and scope change
     expect(outputs?.textContent).not.toContain('重试整理');
     expect(references()?.querySelector('[role="alert"], [role="status"]')).toBeNull();
     expect(document.querySelector('[aria-label="文件整理"]')).toBeNull();
+    await act(() => document.querySelector<HTMLButtonElement>('.native-toast-close')!.click());
+    await openFileActions(references()!.querySelector<HTMLButtonElement>(moreLabel)!);
+    const reveal = document.querySelector<HTMLElement>('[role="menuitem"]')!;
+    expect(reveal.textContent).toBe('在资源管理器中显示');
+    await act(async () => reveal.click());
+    expect(calls.at(-1)).toEqual({
+      method: 'outputs.reveal',
+      generation: 1,
+      target: {
+        storeId: 'store',
+        sessionId: 'session',
+        fileId: 'file-0',
+        locator: file(0).locator,
+      },
+    });
+    expect(document.querySelector('.native-toast-card')?.textContent).toContain(
+      '无法在资源管理器中显示文件',
+    );
+    expect(document.querySelector('[data-testid="opened-file"]')?.textContent).toBe('file-0');
     await act(() => document.querySelector<HTMLButtonElement>('.native-toast-close')!.click());
     const settle = async () => {
       await act(async () => {
@@ -231,7 +240,6 @@ test('file references show only files across reads, pagination, and scope change
       };
     };
     await settle();
-    await click('展开更多');
     await click('加载更多');
     expect(references()?.querySelectorAll('li')).toHaveLength(100);
     await click('加载更多文件');
@@ -363,4 +371,4 @@ test('file references show only files across reads, pagination, and scope change
       else Reflect.deleteProperty(globalThis, key);
     }
   }
-});
+}, 15_000);
