@@ -49,6 +49,18 @@ const formalScripts: Readonly<Record<string, string>> = {
 };
 const legacyConsumer =
   /(?:@kite-ai\/|packages\/|#)(?:agent-api-(?:contract|client)|agent-kernel|builtin-runtime|runtime-(?:host|spi|contract|protocol|server|client|storage-sqlite)|kite-(?:app-contract|local-runtime|client-ui|cli|service|web|desktop))(?:\/|\b)|(?:^|[\s'"/])apps\/kite-(?:cli|service|web|desktop)(?:\/|\b)|scripts\/(?:run-tui-system-tests|runtime\/(?:run-fault-soak|verify-fault-soak-qualification)|release\/(?:oss-candidate|build-oss-candidate|build-artifact|verify-artifact|bootstrap-verifier|prepare-desktop-service|platform-capability-probe|session-log-acl-smoke))\.ts/;
+const mcpContractSuites = [
+  'packages/agent/test/isolated/mcp/mcp.test.ts',
+  'packages/agent/test/isolated/mcp/reads.test.ts',
+  'packages/agent/test/isolated/mcp/failure-feedback.test.ts',
+  'apps/service/test/isolated/mcp-resources-prompts.test.ts',
+  'apps/service/test/isolated/mcp-source-configuration.test.ts',
+  'apps/service/test/isolated/mcp-credentials.test.ts',
+  'apps/service/test/isolated/mcp-oauth-actions.test.ts',
+  'apps/service/test/isolated/mcp-oauth-session.test.ts',
+  'apps/service/test/isolated/mcp-oauth-network.test.ts',
+  'apps/service/test/isolated/mcp-source-oauth-integration.test.ts',
+] as const;
 const stdioSuites = [
   'packages/agent/test/isolated/mcp/stdio-port.test.ts',
   'apps/service/test/isolated/paired.test.ts',
@@ -388,6 +400,82 @@ export function checkUnifiedFormalConsumers(root: string): {
             );
             if (prepare < 0 || consumer <= prepare)
               add('formal-ci-linux-native-dependencies-missing', location, jobName);
+          }
+          if (name === 'mcp-conformance.yml') {
+            const linux = jobName === 'mcp-conformance';
+            const suites = linux
+              ? mcpContractSuites
+              : ['apps/service/test/isolated/mcp-resources-prompts.test.ts'];
+            const junit = `dist/unified-evidence/${linux ? 'mcp-contracts' : 'mcp-macos-stdio'}.xml`;
+            const json = 'dist/unified-evidence/mcp-conformance.json';
+            const run = (command: string) =>
+              steps.findIndex((step) => step.if === undefined && step.run === command);
+            const install = run('bun install --frozen-lockfile');
+            const ready = run('mkdir -p dist/unified-evidence');
+            const tests = steps.findIndex(
+              (step) =>
+                step.shell === 'bash' &&
+                step.if ===
+                  (linux ? "!cancelled() && steps.evidence.outcome == 'success'" : undefined) &&
+                step.run?.trim() ===
+                  [
+                    'read -r -a files <<< "$MCP_TEST_FILES"',
+                    `bun test --parallel=1 --max-concurrency=1 --reporter=junit --reporter-outfile="$MCP_JUNIT" "\${files[@]}"`,
+                    `python3 scripts/ci/verify-mcp-junit.py "$MCP_JUNIT" "\${files[@]}"`,
+                  ].join('\n'),
+            );
+            const uploaded = (path: string) =>
+              steps.some(
+                (step, index) =>
+                  index > tests &&
+                  step.uses?.startsWith('actions/upload-artifact@') &&
+                  step.if === 'always()' &&
+                  step.with?.path === path &&
+                  step.with?.['if-no-files-found'] === 'error',
+              );
+            const env = job.env as Record<string, unknown> | undefined;
+            if (
+              job.if !== undefined ||
+              job['runs-on'] !== (linux ? 'ubuntu-24.04' : 'macos-15') ||
+              env?.MCP_TEST_FILES !== suites.join(' ') ||
+              env.MCP_JUNIT !== junit ||
+              !suites.every((path) => existsSync(resolve(root, path))) ||
+              !existsSync(resolve(root, 'scripts/ci/verify-mcp-junit.py')) ||
+              install < 0 ||
+              ready <= install ||
+              tests <= ready ||
+              !uploaded(junit)
+            )
+              add(
+                'formal-ci-mcp-conformance-missing',
+                location,
+                `${jobName}: owner suites and JUnit`,
+              );
+            if (linux) {
+              const script = 'scripts/runtime/unified-mcp-smoke.ts';
+              const scripts = packageAt('').scripts as Record<string, unknown>;
+              const prepare = run(
+                'sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap openssl',
+              );
+              const smoke = run(
+                `bun run test:mcp:conformance "--output=\${{ github.workspace }}/${json}"`,
+              );
+              if (
+                scripts['test:mcp:conformance'] !== `bun run ${script}` ||
+                !existsSync(resolve(root, script)) ||
+                prepare < 0 ||
+                install <= prepare ||
+                steps[ready]?.id !== 'evidence' ||
+                smoke <= ready ||
+                tests <= smoke ||
+                !uploaded(json)
+              )
+                add(
+                  'formal-ci-mcp-conformance-missing',
+                  location,
+                  `${jobName}: smoke setup and evidence`,
+                );
+            }
           }
           if (name === 'runtime-stdio-smoke.yml') {
             const qualify = steps.findIndex(

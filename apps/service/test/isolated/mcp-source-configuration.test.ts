@@ -20,7 +20,42 @@ import {
   type McpSourceSelectionInput,
 } from '../../src/mcp-source-configuration';
 
+const validBearer = 'owned-temporary-bearer';
+const wrongBearer = 'owned-rejected-bearer';
+const privateRejection = 'owned-private-authentication-response';
 const object = (value: unknown) => value as Record<string, Json>;
+
+function prepareStdio(root: string) {
+  const bubblewrap = process.platform === 'linux' ? Bun.which('bwrap') : null;
+  if (process.platform === 'linux' && !bubblewrap)
+    throw Error('linux_stdio_bubblewrap_unavailable');
+  const build = Bun.spawnSync(
+    [
+      process.execPath,
+      join(import.meta.dir, '../../../../packages/agent/src/mcp/build-assets.ts'),
+      root,
+    ],
+    { stdout: 'inherit', stderr: 'inherit', timeout: 30000 },
+  );
+  if (!build.success) throw Error('mcp_source_fixture_asset_build_failed');
+  const assets = join(root, 'mcp');
+  return {
+    guardianPath: join(
+      assets,
+      process.platform === 'win32' ? 'windows-stdio-guardian.js' : 'stdio-guardian.js',
+    ),
+    bunExecutable: process.execPath,
+    ...(bubblewrap
+      ? {
+          linux: {
+            initExecutable: join(assets, 'linux-stdio-init'),
+            bubblewrapPath: realpathSync.native(bubblewrap),
+          },
+        }
+      : {}),
+  };
+}
+
 async function until<T>(read: () => Promise<T | null>) {
   const deadline = Date.now() + 5000;
   for (;;) {
@@ -38,6 +73,7 @@ async function fixture(
   safePolicy = false,
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-scoped-mcp-source-')));
+  const stdioAssets = stdio ? prepareStdio(root) : undefined;
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -45,6 +81,7 @@ async function fixture(
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const expectedStoreId = (await store.getMetadata()).storeId;
   const wire: string[] = [];
+  const bearerRejections: ('wrong' | 'unexpected')[] = [];
   let lookups = 0;
   let beforeLookup: (() => void) | undefined;
   let afterDns: (() => void) | undefined;
@@ -60,12 +97,22 @@ async function fixture(
       },
     },
   });
-  const credential = await vault.put('owned-temporary-bearer');
+  const credential = await vault.put(validBearer);
   const network = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       if (request.method !== 'POST') return new Response(null, { status: 405 });
+      if (credentialAuth) {
+        const authorization = request.headers.get('authorization');
+        if (authorization !== `Bearer ${validBearer}`) {
+          bearerRejections.push(authorization === `Bearer ${wrongBearer}` ? 'wrong' : 'unexpected');
+          return new Response(privateRejection, {
+            status: 401,
+            headers: { 'www-authenticate': 'Bearer' },
+          });
+        }
+      }
       const rpc = (await request.json()) as { method: string; id?: number };
       if (rpc.id === undefined) return new Response(null, { status: 202 });
       wire.push(rpc.method);
@@ -87,22 +134,6 @@ async function fixture(
     },
   });
   const ledger = join(root, 'stdio-wire.jsonl');
-  const built = stdio
-    ? await Bun.build({
-        entrypoints: [
-          join(
-            import.meta.dir,
-            process.platform === 'win32'
-              ? '../../../../packages/agent/src/mcp/windows-stdio-guardian.ts'
-              : '../../../../packages/agent/src/mcp/stdio-guardian.ts',
-          ),
-        ],
-        outdir: root,
-        naming: 'qualified-guardian.js',
-        target: 'bun',
-      })
-    : undefined;
-  if (built) expect(built.success).toBe(true);
   const raw = {
     ...(stdio
       ? {
@@ -137,9 +168,7 @@ async function fixture(
     runtime: () => runtime,
     credentialVault: vault,
     selection: () => selection,
-    ...(built
-      ? { stdio: { guardianPath: built.outputs[0]!.path, bunExecutable: process.execPath } }
-      : {}),
+    ...(stdioAssets ? { stdio: stdioAssets } : {}),
     http: {
       allowLoopbackForTests: true,
       resolveAddresses: async () => {
@@ -337,6 +366,10 @@ async function fixture(
     },
     expectedStoreId,
     credential,
+    bearerRejections,
+    setCredential(value: string | null) {
+      return value === null ? backend.remove(credential.id) : backend.put(credential.id, value);
+    },
     query,
     invoke,
     get lookups() {
@@ -564,14 +597,18 @@ test('actual reject and source drift after accepted approval are independent zer
   }
 });
 
-test('opaque credential is unavailable until actual independent bind; cold Query and approval never lookup vault', async () => {
+test.each([
+  'valid',
+  'missing',
+  'wrong',
+] as const)('bound static bearer %s uses the scoped vault and redacts public connection results', async (state) => {
   const f = await fixture(false, true);
   try {
     let metadata = await f.query(),
       server = object((metadata.items as Json[])[0]);
     expect(server.admitted).toBe(false);
     expect(server.reason).toBe('mcp_credential_binding_required');
-    expect(JSON.stringify(metadata)).not.toContain(f.credential.id);
+    expect(JSON.stringify(metadata).includes(f.credential.id)).toBe(false);
     expect(f.lookups).toBe(0);
     const pending = f.invoke(
       'mcp.credential.bind',
@@ -589,14 +626,33 @@ test('opaque credential is unavailable until actual independent bind; cold Query
     expect(server.admitted).toBe(true);
     expect(f.lookups).toBe(0);
     expect(f.wire).toEqual([]);
+    if (state !== 'valid') await f.setCredential(state === 'wrong' ? wrongBearer : null);
     const connected = await f.invoke(
       'mcp.connect',
       { serverId: server.id!, key: 'auth' },
       'connect-auth',
     );
-    expect(connected.status).toBe('succeeded');
     expect(f.lookups).toBeGreaterThan(0);
-    expect(f.wire).toContain('initialize');
+    expect(f.bearerRejections).toEqual(state === 'wrong' ? ['wrong'] : []);
+    if (state === 'valid') {
+      expect(connected.status).toBe('succeeded');
+      expect(f.wire).toContain('initialize');
+      expect(f.wire).toContain('tools/list');
+    } else {
+      expect(connected.status).toBe('failed');
+      expect(f.wire).toEqual([]);
+    }
+    const publicFacts = JSON.stringify([
+      await f.client.getCommand('connect-auth'),
+      await f.client.getExecution(connected.id),
+      await f.client.queryExtension('a', 'builtin.mcp', 'mcp.catalogue', {}),
+      await f.query(),
+    ]);
+    expect(
+      [validBearer, wrongBearer, privateRejection].some((privateValue) =>
+        publicFacts.includes(privateValue),
+      ),
+    ).toBe(false);
   } finally {
     await f.close();
   }

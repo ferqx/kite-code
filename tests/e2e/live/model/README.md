@@ -933,7 +933,7 @@ R08和R12在显式证据根中保存 `canonical-model-evidence.json`，逐项由
 
 当前runner先核准准确回执、Source、实际 ModelInput、文件字节及资源关闭，再按各自现场策略删除自有根或保留已关闭证据。精确交错模块指定报告路径时可保留成功样本的 canonical；Native也保留，普通TUI成功后删除，准确状态以原报告的 `canonicalEvidenceRetained` 为准。指定报告路径的非通过用例在关闭资源后保留原 canonical Store 和合成文件于对应 `.workspace`，仅用于准确本地复核；不另复制正文到诊断日志。关闭失败明确 failed 并保留现场。早期尝试不反推符合这项留存规则，其准确缺口见[执行结果](collaboration-v1.1-cases.md#2026-10-19utc真实执行结果)。报告仅包含代码 HEAD/非 Markdown 工作树摘要、OS/Bun、模型/Provider/协议、preset、时间、状态码、可信 schema 中的工具与字段名称、usage、断言和闭集失败类别，不包含凭据、endpoint、原身份、路径或请求/响应正文。
 
-公网 `test:mcp:live` 仍使用固定模型，只证明实际远端 MCP 链路。本目录旧 background、compaction 与旧 MCP 文件保留历史范围，不是当前 V1.1 或全平台验收入口。
+本机 `test:mcp:conformance` 使用固定模型和自有服务验证实际 MCP 协议；MCP 和模型 Provider 各自有独立的认证边界。本目录旧 background、compaction 与旧 MCP 文件保留历史范围，不是当前 V1.1 或全平台验收入口。
 
 ## 问答界面与越界读取
 

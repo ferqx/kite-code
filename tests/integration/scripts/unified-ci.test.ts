@@ -994,6 +994,63 @@ function nativeStdioFixture(source?: string) {
   return { root, command };
 }
 
+test('MCP protocol and authentication run on relevant PRs with independent mandatory reports', () => {
+  const path = '.github/workflows/mcp-conformance.yml';
+  const actual = resolve(import.meta.dir, '../../..');
+  const source = readFileSync(join(actual, path), 'utf8');
+  const workflow = parse(source);
+  expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'workflow_dispatch']);
+  expect(Object.keys(workflow.jobs)).toEqual(['mcp-conformance', 'macos-stdio-resources']);
+  expect(workflow.permissions).toEqual({ contents: 'read' });
+  for (const owner of [
+    'packages/agent/**',
+    'packages/ai/**',
+    'packages/client/**',
+    'apps/service/**',
+    'scripts/runtime/unified-mcp*',
+    'scripts/ci/verify-mcp-junit.py',
+    'tests/fixtures/mcp*/**',
+    'tests/isolated/unified-agent/**',
+    'package.json',
+    'bun.lock',
+    path,
+  ])
+    expect(workflow.on.pull_request.paths).toContain(owner);
+  const check = (changed: string) => {
+    const root = fixture();
+    put(root, 'package.json', {
+      scripts: { 'test:mcp:conformance': 'bun run scripts/runtime/unified-mcp-smoke.ts' },
+    });
+    put(root, 'scripts/runtime/unified-mcp-smoke.ts', 'export {};');
+    put(root, 'scripts/ci/verify-mcp-junit.py', '');
+    for (const file of workflow.jobs['mcp-conformance'].env.MCP_TEST_FILES.split(' '))
+      put(root, file, 'export {};');
+    put(root, path, changed);
+    return checkUnifiedFormalConsumers(root).violations.filter(
+      (v) => v.code === 'formal-ci-mcp-conformance-missing',
+    );
+  };
+  expect(check(source)).toEqual([]);
+  for (const [before, after] of [
+    ['bun run test:mcp:conformance', 'echo smoke'],
+    ['build-essential bubblewrap openssl', 'build-essential openssl'],
+    ['mcp-source-configuration.test.ts', 'other.test.ts'],
+    ['mcp-source-oauth-integration.test.ts', 'other.test.ts'],
+    ['mcp-oauth-network.test.ts', 'other.test.ts'],
+    ['mcp-oauth-session.test.ts', 'other.test.ts'],
+    ['mcp-resources-prompts.test.ts', 'other.test.ts'],
+    ["!cancelled() && steps.evidence.outcome == 'success'", 'success()'],
+    ['path: dist/unified-evidence/mcp-conformance.json', 'path: dist/unified-evidence/'],
+    ['path: dist/unified-evidence/mcp-contracts.xml', 'path: dist/unified-evidence/'],
+    ['runs-on: macos-15', 'runs-on: ubuntu-24.04'],
+    ['path: dist/unified-evidence/mcp-macos-stdio.xml', 'path: dist/unified-evidence/'],
+    ['python3 scripts/ci/verify-mcp-junit.py', 'echo skipped-verifier'],
+    ['if-no-files-found: error', 'if-no-files-found: warn'],
+  ] as const) {
+    expect(check(source.replace(before, after)), before).not.toEqual([]);
+  }
+});
+
 test('native stdio retains every complete MCP suite and the original unfiltered paired caller', () => {
   const code = 'formal-ci-mcp-stdio-missing';
   const { root, command } = nativeStdioFixture();

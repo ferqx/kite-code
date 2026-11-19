@@ -333,7 +333,7 @@
       "id": "mcp-control-plane",
       "sources": [
         ".github/workflows/mcp-native-keyring-smoke.yml",
-        ".github/workflows/mcp-langchain-live-smoke.yml"
+        ".github/workflows/mcp-conformance.yml"
       ],
       "authorities": [
         "docs/active/mcp-control-plane.md",

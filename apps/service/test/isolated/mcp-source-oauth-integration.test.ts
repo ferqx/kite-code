@@ -28,6 +28,7 @@ import {
   type McpOAuthLauncherEvidence,
 } from '../../src/mcp-oauth-launcher-evidence';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
+import { encodeFrames, responseFrames } from '../fixtures/responses-wire';
 
 const object = (v: unknown): Record<string, Json> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, Json>) : {};
@@ -55,12 +56,15 @@ async function peer(ownedLauncher = false) {
     initialize: 0,
     list: 0,
     tool: 0,
+    toolRequests: 0,
+    authenticatedExactToolRequests: 0,
   };
   let invalidRefresh = false,
     tokenGeneration = 0;
   const tokens = new Set<string>(),
     codes = new Map<string, { challenge: string; redirect: string }>();
   const active = new Set<McpServer>();
+  const privateValues = new Set<string>(['owned-client', 'code_verifier']);
   async function handleMcp(request: Request) {
     const sdk = new McpServer({ name: 'owned-oauth-peer', version: '1' });
     sdk.registerTool(
@@ -125,6 +129,8 @@ async function peer(ownedLauncher = false) {
         expect(url.searchParams.get('code_challenge_method')).toBe('S256');
         const code = `owned-code-${calls.authorize}`,
           redirect = url.searchParams.get('redirect_uri')!;
+        privateValues.add(code);
+        privateValues.add(url.searchParams.get('state')!);
         codes.set(code, { challenge: url.searchParams.get('code_challenge')!, redirect });
         const callback = new URL(redirect);
         callback.searchParams.set('code', code);
@@ -140,13 +146,17 @@ async function peer(ownedLauncher = false) {
         } else {
           const code = codes.get(body.get('code')!);
           expect(code).toBeDefined();
-          expect(createHash('sha256').update(body.get('code_verifier')!).digest('base64url')).toBe(
-            code!.challenge,
-          );
-          expect(body.get('redirect_uri')).toBe(code!.redirect);
+          const verifier = body.get('code_verifier')!;
+          privateValues.add(verifier);
+          expect(
+            createHash('sha256').update(verifier).digest('base64url') === code!.challenge,
+          ).toBe(true);
+          expect(body.get('redirect_uri') === code!.redirect).toBe(true);
           codes.delete(body.get('code')!);
         }
         const token = `owned-access-${++tokenGeneration}`;
+        privateValues.add(token);
+        privateValues.add(`owned-refresh-${tokenGeneration}`);
         tokens.clear();
         tokens.add(token);
         return Response.json({
@@ -164,7 +174,21 @@ async function peer(ownedLauncher = false) {
       }
       if (url.pathname !== '/mcp') return new Response(null, { status: 404 });
       const authorization = request.headers.get('authorization');
-      if (!authorization || !tokens.has(authorization.replace(/^Bearer /, ''))) {
+      const authenticated =
+        !!authorization?.startsWith('Bearer ') && tokens.has(authorization.slice(7));
+      const rpc = request.method === 'POST' ? object(await request.clone().json()) : {};
+      if (rpc.method === 'tools/call') {
+        const params = object(rpc.params);
+        calls.toolRequests++;
+        if (
+          authenticated &&
+          params.name === 'owned_effect' &&
+          mcpCanonical(params.arguments ?? null) === mcpCanonical({ value: 'exact' })
+        ) {
+          calls.authenticatedExactToolRequests++;
+        }
+      }
+      if (!authenticated) {
         calls.unauthorized++;
         return new Response(null, {
           status: 401,
@@ -173,17 +197,18 @@ async function peer(ownedLauncher = false) {
           },
         });
       }
-      if (request.method === 'POST') {
-        const rpc = object(await request.clone().json());
-        if (rpc.method === 'initialize') calls.initialize++;
-        if (rpc.method === 'tools/list') calls.list++;
-      }
+      if (rpc.method === 'initialize') calls.initialize++;
+      if (rpc.method === 'tools/list') calls.list++;
       return handleMcp(request);
     },
   });
   return {
     url: `${server.url.origin}/mcp`,
     counts: () => ({ ...calls }),
+    expectRedacted(value: unknown) {
+      const serialized = JSON.stringify(value);
+      expect([...privateValues].some((secret) => serialized.includes(secret))).toBe(false);
+    },
     invalidateRefresh() {
       invalidRefresh = true;
     },
@@ -262,11 +287,12 @@ async function fixture(
     });
   writeFileSync(sourcePath, source(), { mode: 0o600 });
   const holders: { close(): Promise<void> }[] = [];
-  async function launch(sessionId = 's') {
+  async function launch(sessionId = 's', hostConfiguration?: Json) {
     const configuration = createDefaultProcessConfiguration({
       userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
       observerSubjectId: options.observer ?? 'owner',
+      hostConfiguration,
       credentialBackend: backend,
       mcpSources: {
         http: { allowLoopbackForTests: true },
@@ -434,6 +460,7 @@ const result=await fetch(callback);if(result.status!==200)process.exit(3);`,
           'mcp.auth.result',
           { commandId: id },
         );
+        remote.expectRedacted(rows);
         expect(rows).toHaveLength(1);
         expect(rows[0]!.actions).toEqual([]);
         expect(rows[0]!.artifactRefs).toEqual([]);
@@ -556,14 +583,68 @@ function originalProof(
   expect(object(fact.execution).inputDigest).toBe(sha(original.execution.input));
 }
 
-test('implicit real 401 permits explicit Login; fresh connect and cold owned token resume do not auto-login or retry old Tools', async () => {
-  const f = await fixture('implicit', { ownedLauncher: true });
+test('implicit real 401 permits approved Login; only a fresh approved Run calls the Tool after cold token resume', async () => {
+  const f = await fixture('implicit', { ask: true, ownedLauncher: true });
+  let modelSteps = 0;
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const body = object(await request.json());
+      f.remote.expectRedacted([body, request.headers.get('authorization')]);
+      const step = ++modelSteps;
+      const tool = (body.tools as Json[])
+        .map(object)
+        .find((tool) => typeof tool.name === 'string' && tool.name.includes('_owned_effect_'));
+      if (step > 2 || typeof tool?.name !== 'string') throw Error('unexpected_oauth_model_step');
+      const turn =
+        step === 1
+          ? {
+              id: 'first',
+              calls: [{ id: 'effect', name: tool.name, arguments: '{"value":"exact"}' }],
+            }
+          : { id: 'second', text: ['Done'] };
+      return new Response(encodeFrames(responseFrames(turn, body)), {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    },
+  });
   try {
     const warm = await f.launch();
-    const absent = await warm.auth('before-401');
+    async function approve(host: typeof warm, definition: string | RegExp) {
+      const card = await until(
+        async () =>
+          (
+            await host.client.listInteractions('s', {
+              storeId: host.storeId,
+              state: 'pending',
+            })
+          ).interactions[0] ?? null,
+      );
+      expect(card.kind).toBe('approval');
+      if (typeof definition === 'string') expect(card.definitionId).toBe(definition);
+      else expect(card.definitionId).toMatch(definition);
+      expect(f.remote.counts().toolRequests).toBe(0);
+      if (definition === 'builtin.mcp.sources/mcp.auth.login') expect(f.counts().browser).toBe(0);
+      await host.client.answerInteraction('s', card.id, {
+        expectedStoreId: host.storeId,
+        commandId: `approve-${card.id}`,
+        expectedRevision: card.revision,
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+      });
+    }
+    async function connect(host: typeof warm, key: string) {
+      const connecting = host.connect(key);
+      await approve(host, 'builtin.mcp/mcp.connect');
+      await approve(host, 'mcp.source.connection');
+      return connecting;
+    }
+    const unavailable = warm.auth('before-401');
+    await approve(warm, 'builtin.mcp.sources/mcp.auth.login');
+    const absent = await unavailable;
     expect(absent.execution.status).toBe('failed');
     expect(f.counts().browser).toBe(0);
-    const challenged = await warm.connect('challenge');
+    const challenged = await connect(warm, 'challenge');
     expect(challenged.fact.phase).not.toBe('ready');
     expect(f.remote.counts().unauthorized).toBeGreaterThan(0);
     expect(f.counts().browser).toBe(0);
@@ -584,12 +665,15 @@ test('implicit real 401 permits explicit Login; fresh connect and cold owned tok
         details: { transportStopped: object(childResult.details).transportStopped ?? null },
       }),
     );
-    const login = await warm.auth('login');
+    const loggingIn = warm.auth('login');
+    await approve(warm, 'builtin.mcp.sources/mcp.auth.login');
+    const login = await loggingIn;
     const fact = await warm.history('login');
     originalProof(login, fact);
     expect(fact.phase).toBe('completed');
     expect(fact.authStatus).toBe('authenticated');
     const originalExecution = await warm.client.getExecution(login.execution.id);
+    f.remote.expectRedacted([originalExecution, login.execution]);
     const launcher = object(originalExecution.result).details as Record<string, Json>;
     const proof = launcher.ownedLauncher as unknown as McpOAuthLauncherEvidence;
     expect(proof).toMatchObject({
@@ -613,11 +697,9 @@ test('implicit real 401 permits explicit Login; fresh connect and cold owned tok
     expect(
       decodeMcpOAuthLauncherEvidence(proof, { ...proof.binding, sessionId: 'foreign' }),
     ).toBeUndefined();
-    expect(JSON.stringify(proof)).not.toContain('owned-code');
-    expect(JSON.stringify(proof)).not.toContain('owned-client');
-    expect(JSON.stringify(proof)).not.toContain('code_verifier');
     expect(f.remote.counts().initialize).toBe(0);
-    const connected = await warm.connect('fresh');
+    const connected = await connect(warm, 'fresh');
+    f.remote.expectRedacted([connected.fact, connected.execution]);
     if (connected.fact.phase !== 'ready') {
       const result = object(connected.execution.result);
       const code =
@@ -649,21 +731,62 @@ test('implicit real 401 permits explicit Login; fresh connect and cold owned tok
     expect(f.remote.counts().tool).toBe(0);
     await warm.close();
     const before = f.counts();
-    const cold = await f.launch();
+    const cold = await f.launch('s', {
+      configuration: {
+        modelId: 'owned',
+        models: [
+          {
+            id: 'owned',
+            provider: 'compatible',
+            protocol: 'responses',
+            model: 'owned',
+            baseURL: new URL('/v1', provider.url).href,
+          },
+        ],
+      },
+    });
     expect((await cold.history('login')).phase).toBe('completed');
     const coldExecution = await cold.client.getExecution(login.execution.id);
+    f.remote.expectRedacted(coldExecution);
     expect(object(object(coldExecution.result).details).ownedLauncher).toEqual(
       proof as unknown as Json,
     );
     expect(await cold.client.getExecution(login.execution.id)).toEqual(originalExecution);
     expect(f.counts()).toEqual(before);
-    const resumed = await cold.connect('cold-fresh');
+    const resumed = await connect(cold, 'cold-fresh');
     expect(resumed.fact.phase).toBe('ready');
     expect(f.counts().browser).toBe(before.browser);
     expect(f.remote.counts().register).toBe(before.remote.register);
     expect(f.remote.counts().tool).toBe(0);
     expect((await cold.runtime.getView('s')).runs).toEqual([]);
+    expect(modelSteps).toBe(0);
+    await cold.client.startRun('s', {
+      expectedStoreId: cold.storeId,
+      commandId: 'fresh-tool',
+      kind: 'run.start',
+      content: 'Call the connected owned_effect tool once with value exact.',
+    });
+    await approve(cold, /^mcp\.mcp-/);
+    await cold.runtime.waitForCommand('fresh-tool', { timeoutMs: 8000 });
+    const view = await cold.client.getView('s');
+    const run = view.runs.find((row) => row.originCommandId === 'fresh-tool')!;
+    expect(run.status).toBe('completed');
+    const tool = view.executions.find(
+      (row) => row.runId === run.id && row.definitionId?.startsWith('mcp.mcp-'),
+    )!;
+    expect(tool.status).toBe('succeeded');
+    expect(modelSteps).toBe(2);
+    expect(f.remote.counts()).toMatchObject({
+      toolRequests: 1,
+      authenticatedExactToolRequests: 1,
+      tool: 1,
+    });
+    const command = await cold.client.getCommand('fresh-tool');
+    const execution = await cold.client.getExecution(tool.id);
+    expect(JSON.stringify(execution.result).includes('owned effect')).toBe(true);
+    f.remote.expectRedacted([fact, resumed.fact, command, execution, view]);
   } finally {
+    provider.stop(true);
     await f.close();
   }
 }, 30000);

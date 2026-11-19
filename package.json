@@ -22,7 +22,7 @@
     "test": "bun run scripts/run-default-tests.ts",
     "test:all": "bun run test",
     "test:mock": "bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/compression-configuration.test.ts apps/service/test/isolated/compression-automatic-configuration.test.ts packages/agent/test/isolated/context/compression.test.ts packages/agent/test/isolated/storage/context-compression-history-source.test.ts",
-    "test:mcp:live": "bun run scripts/runtime/unified-mcp-live-smoke.ts",
+    "test:mcp:conformance": "bun run scripts/runtime/unified-mcp-smoke.ts",
     "test:model:tools:live": "bun run tests/e2e/live/model/model-tools.live.ts",
     "test:model:pdf:live": "bun run tests/e2e/live/model/pdf-vision.live.ts",
     "test:model:image:live": "bun run tests/e2e/live/model/image-vision.live.ts",

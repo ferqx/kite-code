@@ -38,7 +38,7 @@
     "scripts/runtime/unified-soak-native.ts",
     "scripts/runtime/unified-soak-report.ts",
     "scripts/runtime/unified-soak-verify.ts",
-    "scripts/runtime/unified-mcp-live-smoke.ts",
+    "scripts/runtime/unified-mcp-smoke.ts",
     "scripts/runtime/unified-session-log-acl.ts",
     "scripts/development/ensure-web.ts",
     "scripts/development/retired-entrypoints.ts",

@@ -15,7 +15,7 @@
 | [工具模型 runner](model-tools.live.ts)，根命令 test:model:tools:live | 当前 Agent Runtime、SQLite、SDK 和真实默认模型；直接创建 Runtime，没有经过正式 Client/Service HTTP；fixture 权限直接允许，child 无工具 | 已迁移当前六工具，检查稳定身份、两个 carrier/Run、idle 邮件及显式 follow-up、准确结果 Source 和父子热冷 ModelInput；无工具算术 child 只证明该局部路径 |
 | [协作 live 驱动](collaboration.live.ts)，根命令 test:model:collaboration:live | 正式 Service/Client HTTP、Runtime/SQLite，按 group/case 运行输入、根/子孙默认审批、标题、问答、Files 竞争与取消 | 所有模型闭包使用同一注入真实 adapter；准确可选用例与预算见[套件说明](README.md)。owned-fixture 权限与默认策略分别记录，缺少的 D 变体不计覆盖 |
 | 普通 Native、TUI、CLI 和正式 Service/Client | 当前公共输入、工作选择、模式管理、问题/审批、结果读取与恢复入口 | 下表 M 场景可按正常产品操作执行；需要只读核验原回执和持久关系。普通客户端不增加测试调试入口 |
-| [公网 MCP smoke](../../../../scripts/runtime/unified-mcp-live-smoke.ts)，根命令 test:mcp:live | 正式 Client→Service→Runtime→远端 MCP，但使用 createFixedModel | 只证明公网 MCP 链路；真实模型读取工具目录、选择及理解 MCP 需另按 P09 配对核验 |
+| [本机 MCP 协议检查](../../../../scripts/runtime/unified-mcp-smoke.ts)，根命令 `test:mcp:conformance` | Client → Service → Runtime → 两个自有 HTTP 端点，使用固定模型 | 验证 MCP 工具派发、返回、原始调用归属及错误；真模型协作沿对应本地入口单独验收。 |
 | 本目录旧 background、context-compaction 及旧 MCP live 文件 | 旧 App Server/Host/Kernel 路径；若干根 alias 已退出 | 保留历史范围，不作为当前 V1.1 的执行入口 |
 
 工具 smoke 和逐条协作用例命令如下；第二条需要 macOS 上已合格的原生 Shell。它们都不是整张矩阵的一键验收命令：

@@ -1,0 +1,120 @@
+name: MCP conformance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/ai/**"
+      - "packages/agent/**"
+      - "packages/client/**"
+      - "packages/trajectory/**"
+      - "apps/service/**"
+      - "native/**"
+      - "scripts/release/**"
+      - "scripts/runtime/unified-mcp*"
+      - "tests/fixtures/mcp*"
+      - "tests/fixtures/mcp*/**"
+      - "tests/fixtures/test-filesystem.ts"
+      - "tests/isolated/unified-agent/**"
+      - "tests/integration/scripts/unified-ci.test.ts"
+      - "scripts/check-unified-workspaces.ts"
+      - "scripts/ci/verify-mcp-junit.py"
+      - "package.json"
+      - "bun.lock"
+      - "patches/**"
+      - ".github/workflows/mcp-conformance.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mcp-conformance:
+    name: MCP protocol and authentication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      MCP_JUNIT: dist/unified-evidence/mcp-contracts.xml
+      MCP_TEST_FILES: >-
+        packages/agent/test/isolated/mcp/mcp.test.ts
+        packages/agent/test/isolated/mcp/reads.test.ts
+        packages/agent/test/isolated/mcp/failure-feedback.test.ts
+        apps/service/test/isolated/mcp-resources-prompts.test.ts
+        apps/service/test/isolated/mcp-source-configuration.test.ts
+        apps/service/test/isolated/mcp-credentials.test.ts
+        apps/service/test/isolated/mcp-oauth-actions.test.ts
+        apps/service/test/isolated/mcp-oauth-session.test.ts
+        apps/service/test/isolated/mcp-oauth-network.test.ts
+        apps/service/test/isolated/mcp-source-oauth-integration.test.ts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.4
+      - name: Prepare Linux guardian build and OAuth TLS fixtures
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap openssl
+      - run: bun install --frozen-lockfile
+      - name: Prepare evidence directory
+        id: evidence
+        run: mkdir -p dist/unified-evidence
+      - name: Exercise project-owned MCP endpoints
+        run: bun run test:mcp:conformance "--output=${{ github.workspace }}/dist/unified-evidence/mcp-conformance.json"
+      - name: Check transports, results, permissions and authentication
+        if: "!cancelled() && steps.evidence.outcome == 'success'"
+        shell: bash
+        run: |
+          read -r -a files <<< "$MCP_TEST_FILES"
+          bun test --parallel=1 --max-concurrency=1 --reporter=junit --reporter-outfile="$MCP_JUNIT" "${files[@]}"
+          python3 scripts/ci/verify-mcp-junit.py "$MCP_JUNIT" "${files[@]}"
+      - name: Preserve MCP evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcp-conformance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/unified-evidence/mcp-conformance.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Preserve protocol and authentication test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcp-contracts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/unified-evidence/mcp-contracts.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-stdio-resources:
+    name: MCP native stdio resources and prompts
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      MCP_JUNIT: dist/unified-evidence/mcp-macos-stdio.xml
+      MCP_TEST_FILES: apps/service/test/isolated/mcp-resources-prompts.test.ts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: mkdir -p dist/unified-evidence
+      - name: Run the complete resource and prompt suite on native macOS
+        shell: bash
+        run: |
+          read -r -a files <<< "$MCP_TEST_FILES"
+          bun test --parallel=1 --max-concurrency=1 --reporter=junit --reporter-outfile="$MCP_JUNIT" "${files[@]}"
+          python3 scripts/ci/verify-mcp-junit.py "$MCP_JUNIT" "${files[@]}"
+      - name: Preserve native resource and prompt results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcp-macos-stdio-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/unified-evidence/mcp-macos-stdio.xml
+          if-no-files-found: error
+          retention-days: 7

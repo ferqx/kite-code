@@ -1,25 +1,38 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   parseUnifiedMcpSmoke,
-  runUnifiedMcpLiveSmoke,
-} from '../../../scripts/runtime/unified-mcp-live-smoke';
+  runUnifiedMcpSmoke,
+} from '../../../scripts/runtime/unified-mcp-smoke';
 import {
   parseSessionLogAclArgs,
   runUnifiedSessionLogAcl,
 } from '../../../scripts/runtime/unified-session-log-acl';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
-test('MCP live gate is closed by default and is not network qualification', async () => {
-  expect(parseUnifiedMcpSmoke([], undefined)).toEqual({ output: null, enabled: false });
-  const evidence = await runUnifiedMcpLiveSmoke(false);
-  expect(evidence.status).toBe('disabled');
-  expect(evidence.qualified).toBe(false);
-  expect(evidence.networkAttempted).toBe(false);
-  expect(evidence.cleanup).toBe('not_started');
-});
+test('owned MCP smoke crosses the public Service, preserves tool outcomes and closes its peers', async () => {
+  expect(parseUnifiedMcpSmoke([])).toBeNull();
+  const evidence = await runUnifiedMcpSmoke();
+  expect(evidence.status, String(evidence.reason)).toBe('passed');
+  expect(evidence.cleanup).toBe('confirmed');
+  expect(evidence.modelRequests).toBe(5);
+  expect(evidence.toolExecutions).toMatchObject([
+    { source: 'alpha', outcome: 'succeeded' },
+    { source: 'beta', outcome: 'succeeded' },
+    { source: 'alpha', outcome: 'failed' },
+    { source: 'alpha', outcome: 'outcome_unknown' },
+  ]);
+}, 60000);
 test('smoke argument refusal occurs before filesystem creation or network admission', () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-smoke-argv-'));
   const absent = join(root, 'absent');
@@ -30,10 +43,9 @@ test('smoke argument refusal occurs before filesystem creation or network admiss
       [`--output=${absent}`, '--force'],
       ['--output='],
     ]) {
-      expect(() => parseUnifiedMcpSmoke(args, '1')).toThrow();
+      expect(() => parseUnifiedMcpSmoke(args)).toThrow();
       expect(() => parseSessionLogAclArgs(args)).toThrow();
     }
-    expect(() => parseUnifiedMcpSmoke([`--output=${absent}`], 'yes')).toThrow();
     expect(existsSync(absent)).toBe(false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -86,7 +98,7 @@ test('source-free runtime smokes use the candidate Bun and actual public SQLite 
   async function child(argv: string[], cwd: string, home: string, expectedCode = 0) {
     const process = Bun.spawn(argv, {
       cwd,
-      env: { HOME: home, PATH: globalThis.process.env.PATH ?? '', KITE_RUN_LIVE_MCP_SMOKE: '0' },
+      env: { HOME: home, PATH: globalThis.process.env.PATH ?? '' },
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -126,7 +138,7 @@ test('source-free runtime smokes use the candidate Bun and actual public SQLite 
         process.execPath,
         'build',
         join(repository, 'scripts/runtime/unified-session-log-acl.ts'),
-        join(repository, 'scripts/runtime/unified-mcp-live-smoke.ts'),
+        join(repository, 'scripts/runtime/unified-mcp-smoke.ts'),
         '--target=bun',
         '--packages=external',
         `--outdir=${app}`,
@@ -160,14 +172,15 @@ test('source-free runtime smokes use the candidate Bun and actual public SQLite 
     }
     const mcp = JSON.parse(
       await child(
-        [join(candidate.root, 'runtime/bun'), join(app, 'unified-mcp-live-smoke.js')],
+        [join(candidate.root, 'runtime/bun'), join(app, 'unified-mcp-smoke.js')],
         app,
         home,
       ),
     );
-    expect(mcp.status).toBe('disabled');
-    expect(mcp.qualified).toBe(false);
-    expect(mcp.networkAttempted).toBe(false);
+    expect(mcp.status).toBe('passed');
+    expect(mcp.cleanup).toBe('confirmed');
+    expect(mcp.transport).toBe('streamable-http');
+    expect(mcp.toolExecutions).toHaveLength(4);
     expect(existsSync(join(candidate.root, 'node_modules/@kite-ai/agent/src'))).toBe(false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -177,7 +190,7 @@ test('source-free runtime smokes use the candidate Bun and actual public SQLite 
 test('actual entrypoint invalid argv exits nonzero before creating evidence or profiles', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-smokes-invalid-')));
   try {
-    for (const script of ['unified-mcp-live-smoke.ts', 'unified-session-log-acl.ts']) {
+    for (const script of ['unified-mcp-smoke.ts', 'unified-session-log-acl.ts']) {
       const output = join(root, `${script}.json`);
       const owned = Bun.spawn(
         [
@@ -191,7 +204,6 @@ test('actual entrypoint invalid argv exits nonzero before creating evidence or p
           env: {
             HOME: root,
             PATH: process.env.PATH ?? '',
-            KITE_RUN_LIVE_MCP_SMOKE: '1',
             BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
           },
           stdout: 'pipe',
@@ -222,3 +234,49 @@ test('actual entrypoint invalid argv exits nonzero before creating evidence or p
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform === 'win32')(
+  'MCP JUnit requires actual assertions from every owner and the native stdio case on macOS',
+  () => {
+    const script = resolve(import.meta.dir, '../../../scripts/ci/verify-mcp-junit.py');
+    const root = mkdtempSync(join(tmpdir(), 'kite-mcp-junit-'));
+    try {
+      const owner = 'apps/service/test/isolated/mcp-resources-prompts.test.ts';
+      const native =
+        'default stdio resources/prompts use real original live connection, complete low-trust Model body and ordinary records';
+      const original = `<testsuites failures="0"><testsuite file="${owner}" failures="0"><testcase name="http" assertions="4"/><testcase name="${native}" assertions="1"/></testsuite></testsuites>`;
+      const check = (xml: string, host: string) => {
+        writeFileSync(join(root, 'report.xml'), xml);
+        return Bun.spawnSync(
+          [
+            'python3',
+            '-c',
+            "import runpy,sys; runpy.run_path(sys.argv[1])['verify'](sys.argv[2], [sys.argv[3]], sys.argv[4])",
+            script,
+            join(root, 'report.xml'),
+            owner,
+            host,
+          ],
+          { stdout: 'ignore', stderr: 'ignore' },
+        ).exitCode;
+      };
+      expect(check(original, 'darwin')).toBe(0);
+      const skipped = original.replace('assertions="1"/>', 'assertions="0"><skipped/></testcase>');
+      expect(check(skipped, 'linux')).toBe(0);
+      expect(check(skipped, 'darwin')).not.toBe(0);
+      for (const xml of [
+        '',
+        '<broken',
+        '<testsuites/>',
+        skipped.replace('assertions="4"', 'assertions="0"'),
+        skipped.replace(owner, 'other.test.ts'),
+        original.replace(native, 'other case'),
+        original.replace('assertions="4"/>', 'assertions="0"><skipped/></testcase>'),
+        original.replace('assertions="4"/>', 'assertions="0"><failure/></testcase>'),
+      ])
+        expect(check(xml, 'linux')).not.toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
