@@ -7653,6 +7653,156 @@ for (const leave of [false, true])
     }
   });
 
+test('default preparation waits for its current Main observation without starting either reader or a write', async () => {
+  const f = fixture(true, true, 'accept_edits', { withoutSelection: true, workspaceIds: [] });
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let offline = true;
+  let prematureReads = 0;
+  f.drafts.set('new-conversation', 'saved while closed');
+  bridge.request = async (input) => {
+    if (input.method === 'attach' || input.method === 'state') {
+      const value = await request(input);
+      if (value && 'generation' in value) return { ...value, backgroundUnavailable: offline };
+      return value;
+    }
+    if (
+      offline &&
+      (input.method === 'conversation.models.read' ||
+        (input.method === 'draft.read' && input.sessionId === 'new-conversation'))
+    ) {
+      prematureReads++;
+      throw Error('native_generation_changed');
+    }
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    expect((f.input() as HTMLTextAreaElement | null)?.readOnly).toBe(true);
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    expect(
+      f.calls.filter((call) => ['draft.read', 'conversation.models.read'].includes(call.method)),
+    ).toHaveLength(0);
+    expect(prematureReads).toBe(0);
+    offline = false;
+    await f.refreshFacts();
+    await f.until(
+      () =>
+        promptValue(f.input()) === 'saved while closed' &&
+        (f.input() as HTMLTextAreaElement | null)?.readOnly === false,
+    );
+    expect(f.calls.filter((call) => call.method === 'conversation.models.read')).toHaveLength(1);
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    expect(
+      f.calls.filter((call) =>
+        ['conversation.send', 'submit', 'draft.write'].includes(call.method),
+      ),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a temporary preparation association miss waits and keeps the cold draft even with no project', async () => {
+  const f = fixture(true, true, 'accept_edits', { withoutSelection: true, workspaceIds: [] });
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let attempts = 0;
+  f.drafts.set('new-conversation', 'keep saved text');
+  bridge.request = async (input) => {
+    if (input.method === 'draft.read' && input.sessionId === 'new-conversation' && ++attempts === 1)
+      throw Error('draft_association_unavailable');
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    expect(attempts).toBe(1);
+    expect((f.input() as HTMLTextAreaElement | null)?.readOnly).toBe(true);
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    await f.until(
+      () =>
+        promptValue(f.input()) === 'keep saved text' &&
+        (f.input() as HTMLTextAreaElement | null)?.readOnly === false,
+    );
+    expect(attempts).toBe(2);
+    expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    expect(f.drafts.get('new-conversation')).toBe('keep saved text');
+    expect(
+      f.calls.filter((call) =>
+        ['conversation.send', 'submit', 'draft.write'].includes(call.method),
+      ),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const replaceGeneration of [false, true])
+  test(`dirty preparation retains both copies across ${replaceGeneration ? 'replacement generation' : 'observation recovery'} instead of rebasing onto a competing save`, async () => {
+    const f = fixture(true, true, 'accept_edits', { withoutSelection: true });
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    let offline = false;
+    f.drafts.set('new-conversation', 'original at r1');
+    const outsideWrite = (revision: number, content: string) =>
+      request({
+        method: 'draft.write',
+        generation: 1,
+        sessionId: 'new-conversation',
+        revision,
+        content,
+      });
+    let ownWrites = 0;
+    bridge.request = async (input) => {
+      if (input.method === 'draft.write') ownWrites++;
+      const reply = await request(input);
+      if ((input.method === 'attach' || input.method === 'state') && reply && 'generation' in reply)
+        return { ...reply, backgroundUnavailable: offline };
+      return reply;
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.chooseModel();
+      await f.edit('my pending edit');
+      offline = true;
+      await f.refreshFacts();
+      expect((f.input() as HTMLTextAreaElement).readOnly).toBe(true);
+      await outsideWrite(1, 'different saved revision');
+      offline = false;
+      if (replaceGeneration) await f.reconnect();
+      else await f.refreshFacts();
+      const conflict = () =>
+        f.host.querySelector('.native-toast-card')?.textContent?.includes('未覆盖任何内容');
+      await f.until(() => !!conflict());
+      expect(promptValue(f.input())).toBe('my pending edit');
+      expect((f.input() as HTMLTextAreaElement).readOnly).toBe(true);
+      await f.click('发送首条消息');
+      await expect(f.flushDrafts()).rejects.toThrow();
+      await f.click('新对话');
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 550));
+      });
+      expect(ownWrites).toBe(0);
+      expect(f.drafts.get('new-conversation')).toBe('different saved revision');
+      expect(promptValue(f.input())).toBe('my pending edit');
+      expect((f.input() as HTMLTextAreaElement).readOnly).toBe(true);
+      expect(
+        f.calls.filter((call) => ['conversation.send', 'submit'].includes(call.method)),
+      ).toHaveLength(0);
+      // A matching, confirmed durable copy (e.g. a lost save ACK) safely resolves
+      // the conflict. Re-opening the *same* new page must retry the actual read.
+      await outsideWrite(2, 'my pending edit');
+      await f.click('新对话');
+      await f.until(() => !(f.input() as HTMLTextAreaElement).readOnly);
+      expect(promptValue(f.input())).toBe('my pending edit');
+      await act(async () => f.flushDrafts());
+      expect(ownWrites).toBe(0);
+      expect(f.host.querySelector('.native-toast-card')).toBeNull();
+    } finally {
+      await f.close();
+    }
+  });
+
 test('draft feedback reports preparation read failure as a Toast without an inline placeholder and clears after confirmed recovery', async () => {
   const f = fixture(true, true, 'accept_edits', { withoutSelection: true });
   const bridge = f.dom.window.kiteNative! as NativeBridge,
@@ -7669,7 +7819,6 @@ test('draft feedback reports preparation read failure as a Toast without an inli
     expect(f.host.querySelector('.composer-input-error')).toBeNull();
     expect((f.input() as HTMLTextAreaElement).readOnly).toBe(true);
     fail = false;
-    await f.click('Original A');
     await f.click('新对话');
     await f.until(() => !!f.input() && !(f.input() as HTMLTextAreaElement).readOnly);
     expect(f.host.querySelector('.native-toast-card')).toBeNull();

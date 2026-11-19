@@ -115,6 +115,16 @@ function previousSessionEffort(
     (value) => value === effort,
   );
 }
+// Only interrupted reads may recover without a new user decision. Malformed facts,
+// permission errors and Store identity mismatches remain failures of the current read.
+const interruptedPreparationReads = new Set([
+  'connection_not_admitted',
+  'connection_superseded',
+  'native_generation_changed',
+  'native_selection_changed',
+  'native_read_timeout',
+  'network_outcome_unknown',
+]);
 function errorCode(cause: unknown) {
   const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
   return /^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code : 'model_selection_unavailable';
@@ -399,8 +409,20 @@ export function NativeModelPicker({
       return;
     }
     setState({ key: readKey, facts: retained, error: '', reading: true });
-    void snapshots.prepare(bridge, generation, selection, preparing, revision).then((result) => {
-      if (current.current !== original || sequence.current !== request) return;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const ownsRead = () => current.current === original && sequence.current === request;
+    async function read(again: boolean) {
+      if (!ownsRead()) return;
+      // Only existing Sessions share their navigation prefetch. Re-admitting a
+      // preparation must never adopt a GET started before its page was suspended.
+      const result = preparing
+        ? await prepareNativeModels(bridge, generation, selection, preparing, revision)
+        : await snapshots.prepare(bridge, generation, selection, undefined, revision);
+      if (!ownsRead()) return;
+      if (preparing && again && interruptedPreparationReads.has(result.error)) {
+        retry = setTimeout(() => void read(false), 250);
+        return;
+      }
       if (result.facts) snapshots.set(scope, result.facts);
       if (result.error) reportFailure('暂时无法读取模型列表，请稍后再试。');
       else if (!protocol.unavailable) reported.current.messages.clear();
@@ -410,8 +432,10 @@ export function NativeModelPicker({
         error: result.error,
         reading: false,
       });
-    });
+    }
+    void read(true);
     return () => {
+      clearTimeout(retry);
       sequence.current++;
     };
   }, [readKey, bridge, prepared, disabled, preview]);

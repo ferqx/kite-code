@@ -762,6 +762,128 @@ test('ordinary pending catalogue reads keep a compact busy control and genuine f
   }
 });
 
+test('new-conversation admission retries an interrupted catalogue once, and never publishes a transient error or grants cached send eligibility', async () => {
+  const f = fixture();
+  const errors: string[] = [];
+  const requests: {
+    resolve(value: NativeModelSettingsFacts): void;
+    reject(reason: Error): void;
+  }[] = [];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: (request) => {
+      expect(request.method).toBe('conversation.models.read');
+      return new Promise((resolve, reject) => requests.push({ resolve, reject }));
+    },
+  };
+  let ready = false;
+  const render = (disabled: boolean) =>
+    act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          preparing={{ storeId: 'store' }}
+          value={{ modelId: 'a' }}
+          disabled={disabled}
+          onChange={() => {}}
+          onReady={(next) => {
+            ready = next;
+          }}
+          onError={(message) => errors.push(message)}
+        />,
+      ),
+    );
+  const waitForRetry = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+  try {
+    await render(true);
+    expect(requests).toHaveLength(0);
+    await render(false);
+    await act(async () => requests[0]!.reject(Error('native_generation_changed')));
+    expect(ready).toBe(false);
+    expect(errors).toEqual([]);
+    expect(f.element.querySelector('[data-model-picker]')?.getAttribute('aria-busy')).toBe('true');
+    await waitForRetry();
+    expect(requests).toHaveLength(2);
+    await act(async () => requests[1]!.resolve(facts));
+    expect(ready).toBe(true);
+    expect(errors).toEqual([]);
+
+    await render(true);
+    await render(false);
+    expect(ready).toBe(false);
+    await act(async () => requests[2]!.reject(Error('network_outcome_unknown')));
+    await waitForRetry();
+    expect(requests).toHaveLength(4);
+    await act(async () => requests[3]!.reject(Error('network_outcome_unknown')));
+    expect(errors).toEqual(['暂时无法读取模型列表，请稍后再试。']);
+    expect(ready).toBe(false);
+    await waitForRetry();
+    expect(requests).toHaveLength(4);
+  } finally {
+    await f.close();
+  }
+});
+
+test('renewed preparation admission does not reuse a suspended read, retry a foreign Store, or issue a delayed GET after navigation', async () => {
+  const f = fixture();
+  const requests: {
+    resolve(value: NativeModelSettingsFacts): void;
+    reject(reason: Error): void;
+  }[] = [];
+  const errors: string[] = [];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: () => new Promise((resolve, reject) => requests.push({ resolve, reject })),
+  };
+  let ready = false;
+  const render = (disabled: boolean) =>
+    act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          preparing={{ storeId: 'store' }}
+          value={{ modelId: 'a' }}
+          disabled={disabled}
+          onChange={() => {}}
+          onReady={(next) => {
+            ready = next;
+          }}
+          onError={(message) => errors.push(message)}
+        />,
+      ),
+    );
+  try {
+    await render(false);
+    await render(true);
+    await render(false);
+    expect(requests).toHaveLength(2);
+    await act(async () => requests[0]!.resolve(facts));
+    expect(ready).toBe(false);
+    expect(errors).toEqual([]);
+    await act(async () => requests[1]!.resolve({ ...facts, storeId: 'foreign' }));
+    expect(ready).toBe(false);
+    expect(errors).toEqual(['暂时无法读取模型列表，请稍后再试。']);
+
+    await render(true);
+    await render(false);
+    await act(async () => requests[2]!.reject(Error('connection_superseded')));
+    await render(true);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(requests).toHaveLength(3);
+    expect(errors).toHaveLength(1);
+    expect(ready).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
 test('returning to a cached Session retains its model button while rereading, and late catalogues cannot replace the next Session', async () => {
   const f = fixture(),
     ready: boolean[] = [],
