@@ -359,18 +359,17 @@ test('forced backend sends only one query, confirms search, and does not invent 
 });
 test('loopback receives exactly one POST when disconnected before first SSE or after search starts', async () => {
   for (const afterFirst of [false, true]) {
-    let requests = 0;
+    const methods: (string | undefined)[] = [];
     const server: Server = createServer((req, res) => {
       req.resume();
       req.on('end', () => {
-        requests++;
+        methods.push(req.method);
         if (!afterFirst) {
           res.socket?.destroy();
           return;
         }
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         res.write(created + searching);
-        setTimeout(() => res.socket?.destroy(), 20);
       });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -386,13 +385,31 @@ test('loopback receives exactly one POST when disconnected before first SSE or a
           ['bound', createCompatibleModelBinding({ ...options, fetch: transport })],
         ]),
       });
-      const err = await collect(adapter).then(
-        () => null,
-        (e) => e,
+      const searchEvents: ModelEvent[] = [];
+      let error: unknown;
+      try {
+        for await (const event of adapter.stream(req, { signal: AbortSignal.timeout(4_000) })) {
+          if (event.type === 'web_search' && event.observation.kind === 'activity') {
+            searchEvents.push(event);
+            server.closeAllConnections();
+          }
+        }
+      } catch (cause) {
+        error = cause;
+      }
+      expect(searchEvents).toEqual(
+        afterFirst
+          ? [
+              {
+                type: 'web_search',
+                observation: { kind: 'activity', callId: 'ws_1', status: 'searching' },
+              },
+            ]
+          : [],
       );
-      expect(ModelAttemptError.isInstance(err)).toBe(true);
-      expect(err.retrySafety).toBe(afterFirst ? 'unsafe' : 'unknown');
-      expect(requests).toBe(1);
+      expect(ModelAttemptError.isInstance(error)).toBe(true);
+      expect(error).toMatchObject({ retrySafety: afterFirst ? 'unsafe' : 'unknown' });
+      expect(methods).toEqual(['POST']);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
