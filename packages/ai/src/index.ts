@@ -31,6 +31,35 @@ export interface ModelMessage {
   readonly continuation?: Json;
 }
 
+/** Sealed, destination-bound transport data. The raw provider text never leaves the adapter. */
+export function sealedModelHistory(message: ModelMessage) {
+  const value = message.continuation;
+  return value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    value.format === 'deepseek-chat-reasoning-v1'
+    ? value
+    : undefined;
+}
+
+/** Other adapters and tools-free model use have no use for the ciphertext. */
+export async function boundModelHistory(request: ModelRequest, model: ModelAdapter) {
+  if (!request.messages.some(sealedModelHistory)) return request;
+  const binding = request.tools.length
+    ? await model.privateHistoryBinding?.(request.modelId)
+    : undefined;
+  return {
+    ...request,
+    messages: request.messages.map((message) => {
+      const value = sealedModelHistory(message);
+      if (!value || (binding && value.binding === binding && value.route === request.modelId))
+        return message;
+      const { continuation: _sealed, ...plain } = message;
+      return plain;
+    }),
+  };
+}
+
 export const imageMediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
 export interface ModelImage {
   readonly mediaType: (typeof imageMediaTypes)[number];
@@ -112,6 +141,8 @@ export type ModelEvent =
     };
 
 export interface ModelAdapter {
+  /** A one-way destination identifier for host-sealed private assistant history. */
+  privateHistoryBinding?(modelId: string): Promise<string | undefined>;
   nativeWebSearchCapability?(modelId: string): NativeWebSearchCapability;
   /** Pure binding facts, captured before dispatch. Absence means adapter metadata is unavailable. */
   describeRequest?(request: ModelRequest): ModelAdapterSnapshot;

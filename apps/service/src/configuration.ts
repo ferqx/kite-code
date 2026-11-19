@@ -93,7 +93,12 @@ import {
   type McpSourceConfigurationOptions,
 } from './mcp-source-configuration';
 import { parseModelPreset } from './model-options';
-import { isSupportedModelProvider, modelProtocol, providerModelFetch } from './model-providers';
+import {
+  isSupportedModelProvider,
+  modelProtocol,
+  providerConnectionId,
+  providerModelFetch,
+} from './model-providers';
 import { modelRequestCompression } from './model-request-compression';
 import { resolveModelTransport } from './model-transport';
 import {
@@ -829,6 +834,7 @@ export function createDefaultProcessConfiguration(options: {
       baseURL: selected.baseURL!,
       modelId: selected.model,
       apiKey,
+      ...(selected.provider === 'deepseek' ? { accountId: providerConnectionId(selected) } : {}),
       fetch: modelRequestCompression(
         {
           provider: selected.provider,

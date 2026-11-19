@@ -4,6 +4,7 @@ import {
   type ModelMessage,
   type ModelRequest,
   ModelRequestLimitError,
+  sealedModelHistory,
 } from '@kite-ai/ai';
 import { trajectoryAttributesSchemas } from '@kite-ai/trajectory';
 import type { ArtifactContentStore, ArtifactReadInput } from './artifact-port';
@@ -3372,6 +3373,7 @@ export class AgentRuntime {
       const actual = structuredClone({ ...input.request, requestId: randomUUID() });
       const raw = JSON.parse(JSON.stringify(actual)) as Json;
       const body =
+        actual.messages.some(sealedModelHistory) ||
         Buffer.byteLength(canonicalJson(raw)) > 64 * 1024
           ? await this.publishBody(scope, raw)
           : undefined;
@@ -11308,7 +11310,11 @@ export class AgentRuntime {
     const input = JSON.parse(JSON.stringify(request)) as Json;
     // Projection may shrink an artifact-backed history below the transport threshold.
     // Keep its existing body proof: SQL cannot expand the original private modelInput.
-    if (Buffer.byteLength(canonicalJson(input)) <= 64 * 1024) return input;
+    if (
+      !request.messages.some(sealedModelHistory) &&
+      Buffer.byteLength(canonicalJson(input)) <= 64 * 1024
+    )
+      return input;
     const body = await this.publishBody(scope, input);
     // Identity and actual tool manifest remain visible to durable authorization; body is immutable.
     return {

@@ -1,4 +1,9 @@
-import { type ModelAdapter, ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
+import {
+  boundModelHistory,
+  type ModelAdapter,
+  ModelAttemptError,
+  type ModelRequest,
+} from '@kite-ai/ai';
 import type {
   AuthorizationCheckAnswer,
   AuthorizationCheckOutput,
@@ -146,10 +151,13 @@ export async function runInternalModelCall(options: {
     const providerRequest = structuredClone(options.request);
     if (providerRequest.nativeWebSearch !== undefined)
       throw new AgentError('internal_model_binding_changed');
-    const neutralRequest = {
-      ...providerRequest,
-      messages: nativeSearchMessages(providerRequest.messages, undefined),
-    };
+    const neutralRequest = await boundModelHistory(
+      {
+        ...providerRequest,
+        messages: nativeSearchMessages(providerRequest.messages, undefined),
+      },
+      options.model,
+    );
     signal.throwIfAborted();
     if (options.timing) options.timing.providerStartedAt = Date.now();
     const stream =

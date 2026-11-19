@@ -14,6 +14,7 @@ import {
   tool,
   wrapLanguageModel,
 } from 'ai';
+import { DeepSeekHistory, DeepSeekReasoning } from './deepseek-continuation';
 import type {
   Json,
   ModelAdapter,
@@ -45,6 +46,7 @@ const officialSearchBindings = new WeakSet<object>();
 const nativeToolName = 'web_search';
 const nativeDialect = 'openai-web-search';
 const nativeSerializer = 'openai-4.0.19-websearch-backport-v1';
+const deepSeekBindings = new WeakMap<object, DeepSeekHistory>();
 const responseBindings = new WeakMap<object, string>();
 
 function wireObject(value: unknown): Record<string, unknown> | undefined {
@@ -144,6 +146,7 @@ function messages(
   request: ModelRequest,
   encodeTool: (name: string) => string,
   binding?: string,
+  privateReasoning?: ReadonlyMap<ModelRequest['messages'][number], string>,
 ): SdkMessage[] {
   const calls = new Map<string, string>();
   const encoded = request.messages.map((message): SdkMessage => {
@@ -210,9 +213,11 @@ function messages(
           }) as unknown as Extract<SdkMessage, { role: 'assistant' }>['content'],
         };
       }
+      const reasoning = privateReasoning?.get(message);
       return {
         role: 'assistant',
         content: [
+          ...(reasoning === undefined ? [] : [{ type: 'reasoning' as const, text: reasoning }]),
           { type: 'text', text: message.content },
           ...(message.toolCalls ?? []).map((call) => {
             const toolName = encodeTool(call.name);
@@ -381,7 +386,12 @@ export function createSdkModelAdapter(options: {
       },
       transformation: {
         id: 'kite.sdk.messages',
-        version: provider?.protocol === 'responses' ? '7' : '5',
+        version:
+          provider?.protocol === 'responses'
+            ? '7'
+            : deepSeekBindings.has(model as object)
+              ? '8'
+              : '5',
       },
     };
   };
@@ -395,6 +405,12 @@ export function createSdkModelAdapter(options: {
     return openAIWebSearchModelCapability(facts.modelId, presets.get(id)?.reasoningEffort);
   };
   return {
+    async privateHistoryBinding(modelId) {
+      const model = models.get(modelId);
+      return model && typeof model === 'object'
+        ? deepSeekBindings.get(model)?.binding()
+        : undefined;
+    },
     nativeWebSearchCapability,
     describeRequest,
     async *stream(request, { signal }) {
@@ -413,6 +429,9 @@ export function createSdkModelAdapter(options: {
       )
         throw new Error('native_web_search_unavailable');
       const search = native ? new NativeWebSearchStream() : undefined;
+      const deepSeek = deepSeekBindings.get(model as object);
+      const privateOutput = deepSeek && new DeepSeekReasoning();
+      let assistantText = '';
       const rawBinding =
         typeof model === 'object' && model !== null ? responseBindings.get(model) : undefined;
       const binding =
@@ -473,7 +492,7 @@ export function createSdkModelAdapter(options: {
         idsByPosition.set(index, id);
       };
       // Validate local history before entering the Provider failure/reconnect boundary.
-      const history = messages(request, names.encode, binding);
+      const history = messages(request, names.encode, binding, await deepSeek?.restore(request));
       try {
         const { reasoningEffort, ...settings } = presets.get(request.modelId) ?? {};
         let continuation: Json | undefined;
@@ -538,6 +557,7 @@ export function createSdkModelAdapter(options: {
           switch (part.type) {
             case 'raw': {
               const value = part.rawValue;
+              privateOutput?.observe(value);
               if (search)
                 for (const observation of search.read(value))
                   yield { type: 'web_search', observation };
@@ -563,10 +583,11 @@ export function createSdkModelAdapter(options: {
               break;
             case 'text-delta':
               search?.text(part.text);
+              if (privateOutput) assistantText += part.text;
               yield { type: 'text_delta', text: part.text };
               break;
             case 'reasoning-delta':
-              yield { type: 'reasoning_delta', text: part.text };
+              if (!privateOutput) yield { type: 'reasoning_delta', text: part.text };
               break;
             case 'tool-input-delta':
               argumentsById.set(part.id, (argumentsById.get(part.id) ?? '') + part.delta);
@@ -630,7 +651,17 @@ export function createSdkModelAdapter(options: {
               const usage = recordedUsage ?? sdkModelUsage(part.totalUsage);
               if (provider)
                 callIds.sort((left, right) => positions.get(left)! - positions.get(right)!);
-              for (const id of callIds) yield { type: 'tool_call', ...completedCalls.get(id)! };
+              const calls = callIds.map((id) => completedCalls.get(id)!);
+              if (deepSeek && privateOutput?.text && !(reason === 'length' && calls.length)) {
+                continuation = await deepSeek.seal(
+                  request.modelId,
+                  request.requestId,
+                  assistantText,
+                  calls,
+                  privateOutput.text,
+                );
+              }
+              for (const call of calls) yield { type: 'tool_call', ...call };
               yield {
                 type: 'finish',
                 ...(search?.truncated ? { webSearchTruncated: true as const } : {}),
@@ -710,6 +741,7 @@ export function createSdkModelAdapter(options: {
         if (
           error instanceof Error &&
           [
+            'model_continuation_limit',
             'search_not_performed',
             'search_failed',
             'search_incomplete',
@@ -738,6 +770,8 @@ export function createCompatibleModelBinding(options: {
   apiKey?: string;
   headers?: Record<string, string>;
   fetch?: OpenAICompatibleProviderSettings['fetch'];
+  /** Host-configured connection identity. Never taken from model input. */
+  accountId?: string;
   /** Trusted Codex source/account/subject digest; never supplied by ModelRequest or config. */
   continuationIdentity?: { readonly kind: 'codex-local-auth'; readonly value: string };
 }): LanguageModel {
@@ -777,6 +811,13 @@ export function createCompatibleModelBinding(options: {
     !!options.apiKey?.trim() &&
     Object.keys(options.headers ?? {}).length === 0 &&
     identity === undefined;
+  const officialDeepSeek =
+    options.name === 'deepseek' &&
+    protocol === 'chat-completions' &&
+    /^https:\/\/api\.deepseek\.com(?:\/v1)?\/?$/.test(options.baseURL) &&
+    ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro'].includes(options.modelId) &&
+    !!options.apiKey?.trim() &&
+    Object.keys(options.headers ?? {}).length === 0;
   const model =
     protocol === 'responses'
       ? wrapLanguageModel({
@@ -846,7 +887,13 @@ export function createCompatibleModelBinding(options: {
           name: options.name ?? 'compatible',
           apiKey: options.apiKey,
           headers: options.headers,
-          fetch: options.fetch,
+          fetch: officialDeepSeek
+            ? Object.assign(
+                (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+                  transportFetch(input, { ...init, redirect: 'error' }),
+                { preconnect: globalThis.fetch.preconnect },
+              )
+            : options.fetch,
           includeUsage: true,
           // The SDK compatible default fills missing fields in a partial usage object
           // with zero. Preserve absent Provider measurements as unknown instead.
@@ -873,6 +920,16 @@ export function createCompatibleModelBinding(options: {
             };
           },
         }).chatModel(options.modelId);
+  if (officialDeepSeek)
+    deepSeekBindings.set(
+      model,
+      new DeepSeekHistory(
+        options.baseURL.replace(/\/$/, ''),
+        options.modelId,
+        options.accountId,
+        options.apiKey!,
+      ),
+    );
   if (official) officialSearchBindings.add(model);
   if (protocol === 'responses')
     responseBindings.set(

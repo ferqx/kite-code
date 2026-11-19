@@ -1,4 +1,5 @@
 import {
+  boundModelHistory,
   type ModelAdapter,
   ModelAttemptError,
   type ModelRequest,
@@ -1401,7 +1402,9 @@ export class UnifiedExecution {
       scope.signal.throwIfAborted();
       nativeSent = !!maySearch;
       modelInvoked = true;
-      for await (const event of model.stream(modelRequest, { signal: scope.signal })) {
+      const boundRequest = await boundModelHistory(modelRequest, model);
+      scope.signal.throwIfAborted();
+      for await (const event of model.stream(boundRequest, { signal: scope.signal })) {
         if (finish) throw new AgentError('model_event_after_finish');
         const contentStarted =
           event.type === 'text_delta' && event.text.length > 0 && content.length === 0;

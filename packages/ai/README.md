@@ -61,6 +61,12 @@ SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses �
 默认宿主显式传入 `provider` 时，绑定的公开 family 为 `openai`、`deepseek`、`ollama`、`codex` 或兼容默认 `openai-compatible`，与实际 endpoint/model 同时冻结；不会从模型名称猜 family。四类默认仍走明确单次 SDK compatible Chat Completions transport；OpenAI 与 compatible 可显式选择 Responses，凭据和 endpoint 不进入公开 metadata。Service 的[真实 HTTP 四路请求](../../apps/service/test/isolated/run-model-selection.test.ts)与 [Native 原 ModelInput/wire 验收](../../apps/desktop/test/isolated/native-provider-bundle.test.ts)核对绑定、临时 effort 和 child preset；不据此宣称生产 Provider 全部语义兼容。
 
 
+## DeepSeek Chat 工具续接
+
+官方 DeepSeek Chat 连接的 `deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-pro` 会封存已完成助手回复的非空 `reasoning_content`。下一请求带工具时，SDK 将仍在上下文中的原助手回复与原工具调用批次逐一核对，再回传完整字段。此前仅回答问题的助手消息同样适用。无工具请求省略该字段。用户选择的模型和思考参数沿用原配置。[DeepSeek 思考模式协议](https://api-docs.deepseek.com/guides/thinking_mode/#tool-calls)
+
+续接限于精确官方端点、连接、密钥和模型。HKDF 派生的 AES-GCM 密钥在适配器内使用，助手执行标识、可见文本和有序工具调用参与认证。密钥轮换、账户切换、上下文改写或工具配对不完整时，仅使用普通对话历史。私有字段不进入思考显示、检查器或一般 Trace。超过 4 MiB 的私有字段使该次响应失败，不发布工具。历史中没有封存的字段不能从旧记录推算。[真实 SDK 线协议测试](test/deepseek-continuation.test.ts)和[冷启动与检查器测试](../../apps/service/test/isolated/deepseek-continuation.test.ts)使用合成传输。
+
 ## Responses 协议
 
 `createCompatibleModelBinding({ protocol: 'responses', ... })` 显式使用官方 `@ai-sdk/openai` 的 `.responses(modelId)`；省略协议继续走既有 Chat Completions。SDK 固定 `4.0.19`，匹配现有 `ai@7.0.19` 的 Provider v4 契约，避免无关 SDK 升级。它复用原 Adapter 和 Agent Loop，不手写 SSE、不引入第二执行循环，也不回退其他协议。OpenAI/compatible 可选择 Responses，Codex 的私有宿主绑定固定使用 Responses；DeepSeek/Ollama 的该选项在配置和绑定边界拒绝。

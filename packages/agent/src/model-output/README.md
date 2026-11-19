@@ -31,3 +31,5 @@ Adapter 可在成功 `finish` 携带中立 `continuation: Json`。Core 不解释
 [Service/Client 真实往返回归](../../../../apps/service/test/isolated/responses-loop.test.ts)覆盖带工具名与参数映射的 Responses 小输出、Chat 大输出：完整正文通过公开摘要校验，冷读保持原摘要，下一次真实 SDK 请求仍恢复原模型工具名和参数，Responses sealed continuation 继续保留，原工具效果不重放。测试使用本机受控 SSE Provider，不代表外部模型或 Native 窗口资格。
 
 网页搜索的检索来源和正文引用使用独立、带修订的执行级 Artifact，读取时重新核对原命令主体、Session 和 Execution。公开 ModelOutput 仍只返回原有回答投影，私有续轮材料继续按原链处理。每个查询块 64 KiB、整次模型或工具 Execution 1 MiB；块内 UTF-16 范围与原文指纹一起校验。[Web Search 证据](../web-search-evidence.ts) · [跨包流程与验证](../../../../docs/development/flows/web-queries.md)
+
+DeepSeek Chat 的私有续接随已成功的原 Model Execution 封存。即使请求小于 64 KiB，其含密文的历史也进入私有 model-body Artifact。派发时只向匹配原绑定且声明工具的适配器交付密文。公开模型输入、输出、会话和一般轨迹保留可见文本、工具和用量。字段核对与回传见 [AI 协议实现](../../../ai/README.md#deepseek-chat-工具续接)。
