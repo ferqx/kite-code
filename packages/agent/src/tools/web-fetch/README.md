@@ -8,7 +8,11 @@
 
 `@kite-ai/agent/web-fetch` 导出 `createWebFetchExtension`、`createWebFetchBindingFactory`、`createPinnedWebNetworkPort`、`createPassiveWebExtractor` 及中立的宿主 port。导入和注册均不会解析 DNS、启动 Worker 或打开 socket。`builtin.web@1` 只注册 `web_fetch@1`；Core 必须授权并派发这个普通 Tool。远端内容和宿主资源准入都不能赋予 Tool 权限。
 
-输入是封闭的 `{url, max_chars?, timeout_ms?}`，默认返回完整正文。只有显式传入正整数 `max_chars` 才选择正文前缀，并通过 `details.truncated` 记录这一选择。没有 8K/16K 文本上限，也没有合法跳转次数上限；规范化 URL 构成的真实循环会失败，每个实际跳转都重新准入。URL user-info 和 metadata 名称被拒绝。响应解析的安全边界为实际解码后 5,000,000 字节，支持的 gzip/deflate/br 解压后也受此边界约束；这是单次响应的解析边界，不是累计 Run/Artifact 预算。默认 60 秒总时限从获准派发后的 Tool 入口开始，不包括审批等待，覆盖 parser asset 校验、robots、域名队列、传输和解析；显式正整数 `timeout_ms` 可覆盖默认值，较长的显式超时使用分段计时器。工厂以 `defaultTimeoutMs` 暴露同一运行默认值供 Service 封存，模型 schema 描述使用同一常量。robots 独立 3 秒宽松回退保持。取消仍立即传递至本请求的 socket/Worker，不等待总时限到期；不据此宣称远端服务器的工作已停止。
+单页输入是封闭的 `{url, max_chars?, timeout_ms?}`，默认返回完整正文。只有显式传入正整数 `max_chars` 才选择正文前缀，并通过 `details.truncated` 记录这一选择。没有 8K/16K 文本上限，也没有合法跳转次数上限；规范化 URL 构成的真实循环会失败，每个实际跳转都重新准入。URL user-info 和 metadata 名称被拒绝。响应解析的安全边界为实际解码后 5,000,000 字节，支持的 gzip/deflate/br 解压后也受此边界约束；这是单次响应的解析边界，不是累计 Run/Artifact 预算。默认 60 秒总时限从获准派发后的 Tool 入口开始，不包括审批等待，覆盖 parser asset 校验、robots、域名队列、传输和解析；显式正整数 `timeout_ms` 可覆盖默认值，较长的显式超时使用分段计时器。工厂以 `defaultTimeoutMs` 暴露同一运行默认值供 Service 封存，模型 schema 描述使用同一常量。robots 独立 3 秒宽松回退保持。取消仍立即传递至本请求的 socket/Worker，不等待总时限到期；不据此宣称远端服务器的工作已停止。
+
+多页输入为 `{urls, max_chars?, timeout_ms?}`，`url` 与 `urls` 必须恰选一项。`urls` 按输入顺序接受 1–5 项。每项独立执行，包括重复地址。一次审批覆盖完整列表与限制。每页独立取得请求 scope、检查初始 robots、执行逐跳准入，并在连接前按原 Tool Execution 与输入下标记录审计。最多并行两页，同源沿用 500ms 队列；整批时限最多 60 秒，含排队、读取与解析。取消停止排队项并等待在途清理，清理无法确认时原执行保留 `outcome_unknown`。
+
+批量回执按下标给出成功、HTTP 状态或具体失败码。至少一项成功时保留其他项的失败，全部失败时工具失败。`max_chars` 对每项选取正文；批量模型消息最多 32 KiB（计入 UTF‑8、JSON 转义及宿主回执）。超出预览的已选正文按页保存在原 Execution 作用域的 Artifact，`previewTruncated` 标注预览裁剪。网页内容放在独立的不可信数据区。Service 在新 Run 的 `snapshot.web.batch` 封存上述边界；仅有旧单页绑定的 Run 冷恢复及其子 Run 继续使用旧定义。[Runtime 回归](../../../test/isolated/web-fetch/core.test.ts) · [审批回归](../../../../../apps/service/test/isolated/web-permissions.test.ts)
 
 可信宿主提供 `PinnedWebNetworkOptions`，其中包含封存的 `off`、`public` 或精确主机 `allowlist` 策略，以及 `admitHop(binding,{signal})`。binding 携带原始 URL、当前跳转/资源及实际 execution、Session、原 Store 身份；资源准入独立于普通 Core 授权。所有 DNS 候选地址都要检查，允许地址与私有地址混合的响应在连接前失败。自有直连在 Node HTTP(S) lookup 中固定已验证地址，同时保留原 Host、TLS servername 和证书校验。不使用全局 fetch、ambient proxy/cookies/credentials 或自动跳转。
 

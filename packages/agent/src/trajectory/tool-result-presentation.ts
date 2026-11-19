@@ -115,6 +115,8 @@ export function toolResultPresentation(input: {
   } else if (
     extension === 'builtin.web' &&
     id === 'web_fetch' &&
+    !Array.isArray(args.urls) &&
+    details.kind !== 'web_fetch_batch' &&
     version === '1' &&
     details.executionId === input.executionId
   ) {

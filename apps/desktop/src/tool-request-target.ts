@@ -83,8 +83,15 @@ export function nativeToolRequestTarget(
     case 'files.edit':
       return text('path');
     case 'web_fetch':
-      // URL credentials/query removal remains the shared UI's responsibility.
-      return text('url');
+      if (Array.isArray(request.urls))
+        return !Object.hasOwn(request, 'url') &&
+          request.urls.length >= 1 &&
+          request.urls.length <= 5 &&
+          request.urls.every((url) => typeof url === 'string' && url.length > 0)
+          ? `请求 ${request.urls.length} 页`
+          : undefined;
+      // Leave address redaction to the shared UI. A scalar cannot impersonate the host's count.
+      return /^请求 [1-5] 页$/.test(text('url') ?? '') ? undefined : text('url');
     case 'shell.execute':
     case 'shell.launch':
       return text('description')?.replace(/\s+/gu, ' ').trim() || text('command');

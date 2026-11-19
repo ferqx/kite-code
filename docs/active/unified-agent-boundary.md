@@ -10,6 +10,8 @@ Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desk
 
 默认 Service 的模型代理选择归 [Service owner](../../apps/service/README.md)，不下沉到 AI／Core 或客户端。新 Run 的 `snapshot.modelTransport.digest` 只绑定宿主代理环境与系统选择的摘要；恢复前变化拒绝，旧无字段记录不追补。代理传输不改变模型请求、权限、工具身份、未知结果或零重放边界，也不把模型自动代理推广到 MCP 网络准入。
 
+批量 `web_fetch` 共享一个原 Tool Execution，每项使用独立请求 scope、输入下标审计和正文 Artifact。历史绑定恢复的版本边界见[默认 Web Fetch 装配](../../apps/service/README.md#默认-web-fetch-装配)。
+
 普通 `web_fetch` 的默认代理 DNS 复核策略封存于 `snapshot.web.transport`，冷恢复在凭据和派发前核对。由 Agent 对已授权的单跳确认目标与解析器选中同一代理，再按 [Web owner](../../packages/agent/src/tools/web-fetch/README.md) 的候选规则复核；DNS 服务只取得域名，目标 socket 仍依赖新响应的全候选公网检查与原持久审计。
 
 Web 初始 DNS 复用只在一个 Tool Execution 内将已验证候选从同源 robots 交给正文初始请求，二者各自核准入、取消和 socket 前持久审计。重定向重新解析；Service 通过原 Web 快照核对新运行语义和冷恢复。

@@ -6,6 +6,7 @@ import {
   type PinnedWebNetworkOptions,
   type WebExtractor,
   WebFetchError,
+  webFetchBatchLimits,
 } from '@kite-ai/agent/web-fetch';
 
 export interface WebFetchConfigurationOptions {
@@ -46,48 +47,49 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
       ),
     },
   ];
+  const legacySnapshot = {
+    definition: { id: 'web_fetch', version: '1' },
+    policy,
+    parsingBytes: 5_000_000,
+    parser: 'passive-bounded-worker',
+    completeByDefault: true,
+    defaultTimeoutMs: factory.defaultTimeoutMs,
+    initialResolutionReuse: !options.unavailableReason,
+    // Keep legacy custom-host snapshots stable when no transport was selected.
+    ...(options.network.proxy ||
+    options.network.dnsOverHttps ||
+    options.network.recoverFakeIp ||
+    options.network.recoverProxiedTeredoDns ||
+    options.network.certificateAuthority ||
+    options.unavailableReason
+      ? {
+          transport: {
+            proxy: structuredClone(options.network.proxy ?? {}),
+            dns: options.network.dnsOverHttps
+              ? structuredClone(options.network.dnsOverHttps)
+              : null,
+            recoverFakeIp: options.network.recoverFakeIp === true,
+            ...(options.network.recoverProxiedTeredoDns ? { recoverProxiedTeredoDns: true } : {}),
+            resolver: 'cloudflare-doh-wire-1',
+            ...(options.network.certificateAuthority
+              ? {
+                  certificateAuthorityHash: createHash('sha256')
+                    .update(options.network.certificateAuthority)
+                    .digest('hex'),
+                }
+              : {}),
+            ...(options.unavailableReason ? { unavailableReason: options.unavailableReason } : {}),
+          },
+        }
+      : {}),
+  };
+  const snapshot = { ...legacySnapshot, batch: webFetchBatchLimits };
   return {
     extension,
     bind: factory.bind,
     capabilities,
     toolIds: ['web_fetch'] as readonly string[],
-    snapshot: {
-      definition: { id: 'web_fetch', version: '1' },
-      policy,
-      parsingBytes: 5_000_000,
-      parser: 'passive-bounded-worker',
-      completeByDefault: true,
-      defaultTimeoutMs: factory.defaultTimeoutMs,
-      initialResolutionReuse: !options.unavailableReason,
-      // Keep legacy custom-host snapshots stable when no transport was selected.
-      ...(options.network.proxy ||
-      options.network.dnsOverHttps ||
-      options.network.recoverFakeIp ||
-      options.network.recoverProxiedTeredoDns ||
-      options.network.certificateAuthority ||
-      options.unavailableReason
-        ? {
-            transport: {
-              proxy: structuredClone(options.network.proxy ?? {}),
-              dns: options.network.dnsOverHttps
-                ? structuredClone(options.network.dnsOverHttps)
-                : null,
-              recoverFakeIp: options.network.recoverFakeIp === true,
-              ...(options.network.recoverProxiedTeredoDns ? { recoverProxiedTeredoDns: true } : {}),
-              resolver: 'cloudflare-doh-wire-1',
-              ...(options.network.certificateAuthority
-                ? {
-                    certificateAuthorityHash: createHash('sha256')
-                      .update(options.network.certificateAuthority)
-                      .digest('hex'),
-                  }
-                : {}),
-              ...(options.unavailableReason
-                ? { unavailableReason: options.unavailableReason }
-                : {}),
-            },
-          }
-        : {}),
-    },
+    snapshot,
+    snapshotFor: (batchEnabled: boolean) => (batchEnabled ? snapshot : legacySnapshot),
   };
 }

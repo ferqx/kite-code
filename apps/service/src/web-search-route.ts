@@ -90,7 +90,7 @@ export function savedSearchRoute(raw: Json | undefined): SearchRoute | undefined
     };
   return undefined;
 }
-export function inheritedSearchRoute(configuration: Json | undefined): SearchRoute | null {
+export function savedServiceSnapshot(configuration: Json | undefined) {
   if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration))
     return null;
   let saved = configuration.snapshot;
@@ -108,13 +108,11 @@ export function inheritedSearchRoute(configuration: Json | undefined): SearchRou
     typeof saved.roleId === 'string'
   )
     saved = saved.configuration;
-  return (
-    (saved &&
-      typeof saved === 'object' &&
-      !Array.isArray(saved) &&
-      savedSearchRoute(saved.webSearch)) ||
-    null
-  );
+  return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : null;
+}
+
+export function inheritedSearchRoute(configuration: Json | undefined): SearchRoute | null {
+  return savedSearchRoute(savedServiceSnapshot(configuration)?.webSearch) ?? null;
 }
 
 export function selectSearchRoute(input: {

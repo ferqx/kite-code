@@ -59,7 +59,7 @@ import { createSessionTitleExtension } from '@kite-ai/agent/session-title';
 import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import type { RunRecord } from '@kite-ai/agent/storage';
-import { WebFetchError, webExtractorAssets } from '@kite-ai/agent/web-fetch';
+import { WebFetchError, webExtractorAssets, webFetchBatchLimits } from '@kite-ai/agent/web-fetch';
 import { createCompatibleModelBinding, type ReasoningEffort } from '@kite-ai/ai/sdk';
 import { createWorkspaceAssembly } from './assembly';
 import { createRunModelAdapters } from './authorization-check-model';
@@ -124,7 +124,12 @@ import {
 } from './web-fetch-configuration';
 import { resolveWebTransport } from './web-fetch-proxy';
 import { createSearchBindings } from './web-search-bindings';
-import { inheritedSearchRoute, type SearchRoute, savedSearchRoute } from './web-search-route';
+import {
+  inheritedSearchRoute,
+  type SearchRoute,
+  savedSearchRoute,
+  savedServiceSnapshot,
+} from './web-search-route';
 import { createWebSearchTest } from './web-search-test';
 import { createWorktreeHost, readOnlyWorktreeBoundary } from './worktree-host';
 
@@ -149,6 +154,14 @@ export type {
 export { createUserConfiguration } from './user-configuration';
 export { userConfigurationPath } from './user-configuration-path';
 export type { WebFetchConfigurationOptions } from './web-fetch-configuration';
+
+function savedBatchFetch(web: Json | undefined) {
+  if (!web || typeof web !== 'object' || Array.isArray(web) || !Object.hasOwn(web, 'batch'))
+    return false;
+  if (planningSnapshotDigest(web.batch!) !== planningSnapshotDigest(webFetchBatchLimits))
+    throw new AgentError('recovery_configuration_changed');
+  return true;
+}
 
 /** Decode the same saved Service binding after each caller verifies its own outer identity. */
 function readServiceRecoverySnapshot(snapshot: Json | undefined) {
@@ -853,6 +866,7 @@ export function createDefaultProcessConfiguration(options: {
       toolIds?: readonly string[];
       inheritedModelHiddenToolIds?: readonly string[];
       parentSearch?: SearchRoute | null;
+      parentBatchFetch?: boolean;
       allowChildNative?: boolean;
       skillSelection?: SkillSelection;
       mcpParent?: Parameters<typeof mcpSources.deriveChildSelection>[0];
@@ -1356,6 +1370,9 @@ export function createDefaultProcessConfiguration(options: {
       const epochAssemblies = new Set([assembly]);
       let webBinding: ReturnType<typeof web.bind> | undefined;
       let runWeb = web;
+      const batchFetch =
+        (selection?.parentBatchFetch ?? true) &&
+        (!recovery || savedBatchFetch(recovery.webSnapshot));
       let disposal: Promise<void> | undefined;
       const dispose = () =>
         (disposal ??= Promise.allSettled([
@@ -1397,7 +1414,7 @@ export function createDefaultProcessConfiguration(options: {
             runWeb = automaticWeb;
           } else if (user.webFetch !== undefined)
             throw new ConfigurationError('web_configuration_host_owned');
-          webBinding = runWeb.bind();
+          webBinding = runWeb.bind(batchFetch);
           assembly.extensions.push(webBinding.extension);
         }
         // The original selection and parent fence narrow the catalogue before credential reads.
@@ -1462,7 +1479,7 @@ export function createDefaultProcessConfiguration(options: {
             web:
               planningSnapshotDigest(
                 (assembly.toolIds.includes('web_fetch')
-                  ? runWeb.snapshot
+                  ? runWeb.snapshotFor(batchFetch)
                   : null) as unknown as Json,
               ) === planningSnapshotDigest(recovery.webSnapshot),
             browser:
@@ -1810,7 +1827,7 @@ export function createDefaultProcessConfiguration(options: {
             ...(modelHiddenToolIds.length ? { modelHiddenToolIds } : {}),
             mcp: { ...selectedMcp.snapshot, sources: selectedSources.snapshot },
             shell: shell.snapshot,
-            web: assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null,
+            web: assembly.toolIds.includes('web_fetch') ? runWeb.snapshotFor(batchFetch) : null,
             ...(recovery && !recovery.browserSnapshotPresent
               ? {}
               : {
@@ -1943,6 +1960,9 @@ export function createDefaultProcessConfiguration(options: {
             modelId: selection.modelId,
             toolIds: selection.role.toolIds,
             parentSearch: inheritedSearchRoute(input.parentRun?.configuration),
+            parentBatchFetch: savedBatchFetch(
+              savedServiceSnapshot(input.parentRun?.configuration)?.web,
+            ),
             allowChildNative: childRoles.some(
               (role) =>
                 role.id === selection.role.id &&

@@ -291,3 +291,29 @@ test('inline output presence never guesses old missing fields and remains incomp
     ).toBeUndefined();
   }
 });
+
+test('batch fetch describes the requested count and cannot create a single-page receipt', () => {
+  const call = {
+    definitionId: 'web_fetch',
+    definitionVersion: '1',
+    extensionId: 'builtin.web',
+    input: { urls: ['https://fixture.test/?private=q', 'https://fixture.test/page'] },
+  };
+  expect(toolTrajectoryDisplay(call)).toEqual({
+    kind: 'web',
+    operation: 'fetch',
+    title: '读取网页',
+    summary: '2 个网页',
+  });
+  expect(
+    toolResultPresentation({
+      ...call,
+      executionId: 'e',
+      result: {
+        outcome: 'succeeded',
+        content: 'raw page content',
+        details: { kind: 'web_fetch_batch', executionId: 'e', pages: [] },
+      },
+    }),
+  ).toBeUndefined();
+});

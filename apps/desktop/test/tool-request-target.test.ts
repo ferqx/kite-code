@@ -161,3 +161,15 @@ test.each([
     ])
       expect(nativeToolRequestTarget(input, id, version)).toBeUndefined();
 });
+
+test('batch fetch projection shows only the exact count and never reads addresses into the summary', () => {
+  const urls = ['https://example.org/one?private=1', 'https://example.org/two'];
+  expect(nativeToolRequestTarget({ urls }, 'web_fetch', '1')).toBe('请求 2 页');
+  for (const input of [
+    { url: urls[0], urls },
+    { urls: [] },
+    { urls: [1, 2] },
+    { url: '请求 2 页' },
+  ])
+    expect(nativeToolRequestTarget(input, 'web_fetch', '1')).toBeUndefined();
+});

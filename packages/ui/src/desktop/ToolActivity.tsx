@@ -250,6 +250,16 @@ function shellTitle(message: Message): string {
 
 function toolTarget(message: Message): string | undefined {
   if (message.toolName === 'web_fetch') {
+    if (message.target && /^请求 [1-5] 页$/.test(message.target)) return message.target;
+    const urls = message.arguments?.urls;
+    if (
+      Array.isArray(urls) &&
+      !Object.hasOwn(message.arguments!, 'url') &&
+      urls.length >= 1 &&
+      urls.length <= 5 &&
+      urls.every((url) => typeof url === 'string' && url.length > 0)
+    )
+      return `请求 ${urls.length} 页`;
     const raw = message.target ?? message.arguments?.url;
     if (typeof raw !== 'string') return undefined;
     try {

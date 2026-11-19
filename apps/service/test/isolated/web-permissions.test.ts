@@ -20,6 +20,7 @@ async function fixture(
   decision = 'approve_once',
   guard?: 'off' | 'ssrf',
   trusted = true,
+  batch = false,
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-web-permission-')));
   const workspace = join(root, 'workspace');
@@ -44,13 +45,15 @@ async function fixture(
     },
   });
   const url = `http://fixture.test:${web.port}/page`;
+  const input = batch ? { urls: [url, `${url}?second`], max_chars: 8, timeout_ms: 4000 } : { url };
+  const wireTools: { function?: { name?: string; parameters?: object } }[] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as {
         messages: { role: string; content: string }[];
-        tools?: unknown[];
+        tools?: { function?: { name?: string; parameters?: object } }[];
       };
       let payload: Record<string, unknown> | undefined;
       try {
@@ -68,13 +71,14 @@ async function fixture(
         delta = { content: JSON.stringify({ decision, reason: reviewReason }) };
         finish = 'stop';
       } else if (normal++ === 0) {
+        wireTools.push(...(body.tools ?? []));
         delta = {
           tool_calls: [
             {
               index: 0,
               id: 'original-fetch',
               type: 'function',
-              function: { name: 'web_fetch', arguments: JSON.stringify({ url }) },
+              function: { name: 'web_fetch', arguments: JSON.stringify(input) },
             },
           ],
         };
@@ -106,7 +110,7 @@ async function fixture(
     }),
   );
   const host = createDefaultProcessConfiguration({
-    userConfigurationPath: profile.profilePath + '/config.jsonc',
+    userConfigurationPath: `${profile.profilePath}/config.jsonc`,
     profile,
     permissionPolicy: {
       readPolicy: () => ({
@@ -192,6 +196,8 @@ async function fixture(
     expectedStoreId,
     reviews,
     url,
+    input,
+    wireTools,
     counts: () => ({ dns, sockets, normal }),
     run: () =>
       client.startRun('s', {
@@ -342,3 +348,57 @@ test('Full web_fetch skips routine approval while explicit network-off and SSRF 
     }
   }
 }, 20000);
+
+test('one approval covers the exact batch and limits sent on the provider wire', async () => {
+  const f = await fixture('accept_edits', 'approve_once', undefined, true, true);
+  try {
+    await f.run();
+    const card = await f.pending();
+    expect(card.request).toMatchObject({
+      definitionId: 'web_fetch',
+      input: f.input,
+      policy: { mode: 'accept_edits', effects: ['network', 'unknown'] },
+    });
+    expect(f.counts()).toEqual({ dns: 0, sockets: 0, normal: 1 });
+    const schema = f.wireTools.find((t) => t.function?.name === 'web_fetch')?.function?.parameters;
+    expect(schema).not.toHaveProperty('oneOf');
+    expect(f.wireTools).toContainEqual(
+      expect.objectContaining({
+        type: 'function',
+        function: expect.objectContaining({
+          name: 'web_fetch',
+          parameters: expect.objectContaining({
+            type: 'object',
+            properties: expect.objectContaining({
+              urls: expect.objectContaining({ type: 'array', minItems: 1, maxItems: 5 }),
+            }),
+          }),
+        }),
+      }),
+    );
+    await f.client.answerInteraction('s', card.id, {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'approve-fetch-list',
+      expectedRevision: card.revision,
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+    });
+    await f.done();
+    const tool = await f.tool();
+    expect(tool).toMatchObject({
+      status: 'succeeded',
+      result: {
+        details: {
+          executionId: tool!.id,
+          pages: [
+            { index: 0, outcome: 'succeeded' },
+            { index: 1, outcome: 'succeeded' },
+          ],
+        },
+      },
+    });
+    expect((await f.cards()).interactions).toHaveLength(1);
+    expect(f.counts().sockets).toBe(3);
+  } finally {
+    await f.close();
+  }
+}, 15000);

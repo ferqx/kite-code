@@ -192,6 +192,14 @@ export function toolTrajectoryDisplay(input: {
     display = { kind: 'web', operation: 'fetch', title: '读取网页' };
     const url = safeUrl(args.url);
     if (url) display.summary = url;
+    else if (
+      !Object.hasOwn(args, 'url') &&
+      Array.isArray(args.urls) &&
+      args.urls.length > 0 &&
+      args.urls.length <= 5 &&
+      args.urls.every((url) => typeof url === 'string' && url.length > 0)
+    )
+      display.summary = `${args.urls.length} 个网页`;
   } else if (extension === 'builtin.browser' && version === '1') {
     const operation = id.startsWith('browser.') ? id.slice(8) : '';
     const parsed = trajectoryDisplaySchema.shape.operation.safeParse(operation);

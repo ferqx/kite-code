@@ -695,6 +695,8 @@ read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时�
 
 默认宿主有 HTTP(S) 代理且未显式选择 DNS 时，封存 `recoverProxiedTeredoDns: true`，由 Agent 按每跳的实际代理选择和系统候选决定是否使用 HTTPS DNS 复核。直接连接、绕过名单和显式 DNS 继续使用各自选择的解析路径；显式宿主可独立选择是否启用。
 
+新 Run 的 `snapshot.web.batch` 封存最多五页、并行两页、32 KiB 模型预览及 60 秒总时限。恢复缺少该标记的历史 Run 时装配原单页定义，子 Run 继承父级限制；无法识别的批量策略拒绝恢复。[恢复测试](test/isolated/default-web-fetch.test.ts)
+
 固定地址 Web port 封存 `snapshot.web.initialResolutionReuse`，将同一次调用的初始 robots 与正文解析复用及传输时限绑定到该 Run。每个资源请求独立准入和审计。缺少该字段的旧快照按完整 Web 配置比较拒绝冷恢复。
 
 每个 Run 封存非秘密 `snapshot.web.transport`（实际代理、绕过表、DNS 设置、自动复核策略和 resolver 版本），变更仅影响后续 Run。`snapshot.web.defaultTimeoutMs` 从同一工具工厂取得实际默认总时限60000毫秒，显式调用仍可指定 `timeout_ms`；取消不等待时限到期。冷恢复在凭据读取、模型及 Tool 派发前比较完整 `snapshot.web`；旧默认快照不自动迁移，未保存该默认值或应启用的代理复核策略时报告 `recovery_configuration_changed`。显式宿主不选择自动传输时保留原传输结构，默认时限独立封存。相同当前配置复用最近工厂及其 robots cache/队列，网络变化后建立新工厂，已有 Run 保留原工厂；不建立无限历史配置缓存。解析 scope 仍归原 binding lease。导入、元数据工厂和 model-only 绑定不发现系统代理、不解析 DNS或建立 socket；登记代理的读取不是目标网络 I/O，目标连接仍只在原 Tool 已批准派发后发生。代理凭据、页面输入和代理 header 不能成为网络权威或 SSRF 例外。

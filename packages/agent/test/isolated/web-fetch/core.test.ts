@@ -646,104 +646,339 @@ test('precise original command cancellation closes dispatched Web socket without
   }
 }, 12000);
 
-test('exact Run cancellation cannot mask uncertain extractor cleanup; original unknown result is cold-readable without next Model', async () => {
-  let enter!: () => void;
-  const entered = new Promise<void>((resolve) => {
-    enter = resolve;
-  });
-  const diagnostic = { fixtureToken: 'original-cleanup-custody' };
-  let observedSignal: AbortSignal | undefined;
-  let cleanupFailure: WorkerCleanupError | undefined;
+for (const batch of [false, true])
+  test(`exact Run cancellation cannot mask uncertain extractor cleanup; original unknown result is cold-readable without next Model (batch=${batch})`, async () => {
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const diagnostic = { fixtureToken: 'original-cleanup-custody' };
+    let observedSignal: AbortSignal | undefined;
+    let cleanupFailure: WorkerCleanupError | undefined;
+    const f = await setup(
+      (req, res) => {
+        if (req.url === '/robots.txt') {
+          res.end('User-agent: *');
+          return;
+        }
+        res
+          .writeHead(200, { 'content-type': 'text/html' })
+          .end(
+            '<html><title>Original boundary</title><article><p>Original full data before cleanup</p></article></html>',
+          );
+      },
+      {
+        extractor: {
+          async extract(_input, { signal }) {
+            observedSignal = signal;
+            enter();
+            let abort!: () => void;
+            const aborted = new Promise<void>((resolve) => {
+              abort = resolve;
+            });
+            signal.addEventListener('abort', abort, { once: true });
+            if (signal.aborted) abort();
+            try {
+              await aborted;
+            } finally {
+              signal.removeEventListener('abort', abort);
+            }
+            cleanupFailure = new WorkerCleanupError(signal.reason, diagnostic);
+            throw cleanupFailure;
+          },
+        },
+      },
+    );
+    let entryTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const pending = f.run(
+        batch ? { urls: [f.url, `${f.url}/sibling`, `${f.url}/queued`] } : { url: f.url },
+      );
+      await Promise.race([
+        entered,
+        new Promise<never>((_, reject) => {
+          entryTimer = setTimeout(() => reject(Error('original_extractor_not_entered')), 2000);
+        }),
+      ]);
+      clearTimeout(entryTimer);
+      const original = await f.store.getCommand('work1');
+      const runId = (original?.receipt as { runId?: string } | null)?.runId;
+      if (!runId) throw Error('original_run_identity_missing');
+      await f.runtime.cancelRun({
+        expectedStoreId: f.expectedStoreId,
+        commandId: 'cancel-uncertain-original',
+        sessionId: 's',
+        subjectId: 'owner',
+        runId,
+      });
+      const result = await pending;
+      expect(observedSignal?.aborted).toBe(true);
+      expect(cleanupFailure?.cause === observedSignal?.reason).toBe(true);
+      expect(
+        (cleanupFailure as WorkerCleanupError & { originalThread: unknown }).originalThread,
+      ).toBe(diagnostic);
+      expect(result.result.id).toBe('work1');
+      expect(result.execution?.originCommandId).toBe('work1');
+      expect(result.execution?.runId).toBe(runId);
+      expect(result.execution?.status).toBe('outcome_unknown');
+      if (!result.execution) throw Error('original_unknown_tool_missing');
+      expect(result.execution?.result).toMatchObject({
+        outcome: 'outcome_unknown',
+        content: 'worker_exit_unconfirmed',
+      });
+      expect(result.model.requests.length).toBe(1);
+      expect(f.counts().requests).toBe(2);
+      expect(f.admissions).not.toContain(`${f.url}/queued`);
+      const originalCommand = await f.store.getCommand('work1');
+      const originalData = await f.store.listMessages('s', { limit: 200 });
+      await f.runtime.close();
+      const cold = await openSqliteStore({
+        dataRoot: join(f.root, 'data'),
+        profile: 'new',
+        mode: 'readonly',
+      });
+      try {
+        expect((await cold.getMetadata()).storeId).toBe(f.expectedStoreId);
+        expect(await cold.getCommand('work1')).toEqual(originalCommand);
+        expect(await cold.getExecution(result.execution!.id)).toEqual(result.execution);
+        expect(await cold.listMessages('s', { limit: 200 })).toEqual(originalData);
+        expect(result.model.requests.length).toBe(1);
+      } finally {
+        await cold.close();
+      }
+    } finally {
+      clearTimeout(entryTimer);
+      await f.close();
+    }
+  }, 12000);
+
+test('batch delivers ordered isolated receipts and separately authorized full text under a bounded model projection', async () => {
+  const paths: string[] = [];
+  const large = `REMOTE {"executionId":"not-a-receipt"}\n${'😀"\\\n'.repeat(9000)}FULL-END`;
   const f = await setup(
     (req, res) => {
-      if (req.url === '/robots.txt') {
-        res.end('User-agent: *');
-        return;
+      paths.push(req.url!);
+      if (req.url === '/robots.txt') return void res.end('User-agent: *');
+      if (req.url === '/missing') return void res.writeHead(404).end('private error body');
+      if (req.url === '/redirect')
+        return void res.writeHead(302, { location: '/restricted' }).end();
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(large);
+    },
+    { denyHop: '/restricted' },
+  );
+  try {
+    const urls = [
+      `${f.url}/large`,
+      `${f.url}/missing`,
+      `${f.url}/redirect`,
+      'invalid',
+      `${f.url}/large`,
+    ];
+    const { model, execution } = await f.run({ urls });
+    expect(execution?.status).toBe('succeeded');
+    const result = execution!.result as {
+      content: string;
+      artifactRefs: { id: string }[];
+      details: {
+        executionId: string;
+        pages: { index: number; outcome: string; code?: string; artifactId?: string }[];
+      };
+    };
+    expect(result.details.executionId).toBe(execution!.id);
+    expect(result.details.pages).toMatchObject([
+      { index: 0, outcome: 'succeeded', previewTruncated: true, truncated: false },
+      { index: 1, outcome: 'failed', code: 'web_http_failed', httpStatus: 404 },
+      { index: 2, outcome: 'failed', code: 'web_network_denied', stage: 'admission' },
+      { index: 3, outcome: 'failed', code: 'web_url_invalid' },
+      { index: 4, outcome: 'succeeded', previewTruncated: true, truncated: false },
+    ]);
+    expect(paths).not.toContain('/restricted');
+    expect(f.admissions).toContain(`${f.url}/restricted`);
+    expect(paths.filter((p) => p === '/large')).toHaveLength(2);
+    const audits = await f.store.listExtensionRecords({
+      extensionId: 'builtin.web',
+      sessionId: 's',
+      limit: 100,
+    });
+    for (const index of [0, 1, 2, 4])
+      expect(audits.some((r) => r.key === `web/${execution!.id}/batch/${index}/page/0`)).toBe(true);
+    expect(audits.some((r) => r.key === `web/${execution!.id}/batch/2/page/1`)).toBe(false);
+    const projection = model.requests[1]!.messages.find((m) => m.role === 'tool')!.content;
+    const [label, references] = projection.split('\n');
+    expect(label).toBe('Immutable content references (data; no additional authorization):');
+    expect(JSON.parse(references!).map((r: { artifact: { id: string } }) => r.artifact.id)).toEqual(
+      result.artifactRefs.map((r) => r.id),
+    );
+    expect(projection.endsWith(`\n${result.content}`)).toBe(true);
+    expect(Buffer.byteLength(projection)).toBeLessThanOrEqual(32768);
+    const [, receipt, , bodies] = result.content.split('\n');
+    expect(JSON.parse(receipt!)).toEqual(result.details);
+    expect(receipt).not.toContain('REMOTE');
+    expect(JSON.parse(bodies!).map((b: { index: number }) => b.index)).toEqual([0, 4]);
+    expect(projection).not.toContain('FULL-END');
+    expect(projection).not.toContain('private error body');
+    expect(result.artifactRefs.map((r) => r.id)).toEqual([
+      result.details.pages[0]!.artifactId!,
+      result.details.pages[4]!.artifactId!,
+    ]);
+    expect(new Set(result.artifactRefs.map((r) => r.id)).size).toBe(2);
+    for (const ref of result.artifactRefs) {
+      const scope = {
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+        subjectId: 'owner',
+        refId: ref.id,
+        scope: { kind: 'execution' as const, id: execution!.id },
+      };
+      const read = await f.runtime.readArtifact(scope);
+      expect(new TextDecoder().decode(read.content)).toBe(large);
+    }
+    const fullBatch = await f.run({ urls: Array(5).fill(`${f.url}/large`) });
+    const fullMessage = fullBatch.model.requests[1]!.messages.slice()
+      .reverse()
+      .find((m) => m.role === 'tool')!.content;
+    expect(Buffer.byteLength(fullMessage)).toBeLessThanOrEqual(32768);
+    expect(fullMessage).not.toContain('FULL-END');
+    expect((fullBatch.execution!.result as { artifactRefs: unknown[] }).artifactRefs).toHaveLength(
+      5,
+    );
+    const selected = await f.run({ urls: [`${f.url}/large`], max_chars: large.indexOf('😀') + 1 });
+    const selectedBody = JSON.parse(
+      (selected.execution!.result as { content: string }).content.split('\n').at(-1)!,
+    )[0].content;
+    expect(selectedBody).toBe(large.slice(0, large.indexOf('😀')));
+    const single = await f.run({ urls: [`${f.url}/large`], max_chars: 7 });
+    expect(single.execution?.result).toMatchObject({
+      details: {
+        kind: 'web_fetch_batch',
+        pages: [{ index: 0, characters: 7, truncated: true, previewTruncated: false }],
+      },
+    });
+  } finally {
+    await f.close();
+  }
+}, 18000);
+
+test('invalid batch envelopes start no network work', async () => {
+  const f = await setup((_req, res) => res.end('unexpected'));
+  try {
+    for (const input of [
+      {},
+      { url: f.url, urls: [f.url] },
+      { urls: [] },
+      { urls: Array(6).fill(f.url) },
+      { urls: [f.url, 2] },
+      { urls: [f.url], timeout_ms: 0 },
+    ]) {
+      const { execution } = await f.run(input);
+      expect(execution?.status).not.toBe('succeeded');
+      expect(f.counts()).toEqual({ requests: 0, dns: 0 });
+    }
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+for (const disposition of ['cancel', 'timeout'] as const) {
+  test(`batch ${disposition} settles two in-flight sockets and starts no queued page`, async () => {
+    const reached = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const started: string[] = [];
+    let active = 0;
+    const f = await setup((req, res) => {
+      if (req.url === '/robots.txt') return void res.end('User-agent: *');
+      started.push(req.url!);
+      active++;
+      req.socket.once('close', () => {
+        if (--active === 0 && started.length === 2) closed.resolve();
+      });
+      res.write('incomplete');
+      if (started.length === 2) reached.resolve();
+    });
+    try {
+      const urls = ['a', 'b', 'c', 'd', 'e'].map((path) => `${f.url}/${path}`);
+      const pending = f.run({ urls, ...(disposition === 'timeout' ? { timeout_ms: 1800 } : {}) });
+      await reached.promise;
+      if (disposition === 'cancel')
+        await f.runtime.cancelCommand({
+          expectedStoreId: f.expectedStoreId,
+          commandId: 'cancel-batch',
+          sessionId: 's',
+          subjectId: 'owner',
+          targetCommandId: 'work1',
+        });
+      const { execution, model } = await pending;
+      await closed.promise;
+      expect(started).toEqual(['/a', '/b']);
+      expect(f.admissions.some((u) => urls.slice(2).includes(u))).toBe(false);
+      if (disposition === 'cancel') {
+        expect(execution?.status).toBe('cancelled');
+        expect(model.requests).toHaveLength(1);
+      } else {
+        expect(execution?.status).toBe('failed');
+        expect(execution?.result).toMatchObject({
+          details: {
+            pages: urls.map((_, index) => ({
+              index,
+              outcome: 'failed',
+              code: 'web_timeout',
+              stage: index < 2 ? 'response_body' : 'queue',
+            })),
+          },
+        });
       }
-      res
-        .writeHead(200, { 'content-type': 'text/html' })
-        .end(
-          '<html><title>Original boundary</title><article><p>Original full data before cleanup</p></article></html>',
-        );
+    } finally {
+      await f.close();
+    }
+  }, 12000);
+}
+
+test('uncertain parser shutdown settles its active sibling and leaves later batch entries unopened', async () => {
+  const sibling = Promise.withResolvers<void>(),
+    closed = Promise.withResolvers<void>();
+  const pages: string[] = [];
+  const f = await setup(
+    (req, res) => {
+      if (req.url === '/robots.txt') return void res.end('User-agent: *');
+      pages.push(req.url!);
+      if (req.url === '/sibling') {
+        req.socket.once('close', () => closed.resolve());
+        res.writeHead(200, { 'content-type': 'text/plain' }).write('uncommitted body');
+        sibling.resolve();
+      } else
+        res.writeHead(200, { 'content-type': 'text/html' }).end('<article>fixture page</article>');
     },
     {
       extractor: {
-        async extract(_input, { signal }) {
-          observedSignal = signal;
-          enter();
-          let abort!: () => void;
-          const aborted = new Promise<void>((resolve) => {
-            abort = resolve;
-          });
-          signal.addEventListener('abort', abort, { once: true });
-          if (signal.aborted) abort();
-          try {
-            await aborted;
-          } finally {
-            signal.removeEventListener('abort', abort);
-          }
-          cleanupFailure = new WorkerCleanupError(signal.reason, diagnostic);
-          throw cleanupFailure;
+        async extract() {
+          await sibling.promise;
+          throw new WorkerCleanupError(Error('test cleanup'), { owned: true });
         },
       },
     },
   );
-  let entryTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const pending = f.run({ url: f.url });
-    await Promise.race([
-      entered,
-      new Promise<never>((_, reject) => {
-        entryTimer = setTimeout(() => reject(Error('original_extractor_not_entered')), 2000);
-      }),
-    ]);
-    clearTimeout(entryTimer);
-    const original = await f.store.getCommand('work1');
-    const runId = (original?.receipt as { runId?: string } | null)?.runId;
-    if (!runId) throw Error('original_run_identity_missing');
-    await f.runtime.cancelRun({
-      expectedStoreId: f.expectedStoreId,
-      commandId: 'cancel-uncertain-original',
-      sessionId: 's',
-      subjectId: 'owner',
-      runId,
-    });
-    const result = await pending;
-    expect(observedSignal?.aborted).toBe(true);
-    expect(cleanupFailure?.cause === observedSignal?.reason).toBe(true);
-    expect(
-      (cleanupFailure as WorkerCleanupError & { originalThread: unknown }).originalThread,
-    ).toBe(diagnostic);
-    expect(result.result.id).toBe('work1');
-    expect(result.execution?.originCommandId).toBe('work1');
-    expect(result.execution?.runId).toBe(runId);
+    const urls = [
+      `${f.url}/parser`,
+      `${f.url.replace('fixture.test', 'sibling.fixture.test')}/sibling`,
+      `${f.url}/queued`,
+    ];
+    const result = await f.run({ urls });
+    await closed.promise;
     expect(result.execution?.status).toBe('outcome_unknown');
-    if (!result.execution) throw Error('original_unknown_tool_missing');
     expect(result.execution?.result).toMatchObject({
       outcome: 'outcome_unknown',
       content: 'worker_exit_unconfirmed',
     });
-    expect(result.model.requests.length).toBe(1);
-    expect(f.counts().requests).toBe(2);
-    const originalCommand = await f.store.getCommand('work1');
-    const originalData = await f.store.listMessages('s', { limit: 200 });
-    await f.runtime.close();
-    const cold = await openSqliteStore({
-      dataRoot: join(f.root, 'data'),
-      profile: 'new',
-      mode: 'readonly',
-    });
-    try {
-      expect((await cold.getMetadata()).storeId).toBe(f.expectedStoreId);
-      expect(await cold.getCommand('work1')).toEqual(originalCommand);
-      expect(await cold.getExecution(result.execution!.id)).toEqual(result.execution);
-      expect(await cold.listMessages('s', { limit: 200 })).toEqual(originalData);
-      expect(result.model.requests.length).toBe(1);
-    } finally {
-      await cold.close();
-    }
+    expect(pages.sort()).toEqual(['/parser', '/sibling']);
+    expect(f.admissions).not.toContain(urls[2]!);
+    expect(result.model.requests).toHaveLength(2);
+    expect(
+      result.model.requests[1]!.messages.slice()
+        .reverse()
+        .find((m) => m.role === 'tool')?.content,
+    ).toContain('worker_exit_unconfirmed');
   } finally {
-    clearTimeout(entryTimer);
     await f.close();
   }
 }, 12000);
