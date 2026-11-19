@@ -7,6 +7,8 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 
 验证：`bun run test:shell:native`、`bun test tests/isolated/unified-agent/formal-optional-capabilities.test.ts tests/isolated/unified-agent/native-runtime-protection.test.ts tests/isolated/unified-agent/unified-platform.test.ts`、`bun run scripts/release/unified-platform-probe.ts`、`bun run scripts/release/unified-platform-verify.ts`；三OS声明和formal verifier由[CI守卫](../../tests/integration/scripts/unified-ci.test.ts)核验，实际run仍必须另验。
 
+三平台 PR 的执行边界反例、平台诊断及源 head 发布候选分别有独立检查；手动平台验证和每次发布候选检查执行 formal verifier。产物位置及当前未获资格的原因见[Agent CI 矩阵](../../tests/agent-ci-coverage.md)。
+
 2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 

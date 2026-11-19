@@ -23,7 +23,7 @@ Linux 默认 Service 与调用 Shell 的 Task 接入[原 PID namespace 后端](.
 
 Windows 的普通 Shell Job 支持受限 Git Bash、Windows PowerShell 5.1 和已核实的本机 PowerShell 7。权限及令牌范围见 [Windows active](windows-shell-sandbox.md)。Linux 实机与 installed 资格沿原证据范围。各平台运行、资源指标及正式发行资格分别核验。
 
-[当前platform/execution workflow](../../tests/integration/scripts/unified-ci.test.ts)核新 owner paths、实际 source-free probe 与 formal verifier；不再调用下方旧 builtin/App 测试。当前宿主开放范围由上述实现和运行证据界定；下文保历史投影、威胁模型及仍适用的安全约束，未知/未完成范围继续拒绝。
+[执行边界作业](../../.github/workflows/execution-boundary-conformance.yml)在各支持主机执行负例并归档日志；[平台作业](../../.github/workflows/platform-capability-probe.yml)对源码树外运行的候选归档诊断，手动触发额外执行 formal 核验。发布候选在每次运行中保留完整 formal 门禁。当前宿主开放范围由上述实现和运行证据界定；下文保历史投影、威胁模型及仍适用的安全约束，未知/未完成范围继续拒绝。
 
 ## 历史实现与仍适用的安全约束
 

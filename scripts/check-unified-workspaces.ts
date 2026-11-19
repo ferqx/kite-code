@@ -269,24 +269,27 @@ export function checkUnifiedFormalConsumers(root: string): {
           if (name === 'runtime-transport-qualification.yml') {
             const required =
               'bun test --parallel=1 --max-concurrency=1 apps/cli/test/file-recovery-pty.test.ts apps/cli/test/isolated/tui-drafts-host.test.ts apps/cli/test/isolated/file-recovery-argv.test.ts apps/cli/test/isolated/tui-file-recovery.test.ts apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts apps/cli/test/isolated/tui-file-recovery-scopes.test.ts apps/cli/test/isolated/tui-file-recovery-crash.test.ts apps/cli/test/isolated/tui-recovery-host.test.ts apps/cli/test/isolated/tui-preferences-host.test.ts apps/cli/test/isolated/tui-mcp-connection-pty.test.ts apps/cli/test/isolated/tui-composer-host.test.ts apps/cli/test/isolated/tui-planning-host.test.ts tests/isolated/unified-agent/extension-upgrade.test.ts';
-            const unfiltered = (step: Record<string, unknown>) =>
-              step.if === undefined &&
+            const atHost = (step: Record<string, unknown>, condition?: string) =>
+              step.if === condition &&
               step['working-directory'] === undefined &&
               (step['continue-on-error'] === undefined || step['continue-on-error'] === false);
-            const build = steps.findIndex(
-              (step) => step.run === 'bun run build' && unfiltered(step),
-            );
+            const build = steps.findIndex((step) => step.run === 'bun run build' && atHost(step));
             const caller = steps.findIndex(
               (step) =>
                 typeof step.run === 'string' &&
                 step.run.trim().replace(/\s+/g, ' ') === required &&
-                unfiltered(step),
+                atHost(step),
             );
             const callerIndex = (file: string) =>
               steps.findIndex(
                 (step) =>
                   step.run === `bun test --parallel=1 --max-concurrency=1 ${file}` &&
-                  unfiltered(step),
+                  atHost(
+                    step,
+                    file === 'apps/cli/test/isolated/file-candidate-windows-native.test.ts'
+                      ? "runner.os == 'Windows'"
+                      : undefined,
+                  ),
               );
             const candidateFiles = [
               'apps/cli/test/isolated/tui-file-candidates-host.test.ts',
@@ -318,7 +321,7 @@ export function checkUnifiedFormalConsumers(root: string): {
               'apps/cli/test/isolated/tui-scrollback-pty.test.ts',
             ].map(callerIndex);
             const transport = steps.findIndex(
-              (step) => step.run === 'bun run test:runtime:transport' && unfiltered(step),
+              (step) => step.run === 'bun run test:runtime:transport' && atHost(step),
             );
             const recoveryCallers = [
               'apps/service/test/isolated/run-resume.test.ts',
@@ -358,7 +361,7 @@ export function checkUnifiedFormalConsumers(root: string): {
               'platform-capability-probe.yml',
               'runtime-transport-qualification.yml',
             ].includes(name) ||
-            (name === 'required.yml' && jobName === 'unit')
+            (name === 'required.yml' && jobName === 'unit-shard')
           ) {
             const display = name === 'release-candidate.yml' || name === 'required.yml';
             const prepare = steps.findIndex(
@@ -465,7 +468,7 @@ export function checkUnifiedFormalConsumers(root: string): {
           }
           if (
             name === 'required.yml' &&
-            jobName === 'unit' &&
+            jobName === 'unit-shard' &&
             !steps.some(
               (step) =>
                 step.if === undefined &&
@@ -713,12 +716,41 @@ export function checkUnifiedFormalConsumers(root: string): {
             )
               add('formal-ci-native-build-environment-missing', location, jobName);
           }
-          if (
+          const platformDiagnostic = name === 'platform-capability-probe.yml';
+          const platformRelease = name === 'release-candidate.yml';
+          const platformProbe = 'bun run scripts/release/unified-platform-probe.ts';
+          const platformVerify = 'bun run scripts/release/unified-platform-verify.ts';
+          if (platformDiagnostic || platformRelease) {
+            const report = `\${{ github.workspace }}/dist/unified-evidence/platform.json`;
+            const candidate = `\${{ github.workspace }}/dist/unified-terminal`;
+            const commandIndex = (command: string, condition?: string) =>
+              steps.findIndex(
+                (step) =>
+                  step.if === condition &&
+                  typeof step.run === 'string' &&
+                  step.run.trim().replace(/\s+/g, ' ') === command,
+              );
+            const probe = commandIndex(
+              `${platformProbe} "--candidate=${candidate}" "--output=${report}"`,
+            );
+            const verify = `${platformVerify} "--report=${report}"`;
+            const diagnostic = commandIndex(`${verify} --mode=diagnostic`);
+            const formal = commandIndex(
+              `${verify} --mode=formal`,
+              platformDiagnostic
+                ? "always() && github.event_name == 'workflow_dispatch'"
+                : 'always()',
+            );
+            if (probe < 0 || diagnostic <= probe || formal <= diagnostic)
+              add('formal-ci-qualification-gate-missing', location, jobName);
+          } else if (
             runs.some((run) => run.includes('scripts/release/unified-platform-probe.ts')) &&
-            !runs.some(
-              (run) =>
-                run.includes('scripts/release/unified-platform-verify.ts') &&
-                run.includes('--mode=formal'),
+            !steps.some(
+              (step) =>
+                (step.if === undefined || step.if === 'always()') &&
+                typeof step.run === 'string' &&
+                step.run.trim().startsWith(`${platformVerify} `) &&
+                step.run.trim().endsWith(' --mode=formal'),
             )
           )
             add('formal-ci-qualification-gate-missing', location, jobName);

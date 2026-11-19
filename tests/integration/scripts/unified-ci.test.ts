@@ -129,7 +129,7 @@ test('quality and local gates retain one combined boundary check and independent
   );
   expect(scripts['check:core-boundary']).toBe('bun run scripts/check-unified-agent-boundary.ts');
 });
-test('actual ten workflows and all recursive ten-workspace script consumers remain new; historical files do not imply execution', () => {
+test('actual workflows and all recursive ten-workspace script consumers remain new; historical files do not imply execution', () => {
   const root = resolve(import.meta.dir, '../../..');
   const report = checkUnifiedFormalConsumers(root);
   expect(report.violations).toEqual([]);
@@ -291,7 +291,13 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
         (s: string) => s.replace(run, 'run: echo MCP caller'),
         (s: string) =>
           s.replace(run, run.replace('bun test ', 'bun test --test-name-pattern=never-match ')),
-        (s: string) => s.replace(run, `if: runner.os != 'Windows'\n        ${run}`),
+        (s: string) =>
+          file.endsWith('file-candidate-windows-native.test.ts')
+            ? s.replace(
+                `if: runner.os == 'Windows'\n        ${run}`,
+                `if: runner.os != 'Windows'\n        ${run}`,
+              )
+            : s.replace(run, `if: runner.os != 'Windows'\n        ${run}`),
       ];
     }),
     (s: string) =>
@@ -602,6 +608,26 @@ test('a platform slice must retain the formal verifier, not only a diagnostic re
       '      - run: bun run scripts/release/unified-platform-verify.ts --report=owned.json --mode=formal\n',
   );
   expect(checkUnifiedFormalConsumers(root).violations).toEqual([]);
+});
+
+test('platform diagnostics and explicit promotion each require their original verifier', () => {
+  const path = '.github/workflows/platform-capability-probe.yml';
+  const source = readFileSync(resolve(import.meta.dir, '../../..', path), 'utf8');
+  for (const [before, after] of [
+    ['scripts/release/unified-platform-probe.ts', 'scripts/release/missing.ts'],
+    [`--report=\${{ github.workspace }}/dist/unified-evidence/platform.json`, '--report=old.json'],
+    ['--mode=diagnostic', '--mode=formal'],
+    ['--mode=formal', '--mode=diagnostic'],
+    ["always() && github.event_name == 'workflow_dispatch'", "github.event_name == 'push'"],
+  ]) {
+    const root = fixture();
+    put(root, path, source.replace(before!, after!));
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some(
+        (v) => v.code === 'formal-ci-qualification-gate-missing',
+      ),
+    ).toBe(true);
+  }
 });
 
 test('CI working-directory and command indirection cannot resolve an undeclared legacy workspace', () => {
@@ -1101,8 +1127,69 @@ test('required workflow prepares runner paths inside steps', () => {
     for (const value of Object.values(job.env ?? {}))
       expect(value).not.toMatch(/\$\{\{[^}]*\brunner\./u);
   }
-  expect(workflow.jobs.unit.env).toBeUndefined();
-  expect(workflow.jobs.unit.steps[0].run).toBe(
+  expect(workflow.jobs['unit-shard'].env).toBeUndefined();
+  expect(workflow.jobs['unit-shard'].steps[0].run).toBe(
     'echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/kite-playwright-browsers" >> "$GITHUB_ENV"',
   );
+});
+
+test('unit aggregation retains every mandatory shard and rejects failed, skipped or cancelled work', () => {
+  const workflow = parse(
+    readFileSync(resolve(import.meta.dir, '../../../.github/workflows/required.yml'), 'utf8'),
+  );
+  const shards = workflow.jobs['unit-shard'];
+  expect(shards.strategy.matrix.shard).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  expect(shards.strategy['fail-fast']).toBe(false);
+  expect(
+    shards.steps.find((step: { run?: string }) => step.run === 'xvfb-run -a bun run test').env
+      .KITE_UNIT_SHARD,
+  ).toBe(`\${{ matrix.shard }}/8`);
+  expect(workflow.jobs.unit).toMatchObject({
+    name: 'unit',
+    if: 'always()',
+    needs: 'unit-shard',
+    steps: [
+      {
+        name: 'Require every default test shard',
+        env: { RESULT: `\${{ needs.unit-shard.result }}` },
+        run: 'test "$RESULT" = success',
+      },
+    ],
+  });
+});
+
+test('fault and bounded soak keep independent exits and mandatory evidence', () => {
+  const workflow = parse(
+    readFileSync(resolve(import.meta.dir, '../../../.github/workflows/required.yml'), 'utf8'),
+  );
+  const steps = workflow.jobs['runtime-fault-soak'].steps as {
+    id?: string;
+    run?: string;
+    if?: string;
+    shell?: string;
+    'continue-on-error'?: boolean;
+    uses?: string;
+    with?: { path?: string; 'if-no-files-found'?: string };
+  }[];
+  const ready = steps.findIndex(
+    (step) => step.id === 'native-deps' && step.run?.includes('bubblewrap'),
+  );
+  const fault = steps.findIndex((step) => step.run === 'bun run test:runtime:fault');
+  const diagnostic = steps.findIndex((step) => step.run?.includes('unified-soak.ts --profile=ci'));
+  expect(ready).toBeGreaterThanOrEqual(0);
+  expect(fault).toBeGreaterThan(ready);
+  expect(diagnostic).toBeGreaterThan(fault);
+  expect(steps[fault]?.if).toBeUndefined();
+  expect(steps[fault]?.['continue-on-error']).toBeUndefined();
+  expect(steps[diagnostic]?.if).toBe("!cancelled() && steps.native-deps.outcome == 'success'");
+  expect(steps[diagnostic]?.['continue-on-error']).toBeUndefined();
+  for (const file of ['runtime-fault.log', 'unified-soak-ci.json']) {
+    const upload = steps.find(
+      (step) =>
+        step.uses?.startsWith('actions/upload-artifact@') &&
+        step.with?.path === `dist/unified-evidence/${file}`,
+    );
+    expect(upload?.if).toBe('always()');
+    expect(upload?.with?.['if-no-files-found']).toBe('error');
+  }
 });

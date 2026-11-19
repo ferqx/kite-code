@@ -25,6 +25,9 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - name: Prepare Linux native probe dependencies
+        id: native-deps
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap
       - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
       - name: Run fixed eight-iteration, sixty-minute qualification
         run: >-

@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runTestJob } from '../../../scripts/test-suite';
 import {
+  defaultShardFiles,
   FINITE_ROOT_SCRIPT_TESTS,
+  selectDefaultShard,
   UNIFIED_EXCLUSIVE_TEST_FILES,
   UNIFIED_RUNTIME_WORKSPACES,
   UNIFIED_TEST_SUITES,
@@ -120,4 +122,30 @@ test('default jobs run only their explicit planned files despite ignored archive
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
+});
+
+test('eight default shards preserve every original file and isolation class exactly once', () => {
+  const full = unifiedTestPlan(root, 2);
+  const inventory = [...full.concurrent, ...full.exclusive].flatMap((job) => job.files);
+  const seen = new Set<string>();
+  for (let i = 0; i < 8; i++) {
+    const files = defaultShardFiles(inventory, `${i}/8`);
+    const plan = selectDefaultShard(full, new Set(files));
+    expect(plan.counts.parallel + plan.counts.isolated + plan.counts.exclusive).toBe(files.length);
+    for (const queue of ['concurrent', 'exclusive'] as const) {
+      for (const job of plan[queue]) {
+        const original = full[queue].find((item) => item.label === job.label)!;
+        expect(job.maxConcurrency).toBe(original.maxConcurrency);
+        for (const file of job.files) {
+          expect(original.files).toContain(file);
+          expect(seen.has(file)).toBe(false);
+          seen.add(file);
+        }
+      }
+    }
+  }
+  expect([...seen].sort()).toEqual(inventory.sort());
+  expect(() => selectDefaultShard(full, new Set(['missing-file']))).toThrow('membership_mismatch');
+  expect(() => defaultShardFiles(inventory, '8/8')).toThrow();
+  expect(() => defaultShardFiles([], '0/8')).toThrow();
 });

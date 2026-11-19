@@ -127,12 +127,15 @@ export function shardTestFiles(files: readonly string[], requestedShards: number
 
 function testEnvironment(prefix: string): { env: Record<string, string>; dispose(): void } {
   const home = temporaryDirectory(prefix);
+  // A nested CLI/inventory test must observe the ordinary local default.
+  const childEnvironment = { ...process.env };
+  delete childEnvironment.KITE_UNIT_SHARD;
   const codeRoot = join(home, '.kite-code');
   const temporary = join(home, 'tmp');
   if (process.platform === 'win32') privateDirectory(temporary);
   return {
     env: {
-      ...process.env,
+      ...childEnvironment,
       ...testToolchainEnvironment(),
       HOME: home,
       // KLSV1 Service contract: this is the exact code root, not an OS-home override.

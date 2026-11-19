@@ -3,6 +3,10 @@ name: Execution Boundary Artifact Conformance
 on:
   pull_request:
     paths:
+      - "packages/trajectory/**"
+      - "packages/trace-extension-sdk/**"
+      - "native/**"
+      - "patches/**"
       - "packages/ai/**"
       - "packages/agent/**"
       - "packages/client/**"
@@ -11,6 +15,8 @@ on:
       - "apps/cli/**"
       - "apps/desktop/**"
       - "apps/web/**"
+      - "scripts/ci/logged-shell.ts"
+      - "tests/isolated/scripts/ci-logged-shell.test.ts"
       - "scripts/release/**"
       - "scripts/runtime/**"
       - "tests/isolated/unified-agent/**"
@@ -38,38 +44,32 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - if: runner.os == 'Linux'
+        name: Prepare Linux native dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap
+      - if: runner.os == 'Windows'
+        name: Prepare installed Windows x64 Native compiler
+        run: bun run scripts/release/prepare-windows-native-ci.ts
       - name: Current Files, dispatch, confinement and immutable artifact contracts
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/execution-boundary.log "{0}"
         run: >-
           bun test --parallel=1 --max-concurrency=1
           packages/agent/test/isolated/jobs/confined-shell.test.ts
           packages/agent/test/isolated/files/runtime.test.ts
           packages/agent/test/isolated/execution/authorization-check.test.ts
           apps/service/test/isolated/runtime-assets.test.ts
-          tests/isolated/unified-agent/formal-optional-capabilities.test.ts
-          tests/isolated/unified-agent/native-runtime-protection.test.ts
-      - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
-      - run: bun run release:build --directory dist/unified-terminal
-      - name: Actual relocated candidate Files, assets, default capability and lifetime probe
-        run: >-
-          bun run scripts/release/unified-platform-probe.ts
-          "--candidate=${{ github.workspace }}/dist/unified-terminal"
-          "--output=${{ github.workspace }}/dist/unified-evidence/platform.json"
-      - name: Check diagnostic evidence
-        run: >-
-          bun run scripts/release/unified-platform-verify.ts
-          "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
-          --mode=diagnostic
-      - name: Require complete native execution qualification
+      - if: runner.os == 'macOS' || runner.os == 'Linux'
+        name: Exercise packaged optional capabilities on supported hosts
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/optional-capabilities.log "{0}"
+        run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/formal-optional-capabilities.test.ts
+      - if: runner.os == 'macOS'
+        name: Exercise native runtime protection on its owning host
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/native-runtime-protection.log "{0}"
+        run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-runtime-protection.test.ts
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
-        run: >-
-          bun run scripts/release/unified-platform-verify.ts
-          "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
-          --mode=formal
-      - name: Preserve actual evidence and unsigned candidates
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: execution-boundary-negative-conformance-${{ matrix.os }}
-          path: dist/unified-evidence/platform.json
+          path: dist/unified-evidence/*.log
           if-no-files-found: error
           overwrite: false

@@ -1,5 +1,7 @@
 # 本地开发与验证
 
+[Agent 能力与 CI 验证矩阵](../../tests/agent-ci-coverage.md)列出默认分片、平台、发布检查与本地真模型验证的范围和证据。
+
 Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当前 guardian 与隔离代码 worker 资产；源码 locator 的拒绝规则保持，具体接线和验证范围见 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。锁定 CLI 运行组件及系统 Chrome／Chromium 仍须先准备；开发构建不自动下载浏览器、不导入现有 Profile，只读观察也不会启动 Browser Job。
 
 仓库使用 Bun 1.4.4；本地类型检查、Required 与运行时／qualification workflow 均固定该版本，配套 `@types/bun` 也固定1.4.4。Windows 原1.4.3与新1.4.4的定向对照和既有失败归[测试体系](../../tests/README.md#运行时升级与模型连接池)；原平台／发布资格不会因 pin 或连接池接线更新而获得。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确十个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。

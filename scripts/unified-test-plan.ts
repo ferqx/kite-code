@@ -1,6 +1,6 @@
 import { relative, resolve } from 'node:path';
 import { planTestSuites, runTestPlan, type TestPlan } from './test-plan';
-import { collectTestFiles, testParallelism } from './test-suite';
+import { collectTestFiles, shardTestFiles, testParallelism } from './test-suite';
 
 export const UNIFIED_RUNTIME_WORKSPACES = [
   'packages/trajectory',
@@ -77,18 +77,61 @@ export function unifiedTestPlan(root: string, concurrency: number): TestPlan {
   return plan;
 }
 
+/** Partition exact files before selecting their original isolated/exclusive jobs. */
+export function defaultShardFiles(files: string[], shard: string): string[] {
+  if (!/^[0-7]\/8$/.test(shard)) throw Error('KITE_UNIT_SHARD must be 0/8 through 7/8');
+  const selected = shardTestFiles(files, 8)[Number(shard[0])];
+  if (!selected?.length) throw Error('default_test_shard_empty');
+  return selected;
+}
+
+export function selectDefaultShard(plan: TestPlan, selected: ReadonlySet<string>): TestPlan {
+  const jobs = (items: TestPlan['concurrent']) =>
+    items.flatMap((job) => {
+      const files = job.files.filter((file) => selected.has(file));
+      return files.length ? [{ ...job, files }] : [];
+    });
+  const concurrent = jobs(plan.concurrent);
+  const exclusive = jobs(plan.exclusive);
+  const assigned = [...concurrent, ...exclusive].reduce(
+    (count, job) => count + job.files.length,
+    0,
+  );
+  if (assigned !== selected.size) throw Error('default_test_shard_membership_mismatch');
+  const isolated = concurrent.filter((job) => job.drainOnFailure).length;
+  const counts = {
+    parallel: selected.size - isolated - exclusive.length,
+    isolated,
+    exclusive: exclusive.length,
+  };
+  return { concurrent, exclusive, counts };
+}
+
 export async function runUnifiedTests(root: string, args: readonly string[]): Promise<number> {
   if (args.length > 1 || (args.length === 1 && args[0] !== '--list')) {
     console.error('usage: bun run scripts/run-default-tests.ts [--list]');
     return 2;
   }
+  const shard = process.env.KITE_UNIT_SHARD;
+  const inventory = unifiedTestInventory(root);
+  const selected =
+    shard === undefined
+      ? undefined
+      : defaultShardFiles(
+          inventory.map((file) => resolve(root, file)),
+          shard,
+        );
   if (args[0] === '--list') {
-    console.log(JSON.stringify({ suites: UNIFIED_TEST_SUITES, files: unifiedTestInventory(root) }));
+    const files = selected?.map((file) => relative(root, file).replaceAll('\\', '/')) ?? inventory;
+    console.log(JSON.stringify({ suites: UNIFIED_TEST_SUITES, files }));
     return 0;
   }
   const concurrency = testParallelism();
-  const plan = unifiedTestPlan(root, concurrency);
-  console.log(`[unified-agent] parallelism=${concurrency}`);
+  const full = unifiedTestPlan(root, concurrency);
+  const plan = selected ? selectDefaultShard(full, new Set(selected)) : full;
+  console.log(
+    `[unified-agent] parallelism=${concurrency} shard=${shard ?? 'all'} files=${selected?.length ?? inventory.length}`,
+  );
   const code = await runTestPlan(root, plan, concurrency);
   if (code === 0)
     console.log(

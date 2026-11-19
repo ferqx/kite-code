@@ -3,6 +3,10 @@ name: Platform Capability Probe
 on:
   pull_request:
     paths:
+      - "packages/trajectory/**"
+      - "packages/trace-extension-sdk/**"
+      - "native/**"
+      - "patches/**"
       - "packages/ai/**"
       - "packages/agent/**"
       - "packages/client/**"
@@ -109,8 +113,8 @@ jobs:
           bun run scripts/release/unified-platform-verify.ts
           "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
           --mode=diagnostic
-      - name: Require complete native execution qualification
-        if: always()
+      - name: Manual formal qualification against the original diagnostic packet
+        if: always() && github.event_name == 'workflow_dispatch'
         run: >-
           bun run scripts/release/unified-platform-verify.ts
           "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"

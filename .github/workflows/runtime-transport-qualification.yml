@@ -96,7 +96,8 @@ jobs:
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-scrollback-pty.test.ts
       - name: Validate file candidate directory records on every platform
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/file-candidate-windows-records.test.ts
-      - name: Validate the actual platform file candidate backend
+      - name: Validate the native Windows file candidate backend
+        if: runner.os == 'Windows'
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/file-candidate-windows-native.test.ts
       - name: Complete Workspace file candidates and original draft completion
         run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-file-candidates-host.test.ts

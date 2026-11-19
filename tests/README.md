@@ -1,5 +1,7 @@
 # 测试体系
 
+[Agent 能力与 CI 验证矩阵](agent-ci-coverage.md)列出默认分片、平台、发布检查与本地真模型验证的范围和证据。
+
 [客户端交互验收适用项](../docs/development/subsystems/clients.md#交互变更验收)。
 
 ## 类型检查
