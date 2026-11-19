@@ -176,6 +176,8 @@ import {
 import { NativeTranscriptDisplay } from './native-transcript-display';
 import { useNativeTurnNotifications } from './native-turn-notifications';
 import { NativePendingAttachments, NativeUserImages } from './native-user-images';
+import { type NativeSearchReader, NativeWebSearchActivity } from './native-web-search-evidence';
+import { NativeBoundWebSearchSettings } from './native-web-search-settings';
 import { NativeWindowFrame } from './native-window-frame';
 import { NativeWorkspaceChanges } from './native-workspace-changes';
 import {
@@ -634,7 +636,7 @@ function NativeDesktopContent({
   const [queueFocusKey, setQueueFocusKey] = useState(0);
   const [planMode, setPlanMode] = useState(false);
   const [settingsPage, setSettingsPage] = useState<
-    'general' | 'providers' | 'mcp' | 'skills' | 'trace'
+    'general' | 'providers' | 'mcp' | 'skills' | 'trace' | 'webSearch'
   >('general');
   const [editor, setEditor] = useState<DesktopEditor>('vscode');
   const [settingsRevision, setSettingsRevision] = useState(0);
@@ -3316,7 +3318,7 @@ function NativeDesktopContent({
       !bridge ||
       !directory ||
       !preparationReadsReady ||
-      !!state?.callerUnavailable ||
+      state?.callerUnavailable ||
       !newWorkspace ||
       newBranch?.workspaceId !== newWorkspace ||
       newBranch.storeId !== directory.storeId ||
@@ -5703,6 +5705,59 @@ function NativeDesktopContent({
     selection && directory?.storeId === selection.storeId && !directory.unavailable
       ? directory.workspaces.find(({ id }) => id === selection.session.workspaceId)?.rootUri
       : undefined;
+  function searchReader(id: string | undefined, live: boolean): NativeSearchReader | undefined {
+    if (
+      !id ||
+      !state ||
+      !selection?.canReadWebSearchEvidence ||
+      directory?.unavailable ||
+      selection.permissionUnavailable ||
+      selection.viewLoading ||
+      preparing
+    )
+      return;
+    const scope = {
+      generation: state.generation,
+      expectedStoreId: selection.storeId,
+      sessionId: selection.session.id,
+      executionId: id,
+      viewSelection: selection.viewSelection ?? selection.viewGeneration,
+    };
+    return {
+      scope: JSON.stringify(scope),
+      executionId: id,
+      live,
+      read: async () => {
+        const value = await bridge.request({ method: 'webSearch.evidence', ...scope });
+        return value &&
+          'kind' in value &&
+          value.kind === 'webSearch.evidence' &&
+          'evidence' in value
+          ? (value.evidence ?? undefined)
+          : undefined;
+      },
+    };
+  }
+  const pretextSearchReaders = (executionRecords ?? [])
+    .filter(
+      (e) =>
+        e.sessionId === selection?.session.id &&
+        e.kind === 'model' &&
+        !e.parentExecutionId &&
+        ['dispatching', 'running'].includes(e.status) &&
+        !messages.some(
+          (m) =>
+            m.role === 'assistant' &&
+            !m.originMessage &&
+            (m.outputBody?.executionId === e.id || m.sourceIds?.includes(e.id)) &&
+            !!(m.content || (m.outputBody && m.outputBody.contentBytes !== '0')),
+        ),
+    )
+    .slice(-1)
+    .flatMap((e) => {
+      const reader = searchReader(e.id, true);
+      return reader ? [reader] : [];
+    });
   const renderNativeMessage = (
     model: Parameters<NonNullable<SessionPageProps['renderMessageContent']>>[0],
     detailsOpen = true,
@@ -5836,6 +5891,22 @@ function NativeDesktopContent({
           ])}
           message={message}
           storeId={selection.storeId}
+          searchReader={
+            !message.originMessage &&
+            (message.role === 'assistant' ||
+              (message.role === 'tool' && model.toolName === 'web_search'))
+              ? searchReader(
+                  message.outputBody?.executionId ??
+                    (message.sourceIds?.length === 1 ? message.sourceIds[0] : undefined),
+                  message.status === 'incomplete' &&
+                    executionRecords?.some(
+                      (e) =>
+                        e.id === (message.outputBody?.executionId ?? message.sourceIds?.[0]) &&
+                        ['dispatching', 'running'].includes(e.status),
+                    ) === true,
+                )
+              : undefined
+          }
           terminalObserved={modelOutputTerminalObserved(
             message,
             selection.executions,
@@ -6217,6 +6288,9 @@ function NativeDesktopContent({
       }
       notices={
         <>
+          {pretextSearchReaders.map((reader) => (
+            <NativeWebSearchActivity key={reader.scope} reader={reader} />
+          ))}
           {diagnostics && fileTargets.error && (
             <p role="alert">
               {fileTargets.error}{' '}
@@ -7346,6 +7420,17 @@ function NativeDesktopContent({
                     <SettingsNavigationIcon name="providers" />
                     <span>提供商与模型</span>
                   </DesktopButton>
+                  {directory?.canReadWebSearchSettings && (
+                    <DesktopButton
+                      type="button"
+                      variant="ghost"
+                      aria-pressed={settingsPage === 'webSearch'}
+                      onClick={() => setSettingsPage('webSearch')}
+                    >
+                      <SettingsNavigationIcon name="webSearch" />
+                      <span>网页搜索</span>
+                    </DesktopButton>
+                  )}
                   <DesktopButton
                     variant="ghost"
                     type="button"
@@ -7389,6 +7474,17 @@ function NativeDesktopContent({
                           nativeWindow && document.documentElement.dataset.platform === 'windows'
                         }
                       />
+                    ) : settingsPage === 'webSearch' ? (
+                      directory?.canReadWebSearchSettings && !directory.unavailable ? (
+                        <NativeBoundWebSearchSettings
+                          bridge={bridge}
+                          generation={generation.current}
+                          storeId={directory.storeId}
+                          sessionId={!preparing ? selection?.session.id : undefined}
+                        />
+                      ) : (
+                        <p role="status">当前连接不支持网页搜索设置。</p>
+                      )
                     ) : settingsPage === 'trace' ? (
                       directory?.storeId ? (
                         <NativeTraceSettings

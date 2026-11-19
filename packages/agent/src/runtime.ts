@@ -144,6 +144,7 @@ import {
 import { modelExecutionId } from './model-identifier';
 import { modelOutputReference, readModelOutput } from './model-output';
 import { modelReference } from './model-reference';
+import { matchesModelRequestIdentity } from './model-request-identity';
 import { formatChildResult } from './model-result-presentation';
 import {
   captureModelRequestMetadata,
@@ -205,6 +206,12 @@ import {
   interactionEvidence,
   toolResultEvidence,
 } from './trajectory/evidence-projection';
+import {
+  readWebSearchEvidence,
+  type WebSearchEvidenceBlock,
+  type WebSearchEvidenceScope,
+  WebSearchEvidenceWriter,
+} from './web-search-evidence';
 
 /** A trusted configuration producer could not confirm cleanup of its actual preparation resources. */
 export class ConfigurationPreparationCleanupError extends AgentError {
@@ -403,6 +410,7 @@ export interface AfterTurnPolicy {
   }>;
 }
 export interface RunConfiguration {
+  readonly nativeWebSearch?: ScopedBindings['nativeWebSearch'];
   /** Host verified current destination against the selected ordinary Run; never a permission or receipt. */
   readonly verifiedSessionCompressionTarget?: true;
   readonly compressor?: ContextCompressor;
@@ -449,6 +457,7 @@ function sealSources(sources: ContextSources | undefined): ContextSources | unde
 }
 
 type RunBinding = {
+  nativeWebSearch?: ScopedBindings['nativeWebSearch'];
   verifiedSessionCompressionTarget?: true;
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
@@ -801,6 +810,7 @@ export class AgentRuntime {
           compressor: sealCompressor(configuration.compressor ?? options.compressor),
           dispose: configuration.dispose,
           readStepCapabilities: configuration.readStepCapabilities,
+          nativeWebSearch: configuration.nativeWebSearch,
           afterTurn: configuration.afterTurn ?? options.afterTurn,
           authorizationCheck: sealAuthorizationCheck(
             configuration.authorizationCheck ?? this.defaultChecker,
@@ -839,6 +849,7 @@ export class AgentRuntime {
     }
     this.execution = new UnifiedExecution({
       store: options.store,
+      artifacts: options.artifacts,
       toolBehaviors: this.options.toolBehaviors,
       sealModelInput: (scope, request) => this.sealModelInput(scope, request),
       sealModelMetadata: (scope, metadata, request, sealedInput) =>
@@ -1025,6 +1036,7 @@ export class AgentRuntime {
     this.listModelInputs = this.accountEntry(this.listModelInputs, 'observation');
     this.readModelInput = this.accountEntry(this.readModelInput, 'observation');
     this.readModelOutput = this.accountEntry(this.readModelOutput, 'observation');
+    this.readWebSearchEvidence = this.accountEntry(this.readWebSearchEvidence, 'observation');
     this.readTrajectoryEvidence = this.accountEntry(this.readTrajectoryEvidence, 'observation');
     this.readExecutionEvidence = this.accountEntry(this.readExecutionEvidence, 'observation');
     this.readArtifact = this.accountEntry(this.readArtifact, 'observation');
@@ -2580,10 +2592,33 @@ export class AgentRuntime {
       template.binding.jobs ?? new Map(),
       template.binding.extensions ?? this.extensions,
     );
+    const parentSearch = capturedParent.nativeWebSearch;
+    const childSearch = template.binding.nativeWebSearch;
+    let inheritedSearch: ScopedBindings['nativeWebSearch'];
+    if (childSearch) {
+      if (
+        !parentSearch ||
+        parentSearch.dialect !== childSearch.dialect ||
+        (childSearch.bindingDigest !== parentSearch.bindingDigest &&
+          (!parentSearch.authorizeDescendant ||
+            !parentSearch.accountDigest ||
+            childSearch.accountDigest !== parentSearch.accountDigest))
+      )
+        throw new AgentError('child_web_search_scope_exceeds_parent');
+      const parentAllows = parentSearch.authorizeDescendant ?? parentSearch.authorize;
+      inheritedSearch = {
+        ...childSearch,
+        authorize: async (input) => (await parentAllows(input)) && childSearch.authorize(input),
+        authorizeDescendant: async (input) =>
+          (await parentAllows(input)) &&
+          (childSearch.authorizeDescendant ?? childSearch.authorize)(input),
+      };
+    }
     const configured = {
       ...template,
       binding: {
         ...template.binding,
+        nativeWebSearch: inheritedSearch,
         permissions: this.childPermissions(
           capturedParent!.permissions ?? this.options.permissions,
           template.binding.permissions,
@@ -3965,6 +4000,16 @@ export class AgentRuntime {
     signal.throwIfAborted();
     return page;
   }
+  readWebSearchEvidence(scope: WebSearchEvidenceScope) {
+    return readWebSearchEvidence(this.options.store, this.options.artifacts, scope);
+  }
+  /** Trusted producer. HTTP observers can only read an existing execution's evidence. */
+  publishWebSearchEvidence(scope: WebSearchEvidenceScope, block: WebSearchEvidenceBlock) {
+    if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
+    return new WebSearchEvidenceWriter(this.options.store, this.options.artifacts, scope).append(
+      block,
+    );
+  }
   async readModelOutput(
     input: Parameters<Store['getModelOutputSnapshot']>[0] & { signal?: AbortSignal },
   ): Promise<ModelOutputSnapshot> {
@@ -5209,8 +5254,7 @@ export class AgentRuntime {
       !source ||
       typeof source !== 'object' ||
       Array.isArray(source) ||
-      source.kind !== 'model_request' ||
-      source.requestId !== execution.id
+      !matchesModelRequestIdentity(source, execution.id)
     )
       throw new AgentError('resume_checkpoint_unavailable');
     return source;
@@ -5860,6 +5904,7 @@ export class AgentRuntime {
             resolved?.initializeRequirements ?? this.options.initializeRunRequirements,
           authorizationCheck: checker,
           readStepCapabilities: resolved?.readStepCapabilities,
+          nativeWebSearch: resolved?.nativeWebSearch,
           afterTurn: resolved?.afterTurn ?? this.options.afterTurn,
           compressor: sealCompressor(resolved?.compressor ?? this.options.compressor),
           dispose,
@@ -6481,6 +6526,7 @@ export class AgentRuntime {
             initializeRequirements:
               resolved.initializeRequirements ?? binding.initializeRequirements,
             readStepCapabilities: resolved.readStepCapabilities,
+            nativeWebSearch: resolved.nativeWebSearch,
             afterTurn: resolved.afterTurn ?? binding.afterTurn,
             compressor: sealCompressor(resolved.compressor ?? binding.compressor),
             authorizationCheck: sealAuthorizationCheck(
@@ -8041,6 +8087,7 @@ export class AgentRuntime {
     let compressor = sealCompressor(this.options.compressor);
     let verifiedSessionCompressionTarget: true | undefined;
     let readStepCapabilities: StepCapabilitiesReader | undefined;
+    let nativeWebSearch: ScopedBindings['nativeWebSearch'];
     let dispose: (() => Promise<void>) | undefined;
     let run: RunRecord;
     let preparationResources: RunConfiguration | undefined;
@@ -8163,6 +8210,7 @@ export class AgentRuntime {
         conditions = resolved.conditions;
         initializeRequirements = resolved.initializeRequirements ?? initializeRequirements;
         readStepCapabilities = resolved.readStepCapabilities;
+        nativeWebSearch = resolved.nativeWebSearch;
         afterTurn = resolved.afterTurn ?? afterTurn;
         compressor = sealCompressor(resolved.compressor ?? compressor);
         if (command.kind === 'context.compress')
@@ -8247,6 +8295,7 @@ export class AgentRuntime {
       conditions,
       initializeRequirements,
       authorizationCheck,
+      nativeWebSearch,
       readStepCapabilities,
       afterTurn,
       compressor,
@@ -8451,6 +8500,7 @@ export class AgentRuntime {
   private scopedRunBinding(runId: string, binding: RunBinding): ScopedBindings {
     return {
       extensions: binding.extensions ?? this.extensions,
+      nativeWebSearch: binding.nativeWebSearch,
       tools: binding.definitions,
       jobs: binding.jobs ?? this.runDefinitions().jobs,
       sources: binding.sources ?? this.options.sources,
@@ -8744,6 +8794,7 @@ export class AgentRuntime {
         if (!current) return;
         capabilityFingerprint = current.fingerprint;
         scope.bindings = {
+          nativeWebSearch: binding.nativeWebSearch,
           extensions: current.selected.extensions,
           tools: current.selected.definitions,
           jobs: current.selected.jobs,

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ArtifactReadInput } from '../artifact-port';
 import { canonicalJson } from '../json';
+import { matchesModelRequestIdentity } from '../model-request-identity';
 import { isMissingPublishedImage } from '../published-blob-missing';
 import type { Store } from '../storage/port';
 import { AgentError, type ArtifactReference, type Json } from '../storage/types';
@@ -163,8 +164,7 @@ async function selectedCarrier(
   const source = rec(model.decisionSource);
   const bindings = source.toolBindings;
   requireSource(
-    source.kind === 'model_request' &&
-      source.requestId === model.id &&
+    matchesModelRequestIdentity(source, model.id) &&
       Array.isArray(bindings) &&
       bindings
         .map(rec)

@@ -13,13 +13,19 @@ export type ModelAttemptDetail = (typeof details)[number];
 export class ModelAttemptError extends Error {
   readonly reason: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
   readonly detail?: ModelAttemptDetail;
-  constructor(reason: ModelAttemptError['reason'], detail?: ModelAttemptDetail) {
+  readonly retrySafety: 'safe' | 'unknown' | 'unsafe';
+  constructor(
+    reason: ModelAttemptError['reason'],
+    detail?: ModelAttemptDetail,
+    retrySafety: ModelAttemptError['retrySafety'] = 'unknown',
+  ) {
     super(`MODEL_ATTEMPT_RETRYABLE_FAILURE:${reason}`);
     if (detail !== undefined && !details.includes(detail))
       throw new Error('invalid_model_failure_detail');
     this.name = 'ModelAttemptError';
     this.reason = reason;
     this.detail = detail;
+    this.retrySafety = retrySafety;
     Object.defineProperty(this, marker, { value: true });
   }
   /** The independently built AI root and SDK entries can own distinct constructors. */
@@ -28,6 +34,7 @@ export class ModelAttemptError extends Error {
     const value = error as ModelAttemptError & { [marker]?: boolean };
     return (
       value[marker] === true &&
+      ['safe', 'unknown', 'unsafe'].includes(value.retrySafety) &&
       (value.detail === undefined || details.includes(value.detail)) &&
       ['provider_unavailable', 'connection_failed', 'stream_incomplete'].includes(value.reason) &&
       value.message === `MODEL_ATTEMPT_RETRYABLE_FAILURE:${value.reason}`

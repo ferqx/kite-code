@@ -80,6 +80,7 @@ import { NativeToolMessages } from './tool-messages';
 import { invokeNativeTrace } from './trace-extensions';
 import { NativeTrajectory } from './trajectory';
 import { NativeUserMcpSettings } from './user-mcp-settings';
+import { NativeWebSearch } from './web-search';
 import { NativeWorkspaceChanges } from './workspace-changes';
 import { NativeWorkspaceRemovalPort } from './workspace-removal';
 
@@ -159,6 +160,7 @@ export class NativeCaller {
     promise: Promise<NativeDirectory>;
   };
   private readonly providers: NativeProviderSettings;
+  private readonly webSearch: NativeWebSearch;
   private readonly images = new NativeInputImages();
   private readonly inputFiles = new NativeInputFiles();
   private readonly pendingInlineOfficeFiles = new Map<string, { released: boolean }>();
@@ -653,6 +655,20 @@ export class NativeCaller {
             ...(this.selected ? { sessionId: this.selected } : {}),
           }
         : undefined;
+    this.webSearch = new NativeWebSearch(client, () => {
+      const scope = configurationScope();
+      return scope
+        ? {
+            ...scope,
+            readOnly:
+              !!scope.sessionId &&
+              (!this.controller.snapshot ||
+                this.controller.snapshot.sessionId !== scope.sessionId ||
+                this.controller.snapshot.view.session.parentSessionId !== null ||
+                this.controller.snapshot.workspaceUnavailable),
+          }
+        : undefined;
+    });
     this.inputConfiguration = new NativeConfiguration(client, configurationScope);
     this.providers = new NativeProviderSettings(
       client,
@@ -935,6 +951,8 @@ export class NativeCaller {
         storeId,
         workspaces,
         sessions,
+        canReadWebSearchSettings:
+          this.client.serverInfo!.capabilities.includes('web_search_settings'),
         canManageSessions: this.client.serverInfo!.capabilities.includes('sessions'),
       };
       this.directoryUnavailable = false;
@@ -1551,6 +1569,8 @@ export class NativeCaller {
               this.client.serverInfo!.capabilities.includes('extensions_actions') &&
               this.client.serverInfo!.capabilities.includes('commands') &&
               !snapshot.workspaceUnavailable,
+            canReadWebSearchEvidence:
+              this.client.serverInfo!.capabilities.includes('web_search_evidence'),
             canReadModelOutput: this.client.serverInfo!.capabilities.includes('model_outputs'),
             canReadHistoryPreviews:
               this.client.serverInfo!.capabilities.includes('session_state') &&
@@ -1949,6 +1969,18 @@ export class NativeCaller {
     )
       throw new ClientError('workspace_identity_unavailable');
     switch (request.method) {
+      case 'webSearch.settings.read':
+      case 'webSearch.settings.save':
+      case 'webSearch.settings.test':
+      case 'webSearch.evidence': {
+        if (request.method === 'webSearch.evidence') {
+          const snapshot = this.messageReadSnapshot();
+          if (!snapshot || snapshot.sessionId !== request.sessionId || this.permissionUnavailable)
+            throw new ClientError('native_selection_changed');
+        }
+        result = await this.webSearch.invoke(request);
+        break;
+      }
       case 'trace.manage':
         result = await invokeNativeTrace(this.client.traceExtensions, request.operation);
         break;

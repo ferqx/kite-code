@@ -264,6 +264,7 @@ export async function assembleProcessService(
   }
   const {
     configurationManagement,
+    webSearchTest,
     permissionManagement,
     diagnosticSource,
     skillCatalogue,
@@ -379,6 +380,7 @@ export async function assembleProcessService(
           runtimeAssetAccess?.release();
         },
         configurationManagement: configurationManagement?.(runtime),
+        webSearchTest: runtime ? webSearchTest?.(runtime) : undefined,
         permissionManagement: permissionManagement?.(runtime),
         diagnosticSource,
         skillCatalogue,

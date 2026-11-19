@@ -29,6 +29,7 @@ import type { ProfileSelection } from '@kite-ai/agent/profile';
 import type { createSessionTitleExtension } from '@kite-ai/agent/session-title';
 import { createShellToolBehaviors } from '@kite-ai/agent/shell';
 import { createDefaultTaskRequestClassifier } from '@kite-ai/agent/task';
+import { webSearchExtensionId, webSearchToolId } from '@kite-ai/agent/tools/web-search';
 import type { createBrowserConfiguration } from './browser-configuration';
 import type { ChildRole } from './child-configuration';
 import type { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
@@ -42,6 +43,7 @@ import { readBoundPlanningSuccessor, readPlanningPermissionState } from './plann
 import { resolveSessionExecutionRoot } from './session-execution-root';
 import type { createTaskConfiguration } from './task-configuration';
 import type { createWebFetchConfiguration } from './web-fetch-configuration';
+import { webSearchTestActionId, webSearchTestExtensionId } from './web-search-test';
 
 type McpSources = ReturnType<typeof createMcpSourceConfiguration>;
 type SelectedSources =
@@ -49,6 +51,46 @@ type SelectedSources =
   | ReturnType<McpSources['unboundSelection']>
   | Awaited<ReturnType<McpSources['deriveChildSelection']>>;
 type ResolveInput = Parameters<NonNullable<RuntimeOptions['resolveRunConfiguration']>>[0];
+
+type NativeSearchScope = {
+  expectedStoreId: string;
+  sessionId: string;
+  subjectId: string;
+  workspaceId: string;
+};
+
+/** A provider's internal search cannot stop for a per-query approval or invoke a host checker. */
+export async function readNativeSearchPermission(
+  input: NativeSearchScope,
+  host: {
+    runtime?: Pick<AgentRuntime, 'getSession'>;
+    management?: Pick<PermissionManagementPort, 'readMode' | 'readTrust'>;
+    externalAuthority: boolean;
+  },
+): Promise<boolean> {
+  if (!host.runtime || !host.management || host.externalAuthority) return false;
+  try {
+    const session = await host.runtime.getSession(input.sessionId);
+    if (!session || session.deletedAt !== null || session.workspaceId !== input.workspaceId)
+      return false;
+    const [mode, trust] = await Promise.all([
+      host.management.readMode(input),
+      host.management.readTrust(input),
+    ]);
+    return (
+      mode.mode === 'full' &&
+      mode.scopeSessionId === session.rootSessionId &&
+      mode.sessionId === input.sessionId &&
+      mode.storeId === input.expectedStoreId &&
+      trust.storeId === input.expectedStoreId &&
+      trust.workspaceId === input.workspaceId &&
+      trust.status === 'trusted' &&
+      trust.trusted
+    );
+  } catch {
+    return false;
+  }
+}
 
 export function defaultAutoReviewContract(
   value: Json | undefined,
@@ -88,6 +130,7 @@ export function createDefaultPermissionConfiguration(options: {
   externalPermissionAuthority: boolean;
   afterTurn?: AfterTurnPolicy;
   nativeShellRead: boolean;
+  webSearchTestExtension?: Extension;
   childRoles: readonly ChildRole[];
   defaultTaskRoles: boolean;
   /** Only the default host reviewer selects the new builtin risk contract. */
@@ -239,6 +282,30 @@ export function createDefaultPermissionConfiguration(options: {
     safeRead: false,
   });
   const globalCapabilities = new Map<string, CapabilityDescription>();
+  const testExtension = options.webSearchTestExtension;
+  const searchTestId = `${webSearchTestExtensionId}/${webSearchTestActionId}`;
+  if (
+    testExtension?.id === webSearchTestExtensionId &&
+    testExtension.version === '1' &&
+    testExtension.actions?.some(
+      (action) => action.id === webSearchTestActionId && action.version === '1',
+    )
+  ) {
+    globalCapabilities.set(JSON.stringify(['job', searchTestId, '1']), {
+      kind: 'job',
+      definitionId: searchTestId,
+      definitionVersion: '1',
+      revision: 'web-search-test-1',
+      hardAllowed: true,
+      ...builtinCapability(
+        testExtension.id,
+        webSearchTestActionId,
+        'action',
+        planning.extension.id,
+        '1',
+      ),
+    });
+  }
   for (const role of childRoles) {
     globalCapabilities.set(
       JSON.stringify(['job', `agent/${role.id}`, role.version]),
@@ -331,7 +398,10 @@ export function createDefaultPermissionConfiguration(options: {
         JSON.stringify([request.kind, request.definitionId, request.definitionVersion]),
       );
       return (
-        (description && options.defaultAutoReview && request.runId === null
+        (description &&
+        options.defaultAutoReview &&
+        request.runId === null &&
+        description.definitionId !== searchTestId
           ? { ...description, autoReview: 'none' as const }
           : description) ??
         mcp.describe(request) ??
@@ -603,6 +673,15 @@ export function createDefaultPermissionConfiguration(options: {
           ['files.read', 'files.write', 'files.edit'].includes(definitionId)
         )
           return { autoTimeoutScope: 'stop' };
+        // The query is sent to a third-party account. Auto must review its actual input.
+        if (
+          extension.id === webSearchExtensionId &&
+          extension.version === '1' &&
+          kind === 'tool' &&
+          definitionId === webSearchToolId &&
+          definitionVersion === '1'
+        )
+          return { autoTimeoutScope: 'stop' };
         if (!defaultAutoReview) return {};
         const behavior = toolBehaviorRegistry.get({ kind, definitionId, definitionVersion });
         if (behavior?.autoReview) return { autoReview: behavior.autoReview };
@@ -849,6 +928,15 @@ export function createDefaultPermissionConfiguration(options: {
 
   return {
     permissionManagement,
+    nativeSearchAllowed: (scope: NativeSearchScope) =>
+      readNativeSearchPermission(scope, {
+        runtime: options.readRuntime(),
+        management: managed,
+        externalAuthority:
+          options.externalPermissionAuthority ||
+          authority.permissions !== undefined ||
+          authority.permissionPolicy !== undefined,
+      }),
     afterTurn,
     forRun,
     forModelOnly(modelId: string): Permissions {

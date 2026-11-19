@@ -74,3 +74,11 @@ SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses �
 官方语义参考：[OpenAI Responses](https://developers.openai.com/api/reference/resources/responses/methods/create)、[stateless reasoning](https://developers.openai.com/api/docs/guides/reasoning)、[AI SDK OpenAI provider](https://ai-sdk.dev/providers/ai-sdk-providers/openai)。
 
 Codex 的文件认证和固定 endpoint 适配由[Service 本机来源](../../apps/service/README.md#本机-codex-来源)负责，AI 只复用原 SDK Responses 单次流与工具编码，不读取本地认证或刷新 token。公开 family 明确为 `codex`；私有 bearer/账户 header 留在实际 binding。2026-10-24 在 macOS arm64／Bun 1.4.2、`2ab0a991e` 加本次工作树上，以本机默认 `gpt-6.1-sol` 做一次无工具的真实最小文字探测，固定 Codex endpoint 返回 HTTP 200、完整文本 `KITE_CODEX_OK` 和 stop finish；未发送仓库上下文。这只证明该账户该模型的这次文本连通，真实工具/付费账单/跨平台完整资格不由此推导；受控完整工具链证据归[Service 集成测试](../../apps/service/test/isolated/codex-connection.test.ts)。
+
+## 原生 Web Search
+
+Service/Agent 冻结实际路由并在授权后才向中立请求附上 `nativeWebSearch`。适配器再校验精确官方 OpenAI API 端点、显式 API key、Responses、模型及所需推理设置。已记录的协议组合仅为官方指南所举的 `gpt-6.2-astra` 与默认／low／medium／high 的 `gpt-5`；本地 fixture 不证明用户账户额度、真实联网或发布资格。非官方网关、Codex 登录和未识别模型不会据名启用原生搜索。逐查询审批不使用服务端路线。
+
+真实 SDK 以 `store:false` 宣告服务端工具，本地同名函数独立改名、复原；只有本地调用交回 Agent。搜索开始、结束、已检索 URL 和正文引用分别观察，失败／不完整不是成功。正文位置必须对应实际输出块；两个可能的字符单位产生不同可行锚点时只保留链接。原生 v2 私有历史按输出索引保存，并把工具 dialect、回传序列化器和原有连接身份一起散列；存储、账户、模型、搜索模式或文本投影不匹配时使用普通对话。它不是 ModelOutput 或 Trajectory 的新格式。
+
+`ai@7.0.19` 与 `@ai-sdk/openai@4.0.96` 的 Provider V4 类型不能直接互换。保留锁定的 4.0.19，借用 Bun 既有补丁机制，仅回移上游 [无状态搜索历史](https://github.com/vercel/ai/commit/6aedb07c54c2af2ce6b7b50825f3d1be0e98c12c) 与 4.0.91 的 failed/incomplete 处理到已发布的 ESM 入口，见[补丁](patches/openai-4.0.19-web-search.patch)。SDK、主模型、宿主不得因未见首事件重提可能收费的搜索。独立 OpenAI 后端只提交当前查询、短指令及一个强制搜索工具；最多 2000 输出 token、4 次服务端工具、60 秒、2 MiB 流式读取，未知费用不估算。[HTTP/SSE 测试](test/web-search.test.ts)覆盖真实编码、重开请求体及首包前／搜索后断连的实际 POST 次数。没有用真实账户作资格验证。

@@ -1318,6 +1318,7 @@ export class SqliteOperations {
         return activateChildRun(this, args[0] as Parameters<Store['activateChildRun']>[0]);
       case 'registerArtifact':
       case 'getArtifactReference':
+      case 'listWebSearchEvidenceReferences':
       case 'getLegacyReviewArtifactReference':
         return callArtifact(this, method, args, this.requestId);
       case 'registerInputFileImport':

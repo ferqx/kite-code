@@ -123,6 +123,9 @@ import {
   type WebFetchConfigurationOptions,
 } from './web-fetch-configuration';
 import { resolveWebTransport } from './web-fetch-proxy';
+import { createSearchBindings } from './web-search-bindings';
+import { inheritedSearchRoute, type SearchRoute, savedSearchRoute } from './web-search-route';
+import { createWebSearchTest } from './web-search-test';
 import { createWorktreeHost, readOnlyWorktreeBoundary } from './worktree-host';
 
 export type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
@@ -179,6 +182,8 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
         snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)
           ? (snapshot.mcp.sources ?? null)
           : null,
+      searchRoute: savedSearchRoute(snapshot.webSearch) ?? null,
+      searchPresent: Object.hasOwn(snapshot, 'webSearch'),
       webSnapshot: snapshot.web ?? null,
       browserSnapshot: snapshot.browser ?? null,
       browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
@@ -327,6 +332,10 @@ export function createDefaultProcessConfiguration(options: {
   shellForSession?: (rootSessionId: string) => Promise<ShellConfigurationOptions | undefined>;
   /** Trusted per-hop network policy/admission; JSONC can only select the ordinary Tool. */
   webFetch?: WebFetchConfigurationOptions;
+  /** Trusted host transport, used for local protocol fixtures. */
+  webSearchFetch?: typeof fetch;
+  /** Trusted transport override scoped to the official OpenAI Responses model binding. */
+  openAIResponsesFetch?: typeof fetch;
   /** Trusted browser assets and host ceiling; JSONC may only select existing Tool IDs. */
   browser?: BrowserConfigurationOptions | false;
   desktopBrowser?: DesktopBrowserEndpoint;
@@ -654,10 +663,52 @@ export function createDefaultProcessConfiguration(options: {
       };
     },
   });
+  const runtimeForSearch = () => {
+    if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+    return policyRuntime;
+  };
+  const configurationManagement = (runtime: AgentRuntime | undefined) =>
+    createConfigurationManagement({
+      userConfiguration,
+      profile: options.profile,
+      runtime,
+      vault: modelVault,
+      webSearchVault: vault,
+      persistence: options.credentialBackend?.kind ?? 'os',
+      explicit: () => explicitConfiguration(explicit),
+    });
+  const search = createSearchBindings({
+    runtime: runtimeForSearch,
+    modelVault,
+    searchVault: vault,
+    profileAccessKey: options.profile.profileAccessKey,
+    fetch: options.webSearchFetch,
+    allowNative: (scope) => permissionConfiguration.nativeSearchAllowed(scope),
+    qualified: (scope) => searchTest.isNativeQualified(scope),
+  });
+  const searchTest = createWebSearchTest({
+    runtime: runtimeForSearch,
+    readSettings: (expectedStoreId) =>
+      configurationManagement(runtimeForSearch()).readWebSearch({ expectedStoreId }),
+    async resolveRoute(scope) {
+      const runtime = runtimeForSearch();
+      const user = userConfiguration.read().value;
+      const preference = await runtime.readLatestBusinessModelPreference(scope);
+      const effective = resolveConfiguration({
+        defaults: configurationDefaults,
+        user,
+        explicit: explicitConfiguration(explicit),
+      });
+      const id = preference?.modelId ?? effective.modelId;
+      const model = effective.models?.find((m) => m.id === id && m.enabled !== false);
+      return search.test(user, model, scope);
+    },
+  });
   const businessTools = new Map((planning.extension.tools ?? []).map((tool) => [tool.id, tool]));
   const permissionConfiguration = createDefaultPermissionConfiguration({
     profile: options.profile,
     authority: options,
+    webSearchTestExtension: searchTest.extension,
     externalPermissionAuthority,
     afterTurn,
     nativeShellRead: shellOptions?.platform === 'darwin' && process.platform === 'darwin',
@@ -771,7 +822,15 @@ export function createDefaultProcessConfiguration(options: {
           protocol: modelProtocol(selected.provider, selected.protocol),
           baseURL: selected.baseURL!,
         },
-        providerModelFetch(selected.baseURL!, sessionId, transport.fetch),
+        providerModelFetch(
+          selected.baseURL!,
+          sessionId,
+          selected.provider === 'openai' &&
+            selected.protocol === 'responses' &&
+            /^https:\/\/api\.openai\.com\/v1\/?$/.test(selected.baseURL!)
+            ? (options.openAIResponsesFetch ?? transport.fetch)
+            : transport.fetch,
+        ),
       ),
     });
     const preset = parseModelPreset(selected.options);
@@ -793,6 +852,8 @@ export function createDefaultProcessConfiguration(options: {
       signal?: AbortSignal;
       toolIds?: readonly string[];
       inheritedModelHiddenToolIds?: readonly string[];
+      parentSearch?: SearchRoute | null;
+      allowChildNative?: boolean;
       skillSelection?: SkillSelection;
       mcpParent?: Parameters<typeof mcpSources.deriveChildSelection>[0];
       parentTools?: Parameters<
@@ -1034,8 +1095,32 @@ export function createDefaultProcessConfiguration(options: {
         contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
         ...selected.modelCapabilities,
       };
-      const toolIds =
-        effective.tools?.filter((tool) => tool.enabled !== false).map((tool) => tool.id) ?? [];
+      if (recovery?.searchPresent && !recovery.searchRoute)
+        throw new AgentError('recovery_configuration_unavailable');
+      const searchBinding = await search.bind({
+        user,
+        model: selected,
+        scope: {
+          sessionId: session.id,
+          expectedStoreId: command.originStoreId,
+          subjectId: command.subjectId,
+          workspaceId: workspace.id,
+        },
+        parent: selection?.parentSearch,
+        enabled:
+          !command.kind.startsWith('context.') &&
+          !effective.tools?.some((t) => t.id === 'web.search' && t.enabled === false) &&
+          (!selection?.toolIds ||
+            selection.toolIds.includes('web.search') ||
+            selection.allowChildNative === true),
+        nativeAllowed:
+          !requirePlan && !selection?.readOnlyTask && selection?.allowChildNative !== false,
+        ...(recovery ? { restore: { route: recovery.searchRoute } } : {}),
+      });
+      const toolIds = (effective.tools ?? [])
+        .filter((tool) => tool.enabled !== false && tool.id !== 'web.search')
+        .map((tool) => tool.id);
+      if (searchBinding.extension) toolIds.push('web.search');
       if (selection?.toolIds) {
         const parentTools = selection.parentTools ?? [];
         assertSelectedToolVersions(selection.toolIds, effective.tools, [parentTools]);
@@ -1240,7 +1325,11 @@ export function createDefaultProcessConfiguration(options: {
           workspaceRoot,
           profile: options.profile,
           externallyRegisteredFileTools: files.tools,
-          externallyRegisteredExtensions: [askUser, browser.extension],
+          externallyRegisteredExtensions: [
+            askUser,
+            browser.extension,
+            ...(searchBinding.extension ? [searchBinding.extension] : []),
+          ],
           toolIds,
           toolConfigurations: effective.tools,
           skills: effective.skills,
@@ -1288,6 +1377,7 @@ export function createDefaultProcessConfiguration(options: {
         }));
       try {
         assembly.extensions.push(...shell.extensions);
+        if (searchBinding.extension) assembly.extensions.push(searchBinding.extension);
         if (toolIds.some((id) => webTools.has(id))) {
           if (!options.webFetch) {
             const { unavailableReason, ...transport } = await resolveWebTransport(user.webFetch);
@@ -1356,6 +1446,10 @@ export function createDefaultProcessConfiguration(options: {
         if (recovery) {
           const matches = {
             configuration: snapshot.digest === recovery.digest,
+            search:
+              !recovery.searchPresent ||
+              planningSnapshotDigest(searchBinding.route) ===
+                planningSnapshotDigest(recovery.searchRoute),
             shell:
               !options.shellForSession ||
               recovery.shellSnapshot === undefined ||
@@ -1543,6 +1637,7 @@ export function createDefaultProcessConfiguration(options: {
               const nextAssembly = await makeAssembly(bound.root);
               epochAssemblies.add(nextAssembly);
               nextAssembly.extensions.push(...nextShell.extensions);
+              if (searchBinding.extension) nextAssembly.extensions.push(searchBinding.extension);
               if (webBinding) nextAssembly.extensions.push(webBinding.extension);
               const extensions = [...builtinExtensions, ...nextAssembly.extensions];
               const permissions = permissionConfiguration.forRun({
@@ -1579,6 +1674,9 @@ export function createDefaultProcessConfiguration(options: {
         };
         return {
           ...runPermissions,
+          ...(searchBinding.nativeWebSearch
+            ? { nativeWebSearch: searchBinding.nativeWebSearch }
+            : {}),
           ...(command.kind === 'context.compress' &&
           historicalCompressionTarget?.bindingDigest === modelBindingDigest(selected) &&
           hasCompressionArchiveTools(runExtensions, assembly.toolIds, modelHiddenToolIds)
@@ -1694,6 +1792,7 @@ export function createDefaultProcessConfiguration(options: {
             ...snapshot,
             ...(rootSelection ? { executionRoot: rootSelection.binding as unknown as Json } : {}),
             modelBindingDigest: modelBindingDigest(selected),
+            ...(!recovery || recovery.searchPresent ? { webSearch: searchBinding.route } : {}),
             authorizationCheckPreset,
             defaultAutoReview: defaultAutoReview ?? null,
             ...(defaultAutoReview
@@ -1843,6 +1942,13 @@ export function createDefaultProcessConfiguration(options: {
           {
             modelId: selection.modelId,
             toolIds: selection.role.toolIds,
+            parentSearch: inheritedSearchRoute(input.parentRun?.configuration),
+            allowChildNative: childRoles.some(
+              (role) =>
+                role.id === selection.role.id &&
+                ((role.toolPolicy === 'parent' && !role.toolIds) ||
+                  role.toolIds?.includes('web.search')),
+            ),
             readOnlyTask: selection.role.toolPolicy === 'read_only',
             readOnlyTaskDescription: selection.role.description,
             defaultAutoReview: input.parentRun
@@ -1943,6 +2049,7 @@ export function createDefaultProcessConfiguration(options: {
     extensions: [
       ...builtinExtensions,
       titles.extension,
+      searchTest.extension,
       ...(mcp.extension ? [mcp.extension] : []),
       mcpManagement.extension,
       mcpSources.extension,
@@ -1966,15 +2073,8 @@ export function createDefaultProcessConfiguration(options: {
             ...options.mcpSources,
           })
         : undefined,
-    configurationManagement: (runtime) =>
-      createConfigurationManagement({
-        userConfiguration,
-        profile: options.profile,
-        runtime,
-        vault: modelVault,
-        persistence: options.credentialBackend?.kind ?? 'os',
-        explicit: () => explicitConfiguration(explicit),
-      }),
+    configurationManagement,
+    webSearchTest: () => searchTest,
     permissionManagement: permissionConfiguration.permissionManagement,
     permissions: permissionConfiguration.permissions,
     toolBehaviors: files.toolBehaviors,

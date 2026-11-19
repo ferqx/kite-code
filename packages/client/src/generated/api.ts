@@ -6258,3 +6258,128 @@ export type SessionExportCompletion = {
   verified: true;
   contentMedia: 'sqlite-records-and-original-scope-artifact-references';
 };
+export type WebSearchEvidence = {
+  schema: 'kite.web-search';
+  schemaVersion: 1;
+  storeId: string;
+  sessionId: string;
+  executionId: string;
+  revision: number;
+  blocks: Array<{
+    route: 'native' | 'provider';
+    provider: string;
+    callId: string;
+    status: 'searching' | 'completed' | 'incomplete' | 'failed' | 'outcome_unknown';
+    query?: string;
+    sources: Array<{ url: string; title?: string; snippet?: string }>;
+    citations: Array<{
+      url: string;
+      title?: string;
+      anchor?: {
+        executionId: string;
+        blockIndex: number;
+        textSha256: string;
+        blockLengthUtf16: number;
+        blockStartUtf16?: number;
+        startUtf16: number;
+        endUtf16: number;
+      };
+    }>;
+    truncated: boolean;
+    sourceScope?: 'response';
+    errorCode?: string;
+    usage?: {
+      providerRequests?: number;
+      searchModelInputTokens?: number;
+      searchModelOutputTokens?: number;
+      providerSearchCalls?: number;
+    };
+  }>;
+};
+export type WebSearchSettingsView = {
+  storeId: string;
+  readSet: {
+    userEtag: string;
+    workspaceEtag: string | null;
+    explicitDigest: string;
+    effectiveDigest: string;
+  } | null;
+  webSearch:
+    | { mode: 'disabled' }
+    | { mode: 'auto'; providerId?: string }
+    | { mode: 'provider'; providerId: string };
+  searchProviders: Array<
+    | {
+        id: string;
+        name: string;
+        connection:
+          | { kind: 'provider'; providerAlias: string }
+          | { kind: 'dedicated'; baseURL: string; credentialRef: string };
+        adapter: 'perplexity-search' | 'deepseek-search';
+        maxResults?: number;
+      }
+    | {
+        id: string;
+        name: string;
+        connection:
+          | { kind: 'provider'; providerAlias: string }
+          | { kind: 'dedicated'; baseURL: string; credentialRef: string };
+        adapter: 'openai-search';
+        modelId: string;
+      }
+  >;
+  eligibleConnections?: Array<{
+    providerAlias: string;
+    name: string;
+    adapter: 'deepseek-search' | 'perplexity-search' | 'openai-search';
+  }>;
+  errors: Array<string>;
+};
+export type WebSearchSettingsRequest = {
+  expectedStoreId: string;
+  commandId: string;
+  expectedReadSet: {
+    userEtag: string;
+    workspaceEtag: string | null;
+    explicitDigest: string;
+    effectiveDigest: string;
+  };
+  webSearch:
+    | { mode: 'disabled' }
+    | { mode: 'auto'; providerId?: string }
+    | { mode: 'provider'; providerId: string };
+  searchProviders: Array<
+    | {
+        id: string;
+        name: string;
+        connection:
+          | { kind: 'provider'; providerAlias: string }
+          | { kind: 'dedicated'; baseURL: string; credentialRef: string }
+          | { kind: 'dedicated'; baseURL: string };
+        adapter: 'perplexity-search' | 'deepseek-search';
+        maxResults?: number;
+      }
+    | {
+        id: string;
+        name: string;
+        connection:
+          | { kind: 'provider'; providerAlias: string }
+          | { kind: 'dedicated'; baseURL: string; credentialRef: string }
+          | { kind: 'dedicated'; baseURL: string };
+        adapter: 'openai-search';
+        modelId: string;
+      }
+  >;
+  credential?: { providerId: string; secret: string };
+};
+export type WebSearchTestRequest = {
+  expectedStoreId: string;
+  sessionId: string;
+  commandId: string;
+  expectedReadSet: {
+    userEtag: string;
+    workspaceEtag: string | null;
+    explicitDigest: string;
+    effectiveDigest: string;
+  };
+};

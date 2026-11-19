@@ -10,6 +10,13 @@ import {
 import { inputImages } from '../../input-images';
 import { canonicalJson } from '../../json';
 import { assertNoSymlinkPath } from '../../platform/profile-identity';
+import {
+  webSearchBlockBytes,
+  webSearchMediaType,
+  webSearchRefId,
+  webSearchRefPrefix,
+  webSearchRequestBytes,
+} from '../../web-search-evidence-identity';
 import type { Store } from '../port';
 import { AgentError, type ArtifactReference, type ArtifactScope } from '../types';
 import { isHumanBoundReviewRequest } from './authorization-review';
@@ -234,12 +241,81 @@ export function lookupArtifactReference(
   scope(ops, input, false);
   return get(ops, input);
 }
+function webSearchReferences(
+  ops: SqliteOperations,
+  input: Parameters<Store['listWebSearchEvidenceReferences']>[0],
+): ArtifactReference[] {
+  ops.db.run('BEGIN');
+  try {
+    ops.identity(input.expectedStoreId);
+    const prefix = webSearchRefPrefix(input.sessionId, input.executionId);
+    const owner = { kind: 'execution', id: input.executionId } as const;
+    // Even an empty legacy execution must pass the ordinary Artifact read ACL.
+    scope(ops, { ...input, scope: owner, refId: prefix }, false);
+    const execution = ops.row(
+      `SELECT e.origin_store_id, e.kind FROM execution e JOIN command c ON c.id=e.origin_command_id
+       WHERE e.id=? AND e.session_id=? AND c.origin_store_id=e.origin_store_id`,
+      input.executionId,
+      input.sessionId,
+    );
+    if (!execution || (execution.kind !== 'model' && execution.kind !== 'tool'))
+      throw new AgentError('web_search_evidence_unavailable');
+    // Even a minimal V1 envelope contains the 64-byte input digest and its identity.
+    const minimumEnvelopeBytes = 128;
+    const rows = ops.rows(
+      `SELECT r.id,r.blob_hash,b.size FROM blob_ref r JOIN blob b ON b.hash=r.blob_hash
+       WHERE r.id>=? AND r.id<? AND r.session_id=? AND r.owner_kind='execution'
+         AND r.owner_id=? AND r.subject_id=? AND r.origin_store_id=? AND r.media_type=?
+       ORDER BY r.id LIMIT ?`,
+      prefix,
+      prefix + '~',
+      input.sessionId,
+      input.executionId,
+      input.subjectId,
+      String(execution.origin_store_id),
+      webSearchMediaType,
+      Math.floor(webSearchRequestBytes / minimumEnvelopeBytes) + 1,
+    );
+    let bytes = 0;
+    const refs = rows.map((row, i) => {
+      const size = Number(row.size);
+      bytes += size;
+      if (
+        row.id !== webSearchRefId(input.sessionId, input.executionId, i + 1) ||
+        !Number.isSafeInteger(size) ||
+        size < minimumEnvelopeBytes ||
+        size > webSearchBlockBytes ||
+        bytes > webSearchRequestBytes
+      )
+        throw new AgentError('web_search_evidence_invalid');
+      return {
+        id: String(row.id),
+        hash: String(row.blob_hash),
+        size: String(size),
+        mediaType: webSearchMediaType,
+        sessionId: input.sessionId,
+        subjectId: input.subjectId,
+        scope: owner,
+        storeId: String(execution.origin_store_id),
+      };
+    });
+    ops.db.run('COMMIT');
+    return refs;
+  } catch (error) {
+    return ops.rollback(error);
+  }
+}
 export function callArtifact(
   ops: SqliteOperations,
   method: string,
   args: unknown[],
   requestId?: number,
 ): unknown {
+  if (method === 'listWebSearchEvidenceReferences')
+    return webSearchReferences(
+      ops,
+      args[0] as Parameters<Store['listWebSearchEvidenceReferences']>[0],
+    );
   const input = args[0] as Register;
   if (method === 'getArtifactReference' || method === 'getLegacyReviewArtifactReference') {
     ops.db.run('BEGIN');

@@ -178,6 +178,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'getInputFileImport',
   'releaseInputFileImport',
   'getArtifactReference',
+  'listWebSearchEvidenceReferences',
   'getLegacyReviewArtifactReference',
   'beginHostMutation',
   'finishHostMutation',

@@ -33,6 +33,8 @@ import { desktopMarkdownSemantics, markdownFileLineReference } from './markdown-
 import { desktopKatexOptions, wrapMarkdownMath } from './markdown-math';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
+import { decorateWebSearchAnchors, type WebSearchAnchor } from './web-search-citations';
+
 type MarkdownNode = {
   type: string;
   tagName?: string;
@@ -323,6 +325,7 @@ export const MessageContent = memo(function MessageContent({
   prepared,
   streaming,
   streamingReveal = true,
+  webSearchAnchors,
 }: {
   text: string;
   openFile?: OpenFile;
@@ -332,6 +335,7 @@ export const MessageContent = memo(function MessageContent({
   streaming?: boolean;
   /** A first automatic body fill stays static while seeding subsequent live appends. */
   streamingReveal?: boolean;
+  webSearchAnchors?: readonly WebSearchAnchor[];
 }) {
   const readActive = useConversationReadActive();
   const currentOpenFile = useRef(openFile);
@@ -356,12 +360,14 @@ export const MessageContent = memo(function MessageContent({
               streaming={streaming}
               streamingReveal={streamingReveal}
               readActive={readActive}
+              webSearchAnchors={webSearchAnchors}
             />
           </TooltipProvider>
         </FileReferenceRootContext.Provider>
       </FileLinkContext.Provider>
     ),
     [
+      webSearchAnchors,
       text,
       prepared,
       streaming,
@@ -380,7 +386,9 @@ const MarkdownContent = memo(function MarkdownContent({
   streaming,
   streamingReveal,
   readActive,
+  webSearchAnchors,
 }: {
+  webSearchAnchors?: readonly WebSearchAnchor[];
   text: string;
   prepared?: PreparedDesktopMarkdown;
   streaming: boolean | undefined;
@@ -408,7 +416,13 @@ const MarkdownContent = memo(function MarkdownContent({
   }, [text, streaming]);
   return (
     <div className="typeset typeset-chat">
-      <MarkdownDocument text={text} prepared={prepared} prefix={prefix} revealAfter={revealAfter} />
+      <MarkdownDocument
+        webSearchAnchors={webSearchAnchors}
+        text={text}
+        prepared={prepared}
+        prefix={prefix}
+        revealAfter={revealAfter}
+      />
     </div>
   );
 });
@@ -419,7 +433,9 @@ const MarkdownDocument = memo(
     prepared,
     prefix,
     revealAfter,
+    webSearchAnchors,
   }: {
+    webSearchAnchors?: readonly WebSearchAnchor[];
     text: string;
     prepared?: PreparedDesktopMarkdown;
     prefix: string;
@@ -439,6 +455,7 @@ const MarkdownDocument = memo(
           wrapMarkdownMath,
           [rehypeKatex, desktopKatexOptions],
           [desktopMarkdownSemantics, { prefix }],
+          [decorateWebSearchAnchors, { source: text, anchors: webSearchAnchors }],
           [segmentLongTextNodes, { source: text }],
           [incrementalMarkdown, { source: text, revealAfter }],
         ]}
@@ -468,5 +485,6 @@ const MarkdownDocument = memo(
   (previous, next) =>
     previous.text === next.text &&
     previous.prepared === next.prepared &&
-    previous.prefix === next.prefix,
+    previous.prefix === next.prefix &&
+    previous.webSearchAnchors === next.webSearchAnchors,
 );

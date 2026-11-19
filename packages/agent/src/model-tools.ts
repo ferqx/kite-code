@@ -298,6 +298,7 @@ export function modelToolArgumentError(
 export function createModelToolSurface(
   request: ModelRequest,
   definitions: ReadonlyMap<string, ToolDefinition>,
+  reserveWebSearch = false,
 ) {
   const catalogue = new Map<
     string,
@@ -309,16 +310,76 @@ export function createModelToolSurface(
     }
   >();
   const tools: ModelTool[] = [];
+  const selection = request.tools
+    .map((tool) => {
+      const definition = definitions.get(tool.id);
+      const presentation =
+        definition?.version === tool.definitionVersion ? definition.model : undefined;
+      return { tool, presentation, name: presentation?.name ?? tool.id };
+    })
+    .filter(({ presentation }) => !presentation?.hidden);
+  const localSearch = selection.some(
+    ({ tool, name }) => tool.id === 'web.search' && name === 'web_search',
+  );
+  if (reserveWebSearch && localSearch) throw new AgentError('conflicting_search_routes');
+  const aliases = new Map<string, string>();
+  if (reserveWebSearch || localSearch) {
+    // Reserve the provider/builtin literal and every already selected wire name.
+    // Sort by original identity so catalogue order cannot change dispatch or replay.
+    const declared = new Set(selection.map(({ name }) => name));
+    const occupied = new Set(declared);
+    const previous = new Map<string, string>();
+    const conflicts = new Set(
+      selection
+        .filter(({ tool, name }) => name === 'web_search' && tool.id !== 'web.search')
+        .map(({ tool }) => tool.id),
+    );
+    for (const message of request.messages) {
+      for (const call of message.toolCalls ?? []) {
+        const name = modelToolCall(call).name;
+        occupied.add(name);
+        if (/^web_search_[0-9]+$/.test(name) && call.name !== name) previous.set(call.name, name);
+        if (name === 'web_search' && (reserveWebSearch || call.name !== 'web.search'))
+          conflicts.add(call.name);
+      }
+    }
+    let suffix = 1;
+    for (const id of [...conflicts].sort()) {
+      const prior = previous.get(id);
+      if (prior && !declared.has(prior)) {
+        aliases.set(id, prior);
+        declared.add(prior);
+        continue;
+      }
+      let alias = `web_search_${suffix++}`;
+      while (occupied.has(alias)) alias = `web_search_${suffix++}`;
+      occupied.add(alias);
+      aliases.set(id, alias);
+    }
+  }
+  function messages(history: ModelRequest['messages']): ModelRequest['messages'] {
+    if (!aliases.size) return modelToolMessages(history);
+    return history.map((message) => ({
+      ...message,
+      ...(message.toolCalls
+        ? {
+            toolCalls: message.toolCalls.map((call) => {
+              const projected = modelToolCall(call);
+              return aliases.has(call.name)
+                ? { ...projected, name: aliases.get(call.name)! }
+                : projected;
+            }),
+          }
+        : {}),
+    }));
+  }
   let changed = request.messages.some((message) =>
     message.toolCalls?.some((call) => (call as ToolCall).model !== undefined),
   );
-  for (const tool of request.tools) {
-    const definition = definitions.get(tool.id);
-    const presentation =
-      definition?.version === tool.definitionVersion ? definition.model : undefined;
+  changed ||= aliases.size > 0 || selection.length !== request.tools.length;
+  for (const { tool, presentation, name: declaredName } of selection) {
     changed ||= presentation !== undefined;
-    if (presentation?.hidden) continue;
-    const name = presentation?.name ?? tool.id;
+    const name = aliases.get(tool.id) ?? declaredName;
     if (presentation && !/^[a-z][a-z0-9_]{0,63}$/.test(name))
       throw new AgentError('model_tool_name_invalid');
     if (catalogue.has(name)) throw new AgentError('model_tool_name_collision');
@@ -340,7 +401,8 @@ export function createModelToolSurface(
   return {
     changed,
     tools,
-    request: { ...request, tools, messages: modelToolMessages(request.messages) },
+    messages,
+    request: { ...request, tools, messages: messages(request.messages) },
     decode(call: ModelToolCall): ToolCall {
       const entry = catalogue.get(call.name);
       if (!entry)

@@ -23,6 +23,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { readNativeSearchPermission } from '../../src/permission-configuration';
 import { createPermissionManagement } from '../../src/permission-management';
 
 async function until<T>(read: () => Promise<T | null>) {
@@ -41,7 +42,11 @@ async function fixture(
   afterFinalToolAuthorization?: () => Promise<void>,
   injectedToolDecision?: PermissionDecision,
   scenario?: 'readonly-auto-reject',
-  options: { customTaskReview?: true; reviewDecision?: 'approve_once' | 'ask_user' } = {},
+  options: {
+    customTaskReview?: true;
+    reviewDecision?: 'approve_once' | 'ask_user';
+    ordinarySearch?: true;
+  } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-permission-')));
   const workspace = join(root, 'workspace');
@@ -136,6 +141,15 @@ async function fixture(
       );
     },
   });
+  const searchRef = 'credential:12345678-1234-4321-8123-123456789abc';
+  const searchQueries: string[] = [];
+  if (options.ordinarySearch)
+    calls.splice(
+      0,
+      calls.length,
+      { name: 'web_search', input: { query: 'owned public query' } },
+      undefined,
+    );
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   const configuration = {
     modelId: 'local',
@@ -146,8 +160,33 @@ async function fixture(
         model: 'local',
         baseURL: `http://127.0.0.1:${provider.port}/v1`,
       },
+      ...(options.ordinarySearch
+        ? [
+            {
+              id: 'unselected',
+              provider: 'deepseek',
+              providerName: 'owned-search',
+              model: 'unused',
+              baseURL: 'https://api.deepseek.com',
+              credentialRef: searchRef,
+            },
+          ]
+        : []),
     ],
     tools: scenario ? [{ id: 'files.read' }, { id: 'files.write' }] : [{ id: 'files.write' }],
+    ...(options.ordinarySearch
+      ? {
+          webSearch: { mode: 'provider', providerId: 'owned' },
+          searchProviders: [
+            {
+              id: 'owned',
+              name: 'Owned search',
+              adapter: 'deepseek-search',
+              connection: { kind: 'provider', providerAlias: 'owned-search' },
+            },
+          ],
+        }
+      : {}),
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
   let policy: PermissionPolicySnapshot = {
@@ -163,6 +202,22 @@ async function fixture(
   const host = createDefaultProcessConfiguration({
     userConfigurationPath: `${profile.profilePath}/config.jsonc`,
     profile,
+    ...(options.ordinarySearch
+      ? {
+          credentialBackend: {
+            kind: 'temporary' as const,
+            async put() {},
+            async remove() {},
+            async resolve(ref: string) {
+              return ref === searchRef ? 'owned-synthetic-key' : null;
+            },
+          },
+          webSearchFetch: (async (_url: unknown, init?: RequestInit) => {
+            searchQueries.push(JSON.parse(String(init?.body)).query);
+            return Response.json({ results: [] });
+          }) as typeof fetch,
+        }
+      : {}),
     // These scenarios intentionally exercise the retained custom task-review contract.
     ...(options.customTaskReview
       ? {
@@ -307,6 +362,7 @@ async function fixture(
     expectedStoreId,
     requests,
     authReviews,
+    searchQueries,
     calls,
     projectFile,
     projectBytes,
@@ -668,6 +724,77 @@ async function setManaged(
   });
   return identity;
 }
+
+test('ordinary Web Search reviews the exact query in Auto and Ask before its sole authorized send', async () => {
+  for (const mode of ['auto', 'accept_edits', 'full'] as const) {
+    const f = await fixture(null, true, false, undefined, undefined, undefined, {
+      ordinarySearch: true,
+      reviewDecision: 'ask_user',
+    });
+    try {
+      await setManaged(f, mode);
+      await f.run('search', 'Find sources for the owned public query');
+      if (mode !== 'full') {
+        const card = await f.pending();
+        expect(card.definitionId).toBe('web.search');
+        expect(f.searchQueries).toEqual([]);
+        if (mode === 'auto') {
+          expect(f.authReviews).toHaveLength(1);
+          expect(JSON.stringify(f.authReviews[0]).includes('owned public query')).toBe(true);
+        }
+        await f.approve(card);
+      }
+      await f.runtime.waitForCommand('search', { timeoutMs: 5000 });
+      expect(f.authReviews).toHaveLength(mode === 'auto' ? 1 : 0);
+      expect(f.searchQueries).toEqual(['owned public query']);
+    } finally {
+      await f.close();
+    }
+  }
+}, 20000);
+
+test('native search requires live full mode, matching session and trusted workspace before dispatch', async () => {
+  const f = await fixture(null);
+  try {
+    const scope = {
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      workspaceId: 'w',
+      sessionId: 's',
+    };
+    const host = { runtime: f.runtime, management: f.management, externalAuthority: false };
+    expect(await readNativeSearchPermission(scope, host)).toBe(false);
+    await setManaged(f, 'full');
+    expect(await readNativeSearchPermission(scope, host)).toBe(true);
+    expect(await readNativeSearchPermission(scope, { ...host, externalAuthority: true })).toBe(
+      false,
+    );
+    for (const mismatch of [
+      { sessionId: 'missing' },
+      { workspaceId: 'different' },
+      { expectedStoreId: 'wrong' },
+    ])
+      expect(await readNativeSearchPermission({ ...scope, ...mismatch }, host)).toBe(false);
+    await setModeViaHttp(f, 'accept_edits', 'native-ask');
+    expect(await readNativeSearchPermission(scope, host)).toBe(false);
+    await setModeViaHttp(f, 'auto', 'native-review');
+    expect(await readNativeSearchPermission(scope, host)).toBe(false);
+    await setModeViaHttp(f, 'full', 'native-allow');
+    const trust = await f.management.readTrust(scope);
+    await f.management.setTrust({
+      ...scope,
+      commandId: 'native-untrusted',
+      trusted: false,
+      ifRevision: trust.revision,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+    });
+    expect(await readNativeSearchPermission(scope, host)).toBe(false);
+    expect(f.requests.length).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
 
 test('default Runtime freshly reads durable Accept Edits and actual trusted scope before one real file effect', async () => {
   const f = await fixture(null);

@@ -80,6 +80,7 @@ import type {
 } from './native-preview-layout-bridge';
 import type { NativeTraceRequest, NativeTraceResult } from './native-trace-bridge';
 import type { NativeTrajectoryFileBridge } from './native-trajectory-file-bridge';
+import type { NativeSearchRequest, NativeSearchResult } from './native-web-search-bridge';
 import type {
   NativeOutputRequest,
   NativeOutputResult,
@@ -245,6 +246,7 @@ export type NativeSelection = {
   readonly canReadSkills?: boolean;
   readonly canReadContext?: boolean;
   readonly canReadModelOutput: boolean;
+  readonly canReadWebSearchEvidence?: boolean;
   readonly canReadHistoryPreviews?: boolean;
   readonly canReadModelInput?: boolean;
   readonly canReadTrajectory?: boolean;
@@ -523,6 +525,7 @@ export type NativeFileRecoveryObservation = {
 export type NativeDirectory = {
   storeId: string;
   canManageSessions?: boolean;
+  canReadWebSearchSettings?: boolean;
   /** Main's persisted local read receipts, independent of the renderer origin. */
   readTurns?: readonly (readonly [string, string])[];
   workspaces: Workspace[];
@@ -688,6 +691,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeSearchRequest
   | NativeOutputRequest
   | NativeTraceRequest
   | { method: 'trajectory.open'; generation: number; request: TrajectoryScope }
@@ -1135,6 +1139,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeSearchResult
   | NativeOutputResult
   | NativeTraceResult
   | { kind: 'execution.result'; result: unknown }

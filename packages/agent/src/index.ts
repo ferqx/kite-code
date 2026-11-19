@@ -70,3 +70,6 @@ export {
   type ToolBehaviorBinding,
   type TrustedToolBehavior,
 } from './tool-behavior';
+
+export * from './web-search-evidence';
+export { webSearchDisplayUrl } from './web-search-evidence-identity';

@@ -277,10 +277,7 @@ const validatorCompiler = new Ajv2020({
 });
 validatorCompiler.addFormat('uuid', z.regexes.uuid());
 const validatorRefs: Record<string, string> = {};
-for (const [prefix, names] of [
-  ['response', responseNames],
-  ['request', requestNames],
-] as const) {
+function registerValidators(prefix: 'response' | 'request', names: readonly string[]) {
   for (const name of names) {
     const key = `${prefix}_${name}`;
     validatorCompiler.addSchema(
@@ -291,6 +288,8 @@ for (const [prefix, names] of [
       name !== 'SkillCataloguePage' &&
       name !== 'UserSkillCataloguePage' &&
       name !== 'UserSkillDocument' &&
+      name !== 'WebSearchEvidence' &&
+      name !== 'WebSearchSettingsView' &&
       name !== 'UserMcpSettingsView' &&
       name !== 'UserMcpOperationResult' &&
       name !== 'UserMcpToolsPage' &&
@@ -307,12 +306,23 @@ for (const [prefix, names] of [
     validatorRefs[key] = key;
   }
 }
+registerValidators('response', responseNames);
+registerValidators('request', requestNames);
 const querySchema = schemas.ExtensionCommandRequest!;
 validatorCompiler.addSchema(
   { ...querySchema.properties!.input, $defs: querySchema.$defs },
   'queryInput',
 );
 validatorRefs.queryInput = 'queryInput';
+// AJV assigns numeric identifiers in registration order. Append contracts after the published set
+// so adding a response does not renumber the existing request validators.
+for (const [prefix, names, additions] of [
+  ['response', responseNames, ['WebSearchEvidence', 'WebSearchSettingsView']],
+  ['request', requestNames, ['WebSearchSettingsRequest', 'WebSearchTestRequest']],
+] as const) {
+  registerValidators(prefix, additions);
+  names.push(...additions);
+}
 // Bundle only AJV's static runtime helpers; no AJV compiler or Function/eval enters the Client.
 const validatorTemp = mkdtempSync(resolve('packages/client/.validator-build-'));
 let validatorSource: string;

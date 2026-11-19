@@ -473,5 +473,8 @@ export function withoutProjectModels(value: JsonObject): JsonObject {
   delete result.modelId;
   delete result.provider;
   delete result.model;
+  delete result.webSearch;
+  delete result.searchProviders;
+  delete result._providerConnections;
   return result;
 }

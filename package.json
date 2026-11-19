@@ -123,6 +123,7 @@
     "@kite-ai/trace-extension-sdk": "workspace:*"
   },
   "patchedDependencies": {
+    "@ai-sdk/openai@4.0.19": "packages/ai/patches/openai-4.0.19-web-search.patch",
     "exceljs@4.4.0": "patches/exceljs@4.4.0.patch",
     "@pdf-lib/fontkit@1.1.0": "patches/@pdf-lib%2Ffontkit@1.1.0.patch",
     "ink-virtual-list@0.2.3": "patches/ink-virtual-list@0.2.3.patch",

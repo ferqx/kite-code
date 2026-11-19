@@ -29,3 +29,5 @@ Adapter 可在成功 `finish` 携带中立 `continuation: Json`。Core 不解释
 [同一输出回归](../../test/isolated/model-output/output.test.ts)另核超过单段的 opaque continuation、工具调用 ID、关闭重开后的下一用户轮、输入/输出 Inspector 不泄漏，以及不完整 finish 零工具派发和无 continuation。测试使用固定 Adapter 与本地 SQLite/Artifact，不调用付费 Provider。
 
 [Service/Client 真实往返回归](../../../../apps/service/test/isolated/responses-loop.test.ts)覆盖带工具名与参数映射的 Responses 小输出、Chat 大输出：完整正文通过公开摘要校验，冷读保持原摘要，下一次真实 SDK 请求仍恢复原模型工具名和参数，Responses sealed continuation 继续保留，原工具效果不重放。测试使用本机受控 SSE Provider，不代表外部模型或 Native 窗口资格。
+
+网页搜索的检索来源和正文引用使用独立、带修订的执行级 Artifact，读取时重新核对原命令主体、Session 和 Execution。公开 ModelOutput 仍只返回原有回答投影，私有续轮材料继续按原链处理。每个查询块 64 KiB、整次模型或工具 Execution 1 MiB；块内 UTF-16 范围与原文指纹一起校验。[Web Search 证据](../web-search-evidence.ts) · [跨包流程与验证](../../../../docs/development/flows/web-queries.md)

@@ -59,6 +59,7 @@ import {
   UserMcpToolsPageSchema,
   UserMcpToolsQuerySchema,
 } from './user-mcp';
+import { webSearchSchemas } from './web-search';
 
 const id = z
   .string()
@@ -2174,6 +2175,7 @@ export const apiSchemas = {
   SessionExportPage: SessionExportPageSchema,
   SessionExportTextPage: SessionExportTextPageSchema,
   SessionExportCompletion: SessionExportCompletionSchema,
+  ...webSearchSchemas(id, modelSettingsReadSet),
 };
 export const apiRoutes = [
   ...traceExtensionRoutes,
@@ -2418,6 +2420,30 @@ export const apiRoutes = [
     path: '/v1/sessions/{id}/trajectory/evidence/close',
     request: 'TrajectoryEvidenceCloseRequest',
     response: 'TrajectoryEvidenceClosed',
+  },
+  {
+    method: 'get',
+    path: '/v1/sessions/{id}/executions/{executionId}/web-search-evidence',
+    query: 'HostMutationQuery',
+    response: 'WebSearchEvidence',
+  },
+  {
+    method: 'get',
+    path: '/v1/config/user/web-search',
+    query: 'HostMutationQuery',
+    response: 'WebSearchSettingsView',
+  },
+  {
+    method: 'put',
+    path: '/v1/config/user/web-search',
+    request: 'WebSearchSettingsRequest',
+    response: 'HostMutation',
+  },
+  {
+    method: 'post',
+    path: '/v1/config/user/web-search/test',
+    request: 'WebSearchTestRequest',
+    response: 'Command',
   },
   { method: 'get', path: '/v1/sessions/{id}/model-inputs', response: 'ModelInputPage' },
   {

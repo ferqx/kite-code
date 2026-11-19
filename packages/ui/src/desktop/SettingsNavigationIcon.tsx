@@ -3,6 +3,7 @@ import {
   BookOpen01Icon,
   Link01Icon,
   PlugSocketIcon,
+  Search01Icon,
   Settings02Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
@@ -11,6 +12,7 @@ const icons = {
   back: ArrowLeft02Icon,
   general: Settings02Icon,
   providers: Link01Icon,
+  webSearch: Search01Icon,
   mcp: PlugSocketIcon,
   skills: BookOpen01Icon,
 };

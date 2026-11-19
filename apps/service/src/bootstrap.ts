@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ConfigurationManagementPort } from './configuration-management';
 import type { HostStatusSource } from './host-status';
 import { schemas } from './http/schema';
+import type { ServiceOptions } from './index';
 import type { PermissionManagementPort } from './permission-management';
 import { parseRuntimeProtection } from './runtime-protection';
 import type { SkillCatalogueSource } from './skill-catalogue';
@@ -54,6 +55,7 @@ export interface ProcessHostConfiguration {
   skillCatalogue?: SkillCatalogueSource;
   userMcpManagement?: (runtime?: AgentRuntime) => UserMcpManagementPort | undefined;
   configurationManagement?: (runtime?: AgentRuntime) => ConfigurationManagementPort;
+  webSearchTest?: (runtime: AgentRuntime) => ServiceOptions['webSearchTest'];
   permissionManagement?: (runtime?: AgentRuntime) => PermissionManagementPort;
   model?: RuntimeOptions['model'];
   modelId?: string;

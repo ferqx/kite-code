@@ -204,6 +204,10 @@ export declare function request_MessageTextQuery(value: unknown): boolean;
 export declare function request_SessionHistoryEntriesQuery(value: unknown): boolean;
 export declare function request_SessionExecutionRootQuery(value: unknown): boolean;
 export declare function queryInput(value: unknown): boolean;
+export declare function response_WebSearchEvidence(value: unknown): boolean;
+export declare function response_WebSearchSettingsView(value: unknown): boolean;
+export declare function request_WebSearchSettingsRequest(value: unknown): boolean;
+export declare function request_WebSearchTestRequest(value: unknown): boolean;
 export declare const responseValidators: {
   TraceRemoteDeliveryStatus: (value: unknown) => boolean;
   TraceInstallResult: (value: unknown) => boolean;
@@ -304,6 +308,8 @@ export declare const responseValidators: {
   MessageTextChunk: (value: unknown) => boolean;
   SessionHistoryEntries: (value: unknown) => boolean;
   SessionExecutionRoot: (value: unknown) => boolean;
+  WebSearchEvidence: (value: unknown) => boolean;
+  WebSearchSettingsView: (value: unknown) => boolean;
 };
 export declare const requestValidators: {
   OutputPdfPageRequest: (value: unknown) => boolean;
@@ -411,4 +417,6 @@ export declare const requestValidators: {
   MessageTextQuery: (value: unknown) => boolean;
   SessionHistoryEntriesQuery: (value: unknown) => boolean;
   SessionExecutionRootQuery: (value: unknown) => boolean;
+  WebSearchSettingsRequest: (value: unknown) => boolean;
+  WebSearchTestRequest: (value: unknown) => boolean;
 };

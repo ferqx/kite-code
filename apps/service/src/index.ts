@@ -60,6 +60,7 @@ import type { TraceHost } from './trace-extensions/host';
 import { registerTraceExtensionRoutes } from './trace-extensions/http';
 import type { TrajectorySource } from './trajectory';
 import type { UserMcpManagementPort } from './user-mcp-management';
+import { webSearchTestActionId, webSearchTestExtensionId } from './web-search-test';
 
 export interface ServiceOptions {
   /** Missing only when the explicit host could not open its Store. */
@@ -71,6 +72,15 @@ export interface ServiceOptions {
   configurationManagement?: ConfigurationManagementPort;
   /** The original Windows Desktop paired caller; no public settings or configuration endpoint. */
   desktopShell?: DesktopShellSettingsPort;
+  /** The host dispatches an explicit test through its durable, permission-checked Session command. */
+  webSearchTest?: {
+    run(
+      input: z.infer<typeof apiSchemas.WebSearchTestRequest> & {
+        subjectId: string;
+        signal: AbortSignal;
+      },
+    ): Promise<NonNullable<Awaited<ReturnType<AgentRuntime['getCommand']>>>>;
+  };
   userMcpManagement?: UserMcpManagementPort;
   permissionManagement?: PermissionManagementPort;
   diagnosticSource?: HostStatusSource;
@@ -340,6 +350,9 @@ export async function startService(options: ServiceOptions) {
         'skill_catalogue',
         'user_skill_catalogue',
         'user_skill_document',
+        'web_search_evidence',
+        'web_search_settings',
+        'web_search_test',
         'user_mcp_settings',
         'run_skill_selection',
         'run_extension_inputs',
@@ -378,6 +391,20 @@ export async function startService(options: ServiceOptions) {
   if (options.runtime?.supportsArtifactStreams) capabilities.push('output_files');
   if (options.runtime?.supportsExtensionInputs) capabilities.push('run_extension_inputs');
   if (options.diagnosticSource) capabilities.push('host_status');
+  if (typeof options.runtime?.readWebSearchEvidence === 'function')
+    capabilities.push('web_search_evidence');
+  const searchManager = options.configurationManagement;
+  const webSearchManagement =
+    options.runtime &&
+    typeof searchManager?.readWebSearch === 'function' &&
+    typeof searchManager.updateWebSearch === 'function'
+      ? {
+          read: searchManager.readWebSearch.bind(searchManager),
+          update: searchManager.updateWebSearch.bind(searchManager),
+        }
+      : undefined;
+  if (webSearchManagement) capabilities.push('web_search_settings');
+  if (options.runtime && options.webSearchTest) capabilities.push('web_search_test');
   if (options.userMcpManagement) capabilities.push('user_mcp_settings');
   if (options.skillCatalogue) capabilities.push('skill_catalogue');
   if (options.skillCatalogue?.listUser) capabilities.push('user_skill_catalogue');
@@ -424,6 +451,15 @@ export async function startService(options: ServiceOptions) {
     ) {
       context.header('cache-control', 'no-store');
       context.header('x-content-type-options', 'nosniff');
+    }
+    if (
+      /^\/v1\/(?:config\/user\/web-search(?:\/test)?|sessions\/[^/]+\/executions\/[^/]+\/web-search-evidence)$/.test(
+        context.req.path,
+      )
+    ) {
+      context.header('cache-control', 'no-store');
+      context.header('x-content-type-options', 'nosniff');
+      if (context.req.header('origin') !== undefined) throw new HttpFailure('invalid_origin', 403);
     }
     if (context.req.header('host') !== new URL(endpoint).host)
       throw new HttpFailure('invalid_host', 403);
@@ -498,6 +534,7 @@ export async function startService(options: ServiceOptions) {
             ? 429
             : [
                   'permission_denied',
+                  'web_search_test_scope_invalid',
                   'host_mutation_scope_denied',
                   'host_control_scope_denied',
                   'permission_authority_external',
@@ -548,6 +585,9 @@ export async function startService(options: ServiceOptions) {
                     'model_settings_model_disabled',
                     'model_settings_default_unconfigured',
                     'model_settings_override',
+                    'web_search_connection_invalid',
+                    'web_search_configuration_invalid',
+                    'web_search_settings_override',
                     'invalid_query_arguments',
                     'invalid_action_arguments',
                     'invalid_public_view',
@@ -594,6 +634,7 @@ export async function startService(options: ServiceOptions) {
                             'directory_identity_conflict',
                             'configuration_conflict',
                             'configuration_read_set_conflict',
+                            'web_search_binding_changed',
                             'host_mutation_conflict',
                             'host_control_conflict',
                             'permission_control_changed',
@@ -1015,6 +1056,38 @@ export async function startService(options: ServiceOptions) {
     });
     return modelInputResponse(snapshot, context.req.raw.signal);
   });
+
+  app.get('/v1/sessions/:id/executions/:executionId/web-search-evidence', async (context) => {
+    if (!capabilities.includes('web_search_evidence'))
+      throw new HttpFailure('capability_unavailable', 503);
+    const { storeId } = sessionExportQuery(context.req.queries(), schemas.HostMutationQuery);
+    const sessionId = context.req.param('id');
+    const executionId = context.req.param('executionId');
+    if (
+      ![sessionId, executionId].every((value) => schemas.Session.shape.id.safeParse(value).success)
+    )
+      throw new HttpFailure('invalid_scope', 400);
+    try {
+      const value = await runtime.readWebSearchEvidence({
+        expectedStoreId: storeId,
+        sessionId,
+        executionId,
+        subjectId,
+        signal: context.req.raw.signal,
+      });
+      if (
+        value.storeId !== storeId ||
+        value.sessionId !== sessionId ||
+        value.executionId !== executionId
+      )
+        throw new HttpFailure('web_search_evidence_unavailable', 404);
+      return context.json(apiSchemas.WebSearchEvidence.parse(value));
+    } catch (error) {
+      if (error instanceof AgentError && error.code === 'web_search_evidence_unavailable')
+        throw new HttpFailure(error.code, 404);
+      throw error;
+    }
+  });
   app.get('/v1/sessions/:id/executions/:executionId/model-output', async (context) => {
     const query = schemas.ModelOutputQuery.safeParse(
       Object.fromEntries(
@@ -1401,6 +1474,59 @@ export async function startService(options: ServiceOptions) {
         'x-content-type-options': 'nosniff',
       },
     });
+  });
+
+  app.get('/v1/config/user/web-search', async (context) => {
+    if (!webSearchManagement) throw new HttpFailure('capability_unavailable', 503);
+    const { storeId } = sessionExportQuery(context.req.queries(), schemas.HostMutationQuery);
+    if ((await runtime.getMetadata()).storeId !== storeId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    const view = await webSearchManagement.read({ expectedStoreId: storeId });
+    if (view.storeId !== storeId) throw new HttpFailure('store_identity_mismatch', 409);
+    return context.json(apiSchemas.WebSearchSettingsView.parse(view));
+  });
+  app.put('/v1/config/user/web-search', async (context) => {
+    if (!webSearchManagement) throw new HttpFailure('capability_unavailable', 503);
+    if (Object.keys(context.req.queries()).length) throw new HttpFailure('invalid_request', 400);
+    const input = await readBusinessBody(
+      context.req.raw,
+      apiSchemas.WebSearchSettingsRequest,
+      options.maxBodyBytes ?? 1048576,
+    );
+    if ((await runtime.getMetadata()).storeId !== input.expectedStoreId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    return context.json(
+      schemas.HostMutation.parse(await webSearchManagement.update({ ...input, subjectId })),
+    );
+  });
+  app.post('/v1/config/user/web-search/test', async (context) => {
+    if (!options.webSearchTest || !capabilities.includes('web_search_test'))
+      throw new HttpFailure('capability_unavailable', 503);
+    if (Object.keys(context.req.queries()).length) throw new HttpFailure('invalid_request', 400);
+    const input = await readBusinessBody(context.req.raw, apiSchemas.WebSearchTestRequest, 4096);
+    if ((await runtime.getMetadata()).storeId !== input.expectedStoreId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    if (input.expectedReadSet.workspaceEtag !== null) throw new HttpFailure('invalid_request', 400);
+    const command = await options.webSearchTest.run({
+      ...input,
+      subjectId,
+      signal: context.req.raw.signal,
+    });
+    const request = command.request;
+    if (
+      !request ||
+      typeof request !== 'object' ||
+      Array.isArray(request) ||
+      request.extensionId !== webSearchTestExtensionId ||
+      request.actionId !== webSearchTestActionId ||
+      command.kind !== 'extension.invoke' ||
+      command.originStoreId !== input.expectedStoreId ||
+      command.sessionId !== input.sessionId ||
+      command.id !== input.commandId ||
+      command.subjectId !== subjectId
+    )
+      throw new HttpFailure('command_conflict', 409);
+    return context.json(publicCommand(command));
   });
   app.get('/v1/config/user/providers', async (context) => {
     const raw = context.req.queries();

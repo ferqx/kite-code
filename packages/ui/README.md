@@ -776,3 +776,7 @@ Desktop `MessageContent` 的 `WebLinkContext` 由Native宿主注入，仅在当�
 首条输入提交后、正式 Run 尚未确认时，Trace 沿原提交身份显示“正在准备回复…”；确认运行后继续显示准确阶段，不能把本地准备误当成已开始执行。运行中的 Trace 在首条模型正文尚未到达时，也显示已确认的回复状态；状态不可用或执行未确认时不伪造进行中提示。排队、等待、恢复和停止仍由原状态决定，不被准备阶段覆盖。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核阶段与观察边界，[Native 首条发送回归](../../apps/desktop/test/isolated/native-new-conversation-dom.test.tsx)核原提交、持久输入、模型派发、正文与结束间的状态节点接管。
 
 退役工具的旧 ID 和旧模型显示别名不再进入工具行的专属图标、参数预览或完成动作统计；历史结果仍可用通用工具行展开，原内容和状态不变。现役 `read_file`、`write_file`、`edit_file`、`view_images`、Shell 与 Skills 的展示保持。[共享回归](test/isolated/desktop-tool-aggregation.test.tsx)核通用回退与现役分类；Native 的准确原调用和文件资格由 [Desktop owner](../../apps/desktop/README.md)负责。
+
+## 网页搜索证据展示
+
+[WebSearchSources](src/desktop/WebSearchSources.tsx) 区分检索来源与正文引用，不把检索过的页面当成答案引用。宿主只能在原执行的完整已验证正文上装饰链接：按原文本块的显式 UTF-16 起点核对 SHA-256、边界和 Markdown 文本节点。锚点缺失、文本不符、跨标记或协议不兼容时保留普通来源链接，不改写 Markdown。不加载远端图片或解释来源标题里的 HTML。[引用回归](test/isolated/desktop-web-search-citations.test.tsx) 覆盖中文、emoji、多块、危险链接和改写降级。

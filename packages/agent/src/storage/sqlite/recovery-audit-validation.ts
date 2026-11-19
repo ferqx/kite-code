@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
+import { matchesModelRequestIdentity } from '../../model-request-identity';
 import { AgentError, type Json } from '../types';
 import { validateAgentSource } from './agent-input-operations';
 import type { SqliteOperations } from './operations';
@@ -29,8 +30,13 @@ export function assertEffectFreeModel(db: SqliteOperations, execution: AuditRow)
     execution.kind !== 'model' ||
     execution.parent_execution_id !== (carrier?.id ?? null) ||
     execution.cancel_requested ||
-    source?.kind !== 'model_request' ||
-    source.requestId !== execution.id ||
+    !source ||
+    !matchesModelRequestIdentity(source, execution.id) ||
+    // With an admitted server-side search the provider may have searched before the first byte.
+    // Only an explicit proof of safe failure can retire a dispatched browser-search attempt.
+    (source.nativeWebSearch !== undefined &&
+      (execution.dispatched === 1n || execution.dispatched === 1) &&
+      parse(execution.result_json)?.nativeSearchRetrySafety !== 'safe') ||
     db.row(
       `SELECT id FROM execution WHERE session_id=? AND kind IN('tool','job') AND step_id=?
        UNION ALL SELECT id FROM execution WHERE session_id=? AND kind IN('tool','job') AND parent_execution_id=?

@@ -148,6 +148,13 @@ export function builtinCapability(
         : {}),
     };
   }
+  if (
+    kind === 'action' &&
+    extensionId === 'builtin.web-search-test' &&
+    definitionId === 'web_search.test' &&
+    definitionVersion === '1'
+  )
+    return { effects: ['network', 'external'], safeRead: false };
   if (kind === 'action' && extensionId === planningId)
     return { effects: [planningEffect(definitionId)], safeRead: false };
   if (kind === 'action' && extensionId === 'builtin.files')
@@ -166,6 +173,8 @@ export function builtinCapability(
   )
     return { effects: ['record_write'], safeRead: false, internalRecordOnly: true };
   if (extensionId === 'builtin.task') return taskToolCapability(toolId);
+  if (extensionId === 'builtin.web-search' && toolId === 'web.search' && definitionVersion === '1')
+    return { effects: ['network', 'external'], safeRead: false };
   if (extensionId === 'builtin.web' && toolId === 'web_fetch' && definitionVersion === '1')
     return { effects: ['network', 'unknown'], safeRead: false };
   if (extensionId === 'builtin.shell') return shellToolCapability(toolId);

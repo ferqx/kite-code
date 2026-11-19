@@ -33,6 +33,8 @@ export interface Responses {
   SkillCataloguePage: API.SkillCataloguePage;
   UserSkillCataloguePage: API.UserSkillCataloguePage;
   UserSkillDocument: API.UserSkillDocument;
+  WebSearchEvidence: API.WebSearchEvidence;
+  WebSearchSettingsView: API.WebSearchSettingsView;
   UserMcpSettingsView: API.UserMcpSettingsView;
   UserMcpOperationResult: API.UserMcpOperationResult;
   UserMcpToolsPage: API.UserMcpToolsPage;
@@ -143,6 +145,8 @@ export function validateRequest(
     | 'UserSkillCatalogueQuery'
     | 'UserSkillDocumentQuery'
     | 'UserMcpSettingsQuery'
+    | 'WebSearchSettingsRequest'
+    | 'WebSearchTestRequest'
     | 'UserMcpSettingsRequest'
     | 'UserMcpOperationQuery'
     | 'UserMcpToolsQuery'

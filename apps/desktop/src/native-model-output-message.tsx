@@ -4,10 +4,18 @@ import {
   PromptMarkdown,
   useConversationReadActive,
   useConversationResourceRetention,
+  type WebSearchDisplay,
+  WebSearchSources,
 } from '@kite-ai/ui/desktop';
 import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useNativeDiagnostics } from './native-diagnostics';
 import { nativePreparedMarkdown } from './native-markdown';
+
+import {
+  type NativeSearchReader,
+  useNativeSearchAnchors,
+  useNativeSearchEvidence,
+} from './native-web-search-evidence';
 
 const RetainedModelOutput = memo(ModelOutputMessage);
 
@@ -16,11 +24,14 @@ export function NativeModelOutputMessage({
   openFile,
   fileRootUri,
   autoRead = true,
+  searchReader,
   ...props
 }: ModelOutputMessageProps & {
   openFile?: (path: string, line?: number) => void;
+  searchReader?: NativeSearchReader;
   fileRootUri?: string;
 }) {
+  const evidence = useNativeSearchEvidence(searchReader);
   const diagnostics = useNativeDiagnostics();
   const readActive = useConversationReadActive();
   const retention = useConversationResourceRetention();
@@ -55,6 +66,7 @@ export function NativeModelOutputMessage({
     (text, verified) => (
       <NativeMarkdownBody
         text={text}
+        evidence={evidence}
         verified={verified}
         message={props.message}
         storeId={props.storeId}
@@ -66,6 +78,7 @@ export function NativeModelOutputMessage({
       />
     ),
     [
+      evidence,
       props.message,
       props.storeId,
       props.verifiedSnapshot,
@@ -76,16 +89,21 @@ export function NativeModelOutputMessage({
     ],
   );
   return (
-    <RetainedModelOutput
-      {...props}
-      autoRead={autoRead}
-      renderText={
-        props.message.contentFormat === 'unsupported' ? undefined : (props.renderText ?? renderText)
-      }
-      showReasoning={diagnostics && props.showReasoning === true}
-      onContent={publishDisplay}
-      readActive={readActive}
-    />
+    <>
+      <RetainedModelOutput
+        {...props}
+        autoRead={autoRead}
+        renderText={
+          props.message.contentFormat === 'unsupported'
+            ? undefined
+            : (props.renderText ?? renderText)
+        }
+        showReasoning={diagnostics && props.showReasoning === true}
+        onContent={publishDisplay}
+        readActive={readActive}
+      />
+      {evidence && <WebSearchSources evidence={evidence} />}
+    </>
   );
 }
 
@@ -98,6 +116,7 @@ function NativeMarkdownBody({
   autoRead,
   suspended,
   hasVerifiedCandidate,
+  evidence,
   openFile,
   fileRootUri,
 }: {
@@ -108,6 +127,7 @@ function NativeMarkdownBody({
   autoRead: boolean;
   suspended?: boolean;
   hasVerifiedCandidate: boolean;
+  evidence?: WebSearchDisplay;
   openFile?: (path: string, line?: number) => void;
   fileRootUri?: string;
 }) {
@@ -138,6 +158,11 @@ function NativeMarkdownBody({
     previous?.hasVerified &&
     previous.text.startsWith(text);
   const displayed = retained ? previous.text : text;
+  const webSearchAnchors = useNativeSearchAnchors(
+    displayed,
+    !retained && verified?.output.complete ? verified.executionId : undefined,
+    evidence,
+  );
   const prepared = retained ? previous.prepared : nativePreparedMarkdown(verified, displayed);
   useLayoutEffect(() => {
     committed.current = {
@@ -167,6 +192,7 @@ function NativeMarkdownBody({
       key={scope}
       text={displayed}
       prepared={prepared}
+      webSearchAnchors={webSearchAnchors}
       openFile={retained ? undefined : openFile}
       fileRootUri={fileRootUri}
       streaming={

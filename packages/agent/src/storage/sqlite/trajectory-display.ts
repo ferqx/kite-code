@@ -5,6 +5,7 @@ import {
 } from '@kite-ai/trajectory';
 import { canonicalJson } from '../../json';
 import { readModelIdentifier } from '../../model-identifier';
+import { matchesModelRequestIdentity } from '../../model-request-identity';
 import { toolTrajectoryDisplay } from '../../trajectory/display';
 import type { Json } from '../types';
 import type { SqliteOperations } from './operations';
@@ -42,9 +43,7 @@ export function trajectoryToolDefinition(
       : null;
   const source = model ? object(parsed(model.decision_source_json)) : undefined;
   const definitions =
-    source?.kind === 'model_request' &&
-    source.requestId === model?.id &&
-    Array.isArray(source.toolBindings)
+    source && matchesModelRequestIdentity(source, model?.id) && Array.isArray(source.toolBindings)
       ? source.toolBindings
       : config?.tools;
   return Array.isArray(definitions)

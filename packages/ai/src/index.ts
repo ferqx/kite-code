@@ -56,7 +56,29 @@ export interface ModelTool {
   readonly inputSchema: Readonly<Record<string, Json>>;
 }
 
+export type NativeWebSearchCapability = 'supported' | 'unsupported' | 'unknown';
+export type NativeWebSearchObservation =
+  | {
+      kind: 'activity';
+      callId: string;
+      status: 'searching' | 'completed' | 'failed' | 'incomplete';
+      query?: string;
+    }
+  | { kind: 'source'; url: string; title?: string }
+  | {
+      kind: 'citation';
+      url: string;
+      title?: string;
+      blockIndex?: number;
+      text?: string;
+      blockStartUtf16?: number;
+      startUtf16?: number;
+      endUtf16?: number;
+    };
+
 export interface ModelRequest {
+  /** Host-authorized setting, not a model-visible argument. Absence never declares search. */
+  readonly nativeWebSearch?: { readonly dialect: 'openai-web-search'; readonly required?: boolean };
   readonly modelId: string;
   readonly requestId: string;
   readonly messages: readonly ModelMessage[];
@@ -75,6 +97,7 @@ export interface ModelUsage {
 }
 
 export type ModelEvent =
+  | { readonly type: 'web_search'; readonly observation: NativeWebSearchObservation }
   | { readonly type: 'text_delta'; readonly text: string }
   | { readonly type: 'reasoning_delta'; readonly text: string }
   /** A request usage snapshot, independent of successful response completion. */
@@ -82,12 +105,14 @@ export type ModelEvent =
   | ({ readonly type: 'tool_call' } & ModelToolCall)
   | {
       readonly type: 'finish';
+      readonly webSearchTruncated?: true;
       readonly reason: 'stop' | 'tool_calls' | 'length' | 'cancelled';
       readonly usage: ModelUsage;
       readonly continuation?: Json;
     };
 
 export interface ModelAdapter {
+  nativeWebSearchCapability?(modelId: string): NativeWebSearchCapability;
   /** Pure binding facts, captured before dispatch. Absence means adapter metadata is unavailable. */
   describeRequest?(request: ModelRequest): ModelAdapterSnapshot;
   stream(

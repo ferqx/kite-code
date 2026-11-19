@@ -498,6 +498,8 @@ Desktop Main在应用存续期内触发本地定时任务，调度元数据属de
 
 ### 显式模型协议与私有 continuation
 
+Web Search 的原生搜索由现有模型请求执行，普通搜索沿 Tool 审批链执行；一次请求绑定一个已获准的账户和路线。可以证明发送前未派发时才沿原规则重试，已交给服务端但结果未确认的查询不会自动改用其他提供商或在重开时补发。富证据使用原 Execution 的 Artifact 权限，`web_search_evidence` 读取重新核主体、Session 与 Store；公开 ModelOutput 和 Trajectory 使用原合同。各项 SDK、SQLite、Service、客户端与真实账户验收分别见 [Web Search 流程](../development/flows/web-queries.md)。
+
 默认宿主的 OpenAI/compatible 连接可显式选择 Responses；旧配置缺省仍为 Chat Completions。协议冻结在实际 Run 绑定与公开非秘密 metadata 中；定时任务继续复用同一选择和 Agent Loop，不另建模型执行器。Responses 由官方 SDK 传输，单次零内部重试、`store:false`，错误不回退其他协议。
 
 加密推理状态与 SDK assistant parts 只作为不透明 continuation，沿已有私有 ModelOutput Artifact 链保存、恢复并传回匹配的 endpoint/provider/model/账户/header/路由绑定；它不授予工具执行权限，也不作为用户可见消息或 Inspector 正文。取消、流异常、截断工具批次及未完成压缩不提交可重放状态；非空纯文本 length 仍按长任务续接保存原文本段与其私有 continuation，由下一 Model Execution 继续。技术契约与测试见 [AI owner](../../packages/ai/README.md) 和 [ModelOutput owner](../../packages/agent/src/model-output/README.md)。

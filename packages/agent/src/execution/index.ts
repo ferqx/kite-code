@@ -4,6 +4,7 @@ import {
   type ModelRequest,
   ModelRequestLimitError,
 } from '@kite-ai/ai';
+import type { ArtifactContentStore } from '../artifact-port';
 import type { ContextSource, ContextSources } from '../context';
 import { frozenModelInputLimit } from '../context-estimate';
 import type {
@@ -29,7 +30,7 @@ import { canonicalJson, semanticDigest } from '../json';
 import { bodyReference } from '../model-body';
 import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
 import { captureModelRequestMetadata, modelMetadataJson } from '../model-snapshot';
-import { createModelToolSurface, modelToolArgumentError, modelToolMessages } from '../model-tools';
+import { createModelToolSurface, modelToolArgumentError } from '../model-tools';
 import type { AuthorizationCheckBinding } from '../runtime';
 import { InputSchemaCompiler } from '../schema-cache';
 import type {
@@ -66,6 +67,11 @@ import {
   InteractionGate,
   isPublicAuthorizationDeniedError,
 } from './interactions';
+import {
+  NativeSearchActivity,
+  type NativeWebSearchBinding,
+  nativeSearchMessages,
+} from './native-web-search';
 import { createProgressWriter } from './progress';
 import type { ExecutionResources } from './resources';
 import { type ToolDispatchAdmission, ToolDispatchCancelledError } from './tool-dispatch-admission';
@@ -209,6 +215,7 @@ export interface ExecutionScope {
   bindings?: ScopedBindings;
 }
 export interface ScopedBindings {
+  readonly nativeWebSearch?: NativeWebSearchBinding;
   readonly authorizationCheck?: AuthorizationCheckBinding;
   readonly toolBehaviors?: readonly import('../tool-behavior').TrustedToolBehavior[];
   readonly extensions: readonly Extension[];
@@ -259,6 +266,7 @@ function identity(scope: ToolScope) {
       };
 }
 export interface ExecutionOptions {
+  artifacts?: ArtifactContentStore;
   toolBehaviors?: readonly TrustedToolBehavior[];
   prepareExecutionConfirmation?: (
     scope: ToolScope,
@@ -1162,7 +1170,31 @@ export class UnifiedExecution {
         JSON.stringify(windowScope)
     )
       throw new AgentError('image_window_scope_invalid');
-    const surface = createModelToolSurface(request, scope.bindings?.tools ?? new Map());
+    const native =
+      !scope.compressionId &&
+      !observation &&
+      this.options.artifacts &&
+      model.nativeWebSearchCapability?.(request.modelId) === 'supported'
+        ? scope.bindings?.nativeWebSearch
+        : undefined;
+    const expectedSearch = native && {
+      version: 1,
+      requestId: request.requestId,
+      dialect: native.dialect,
+      bindingDigest: native.bindingDigest,
+    };
+    if (
+      planned &&
+      canonicalJson((planned.decisionSource as Record<string, Json>)?.nativeWebSearch ?? null) !==
+        canonicalJson(expectedSearch ?? null)
+    )
+      throw new AgentError('native_search_binding_changed');
+    // A caller's request or saved input never grants a provider-side effect.
+    if (request.nativeWebSearch !== undefined) {
+      const { nativeWebSearch: _ignored, ...plain } = request;
+      request = plain;
+    }
+    const surface = createModelToolSurface(request, scope.bindings?.tools ?? new Map(), !!native);
     const executionId = request.requestId;
     const input = planned
       ? structuredClone(planned.input)
@@ -1191,7 +1223,7 @@ export class UnifiedExecution {
               }
             : {}),
           ...(scope.continuation ? { continuation: scope.continuation } : {}),
-          requestId: executionId,
+          ...(expectedSearch ? { nativeWebSearch: expectedSearch } : { requestId: executionId }),
           sourceIds: request.messages.flatMap((message) => message.sourceIds ?? []),
           sources: JSON.parse(JSON.stringify(scope.decisionSources ?? [])) as Json,
           toolBindings: request.tools.flatMap((tool) => {
@@ -1249,6 +1281,8 @@ export class UnifiedExecution {
     let release: (() => void) | undefined;
     let dispatched = false;
     let modelInvoked = false;
+    let nativeSent = false;
+    let search: NativeSearchActivity | undefined;
     let windowFenceFailed = false;
     let cancelledByStoreAdmission = false;
     let content = '';
@@ -1318,11 +1352,6 @@ export class UnifiedExecution {
       }
       let savedLength = 0;
       let savedAt = Date.now();
-      const modelRequest = {
-        ...actualRequest,
-        tools: surface.tools,
-        messages: modelToolMessages(actualRequest.messages),
-      };
       // Admission/slot acquisition can wait. Recheck at the final local send boundary.
       if (windowScope || scope.imageAvailabilityProjection) {
         try {
@@ -1334,6 +1363,43 @@ export class UnifiedExecution {
           throw error;
         }
       }
+      let maySearch = false;
+      if (native) {
+        const command = await this.options.store.getCommand(scope.run.originCommandId);
+        if (
+          !command ||
+          command.sessionId !== scope.run.sessionId ||
+          command.originStoreId !== scope.run.originStoreId
+        )
+          throw new AgentError('web_search_scope_denied');
+        // Admission can wait. Recheck the frozen destination and permission just before send.
+        maySearch = await native.authorize({
+          sessionId: scope.run.sessionId,
+          runId: scope.run.id,
+          executionId,
+          modelId: request.modelId,
+          signal: scope.signal,
+        });
+        if (maySearch)
+          search = new NativeSearchActivity(this.options.store, this.options.artifacts!, {
+            expectedStoreId: command.originStoreId,
+            sessionId: command.sessionId,
+            subjectId: command.subjectId,
+            executionId,
+          });
+      }
+      const { nativeWebSearch: _ignored, ...wireInput } = actualRequest;
+      const modelRequest: ModelRequest = {
+        ...wireInput,
+        tools: surface.tools,
+        messages: nativeSearchMessages(
+          surface.messages(actualRequest.messages),
+          maySearch ? native?.bindingDigest : undefined,
+        ),
+        ...(maySearch && native ? { nativeWebSearch: { dialect: native.dialect } } : {}),
+      };
+      scope.signal.throwIfAborted();
+      nativeSent = !!maySearch;
       modelInvoked = true;
       for await (const event of model.stream(modelRequest, { signal: scope.signal })) {
         if (finish) throw new AgentError('model_event_after_finish');
@@ -1341,7 +1407,11 @@ export class UnifiedExecution {
           event.type === 'text_delta' && event.text.length > 0 && content.length === 0;
         if (event.type === 'usage') recordedUsage = structuredClone({ ...event.usage });
         scope.signal.throwIfAborted();
-        if (event.type === 'usage') {
+        if (event.type === 'web_search') {
+          if (!search) throw new AgentError('unexpected_native_search_event');
+          await search.observe(event.observation);
+          continue;
+        } else if (event.type === 'usage') {
           continue;
         } else if (event.type === 'text_delta') {
           if (event.text.length) firstOutput ??= 'content';
@@ -1413,9 +1483,19 @@ export class UnifiedExecution {
         throw new ModelAttemptError('stream_incomplete');
       if (new Set(calls.map((call) => call.id)).size !== calls.length)
         throw new AgentError('duplicate_tool_call_id');
+      await search?.finish(content);
       if (finish.continuation !== undefined) {
         if (!output) await activateOutput();
-        await output!.continuation(finish.continuation);
+        await output!.continuation(
+          nativeSent && native
+            ? {
+                kind: 'native_web_search_continuation',
+                version: 1,
+                bindingDigest: native.bindingDigest,
+                value: finish.continuation,
+              }
+            : finish.continuation,
+        );
       }
       // Artifact-backed output keeps only finite, body-free call identities in
       // the original Model result. Store can bind a descendant review to the
@@ -1495,6 +1575,15 @@ export class UnifiedExecution {
         finishReason: finish.reason,
       };
     } catch (error) {
+      const nativeFailure = !nativeSent
+        ? 'safe'
+        : search?.observed
+          ? 'unsafe'
+          : finish || !ModelAttemptError.isInstance(error)
+            ? 'unknown'
+            : (error.retrySafety ?? 'unknown');
+      const unsafeSearch = nativeFailure !== 'safe';
+      if (unsafeSearch) await search?.interrupted().catch(() => {});
       if (dispatched && (content || reasoning) && !output)
         await this.options.store
           .persistModelPartial({
@@ -1513,19 +1602,22 @@ export class UnifiedExecution {
           executionId,
           status: scope.signal.aborted || cancelledByStoreAdmission ? 'cancelled' : 'failed',
           result: {
-            code: windowFenceFailed
-              ? modelInvoked
-                ? 'image_window_outcome_unknown'
-                : 'image_window_not_dispatched'
-              : ModelRequestLimitError.isInstance(error)
-                ? 'model_request_body_too_large'
-                : observation && ModelAttemptError.isInstance(error)
-                  ? 'image_observation_outcome_unknown'
-                  : error instanceof AgentError
-                    ? error.code
-                    : ModelAttemptError.isInstance(error)
-                      ? error.message
-                      : 'model_failed',
+            ...(expectedSearch ? { nativeSearchRetrySafety: nativeFailure } : {}),
+            code: unsafeSearch
+              ? 'native_search_outcome_unknown'
+              : windowFenceFailed
+                ? modelInvoked
+                  ? 'image_window_outcome_unknown'
+                  : 'image_window_not_dispatched'
+                : ModelRequestLimitError.isInstance(error)
+                  ? 'model_request_body_too_large'
+                  : observation && ModelAttemptError.isInstance(error)
+                    ? 'image_observation_outcome_unknown'
+                    : error instanceof AgentError
+                      ? error.code
+                      : ModelAttemptError.isInstance(error)
+                        ? error.message
+                        : 'model_failed',
             incomplete: true,
             ...((windowScope || scope.imageAvailabilityProjection) && !modelInvoked
               ? { dispatchCommitted: false }
@@ -1548,6 +1640,7 @@ export class UnifiedExecution {
         })
         .catch(() => {});
       if (settled) this.modelSettled(scope, settled);
+      if (unsafeSearch) throw new AgentError('native_search_outcome_unknown');
       if (windowFenceFailed)
         throw new AgentError(
           modelInvoked ? 'image_window_outcome_unknown' : 'image_window_not_dispatched',

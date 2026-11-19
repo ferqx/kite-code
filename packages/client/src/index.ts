@@ -92,6 +92,8 @@ import type {
   UserSkillCataloguePage,
   UserSkillDocument,
   VerifySessionExportQuery,
+  WebSearchSettingsRequest,
+  WebSearchTestRequest,
   WithdrawPendingInputRequest,
   WorkspaceRemoval,
 } from './generated/api';
@@ -414,7 +416,9 @@ export class AgentClient {
         response,
         shape === 'SessionLogPage' || shape === 'TrajectoryPage'
           ? Math.min(this.maximum, 512 * 1024)
-          : this.maximum,
+          : shape === 'WebSearchEvidence'
+            ? Math.min(this.maximum, 1024 * 1024)
+            : this.maximum,
       );
       if (!response.ok) {
         const problem = decodeResponse('Problem', value);
@@ -524,9 +528,13 @@ export class AgentClient {
     return this.fetchJSON(path, responseShape, { method: 'POST', body: intent, signal });
   }
 
-  private managementStore(storeId?: string, diagnostic = false): void {
+  private managementStore(
+    storeId?: string,
+    diagnostic = false,
+    capability: 'configuration_management' | 'web_search_settings' = 'configuration_management',
+  ): void {
     this.requireConnection(!diagnostic);
-    if (!this.lastServer!.capabilities.includes('configuration_management'))
+    if (!this.lastServer!.capabilities.includes(capability))
       throw new ClientError('capability_unavailable');
     if (this.lastServer!.dataAvailability === 'available') {
       validateRequest('HostMutationQuery', { storeId });
@@ -664,6 +672,7 @@ export class AgentClient {
   private async writeManagement(
     path: string,
     shape:
+      | 'WebSearchSettingsRequest'
       | 'ModelSettingsRequest'
       | 'ProviderSettingsRequest'
       | 'ConfigurationPatchRequest'
@@ -672,6 +681,7 @@ export class AgentClient {
       | 'CredentialRevokeRequest',
     kind: HostMutation['kind'],
     input:
+      | WebSearchSettingsRequest
       | ModelSettingsRequest
       | ProviderSettingsRequest
       | ConfigurationPatchRequest
@@ -679,7 +689,7 @@ export class AgentClient {
       | CredentialPutRequest
       | CredentialRevokeRequest,
     scope: 'user' | 'workspace',
-    method: 'PATCH' | 'POST',
+    method: 'PATCH' | 'POST' | 'PUT',
     signal?: AbortSignal,
     opaqueRef?: string,
   ) {
@@ -693,7 +703,11 @@ export class AgentClient {
     )
       throw new ClientError('invalid_request');
     this.configurationScope(scope, 'workspaceId' in intent ? intent.workspaceId : undefined);
-    this.managementStore(intent.expectedStoreId);
+    this.managementStore(
+      intent.expectedStoreId,
+      false,
+      shape === 'WebSearchSettingsRequest' ? 'web_search_settings' : 'configuration_management',
+    );
     const generation = this.connectionGeneration;
     await this.verifyConnection({ signal });
     const result = await this.fetchJSON(path, 'HostMutation', {
@@ -719,7 +733,8 @@ export class AgentClient {
             : 'ifMatch' in intent
               ? intent.ifMatch
               : undefined) ||
-        ('expectedReadSet' in intent &&
+        ('operation' in intent &&
+          'expectedReadSet' in intent &&
           canonicalModelBody(
             kind === 'provider_settings.update' ? result.providerSettings : result.modelSettings,
           ) !==
@@ -804,6 +819,78 @@ export class AgentClient {
     validateRequest('UserMcpSettingsQuery', { storeId });
     if (storeId !== this.lastServer!.storeId) throw new ClientError('store_identity_mismatch');
   }
+  async getWebSearchSettings(options: { storeId: string; signal?: AbortSignal }) {
+    const { signal, ...query } = options;
+    validateRequest('HostMutationQuery', query);
+    this.managementStore(query.storeId, false, 'web_search_settings');
+    const generation = this.connectionGeneration;
+    await this.verifyConnection({ signal });
+    const view = await this.fetchJSON(
+      `/v1/config/user/web-search?${new URLSearchParams(query)}`,
+      'WebSearchSettingsView',
+      { signal },
+    );
+    if (
+      view.storeId !== query.storeId ||
+      (view.readSet && view.readSet.workspaceEtag !== null) ||
+      new Set(view.searchProviders.map((provider) => provider.id)).size !==
+        view.searchProviders.length
+    )
+      throw new ClientError('configuration_scope_mismatch');
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return view;
+  }
+
+  saveWebSearchSettings(input: WebSearchSettingsRequest, options: { signal?: AbortSignal } = {}) {
+    return this.writeManagement(
+      '/v1/config/user/web-search',
+      'WebSearchSettingsRequest',
+      'config.patch',
+      input,
+      'user',
+      'PUT',
+      options.signal,
+    );
+  }
+
+  async testWebSearch(input: WebSearchTestRequest, options: { signal?: AbortSignal } = {}) {
+    this.requireCapability('web_search_test');
+    if (!this.lastServer!.subjectId) throw new ClientError('connection_identity_mismatch');
+    const intent = structuredClone(input);
+    validateRequest('WebSearchTestRequest', intent);
+    if (intent.expectedReadSet.workspaceEtag !== null) throw new ClientError('invalid_request');
+    if (intent.expectedStoreId !== this.lastServer!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    await this.verifyConnection(options);
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    const command = await this.fetchJSON('/v1/config/user/web-search/test', 'Command', {
+      method: 'POST',
+      body: intent,
+      signal: options.signal,
+    }).catch((error: unknown) => {
+      if (!(error instanceof ClientError) || error.status === undefined)
+        throw new ClientError('network_outcome_unknown');
+      throw error;
+    });
+    try {
+      if (
+        command.originStoreId !== intent.expectedStoreId ||
+        command.sessionId !== intent.sessionId ||
+        command.id !== intent.commandId ||
+        command.subjectId !== this.lastServer!.subjectId ||
+        command.kind !== 'extension.invoke'
+      )
+        throw new ClientError('command_scope_mismatch');
+      await this.verifyConnection(options);
+      if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    } catch {
+      throw new ClientError('network_outcome_unknown');
+    }
+    return command;
+  }
+
   async getUserMcpSettings(options: { storeId: string; signal?: AbortSignal }) {
     const { signal, ...query } = options;
     validateRequest('UserMcpSettingsQuery', query);
@@ -3234,6 +3321,66 @@ export class AgentClient {
       throw new ClientError('model_input_identity_mismatch');
     return snapshot;
   }
+  async getWebSearchEvidence(
+    executionId: string,
+    options: { storeId: string; sessionId: string; signal?: AbortSignal },
+  ) {
+    const { signal, sessionId, ...query } = options;
+    this.requireCapability('web_search_evidence');
+    validateRequest('HostMutationQuery', query);
+    if (
+      [sessionId, executionId].some(
+        (id) => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id),
+      )
+    )
+      throw new ClientError('invalid_request');
+    if (query.storeId !== this.lastServer!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const evidence = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/executions/${encodeURIComponent(executionId)}/web-search-evidence?${new URLSearchParams(query)}`,
+      'WebSearchEvidence',
+      { signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      evidence.storeId !== query.storeId ||
+      evidence.sessionId !== sessionId ||
+      evidence.executionId !== executionId
+    )
+      throw new ClientError('web_search_evidence_identity_mismatch');
+    if (
+      evidence.revision < evidence.blocks.length ||
+      (evidence.revision === 0) !== (evidence.blocks.length === 0) ||
+      new Set(evidence.blocks.map((block) => block.callId)).size !== evidence.blocks.length
+    )
+      throw new ClientError('invalid_response');
+    for (const block of evidence.blocks) {
+      for (const link of [...block.sources, ...block.citations]) {
+        const url = URL.parse(link.url);
+        if (
+          !url?.hostname ||
+          url.username ||
+          url.password ||
+          /[\\\s]/u.test(link.url) ||
+          [...link.url].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
+        )
+          throw new ClientError('invalid_response');
+      }
+      for (const { anchor } of block.citations) {
+        if (
+          anchor &&
+          (anchor.executionId !== executionId ||
+            anchor.startUtf16 >= anchor.endUtf16 ||
+            anchor.endUtf16 > anchor.blockLengthUtf16 ||
+            !Number.isSafeInteger((anchor.blockStartUtf16 ?? 0) + anchor.blockLengthUtf16))
+        )
+          throw new ClientError('invalid_response');
+      }
+    }
+    return evidence;
+  }
+
   async getModelOutput(
     sessionId: string,
     executionId: string,

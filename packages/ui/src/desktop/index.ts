@@ -212,3 +212,5 @@ export type {
   WorkspaceSummary,
 } from './types';
 export { Button } from './ui';
+export { WebSearchSources } from './WebSearchSources';
+export * from './web-search-citations';

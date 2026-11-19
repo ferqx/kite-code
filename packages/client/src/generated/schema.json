@@ -32953,5 +32953,847 @@
     },
     "required": ["manifest", "verified", "contentMedia"],
     "additionalProperties": false
+  },
+  "WebSearchEvidence": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "schema": {
+        "type": "string",
+        "const": "kite.web-search"
+      },
+      "schemaVersion": {
+        "type": "number",
+        "const": 1
+      },
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "sessionId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "executionId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "blocks": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "route": {
+              "type": "string",
+              "enum": ["native", "provider"]
+            },
+            "provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "callId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "status": {
+              "type": "string",
+              "enum": ["searching", "completed", "incomplete", "failed", "outcome_unknown"]
+            },
+            "query": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "sources": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "pattern": "^[Hh][Tt][Tt][Pp][Ss]?:\\/\\/[^/?#@\\s]+(?:[/?#][^\\s]*)?$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "snippet": {
+                    "type": "string",
+                    "maxLength": 2048
+                  }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+              }
+            },
+            "citations": {
+              "maxItems": 128,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "pattern": "^[Hh][Tt][Tt][Pp][Ss]?:\\/\\/[^/?#@\\s]+(?:[/?#][^\\s]*)?$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "anchor": {
+                    "type": "object",
+                    "properties": {
+                      "executionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "blockIndex": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "textSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "blockLengthUtf16": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "blockStartUtf16": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "startUtf16": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "endUtf16": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "executionId",
+                      "blockIndex",
+                      "textSha256",
+                      "blockLengthUtf16",
+                      "startUtf16",
+                      "endUtf16"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+              }
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "sourceScope": {
+              "type": "string",
+              "const": "response"
+            },
+            "errorCode": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,128}$"
+            },
+            "usage": {
+              "type": "object",
+              "properties": {
+                "providerRequests": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "searchModelInputTokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "searchModelOutputTokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "providerSearchCalls": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "route",
+            "provider",
+            "callId",
+            "status",
+            "sources",
+            "citations",
+            "truncated"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "schema",
+      "schemaVersion",
+      "storeId",
+      "sessionId",
+      "executionId",
+      "revision",
+      "blocks"
+    ],
+    "additionalProperties": false
+  },
+  "WebSearchSettingsView": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "readSet": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "userEtag": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "workspaceEtag": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "explicitDigest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "effectiveDigest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "webSearch": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "const": "disabled"
+              }
+            },
+            "required": ["mode"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "const": "auto"
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              }
+            },
+            "required": ["mode"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "const": "provider"
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              }
+            },
+            "required": ["mode", "providerId"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "searchProviders": {
+        "maxItems": 128,
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "connection": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "provider"
+                        },
+                        "providerAlias": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                        }
+                      },
+                      "required": ["kind", "providerAlias"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "dedicated"
+                        },
+                        "baseURL": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "credentialRef": {
+                          "type": "string",
+                          "pattern": "^credential:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        }
+                      },
+                      "required": ["kind", "baseURL", "credentialRef"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "adapter": {
+                  "type": "string",
+                  "enum": ["perplexity-search", "deepseek-search"]
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": ["id", "name", "connection", "adapter"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "connection": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "provider"
+                        },
+                        "providerAlias": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                        }
+                      },
+                      "required": ["kind", "providerAlias"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "dedicated"
+                        },
+                        "baseURL": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "credentialRef": {
+                          "type": "string",
+                          "pattern": "^credential:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        }
+                      },
+                      "required": ["kind", "baseURL", "credentialRef"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "adapter": {
+                  "type": "string",
+                  "const": "openai-search"
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+                }
+              },
+              "required": ["id", "name", "connection", "adapter", "modelId"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "eligibleConnections": {
+        "maxItems": 128,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "providerAlias": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "adapter": {
+              "type": "string",
+              "enum": ["deepseek-search", "perplexity-search", "openai-search"]
+            }
+          },
+          "required": ["providerAlias", "name", "adapter"],
+          "additionalProperties": false
+        }
+      },
+      "errors": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,128}$"
+        }
+      }
+    },
+    "required": ["storeId", "readSet", "webSearch", "searchProviders", "errors"],
+    "additionalProperties": false
+  },
+  "WebSearchSettingsRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "expectedStoreId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "commandId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "expectedReadSet": {
+        "type": "object",
+        "properties": {
+          "userEtag": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "workspaceEtag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "explicitDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "effectiveDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+        "additionalProperties": false
+      },
+      "webSearch": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "const": "disabled"
+              }
+            },
+            "required": ["mode"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "const": "auto"
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              }
+            },
+            "required": ["mode"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "const": "provider"
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+              }
+            },
+            "required": ["mode", "providerId"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "searchProviders": {
+        "maxItems": 128,
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "connection": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "provider"
+                        },
+                        "providerAlias": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                        }
+                      },
+                      "required": ["kind", "providerAlias"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "dedicated"
+                        },
+                        "baseURL": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "credentialRef": {
+                          "type": "string",
+                          "pattern": "^credential:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        }
+                      },
+                      "required": ["kind", "baseURL", "credentialRef"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "dedicated"
+                        },
+                        "baseURL": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        }
+                      },
+                      "required": ["kind", "baseURL"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "adapter": {
+                  "type": "string",
+                  "enum": ["perplexity-search", "deepseek-search"]
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": ["id", "name", "connection", "adapter"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "connection": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "provider"
+                        },
+                        "providerAlias": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                        }
+                      },
+                      "required": ["kind", "providerAlias"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "dedicated"
+                        },
+                        "baseURL": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "credentialRef": {
+                          "type": "string",
+                          "pattern": "^credential:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        }
+                      },
+                      "required": ["kind", "baseURL", "credentialRef"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "dedicated"
+                        },
+                        "baseURL": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        }
+                      },
+                      "required": ["kind", "baseURL"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "adapter": {
+                  "type": "string",
+                  "const": "openai-search"
+                },
+                "modelId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+                }
+              },
+              "required": ["id", "name", "connection", "adapter", "modelId"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "credential": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+          },
+          "secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000,
+            "pattern": "^[!-~]+$"
+          }
+        },
+        "required": ["providerId", "secret"],
+        "additionalProperties": false
+      }
+    },
+    "required": ["expectedStoreId", "commandId", "expectedReadSet", "webSearch", "searchProviders"],
+    "additionalProperties": false
+  },
+  "WebSearchTestRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "expectedStoreId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "sessionId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "commandId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "expectedReadSet": {
+        "type": "object",
+        "properties": {
+          "userEtag": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "workspaceEtag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "explicitDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "effectiveDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+        "additionalProperties": false
+      }
+    },
+    "required": ["expectedStoreId", "sessionId", "commandId", "expectedReadSet"],
+    "additionalProperties": false
   }
 }

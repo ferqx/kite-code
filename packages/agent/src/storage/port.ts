@@ -1110,6 +1110,9 @@ export interface Store {
       scope: ArtifactScope;
     },
   ): Promise<ArtifactReference | null>;
+  listWebSearchEvidenceReferences(
+    input: WriteContext & { sessionId: string; subjectId: string; executionId: string },
+  ): Promise<ArtifactReference[]>;
   /** Exact public human-card binding for legacy Auto request bodies only. */
   getLegacyReviewArtifactReference(
     input: Parameters<Store['getArtifactReference']>[0],

@@ -1,0 +1,44 @@
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -4081,6 +4081,22 @@
+               const resolvedResultToolName = toolNameMapping.toProviderToolName(
+                 part.toolName
+               );
++              if (!store && resolvedResultToolName === "web_search" && part.output.type === "json") {
++                const value = await validateTypes({ value: part.output.value, schema: webSearchOutputSchema });
++                const action = value.action;
++                if (action) {
++                  const id = part.providerOptions?.[providerOptionsName]?.itemId ?? part.toolCallId;
++                  const wireAction = action.type === "search" ? {
++                    type: "search",
++                    ...(action.query != null && { query: action.query }),
++                    ...(action.queries != null && { queries: action.queries }),
++                    ...(value.sources != null && { sources: value.sources })
++                  } : action.type === "openPage" ? { type: "open_page", url: action.url } :
++                    { type: "find_in_page", url: action.url, pattern: action.pattern };
++                  input.push({ type: "web_search_call", id, status: "completed", action: wireAction });
++                  break;
++                }
++              }
+               if (resolvedResultToolName === "tool_search") {
+                 const itemId = (_s = (_r = (_o = (_n = part.providerOptions) == null ? void 0 : _n[providerOptionsName]) == null ? void 0 : _o.itemId) != null ? _r : (_q = (_p = part.providerMetadata) == null ? void 0 : _p[providerOptionsName]) == null ? void 0 : _q.itemId) != null ? _s : part.toolCallId;
+                 if (store) {
+@@ -6866,7 +6882,7 @@
+             toolName: toolNameMapping.toCustomToolName(
+               webSearchToolName != null ? webSearchToolName : "web_search"
+             ),
+-            result: mapWebSearchOutput(part.action)
++            ...(part.status === "failed" || part.status === "incomplete" ? { isError: true, result: { status: part.status } } : { result: mapWebSearchOutput(part.action) })
+           });
+           break;
+         }
+@@ -7413,7 +7429,7 @@
+                   toolName: toolNameMapping.toCustomToolName(
+                     webSearchToolName != null ? webSearchToolName : "web_search"
+                   ),
+-                  result: mapWebSearchOutput(value.item.action)
++                  ...(value.item.status === "failed" || value.item.status === "incomplete" ? { isError: true, result: { status: value.item.status } } : { result: mapWebSearchOutput(value.item.action) })
+                 });
+               } else if (value.item.type === "computer_call") {
+                 ongoingToolCalls[value.output_index] = void 0;

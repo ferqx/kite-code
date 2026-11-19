@@ -68,6 +68,8 @@ import { parseScheduledTaskSaveInput } from './scheduled-tasks';
 import { saveStartupDiagnosticReport } from './startup-report';
 import { decodeNativeTraceOperation } from './trace-extensions';
 
+import { validateSearchOperation } from './web-search-ipc';
+
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
@@ -101,6 +103,10 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'outputs.preview.close': ['previewId'],
   'outputs.preview.bounds': ['previewId', 'bounds'],
   'input.files.fromOutput': ['id', 'target', 'context'],
+  'webSearch.settings.read': ['expectedStoreId'],
+  'webSearch.settings.save': ['expectedStoreId', 'revision', 'draft', 'credential'],
+  'webSearch.settings.test': ['expectedStoreId', 'revision', 'sessionId'],
+  'webSearch.evidence': ['expectedStoreId', 'sessionId', 'executionId', 'viewSelection'],
   'trace.manage': ['operation'],
   'session.markRead': ['expectedStoreId', 'sessionId', 'runId', 'status'],
   'input.queue.read': ['readId', 'viewSelection', 'historyEpoch'],
@@ -1006,6 +1012,13 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     ...fields[method as NativeRequest['method']],
     ...(method.startsWith('background.') ? ['surface'] : []),
   ]);
+  if (
+    method === 'webSearch.settings.read' ||
+    method === 'webSearch.settings.save' ||
+    method === 'webSearch.settings.test' ||
+    method === 'webSearch.evidence'
+  )
+    validateSearchOperation(method, input);
   if (method === 'trace.manage') decodeNativeTraceOperation(input.operation);
   if (method.startsWith('trajectory.') && method !== 'trajectory.cancel') {
     const schema =

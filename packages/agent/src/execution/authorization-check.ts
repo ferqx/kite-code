@@ -19,6 +19,7 @@ import type { ToolBehaviorBinding } from '../tool-behavior';
 import { approvalModelAttempts } from './authorization-retry';
 import { type AuthorizationTimingState, authorizationTimingSnapshot } from './authorization-timing';
 import type { ModelResponse } from './index';
+import { nativeSearchMessages } from './native-web-search';
 import type { ExecutionResources } from './resources';
 
 /** One internal Model call. Its owning operation supplies the sealed purpose and persistence. */
@@ -143,13 +144,19 @@ export async function runInternalModelCall(options: {
     let savedLength = 0;
     let savedAt = Date.now();
     const providerRequest = structuredClone(options.request);
+    if (providerRequest.nativeWebSearch !== undefined)
+      throw new AgentError('internal_model_binding_changed');
+    const neutralRequest = {
+      ...providerRequest,
+      messages: nativeSearchMessages(providerRequest.messages, undefined),
+    };
     signal.throwIfAborted();
     if (options.timing) options.timing.providerStartedAt = Date.now();
     const stream =
       permissionCheck && options.transientRetryTimeoutMs !== undefined
         ? approvalModelAttempts({
             model: options.model,
-            request: providerRequest,
+            request: neutralRequest,
             signal,
             timeoutMs: options.transientRetryTimeoutMs,
             retainCleanup: (pending) => {
@@ -166,7 +173,7 @@ export async function runInternalModelCall(options: {
               await partial();
             },
           })
-        : options.model.stream(providerRequest, { signal });
+        : options.model.stream(neutralRequest, { signal });
     for await (const event of stream) {
       if (finished) throw new AgentError('model_event_after_finish');
       if (event.type === 'usage') usage = structuredClone({ ...event.usage });
@@ -183,7 +190,7 @@ export async function runInternalModelCall(options: {
         if (event.text.length) firstOutput ??= 'reasoning';
         reasoning += event.text;
         if (output) await output.text('reasoning', event.text);
-      } else if (event.type === 'tool_call') {
+      } else if (event.type === 'tool_call' || event.type === 'web_search') {
         throw new AgentError(
           permissionCheck ? 'authorization_check_output_invalid' : 'internal_model_output_invalid',
         );

@@ -273,6 +273,7 @@ nativeTest(
         './ask-user': './tools/ask-user/index.js',
         './planning': './business/planning/index.js',
         './web-fetch': './tools/web-fetch/index.js',
+        './tools/web-search': './tools/web-search/index.js',
         './maintenance': './maintenance/index.js',
         './artifact-access': './artifact-access.js',
         './sqlite-engine': './sqlite-engine.js',
