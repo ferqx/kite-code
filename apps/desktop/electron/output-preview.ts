@@ -685,9 +685,11 @@ export class NativeOutputPreview {
         },
       };
       sync();
-      addNativeWindowView(input.window, view);
+      // A first navigation in an attached hidden WebContentsView can take AppKit's
+      // keyboard responder before dom-ready. Load detached; presenting is not a focus request.
       await view.webContents.loadURL(`${origin}/${entry}`);
       current();
+      addNativeWindowView(input.window, view);
       if (hostedImageScript) {
         await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
           { code: hostedImageScript },

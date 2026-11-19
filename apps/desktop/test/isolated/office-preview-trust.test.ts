@@ -162,7 +162,9 @@ function harness(
     control: NativeOutputPreview['control'];
   };
   function active(id = 'A') {
-    return {
+    const children: object[] = [];
+    let closed = false;
+    const state = {
       id,
       generation: 1,
       target: structuredClone(target),
@@ -174,11 +176,22 @@ function harness(
       window: {
         isFocused: () => false,
         isDestroyed: () => false,
-        contentView: { removeChildView() {} },
+        contentView: {
+          children,
+          removeChildView(child: object) {
+            const index = children.indexOf(child);
+            if (index >= 0) children.splice(index, 1);
+          },
+        },
       },
       view: {
+        get closed() {
+          return closed;
+        },
         webContents: {
-          close() {},
+          close() {
+            closed = true;
+          },
           executeJavaScriptInIsolatedWorld: async (_world: number, scripts: { code: string }[]) => {
             const code = scripts[0]!.code;
             if (code.startsWith('release:')) {
@@ -205,10 +218,24 @@ function harness(
             prompt?: string;
           },
     };
+    children.push(state.view);
+    return state;
   }
   preview.active = active();
   return { preview, requests, released, active };
 }
+
+test('close destroys both a navigating detached document and an attached document', () => {
+  for (const attached of [false, true]) {
+    const { preview } = harness({});
+    const active = preview.active!;
+    if (!attached) active.window.contentView.children.length = 0;
+    preview.close();
+    expect(active.view.closed).toBe(true);
+    expect(active.window.contentView.children).toHaveLength(0);
+    expect(active.abort.signal.aborted).toBe(true);
+  }
+});
 
 test('only trusted request View supplies inline prompt and host owns file/hash/request identity', async () => {
   const forged = {

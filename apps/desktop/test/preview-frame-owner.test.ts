@@ -11,7 +11,7 @@ function fixture(fail = false) {
   const body = source.slice(
     source.indexOf('      let drawable = false;'),
     source.indexOf(
-      '      addNativeWindowView(input.window, view);',
+      '      await view.webContents.loadURL',
       source.indexOf('      let drawable = false;'),
     ),
   );

@@ -44,11 +44,11 @@ test('pending preview retains latest bounds for the eventual native view', () =>
   assert.deepEqual(applied, [preview.active.bounds]);
 });
 
-test('native view remains hidden until load, interaction install and initial controls finish', () => {
+test('native view navigates detached and remains hidden until interaction install and initial controls finish', () => {
   const steps = [
     'view.setVisible(false)',
-    'addNativeWindowView(input.window, view)',
     'await view.webContents.loadURL',
+    'addNativeWindowView(input.window, view)',
     'globalThis.kiteOfficePreviewReady',
     'const initialControls = input.initialControls ?? []',
     'for (const command of initialControls)',
