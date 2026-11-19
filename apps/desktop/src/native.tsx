@@ -7505,6 +7505,7 @@ function NativeDesktopContent({
                     ) : settingsPage === 'webSearch' ? (
                       directory?.canReadWebSearchSettings && !directory.unavailable ? (
                         <NativeBoundWebSearchSettings
+                          onManageProviders={() => setSettingsPage('providers')}
                           bridge={bridge}
                           generation={generation.current}
                           storeId={directory.storeId}

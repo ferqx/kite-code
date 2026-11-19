@@ -436,3 +436,131 @@ test('derived routes bind without probing, and a changed credential or disabled 
   expect(readIds).toEqual([original.id, replacement.id]);
   expect(sent).toEqual([true]);
 });
+
+for (const order of [
+  ['primary', 'secondary'],
+  ['secondary', 'primary'],
+] as const) {
+  test(`Service root Run requires an account choice when two DeepSeek aliases are eligible (${order.join(', ')})`, async () => {
+    const root = temporaryDirectory('kite-search-run-choice-');
+    const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'fixture' });
+    privateDirectory(profile.profilePath);
+    const workdir = join(root, 'workspace');
+    mkdirSync(workdir);
+    const file = join(profile.profilePath, 'config.jsonc');
+    const credentialBackend = createTemporaryCredentialBackend();
+    const vault = createCredentialVault({ backend: credentialBackend });
+    const entries = await Promise.all(
+      order.map(
+        async (alias) =>
+          [
+            alias,
+            {
+              type: 'deepseek',
+              name: alias,
+              baseURL: 'https://api.deepseek.com/v1',
+              models: ['deepseek-flash'],
+              credentialRef: (await vault.put(`fixture-${crypto.randomUUID()}`)).id,
+            },
+          ] as const,
+      ),
+    );
+    const config = {
+      provider: Object.fromEntries(entries),
+      tools: [{ id: 'web.search', definitionVersion: '1' }],
+    };
+    writeFileSync(file, JSON.stringify(config), { mode: 0o600 });
+    let sent = 0;
+    const host = createDefaultProcessConfiguration({
+      profile,
+      credentialBackend,
+      userConfigurationPath: file,
+      webSearchFetch: Object.assign(
+        async () => {
+          sent++;
+          throw Error('unexpected_search_request');
+        },
+        { preconnect: fetch.preconnect },
+      ),
+      permissions: { authorize: async () => ({ allowed: true, revision: 'fixture' }) },
+    });
+    const store = await openSqliteStore(profile);
+    const runtime = createRuntime({
+      store,
+      artifacts: createArtifactStore({ profile, store }),
+      permissions: host.permissions!,
+    });
+    try {
+      host.permissionManagement!(runtime);
+      const expectedStoreId = (await store.getMetadata()).storeId;
+      const identity = { expectedStoreId, sessionId: 'session', subjectId: 'owner' };
+      await runtime.createWorkspace({
+        expectedStoreId,
+        id: 'work',
+        name: 'fixture',
+        rootUri: pathToFileURL(workdir).href,
+      });
+      await runtime.createSession({
+        ...identity,
+        commandId: 'create',
+        workspaceId: 'work',
+        title: 'fixture',
+      });
+      const session = (await store.getSession('session'))!;
+      const workspace = (await store.getWorkspace('work'))!;
+      const inventory = await host.configurationManagement!(runtime).readModels({
+        scope: 'user',
+        expectedStoreId,
+      });
+      const ids = new Map(inventory.models.map((entry) => [entry.provider, entry.id]));
+      expect([...ids.keys()].sort()).toEqual(['primary', 'secondary']);
+      async function resolve(commandId: string, modelId?: string) {
+        const command = await store.acceptCommand({
+          ...identity,
+          commandId,
+          request: { kind: 'run.start', content: 'route only', ...(modelId ? { modelId } : {}) },
+        });
+        const binding = await host.resolveRunConfiguration!({ command, session, workspace });
+        try {
+          return {
+            modelId: binding.modelId,
+            route: inheritedSearchRoute({ snapshot: binding.snapshot }),
+            selected: binding.toolIds?.includes('web.search') ?? false,
+            registered:
+              binding.extensions?.some((ext) => ext.tools?.some((t) => t.id === 'web.search')) ??
+              false,
+          };
+        } finally {
+          await binding.dispose?.();
+        }
+      }
+      expect(await resolve('implicit')).toEqual({
+        modelId: ids.get(order[0])!,
+        route: { kind: 'none', reason: 'unconfigured' },
+        selected: false,
+        registered: false,
+      });
+      writeFileSync(file, JSON.stringify({ ...config, model: 'primary:deepseek-flash' }));
+      const defaultRun = await resolve('declared-default');
+      expect(defaultRun).toMatchObject({
+        modelId: ids.get('primary'),
+        route: { kind: 'provider', adapter: 'deepseek-search', providerId: 'primary' },
+        selected: true,
+        registered: true,
+      });
+      const override = await resolve('explicit', ids.get('secondary')!);
+      expect(override).toMatchObject({
+        modelId: ids.get('secondary'),
+        route: { kind: 'provider', adapter: 'deepseek-search', providerId: 'secondary' },
+        selected: true,
+        registered: true,
+      });
+      expect(override.route).not.toEqual(defaultRun.route);
+      expect(await store.listExecutions('session')).toEqual([]);
+      expect(sent).toBe(0);
+    } finally {
+      await runtime.close();
+      removeTemporaryDirectory(root);
+    }
+  });
+}

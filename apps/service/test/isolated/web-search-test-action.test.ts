@@ -1,15 +1,28 @@
 import { expect, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type AgentRuntime, createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { createFixedModel } from '@kite-ai/ai';
+import { createClient } from '@kite-ai/client';
 import {
   privateDirectory,
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../../../../tests/fixtures/test-filesystem';
-import { createWebSearchTest, type WebSearchTestRoute } from '../../src/web-search-test';
+import { startService } from '../../src';
+import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { createUserConfiguration } from '../../src/user-configuration';
+import {
+  createWebSearchTest,
+  type WebSearchTestRoute,
+  webSearchTestExtensionId,
+} from '../../src/web-search-test';
 
 const set = {
   userEtag: '1'.repeat(64),
@@ -288,3 +301,199 @@ test('cancelling an in-flight explicit search does not prove an effect or replay
     await f.close();
   }
 });
+
+test('the Service sends the test probe only to an explicitly selected DeepSeek account when two accounts are eligible', async () => {
+  const root = temporaryDirectory('kite-search-test-accounts-');
+  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
+  privateDirectory(profile.profilePath);
+  const file = join(profile.profilePath, 'config.jsonc');
+  const credentialBackend = createTemporaryCredentialBackend();
+  const vault = createCredentialVault({ backend: credentialBackend });
+  const accounts = ['primary', 'secondary'] as const;
+  type Account = (typeof accounts)[number];
+  const aliases = new Map<string, Account>();
+  const providers: Record<string, { type: string; credentialRef: string; models: string[] }> = {};
+  for (const account of accounts) {
+    const value = crypto.randomUUID();
+    aliases.set(`Bearer ${value}`, account);
+    providers[account] = {
+      type: 'deepseek',
+      credentialRef: (await vault.put(value)).id,
+      models: ['deepseek-flash'],
+    };
+  }
+  const configure = (selected?: Account) =>
+    writeFileSync(
+      file,
+      JSON.stringify({
+        provider: providers,
+        ...(selected ? { model: `${selected}:deepseek-flash` } : {}),
+        tools: [],
+        skills: [],
+      }),
+      { mode: 0o600 },
+    );
+  configure();
+  const wire: Account[] = [];
+  const host = createDefaultProcessConfiguration({
+    profile,
+    userConfigurationPath: file,
+    credentialBackend,
+    localCodex: false,
+    permissions: { authorize: async () => ({ allowed: true, revision: 'fixture' }) },
+    webSearchFetch: Object.assign(
+      async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const request = new Request(input, init);
+        const account = aliases.get(request.headers.get('authorization') ?? '');
+        if (
+          !account ||
+          request.url !== 'https://api.deepseek.com/v1/tools/search' ||
+          request.method !== 'POST'
+        )
+          throw Error('unexpected_fixture_search_request');
+        wire.push(account);
+        expect((await request.json()).query).toBe('Kite web search connectivity test');
+        return Response.json({ results: [] });
+      },
+      {
+        preconnect() {
+          throw Error('unexpected_fixture_preconnect');
+        },
+      },
+    ),
+  });
+  const finish = {
+    type: 'finish' as const,
+    reason: 'stop' as const,
+    usage: { inputTokens: 1, outputTokens: 1 },
+  };
+  const store = await openSqliteStore(profile);
+  const fixed = createFixedModel([
+    [{ type: 'text_delta', text: 'First business reply' }, finish],
+    [{ type: 'text_delta', text: 'Second business reply' }, finish],
+  ]);
+  const runtime = createRuntime({
+    store,
+    artifacts: createArtifactStore({ profile, store }),
+    extensions: host.extensions?.filter((extension) => extension.id === webSearchTestExtensionId),
+    permissions: { authorize: async () => ({ allowed: true, revision: 'fixture' }) },
+    async resolveRunConfiguration(input) {
+      const selected = await host.resolveRunConfiguration!(input);
+      // The real host selects the business model. This fixture records that selection
+      // using a fixed reply without exposing any business tools or model transport.
+      return {
+        modelId: selected.modelId,
+        snapshot: selected.snapshot,
+        dispose: selected.dispose,
+        toolIds: [],
+        model: fixed,
+      };
+    },
+  });
+  host.permissionManagement!(runtime);
+  const expectedStoreId = (await runtime.getMetadata()).storeId;
+  const owner = { expectedStoreId, sessionId: 's', subjectId: 'owner' };
+  const service = await startService({
+    runtime,
+    subjectId: 'owner',
+    buildId: 'search-test-account',
+    profile: {
+      dataRoot: profile.dataRoot,
+      name: profile.profile,
+      accessKey: profile.profileAccessKey,
+    },
+    configurationManagement: host.configurationManagement!(runtime),
+    webSearchTest: host.webSearchTest!(runtime),
+  });
+  const client = createClient({
+    endpoint: service.endpoint,
+    token: service.bootstrap.token,
+    expected: {
+      apiMajor: 1,
+      profile: service.bootstrap.profile,
+      requiredCapabilities: ['web_search_settings', 'web_search_test', 'commands'],
+    },
+  });
+  async function probe(commandId: string) {
+    const settings = await client.getWebSearchSettings({ storeId: expectedStoreId });
+    return client.testWebSearch({
+      expectedStoreId,
+      sessionId: 's',
+      commandId,
+      expectedReadSet: settings.readSet!,
+    });
+  }
+  async function unavailable(commandId: string) {
+    const failure = await probe(commandId).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toMatchObject({ code: 'web_search_route_unavailable' });
+    expect(await runtime.getCommand(commandId)).toBeNull();
+    expect(wire).toEqual([]);
+  }
+  async function checked(commandId: string, account: Account) {
+    const count = wire.length;
+    await probe(commandId);
+    const command = await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
+    const execution = await runtime.getExecution(String(obj(command.receipt).executionId));
+    expect(execution?.status).toBe('succeeded');
+    expect(obj(execution?.result).details).toMatchObject({ route: 'provider', provider: account });
+    expect(wire.slice(count)).toEqual([account]);
+  }
+  async function run(commandId: string, modelId?: string) {
+    await client.startRun('s', {
+      expectedStoreId,
+      commandId,
+      kind: 'run.start',
+      content: 'New task: reply with a word.',
+      ...(modelId ? { modelId } : {}),
+    });
+    const command = await runtime.waitForCommand(commandId, { timeoutMs: 10000 });
+    expect({ status: command.status, reason: obj(command.receipt).reason }).toEqual({
+      status: 'applied',
+      reason: undefined,
+    });
+    expect((await runtime.getRun(String(obj(command.receipt).runId)))?.status).toBe('completed');
+    return runtime.readLatestBusinessModelPreference(owner);
+  }
+  try {
+    await client.connect();
+    await client.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      name: 'owned',
+      rootUri: pathToFileURL(root).href,
+    });
+    await client.createSession({
+      expectedStoreId,
+      commandId: 'create',
+      sessionId: 's',
+      workspaceId: 'w',
+      title: 'Owned',
+    });
+    const user = createUserConfiguration(file).read().value;
+    const models = Array.isArray(user.models) ? user.models.map(obj) : [];
+    const modelId = (alias: Account) =>
+      String(models.find((model) => model.providerName === alias)!.id);
+    expect(await runtime.readLatestBusinessModelPreference(owner)).toBeNull();
+    await unavailable('fresh');
+    expect(await run('implicit')).toMatchObject({ modelId: modelId('primary') });
+    expect(obj((await runtime.getCommand('implicit'))?.request)).not.toHaveProperty('modelId');
+    await unavailable('implicit-probe');
+    configure('secondary');
+    await checked('current-selection', 'secondary');
+    configure();
+    expect(await run('explicit', modelId('primary'))).toMatchObject({
+      modelId: modelId('primary'),
+    });
+    await checked('previous-selection', 'primary');
+    await probe('previous-selection');
+    expect(wire).toEqual(['secondary', 'primary']);
+    expect(fixed.requests).toHaveLength(2);
+  } finally {
+    client.disposeNetwork();
+    await service.close();
+    removeTemporaryDirectory(root);
+  }
+}, 30000);

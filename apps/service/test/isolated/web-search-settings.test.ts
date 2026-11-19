@@ -340,3 +340,104 @@ test('trusted explicit disable narrows search without introducing a host account
     await f.close();
   }
 });
+
+for (const aliases of [
+  ['primary', 'secondary'],
+  ['secondary', 'primary'],
+] as const)
+  test(`settings read derives the paid DeepSeek fallback from explicit defaults, independent of provider order (${aliases.join(', ')})`, async () => {
+    const f = await fixture();
+    try {
+      const provider = (name: string, credentialRef: string) => ({
+        type: 'deepseek',
+        name,
+        baseURL: 'https://api.deepseek.com/v1',
+        credentialRef,
+        models: ['deepseek-flash'],
+      });
+      const primary = provider('Primary connection', (await f.vault.put(syntheticKey())).id);
+      const secondary = provider('Secondary connection', (await f.vault.put(syntheticKey())).id);
+      async function readConfiguration(
+        options: {
+          root?: string;
+          primary?: JsonObject;
+          secondary?: JsonObject;
+          disabledModels?: string[];
+        } = {},
+      ) {
+        const rows = {
+          primary: { ...primary, ...options.primary },
+          secondary: { ...secondary, ...options.secondary },
+        };
+        writeFileSync(
+          f.file,
+          JSON.stringify({
+            provider: Object.fromEntries(aliases.map((alias) => [alias, rows[alias]])),
+            ...(options.root ? { model: options.root } : {}),
+            ...(options.disabledModels ? { disabledModels: options.disabledModels } : {}),
+          }),
+        );
+        const view = await f.read();
+        expect(view.errors).toEqual([]);
+        expect(view.webSearch).toEqual({ mode: 'auto' });
+        expect(view.searchProviders).toEqual([]);
+        expect(JSON.stringify(view).includes('credential:')).toBe(false);
+        return view;
+      }
+      const ambiguous = await readConfiguration();
+      expect(ambiguous.derivedDeepSeek).toEqual({ status: 'ambiguous' });
+      expect(JSON.parse(readFileSync(f.file, 'utf8'))).not.toHaveProperty('model');
+      const selection = await f
+        .manager()
+        .readModels({ scope: 'user', expectedStoreId: ambiguous.storeId });
+      expect(selection.defaultModelId).toBeTruthy();
+      const receipt = await f.manager().updateModels({
+        ...f.identity('accept-implicit-default'),
+        scope: 'user',
+        expectedReadSet: selection.readSet!,
+        operation: { kind: 'default', modelId: selection.defaultModelId! },
+      });
+      expect(receipt.state).toBe('applied');
+      const firstAlias = aliases[0];
+      expect(JSON.parse(readFileSync(f.file, 'utf8')).model).toBe(`${firstAlias}:deepseek-flash`);
+      const explicitlySelected = await f.read();
+      expect(explicitlySelected.derivedDeepSeek).toEqual({
+        status: 'configured',
+        label: firstAlias === 'primary' ? primary.name : secondary.name,
+      });
+      expect(explicitlySelected.readSet!.userEtag).not.toBe(ambiguous.readSet!.userEtag);
+
+      const localDefault = { model: 'deepseek-flash' };
+      const metadataDefault = { models: [{ name: 'deepseek-flash', default: true }] };
+      expect((await readConfiguration({ secondary: localDefault })).derivedDeepSeek).toEqual({
+        status: 'configured',
+        label: secondary.name,
+      });
+      expect((await readConfiguration({ primary: metadataDefault })).derivedDeepSeek).toEqual({
+        status: 'configured',
+        label: primary.name,
+      });
+      expect(
+        (await readConfiguration({ secondary: localDefault, primary: metadataDefault }))
+          .derivedDeepSeek,
+      ).toEqual({ status: 'ambiguous' });
+      const chosen = await readConfiguration({
+        root: 'secondary:deepseek-flash',
+        primary: metadataDefault,
+      });
+      expect(chosen.derivedDeepSeek).toEqual({ status: 'configured', label: secondary.name });
+      const credentialRef = (await f.vault.put(syntheticKey())).id;
+      const rotated = await readConfiguration({
+        root: 'secondary:deepseek-flash',
+        primary: metadataDefault,
+        secondary: { credentialRef },
+      });
+      expect(rotated.derivedDeepSeek).toEqual(chosen.derivedDeepSeek);
+      expect(rotated.readSet!.userEtag).not.toBe(chosen.readSet!.userEtag);
+      const disabled = await readConfiguration({ disabledModels: ['secondary:deepseek-flash'] });
+      expect(disabled.derivedDeepSeek).toEqual({ status: 'configured', label: primary.name });
+      expect(f.counts).toEqual({ writes: 3, reads: 0, removes: 0 });
+    } finally {
+      await f.close();
+    }
+  });

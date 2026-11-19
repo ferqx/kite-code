@@ -12,6 +12,8 @@ export type SearchService = {
 export type SearchDraft = { mode: SearchMode; providerId?: string; providers: SearchService[] };
 export type SearchView = {
   revision: string;
+  /** Service-derived status; older Services do not report it. Never infer it from accounts. */
+  derivedDeepSeek?: { status: 'configured' | 'unavailable' | 'ambiguous'; label?: string };
   canWrite: boolean;
   draft: SearchDraft;
   accounts: readonly { alias: string; name: string; adapter: SearchAdapter }[];

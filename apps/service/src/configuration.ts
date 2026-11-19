@@ -710,14 +710,30 @@ export function createDefaultProcessConfiguration(options: {
       const runtime = runtimeForSearch();
       const user = userConfiguration.read().value;
       const preference = await runtime.readLatestBusinessModelPreference(scope);
+      const host = explicitConfiguration(explicit);
       const effective = resolveConfiguration({
         defaults: configurationDefaults,
         user,
-        explicit: explicitConfiguration(explicit),
+        explicit: host,
       });
       const id = preference?.modelId ?? effective.modelId;
       const model = effective.models?.find((m) => m.id === id && m.enabled !== false);
-      return search.test(user, model, scope);
+      // A completed Run identifies the model, even when list order supplied it. Only an explicit
+      // model selection on its original command can override the configured search default.
+      const run = preference && (await runtime.getRun(preference.runId));
+      const command = run && (await runtime.getCommand(run.originCommandId));
+      const requested = command?.request;
+      const selectedModelId =
+        requested &&
+        typeof requested === 'object' &&
+        !Array.isArray(requested) &&
+        typeof requested.modelId === 'string' &&
+        requested.modelId === id
+          ? requested.modelId
+          : typeof host.modelId === 'string'
+            ? host.modelId
+            : undefined;
+      return search.test(user, model, scope, selectedModelId);
     },
   });
   const businessTools = new Map((planning.extension.tools ?? []).map((tool) => [tool.id, tool]));
@@ -1118,6 +1134,9 @@ export function createDefaultProcessConfiguration(options: {
       const searchBinding = await search.bind({
         user,
         model: selected,
+        // current holds an explicit host, command, child or reconstructed Run choice; the
+        // effective business-model fallback alone cannot pick between independent search accounts.
+        selectedModelId: typeof current.modelId === 'string' ? current.modelId : undefined,
         scope: {
           sessionId: session.id,
           expectedStoreId: command.originStoreId,

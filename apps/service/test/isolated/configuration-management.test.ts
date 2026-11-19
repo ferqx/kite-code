@@ -588,6 +588,7 @@ test('Native configuration SDK keeps original CAS and cold receipts, with one co
     );
     const user = await client.getConfiguration('user', { storeId: f.storeId });
     expect(JSON.stringify(user)).not.toContain('PRIVATE_UNKNOWN');
+    expect(JSON.stringify(user)).not.toContain('_declaredDefaultModelIds');
     expect(user.storeId).toBe(f.storeId);
     expect(JSON.stringify(user)).toContain('reasoningEffort');
     expect(JSON.stringify(user)).toContain('low');

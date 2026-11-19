@@ -216,6 +216,7 @@ export class NativeWebSearch {
     const settings = await this.client.getWebSearchSettings({ storeId: scope.storeId });
     this.checked(scope);
     if (settings.storeId !== scope.storeId) throw new ClientError('native_selection_changed');
+    if (settings.errors.length) throw new ClientError('web_search_configuration_invalid');
     const revision = randomUUID(),
       saved = settings.webSearch;
     const draft: SearchDraft = {
@@ -252,6 +253,14 @@ export class NativeWebSearch {
       revision,
       draft,
       accounts,
+      ...(settings.derivedDeepSeek && {
+        derivedDeepSeek: {
+          status: settings.derivedDeepSeek.status,
+          ...(settings.derivedDeepSeek.status === 'configured' && {
+            label: clean(settings.derivedDeepSeek.label, 120) || 'DeepSeek',
+          }),
+        },
+      }),
       canWrite: !!settings.readSet && !settings.errors.length && !scope.readOnly,
       route: {
         available:

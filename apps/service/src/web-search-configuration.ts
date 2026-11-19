@@ -239,6 +239,9 @@ export function automaticWebSearchConfiguration(
   );
   const choices = new Map<string, SearchProviderConfig>();
   const defaultAliases = new Set<string>();
+  const declaredDefaults = new Set(
+    Array.isArray(user._declaredDefaultModelIds) ? user._declaredDefaultModelIds : [user.modelId],
+  );
   for (const [alias, group] of connections.aliases) {
     if (
       group[0]!.provider !== 'deepseek' ||
@@ -268,7 +271,7 @@ export function automaticWebSearchConfiguration(
       if (error instanceof ConfigurationError) continue;
       throw error;
     }
-    if (enabled.some((model) => model.id === user.modelId)) defaultAliases.add(alias);
+    if (enabled.some((model) => declaredDefaults.has(model.id))) defaultAliases.add(alias);
     choices.set(alias, {
       id: alias,
       name: connectionLabel(group[0]!, alias),

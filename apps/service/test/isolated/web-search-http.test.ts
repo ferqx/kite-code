@@ -41,11 +41,12 @@ test('paired Client reads owned evidence, saves redacted settings and submits on
   });
   const expectedStoreId = (await runtime.getMetadata()).storeId;
   const owner = { expectedStoreId, subjectId: 'owner', sessionId: 'session' };
+  const vault = createCredentialVault({ backend: createTemporaryCredentialBackend() });
   const manager = createConfigurationManagement({
     runtime,
     profile: selected,
     userConfiguration: createUserConfiguration(path),
-    vault: createCredentialVault({ backend: createTemporaryCredentialBackend() }),
+    vault,
     persistence: 'temporary',
     explicit: () => ({}),
   });
@@ -210,6 +211,27 @@ test('paired Client reads owned evidence, saves redacted settings and submits on
     });
     expect(testCalls).toEqual(['explicit-test']);
     expect(model.requests).toHaveLength(1);
+    const providers = await Promise.all(
+      ['first', 'second'].map(
+        async (alias) =>
+          [
+            alias,
+            {
+              type: 'deepseek',
+              models: ['deepseek-flash'],
+              credentialRef: (await vault.put(crypto.randomUUID())).id,
+            },
+          ] as const,
+      ),
+    );
+    for (const entries of [providers, [...providers].reverse()]) {
+      writeFileSync(path, JSON.stringify({ provider: Object.fromEntries(entries) }));
+      const settings = await client.getWebSearchSettings({ storeId: expectedStoreId });
+      expect(settings.errors).toEqual([]);
+      expect(settings.derivedDeepSeek).toEqual({ status: 'ambiguous' });
+      expect(settings.searchProviders).toEqual([]);
+    }
+    expect(testCalls).toEqual(['explicit-test']);
     const outsider = await startService({
       runtime,
       profile,

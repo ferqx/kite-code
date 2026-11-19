@@ -116,13 +116,19 @@ export function createUserConfiguration(
   }
   function normalize(raw: JsonObject): JsonObject {
     // The assembly form remains valid in this same file for explicitly configured hosts.
-    if (assemblyForm(raw)) return { ...structuredClone(raw), _providerConnections: [] };
+    if (assemblyForm(raw))
+      return {
+        ...structuredClone(raw),
+        _providerConnections: [],
+        _declaredDefaultModelIds: typeof raw.modelId === 'string' ? [raw.modelId] : [],
+      };
     const providers = localProviders(raw);
     const disabled = raw.disabledModels ?? [];
     if (!Array.isArray(disabled)) throw new ConfigurationError('invalid_user_configuration');
     const overrides = raw.modelOptions === undefined ? {} : object(raw.modelOptions);
     const models: JsonObject[] = [];
     const connections: JsonObject[] = [];
+    const declaredDefaults: string[] = [];
     let preferred: string | undefined;
     let localPreferred: string | undefined;
     for (const [alias, value] of Object.entries(providers)) {
@@ -180,25 +186,29 @@ export function createUserConfiguration(
           ...(Object.keys(options).length ? { options } : {}),
         });
         if (enabled && (provider.model === name || metadata.default === true)) {
+          declaredDefaults.push(id);
           if (metadataConnection.provider === 'codex') localPreferred ??= id;
           else preferred ??= id;
         }
       }
     }
     const selection = route(raw.model);
+    const selectedId = selection && routeId(selection.provider, selection.name);
     const result = structuredClone(raw);
     for (const key of ['provider', 'model', 'disabledModels', 'modelOptions']) delete result[key];
     return {
       ...result,
       models,
       _providerConnections: connections,
-      modelId: selection
-        ? routeId(selection.provider, selection.name)
-        : (preferred ??
-          models.find((model) => model.enabled && model.provider !== 'codex')?.id ??
-          localPreferred ??
-          models.find((model) => model.enabled)?.id ??
-          null),
+      // The legacy modelId may be a list-order fallback. Only declared defaults can select a paid search account.
+      _declaredDefaultModelIds: selectedId ? [selectedId] : declaredDefaults,
+      modelId:
+        selectedId ??
+        preferred ??
+        models.find((model) => model.enabled && model.provider !== 'codex')?.id ??
+        localPreferred ??
+        models.find((model) => model.enabled)?.id ??
+        null,
     };
   }
   const read = (): ConfigurationDocument => {
@@ -401,7 +411,13 @@ export function createUserConfiguration(
       }
       const selected = models.find((model) => model.id === desired.modelId);
       if (desired.modelId && !selected) throw new ConfigurationError('user_model_route_missing');
-      if (selected && desired.modelId !== original.modelId) {
+      const setsDefault = operations.some(
+        (edit) => edit.kind === 'set' && edit.path.length === 1 && edit.path[0] === 'modelId',
+      );
+      if (
+        selected &&
+        (desired.modelId !== original.modelId || (setsDefault && !route(raw.model)))
+      ) {
         const selection = raw.model;
         const nested =
           selection &&
@@ -477,5 +493,6 @@ export function withoutProjectModels(value: JsonObject): JsonObject {
   delete result.webSearch;
   delete result.searchProviders;
   delete result._providerConnections;
+  delete result._declaredDefaultModelIds;
   return result;
 }

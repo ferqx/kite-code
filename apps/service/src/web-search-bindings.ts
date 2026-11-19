@@ -39,7 +39,13 @@ export function createSearchBindings(
     qualified(scope: Scope & { bindingDigest: string }): Promise<boolean>;
   },
 ) {
-  function candidates(user: JsonObject, model: ModelConfiguration | undefined, scope: Scope) {
+  function candidates(
+    user: JsonObject,
+    model: ModelConfiguration | undefined,
+    scope: Scope,
+    selectedModelId?: string,
+    restoredProviderId?: string,
+  ) {
     const selectedUserModel =
       model &&
       typeof model.providerName === 'string' &&
@@ -62,7 +68,10 @@ export function createSearchBindings(
         : undefined;
     const { webSearch: settings, searchProviders } = automaticWebSearchConfiguration(
       user,
-      model?.provider === 'deepseek' ? selectedUserModel : undefined,
+      restoredProviderId ??
+        (model?.provider === 'deepseek' && model.id === selectedModelId
+          ? selectedUserModel
+          : undefined),
     );
     if (settings.mode === 'disabled') return { settings };
     const provider = searchProviders.find((entry) => settings.providerId === entry.id);
@@ -144,6 +153,7 @@ export function createSearchBindings(
     async bind(input: {
       user: JsonObject;
       model: ModelConfiguration;
+      selectedModelId?: string;
       scope: Scope;
       enabled: boolean;
       parent?: SearchRoute | null;
@@ -155,8 +165,15 @@ export function createSearchBindings(
         return {
           route: input.restore.route ?? { kind: 'none' as const, reason: 'disabled' as const },
         };
-      const c = candidates(input.user, input.model, input.scope);
       const frozen = input.restore?.route;
+      // A recovery already owns an exact route. Revalidate that provider and its complete digest below.
+      const c = candidates(
+        input.user,
+        input.model,
+        input.scope,
+        input.selectedModelId,
+        frozen?.kind === 'provider' ? frozen.providerId : undefined,
+      );
       const native =
         frozen?.kind !== 'provider' &&
         c.native &&
@@ -242,8 +259,13 @@ export function createSearchBindings(
       }
       return { route };
     },
-    test(user: JsonObject, model: ModelConfiguration | undefined, scope: Scope) {
-      const c = candidates(user, model, scope);
+    test(
+      user: JsonObject,
+      model: ModelConfiguration | undefined,
+      scope: Scope,
+      selectedModelId?: string,
+    ) {
+      const c = candidates(user, model, scope, selectedModelId);
       const choice =
         c.native && c.owner
           ? {

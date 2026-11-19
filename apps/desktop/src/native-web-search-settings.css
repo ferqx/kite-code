@@ -1,0 +1,121 @@
+/* Read-only Web Search preferences. Provider setup lives in the existing model settings. */
+.kite-client .desktop-settings .settings-content > .web-search-preferences {
+  max-width: 660px;
+}
+.kite-client .desktop-settings .web-search-preferences .settings-page-heading {
+  margin-block-end: 30px;
+}
+.kite-client .desktop-settings .web-search-preferences .settings-page-heading p {
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.kite-client .search-pref-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 32px;
+  margin-bottom: 6px;
+}
+.kite-client .search-pref-heading h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.kite-client .search-pref-heading .search-manage {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  padding-inline: 7px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .search-pref-heading .search-manage:hover {
+  color: var(--foreground);
+}
+.kite-client .search-manage svg {
+  width: 12px;
+  height: 12px;
+}
+.kite-client .search-pref-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-block: 1px solid var(--border);
+}
+.kite-client .search-pref-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 68px;
+  padding: 10px 2px;
+}
+.kite-client .search-pref-row + .search-pref-row {
+  border-block-start: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+.kite-client .search-pref-mark {
+  height: 30px;
+  width: 30px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 8px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.kite-client .search-pref-mark svg {
+  height: 16px;
+  width: 16px;
+}
+.kite-client .search-pref-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kite-client .search-pref-copy strong {
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.kite-client .search-pref-copy span,
+.kite-client .search-pref-state {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.kite-client .search-pref-state {
+  margin-inline-start: auto;
+  flex: none;
+  font-size: 12px;
+}
+.kite-client .search-pref-state[data-configured] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.kite-client .search-pref-state[data-configured]::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+.kite-client .search-pref-result {
+  margin-block-start: 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+@container settings-content (max-width: 400px) {
+  .kite-client .search-pref-row {
+    gap: 8px;
+  }
+  .kite-client .search-pref-mark {
+    width: 24px;
+    height: 24px;
+  }
+}

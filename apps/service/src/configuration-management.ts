@@ -272,6 +272,7 @@ function publicMutation(
 function redacted(value: JsonObject): JsonObject {
   const result: JsonObject = {};
   for (const [key, entry] of Object.entries(value)) {
+    if (key === '_declaredDefaultModelIds') continue;
     if (key === 'modelId')
       result[key] = typeof entry === 'string' || entry === null ? entry : '[invalid]';
     else if (['models', 'tools', 'skills', 'mcp'].includes(key) && Array.isArray(entry))

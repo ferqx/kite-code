@@ -1180,4 +1180,4 @@ MCP Agent 工具权限由 `permission-configuration.ts` 在准确宿主注册或
 
 ## 网页搜索与模型配置
 
-每个 Run 优先选择有资格且获准的原生路由。普通搜索从用户层官方 DeepSeek 配置派生，在实际请求时从模型凭据库解析原提供商的凭据。配置读取、保存和恢复不探测提供商。旧独立搜索条目保留在本地，不能成为新的派发依据；账户来源变化时也不能重绑旧 Run。[选择规则](src/web-search-configuration.ts) · [路由与恢复验证](test/isolated/web-search-routing.test.ts)
+每个 Run 优先选择有资格且获准的原生路由。普通搜索从用户层官方 DeepSeek 配置派生，在实际请求时从模型凭据库解析原提供商的凭据。搜索只接受明确选用的模型连接、明确声明的默认连接或唯一可用连接。普通模型的列表顺序回退不作为搜索账户选择。配置读取、保存和恢复不探测提供商。旧独立搜索条目保留在本地，不能成为新的派发依据；账户来源变化时也不能重绑旧 Run。[选择规则](src/web-search-configuration.ts) · [路由与恢复验证](test/isolated/web-search-routing.test.ts)

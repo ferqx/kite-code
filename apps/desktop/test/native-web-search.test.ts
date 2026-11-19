@@ -118,6 +118,26 @@ function make() {
     },
   };
 }
+test('host projects only derived status and public label; no lookup, account inference or active test', async () => {
+  const f = make();
+  expect((await f.read()).derivedDeepSeek).toBeUndefined();
+  const saved = await f.api.getWebSearchSettings();
+  const flags = { status: 'configured', label: 'Official DeepSeek', secret: 'PRIVATE_SENTINEL' };
+  f.api.getWebSearchSettings = async () => ({
+    ...saved,
+    eligibleConnections: [],
+    searchProviders: [],
+    derivedDeepSeek: flags,
+  });
+  const view = await f.read();
+  expect(view.derivedDeepSeek).toEqual({ status: 'configured', label: 'Official DeepSeek' });
+  expect(JSON.stringify(view)).not.toContain('PRIVATE_SENTINEL');
+  flags.status = 'ambiguous';
+  expect((await f.read()).derivedDeepSeek).toEqual({ status: 'ambiguous' });
+  flags.status = 'unavailable';
+  expect((await f.read()).derivedDeepSeek).toEqual({ status: 'unavailable' });
+  expect(f.state()).toMatchObject({ probes: 0, saves: 0, lookups: 0 });
+});
 test('read and save never probe; host masks vault refs, reuses only the exact service binding and discards raw secrets', async () => {
   const f = make(),
     view = await f.read();

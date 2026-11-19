@@ -1,11 +1,7 @@
 import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import type {
-  SearchProbe,
-  SearchView,
-  WebSearchSettingsPort,
-} from '../../src/web-search-settings-model';
+import type { SearchView } from '../../src/web-search-settings-model';
 import { searchDraftIssue } from '../../src/web-search-settings-model';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
@@ -28,12 +24,13 @@ const view: SearchView = {
   revision: 'rev1',
   canWrite: true,
   accounts: [],
-  draft: { providers: [], mode: 'auto' },
-  route: { available: true, label: 'OpenAI 原生' },
+  draft: { mode: 'auto', providers: [] },
+  derivedDeepSeek: { status: 'configured', label: '我的 DeepSeek' },
+  route: { available: true, label: '自动（待核实）' },
 };
-test('opening only reads, double click costs one query, timeout never replays and stale result cannot enter reopened page', async () => {
-  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true }),
-    restore = prepareDesktopDom(dom);
+test('passive settings follow reported selection, ambiguity, disablement and legacy; opening never searches or writes', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const restore = prepareDesktopDom(dom);
   const previous = {
     window: globalThis.window,
     document: globalThis.document,
@@ -49,84 +46,98 @@ test('opening only reads, double click costs one query, timeout never replays an
   });
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
-  let reads = 0,
-    probes = 0,
-    saves = 0,
-    resolve!: (v: SearchProbe) => void;
-  const port: WebSearchSettingsPort = {
-    read: async () => {
-      reads++;
-      return view;
-    },
-    save: async () => {
-      saves++;
-      return view;
-    },
-    test: async () => {
-      probes++;
-      return await new Promise((r) => {
-        resolve = r;
-      });
-    },
+  let navigations = 0,
+    reads = 0,
+    writes = 0,
+    tests = 0;
+  const present = async (key: string, read: () => Promise<SearchView>) => {
+    const port = {
+      read: () => {
+        reads++;
+        return read();
+      },
+      save: () => {
+        writes++;
+        throw Error('never save');
+      },
+      test: () => {
+        tests++;
+        throw Error('never search');
+      },
+    };
+    await act(async () =>
+      root.render(
+        <NativeWebSearchSettings key={key} port={port} onManageProviders={() => navigations++} />,
+      ),
+    );
   };
-  const button = (label: string) =>
-    [...host.querySelectorAll('button')].find((x) => x.textContent === label)!;
+  const text = () => host.textContent || '';
   try {
-    await act(async () => {
-      root.render(<NativeWebSearchSettings key="a" port={port} />);
+    let late!: (x: SearchView) => void;
+    await present(
+      'pending',
+      () =>
+        new Promise((r) => {
+          late = r;
+        }),
+    );
+    await present('configured', async () => view);
+    await act(async () =>
+      late({ ...view, derivedDeepSeek: { status: 'configured', label: 'STALE' } }),
+    );
+    expect(text()).toContain('默认备用提供商为「我的 DeepSeek」');
+    expect(text()).toContain('本次明确选择的模型有可用的 DeepSeek 提供商时优先使用');
+    expect(text()).toContain('已配置');
+    expect(text()).toContain('优先');
+    expect(text()).not.toContain('STALE');
+    expect(text()).not.toContain('已执行');
+    expect(host.querySelector('input,select,[role=combobox],fieldset')).toBeNull();
+    expect([...host.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['管理提供商']);
+    await act(async () => host.querySelector('button')?.click());
+    expect(navigations).toBe(1);
+    await present('ambiguous', async () => ({ ...view, derivedDeepSeek: { status: 'ambiguous' } }));
+    expect(text()).toContain('按模型选择');
+    expect(text()).not.toContain('未配置');
+    await present('unavailable', async () => ({
+      ...view,
+      derivedDeepSeek: { status: 'unavailable' },
+    }));
+    expect(text()).toContain('未配置');
+    expect(text()).not.toContain('已配置');
+    await present('disabled', async () => ({
+      ...view,
+      draft: { mode: 'disabled', providers: [] },
+    }));
+    expect(text()).toContain('已关闭');
+    expect(text()).not.toContain('我的 DeepSeek');
+    expect(text()).not.toContain('已配置');
+    await present('legacy', async () => ({
+      ...view,
+      derivedDeepSeek: undefined,
+      accounts: [{ alias: 'old', name: 'NOT-PROOF', adapter: 'deepseek-search' }],
+    }));
+    expect(text()).toContain('未报告');
+    expect(text()).not.toContain('NOT-PROOF');
+    await present('legacy-provider', async () => ({
+      ...view,
+      draft: { mode: 'provider', providers: [] },
+      derivedDeepSeek: undefined,
+    }));
+    expect(text()).toContain('未选用');
+    expect(text()).toContain('未报告');
+    let fail = true;
+    await present('error', async () => {
+      if (fail) throw Error('private');
+      return view;
     });
-    expect(reads).toBe(1);
-    expect(probes).toBe(0);
-    expect(saves).toBe(0);
-    await act(async () => {
-      const b = button('测试搜索');
-      b.click();
-      b.click();
-    });
-    expect(probes).toBe(1);
-    await act(async () => {
-      root.render(<NativeWebSearchSettings key="b" port={port} />);
-      resolve({ route: 'STALE', observed: true, sources: [] });
-    });
-    expect(host.textContent).not.toContain('STALE');
-    expect(probes).toBe(1);
-    await act(async () => {
-      root.render(
-        <NativeWebSearchSettings
-          key="c"
-          port={{
-            ...port,
-            test: async () => {
-              probes++;
-              throw Error('web_search_timeout');
-            },
-          }}
-        />,
-      );
-    });
-    await act(async () => {
-      button('测试搜索').click();
-    });
-    expect(probes).toBe(2);
-    expect(host.textContent).toContain('未自动重试');
-    await act(async () => {
-      button('添加搜索服务').click();
-    });
-    expect(button('测试搜索').disabled).toBe(true);
-    await act(async () => {
-      button('保存设置').click();
-    });
-    expect(saves).toBe(0);
-    expect(host.textContent).toContain('API Key');
-    await act(async () => {
-      root.render(
-        <NativeWebSearchSettings
-          key="d"
-          port={{ ...port, read: async () => ({ ...view, canWrite: false }) }}
-        />,
-      );
-    });
-    expect(host.querySelector('fieldset')?.disabled).toBe(true);
+    expect(host.querySelector('[role=alert]')?.textContent).toContain('无法读取');
+    expect(text()).not.toContain('未配置');
+    fail = false;
+    await act(async () => host.querySelector('button')?.click());
+    expect(text()).toContain('我的 DeepSeek');
+    expect(reads).toBe(9);
+    expect(writes).toBe(0);
+    expect(tests).toBe(0);
   } finally {
     await act(async () => root.unmount());
     restore();
