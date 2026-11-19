@@ -570,28 +570,102 @@ test('release must execute complete real-code Terminal and Native comparisons on
   }
 });
 
-test('Required unit gives the whole Linux default graph an actual display', () => {
+test('Required Linux units run every selected agent shard with its actual display', () => {
   const source = readFileSync(
     resolve(import.meta.dir, '../../../.github/workflows/required.yml'),
     'utf8',
   );
-  for (const replacement of [
-    'run: bun run test',
-    'run: echo xvfb-run -a bun run test',
-    'if: false\n        run: xvfb-run -a bun run test',
-  ]) {
+  for (const [before, after] of [
+    ['run: xvfb-run -a bun run test', 'run: bun run test'],
+    ['run: xvfb-run -a bun run test', 'run: echo xvfb-run -a bun run test'],
+    ['run: xvfb-run -a bun run test', 'if: false\n        run: xvfb-run -a bun run test'],
+    ['KITE_TEST_SCOPE: required-agent', 'KITE_TEST_SCOPE: default'],
+    [`KITE_UNIT_SHARD: \${{ matrix.shard }}/8`, 'KITE_UNIT_SHARD: 0/8'],
+  ] as const) {
     const root = fixture();
-    put(
-      root,
-      '.github/workflows/required.yml',
-      source.replace('run: xvfb-run -a bun run test', replacement),
-    );
+    put(root, '.github/workflows/required.yml', source.replace(before, after));
     expect(
       checkUnifiedFormalConsumers(root).violations.some(
-        (v) => v.code === 'formal-ci-linux-unit-display-missing',
+        (v) => v.code === 'required-ci-agent-shard-missing',
       ),
     ).toBe(true);
   }
+});
+
+test('Required rejects TUI system aliases even through another package script', () => {
+  const actual = resolve(import.meta.dir, '../../..');
+  const scripts = JSON.parse(readFileSync(join(actual, 'package.json'), 'utf8')).scripts;
+  for (const key of ['test:tui:integration', 'test:tui:system'])
+    expect(scripts[key]).toBe('bun run scripts/run-unified-tui-system-tests.ts');
+  const workflow = parse(readFileSync(join(actual, '.github/workflows/required.yml'), 'utf8'));
+  expect(workflow.jobs['tui-system']).toBeUndefined();
+  expect(workflow.jobs['tui-system-shard']).toBeUndefined();
+  for (const key of ['test:tui:system', 'test:tui:integration']) {
+    const root = fixture();
+    put(root, 'package.json', {
+      scripts: { alias: 'bun run forwarded', forwarded: `bun run ${key}`, [key]: scripts[key] },
+    });
+    put(root, '.github/workflows/required.yml', {
+      on: 'pull_request',
+      jobs: { regression: { 'runs-on': 'ubuntu-latest', steps: [{ run: 'bun run alias' }] } },
+    });
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some((v) => v.code === 'required-ci-tui-suite'),
+    ).toBe(true);
+  }
+});
+
+test('desktop acceptance requires native Windows and macOS renderer and platform tests', () => {
+  const path = '.github/workflows/required.yml';
+  const workflow = parse(readFileSync(resolve(import.meta.dir, '../../..', path), 'utf8'));
+  const source = JSON.stringify(workflow);
+  const desktop = workflow.jobs['desktop-client'];
+  expect(desktop.strategy['fail-fast']).toBe(false);
+  for (const [before, after] of [
+    ['"desktop-client":', '"other":'],
+    ['windows-2025', 'ubuntu-24.04'],
+    ['macos-15', 'ubuntu-24.04'],
+    ['bun apps/desktop/test/file-ui-electron-runner.fixture.ts', 'echo renderer'],
+    ['native-browser.test.ts', 'unrelated.test.ts'],
+    ['native-model-preference-electron.test.ts', 'unrelated.test.ts'],
+    ['native-image-display-bundle.test.ts', 'unrelated.test.ts'],
+    ['file-ui-electron-*/narrow-edit.png', 'file-ui-electron-*/*.png'],
+    ['windows-office-editor.test.ts', 'unrelated.test.ts'],
+    ['native-electron.test.ts', 'unrelated.test.ts'],
+    ["runner.os == 'macOS'", "runner.os == 'Windows'"],
+  ]) {
+    const root = fixture();
+    const changed = source.replace(before!, after!);
+    expect(changed).not.toBe(source);
+    put(root, path, changed);
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some(
+        (v) => v.code === 'required-ci-desktop-client-missing',
+      ),
+    ).toBe(true);
+  }
+});
+
+test('native desktop preserves assertion reports, screenshots and process logs on each host', () => {
+  const path = '.github/workflows/required.yml';
+  const workflow = parse(readFileSync(resolve(import.meta.dir, '../../..', path), 'utf8'));
+  const steps = workflow.jobs['desktop-client'].steps as {
+    uses?: string;
+    if?: string;
+    with?: Record<string, unknown>;
+  }[];
+  const upload = steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'));
+  expect(upload?.if).toBe('always()');
+  expect(upload?.with).toMatchObject({
+    name: `desktop-client-\${{ matrix.os }}`,
+    'if-no-files-found': 'error',
+    'include-hidden-files': true,
+  });
+  expect(String(upload?.with?.path).trim().split(/\s+/)).toEqual([
+    'dist/unified-evidence/desktop-*.log',
+    '.cache/file-ui-electron-*/report.json',
+    '.cache/file-ui-electron-*/*.png',
+  ]);
 });
 
 test('a platform slice must retain the formal verifier, not only a diagnostic report', () => {
@@ -1141,9 +1215,11 @@ test('unit aggregation retains every mandatory shard and rejects failed, skipped
   expect(shards.strategy.matrix.shard).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
   expect(shards.strategy['fail-fast']).toBe(false);
   expect(
-    shards.steps.find((step: { run?: string }) => step.run === 'xvfb-run -a bun run test').env
-      .KITE_UNIT_SHARD,
-  ).toBe(`\${{ matrix.shard }}/8`);
+    shards.steps.find((step: { run?: string }) => step.run === 'xvfb-run -a bun run test').env,
+  ).toMatchObject({
+    KITE_UNIT_SHARD: `\${{ matrix.shard }}/8`,
+    KITE_TEST_SCOPE: 'required-agent',
+  });
   expect(workflow.jobs.unit).toMatchObject({
     name: 'unit',
     if: 'always()',

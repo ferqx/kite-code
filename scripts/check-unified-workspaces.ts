@@ -91,7 +91,14 @@ export function checkUnifiedFormalConsumers(root: string): {
       for (const child of readdirSync(resolve(root, path))) paths(`${path}/${child}`);
     else if (/\.[cm]?[jt]sx?$/.test(path)) entrypoints.add(path.replaceAll('\\', '/'));
   };
-  const inspect = (command: string, location: string, cwd = ''): void => {
+  const inspect = (command: string, location: string, cwd = '', required = false): void => {
+    if (
+      required &&
+      /\b(?:test:tui:(?:system|integration)|run-unified-tui-system-tests\.ts|tests\/tui-system\/scenarios)\b/.test(
+        command,
+      )
+    )
+      add('required-ci-tui-suite', location, command);
     if (legacyConsumer.test(command) || legacyConsumer.test(cwd))
       add('formal-legacy-command', location, command);
     if (/^\s*\$/.test(command)) add('formal-command-unresolved', location, 'computed command head');
@@ -127,13 +134,14 @@ export function checkUnifiedFormalConsumers(root: string): {
         if (/\.[cm]?[jt]sx?$/.test(target)) paths(relative(root, resolve(root, selected, target)));
         else {
           const key = `${selected}:${target}`;
-          if (visited.has(key)) continue;
-          visited.add(key);
+          const traversal = required ? `required:${key}` : key;
+          if (visited.has(traversal)) continue;
+          visited.add(traversal);
           try {
             const scripts = packageAt(selected).scripts as Record<string, unknown> | undefined;
             const value = scripts?.[target];
             if (typeof value !== 'string') add('formal-command-unresolved', location, key);
-            else inspect(value, `${selected || '.'}/package.json#${target}`, selected);
+            else inspect(value, `${selected || '.'}/package.json#${target}`, selected, required);
           } catch (error) {
             add('formal-command-unresolved', location, String(error));
           }
@@ -196,6 +204,8 @@ export function checkUnifiedFormalConsumers(root: string): {
           throw Error('workflow primary keys');
         const jobs = value.jobs as Record<string, Record<string, unknown>>;
         if (!jobs || Array.isArray(jobs)) throw Error('workflow jobs');
+        if (name === 'required.yml' && !jobs['desktop-client'])
+          add('required-ci-desktop-client-missing', location, 'desktop-client');
         const platforms = new Set<string>();
         for (const [jobName, job] of Object.entries(jobs)) {
           if (
@@ -472,11 +482,65 @@ export function checkUnifiedFormalConsumers(root: string): {
             !steps.some(
               (step) =>
                 step.if === undefined &&
-                typeof step.run === 'string' &&
-                step.run.trim() === 'xvfb-run -a bun run test',
+                step.run === 'xvfb-run -a bun run test' &&
+                step.env?.KITE_TEST_SCOPE === 'required-agent' &&
+                step.env?.KITE_UNIT_SHARD === `\${{ matrix.shard }}/8`,
             )
           )
-            add('formal-ci-linux-unit-display-missing', location, jobName);
+            add('required-ci-agent-shard-missing', location, jobName);
+          if (name === 'required.yml' && jobName === 'desktop-client') {
+            const stepIndex = (command: string, condition?: string) =>
+              steps.findIndex(
+                (step) =>
+                  step.run === command &&
+                  step.if === condition &&
+                  step['working-directory'] === undefined,
+              );
+            const install = stepIndex('bun install --frozen-lockfile');
+            const windowsCompiler = stepIndex(
+              'bun run scripts/release/prepare-windows-native-ci.ts',
+              "runner.os == 'Windows'",
+            );
+            const electron = stepIndex('node apps/desktop/node_modules/electron/install.js');
+            const build = stepIndex('bun run build');
+            const renderer = stepIndex('bun apps/desktop/test/file-ui-electron-runner.fixture.ts');
+            const nativeTest =
+              'bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/';
+            const shared = [
+              'native-browser.test.ts',
+              'native-model-preference-electron.test.ts',
+              'native-image-display-bundle.test.ts',
+            ].map((file) => stepIndex(`${nativeTest}${file}`));
+            const requiredEvidence = stepIndex(
+              'exit 1',
+              "success() && (hashFiles('.cache/file-ui-electron-*/report.json') == '' || hashFiles('.cache/file-ui-electron-*/narrow-edit.png') == '')",
+            );
+            const windows = stepIndex(
+              `${nativeTest}windows-office-editor.test.ts`,
+              "runner.os == 'Windows'",
+            );
+            const mac = stepIndex(`${nativeTest}native-electron.test.ts`, "runner.os == 'macOS'");
+            if (
+              job.if !== undefined ||
+              job['runs-on'] !== `\${{ matrix.os }}` ||
+              !matrix ||
+              Object.keys(matrix).length !== 1 ||
+              !Array.isArray(matrix.os) ||
+              matrix.os.length !== 2 ||
+              !matrix.os.includes('windows-2025') ||
+              !matrix.os.includes('macos-15') ||
+              windowsCompiler < 0 ||
+              install <= windowsCompiler ||
+              electron <= install ||
+              build <= electron ||
+              shared.some((index) => index <= build) ||
+              renderer <= build ||
+              requiredEvidence <= renderer ||
+              windows <= renderer ||
+              mac <= renderer
+            )
+              add('required-ci-desktop-client-missing', location, jobName);
+          }
           if (
             name === 'release-candidate.yml' &&
             !steps.some(
@@ -801,6 +865,7 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.run,
                 `${location}#${jobName}`,
                 typeof step['working-directory'] === 'string' ? step['working-directory'] : '',
+                name === 'required.yml',
               );
               if (typeof step.shell === 'string')
                 inspect(step.shell, `${location}#${jobName}:shell`);

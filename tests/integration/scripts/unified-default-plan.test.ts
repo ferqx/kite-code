@@ -149,3 +149,60 @@ test('eight default shards preserve every original file and isolation class exac
   expect(() => defaultShardFiles(inventory, '8/8')).toThrow();
   expect(() => defaultShardFiles([], '0/8')).toThrow();
 });
+
+test('required Agent Linux shards partition runtime and shared coverage while leaving client-only suites local', () => {
+  const local = unifiedTestInventory(root);
+  const required = unifiedTestInventory(root, 'required-agent');
+  const selected = new Set(required);
+  expect(selected.size).toBe(required.length);
+  expect(required.every((file) => local.includes(file))).toBe(true);
+  const deferred = local.filter((file) => !selected.has(file));
+  for (const file of [
+    'apps/cli/test/file-recovery-pty.test.ts',
+    'apps/cli/test/isolated/tui-caller-job-stop.test.ts',
+    'apps/desktop/test/isolated/native-browser.test.ts',
+    'apps/desktop/test/isolated/native-image-display-bundle.test.ts',
+    'apps/desktop/test/isolated/native-model-preference-electron.test.ts',
+    'packages/ui/test/tui/scrollback.test.tsx',
+    'packages/ui/test/isolated/tui/pending-cards.test.ts',
+    'tests/isolated/unified-agent/unified-soak-tui.test.ts',
+    'tests/isolated/unified-agent/restored-web-model-output.test.ts',
+    'apps/web/test/page.test.tsx',
+  ]) {
+    expect(deferred).toContain(file);
+  }
+  for (const file of [
+    'packages/agent/test/isolated/recovery/history-followup-owned-service.test.ts',
+    'apps/cli/test/isolated/windows-tui-private-files.test.ts',
+    'apps/cli/test/isolated/caller-kind-crash.test.ts',
+    'apps/cli/test/mcp-tools-port.test.ts',
+    'apps/cli/test/mcp-source-mutation.test.ts',
+    'apps/cli/test/file-candidate-windows-records.test.ts',
+    'apps/service/test/isolated/responses-loop.test.ts',
+    'packages/client/test/sse.test.ts',
+    'apps/desktop/test/isolated/native-main-scheduling-lifecycle.test.ts',
+    'apps/desktop/test/isolated/native-session-anomalies-electron.test.ts',
+    'apps/web/test/isolated/assets.test.ts',
+    'packages/ui/test/isolated/desktop-session-tabs.test.tsx',
+    'tests/isolated/unified-agent/native-cross-version.test.ts',
+    'tests/isolated/unified-agent/native-install-lifecycle.test.ts',
+    'tests/isolated/unified-agent/restored-context.test.ts',
+    'tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts',
+    'tests/isolated/unified-agent/terminal-bundle.test.ts',
+    'tests/isolated/unified-agent/unified-soak.test.ts',
+  ]) {
+    expect(selected.has(file)).toBe(true);
+  }
+  for (const workspace of ['packages/agent', 'packages/ai', 'packages/client', 'apps/service']) {
+    expect(deferred.some((file) => file.startsWith(`${workspace}/test/`))).toBe(false);
+  }
+  const plan = unifiedTestPlan(root, 2);
+  const absolute = required.map((file) => join(root, file));
+  const assigned = Array.from({ length: 8 }, (_, i) => {
+    const shard = selectDefaultShard(plan, new Set(defaultShardFiles(absolute, `${i}/8`)));
+    return [...shard.concurrent, ...shard.exclusive].flatMap((job) => job.files);
+  }).flat();
+  expect(assigned.sort()).toEqual(absolute.sort());
+  expect(() => unifiedTestInventory(root, '')).toThrow();
+  expect(() => unifiedTestInventory(root, 'typo')).toThrow();
+});

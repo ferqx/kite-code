@@ -50,10 +50,40 @@ export const UNIFIED_EXCLUSIVE_TEST_FILES = [
   'tests/isolated/unified-agent/terminal-bundle.test.ts',
 ] as const;
 
-export function unifiedTestInventory(root: string): string[] {
-  return UNIFIED_TEST_SUITES.flatMap((suite) => collectTestFiles(resolve(root, suite)))
+// Keep mixed runtime/release files intact. The client-specific cases outside their
+// own test directories have explicit owners in the full local or platform suites.
+const deferredClientTests = new Set([
+  'apps/cli/test/file-recovery-pty.test.ts',
+  'apps/cli/test/isolated/file-candidate-windows-native.test.ts',
+  'apps/desktop/test/isolated/native-browser.test.ts',
+  'apps/desktop/test/isolated/native-electron.test.ts',
+  'apps/desktop/test/isolated/native-image-display-bundle.test.ts',
+  'apps/desktop/test/isolated/native-model-preference-electron.test.ts',
+  'tests/isolated/unified-agent/development-tui.test.ts',
+  'tests/isolated/unified-agent/restored-tui-background.test.tsx',
+  'tests/isolated/unified-agent/restored-tui-context-include.test.tsx',
+  'tests/isolated/unified-agent/restored-tui-model-output.test.tsx',
+  'tests/isolated/unified-agent/restored-web-model-output.test.ts',
+  'tests/isolated/unified-agent/tui-startup-wait.test.ts',
+  'tests/isolated/unified-agent/unified-soak-tui.test.ts',
+  'tests/isolated/unified-agent/unified-tui-runner.test.ts',
+]);
+
+export function unifiedTestInventory(root: string, scope?: string): string[] {
+  if (scope !== undefined && scope !== 'required-agent')
+    throw Error('KITE_TEST_SCOPE must be required-agent when set');
+  const files = UNIFIED_TEST_SUITES.flatMap((suite) => collectTestFiles(resolve(root, suite)))
     .map((file) => relative(root, file).replaceAll('\\', '/'))
     .sort();
+  if (scope === undefined) return files;
+  return files.filter(
+    (file) =>
+      (!file.startsWith('apps/web/test/') || file === 'apps/web/test/isolated/assets.test.ts') &&
+      !file.startsWith('packages/ui/test/tui/') &&
+      !file.startsWith('packages/ui/test/isolated/tui/') &&
+      !/^apps\/cli\/test\/(?:isolated\/)?tui-/.test(file) &&
+      !deferredClientTests.has(file),
+  );
 }
 
 export function unifiedTestPlan(root: string, concurrency: number): TestPlan {
@@ -113,24 +143,21 @@ export async function runUnifiedTests(root: string, args: readonly string[]): Pr
     return 2;
   }
   const shard = process.env.KITE_UNIT_SHARD;
-  const inventory = unifiedTestInventory(root);
-  const selected =
-    shard === undefined
-      ? undefined
-      : defaultShardFiles(
-          inventory.map((file) => resolve(root, file)),
-          shard,
-        );
+  const scope = process.env.KITE_TEST_SCOPE;
+  const inventory = unifiedTestInventory(root, scope);
+  const files = inventory.map((file) => resolve(root, file));
+  const selected = shard === undefined ? files : defaultShardFiles(files, shard);
   if (args[0] === '--list') {
-    const files = selected?.map((file) => relative(root, file).replaceAll('\\', '/')) ?? inventory;
-    console.log(JSON.stringify({ suites: UNIFIED_TEST_SUITES, files }));
+    const paths = selected.map((file) => relative(root, file).replaceAll('\\', '/'));
+    console.log(JSON.stringify({ suites: UNIFIED_TEST_SUITES, files: paths }));
     return 0;
   }
   const concurrency = testParallelism();
   const full = unifiedTestPlan(root, concurrency);
-  const plan = selected ? selectDefaultShard(full, new Set(selected)) : full;
+  const plan =
+    scope === undefined && shard === undefined ? full : selectDefaultShard(full, new Set(selected));
   console.log(
-    `[unified-agent] parallelism=${concurrency} shard=${shard ?? 'all'} files=${selected?.length ?? inventory.length}`,
+    `[unified-agent] parallelism=${concurrency} scope=${scope ?? 'all'} shard=${shard ?? 'all'} files=${selected.length}`,
   );
   const code = await runTestPlan(root, plan, concurrency);
   if (code === 0)

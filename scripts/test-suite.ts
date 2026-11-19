@@ -130,6 +130,7 @@ function testEnvironment(prefix: string): { env: Record<string, string>; dispose
   // A nested CLI/inventory test must observe the ordinary local default.
   const childEnvironment = { ...process.env };
   delete childEnvironment.KITE_UNIT_SHARD;
+  delete childEnvironment.KITE_TEST_SCOPE;
   const codeRoot = join(home, '.kite-code');
   const temporary = join(home, 'tmp');
   if (process.platform === 'win32') privateDirectory(temporary);

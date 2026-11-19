@@ -90,6 +90,7 @@ jobs:
         shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/unit.log "{0}"
         env:
           KITE_UNIT_SHARD: ${{ matrix.shard }}/8
+          KITE_TEST_SCOPE: required-agent
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -168,41 +169,62 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  tui-system-shard:
-    name: tui-system (${{ matrix.shard }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  desktop-client:
+    name: Desktop client (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        os: [windows-2025, macos-15]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.4
+      - if: runner.os == 'Windows'
+        name: Prepare Windows x64 native compiler
+        run: bun run scripts/release/prepare-windows-native-ci.ts
       - run: bun install --frozen-lockfile
-      - run: bun run test:tui:system
-        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/tui-system.log "{0}"
-        env:
-          KITE_TUI_SYSTEM_SHARD: ${{ matrix.shard }}/4
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - name: Install the locked Electron binary for this host
+        run: node apps/desktop/node_modules/electron/install.js
+      - run: bun run build
+      - name: Exercise the sandboxed browser and its native window ownership
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/desktop-browser.log "{0}"
+        run: bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-browser.test.ts
+      - name: Restore model preferences across Electron restarts
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/desktop-preferences.log "{0}"
+        run: bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-model-preference-electron.test.ts
+      - name: Render images with the original and relocated private codec
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/desktop-images.log "{0}"
+        run: bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-image-display-bundle.test.ts
+      - name: Exercise file edit and write states in a real Electron window
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/desktop-window.log "{0}"
+        run: bun apps/desktop/test/file-ui-electron-runner.fixture.ts
+      - name: Fail if the Electron report or its final screenshot is missing
+        if: >-
+          success() && (hashFiles('.cache/file-ui-electron-*/report.json') == '' ||
+          hashFiles('.cache/file-ui-electron-*/narrow-edit.png') == '')
+        run: exit 1
+      - if: runner.os == 'Windows'
+        name: Check native Office file history and permissions in Electron
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/desktop-host.log "{0}"
+        run: bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/windows-office-editor.test.ts
+      - if: runner.os == 'macOS'
+        name: Check Electron preload, service refresh and shutdown
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/desktop-host.log "{0}"
+        run: bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-electron.test.ts
+      - name: Preserve desktop logs, screenshots and assertions
         if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: tui-system-${{ matrix.shard }}
-          path: dist/unified-evidence/tui-system.log
+          name: desktop-client-${{ matrix.os }}
+          path: |
+            dist/unified-evidence/desktop-*.log
+            .cache/file-ui-electron-*/report.json
+            .cache/file-ui-electron-*/*.png
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-  # Keep the established required-check name while making every isolated PTY
-  # shard visible and independently retryable in the Actions UI.
-  tui-system:
-    name: tui-system
-    needs: tui-system-shard
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Verify all TUI PTY shards passed
-        run: test "${{ needs.tui-system-shard.result }}" = "success"

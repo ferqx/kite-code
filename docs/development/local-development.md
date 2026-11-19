@@ -30,7 +30,8 @@ quality 仅缓存 `BUN_INSTALL_CACHE_DIR` 指定的下载目录，位于 runner 
 | Desktop 定向验证 | `bun run test:desktop:native` | 新 Native bundle/process/Files 的隔离实际场景，使用本地固定 Provider |
 | Native 安装生命周期 | `bun run test:desktop:window` | 新完整 Native 的源码外安装、升级、强杀、回滚与卸载；具体资格见 Native owner |
 | 默认测试 | `bun run test` | 与 `test:unified-agent` 共用精确十 workspace 和有限 root safety 计划，最多四槽；独占场景串行 |
-| TUI 系统测试 | `bun run test:tui:system` | 当前 112 个完整文件（原 52 个旅程及 60 个当前宿主文件）；支持 `--list` 和 `KITE_TUI_SYSTEM_SHARD=0/4` 至 `3/4`，详见测试 owner |
+| Linux Required 分片清单 | `KITE_TEST_SCOPE=required-agent bun run test --list` | 八分片运行 Agent、Service、Client SDK、可移植组件和打包合同；Windows/macOS 桌面检查及证据范围见[矩阵](../../tests/agent-ci-coverage.md)。 |
+| 本地 TUI 系统诊断 | `bun run test:tui:system` | 现有 TUI 旅程与宿主用例；支持 `--list` 和 `KITE_TUI_SYSTEM_SHARD=0/4` 至 `3/4`，详见测试 owner |
 | 类型检查 | `bun run typecheck` | Bun 1.4.4；单进程检查原根与精确十 workspace 的十一份配置 |
 | 工作区与依赖边界 | `bun run check:runtime-packages`、`bun run check:core-boundary` | 工作区清单、正式消费闭包与源代码依赖边界 |
 | 文档 | `bun run check:docs`、`bun run check:docs-impact` | 结构检查与实际影响语义核对 |

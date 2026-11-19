@@ -511,7 +511,7 @@ Windows另接[安装版本／维护完整caller](fixtures/unified-agent/windows-
 
 根默认和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)：精确十 workspace、mini-review 独立扩展、新 root unified-agent 场景及有限脚本安全列表；不会发现整个旧 integration/qualification/release/e2e/golden/TUI 树。原测试机制的独立 HOME、exclusive、失败停止派发、运行者 drain 与 OS 并发上限保持。新增 source-free/真实 Native/TTY 场景按实际分类单独进程执行，不以历史排除规则丢失其断言。
 
-新 `test:tui:system` 由[当前 runner](../scripts/run-unified-tui-system-tests.ts)从新 UI TUI 与 CLI `tui*.test.ts` owner 动态发现，按当前文件清单分配四个 shard；`--list` 只读返回准确 inventory，只有所有 shard 成功才通过既有 `tui-system` check。根 runtime mock/e2e/fault/stdio/transport 与 Desktop aliases 已指向当前 owner 测试；旧 WebSocket/standalone/foundation/模型 live aliases 已退出，未将 paid Provider 测试重命名为 mock 通过。
+新 `test:tui:system` 由[当前 runner](../scripts/run-unified-tui-system-tests.ts)从新 UI TUI 与 CLI `tui*.test.ts` owner 动态发现，按当前文件清单分配四个 shard；`--list` 只读返回准确 inventory，用于本地诊断。当前 Required 对 Agent 范围分八片，桌面客户端验收分别运行于 Windows 和 macOS，详见[能力矩阵](agent-ci-coverage.md)。根 runtime mock/e2e/fault/stdio/transport 与 Desktop aliases 已指向当前 owner 测试；旧 WebSocket/standalone/foundation/模型 live aliases 已退出，未将 paid Provider 测试重命名为 mock 通过。
 
 当前显式工具模型入口为 `test:model:tools:live`，以 `KITE_RUN_LIVE_MODEL_TOOLS=1` 启用。[套件说明](e2e/live/model/README.md)定义实际 Agent/SDK、现有默认模型、合成 Workspace、请求预算和脱敏报告；该 runner 使用 `.live.ts`，不进入默认测试发现，也不恢复旧模型 aliases。
 
