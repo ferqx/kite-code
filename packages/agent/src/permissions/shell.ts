@@ -859,7 +859,7 @@ export async function createShellConfiguration(input: {
         ? { linux: { bubblewrapPath: bubblewrap.path, initExecutable: supervisor.path } }
         : {}),
     };
-    const makeJob = async (directory = cwd) =>
+    const makeJob = async (directory = cwd, jobSignal?: AbortSignal) =>
       options.platform === 'win32' && options.windows && host
         ? await createWindowsShellJob(
             {
@@ -884,7 +884,9 @@ export async function createShellConfiguration(input: {
                   : scope;
               },
             },
-            input.signal,
+            jobSignal && input.signal
+              ? AbortSignal.any([input.signal, jobSignal])
+              : (jobSignal ?? input.signal),
           )
         : options.platform === 'linux' && bubblewrap && host
           ? createLinuxHostShellJob({
@@ -1030,7 +1032,8 @@ export async function createShellConfiguration(input: {
             const parsed = parseShellCommandInput(value, 'job', !!host);
             if (!parsed) throw new AgentError('invalid_shell_arguments');
             const directory = await executionDirectory(parsed.workdir);
-            const selectedJob = parsed.workdir === undefined ? job : await makeJob(directory.path);
+            const selectedJob =
+              parsed.workdir === undefined ? job : await makeJob(directory.path, context.signal);
             const classified = await commandPolicy.classify(
               command,
               context.signal,

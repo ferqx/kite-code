@@ -28,7 +28,7 @@ AND 与真实子 Agent 组合按本次返回的完整 `PermissionDecision` 对�
 
 Auto 材料指纹进入原 operation key 和批准证据。脚本及其他依赖未确认的程序不扩大跨独立调用缓存。准确自身 Job 可沿实际模型／人工／有效 grant 依据避免重复审核。Job 启动对真实材料批准标记及本 Job 已捕获入口做 hash／对象身份复核，变化在启动前失败。该检查与 OS 最终打开文件之间仍有竞态。
 
-Windows [Shell 权限装配](shell.ts)从实际 PowerShell AST 或 Bash 字面量命令、管道和 `&&` 组合识别可执行的只读调用。`rg` 复用同一有界 argv 语法，预处理、外部解压、未知参数和重定向退出免审路径。PowerShell 用固定 `rg` 别名和清理后的配置环境执行，Git Bash 固定读取程序并保留管道运算。有限 [Git 查询](windows-git-read.ts)使用原生只读令牌和进程上限，详见 [Jobs owner](../jobs/README.md#默认-windows-git-bash)。判定参与命令派发摘要，工作目录、资产或范围漂移在启动前失败。
+Windows [Shell 权限装配](shell.ts)从实际 PowerShell AST 或 Bash 字面量命令、管道和 `&&` 组合识别可执行的只读调用。`rg` 复用同一有界 argv 语法，预处理、外部解压、未知参数和重定向退出免审路径。PowerShell 用固定 `rg` 别名和清理后的配置环境执行，Git Bash 固定读取程序并保留管道运算。有限 [Git 查询](windows-git-read.ts)使用原生只读令牌和进程上限，详见 [Jobs owner](../jobs/README.md#默认-windows-git-bash)。判定参与命令派发摘要，工作目录、资产或范围漂移在启动前失败。显式指定工作目录时，重建 Windows Job 的资产校验同时响应本次 Job 与配置恢复的取消信号，在途读取收尾后才结束准备。
 
 Windows Auto 将未能静态确认效果的 PowerShell 交给同一 Shell 风险审核。单一字面量路径的 PowerShell 脚本调用可提供有界正文。原 Tool 与准确自身 Job 共用经核实的风险审核与高风险人答，派发时复核工作目录、范围和已审核文件。 [Windows 原生 Service 回归](../../../../apps/service/test/isolated/windows-shell-auto.test.ts)
 

@@ -1,14 +1,131 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { JobContext, JobEvent } from '../../../src/extensions';
+import { setImmediate } from 'node:timers/promises';
+import {
+  type JobContext,
+  type JobEvent,
+  type JobHandle,
+  JobStartError,
+} from '../../../src/extensions';
 import {
   captureInstalledWindowsGitBashRuntime,
   discoverInstalledWindowsGitBash,
 } from '../../../src/jobs/windows-git-bash';
 import { createWindowsShellJob } from '../../../src/jobs/windows-shell';
+import { createPermissionPolicy } from '../../../src/permissions';
 import { createShellConfiguration } from '../../../src/permissions/shell';
+
+async function cancelExplicitWorkdirRecheck(
+  authority: Awaited<ReturnType<typeof createShellConfiguration>>,
+  cwd: string,
+  control: string,
+  git: string,
+) {
+  const job = authority.extensions
+    .flatMap((extension) => extension.jobs ?? [])
+    .find((definition) => definition.id === 'shell.command')!;
+  const capability = { kind: 'job', definitionId: job.id, definitionVersion: job.version } as const;
+  const settings = {
+    mode: 'full',
+    revision: 'fixture',
+    workspaceTrust: true,
+    allowed: [capability],
+  } as const;
+  const input = { command: 'printf started > cancelled.txt', workdir: 'nested' };
+  mkdirSync(join(cwd, input.workdir));
+  const controller = new AbortController();
+  const request = {
+    ...capability,
+    sessionId: 'owned',
+    runId: 'workdir-run',
+    executionId: 'workdir-cancel',
+    input,
+    signal: controller.signal,
+  };
+  const description = await authority.describeRequest(request, settings);
+  expect(structuredClone(description)).toMatchObject({
+    hardAllowed: true,
+    windowsNativeUserProcess: true,
+    commandDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    executionScope: { filesystem: 'full_access', network: 'internet' },
+  });
+  const accepted = await createPermissionPolicy({
+    readPolicy: () => settings,
+    describeCapability: () => ({
+      ...capability,
+      ...authority.describe(job.id),
+      revision: settings.revision,
+      hardAllowed: false,
+      ...description,
+    }),
+  }).authorize(request);
+  expect(accepted.allowed).toBe(true);
+
+  // The outer dispatch checks Bash and its DLL. Only the new workdir backend
+  // opens this Git executable when recapturing the installed runtime closure.
+  const opened = Promise.withResolvers<fs.FileHandle>();
+  const release = Promise.withResolvers<void>();
+  const open = fs.open;
+  const opening = spyOn(fs, 'open').mockImplementation(async (path, ...args) => {
+    const handle = await open(path, ...args);
+    if (path === git) {
+      opened.resolve(handle);
+      await release.promise;
+    }
+    return handle;
+  });
+  let settled = false;
+  let unexpectedHandle: JobHandle | undefined;
+  const attempt = job
+    .start(input, { ...request, dispatchAuthorization: accepted })
+    .then(
+      (handle) => {
+        unexpectedHandle = handle;
+        return handle;
+      },
+      (error: unknown) => {
+        if (error instanceof JobStartError) unexpectedHandle = error.handle;
+        return error;
+      },
+    )
+    .finally(() => {
+      settled = true;
+    });
+  try {
+    const handle = await Promise.race([
+      opened.promise,
+      attempt.then(() => {
+        throw Error('native_asset_recheck_missing');
+      }),
+    ]);
+    const reads = spyOn(handle, 'read');
+    try {
+      controller.abort(new Error('cancelled_during_native_assets'));
+      await setImmediate();
+      expect(settled).toBe(false);
+      release.resolve();
+      expect(await attempt).toMatchObject({
+        name: 'JobStartError',
+        message: 'cancelled_during_native_assets',
+        handle: undefined,
+      });
+      expect(reads).not.toHaveBeenCalled();
+      expect(handle.fd).toBe(-1);
+    } finally {
+      reads.mockRestore();
+    }
+  } finally {
+    release.resolve();
+    await attempt;
+    opening.mockRestore();
+    if (unexpectedHandle) await job.dispose(unexpectedHandle);
+  }
+  expect(existsSync(join(cwd, input.workdir, 'cancelled.txt'))).toBe(false);
+  expect(readdirSync(control)).toEqual([]);
+}
 
 test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
   'original Git Bash uses the accepted user scope, reports its real install, and reaps the owned Job on stop',
@@ -96,6 +213,7 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
       );
     }
     expect(existsSync(join(cwd, 'detached.txt'))).toBe(false);
+    await cancelExplicitWorkdirRecheck(authority, cwd, control, installed.git);
     const context = (id: string): JobContext => ({
       executionId: id,
       sessionId: 'owned',
