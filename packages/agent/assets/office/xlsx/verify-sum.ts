@@ -22,6 +22,8 @@ function verify() {
     throw Error('xlsx_sum_check_input_invalid');
   const cli = process.env.KITE_OFFICE_CLI;
   if (!cli || !isAbsolute(cli)) throw Error('xlsx_sum_check_cli_unavailable');
+  const validator = process.env.KITE_DOCUMENTS_HELPER;
+  if (!validator || !isAbsolute(validator)) throw Error('xlsx_sum_check_validator_unavailable');
   const directory = mkdtempSync(join(dirname(resolve(output)), '.kite-xlsx-'));
   const copy = join(directory, 'check.xlsx');
   try {
@@ -77,6 +79,20 @@ function verify() {
     }
     if (current.computedValue !== expected || current.evaluated !== true)
       throw Error('xlsx_sum_check_result_mismatch');
+    // OfficeCLI get resolves shared formulas to ordinary text. Its set can sever
+    // the shared anchor, so prove this is a standalone cell before publishing.
+    const xml = command('raw', '/' + target[1], '--start', target[3]!, '--end', target[3]!, '--cols', target[2]!);
+    try {
+      const proof = JSON.parse(execFileSync(process.execPath,
+        ['--no-install', validator, 'xlsx-formula-guard', '--input', '-'], {
+          input: JSON.stringify({ xml, address: target[2]! + target[3]!, formula }),
+          encoding: 'utf8', timeout: 10000, maxBuffer: 4096,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }));
+      if (proof.success !== true) throw Error('invalid_proof');
+    } catch {
+      throw Error('xlsx_sum_check_formula_unverified');
+    }
     if (current.cachedValue !== expected)
       command('set', cell!, '--prop', 'formula=' + formula);
     const saved = get(cell!);

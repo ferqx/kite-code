@@ -129,7 +129,7 @@ Six steps. Every non-trivial build follows this shape.
 
 ### Verify a summary before delivery
 
-For a directly referenced, same-sheet integer SUM (at most 16 numeric input cells), use the bundled checker on your authorized edited working copy, after all inputs are final. Supply the existing formula verbatim and the integer you independently expect from the final inputs. This example expects 33:
+For a standalone, directly referenced, same-sheet integer SUM (at most 16 numeric input cells), use the bundled checker on your authorized edited working copy, after all inputs are final. Supply the existing formula verbatim and the integer you independently expect from the final inputs. This example expects 33:
 
 ```sh
 "$KITE_DOCUMENTS_BUN" --no-install "$KITE_OFFICE_SKILLS_DIR/xlsx/verify-sum.ts" edited.xlsx verified.xlsx /Sheet1/D2 'SUM(B2:C2)' 33
@@ -140,7 +140,7 @@ For a directly referenced, same-sheet integer SUM (at most 16 numeric input cell
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 
-Only stage `verified.xlsx` if verification succeeds. The checker creates a new file without overwriting either input or destination. It refreshes the original formula using bundled OfficeCLI if necessary and checks both the saved cache and the independently computed CLI result after reopening. A structural `validate` or a successful `get` with only `computedValue` does not prove the result is stored. For formulas outside this scope, retain the formula, verify saved results independently when possible, and tell the user which results still need recalculation in Excel; never report an unverified value as saved.
+Only stage `verified.xlsx` if verification succeeds. The checker creates a new file without overwriting either input or destination. It refuses shared, array, data-table, or otherwise unverified formula structures; do not bypass a refusal by resetting the formula. It refreshes the same standalone formula using bundled OfficeCLI if necessary and checks both the saved cache and the independently computed CLI result after reopening. A structural `validate` or a successful `get` with only `computedValue` does not prove the result is stored. OfficeCLI can refresh or remove other formulas' cached results during a save. Do not assume those caches are unchanged; verify other important results before delivery. For formulas outside this scope, retain the formula, verify saved results independently when possible, and tell the user which results still need recalculation in Excel; never report an unverified value as saved.
 
 ## Quick Start
 

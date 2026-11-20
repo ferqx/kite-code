@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { bundledOfficeSkillDirectory } from '../../../../src/skills/office-source';
 import { createBuiltinSkillSources } from '../../../../src/skills/registry';
 
+const verifier = join(import.meta.dir, '../../../../src/tools/documents/kite-documents.ts');
+
 const officeSkills = [
   ['docx', 'docx'],
   ['pdf', 'pdf'],
@@ -229,6 +231,43 @@ test('XLSX sum verification refuses unsupported operations and does not search P
   }
 });
 
+const formulaXml = (cellAttributes: string, formulaAttributes: string) =>
+  `<m:worksheet xmlns:m="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><m:sheetData><m:row r="2"><m:c r="D2"${cellAttributes}><m:f${formulaAttributes}>SUM(B2:C2)</m:f></m:c></m:row></m:sheetData></m:worksheet>`;
+
+test('XLSX guard proves a single plain formula in namespaced target XML', () => {
+  const xml = formulaXml('', '');
+  const cases: [string, boolean][] = [
+    [xml, true],
+    [formulaXml('', ' t="normal"'), true],
+    [formulaXml('', ' t="shared" ref="D2:D3" si="0"'), false],
+    [formulaXml('', ' t="array" ref="D2:D2"'), false],
+    [formulaXml('', ' t="dataTable" ref="D2:D3"'), false],
+    [formulaXml(' cm="1"', ''), false],
+    [formulaXml(' vm="1"', ''), false],
+    [xml.replace('r="D2"', 'r="D3"'), false],
+    [xml.replace('SUM(B2:C2)', 'SUM(B2:C3)'), false],
+    [xml.replace('/2006/main', '/2006/other'), false],
+    [xml.replace('</m:row>', '<m:c r="D2"/> </m:row>'), false],
+    [`<!DOCTYPE x>${xml}`, false],
+    [xml.slice(0, -20), false],
+  ];
+  for (const [xml, accepted] of cases) {
+    const result = Bun.spawnSync({
+      cmd: [process.execPath, '--no-install', verifier, 'xlsx-formula-guard', '--input', '-'],
+      stdin: Buffer.from(JSON.stringify({ xml, address: 'D2', formula: 'SUM(B2:C2)' })),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(result.exitCode).toBe(accepted ? 0 : 1);
+    if (accepted) expect(JSON.parse(result.stdout.toString())).toEqual({ success: true });
+    else
+      expect(JSON.parse(result.stderr.toString())).toEqual({
+        success: false,
+        error: 'xlsx_sum_check_formula_unverified',
+      });
+  }
+});
+
 test.skipIf(process.platform === 'win32')(
   'XLSX verification publishes only the reopened cached result',
   async () => {
@@ -238,6 +277,7 @@ test.skipIf(process.platform === 'win32')(
       const output = join(directory, 'final.xlsx');
       const cli = join(directory, 'fixture-officecli');
       const helper = join(bundledOfficeSkillDirectory()!, 'xlsx', 'verify-sum.ts');
+      const rewriteLog = join(directory, 'rewrites');
       await writeFile(input, 'uncached');
       await writeFile(
         cli,
@@ -245,8 +285,12 @@ test.skipIf(process.platform === 'win32')(
 [ "$OFFICECLI_NO_AUTO_RESIDENT" = 1 ] && [ "$OFFICECLI_SKIP_UPDATE" = 1 ] || exit 10
 if [ "$1" = set ]; then
   [ "$4" = --prop ] && [ "$5" = 'formula=SUM(B2:C2)' ] || exit 11
+  printf rewrite >> "$FIXTURE_REWRITE_LOG"
   printf cached > "$2"
   printf '%s' '{"success":true}'
+elif [ "$1" = raw ]; then
+  [ "$3" = /Sheet1 ] && [ "$4" = --start ] && [ "$5" = 2 ] && [ "$6" = --end ] && [ "$7" = 2 ] && [ "$8" = --cols ] && [ "$9" = D ] || exit 12
+  printf '%s' "$FIXTURE_FORMULA_XML"
 elif [ "$3" = /Sheet1/B2:C2 ]; then
   printf '%s' '{"success":true,"data":{"matches":1,"results":[{"path":"/Sheet1/B2:C2","children":[{"path":"/Sheet1/B2","text":"12","format":{"type":"Number"}},{"path":"/Sheet1/C2","text":"21","format":{"type":"Number"}}]}]}}'
 else
@@ -256,7 +300,7 @@ fi
 `,
         { mode: 0o700 },
       );
-      const run = (expected: string) =>
+      const run = (expected: string, formulaAttributes = '') =>
         Bun.spawnSync({
           cmd: [
             process.execPath,
@@ -271,6 +315,12 @@ fi
           env: {
             ...process.env,
             KITE_OFFICE_CLI: cli,
+            KITE_DOCUMENTS_HELPER: verifier,
+            FIXTURE_FORMULA_XML: JSON.stringify({
+              success: true,
+              data: formulaXml('', formulaAttributes),
+            }),
+            FIXTURE_REWRITE_LOG: rewriteLog,
             OFFICECLI_SKIP_UPDATE: '0',
             OFFICECLI_NO_AUTO_RESIDENT: '0',
           },
@@ -279,6 +329,12 @@ fi
         });
       expect(run('34').exitCode).toBe(1);
       expect(await Bun.file(output).exists()).toBe(false);
+      const shared = run('33', ' t="shared" ref="D2:D3" si="0"');
+      expect(shared.exitCode).toBe(1);
+      expect(JSON.parse(shared.stderr.toString()).error).toBe('xlsx_sum_check_formula_unverified');
+      expect(await Bun.file(output).exists()).toBe(false);
+      expect(await Bun.file(rewriteLog).exists()).toBe(false);
+      expect(await Bun.file(input).text()).toBe('uncached');
       const result = run('33');
       expect(result.exitCode).toBe(0);
       expect(JSON.parse(result.stdout.toString())).toMatchObject({

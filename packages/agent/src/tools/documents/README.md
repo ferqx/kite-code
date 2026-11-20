@@ -12,7 +12,7 @@ Kite 从 OfficeCLI 上游提交 `5fbf766` 改编三个办公技能。随包的 `
 
 在工作区或用户指定的已授权位置保存并核验成品后，调用 `kite-documents stage --input <文件>`。该命令支持任何可交付的普通文件，排他复制到当前 Job 的 `KITE_OUTPUT_DIR`，并通过 stdout 返回 JSON。`absolutePath` 是实际源文件的规范绝对路径，`markdownTarget` 是同一路径的 Markdown 表示，使用正斜杠并转义有语法含义的字符。模型从本次 Shell 结果直接取得路径，将原样的 `markdownTarget` 写入 `[文件名](<路径>)`。暂存目录在归档后清理。原保存位置仍可由桌面按现有权限打开，文件卡提供归档快照。
 
-Excel 编辑后，先在工作副本上复核重要汇总格。内置 XLSX 技能的 `verify-sum.ts` 仅支持用户任务中明确指定的同表整数 SUM，检查直接数值输入和预期值，用宿主已校验的 OfficeCLI 重写未缓存的同一公式，再重新打开核对缓存；成功后排他发布新文件。原稿和通用 `stage` 不会重算或改写。未通过或超出范围的公式保留原样，并在交付中明确哪些数字需要在 Excel 中重算。[XLSX 技能](../../../assets/office/xlsx/SKILL.md#verify-a-summary-before-delivery)
+Excel 编辑后，先在工作副本上复核重要汇总格。内置 XLSX 技能的 `verify-sum.ts` 仅支持用户任务中明确指定的独立同表整数 SUM，检查直接数值输入和预期值，通过已校验的文档 helper 识别目标单元格的 OOXML 公式结构，拒绝共享、数组、数据表或无法验证的结构。对于独立公式，使用宿主已校验的 OfficeCLI 重写未缓存的同一公式，再重新打开核对缓存；成功后排他发布新文件。原稿和通用 `stage` 不会重算或改写。OfficeCLI 保存时可能刷新或清除同一副本中的其他公式缓存，不保证其他缓存不变；交付前仍需核对其他重要结果。未通过或超出范围的公式保留原样，并在交付中明确哪些数字需要在 Excel 中重算。[XLSX 技能](../../../assets/office/xlsx/SKILL.md#verify-a-summary-before-delivery)
 
 ## PDF 制作与交付
 
