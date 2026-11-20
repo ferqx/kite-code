@@ -1285,6 +1285,19 @@ test('unit aggregation retains every mandatory shard and rejects failed, skipped
   const shards = workflow.jobs['unit-shard'];
   expect(shards.strategy.matrix.shard).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
   expect(shards.strategy['fail-fast']).toBe(false);
+  const commands = shards.steps.map((step: { run?: string }) => step.run);
+  const install = commands.indexOf('bun install --frozen-lockfile');
+  const compiler = commands.indexOf(
+    'sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap xvfb',
+  );
+  const build = commands.indexOf('bun packages/agent/src/mcp/build-assets.ts packages/agent/dist');
+  expect(install).toBeGreaterThanOrEqual(0);
+  expect(compiler).toBeGreaterThan(install);
+  expect(build).toBeGreaterThan(compiler);
+  expect(build).toBeLessThan(commands.indexOf('xvfb-run -a bun run test'));
+  expect(shards.steps[build].if).toBeUndefined();
+  expect(shards.steps[build]['working-directory']).toBeUndefined();
+  expect(shards.steps[build]['continue-on-error'] ?? false).toBe(false);
   expect(
     shards.steps.find((step: { run?: string }) => step.run === 'xvfb-run -a bun run test').env,
   ).toMatchObject({
