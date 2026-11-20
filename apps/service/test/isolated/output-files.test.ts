@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -18,16 +18,34 @@ import { createShellExtension } from '@kite-ai/agent/shell';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { AgentClient } from '@kite-ai/client';
-import { launchIdentityAsync } from '../../../../packages/agent/src/jobs/launch-identity';
+import {
+  launchIdentityAsync,
+  removeRuntimeTempAsync,
+} from '../../../../packages/agent/src/jobs/launch-identity';
+import { prepareShellOutputCollection } from '../../../../packages/agent/src/jobs/output-collection';
 import { startService } from '../../src';
 
-test('real HTTP output stream and input preparation preserve exact source and edited work after ACK', async () => {
+test(
+  'real HTTP output stream and input preparation preserve exact source and edited work after ACK',
+  () => verifyOutputFiles(false),
+  30000,
+);
+
+test(
+  'rejected output preparation leaves no producer, publication or unconfirmed cleanup',
+  () => verifyOutputFiles(true),
+  30000,
+);
+
+async function verifyOutputFiles(rejectPreparation: boolean) {
   const root = await mkdtemp(join(tmpdir(), 'kite-office-http-'));
   const profile = { dataRoot: join(root, 'profile'), profile: 'test' },
     store = await openSqliteStore(profile),
     paths = resolveProfile(profile);
   let runtime!: AgentRuntime;
   const tasks = new WeakMap<JobHandle, Promise<number>>();
+  const spawned: number[] = [],
+    closed: number[] = [];
   const job: JobDefinition = {
     id: 'shell.command',
     version: '1',
@@ -35,9 +53,12 @@ test('real HTTP output stream and input preparation preserve exact source and ed
     inputSchema: { type: 'object' },
     async start(input, context) {
       const directory = await mkdtemp(join(root, 'producer-'));
-      const allocation = await runtime.prepareOutputCollection(
+      const runtimeTemp = await launchIdentityAsync(directory);
+      // Match the Shell owner: only confirmed pre-spawn cleanup is a known non-start.
+      const allocation = await prepareShellOutputCollection(
+        { prepare: (scope, identity) => runtime.prepareOutputCollection(scope, identity) },
         context,
-        await launchIdentityAsync(directory),
+        { runtimeTemp, cleanup: () => removeRuntimeTempAsync(runtimeTemp) },
       );
       const handle = { reference: {} };
       tasks.set(
@@ -51,8 +72,12 @@ test('real HTTP output stream and input preparation preserve exact source and ed
               stdio: 'ignore',
             },
           );
+          process.once('spawn', () => spawned.push(process.pid!));
           process.once('error', reject);
-          process.once('exit', (code) => resolve(code ?? 1));
+          process.once('close', (code) => {
+            if (process.pid !== undefined) closed.push(process.pid);
+            resolve(code ?? 1);
+          });
         }),
       );
       return handle;
@@ -97,7 +122,10 @@ test('real HTTP output stream and input preparation preserve exact source and ed
   runtime = createRuntime({
     store,
     outputCollections: {
-      prepare: (context, identity) => prepareOutputDirectory(runtime, context, identity),
+      async prepare(context, identity) {
+        if (rejectPreparation) throw Error('fixture_output_preparation_rejected');
+        return prepareOutputDirectory(runtime, context, identity);
+      },
     },
     model,
     modelId: 'fixed',
@@ -158,6 +186,32 @@ test('real HTTP output stream and input preparation preserve exact source and ed
       kind: 'run.start',
       content: 'Create a file',
     });
+    await runtime.waitForCommand('generate', { timeoutMs: 5000 });
+    const jobs = (await store.listExecutions('s')).filter((entry) => entry.kind === 'job');
+    if (rejectPreparation) {
+      expect(jobs).toMatchObject([
+        {
+          status: 'failed',
+          result: {
+            content: 'shell_output_preparation_failed',
+            details: { adapterAttempted: false },
+          },
+        },
+      ]);
+      expect(spawned).toEqual([]);
+      expect(closed).toEqual([]);
+      expect((await readdir(root)).filter((name) => name.startsWith('producer-'))).toEqual([]);
+      expect((await client.queryOutputFiles({ scope: { storeId, sessionId: 's' } })).items).toEqual(
+        [],
+      );
+      return;
+    }
+    expect(
+      jobs.find((entry) => entry.definitionId === 'shell.command'),
+      'The producer must succeed before checking publication. Source tests require bun run build:files-native.',
+    ).toMatchObject({ status: 'succeeded' });
+    expect(spawned).toHaveLength(1);
+    expect(closed).toEqual(spawned);
     let page = await client.queryOutputFiles({ scope: { storeId, sessionId: 's' } });
     for (let i = 0; i < 500 && !page.items.length; i++) {
       await Bun.sleep(10);
@@ -245,4 +299,4 @@ test('real HTTP output stream and input preparation preserve exact source and ed
     await service.close();
     await rm(root, { recursive: true, force: true });
   }
-}, 30000);
+}
