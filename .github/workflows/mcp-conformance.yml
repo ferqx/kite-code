@@ -59,6 +59,8 @@ jobs:
       - name: Prepare Linux guardian build and OAuth TLS fixtures
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap openssl
       - run: bun install --frozen-lockfile
+      - name: Build MCP runtime assets
+        run: bun packages/agent/src/mcp/build-assets.ts packages/agent/dist
       - name: Prepare evidence directory
         id: evidence
         run: mkdir -p dist/unified-evidence
@@ -103,6 +105,8 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - name: Build MCP runtime assets
+        run: bun packages/agent/src/mcp/build-assets.ts packages/agent/dist
       - run: mkdir -p dist/unified-evidence
       - name: Run the complete resource and prompt suite on native macOS
         shell: bash

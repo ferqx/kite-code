@@ -1031,7 +1031,21 @@ test('MCP protocol and authentication run on relevant PRs with independent manda
     );
   };
   expect(check(source)).toEqual([]);
+  const build = 'bun packages/agent/src/mcp/build-assets.ts packages/agent/dist';
+  for (const jobName of Object.keys(workflow.jobs)) {
+    const changed = structuredClone(workflow);
+    const steps = changed.jobs[jobName].steps as { run?: string }[];
+    const index = steps.findIndex((step) => step.run === build);
+    expect(index).toBeGreaterThan(0);
+    const [removed] = steps.splice(index, 1);
+    expect(check(JSON.stringify(changed)), `${jobName}: missing assets`).not.toEqual([]);
+    steps.push(removed!);
+    expect(check(JSON.stringify(changed)), `${jobName}: assets built after use`).not.toEqual([]);
+  }
   for (const [before, after] of [
+    [`run: ${build}`, `if: false\n        run: ${build}`],
+    [`run: ${build}`, `continue-on-error: true\n        run: ${build}`],
+    [`run: ${build}`, `working-directory: packages/agent\n        run: ${build}`],
     ['bun run test:mcp:conformance', 'echo smoke'],
     ['build-essential bubblewrap openssl', 'build-essential openssl'],
     ['mcp-source-configuration.test.ts', 'other.test.ts'],

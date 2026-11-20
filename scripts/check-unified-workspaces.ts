@@ -409,8 +409,15 @@ export function checkUnifiedFormalConsumers(root: string): {
             const junit = `dist/unified-evidence/${linux ? 'mcp-contracts' : 'mcp-macos-stdio'}.xml`;
             const json = 'dist/unified-evidence/mcp-conformance.json';
             const run = (command: string) =>
-              steps.findIndex((step) => step.if === undefined && step.run === command);
+              steps.findIndex(
+                (step) =>
+                  step.run === command &&
+                  step.if === undefined &&
+                  step['working-directory'] === undefined &&
+                  (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+              );
             const install = run('bun install --frozen-lockfile');
+            const build = run('bun packages/agent/src/mcp/build-assets.ts packages/agent/dist');
             const ready = run('mkdir -p dist/unified-evidence');
             const tests = steps.findIndex(
               (step) =>
@@ -442,7 +449,8 @@ export function checkUnifiedFormalConsumers(root: string): {
               !suites.every((path) => existsSync(resolve(root, path))) ||
               !existsSync(resolve(root, 'scripts/ci/verify-mcp-junit.py')) ||
               install < 0 ||
-              ready <= install ||
+              build <= install ||
+              ready <= build ||
               tests <= ready ||
               !uploaded(junit)
             )
