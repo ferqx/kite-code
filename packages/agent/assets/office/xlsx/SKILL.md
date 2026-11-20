@@ -127,6 +127,21 @@ Six steps. Every non-trivial build follows this shape.
 5. Reopen the saved workbook and verify the formulas, references and cached results that readers will see. Check inputs before refreshing any downstream formulas with standalone `set`. A cached value can be empty or stale, especially in cross-sheet chains. If it needs recalculation in Excel, say so in the delivery message.
 6. Run the relevant checks below and deliver the saved `.xlsx` through the current Shell call's output directory.
 
+### Verify a summary before delivery
+
+For a directly referenced, same-sheet integer SUM (at most 16 numeric input cells), use the bundled checker on your authorized edited working copy, after all inputs are final. Supply the existing formula verbatim and the integer you independently expect from the final inputs. This example expects 33:
+
+```sh
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_OFFICE_SKILLS_DIR/xlsx/verify-sum.ts" edited.xlsx verified.xlsx /Sheet1/D2 'SUM(B2:C2)' 33
+```
+
+```powershell
+& $env:KITE_DOCUMENTS_BUN --no-install "$env:KITE_OFFICE_SKILLS_DIR/xlsx/verify-sum.ts" edited.xlsx verified.xlsx /Sheet1/D2 'SUM(B2:C2)' 33
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+```
+
+Only stage `verified.xlsx` if verification succeeds. The checker creates a new file without overwriting either input or destination. It refreshes the original formula using bundled OfficeCLI if necessary and checks both the saved cache and the independently computed CLI result after reopening. A structural `validate` or a successful `get` with only `computedValue` does not prove the result is stored. For formulas outside this scope, retain the formula, verify saved results independently when possible, and tell the user which results still need recalculation in Excel; never report an unverified value as saved.
+
 ## Quick Start
 
 Save this UTF-8 operation array as `xlsx-ops.json` in the workspace. Use the requested data and number formats in the finished workbook.

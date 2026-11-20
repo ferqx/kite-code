@@ -24,7 +24,8 @@ export function cellDisplay(cell: Cell | undefined, date1904: boolean) {
   const raw = cell.value;
   const formula = cell.formula ? `=${cell.formula}` : undefined;
   const result = formula ? cell.result : raw;
-  if (result === null || result === undefined) return { value: '', formula };
+  if (result === null || result === undefined)
+    return { value: '', formula, resultUnavailable: formula !== undefined };
   if (typeof result === 'boolean') return { value: result ? 'TRUE' : 'FALSE', formula };
   if (typeof result === 'number' || result instanceof Date) {
     try {

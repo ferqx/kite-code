@@ -44,3 +44,21 @@ diff --git a/dist/exceljs.js b/dist/exceljs.js
    }));
    for await (const chunk of iterable) {
      saxesParser.write(bufferToString(chunk));
+@@ -9029,6 +9048,8 @@
+         return true;
+       case 'v':
+         this.currentNode = 'v';
++        // Excel stores a calculated empty string as t="str" with an explicit empty v.
++        if (this.t === 'str' && this.model.value === undefined) this.model.value = '';
+         return true;
+       case 't':
+         this.currentNode = 't';
+@@ -9073,7 +9094,7 @@
+           // first guess on cell type
+           if (model.formula || model.shareType) {
+             model.type = Enums.ValueType.Formula;
+-            if (model.value) {
++            if (model.value || (this.t === 'str' && model.value === '')) {
+               if (this.t === 'str') {
+                 model.result = utils.xmlDecode(model.value);
+               } else if (this.t === 'b') {

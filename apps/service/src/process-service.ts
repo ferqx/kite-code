@@ -487,6 +487,7 @@ async function packagedShellAssets(
     'KITE_DOCUMENTS_BUN',
     'KITE_DOCUMENTS_HELPER',
     'KITE_OFFICE_SKILLS_DIR',
+    'KITE_OFFICE_CLI',
   ]);
   const ripgrep = withBundledRipgrep(
     Object.fromEntries(
@@ -509,6 +510,7 @@ async function packagedShellAssets(
       ...ripgrep.env,
       ...(helper ? { KITE_DOCUMENTS_BUN: process.execPath, KITE_DOCUMENTS_HELPER: helper } : {}),
       ...(officeSkills ? { KITE_OFFICE_SKILLS_DIR: officeSkills } : {}),
+      ...(officeCli ? { KITE_OFFICE_CLI: officeCli } : {}),
     },
     supervisorPath,
     bunExecutable: process.execPath,

@@ -117,8 +117,13 @@
       "files": [
         {
           "path": "SKILL.md",
-          "bytes": 33864,
-          "sha256": "cb639d75e75da948f75fb946e263428dc482069f94e080476552c9f0f465b7f4"
+          "bytes": 35175,
+          "sha256": "45e2526a68e8dce8c625f8dd97262c5ba229c8051d286d51ff4be7462b41ca2c"
+        },
+        {
+          "path": "verify-sum.ts",
+          "bytes": 4947,
+          "sha256": "22fee3416b6e557ebe7e66780e373c675b275b2a7908fba1c09486568cad0276"
         }
       ]
     }

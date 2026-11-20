@@ -20,7 +20,7 @@
 
 2026-11-19 在 Windows x64／Electron 44.3.0 的隔离窗口验证了两处入口、复制期间的进行中状态和失败反馈。聊天文件卡从两份同名样本中选择第二份，检查了副本的实际字节与资源管理器的选中项。输出列表使用损坏流复验失败提示和本次副本清理。当前开发窗口重启后载入新的 Main。 [客户端回归](test/isolated/native-output-files-dom.test.tsx)
 
-三个 OOXML 格式在[隔离预览 View](electron/output-preview.ts)直接读取当前清单中的已校验原文件快照。Word 用 [docx-preview](electron/docx-preview.ts)渲染，将可定位段落和表格文字对到源 XML。PPT 用 [PPTX Renderer](electron/pptx-preview.ts)保留渲染页与原部件关系，按演示顺序绑定页码，并用原幻灯片的 `cNvPr` ID 定位对象。Excel 的[虚拟网格](electron/xlsx-preview.tsx)用 ExcelJS、SSF 和 TanStack Virtual 解析数据与公式缓存，按工作表和源单元格生成选区。PDF 使用现有 PDF.js worker。
+三个 OOXML 格式在[隔离预览 View](electron/output-preview.ts)直接读取当前清单中的已校验原文件快照。Word 用 [docx-preview](electron/docx-preview.ts)渲染，将可定位段落和表格文字对到源 XML。PPT 用 [PPTX Renderer](electron/pptx-preview.ts)保留渲染页与原部件关系，按演示顺序绑定页码，并用原幻灯片的 `cNvPr` ID 定位对象。Excel 的[虚拟网格](electron/xlsx-preview.tsx)用 ExcelJS、SSF 和 TanStack Virtual 解析数据与公式缓存，按工作表和源单元格生成选区。预览不执行公式；仅无缓存结果的公式单元格显示提示，该提示不写入文件或选区。随包 ExcelJS 保留显式的空字符串缓存。PDF 使用现有 PDF.js worker。
 
 文件预览先在未附加到窗口的视图中完成首次导航，再以隐藏状态附加；打开相邻文件不因此改变键盘焦点。Word、Excel 和 PPT 的渲染初始化可能在隐藏视图中等待动画帧或定时任务。[Main](electron/output-preview.ts)在等待 Office 渲染就绪期间暂停该视图的后台节流，结束时恢复。预览仍由当前窗口几何和有效原生首帧准入显示。Windows x64／Electron 44.3.0 的[真实 Office 窗口回归](test/isolated/office-readonly-host.test.ts)覆盖 Word 与 Excel 等待动画帧、隐藏初始化、恢复节流、失败重试与原件切换。[PPT 回归](test/isolated/office-preview-security.test.ts)使用悬挂标点触发同一路径。原故障附件在隔离窗口从文件卡打开后呈现五页，实测切到第 4 页、关闭重开、读取失败后重试，以及加载中关闭时晚到的结果未重新显示。同机在 125% 和 150% 缩放核实交付文件或原路径的 Word、Excel、PPT、PDF、PNG、Markdown 和文本样本取得有效首帧。
 

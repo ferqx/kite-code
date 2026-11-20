@@ -40,6 +40,15 @@ test.each(officeSkills)('packaged %s skill loads its pinned document', async (ke
     expect(loaded.body).toContain('absolutePath');
     expect(loaded.body).not.toMatch(/d\.officecli\.ai\/install|officecli\s+--version/u);
   }
+  if (key === 'xlsx') {
+    expect(loaded.body).toContain('verify-sum.ts');
+    const helper = await source.readResource({
+      skillId: id,
+      version: loaded.version,
+      path: 'verify-sum.ts',
+    });
+    expect(helper.body).toContain('OFFICECLI_NO_AUTO_RESIDENT');
+  }
   expect(
     await source.readDocument({ id, version: loaded.version, maxTextBytes: 1048576 }),
   ).toMatchObject({ body: loaded.body, version: loaded.version });
@@ -182,3 +191,106 @@ test('publication uses a private destination sibling and concurrent exports neve
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('XLSX sum verification refuses unsupported operations and does not search PATH', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'kite-xlsx-sum-'));
+  try {
+    const input = join(directory, 'working.xlsx');
+    const output = join(directory, 'final.xlsx');
+    const helper = join(bundledOfficeSkillDirectory()!, 'xlsx', 'verify-sum.ts');
+    await writeFile(input, 'source belongs to caller');
+    for (const [formula, reason] of [
+      ['SUM(B2:C200)', 'xlsx_sum_check_unsupported'],
+      ['SUM(B2:D2)', 'xlsx_sum_check_unsupported'],
+      ['SUM(B2:C2)', 'xlsx_sum_check_cli_unavailable'],
+    ]) {
+      const result = Bun.spawnSync({
+        cmd: [
+          process.execPath,
+          '--no-install',
+          helper,
+          input,
+          output,
+          '/Sheet1/D2',
+          formula!,
+          '33',
+        ],
+        env: { ...process.env, KITE_OFFICE_CLI: '' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stderr.toString())).toEqual({ success: false, error: reason });
+      expect(await Bun.file(output).exists()).toBe(false);
+      expect(await Bun.file(input).text()).toBe('source belongs to caller');
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(process.platform === 'win32')(
+  'XLSX verification publishes only the reopened cached result',
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'kite-xlsx-sum-success-'));
+    try {
+      const input = join(directory, 'working.xlsx');
+      const output = join(directory, 'final.xlsx');
+      const cli = join(directory, 'fixture-officecli');
+      const helper = join(bundledOfficeSkillDirectory()!, 'xlsx', 'verify-sum.ts');
+      await writeFile(input, 'uncached');
+      await writeFile(
+        cli,
+        `#!/bin/sh
+[ "$OFFICECLI_NO_AUTO_RESIDENT" = 1 ] && [ "$OFFICECLI_SKIP_UPDATE" = 1 ] || exit 10
+if [ "$1" = set ]; then
+  [ "$4" = --prop ] && [ "$5" = 'formula=SUM(B2:C2)' ] || exit 11
+  printf cached > "$2"
+  printf '%s' '{"success":true}'
+elif [ "$3" = /Sheet1/B2:C2 ]; then
+  printf '%s' '{"success":true,"data":{"matches":1,"results":[{"path":"/Sheet1/B2:C2","children":[{"path":"/Sheet1/B2","text":"12","format":{"type":"Number"}},{"path":"/Sheet1/C2","text":"21","format":{"type":"Number"}}]}]}}'
+else
+  if [ "$(cat "$2")" = cached ]; then cache=',"cachedValue":"33"'; else cache=; fi
+  printf '%s%s%s' '{"success":true,"data":{"matches":1,"results":[{"path":"/Sheet1/D2","format":{"type":"Number","formula":"SUM(B2:C2)","computedValue":"33","evaluated":true' "$cache" '}}]}}'
+fi
+`,
+        { mode: 0o700 },
+      );
+      const run = (expected: string) =>
+        Bun.spawnSync({
+          cmd: [
+            process.execPath,
+            '--no-install',
+            helper,
+            input,
+            output,
+            '/Sheet1/D2',
+            'SUM(B2:C2)',
+            expected,
+          ],
+          env: {
+            ...process.env,
+            KITE_OFFICE_CLI: cli,
+            OFFICECLI_SKIP_UPDATE: '0',
+            OFFICECLI_NO_AUTO_RESIDENT: '0',
+          },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+      expect(run('34').exitCode).toBe(1);
+      expect(await Bun.file(output).exists()).toBe(false);
+      const result = run('33');
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout.toString())).toMatchObject({
+        success: true,
+        cachedValue: '33',
+      });
+      expect(await Bun.file(output).text()).toBe('cached');
+      expect(await Bun.file(input).text()).toBe('uncached');
+      expect(run('33').exitCode).toBe(1);
+      expect(await Bun.file(output).text()).toBe('cached');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);

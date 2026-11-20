@@ -501,8 +501,9 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
                       aria-selected={Boolean(selected)}
                       data-row={firstRow}
                       data-col={firstCol}
+                      aria-label={displayed.resultUnavailable ? '计算结果不可用' : undefined}
                       title={
-                        displayed.formula && source?.result == null
+                        displayed.resultUnavailable
                           ? '计算结果不可用'
                           : displayed.value || undefined
                       }
@@ -518,6 +519,11 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
                       }}
                     >
                       <span className="xlsx-value">{displayed.value}</span>
+                      {displayed.resultUnavailable && (
+                        <span className="xlsx-result-unavailable" aria-hidden="true">
+                          —
+                        </span>
+                      )}
                       {edges && (
                         <span
                           aria-hidden="true"
@@ -620,6 +626,7 @@ const css = [
   '.xlsx-cell,.xlsx-header{position:absolute;box-sizing:border-box;display:flex;align-items:center;overflow:hidden}',
   '.xlsx-cell{background:#fff;border:solid #d6d9dc;border-width:0 1px 1px 0;white-space:nowrap;cursor:cell;overflow:visible}',
   '.xlsx-no-grid .xlsx-cell{border-color:transparent}',
+  '.xlsx-result-unavailable{color:#667085;pointer-events:none}',
   '.xlsx-value{overflow:hidden;text-overflow:clip;max-width:100%;max-height:100%}',
   '.xlsx-header{background:#f3f4f6;border:solid #d6d9dc;border-width:0 1px 1px 0;justify-content:center;font-size:11px;font-weight:normal;color:#374151}',
   '.xlsx-highlight{position:absolute;inset:0;background:#64748b1c;border:solid #667085;pointer-events:none}',
