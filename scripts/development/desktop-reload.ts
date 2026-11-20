@@ -168,29 +168,40 @@ function developmentSourceSha256(root: string): string {
   return hash.digest('hex');
 }
 
-/** Load the actual external dependency graph in a fresh process, without executing import.meta.main. */
-async function verifyDevelopmentService(entrypoint: string, root: string): Promise<void> {
-  const child = Bun.spawn(
-    [
-      process.execPath,
-      '--no-install',
-      '--eval',
-      `await import(${JSON.stringify(pathToFileURL(entrypoint).href)})`,
-    ],
-    {
-      cwd: root,
-      env: {
-        PATH: process.env.PATH ?? '',
-        HOME: homedir(),
-        LANG: 'C.UTF-8',
-        ...(process.platform === 'win32' ? { USERPROFILE: homedir() } : {}),
-        BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
-      },
-      stdin: 'ignore',
-      stdout: 'ignore',
-      stderr: 'pipe',
+/** Check the built tools and external dependencies in a fresh process without starting Service. */
+async function verifyDevelopmentService(
+  entrypoint: string,
+  root: string,
+  shellModuleUrl: string | undefined,
+): Promise<void> {
+  const checkShell = shellModuleUrl
+    ? `
+const shell = await import(${JSON.stringify(shellModuleUrl)});
+if (typeof shell.bundledOfficeCliAsset !== 'function' || typeof shell.ripgrepAsset !== 'function')
+  throw Error('Built Agent Shell module is out of date. Run \`bun run build\`.');
+try {
+  if (!shell.bundledOfficeCliAsset()) throw Error('officecli_asset_unavailable');
+  shell.ripgrepAsset();
+} catch {
+  console.error('Built Agent Shell tools (OfficeCLI and ripgrep) are missing or invalid. Run bun install to restore tools for an existing build, or bun run build to rebuild Agent.');
+  process.exit(1);
+}
+`
+    : '';
+  const loadService = `await import(${JSON.stringify(pathToFileURL(entrypoint).href)});`;
+  const child = Bun.spawn([process.execPath, '--no-install', '--eval', checkShell + loadService], {
+    cwd: root,
+    env: {
+      PATH: process.env.PATH ?? '',
+      HOME: homedir(),
+      LANG: 'C.UTF-8',
+      ...(process.platform === 'win32' ? { USERPROFILE: homedir() } : {}),
+      BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
     },
-  );
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'pipe',
+  });
   let timedOut = false;
   const timeout = setTimeout(() => {
     timedOut = true;
@@ -259,6 +270,7 @@ export async function buildDevelopmentService(
     }
   }
   let result: Awaited<ReturnType<typeof Bun.build>>;
+  let shellModuleUrl: string | undefined;
   try {
     result = await Bun.build({
       entrypoints: [join(root, 'apps/service/src/main.ts')],
@@ -285,10 +297,10 @@ export async function buildDevelopmentService(
             });
             // The packaged locator must keep its original module URL next to built assets.
             // Other workspace imports continue using current sources during development.
-            build.onResolve({ filter: /^@kite-ai\/agent\/jobs\/shell$/ }, () => ({
-              path: pathToFileURL(join(root, 'packages/agent/dist/jobs/shell.js')).href,
-              external: true,
-            }));
+            build.onResolve({ filter: /^@kite-ai\/agent\/jobs\/shell$/ }, () => {
+              shellModuleUrl = pathToFileURL(join(root, 'packages/agent/dist/jobs/shell.js')).href;
+              return { path: shellModuleUrl, external: true };
+            });
           },
         },
       ],
@@ -299,7 +311,7 @@ export async function buildDevelopmentService(
     throw new AggregateError([error], 'development_service_build_failed');
   }
   if (!result.success) throw new AggregateError(result.logs, 'development_service_build_failed');
-  await verifyDevelopmentService(join(directory, 'main.js'), root);
+  await verifyDevelopmentService(join(directory, 'main.js'), root, shellModuleUrl);
   if (developmentSourceSha256(root) !== sourceSha256)
     throw Error('development_service_source_changed');
   return {

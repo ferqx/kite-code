@@ -64,7 +64,7 @@ Windows 在原 Job 停止、runner 回执和原 HANDLE 关闭均确认后，等�
 
 已结算的 Windows Shell Job 从有限 stderr 尾部读取可识别的命令查找诊断。PowerShell 从命令未找到的异常记录报告具体名称，包含 `SilentlyContinue` 后仍有记录的探测。Git Bash 使用执行或 `type` 的原查找报错，也可用独立字面量 `command -v NAME`（含尾随 `|| true`）的空输出和结束状态识别未命中。脚本最终状态和退出码保持原值，单靠退出码或任意复合脚本的空输出不推断未命中。路径核对基于本次启动 PATH、Windows 用户／系统 App Paths 的默认值和 `KITE_SHELL_TOOL_DIRS` 中按分号声明的绝对目录。只检查精确文件名与常见可执行扩展，读取本地固定磁盘的文件属性，遇到重解析点即停止该路径的检查。原 Job 保存至多八个候选及来源，后续调用沿当前 Shell 授权。 [查找实现](windows-command-lookup.ts) [Windows 原生回归](../../test/isolated/jobs/windows-command-lookup.test.ts)
 
-OfficeCLI 1.0.161 与 `rg` 同放在包内 `platform/process/tools`。构建按当前原生目标选择并核对官方资产大小和 SHA-256。Service 校验包内文件，在既有工具目录 PATH 生效的同一 Shell 中运行。Windows x64、macOS arm64／x64、Linux glibc x64／arm64 分别选择自己的程序。macOS 签名后将实际摘要写回同一清单。 [运行时](officecli-runtime.ts) [构建准备](prepare-officecli.ts) [随包工具回归](../../test/isolated/jobs/ripgrep-package.test.ts)
+OfficeCLI 1.0.161 与 `rg` 同放在包内 `platform/process/tools`。Agent 构建与源码安装时补齐已有构建的工具共用资产准备入口，按当前原生目标选择并核对 OfficeCLI 大小和 SHA-256。工具和许可证齐备后写入清单。Service 校验包内文件，在既有工具目录 PATH 生效的同一 Shell 中运行。Windows x64、macOS arm64／x64、Linux glibc x64／arm64 分别选择自己的程序。macOS 签名后将实际摘要写回同一清单。 [资产准备](prepare-shell-tools.ts) [本地开发](../../../../docs/development/local-development.md) [运行时](officecli-runtime.ts) [随包工具回归](../../test/isolated/jobs/ripgrep-package.test.ts)
 
 Runner 按完整转义命令行的 UTF-8 字节数选择 Git Bash 启动方式。实机 Git Bash 的 `-c` 参数在约 8 KiB 时已经出现截断。完整命令行小于 8 KiB 的脚本作为 `bash -c` 参数，其余脚本先通过本次私有标准输入管道完整接收，再由 Bash 执行。启动路径会核实脚本已送达。进入用户脚本时，标准输入已到 EOF，用户脚本可使用重定向、管道或 here-document 给子程序传入数据。实机回归覆盖低于 Win32 上限的多字节 here-document，以及超长脚本中的引号、退出码和原 Job 清理。 [Windows Job 回归](../../test/isolated/jobs/windows-shell.test.ts)
 

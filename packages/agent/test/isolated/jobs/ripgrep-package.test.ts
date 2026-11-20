@@ -1,17 +1,24 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   cpSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { officeCliReleaseAsset } from '../../../src/jobs/officecli-runtime';
+import { readOfficeCliRelease } from '../../../src/jobs/prepare-officecli';
+import { prepareShellTools } from '../../../src/jobs/prepare-shell-tools';
+import { ripgrepAsset } from '../../../src/jobs/ripgrep';
 
 test('built package supplies rg and OfficeCLI outside the repository with no ambient PATH', async () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-packaged-rg-')));
@@ -91,6 +98,73 @@ console.log(JSON.stringify({executable,officecli,officeCliVersion:office.stdout.
       ).toBeGreaterThan(300);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+}, 20000);
+
+test('restores missing Shell metadata and corrupt rg while reusing a verified OfficeCLI', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'kite-repair-shell-tools-'));
+  try {
+    const office = officeCliReleaseAsset();
+    const executable = join(directory, office.executable);
+    copyFileSync(
+      resolve(import.meta.dir, '../../../dist/platform/process/tools', office.executable),
+      executable,
+    );
+    const installedAt = new Date('2020-01-01T00:00:00Z');
+    utimesSync(executable, installedAt, installedAt);
+    const sourceRg = ripgrepAsset();
+    const rg = join(directory, basename(sourceRg));
+    const rgBytes = readFileSync(sourceRg);
+    const corrupted = Buffer.from(rgBytes);
+    corrupted[0] = corrupted[0]! ^ 1;
+    writeFileSync(rg, corrupted, { mode: 0o755 });
+
+    await prepareShellTools(directory);
+
+    expect(statSync(executable).mtimeMs).toBe(installedAt.getTime());
+    expect(readFileSync(rg).equals(rgBytes)).toBe(true);
+    const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
+    expect(manifest).toMatchObject({
+      platform: process.platform,
+      arch: process.arch,
+      rg: { sha256: createHash('sha256').update(rgBytes).digest('hex') },
+      officecli: { version: office.version, upstreamSha256: office.sha256, sha256: office.sha256 },
+    });
+    expect(readFileSync(join(directory, 'LICENSE.vscode-ripgrep'), 'utf8')).toBe(
+      readFileSync(resolve(sourceRg, '../../LICENSE'), 'utf8'),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('replaces a corrupt OfficeCLI cache only after the fixed download verifies', async () => {
+  const cache = mkdtempSync(join(tmpdir(), 'kite-officecli-repair-cache-'));
+  const release = officeCliReleaseAsset();
+  const bytes = readFileSync(
+    resolve(import.meta.dir, '../../../dist/platform/process/tools', release.executable),
+  );
+  const path = join(cache, release.sha256);
+  const invalid = Buffer.from(bytes);
+  invalid[0] = invalid[0]! ^ 1;
+  const fetchRelease = spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(new Response(invalid))
+    .mockResolvedValueOnce(new Response(bytes));
+  try {
+    writeFileSync(path, invalid);
+    await expect(readOfficeCliRelease(release, cache)).rejects.toThrow(
+      'officecli_checksum_mismatch',
+    );
+    expect(readFileSync(path).equals(invalid)).toBe(true);
+
+    expect(Buffer.from(await readOfficeCliRelease(release, cache)).equals(bytes)).toBe(true);
+    expect(readFileSync(path).equals(bytes)).toBe(true);
+    expect(Buffer.from(await readOfficeCliRelease(release, cache)).equals(bytes)).toBe(true);
+    expect(fetchRelease.mock.calls.map(([url]) => url)).toEqual([release.url, release.url]);
+    expect(readdirSync(cache)).toEqual([release.sha256]);
+  } finally {
+    fetchRelease.mockRestore();
+    rmSync(cache, { recursive: true, force: true });
   }
 }, 20000);
 

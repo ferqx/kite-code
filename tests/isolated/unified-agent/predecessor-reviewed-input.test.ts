@@ -177,7 +177,7 @@ test('exact live script and build/entry increments cannot be omitted, duplicated
       [collaborationLine, collaborationLine + collaborationLine],
       ['collaboration.live.ts', 'other.live.ts'],
       ['collaboration.live.ts"', 'collaboration.live.ts && echo injected"'],
-      ['"postinstall": "bun run build:files-native"', '"postinstall": "echo skip"'],
+      ['"postinstall": "bun run build:files-native', '"postinstall": "echo skip'],
     ],
     'packages/ai/package.json': [
       ['"4.0.19"', '"4.0.20"'],

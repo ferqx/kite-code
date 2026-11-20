@@ -94,7 +94,7 @@ execution admission。
 专用 Git Broker、typed schema 与发布 probe 已退役。Git 命令通过普通 Shell 治理；发行证据仍需证明原生沙箱对受保护 `.git` 路径的读取和写入约束。封存生产的 restricted read scope 仅在 Workspace Trust 历史精确授权后加入 linked worktree 外部 metadata root；开发期 broad read 不按 Git 命令名追加权限。
 
 源码安装仍以 Bun 为包管理器；候选版本另使用 Bun standalone executable、manifest/checksum 和安全
-安装器，不要求目标机预装 Node。开发依赖安装不再执行仓库自定义 root `postinstall`；Git hook 安装由
+安装器，不要求目标机预装 Node。当前源码安装的 root `postinstall` 见[本地开发](../development/local-development.md)。Git hook 安装由
 `lefthook` 包自身的安装生命周期负责，不下载仓库管理的备用二进制，也不修改 `node_modules` 内的上游文件。
 lefthook 安装失败继续是非关键开发工具故障，不能阻断应用构建或发行验证。
 

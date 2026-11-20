@@ -72,6 +72,44 @@ test('runtime workspace exports are checked before publishing a development Serv
   }
 });
 
+test('incomplete built Shell assets report repair and rebuild commands during Service preflight', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-shell-assets-')));
+  try {
+    const source = join(root, 'apps/service/src');
+    const jobs = join(root, 'packages/agent/dist/jobs');
+    const shellSource = join(import.meta.dir, '../../../packages/agent/src/jobs');
+    const fixture = join(root, 'shell.ts');
+    mkdirSync(source, { recursive: true });
+    mkdirSync(jobs, { recursive: true });
+    writeFileSync(
+      join(source, 'main.ts'),
+      "export {bundledOfficeCliAsset} from '@kite-ai/agent/jobs/shell';",
+    );
+    writeFileSync(join(jobs, 'shell.js'), "import './missing-shell-chunk.js';");
+    const output = join(root, 'output');
+    await expect(buildDevelopmentService(root, output)).rejects.toMatchObject({
+      code: 'development_service_load_failed',
+      message: expect.stringContaining('missing-shell-chunk.js'),
+    });
+
+    writeFileSync(
+      fixture,
+      `export {bundledOfficeCliAsset} from ${JSON.stringify(join(shellSource, 'officecli-runtime.ts'))};
+export {ripgrepAsset} from ${JSON.stringify(join(shellSource, 'ripgrep.ts'))};`,
+    );
+    const shell = await Bun.build({ entrypoints: [fixture], outdir: jobs, target: 'bun' });
+    expect(shell.success).toBe(true);
+
+    await expect(buildDevelopmentService(root, output)).rejects.toMatchObject({
+      code: 'development_service_load_failed',
+      message:
+        'Built Agent Shell tools (OfficeCLI and ripgrep) are missing or invalid. Run bun install to restore tools for an existing build, or bun run build to rebuild Agent.',
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a connected Desktop is not ready until Service startup succeeds; authenticated startup failure reaches the parent', async () => {
   const control = await startDesktopControl();
   const peer = connect({ host: '127.0.0.1', port: control.configuration.port });
@@ -455,7 +493,9 @@ console.log(JSON.stringify([shellSupervisorAsset(),linuxShellInitAsset()]));`,
     writeFileSync(
       join(jobs, 'shell.js'),
       `export const shellSupervisorAsset=()=>import.meta.url;
-export const linuxShellInitAsset=()=>new URL('../platform/process/linux-shell-init',import.meta.url).href;`,
+export const linuxShellInitAsset=()=>new URL('../platform/process/linux-shell-init',import.meta.url).href;
+export const bundledOfficeCliAsset=()=>new URL('../platform/process/tools/officecli',import.meta.url).href;
+export const ripgrepAsset=()=>new URL('../platform/process/tools/rg',import.meta.url).href;`,
     );
     for (let revision = 0; revision < 2; revision++) {
       const built = await buildDevelopmentService(root, join(root, 'output'));

@@ -6,9 +6,11 @@ Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当
 
 源码安装的 postinstall 会构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，期间显示三个构建阶段及实时 Cargo 诊断，完成后显示资产路径。需要 rustup／固定 Rust1.97.1 和本机 linker；Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C 工具链。使用 `--ignore-scripts` 安装后，先显式运行 `bun run build:files-native` 再执行文件工具测试。正式 Agent build 会把同一原生模块、ABI/hash manifest 和许可证放进制品；用户机器不需要 Rust。运行期缺失资产明确失败，不能依靠源码或即时编译回退。
 
-`bun run build` 准备开发 Service 所需的文档资产，包括内置 OfficeCLI 与 PDF 技能、PDF helper 和经摘要校验的 Noto Sans SC 字体。Terminal 和 Native 打包使用同一构建入口。执行 OfficeCLI 技能时，受管 Shell 从宿主环境解析 `officecli`。 [文档资产边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
+已有 `packages/agent/dist/jobs/shell.js` 时，`bun install` 的 postinstall 还会修复 Shell 工具目录中的 OfficeCLI、rg、许可证和 `manifest.json`。有效文件直接复用。OfficeCLI 需要补齐时优先读取 `.cache/officecli-assets`。缓存缺失或校验失败时，从 GitHub 下载当前平台的固定版本，核对大小和 SHA-256 后写入缓存。使用 `--ignore-scripts` 会跳过补齐。全新检出在安装依赖后执行 `bun run build` 生成开发所需的完整产物。 [共用资产准备入口](../../packages/agent/src/jobs/prepare-shell-tools.ts)
 
-Required 的纯静态 `quality` 作业使用 `bun install --frozen-lockfile --ignore-scripts`，不需要 Rust，也不准备 Files 原生资产。安装后以 Actions 的 `working-directory: apps/web` 执行 `bun run build`，生成公开 `./assets` 的实际默认导出 `apps/web/dist/assets.js`，再执行原全部质量门禁；缺少该导出仍由工作区守卫拒绝。该准备只构建 Web，不执行整个 workspace build。其他运行时测试、qualification、发布和普通源码安装继续执行原 postinstall，不能照搬 quality 的安装方式后直接运行文件工具。
+`bun run build` 准备开发 Service 所需的文档资产，包括固定版本且经摘要校验的 OfficeCLI 可执行文件、Office 与 PDF 技能、PDF helper 和 Noto Sans SC 字体。Terminal 和 Native 打包使用同一构建入口。执行 OfficeCLI 技能时，受管 Shell 从随包工具目录解析 `officecli`。 [文档资产边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
+
+Required 的纯静态 `quality` 作业使用 `bun install --frozen-lockfile --ignore-scripts`，不需要 Rust，也不准备 Files 原生资产。安装后以 Actions 的 `working-directory: apps/web` 执行 `bun run build`，生成公开 `./assets` 的实际默认导出 `apps/web/dist/assets.js`，再执行原全部质量门禁；缺少该导出仍由工作区守卫拒绝。该准备只构建 Web，不执行整个 workspace build。其他运行时测试、qualification、发布和普通源码安装继续执行 postinstall，不能照搬 quality 的安装方式后直接运行文件工具。
 
 quality 仅缓存 `BUN_INSTALL_CACHE_DIR` 指定的下载目录，位于 runner 临时目录。quality 的下载目录和 unit 的浏览器目录均由首个准备步骤从 `RUNNER_TEMP` 写入 `GITHUB_ENV`，供后续步骤使用；job 级 `env` 不引用尚不可用的 `runner` context。不缓存 `node_modules`、workspace 构建或原生资产。不可变 cache action 的 key 包含 OS、架构、Bun1.4.4、lock、根及精确十 workspace manifest、registry 配置和 patches；不使用较宽 restore key。命中和未命中都执行原 frozen install、Web 准备与全部检查，不能把 cache hit 当作依赖或边界验证通过。
 
@@ -59,7 +61,7 @@ Desktop 的主页面与全局确认框均由该 Vite 服务提供，启动时预
 
 Windows 数据目录若被其他程序增加授权（例如 Agent 沙箱读取组），Desktop 会在启动 Service／SQLite 前显示准确路径和处理选项，默认退出；符合有限安全条件时可主动备份并修复该对象，操作见[桌面手册](../handbook/clients/desktop/README.md)。取消后开发命令返回 `native_profile_permissions_cancelled`，不删除 Profile。验证权限错误须使用测试自有的数据根，不在真实用户目录制造故障；正式 Native 默认数据根 `~/.kite-code/unified-agent` 与开发入口保持独立。
 
-`desktop:dev` 在启动 Electron 前，用独立 Bun 进程加载实际 Service 版本及其外部 workspace 导入；不执行入口的 `import.meta.main` 分支，不启动业务服务，不自动安装缺失依赖。缺失导出或模块加载失败会阻止启动，并在终端保留具体加载诊断。Electron 的父控制连接只有在实际 Service 握手、连接及 Native caller 初始化成功后才报告就绪；初次失败返回非零并等待所属进程退出，再清理应用目录。打开窗口或启动 Vite 不表示后台就绪。这不是完整类型检查或任意业务逻辑验证。
+`desktop:dev` 在启动 Electron 前，用独立 Bun 进程加载实际 Service 版本及其外部 workspace 导入；不执行入口的 `import.meta.main` 分支，不启动业务服务，不自动安装缺失依赖。缺失导出或模块加载失败会阻止启动，并在终端保留具体加载诊断。OfficeCLI、rg 或其清单缺失或校验失败时，终端提示用 `bun install` 修复已有构建的工具，或用 `bun run build` 重建，完成后重新启动。Electron 的父控制连接只有在实际 Service 握手、连接及 Native caller 初始化成功后才报告就绪；初次失败返回非零并等待所属进程退出，再清理应用目录。打开窗口或启动 Vite 不表示后台就绪。这不是完整类型检查或任意业务逻辑验证。
 
 页面、组件和样式（包括共享 UI）使用 Vite／React Fast Refresh，保存后即时更新，通常保留组件的页面状态；不能进行 Fast Refresh 的模块由 Vite 重新加载。Service 以及 Agent、AI、Client 的 `src` 源码保存后合并连续变更，构建到新的私有 Service 版本并再次检查运行时加载；同时比较这些源码的内容摘要，外部依赖变化不会因入口字节未变而被跳过，内容未变不重启。检查失败保持旧服务，修正保存后可再次检查。在同一 Electron 窗口内关闭并核实旧配套服务实际退出，再按新 SHA／build 身份准入新服务并重载页面。运行中的开发任务会正常取消和收尾，不自动重发或接续；Service 重载会重置页面内存中的未保存状态，持久数据保留。
 

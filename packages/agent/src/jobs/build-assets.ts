@@ -1,8 +1,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
-import { prepareBundledOfficeCli } from './prepare-officecli';
-import { ripgrepAsset } from './ripgrep';
+import { resolve } from 'node:path';
+import { prepareShellTools } from './prepare-shell-tools';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'platform/process');
 mkdirSync(destination, { recursive: true });
@@ -13,22 +12,7 @@ const result = await Bun.build({
   naming: 'shell-supervisor.js',
 });
 if (!result.success) throw new Error('shell_supervisor_build_failed');
-// Install real executables in the package's immutable tool directory.
-const searchDirectory = resolve(destination, 'tools');
-mkdirSync(searchDirectory, { recursive: true });
-const sourceRg = ripgrepAsset();
-copyFileSync(sourceRg, join(searchDirectory, basename(sourceRg)));
-copyFileSync(
-  join(dirname(dirname(sourceRg)), 'LICENSE'),
-  join(searchDirectory, 'LICENSE.vscode-ripgrep'),
-);
-for (const name of ['LICENSE-MIT.txt', 'LICENSE-PCRE2.txt', 'LICENSE-SLJIT.txt'])
-  copyFileSync(resolve(import.meta.dir, 'ripgrep-licenses', name), join(searchDirectory, name));
-const officecli = await prepareBundledOfficeCli(searchDirectory);
-writeFileSync(
-  join(searchDirectory, 'manifest.json'),
-  `${JSON.stringify({ platform: process.platform, arch: process.arch, rg: { version: '15.0.0', package: '@vscode/ripgrep', packageVersion: '1.18.0', sha256: createHash('sha256').update(readFileSync(sourceRg)).digest('hex') }, officecli }, null, 2)}\n`,
-);
+await prepareShellTools(resolve(destination, 'tools'));
 
 if (process.platform === 'win32') {
   if (process.arch !== 'x64') throw Error('windows_shell_arch_unsupported');

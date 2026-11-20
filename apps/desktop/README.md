@@ -575,6 +575,12 @@ Vite 使用 middleware 模式，HTTP 与 HMR WebSocket 共用宿主拥有的 loo
 
 开发 Service 对 `@kite-ai/agent/jobs/shell` 的导入固定为当前 checkout 已构建的 `packages/agent/dist/jobs/shell.js`，以独立文件 URL 保留资产定位器的原模块位置；其余工作区导入继续使用当前源码。不能把源码 `.ts` 的资产不可用误判为宿主缺少 Shell，也不能内联定位器后按 Service 缓存目录寻找 guardian。资产准备、平台限制和实际权限仍归[默认 Shell 装配](../service/README.md#默认-shell-装配)，子 Agent 按父 Agent 实际工具范围继承。[开发 Shell 回归](../../tests/isolated/unified-agent/development-desktop-shell.test.ts)通过普通开发构建与 paired Service，在隔离 HOME／Profile／Workspace 和受控模型下，核 macOS 主 Agent、默认通用及 code 子 Agent 的真实工具声明、Shell 执行和完整短输出；不注入工具或审批策略。[构建回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)另核连续重建及中文／空格路径保留原资产 URL。本机执行证据不赋予 Windows／Linux Shell 或正式发行资格。
 
+[开发 Service 加载检查](../../scripts/development/desktop-reload.ts)通过同一已构建入口校验 OfficeCLI 和 rg。包文件或清单缺失时，新 Service 版本无法通过检查，开发终端提示用 `bun install` 修复已有构建的工具，或用 `bun run build` 重建。[缺失资产回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)使用真实定位器复现只完成代码构建、未生成工具清单的情况。 [安装时补齐工具](../../docs/development/local-development.md)
+
+2026-11-19，macOS arm64／Bun 1.4.4／Electron 44.3.0，使用隔离开发 Profile 复现了工具清单缺失导致的 `bootstrap_channel_closed`。修后终端在启动 Electron 前提示重建。补齐资产后的隔离实窗依次呈现空页、启动页和唯一新对话输入区，未观察到渲染错误。SIGTERM 后所属 Electron 和 Service 进程均退出，临时应用目录已清理。同一隔离 Profile 再用 `bun run desktop:dev` 启动，5.95 秒完成握手并就绪，Ctrl+C 后返回 130。
+
+2026-11-20，在同平台暂移工具目录后执行 `bun install`，确认从本地缓存恢复 OfficeCLI 及全部工具文件，文件摘要与移走前一致。随后用隔离开发 Profile 执行 `bun run desktop:dev`，5.90 秒完成握手并就绪。SIGINT 后返回 130，临时应用目录已清理。
+
 开发配置由 builder 固定且仅 `kind: development` 接受。[闭合配置／父通道](electron/development.ts)限定 renderer 为 `127.0.0.1` 的实际 HTTP 地址；script 用 Vite nonce，connect 只允许同源资源及该端口 WebSocket。Main 的沙箱、隔离、导航与准确窗口／主 frame 校验保持，Vite 文件服务只开放应用／workspace／依赖源码并拒绝仓库内 Profile、缓存、密钥及内部目录。正式候选不接受这份开发配置，继续 file renderer 和原 `connect-src 'none'`。
 
 Windows GUI stdin 的实际过早 EOF 已否定其控制通道方案。当前父宿主为每次启动创建独立 loopback TCP 连接，编译到私有 Main 的 32 字节随机 token 认证连接；token 不进入 argv、日志、renderer 或 Vite 内容。闭合重载请求只含版本 ID／SHA，不接受任意路径或命令；Main 派生自己应用目录内的版本，先验证新字节，再沿原 caller／私有数据／paired 关闭并确认实际退出0，按新 build 身份准入并整页重新 attach。新旧 Service 不重叠，历史和持久申请保留，不重发工作；未知关闭或回执阻止后续自动切换。父连接 EOF、错误或关闭，以及 Main 的 SIGINT／SIGTERM，均等待同一幂等资源收尾完成再退出；配套 Service 自己也沿信号进入原 drain。父控制在连接／认证前收到停止会锁存，准确认证后立即 EOF，不丢退出请求；停止后拒绝新重载，迟到回执不恢复资格。菜单等待检查或用户决定期间被上述退出接管后，迟到“保留服务”或拒绝不能重新启动调度／观察。普通应用退出关闭 Vite 和监听器。取舍归[开发重载 Note](../../.agents/notes/implemented/architecture/2026-10-14-desktop-development-reload.md)。
