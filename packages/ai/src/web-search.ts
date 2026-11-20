@@ -1,5 +1,6 @@
 import type { NativeWebSearchObservation as Observation } from './index';
 import { ModelAttemptError } from './model-attempt';
+import { PlainLengthProof } from './web-search-plain-length';
 
 type Data = Record<string, unknown>;
 const object = (value: unknown): Data | undefined =>
@@ -65,6 +66,7 @@ export class NativeWebSearchStream {
   private chars = 0;
   private evidenceBytes = 0;
   private displayed: string | undefined = '';
+  readonly plainLength = new PlainLengthProof();
   terminal = false;
   invalid = false;
   truncated = false;
@@ -175,6 +177,7 @@ export class NativeWebSearchStream {
     return result;
   }
   *read(value: unknown): Generator<Observation> {
+    this.plainLength.observe(value);
     const chunk = object(value);
     if (!chunk) return;
     if (chunk.type === 'response.output_item.added' || chunk.type === 'response.output_item.done') {
@@ -285,6 +288,9 @@ export class NativeWebSearchStream {
     if ([...this.calls].some(([id, status]) => status === 'completed' && found.get(id)?.size !== 2))
       return fail();
     return filtered.sort((a, b) => a.position - b.position || a.order - b.order).map((e) => e.part);
+  }
+  assertPlainLength(continuation: unknown) {
+    if (!this.plainLength.matches(this.displayed, continuation) || this.seenSearch()) return fail();
   }
   assertComplete(required: boolean) {
     if ([...this.calls.values()].includes('failed'))

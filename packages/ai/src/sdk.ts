@@ -554,6 +554,8 @@ export function createSdkModelAdapter(options: {
         });
         for await (const part of response.stream) {
           signal.throwIfAborted();
+          if (search && (part.type.startsWith('tool-') || part.type === 'source'))
+            search.plainLength.reject();
           switch (part.type) {
             case 'raw': {
               const value = part.rawValue;
@@ -627,7 +629,9 @@ export function createSdkModelAdapter(options: {
                     : part.finishReason === 'length'
                       ? 'length'
                       : null;
-              if (search) {
+              if (search && reason === 'length' && !native?.required) {
+                search.assertPlainLength(continuation);
+              } else if (search) {
                 search.assertComplete(native?.required === true);
                 if (reason === 'length' || reason === null)
                   throw new ModelAttemptError('stream_incomplete');

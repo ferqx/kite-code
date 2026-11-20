@@ -106,13 +106,16 @@ const options = {
   protocol: 'responses' as const,
 };
 const fakeFetch = (fn: typeof fetch) => Object.assign(fn, { preconnect: fetch.preconnect });
-async function fixture(respond: (body: Body, request: number) => Response) {
+async function fixture(
+  respond: (body: Body, request: number) => Response,
+  apiKey = options.apiKey,
+) {
   const bodies: Body[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {
-      expect(req.headers.get('authorization')).toBe('Bearer fixture-token');
+      expect(req.headers.get('authorization')).toBe(`Bearer ${apiKey}`);
       const body = (await req.json()) as Body;
       bodies.push(body);
       return respond(body, bodies.length);
@@ -122,7 +125,9 @@ async function fixture(respond: (body: Body, request: number) => Response) {
     Object.assign(
       (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
         expect(String(url)).toBe(`${baseURL}/responses`);
-        expect(init?.redirect).toBe('error');
+        const body = JSON.parse(String(init?.body)) as Body;
+        if (body.tools?.some((entry) => entry.type === 'web_search'))
+          expect(init?.redirect).toBe('error');
         return fetch(server.url, init);
       },
       { preconnect: fetch.preconnect },
@@ -130,7 +135,9 @@ async function fixture(respond: (body: Body, request: number) => Response) {
   );
   const adapter = () =>
     createSdkModelAdapter({
-      models: new Map([['bound', createCompatibleModelBinding({ ...options, fetch: transport })]]),
+      models: new Map([
+        ['bound', createCompatibleModelBinding({ ...options, apiKey, fetch: transport })],
+      ]),
     });
   return { bodies, transport, adapter, close: () => server.stop(true) };
 }
@@ -463,6 +470,325 @@ test('bounded standalone reader aborts an oversized SSE line before parsing; no 
     );
     expect(ModelAttemptError.isInstance(error)).toBe(true);
     expect(error.retrySafety).toBe('unknown');
+    expect(f.bodies).toHaveLength(1);
+  } finally {
+    f.close();
+  }
+});
+
+const lengthText = 'Partial assistant reply';
+const lengthMessage = {
+  type: 'message',
+  id: 'msg_0',
+  role: 'assistant',
+  status: 'completed',
+  content: [{ type: 'output_text', text: lengthText, annotations: [] }],
+};
+const lengthResponse = {
+  id: 'response1',
+  status: 'incomplete',
+  incomplete_details: { reason: 'max_output_tokens' },
+  output: [lengthMessage],
+  usage: { input_tokens: 3, output_tokens: 5 },
+};
+const lengthFrame = (response: Row = lengthResponse) => frame('response.incomplete', { response });
+
+test('optional native search preserves only bound encrypted reasoning and text from a proven plain length turn', async () => {
+  const reasoning = {
+    type: 'reasoning',
+    id: 'rs_1',
+    summary: [],
+    encrypted_content: 'fixture-length-reasoning-private',
+  };
+  const answer = { ...lengthMessage, id: 'msg_1' };
+  const nextResponse = () => sse(created + message(0, 'complete') + done);
+  const f = await fixture((_body, n) =>
+    n > 1
+      ? nextResponse()
+      : sse(
+          created +
+            item('added', 0, reasoning) +
+            item('done', 0, reasoning) +
+            message(1, lengthText) +
+            lengthFrame({ ...lengthResponse, output: [reasoning, answer] }),
+        ),
+  );
+  try {
+    const events = await collect(f.adapter());
+    expect(
+      events
+        .filter((e) => e.type === 'text_delta')
+        .map((e) => e.text)
+        .join(''),
+    ).toBe(lengthText);
+    expect(events.filter((e) => e.type === 'web_search' || e.type === 'tool_call')).toEqual([]);
+    const finish = events.at(-1);
+    expect(finish).toMatchObject({
+      type: 'finish',
+      reason: 'length',
+      usage: { inputTokens: 3, outputTokens: 5 },
+    });
+    if (finish?.type !== 'finish') throw Error('missing finish');
+    expect(JSON.stringify(finish.continuation)).toContain(reasoning.encrypted_content);
+    expect(JSON.stringify(events.filter((event) => event.type !== 'finish'))).not.toContain(
+      reasoning.encrypted_content,
+    );
+    expect(f.bodies).toHaveLength(1);
+    const next = {
+      ...req,
+      requestId: 'next-step',
+      messages: [
+        ...req.messages,
+        {
+          role: 'assistant' as const,
+          content: lengthText,
+          continuation: structuredClone(finish.continuation),
+        },
+        { role: 'user' as const, content: 'Continue the saved response.' },
+      ],
+    };
+    await collect(f.adapter(), next);
+    await collect(f.adapter(), { ...next, nativeWebSearch: undefined });
+    expect(f.bodies).toHaveLength(3);
+    const changed = await fixture(nextResponse, 'fixture-rotated-account');
+    try {
+      await collect(changed.adapter(), next);
+      expect(changed.bodies).toHaveLength(1);
+      const authorized = f.bodies[1]!;
+      expect(authorized.input.filter((part) => part.type === 'reasoning')).toEqual([reasoning]);
+      for (const body of [f.bodies[2]!, changed.bodies[0]!]) {
+        expect(body.input.some((part) => part.type === 'reasoning')).toBe(false);
+        expect(JSON.stringify(body.input)).not.toContain(reasoning.encrypted_content);
+      }
+      for (const body of [authorized, f.bodies[2]!, changed.bodies[0]!]) {
+        expect(JSON.stringify(body.input)).toContain(lengthText);
+        expect(JSON.stringify(body.input)).toContain('Continue the saved response.');
+        expect(
+          body.input.some((part) =>
+            ['web_search_call', 'function_call', 'function_call_output'].includes(
+              String(part.type),
+            ),
+          ),
+        ).toBe(false);
+      }
+    } finally {
+      changed.close();
+    }
+  } finally {
+    f.close();
+  }
+});
+
+test('wire text can arrive in thousands of small deltas without changing a proven native length outcome', async () => {
+  const text = 'a'.repeat(4100);
+  const scope = { output_index: 0, content_index: 0, item_id: 'msg_0' };
+  const part = { type: 'output_text', text, annotations: [] };
+  const answer = { ...lengthMessage, status: 'incomplete', content: [part] };
+  const f = await fixture(() =>
+    sse(
+      created +
+        frame('response.in_progress', {
+          response: { id: 'response1', status: 'in_progress', output: [] },
+        }) +
+        item('added', 0, {
+          id: 'msg_0',
+          type: 'message',
+          role: 'assistant',
+          status: 'in_progress',
+          content: [],
+        }) +
+        frame('response.content_part.added', { ...scope, part: { ...part, text: '' } }) +
+        frame('response.output_text.delta', { ...scope, delta: 'a' }).repeat(text.length) +
+        frame('response.output_text.done', { ...scope, text }) +
+        frame('response.content_part.done', { ...scope, part }) +
+        item('done', 0, answer) +
+        lengthFrame({ ...lengthResponse, output: [answer] }),
+    ),
+  );
+  try {
+    const events = await collect(f.adapter());
+    expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'length' });
+    expect(
+      events
+        .filter((e) => e.type === 'text_delta')
+        .map((e) => e.text)
+        .join(''),
+    ).toBe(text);
+    expect(f.bodies).toHaveLength(1);
+  } finally {
+    f.close();
+  }
+});
+
+test('native length fails closed when terminal output, visible text, or earlier events cannot exclude tool effects', async () => {
+  const stream = message(0, lengthText);
+  const terminal = (fields: Row) => stream + lengthFrame({ ...lengthResponse, ...fields });
+  const after = (extra: string) => stream + extra + lengthFrame();
+  const scenarios = [
+    ['no terminal', stream],
+    ['no output', terminal({ output: undefined })],
+    ['empty output', terminal({ output: [] })],
+    [
+      'terminal-only ciphertext missing from streamed SDK history',
+      item('added', 0, { type: 'reasoning', id: 'rs', summary: [] }) +
+        item('done', 0, { type: 'reasoning', id: 'rs', summary: [] }) +
+        message(1, lengthText) +
+        lengthFrame({
+          ...lengthResponse,
+          output: [
+            { type: 'reasoning', id: 'rs', summary: [], encrypted_content: 'fixture-unstreamed' },
+            { ...lengthMessage, id: 'msg_1' },
+          ],
+        }),
+    ],
+    ['reasoning only', terminal({ output: [{ type: 'reasoning', id: 'rs', summary: [] }] })],
+    ['wrong reason', terminal({ incomplete_details: { reason: 'content_filter' } })],
+    ['wrong status', terminal({ status: 'completed' })],
+    ['response identity', terminal({ id: 'another' })],
+    ['response error', terminal({ error: { code: 'failed' } })],
+    ['missing assistant text', terminal({ output: [{ ...lengthMessage, content: [] }] })],
+    ['unknown message phase', terminal({ output: [{ ...lengthMessage, phase: 'future_phase' }] })],
+    [
+      'unsupported output token metadata',
+      terminal({
+        output: [
+          {
+            ...lengthMessage,
+            content: [{ ...lengthMessage.content[0], logprobs: { type: 'future' } }],
+          },
+        ],
+      }),
+    ],
+    ['invalid terminal usage', terminal({ usage: { input_tokens: -1, output_tokens: 3 } })],
+    ['different response model', terminal({ model: 'contradictory-model' })],
+    [
+      'assistant slot mismatch',
+      stream.replace('"item_id":"msg_0"', '"item_id":"other"') + lengthFrame(),
+    ],
+    [
+      'stream status conflicts with terminal',
+      terminal({ output: [{ ...lengthMessage, status: 'incomplete' }] }),
+    ],
+    [
+      'terminal annotations only',
+      terminal({
+        output: [
+          {
+            ...lengthMessage,
+            content: [{ ...lengthMessage.content[0], annotations: [annotation] }],
+          },
+        ],
+      }),
+    ],
+    [
+      'known item with unsupported field',
+      terminal({ output: [{ ...lengthMessage, tool_calls: [{ type: 'function' }] }] }),
+    ],
+    [
+      'hidden reasoning content',
+      terminal({
+        output: [
+          { type: 'reasoning', id: 'rs', summary: [{ type: 'function_call' }] },
+          lengthMessage,
+        ],
+      }),
+    ],
+    ['wrong role', terminal({ output: [{ ...lengthMessage, role: 'user' }] })],
+    ['hidden terminal search', terminal({ output: [lengthMessage, call] })],
+    [
+      'hidden local call',
+      terminal({ output: [lengthMessage, { type: 'function_call', id: 'fc' }] }),
+    ],
+    [
+      'unknown terminal item',
+      terminal({ output: [lengthMessage, { type: 'future_item', id: 'unknown' }] }),
+    ],
+    [
+      'unknown terminal content',
+      terminal({
+        output: [{ ...lengthMessage, content: [...lengthMessage.content, { type: 'refusal' }] }],
+      }),
+    ],
+    [
+      'different text',
+      terminal({
+        output: [{ ...lengthMessage, content: [{ type: 'output_text', text: 'different' }] }],
+      }),
+    ],
+    ['different item id', terminal({ output: [{ ...lengthMessage, id: 'another' }] })],
+    [
+      'missing prior tool',
+      after(item('added', 1, { type: 'web_search_call', id: 'ws_orphan', status: 'in_progress' })),
+    ],
+    [
+      'orphan wire tool progress',
+      after(frame('response.web_search_call.searching', { output_index: 1, item_id: 'orphan' })),
+    ],
+    [
+      'orphan local argument',
+      after(
+        frame('response.function_call_arguments.done', {
+          output_index: 1,
+          item_id: 'orphan',
+          arguments: '{}',
+        }),
+      ),
+    ],
+    ['unknown wire event', after(frame('response.future_tool_event', {}))],
+    [
+      'reported citation',
+      after(
+        frame('response.output_text.annotation.added', {
+          output_index: 0,
+          content_index: 0,
+          annotation_index: 0,
+          item_id: 'msg_0',
+          annotation,
+        }),
+      ),
+    ],
+    ['earlier conflicting terminal', after(done)],
+    ['later conflicting terminal', stream + lengthFrame() + lengthFrame()],
+    ['raw after terminal', stream + lengthFrame() + frame('response.future_event', {})],
+    [
+      'role changed midstream',
+      item('added', 0, { ...lengthMessage, role: 'tool', content: [] }) + stream + lengthFrame(),
+    ],
+    [
+      'item text changed midstream',
+      stream +
+        item('done', 0, { ...lengthMessage, content: [{ type: 'output_text', text: 'other' }] }) +
+        lengthFrame(),
+    ],
+    [
+      'item hidden in progress envelope',
+      frame('response.in_progress', { response: { id: 'response1', output: [call] } }) +
+        stream +
+        lengthFrame(),
+    ],
+  ] as const;
+  for (const [name, payload] of scenarios) {
+    const f = await fixture(() => sse(created + payload));
+    try {
+      const error: unknown = await collect(f.adapter()).then(
+        () => undefined,
+        (cause) => cause,
+      );
+      expect(ModelAttemptError.isInstance(error), name).toBe(true);
+      expect(error, name).toMatchObject({
+        retrySafety:
+          name === 'missing prior tool' || name === 'hidden terminal search' ? 'unsafe' : 'unknown',
+      });
+      expect(f.bodies, name).toHaveLength(1);
+    } finally {
+      f.close();
+    }
+  }
+  const f = await fixture(() => sse(created + stream + lengthFrame()));
+  try {
+    await expect(
+      runOpenAIWebSearch({ ...options, query: 'required', signal: signal(), fetch: f.transport }),
+    ).rejects.toMatchObject({ retrySafety: 'unknown' });
     expect(f.bodies).toHaveLength(1);
   } finally {
     f.close();

@@ -87,4 +87,6 @@ Service/Agent 冻结实际路由并在授权后才向中立请求附上 `nativeW
 
 真实 SDK 以 `store:false` 宣告服务端工具，本地同名函数独立改名、复原；只有本地调用交回 Agent。搜索开始、结束、已检索 URL 和正文引用分别观察，失败／不完整不是成功。正文位置必须对应实际输出块；两个可能的字符单位产生不同可行锚点时只保留链接。原生 v2 私有历史按输出索引保存，并把工具 dialect、回传序列化器和原有连接身份一起散列；存储、账户、模型、搜索模式或文本投影不匹配时使用普通对话。它不是 ModelOutput 或 Trajectory 的新格式。
 
+可选原生搜索的 Responses 流只有在同一次响应明确以 `incomplete_details.reason=max_output_tokens` 结束，并能逐项核对完整输出时，才将纯文本片段以 `length` 交给 Agent 续写。当前支持一个非空助手文本块，前面可有仅含元数据或加密内容、摘要为空的推理项。原始流和 SDK 的可见文本必须一致；缺少终态、出现工具或引用、身份或内容矛盾、超出核验范围均保留原来的中断处理。续写保存普通助手文本，并将本轮已核验的加密推理留在原提供商的私有历史中；相同账户、模型与原生搜索绑定再次获准时才回传。之前已完成的搜索继续按原绑定恢复。[SDK 流测试](test/web-search.test.ts)
+
 `ai@7.0.19` 与 `@ai-sdk/openai@4.0.96` 的 Provider V4 类型不能直接互换。保留锁定的 4.0.19，借用 Bun 既有补丁机制，仅回移上游 [无状态搜索历史](https://github.com/vercel/ai/commit/6aedb07c54c2af2ce6b7b50825f3d1be0e98c12c) 与 4.0.91 的 failed/incomplete 处理到已发布的 ESM 入口，见[补丁](patches/openai-4.0.19-web-search.patch)。SDK、主模型、宿主不得因未见首事件重提可能收费的搜索。独立 OpenAI 后端只提交当前查询、短指令及一个强制搜索工具；最多 2000 输出 token、4 次服务端工具、60 秒、2 MiB 流式读取，未知费用不估算。[HTTP/SSE 测试](test/web-search.test.ts)覆盖真实编码、重开请求体及首包前／搜索后断连的实际 POST 次数。没有用真实账户作资格验证。

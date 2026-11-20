@@ -830,3 +830,307 @@ test('A17 a configured child cannot enable server search when its parent has no 
     await f.close();
   }
 });
+
+const sealedLengthReasoning = {
+  type: 'reasoning',
+  id: 'rs_fixture_length',
+  summary: [],
+  encrypted_content: 'opaque-fixture-length-ciphertext',
+};
+
+function nativeLengthResponses(
+  turns: {
+    text: string;
+    limited?: boolean;
+    reasoning?: typeof sealedLengthReasoning;
+    remote?: { id: string; type: string } & Record<string, unknown>;
+    citation?: Record<string, unknown>;
+  }[],
+) {
+  type Wire = {
+    input: { type?: string; role?: string; content?: string | { type: string; text?: string }[] }[];
+    tools: { type: string }[];
+  };
+  const wire: Wire[] = [];
+  const requests: ModelRequest[] = [];
+  const frame = (type: string, data: object) => `data: ${JSON.stringify({ type, ...data })}\n\n`;
+  const item = (stage: string, index: number, value: object) =>
+    frame(`response.output_item.${stage}`, { output_index: index, item: value });
+  const transport = Object.assign(
+    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const turn = turns[wire.length];
+      wire.push(JSON.parse(String(init?.body)) as Wire);
+      if (!turn || String(input) !== 'https://api.openai.com/v1/responses')
+        throw Error('unexpected_fixture_dispatch');
+      const { text, limited, reasoning, remote, citation } = turn;
+      const status = limited ? 'incomplete' : 'completed';
+      const id = `msg_${wire.length}`;
+      const responseId = `resp_${wire.length}`;
+      const prefix = [...(remote ? [remote] : []), ...(reasoning ? [reasoning] : [])];
+      const index = prefix.length;
+      const slot = { item_id: id, output_index: index, content_index: 0 };
+      const message = {
+        id,
+        type: 'message',
+        role: 'assistant',
+        status,
+        content: [{ type: 'output_text', text, annotations: citation ? [citation] : [] }],
+      };
+      const stream = [
+        frame('response.created', {
+          response: { id: responseId, model: 'gpt-6.2-astra', created_at: 1 },
+        }),
+      ];
+      if (remote)
+        stream.push(
+          item('added', 0, { id: remote.id, type: remote.type, status: 'in_progress' }),
+          item('done', 0, remote),
+        );
+      if (reasoning) {
+        const slot = prefix.indexOf(reasoning);
+        stream.push(
+          item('added', slot, { ...reasoning, encrypted_content: null }),
+          item('done', slot, reasoning),
+        );
+      }
+      stream.push(
+        item('added', index, { id, type: 'message' }),
+        frame('response.output_text.delta', { ...slot, delta: text }),
+      );
+      if (citation)
+        stream.push(
+          frame('response.output_text.annotation.added', {
+            ...slot,
+            annotation_index: 0,
+            annotation: citation,
+          }),
+        );
+      stream.push(
+        item('done', index, message),
+        frame(`response.${status}`, {
+          response: {
+            id: responseId,
+            status,
+            output: [...prefix, message],
+            ...(limited ? { incomplete_details: { reason: 'max_output_tokens' } } : {}),
+            usage: { input_tokens: 2, output_tokens: 3 },
+          },
+        }),
+      );
+      return new Response(stream.join(''), { headers: { 'content-type': 'text/event-stream' } });
+    },
+    { preconnect: fetch.preconnect },
+  );
+  const sdk = createSdkModelAdapter({
+    models: new Map([
+      [
+        'owned',
+        createCompatibleModelBinding({
+          name: 'openai',
+          protocol: 'responses',
+          baseURL: 'https://api.openai.com/v1',
+          modelId: 'gpt-6.2-astra',
+          apiKey: 'synthetic-local-fixture',
+          fetch: transport,
+        }),
+      ],
+    ]),
+  });
+  const model: ModelAdapter = {
+    ...sdk,
+    stream(request, context) {
+      requests.push(request);
+      return sdk.stream(request, context);
+    },
+  };
+  return { model, wire, requests };
+}
+
+test('optional native plain length continues the original Run once under fresh authorization', async () => {
+  const partial = 'The first part of the answer.';
+  const complete = 'The remaining part of the answer.';
+
+  const { model, wire, requests } = nativeLengthResponses([
+    { text: partial, limited: true, reasoning: sealedLengthReasoning },
+    { text: complete },
+  ]);
+  const f = await fixture(model, () => wire.length === 0);
+  try {
+    await f.start();
+    const view = await f.wait();
+    expect(view.runs.map((r) => r.status)).toEqual(['completed']);
+    expect(requests).toHaveLength(2);
+    expect(wire).toHaveLength(2);
+    expect(f.authorizations).toBe(2);
+    expect(wire.map((r) => r.tools.filter((t) => t.type === 'web_search').length)).toEqual([1, 0]);
+    const [first, next] = requests;
+    expect(first!.requestId).not.toBe(next!.requestId);
+    expect(next!.messages.filter((m) => m.role === 'assistant' && m.content === partial)).toEqual([
+      expect.objectContaining({ sourceIds: [first!.requestId] }),
+    ]);
+    expect(next!.messages.at(-1)).toMatchObject({
+      role: 'user',
+      sourceIds: [first!.requestId],
+      content: expect.stringContaining('Continue the original task'),
+    });
+    const assistantText = wire[1]!.input
+      .filter((row) => row.role === 'assistant')
+      .map((row) =>
+        typeof row.content === 'string'
+          ? row.content
+          : row.content?.map((part) => part.text).join(''),
+      );
+    expect(assistantText).toEqual([partial]);
+    expect(wire.flatMap((r) => r.input).filter((row) => row.type === 'reasoning')).toEqual([]);
+    expect(JSON.stringify(wire).includes(sealedLengthReasoning.encrypted_content)).toBe(false);
+    expect(JSON.stringify(view.messages).includes(sealedLengthReasoning.encrypted_content)).toBe(
+      false,
+    );
+    expect(wire.flatMap((r) => r.input).filter((row) => row.type === 'web_search_call')).toEqual(
+      [],
+    );
+    expect(view.executions).toHaveLength(2);
+    for (const [request, finishReason] of [
+      [first!, 'length'],
+      [next!, 'stop'],
+    ] as const) {
+      const model = view.executions.find((e) => e.id === request.requestId);
+      expect(model).toMatchObject({
+        kind: 'model',
+        runId: view.runs[0]!.id,
+        status: 'succeeded',
+        result: { finishReason },
+      });
+      const evidence = await f.runtime.readWebSearchEvidence({
+        ...f.input,
+        executionId: request.requestId,
+      });
+      expect(evidence).toMatchObject({ revision: 0, blocks: [] });
+      const scope = { ...f.input, executionId: request.requestId };
+      const publicInput = await f.runtime.readModelInput(scope);
+      const publicOutput = await f.runtime.readModelOutput(scope);
+      expect(
+        JSON.stringify([publicInput, publicOutput, evidence]).includes(
+          sealedLengthReasoning.encrypted_content,
+        ),
+      ).toBe(false);
+    }
+    expect(f.ordinaryCalls).toBe(0);
+  } finally {
+    await f.close();
+  }
+}, 10000);
+
+test('a cited native search stays bound to its original Execution through a later plain length continuation', async () => {
+  const cited = 'Owned source confirms the claim.';
+  const partial = 'The later answer begins here.';
+  const remote = {
+    type: 'web_search_call',
+    id: 'ws_prior',
+    status: 'completed',
+    action: { type: 'search', query: 'owned source' },
+  };
+  const citation = {
+    type: 'url_citation',
+    url: 'https://example.test/original',
+    title: 'Owned source',
+    start_index: 0,
+    end_index: 5,
+  };
+
+  const { model, wire } = nativeLengthResponses([
+    { text: cited, remote, citation },
+    { text: partial, limited: true, reasoning: sealedLengthReasoning },
+    { text: 'The later answer is complete.' },
+  ]);
+  const f = await fixture(model);
+  const read = (executionId: string) =>
+    f.runtime.readWebSearchEvidence({ ...f.input, executionId });
+  try {
+    await f.start();
+    const first = await f.wait();
+    expect(first.runs[0]!.status).toBe('completed');
+    expect(first.executions).toHaveLength(1);
+    const original = first.executions[0]!;
+    expect(original).toMatchObject({
+      kind: 'model',
+      status: 'succeeded',
+      result: { finishReason: 'stop' },
+    });
+    const saved = await read(original.id);
+    expect(saved.blocks).toMatchObject([
+      { callId: remote.id, status: 'completed' },
+      {
+        sourceScope: 'response',
+        status: 'completed',
+        citations: [
+          {
+            url: citation.url,
+            anchor: {
+              executionId: original.id,
+              startUtf16: 0,
+              endUtf16: 5,
+              textSha256: createHash('sha256').update(cited).digest('hex'),
+            },
+          },
+        ],
+      },
+    ]);
+    await f.start(
+      'later',
+      f.input.sessionId,
+      'Continue with a plain answer about the earlier source.',
+    );
+    const final = await f.wait('later');
+    const later = final.runs.find((r) => r.originCommandId === 'later')!;
+    expect(later.status).toBe('completed');
+    expect(final.executions).toHaveLength(3);
+    const next = final.executions.filter((e) => e.runId === later.id);
+    expect(
+      next
+        .map((e) => e.result)
+        .map((result) => (result as { finishReason: string }).finishReason)
+        .sort(),
+    ).toEqual(['length', 'stop']);
+    for (const e of next) {
+      expect(e).toMatchObject({ kind: 'model', status: 'succeeded' });
+      const evidence = await read(e.id);
+      expect(evidence).toMatchObject({ revision: 0, blocks: [] });
+      const scope = { ...f.input, executionId: e.id };
+      const publicInput = await f.runtime.readModelInput(scope);
+      const publicOutput = await f.runtime.readModelOutput(scope);
+      expect(
+        JSON.stringify([publicInput, publicOutput, evidence]).includes(
+          sealedLengthReasoning.encrypted_content,
+        ),
+      ).toBe(false);
+    }
+    expect(await read(original.id)).toEqual(saved);
+    expect(
+      JSON.stringify([final.messages, saved]).includes(sealedLengthReasoning.encrypted_content),
+    ).toBe(false);
+    expect(wire.map((r) => r.input.filter((row) => row.type === 'reasoning'))).toEqual([
+      [],
+      [],
+      [sealedLengthReasoning],
+    ]);
+    expect(
+      wire.map((r) => JSON.stringify(r).split(sealedLengthReasoning.encrypted_content).length - 1),
+    ).toEqual([0, 0, 1]);
+    expect(wire).toHaveLength(3);
+    expect(f.authorizations).toBe(3);
+    expect(wire.map((r) => r.tools.filter((t) => t.type === 'web_search').length)).toEqual([
+      1, 1, 1,
+    ]);
+    expect(wire.map((r) => r.input.filter((t) => t.type === 'web_search_call'))).toEqual([
+      [],
+      [remote],
+      [remote],
+    ]);
+    expect(wire.map((r) => JSON.stringify(r.input).split(partial).length - 1)).toEqual([0, 0, 1]);
+    expect(wire.map((r) => JSON.stringify(r.input).split(cited).length - 1)).toEqual([0, 1, 1]);
+    expect(f.ordinaryCalls).toBe(0);
+  } finally {
+    await f.close();
+  }
+}, 10000);
