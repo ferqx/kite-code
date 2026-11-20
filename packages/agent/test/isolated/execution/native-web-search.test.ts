@@ -521,12 +521,17 @@ test('A06 a proved local pre-send failure retries under fresh authorization; no 
 test('A04/A16 after reopening the original SQLite profile a real Responses SDK request carries the native search once; denial strips it', async () => {
   type Row = Record<string, unknown>;
   const requests: { input: Row[]; tools: Row[] }[] = [];
-  const remote = {
-    id: 'ws_cold',
+  const urls = Array.from({ length: 65 }, (_, n) => `https://example.test/result/${n}`);
+  const remote = (n: number) => ({
+    id: `ws_cold_${n}`,
     type: 'web_search_call',
     status: 'completed',
-    action: { type: 'search', query: 'owned source' },
-  };
+    action: {
+      type: 'search',
+      query: 'owned source',
+      sources: urls.slice(0, n === 1 ? 64 : 65).map((url) => ({ type: 'url', url })),
+    },
+  });
   const event = (type: string, data: Row) => `data: ${JSON.stringify({ type, ...data })}\n\n`;
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -535,7 +540,7 @@ test('A04/A16 after reopening the original SQLite profile a real Responses SDK r
       const body = (await req.json()) as { input: Row[]; tools: Row[] };
       requests.push(body);
       const n = requests.length,
-        pos = n === 1 ? 1 : 0,
+        pos = n <= 2 ? 1 : 0,
         text = n === 1 ? 'source one' : 'ack';
       const item = (stage: string, pos: number, value: Row) =>
         event(`response.output_item.${stage}`, { output_index: pos, item: value });
@@ -544,9 +549,9 @@ test('A04/A16 after reopening the original SQLite profile a real Responses SDK r
         event('response.created', {
           response: { id: `response_${n}`, model: 'gpt-6.2-astra', created_at: 1 },
         }) +
-        (n === 1
-          ? item('added', 0, { type: 'web_search_call', id: remote.id, status: 'in_progress' }) +
-            item('done', 0, remote)
+        (n <= 2
+          ? item('added', 0, { type: 'web_search_call', id: remote(n).id, status: 'in_progress' }) +
+            item('done', 0, remote(n))
           : '') +
         item('added', pos, { type: 'message', id }) +
         event('response.output_text.delta', {
@@ -604,6 +609,22 @@ test('A04/A16 after reopening the original SQLite profile a real Responses SDK r
     expect(second.runs.find((r) => r.originCommandId === 'cold')?.status).toBe('completed');
     allowed = false;
     await f.reopen(adapter());
+    for (const [commandId, truncated] of [
+      ['work', false],
+      ['cold', true],
+    ] as const) {
+      const run = second.runs.find((r) => r.originCommandId === commandId)!;
+      const execution = second.executions.find((e) => e.runId === run.id && e.kind === 'model')!;
+      const evidence = await f.runtime.readWebSearchEvidence({
+        ...f.input,
+        executionId: execution.id,
+      });
+      const response = evidence.blocks.find((block) => block.sourceScope === 'response');
+      expect(response?.status).toBe('completed');
+      expect(response?.sources.map((source) => source.url)).toEqual(urls.slice(0, 64));
+      expect(response?.truncated).toBe(truncated);
+    }
+    expect(requests).toHaveLength(2);
     await f.start('revoked');
     const third = await f.wait('revoked');
     expect(third.runs.find((r) => r.originCommandId === 'revoked')?.status).toBe('completed');
@@ -613,7 +634,7 @@ test('A04/A16 after reopening the original SQLite profile a real Responses SDK r
     ]);
     expect(requests.map((r) => r.input.filter((t) => t.type === 'web_search_call'))).toEqual([
       [],
-      [remote],
+      [remote(1)],
       [],
     ]);
     expect(JSON.stringify(requests[2]!.input)).toContain('source one');
@@ -623,6 +644,48 @@ test('A04/A16 after reopening the original SQLite profile a real Responses SDK r
     await f.close();
   }
 }, 15000);
+
+test('link-free truncation produces a response receipt only for observed native search', async () => {
+  let searches = true;
+  const model: ModelAdapter = {
+    nativeWebSearchCapability: capability,
+    async *stream() {
+      if (searches) {
+        yield {
+          type: 'web_search',
+          observation: { kind: 'activity', callId: 'ws', status: 'completed' },
+        };
+      }
+      yield { type: 'text_delta', text: 'answer' };
+      yield { ...finish, webSearchTruncated: true };
+    },
+  };
+  const f = await fixture(model);
+  try {
+    for (const command of ['searched', 'plain']) {
+      searches = command === 'searched';
+      await f.start(command);
+      const view = await f.wait(command);
+      const run = view.runs.find((r) => r.originCommandId === command)!;
+      expect(run.status).toBe('completed');
+      const execution = view.executions.find((e) => e.runId === run.id && e.kind === 'model')!;
+      const { blocks } = await f.runtime.readWebSearchEvidence({
+        ...f.input,
+        executionId: execution.id,
+      });
+      if (searches) {
+        expect(blocks.find((b) => b.sourceScope === 'response')).toMatchObject({
+          status: 'completed',
+          sources: [],
+          citations: [],
+          truncated: true,
+        });
+      } else expect(blocks).toEqual([]);
+    }
+  } finally {
+    await f.close();
+  }
+});
 
 test('A12 concurrently searching child and independent Session keep identical provider call IDs and Model usage scoped to each execution', async () => {
   const childStarted = Promise.withResolvers<void>(),

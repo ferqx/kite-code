@@ -148,14 +148,16 @@ export class NativeSearchActivity {
       if (text && text.length > 16384) this.truncated = true;
     }
   }
-  async finish(content: string) {
+  async finish(content: string, providerTruncated: boolean) {
+    this.truncated ||= providerTruncated;
     for (const [id, call] of this.calls) {
       if (call.status === 'searching') {
         call.status = 'incomplete';
         await this.write(id, call.status, call.query);
       }
     }
-    if (!this.sources.length && !this.citations.length) return;
+    if (!this.sources.length && !this.citations.length && !(this.observed && this.truncated))
+      return;
     const citations: WebSearchEvidenceBlock['citations'][number][] = [];
     for (const c of this.citations) {
       // The adapter returns the full original text block for grounded ranges. A rewritten,

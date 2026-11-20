@@ -14,7 +14,7 @@
 
 搜索请求由本次 Run 的模型、账户、用户设置和权限共同选择路线。原生搜索在模型请求内执行。普通工具 `web_search` 从用户已有的官方 DeepSeek 模型提供商派生备用搜索。多个可用提供商需要明确选用的模型连接或无歧义的显式默认配置。声明顺序不能指定付费账户。桌面状态页只读；Service 的显式搜索测试会发起一次可能计费的查询。搜索结果中的 URL 不触发逐页抓取，用户仍可按原权限使用 `web_fetch`。[搜索路由](../../../apps/service/src/web-search-route.ts) · [提供商适配器](../../../apps/service/src/web-search-providers.ts) · [普通工具](../../../packages/agent/src/tools/web-search/index.ts)
 
-已配对的 Client 可协商 `web_search_evidence`，读取 `GET /v1/sessions/:id/executions/:executionId/web-search-evidence?storeId=…`。Service 从认证上下文取主体。首次读取和每个后续版本都核对 Store、Session、Execution、原命令主体和 Artifact 归属。同一 Execution 的每次发布使用独立的 `application/vnd.kite.web-search+json` Artifact（`kite.web-search`，版本 1），按修订单调增加。响应按调用返回最新状态，分别保留检索来源、实际引用、截断标记及已知用量。原生回答用目标 Execution、保存文本块序号、UTF-8 SHA-256 和块内 UTF-16 半开区间定位引用。文本不能匹配时保留来源链接；独立后端的回答坐标只属于后端回答。[证据实现](../../../packages/agent/src/web-search-evidence.ts) · [HTTP 合同](../../../apps/service/src/http/schema/web-search.ts) · [Client 读验](../../../packages/client/test/isolated/web-search.test.ts)
+已配对的 Client 可协商 `web_search_evidence`，读取 `GET /v1/sessions/:id/executions/:executionId/web-search-evidence?storeId=…`。Service 从认证上下文取主体。首次读取和每个后续版本都核对 Store、Session、Execution、原命令主体和 Artifact 归属。同一 Execution 的每次发布使用独立的 `application/vnd.kite.web-search+json` Artifact（`kite.web-search`，版本 1），按修订单调增加。响应按调用返回最新状态，分别保留检索来源、实际引用、截断标记及已知用量。原生回答用目标 Execution、保存文本块序号、UTF-8 SHA-256 和块内 UTF-16 半开区间定位引用。文本不能匹配时保留来源链接；独立后端的回答坐标只属于后端回答。原生搜索响应保留适配器或 Runtime 任一侧观察到的截断。已执行搜索但没有可保存链接时，响应仍可标明截断。[证据实现](../../../packages/agent/src/web-search-evidence.ts) · [HTTP 合同](../../../apps/service/src/http/schema/web-search.ts) · [Client 读验](../../../packages/client/test/isolated/web-search.test.ts)
 
 ### V1 验收范围
 

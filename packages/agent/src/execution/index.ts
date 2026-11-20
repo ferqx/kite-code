@@ -1320,7 +1320,9 @@ export class UnifiedExecution {
       await output.text('reasoning', reasoning);
       for (const call of calls) await output.call(call);
     };
-    let finish: { reason: string; usage: Json; continuation?: Json } | undefined;
+    let finish:
+      | { reason: string; usage: Json; continuation?: Json; webSearchTruncated: boolean }
+      | undefined;
     let recordedUsage: Json | undefined;
     try {
       const actualRequest = this.options.openModelInput
@@ -1434,6 +1436,7 @@ export class UnifiedExecution {
           recordedUsage = structuredClone({ ...event.usage });
           finish = {
             reason: event.reason,
+            webSearchTruncated: event.webSearchTruncated === true,
             usage: recordedUsage,
             ...(event.continuation === undefined
               ? {}
@@ -1486,7 +1489,7 @@ export class UnifiedExecution {
         throw new ModelAttemptError('stream_incomplete');
       if (new Set(calls.map((call) => call.id)).size !== calls.length)
         throw new AgentError('duplicate_tool_call_id');
-      await search?.finish(content);
+      await search?.finish(content, finish.webSearchTruncated);
       if (finish.continuation !== undefined) {
         if (!output) await activateOutput();
         await output!.continuation(
