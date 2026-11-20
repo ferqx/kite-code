@@ -1139,6 +1139,42 @@ test('native stdio binds original PR source and actual three runners without sup
   }
 });
 
+for (const [file, job, consumer, condition] of [
+  ['platform-capability-probe.yml', 'native-probe', 'files-native-boundary.test.ts', undefined],
+  [
+    'runtime-stdio-smoke.yml',
+    'parent-owned-child',
+    'bun run test:runtime:stdio',
+    "runner.os == 'macOS'",
+  ],
+] as const) {
+  test(`${job} builds the MCP schema worker before its first source consumer`, () => {
+    const workflow = parse(
+      readFileSync(resolve(import.meta.dir, '../../../.github/workflows', file), 'utf8'),
+    );
+    const steps = workflow.jobs[job].steps;
+    const runs: string[] = steps.map((step: { run?: string }) => step.run ?? '');
+    const command = 'bun packages/agent/src/mcp/build-assets.ts packages/agent/dist';
+    const install = runs.indexOf('bun install --frozen-lockfile');
+    const build = runs.indexOf(command);
+    expect(runs.filter((run) => run === command)).toHaveLength(1);
+    expect(install).toBeGreaterThanOrEqual(0);
+    expect(build).toBeGreaterThan(install);
+    if (job === 'native-probe') {
+      expect(build).toBeGreaterThan(
+        runs.findIndex((run) => run.includes('build-essential bubblewrap')),
+      );
+      expect(build).toBeGreaterThan(
+        runs.indexOf('bun run scripts/release/prepare-windows-native-ci.ts'),
+      );
+    }
+    expect(build).toBeLessThan(runs.findIndex((run) => run.includes(consumer)));
+    expect(steps[build].if).toBe(condition);
+    expect(steps[build]['working-directory']).toBeUndefined();
+    expect(steps[build]['continue-on-error'] ?? false).toBe(false);
+  });
+}
+
 test('current native CI consumers prepare Linux isolation and display plus the Windows compiler before execution', () => {
   const actual = resolve(import.meta.dir, '../../..');
   for (const name of [

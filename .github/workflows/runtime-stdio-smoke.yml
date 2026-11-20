@@ -61,6 +61,9 @@ jobs:
       - name: Check native qualification log and exit propagation
         shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/runtime-stdio-shell.log "{0}"
         run: bun test --parallel=1 --max-concurrency=1 tests/isolated/scripts/ci-logged-shell.test.ts
+      - if: runner.os == 'macOS'
+        name: Build MCP runtime assets
+        run: bun packages/agent/src/mcp/build-assets.ts packages/agent/dist
       - run: bun run test:runtime:stdio
         shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/runtime-stdio.log "{0}"
       - name: Preserve complete native MCP and paired lifecycle logs

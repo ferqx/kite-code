@@ -65,6 +65,8 @@ jobs:
       - if: runner.os == 'Windows'
         name: Prepare installed Windows x64 Native compiler
         run: bun run scripts/release/prepare-windows-native-ci.ts
+      - name: Build MCP runtime assets
+        run: bun packages/agent/src/mcp/build-assets.ts packages/agent/dist
       - name: Native Files resource ownership and failure semantics
         working-directory: packages/agent/native/files
         run: cargo test --locked --lib
