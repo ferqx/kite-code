@@ -268,9 +268,11 @@ test('XLSX guard proves a single plain formula in namespaced target XML', () => 
   }
 });
 
-test.skipIf(process.platform === 'win32')(
-  'XLSX verification publishes only the reopened cached result',
-  async () => {
+test
+  .skipIf(process.platform === 'win32')
+  .each(['Sheet1', 'workbook', 'styles', 'sharedstrings', 'theme', '--help', 'Rows '])(
+  'XLSX verification publishes only the reopened cached result for %s',
+  async (sheet) => {
     const directory = await mkdtemp(join(tmpdir(), 'kite-xlsx-sum-success-'));
     try {
       const input = join(directory, 'working.xlsx');
@@ -284,18 +286,20 @@ test.skipIf(process.platform === 'win32')(
         `#!/bin/sh
 [ "$OFFICECLI_NO_AUTO_RESIDENT" = 1 ] && [ "$OFFICECLI_SKIP_UPDATE" = 1 ] || exit 10
 if [ "$1" = set ]; then
-  [ "$4" = --prop ] && [ "$5" = 'formula=SUM(B2:C2)' ] || exit 11
+  [ "$3" = "/${sheet}/D2" ] && [ "$4" = --prop ] && [ "$5" = 'formula=SUM(B2:C2)' ] || exit 11
   printf rewrite >> "$FIXTURE_REWRITE_LOG"
   printf cached > "$2"
   printf '%s' '{"success":true}'
 elif [ "$1" = raw ]; then
-  [ "$3" = /Sheet1 ] && [ "$4" = --start ] && [ "$5" = 2 ] && [ "$6" = --end ] && [ "$7" = 2 ] && [ "$8" = --cols ] && [ "$9" = D ] || exit 12
+  [ "$3" = "//${sheet}" ] && [ "$4" = --start ] && [ "$5" = 2 ] && [ "$6" = --end ] && [ "$7" = 2 ] && [ "$8" = --cols ] && [ "$9" = D ] || exit 12
   printf '%s' "$FIXTURE_FORMULA_XML"
-elif [ "$3" = /Sheet1/B2:C2 ]; then
-  printf '%s' '{"success":true,"data":{"matches":1,"results":[{"path":"/Sheet1/B2:C2","children":[{"path":"/Sheet1/B2","text":"12","format":{"type":"Number"}},{"path":"/Sheet1/C2","text":"21","format":{"type":"Number"}}]}]}}'
-else
+elif [ "$3" = "/${sheet}/B2:C2" ]; then
+  printf '%s' '{"success":true,"data":{"matches":1,"results":[{"path":"/${sheet}/B2:C2","children":[{"path":"/${sheet}/B2","text":"12","format":{"type":"Number"}},{"path":"/${sheet}/C2","text":"21","format":{"type":"Number"}}]}]}}'
+elif [ "$3" = "/${sheet}/D2" ]; then
   if [ "$(cat "$2")" = cached ]; then cache=',"cachedValue":"33"'; else cache=; fi
-  printf '%s%s%s' '{"success":true,"data":{"matches":1,"results":[{"path":"/Sheet1/D2","format":{"type":"Number","formula":"SUM(B2:C2)","computedValue":"33","evaluated":true' "$cache" '}}]}}'
+  printf '%s%s%s' '{"success":true,"data":{"matches":1,"results":[{"path":"/${sheet}/D2","format":{"type":"Number","formula":"SUM(B2:C2)","computedValue":"33","evaluated":true' "$cache" '}}]}}'
+else
+  exit 13
 fi
 `,
         { mode: 0o700 },
@@ -308,7 +312,7 @@ fi
             helper,
             input,
             output,
-            '/Sheet1/D2',
+            `/${sheet}/D2`,
             'SUM(B2:C2)',
             expected,
           ],

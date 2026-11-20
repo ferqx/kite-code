@@ -122,8 +122,8 @@
         },
         {
           "path": "verify-sum.ts",
-          "bytes": 5867,
-          "sha256": "579038f817125c630be4bbb944a63ec7b926eefb1486e7344d2ae877fdec2c35"
+          "bytes": 5967,
+          "sha256": "cc81e334b06447b2a3700a88aa542b8591f1dfed043d16e9ef051974cc5b36eb"
         }
       ]
     }

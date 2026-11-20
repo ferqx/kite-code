@@ -81,7 +81,8 @@ function verify() {
       throw Error('xlsx_sum_check_result_mismatch');
     // OfficeCLI get resolves shared formulas to ordinary text. Its set can sever
     // the shared anchor, so prove this is a standalone cell before publishing.
-    const xml = command('raw', '/' + target[1], '--start', target[3]!, '--end', target[3]!, '--cols', target[2]!);
+    // An explicit sheet path avoids raw's reserved /workbook, /styles, /sharedstrings and /theme.
+    const xml = command('raw', '//' + target[1], '--start', target[3]!, '--end', target[3]!, '--cols', target[2]!);
     try {
       const proof = JSON.parse(execFileSync(process.execPath,
         ['--no-install', validator, 'xlsx-formula-guard', '--input', '-'], {
