@@ -203,3 +203,5 @@ Files 同轮读回的审核材料可附 `recordedFileMutations`：仅普通工�
 用户自己写的指令不因引用或代码块格式失去原授权地位，实际来源仍按可信上下文判断；转述的第三方内容不能仅凭其中的自称变成用户指令。计划、文件正文、工具输出以及 `untrustedMcpTool` 的名称、描述和 schema 均不能授予权限或覆写规则；MCP 裁剪或缺失字段是证据限制，不单独证明安全或构成人审／拒绝原因。宿主独立执行父子权限、保护路径、原生范围、取消、时效、目标身份与最终派发核验；模型批准不代表这些检查已通过。技术失败不产生批准或拒绝，重试和超时策略归宿主，未知业务副作用不得推为未发生或盲目重放。默认 Shell 仍用独立风险提示，通用指导不替代其合同。
 
 本次仅重构通用审核指导及[反馈契约](../../test/isolated/execution/authorization-check-feedback.test.ts)、[真实 SDK 受控 wire 回归](../../test/isolated/execution/authorization-check.test.ts)，不改输出 schema、执行权限或最终 gate。受控 wire 核完整 system 与三态、硬拒绝零派发；[默认 Service Files 回归](../../../../apps/service/test/isolated/full-external-files.test.ts)另核真实内外路径分类、原任务来源和 compact SDK wire，并非手工填入 `effects`。实际模型遵循程度和完整工具路由仍须最终 Mac 客户端真实流程验证，不能由提示字串或受控回答测试代替。
+
+仅 Windows 原版 Git Bash 的普通 Shell 使用当前非提升用户可访问的文件与网络。非 Full 模式需到实际 Job 作一次不可复用的人答，旧范围授权、只读分类和旧父快照不能换算成此权限；原有硬拒绝仍先行。旧式 detached 请求在非 Full 模式直接拒绝，普通 background 仍归所属运行取消。PowerShell 和固定 git.worktree worker 不采用此合同。

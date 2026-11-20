@@ -55,6 +55,8 @@ export interface CapabilityDescription extends CapabilityIdentity {
   readonly autoReview?: 'check' | 'none';
   /** Trusted classification requires an exact human decision for this call. */
   readonly requiresApproval?: true;
+  /** Only the registered Windows native Git Bash contract; parents schedule, Jobs execute. */
+  readonly windowsNativeUserProcess?: true;
   readonly reviewBehavior?: ToolBehaviorBinding;
   readonly grantOffers?: readonly GrantCandidate[];
   readonly grantBehavior?: { readonly contractRef: string; readonly configurationDigest: string };
@@ -175,6 +177,17 @@ function validDescription(description: CapabilityDescription) {
     (description.autoReview === undefined ||
       description.autoReview === 'check' ||
       description.autoReview === 'none') &&
+    (description.windowsNativeUserProcess === undefined ||
+      (description.windowsNativeUserProcess === true &&
+        description.definitionVersion === '1' &&
+        ((description.kind === 'job' && description.definitionId === 'shell.command') ||
+          (description.kind === 'tool' &&
+            ['shell.execute', 'shell.launch'].includes(description.definitionId))) &&
+        description.executionScope?.filesystem === 'full_access' &&
+        description.executionScope.network === 'internet' &&
+        description.safeRead === false &&
+        !description.worktreeAuthorization &&
+        !description.approvalExempt)) &&
     (description.requiresApproval === undefined || description.requiresApproval === true) &&
     (description.reviewBehavior === undefined ||
       (!!toolBehaviorBinding(description.reviewBehavior) &&
@@ -252,6 +265,7 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
             ? ['stop_on_timeout']
             : []),
           ...(description.requiresApproval ? ['requires_approval'] : []),
+          ...(description.windowsNativeUserProcess ? ['windows-native-user-process'] : []),
           ...(description.worktreeAuthorization ? [description.worktreeAuthorization] : []),
         ],
       }),
@@ -276,6 +290,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       !facts?.policy.workspaceTrust ||
       !facts.description?.hardAllowed ||
       facts.description.requiresApproval ||
+      facts.description.windowsNativeUserProcess ||
       !facts.policy.allowed.some((entry) => sameCapability(entry, capability))
     )
       return null;
@@ -362,6 +377,9 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
                   revision: description.revision,
                   effects: [...description.effects],
                   hardAllowed: description.hardAllowed,
+                  ...(description.windowsNativeUserProcess
+                    ? { windowsNativeUserProcess: true }
+                    : {}),
                   safeRead: description.safeRead,
                   ...(description.autoReviewKey
                     ? { autoReviewKey: description.autoReviewKey }
@@ -431,6 +449,12 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
         return { ...offerProof, allowed: true, revision: boundRevision };
       if (!description.requiresApproval && policy.mode === 'full')
         return { ...offerProof, allowed: true, revision: boundRevision };
+      // This Tool can only submit the typed shell.command Job. Do not ask twice; only
+      // the dispatching Job owns a user-process confirmation. Independent policies still apply.
+      if (description.windowsNativeUserProcess && request.kind === 'tool')
+        return { ...controlProof, allowed: true, revision: boundRevision };
+      const nativeUserConsent =
+        description.windowsNativeUserProcess === true && request.kind === 'job';
       const safeRead =
         description.safeRead && description.effects.every((effect) => effect === 'read');
       const workspaceEdit = description.effects.every(
@@ -441,13 +465,14 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
         description.executionScope.network === 'none';
       if (
         !description.requiresApproval &&
+        !nativeUserConsent &&
         (safeRead ||
           description.internalRecordOnly === true ||
           (policy.mode === 'accept_edits' && (workspaceEdit || scopedWorkspace)))
       )
         return { ...offerProof, allowed: true, revision: boundRevision };
       if (!description.requiresApproval && policy.mode === 'auto') {
-        if (description.autoReview === 'none')
+        if (description.autoReview === 'none' && !nativeUserConsent)
           return { ...offerProof, allowed: true, revision: boundRevision };
         const riskOnly = description.autoReview === 'check';
         const context =
@@ -463,6 +488,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
           revision: boundRevision,
           reason: 'auto_check_required',
           check: {
+            ...(nativeUserConsent ? { requireApproval: true as const } : {}),
             ...(description.autoReviewKey ? { operationKey: description.autoReviewKey } : {}),
             ...(behavior
               ? { behavior, stopOnTimeout: true }
@@ -489,6 +515,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
             request: {
               mode: policy.mode,
               reason: 'auto_check_unavailable',
+              ...(nativeUserConsent ? { windowsNativeUserProcess: true } : {}),
               effects: [...description.effects],
               ...(description.executionScope ? { executionScope: description.executionScope } : {}),
             },
@@ -505,6 +532,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
           request: {
             mode: policy.mode,
             reason,
+            ...(nativeUserConsent ? { windowsNativeUserProcess: true } : {}),
             effects: [...description.effects],
             ...(description.executionScope ? { executionScope: description.executionScope } : {}),
           },

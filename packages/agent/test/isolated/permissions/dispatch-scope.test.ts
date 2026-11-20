@@ -107,3 +107,36 @@ test('malformed policy order and parent subtrees reject the Shell dispatch', () 
     'shell_dispatch_scope_unavailable',
   );
 });
+
+test('full-user Windows Bash cannot inherit historical or narrower Store authority', () => {
+  const native = (filesystem = 'full_access', network = 'internet'): Snapshot => ({
+    namespace: 'builtin.permissions',
+    version: '1',
+    data: {
+      mode: 'accept_edits',
+      workspaceTrust: true,
+      capability: {
+        kind: 'job',
+        definitionId: 'shell.command',
+        definitionVersion: '1',
+        hardAllowed: true,
+        windowsNativeUserProcess: true,
+        executionScope: { filesystem, network },
+      },
+    },
+  });
+  const verify = (snapshot: Snapshot) =>
+    hostExecutionScope(context(snapshot), 'shell.command', true);
+  expect(verify(native())).toEqual({ filesystem: 'full_access', network: 'internet' });
+  for (const old of [
+    leaf('job', 'full'),
+    leaf('job', 'accept_edits'),
+    native('workspace_write'),
+    native('full_access', 'none'),
+  ]) {
+    expect(() => verify(old)).toThrow('windows_native_shell_authority_missing');
+    expect(() => verify(intersection(native(), old))).toThrow(
+      'windows_native_shell_authority_missing',
+    );
+  }
+});

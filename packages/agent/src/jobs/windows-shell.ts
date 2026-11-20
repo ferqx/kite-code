@@ -33,8 +33,9 @@ import type { TrustedWorkerLaunch } from './shell';
 import type { HostShellExecutionScopeResolver } from './shell-scope';
 import { windowsCommandLookup } from './windows-command-lookup';
 import {
+  captureInstalledWindowsGitBashRuntime,
   captureWindowsGitBashRuntime,
-  stageWindowsGitBash,
+  discoverInstalledWindowsGitBash,
   WindowsGitBashUnavailable,
 } from './windows-git-bash';
 import {
@@ -136,7 +137,7 @@ const canonical = (value: unknown): string =>
       : JSON.stringify(value);
 
 export type WindowsShellBackend =
-  | { kind?: 'bash'; fullShellExecutable: string; bashVersion?: string }
+  | { kind?: 'bash' | 'native-git-bash'; fullShellExecutable: string; bashVersion?: string }
   | {
       kind: 'powershell';
       powerShell: WindowsPowerShell;
@@ -186,15 +187,16 @@ export async function windowsShellAssets(
     );
   }
   try {
-    const bash = await stageWindowsGitBash(stateRoot, join(root, 'ktipc.dll'));
+    const bash = discoverInstalledWindowsGitBash();
+    privateDirectory(stateRoot);
     return {
       runner,
       shell: bash.shell,
       windows: {
-        kind: 'bash',
+        kind: 'native-git-bash',
         stateRoot,
         fullShellExecutable: bash.fullShell,
-        bashVersion: await inspectGitBashVersion(runner, stateRoot, bash),
+        // No process may run merely because Settings inspected this installation.
       },
     };
   } catch (error) {
@@ -203,55 +205,37 @@ export async function windowsShellAssets(
   }
 }
 
-/** Read the staged interpreter through the same restricted Job used for commands. */
-async function inspectGitBashVersion(
-  supervisorPath: string,
-  stateRoot: string,
-  bash: { shell: string; fullShell: string },
-): Promise<string | undefined> {
-  const signal = AbortSignal.timeout(5000);
-  const job = await createWindowsShellJob(
-    {
-      cwd: dirname(bash.shell),
-      controlBase: stateRoot,
-      stateRoot,
-      shellExecutable: bash.shell,
-      fullShellExecutable: bash.fullShell,
-      supervisorPath,
-      env: { LANG: 'C.UTF-8' },
-      executionScope: () => ({ filesystem: 'read_only', network: 'none' }),
-    },
-    signal,
-  ).catch((error: unknown) => {
-    if (error !== signal.reason) throw error;
+/** Refuse to inherit an elevated Service token, even when a caller has administrator membership. */
+function requireUnelevatedWindowsUser() {
+  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
+  const kernel = dlopen('kernel32.dll', {
+    GetCurrentProcess: { args: [], returns: 'u64' },
+    CloseHandle: { args: ['u64'], returns: 'bool' },
   });
-  if (!job) return;
-  let handle: JobHandle | undefined;
   try {
-    handle = await job.start(
-      { command: `builtin printf '%s\\n' "$BASH_VERSION"` },
-      { sessionId: 'windows-shell-runtime', executionId: randomBytes(16).toString('hex'), signal },
-    );
-    let stdout = '';
-    for await (const event of job.observe(handle)) {
-      if (event.type === 'output_dropped' && event.stream === 'stdout') return;
-      if (event.type === 'output' && event.stream === 'stdout') {
-        stdout += event.content;
-        if (stdout.length > 128) return;
-      }
-      if (event.type === 'terminal' && event.result.outcome === 'succeeded' && !signal.aborted) {
-        const version = stdout.trim();
-        if (version.length <= 64 && /^\d+\.\d+\.\d+\(\d+\)-[a-z0-9-]+$/iu.test(version))
-          return version;
-      }
+    const security = dlopen('advapi32.dll', {
+      OpenProcessToken: { args: ['u64', 'u32', 'ptr'], returns: 'bool' },
+      GetTokenInformation: { args: ['u64', 'u32', 'ptr', 'u32', 'ptr'], returns: 'bool' },
+    });
+    const handle = new BigUint64Array(1);
+    try {
+      if (!security.symbols.OpenProcessToken(kernel.symbols.GetCurrentProcess(), 8, ptr(handle)))
+        throw Error('windows_native_shell_token_unavailable');
+      const elevated = new Uint32Array(1),
+        length = new Uint32Array(1);
+      if (
+        !security.symbols.GetTokenInformation(handle[0]!, 20, ptr(elevated), 4, ptr(length)) ||
+        length[0] !== 4
+      )
+        throw Error('windows_native_shell_token_unavailable');
+      if (elevated[0] !== 0) throw Error('windows_native_shell_elevated');
+    } finally {
+      if (handle[0]) kernel.symbols.CloseHandle(handle[0]);
+      security.close();
     }
-  } catch (error) {
-    if (!(error instanceof JobStartError)) throw error;
-    handle = error.handle;
   } finally {
-    if (handle) await job.dispose(handle);
+    kernel.close();
   }
-  return undefined;
 }
 
 export function windowsUserLocale(): string | undefined {
@@ -285,6 +269,9 @@ interface State {
 export type WindowsShellOptions = WindowsShellBackend & {
   cwd: string;
   workspaceRoot?: string;
+  /** Frozen original installation identity from the command authorization owner. */
+  expectedNativeRuntimeIdentity?: string;
+  nativeWorktreePowerShell?: WindowsPowerShell;
   env: Readonly<Record<string, string>>;
   supervisorPath: string;
   shellExecutable: string;
@@ -312,6 +299,58 @@ export type WindowsShellOptions = WindowsShellBackend & {
 };
 /** Live native Job/HANDLE owner; durable references never reconstruct a process from a PID. */
 export async function createWindowsShellJob(
+  input: WindowsShellOptions,
+  signal?: AbortSignal,
+): Promise<JobDefinition> {
+  const regular = await createWindowsShellJobBackend(input, signal);
+  if (input.kind !== 'native-git-bash' || !input.trustedWorkerLaunch) return regular;
+  const owners = new WeakMap<JobHandle, JobDefinition>();
+  // Only the typed, host-owned git.worktree phase uses the existing confined PowerShell
+  // worker. Never route a regular Shell command (including a failed one) to PowerShell.
+  return {
+    ...regular,
+    async start(value, context) {
+      const command =
+        value && typeof value === 'object' && !Array.isArray(value) ? value.command : undefined;
+      const worker =
+        typeof command === 'string' ? input.trustedWorkerLaunch?.(command, context) : undefined;
+      if (!worker) return regular.start(value, context);
+      if (!worker.powerShellCommand)
+        throw new JobStartError(undefined, 'worktree_worker_unavailable');
+      const selected = input.nativeWorktreePowerShell;
+      if (!selected) throw new JobStartError(undefined, 'worktree_worker_unavailable');
+      const confined = await createWindowsShellJobBackend(
+        {
+          ...input,
+          kind: 'powershell',
+          fullShellExecutable: undefined,
+          powerShell: selected,
+          shellExecutable: selected.executable.canonical,
+        },
+        context.signal,
+      );
+      try {
+        const handle = await confined.start(value, context);
+        owners.set(handle, confined);
+        return handle;
+      } catch (error) {
+        if (error instanceof JobStartError && error.handle) owners.set(error.handle, confined);
+        throw error;
+      }
+    },
+    observe(handle) {
+      return (owners.get(handle) ?? regular).observe(handle);
+    },
+    cancel(handle) {
+      return (owners.get(handle) ?? regular).cancel(handle);
+    },
+    dispose(handle) {
+      return (owners.get(handle) ?? regular).dispose(handle);
+    },
+  };
+}
+
+async function createWindowsShellJobBackend(
   input: WindowsShellOptions,
   signal?: AbortSignal,
 ): Promise<JobDefinition> {
@@ -353,11 +392,20 @@ export async function createWindowsShellJob(
   const bashRuntime =
     options.kind === 'powershell'
       ? undefined
-      : await captureWindowsGitBashRuntime(
-          options.shellExecutable,
-          options.fullShellExecutable,
-          signal,
-        );
+      : options.kind === 'native-git-bash'
+        ? await captureInstalledWindowsGitBashRuntime(options.shellExecutable, signal)
+        : await captureWindowsGitBashRuntime(
+            options.shellExecutable,
+            options.fullShellExecutable,
+            signal,
+          );
+  if (
+    options.kind === 'native-git-bash' &&
+    (!bashRuntime ||
+      !('identity' in bashRuntime) ||
+      options.expectedNativeRuntimeIdentity !== bashRuntime.identity)
+  )
+    throw Error('windows_git_bash_identity_required');
   if (powerShell && assets[1]!.canonical !== powerShell.executable.canonical)
     throw Error('windows_powershell_asset_invalid');
   const states = new WeakMap<JobHandle, State>();
@@ -369,7 +417,10 @@ export async function createWindowsShellJob(
   return {
     id: 'shell.command',
     version: '1',
-    description: `${powerShell ? `PowerShell ${powerShell.version}` : 'Git Bash'} with unelevated write-restricted filesystem access and owned Job supervision`,
+    description:
+      options.kind === 'native-git-bash'
+        ? 'Installed Git Bash with normal Windows user filesystem and network access in an owned Job (no workspace sandbox)'
+        : `${powerShell ? `PowerShell ${powerShell.version}` : 'Git Bash'} with unelevated write-restricted filesystem access and owned Job supervision`,
     resources: { slot: 'process' },
     inputSchema: {
       type: 'object',
@@ -396,6 +447,15 @@ export async function createWindowsShellJob(
             context.signal,
           );
           const scope = options.executionScope(context);
+          if (options.kind === 'native-git-bash') {
+            if (
+              scope.filesystem !== 'full_access' ||
+              scope.network !== 'internet' ||
+              options.shellExecutable !== options.fullShellExecutable
+            )
+              throw Error('windows_native_shell_authority_missing');
+            requireUnelevatedWindowsUser();
+          }
           const readOnly =
             scope.filesystem === 'read_only' ? options.readOnlyLaunch?.(context) : undefined;
           await bashRuntime?.verify(scope.filesystem === 'full_access', context.signal);
@@ -869,9 +929,11 @@ export async function createWindowsShellJob(
           supervisorPid: owner.pid,
           confinement: {
             backend:
-              scope.filesystem === 'full_access'
-                ? 'windows-full-job'
-                : 'windows-restricted-token-job',
+              options.kind === 'native-git-bash'
+                ? 'windows-native-git-bash-job'
+                : scope.filesystem === 'full_access'
+                  ? 'windows-full-job'
+                  : 'windows-restricted-token-job',
             filesystem: scope.filesystem,
             network: scope.network,
           },

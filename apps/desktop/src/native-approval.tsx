@@ -64,6 +64,11 @@ export function NativeApproval({
         : '完整审批内容尚不可用';
   return (
     <article aria-label={`approval ${interaction.id}`}>
+      {command !== undefined && policy?.windowsNativeUserProcess === true && (
+        <p className="approval-native-scope">
+          此命令将以当前 Windows 用户权限运行，可访问该用户的文件和网络，不限于工作区。
+        </p>
+      )}
       <Approval
         embedded={embedded}
         command={command}

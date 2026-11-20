@@ -350,3 +350,46 @@ test('compact Shell approval exposes the exact permission scope on keyboard focu
     await f.close();
   }
 });
+
+test('native Windows user-process scope is visible before deciding and cannot be spoofed by input', async () => {
+  const f = fixture();
+  try {
+    for (const native of [false, true]) {
+      const request = {
+        definitionId: 'shell.command',
+        definitionVersion: '1',
+        input: { command: 'printf ok', windowsNativeUserProcess: true },
+        policy: {
+          reason: 'approval_required',
+          ...(native
+            ? {
+                windowsNativeUserProcess: true,
+                executionScope: { filesystem: 'full_access', network: 'internet' },
+              }
+            : {}),
+        },
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+      };
+      await act(async () =>
+        f.root.render(
+          <NativeApproval
+            interaction={{ ...card, definitionId: 'shell.command', request }}
+            disabled={false}
+            onAnswer={() => {}}
+            embedded
+          />,
+        ),
+      );
+      expect(!!f.host.querySelector('.approval-native-scope')).toBe(native);
+      if (native)
+        expect(f.host.querySelector('.approval-native-scope')!.textContent).toContain(
+          '不限于工作区',
+        );
+      expect(f.host.querySelector('.approval-command')?.textContent).toBe('printf ok');
+    }
+  } finally {
+    await f.close();
+  }
+});

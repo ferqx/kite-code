@@ -12,6 +12,7 @@ import type {
 } from '../extensions';
 import { semanticDigest } from '../json';
 import {
+  type ApprovalOption,
   approvalOptions,
   type GrantUse,
   parseGrantOffer,
@@ -39,6 +40,44 @@ import {
   AuthorizationRefreshRequired,
   modeControlsChanged,
 } from './authorization-refresh';
+
+/** Compose only from the trusted policy portion, never from model-supplied tool input.
+ * The durable option label is visible on every surface before the choice is made. */
+function presentedApprovalOptions(
+  request: AuthorizationRequest,
+  policy: Json,
+  options: readonly ApprovalOption[],
+): readonly ApprovalOption[] {
+  if (
+    request.kind !== 'job' ||
+    request.definitionId !== 'shell.command' ||
+    request.definitionVersion !== '1'
+  )
+    return options;
+  const pending: Json[] = [policy];
+  while (pending.length) {
+    const entry = pending.pop();
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    if (entry.windowsNativeUserProcess === true)
+      return options.map((option) =>
+        option.kind === 'once'
+          ? {
+              ...option,
+              presentation: {
+                label: '仅此次：当前 Windows 用户文件和网络（不限工作区）',
+                details: [
+                  '此命令将以当前 Windows 用户权限运行，可访问该用户的文件和网络，不限于工作区。',
+                ],
+              },
+            }
+          : option,
+      );
+    if (Array.isArray(entry.policies)) pending.push(...entry.policies);
+    if (entry.kind === 'approval_after_check_timeout' && entry.originalRequest)
+      pending.push(entry.originalRequest);
+  }
+  return options;
+}
 
 /** Public authorization reasons are distinct from private adapter errors. */
 export class AuthorizationDeniedError extends AgentError {
@@ -789,9 +828,11 @@ export class InteractionGate {
     const inputDigest = await semanticDigest(request.input);
     const approvalRequest = (): Json => ({
       policy: decision.approval!.request,
-      options: [
-        ...(decision.approval!.options ?? approvalOptions(decision.grantOffers)),
-      ] as unknown as Json,
+      options: presentedApprovalOptions(
+        request,
+        decision.approval!.request,
+        decision.approval!.options ?? approvalOptions(decision.grantOffers),
+      ) as unknown as Json,
       definitionId: request.definitionId,
       definitionVersion: request.definitionVersion,
       input: request.input,

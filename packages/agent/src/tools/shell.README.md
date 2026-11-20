@@ -16,7 +16,7 @@ Windows Shell 工具描述和命令参数说明使用宿主装配实际选中的
 
 原 Windows Job 的已结算查找失败回执可携带命令名与候选路径。模型展示核对原 Job 和终态身份后，提供候选绝对路径、来源及单独核验可执行文件和运行时的提示。原命令退出码、双流内容和授权证据继续归该次执行回执。依赖本地进程状态的工作先选定磁盘保存点，同次调用完成修改、保存和关闭，后续调用从磁盘重新打开核对。 [模型结果回归](../../test/isolated/tools/shell/model-presentation.test.ts)
 
-Windows 辅助进程指引要求在原 Job 内保存并关闭，提示提前选择程序支持的单进程模式。确需访问受拒的双向本地命名管道时，模型可以通过原授权入口为该条命令申请 `filesystem:full_access` 并保持 `network:none`。共享冲突后先核落盘结果并确认文件已释放，再发起下一次调用。 [原生实机对照](../jobs/README.md#默认-windows-git-bash)
+受限 Windows PowerShell 辅助进程指引要求在原 Job 内保存并关闭，提示提前选择程序支持的单进程模式。确需访问受拒的双向本地命名管道时，模型可以通过原授权入口为该条命令申请 `filesystem:full_access` 并保持 `network:none`。共享冲突后先核落盘结果并确认文件已释放，再发起下一次调用。 [原生实机对照](../jobs/README.md#默认-windows-git-bash)
 
 原命令及其子进程结束后，打开的编辑会话和仅在进程内的未保存状态不能留给后续 `shell_execute`。后续调用重新打开已保存的工作区文件，每组编辑、保存和关闭在同一个仍运行的命令内完成。模型反馈只有核对原操作的准确终态且 `cleanupConfirmed`、`processTreeStopped` 均为 true 时，才说明进程作用域已结束、从落盘文件继续；不根据进程峰值或外层 Runner 的终止请求猜测有多少驻留进程。反馈由现有呈现层追加，原回执、输出与审批决定保持。[原 Loop 回归](../../test/isolated/tools/shell/unified-entry.test.ts)覆盖确认与未确认清理、后续模型输入、一次派发和原始结果不变。
 
@@ -30,7 +30,7 @@ Windows 辅助进程指引要求在原 Job 内保存并关闭，提示提前选�
 
 前台期限省略时不设置执行截止时限。显式 `execution_timeout_ms` 从首次观察原 Job 进入 `dispatching/running` 起计算，审批和资源排队的 `planned` 等待不消耗执行预算；主／子 Agent 使用同一前台完成路径。观察派发使用短段等待，会有轮询与宿主调度延迟，不承诺从原生进程实际启动瞬间精确计时或毫秒级硬实时保证。时钟启动后不因后续等待或状态观察而重置；期限到达仍只取消同一原 Job，并继续等待其真实停止证据。未派发就终态拒绝或取消的 Job 直接保留原结果，不误标执行超时。用户取消仍在等待期间生效，不因尚未派发而失去响应。[前台回归](../../test/isolated/tools/shell/foreground.test.ts)使用真实 Runtime／SQLite／POSIX Shell，核人工等待超过执行预算后批准仍只执行一次，以及派发后超预算仍取消并确认原进程组停止；该 POSIX 证据不代替其他平台或完整原生进程树资格。
 
-支持范围请求的宿主在工具说明开头和参数中要求 Agent 先选范围。当前技能所需的执行、验证和交付步骤在任务允许时显式申请 `filesystem:full_access`，遵守用户指定的较窄范围。普通工作区命令使用 `workspace_write`。Windows 本地辅助进程的启动和双向管道可能需要完整文件范围，即使源文件在工作区内。本地文件和管道操作使用 `network:none`。Windows 工作区命令失败且原 Job 确认已清理时，模型反馈标明原实际范围，提示先核实受限原因和落盘效果再申请新调用。执行范围由本次授权、当前模式和硬上限决定。
+原装 Windows Git Bash 的工具说明明确指出它没有文件或网络沙箱；若任务必须由系统强制窄范围，不应选择它。非完全模式不能把旧 detached 调用转为原装用户进程；正常后台运行仍跟随父操作。其他支持范围请求的宿主在工具说明开头和参数中要求 Agent 先选范围。当前技能所需的执行、验证和交付步骤在任务允许时显式申请 `filesystem:full_access`，遵守用户指定的较窄范围。普通工作区命令使用 `workspace_write`。Windows 本地辅助进程的启动和双向管道可能需要完整文件范围，即使源文件在工作区内。本地文件和管道操作使用 `network:none`。Windows 工作区命令失败且原 Job 确认已清理时，模型反馈标明原实际范围，提示先核实受限原因和落盘效果再申请新调用。执行范围由本次授权、当前模式和硬上限决定。
 
 新默认 Auto 的调用事实和直接脚本读取复用[权限 owner](../permissions/README.md)的 Shell 领域实现；[Shell 行为工厂](shell-approval.ts)随准确执行定义提供审核材料、指引、风险输出解释和同命令候选，再由可信宿主登记。材料保完整命令与执行事实，模型 description 不成为风险依据。ordinary/high/critical 由 Shell owner 映射为统一 approve_once/ask_user/reject；核心和 SQLite 不重新解析领域风险文本。显式自定义 checker 不被替换为该风险解释器。
 

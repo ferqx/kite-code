@@ -368,3 +368,66 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
     preparation.release();
   }
 }
+/** Resolve the installed interpreter without creating a private runtime or executing it.
+ * The shell preference screen only discovers files; it does not authorize a command. */
+export function discoverInstalledWindowsGitBash() {
+  if (process.platform !== 'win32' || process.arch !== 'x64')
+    throw Error('windows_shell_unqualified');
+  const path = Bun.which('git');
+  if (!path) throw new WindowsGitBashUnavailable();
+  const git = realpathSync.native(path);
+  const selected = discoverGitInstallation(git);
+  if (!selected) throw new WindowsGitBashUnavailable(git);
+  const shell = join(selected.installation, 'usr/bin/bash.exe');
+  if (realpathSync.native(shell) !== shell) throw Error('windows_git_bash_asset_invalid');
+  return { shell, fullShell: shell };
+}
+
+/** Freeze the same original installation closure against which a fresh command is authorized. */
+export async function captureInstalledWindowsGitBashRuntime(shell: string, signal?: AbortSignal) {
+  const selected = discoverGitInstallation(shell);
+  if (!selected || !isAbsolute(shell) || join(selected.installation, 'usr/bin/bash.exe') !== shell)
+    throw Error('windows_git_bash_asset_invalid');
+  const { installation, programRoot } = selected;
+  const source = dirname(shell);
+  const paths: string[] = [];
+  const collect = (dir: string, recursive: boolean) => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isSymbolicLink()) throw Error('windows_git_bash_asset_invalid');
+      if (entry.isDirectory()) {
+        if (recursive) collect(path, true);
+      } else if (entry.isFile() && (recursive || /\.(exe|dll)$/iu.test(entry.name)))
+        paths.push(path);
+    }
+  };
+  collect(source, false);
+  for (const path of ['bin', 'libexec/git-core', 'share/git-core', 'etc'])
+    collect(join(programRoot, path), true);
+  for (const path of ['usr/lib', 'usr/share/misc', 'etc/ssl'])
+    collect(join(installation, path), true);
+  const git = join(programRoot, 'bin/git.exe');
+  if (![shell, join(source, 'msys-2.0.dll'), git].every((path) => paths.includes(path)))
+    throw Error('windows_git_bash_asset_invalid');
+  const facts = await mapAssetVerification(
+    [...new Set(paths)].sort(),
+    async (path, signal) => {
+      const fact = await launchIdentityAsync(path, true, signal);
+      if (fact.canonical !== path) throw Error('windows_git_bash_asset_invalid');
+      return fact;
+    },
+    signal,
+  );
+  const identity = createHash('sha256').update(JSON.stringify(facts)).digest('hex');
+  return {
+    git,
+    fullGit: git,
+    identity,
+    async verify(_full: boolean, signal?: AbortSignal) {
+      // The verified helper admits bounded batches; retain every original file identity.
+      for (let i = 0; i < facts.length; i += 100)
+        await verifyLaunchIdentitiesAsync(facts.slice(i, i + 100), signal);
+    },
+  };
+}

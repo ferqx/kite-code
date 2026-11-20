@@ -12,6 +12,8 @@ Probe，或 Windows Full/fallback UI 状态时。
 
 ## 当前新图与Windows资格
 
+普通 Windows Git Bash 使用受信 PATH 所指向的原装解释器，并在普通用户 token 下由原 Job 管理。不能将此前的只读、工作区或离线授权用于此进程。只读操作不构成权限例外，打开设置本身不运行 Bash。下文的受限 token、兼容副本与 ACL 证据仍用于相应受限后端或历史验收，不能据之宣称普通原装 Bash 有文件或网络沙箱。
+
 2026-11-18 工作区文件替换兼容性修复由原生 ACL 准备层提供。文件继承原 capability 的 `WRITE_DAC`，使 `ReplaceFileW` 可以保留原目标 ACL；目录没有这项有效权限。旧账本在原工作区锁内补齐文件继承权限，准备取消和恢复继续使用同一 SID 与未完成标记。PowerShell 5.1、PowerShell 7 和 Git Bash 的原生回归核实保存、文件占用、目录与区外拒绝和只读 Job 边界。 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash) [真实文件替换回归](../../packages/agent/test/isolated/jobs/windows-file-replace.test.ts)
 
 同日完成 Kite Native 中 OpenAI `gpt-6-luna`／high 的 PowerShell 7 与 Git Bash PPT 复测，两份成品均可在 PowerPoint 打开。仍保留跨命令未保存驻留状态导致的各一次失败，以及首次预览与输入快照核验限制；完整环境、23 个 Job 的清理和文件占用证据归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type AgentRuntime, createRuntime, prepareOutputDirectory } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -9,6 +9,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ChangeEvent } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
+import { discoverInstalledWindowsGitBash } from '../../../../packages/agent/src/jobs/windows-git-bash';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   closeWorktreeFixture,
@@ -21,15 +22,18 @@ import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createWorktreeHost } from '../../src/worktree-host';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
-const native = process.platform === 'darwin' ? test : test.skip;
+const onWindows = process.platform === 'win32' && process.arch === 'x64';
+const native = process.platform === 'darwin' || onWindows ? test : test.skip;
+const nativeGit = onWindows ? Bun.which('git')! : '/usr/bin/git';
 function git(cwd: string, ...args: string[]) {
-  const result = Bun.spawnSync(['/usr/bin/git', ...args], {
+  const result = Bun.spawnSync([nativeGit, ...args], {
     cwd,
     env: {
-      PATH: '/usr/bin:/bin',
+      PATH: onWindows ? process.env.PATH! : '/usr/bin:/bin',
+      ...(onWindows ? { SystemRoot: process.env.SystemRoot!, USERPROFILE: cwd } : {}),
       HOME: cwd,
       GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_GLOBAL: onWindows ? 'NUL' : '/dev/null',
     },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -42,12 +46,16 @@ native(
   async () => {
     const root = persistentWorktreeDirectory('kite-service-worktree-');
     const source = join(root, 'source'),
-      target = join(root, "中文 target\nwith quote'");
+      target = join(root, onWindows ? "中文 target with quote'" : "中文 target\nwith quote'");
     mkdirSync(source);
     git(source, 'init', '-b', 'main');
     git(source, 'config', 'user.name', 'Worktree Fixture');
     git(source, 'config', 'user.email', 'worktree@example.invalid');
     writeFileSync(join(source, 'tracked.txt'), 'committed\n');
+    if (onWindows) {
+      writeFileSync(join(source, '.gitattributes'), 'tracked.txt text eol=lf\n');
+      git(source, 'add', '.gitattributes');
+    }
     git(source, 'add', 'tracked.txt');
     git(source, 'commit', '-m', 'initial');
     const head = git(source, 'rev-parse', 'HEAD');
@@ -159,12 +167,35 @@ native(
         localCodex: false,
         credentialBackend: createTemporaryCredentialBackend(),
         shell: {
-          platform: 'darwin',
+          platform: onWindows ? 'win32' : 'darwin',
           configurationId: 'worktree-service-fixture',
-          env: { PATH: '/usr/bin:/bin', HOME: source },
-          supervisorPath: supervisor.outputs[0]!.path,
+          env: onWindows
+            ? {
+                PATH: process.env.PATH!,
+                SystemRoot: process.env.SystemRoot!,
+                HOME: root,
+                USERPROFILE: root,
+                GIT_CONFIG_NOSYSTEM: '1',
+                GIT_CONFIG_GLOBAL: 'NUL',
+              }
+            : { PATH: '/usr/bin:/bin', HOME: source },
+          supervisorPath: onWindows
+            ? resolve(
+                import.meta.dir,
+                '../../../../native/windows-sandbox-runner/target/release/kite-windows-runner.exe',
+              )
+            : supervisor.outputs[0]!.path,
           bunExecutable: process.execPath,
-          shellExecutable: '/bin/sh',
+          shellExecutable: onWindows ? discoverInstalledWindowsGitBash().shell : '/bin/sh',
+          ...(onWindows
+            ? {
+                windows: {
+                  kind: 'native-git-bash' as const,
+                  fullShellExecutable: discoverInstalledWindowsGitBash().shell,
+                  stateRoot: join(root, 'control'),
+                },
+              }
+            : {}),
           host: {
             controlBase: join(root, 'control'),
             // Match the default host: do not protect the parent of its own staging.
@@ -208,7 +239,7 @@ native(
         workspaceId: 'source',
         mode: 'full',
         trusted: true,
-        nativeShellRead: true,
+        nativeShellRead: !onWindows,
       });
       const results = [];
       const publicProfile = {
@@ -342,7 +373,7 @@ native(
           });
           expect(existsSync(target)).toBe(false);
           const branch = Bun.spawnSync(
-            ['/usr/bin/git', 'show-ref', '--verify', '--quiet', 'refs/heads/must-not-exist'],
+            [nativeGit, 'show-ref', '--verify', '--quiet', 'refs/heads/must-not-exist'],
             { cwd: source },
           );
           expect(branch.exitCode).toBe(1);

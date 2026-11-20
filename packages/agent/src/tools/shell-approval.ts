@@ -44,6 +44,12 @@ export function createShellToolBehaviors(options: {
     request: AuthorizationRequest,
     context?: ToolBehaviorContext,
   ): Promise<Json | null> {
+    // The parent schedules this Job; it did not authorize a full-user process.
+    if (
+      (options.snapshot as { qualification?: unknown }).qualification ===
+      'windows_original_git_bash_current_user_job'
+    )
+      return null;
     const parent = context?.parent;
     const parentBinding =
       parent &&

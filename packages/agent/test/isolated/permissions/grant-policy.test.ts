@@ -174,3 +174,58 @@ test('explicit confirmation support composes without optional policy snapshots',
     true,
   );
 });
+
+test('native Windows process authority excludes a previously offered exact command grant', async () => {
+  const cap = { kind: 'job' as const, definitionId: 'shell.command', definitionVersion: '1' };
+  const raw = {
+    ruleId: 'builtin.shell.command',
+    contractId: 'builtin.shell.exact-command',
+    scope: { commandDigest: 'a'.repeat(64) },
+    bindings: [cap],
+    presentation: { label: 'exact', details: [] },
+  };
+  const candidate = { ...raw, scopeDigest: grantScopeDigest(raw) };
+  let native = false;
+  const p = createPermissionPolicy({
+    readPolicy: async () => ({
+      mode: 'accept_edits',
+      workspaceTrust: true,
+      allowed: [cap],
+      revision: 'same-policy',
+    }),
+    describeCapability: async () => ({
+      ...cap,
+      revision: 'same-executable',
+      safeRead: false,
+      hardAllowed: true,
+      effects: ['process'],
+      autoReview: 'check',
+      grantSatisfiesDefaultCheck: true,
+      grantOffers: [candidate],
+      executionScope: { filesystem: 'full_access', network: native ? 'internet' : 'none' },
+      ...(native ? { windowsNativeUserProcess: true as const } : {}),
+    }),
+  });
+  const invocation: AuthorizationRequest = {
+    ...cap,
+    sessionId: 'owned',
+    runId: null,
+    executionId: 'first',
+    input: { command: 'printf ok' },
+    signal: new AbortController().signal,
+  };
+  const previous = await p.authorize(invocation);
+  expect(previous.grantOffers).toHaveLength(1);
+  expect(await p.reuseRevision!(invocation, cap, candidate, previous)).not.toBeNull();
+  native = true;
+  const fresh = await p.authorize({ ...invocation, executionId: 'new' });
+  expect(fresh.allowed).toBe(false);
+  expect(fresh.revision).not.toBe(previous.revision);
+  expect(fresh.grantOffers ?? []).toEqual([]);
+  expect(fresh.approval?.options).toHaveLength(1);
+  expect(fresh.approval?.request).toMatchObject({
+    windowsNativeUserProcess: true,
+    executionScope: { filesystem: 'full_access', network: 'internet' },
+  });
+  expect(await p.reuseRevision!(invocation, cap, candidate, fresh)).toBeNull();
+});

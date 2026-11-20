@@ -29,6 +29,7 @@ export interface ShellToolsOptions {
   readonly powerShellVersion?: string;
   readonly powerShellEdition?: 'Desktop' | 'Core';
   readonly gitBashVersion?: string;
+  readonly windowsNativeGitBash?: true;
   readonly windowsUserLocale?: string;
   readonly outputCollection?: true;
   readonly classifyPresentation?: (command: string) => Promise<'exploration' | 'standalone'>;
@@ -128,9 +129,11 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     ...(options.job.resources ? { resources: structuredClone(options.job.resources) } : {}),
   });
   if (job.id !== 'shell.command') throw new AgentError('invalid_shell_job');
-  const scopeGuidance = options.permissionsSchema
-    ? ' Choose the filesystem request before composing the command. For a step required by the skill you are executing, explicitly pass filesystem:"full_access" on this call if the task allows it. Set network separately. Current authorization and hard limits determine the effective scope. Before retrying with wider scope, confirm that it addresses the error and check which effects already occurred.'
-    : '';
+  const scopeGuidance = options.windowsNativeGitBash
+    ? ' This installed Git Bash runs with the ordinary Windows user’s file and network access. It has no read-only, workspace or offline sandbox. Do not use it for a task requiring that confinement. Keep the command within the user’s request. A narrower request does not restrict the process.'
+    : options.permissionsSchema
+      ? ' Choose the filesystem request before composing the command. For a step required by the skill you are executing, explicitly pass filesystem:"full_access" on this call if the task allows it. Set network separately. Current authorization and hard limits determine the effective scope. Before retrying with wider scope, confirm that it addresses the error and check which effects already occurred.'
+      : '';
   const powerShellVersion = options.powerShellVersion ?? '(version not reported)';
   const windowsPowerShell = options.powerShellEdition === 'Desktop';
   const gitBashVersion = options.gitBashVersion ? ` ${options.gitBashVersion}` : '';
@@ -152,11 +155,16 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     ? ` To check an uncertain executable, run ${options.dialect === 'powershell' ? 'Get-Command NAME' : 'type NAME'} as a standalone probe and keep its diagnostics. If the result gives an absolute candidate path, check it with the program's supported version probe before considering installation.`
     : ' If a required program is uncertain, check command resolution and a supported version probe in the same Job before using it.';
   const windowsProcessGuidance = options.dialect
-    ? ' On Windows, Kite stops remaining child processes when the command exits, including with background:true. Before splitting a stateful workflow, identify where each step will save its data to disk. Start and use local helpers within the same running command, then flush their changes and close them before it exits. Reopen the saved file from disk in the next call before further edits or delivery. Default local named pipes can deny bidirectional access under workspace_write. When available, select the CLI’s supported single-process or standalone batch mode before execution. After a sharing violation, verify what was saved and wait for the process holding the file to release it before retrying.'
+    ? ' On Windows, Kite stops remaining child processes when the command exits, including with background:true. Before splitting a stateful workflow, identify where each step will save its data to disk. Start and use local helpers within the same running command, then flush their changes and close them before it exits. Reopen the saved file from disk in the next call before further edits or delivery.' +
+      (options.windowsNativeGitBash
+        ? ''
+        : ' Default local named pipes can deny bidirectional access under workspace_write. When available, select the CLI’s supported single-process or standalone batch mode before execution.') +
+      ' After a sharing violation, verify what was saved and wait for the process holding the file to release it before retrying.'
     : '';
-  const windowsFilesystemGuidance = options.dialect
-    ? ' On Windows, request full_access for a required native helper when its startup or bidirectional local named pipe needs that scope, even for a workspace file.'
-    : '';
+  const windowsFilesystemGuidance =
+    options.dialect && !options.windowsNativeGitBash
+      ? ' On Windows, request full_access for a required native helper when its startup or bidirectional local named pipe needs that scope, even for a workspace file.'
+      : '';
   const outputGuidance = options.outputCollection
     ? ' KITE_OUTPUT_DIR belongs to the current Job. Keep the verified final file in the workspace or user-requested destination. If KITE_DOCUMENTS_BUN and KITE_DOCUMENTS_HELPER are available, run the helper with stage --input <saved-file>. It copies the saved file into KITE_OUTPUT_DIR and returns its actual absolutePath and a Markdown-ready absolute path in markdownTarget. Report the saved location with [filename](<markdownTarget>), using that value exactly. Otherwise resolve the actual absolute path in Shell before reporting it and copy the saved file to KITE_OUTPUT_DIR. Files from a failed Job are not delivered.'
     : '';
@@ -232,12 +240,15 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
               permissions: options.permissionsSchema,
               filesystem: {
                 enum: ['workspace_write', 'full_access'],
-                description: `Set "full_access" explicitly for commands required by the active skill, including its validation and delivery steps, when the user and task allow it. Use "workspace_write" for ordinary workspace commands and when the task limits you to that scope. Other external writes require task authorization and an explicit "full_access" request.${windowsFilesystemGuidance}`,
+                description: options.windowsNativeGitBash
+                  ? 'The installed Git Bash uses normal user file access. A requested workspace scope is not a sandbox.'
+                  : `Set "full_access" explicitly for commands required by the active skill, including its validation and delivery steps, when the user and task allow it. Use "workspace_write" for ordinary workspace commands and when the task limits you to that scope. Other external writes require task authorization and an explicit "full_access" request.${windowsFilesystemGuidance}`,
               },
               network: {
                 enum: ['none', 'internet'],
-                description:
-                  'Set "none" for local file work and local named-pipe IPC, including when requesting full_access. Set "internet" for required, authorized network access, including localhost, 127.0.0.1, ::1, LAN and the Internet.',
+                description: options.windowsNativeGitBash
+                  ? 'Installed Git Bash is not network-isolated. Do not use it for tasks requiring an offline process.'
+                  : 'Set "none" for local file work and local named-pipe IPC, including when requesting full_access. Set "internet" for required, authorized network access, including localhost, 127.0.0.1, ::1, LAN and the Internet.',
               },
             }
           : {}),

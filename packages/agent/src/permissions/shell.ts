@@ -21,9 +21,21 @@ import type {
   JobHandle,
 } from '../extensions';
 import { JobStartError } from '../extensions';
-import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
-import { captureWindowsGitBashRuntime, windowsGitProgram } from '../jobs/windows-git-bash';
-import { powerShellLaunchIdentities } from '../jobs/windows-powershell';
+import {
+  launchIdentityAsync,
+  mapAssetVerification,
+  verifyLaunchIdentitiesAsync,
+} from '../jobs/launch-identity';
+import {
+  captureInstalledWindowsGitBashRuntime,
+  captureWindowsGitBashRuntime,
+  windowsGitProgram,
+} from '../jobs/windows-git-bash';
+import {
+  discoverPreferredWindowsPowerShell,
+  powerShellLaunchIdentities,
+  type WindowsPowerShell,
+} from '../jobs/windows-powershell';
 import { type WindowsShellBackend, windowsUserLocale } from '../jobs/windows-shell';
 import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
@@ -83,7 +95,7 @@ export const shellToolIds = [
 /** Interpret only the original accepted default-policy tree, including delegated AND policies. */
 function acceptedScopeLeaves(context: JobContext, definitionId: string) {
   const authorization = context.dispatchAuthorization;
-  const leaves: { mode: string; executionScope: unknown }[] = [];
+  const leaves: { mode: string; executionScope: unknown; nativeUserProcess: boolean }[] = [];
   if (!authorization?.revision) throw new AgentError('shell_dispatch_scope_unavailable');
   for (const { namespace, data } of dispatchScopeLeaves(
     authorization.snapshot,
@@ -104,7 +116,11 @@ function acceptedScopeLeaves(context: JobContext, definitionId: string) {
       capability.hardAllowed !== true
     )
       throw new AgentError('shell_dispatch_scope_unavailable');
-    leaves.push({ mode: data.mode, executionScope: capability.executionScope });
+    leaves.push({
+      mode: data.mode,
+      executionScope: capability.executionScope,
+      nativeUserProcess: capability.windowsNativeUserProcess === true,
+    });
   }
   return leaves;
 }
@@ -117,10 +133,26 @@ export function hostFilesystemScope(
     : 'workspace_write';
 }
 /** Read only the final accepted proof, intersecting independent filesystem and network grants. */
-export function hostExecutionScope(context: JobContext, definitionId = 'shell.command') {
+export function hostExecutionScope(
+  context: JobContext,
+  definitionId = 'shell.command',
+  requireNativeUserProcess = false,
+) {
   let filesystem: 'workspace_write' | 'full_access' = 'full_access';
   let network: 'none' | 'internet' = 'internet';
   for (const leaf of acceptedScopeLeaves(context, definitionId)) {
+    if (
+      requireNativeUserProcess &&
+      (!leaf.nativeUserProcess ||
+        !leaf.executionScope ||
+        typeof leaf.executionScope !== 'object' ||
+        Array.isArray(leaf.executionScope) ||
+        !('filesystem' in leaf.executionScope) ||
+        leaf.executionScope.filesystem !== 'full_access' ||
+        !('network' in leaf.executionScope) ||
+        leaf.executionScope.network !== 'internet')
+    )
+      throw new AgentError('windows_native_shell_authority_missing');
     // Older trusted adapter proofs never contained a per-call escalation. Keep
     // their mode ceiling; a missing field cannot widen an approved call.
     const scope = leaf.executionScope ?? {
@@ -201,6 +233,10 @@ export async function inspectShellAssets(
     if (options.shellExecutable !== powerShell.executable.canonical)
       throw new AgentError('windows_powershell_asset_invalid');
     for (const dependency of powerShellAssets.slice(1)) paths.push([dependency.canonical, false]);
+  } else if (options.windows?.kind === 'native-git-bash') {
+    if (options.shellExecutable !== options.windows.fullShellExecutable)
+      throw new AgentError('shell_asset_unavailable');
+    paths.push([join(dirname(options.shellExecutable), 'msys-2.0.dll'), true]);
   } else if (options.windows && options.windows.kind !== 'powershell')
     paths.push(
       [options.windows.fullShellExecutable, true],
@@ -367,6 +403,7 @@ async function worktreeAssets(
   bun: ShellAsset,
   windowsGitPath: string | undefined,
   signal?: AbortSignal,
+  nativeWorker?: WindowsPowerShell,
 ) {
   const root = gitWorktreeAssetDirectory();
   const unavailable = (code: string) => ({
@@ -393,6 +430,8 @@ async function worktreeAssets(
       !['sh', 'bash', 'dash'].includes(basename(await realpath(options.shellExecutable)))
     )
       return unavailable('unsupported_shell_configuration');
+    if (options.windows?.kind === 'native-git-bash' && !nativeWorker)
+      return unavailable('worktree_worker_unavailable');
     const manifestPath = join(root, 'manifest.json');
     const manifestAsset = await asset(manifestPath, false, signal);
     const bytes = await readFile(manifestAsset.path);
@@ -457,7 +496,14 @@ async function worktreeAssets(
     const profile: TrustedWorkerLaunch = Object.freeze({
       ...profileBase,
       digest: createHash('sha256')
-        .update(JSON.stringify({ ...profileBase, config, bun }))
+        .update(
+          JSON.stringify({
+            ...profileBase,
+            config,
+            bun,
+            ...(nativeWorker ? { workerPowerShell: powerShellLaunchIdentities(nativeWorker) } : {}),
+          }),
+        )
         .digest('hex'),
     });
     const captured = [worker, config, git, manifestAsset];
@@ -480,6 +526,11 @@ async function worktreeAssets(
       assets: captured,
       profile,
       async verify(verificationSignal?: AbortSignal) {
+        if (nativeWorker)
+          await verifyLaunchIdentitiesAsync(
+            powerShellLaunchIdentities(nativeWorker),
+            verificationSignal,
+          );
         const actual = await mapAssetVerification(
           captured,
           (item, readSignal, index) => asset(item.path, index === 2, readSignal),
@@ -543,10 +594,16 @@ export async function createShellConfiguration(input: {
     // PowerShell may have a standalone Git installation. Git Bash uses the
     // real binary inside the same staged closure as its interpreter.
     const windows = options.windows;
-    const bashRuntime =
-      windows && windows.kind !== 'powershell'
-        ? await captureWindowsGitBashRuntime(shell.path, windows.fullShellExecutable, input.signal)
+    const native =
+      windows?.kind === 'native-git-bash'
+        ? await captureInstalledWindowsGitBashRuntime(shell.path, input.signal)
         : undefined;
+    const nativeScope = { filesystem: 'full_access', network: 'internet' } as const;
+    const bashRuntime =
+      native ??
+      (windows && windows.kind !== 'powershell'
+        ? await captureWindowsGitBashRuntime(shell.path, windows.fullShellExecutable, input.signal)
+        : undefined);
     const gitPath = windows?.kind === 'powershell' ? windows.gitExecutable : bashRuntime?.git;
     let git: ShellAsset | undefined;
     if (gitPath) {
@@ -564,8 +621,28 @@ export async function createShellConfiguration(input: {
       signal: input.signal,
     });
     const searchAsset = await asset(ripgrepAsset(), true, input.signal);
+    let nativeWorker: WindowsPowerShell | undefined;
+    if (native && selected.includes('git.worktree')) {
+      try {
+        nativeWorker = await discoverPreferredWindowsPowerShell();
+      } catch (error) {
+        input.signal?.throwIfAborted();
+        if (
+          error instanceof Error &&
+          error.message === 'windows_powershell_inspection_close_unknown'
+        )
+          throw error;
+      }
+    }
     const worktree = selected.includes('git.worktree')
-      ? await worktreeAssets(options, cwd, bun, bashRuntime?.fullGit ?? git?.path, input.signal)
+      ? await worktreeAssets(
+          options,
+          cwd,
+          bun,
+          bashRuntime?.fullGit ?? git?.path,
+          input.signal,
+          nativeWorker,
+        )
       : undefined;
     const worktreeRequest = (request: AuthorizationRequest) => {
       if (request.definitionVersion !== '1') return undefined;
@@ -680,6 +757,13 @@ export async function createShellConfiguration(input: {
               ? { background: true }
               : {}),
             executionScope: host ? value.executionScope : null,
+            ...(native
+              ? {
+                  windowsNativeUserProcess: true,
+                  authority: nativeScope,
+                  installation: native.identity,
+                }
+              : {}),
             cwd: directory,
             env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),
             assets,
@@ -738,8 +822,8 @@ export async function createShellConfiguration(input: {
       { filesystem: 'workspace_write' | 'full_access'; network: 'none' }
     >();
     const executionScope = (context: JobContext) => {
-      const accepted = hostExecutionScope(context);
       const requested = workerScopes.get(context.executionId);
+      const accepted = hostExecutionScope(context, 'shell.command', !!native && !requested);
       return requested
         ? {
             filesystem:
@@ -762,7 +846,7 @@ export async function createShellConfiguration(input: {
         if (!worktree?.profile) return;
         const worker = parseWorkerCommand(command, worktree.configuration);
         if (!worker) return;
-        return powerShell
+        return powerShell || native
           ? {
               ...worktree.profile,
               powerShellCommand: buildPowerShellWorkerCommand(worktree.configuration, worker),
@@ -781,6 +865,12 @@ export async function createShellConfiguration(input: {
             {
               ...jobOptions,
               ...options.windows,
+              ...(native
+                ? {
+                    expectedNativeRuntimeIdentity: native.identity,
+                    nativeWorktreePowerShell: nativeWorker,
+                  }
+                : {}),
               cwd: directory,
               workspaceRoot: cwd,
               controlBase: host.controlBase,
@@ -818,6 +908,7 @@ export async function createShellConfiguration(input: {
     const handleOwners = new WeakMap<JobHandle, JobDefinition>();
     const extension = createShellExtension({
       ...(host ? { permissionsSchema } : {}),
+      ...(native ? { windowsNativeGitBash: true as const } : {}),
       ...(outputCollection ? { outputCollection: true } : {}),
       ...(windows
         ? {
@@ -1050,7 +1141,9 @@ export async function createShellConfiguration(input: {
           options.platform === 'win32'
             ? powerShell
               ? 'windows_unelevated_powershell_job'
-              : 'windows_unelevated_git_bash_job'
+              : native
+                ? 'windows_original_git_bash_current_user_job'
+                : 'windows_unelevated_git_bash_job'
             : options.platform === 'linux'
               ? options.host?.protectedFiles?.length
                 ? 'linux_owned_pid_namespace_bubblewrap_private_directories'
@@ -1068,6 +1161,7 @@ export async function createShellConfiguration(input: {
           parser: [...commandPolicy.assets],
           ripgrep: searchAsset,
           ...(git ? { windowsReadGit: git } : {}),
+          ...(native ? { windowsNativeUserProcess: native.identity } : {}),
           ...(worktree
             ? {
                 gitWorktree: {
@@ -1113,7 +1207,7 @@ export async function createShellConfiguration(input: {
               });
         const prepared = await preparer.prepare(
           value.command,
-          value.executionScope,
+          native ? nativeScope : value.executionScope,
           request.signal,
         );
         request.signal.throwIfAborted();
@@ -1237,6 +1331,18 @@ export async function createShellConfiguration(input: {
         if (!shellCommandKind(request)) return undefined;
         const value = commandRequest(request, !!host);
         if (!value) return { hardAllowed: false, denialReason: 'invalid_shell_arguments' };
+        // A Job's confirmation cannot represent a legacy parent's detached lifetime.
+        // Keep existing explicit Full semantics, but never upgrade a narrow detached request.
+        if (
+          native &&
+          request.kind === 'tool' &&
+          value.cancellation === 'detached' &&
+          policy?.mode !== 'full'
+        )
+          return {
+            hardAllowed: false,
+            denialReason: 'windows_native_detached_authorization_unavailable',
+          };
         let directory: Awaited<ReturnType<typeof executionDirectory>>;
         try {
           directory = await executionDirectory(value.workdir);
@@ -1297,6 +1403,15 @@ export async function createShellConfiguration(input: {
               }),
             )
             .digest('hex'),
+          ...(native
+            ? {
+                windowsNativeUserProcess: true as const,
+                safeRead: false,
+                effects: ['process', 'external', 'network'] as const,
+                executionScope: nativeScope,
+                autoTimeoutScope: 'stop' as const,
+              }
+            : {}),
           hardAllowed: denial === null,
           ...(denial ? { denialReason: ps ? denial : 'shell_command_hard_denied' } : {}),
         };
