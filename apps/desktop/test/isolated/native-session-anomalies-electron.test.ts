@@ -206,7 +206,6 @@ test.skipIf(process.platform !== 'darwin')(
                         arguments: JSON.stringify({
                           path: `effects/${marker}.txt`,
                           content: marker,
-                          base: null,
                         }),
                       },
                     },

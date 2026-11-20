@@ -957,7 +957,12 @@ export function Conversation({
     );
     const visibleTurns = new Set([...visible].map(processTurnId).filter(Boolean));
     const anchors = new Map<string, Message>();
+    const turnBySubmission = new Map<string, string>();
+    if (turnActivity?.presentationKey)
+      turnBySubmission.set(turnActivity.presentationKey, turnActivity.turnId);
     for (const message of messages) {
+      if (message.systemKind === 'turn_timing' && message.turnId && message.presentationKey)
+        turnBySubmission.set(message.presentationKey, message.turnId);
       if (structural(message) && message.turnId && !anchors.has(message.turnId))
         anchors.set(message.turnId, message);
     }
@@ -970,6 +975,13 @@ export function Conversation({
         text: '',
         settled: ['completed', 'failed', 'cancelled'].includes(turnActivity.status),
       });
+    // A pending original may have only its submission ID when the Run timing
+    // arrives. Reserve the structural row for that exact input, not a neighbor.
+    const inputTurn = (message: Message) =>
+      message.role === 'user' && !message.inputKind
+        ? (message.turnId ?? turnBySubmission.get(message.presentationKey ?? message.id))
+        : undefined;
+    const inputTurns = new Set([...visible].map(inputTurn).filter(Boolean));
     const anchoredTurns = new Set<string>();
     // A hidden-only Turn still needs its status in chronological position. Keep
     // one structural anchor only when no readable message already owns that Turn;
@@ -978,22 +990,16 @@ export function Conversation({
     for (const message of messages) {
       if (visible.has(message)) {
         shown.push(message);
-        const anchor = message.turnId && anchors.get(message.turnId);
-        // Native seals timing/terminal markers after all history. The exact user
-        // identity keeps a no-output Turn before subsequent conversation rounds.
-        if (
-          message.role === 'user' &&
-          !processTurnId(message) &&
-          anchor &&
-          !visibleTurns.has(message.turnId) &&
-          !anchoredTurns.has(message.turnId)
-        ) {
-          anchoredTurns.add(message.turnId);
+        const turn = inputTurn(message);
+        const anchor = turn && anchors.get(turn);
+        if (turn && anchor && !visibleTurns.has(turn) && !anchoredTurns.has(turn)) {
+          anchoredTurns.add(turn);
           shown.push(anchor);
         }
       } else if (
         structural(message) &&
         message.turnId &&
+        !inputTurns.has(message.turnId) &&
         !visibleTurns.has(message.turnId) &&
         !anchoredTurns.has(message.turnId)
       ) {

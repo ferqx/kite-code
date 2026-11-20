@@ -428,7 +428,7 @@ async function probe(page: Page) {
 }
 async function select(page: Page, title: string) {
   await page.getByRole('button', { name: title, exact: true }).click();
-  await page.locator('.session-header').getByTitle(title, { exact: true }).waitFor();
+  await page.locator('.session-header .breadcrumb strong').filter({ hasText: title }).waitFor();
   await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).waitFor();
   const mode = page.locator('[data-permission-trigger]');
   await until(async () => (await mode.getAttribute('aria-busy')) !== 'true', 'mode readable');

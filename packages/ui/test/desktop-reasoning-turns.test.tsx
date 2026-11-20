@@ -464,6 +464,75 @@ test('timing-only completed turns keep exact identities and never render private
   expect(result.html).not.toContain('PRIVATE');
 });
 
+for (const markerFirst of [true, false]) {
+  test(`a structural timing marker keeps immediately running status below its original input (marker first: ${markerFirst})`, () => {
+    const first: Message = { ...user('original'), turnId: 'run' };
+    const timing: Message = {
+      id: 'timing',
+      turnId: 'run',
+      role: 'system',
+      systemKind: 'turn_timing',
+      text: '',
+      settled: false,
+    };
+    const later: Message = { ...user('later'), turnId: 'later-turn' };
+    const rows = markerFirst ? [timing, first] : [first, timing];
+    const { document } = render([...rows, later, terminal('later-turn', 'completed')], false, true);
+    const entries = [...document.querySelectorAll('.message.user,.agent-turn')].map((el) =>
+      el.classList.contains('agent-turn')
+        ? el.getAttribute('data-turn-status')
+        : el.getAttribute('data-message-id'),
+    );
+    expect(entries).toEqual(['original', 'running', 'later', 'completed']);
+    expect(document.querySelector('.agent-turn')?.textContent).toContain('正在回复');
+  });
+}
+
+test('Native immediately shows one running status below an unacknowledged original, then retains order on durable handoff', () => {
+  const timing: Message = {
+    id: 'native-run-timing',
+    turnId: 'run',
+    presentationKey: 'new-command',
+    role: 'system',
+    systemKind: 'turn_timing',
+    text: '',
+    settled: false,
+  };
+  const pending: Message = { ...user('new-command'), text: 'same input', delivery: 'unknown' };
+  const saved: Message = {
+    ...user('saved-message'),
+    turnId: 'run',
+    presentationKey: 'new-command',
+    text: 'same input',
+  };
+  const prior: Message = { ...user('other-command'), text: 'same input', turnId: 'prior' };
+  for (const input of [pending, saved])
+    for (const pair of [
+      [timing, input],
+      [input, timing],
+    ]) {
+      const html = renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={[prior, terminal('prior', 'completed'), ...pair]}
+          loading={false}
+          selected
+          connected
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'run', status: 'running' }}
+        />,
+      );
+      const doc = new JSDOM(html).window.document;
+      const entries = [...doc.querySelectorAll('.message.user,.agent-turn')].map(
+        (el) => el.getAttribute('data-message-id') ?? el.getAttribute('data-turn-status'),
+      );
+      expect(entries).toEqual(['other-command', 'completed', input.id, 'running']);
+      expect(doc.querySelector('.agent-turn[data-turn-status=running]')?.textContent).toContain(
+        '进行中',
+      );
+    }
+});
+
 test('late Native terminal markers anchor a no-output turn after its exact original user', () => {
   const firstUser: Message = { ...user('first-user'), turnId: 'first-run' };
   const secondUser: Message = { ...user('second-user'), turnId: 'second-run' };
