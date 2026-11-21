@@ -26,7 +26,6 @@ const { Conversation } = await import('../../src/desktop/Conversation');
 const { DesktopDiagnosticsProvider } = await import('../../src/desktop/diagnostics');
 const {
   completedToolActions,
-  completedToolCategory,
   completedToolSummary,
   toolIcon,
   toolTraceTitle,
@@ -1735,12 +1734,12 @@ test('completed Trace categories deduplicate in first-action order without borro
     completedToolActions([
       mcp,
       tool('read', 'completed'),
-      { ...mcp, id: 'connect', title: 'mcp.connect' },
+      { ...mcp, id: 'connect', toolName: 'mcp.connect', toolSummaryCategory: undefined },
       skill,
       { ...skill, id: 'skill-2' },
     ]),
-  ).toBe('运行了 · 读取了 · 加载了');
-  expect(completedToolActions([skill, mcp, skill])).toBe('加载了 · 运行了');
+  ).toBe('调用了 MCP 工具读取了文件加载了技能');
+  expect(completedToolActions([skill, mcp, skill])).toBe('加载了技能调用了 MCP 工具');
   for (const category of [mcp, skill]) {
     for (const status of [
       'failed',
@@ -1756,13 +1755,12 @@ test('completed Trace categories deduplicate in first-action order without borro
     ] as const) {
       const message = { ...category, status };
       expect(completedToolActions([message])).toBe('');
-      expect(completedToolCategory(message)).toBeUndefined();
+      expect(completedToolSummary(message)).toBeUndefined();
     }
     expect(completedToolActions([{ ...category, dispatchCommitted: false }])).toBe('');
-    expect(completedToolCategory({ ...category, dispatchCommitted: false })).toBeUndefined();
+    expect(completedToolSummary({ ...category, dispatchCommitted: false })).toBeUndefined();
   }
   for (const toolName of [
-    'mcp_tool',
     'list_mcp_tools',
     'list_mcp_resources',
     'read_mcp_resource',
@@ -1770,10 +1768,11 @@ test('completed Trace categories deduplicate in first-action order without borro
     'mcp.resources.list',
     'mcp.resources.read',
   ])
-    expect(completedToolActions([{ ...mcp, toolSummaryCategory: undefined, toolName }])).toBe(
-      '运行了',
-    );
-  expect(completedToolActions([{ ...skill, toolSummaryCategory: undefined }])).toBe('加载了');
+    expect(completedToolActions([{ ...mcp, toolSummaryCategory: undefined, toolName }])).toBe('');
+  expect(
+    completedToolActions([{ ...mcp, toolSummaryCategory: undefined, toolName: 'mcp_tool' }]),
+  ).toBe('调用了 MCP 工具');
+  expect(completedToolActions([{ ...skill, toolSummaryCategory: undefined }])).toBe('加载了技能');
   expect(
     completedToolActions([
       {
@@ -1783,7 +1782,7 @@ test('completed Trace categories deduplicate in first-action order without borro
         title: '读取技能资料',
       },
     ]),
-  ).toBe('读取了');
+  ).toBe('');
   expect(
     completedToolActions([
       {
@@ -1793,16 +1792,16 @@ test('completed Trace categories deduplicate in first-action order without borro
         title: 'MCP spoofed title',
       },
     ]),
-  ).toBe('运行了');
+  ).toBe('');
   expect(
     completedToolActions([
       {
         ...tool('shell', 'failed'),
         toolName: 'shell_execute',
-        shell: { operation: 'execute', jobStatus: 'failed' },
+        shell: { operation: 'execute', jobStatus: 'failed', exitCode: 7 },
       },
     ]),
-  ).toBe('运行了');
+  ).toBe('运行了命令');
 });
 
 test('retired tools retain original titles, targets, states and results through generic presentation', () => {
@@ -1841,8 +1840,8 @@ test('retired tools retain original titles, targets, states and results through 
       const generic = { ...original, toolName: 'unknown_tool' };
       expect(toolIcon(original)).toBe(toolIcon(generic));
       expect(toolTraceTitle(original)).toBe(`Original ${toolName} original-target.txt`);
-      expect(completedToolActions([original])).toBe(status === 'completed' ? '运行了' : '');
-      expect(completedToolCategory(original)).toBe(status === 'completed' ? '运行了' : undefined);
+      expect(completedToolActions([original])).toBe('');
+      expect(completedToolSummary(original)).toBeUndefined();
       const dom = new JSDOM(
         renderToStaticMarkup(
           <ToolActivity
@@ -1871,39 +1870,41 @@ test('retired tools retain original titles, targets, states and results through 
   }
 });
 
-test('completed action summaries use four owned labels for supported actions without rewriting data', () => {
+test('completed action summaries include only allowlisted actions without rewriting data', () => {
   const matrix: readonly [string | undefined, string][] = [
-    ['read_file', '读取了'],
-    ['read_skill_resource', '读取了'],
-    ['view_images', '读取了'],
-    ['write_file', '运行了'],
-    ['edit_file', '运行了'],
-    ['web_fetch', '读取了'],
-    ['browser_execute', '运行了'],
-    ['tool_search', '搜索了'],
-    ['skill', '运行了'],
-    ['task', '运行了'],
-    ['spawn_agent', '运行了'],
-    ['follow_up_agent', '运行了'],
-    ['send_agent_message', '运行了'],
-    ['wait_agent_events', '运行了'],
-    ['list_agents', '运行了'],
-    ['interrupt_agent', '运行了'],
-    ['ask_user', '运行了'],
-    ['write_plan', '运行了'],
-    ['update_plan', '运行了'],
-    ['request_plan_review', '运行了'],
-    ['planning.read', '读取了'],
-    ['planning.write', '运行了'],
-    ['planning.review', '运行了'],
-    ['planning.update', '运行了'],
-    ['git.worktree', '运行了'],
-    ['unknown-tool', '运行了'],
-    ['toString', '运行了'],
-    ['constructor', '运行了'],
-    ['__proto__', '运行了'],
-    ['hasOwnProperty', '运行了'],
-    [undefined, '运行了'],
+    ['read_file', '读取了文件'],
+    ['read_skill_resource', ''],
+    ['view_images', ''],
+    ['reinspect_images', ''],
+    ['write_file', '写入了文件'],
+    ['edit_file', '编辑了文件'],
+    ['web_fetch', '读取了网页'],
+    ['web_search', '搜索了网页'],
+    ['browser_execute', ''],
+    ['tool_search', ''],
+    ['skill', ''],
+    ['task', ''],
+    ['spawn_agent', ''],
+    ['follow_up_agent', ''],
+    ['send_agent_message', ''],
+    ['wait_agent_events', ''],
+    ['list_agents', ''],
+    ['interrupt_agent', ''],
+    ['ask_user', '询问了用户'],
+    ['write_plan', ''],
+    ['update_plan', ''],
+    ['request_plan_review', ''],
+    ['planning.read', ''],
+    ['planning.write', ''],
+    ['planning.review', ''],
+    ['planning.update', ''],
+    ['git.worktree', ''],
+    ['unknown-tool', ''],
+    ['toString', ''],
+    ['constructor', ''],
+    ['__proto__', ''],
+    ['hasOwnProperty', ''],
+    [undefined, ''],
   ];
   for (const [toolName, expected] of matrix) {
     const original: Message = {
@@ -1913,7 +1914,7 @@ test('completed action summaries use four owned labels for supported actions wit
       target: undefined,
     };
     expect(completedToolActions([original, { ...original, id: 'duplicate' }])).toBe(expected);
-    expect(completedToolSummary(original)).toBe(expected);
+    expect(completedToolSummary(original)).toBe(expected || undefined);
     expect(original.title).toBe('已保存工具');
 
     for (const status of [
@@ -1938,22 +1939,32 @@ test('completed action summaries use four owned labels for supported actions wit
     expect(completedToolSummary({ ...original, dispatchCommitted: false })).toBeUndefined();
   }
   const read = { ...tool('read', 'completed'), target: '已完成.txt' };
-  expect(completedToolSummary(read)).toBe('读取了');
+  expect(completedToolSummary(read)).toBe('读取了文件');
+  expect(completedToolSummary({ ...read, fileMissing: true })).toBe('检查了文件');
   expect(completedToolActions([read, { ...read, toolName: 'edit_file' }, read])).toBe(
-    '读取了 · 运行了',
+    '读取了文件编辑了文件',
   );
   expect(completedToolSummary({ ...read, toolName: 'write_file', fileCreated: true })).toBe(
-    '运行了',
+    '创建了文件',
   );
   const image = { ...read, toolName: 'view_images', toolImageCount: 7 };
-  expect(completedToolSummary(image)).toBe('读取了');
+  expect(completedToolSummary(image)).toBe('查看了图片');
+  expect(completedToolSummary({ ...image, toolName: 'reinspect_images' })).toBe('查看了图片');
+  expect(
+    completedToolSummary({
+      ...image,
+      toolName: 'reinspect_images',
+      toolImageCount: 0,
+      imageSourcesListed: true,
+    }),
+  ).toBe('查看了图片来源');
   expect(image.toolImageCount).toBe(7);
   for (const [operation, expected] of [
-    ['execute', '运行了'],
-    ['launch', '运行了'],
-    ['read', '运行了'],
-    ['wait', '运行了'],
-    ['stop', '运行了'],
+    ['execute', '运行了命令'],
+    ['launch', '运行了命令'],
+    ['read', ''],
+    ['wait', ''],
+    ['stop', ''],
   ] as const) {
     const shell: Message = {
       ...tool('shell', 'completed'),
@@ -1962,20 +1973,23 @@ test('completed action summaries use four owned labels for supported actions wit
       shell: { operation, jobStatus: 'succeeded', command: 'printf 已完成' },
     };
     expect(completedToolActions([shell])).toBe(expected);
-    expect(completedToolSummary(shell)).toBe(expected);
+    expect(completedToolSummary(shell)).toBe(expected || undefined);
   }
   const failed: Message = {
     ...tool('failed', 'failed'),
     toolName: 'shell_execute',
     target: undefined,
-    shell: { operation: 'execute', jobStatus: 'failed' },
+    shell: { operation: 'execute', jobStatus: 'failed', exitCode: 7 },
   };
-  expect(completedToolSummary(failed)).toBe('运行了');
+  expect(completedToolSummary(failed)).toBe('运行了命令');
   expect(failed.status).toBe('failed');
   for (const shell of [
     { operation: 'execute' as const },
     { operation: 'execute' as const, jobStatus: 'outcome_unknown' as const },
     { operation: 'execute' as const, timedOut: true },
+    { operation: 'execute' as const, jobStatus: 'failed' as const },
+    { operation: 'launch' as const, accepted: true },
+    { operation: 'launch' as const, accepted: true, jobStatus: 'running' as const },
   ])
     expect(completedToolSummary({ ...failed, status: 'completed', shell })).toBeUndefined();
   expect(completedToolActions([])).toBe('');
@@ -1989,27 +2003,31 @@ test('simple Trace summaries group by first occurrence, not command or remote co
   });
   const messages = [
     completed('read', 'read_file'),
-    completed('image', 'view_images'),
+    completed('image', 'view_images', { toolImageCount: 1 }),
     completed('search', 'tool_search'),
     completed('shell', 'shell_execute', {
       target: 'rg needle . && cat result.txt',
       arguments: { command: 'rg needle . && cat result.txt' },
       shell: { operation: 'execute', jobStatus: 'succeeded' },
     }),
-    completed('mcp', 'mcp.resources.read', { toolSummaryCategory: 'mcp' }),
+    completed('resource-mcp', 'mcp.resources.read'),
+    completed('mcp', 'mcp_tool'),
     completed('skill', 'load_skill', { toolSummaryCategory: 'skill', target: 'private_skill' }),
     completed('resource', 'read_skill_resource'),
     completed('retired-search', 'search_files'),
   ];
   const original = structuredClone(messages);
-  expect(completedToolActions(messages)).toBe('读取了 · 搜索了 · 运行了 · 加载了');
-  expect(completedToolActions([...messages].reverse())).toBe('运行了 · 读取了 · 加载了 · 搜索了');
+  expect(completedToolActions(messages)).toBe(
+    '读取了文件查看了图片运行了命令调用了 MCP 工具加载了技能',
+  );
+  expect(completedToolActions([...messages].reverse())).toBe(
+    '加载了技能调用了 MCP 工具运行了命令查看了图片读取了文件',
+  );
   expect(messages).toEqual(original);
   for (const message of messages) {
     const rejected: Message = { ...message, approval: { state: 'rejected', source: 'auto' } };
     expect(completedToolActions([rejected])).toBe('');
     expect(completedToolSummary(rejected)).toBeUndefined();
-    expect(completedToolCategory(rejected)).toBeUndefined();
   }
   for (const shell of [
     { operation: 'execute' as const },
@@ -2024,7 +2042,7 @@ test('simple Trace summaries group by first occurrence, not command or remote co
     const message = completed(operation, `shell.${operation}`, {
       shell: { operation, jobStatus: 'running' },
     });
-    expect(completedToolSummary(message)).toBe('运行了');
+    expect(completedToolSummary(message)).toBeUndefined();
     expect(message.shell?.jobStatus).toBe('running');
   }
 });

@@ -65,6 +65,7 @@ export function PlanReviewPanel({
   initialDraft,
   onDraftChange,
   completeContent,
+  showPlanIdentity = true,
 }: {
   interaction: Interaction;
   disabled: boolean;
@@ -72,6 +73,7 @@ export function PlanReviewPanel({
   initialDraft?: PlanReviewDraft;
   onDraftChange?: (draft: PlanReviewDraft) => void;
   completeContent?: string;
+  showPlanIdentity?: boolean;
 }) {
   const plan = describePlanReview(interaction.request);
   const request =
@@ -82,19 +84,25 @@ export function PlanReviewPanel({
       : {};
   return (
     <section aria-label="Plan review">
-      <p>
-        Plan {typeof request.planId === 'string' ? request.planId : 'unknown'} · version{' '}
-        {typeof request.version === 'string' ? request.version : 'unknown'} · digest{' '}
-        {typeof request.digest === 'string' ? request.digest : 'unknown'}
-      </p>
+      {showPlanIdentity ? (
+        <p>
+          Plan {typeof request.planId === 'string' ? request.planId : 'unknown'} · version{' '}
+          {typeof request.version === 'string' ? request.version : 'unknown'} · digest{' '}
+          {typeof request.digest === 'string' ? request.digest : 'unknown'}
+        </p>
+      ) : (
+        typeof request.version === 'string' && <p>版本 {request.version}</p>
+      )}
       <PlanBody
         content={completeContent ?? (typeof request.content === 'string' ? request.content : '')}
         request={request}
       />
-      <p>
-        Approve only this exact plan for implementation. Tool permissions stay unchanged; approval
-        does not prove execution or completion.
-      </p>
+      {showPlanIdentity && (
+        <p>
+          Approve only this exact plan for implementation. Tool permissions stay unchanged; approval
+          does not prove execution or completion.
+        </p>
+      )}
       {plan.kind === 'readonly' ? (
         <p>Read only: {plan.reason}</p>
       ) : onAnswer ? (
@@ -106,9 +114,9 @@ export function PlanReviewPanel({
           initialDraft={initialDraft}
           onDraftChange={onDraftChange}
         />
-      ) : (
+      ) : showPlanIdentity ? (
         <p>Read only</p>
-      )}
+      ) : null}
     </section>
   );
 }

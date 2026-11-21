@@ -4365,7 +4365,7 @@ test('the first reply starts timing with its Run and keeps its place through dis
     // Dispatch alone is not evidence of public reasoning content.
     expect(f.host.querySelector('.agent-turn-running')).toBe(progress);
     expect(f.host.querySelector('.conversation-trace-line')).toBeNull();
-    expect(f.host.body.textContent).not.toContain('正在思考…');
+    expect(f.host.body.textContent).not.toContain('思考中');
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant')).toBeNull();
     const reasoning: Message = {
@@ -4389,7 +4389,7 @@ test('the first reply starts timing with its Run and keeps its place through dis
     };
     await f.publishMessages([input, reasoning], [run]);
     const thinking = f.host.querySelector('.conversation-trace-line');
-    expect(thinking?.textContent).toBe('正在思考…');
+    expect(thinking?.textContent).toBe('思考中');
     expect(f.host.querySelector('.agent-turn-running')).toBe(progress);
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant')).toBeNull();

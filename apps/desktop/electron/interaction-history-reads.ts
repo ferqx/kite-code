@@ -25,7 +25,7 @@ type Lease = {
 
 /** Public record reading owns no answer observation or loaded approval proof. */
 export class NativeInteractionHistoryReads {
-  private lease?: Lease;
+  private readonly leases = new Map<string, Lease>();
   readonly attachments: NativeInteractionAttachmentReads;
   private readonly client: Client;
   private readonly current: () => NativeInteractionHistoryScope | undefined;
@@ -34,17 +34,9 @@ export class NativeInteractionHistoryReads {
     this.current = current;
     this.attachments = new NativeInteractionAttachmentReads(
       async (attachment, options) => {
-        const lease = this.lease;
-        if (!lease) throw new ClientError('interaction_history_read_missing');
-        this.check(lease);
-        const card = [...lease.cards.values()].find((value) => {
-          try {
-            return interactionAttachment(value)?.key === attachment.key;
-          } catch {
-            return false;
-          }
-        });
-        if (!card) throw new ClientError('interaction_scope_mismatch');
+        const owner = this.attachmentOwner(attachment.key);
+        if (!owner) throw new ClientError('interaction_scope_mismatch');
+        const { lease, card } = owner;
         const fresh = await client.getInteraction(
           lease.scope.sessionId,
           card.id,
@@ -59,22 +51,36 @@ export class NativeInteractionHistoryReads {
         return result;
       },
       () => {
-        const lease = this.lease;
-        if (!lease || !this.matches(lease)) return;
+        const scope = this.current();
+        const leases = [...this.leases.values()].filter((lease) => this.matches(lease, scope));
+        if (!scope || !leases.length) return;
         return {
-          generation: lease.scope.generation,
-          selection: lease.scope.viewSelection,
-          storeId: lease.scope.storeId,
-          sessionId: lease.scope.sessionId,
-          interactions: [...lease.cards.values()],
+          generation: scope.generation,
+          selection: scope.viewSelection,
+          storeId: scope.storeId,
+          sessionId: scope.sessionId,
+          interactions: leases.flatMap((lease) => [...lease.cards.values()]),
         };
       },
     );
   }
-  private matches(lease: Lease) {
-    const now = this.current();
+  private attachmentOwner(key: string) {
+    const scope = this.current();
+    for (const lease of this.leases.values()) {
+      if (!this.matches(lease, scope)) continue;
+      for (const card of lease.cards.values()) {
+        try {
+          if (interactionAttachment(card)?.key === key) return { lease, card };
+        } catch {
+          /* An invalid history card has no readable attachment identity. */
+        }
+      }
+    }
+    return undefined;
+  }
+  private matches(lease: Lease, now: NativeInteractionHistoryScope | undefined) {
     return (
-      this.lease === lease &&
+      this.leases.get(lease.readId) === lease &&
       !lease.abort.signal.aborted &&
       this.client.serverInfo?.storeId === lease.scope.storeId &&
       !!now &&
@@ -86,7 +92,8 @@ export class NativeInteractionHistoryReads {
     );
   }
   private check(lease: Lease) {
-    if (!this.matches(lease)) throw new ClientError('interaction_history_view_changed');
+    if (!this.matches(lease, this.current()))
+      throw new ClientError('interaction_history_view_changed');
   }
   async open(input: {
     readId: string;
@@ -102,7 +109,9 @@ export class NativeInteractionHistoryReads {
       throw new ClientError('native_selection_changed');
     if (!this.client.serverInfo?.capabilities.includes('interactions'))
       throw new ClientError('capability_unavailable');
-    this.release();
+    for (const lease of this.leases.values()) {
+      if (lease.readId === input.readId || !this.matches(lease, scope)) this.close(lease.readId);
+    }
     const lease: Lease = {
       readId: input.readId,
       scope: { ...scope },
@@ -111,13 +120,12 @@ export class NativeInteractionHistoryReads {
       reading: true,
       cards: new Map(),
     };
-    this.lease = lease;
+    this.leases.set(lease.readId, lease);
     return this.readPage(lease);
   }
   async next(readId: string) {
-    const lease = this.lease;
-    if (!lease || lease.readId !== readId)
-      throw new ClientError('interaction_history_read_missing');
+    const lease = this.leases.get(readId);
+    if (!lease) throw new ClientError('interaction_history_read_missing');
     this.check(lease);
     if (lease.reading) throw new ClientError('interaction_history_read_busy');
     if (lease.complete || !lease.afterId)
@@ -155,18 +163,22 @@ export class NativeInteractionHistoryReads {
         page,
       };
     } catch (error) {
-      if (this.lease === lease) this.release();
+      if (this.leases.get(lease.readId) === lease) this.close(lease.readId);
       throw error;
     } finally {
       lease.reading = false;
     }
   }
   close(readId: string) {
-    if (this.lease?.readId === readId) this.release();
+    const lease = this.leases.get(readId);
+    if (!lease) return;
+    this.leases.delete(readId);
+    lease.abort.abort();
+    if (!this.leases.size) this.attachments.release();
   }
   release() {
-    this.lease?.abort.abort();
-    this.lease = undefined;
+    for (const lease of this.leases.values()) lease.abort.abort();
+    this.leases.clear();
     this.attachments.release();
   }
 }

@@ -2333,7 +2333,8 @@ test('mixed Trace keeps first-seen search, Skill, MCP category order and both se
     mk('a', 'web.search', '查询 A'),
     mk('skill', 'skills.load', 'S'),
     mk('b', 'web.search', '查询 B'),
-    mk('mcp', 'mcp.tools.search'),
+    mk('mcp-directory', 'mcp.tools.search'),
+    mk('mcp', `mcp.provider.${'a'.repeat(32)}`),
   ];
   const models = facts.map((f) => ({ ...desktopToolMessage(f, f.messageId, ''), turnId: 'mixed' }));
   try {
@@ -2365,7 +2366,7 @@ test('mixed Trace keeps first-seen search, Skill, MCP category order and both se
       ),
     );
     const group = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
-    expect(group.textContent).toBe('搜索了 · 加载了 · 运行了');
+    expect(group.textContent).toBe('搜索了网页加载了技能调用了 MCP 工具');
     expect(f.host.textContent).not.toContain('sources:exec-');
     await act(async () => group.click());
     const find = (q: string) =>
@@ -2376,6 +2377,9 @@ test('mixed Trace keeps first-seen search, Skill, MCP category order and both se
       ).find((x) => x.textContent?.includes(q))!;
     expect(find('查询 A')).toBeDefined();
     expect(find('查询 B')).toBeDefined();
+    expect(f.host.querySelector('.conversation-trace-steps')?.textContent).toContain(
+      '搜索 MCP 工具',
+    );
     await act(async () => find('查询 B').click());
     expect(f.host.textContent).toContain('sources:exec-b');
     expect(f.host.textContent).not.toContain('sources:exec-a');
@@ -2384,7 +2388,7 @@ test('mixed Trace keeps first-seen search, Skill, MCP category order and both se
     await act(async () => find('查询 B').click());
     expect(f.host.textContent).toContain('sources:exec-a');
     expect(f.host.textContent).not.toContain('sources:exec-b');
-    expect(group.textContent).toBe('搜索了 · 加载了 · 运行了');
+    expect(group.textContent).toBe('搜索了网页加载了技能调用了 MCP 工具');
   } finally {
     await f.close();
   }
@@ -2450,13 +2454,19 @@ test('single Native tools keep their own card, verified target and original resu
           const label = f.host.querySelector(
             '.conversation-trace article.tool-activity .tool-label',
           );
-          expect(label?.textContent).toBe(
-            verified && status === 'succeeded' && definitionId.startsWith('files.')
-              ? `已${originalTitle}`
-              : originalTitle,
+          const omitted =
+            status === 'failed' || (status === 'succeeded' && definitionId === 'task.events');
+          const expected =
+            status === 'succeeded' && definitionId === 'files.edit'
+              ? '编辑了文件'
+              : status === 'succeeded' && definitionId === 'files.read'
+                ? '读取了文件'
+                : originalTitle;
+          expect(label?.textContent).toBe(expected);
+          expect(f.host.querySelector('.conversation-trace > button')?.textContent).toBe(
+            omitted ? '工具执行' : undefined,
           );
-          expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
-          expect(f.host.querySelector('.conversation-trace-steps')).toBeNull();
+          expect(!!f.host.querySelector('.conversation-trace-steps')).toBe(omitted);
           if (definitionId === 'files.read' && verified && status === 'succeeded')
             expect(f.host.querySelector('article.tool-activity button[aria-expanded]')).toBeNull();
           if (fact.target) expect(f.host.textContent).toContain(fact.target);

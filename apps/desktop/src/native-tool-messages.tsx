@@ -25,6 +25,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'files.write': [['2', '3'], '写入'],
   'files.edit': [['2'], '修改'],
   'files.view_images': [['1'], '查看图像'],
+  'files.reinspect_images': [['1'], '复看图像'],
   'shell.launch': [['1'], '启动后台 Shell'],
   'shell.execute': [['1'], '运行命令'],
   'shell.read': [['1'], '读取后台 Shell'],
@@ -52,16 +53,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'browser.execute': [['1'], '浏览器操作'],
 };
 const exploration = new Set(['files.read']);
-const mcpSummaryTools = new Set([
-  'mcp.sources.list',
-  'mcp.connect',
-  'mcp.catalogue.refresh',
-  'mcp.tools.search',
-  'mcp.resources.list',
-  'mcp.resources.read',
-  'mcp.prompts.list',
-  'mcp.prompts.get',
-]);
+const standalone = new Set(['task.spawn', 'planning.review']);
 
 /** Names follow stable IDs; structured presentation still requires a supported version. */
 export function desktopToolPresentation(
@@ -78,9 +70,9 @@ export function desktopToolPresentation(
     ...(known && fact.definitionId === 'web.search' ? { webSearchReceipt: true as const } : {}),
     // Classification follows the original definition, not a remote display name.
     // It changes only completed Trace summaries, not versioned result rendering.
-    ...(mcp || mcpSummaryTools.has(fact.definitionId)
+    ...(mcp
       ? { toolSummaryCategory: 'mcp' as const }
-      : fact.definitionId === 'skills.load'
+      : known && fact.definitionId === 'skills.load'
         ? { toolSummaryCategory: 'skill' as const }
         : {}),
     toolName: known
@@ -91,6 +83,7 @@ export function desktopToolPresentation(
             'files.write': 'write_file',
             'files.edit': 'edit_file',
             'files.view_images': 'view_images',
+            'files.reinspect_images': 'reinspect_images',
             'shell.execute': 'shell_execute',
             'task.spawn': 'spawn_agent',
             'task.follow_up': 'follow_up_agent',
@@ -114,9 +107,11 @@ export function desktopToolPresentation(
           },
         }
       : {}),
-    ...(known && exploration.has(fact.definitionId)
-      ? { presentation: 'exploration' as const }
-      : {}),
+    ...(standalone.has(fact.definitionId)
+      ? { presentation: 'standalone' as const }
+      : known && exploration.has(fact.definitionId)
+        ? { presentation: 'exploration' as const }
+        : {}),
   };
 }
 
@@ -337,6 +332,9 @@ export function desktopToolMessage(
       | 'decisionRefresh'
       | 'fileMissing'
       | 'fileCreated'
+      | 'images'
+      | 'reinspectedImages'
+      | 'imageSourcesListed'
       | 'agentMessageAccepted'
       | 'agentWait'
       | 'shellInput'
@@ -344,6 +342,8 @@ export function desktopToolMessage(
       | 'shellOutputLimit'
       | 'shellOutputReceipt'
       | 'shellResultVerified'
+      | 'shellJobExecutionId'
+      | 'shellJobSettlement'
       | 'worktreeFailure'
       | 'label'
     >,
@@ -376,12 +376,21 @@ export function desktopToolMessage(
             input: '收到新输入，已结束等待',
             timeout: '等待期间暂无新事件',
           }[wait.reason];
+  const messageAccepted =
+    fact.agentMessageAccepted &&
+    fact.definitionId === 'task.message' &&
+    fact.definitionVersion === '1' &&
+    fact.status === 'succeeded';
   return {
     id,
     role: 'tool',
     text:
       waitText ??
-      (shell && (fact.shellResultVerified || /^[\s\uFEFF]*[[{]/u.test(text)) ? '' : text),
+      (messageAccepted
+        ? '消息已提交'
+        : shell && (fact.shellResultVerified || /^[\s\uFEFF]*[[{]/u.test(text))
+          ? ''
+          : text),
     ...(waitText ? { agentWait: true as const } : {}),
     settled: !['planned', 'dispatching', 'running'].includes(fact.status),
     ...desktopToolPresentation(fact),
@@ -391,12 +400,11 @@ export function desktopToolMessage(
     ...(fact.ask ? { ask: fact.ask } : {}),
     ...(fact.fileMissing && fact.status === 'succeeded' ? { fileMissing: true } : {}),
     ...(fact.fileCreated && fact.status === 'succeeded' ? { fileCreated: true } : {}),
-    ...(fact.agentMessageAccepted &&
-    fact.definitionId === 'task.message' &&
-    fact.definitionVersion === '1' &&
-    fact.status === 'succeeded'
-      ? { presentation: 'hidden' as const }
-      : {}),
+    ...(fact.status === 'succeeded' && fact.definitionId === 'files.view_images'
+      ? { toolImageCount: fact.images?.length ?? 0 }
+      : fact.status === 'succeeded' && fact.definitionId === 'files.reinspect_images'
+        ? { toolImageCount: fact.reinspectedImages, imageSourcesListed: fact.imageSourcesListed }
+        : {}),
     ...(fact.status === 'failed' && fact.decisionRefresh
       ? { decisionRefresh: fact.decisionRefresh }
       : {}),
@@ -485,6 +493,7 @@ export function liveToolMessages(
   messages: readonly Message[],
   executionUnconfirmed = false,
   inputFacts: readonly NativeToolMessageFact[] = [],
+  submittedInteractions: ReadonlySet<string> = new Set(),
 ): { message: DesktopMessage; execution: NativeToolExecution }[] {
   if (!selection) return [];
   const runIds = new Set(selection.runs.filter((run) => run.isActive).map((run) => run.id));
@@ -533,18 +542,21 @@ export function liveToolMessages(
           run.originStoreId === selection.storeId &&
           run.sessionId === selection.session.id,
       );
-      const approvals =
+      const cards =
         selection.interactions?.filter(
           (card) =>
-            card.kind === 'approval' &&
             card.state === 'pending' &&
             card.originStoreId === selection.storeId &&
             card.sessionId === execution.sessionId &&
+            card.presentationSessionId === selection.session.id &&
             card.runId === execution.runId &&
             card.executionId === execution.id &&
             card.definitionId === execution.definitionId &&
             card.definitionVersion === execution.definitionVersion,
         ) ?? [];
+      const approval = cards.find((card) => card.kind === 'approval');
+      const question =
+        execution.definitionId === 'ask_user' && cards.find((card) => card.kind === 'question');
       return {
         execution,
         message: {
@@ -585,14 +597,23 @@ export function liveToolMessages(
                 ]),
               }
             : {}),
-          ...(approvals.length === 1
+          ...(approval
             ? {
                 approval: {
-                  state: 'awaiting_user' as const,
+                  state: submittedInteractions.has(approval.id)
+                    ? ('submitted' as const)
+                    : ('awaiting_user' as const),
                   source: 'user' as const,
-                  interactionId: approvals[0]!.id,
+                  interactionId: approval.id,
                   reason: execution.authorization?.check?.reason ?? undefined,
                 },
+              }
+            : {}),
+          ...(question
+            ? {
+                questionState: submittedInteractions.has(question.id)
+                  ? ('submitted' as const)
+                  : ('pending' as const),
               }
             : {}),
         },
@@ -669,7 +690,6 @@ export class NativeToolPresentation {
       execution: NativeToolExecution & Partial<Pick<Execution, 'toolInput'>>;
     }[],
     boundary?: { bridge: unknown; key: string },
-    pendingMessageIds?: ReadonlySet<string>,
   ): DesktopMessage[] {
     if (boundary && (boundary.bridge !== this.bridge || boundary.key !== this.boundary)) {
       this.bridge = boundary.bridge;
@@ -730,15 +750,6 @@ export class NativeToolPresentation {
       }
       const prior = this.complete.get(key)?.message;
       if (!prior) return [];
-      // Wait for this exact receipt before falling back to its completed live row:
-      // Main may classify it as a redundant Task acknowledgment. Failed reads
-      // clear pending admission and retain the original unverified fallback.
-      if (
-        pendingMessageIds?.has(message.id) &&
-        prior.toolName === 'send_agent_message' &&
-        prior.status === 'completed'
-      )
-        return [];
       return [
         {
           ...prior,

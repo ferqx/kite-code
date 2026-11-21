@@ -13,6 +13,7 @@ import {
   type NativeToolMessageRequest,
   type NativeToolMessageScope,
   type NativeToolRunPage,
+  nativeShellJobSettlement,
   nativeShellOutputPageBytes,
   nativeToolMessagePageBytes,
   presentableRun,
@@ -519,6 +520,20 @@ export class NativeToolMessages {
           commandOffset: input.commandOffsets?.[id] ?? 0,
         });
         if (fact) {
+          if (fact.shellJobExecutionId) {
+            try {
+              const job = await this.client.getExecution(fact.shellJobExecutionId, {
+                signal: lease.abort.signal,
+              });
+              fact.shellJobSettlement = nativeShellJobSettlement(job, {
+                ...execution,
+                executionId: execution.id,
+              });
+            } catch {
+              // The verified launch remains readable when its optional Job result is unavailable.
+            }
+            this.check(lease);
+          }
           if (fact.shellDisplay?.output !== undefined) {
             const bytes = Buffer.byteLength(JSON.stringify(fact.shellDisplay.output));
             shellOutputBytes += bytes;

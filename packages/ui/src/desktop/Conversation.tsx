@@ -30,7 +30,9 @@ import {
 import {
   ConversationTrace,
   isConversationTraceStep,
+  isStandaloneTraceTool,
   latestRunningTraceTool,
+  traceInteractionTitle,
   traceKey,
 } from './ConversationTrace';
 import { ClipboardWriteContext, CodeCopyEligibilityContext } from './clipboard';
@@ -201,10 +203,12 @@ function TurnElapsed({
 function TurnSummary({
   label,
   open,
+  disabled,
   children,
 }: {
   label: string;
   open: boolean;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -213,6 +217,7 @@ function TurnSummary({
         <Button
           className="agent-turn-summary"
           variant="ghost"
+          disabled={disabled}
           aria-label={`${label}，${open ? '收起' : '展开'}本轮处理过程`}
         >
           {children}
@@ -615,6 +620,7 @@ export function Conversation({
   renderTurnOutputs,
   renderToolActivity,
   traceTurns = false,
+  pendingTraceToolTurns,
   renderReasoning,
 }: {
   messages: readonly Message[];
@@ -652,6 +658,8 @@ export function Conversation({
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   /** Native conversation: group consecutive reasoning and tools around public prose. */
   traceTurns?: boolean;
+  /** Saved Turns with receipts whose first presentation is still being verified. */
+  pendingTraceToolTurns?: ReadonlySet<string>;
   renderReasoning?: (message: Message, open: boolean) => ReactNode;
 }) {
   const presented = useRef(false);
@@ -1130,10 +1138,14 @@ export function Conversation({
       group: Message[],
       placement: 'standalone' | 'process' | 'result' | 'trace' = 'standalone',
       {
+        directTraceDetails = false,
+        traceSummaryTitle,
         showTraceReply = false,
         parentDisclosureOpen = true,
         turnOutputs,
       }: {
+        directTraceDetails?: boolean;
+        traceSummaryTitle?: string;
         showTraceReply?: boolean;
         parentDisclosureOpen?: boolean;
         turnOutputs?: ReactNode;
@@ -1154,7 +1166,10 @@ export function Conversation({
       // A host-provided group starts with its first tool, before metadata arrives.
       // Its disclosure and DOM survive subsequent receipts and additional tools.
       const inTrace = placement === 'trace';
-      const aggregate = !inTrace && (group.length > 1 || !!message.presentationGroupId);
+      const aggregate =
+        !inTrace &&
+        (group.length > 1 ||
+          (!!message.presentationGroupId && !(traceTurns && isStandaloneTraceTool(message))));
       const activityKey = aggregate
         ? `activity-group:${message.presentationGroupId ?? message.presentationKey ?? message.id}`
         : `activity:${message.presentationKey ?? message.id}`;
@@ -1166,6 +1181,8 @@ export function Conversation({
               aggregate,
               expanded: expanded[activityKey],
               inTrace,
+              directTraceDetails,
+              traceSummaryTitle,
               parentDisclosureOpen,
               activityId: activityKey,
               restoredExpanded: restoredExpanded.current,
@@ -1181,6 +1198,8 @@ export function Conversation({
           messages={group}
           aggregate={aggregate}
           inTrace={inTrace}
+          directTraceDetails={directTraceDetails}
+          traceSummaryTitle={traceSummaryTitle}
           parentDisclosureOpen={parentDisclosureOpen}
           suppressGenericFailure={
             message.toolName === 'task' &&
@@ -1434,27 +1453,34 @@ export function Conversation({
             const tools = steps.filter((item) => item.role === 'tool');
             const currentTrace =
               ongoing && !ended && lastTurnEntry && !reply && index === blocks.length - 1;
+            const interaction = turnActive ? traceInteractionTitle(tools) : undefined;
             const runningTool = turnActive ? latestRunningTraceTool(tools) : undefined;
-            const latestTool = runningTool ?? (currentTrace ? tools.at(-1) : undefined);
             const trailing = block.at(-1);
-            const thinking =
-              tools.length === 0 &&
-              turnActive &&
-              currentTrace &&
-              (!activity || activity.status === 'running') &&
-              trailing?.role === 'thinking' &&
-              !trailing.tracePending &&
-              (!!trailing.text.trim() || !!trailing.reasoningSource) &&
-              !trailing.settled;
-            const summary = latestTool
-              ? toolTraceTitle(latestTool)
-              : tools.length
-                ? completedToolActions(tools) || '工具执行'
-                : thinking
-                  ? '正在思考…'
-                  : steps.some((step) => !step.settled)
-                    ? '思考'
-                    : '思考了';
+            const activeReasoning =
+              turnActive && currentTrace && (!activity || activity.status === 'running')
+                ? steps.find(
+                    (step) =>
+                      step.role === 'thinking' &&
+                      !step.settled &&
+                      !step.executionUnconfirmed &&
+                      (step.reasoningActive ??
+                        (step === trailing && (!!step.text.trim() || !!step.reasoningSource))),
+                  )
+                : undefined;
+            const latestTool = currentTrace ? tools.at(-1) : undefined;
+            const completedSummary =
+              !interaction && !runningTool && !activeReasoning && !currentTrace;
+            const summary =
+              interaction ??
+              (runningTool
+                ? toolTraceTitle(runningTool)
+                : activeReasoning
+                  ? '思考中'
+                  : latestTool
+                    ? toolTraceTitle(latestTool)
+                    : tools.length
+                      ? completedToolActions(tools) || '工具执行'
+                      : '处理过程');
             const boundary = blocks[index - 1]?.[0];
             const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
             if (open && expanded[id] === true) trackOpen(id);
@@ -1464,7 +1490,10 @@ export function Conversation({
                 id={id}
                 steps={steps}
                 label={summary}
-                running={!!runningTool || thinking}
+                running={!interaction && (!!runningTool || !!activeReasoning)}
+                activeReasoning={activeReasoning}
+                interactionTitle={interaction}
+                summarizeTools={completedSummary}
                 processOpen={open}
                 notice={
                   turnActive &&
@@ -1477,7 +1506,7 @@ export function Conversation({
                 expanded={expanded}
                 restoredExpanded={restoredExpanded.current}
                 onToggle={onTraceToggle}
-                renderTool={(item, parentDisclosureOpen) =>
+                renderTool={(item, parentDisclosureOpen, traceSummaryTitle, directTraceDetails) =>
                   renderGroup(
                     [
                       steps.length === 1 && !item.settled && activity?.executionUnconfirmed
@@ -1485,7 +1514,7 @@ export function Conversation({
                         : item,
                     ],
                     'trace',
-                    { parentDisclosureOpen },
+                    { parentDisclosureOpen, traceSummaryTitle, directTraceDetails },
                   )
                 }
                 renderReasoning={renderReasoning}
@@ -1504,7 +1533,11 @@ export function Conversation({
                 className="agent-turn-process"
                 data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
               >
-                <TurnSummary label={finishedLabel} open={open}>
+                <TurnSummary
+                  label={finishedLabel}
+                  open={open}
+                  disabled={!open && pendingTraceToolTurns?.has(entry.turnId)}
+                >
                   {statusContent}
                 </TurnSummary>
                 <DeferredProcessContent
@@ -1709,6 +1742,7 @@ export function Conversation({
     renderTurnOutputs,
     renderToolActivity,
     traceTurns,
+    pendingTraceToolTurns,
     renderReasoning,
     childSessionIdsByTaskId,
     onOpenChildSession,

@@ -36,6 +36,7 @@ import type {
 } from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
 import type { OutputDraftFile } from '../src/output-files-bridge';
+import { nativeShellExitCode } from '../src/tool-messages-bridge';
 import { NativeAnswerJournal } from './answer-journal';
 import { NativeBackground } from './background';
 import {
@@ -1049,6 +1050,7 @@ export class NativeCaller {
         resultRevision: execution.resultRevision,
         cancelRequestedAt: execution.cancelRequestedAt,
         parentExecutionId: execution.parentExecutionId,
+        shellExitCode: nativeShellExitCode(execution),
         modelRetry: execution.modelRetry,
         ...(execution.kind === 'model' && execution.status === 'failed'
           ? { result: execution.result }

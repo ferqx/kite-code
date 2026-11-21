@@ -352,7 +352,7 @@ try {
         final
       )
         probe.violations.push(`${kind}:${probe.phase}:premature_final`);
-      if (probe.phase === 'settled' && visible.includes('正在思考'))
+      if (probe.phase === 'settled' && visible.includes('思考中'))
         probe.violations.push(`${kind}:settled:thinking_after_final`);
       const segments = [
         ...conversation.querySelectorAll(
@@ -364,7 +364,7 @@ try {
           /^(正在回复|等待工具执行|正在等待|等待处理|正在停止|需要恢复|执行状态待确认)/.test(
             label,
           ) ||
-          (label.startsWith('正在思考') && !button.querySelector('[data-reasoning]'))
+          (label === '思考中' && !button.querySelector('[data-status="running"]'))
         )
           probe.violations.push(`${kind}:${probe.phase}:trace_borrowed_turn_activity`);
         return {
@@ -373,7 +373,7 @@ try {
         };
       });
       if (
-        ['tools-complete', 'tools-complete-open', 'second-reasoning'].includes(probe.phase) &&
+        ['tools-complete', 'tools-complete-open'].includes(probe.phase) &&
         (segments.length !== 2 ||
           segments[1]?.text !== '已读取 read-only.txt' ||
           segments[1].running)
@@ -382,7 +382,9 @@ try {
       if (
         probe.phase === 'body' &&
         visible.includes('PUBLIC_LIVE_PREFIX') &&
-        (segments.length !== 2 || segments[1]?.text !== '读取了' || segments[1].running)
+        (segments.length !== 2 ||
+          segments[1]?.text !== '检查了文件读取了文件' ||
+          segments[1].running)
       )
         probe.violations.push(`${kind}:${probe.phase}:finished_trace_missing_tool_summary`);
       if (visible.includes('PUBLIC_STAGE_PROSE') && segments.length > 1) {
@@ -392,7 +394,7 @@ try {
       const value = {
         phase: probe.phase,
         assistants,
-        thinking: visible.includes('正在思考'),
+        thinking: visible.includes('思考中'),
         final,
         segments,
         timer: timerText,
@@ -558,9 +560,9 @@ try {
     (value) => value.some((message) => message.firstOutput === 'reasoning'),
     'real reasoning first output',
   );
-  await until(content, (value) => value.includes('正在思考'), 'first reasoning painted');
+  await until(content, (value) => value.includes('思考中'), 'first reasoning painted');
   await page.waitForTimeout(300);
-  assert.ok((await content()).includes('正在思考'), 'inline reasoning keeps its own heading');
+  assert.ok((await content()).includes('思考中'), 'inline reasoning keeps its own heading');
   await checkBeforeReply('inline-reasoning', 0);
   await setPhase('reasoning-open');
   const thought = page.locator('.conversation-reasoning > button');
@@ -628,7 +630,7 @@ try {
     'reasoning Artifact recorded',
   );
   await page.waitForTimeout(300);
-  assert.ok((await content()).includes('正在思考'), 'artifact reasoning keeps its own heading');
+  assert.ok((await content()).includes('思考中'), 'artifact reasoning keeps its own heading');
   await checkBeforeReply('artifact-reasoning', 0);
   const reasoningArtifactBytes = Math.max(
     ...(await messages()).map((message) => Number(message.outputBody?.reasoningBytes ?? 0)),
@@ -692,7 +694,7 @@ try {
   const originalToolHeading = await toolHeading.elementHandle();
   assert.equal(await toolHeading.getAttribute('aria-expanded'), 'false');
   assert.equal(await toolHeading.locator('[data-status="running"]').count(), 0);
-  assert.deepEqual(await traceHeadings.allTextContents(), ['思考了', latestReadTitle]);
+  assert.deepEqual(await traceHeadings.allTextContents(), ['处理过程', latestReadTitle]);
   await setPhase('tools-complete');
   const toolTiming = await readTimer();
   await until(readTimer, (value) => value !== toolTiming, 'Run keeps ticking over the latest read');
@@ -810,11 +812,16 @@ try {
   );
   await resetClosedFrames();
   await setPhase('second-reasoning');
+  await until(
+    () => toolHeading.textContent(),
+    (value) => value === '思考中',
+    'new reasoning takes over the unfinished tool Trace',
+  );
   await checkBeforeReply('second-reasoning', 1);
   assert.deepEqual(
     await traceHeadings.allTextContents(),
-    ['思考了', latestReadTitle],
-    'neither trace heading inherits the current Model phase',
+    ['处理过程', '思考中'],
+    'only the current trace shows the current Model phase',
   );
   assert.equal(
     await toolHeading.evaluate((element, original) => element === original, originalToolHeading),
@@ -840,8 +847,8 @@ try {
   );
   assert.deepEqual(
     await traceHeadings.allTextContents(),
-    ['思考了', '读取了'],
-    'actual prose ends the Trace and the completed reads share one result category',
+    ['处理过程', '检查了文件读取了文件'],
+    'actual prose ends the Trace and summary distinguishes missing files from reads',
   );
   assert.equal(
     await toolHeading.evaluate((element, original) => element === original, originalToolHeading),
@@ -852,7 +859,7 @@ try {
   assert.equal(await page.locator('.message-copy[aria-label="复制本轮Agent回复"]').count(), 0);
   await step('later-reasoning');
   await page.waitForTimeout(400);
-  assert.equal(await toolHeading.textContent(), '读取了');
+  assert.equal(await toolHeading.textContent(), '检查了文件读取了文件');
   assert.equal(
     await toolHeading.getAttribute('aria-expanded'),
     'false',
@@ -905,7 +912,7 @@ try {
   const finishedTiming = await elapsed.innerText();
   assert.equal(await page.locator('.conversation .conversation-trace').count(), 0);
   await elapsed.click();
-  const readTrace = page.locator('.conversation-trace').filter({ hasText: '读取了' });
+  const readTrace = page.locator('.conversation-trace').filter({ hasText: '读取了文件' });
   const trigger = readTrace.locator(':scope > .conversation-trace-trigger');
   await trigger.click();
   await until(
@@ -965,7 +972,7 @@ try {
     (value) => value.includes('PRIVATE_REASONING_SENTINEL_SECOND_MODEL'),
     'the reasoning from the third Model is readable in its own step',
   );
-  assert.equal(await trigger.textContent(), '读取了');
+  assert.equal(await trigger.textContent(), '检查了文件读取了文件');
   await readThought.click();
   await until(
     () => readTrace.innerText(),
@@ -995,7 +1002,7 @@ try {
     (value) => value.includes('PUBLIC_FINAL_REPLY'),
     'reopened warm history visible',
   );
-  assert.ok(!(await content()).includes('正在思考'));
+  assert.ok(!(await content()).includes('思考中'));
   assert.equal(await timer.count(), 0);
   assert.equal(await elapsed.innerText(), finishedTiming);
   assert.deepEqual((await probe()).violations, []);
@@ -1008,7 +1015,7 @@ try {
   assert.equal(await elapsed.count(), 1);
   assert.equal(await timer.count(), 0);
   assert.equal(await elapsed.innerText(), finishedTiming);
-  assert.ok(!(await content()).includes('正在思考'));
+  assert.ok(!(await content()).includes('思考中'));
   assert.equal((await counts()).calls, 3);
   const report = {
     warm,

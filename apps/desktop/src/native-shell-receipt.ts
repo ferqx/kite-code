@@ -32,6 +32,8 @@ export function desktopShell(
       | 'shellOutputLimit'
       | 'shellOutputReceipt'
       | 'shellResultVerified'
+      | 'shellJobExecutionId'
+      | 'shellJobSettlement'
       | 'target'
     >,
   text: string,
@@ -49,6 +51,7 @@ export function desktopShell(
   const shell: NonNullable<DesktopMessage['shell']> = {
     operation: operation as NonNullable<DesktopMessage['shell']>['operation'],
     ...(input?.shellId ? { shellId: input.shellId } : {}),
+    ...(fact.shellJobExecutionId ? { jobExecutionId: fact.shellJobExecutionId } : {}),
     ...(input?.command === undefined && fact.target && ['execute', 'launch'].includes(operation)
       ? { commandPreview: fact.target }
       : {}),
@@ -58,7 +61,7 @@ export function desktopShell(
       ? { command: input.command }
       : {}),
   };
-  if (fact.shellDisplay) return { ...shell, ...fact.shellDisplay };
+  if (fact.shellDisplay) return { ...shell, ...fact.shellDisplay, ...fact.shellJobSettlement };
   if (!fact.shellResultVerified) return shell;
   if (fact.shellOutputReceipt) return { ...shell, ...fact.shellOutputReceipt, output: text };
   let result: Record<string, unknown> | undefined;
@@ -72,7 +75,7 @@ export function desktopShell(
   if (ref?.extensionId !== 'builtin.shell' || ref.key !== shell.shellId) return shell;
   if (operation === 'launch')
     return result.accepted === true && result.shellId === shell.shellId
-      ? { ...shell, accepted: true }
+      ? { ...shell, accepted: true, ...fact.shellJobSettlement }
       : shell;
   const job = record(result.execution);
   if (

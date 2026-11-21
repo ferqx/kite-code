@@ -11,14 +11,36 @@ import {
   TraceTitle,
 } from './components/ui/trace';
 import { DeferredProcessContent } from './DeferredProcessContent';
-import { toolIcon } from './ToolActivity';
+import { completedToolSummary, toolIcon, toolTextFailed } from './ToolActivity';
 import type { Message } from './types';
 
 export const traceKey = (boundary: Message) =>
   `trace-after:${boundary.presentationKey ?? boundary.id}`;
 
+const standaloneTools = new Set(['task', 'spawn_agent', 'planning.review', 'request_plan_review']);
+
+export const isStandaloneTraceTool = (message: Message) =>
+  message.role === 'tool' &&
+  (message.presentation === 'standalone' || standaloneTools.has(message.toolName ?? ''));
+
 export const isConversationTraceStep = (message: Message) =>
-  message.role === 'thinking' || (message.role === 'tool' && message.toolName !== 'spawn_agent');
+  message.role === 'thinking' || (message.role === 'tool' && !isStandaloneTraceTool(message));
+
+export function traceInteractionTitle(steps: readonly Message[]) {
+  let answer = false;
+  let approval = false;
+  let submitted = false;
+  for (const step of steps) {
+    if (step.role !== 'tool' || step.settled || step.executionUnconfirmed) continue;
+    answer ||= step.questionState === 'pending';
+    approval ||= step.approval?.state === 'awaiting_user' && step.dispatchCommitted !== true;
+    submitted ||= step.questionState === 'submitted' || step.approval?.state === 'submitted';
+  }
+  if (answer && approval) return '等待回答 · 等待审批';
+  if (answer) return '等待回答';
+  if (approval) return '等待审批';
+  return submitted ? '已提交，待确认' : undefined;
+}
 
 export function latestRunningTraceTool(steps: readonly Message[]) {
   let tool: Message | undefined;
@@ -45,6 +67,9 @@ export function ConversationTrace({
   id,
   label,
   running,
+  activeReasoning,
+  interactionTitle,
+  summarizeTools,
   notice,
   processOpen,
   expanded,
@@ -57,22 +82,37 @@ export function ConversationTrace({
   id: string;
   label: string;
   running: boolean;
+  activeReasoning?: Message;
+  interactionTitle?: string;
+  summarizeTools: boolean;
   notice?: ReactNode;
   processOpen: boolean;
   expanded: Readonly<Record<string, boolean>>;
   restoredExpanded: ReadonlySet<string>;
   onToggle: (id: string, open: boolean) => void;
-  renderTool: (message: Message, parentOpen: boolean) => ReactNode;
+  renderTool: (
+    message: Message,
+    parentOpen: boolean,
+    summaryTitle?: string,
+    directDetails?: boolean,
+  ) => ReactNode;
   renderReasoning?: (message: Message, open: boolean) => ReactNode;
 }) {
   const first = steps[0];
   const grouped = steps.length > 1;
+  const singleTool = !grouped && first?.role === 'tool' ? first : undefined;
+  const completedTitle =
+    summarizeTools && singleTool ? completedToolSummary(singleTool) : undefined;
+  // An omitted action still needs a way to read its original row and result.
+  const omittedTool = summarizeTools && singleTool && !completedTitle ? singleTool : undefined;
+  const showSummary = grouped || !!omittedTool;
   const firstTool = steps.find((step) => step.role === 'tool');
   const summaryIcon = firstTool ? toolIcon(firstTool) : BulbIcon;
   const panelId = useId();
   const firstKey = first?.presentationKey ?? first?.id;
-  const open = expanded[id] === true;
-  const showSteps = !grouped || open;
+  const open =
+    (expanded[id] ?? (omittedTool ? expanded[`activity:${firstKey}`] : undefined)) === true;
+  const showSteps = !showSummary || open;
   const detailsOpen = processOpen && showSteps;
   // Older singleton layouts could save only their outer disclosure.
   useEffect(() => {
@@ -85,7 +125,9 @@ export function ConversationTrace({
     <TraceLine
       className="conversation-trace-line"
       data-reasoning={!firstTool || undefined}
-      status={running ? 'running' : undefined}
+      status={
+        running ? 'running' : omittedTool && toolTextFailed(omittedTool) ? 'error' : undefined
+      }
     >
       <TraceIcon>
         <HugeiconsIcon icon={summaryIcon} />
@@ -105,7 +147,7 @@ export function ConversationTrace({
       open={showSteps}
       onOpenChange={(next) => onToggle(id, next)}
     >
-      {grouped && (
+      {showSummary && (
         <button
           type="button"
           className="conversation-trace-trigger"
@@ -116,36 +158,50 @@ export function ConversationTrace({
           {summary}
         </button>
       )}
-      {grouped && notice}
+      {showSummary && notice}
       <DeferredProcessContent
         component={TraceCollapsibleContent}
         id={panelId}
         data-direct-step={!grouped || undefined}
-        open={grouped ? open : 'inline'}
+        open={showSummary ? open : 'inline'}
         render={() => (
           <Trace
-            className={grouped ? 'conversation-trace-steps' : undefined}
-            data-direct-trace-tool={(!grouped && first.role === 'tool') || undefined}
+            className={showSummary ? 'conversation-trace-steps' : undefined}
+            data-direct-trace-tool={(!showSummary && first.role === 'tool') || undefined}
             data-grouped={grouped || undefined}
           >
             {steps.map((step) => {
               const stepKey = step.presentationKey ?? step.id;
               if (step.role === 'tool')
-                return <Fragment key={stepKey}>{renderTool(step, detailsOpen)}</Fragment>;
+                return (
+                  <Fragment key={stepKey}>
+                    {renderTool(
+                      step,
+                      detailsOpen,
+                      grouped
+                        ? undefined
+                        : omittedTool
+                          ? label
+                          : (interactionTitle ?? completedTitle),
+                      !!omittedTool,
+                    )}
+                  </Fragment>
+                );
               const canRead = !!step.reasoningSource && !!renderReasoning;
               const stepOpen = expanded[stepKey];
               const reasoningOpen = canRead && (stepOpen ?? (!grouped && open));
+              const thinking = step === activeReasoning;
               const heading = (
                 <TraceLine
                   className="conversation-trace-line"
                   data-reasoning
-                  status={!grouped && running ? 'running' : undefined}
+                  status={thinking ? 'running' : undefined}
                 >
                   <TraceIcon>
                     <HugeiconsIcon icon={BulbIcon} />
                   </TraceIcon>
                   <TraceTitle aria-live={grouped ? undefined : 'polite'}>
-                    {grouped ? (step.settled ? '已思考' : '思考') : label}
+                    {grouped ? (thinking ? '思考中' : step.settled ? '已思考' : '思考') : label}
                   </TraceTitle>
                   {canRead && (
                     <TraceIcon className="conversation-trace-chevron">
@@ -193,7 +249,7 @@ export function ConversationTrace({
           </Trace>
         )}
       />
-      {!grouped && notice}
+      {!showSummary && notice}
     </TraceCollapsible>
   );
 }

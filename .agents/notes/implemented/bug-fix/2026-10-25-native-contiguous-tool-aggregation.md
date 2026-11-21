@@ -12,6 +12,8 @@ Shell卡片实际使用中又暴露同一交接的缓存问题：Tool回执已�
 
 当前行为归[桌面手册](../../../../docs/handbook/clients/desktop/README.md)与[Desktop owner](../../../../apps/desktop/README.md#原工具过程与结果阅读)，共享布局归[UI owner](../../../../packages/ui/README.md)。本决定只调整 Native／共享 Desktop 呈现，不改变 TUI 的探索分类、工具授权或执行结果合同。
 
+Native 主会话 Trace 的当前标题、完成摘要和独立消息边界由[思维链呈现决定](../feature/2026-11-21-native-conversation-trace.md)接续。以下稳定身份、工具详情及读取资格的取舍继续适用。
+
 文件读取后续出现连续多行只有“读取”而无路径：非Shell实时投影未携带目标，ModelOutput封存又会将消息中的toolCalls留空；原目标提取只对Shell补原Execution输入，其他工具完成后仍缺参数。MCP、计划与Skill引用还缺当前参数名的目标映射。
 
 ## Decision

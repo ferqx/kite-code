@@ -22,6 +22,7 @@ type Options = {
   diagnostics: boolean;
   metadataPending?: ReadonlySet<string>;
   renderSearch?: (model: DesktopMessage, executionId: string, live: boolean) => ReactNode;
+  renderPlanReview?: (model: DesktopMessage) => (() => ReactNode) | undefined;
   renderOriginal: (message: DesktopMessage, open: boolean) => ReactNode;
   hasDeferredText?: (message: DesktopMessage) => boolean;
   agentProps?: (
@@ -56,7 +57,7 @@ export function renderNativeToolGroup(
   const keyOf = (model: DesktopMessage) => model.presentationKey ?? model.id;
   const childOperation = (model: DesktopMessage) =>
     model.toolName === 'spawn_agent' || model.toolName === 'follow_up_agent';
-  const confirmedCreation = (model: DesktopMessage) => {
+  const savedCreation = (model: DesktopMessage) => {
     if (model.toolName !== 'spawn_agent' || model.status !== 'completed' || !model.turnId) return;
     const fact = factFor(model);
     if (
@@ -67,11 +68,10 @@ export function renderNativeToolGroup(
       return;
     const props = options.agentProps?.(model, fact);
     const agent = props?.childAgent;
-    if (!agent?.identity) return;
     return {
       key: keyOf(model),
-      identity: agent.identity,
-      name: agent.name,
+      identity: agent?.identity,
+      name: agent?.name ?? '子 Agent',
       onOpen: props?.childDetail?.onOpen,
     };
   };
@@ -148,17 +148,18 @@ export function renderNativeToolGroup(
         continue;
       }
       flush();
-      const creation = confirmedCreation(model);
-      if (!creation) {
+      const creation = savedCreation(model);
+      // A placeholder in a batch leaves the first group key available for its later members.
+      if (!creation || (!creation.identity && group.length > 1)) {
         rows.push(<Fragment key={keyOf(model)}>{agentTool(model)}</Fragment>);
         childBoundary = model;
         continue;
       }
       const creations = [creation];
       let end = index + 1;
-      while (end < group.length && group[end]!.turnId === model.turnId) {
-        const next = confirmedCreation(group[end]!);
-        if (!next) break;
+      while (creation.identity && end < group.length && group[end]!.turnId === model.turnId) {
+        const next = savedCreation(group[end]!);
+        if (!next?.identity) break;
         creations.push(next);
         end++;
       }
@@ -269,27 +270,26 @@ export function renderNativeToolGroup(
         aggregate={aggregate}
         unverified={unverified.size > 0}
         messages={models}
-        receiptDetails={
-          options.renderSearch
-            ? (model) => {
-                const fact = displayTools.find((e) => e.messageId === model.id),
-                  live = options.liveTools.find((e) => e.message.id === model.id)?.execution,
-                  owner = fact ?? live;
-                if (owner?.definitionId !== 'web.search' || owner.definitionVersion !== '1') return;
-                const id = fact?.executionId ?? live?.id;
-                if (!id) return;
-                return () =>
-                  options.renderSearch!(
-                    model,
-                    id,
-                    !!live &&
-                      live.id === id &&
-                      live.status === 'running' &&
-                      !options.executionUnconfirmed,
-                  );
-              }
-            : undefined
-        }
+        receiptDetails={(model) => {
+          if (model.toolName === 'planning.review' && model.status === 'completed')
+            return options.renderPlanReview?.(model);
+          if (!options.renderSearch) return;
+          const fact = displayTools.find((e) => e.messageId === model.id),
+            live = options.liveTools.find((e) => e.message.id === model.id)?.execution,
+            owner = fact ?? live;
+          if (owner?.definitionId !== 'web.search' || owner.definitionVersion !== '1') return;
+          const id = fact?.executionId ?? live?.id;
+          if (!id) return;
+          return () =>
+            options.renderSearch!(
+              model,
+              id,
+              !!live &&
+                live.id === id &&
+                live.status === 'running' &&
+                !options.executionUnconfirmed,
+            );
+        }}
         renderItem={
           aggregate
             ? (model) =>

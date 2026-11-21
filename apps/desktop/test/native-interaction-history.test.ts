@@ -116,6 +116,54 @@ test('restored readonly history preserves original Store and requests explicit h
   }
 });
 
+test('open review rows keep their own history reads when another row opens or closes', async () => {
+  const signals: AbortSignal[] = [];
+  let finishFirst!: () => void;
+  const firstPage = {
+    interactions: [card('record-a')],
+    nextAfterId: 'record-a',
+    snapshotCursor: '10',
+  };
+  const lastPage = {
+    interactions: [card('record-b')],
+    nextAfterId: null,
+    snapshotCursor: '10',
+  };
+  const reader = new NativeInteractionHistoryReads(
+    {
+      serverInfo: info,
+      listInteractions: async (_id, query, options) => {
+        signals.push(options!.signal!);
+        if (query.afterId) return lastPage;
+        if (signals.length === 1)
+          await new Promise<void>((resolve) => {
+            finishFirst = resolve;
+          });
+        return firstPage;
+      },
+    } as ConstructorParameters<typeof NativeInteractionHistoryReads>[0],
+    () => scope,
+  );
+  const first = reader.open({ readId: 'first', viewSelection: 2, historyEpoch: 3 });
+  try {
+    await reader.open({ readId: 'second', viewSelection: 2, historyEpoch: 3 });
+    reader.close('second');
+    expect(signals[1]?.aborted).toBe(true);
+    expect(signals[0]?.aborted).toBe(false);
+    finishFirst();
+    expect((await first).page).toEqual(firstPage);
+    expect((await reader.next('first')).page).toEqual(lastPage);
+    await expect(reader.next('second')).rejects.toMatchObject({
+      code: 'interaction_history_read_missing',
+    });
+  } finally {
+    finishFirst();
+    await first.catch(() => {});
+    reader.release();
+  }
+  expect(signals[0]?.aborted).toBe(true);
+});
+
 test('a changing page and a late old selection cannot publish a complete history or release another reader', async () => {
   let current = { ...scope },
     resolve!: (value: {

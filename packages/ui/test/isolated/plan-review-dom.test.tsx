@@ -3,6 +3,7 @@ import type { Interaction } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { PlanReviewDraft } from '../../src';
 
 const original = {
@@ -31,6 +32,25 @@ const original = {
     content: 'Full plan\n1. inspect\n2. verify\nORIGINAL_FULL_TAIL',
   },
 } satisfies Interaction;
+
+test('inline plan review distinguishes a saved answer from a decision accepted by execution', async () => {
+  const { InteractionCard } = await import('../../src');
+  const answered: Interaction = {
+    ...original,
+    state: 'answered',
+    answer: { kind: 'plan_review', decision: 'approve', feedback: '原审阅反馈' },
+  };
+  const render = (interaction: Interaction) =>
+    renderToStaticMarkup(<InteractionCard interaction={interaction} inlinePlanReview />);
+  const saved = render(answered);
+  expect(saved).toContain('计划审阅 · 答复已保存，待确认');
+  expect(saved).toContain('原审阅反馈');
+  expect(saved).not.toContain('计划审阅 · 已批准');
+  expect(render({ ...answered, acceptedDecisionRevision: answered.revision })).toContain(
+    '计划审阅 · 已批准',
+  );
+  expect(render({ ...original, state: 'cancelled' })).toContain('计划审阅 · 已取消');
+});
 
 test('actual DOM preserves original feedback without selecting permissions, locks repeated Enter, and preserves failed drafts', async () => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' });

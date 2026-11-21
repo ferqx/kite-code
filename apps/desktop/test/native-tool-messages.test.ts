@@ -483,7 +483,7 @@ test('only the verified builtin Task wait envelope supplies a compact failure', 
   expect(desktopToolMessage(inconsistent!, 'wait', content).text).toBe(content);
 });
 
-test('only an exact builtin Task message acknowledgment is hidden through the original Main reader', async () => {
+test('only an exact builtin Task message acknowledgment produces the submitted receipt wording', async () => {
   const f = fixture();
   const content = '{"accepted":true,"delivery":"queued"}';
   const successResult = {
@@ -519,8 +519,8 @@ test('only an exact builtin Task message acknowledgment is hidden through the or
     expect(fact.agentMessageAccepted).toBe(true);
     expect(desktopToolMessage(fact, fact.messageId, content)).toMatchObject({
       status: 'completed',
-      presentation: 'hidden',
-      text: content,
+      toolName: 'send_agent_message',
+      text: '消息已提交',
     });
   }
   const execution = f.executions.get('execution-mail-one')!;
@@ -610,7 +610,7 @@ test('only an exact builtin Task message acknowledgment is hidden through the or
   expect(runReads).toBe(4);
 });
 
-test('a completed live Task message waits only for its own pending receipt and restores fallback after an unavailable read', () => {
+test('a Task message keeps its original row while its exact receipt is being read', () => {
   const presentation = new NativeToolPresentation();
   for (const status of ['succeeded', 'failed', 'outcome_unknown'] as const) {
     const execution = {
@@ -632,18 +632,14 @@ test('a completed live Task message waits only for its own pending receipt and r
     };
     const receipt = { ...live, id: `receipt-${execution.id}`, text: 'original receipt' };
     expect(presentation.project(status, [], [], [{ message: live, execution }])).toEqual([live]);
-    const pending = presentation.project(
-      status,
-      [receipt],
-      [],
-      [],
-      undefined,
-      new Set([receipt.id]),
-    );
-    expect(pending).toHaveLength(status === 'succeeded' ? 0 : 1);
-    const unavailable = presentation.project(status, [receipt], [], [], undefined, new Set());
-    expect(unavailable).toMatchObject([
-      { id: receipt.id, status: live.status, executionUnconfirmed: true },
+    const pending = presentation.project(status, [receipt], [], []);
+    expect(pending).toMatchObject([
+      {
+        id: receipt.id,
+        presentationKey: live.presentationKey,
+        status: live.status,
+        executionUnconfirmed: true,
+      },
     ]);
   }
 });
@@ -735,6 +731,7 @@ test('future known tools keep stable names without borrowing structured semantic
     expect(desktopToolPresentation({ definitionId, definitionVersion: '999' })).toEqual({
       toolName: undefined,
       title,
+      ...(definitionId === 'task.spawn' ? { presentation: 'standalone' } : {}),
     });
   expect(desktopToolPresentation({ definitionId: 'new.tool', definitionVersion: '999' })).toEqual({
     toolName: undefined,
@@ -2427,6 +2424,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       operation: 'launch',
       accepted: true,
       shellId: launch.id,
+      jobExecutionId: `job-${launch.id}`,
       command: 'printf first\nprintf second\n',
     });
 
@@ -2449,9 +2447,33 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       operation: 'launch',
       accepted: true,
       shellId: background.id,
+      jobExecutionId: `job-${background.id}`,
       command: backgroundInput.command,
     });
     expect(backgroundResult.message.shell?.jobStatus).toBeUndefined();
+    const acceptedJobId = backgroundResult.fact.shellJobExecutionId!;
+    const completedJob: Execution = {
+      ...background.execution,
+      id: acceptedJobId,
+      parentExecutionId: background.execution.id,
+      kind: 'job',
+      definitionId: 'shell.command',
+      status: 'succeeded',
+      result: { outcome: 'succeeded', content: 'Shell completed' },
+    };
+    f.executions.set(acceptedJobId, completedJob);
+    expect((await background.read()).message.shell?.jobStatus).toBe('succeeded');
+    f.executions.set(acceptedJobId, { ...completedJob, parentExecutionId: 'unrelated-tool' });
+    expect((await background.read()).message.shell?.jobStatus).toBeUndefined();
+    f.executions.set(acceptedJobId, {
+      ...completedJob,
+      status: 'failed',
+      result: { outcome: 'failed', content: 'Shell failed', details: { exitCode: 7 } },
+    });
+    expect((await background.read()).message.shell).toMatchObject({
+      jobStatus: 'failed',
+      exitCode: 7,
+    });
     const liveBackground = nativeLiveShellInputFact({
       ...background.execution,
       toolCallId: 'repeated',
@@ -3026,7 +3048,8 @@ test('Trace categories follow exact tool definitions without changing individual
     for (const definitionVersion of ['1', 'future']) {
       const source = { definitionId, definitionVersion, label: 'MCP · qa-names-7e · add' };
       const presentation = desktopToolPresentation(source);
-      expect(presentation.toolSummaryCategory).toBe('mcp');
+      const category = /\.[a-f0-9]{32}$/.test(definitionId) ? 'mcp' : undefined;
+      expect(presentation.toolSummaryCategory).toBe(category);
       for (const status of [
         'planned',
         'running',
@@ -3036,7 +3059,7 @@ test('Trace categories follow exact tool definitions without changing individual
         'outcome_unknown',
       ] as const) {
         const message = desktopToolMessage({ ...source, status }, 'original', 'original output');
-        expect(message.toolSummaryCategory).toBe('mcp');
+        expect(message.toolSummaryCategory).toBe(category);
         expect(message.title).toBe(presentation.title);
         expect(message.text).toBe('original output');
         expect(message.status === 'completed').toBe(status === 'succeeded');
@@ -3047,7 +3070,7 @@ test('Trace categories follow exact tool definitions without changing individual
     expect(
       desktopToolPresentation({ definitionId: 'skills.load', definitionVersion }),
     ).toMatchObject({
-      toolSummaryCategory: 'skill',
+      ...(definitionVersion === '1' ? { toolSummaryCategory: 'skill' } : {}),
       title: '加载技能',
     });
   for (const definitionId of [

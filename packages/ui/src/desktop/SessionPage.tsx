@@ -240,6 +240,7 @@ export interface SessionPageProps {
   renderMessageAttachments?: (message: Message) => ReactNode;
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   traceTurns?: boolean;
+  pendingTraceToolTurns?: React.ComponentProps<typeof Conversation>['pendingTraceToolTurns'];
   renderReasoning?: (message: Message, open: boolean) => ReactNode;
   /** Host-confirmed current Turn; omitted when the message source has no Turn identity. */
   turnActivity?: TurnActivity;
@@ -1397,6 +1398,7 @@ function SessionPageContent({
       renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}
       traceTurns={props.traceTurns}
+      pendingTraceToolTurns={props.pendingTraceToolTurns}
       renderReasoning={props.renderReasoning}
       turnActivity={props.turnActivity}
       preserveReadingAnchor={keepAlive}

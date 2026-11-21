@@ -75,6 +75,9 @@ export type NativeToolMessageFact = Pick<
   inputSource?: { storeId: string; sessionId: string; runId: string; toolCallId: string };
   /** Exact known Shell result content equals its saved structured details. */
   shellResultVerified?: boolean;
+  /** Original Job identity and, when observed, a proved background command exit. */
+  shellJobExecutionId?: string;
+  shellJobSettlement?: { jobStatus: 'succeeded' | 'failed'; exitCode?: number };
   /** Host-verified status for a receipt whose message body is already the model output. */
   shellOutputReceipt?: Pick<
     NonNullable<import('@kite-ai/ui/desktop').Message['shell']>,
@@ -98,6 +101,9 @@ export type NativeToolMessageFact = Pick<
   worktreeFailure?: NativeWorktreeFailure;
   /** Original image/PDF metadata, loaded through the same bounded image reader. */
   images?: { name: string; reference: { mediaType: string; size: string } }[];
+  /** Verified history image observation, without granting an image reader. */
+  reinspectedImages?: number;
+  imageSourcesListed?: true;
   /** Read-only original Execution authorization; never a grant or answer capability. */
   authorization?: Execution['authorization'];
   /** Known ask_user v1 request and successful result; no Interaction authority. */
@@ -192,7 +198,52 @@ export type NativeToolExecution = Pick<
   inputReady?: boolean;
   modelRetry?: Execution['modelRetry'];
   result?: Execution['result'];
+  shellExitCode?: number;
 };
+
+export function nativeShellExitCode(execution: NativeToolExecution): number | undefined {
+  if (
+    execution.kind !== 'job' ||
+    execution.definitionId !== 'shell.command' ||
+    execution.definitionVersion !== '1' ||
+    execution.status !== 'failed'
+  )
+    return;
+  const result = execution.result;
+  const details =
+    result && typeof result === 'object' && !Array.isArray(result) && result.outcome === 'failed'
+      ? result.details
+      : undefined;
+  const code =
+    details && typeof details === 'object' && !Array.isArray(details)
+      ? details.exitCode
+      : undefined;
+  return typeof code === 'number' && Number.isSafeInteger(code) && code !== 0 ? code : undefined;
+}
+
+export function nativeShellJobSettlement(
+  job: NativeToolExecution | undefined,
+  tool: Pick<NativeToolExecution, 'originStoreId' | 'sessionId' | 'runId'> & {
+    executionId: string;
+  },
+): NativeToolMessageFact['shellJobSettlement'] {
+  if (
+    job?.kind !== 'job' ||
+    job.definitionId !== 'shell.command' ||
+    job.definitionVersion !== '1' ||
+    job.parentExecutionId !== tool.executionId ||
+    !tool.originStoreId ||
+    job.originStoreId !== tool.originStoreId ||
+    job.sessionId !== tool.sessionId ||
+    job.runId !== tool.runId
+  )
+    return;
+  if (job.status === 'succeeded') return { jobStatus: 'succeeded' };
+  const exitCode = job.shellExitCode ?? nativeShellExitCode(job);
+  return job.status === 'failed' && exitCode !== undefined
+    ? { jobStatus: 'failed', exitCode }
+    : undefined;
+}
 
 export function nativeRunFact(run: NativeRunFact): NativeRunFact {
   const {
@@ -234,6 +285,7 @@ export function nativeToolExecution(
     resultRevision,
     authorization,
     cancelRequestedAt,
+    parentExecutionId,
   } = execution;
   return {
     id,
@@ -247,6 +299,8 @@ export function nativeToolExecution(
     resultRevision,
     authorization,
     cancelRequestedAt,
+    parentExecutionId,
+    shellExitCode: nativeShellExitCode(execution),
     target: definitionId.startsWith('shell.')
       ? undefined
       : nativeToolRequestTarget(execution.toolInput, definitionId, definitionVersion),

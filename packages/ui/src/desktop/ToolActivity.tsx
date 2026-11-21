@@ -199,10 +199,6 @@ function shellOperation(message: Message): NonNullable<Message['shell']>['operat
   );
 }
 
-function isShellExecution(message: Message): boolean {
-  return isShellMessage(message) && shellOperation(message) === 'execute';
-}
-
 function shellCommand(message: Message): string | undefined {
   if (message.shell) return message.shell.command;
   if (typeof message.arguments?.command === 'string') return message.arguments.command;
@@ -511,99 +507,57 @@ export function toolTextFailed(message: Message): boolean {
   return traceStatus(message) === 'error' || message.shell?.jobStatus === 'failed';
 }
 
-/** Owned summary copy only. Never infer an action from a title, target or command. */
-const COMPLETED_TRACE_ACTIONS: ReadonlyMap<string, string> = new Map(
-  Object.entries({
-    read_file: '读取了',
-    read_skill_resource: '读取了',
-    view_images: '读取了',
-    write_file: '运行了',
-    edit_file: '运行了',
-    web_fetch: '读取了',
-    web_search: '搜索了',
-    browser_execute: '运行了',
-    tool_search: '搜索了',
-    skill: '运行了',
-    task: '运行了',
-    spawn_agent: '运行了',
-    follow_up_agent: '运行了',
-    send_agent_message: '运行了',
-    wait_agent_events: '运行了',
-    list_agents: '运行了',
-    interrupt_agent: '运行了',
-    ask_user: '运行了',
-    write_plan: '运行了',
-    update_plan: '运行了',
-    request_plan_review: '运行了',
-    'planning.read': '读取了',
-    'planning.write': '运行了',
-    'planning.review': '运行了',
-    'planning.update': '运行了',
-    'git.worktree': '运行了',
-  }),
-);
-
-/** Summary categories never replace the original per-tool title or target. */
-function traceCategoryAction(message: Message): string | undefined {
-  if (message.toolSummaryCategory === 'mcp') return '运行了';
-  if (message.toolSummaryCategory === 'skill') return '加载了';
+/** Only verified operations on the summary allowlist contribute a phrase. */
+export function completedToolSummary(message: Message): string | undefined {
+  if (message.dispatchCommitted === false || message.approval?.state === 'rejected') return;
+  if (isShellMessage(message)) {
+    const shell = message.shell;
+    if (shell?.operation !== 'execute' && shell?.operation !== 'launch') return;
+    if (shell.timedOut || message.toolResult?.terminationReason === 'timed_out') return;
+    if (
+      (message.status === 'completed' && shell.jobStatus === 'succeeded') ||
+      ((message.status === 'completed' || message.status === 'failed') &&
+        shell.jobStatus === 'failed' &&
+        Number.isSafeInteger(shell.exitCode) &&
+        shell.exitCode !== 0)
+    )
+      return '运行了命令';
+    return;
+  }
+  if (message.status !== 'completed') return;
+  if (message.toolSummaryCategory === 'mcp' || message.toolName === 'mcp_tool')
+    return '调用了 MCP 工具';
+  if (message.toolSummaryCategory === 'skill' || message.toolName === 'load_skill')
+    return '加载了技能';
   switch (message.toolName) {
-    case 'mcp_tool':
-    case 'list_mcp_tools':
-    case 'list_mcp_resources':
-    case 'read_mcp_resource':
-    case 'mcp.tools.search':
-    case 'mcp.resources.list':
-    case 'mcp.resources.read':
-      return '运行了';
-    case 'load_skill':
-      return '加载了';
+    case 'read_file':
+      return message.fileMissing ? '检查了文件' : '读取了文件';
+    case 'write_file':
+      return message.fileCreated ? '创建了文件' : '写入了文件';
+    case 'edit_file':
+      return '编辑了文件';
+    case 'view_images':
+    case 'reinspect_images':
+      if ((message.toolImageCount ?? 0) > 0) return '查看了图片';
+      return message.imageSourcesListed ? '查看了图片来源' : undefined;
+    case 'web_fetch':
+      return '读取了网页';
+    case 'web_search':
+      return '搜索了网页';
+    case 'ask_user':
+      return '询问了用户';
     default:
       return undefined;
   }
 }
 
-function completedTraceAction(message: Message): string {
-  const category = traceCategoryAction(message);
-  if (category) return category;
-  if (isShellMessage(message) || message.fileCreated) return '运行了';
-  return COMPLETED_TRACE_ACTIONS.get(message.toolName ?? '') ?? '运行了';
-}
-
-function hasCompletedTraceAction(message: Message): boolean {
-  // A finite Shell process can exit unsuccessfully and still have run.
-  const ran = isShellExecution(message) && message.shell?.jobStatus === 'failed';
-  return (
-    (message.status === 'completed' || ran) &&
-    message.dispatchCommitted !== false &&
-    message.approval?.state !== 'rejected' &&
-    // A completed wrapper alone does not establish missing or unknown Shell evidence.
-    (!isShellMessage(message) || shellTitle(message).startsWith('已'))
-  );
-}
-
-/** Preserve the existing single-tool disclosure layout while hiding outer identities. */
-export function completedToolCategory(message: Message): string | undefined {
-  if (message.status !== 'completed' || !hasCompletedTraceAction(message)) return undefined;
-  return (
-    traceCategoryAction(message) ??
-    (!isShellMessage(message) &&
-    !message.fileCreated &&
-    !COMPLETED_TRACE_ACTIONS.get(message.toolName ?? '')
-      ? '运行了'
-      : undefined)
-  );
-}
-
-export function completedToolSummary(message: Message): string | undefined {
-  return hasCompletedTraceAction(message) ? completedTraceAction(message) : undefined;
-}
-
 export function completedToolActions(messages: readonly Message[]): string {
   const actions = new Set<string>();
-  for (const message of messages)
-    if (hasCompletedTraceAction(message)) actions.add(completedTraceAction(message));
-  return [...actions].join(' · ');
+  for (const message of messages) {
+    const action = completedToolSummary(message);
+    if (action) actions.add(action);
+  }
+  return [...actions].join('');
 }
 
 /** New adapters emit checking; saved UI snapshots may still carry reviewing. */
@@ -993,9 +947,11 @@ function ShellOutput({
 export function ToolRow({
   message,
   openFile,
+  label,
 }: {
   message: Message;
   openFile?: (path: string) => void;
+  label?: string;
   showReadFailure?: boolean;
 }) {
   const diagnostics = useDesktopDiagnostics();
@@ -1013,9 +969,9 @@ export function ToolRow({
         <TraceIcon>
           <HugeiconsIcon className="tool-step-icon" icon={toolIcon(message)} />
         </TraceIcon>
-        <TraceTitle className="tool-step-content">
+        <TraceTitle className="tool-step-content" aria-live={label ? 'polite' : undefined}>
           <span className="tool-step-heading">
-            <span className="tool-step-title tool-label">{toolTitle(message)}</span>
+            <span className="tool-step-title tool-label">{label ?? toolTitle(message)}</span>
             {target && (
               <span className="tool-step-target" title={target}>
                 {file && openFile ? (
@@ -1226,7 +1182,8 @@ export function ToolActivity({
       !!message.text ||
       (imageOnly && !!renderImages) ||
       Boolean(getChildren()));
-  const ownSummaryTitle = canExpand && !directTraceDetails ? traceSummaryTitle : undefined;
+  const ownSummaryTitle = directTraceDetails ? undefined : traceSummaryTitle;
+  const showTarget = !ownSummaryTitle || (!canExpand && message.settled);
   const label =
     ownSummaryTitle ??
     (imageOnly
@@ -1310,11 +1267,11 @@ export function ToolActivity({
       <TraceTitle
         className="tool-activity-marker-content"
         title={grouped ? label : shell ? commandSummary?.slice(0, 2048) : undefined}
-        aria-live={grouped ? 'polite' : undefined}
-        aria-atomic={grouped ? 'true' : undefined}
+        aria-live={grouped || ownSummaryTitle ? 'polite' : undefined}
+        aria-atomic={grouped || ownSummaryTitle ? 'true' : undefined}
       >
         <span className="tool-activity-title tool-label">{label}</span>
-        {!ownSummaryTitle &&
+        {showTarget &&
           target &&
           (shell ? (
             <code className="tool-command tool-label">{shortCommand}</code>
@@ -1398,7 +1355,7 @@ export function ToolActivity({
             </Button>
           </div>
         ) : read && !itemIssue ? (
-          <ToolRow message={message} openFile={messageOpenFile} />
+          <ToolRow message={message} openFile={messageOpenFile} label={ownSummaryTitle} />
         ) : edit && !itemIssue ? (
           <TraceLine
             asChild
@@ -1424,7 +1381,7 @@ export function ToolActivity({
               ) : (
                 <TraceTitle className="tool-activity-marker-content">
                   <span className="tool-label">{label}</span>
-                  {!ownSummaryTitle &&
+                  {showTarget &&
                     target &&
                     (messageOpenFile ? (
                       <Button
@@ -1468,7 +1425,11 @@ export function ToolActivity({
               return (
                 <>
                   {ownSummaryTitle && !edit && (
-                    <p className="tool-detail-status">{toolTraceTitle(message)}</p>
+                    <p className="tool-detail-status">
+                      {ask && target
+                        ? `${toolTraceLabel(message)} · ${target}`
+                        : toolTraceTitle(message)}
+                    </p>
                   )}
                   {grouped && (
                     <ScrollArea

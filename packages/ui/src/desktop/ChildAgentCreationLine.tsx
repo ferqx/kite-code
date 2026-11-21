@@ -1,3 +1,5 @@
+import { BotIcon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { Fragment } from 'react';
 import { ChildAgentIcon, childAgentAppearance } from './ApprovalHeader';
 import { TraceDescription, TraceIcon, TraceLine, TraceTitle } from './components/ui/trace';
@@ -5,7 +7,7 @@ import { Button } from './ui';
 
 type Creation = {
   key: string;
-  identity: string;
+  identity?: string;
   name: string;
   onOpen?: () => void;
 };
@@ -18,7 +20,9 @@ export function ChildAgentCreationLine({ creations }: { creations: readonly Crea
     <article
       className="message tool-activity child-agent-activity"
       aria-label={grouped ? '已创建的子 Agent' : `${first.name} · ${singleLabel}`}
-      data-child-color={grouped ? undefined : childAgentAppearance(first.identity).color}
+      data-child-color={
+        !grouped && first.identity ? childAgentAppearance(first.identity).color : undefined
+      }
     >
       <TraceLine
         className="tool-activity-summary child-agent-creation-line"
@@ -26,9 +30,9 @@ export function ChildAgentCreationLine({ creations }: { creations: readonly Crea
       >
         {grouped && (
           <span className="child-agent-creation-icons" aria-hidden="true">
-            {creations.map(({ key, identity }) => (
-              <ChildAgentIcon key={key} identity={identity} />
-            ))}
+            {creations.map(({ key, identity }) =>
+              identity ? <ChildAgentIcon key={key} identity={identity} /> : null,
+            )}
           </span>
         )}
         <TraceTitle className="child-agent-creation-names">
@@ -47,7 +51,11 @@ export function ChildAgentCreationLine({ creations }: { creations: readonly Crea
               >
                 {!grouped && (
                   <TraceIcon>
-                    <ChildAgentIcon identity={identity} />
+                    {identity ? (
+                      <ChildAgentIcon identity={identity} />
+                    ) : (
+                      <HugeiconsIcon icon={BotIcon} />
+                    )}
                   </TraceIcon>
                 )}
                 <span className="tool-agent-name">{name}</span>

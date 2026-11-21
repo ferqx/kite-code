@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { createNativeDraftFlush } from '../../electron/native-draft-flush';
 import { assertNativeSender } from '../../electron/native-ipc';
@@ -14,7 +15,7 @@ import {
 function host() {
   const ipc = new EventEmitter();
   const sent: unknown[][] = [];
-  const frame = { url: 'file:///app/renderer.html' };
+  const frame = { url: pathToFileURL(resolve('app', 'renderer.html')).href };
   const sender = {
     mainFrame: frame,
     isDestroyed: () => false,

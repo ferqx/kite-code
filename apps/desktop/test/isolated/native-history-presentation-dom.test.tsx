@@ -190,6 +190,16 @@ function fixture(
     async request(request): Promise<NativeResult> {
       requests.push(request);
       switch (request.method) {
+        case 'outputs.query':
+          return {
+            kind: 'outputs.page',
+            page: {
+              scope: request.scope,
+              revision: '1',
+              items: [],
+              collections: [],
+            },
+          };
         case 'background.open': {
           if (!options.lateChild) return null;
           const item = backgroundItem(1, true);
@@ -850,6 +860,38 @@ test('a cold Native view shows the verified baseline while newer streaming reads
   }
 });
 
+test('a readable cold baseline waits for the original tool facts before expanding its saved trace', async () => {
+  const f = fixture(false, false, false, { historyCatchup: true });
+  try {
+    await f.render(false);
+    await f.until(() => f.pendingHistoryReads() === 1);
+    await f.advanceHistoryTarget();
+    await f.releaseHistoryRead();
+    await f.until(() => f.pendingHistoryReads() === 1);
+    await f.releaseHistoryRead();
+    await f.until(() => f.pending('runs') > 0 && f.pending('tools') > 0);
+    await f.release('runs');
+    await f.until(() => !!f.host.querySelector(elapsedTrigger));
+
+    const reply = f.host.querySelector('.agent-turn-final');
+    const elapsed = f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!;
+    expect(reply?.textContent).toContain('streamed reply 2');
+    expect(elapsed.disabled).toBe(true);
+    await act(async () => elapsed.click());
+    expect(elapsed.getAttribute('aria-expanded')).toBe('false');
+    expect(f.host.querySelector('.conversation-trace-trigger')).toBeNull();
+
+    await f.release('tools');
+    expect(f.host.querySelector(elapsedTrigger)).toBe(elapsed);
+    expect(elapsed.disabled).toBe(false);
+    await act(async () => elapsed.click());
+    expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('读取了文件');
+    expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a history scan failure ends cold structural waiting and preserves the saved original messages', async () => {
   const f = fixture();
   try {
@@ -1113,6 +1155,12 @@ test('repeatedly opening the current conversation preserves its nodes and readin
     await act(async () =>
       f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
     );
+    // Opening the saved turn starts a deferred output read independently of navigation.
+    await f.until(() =>
+      ['old-run', undefined].every((runId) =>
+        f.requests.some((request) => request.method === 'outputs.query' && request.runId === runId),
+      ),
+    );
     const viewport = f.host.querySelector<HTMLElement>('.conversation-viewport')!,
       reply = f.host.querySelector('.message.assistant[data-final-reply="true"]'),
       compression = f.host.querySelector('.context-compacted'),
@@ -1355,11 +1403,12 @@ test('late verified child directory updates its direct row without replacing exp
     await f.release('runs');
     await f.release('tools');
     await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
-    const toolDisclosure = '.tool-activity:not(.child-agent-activity) button.tool-activity-summary';
+    const toolDisclosure = '.conversation-trace > button.conversation-trace-trigger';
     await f.until(() => f.host.querySelectorAll(toolDisclosure).length === 2);
-    expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
-    for (const button of f.host.querySelectorAll<HTMLButtonElement>(toolDisclosure))
+    for (const button of f.host.querySelectorAll<HTMLButtonElement>(toolDisclosure)) {
+      expect(button.textContent).toBe('工具执行');
       await act(async () => button.click());
+    }
     await f.until(() => !!f.host.querySelector('.child-agent-activity'));
     const child = f.host.querySelector('.child-agent-activity')!;
     expect(child.closest('.conversation-trace')).toBeNull();

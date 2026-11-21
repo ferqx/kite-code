@@ -22,6 +22,7 @@ import {
   type NativeToolExecution,
   type NativeToolMessageFact,
   nativeRunFact,
+  nativeShellJobSettlement,
   presentableRun,
 } from './tool-messages-bridge';
 
@@ -505,6 +506,21 @@ export function desktopTranscript({
           fact.shellInput && message.deferredText ? '' : message.content,
         )
       : undefined;
+    const shell = factMessage?.shell;
+    const jobSettlement =
+      shell?.jobExecutionId && fact && run
+        ? executionsById
+            .get(shell.jobExecutionId)
+            ?.map((job) =>
+              nativeShellJobSettlement(job, {
+                executionId: fact.executionId,
+                originStoreId: run.originStoreId,
+                sessionId: message.originMessage?.sessionId ?? sessionId,
+                runId: run.id,
+              }),
+            )
+            .find(Boolean)
+        : undefined;
     const result: DesktopMessage = {
       ...(factMessage ?? model),
       ...(execution
@@ -518,6 +534,15 @@ export function desktopTranscript({
             shell: {
               ...factMessage?.shell,
               ...inputPresentation,
+            },
+          }
+        : {}),
+      ...(jobSettlement && shell
+        ? {
+            shell: {
+              ...shell,
+              ...(inputCompatible ? inputPresentation : undefined),
+              ...jobSettlement,
             },
           }
         : {}),
@@ -639,6 +664,10 @@ export function desktopTranscript({
       const execution = source && byId.get(source);
       const visibleText =
         !!message.content || !!(message.outputBody && message.outputBody.contentBytes !== '0');
+      const toolRequested =
+        message.firstOutput === 'tool_calls' ||
+        !!message.toolCalls?.length ||
+        !!message.outputBody?.toolCallCount;
       if (lastModel?.id === source && model.turnId === activeTurn) lastModelSeen = true;
       const reasoning = nativeReasoningSource(message);
       const thought: DesktopMessage | undefined = reasoning
@@ -649,8 +678,10 @@ export function desktopTranscript({
             role: 'thinking',
             text: '',
             reasoningSource: message.id,
+            reasoningActive: running && !visibleText && !toolRequested && !model.settled,
             settled:
               visibleText ||
+              toolRequested ||
               model.settled ||
               (!running && (model.turnId !== activeTurn || !!execution || !!currentModel)),
           }

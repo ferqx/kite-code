@@ -14,13 +14,21 @@ export function NativeInteractionHistory({
   generation,
   selection,
   historyEpoch,
+  planReview,
 }: {
   bridge: NativeBridge;
   generation: number;
   selection: NativeSelection;
   historyEpoch: number;
+  planReview?: { executionId: string; runId: string; sessionId: string; storeId: string };
 }) {
   const { storeId, session } = selection;
+  const {
+    executionId: reviewExecutionId,
+    runId: reviewRunId,
+    sessionId: reviewSessionId,
+    storeId: reviewStoreId,
+  } = planReview ?? {};
   const viewSelection = selection.viewSelection ?? selection.viewGeneration;
   const scope: NativeInteractionHistoryScope = useMemo(
     () => ({
@@ -33,7 +41,13 @@ export function NativeInteractionHistory({
     }),
     [generation, storeId, session.id, session.workspaceId, viewSelection, historyEpoch],
   );
-  const identity = JSON.stringify(scope);
+  const identity = JSON.stringify([
+    scope,
+    reviewExecutionId,
+    reviewRunId,
+    reviewSessionId,
+    reviewStoreId,
+  ]);
   const [revision, setRevision] = useState(0);
   const current = useRef('');
   current.current = `${identity}/${revision}`;
@@ -91,8 +105,21 @@ export function NativeInteractionHistory({
         )
           throw Error('interaction_history_identity_mismatch');
         verifyInteractionHistoryPage(result.page, scope, previous);
-        cards.push(...result.page.interactions);
-        if (result.page.nextAfterId === null) {
+        cards.push(
+          ...(reviewExecutionId
+            ? result.page.interactions.filter(
+                (card) =>
+                  card.kind === 'plan_review' &&
+                  card.definitionId === 'planning.review' &&
+                  card.definitionVersion === '1' &&
+                  card.executionId === reviewExecutionId &&
+                  card.runId === reviewRunId &&
+                  card.sessionId === reviewSessionId &&
+                  card.originStoreId === reviewStoreId,
+              )
+            : result.page.interactions),
+        );
+        if (result.page.nextAfterId === null || (reviewExecutionId && cards.length)) {
           setView({ identity, readId, cards, loading: false });
           return;
         }
@@ -112,7 +139,19 @@ export function NativeInteractionHistory({
       active = false;
       void close();
     };
-  }, [bridge, generation, viewSelection, historyEpoch, identity, revision, scope]);
+  }, [
+    bridge,
+    generation,
+    viewSelection,
+    historyEpoch,
+    identity,
+    revision,
+    scope,
+    reviewExecutionId,
+    reviewRunId,
+    reviewSessionId,
+    reviewStoreId,
+  ]);
   const facts = view.identity === identity ? view : undefined;
   const readId = facts?.readId;
   const attachmentReader = useMemo(
@@ -134,6 +173,29 @@ export function NativeInteractionHistory({
         : undefined,
     [bridge, generation, viewSelection, readId, identity, revision],
   );
+  if (planReview) {
+    return (
+      <section aria-label="原计划审阅" aria-busy={facts?.loading || undefined}>
+        {facts?.error && (
+          <p role="alert">
+            {facts.error}{' '}
+            <button type="button" onClick={() => setRevision((value) => value + 1)}>
+              重新读取
+            </button>
+          </p>
+        )}
+        {facts?.cards?.length === 0 && <p>没有可读取的计划审阅记录。</p>}
+        {facts?.cards?.map((card) => (
+          <InteractionCard
+            key={`${card.id}/${card.revision}`}
+            interaction={card}
+            inlinePlanReview
+            onReadAttachment={attachmentReader}
+          />
+        ))}
+      </section>
+    );
+  }
   return (
     <section aria-label="交互记录" aria-busy={facts?.loading || undefined}>
       <h2>交互记录</h2>

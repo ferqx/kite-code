@@ -17,6 +17,8 @@ export interface Message {
   readonly streaming?: boolean;
   /** Original assistant message whose public reasoning can be read on disclosure. */
   readonly reasoningSource?: string;
+  /** Current observation of this exact model's public reasoning phase. */
+  readonly reasoningActive?: boolean;
   /** Model/Tool handoff marker for the current reasoning phase, without a visible step. */
   readonly tracePending?: 'reasoning' | 'tool';
   /** Client-observed reasoning segment timing, in epoch milliseconds. */
@@ -100,6 +102,8 @@ export interface Message {
   };
   /** Host-confirmed dispatch fact; approval alone does not prove execution. */
   readonly dispatchCommitted?: boolean;
+  /** A current question or submission bound to this tool's original interaction. */
+  readonly questionState?: 'pending' | 'submitted';
   /** Host-verified Core freshness rejection before adapter dispatch; never inferred from text. */
   readonly decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
   /** Host-verified successful builtin Files read with exists:false; no file content. */
@@ -143,6 +147,7 @@ export interface Message {
     /** Bounded display preview while the exact original command is being read. */
     readonly commandPreview?: string;
     readonly shellId?: string;
+    readonly jobExecutionId?: string;
     readonly jobStatus?:
       | 'planned'
       | 'dispatching'
@@ -176,6 +181,7 @@ export interface Message {
   readonly toolStartOrder?: number;
   /** Count from a verified successful original image Tool receipt, never model-authored text. */
   readonly toolImageCount?: number;
+  readonly imageSourcesListed?: true;
   /** Host-confirmed display classification; tool aggregation does not require it. */
   readonly presentation?: 'exploration' | 'standalone' | 'hidden';
   /** Exact child-task owner for internal tool presentation. */

@@ -503,6 +503,7 @@ export function nativeToolMessageFact({
   }
   let shell = shellInput(execution, call, commandOffset);
   let shellResultVerified = false;
+  let shellJobExecutionId: string | undefined;
   let shellOutputReceipt: NativeToolMessageFact['shellOutputReceipt'];
   if (shell && details) {
     try {
@@ -583,6 +584,15 @@ export function nativeToolMessageFact({
           };
       }
       if (shellResultVerified && !shell.shellId) shell = { ...shell, shellId };
+      if (
+        shellResultVerified &&
+        shell.operation === 'launch' &&
+        execution.status === 'succeeded' &&
+        details.accepted === true &&
+        details.shellId === shellId &&
+        typeof ref?.executionId === 'string'
+      )
+        shellJobExecutionId = ref.executionId;
     } catch {
       // Original non-JSON failures retain their existing body reader and error text.
     }
@@ -616,6 +626,12 @@ export function nativeToolMessageFact({
     execution.definitionId,
     execution.definitionVersion,
   );
+  const reinspection =
+    execution.definitionId === 'files.reinspect_images' &&
+    execution.definitionVersion === '1' &&
+    execution.status === 'succeeded'
+      ? nativeImageReinspection(execution, result, call)
+      : undefined;
   const fact: NativeToolMessageFact = {
     messageId: message.id,
     executionId: execution.id,
@@ -624,6 +640,7 @@ export function nativeToolMessageFact({
     status: execution.status,
     resultRevision: execution.resultRevision,
     ...(result.modelImages !== undefined ? { images: nativeToolImages(execution) } : {}),
+    ...reinspection,
     ...(decisionRefresh ? { decisionRefresh } : {}),
     ...(fileMissing ? { fileMissing: true } : {}),
     ...(fileCreated ? { fileCreated: true } : {}),
@@ -646,6 +663,7 @@ export function nativeToolMessageFact({
         }
       : {}),
     ...(shellResultVerified ? { shellResultVerified: true } : {}),
+    ...(shellJobExecutionId ? { shellJobExecutionId } : {}),
     ...(shellOutputReceipt ? { shellOutputReceipt } : {}),
     ...(legacyShellOutput
       ? {
@@ -692,4 +710,43 @@ export function nativeToolMessageFact({
     }
   }
   return fact;
+}
+
+/** These summary facts carry no image handles or preview authority. */
+function nativeImageReinspection(
+  execution: Execution,
+  result: Record<string, unknown>,
+  call: Record<string, unknown> | undefined,
+): Pick<NativeToolMessageFact, 'reinspectedImages' | 'imageSourcesListed'> | undefined {
+  let content: Record<string, unknown> | undefined;
+  try {
+    content = object(JSON.parse(String(result.content)));
+  } catch {
+    return;
+  }
+  if (
+    call?.list === true &&
+    Array.isArray(content?.sources) &&
+    (content.nextBeforeSeq === null || typeof content.nextBeforeSeq === 'string')
+  )
+    return { imageSourcesListed: true };
+  const images = result.modelImages;
+  if (
+    content?.kind === 'selected_original_images' &&
+    Array.isArray(content.ordinals) &&
+    Array.isArray(images) &&
+    images.length > 0 &&
+    images.length <= 4 &&
+    images.length === content.ordinals.length &&
+    isDeepStrictEqual(images, result.artifactRefs) &&
+    images.every((image) => {
+      const ref = object(image),
+        scope = object(ref?.scope);
+      return (
+        ref?.mediaType === 'image/png' && scope?.kind === 'execution' && scope.id === execution.id
+      );
+    })
+  )
+    return { reinspectedImages: images.length };
+  return undefined;
 }

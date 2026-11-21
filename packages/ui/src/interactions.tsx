@@ -31,6 +31,8 @@ type InteractionCardProps = {
   completeContent?: string;
   /** Compact tool approvals still verify the complete attachment before enabling answers. */
   compactApproval?: boolean;
+  /** The original plan review is presented as a conversation message. */
+  inlinePlanReview?: boolean;
   renderApproval?: (props: {
     interaction: Interaction;
     disabled: boolean;
@@ -51,6 +53,7 @@ function PlainInteractionCard({
   initialPlanDraft,
   onPlanDraftChange,
   completeContent,
+  inlinePlanReview,
   renderApproval,
   attachment,
 }: InteractionCardProps & {
@@ -71,6 +74,17 @@ function PlainInteractionCard({
   const structuredQuestion =
     interaction.kind === 'question' && !!onAnswer && !!questionForm(request);
   const approvalOptions = readApprovalOptions(request);
+  const planMessage = inlinePlanReview && interaction.kind === 'plan_review';
+  const planAnswer =
+    planMessage && interaction.answer?.kind === 'plan_review' ? interaction.answer : undefined;
+  const planStatus =
+    planAnswer && interaction.acceptedDecisionRevision === interaction.revision
+      ? { approve: '已批准', deny: '已拒绝', revise: '已要求修改' }[planAnswer.decision]
+      : interaction.state === 'cancelled'
+        ? '已取消'
+        : planAnswer
+          ? '答复已保存，待确认'
+          : '等待审阅';
   const materials = (
     <>
       <p>
@@ -104,14 +118,21 @@ function PlainInteractionCard({
       data-question-interaction={
         interaction.kind === 'question' && !mcpSourceReview ? '' : undefined
       }
-      aria-label={structuredQuestion ? '补充问题' : `${interaction.kind} ${interaction.id}`}
+      aria-label={
+        planMessage
+          ? '计划审阅'
+          : structuredQuestion
+            ? '补充问题'
+            : `${interaction.kind} ${interaction.id}`
+      }
     >
       {!structuredQuestion && (
         <h3>
-          {interaction.kind} · {interaction.state}
+          {planMessage ? `计划审阅 · ${planStatus}` : `${interaction.kind} · ${interaction.state}`}
         </h3>
       )}
-      {structuredQuestion ? null : interaction.kind === 'plan_review' ? (
+      {planAnswer?.feedback && <p className="whitespace-pre-wrap">{planAnswer.feedback}</p>}
+      {structuredQuestion || planMessage ? null : interaction.kind === 'plan_review' ? (
         <details>
           <summary>原请求与身份</summary>
           {materials}
@@ -135,8 +156,15 @@ function PlainInteractionCard({
       )}
       {submission && !structuredQuestion && (
         <p role="status">
-          Answer {submission.phase} · command {submission.commandId}
-          {submission.error ? ` · ${submission.error}` : ''}. Acceptance does not prove execution.
+          {planMessage
+            ? {
+                saved: '审阅答复已保存，正在提交…',
+                submitting: '正在提交审阅答复…',
+                accepted: '审阅答复已提交，等待确认。',
+                unknown: '审阅答复的提交结果尚未确认。',
+                failed: '审阅答复提交失败。',
+              }[submission.phase]
+            : `Answer ${submission.phase} · command ${submission.commandId}${submission.error ? ` · ${submission.error}` : ''}. Acceptance does not prove execution.`}
         </p>
       )}
       {interaction.kind === 'approval' && !mcpSourceReview && (
@@ -204,9 +232,10 @@ function PlainInteractionCard({
           initialDraft={initialPlanDraft}
           onDraftChange={onPlanDraftChange}
           completeContent={completeContent}
+          showPlanIdentity={!planMessage}
         />
       )}
-      {!onAnswer && <p>Read only</p>}
+      {!onAnswer && !planMessage && <p>Read only</p>}
     </article>
   );
 }
