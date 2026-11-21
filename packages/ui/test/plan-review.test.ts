@@ -40,7 +40,7 @@ test('plan projection preserves exact identity/body and unavailable metadata or 
   const text = JSON.stringify(PlanReviewPanel({ interaction, disabled: false }));
   expect(text).toContain('Full exact plan');
   expect(text).toContain('original-digest');
-  expect(text).toContain('Read only');
+  expect(text).toContain('原请求与身份');
   expect(describePlanReview({ ...request, allowedModes: ['auto', 'full'] })).toMatchObject({
     kind: 'readonly',
   });

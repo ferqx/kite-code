@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client';
 import type { NativeBridge, NativeState, NativeWindowBridge } from '../../src/native-bridge';
 import { nextDesktopPresentation, prepareDesktopDom } from '../native-page-dom.fixture';
 
-test('ordinary pending business cards retain scoped permission controls and cancel without answering or exposing the prompt', async () => {
+test('plan review hides permissions while ordinary questions retain their scoped controls', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -48,7 +48,7 @@ test('ordinary pending business cards retain scoped permission controls and canc
     executionId: 'review',
     attempt: 1,
     kind,
-    definitionId: 'planning.review',
+    definitionId: kind === 'plan_review' ? 'planning.review' : 'ask_user',
     definitionVersion: '1',
     inputDigest: 'input',
     policyRevision: 'information-1',
@@ -117,7 +117,7 @@ test('ordinary pending business cards retain scoped permission controls and canc
           sessionId: session.id,
           runId: 'run',
           kind: 'tool',
-          definitionId: 'planning.review',
+          definitionId: card().definitionId,
           definitionVersion: '1',
           status: 'dispatching',
           result: null,
@@ -205,6 +205,7 @@ test('ordinary pending business cards retain scoped permission controls and canc
         new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
       ),
     );
+    await settle();
     const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
       (node) => node.textContent?.includes(label),
     );
@@ -218,7 +219,15 @@ test('ordinary pending business cards retain scoped permission controls and canc
     )!;
     await act(async () => sessionButton.click());
     await settle();
+    expect(document.querySelector('[aria-label="当前会话私有草稿"]')).toBeNull();
+    expect(document.querySelector('[data-permission-trigger]')).toBeNull();
+    expect(document.querySelector('.conversation-footer .plan-review-composer')).not.toBeNull();
+    kind = 'question';
+    await act(async () => watcher?.());
+    await settle();
     const initialCard = JSON.stringify(card());
+    const editor = document.querySelector('[aria-label="当前会话私有草稿"]');
+    expect(editor).not.toBeNull();
     for (const [next, label] of [
       ['auto', 'Automatic check'],
       ['full', 'Full permission'],
@@ -227,7 +236,7 @@ test('ordinary pending business cards retain scoped permission controls and canc
       ['full', 'Full permission'],
       ['accept_edits', 'Request Approval'],
     ] as const) {
-      expect(document.querySelector('[aria-label="当前会话私有草稿"]')).toBeNull();
+      expect(document.querySelector('[aria-label="当前会话私有草稿"]')).toBe(editor);
       const before = mutations.length;
       await choose(label);
       if (next === 'full') {
@@ -256,10 +265,7 @@ test('ordinary pending business cards retain scoped permission controls and canc
     await act(async () => watcher?.());
     await settle();
 
-    kind = 'question';
-    await act(async () => watcher?.());
-    await settle();
-    expect(document.querySelector('[aria-label="当前会话私有草稿"]')).toBeNull();
+    expect(document.querySelector('[aria-label="当前会话私有草稿"]')).not.toBeNull();
     expect(document.querySelector('[data-permission-trigger]')).not.toBeNull();
     await choose('Automatic check');
     await settle();

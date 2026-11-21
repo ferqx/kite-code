@@ -75,6 +75,10 @@ import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeModelPreferenceBridge } from './native-model-preference-bridge';
 import type {
+  NativePlanProgressRequest,
+  NativePlanProgressResult,
+} from './native-plan-progress-bridge';
+import type {
   NativePreviewLayoutIdentity,
   NativePreviewLayoutRequest,
 } from './native-preview-layout-bridge';
@@ -730,6 +734,7 @@ export type NativeRequest =
   | NativeInputImageRequest
   | NativeScheduledRequest
   | NativeExtensionsRequest
+  | NativePlanProgressRequest
   | NativeInteractionHistoryRequest
   | NativeToolMessageRequest
   | NativeWorkspaceChangeRequest
@@ -1156,6 +1161,7 @@ export type NativeResult =
   | NativeInputFileResult
   | NativeScheduledResult
   | NativeExtensionsResult
+  | NativePlanProgressResult
   | NativeInteractionHistoryPage
   | NativeToolMessagePage
   | NativeToolRunPage

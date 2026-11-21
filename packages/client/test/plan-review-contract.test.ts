@@ -14,6 +14,9 @@ test('new plan answers contain business decisions, never execution modes', () =>
   for (const decision of ['approve', 'revise', 'deny']) {
     const answer = { kind: 'plan_review', decision, feedback: 'original feedback' };
     expect(request_AnswerInteractionRequest({ ...request, answer })).toBe(true);
+    expect(
+      request_AnswerInteractionRequest({ ...request, answer: { ...answer, asUserMessage: false } }),
+    ).toBe(false);
     for (const mode of ['auto', 'accept_edits', 'full'])
       expect(request_AnswerInteractionRequest({ ...request, answer: { ...answer, mode } })).toBe(
         false,
@@ -52,4 +55,7 @@ test('recorded plan answers use the same mode-free business contract', () => {
   expect(response_Interaction(interaction)).toBe(true);
   expect(JSON.stringify(interaction)).toBe(original);
   expect(request_AnswerInteractionRequest({ ...request, answer: interaction.answer })).toBe(true);
+  const messageAnswer = { ...interaction.answer, asUserMessage: true };
+  expect(request_AnswerInteractionRequest({ ...request, answer: messageAnswer })).toBe(true);
+  expect(response_Interaction({ ...interaction, answer: messageAnswer })).toBe(true);
 });

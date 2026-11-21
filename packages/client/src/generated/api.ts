@@ -3024,7 +3024,12 @@ export type Interaction = {
             | { kind: 'approval'; decision: 'deny' }
           )
         | { kind: 'question'; answers: Interaction___schema0 }
-        | { kind: 'plan_review'; decision: 'approve' | 'deny' | 'revise'; feedback?: string }
+        | {
+            kind: 'plan_review';
+            decision: 'approve' | 'deny' | 'revise';
+            feedback?: string;
+            asUserMessage?: true;
+          }
       )
     | null;
   revision: string;
@@ -3073,7 +3078,12 @@ export type InteractionPage = {
               | { kind: 'approval'; decision: 'deny' }
             )
           | { kind: 'question'; answers: InteractionPage___schema0 }
-          | { kind: 'plan_review'; decision: 'approve' | 'deny' | 'revise'; feedback?: string }
+          | {
+              kind: 'plan_review';
+              decision: 'approve' | 'deny' | 'revise';
+              feedback?: string;
+              asUserMessage?: true;
+            }
         )
       | null;
     revision: string;
@@ -3100,7 +3110,12 @@ export type AnswerInteractionRequest = {
         | { kind: 'approval'; decision: 'deny' }
       )
     | { kind: 'question'; answers: AnswerInteractionRequest___schema0 }
-    | { kind: 'plan_review'; decision: 'approve' | 'deny' | 'revise'; feedback?: string };
+    | {
+        kind: 'plan_review';
+        decision: 'approve' | 'deny' | 'revise';
+        feedback?: string;
+        asUserMessage?: true;
+      };
 };
 export type InteractionListQuery = {
   storeId: string;
@@ -3728,7 +3743,7 @@ export type Message = {
   sourceIds?: Array<string>;
   originCommandId?: string;
   contextSelectionId?: string;
-  inputKind?: 'input.steer' | 'input.follow_up' | 'result.include';
+  inputKind?: 'input.steer' | 'input.follow_up' | 'result.include' | 'interaction.answer';
 };
 type Change___schema0 =
   | string
@@ -4592,7 +4607,7 @@ export type SelectedContextPage = {
     sourceIds?: Array<string>;
     originCommandId?: string;
     contextSelectionId?: string;
-    inputKind?: 'input.steer' | 'input.follow_up' | 'result.include';
+    inputKind?: 'input.steer' | 'input.follow_up' | 'result.include' | 'interaction.answer';
   }>;
   resultSources: Array<{
     id: string;
@@ -5002,7 +5017,7 @@ export type MessageList = Array<{
   sourceIds?: Array<string>;
   originCommandId?: string;
   contextSelectionId?: string;
-  inputKind?: 'input.steer' | 'input.follow_up' | 'result.include';
+  inputKind?: 'input.steer' | 'input.follow_up' | 'result.include' | 'interaction.answer';
 }>;
 export type MessageTextQuery = { storeId: string; seq: string; sha256: string; offset: string };
 export type MessageTextChunk = {
@@ -5135,7 +5150,7 @@ export type MessageChangesPage = {
     sourceIds?: Array<string>;
     originCommandId?: string;
     contextSelectionId?: string;
-    inputKind?: 'input.steer' | 'input.follow_up' | 'result.include';
+    inputKind?: 'input.steer' | 'input.follow_up' | 'result.include' | 'interaction.answer';
   }>;
   removedIds: Array<string>;
 };
@@ -5343,7 +5358,7 @@ export type SessionView = {
     sourceIds?: Array<string>;
     originCommandId?: string;
     contextSelectionId?: string;
-    inputKind?: 'input.steer' | 'input.follow_up' | 'result.include';
+    inputKind?: 'input.steer' | 'input.follow_up' | 'result.include' | 'interaction.answer';
   }>;
   snapshotCursor: string;
   storeId: string;

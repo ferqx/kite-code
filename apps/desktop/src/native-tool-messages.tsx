@@ -20,6 +20,8 @@ import { nativeToolRequestTarget } from './tool-request-target';
 
 const emptyToolFacts: NativeToolMessageFact[] = [];
 
+export const PLAN_PROGRESS_TOOL = 'planning.update';
+
 const labels: Record<string, readonly [readonly string[], string]> = {
   'files.read': [['2', '3', '4', '5'], '读取'],
   'files.write': [['2', '3'], '写入'],
@@ -44,7 +46,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'planning.read': [['1'], '读取计划'],
   'planning.write': [['1'], '编写计划'],
   'planning.review': [['1'], '请求计划审阅'],
-  'planning.update': [['1'], '更新计划'],
+  [PLAN_PROGRESS_TOOL]: [['1'], '更新计划'],
   'mcp.tools.search': [['1'], '搜索 MCP 工具'],
   'mcp.resources.list': [['1'], '列出 MCP 资源'],
   'mcp.resources.read': [['1'], '读取 MCP 资源'],
@@ -520,6 +522,7 @@ export function liveToolMessages(
     .filter(
       (execution) =>
         execution.kind === 'tool' &&
+        execution.definitionId !== PLAN_PROGRESS_TOOL &&
         execution.originStoreId === selection.storeId &&
         execution.sessionId === selection.session.id &&
         !!execution.runId &&

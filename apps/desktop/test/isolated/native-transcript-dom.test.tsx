@@ -13,7 +13,7 @@ import { createRoot } from 'react-dom/client';
 import { markdownMarkup } from '../../../../packages/ui/test/markdown-dom.fixture';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { NativeModelOutputMessage } from '../../src/native-model-output-message';
-import { groupNativeToolMessages } from '../../src/native-tool-messages';
+import { groupNativeToolMessages, liveToolMessages } from '../../src/native-tool-messages';
 import {
   desktopTranscript,
   nativePendingInputMessage,
@@ -218,6 +218,118 @@ const tool = (id: string): NativeToolMessageFact => ({
   status: 'succeeded',
   resultRevision: '1',
   target: `${id}.txt`,
+});
+
+test('plan progress updates stay out of live and reopened Native transcripts', async () => {
+  const f = fixture();
+  const active: NativeRunFact = { ...run(), status: 'running', isActive: true, finishedAt: null };
+  const progress: NativeToolExecution = {
+    id: 'e-progress',
+    sessionId: 's',
+    runId: 'r',
+    originStoreId: 'store',
+    kind: 'tool',
+    definitionId: 'planning.update',
+    definitionVersion: '1',
+    status: 'running',
+    resultRevision: '0',
+    cancelRequestedAt: null,
+    parentExecutionId: null,
+    inputReady: true,
+  };
+  const read: NativeToolExecution = {
+    ...progress,
+    id: 'e-read',
+    definitionId: 'files.read',
+    definitionVersion: '3',
+    target: 'acceptance.txt',
+  };
+  const request = {
+    ...message('call', 'assistant', '2', ''),
+    firstOutput: 'tool_calls' as const,
+    toolCalls: [{ id: 'step-update', name: 'planning.update', arguments: '{}' }],
+  };
+  const input = message('input', 'user', '1', '实施此计划');
+  const receipt = {
+    ...message('progress', 'tool', '3', '原始进度回执'),
+    sourceIds: [progress.id],
+  };
+  const file = {
+    ...message('read', 'tool', '4', '实际文件结果'),
+    sourceIds: [read.id],
+  };
+  const selection = { storeId: 'store', session: { id: 's' }, runs: [active] };
+  const project = (
+    messages: Message[],
+    options: Partial<Parameters<typeof desktopTranscript>[0]> = {},
+  ) =>
+    desktopTranscript({
+      messages,
+      runs: [active],
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+      traceTurns: true,
+      ...options,
+    });
+  try {
+    expect(liveToolMessages({ ...selection, executions: [progress] }, [])).toEqual([]);
+    expect(project([input, request]).messages.some((entry) => entry.tracePending)).toBe(false);
+    const mixed = {
+      ...request,
+      toolCalls: [
+        ...request.toolCalls,
+        { id: 'file-read', name: read.definitionId, arguments: '{}' },
+      ],
+    };
+    expect(project([input, mixed]).messages.some((entry) => entry.tracePending === 'tool')).toBe(
+      true,
+    );
+    const live = liveToolMessages({ ...selection, executions: [progress, read] }, [receipt]);
+    expect(live.map((entry) => entry.execution.id)).toEqual([read.id]);
+    const hot = project([input, request, receipt], { executions: [progress, read] });
+    expect(hot.messages.map((entry) => entry.id)).not.toContain(receipt.id);
+    const cold = project(
+      [input, request, receipt, file, message('final', 'assistant', '5', '验收完成')],
+      {
+        runs: [run()],
+        tools: [
+          {
+            ...tool(receipt.id),
+            definitionId: progress.definitionId,
+            definitionVersion: '1',
+            status: 'failed',
+          },
+          tool(file.id),
+        ],
+      },
+    );
+    for (const messages of [
+      groupNativeToolMessages([...hot.messages, ...live.map((entry) => entry.message)]),
+      cold.messages,
+    ]) {
+      await act(async () =>
+        f.root.render(
+          <Conversation
+            traceTurns
+            selected
+            connected
+            loading={false}
+            messages={messages}
+            saveReading={() => {}}
+          />,
+        ),
+      );
+      expect(f.host.textContent).not.toContain('更新计划');
+      expect(f.host.textContent).not.toContain(receipt.content);
+    }
+    expect(cold.messages.filter((entry) => entry.role === 'tool').map((entry) => entry.id)).toEqual(
+      [file.id],
+    );
+    expect(f.host.textContent).toContain('验收完成');
+  } finally {
+    await f.close();
+  }
 });
 
 test('Native model segments retain exact reasoning identity through prose, observation loss and cold terminal history', async () => {

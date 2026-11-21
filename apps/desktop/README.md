@@ -1158,7 +1158,7 @@ Chrome生产组件／编译CSS在浅1280／深780px核工具聚合200px、viewpo
 
 2026-10-23，macOS arm64／Bun 1.4.2，`8a8458800` 加本次工作树：[普通真实窗口 runner](../../tests/e2e/live/model/collaboration-unified-native-window.live.ts)使用 `testDiagnostics:false`、现有 `deepseek-v4-flash`／chat-completions／medium／4096，通过13次实际HTTP 200。两条多段引导从普通输入框发送，先受理再由原检查点应用；原 Command／Message／Run／selection、完整正文和准确来源逐项核对，下一份真实 ModelInput 及 Provider 请求各包含两条原文一次，原父 Run 的最终回复含两条核验码。28张阶段截图、174帧、canonical正文与回执保存在 `dist/acceptance/steer-process-live-window-20261023-3a9e5d9f.json.workspace`，报告为同名去掉 `.workspace` 的JSON。发送、接管、后续模型、完成与冷开相关41帧始终只有原父一段过程，无过程外引导或重复；实际检查了草稿清空、发送占位接管、终态默认折叠、展开原序全文及再次收起。`16-complete-steer-collapsed.png` 显示单个“用时10秒”和过程外最终回复，`17-cold-steer-1-expanded.png` 保留重开后的完整引导。冷开零新增Provider／Run／Execution／Command／Source／control，两个窗口正常退出，准确所属进程无残留。UI／Native及原首条输入接管七整文件117项／3007断言、八workspace typecheck、同源API、边界、测试归属、Biome与文档检查通过。该结果限本机普通候选与上述真实模型；时序门只延迟真实响应，不生成或改写模型内容。
 
-Native 主会话由 [desktopTranscript](src/native-transcript.ts)投影准确 Run、Model 和工具 Execution。当前 Model 的公开思考阶段供活动标题和原思考行使用。问答和审批等待与同一 Store／会话／Run／工具的原 Interaction 绑定，提交期沿原答案回执，未核实执行时停止活动提示。原 [ConversationTrace](../../packages/ui/src/desktop/ConversationTrace.tsx)保留各段及步骤的展示身份，并行工具取实际观察到的启动顺序。创建子 Agent 与计划审阅是独立行，等待、发送和其他子 Agent 工具归入链内。原计划卡在匹配的消息行内呈现，已保存的审阅详情复用[交互历史读取](src/native-interaction-history.tsx)与附件核验。原执行接收同一修订的答复后，历史审阅才显示决定。多个已展开的审阅行使用各自的[只读句柄](electron/interaction-history-reads.ts)，切换会话后统一撤销原选中的读取与附件准入。轮次计时继续使用原 Run 的开始时间，正文、思考与回执各按原来源接管。相关取舍见[思维链呈现 Note](../../.agents/notes/implemented/feature/2026-11-21-native-conversation-trace.md)。
+Native 主会话由 [desktopTranscript](src/native-transcript.ts)投影准确 Run、Model 和工具 Execution。当前 Model 的公开思考阶段供活动标题和原思考行使用。问答和审批等待与同一 Store／会话／Run／工具的原 Interaction 绑定，提交期沿原答案回执，未核实执行时停止活动提示。原 [ConversationTrace](../../packages/ui/src/desktop/ConversationTrace.tsx)保留各段及步骤的展示身份，并行工具取实际观察到的启动顺序。创建子 Agent 与计划审阅是独立行，等待、发送和其他子 Agent 工具归入链内。计划正文及已接收的决定在原会话计划卡内呈现，待审操作在会话底部。已保存审阅复用[交互历史读取](src/native-interaction-history.tsx)与附件核验。原执行接收同一修订的答复后，历史审阅才显示决定。多个已展开的审阅行使用各自的[只读句柄](electron/interaction-history-reads.ts)，切换会话后统一撤销原选中的读取与附件准入。轮次计时继续使用原 Run 的开始时间，正文、思考与回执各按原来源接管。相关取舍见[思维链呈现 Note](../../.agents/notes/implemented/feature/2026-11-21-native-conversation-trace.md)。
 
 2026-11-21，Windows x64／Bun 1.4.4／Electron 44.3.0，`c7c9c4b2d` 加初版实现。隔离的普通源码构建连接真实 paired Service／SQLite 和可控本地模型。窗口暖流程观察了 96 个状态变化，包含初次与工具后的思考、问答提交、人工批准和拒绝、单条编辑等待审批、创建子 Agent 与计划审阅独立呈现，以及发送与等待子 Agent 在链内阅读。断开实际事件流后撤下「思考中」，重连新流后在原标题和思考正文恢复，原选区、输入焦点与草稿保留。结束摘要为「读取了文件查看了图片询问了用户运行了命令」。单条编写计划段结束后从「工具执行」进入，计划审阅在独立行保留计划和批准决定。
 
@@ -1384,7 +1384,7 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 
 自动批准通过理由不进入工具展开正文，真实执行失败和结果未知只展示各自异常；原授权事实和盾牌提示仍保留，拒绝及转人工原因不受影响。显示规则、逐状态回归与实际浏览器过程证据归 [共享 UI](../../packages/ui/README.md#原桌面展示层)。Native 的已知写入展示同时支持保存的 `files.write@2` 和当前 `@3`，两者均显示“写入”；未来未识别版本仍使用原定义／版本文字，不推断能力或执行结果。
 
-普通 root／child 工具审批都与父 Composer、权限选择器并存，待批时可切 Auto／Full 使原未派发工具重新判断。`nativeRootInteractionBlocksComposer` 只为准确当前根的 question、plan_review 与 MCP 特殊审批隐藏输入，仍核原 Store、父 Session、准确 Execution 与活动 Run；runless 原交互核准确原执行，不以 rootSessionId 或 waiting 文案推断。共享 SessionPage 的 `interactionHidesPrompt` 缺省保持，Native 对普通工具审批明确保留 Composer。实际输入、单轮准入及模式复核继续由原 Runtime 决定。
+普通 root／child 工具审批都与父 Composer、权限选择器并存，待批时可切 Auto／Full 使原未派发工具重新判断。`nativeRootInteractionBlocksComposer` 为当前会话的 MCP 特殊审批核对原 Store、Session、Execution 与活动 Run，无 Run 的交互核对原执行。共享 SessionPage 的 `interactionHidesPrompt` 缺省保持。普通工具审批和补充问题与主编辑器并存。计划待审时，专用面板占用底部输入位置。实际输入、单轮准入及模式复核继续由原 Runtime 决定。
 
 ## 原运行中消息队列
 
@@ -1401,6 +1401,8 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 [queue journal](electron/native-input-queue-journal.ts)沿 [private-data](electron/private-data.ts)懒迁移 DB11 `input_queue_intents`，保存 Main 分配的原操作 ID、闭合 request、scope、subject、digest 与编辑原文。首次 POST 前持久提交；未知／冷记录只 GET 原 ID，不重发。read 恢复未决元数据和已 applied 未交付编辑，但不自动回填；显式 lookup 核实后返回原文，renderer 成功填入普通输入框后以 `input.queue.ack` 标记交付，之后不再提示或返回旧文。草稿沿原普通编辑／显式保存合同，不将交付 ack 当作草稿已落盘。128行／16MiB局部容量不裁未决或未交付编辑，已交付终态记录有界剪裁。切会话、Store、代次或关闭撤销原读取，晚到结果只记账，不向替换视图回填。
 
 [Main／IPC 回归](test/native-input-queue.test.ts)、[实际 Node journal](test/isolated/native-input-queue-journal.test.ts)与[renderer DOM](test/isolated/native-input-queue-dom.test.tsx)分别覆盖封闭输入、分页 revision、完整原文、未知只查原 ID、ack、附件、防迟到及受控交互；后端消费与持久顺序的实现和测试归 [Store owner](../../packages/agent/src/storage/README.md#待消费输入的撤回与排序)。真实窗口通过[原运行中权限夹具](test/isolated/native-live-permissions-bundle.test.ts)核验，不据 DOM／Node 结果推导窗口或其他平台资格。
+
+在 Windows 普通窗口的计划审阅与队列并存场景，成功删除排队消息后，原输入的终态仍可能使主输入显示「发送失败」。实窗中两次撤回已保存 `input_withdrawn`，原输入对应 `withdrawn_before_apply`。对应提示沿 [Native 主输入状态投影](src/native.tsx)核查，本机复现记录为 `.cache/plan-review-above-queue-window-a7d564ce/`。
 
 取舍和未采用方案见[紧凑审批与队列决定](../../.agents/notes/implemented/feature/2026-10-22-native-approval-input-queue.md)。
 
@@ -1999,21 +2001,63 @@ renderer 的页面 Map 分别保存步骤与 JSON fallback 草稿，身份固定
 
 ## Native 计划入口与完整审核
 
+2026-11-21，Windows x64 普通源码窗口通过既有 OpenAI 连接使用 `gpt-6-luna`／`medium` 和 Responses 协议验收。实施会话有 14 次实际模型执行，跳过会话有 3 次，原调用均成功。观察了第一版待审、回复生成第二版、批准后右上角从待开始到两步完成、正在收尾、原轮历史接管及关闭环境卡后的回看。修改意见和「开始实施此计划」各保留一条原用户消息，按准确来源进入下一模型；实际写入和读回的两次回执均属于原 Run。跳过结束原轮、零写入、零后继模型执行。冷重开还原第二版和完成步骤，模型执行总数保持，两次窗口均退出 0，renderer 未报错。8 张截图和确认记录位于本机 `.cache/plan-delivery-live-a797ebfc/`。
+
 2026-11-08，参数改造后的隔离诊断候选再次构建并搬迁，固定Provider／真实Service、IPC和SQLite的完整Electron文件1项／313断言通过。使用新plan_ref/progress_ref，核完整大计划阅读、修订、批准、拒绝后零后继Model、等待中停止、原草稿恢复、零重复回答及冷Store证明；工作区Files没有额外权限卡。69帧过程画面及阶段／滚动记录保存在本机dist/acceptance/tool-parameters-native-plan-review/，已观察审批卡切换和终态。此项使用明确测试制品；真实Luna与三模式工具证据归模型测试owner，不作为全部普通客户端外观或其他平台资格。
 
 2026-11-07，macOS arm64／Bun1.4.4，最终源码3402文件／`2273a30b…a9ed` 的普通 `testDiagnostics:false` 制品，用现有 Codex 登录的 `gpt-6-luna/medium` 实际完成三模式计划人答。原 Full 计划在待答时经普通权限控件切 Manual 再确认 Full，同卡／request／revision 保持，空 Enter 零回答、批准前零效果；批准后 Full 零权限卡，Auto 一次独立 low reviewer，Manual 原 Tool/Job 各一次。Auto 丢原202时实际显示 unknown、禁重复提交，随后准确原 Command GET 200恢复，原 POST 仍一次；5个原 journal 均 accepted。冷重开逐模式观察历史，43个 Execution／3 Run／5 Interaction／25 Command 全行摘要及3个唯一效果完全相同，冷 POST 为零。原生全树停止、注册移除及 broker 回收证明完整，Main60766正常 exit0，所属 Profile/制品进程无残留。55个原 PNG/DOM/SQL阶段与 `actual-report.json` 在本机 `/private/tmp/kite-luna-plan-business-observe-983cd353-21f4-4d3a-ad4a-87199f0264d3/evidence/native/`。Auto 一次错误计划 ID 被拒后模型读取原计划更正，原失败保留，不称所有模型参数均正确；这不提升其他平台或安装发行资格。
 
 显式自动测试模式的主输入以“先审核计划”明确选择本次任务，选择本身零业务 POST；普通启动及 `desktop:dev` 不提供此辅助选择。idle 保存原 `run.start`，活动任务保存准确 `afterRunId/contextSelectionId` 的 `input.follow_up`；两者只带闭合 `builtin.planning@1 {mode:'plan'}`，不改变当前原 Run。选择按原 Store/Workspace/Session 隔离，已知正回执后复位，失败或未知保留。默认 Service 负责装配原 Run 计划义务与必要条件，调用者不自报只读定义或批准权。
 
-共享 Plan 面板显示准确当前版本的完整正文、步骤和原材料，提供批准此计划、补充修改与拒绝，不提供执行权限模式选择。三种权限模式均等待用户明确业务答复；批准保留当前权限模式，不授权后续其他 Tools。普通客户端可显示工具主动请求的计划确认，不增加文字 slash 解析或普通“先审核计划”开关。修改要求作为原反馈由真实 `planning.review` ToolResult 交给下一 Model，新版继续独立审核。拒绝时，默认 Planning 工具返回简短用户拒绝说明并直接结束当前轮次，不再请求模型续答或重复批准；原 Tool 和回答记录保留，新消息仍可继续。“停止任务”固定当前已核实活动 Run 的原 Command，复用主输入停止的权限、历史与 caller 校准门禁；取消中和结果未知时不能换新命令补发。普通工具 pending approval 保留主输入与权限选择；根会话 question、plan_review 隐藏主输入但保留原权限工具栏、Full 确认和准确原任务停止入口，业务卡结束后恢复原主草稿。特殊来源授权继续遵循原输入独占边界。权限切换不回答或替换业务卡；未知权限提交、读取失效与会话切换仍受原门禁和 Full 确认作用域约束。取消原 Run 不撤销已有事实，已派发 review 的未知结果及退出提示继续保留。
+共享 Plan 面板显示准确当前版本的完整正文、步骤和原材料。三种权限模式均等待用户明确业务答复；批准保留当前权限模式，不授权后续其他 Tools。普通客户端可显示工具主动请求的计划确认，不增加文字 slash 解析或普通“先审核计划”开关。修改要求作为原反馈由真实 `planning.review` ToolResult 交给下一 Model，新版继续独立审核。拒绝时，默认 Planning 工具返回简短用户拒绝说明并直接结束当前轮次，不再请求模型续答或重复批准；原 Tool 和回答记录保留，新消息仍可继续。“停止任务”固定当前已核实活动 Run 的原 Command，复用主输入停止的权限、历史与 caller 校准门禁；取消中和结果未知时不能换新命令补发。普通工具审批和补充问题保留主输入、权限选择和 Full 确认。计划审阅和特殊来源授权各用自己的回答区。权限切换不回答或替换业务卡；未知权限提交、读取失效与会话切换仍受原门禁和 Full 确认作用域约束。取消原 Run 不撤销已有事实，已派发 review 的未知结果及退出提示继续保留。
 
-页面 Plan Map 保存 Store/source/presentation Session/id/revision/inputDigest 的反馈，与 Question、主草稿各自独立。准确 Main accepted answer_saved、实际同原卡替换或非 pending、以及精确原 Run 已观察 cancelled 才清对应原键；遗漏 bounded pending 页、读取失败、Promise resolve 不清草稿。完整页面刷新或退出不保证未提交 Plan 草稿恢复。
+待审计划和[原审阅历史](src/native-interaction-history.tsx)复用[共享计划卡](../../packages/ui/src/plan-review.tsx)。[Native](src/native.tsx)按原交互身份在会话底部挂载待审组件，正文通过同一组件呈现在对应会话消息里。实施、跳过和专用回复留在原输入框位置，三种操作共用提交锁和附件读取证明。未核实完整附件时，底部提供定位原消息的入口。已保存答复留在原计划消息，历史同时读取原用户消息。
 
-[普通业务卡 DOM](test/isolated/native-business-permission-dom.test.tsx)以 `testDiagnostics:false` 核对待计划卡的六向权限切换、原卡 ID/revision 不变、零答案提交、权限读取失效时拒绝迟到 Full 确认，以及 Question 卡停止可达；[Full 作用域回归](test/isolated/native-full-permission-context-dom.test.tsx)核对隐藏正文时会话替换仍撤销旧确认。相关五个完整文件在本机 macOS／Bun1.4.4 为16项／187断言通过，Desktop/UI 类型通过；这不代替最终普通窗口真实模型验收。以下早期实际候选记录保留其当时模式与审批合同，不作为新纯业务答案的最终冻结资格。
+[待审判定](src/native-input.ts)在根会话有待审计划时隐藏主输入、队列及权限控件，原执行仍在等待时可跨越待审列表的暂时缺页。审阅期间暂停客户端的队列观察与操作，结束后重新读取原队列，恢复开合状态、主草稿及权限控件。实施使用 `approve` 和原文「开始实施此计划」，跳过使用 `deny`，专用回复使用 `revise` 和所输入的原文。带 `asUserMessage` 的答复和用户消息在[同一存储事务](../../packages/agent/src/storage/sqlite/interactions/README.md)落地。计划回复使用原 Interaction 身份保存的页面草稿。
+
+[计划进度读取](src/native-plan-progress.tsx)由 [Main](electron/native-caller.ts) 在当前根会话作用域调用 Planning 的只读查询，传给 renderer 的投影只有准确 Run、批准版本、原审阅 Execution 及步骤标题和状态。查询响应前后复核 Store、主体与会话阅读代次，renderer 淘汰旧视图中的迟到结果。同一会话临时断线保留已核对的步骤。原计划定位沿会话阅读视口展开准确工具消息，窄窗环境浮层随定位收起。
+
+[实时工具投影](src/native-tool-messages.tsx)和[历史会话投影](src/native-transcript.ts)按原工具定义隐藏 `planning.update` 的过程行。原执行与进度回执继续供计划进度查询和轮次回看使用。
+
+计划原文的历史读取在重连后等待当前会话重新取得读取资格。同一阅读选择暂存已结算的原交互，历史读柄仍按新的观察代次重建；点击计划标题时，尚未读取的长正文沿原计划附件入口核验，核验后展开原文。
+
+「环境信息」在原计划获批后显示进度。已展开阅读的步骤随历史接管更新到终态，待收起步骤或环境卡再撤下。其他情况在原轮结果展示且历史查询成功后撤下。「查看执行步骤」跟随该轮摘要，冷打开仍从持久批准与进度读取。同一轮的多个已获批版本各自显示，计划正文仍从原审阅读取。产品规则见[桌面手册](../../docs/handbook/clients/desktop/README.md#会话与操作)，业务事实见[Planning owner](../../packages/agent/src/business/planning/README.md)。
+
+2026-11-21，Windows x64 普通源码窗口使用 paired Service、SQLite 和本机受控模型验证了两项实际文件步骤。10 张截图和 22 次界面状态变化记录在本机 `.cache/plan-progress-window-f4124985/`。验证批准前隐藏进度、获批后定位原方案、断开并重建真实事件流、800px 级浅色窄窗、切换会话和原轮已完成两步但仍在收尾的阶段。进度列表在重连过程中连续保留，原计划重读成功。最终回复和历史入口接管后，打开的进度保留至收起。冷打开从历史入口核验并展开原长计划。两次窗口均退出 0，renderer 错误为零。实际步骤与回执见同目录的 `lifecycle-proof.json`。同版后继 Run 和迟到读数由 [Planning 回归](../../packages/agent/test/isolated/business/planning-progress-view.test.ts)及[计划进度 DOM 回归](test/isolated/native-plan-progress-dom.test.tsx)核对。
+
+计划标题与进度合为一行后，在 Windows 深色窗和 820px 浅色窄窗中核对行内对齐、键盘展开、标题定位、收尾及历史切换。实窗与过程记录保存在本机 `.cache/plan-progress-inline-window-9cdabf90/`。
+
+过滤计划进度工具行后，在 Windows 实窗逐阶段核对待审、执行、断线恢复、终态和冷打开。展开实时与历史处理过程均可查看文件工具，界面未出现进度工具行。原 Run 的四次进度更新成功落盘，两项步骤按原回执在计划栏及原轮历史显示。证据保存在本机 `.cache/plan-progress-chat-window-41374991/`。
+
+2026-11-21，Windows x64／Bun 1.4.4／Electron 44.3.0 的普通源码构建连接真实 paired Service 和 SQLite，由本机固定模型提供两版计划及拒绝用例。实窗共记录 17 个操作阶段、暖窗 132 和冷窗 10 个呈现变化。核对卡头与正文的初始位置、断线原位禁用和草稿恢复、跨会话返回、修订回执、完整附件读取取消与重试、键盘滚到正文首尾及窄窗操作。三次决定分别提交一次，历史显示对应决定和原反馈。冷重开重新读取完整附件，模型请求和答复 POST 均为零。两次退出码为 0，renderer 错误为零。夹具登记了实际写入的步骤，第二步保留待核对，运行如实结算为完成条件未满足。过程记录和截图保存在本机 `.cache/plan-review-window-947857b0/`。
+
+2026-11-21，同一 Windows 环境复验本次计划文档与表单的位置，以及两处提交入口。实窗记录 18 个操作阶段，暖窗和冷窗分别记录 159 和 10 个呈现变化。待审文档在会话消息中显示，补充问题与计划使用同一交互区。主输入发送的多行原文以版本 1 的修改意见保存，故意丢失回执后只核对原提交。版次切换保留随后编辑的主草稿。版本 2 在附件读取取消、失败和重试期间可编辑主输入，完整核验后可阅读全文并提交决定。批准、修改和拒绝各提交一次。冷重开恢复原记录并重新读取附件，模型请求和答复 POST 均为零。两次正常退出，renderer 错误为零。过程记录和截图保存在本机 `.cache/plan-feedback-window-3014fee2/`。Desktop、UI、Web 类型检查和 25 项定向回归通过。
+
+2026-11-21，Windows 普通源码构建复验三操作方案。配对 Service 和 SQLite 连接本机固定模型，实窗记录 18 个阶段，暖窗和冷窗分别记录 112 和 10 个呈现变化。原文回复和「开始实施此计划」各在原任务保存一条用户消息，并按相同原文进入模型。丢失回复回执后只核对原命令。故意拒绝一次草稿保存后，原草稿继续编辑并成功保存。跳过后计划卡保留在原消息。长附件核验失败、取消、恢复和窄窗展开均经实窗观察。冷重开确认两版计划及原消息，模型请求和答复 POST 均为零。两次退出码为 0，未观察到 renderer 或草稿保存错误。记录保存在本机 `.cache/plan-three-actions-window-686a80a9/`。共 48 项定向回归通过，覆盖原答复及草稿边界。交互与事务取舍见 [Agent Note](../../.agents/notes/implemented/feature/2026-11-21-plan-review-conversation-reply.md)。
+
+2026-11-21，Windows 普通源码窗口复验计划卡样式。用本机固定模型和配对 Service 记录 20 个阶段，暖窗和冷窗分别记录 136 和 12 个呈现变化。通过主题菜单核对深浅主题和 800px 窄窗的标题、版号、按钮对比与输入节点。检查了草稿和焦点、断线恢复、长附件取消及重试、计划与用户回复的顺序和间距。跳过和冷重开后保留原计划卡，两次退出码为 0。[计划 DOM 回归](test/isolated/native-plan-review-dom.test.tsx)同时核对当前计划与提示词编辑器使用同一个表单。实窗记录在本机 `.cache/plan-review-style-window-222fd422/`。
+
+展开入口移到标题行右端后，在 Windows 实窗通过 Enter 展开、空格收起，核对同一按钮保有键盘焦点及卡片内位置。深浅主题、800px 窄窗和冷重开覆盖待审及历史计划，完整附件沿原会话滚动。21 个阶段的记录保存在本机 `.cache/plan-review-toggle-window-53bd4cda/`。
+
+独立审阅栏在 Windows 普通实窗中以两条真实排队输入复验。已读队列展开和收起时都位于审阅栏下方，两处外框间保持 11.2 CSS px 留白。深浅主题和 800px 窄窗核对了三块的顺序及边界。主输入提交审阅答复后，两条原队列项仍以原身份和顺序显示。继续核对了新版附件、实施、跳过和冷重开。23 个阶段及暖窗 158 个、冷窗 12 个呈现变化保存在本机 `.cache/plan-review-above-queue-window-09095168/`，两个窗口均正常退出。
+
+审批移入计划卡后，以 Windows 普通实窗及两条真实排队输入复验。核对收起预览和展开长附件末尾的按钮位置、深浅主题、800px 窄窗、两次版号提示及原输入节点。观察了断线恢复、原答复回执接管、新版附件核验、实施、跳过及冷重开，主输入提交审阅答复后，两条原队列项仍按原 ID 和顺序显示。24 个阶段和暖窗 223 个、冷窗 11 个呈现变化保存在本机 `.cache/plan-review-in-card-window-80c7d425/`。两个窗口均正常退出。
+
+改用计划卡专用回复后，在 Windows 普通实窗通过两条排队输入复验。24 个阶段覆盖首次待审、新版待审、断线、切换会话、回复回执、实施、跳过和冷重开，175 个暖窗与 11 个冷窗呈现变化中，主输入和待审操作同时可见的帧为零。卡内草稿跨会话保留，主草稿在答复后恢复，队列保留准确条目和开合。两个窗口均正常退出，记录在本机 `.cache/plan-review-exclusive-window-ddf162f6/`。
+
+整块底部区域隐藏后，使用 Windows 普通实窗和两条排队输入复验。首版、修订版和断线恢复期间共 58 个待审呈现状态，底部区域高度均为零。回复回执接管和实施后恢复两条原队列项、权限入口和主草稿，队列开合按该会话保留。22 个阶段及暖窗 175 个、冷窗 12 个呈现变化记录在本机 `.cache/plan-review-footer-hidden-window-b7cd23d9/`，两个窗口均正常退出。实施后测试清理队列时再次观察到队列章节已记录的撤回提示。
+
+审阅面板移到输入框位置后，在 Windows 普通实窗连接真实 paired Service、SQLite 和本地固定模型复验。首版和修订版共 57 个待审呈现状态，均只显示审阅输入，普通输入、队列和权限入口在答复后恢复。浅色、深色与 800px 窗口核对了启用和禁用样式。展开长计划并在首尾往返时，审阅面板位置保持。模拟输入法确认保留草稿，Shift+Enter 换行，连按 Enter 只提交一次。覆盖断线、原答复回执接管、附件取消与重试、实施、跳过及冷重开。22 个阶段、暖窗 177 个与冷窗 11 个呈现变化在本机 `.cache/plan-review-at-input-window-bcf7ba3d/`，两个窗口正常退出，页面错误为零。
+
+底部计划审阅面板在标题旁并列显示跳过和实施，下方回复框包含发送按钮。Windows 实窗核对深浅主题与 800px 宽度下的分组、对齐、键盘和三种答复。复验还覆盖断线恢复、长计划核验、队列恢复及冷重开。22 个操作阶段、暖窗 182 个与冷窗 12 个呈现变化记录在本机 `.cache/plan-review-decision-layout-window-c6cdaaeb/`。两次退出码为 0，renderer 错误为零。
+
+[普通业务卡 DOM](test/isolated/native-business-permission-dom.test.tsx)以 `testDiagnostics:false` 核对计划待审时隐藏底部输入和权限入口。普通问答待答时保留六向权限切换，原卡 ID/revision 不变，期间无答案提交，权限读取失效时拒绝迟到 Full 确认，停止操作可达。[Full 作用域回归](test/isolated/native-full-permission-context-dom.test.tsx)核对隐藏正文时会话替换仍撤销旧确认。调整前的 macOS／Bun1.4.4 五文件回归为 16 项／187 断言通过，Desktop/UI 类型通过。以下早期实际候选记录保留其当时模式与审批合同，不作为新纯业务答案的最终冻结资格。
+
+同一次本机验证另行运行 [Planning 固定模型业务用例](../../packages/agent/test/isolated/business/planning.test.ts)，该用例在首次待审记录出现前超时。此次实窗使用独立的真实 paired Service 验证三操作路径。
 
 [Main 原附件 reader](electron/interaction-attachment-reads.ts)只打开当前视图实际 offered card 的公开原身份，复用 controller 与 SDK 的完整 Artifact/hash/UTF-8 证明。renderer 经 [64KiB reader](src/native-interaction-attachment.ts)核 scope、原 size、完整 EOF、SHA 和 fatal UTF-8；Main 在原视图完整传输至 EOF 前另拒绝回答。close 只释放读取，当前完整证明保留；选择或网络释放清证明，迟到正文不改绑。Native `viewSelection` 区分同 Session 重选，`historyEpoch` 隔离观察流 reset，renderer 同时撤销旧正文资格。普通同作用域刷新中止旧在途读取，保留已经完成且仍实际 offered 的准确 key；失败期间拒绝操作，恢复后重新核原卡，不清反馈草稿。无任意 Artifact、路径或 Runtime 端口。
 
-[页面 DOM](test/isolated/native-plan-review-dom.test.tsx)、[读取边界](test/native-interaction-attachment.test.ts)与 [显式输入](test/native-input.test.ts)核草稿、主输入独占、原取消清理、未读取/部分读取不得回答和闭合 Plan 意图。[实际候选](test/isolated/native-plan-review-bundle.test.ts)与 [Electron driver](test/native-plan-review-electron.fixture.ts)已在本机 macOS 核搬迁并删除构建源的默认 Service/compatible Provider、真实两种执行方式、原反馈 v2、独立管理/File 许可、拒绝/取消、正常所属 PID 退出与冷 Store。普通 Plan Model 保 Planning 目录；Auto 专用 reviewer 按实际 `authorization_review` 用途及原 Store/Run/Files Execution 核空工具目录，不借计划批准跳过独立人工审批。Driver 在独立 Files 回答后等同一原审批 submission 已 accepted 且原卡不再 pending，再进入严格 Planning 管理 helper；仅回执接纳不足以证明 Main 视图交接完成。计划卡的正向读取还须核同一原 Store、Main 当前视图已结束刷新且权限观察可用；给定原 Run 时卡必须仍属于该 Run，不把旧只读卡当作读取就绪，也不重试已经进入的附件读取。原身份、全部断言和等待预算保持，实际结果与原失败保留见 [进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)。退出 unknown 提示的明确选择由严格一次性的测试 dialog 端口返回，不代表 macOS 原生 modal 点击资格，生产 guard 不被替换。该窗口不推导全部视觉、设置、平台或 P5 退出。
+[页面 DOM](test/isolated/native-plan-review-dom.test.tsx)、[读取边界](test/native-interaction-attachment.test.ts)与 [显式输入](test/native-input.test.ts)覆盖主输入、原审阅草稿、原取消清理、未读取或部分读取时的答复门禁及闭合 Plan 意图。[实际候选](test/isolated/native-plan-review-bundle.test.ts)与 [Electron driver](test/native-plan-review-electron.fixture.ts)已在本机 macOS 核搬迁并删除构建源的默认 Service/compatible Provider、真实两种执行方式、原反馈 v2、独立管理/File 许可、拒绝/取消、正常所属 PID 退出与冷 Store。普通 Plan Model 保 Planning 目录；Auto 专用 reviewer 按实际 `authorization_review` 用途及原 Store/Run/Files Execution 核空工具目录，不借计划批准跳过独立人工审批。Driver 在独立 Files 回答后等同一原审批 submission 已 accepted 且原卡不再 pending，再进入严格 Planning 管理 helper；仅回执接纳不足以证明 Main 视图交接完成。计划卡的正向读取还须核同一原 Store、Main 当前视图已结束刷新且权限观察可用；给定原 Run 时卡必须仍属于该 Run，不把旧只读卡当作读取就绪，也不重试已经进入的附件读取。原身份、全部断言和等待预算保持，实际结果与原失败保留见 [进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)。退出 unknown 提示的明确选择由严格一次性的测试 dialog 端口返回，不代表 macOS 原生 modal 点击资格，生产 guard 不被替换。该窗口不推导全部视觉、设置、平台或 P5 退出。
 
 计划窗口driver切换会话后还须等准确Store/Session权限范围、信任及渲染revision就绪，再选择模式。已是Auto时核模式、revision与原申请列表不变，不声称新保存；需要变更和首次显式选择仍通过原radio/保存按钮，核唯一原申请及applied回执，unknown不重投。2026-10-20默认第15轮的disabled按钮原失败保留；修正测试前提后的完整Electron文件1pass/316断言，不改变生产disabled规则、等待预算或上述计划/Files断言。
 

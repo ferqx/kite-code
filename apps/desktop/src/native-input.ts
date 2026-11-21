@@ -1,23 +1,40 @@
-import { ClientError } from '@kite-ai/client';
+import { ClientError, type Interaction } from '@kite-ai/client';
 import type { InputRequest } from './input';
 import type { NativeSelection } from './native-bridge';
 import type { NativeModelChoice } from './native-model-picker';
 
+function pendingRootInteraction(card: Interaction, selection: NativeSelection) {
+  return (
+    card.state === 'pending' &&
+    card.originStoreId === selection.storeId &&
+    card.sessionId === selection.session.id &&
+    card.presentationSessionId === selection.session.id
+  );
+}
+
 export function nativeAskUserAwaitingAnswer(selection: NativeSelection | undefined): boolean {
   if (!selection) return false;
-  const { session, storeId } = selection;
-  if (
+  return (
     selection.interactions.some(
       (card) =>
         card.kind === 'question' &&
         card.definitionId === 'ask_user' &&
-        card.state === 'pending' &&
-        card.originStoreId === storeId &&
-        card.sessionId === session.id &&
-        card.presentationSessionId === session.id,
-    )
-  )
-    return true;
+        pendingRootInteraction(card, selection),
+    ) || runningToolAwaitingAnswer(selection, 'ask_user')
+  );
+}
+
+export function nativePlanReviewAwaitingAnswer(selection: NativeSelection | undefined): boolean {
+  if (!selection) return false;
+  return (
+    selection.interactions.some(
+      (card) => card.kind === 'plan_review' && pendingRootInteraction(card, selection),
+    ) || runningToolAwaitingAnswer(selection, 'planning.review')
+  );
+}
+
+function runningToolAwaitingAnswer(selection: NativeSelection, definitionId: string): boolean {
+  const { session, storeId } = selection;
 
   // The pending page can omit a card while its original Run is still waiting.
   const waitingRun = selection.runs.find(
@@ -32,7 +49,7 @@ export function nativeAskUserAwaitingAnswer(selection: NativeSelection | undefin
     selection.executions.some(
       (execution) =>
         execution.kind === 'tool' &&
-        execution.definitionId === 'ask_user' &&
+        execution.definitionId === definitionId &&
         execution.originStoreId === storeId &&
         execution.sessionId === session.id &&
         execution.runId === waitingRun.id &&

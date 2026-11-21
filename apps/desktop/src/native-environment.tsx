@@ -225,6 +225,7 @@ export function useNativeEnvironment({
   paused = false,
   submissions,
   onChanged,
+  plan,
   references,
   onOpenChild,
 }: {
@@ -242,6 +243,7 @@ export function useNativeEnvironment({
   /** A known selection handoff pauses IO while retaining the displayed card. */
   paused?: boolean;
   submissions?: readonly NativeCallerMetadata[];
+  plan?: ReactNode;
   references?: ReactNode;
   onChanged: () => Promise<void>;
   /** A tab host may route navigation before activating this hook's one visible child reader. */
@@ -950,6 +952,7 @@ export function useNativeEnvironment({
               })) ?? []
             }
             references={references}
+            plan={plan}
             currentOnly
             stale={stale}
             busy={busy}

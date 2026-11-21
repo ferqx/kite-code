@@ -19,6 +19,7 @@ export interface PromptEditorProps {
   scopeKey: string;
   label: string;
   placeholder?: string;
+  maxLength?: number;
   disabled: boolean;
   inputRef?: Ref<PromptEditorHandle>;
   onChange(value: string): void;
@@ -120,6 +121,7 @@ export function PromptEditor(props: PromptEditorProps) {
         aria-disabled={unavailable || undefined}
         data-disabled={props.disabled || undefined}
         placeholder={props.placeholder ?? props.label}
+        maxLength={props.maxLength}
         value={text}
         disabled={props.disabled}
         readOnly={unavailable}

@@ -477,7 +477,7 @@ try {
         ),
       'exact original Plan review missing',
     );
-    await page.getByRole('region', { name: 'Plan review', exact: true }).waitFor();
+    await page.getByRole('region', { name: '计划审阅', exact: true }).waitFor();
     stage('plan_wait_complete', {
       sessionId: current.selection!.session.id,
       interactions: current
@@ -625,10 +625,10 @@ try {
     )!;
     assert.ok(card);
     assert.equal(await input.count(), 0);
-    assert.equal(await page.getByRole('button', { name: '保留草稿', exact: true }).count(), 0);
-    assert.ok(
-      (await page.getByRole('button', { name: '停止任务', exact: true }).count()) > 0,
-      'pending Plan must preserve its original task stop',
+    assert.equal(
+      await page.getByRole('button', { name: '停止任务', exact: true }).count(),
+      0,
+      'the review shows its own skip and implementation actions',
     );
     assert.equal(existsSync(join(home, 'workspace', `blocked-${id}-1.txt`)), false);
     stage('start_complete', {
@@ -766,16 +766,26 @@ try {
   assert.ok(first.runId);
   const firstRequest = planRequest(first);
   assert.ok(firstRequest.policy);
-  const approve = page.getByRole('button', { name: 'Approve this exact plan', exact: true });
+  const approve = page.getByRole('button', { name: '实施此计划', exact: true });
+  const skip = page.getByRole('button', { name: '跳过', exact: true });
+  const composer = page.getByRole('textbox', { name: '当前会话私有草稿', exact: true });
+  const reviewReplies = page.locator('[data-input-kind="interaction.answer"]');
+  const livePlan = page.getByRole('region', { name: '计划内容', exact: true });
+  const review = page
+    .locator('.conversation-footer')
+    .getByRole('region', { name: '计划审阅', exact: true });
+  await review.waitFor();
+  assert.equal(await livePlan.getByRole('region', { name: '计划审阅', exact: true }).count(), 0);
+  await composer.waitFor({ state: 'hidden' });
   assert.ok(Number(firstRequest.policy.review.reference.size) > 32768);
   assert.equal(firstRequest.policy.review.originStoreId, storeId);
   assert.equal(firstRequest.policy.review.executionId, first.executionId);
   assert.ok((await approve.count()) === 0 || (await approve.isDisabled()));
-  const reviseBeforeRead = page.getByRole('button', { name: 'Request revision', exact: true });
-  assert.ok((await reviseBeforeRead.count()) === 0 || (await reviseBeforeRead.isDisabled()));
+  assert.equal(await skip.isDisabled(), true);
   assert.equal(await posts(), management.length);
-  await page.getByRole('button', { name: 'Load complete attachment', exact: true }).click();
-  await page.getByLabel('完整计划正文', { exact: true }).waitFor();
+  await livePlan.getByRole('button', { name: '读取完整计划', exact: true }).click();
+  await livePlan.getByText('展开完整计划', { exact: true }).click();
+  await livePlan.getByLabel('完整计划正文', { exact: true }).waitFor();
   const completePlan = JSON.parse(
     (await page.locator('[data-complete-attachment="verified"]').textContent())!,
   );
@@ -794,25 +804,21 @@ try {
     await page.getByLabel('计划步骤', { exact: true }).innerText(),
     /Write the approved file/,
   );
-  await page
-    .getByRole('textbox', { name: 'Plan review feedback', exact: true })
-    .fill(metadata.feedback);
+  const reviewInput = review.getByRole('textbox', { name: '审阅意见', exact: true });
+  await reviewInput.fill(metadata.feedback);
   await select('b');
-  assert.equal(await page.getByRole('region', { name: 'Plan review', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('region', { name: '计划审阅', exact: true }).count(), 0);
   await select('a');
   // Selection invalidates the original complete-read proof; explicitly read again.
-  if (await page.getByRole('button', { name: 'Load complete attachment', exact: true }).count())
-    await page.getByRole('button', { name: 'Load complete attachment', exact: true }).click();
-  await page.getByLabel('完整计划正文', { exact: true }).waitFor();
+  if (await livePlan.getByRole('button', { name: '读取完整计划', exact: true }).count())
+    await livePlan.getByRole('button', { name: '读取完整计划', exact: true }).click();
+  await approve.waitFor();
   assert.equal(
     await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).count(),
     0,
   );
-  assert.equal(
-    await page.getByRole('textbox', { name: 'Plan review feedback', exact: true }).inputValue(),
-    metadata.feedback,
-  );
-  await page.getByRole('button', { name: 'Request revision', exact: true }).click();
+  assert.equal(await promptText(reviewInput), metadata.feedback);
+  await review.getByRole('button', { name: '发送审阅意见', exact: true }).click();
   await capture(first, 'revise');
   const secondState = await waitForPlan(first.runId, first.id);
   const second = secondState.selection!.interactions.find(
@@ -820,14 +826,14 @@ try {
   )!;
   assert.notEqual(second.id, first.id);
   assert.equal(planRequest(second).version, '2');
+  await composer.waitFor({ state: 'hidden' });
+  await review.waitFor();
   assert.equal(
     await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).count(),
     0,
   );
-  assert.equal(
-    await page.getByRole('textbox', { name: 'Plan review feedback', exact: true }).inputValue(),
-    '',
-  );
+  assert.equal(await promptText(reviewInput), '');
+  assert.equal(await reviewReplies.count(), 1);
   assert.equal(await approve.isDisabled(), false);
   assert.equal(existsSync(join(home, 'workspace', 'blocked-a-2.txt')), false);
   assert.equal(existsSync(join(home, 'workspace', 'effect-a.txt')), false);
@@ -836,6 +842,7 @@ try {
   await capture(second, 'approve');
   await done('a', second.runId!, 'completed', mainDraft);
   await assertWorkspaceWrite('a', second.runId!);
+  assert.equal(await reviewReplies.filter({ hasText: '开始实施此计划' }).count(), 1);
   const postsBeforeHistory = await posts();
   const history = page.locator('[data-interaction-history]');
   await history.locator(':scope > summary').click();
@@ -843,12 +850,9 @@ try {
   await historyPanel.getByText(/^已完整读取 \d+ 项交互记录。$/).waitFor();
   const originalReview = historyPanel.locator(`[data-interaction-id="${first.id}"]`);
   await originalReview.locator(':scope > summary').click();
-  await originalReview
-    .getByText('本次执行已接收该回答；这不表示执行成功。', { exact: true })
-    .waitFor();
-  await originalReview
-    .getByRole('button', { name: 'Load complete attachment', exact: true })
-    .click();
+  await originalReview.getByText('已回复', { exact: true }).waitFor();
+  await originalReview.getByRole('button', { name: '读取完整计划', exact: true }).click();
+  await originalReview.getByText('展开完整计划', { exact: true }).click();
   await originalReview.getByLabel('完整计划正文', { exact: true }).waitFor();
   await originalReview.getByText('完整原附件', { exact: true }).click();
   await originalReview.locator('[data-complete-attachment="verified"]').waitFor();
@@ -861,12 +865,10 @@ try {
     Number(firstRequest.policy.review.reference.size),
   );
   assert.equal(
-    await originalReview
-      .getByRole('button', { name: 'Approve this exact plan', exact: true })
-      .count(),
+    await originalReview.getByRole('button', { name: '实施此计划', exact: true }).count(),
     0,
   );
-  assert.ok((await originalReview.textContent())!.includes(metadata.feedback));
+  assert.equal(await reviewReplies.count(), 2);
   assert.equal(await posts(), postsBeforeHistory);
   await history.locator(':scope > summary').click();
   const bDraft = '  B 原草稿 雪🙂  ';
@@ -878,13 +880,10 @@ try {
   await assertWorkspaceWrite('b', b.runId!);
   const dDraft = '拒绝原 Main 草稿';
   const d = await start('d', dDraft);
-  await page
-    .getByRole('textbox', { name: 'Plan review feedback', exact: true })
-    .fill('原拒绝理由 雪🙂');
   const deniedModelsBeforeAnswer = Number(
     await (await fetch(`${control}/count?sessionId=d`)).text(),
   );
-  await page.getByRole('button', { name: 'Deny plan', exact: true }).click();
+  await skip.click();
   await capture(d, 'deny');
   await done('d', d.runId!, 'cancelled', dDraft);
   const deniedState = await state();
@@ -900,8 +899,8 @@ try {
   assert.deepEqual(deniedResult.details, {
     status: 'not_approved',
     decision: 'deny',
-    feedback: '原拒绝理由 雪🙂',
   });
+  assert.equal(await reviewReplies.count(), 0);
   assert.equal(
     Number(await (await fetch(`${control}/count?sessionId=d`)).text()),
     deniedModelsBeforeAnswer,
@@ -923,21 +922,32 @@ try {
   const cCommand = (await state()).callerSubmissions!.find(
     (row) => row.scope.sessionId === 'c' && row.request.kind === 'run.start',
   )!.request.commandId;
-  const cancelButton = page.getByRole('button', { name: '停止任务', exact: true });
   const providerRequestsBeforeCancel = Number(await (await fetch(`${control}/count`)).text());
   stage('original_cancel_before_click', {
     sessionId: 'c',
     runId: c.runId,
     commandId: cCommand,
-    text: await cancelButton.innerText(),
-    enabled: !(await cancelButton.isDisabled()),
     history: await page.getByRole('status').allTextContents(),
     observedRuns: (await state()).selection?.runs.map((run) => ({
       id: run.id,
       status: run.status,
     })),
   });
-  await cancelButton.click();
+  await page.evaluate(
+    async ({ targetCommandId, storeId }) => {
+      const bridge = window.kiteNative!;
+      const current = (await bridge.request({ method: 'state', generation: 1 })) as NativeState;
+      const commandId = crypto.randomUUID();
+      await bridge.request({
+        method: 'caller.prepare',
+        generation: current.generation,
+        sessionId: 'c',
+        intent: { kind: 'command.cancel', expectedStoreId: storeId, commandId, targetCommandId },
+      });
+      await bridge.request({ method: 'caller.submit', generation: current.generation, commandId });
+    },
+    { targetCommandId: cCommand, storeId },
+  );
   stage('original_cancel_clicked', { sessionId: 'c', runId: c.runId, commandId: cCommand });
   const cancelState = await state();
   stage('original_cancel_observed', {

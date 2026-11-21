@@ -9,11 +9,12 @@ import {
 import { Button } from './desktop/ui';
 import { ActionInputForm } from './index';
 import { isMcpSourceReview, McpSourceReview } from './mcp-source-review';
-import { type PlanReviewDraft, PlanReviewPanel } from './plan-review';
+import { type PlanReviewAttachment, type PlanReviewDraft, PlanReviewPanel } from './plan-review';
 import { questionForm } from './question';
 import { type QuestionAnswerDraft, Questionnaire, questionDraftKey } from './questionnaire';
 
 export type InteractionAnswer = NonNullable<Interaction['answer']>;
+type AnswerHandler = (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
 export interface InteractionSubmission {
   readonly phase: 'saved' | 'submitting' | 'accepted' | 'unknown' | 'failed';
   readonly commandId: string;
@@ -22,7 +23,7 @@ export interface InteractionSubmission {
 type InteractionCardProps = {
   interaction: Interaction;
   submission?: InteractionSubmission;
-  onAnswer?: (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
+  onAnswer?: AnswerHandler;
   onReadAttachment?: AttachmentReader;
   initialQuestionDraft?: QuestionAnswerDraft;
   onQuestionDraftChange?: (draft: QuestionAnswerDraft) => void;
@@ -31,8 +32,12 @@ type InteractionCardProps = {
   completeContent?: string;
   /** Compact tool approvals still verify the complete attachment before enabling answers. */
   compactApproval?: boolean;
-  /** The original plan review is presented as a conversation message. */
+  /** The native plan card omits the diagnostic identity disclosure. */
   inlinePlanReview?: boolean;
+  planAnswerPaused?: boolean;
+  planDocumentTarget?: HTMLElement | null;
+  planDocument?: { content?: string; expanded?: boolean };
+  onPlanDocumentChange?: (document: { content?: string; expanded?: boolean }) => void;
   renderApproval?: (props: {
     interaction: Interaction;
     disabled: boolean;
@@ -54,13 +59,38 @@ function PlainInteractionCard({
   onPlanDraftChange,
   completeContent,
   inlinePlanReview,
+  planAnswerPaused,
+  planDocumentTarget,
+  planDocument,
+  onPlanDocumentChange,
+  planAttachment,
   renderApproval,
   attachment,
 }: InteractionCardProps & {
   attachment?: { phase: 'idle' | 'loading' | 'failed' | 'loaded'; retry?: () => void };
+  planAttachment?: PlanReviewAttachment;
 }) {
   const disabled = !onAnswer || interaction.state !== 'pending' || submission !== undefined;
   const mcpSourceReview = isMcpSourceReview(interaction);
+  if (interaction.kind === 'plan_review' && !mcpSourceReview)
+    return (
+      <PlanReviewPanel
+        interaction={interaction}
+        disabled={disabled || !!planAnswerPaused}
+        onAnswer={onAnswer}
+        initialDraft={initialPlanDraft}
+        onDraftChange={onPlanDraftChange}
+        completeContent={completeContent}
+        attachment={planAttachment}
+        documentTarget={planDocumentTarget}
+        documentExpanded={planDocument?.expanded}
+        onDocumentExpanded={(expanded) => onPlanDocumentChange?.({ expanded })}
+        submission={submission}
+        showPlanIdentity={!inlinePlanReview}
+      >
+        <InteractionMaterials interaction={interaction} />
+      </PlanReviewPanel>
+    );
   if (interaction.kind === 'approval' && !mcpSourceReview && renderApproval)
     return renderApproval({
       interaction,
@@ -74,72 +104,18 @@ function PlainInteractionCard({
   const structuredQuestion =
     interaction.kind === 'question' && !!onAnswer && !!questionForm(request);
   const approvalOptions = readApprovalOptions(request);
-  const planMessage = inlinePlanReview && interaction.kind === 'plan_review';
-  const planAnswer =
-    planMessage && interaction.answer?.kind === 'plan_review' ? interaction.answer : undefined;
-  const planStatus =
-    planAnswer && interaction.acceptedDecisionRevision === interaction.revision
-      ? { approve: '已批准', deny: '已拒绝', revise: '已要求修改' }[planAnswer.decision]
-      : interaction.state === 'cancelled'
-        ? '已取消'
-        : planAnswer
-          ? '答复已保存，待确认'
-          : '等待审阅';
-  const materials = (
-    <>
-      <p>
-        Source Session: {interaction.sessionId} · Presentation Session:{' '}
-        {interaction.presentationSessionId}
-      </p>
-      <p>Ancestry: {interaction.ancestry.join(' → ')}</p>
-      <p>
-        {interaction.definitionId} · {interaction.definitionVersion} · attempt {interaction.attempt}
-      </p>
-      <p>
-        Interaction {interaction.id} · revision {interaction.revision}
-      </p>
-      <p>
-        Run: {interaction.runId ?? 'none'} · Execution: {interaction.executionId}
-      </p>
-      <p>
-        Input digest: {interaction.inputDigest} · Policy revision: {interaction.policyRevision}
-      </p>
-      <pre>{JSON.stringify(interaction.requiredRefs, null, 2)}</pre>
-      <pre>{JSON.stringify(interaction.request, null, 2)}</pre>
-      {interaction.acceptedDecisionRevision !== null && (
-        <p>Decision accepted revision: {interaction.acceptedDecisionRevision}</p>
-      )}
-      {interaction.answer && <pre>{JSON.stringify(interaction.answer, null, 2)}</pre>}
-    </>
-  );
   return (
     <article
-      className={structuredQuestion ? 'question-interaction' : undefined}
-      data-question-interaction={
-        interaction.kind === 'question' && !mcpSourceReview ? '' : undefined
-      }
-      aria-label={
-        planMessage
-          ? '计划审阅'
-          : structuredQuestion
-            ? '补充问题'
-            : `${interaction.kind} ${interaction.id}`
-      }
+      className={structuredQuestion ? 'answer-interaction' : undefined}
+      data-answer-interaction={interaction.kind === 'question' && !mcpSourceReview ? '' : undefined}
+      aria-label={structuredQuestion ? '补充问题' : `${interaction.kind} ${interaction.id}`}
     >
       {!structuredQuestion && (
         <h3>
-          {planMessage ? `计划审阅 · ${planStatus}` : `${interaction.kind} · ${interaction.state}`}
+          {interaction.kind} · {interaction.state}
         </h3>
       )}
-      {planAnswer?.feedback && <p className="whitespace-pre-wrap">{planAnswer.feedback}</p>}
-      {structuredQuestion || planMessage ? null : interaction.kind === 'plan_review' ? (
-        <details>
-          <summary>原请求与身份</summary>
-          {materials}
-        </details>
-      ) : (
-        materials
-      )}
+      {!structuredQuestion && <InteractionMaterials interaction={interaction} />}
       {submission && structuredQuestion && (
         <p className="question-submission" data-phase={submission.phase} role="status">
           {
@@ -156,15 +132,7 @@ function PlainInteractionCard({
       )}
       {submission && !structuredQuestion && (
         <p role="status">
-          {planMessage
-            ? {
-                saved: '审阅答复已保存，正在提交…',
-                submitting: '正在提交审阅答复…',
-                accepted: '审阅答复已提交，等待确认。',
-                unknown: '审阅答复的提交结果尚未确认。',
-                failed: '审阅答复提交失败。',
-              }[submission.phase]
-            : `Answer ${submission.phase} · command ${submission.commandId}${submission.error ? ` · ${submission.error}` : ''}. Acceptance does not prove execution.`}
+          {`Answer ${submission.phase} · command ${submission.commandId}${submission.error ? ` · ${submission.error}` : ''}. Acceptance does not prove execution.`}
         </p>
       )}
       {interaction.kind === 'approval' && !mcpSourceReview && (
@@ -224,21 +192,41 @@ function PlainInteractionCard({
           />
         )
       )}
-      {interaction.kind === 'plan_review' && !mcpSourceReview && (
-        <PlanReviewPanel
-          interaction={interaction}
-          disabled={disabled}
-          onAnswer={onAnswer}
-          initialDraft={initialPlanDraft}
-          onDraftChange={onPlanDraftChange}
-          completeContent={completeContent}
-          showPlanIdentity={!planMessage}
-        />
-      )}
-      {!onAnswer && !planMessage && <p>Read only</p>}
+      {!onAnswer && <p>Read only</p>}
     </article>
   );
 }
+
+function InteractionMaterials({ interaction }: { interaction: Interaction }) {
+  return (
+    <>
+      <p>
+        Source Session: {interaction.sessionId} · Presentation Session:{' '}
+        {interaction.presentationSessionId}
+      </p>
+      <p>Ancestry: {interaction.ancestry.join(' → ')}</p>
+      <p>
+        {interaction.definitionId} · {interaction.definitionVersion} · attempt {interaction.attempt}
+      </p>
+      <p>
+        Interaction {interaction.id} · revision {interaction.revision}
+      </p>
+      <p>
+        Run: {interaction.runId ?? 'none'} · Execution: {interaction.executionId}
+      </p>
+      <p>
+        Input digest: {interaction.inputDigest} · Policy revision: {interaction.policyRevision}
+      </p>
+      <pre>{JSON.stringify(interaction.requiredRefs, null, 2)}</pre>
+      <pre>{JSON.stringify(interaction.request, null, 2)}</pre>
+      {interaction.acceptedDecisionRevision !== null && (
+        <p>Decision accepted revision: {interaction.acceptedDecisionRevision}</p>
+      )}
+      {interaction.answer && <pre>{JSON.stringify(interaction.answer, null, 2)}</pre>}
+    </>
+  );
+}
+
 function QuestionAnswerForm({
   interaction,
   disabled,
@@ -295,7 +283,7 @@ export function InteractionCard(props: InteractionCardProps) {
   return PlainInteractionCard(props);
 }
 function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0]) {
-  const [body, setBody] = useState<{ identity: string; text: string } | undefined>();
+  const [body, setBody] = useState<{ identity: string; text: string; reader: AttachmentReader }>();
   const [phase, setPhase] = useState<'idle' | 'loading' | 'failed' | 'loaded'>('idle');
   const [error, setError] = useState<string>();
   const active = useRef<AbortController | undefined>(undefined);
@@ -317,22 +305,22 @@ function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0])
       active.current = undefined;
     };
   }, [identity, props.onReadAttachment]);
-  const verified = body?.identity === identity && phase === 'loaded';
+  const verified =
+    body?.identity === identity && body.reader === props.onReadAttachment && phase === 'loaded';
   async function load() {
-    if (active.current || !props.onReadAttachment || identity === 'invalid') return;
+    const reader = props.onReadAttachment;
+    if (active.current || !reader || identity === 'invalid') return;
     const controller = new AbortController();
     active.current = controller;
     setPhase('loading');
     setError(undefined);
     try {
-      const loaded = await loadInteractionAttachment(
-        props.interaction,
-        props.onReadAttachment,
-        controller.signal,
-      );
+      const loaded = await loadInteractionAttachment(props.interaction, reader, controller.signal);
       if (!controller.signal.aborted && active.current === controller) {
-        setBody({ identity: loaded.identity, text: loaded.text });
+        setBody({ identity: loaded.identity, text: loaded.text, reader });
         setPhase('loaded');
+        if (props.interaction.kind === 'plan_review')
+          props.onPlanDocumentChange?.({ content: loaded.text });
       }
     } catch {
       if (!controller.signal.aborted && active.current === controller) {
@@ -343,25 +331,32 @@ function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0])
       if (active.current === controller) active.current = undefined;
     }
   }
+  function cancel() {
+    active.current?.abort();
+    active.current = undefined;
+    setPhase('idle');
+    setBody(undefined);
+  }
+  const read = props.onReadAttachment && identity !== 'invalid' ? () => void load() : undefined;
   const compact =
     props.compactApproval &&
     props.interaction.kind === 'approval' &&
     !isMcpSourceReview(props.interaction);
+  const plan = props.interaction.kind === 'plan_review' && !isMcpSourceReview(props.interaction);
   // The existing loader validates identity, length, digest and UTF-8 before proof is published.
   // Only the compact approval presentation reads automatically; other forms keep their reader.
   useEffect(() => {
-    if (compact && phase === 'idle' && props.onReadAttachment && identity !== 'invalid')
-      void load();
+    if (compact && phase === 'idle') read?.();
   });
   const card = PlainInteractionCard({
     ...props,
-    completeContent: verified ? body.text : undefined,
-    attachment: compact
-      ? {
-          phase,
-          retry: props.onReadAttachment && identity !== 'invalid' ? () => void load() : undefined,
-        }
-      : undefined,
+    completeContent: verified
+      ? body.text
+      : !props.onAnswer && props.interaction.kind === 'plan_review'
+        ? props.planDocument?.content
+        : undefined,
+    attachment: compact ? { phase, retry: read } : undefined,
+    planAttachment: plan ? { phase, read, cancel } : undefined,
     onAnswer:
       verified && props.onAnswer
         ? async (interaction, answer) => {
@@ -376,6 +371,7 @@ function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0])
           }
         : undefined,
   });
+  if (plan) return card;
   if (compact)
     return (
       <section
@@ -396,36 +392,16 @@ function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0])
       {!props.onReadAttachment && <p>Complete attachment reader unavailable</p>}
       {error && <p role="alert">{error}</p>}
       <div className="actions">
-        <Button
-          type="button"
-          disabled={!props.onReadAttachment || phase === 'loading' || identity === 'invalid'}
-          onClick={() => void load()}
-        >
+        <Button type="button" disabled={!read || phase === 'loading'} onClick={read}>
           Load complete attachment
         </Button>
         {phase === 'loading' && (
-          <Button
-            type="button"
-            onClick={() => {
-              active.current?.abort();
-              active.current = undefined;
-              setPhase('idle');
-              setBody(undefined);
-            }}
-          >
+          <Button type="button" onClick={cancel}>
             Cancel attachment loading
           </Button>
         )}
       </div>
-      {verified &&
-        (props.interaction.kind === 'plan_review' ? (
-          <details>
-            <summary>完整原附件</summary>
-            <pre data-complete-attachment="verified">{body.text}</pre>
-          </details>
-        ) : (
-          <pre data-complete-attachment="verified">{body.text}</pre>
-        ))}
+      {verified && <pre data-complete-attachment="verified">{body.text}</pre>}
     </section>
   );
 }

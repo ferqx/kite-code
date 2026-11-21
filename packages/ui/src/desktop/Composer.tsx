@@ -220,7 +220,7 @@ export interface ComposerProps {
   submitStatus?: string;
   sending?: boolean;
   promptHidden?: boolean;
-  /** Keep only the original permission control while a business interaction owns the input. */
+  /** Keep the original permission control while a business interaction owns the input. */
   permissionWhenPromptHidden?: boolean;
 }
 function canConfirmFull(props: ComposerProps) {
@@ -261,6 +261,7 @@ export function Composer(props: ComposerProps) {
     };
   }, [props.scopeKey, props.disabled, props.readOnly, props.promptHidden, onError]);
   const editor = useRef<PromptEditorHandle>(null);
+  const [queueDisclosure, setQueueDisclosure] = useState<{ scopeKey?: string; open: boolean }>();
   const queueFocus = useRef({ scope: props.scopeKey, key: props.queueFocusKey });
   useLayoutEffect(() => {
     const prior = queueFocus.current;
@@ -557,6 +558,7 @@ export function Composer(props: ComposerProps) {
       : undefined;
   const canSend =
     !!props.onSend &&
+    !props.promptHidden &&
     !props.disabled &&
     !props.sendDisabled &&
     !props.sending &&
@@ -776,6 +778,13 @@ export function Composer(props: ComposerProps) {
             key={props.scopeKey}
             {...props.queue}
             disabled={props.disabled || props.queue.disabled}
+            disclosure={{
+              open:
+                queueDisclosure?.scopeKey === props.scopeKey
+                  ? (queueDisclosure?.open ?? true)
+                  : true,
+              onOpenChange: (open) => setQueueDisclosure({ scopeKey: props.scopeKey, open }),
+            }}
           />
         )}
         {filePickingEnabled && (

@@ -8,8 +8,8 @@ export interface Message {
   readonly createdAtMs?: number;
   /** Host-confirmed Runtime Turn or public Run ownership for presentation actions. */
   readonly turnId?: string;
-  /** Host-confirmed guidance classification; presentation only, never execution authority. */
-  readonly inputKind?: 'input.steer';
+  /** Host-confirmed input in an existing Turn. */
+  readonly inputKind?: 'input.steer' | 'interaction.answer';
   readonly role: 'user' | 'assistant' | 'tool' | 'subagent' | 'system' | 'thinking';
   readonly text: string;
   readonly settled: boolean;

@@ -478,7 +478,7 @@ export interface MessageContent {
   modelOutput?: import('../model-output').ModelOutputReference;
   contextSelectionId?: string;
   originCommandId?: string;
-  inputKind?: 'input.steer' | 'input.follow_up';
+  inputKind?: 'input.steer' | 'input.follow_up' | 'interaction.answer';
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   images?: InputImage[];
@@ -770,6 +770,7 @@ export type InteractionAnswer =
       kind: 'plan_review';
       decision: 'approve' | 'deny' | 'revise';
       feedback?: string;
+      asUserMessage?: true;
     };
 export interface InteractionRecord {
   /** Private permission observation; never a Tool grant or public answer field. */

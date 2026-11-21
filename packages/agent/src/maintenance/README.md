@@ -164,11 +164,11 @@ Desktop DB5 的 [desktop-answers.ts](desktop-answers.ts) 独立核准确 `answer
 
 每行核完整 closed scope/subject/interaction/request/phase，原 SQL PK 等于 request.commandId，原 Store 与 expectedStoreId、revision 一致，三个答案种类的准确请求字段、全记录 commandId 与 Store/Interaction/revision 唯一。实际 BLOB hex 对照 UTF8 原字节，单记录 JSON 4MiB、整个表最多128行/16MiB；unknown 不静默删除。完整请求 bodyDigest 与准确 interaction.answer Core requestDigest 重新计算，observationDigest/subject 仅保存既有身份元数据，不能推导 Service receipt、查询许可或首次 POST 权。
 
-当前审批答复与 Desktop journal 使用同一闭合形状：approve 必须保存原 `optionId`，deny 不携带选项；旧 `grant`、缺选项及额外字段即使重算摘要也拒绝。真实 Node 三种答复的备份／恢复整文件4项79断言通过，保原 Unicode／CRLF、原申请身份、冷读零 HTTP；不为旧 Core 格式增加读取兼容。
+当前审批答复与 Desktop journal 使用同一闭合形状：工具审批 approve 必须保存原 `optionId`，deny 不携带选项；旧 `grant`、缺选项及额外字段即使重算摘要也拒绝。计划实施或修改答复带非空 `feedback` 时可保存 `asUserMessage: true`，跳过与空白答复拒绝该字段。DB5 与 manifest v7 保持原格式，备份和恢复逐字节保留答复、原申请身份和摘要，冷读零 HTTP。
 
 原 answer 表随同一私有 SQLite 的 VACUUM INTO 一致副本保存；source DB/WAL、snapshot proof、inspect 和 restore 独立核验。恢复生成新 Core Store，但 UI 的旧 Store、Session、Workspace、Interaction、Execution、Run、Command、subject、两种请求摘要、完整答案 Unicode/CRLF 与 phase 均保持。维护不执行答案、不重标身份、不恢复热 authority，不接触 Provider/vault。
 
-[真实 Node answer 资产测试](../../test/isolated/maintenance/desktop-answers.test.ts)由 [独立 fixture](../../test/isolated/maintenance/desktop-answer-assets-fixture.ts) 调用当前 Desktop PrivateData owner 写三种 unknown 答案，再用上述空新增表守卫明确保留历史 DB5，包含312022字节原 Unicode/CRLF正文。备份 v7、新 Store 恢复与冷 Node 读取核 SQL state 原字节、完整 SQLite hash、原 IDs/subject/digests 和零 HTTP；坏 PK/摘要/phase/authority、重复 target、非法 UTF8、行/字节超额、非私有源、未来格式/字段、伪旧 manifest 与重算外层 proof 的坏候选均拒绝。此证据只覆盖 owned 临时离线资产；实际 Windows Node 后端、正式窗口、发行引擎与完整平台资格仍由相应 owner 单独核对。
+[真实 Node answer 资产测试](../../test/isolated/maintenance/desktop-answers.test.ts)由 [独立 fixture](../../test/isolated/maintenance/desktop-answer-assets-fixture.ts) 调用当前 Desktop PrivateData owner 写三种 unknown 答案，涵盖 312022 字节 Unicode/CRLF 正文和带 `asUserMessage` 的计划回复。使用空新增表守卫保留历史 DB5，验证 v7 备份、恢复及冷读均逐字节保留 SQL state、SQLite hash、原身份和摘要，且零 HTTP。坏 PK、摘要、phase、authority、重复 target、非法 UTF8、行／字节超额、非私有源和重算外层 proof 的坏候选均拒绝。Windows x64 以专用原生访问资产复验该文件，4 项通过，覆盖 Windows ACL 拒绝路径。
 
 
 ## MCP 选择意图的独立离线资产

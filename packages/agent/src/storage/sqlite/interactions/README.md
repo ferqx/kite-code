@@ -6,6 +6,8 @@
 
 `answerInteraction` 仅接受准确 presentation 根、interactionId/revision 与原主体。公共 child 入口拒绝；一张子审批卡就是原 Interaction 的投影，没有第二个批准状态。expectedStoreId 在查重前核实。答案与 applied Command 回执和父/子事件同事务提交，同 ID/答案幂等，不同答案冲突。取消先提交时，迟到答案可保存为历史 cancelled 决定，但不能接纳或派发。答案回执仅表示 answer_saved。
 
+计划答复可用 `asUserMessage: true` 将已有 `feedback` 同时作为原会话的用户消息。原文沿同一答复事务保存，消息归原 Run，`inputKind` 为 `interaction.answer`。sourceIds 记录原答复 Command 与原审阅 Execution。仅首次保存且原卡仍接纳答复时产生一条消息。拒绝、取消后到达的答复与幂等读取沿原事实处理。模型继续沿原工具批次排序，在工具结果之后读到已保存的用户消息。
+
 `acceptInteractionDecision` 使用真正 root owner，核实原 Execution/attempt、owner generation、原 Store、适用取消/删除边界、来源 freshness 和当前必要记录来源/revision。仅 approval 要求 dispatch 阶段必要 evaluator 的 satisfied/waived；question 与 plan_review 不要求尚待批准的计划已满足，允许 requirements:[]，但仍核实封存 refs 与当前记录 revision/origin 未变。接纳标记是同一 Interaction 的 acceptedDecisionRevision；重复接纳无新增事件。仅 approval 决定在原 Execution 绑定该引用；同一已批准 Tool 可再请求信息，不覆盖已有 approvalBinding。Run 的全部待办已接纳后才能从 waiting_interaction 回 running。父前台正常完成不撤销既有 detached child。
 
 `markDispatching` 对普通审批绑定的 Execution 强制核实该 Interaction 当前 answered、准确 accepted revision、approve 决定、原 definition/input/source/refs 与 authorization.revision 等于封存 policyRevision。单独 allowed:true 无法绕过请求，旧答案不能复制给新参数/attempt。question 与 plan_review 都只提供信息，不建立授权 binding；它们的 accepted ID 不能传给 markDispatching 当作另一执行的许可。计划 approve/deny/revise 与反馈是原业务记录的输入，由业务 evaluator 按准确计划版本和摘要保存，答案不携带权限 mode，也不能替代 HostPolicy 或必要完成条件。Core 仍负责当前权限判断、工具执行和真实结果；Store 不另建 Workflow Loop。

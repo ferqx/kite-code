@@ -46,13 +46,15 @@ Plan 原记录和历史审阅正文不随当前文件变化；恢复保留实际
 
 审阅 request 保留公共面板的 string version、准确 plan digest，不含 `allowedModes`。实际 canonical request 不超过现有 Interaction 32 KiB metadata 预算时继续 inline 完整 `content`；超过时只改变传输方式：完整 canonical plan 由公共 ArtifactWriter 发布到原 review Execution scope，request 的 `content` 明示正文在完整附件，`policy.review={kind:'artifact',complete:true,reference,...}` 保存准确原 scope ref、完整 size/hash/contentVersion、原 Store/Session/Run/Execution、plan digest 与 plan record revision，不截断或把字数变成业务上限。
 
-这里的 `policy.review` 名称沿用既有 generic complete-Interaction attachment 消费协议，只是信息附件，不是授权 policy/grant。SDK `interactionAttachment/readInteractionAttachment`、CLI stdio、TUI、Desktop 与通用 UI 已有完整读取/hash/EOF 与未读取不得提交的公共接点；本叶子不修改客户端或另建 HTTP 路径。小计划 request 与回答保持原格式。
+这里的 `policy.review` 名称沿用既有 generic complete-Interaction attachment 消费协议，只是信息附件，不是授权 policy/grant。SDK `interactionAttachment/readInteractionAttachment`、CLI stdio、TUI、Desktop 与通用 UI 沿完整读取、hash 和 EOF 的核验。带 `asUserMessage: true` 的计划答复同时保存原文用户消息。其 `feedback` 仍进入 `planning.review` 的原业务结果。消息和答复的保存由 [Interaction Store](../../storage/sqlite/interactions/README.md) 负责。评估器继续核对原答复、计划版本和摘要。
 
 叶子在 `review.body/<actualExecutionId>` 保存不可变封存记录。request 前与接受答案后均通过原 scope 公共 reader 读取到完整 EOF，核 size、SHA-256、fatal UTF-8 与完整 canonical plan 全等；不能把 ref/hash 当已经阅读或当权限。原 accepted proof 仍须绑定同一精确 request 与实际 Run 批准 Execution。最后条件/`readPlanningState` 不取得物理文件或 SQL：重读完整原 plan 和 seal、核原记录 revision、原 scope、完整 hash/size、accepted Interaction 与 Run proof，收集最终 record read-set CAS。已接受的人类阅读事实不把外部文件修改与 SQL commit 冒称原子；物理正文损坏在实际读取边界拒绝，封存记录或 plan 在最后读后漂移则在 SQL 派发/完成事务拒绝。
 
 完整 plan 仍保存在既有 record；当前没有单 record 业务正文限额，但 SQLite Worker 保留既有 queuedBytes/pending 资源准入（普通队列 14 MiB/224、关键队列 16 MiB/256），不因本叶子扩大。真实资格覆盖超过 300 KiB 的 UTF-8 与 JSON escaped 大正文写入、原 Artifact 完整审阅、批准状态和真实 step receipt 完成；不宣称超过既有队列/平台容量的无界传输。贡献中的批准摘要仍只保留 decision identity/answer，不再次复制审阅附件正文。
 
 当前步骤进度由 `read_plan` 从原 `progress/<plan>/<version>` 记录读取；压缩后若进度已不在模型窗口，静态合同指导模型先核当前进度，再选择剩余步骤。进度不混入稳定的计划来源或批准摘要，避免同批步骤更新使普通后继工具刷新失败，也不使先前成功 receipt 随进度变化失效。[进度观察与批准事实](../../../test/isolated/business/planning-progress-view.test.ts)核准确要求、无阶段投影与进度变化后的稳定来源；[计划执行回归](../../../test/isolated/business/planning.test.ts)核同批普通工具及后续进度仍可引用原成功 receipt。该指导不等同于自动注入全部进度或保证模型永不遗忘。
+
+`planning.progress.display` 沿现有 Extension Query 提供客户端只读投影。当前视图核原 Run 的执行批准和当前计划文件。结束后的历史沿原 Run 的不可变批准记录核对每个获批版本及原审阅执行，读取该轮持久进度。同一版本被后续 Run 重用时，从原 Run 成功更新的确切结果和已提交的进度修订恢复原步骤。后续 Run 的首次更新从该轮自己的步骤状态开始。投影仅含计划标题、版本身份、审阅入口、步骤标题及状态。
 
 `planning.update@1` 要求准确当前 ID/version/digest、Run、step 与 progress revision。完成步骤必须引用该 Run 真实成功 Tool/Job 的原 Store、attempt、定义版本、input digest、result revision，并匹配该执行真正捕获的当前计划来源 ID/digest。Model 文本、计划/验证管理 Tool、旧 Run 或旧计划成功回执不能替代。完成候选需要全部 step 完成、当前批准和原计划义务；Core 最终仍重新读取相关记录并事务复核。compensated 保存原 receipt 与补偿 receipt，不成为 passed 或完整计划完成。用户 `planning.write/review/update` Actions 共用业务函数但有独立 Command 身份；活跃 Run 的同 Session Action 按当前串行队列等待，不能假装它已并发修改当前工作。
 

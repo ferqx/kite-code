@@ -1,7 +1,7 @@
 import type { Interaction } from '@kite-ai/client';
 import { Box, useInput, usePaste, useStdout } from 'ink';
 import { useRef, useState } from 'react';
-import { describePlanReview } from '../plan-review';
+import { describePlanReview } from '../plan-review-answer';
 import { type ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch } from './composer-input';
 import { terminalText } from './controller';

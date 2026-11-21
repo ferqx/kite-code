@@ -134,7 +134,7 @@ function answer(kind: InteractionRecord['kind'], value: InteractionAnswer, reque
       ? ['kind', 'answers']
       : kind === 'approval'
         ? ['kind', 'decision', 'optionId']
-        : ['kind', 'decision', 'feedback'];
+        : ['kind', 'decision', 'feedback', 'asUserMessage'];
   if (Object.keys(value).some((key) => !allowed.includes(key)))
     throw new AgentError('interaction_answer_invalid');
   if (kind === 'question') {
@@ -153,6 +153,12 @@ function answer(kind: InteractionRecord['kind'], value: InteractionAnswer, reque
     )
       throw new AgentError('interaction_answer_invalid');
     if ('feedback' in value && (typeof value.feedback !== 'string' || value.feedback.length > 8192))
+      throw new AgentError('interaction_answer_invalid');
+    if (
+      value.kind === 'plan_review' &&
+      Object.hasOwn(value, 'asUserMessage') &&
+      (value.asUserMessage !== true || value.decision === 'deny' || !value.feedback?.trim())
+    )
       throw new AgentError('interaction_answer_invalid');
   }
 }
@@ -894,6 +900,23 @@ export function callInteraction(db: SqliteOperations, method: string, args: unkn
         String(execution.root_work_command_id),
         String(execution.root_work_seq),
       );
+      if (
+        row.answer_json === null &&
+        updated.state === 'answered' &&
+        input.answer.kind === 'plan_review' &&
+        input.answer.asUserMessage
+      )
+        db.appendMessage(
+          String(row.session_id),
+          row.run_id === null ? null : String(row.run_id),
+          {
+            content: input.answer.feedback!,
+            originCommandId: input.commandId,
+            sourceIds: [input.commandId, String(row.execution_id)],
+            inputKind: 'interaction.answer',
+          },
+          'user',
+        );
       db.event(String(row.session_id), input.interactionId, 'interaction.answered');
       if (row.session_id !== row.presentation_session_id)
         db.event(String(row.presentation_session_id), input.interactionId, 'interaction.answered');

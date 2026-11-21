@@ -21,6 +21,7 @@ import {
   ErrorFeedbackContext,
   MessageContent,
   NAVIGATION_MIN_WIDTH,
+  PlanExecutionProgress,
   PromptMarkdown,
   ReadingStateCache,
   RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
@@ -118,6 +119,7 @@ import { NativeImageGalleryProvider } from './native-image-gallery';
 import {
   nativeAskUserAwaitingAnswer,
   nativeInputErrorText,
+  nativePlanReviewAwaitingAnswer,
   nativeTextIntent,
 } from './native-input';
 import { nativeInputFileIntent } from './native-input-file-intent';
@@ -143,6 +145,8 @@ import {
 } from './native-model-picker';
 import { submitOfficeRequest } from './native-office-request-submit';
 import { useNativeOutputFiles } from './native-output-files';
+import { NativePlanHistory, useNativePlanProgress } from './native-plan-progress';
+import type { NativePlanProgress } from './native-plan-progress-bridge';
 import {
   desktopConversationMessages,
   desktopMessages,
@@ -231,7 +235,7 @@ function savedNativeInput(
 export function nativeRootInteractionBlocksComposer(selection: NativeState['selection']): boolean {
   return !!selection?.interactions.some(
     (card) =>
-      (card.kind === 'plan_review' || isMcpSourceReview(card)) &&
+      isMcpSourceReview(card) &&
       card.state === 'pending' &&
       card.originStoreId === selection.storeId &&
       card.sessionId === selection.session.id &&
@@ -253,6 +257,20 @@ export function nativeRootInteractionBlocksComposer(selection: NativeState['sele
             run.isActive,
         )),
   );
+}
+
+function NativePlanReviewMessage({
+  identity,
+  register,
+}: {
+  identity: string;
+  register: (identity: string, element: HTMLDivElement) => () => void;
+}) {
+  const target = useCallback(
+    (element: HTMLDivElement | null) => (element ? register(identity, element) : undefined),
+    [identity, register],
+  );
+  return <div className="native-plan-review-message" ref={target} tabIndex={-1} />;
 }
 
 export function NativeDesktop({
@@ -278,6 +296,10 @@ export function NativeDesktop({
   );
 }
 
+type InteractionDraft =
+  | { kind: 'question'; draft: QuestionAnswerDraft }
+  | { kind: 'plan_review'; draft: PlanReviewDraft };
+
 type CachedComposer = NativeModelDisplay & {
   sourceId: number;
   storeId: string;
@@ -288,6 +310,7 @@ type CachedComposer = NativeModelDisplay & {
   active: boolean;
   stopping: boolean;
   waitingForAskUser: boolean;
+  waitingForPlanReview: boolean;
   sendLabel: string;
   queueItems?: NonNullable<NonNullable<SessionPageProps['composer']>['queue']>['items'];
   cacheMetrics?: NonNullable<SessionPageProps['composer']>['cacheMetrics'];
@@ -942,28 +965,14 @@ function NativeDesktopContent({
   const operationDiffs = useRef(new NativeDisplayCache<NativeFileChangeDetail>());
   const [verifiedReplyRevision, renderVerifiedReply] = useState(0);
   const transcriptDisplay = useRef(new NativeTranscriptDisplay());
-  const questionDrafts = useRef(
+  const interactionDrafts = useRef(
     new Map<
       string,
-      {
+      InteractionDraft & {
         storeId: string;
         sourceSessionId: string;
         presentationSessionId: string;
         cardId: string;
-        draft: QuestionAnswerDraft;
-      }
-    >(),
-  );
-  const planDrafts = useRef(
-    new Map<
-      string,
-      {
-        storeId: string;
-        sourceSessionId: string;
-        presentationSessionId: string;
-        cardId: string;
-        draft: PlanReviewDraft;
-        runId: string | null;
       }
     >(),
   );
@@ -1054,36 +1063,21 @@ function NativeDesktopContent({
       historyEpoch.current = value.historyEpoch;
       // Main has verified the exact answer_saved receipt. Promise resolution and
       // omission from a bounded pending page are not confirmation of an answer.
-      for (const drafts of [questionDrafts.current, planDrafts.current]) {
-        for (const submission of value.interactionSubmissions)
-          if (submission.phase === 'accepted' && submission.receipt)
-            drafts.delete(questionDraftKey(submission.interaction));
-        for (const card of value.selection?.interactions ?? []) {
-          const currentKey = questionDraftKey(card);
-          for (const [key, saved] of drafts)
-            if (
-              saved.storeId === card.originStoreId &&
-              saved.sourceSessionId === card.sessionId &&
-              saved.presentationSessionId === card.presentationSessionId &&
-              saved.cardId === card.id &&
-              (key !== currentKey || card.state !== 'pending')
-            )
-              drafts.delete(key);
-        }
-      }
-      for (const [key, saved] of planDrafts.current)
-        if (
-          saved.storeId === value.selection?.storeId &&
-          saved.sourceSessionId === value.selection.session.id &&
-          value.selection.runs.some(
-            (run) =>
-              run.id === saved.runId &&
-              run.originStoreId === saved.storeId &&
-              run.status === 'cancelled' &&
-              !run.isActive,
+      for (const submission of value.interactionSubmissions)
+        if (submission.phase === 'accepted' && submission.receipt)
+          interactionDrafts.current.delete(questionDraftKey(submission.interaction));
+      for (const card of value.selection?.interactions ?? []) {
+        const currentKey = questionDraftKey(card);
+        for (const [key, saved] of interactionDrafts.current)
+          if (
+            saved.storeId === card.originStoreId &&
+            saved.sourceSessionId === card.sessionId &&
+            saved.presentationSessionId === card.presentationSessionId &&
+            saved.cardId === card.id &&
+            (key !== currentKey || card.state !== 'pending')
           )
-        )
-          planDrafts.current.delete(key);
+            interactionDrafts.current.delete(key);
+      }
       if (value.selection)
         setPlanMode(
           planModes.current.get(
@@ -2027,10 +2021,47 @@ function NativeDesktopContent({
   const choiceViewIntent = viewIntent.current;
   const activeInputRun = selection?.runs.find((run) => run.isActive);
   const waitingForAskUser = nativeAskUserAwaitingAnswer(selection);
+  const waitingForPlanReview = nativePlanReviewAwaitingAnswer(selection);
+  const [planDocuments, setPlanDocuments] = useState<ReadonlyMap<string, HTMLDivElement>>(
+    () => new Map(),
+  );
+  const lastPlanDocument = useRef<
+    | {
+        scope: string;
+        cardId: string;
+        executionId: string;
+        request: Interaction['request'];
+        content?: string;
+        expanded?: boolean;
+      }
+    | undefined
+  >(undefined);
+  const planDocumentScope =
+    state && selection
+      ? JSON.stringify([
+          state.generation,
+          selection.storeId,
+          selection.session.id,
+          selection.viewSelection ?? selection.viewGeneration,
+          state.historyEpoch ?? 0,
+        ])
+      : undefined;
+  const registerPlanDocument = useCallback((identity: string, element: HTMLDivElement) => {
+    setPlanDocuments((current) => new Map(current).set(identity, element));
+    return () =>
+      setPlanDocuments((current) => {
+        if (current.get(identity) !== element) return current;
+        const next = new Map(current);
+        next.delete(identity);
+        return next;
+      });
+  }, []);
   const waitingForAskUserRef = useRef(waitingForAskUser);
+  const waitingForPlanReviewRef = useRef(waitingForPlanReview);
   useLayoutEffect(() => {
     waitingForAskUserRef.current = waitingForAskUser;
-  }, [waitingForAskUser]);
+    waitingForPlanReviewRef.current = waitingForPlanReview;
+  }, [waitingForAskUser, waitingForPlanReview]);
   const executionObservation = nativeExecutionObservation(state);
   const executionRuns = executionObservation?.runs ?? selection?.runs;
   const executionRecords = executionObservation?.executions ?? selection?.executions;
@@ -2289,7 +2320,124 @@ function NativeDesktopContent({
       });
     },
   });
+  const planSelection =
+    !preparing &&
+    !scheduledTasksView &&
+    selection?.session.parentSessionId === null &&
+    selection.session.deletedAt === null &&
+    selected.current === selection.session.id &&
+    !selection.workspaceUnavailable &&
+    (!directory || directory.storeId === selection.storeId)
+      ? selection
+      : undefined;
+  const planRun =
+    planSelection &&
+    activeExecutionRun?.sessionId === planSelection.session.id &&
+    activeExecutionRun.originStoreId === planSelection.storeId
+      ? activeExecutionRun
+      : undefined;
+  const planExecutions =
+    planRun &&
+    executionRecords?.filter(
+      (entry) =>
+        entry.runId === planRun.id &&
+        entry.originStoreId === planRun.originStoreId &&
+        entry.sessionId === planRun.sessionId &&
+        entry.definitionId.startsWith('planning.') &&
+        entry.definitionId !== 'planning.read',
+    );
+  const planHasReview =
+    planRun &&
+    (planExecutions?.some((entry) => entry.definitionId === 'planning.review') ||
+      messages.some(
+        (message) =>
+          !message.originMessage &&
+          message.sessionId === planRun.sessionId &&
+          message.runId === planRun.id &&
+          message.toolCalls?.some((call) => call.name === 'planning.review'),
+      ));
+  const planProgress = useNativePlanProgress({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    selection: planSelection,
+    historyEpoch: state?.historyEpoch ?? 0,
+    available:
+      !!planSelection?.canReadExtensions &&
+      !planSelection.viewLoading &&
+      !planSelection.permissionUnavailable &&
+      !selectionHandoff &&
+      !executionUnconfirmed,
+    unconfirmed:
+      executionUnconfirmed ||
+      !!directory?.unavailable ||
+      !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
+    activeRun: planRun
+      ? {
+          id: planRun.id,
+          revision: planHasReview
+            ? JSON.stringify([
+                planRun.status,
+                planExecutions?.map(({ id, status, resultRevision }) => [
+                  id,
+                  status,
+                  resultRevision,
+                ]),
+              ])
+            : undefined,
+        }
+      : undefined,
+    waitingForReview: waitingForPlanReview,
+  });
+  const [planFocus, setPlanFocus] = useState<{
+    scope: string;
+    request: NonNullable<SessionPageProps['focusMessage']>;
+  }>();
+  const planFocusScope =
+    planSelection &&
+    JSON.stringify([state?.generation, planSelection.storeId, planSelection.session.id]);
+  const locatePlan = (runId: string, plan: NativePlanProgress) => {
+    if (!planSelection || !planFocusScope) return;
+    const started = new WeakSet<HTMLButtonElement>();
+    setPlanFocus({
+      scope: planFocusScope,
+      request: {
+        presentationKey: nativeToolPresentationKey(
+          planSelection.storeId,
+          planSelection.session.id,
+          runId,
+          plan.reviewExecutionId,
+        ),
+        reveal: (element) => {
+          const toggle = element.querySelector<HTMLButtonElement>('.plan-review-document-toggle');
+          if (toggle) {
+            if (toggle.getAttribute('aria-expanded') === 'false') toggle.click();
+            return true;
+          }
+          if (element.querySelector('[role="alert"]')) return true;
+          const read = element.querySelector<HTMLButtonElement>('[data-plan-document-load]');
+          if (read && !read.disabled && !started.has(read)) {
+            started.add(read);
+            read.click();
+          }
+          return false;
+        },
+        onFocused: () => setPlanFocus(undefined),
+      },
+    });
+  };
   const environment = useNativeEnvironment({
+    plan: planProgress.active && (
+      <PlanExecutionProgress
+        plan={planProgress.active.plan}
+        stale={planProgress.active.stale}
+        outcome={planProgress.active.outcome}
+        open={planProgress.open}
+        onOpenChange={planProgress.setOpen}
+        onLocate={() => {
+          if (planProgress.active) locatePlan(planProgress.active.runId, planProgress.active.plan);
+        }}
+      />
+    ),
     references: outputFiles.references,
     bridge,
     generation: state?.generation ?? generation.current,
@@ -2373,6 +2521,7 @@ function NativeDesktopContent({
     historyEpoch: state?.historyEpoch ?? 0,
     available:
       readingParent &&
+      !waitingForPlanReview &&
       !pending &&
       historyState.phase === 'complete' &&
       !selection?.viewLoading &&
@@ -3545,9 +3694,7 @@ function NativeDesktopContent({
         if (snapshot?.content === document.content) dirtyDrafts.current.delete(key);
         return;
       }
-      const reconcile = async () => {
-        const commandId = saved.consumedCommand;
-        if (!commandId) return false;
+      const readDraft = async () => {
         const observed = await bridge.request({
           method: 'draft.read',
           generation: currentGeneration,
@@ -3562,13 +3709,22 @@ function NativeDesktopContent({
           !('content' in observed) ||
           observed.id !== saved.id ||
           observed.workspaceId !== saved.workspaceId ||
-          (observed.revision !== saved.revision &&
-            (observed.content !== '' ||
-              observed.browserAnnotations?.length ||
-              observed.outputFiles?.length)) ||
           (sessionId === 'new-conversation'
             ? JSON.stringify([observed.storeId, 'new-conversation'])
             : imageScope(observed.storeId, observed.rootSessionId)) !== key
+        )
+          throw Error('browser_draft_save_unconfirmed');
+        return observed;
+      };
+      const reconcile = async (knownDraft?: Awaited<ReturnType<typeof readDraft>>) => {
+        const commandId = saved.consumedCommand;
+        if (!commandId) return false;
+        const observed = knownDraft ?? (await readDraft());
+        if (
+          observed.revision !== saved.revision &&
+          (observed.content !== '' ||
+            observed.browserAnnotations?.length ||
+            observed.outputFiles?.length)
         )
           throw Error('browser_draft_save_unconfirmed');
         const previous = saved.revision;
@@ -3594,15 +3750,40 @@ function NativeDesktopContent({
           result = await write();
         } catch (cause) {
           const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
-          // An acknowledgement can consume the exact saved revision between our
-          // read and write. Only that proven local consumption allows one retry.
-          if (code !== 'draft_revision_conflict' || !(await reconcile())) throw cause;
-          if (!ownsSnapshot()) return;
-          expectedRevision = saved.revision;
-          result = await write();
+          if (code === 'native_selection_changed' && selected.current === sessionId) {
+            // Main rejected before touching the draft during a view refresh.
+            await refresh().catch(() => {});
+            if (
+              selected.current !== sessionId ||
+              generation.current !== currentGeneration ||
+              noteDraftStates.current.get(key) !== saved
+            )
+              throw cause;
+            if (!ownsSnapshot()) return;
+            result = await write();
+          } else {
+            if (code !== 'draft_revision_conflict') throw cause;
+            const observed = await readDraft();
+            const observedDocument = JSON.stringify({
+              content: observed.content,
+              browserAnnotations: observed.browserAnnotations ?? [],
+              annotationImageOffset: observed.annotationImageOffset ?? 0,
+              outputFiles: observed.outputFiles ?? [],
+            });
+            if (observed.revision === expectedRevision + 1 && observedDocument === serialized) {
+              result = observed;
+            } else {
+              // Only an acknowledged input may advance a changed draft baseline.
+              if (!(await reconcile(observed))) throw cause;
+              if (!ownsSnapshot()) return;
+              expectedRevision = saved.revision;
+              result = await write();
+            }
+          }
         }
       } catch (cause) {
-        saved.uncertain = true;
+        const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+        if (code !== 'native_selection_changed') saved.uncertain = true;
         throw cause;
       }
       if (
@@ -3658,12 +3839,14 @@ function NativeDesktopContent({
       return saveBrowserDraft(key, selection.session.id, document).then(
         () => clearDraftPersistenceError(key),
         (error) => {
-          reportDraftPersistenceError(
-            key,
-            '草稿尚未确认保存。内容仍保留在窗口中，请重新打开原会话核对。',
-            feedbackEpoch,
-            notify,
-          );
+          const code = (error as { code?: string })?.code ?? (error as Error)?.message;
+          if (code !== 'native_selection_changed')
+            reportDraftPersistenceError(
+              key,
+              '草稿尚未确认保存。内容仍保留在窗口中，请重新打开原会话核对。',
+              feedbackEpoch,
+              notify,
+            );
           throw error;
         },
       );
@@ -3675,6 +3858,8 @@ function NativeDesktopContent({
   const noteSaveSignal = selection
     ? JSON.stringify([
         imageScope(selection.storeId, selection.session.id),
+        selection.viewLoading,
+        state?.backgroundUnavailable,
         noteRevision,
         draft,
         imageDrafts.get(imageScope(selection.storeId, selection.session.id)).length,
@@ -3899,13 +4084,8 @@ function NativeDesktopContent({
     [bridge],
   );
   function sendInput() {
-    if (
-      !bridge ||
-      !selection ||
-      worktreeExitRead.current ||
-      waitingForAskUserRef.current ||
-      sendContentBlocked
-    )
+    if (!bridge || !selection || worktreeExitRead.current) return;
+    if (waitingForPlanReviewRef.current || waitingForAskUserRef.current || sendContentBlocked)
       return;
     const images = imageDrafts.get(imageScope(selection.storeId, selection.session.id));
     const files = imageDrafts.files(imageScope(selection.storeId, selection.session.id));
@@ -3975,7 +4155,7 @@ function NativeDesktopContent({
         (draftCache.current.get(draftKey) !== submittedDraft && draftCache.current.has(draftKey))
       )
         throw Error('native_selection_changed');
-      if (waitingForAskUserRef.current) return;
+      if (waitingForAskUserRef.current || waitingForPlanReviewRef.current) return;
       draftCache.current.set(draftKey, submittedDraft);
       const intent = {
         ...nativeTextIntent(
@@ -4250,7 +4430,16 @@ function NativeDesktopContent({
   const visibleInteractions = selection?.interactions.filter(
     (card) => !approvalPresentation.hidden(card),
   );
-  const hasPendingInteraction = visibleInteractions?.some(
+  const pendingPlanReviews = new Set(
+    preparing
+      ? []
+      : visibleInteractions?.filter(
+          (card) =>
+            card.kind === 'plan_review' && card.state === 'pending' && !isMcpSourceReview(card),
+        ),
+  );
+  const footerInteractions = visibleInteractions?.filter((card) => !pendingPlanReviews.has(card));
+  const hasPendingInteraction = footerInteractions?.some(
     (card) =>
       ['approval', 'question', 'plan_review'].includes(card.kind) && card.state === 'pending',
   );
@@ -4259,9 +4448,7 @@ function NativeDesktopContent({
     selection
       ? {
           ...selection,
-          interactions: selection.interactions.filter(
-            (card) => card.kind === 'question' || card.kind === 'plan_review',
-          ),
+          interactions: selection.interactions.filter((card) => card.kind === 'question'),
         }
       : selection,
   );
@@ -4315,6 +4502,7 @@ function NativeDesktopContent({
       active: !!activeInputRun && !executionUnconfirmed,
       stopping: activeInputRun?.status === 'cancelling',
       waitingForAskUser,
+      waitingForPlanReview,
       sendLabel: currentSendLabel,
       queueItems: inputQueue.queue?.items,
       cacheMetrics: cacheMetrics.metrics,
@@ -4333,6 +4521,7 @@ function NativeDesktopContent({
     draft,
     activeInputRun,
     waitingForAskUser,
+    waitingForPlanReview,
     executionUnconfirmed,
     currentSendLabel,
     inputQueue.queue?.items,
@@ -4826,6 +5015,31 @@ function NativeDesktopContent({
       if (!model.presentationKey && commandId)
         models[index] = { ...model, presentationKey: commandId };
     }
+    for (const message of displayMessages) {
+      if (
+        message.role !== 'user' ||
+        message.inputKind !== 'interaction.answer' ||
+        message.originMessage ||
+        message.sessionId !== selection?.session.id ||
+        !message.runId ||
+        message.sourceIds?.length !== 2 ||
+        message.sourceIds[0] !== message.originCommandId
+      )
+        continue;
+      const key = nativeToolPresentationKey(
+        selection.storeId,
+        message.sessionId,
+        message.runId,
+        message.sourceIds[1]!,
+      );
+      const answerIndex = models.findIndex((model) => model.id === message.id);
+      const planIndex = models.findIndex(
+        (model) => model.toolName === 'planning.review' && model.presentationKey === key,
+      );
+      // The request was shown before the reply even if its ToolResult settled later.
+      if (answerIndex >= 0 && planIndex > answerIndex)
+        models.splice(answerIndex, 0, ...models.splice(planIndex, 1));
+    }
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
       if (input.delivery === 'failed' || (rejectedInputs.has(input.id) && !input.turnId)) continue;
@@ -4923,39 +5137,74 @@ function NativeDesktopContent({
     () => new Map(displayMessages.map((message) => [message.id, message])),
     [displayMessages],
   );
-  const planReviewRows = new Map<string, Interaction>();
-  if (selection && !preparing) {
-    const rowKeys = new Set(
-      messageModels.flatMap((message) =>
-        message.toolName === 'planning.review' && message.presentationKey
-          ? [message.presentationKey]
-          : [],
-      ),
-    );
-    for (const card of visibleInteractions ?? []) {
+  const planHistoryRuns = new Map<string, string>();
+  if (planSelection) {
+    for (const model of messageModels) {
+      if (model.toolName !== 'planning.review' || !model.turnId) continue;
+      const message = messagesById.get(model.id);
       if (
-        card.kind !== 'plan_review' ||
-        card.definitionId !== 'planning.review' ||
-        card.definitionVersion !== '1' ||
-        card.originStoreId !== selection.storeId ||
-        card.sessionId !== selection.session.id ||
-        card.presentationSessionId !== selection.session.id ||
-        !card.runId
+        message?.runId &&
+        !message.originMessage &&
+        message.sessionId === planSelection.session.id
       )
-        continue;
-      const key = nativeToolPresentationKey(
-        card.originStoreId,
-        card.sessionId,
-        card.runId,
-        card.executionId,
-      );
-      if (rowKeys.has(key)) planReviewRows.set(key, card);
+        planHistoryRuns.set(model.turnId, message.runId);
     }
   }
-  const inlineReviewIds = new Set([...planReviewRows.values()].map((card) => card.id));
-  const renderInteraction = (interaction: Interaction, embedded: boolean, inline = false) => {
+  const planReviewRows = new Map<string, string>();
+  const planReviewMessages: typeof messageModels = [];
+  if (!preparing && selection) {
+    const toolKeys = new Set(
+      messageModels
+        .filter((message) => message.toolName === 'planning.review')
+        .map((message) => message.presentationKey),
+    );
+    for (const card of pendingPlanReviews) {
+      const identity = questionDraftKey(card);
+      const toolKey =
+        card.definitionId === 'planning.review' && card.definitionVersion === '1' && card.runId
+          ? nativeToolPresentationKey(
+              card.originStoreId,
+              card.sessionId,
+              card.runId,
+              card.executionId,
+            )
+          : undefined;
+      if (toolKey && toolKeys.has(toolKey) && !planReviewRows.has(toolKey)) {
+        planReviewRows.set(toolKey, identity);
+      } else {
+        // A pending interaction can arrive before its original tool message.
+        const key = `plan-review:${identity}`;
+        planReviewRows.set(key, identity);
+        planReviewMessages.push({
+          id: key,
+          role: 'tool',
+          text: '',
+          settled: false,
+          presentationKey: key,
+          toolName: 'planning.review',
+        });
+      }
+    }
+  }
+  const renderInteraction = (interaction: Interaction, embedded: boolean) => {
     if (!selection || !state) return null;
+    const answerGeneration = state.generation;
+    const answerView = viewIntent.current;
+    const planReview = interaction.kind === 'plan_review';
+    const answerUnavailable =
+      selection.workspaceUnavailable ||
+      (planReview &&
+        (executionUnconfirmed || selection.viewLoading || selection.permissionUnavailable));
     const draftKey = questionDraftKey(interaction);
+    const initialDraft = interactionDrafts.current.get(draftKey);
+    const saveDraft = (entry: InteractionDraft) =>
+      interactionDrafts.current.set(draftKey, {
+        ...entry,
+        storeId: interaction.originStoreId,
+        sourceSessionId: interaction.sessionId,
+        presentationSessionId: interaction.presentationSessionId,
+        cardId: interaction.id,
+      });
     const saved = state?.answerSubmissions?.find(
       (row) =>
         row.scope.storeId === interaction.originStoreId &&
@@ -4969,19 +5218,37 @@ function NativeDesktopContent({
     return (
       <InteractionCard
         compactApproval={embedded}
-        inlinePlanReview={inline}
-        key={JSON.stringify([
-          draftKey,
-          interaction.kind === 'plan_review' &&
-            selection.runs.some(
-              (run) =>
-                run.id === interaction.runId &&
-                run.sessionId === interaction.sessionId &&
-                run.originStoreId === interaction.originStoreId &&
-                run.status === 'cancelled' &&
-                !run.isActive,
-            ),
-        ])}
+        inlinePlanReview={planReview}
+        planAnswerPaused={planReview && answerUnavailable}
+        planDocumentTarget={
+          planReview && interaction.state === 'pending'
+            ? (planDocuments.get(draftKey) ?? null)
+            : undefined
+        }
+        planDocument={
+          lastPlanDocument.current?.scope === planDocumentScope &&
+          lastPlanDocument.current?.cardId === interaction.id
+            ? lastPlanDocument.current
+            : undefined
+        }
+        onPlanDocumentChange={
+          planReview && planDocumentScope
+            ? (change) => {
+                const previous = lastPlanDocument.current;
+                lastPlanDocument.current = {
+                  ...(previous?.cardId === interaction.id && previous.scope === planDocumentScope
+                    ? previous
+                    : {}),
+                  ...change,
+                  scope: planDocumentScope,
+                  cardId: interaction.id,
+                  executionId: interaction.executionId,
+                  request: interaction.request,
+                };
+              }
+            : undefined
+        }
+        key={draftKey}
         interaction={interaction}
         renderApproval={(props) => (
           <NativeApproval
@@ -5018,33 +5285,22 @@ function NativeDesktopContent({
                 }
               : undefined
         }
-        initialQuestionDraft={questionDrafts.current.get(draftKey)?.draft}
-        onQuestionDraftChange={(draft) =>
-          questionDrafts.current.set(draftKey, {
-            storeId: interaction.originStoreId,
-            sourceSessionId: interaction.sessionId,
-            presentationSessionId: interaction.presentationSessionId,
-            cardId: interaction.id,
-            draft,
-          })
-        }
-        initialPlanDraft={planDrafts.current.get(draftKey)?.draft}
-        onPlanDraftChange={(draft) =>
-          planDrafts.current.set(draftKey, {
-            storeId: interaction.originStoreId,
-            sourceSessionId: interaction.sessionId,
-            presentationSessionId: interaction.presentationSessionId,
-            cardId: interaction.id,
-            runId: interaction.runId,
-            draft,
-          })
-        }
+        initialQuestionDraft={initialDraft?.kind === 'question' ? initialDraft.draft : undefined}
+        onQuestionDraftChange={(draft) => saveDraft({ kind: 'question', draft })}
+        initialPlanDraft={initialDraft?.kind === 'plan_review' ? initialDraft.draft : undefined}
+        onPlanDraftChange={(draft) => saveDraft({ kind: 'plan_review', draft })}
         onAnswer={
-          selection.workspaceUnavailable ||
-          (inline &&
-            (executionUnconfirmed || selection.viewLoading || selection.permissionUnavailable))
+          answerUnavailable && !planReview
             ? undefined
             : async (_card, answer) => {
+                if (
+                  answerUnavailable ||
+                  (planReview &&
+                    (generation.current !== answerGeneration ||
+                      viewIntent.current !== answerView ||
+                      selected.current !== selection.session.id))
+                )
+                  throw Error('interaction_observation_changed');
                 try {
                   await bridge.request({
                     method: 'interaction.answer',
@@ -5055,9 +5311,10 @@ function NativeDesktopContent({
                   });
                 } finally {
                   // Observation failure cannot turn a saved answer into a retryable failure.
-                  if (isOrdinaryNativeApproval(interaction)) void refresh().catch(() => {});
+                  if (planReview) await refresh().catch(() => {});
+                  else if (isOrdinaryNativeApproval(interaction)) void refresh().catch(() => {});
                 }
-                if (!isOrdinaryNativeApproval(interaction)) await refresh();
+                if (!planReview && !isOrdinaryNativeApproval(interaction)) await refresh();
               }
         }
       />
@@ -5066,7 +5323,7 @@ function NativeDesktopContent({
   const interactionCards =
     selection && state ? (
       <NativeApprovalGroup
-        interactions={(visibleInteractions ?? []).filter((card) => !inlineReviewIds.has(card.id))}
+        interactions={footerInteractions ?? []}
         storeId={selection.storeId}
         rootSessionId={
           selection.session.rootSessionId ??
@@ -6074,154 +6331,183 @@ function NativeDesktopContent({
   const renderNativeTools: NativeToolRenderer = (group, controls) => {
     const plan =
       group.length === 1 && group[0]?.toolName === 'planning.review' ? group[0] : undefined;
-    const pendingReview = plan?.presentationKey && planReviewRows.get(plan.presentationKey);
-    const rendered = pendingReview
-      ? renderInteraction(pendingReview, false, true)
-      : renderNativeToolGroup(group, controls, {
-          tools: toolMessages.entries,
-          retainedFact: (model) => toolPresentation.current.retainedFact(model),
-          targets: fileTargets.entries,
-          liveTools,
-          executionUnconfirmed,
-          observationUnavailable: !!(selection?.viewLoading || selection?.permissionUnavailable),
-          diagnostics,
-          metadataPending: toolMessages.pendingMessageIds,
-          renderOriginal: renderNativeMessage,
-          renderPlanReview: (model) => {
-            const original = messagesById.get(model.id);
-            const executionId = original?.sourceIds?.length === 1 && original.sourceIds[0];
-            const origin = original?.originMessage ?? original;
-            if (!state || !selection || !executionId || !origin?.runId) return;
-            return () => (
-              <NativeInteractionHistory
-                bridge={bridge}
-                generation={state.generation}
-                selection={selection}
-                historyEpoch={state.historyEpoch ?? 0}
-                planReview={{
-                  executionId,
-                  runId: origin.runId!,
-                  sessionId: origin.sessionId,
-                  storeId: original?.originMessage?.storeId ?? selection.storeId,
-                }}
-              />
+    const review = plan?.presentationKey && planReviewRows.get(plan.presentationKey);
+    if (review)
+      return <NativePlanReviewMessage identity={review} register={registerPlanDocument} />;
+    if (plan && state && selection) {
+      const original = messagesById.get(plan.id);
+      const origin = original?.originMessage ?? original;
+      const live = liveTools.find((entry) => entry.message.id === plan.id)?.execution;
+      const executionId = original?.sourceIds?.length === 1 ? original.sourceIds[0] : live?.id;
+      const runId = origin?.runId ?? live?.runId;
+      const sessionId = origin?.sessionId ?? live?.sessionId;
+      const storeId = original?.originMessage?.storeId ?? live?.originStoreId ?? selection.storeId;
+      if (executionId && runId && sessionId) {
+        const carried =
+          lastPlanDocument.current?.scope === planDocumentScope &&
+          lastPlanDocument.current?.executionId === executionId
+            ? lastPlanDocument.current
+            : undefined;
+        const previous = state.interactionSubmissions.find(
+          ({ interaction }) =>
+            interaction.kind === 'plan_review' &&
+            interaction.executionId === executionId &&
+            interaction.runId === runId &&
+            interaction.sessionId === sessionId &&
+            interaction.originStoreId === storeId,
+        )?.interaction;
+        return (
+          <div
+            className="native-plan-review-message"
+            tabIndex={-1}
+            data-conversation-focus={plan.presentationKey}
+          >
+            <NativeInteractionHistory
+              bridge={bridge}
+              generation={state.generation}
+              selection={selection}
+              historyEpoch={state.historyEpoch ?? 0}
+              planReview={{ executionId, runId, sessionId, storeId, settled: plan.settled }}
+              carriedPlanDocument={carried}
+              fallback={
+                previous ? (
+                  <InteractionCard
+                    interaction={previous}
+                    inlinePlanReview
+                    planDocument={carried?.cardId === previous.id ? carried : undefined}
+                  />
+                ) : undefined
+              }
+            />
+          </div>
+        );
+      }
+    }
+    const rendered = renderNativeToolGroup(group, controls, {
+      tools: toolMessages.entries,
+      retainedFact: (model) => toolPresentation.current.retainedFact(model),
+      targets: fileTargets.entries,
+      liveTools,
+      executionUnconfirmed,
+      observationUnavailable: !!(selection?.viewLoading || selection?.permissionUnavailable),
+      diagnostics,
+      metadataPending: toolMessages.pendingMessageIds,
+      renderOriginal: renderNativeMessage,
+      renderSearch: (model, executionId, live) => {
+        const message = messagesById.get(model.id);
+        const exact = message
+          ? !message.originMessage &&
+            message.role === 'tool' &&
+            message.sessionId === selection?.session.id &&
+            message.sourceIds?.length === 1 &&
+            message.sourceIds[0] === executionId
+          : liveTools.some(
+              ({ execution, message: row }) =>
+                row.id === model.id &&
+                execution.id === executionId &&
+                execution.originStoreId === selection?.storeId &&
+                execution.sessionId === selection?.session.id,
             );
-          },
-          renderSearch: (model, executionId, live) => {
-            const message = messagesById.get(model.id);
-            const exact = message
-              ? !message.originMessage &&
-                message.role === 'tool' &&
-                message.sessionId === selection?.session.id &&
-                message.sourceIds?.length === 1 &&
-                message.sourceIds[0] === executionId
-              : liveTools.some(
-                  ({ execution, message: row }) =>
-                    row.id === model.id &&
-                    execution.id === executionId &&
-                    execution.originStoreId === selection?.storeId &&
-                    execution.sessionId === selection?.session.id,
-                );
-            const reader = exact ? searchReader(executionId, live) : undefined;
-            return (
-              <WebLinkContext.Provider value={openNativeWebLink}>
-                <NativeWebSearchToolDetails
-                  key={reader?.scope ?? executionId}
-                  headingQuery={model.target}
-                  reader={reader}
-                  unsupported={!selection?.canReadWebSearchEvidence}
-                />
-              </WebLinkContext.Provider>
-            );
-          },
-          hasDeferredText: (model) => !!messagesById.get(model.id)?.deferredText,
-          agentProps: (model, fact) => {
-            const activity = nativeAgentActivityForTool(
-              environment.agentActivities,
-              messages.find((message) => message.id === model.id),
-              fact,
-            );
-            return {
-              childAgent: activity?.childAgent,
-              childDetail:
-                activity &&
-                childReadAvailable &&
-                toolMessages.entries.some((entry) => entry.messageId === model.id)
-                  ? {
-                      label: activity.childAgent.name,
-                      onOpen: () =>
-                        setChildTabRequest({
-                          parent: childParent,
-                          requestId: ++childTabSequence.current,
-                          sessionId: activity.sessionId,
-                          executionId: activity.executionId,
-                          title: activity.childAgent.name,
-                          childAgentIdentity: activity.childAgent.identity,
-                        }),
-                    }
-                  : undefined,
-            };
-          },
-          renderImages: (model, fact) => {
-            const message = messagesById.get(model.id);
-            const images = fact?.images;
-            return message && images?.length && selection && state ? (
-              <NativeUserImages
-                key={model.id}
-                bridge={bridge}
-                previews={imageDrafts.previews}
-                generation={state.generation}
-                viewSelection={selection.viewSelection ?? selection.viewGeneration}
-                historyEpoch={state.historyEpoch ?? 0}
-                message={message}
-                images={images}
-                readAvailable={
-                  !selection.viewLoading &&
-                  historyState.phase === 'complete' &&
-                  !directory?.unavailable &&
-                  toolMessages.entries.some((entry) => entry.messageId === model.id) &&
-                  !toolMessages.pendingMessageIds.has(model.id)
+        const reader = exact ? searchReader(executionId, live) : undefined;
+        return (
+          <WebLinkContext.Provider value={openNativeWebLink}>
+            <NativeWebSearchToolDetails
+              key={reader?.scope ?? executionId}
+              headingQuery={model.target}
+              reader={reader}
+              unsupported={!selection?.canReadWebSearchEvidence}
+            />
+          </WebLinkContext.Provider>
+        );
+      },
+      hasDeferredText: (model) => !!messagesById.get(model.id)?.deferredText,
+      agentProps: (model, fact) => {
+        const activity = nativeAgentActivityForTool(
+          environment.agentActivities,
+          messages.find((message) => message.id === model.id),
+          fact,
+        );
+        return {
+          childAgent: activity?.childAgent,
+          childDetail:
+            activity &&
+            childReadAvailable &&
+            toolMessages.entries.some((entry) => entry.messageId === model.id)
+              ? {
+                  label: activity.childAgent.name,
+                  onOpen: () =>
+                    setChildTabRequest({
+                      parent: childParent,
+                      requestId: ++childTabSequence.current,
+                      sessionId: activity.sessionId,
+                      executionId: activity.executionId,
+                      title: activity.childAgent.name,
+                      childAgentIdentity: activity.childAgent.identity,
+                    }),
                 }
-              />
-            ) : null;
-          },
-          renderFileChange: (entry, open, openFile) =>
-            state ? (
-              <NativeOperationDiff
-                key={entry.changeId}
-                bridge={bridge}
-                generation={state.generation}
-                entry={entry}
-                openFile={openFile}
-                editor={editor}
-                open={open}
-                cache={operationDiffs.current}
-              />
-            ) : null,
-          openFileForTarget: (target) => {
-            if (
-              !selection ||
-              !state ||
-              selection.viewLoading ||
-              historyState.phase !== 'complete' ||
-              directory?.unavailable ||
-              !target?.openable ||
-              !target.path
-            )
-              return;
-            return (path) => {
-              if (path !== target.path) return;
-              void report(() =>
-                bridge.request({
-                  method: 'fileChanges.open',
-                  generation: state.generation,
-                  changeId: target.changeId,
-                  editor,
-                }),
-              );
-            };
-          },
-        });
+              : undefined,
+        };
+      },
+      renderImages: (model, fact) => {
+        const message = messagesById.get(model.id);
+        const images = fact?.images;
+        return message && images?.length && selection && state ? (
+          <NativeUserImages
+            key={model.id}
+            bridge={bridge}
+            previews={imageDrafts.previews}
+            generation={state.generation}
+            viewSelection={selection.viewSelection ?? selection.viewGeneration}
+            historyEpoch={state.historyEpoch ?? 0}
+            message={message}
+            images={images}
+            readAvailable={
+              !selection.viewLoading &&
+              historyState.phase === 'complete' &&
+              !directory?.unavailable &&
+              toolMessages.entries.some((entry) => entry.messageId === model.id) &&
+              !toolMessages.pendingMessageIds.has(model.id)
+            }
+          />
+        ) : null;
+      },
+      renderFileChange: (entry, open, openFile) =>
+        state ? (
+          <NativeOperationDiff
+            key={entry.changeId}
+            bridge={bridge}
+            generation={state.generation}
+            entry={entry}
+            openFile={openFile}
+            editor={editor}
+            open={open}
+            cache={operationDiffs.current}
+          />
+        ) : null,
+      openFileForTarget: (target) => {
+        if (
+          !selection ||
+          !state ||
+          selection.viewLoading ||
+          historyState.phase !== 'complete' ||
+          directory?.unavailable ||
+          !target?.openable ||
+          !target.path
+        )
+          return;
+        return (path) => {
+          if (path !== target.path) return;
+          void report(() =>
+            bridge.request({
+              method: 'fileChanges.open',
+              generation: state.generation,
+              changeId: target.changeId,
+              editor,
+            }),
+          );
+        };
+      },
+    });
     return plan ? <div className="native-plan-review-message">{rendered}</div> : rendered;
   };
   const windowFrame = (content: ReactNode) =>
@@ -6366,7 +6652,13 @@ function NativeDesktopContent({
           historyState.phase === 'complete' &&
           (!historyMetadataLoading || !!selection.canReadHistoryPreviews),
       }}
-      messages={pendingReading && !(firstVisible && !firstSaved) ? [] : messageModels}
+      messages={
+        pendingReading && !(firstVisible && !firstSaved)
+          ? []
+          : planReviewMessages.length
+            ? [...messageModels, ...planReviewMessages]
+            : messageModels
+      }
       hideEmptyWelcome={
         (!preparing && rejectedInputs.size > 0) ||
         (firstVisible && firstSubmission.result?.phase === 'failed')
@@ -6386,6 +6678,7 @@ function NativeDesktopContent({
           ? !historyState.baselineReady
           : !selection.canReadHistoryPreviews &&
             ((canCompose &&
+              !waitingForPlanReview &&
               (resolvedChoice?.identity !== choiceIdentity || !resolvedChoice.settled)) ||
               !!selection.viewLoading ||
               runMessages.loading ||
@@ -6722,7 +7015,24 @@ function NativeDesktopContent({
       renderFile={outputFiles.renderFile}
       closeFile={outputFiles.closeFile}
       renderTurnOutputs={outputFiles.renderTurnOutputs}
+      renderTurnDetails={({ turnId, terminalStatus }) => {
+        const runId = planHistoryRuns.get(turnId);
+        return (
+          runId && (
+            <NativePlanHistory
+              key={JSON.stringify([planFocusScope, turnId])}
+              runId={runId}
+              outcome={terminalStatus}
+              read={planProgress.read}
+              onReady={planProgress.settle}
+              onLocate={(plan) => locatePlan(runId, plan)}
+            />
+          )
+        );
+      }}
+      focusMessage={planFocus && planFocus.scope === planFocusScope ? planFocus.request : undefined}
       environmentInformation={environment.card}
+      onEnvironmentVisibilityChange={planProgress.onEnvironmentVisibilityChange}
       connected={generation.current > 0}
       connectionLabel={
         diagnostics
@@ -6930,9 +7240,9 @@ function NativeDesktopContent({
         )
       }
       interaction={
-        !preparing && hasPendingInteraction ? (
+        !preparing && (hasPendingInteraction || pendingPlanReviews.size > 0) ? (
           <>
-            {interactionCards}
+            {hasPendingInteraction && interactionCards}
             {hasPendingRootInteraction &&
               activeInputRun &&
               activeInputRun.sessionId === selection?.session.id &&
@@ -6945,6 +7255,7 @@ function NativeDesktopContent({
                   {activeInputRun.status === 'cancelling' ? '正在停止…' : '停止任务'}
                 </DesktopButton>
               )}
+            {Array.from(pendingPlanReviews, (card) => renderInteraction(card, false))}
           </>
         ) : undefined
       }
@@ -6961,6 +7272,7 @@ function NativeDesktopContent({
               onCancel: () => {},
               inputLabel: '当前会话私有草稿',
               inputPlaceholder: '输入新的想法',
+              promptHidden: cachedComposer.waitingForPlanReview,
               onFileReferences: () => [],
               onFilesSelected: () => {},
               onImageFiles: () => {},
@@ -7240,7 +7552,9 @@ function NativeDesktopContent({
                   sessionLoading,
                   sending,
                   // A routine history scan gates actions without removing the observed label.
-                  permissionWhenPromptHidden: hasPendingRootBusinessInteraction,
+                  promptHidden: waitingForPlanReview,
+                  permissionWhenPromptHidden:
+                    !waitingForPlanReview && hasPendingRootBusinessInteraction,
                   permission: displayedPermission,
                   fullPermissionScope: JSON.stringify([
                     state.generation,
@@ -7268,6 +7582,7 @@ function NativeDesktopContent({
                       : undefined,
                   sendDisabled:
                     waitingForAskUser ||
+                    waitingForPlanReview ||
                     sendContentBlocked ||
                     (!localWorktreeExit && (!nextModelObserved || permissionFailed)) ||
                     historyState.phase === 'unavailable',

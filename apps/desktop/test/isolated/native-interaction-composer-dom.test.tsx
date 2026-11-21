@@ -7,10 +7,11 @@ import { createRoot } from 'react-dom/client';
 import { nativeRootInteractionBlocksComposer } from '../../src/native';
 import { NativeApproval } from '../../src/native-approval';
 import type { NativeSelection } from '../../src/native-bridge';
+import { nativePlanReviewAwaitingAnswer } from '../../src/native-input';
 import { backgroundItem } from '../background-item.fixture';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
-test('ordinary approvals and questions retain the prompt while plan and MCP decisions own the input area', async () => {
+test('ordinary approvals and questions retain the prompt while plan reviews and MCP decisions hide it', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -106,6 +107,7 @@ test('ordinary approvals and questions retain the prompt while plan and MCP deci
           interactionHidesPrompt={nativeRootInteractionBlocksComposer(current)}
           composer={{
             draft: 'next parent work',
+            promptHidden: nativePlanReviewAwaitingAnswer(current),
             onChange: () => {},
             onSend: () => {},
             active: false,
@@ -126,8 +128,12 @@ test('ordinary approvals and questions retain the prompt while plan and MCP deci
     expect(nativeRootInteractionBlocksComposer(waiting)).toBe(false);
     await render(waiting, question);
     expect(host.querySelector('[aria-label="parent input"]') === editor).toBe(true);
+    const plan = { ...card, kind: 'plan_review' as const };
+    const reviewing = { ...selection, interactions: [plan] };
+    expect(nativeRootInteractionBlocksComposer(reviewing)).toBe(false);
+    await render(reviewing, plan);
+    expect(host.querySelector('[aria-label="parent input"]')).toBeNull();
     for (const other of [
-      { ...card, kind: 'plan_review' as const },
       { ...card, request: { kind: 'mcp_source_approval' } },
       { ...card, request: { kind: 'mcp_credential_binding' } },
       { ...question, definitionId: 'builtin.mcp.sources/mcp.source.approve' },

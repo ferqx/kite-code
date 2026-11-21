@@ -815,9 +815,40 @@ test('question schema rejects invalid answers and never becomes approval; plan m
       }),
       'interaction_binding_changed',
     );
-    await f.store.answerInteraction(
-      f.answer('p', 'answer-p', { kind: 'plan_review', decision: 'approve' }),
+    await rejected(
+      f.store.answerInteraction(
+        f.answer('p', 'invalid-skip', {
+          kind: 'plan_review',
+          decision: 'deny',
+          asUserMessage: true,
+          feedback: 'skip',
+        }),
+      ),
+      'interaction_answer_invalid',
     );
+    const answer = {
+      kind: 'plan_review',
+      decision: 'approve',
+      asUserMessage: true,
+      feedback: '开始实施此计划',
+    } as const;
+    const submission = f.answer('p', 'answer-p', answer);
+    const receipt = await f.store.answerInteraction(submission);
+    expect(await f.store.answerInteraction(submission)).toEqual(receipt);
+    await f.store.answerInteraction(f.answer('p', 'answer-recheck', answer));
+    expect(
+      (await f.store.listMessages('s')).filter(
+        (message) => message.inputKind === 'interaction.answer',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: '开始实施此计划',
+        runId: f.run.id,
+        originCommandId: 'answer-p',
+        sourceIds: ['answer-p', 'p'],
+      }),
+    ]);
     await rejected(
       f.store.acceptInteractionDecision({
         ...f.accept('p'),
@@ -1210,12 +1241,13 @@ test('late informational plan answer remains historical after cancellation and c
       commandId: 'cancel-tool',
       targetCommandId: 'work',
     });
-    const saved = await f.store.answerInteraction(
-      f.answer('review-late', 'late-answer', {
-        kind: 'plan_review',
-        decision: 'approve',
-      }),
-    );
+    const answer = f.answer('review-late', 'late-answer', {
+      kind: 'plan_review',
+      decision: 'approve',
+      feedback: '开始实施此计划',
+      asUserMessage: true,
+    });
+    const saved = await f.store.answerInteraction(answer);
     expect(saved.receipt).toMatchObject({ outcome: 'answer_saved', cancelled: true });
     const review = await f.store.getInteraction({
       expectedStoreId: f.expectedStoreId,
@@ -1223,7 +1255,12 @@ test('late informational plan answer remains historical after cancellation and c
       interactionId: 'review-late',
     });
     expect(review!.state).toBe('cancelled');
-    expect(review!.answer).toEqual({ kind: 'plan_review', decision: 'approve' });
+    expect(review!.answer).toEqual(answer.answer);
+    expect(
+      (await f.store.listMessages('s')).filter(
+        (message) => message.inputKind === 'interaction.answer',
+      ),
+    ).toHaveLength(0);
     await rejected(
       f.store.acceptInteractionDecision(f.accept('review-late', 'tool')),
       'cancelled_before_dispatch',
@@ -1231,14 +1268,7 @@ test('late informational plan answer remains historical after cancellation and c
     expect((await f.store.getExecution('tool'))!.interactionBinding).toBeNull();
     expect((await f.store.getExecution('tool'))!.status).toBe('dispatching');
     const cursor = (await f.store.getMetadata()).lastChangeCursor;
-    expect(
-      await f.store.answerInteraction(
-        f.answer('review-late', 'late-answer', {
-          kind: 'plan_review',
-          decision: 'approve',
-        }),
-      ),
-    ).toEqual(saved);
+    expect(await f.store.answerInteraction(answer)).toEqual(saved);
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
   } finally {
     await f.cleanup();

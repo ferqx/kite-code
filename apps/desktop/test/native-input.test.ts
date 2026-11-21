@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test';
 import type { NativeSelection } from '../src/native-bridge';
-import { nativeInputErrorText, nativeTextIntent } from '../src/native-input';
+import {
+  nativeInputErrorText,
+  nativePlanReviewAwaitingAnswer,
+  nativeTextIntent,
+} from '../src/native-input';
 import { promptTextForSend } from '../src/prompt-text';
 
 test('submitted prompts remove every final LF or CRLF without trimming Markdown whitespace', () => {
@@ -9,6 +13,55 @@ test('submitted prompts remove every final LF or CRLF without trimming Markdown 
   }
   expect(promptTextForSend('\n\r\n')).toBe('');
   expect(promptTextForSend('text\n \n\n')).toBe('text\n ');
+});
+
+test('a root plan gates the main prompt even when the pending page omits its card', () => {
+  const selection = {
+    storeId: 'store',
+    session: { id: 'root' },
+    runs: [
+      {
+        id: 'run',
+        isActive: true,
+        status: 'waiting_interaction',
+        originStoreId: 'store',
+        sessionId: 'root',
+      },
+    ],
+    executions: [
+      {
+        kind: 'tool',
+        definitionId: 'planning.review',
+        originStoreId: 'store',
+        sessionId: 'root',
+        runId: 'run',
+        status: 'running',
+      },
+    ],
+    interactions: [],
+  } as unknown as NativeSelection;
+  const parent = {
+    id: 'root-card',
+    kind: 'plan_review',
+    state: 'pending',
+    originStoreId: 'store',
+    sessionId: 'root',
+    presentationSessionId: 'root',
+  } as NativeSelection['interactions'][number];
+  const child = { ...parent, id: 'child-card', sessionId: 'child' };
+  expect(nativePlanReviewAwaitingAnswer(selection)).toBe(true);
+  expect(nativePlanReviewAwaitingAnswer({ ...selection, interactions: [parent, child] })).toBe(
+    true,
+  );
+  expect(
+    nativePlanReviewAwaitingAnswer({
+      ...selection,
+      interactions: [parent, { ...parent, id: 'another' }],
+    }),
+  ).toBe(true);
+  expect(
+    nativePlanReviewAwaitingAnswer({ ...selection, executions: [], interactions: [child] }),
+  ).toBe(false);
 });
 
 test('Native ordinary sends always queue during an active Run, including compression/reset', () => {

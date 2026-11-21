@@ -1,6 +1,6 @@
 import type { Interaction } from '@kite-ai/client';
 import { InteractionCard } from '@kite-ai/ui';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   interactionHistoryLabel,
   type NativeInteractionHistoryScope,
@@ -15,12 +15,27 @@ export function NativeInteractionHistory({
   selection,
   historyEpoch,
   planReview,
+  fallback,
+  carriedPlanDocument,
 }: {
   bridge: NativeBridge;
   generation: number;
   selection: NativeSelection;
   historyEpoch: number;
-  planReview?: { executionId: string; runId: string; sessionId: string; storeId: string };
+  planReview?: {
+    executionId: string;
+    runId: string;
+    sessionId: string;
+    storeId: string;
+    settled?: boolean;
+  };
+  fallback?: ReactNode;
+  carriedPlanDocument?: {
+    cardId: string;
+    request: Interaction['request'];
+    content?: string;
+    expanded?: boolean;
+  };
 }) {
   const { storeId, session } = selection;
   const {
@@ -28,6 +43,7 @@ export function NativeInteractionHistory({
     runId: reviewRunId,
     sessionId: reviewSessionId,
     storeId: reviewStoreId,
+    settled: reviewSettled,
   } = planReview ?? {};
   const viewSelection = selection.viewSelection ?? selection.viewGeneration;
   const scope: NativeInteractionHistoryScope = useMemo(
@@ -47,18 +63,41 @@ export function NativeInteractionHistory({
     reviewRunId,
     reviewSessionId,
     reviewStoreId,
+    reviewSettled,
   ]);
+  const planDisplayIdentity =
+    reviewExecutionId && reviewSettled
+      ? JSON.stringify([
+          generation,
+          storeId,
+          session.id,
+          session.workspaceId,
+          viewSelection,
+          reviewExecutionId,
+          reviewRunId,
+          reviewSessionId,
+          reviewStoreId,
+        ])
+      : undefined;
+  const [admittedPlanRead, setAdmittedPlanRead] = useState<string>();
+  const planReadable = !selection.permissionUnavailable && !selection.viewLoading;
+  useEffect(() => {
+    if (reviewExecutionId && planReadable) setAdmittedPlanRead(identity);
+  }, [identity, reviewExecutionId, planReadable]);
+  const waitingForPlanRead = !!reviewExecutionId && admittedPlanRead !== identity;
   const [revision, setRevision] = useState(0);
   const current = useRef('');
   current.current = `${identity}/${revision}`;
   const [view, setView] = useState<{
     identity: string;
+    planDisplayIdentity?: string;
     readId?: string;
     cards?: Interaction[];
     error?: string;
     loading: boolean;
   }>({ identity, loading: true });
   useEffect(() => {
+    if (waitingForPlanRead) return;
     const readId = crypto.randomUUID(),
       key = `${identity}/${revision}`;
     let active = true;
@@ -66,7 +105,13 @@ export function NativeInteractionHistory({
       bridge.request({ method: 'interactionHistory.close', generation, readId }).catch(() => {});
     setView((old) => ({
       identity,
-      cards: old.identity === identity ? old.cards : undefined,
+      planDisplayIdentity,
+      cards:
+        old.identity === identity
+          ? old.cards
+          : planDisplayIdentity && old.planDisplayIdentity === planDisplayIdentity
+            ? old.cards?.filter((card) => card.state !== 'pending')
+            : undefined,
       loading: true,
     }));
     void (async () => {
@@ -120,7 +165,7 @@ export function NativeInteractionHistory({
             : result.page.interactions),
         );
         if (result.page.nextAfterId === null || (reviewExecutionId && cards.length)) {
-          setView({ identity, readId, cards, loading: false });
+          setView({ identity, planDisplayIdentity, readId, cards, loading: false });
           return;
         }
         previous = { cursor: result.page.snapshotCursor, afterId: result.page.nextAfterId };
@@ -130,6 +175,7 @@ export function NativeInteractionHistory({
       if (active && current.current === key)
         setView((old) => ({
           identity,
+          planDisplayIdentity,
           cards: old.identity === identity ? old.cards : undefined,
           loading: false,
           error: '交互记录未能完整核实，请重新读取。',
@@ -151,6 +197,8 @@ export function NativeInteractionHistory({
     reviewRunId,
     reviewSessionId,
     reviewStoreId,
+    planDisplayIdentity,
+    waitingForPlanRead,
   ]);
   const facts = view.identity === identity ? view : undefined;
   const readId = facts?.readId;
@@ -174,8 +222,19 @@ export function NativeInteractionHistory({
     [bridge, generation, viewSelection, readId, identity, revision],
   );
   if (planReview) {
+    // The read handle changes with the history epoch. A settled original
+    // interaction can still be displayed in the same root reading selection.
+    const cards =
+      facts?.cards ??
+      (planDisplayIdentity && view.planDisplayIdentity === planDisplayIdentity
+        ? view.cards?.filter((card) => card.state !== 'pending')
+        : undefined);
     return (
-      <section aria-label="原计划审阅" aria-busy={facts?.loading || undefined}>
+      <section
+        aria-label="原计划审阅"
+        aria-busy={waitingForPlanRead || facts?.loading || undefined}
+      >
+        {(!facts || facts.loading) && !cards?.length && fallback}
         {facts?.error && (
           <p role="alert">
             {facts.error}{' '}
@@ -185,12 +244,18 @@ export function NativeInteractionHistory({
           </p>
         )}
         {facts?.cards?.length === 0 && <p>没有可读取的计划审阅记录。</p>}
-        {facts?.cards?.map((card) => (
+        {cards?.map((card) => (
           <InteractionCard
             key={`${card.id}/${card.revision}`}
             interaction={card}
             inlinePlanReview
             onReadAttachment={attachmentReader}
+            planDocument={
+              carriedPlanDocument?.cardId === card.id &&
+              JSON.stringify(carriedPlanDocument.request) === JSON.stringify(card.request)
+                ? carriedPlanDocument
+                : undefined
+            }
           />
         ))}
       </section>
@@ -220,23 +285,27 @@ export function NativeInteractionHistory({
             {interactionHistoryLabel(card)} · {card.definitionId}
           </summary>
           {card.originStoreId !== storeId && <p>恢复历史，只读。</p>}
-          <p>
-            {card.acceptedDecisionRevision === card.revision
-              ? '本次执行已接收该回答；这不表示执行成功。'
-              : card.answer !== null
-                ? '回答已保存，尚未确认被执行接收。'
-                : '没有已保存的回答。'}
-          </p>
-          {card.answer !== null && (
-            <section aria-label="已保存的回答">
-              <pre data-saved-answer>
-                {card.answer.kind === 'plan_review' && card.answer.decision === 'revise'
-                  ? card.answer.feedback
-                  : JSON.stringify(card.answer, null, 2)}
-              </pre>
-            </section>
+          {card.kind !== 'plan_review' && (
+            <>
+              <p>
+                {card.acceptedDecisionRevision === card.revision
+                  ? '本次执行已接收该回答；这不表示执行成功。'
+                  : card.answer !== null
+                    ? '回答已保存，尚未确认被执行接收。'
+                    : '没有已保存的回答。'}
+              </p>
+              {card.answer !== null && (
+                <section aria-label="已保存的回答">
+                  <pre data-saved-answer>{JSON.stringify(card.answer, null, 2)}</pre>
+                </section>
+              )}
+            </>
           )}
-          <InteractionCard interaction={card} onReadAttachment={attachmentReader} />
+          <InteractionCard
+            interaction={card}
+            inlinePlanReview={card.kind === 'plan_review'}
+            onReadAttachment={attachmentReader}
+          />
         </details>
       ))}
     </section>

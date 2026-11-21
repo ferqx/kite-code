@@ -137,6 +137,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'scheduled.delete': ['id'],
   'scheduled.runNow': ['id'],
   'extensions.open': ['readId', 'viewSelection', 'historyEpoch'],
+  'planning.progress': ['viewSelection', 'historyEpoch', 'runId', 'history'],
   'extensions.query': ['readId', 'observationId', 'extensionId', 'queryId', 'input'],
   'extensions.read': ['readId', 'offset', 'limit'],
   'extensions.close': ['readId'],
@@ -763,11 +764,16 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     if (method === 'scheduled.toggle' && typeof input.enabled !== 'boolean')
       throw Error('invalid_native_request');
   }
-  if (method === 'extensions.open') {
+  if (method === 'extensions.open' || method === 'planning.progress') {
     for (const key of ['viewSelection', 'historyEpoch'])
       if (!Number.isSafeInteger(input[key]) || Number(input[key]) < 0)
         throw Error('invalid_native_request');
   }
+  if (
+    method === 'planning.progress' &&
+    (!resourceId(input.runId) || typeof input.history !== 'boolean')
+  )
+    throw Error('invalid_native_request');
   if (method === 'extensions.read') {
     if (
       !Number.isSafeInteger(input.offset) ||
@@ -1563,7 +1569,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
         : answer.kind === 'approval'
           ? ['decision', ...(answer.decision === 'approve' ? ['optionId'] : [])]
           : answer.kind === 'plan_review'
-            ? ['decision', 'feedback']
+            ? ['decision', 'feedback', 'asUserMessage']
             : undefined;
     if (!extras) throw Error('invalid_native_request');
     exact(answer, ['kind', ...extras]);
@@ -1572,6 +1578,15 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       (!['approve', 'deny'].includes(String(answer.decision)) ||
         (answer.decision === 'approve' &&
           (typeof answer.optionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(answer.optionId))))
+    )
+      throw Error('invalid_native_request');
+    if (
+      answer.kind === 'plan_review' &&
+      Object.hasOwn(answer, 'asUserMessage') &&
+      (answer.asUserMessage !== true ||
+        answer.decision === 'deny' ||
+        typeof answer.feedback !== 'string' ||
+        !answer.feedback.trim())
     )
       throw Error('invalid_native_request');
   }

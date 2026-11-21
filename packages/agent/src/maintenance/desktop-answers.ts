@@ -101,12 +101,23 @@ function validateAnswerRecord(raw: unknown): void {
       throw Error();
   } else if (answer.kind === 'question') closed(answer, ['kind', 'answers']);
   else {
-    closed(answer, ['kind', 'decision', ...('feedback' in answer ? ['feedback'] : [])]);
+    const hasFeedback = 'feedback' in answer;
+    const asUserMessage = 'asUserMessage' in answer;
+    closed(answer, [
+      'kind',
+      'decision',
+      ...(hasFeedback ? ['feedback'] : []),
+      ...(asUserMessage ? ['asUserMessage'] : []),
+    ]);
+    const { decision, feedback } = answer as Record<string, unknown>;
     if (
-      !['approve', 'deny', 'revise'].includes(
-        String((answer as Record<string, unknown>).decision),
-      ) ||
-      ('feedback' in answer && typeof answer.feedback !== 'string')
+      !['approve', 'deny', 'revise'].includes(String(decision)) ||
+      (hasFeedback && typeof feedback !== 'string') ||
+      (asUserMessage &&
+        (answer.asUserMessage !== true ||
+          decision === 'deny' ||
+          typeof feedback !== 'string' ||
+          !feedback.trim()))
     )
       throw Error();
   }

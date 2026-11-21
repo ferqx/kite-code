@@ -8,13 +8,15 @@ import {
   nextDesktopPresentation,
   prepareDesktopDom,
   promptValue,
+  setPromptText,
 } from '../native-page-dom.fixture';
 
-test('Native page keeps exact plan drafts across sessions, missing pages and read failure; accepted answers or observed original Run cancellation clear only that draft', async () => {
+test('Native puts plan decisions in the composer slot and restores the original queue and draft', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
   });
+  Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {} });
   const restoreLayoutGlobals = prepareDesktopDom(dom);
   const prior = {
     window: globalThis.window,
@@ -66,7 +68,15 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
           planId: `plan-${session.id}`,
           version: '1',
           digest: `plan-digest-${session.id}`,
-          content: 'Full original plan\n1. first step\n2. second step',
+          content: JSON.stringify({
+            kind: 'plan_document',
+            planId: `plan-${session.id}`,
+            version: 1,
+            digest: `plan-digest-${session.id}`,
+            title: '核对原计划',
+            body: '保留正文预览。',
+            steps: [{ id: 'verify', title: '核对方案' }],
+          }),
         },
       } satisfies Interaction,
     ]),
@@ -74,10 +84,12 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
   let selected = 'a',
     omitted = false,
     unavailable = false,
+    permissionUnavailable = false,
+    ordinarySends = 0,
     posts = 0;
   let watcher: ((event: NativeEvent) => void) | undefined;
   let submissions: NativeState['interactionSubmissions'] = [];
-  let observedRuns: NonNullable<NativeState['selection']>['runs'] = [];
+  const waitingPlans = new Set<string>();
   const state = (): NativeState => ({
     generation: 1,
     creationSubmissions: [],
@@ -86,24 +98,24 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     interactionSubmissions: submissions,
     selection: {
       viewGeneration: 1,
+      canReadInputQueue: selected === 'a',
       canReadModelOutput: false,
+      permissionUnavailable,
       storeId: 'store',
       session: sessions.find((session) => session.id === selected)!,
-      runs: observedRuns.some((run) => run.sessionId === selected)
-        ? observedRuns
-        : [
-            {
-              id: `run-${selected}`,
-              sessionId: selected,
-              originCommandId: `work-${selected}`,
-              originStoreId: 'store',
-              status: 'waiting_interaction',
-              isActive: true,
-              createdAt: 1,
-              finishedAt: null,
-              reason: null,
-            },
-          ],
+      runs: [
+        {
+          id: `run-${selected}`,
+          sessionId: selected,
+          originCommandId: `work-${selected}`,
+          originStoreId: 'store',
+          status: waitingPlans.has(selected) ? 'waiting_interaction' : 'running',
+          isActive: true,
+          createdAt: 1,
+          finishedAt: null,
+          reason: null,
+        },
+      ],
       executions: [
         {
           id: `execution-${selected}`,
@@ -131,7 +143,10 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
           cancelRequestedAt: null,
         },
       ],
-      interactions: omitted ? [] : [cards[selected]!],
+      interactions:
+        omitted || (!waitingPlans.has(selected) && cards[selected]!.kind === 'plan_review')
+          ? []
+          : [cards[selected]!],
       interactionsAfterId: null,
     },
   });
@@ -160,6 +175,25 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       }
       if (input.method === 'messages')
         return { messages: [], nextAfterSeq: null, highWaterSeq: '0' };
+      if (input.method === 'input.queue.read')
+        return {
+          kind: 'input.queue.observation',
+          scope: {
+            generation: input.generation,
+            viewSelection: input.viewSelection,
+            historyEpoch: input.historyEpoch,
+            storeId: 'store',
+            sessionId: selected,
+            workspaceId: 'w',
+          },
+          readId: input.readId,
+          observationId: 7,
+          revision: 'a'.repeat(64),
+          entries: [
+            { id: 'queued-follow-up', text: '核对后续事项', editable: true, steerable: true },
+          ],
+          submissions: [],
+        };
       if (input.method === 'draft.read')
         return {
           id: input.sessionId,
@@ -186,6 +220,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
         ];
         return null;
       }
+      if (input.method === 'caller.prepare') ordinarySends++;
       return null;
     },
   };
@@ -201,23 +236,75 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       button.click();
       if (button.classList.contains('session-row')) await nextDesktopPresentation(dom);
     });
-  const text = () =>
-    host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
   const mainInput = () =>
-    host.querySelector<HTMLElement>('[role="textbox"][aria-label="当前会话私有草稿"]');
-  const edit = async (value: string) =>
-    act(async () => {
-      text().value = value;
-      text().dispatchEvent(new dom.window.Event('input', { bubbles: true }));
-    });
+    host.querySelector<HTMLTextAreaElement>('[role="textbox"][aria-label="当前会话私有草稿"]');
+  const replyInput = () => host.querySelector<HTMLTextAreaElement>('[aria-label="审阅意见"]');
+  const review = () => host.querySelector('.bottom-controls .plan-review-composer');
+  const actions = () => [...(review()?.querySelectorAll('button') ?? [])];
   const refresh = async () => act(async () => watcher?.({ generation: 1, kind: 'changed' }));
   try {
     await act(async () => root.render(<NativeDesktop testDiagnostics />));
     await click('Plan A');
     await click('会话工具');
-    expect(mainInput() === null).toBe(true);
-    await edit('  original A\n雪🙂  ');
-    expect(host.querySelector('[aria-label="Plan review mode"]')).toBeNull();
+    const firstInput = mainInput()!;
+    expect(promptValue(firstInput)).toBe('  main a\n雪🙂  ');
+    const originalForm = firstInput.closest('form')!;
+    expect(host.querySelector('.composer-queue')?.textContent).toContain('核对后续事项');
+    await click('已排队 1 条');
+    waitingPlans.add('a');
+    await refresh();
+    expect(mainInput()).toBeNull();
+    expect(host.querySelector('.bottom-controls .composer')).toBeNull();
+    expect(host.querySelector('.composer-queue')).toBeNull();
+    expect(host.querySelector('[data-permission-trigger]')).toBeNull();
+    const planSource = host.querySelector(
+      '.native-plan-review-message .plan-review-document-heading',
+    )!;
+    expect(planSource.closest('.native-plan-review-message')).toBeTruthy();
+    expect(planSource.closest('.interaction-area')).toBeNull();
+    const planCard = planSource.closest<HTMLElement>('.plan-review-document-card')!;
+    const planActions = review()!;
+    expect(planActions.closest('.conversation-footer')).toBeTruthy();
+    expect(planCard.querySelector('.plan-review-composer')).toBeNull();
+    expect(planCard.querySelector('.plan-review-excerpt')).not.toBeNull();
+    const toggle = planSource.querySelector('button')!;
+    await act(async () => toggle.click());
+    expect(toggle.textContent).toBe('收起完整计划');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const fullPlan = host.querySelector('[aria-label="完整计划正文"]')!;
+    expect(toggle.getAttribute('aria-controls')).toBe(fullPlan.id);
+    expect(fullPlan.closest('.plan-review-document-card')).toBe(planCard);
+    expect(review()).toBe(planActions);
+    await act(async () => toggle.click());
+    expect(toggle.textContent).toBe('展开完整计划');
+    expect(host.querySelector('[aria-label="完整计划正文"]')).toBeNull();
+    expect(mainInput()).toBeNull();
+    expect(replyInput()?.closest('.plan-review-composer')).toBe(planActions);
+    expect(planActions.querySelector('h3')?.textContent).toBe('计划审阅');
+    const decisions = planActions.querySelector('.plan-review-composer-decisions');
+    const reply = planActions.querySelector('.plan-review-composer-reply');
+    expect([...decisions!.querySelectorAll('button')].map((button) => button.textContent)).toEqual([
+      '跳过',
+      '实施此计划',
+    ]);
+    expect(
+      [...reply!.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')),
+    ).toEqual(['发送审阅意见']);
+    expect(promptValue(replyInput())).toBe('');
+    expect(actions().find((button) => button.type === 'submit')?.disabled).toBe(true);
+    expect(host.querySelectorAll('.composer-actions button')).toHaveLength(0);
+    const reviewDraft = '  增加验收步骤\n雪🙂  ';
+    await act(async () => setPromptText(replyInput()!, reviewDraft));
+    expect(promptValue(replyInput())).toBe(reviewDraft);
+    permissionUnavailable = true;
+    await refresh();
+    expect(actions().every((button) => button.disabled)).toBe(true);
+    expect(mainInput()).toBeNull();
+    expect(promptValue(replyInput())).toBe(reviewDraft);
+    expect(posts).toBe(0);
+    permissionUnavailable = false;
+    await refresh();
+    expect(actions().every((button) => !button.disabled)).toBe(true);
     // Plan denial and the explicit original-work cancellation are separate choices.
     expect(
       [...host.querySelectorAll('button')].some((button) =>
@@ -225,36 +312,79 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       ),
     ).toBe(true);
     await click('Plan B');
-    expect(text().value).toBe('');
-    await edit('other B');
+    expect(promptValue(mainInput())).toBe('  main b\n雪🙂  ');
+    await act(async () => setPromptText(mainInput()!, 'other B'));
     await click('Plan A');
-    expect(text().value).toBe('  original A\n雪🙂  ');
+    await act(async () => nextDesktopPresentation(dom));
+    expect(mainInput()).toBeNull();
+    expect(review()).not.toBeNull();
+    expect(promptValue(replyInput())).toBe(reviewDraft);
     omitted = true;
     await refresh();
-    expect(text()).toBeNull();
-    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
+    expect(review()).toBeNull();
+    expect(host.querySelector('.bottom-controls > .interaction-area')).toBeNull();
+    expect(mainInput()).toBeNull();
+    expect(host.querySelector('.composer-queue')).toBeNull();
+    await act(async () => {
+      originalForm.dispatchEvent(
+        new dom.window.Event('submit', { bubbles: true, cancelable: true }),
+      );
+    });
+    expect(ordinarySends).toBe(0);
     unavailable = true;
     await refresh();
     omitted = unavailable = false;
     await refresh();
-    expect(text().value).toBe('  original A\n雪🙂  ');
-    await click('Request revision');
+    expect(mainInput()).toBeNull();
+    expect(promptValue(replyInput())).toBe(reviewDraft);
+    await act(async () => {
+      const input = replyInput()!;
+      input.focus();
+      input.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }),
+      );
+      input.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
+      );
+    });
+    expect(posts).toBe(0);
+    await act(async () => {
+      const input = replyInput()!;
+      for (let index = 0; index < 2; index++)
+        input.dispatchEvent(
+          new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+    });
     expect(posts).toBe(1);
-    expect(mainInput() === null).toBe(true);
+    expect(mainInput()).toBeNull();
+    expect(ordinarySends).toBe(0);
     expect(submissions[0]!.intent.answer).toEqual({
       kind: 'plan_review',
       decision: 'revise',
-      feedback: '  original A\n雪🙂  ',
+      feedback: reviewDraft,
+      asUserMessage: true,
     });
+    omitted = true;
+    waitingPlans.delete('a');
+    await refresh();
+    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
+    expect(host.querySelector('.composer-queue-heading')?.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    await click('已排队 1 条');
+    expect(host.querySelector('.composer-queue')?.textContent).toContain('核对后续事项');
+    expect(ordinarySends).toBe(0);
+    omitted = false;
+    const laterDraft = '  主输入的新草稿\n后续  ';
+    await act(async () => setPromptText(mainInput()!, laterDraft));
+    waitingPlans.add('a');
+    await refresh();
     await click('Plan B');
-    expect(text().value).toBe('other B');
+    expect(promptValue(mainInput())).toBe('other B');
     await click('Plan A');
-    expect(text().value).toBe('  original A\n雪🙂  ');
-    expect(
-      [...host.querySelectorAll('button')].find(
-        (button) => button.textContent === 'Request revision',
-      )!.disabled,
-    ).toBe(true);
+    expect(actions().every((button) => button.disabled)).toBe(true);
+    expect(mainInput()).toBeNull();
+    expect(promptValue(replyInput())).toBe(reviewDraft);
     expect(posts).toBe(1);
     await click('Plan B');
     const original = submissions[0]!;
@@ -280,35 +410,9 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       },
     ];
     await refresh();
-    expect(text().value).toBe('other B');
+    expect(promptValue(mainInput())).toBe('other B');
     await click('Plan A');
-    expect(text().value).toBe('');
-    await click('Plan B');
-    expect(text().value).toBe('other B');
-    cards.b = { ...cards.b!, revision: '2', inputDigest: 'replacement-input' };
-    await refresh();
-    expect(text().value).toBe('');
-    expect(posts).toBe(1);
-    await edit('original cancelled B feedback');
-    omitted = true;
-    observedRuns = [
-      {
-        id: cards.b!.runId,
-        sessionId: 'b',
-        originCommandId: 'work-b',
-        originStoreId: 'store',
-        status: 'cancelled',
-        isActive: false,
-        createdAt: 1,
-        finishedAt: 2,
-        reason: 'cancelled',
-      },
-    ] as unknown as typeof observedRuns;
-    await refresh();
-    expect(promptValue(mainInput())).toBe('  main b\n雪🙂  ');
-    omitted = false;
-    await refresh();
-    expect(text().value).toBe('');
+    expect(mainInput()).toBeNull();
     expect(posts).toBe(1);
     cards.a = {
       ...cards.a!,
@@ -317,8 +421,9 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       acceptedDecisionRevision: '2',
       answer: original.intent.answer,
     };
-    await click('Plan A');
-    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
+    waitingPlans.delete('a');
+    await refresh();
+    expect(promptValue(mainInput())).toBe(laterDraft);
     expect(posts).toBe(1);
     cards.a = {
       ...cards.a!,
@@ -334,8 +439,28 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       },
     };
     await refresh();
-    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
+    expect(promptValue(mainInput())).toBe(laterDraft);
     expect(posts).toBe(1);
+    await click('Plan B');
+    waitingPlans.add('b');
+    await refresh();
+    expect(promptValue(replyInput())).toBe('');
+    await click('实施此计划');
+    expect(submissions[0]!.intent.answer).toEqual({
+      kind: 'plan_review',
+      decision: 'approve',
+      feedback: '开始实施此计划',
+      asUserMessage: true,
+    });
+    expect(mainInput()).toBeNull();
+    cards.b = { ...cards.b!, revision: '2', inputDigest: 'replacement-input' };
+    await refresh();
+    await click('跳过');
+    expect(submissions[0]!.intent.answer).toEqual({ kind: 'plan_review', decision: 'deny' });
+    waitingPlans.delete('b');
+    await refresh();
+    expect(promptValue(mainInput())).toBe('other B');
+    expect(posts).toBe(3);
   } finally {
     await act(async () => root.unmount());
     restoreLayoutGlobals();

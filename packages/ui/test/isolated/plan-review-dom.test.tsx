@@ -33,23 +33,59 @@ const original = {
   },
 } satisfies Interaction;
 
-test('inline plan review distinguishes a saved answer from a decision accepted by execution', async () => {
+test('inline review renders the original plan as a document and uses the accepted revision for its decision', async () => {
   const { InteractionCard } = await import('../../src');
+  const content = JSON.stringify({
+    kind: 'plan_document',
+    planId: original.request.planId,
+    version: Number(original.request.version),
+    digest: original.request.digest,
+    title: '原计划标题',
+    body: '## 验收\n\n检查**原文**。\n\n| 项目 | 结果 |\n| --- | --- |\n| 文件 | `plan.md` |\n\n![示意](https://example.invalid/remote.png)',
+    steps: [{ id: 'internal-step-id', title: '核对保存结果' }],
+  });
+  const review = { ...original, request: { ...original.request, content } };
   const answered: Interaction = {
-    ...original,
+    ...review,
     state: 'answered',
     answer: { kind: 'plan_review', decision: 'approve', feedback: '原审阅反馈' },
   };
-  const render = (interaction: Interaction) =>
-    renderToStaticMarkup(<InteractionCard interaction={interaction} inlinePlanReview />);
+  const render = (interaction: Interaction, inlinePlanReview = true) =>
+    JSDOM.fragment(
+      renderToStaticMarkup(
+        <InteractionCard interaction={interaction} inlinePlanReview={inlinePlanReview} />,
+      ),
+    );
+  const pending = render(review);
+  const heading = pending.querySelector('.plan-review-document-heading');
+  expect(heading?.querySelector('.plan-review-document-meta')?.textContent).toBe('第 2 版');
+  expect(heading?.querySelector('h4')?.textContent).toBe('原计划标题');
+  const toggle = heading?.querySelector('button');
+  expect(toggle?.textContent).toBe('展开完整计划');
+  expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+  expect(pending.querySelector('.plan-review-excerpt strong')?.textContent).toBe('原文');
+  expect(pending.querySelector('[aria-label="完整计划正文"]')).toBeNull();
+  const body = render(review, false).querySelector('[aria-label="完整计划正文"]')!;
+  expect(body.querySelector('h2')?.textContent).toBe('验收');
+  expect(body.querySelector('strong')?.textContent).toBe('原文');
+  expect(body.querySelector('.markdown-table-scroll table td code')?.textContent).toBe('plan.md');
+  expect(body.querySelector('img')).toBeNull();
+  expect(body.querySelector('ol[aria-label="计划步骤"] li')?.textContent).toBe('核对保存结果');
+  expect(pending.textContent).not.toContain('internal-step-id');
   const saved = render(answered);
-  expect(saved).toContain('计划审阅 · 答复已保存，待确认');
-  expect(saved).toContain('原审阅反馈');
-  expect(saved).not.toContain('计划审阅 · 已批准');
-  expect(render({ ...answered, acceptedDecisionRevision: answered.revision })).toContain(
-    '计划审阅 · 已批准',
-  );
-  expect(render({ ...original, state: 'cancelled' })).toContain('计划审阅 · 已取消');
+  expect(saved.querySelector('[role="status"]')?.textContent).toBe('答复已保存，待确认');
+  expect(saved.querySelector('.plan-review-feedback p')?.textContent).toBe('原审阅反馈');
+  expect(saved.querySelector('form')).toBeNull();
+  expect(
+    render({ ...answered, acceptedDecisionRevision: answered.revision }).querySelector(
+      '.plan-review-document-heading [role="status"]',
+    )?.textContent,
+  ).toBe('已批准');
+  expect(
+    render({ ...review, state: 'cancelled' }).querySelector('[role="status"]')?.textContent,
+  ).toBe('已取消');
+  const mismatched = render({ ...review, request: { ...review.request, version: '3' } }, false);
+  expect(mismatched.querySelector('[aria-label="计划原文"]')?.textContent).toBe(content);
 });
 
 test('actual DOM preserves original feedback without selecting permissions, locks repeated Enter, and preserves failed drafts', async () => {
@@ -119,17 +155,15 @@ test('actual DOM preserves original feedback without selecting permissions, lock
         />,
       ),
     );
-  const feedback = () =>
-    host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
-  const approve = () =>
-    [...host.querySelectorAll('button')].find(
-      (node) => node.textContent === 'Approve this exact plan',
-    )!;
+  const feedback = () => host.querySelector<HTMLTextAreaElement>('.plan-review textarea')!;
+  const submit = () => host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  const approve = () => host.querySelector<HTMLInputElement>('[aria-label="批准此版本"]')!;
   try {
     await render('first');
     expect(host.textContent).toContain('ORIGINAL_FULL_TAIL');
+    expect(feedback().labels?.[0]?.textContent).toBe('审阅意见（选填）');
     expect(host.querySelector('[aria-label="Plan review mode"]')).toBeNull();
-    expect(approve().disabled).toBe(false);
+    expect(submit().disabled).toBe(true);
     await act(async () => {
       host
         .querySelector('form')!
@@ -142,20 +176,24 @@ test('actual DOM preserves original feedback without selecting permissions, lock
       feedback().dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     });
     expect(saved).toEqual({ feedback: text });
+    await act(async () => approve().click());
+    expect(answers).toEqual([]);
+    expect(saved).toEqual({ feedback: text, decision: 'approve' });
     await render('returned');
     expect(feedback().value).toBe(text);
+    expect(approve().checked).toBe(true);
     await act(async () => {
-      approve().click();
-      approve().click();
+      submit().click();
+      submit().click();
     });
     expect(answers).toEqual([{ kind: 'plan_review', decision: 'approve', feedback: text }]);
-    expect(approve().disabled).toBe(true);
+    expect(submit().disabled).toBe(true);
     await act(async () => reject(new Error('original_answer_unknown')));
     expect(feedback().value).toBe(text);
-    expect(saved).toEqual({ feedback: text });
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe('original_answer_unknown');
+    expect(saved).toEqual({ feedback: text, decision: 'approve' });
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe('审阅答复提交失败，请重试。');
     await render('unknown', { phase: 'unknown', commandId: 'original-answer' });
-    expect(approve().disabled).toBe(true);
+    expect(submit().disabled).toBe(true);
     expect(feedback().disabled).toBe(true);
     expect(answers).toHaveLength(1);
   } finally {

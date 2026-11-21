@@ -16,6 +16,7 @@ import {
   desktopToolPresentation,
   nativeShellInputPresentation,
   nativeToolPresentationKey,
+  PLAN_PROGRESS_TOOL,
 } from './native-tool-messages';
 import {
   type NativeRunFact,
@@ -408,6 +409,7 @@ export function desktopTranscript({
     copyScope: 'final',
   });
   const toolsByMessage = new Map<string, NativeToolMessageFact[]>();
+  const progressMessages = new Set<string>();
   for (const fact of tools) indexEntry(toolsByMessage, fact.messageId, fact);
   const executionsById = new Map<string, NativeToolExecution[]>();
   for (const execution of executions) indexEntry(executionsById, execution.id, execution);
@@ -456,6 +458,8 @@ export function desktopTranscript({
                 entry.runId === run.id,
             )
         : undefined;
+    if (message.role === 'tool' && (fact ?? execution)?.definitionId === PLAN_PROGRESS_TOOL)
+      progressMessages.add(message.id);
     const liveInput =
       run && message.role === 'tool' && message.sourceIds?.length === 1
         ? toolsByMessage
@@ -565,8 +569,8 @@ export function desktopTranscript({
       ...(run &&
       run.originStoreId === storeId &&
       message.role === 'user' &&
-      message.inputKind === 'input.steer'
-        ? { inputKind: 'input.steer' as const }
+      (message.inputKind === 'input.steer' || message.inputKind === 'interaction.answer')
+        ? { inputKind: message.inputKind }
         : {}),
       ...(!model.agentResult && !model.agentMessage && replies.has(message.id)
         ? {
@@ -701,8 +705,15 @@ export function desktopTranscript({
       const streaming = !!visibleText && !model.settled && running;
       return [...(thought ? [thought] : []), { ...model, streaming }];
     });
+    const lastCalls = lastAction?.toolCalls;
+    const progressOnly =
+      lastAction?.status === 'complete' &&
+      !!lastCalls?.length &&
+      (!lastAction.outputBody || lastCalls.length === lastAction.outputBody.toolCallCount) &&
+      lastCalls.every((call) => call.name === PLAN_PROGRESS_TOOL);
     const waitingForTool =
       lastAction?.role === 'assistant' &&
+      !progressOnly &&
       (lastAction.firstOutput === 'tool_calls' ||
         !!lastAction.toolCalls?.length ||
         !!lastAction.outputBody?.toolCallCount);
@@ -810,6 +821,7 @@ export function desktopTranscript({
     // matching hot observation above may make that attempt a visible live row.
     messages: modeled.filter(
       (model) =>
+        !progressMessages.has(model.id) &&
         !(model.systemKind === 'turn_failure' && failedConnections.has(model.turnId)) &&
         !(
           model.systemKind === 'compaction' &&

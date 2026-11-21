@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
-import { nodeAssets, retainLegacyDb5Fixture } from './assets-fixture';
+import { nodeAssets, nodeWindowsAccess, retainLegacyDb5Fixture } from './assets-fixture';
 
 const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 export async function nodeAnswerAssets(
@@ -13,7 +13,8 @@ export async function nodeAnswerAssets(
   storeId: string,
   action: 'seed' | 'read' = 'seed',
 ) {
-  if (action === 'seed') await nodeAssets(root, profile, storeId);
+  const windowsAsset = await nodeWindowsAccess(root);
+  if (action === 'seed') await nodeAssets(root, profile, storeId, 'seed', windowsAsset);
   const directory = join(root, 'node-answer-fixture');
   privateDirectory(directory);
   const helper = join(root, 'node-ui-fixture/profile-access-helper.js'),
@@ -33,10 +34,14 @@ const denied=()=>{httpRequests++;throw Error('owned_answer_http_forbidden');};
 globalThis.fetch=async()=>denied();for(const protocol of [http,https])for(const method of ['get','request'])protocol[method]=denied;
 const lease=await acquireDesktopProfileAccess(input.access);let data;
 try {data=openPrivateData(input.profilePath,lease);
-if(input.action==='seed')for(const kind of ['question','approval','plan_review']){
- const interaction={id:'original-'+kind,sessionId:'original-session',executionId:'original-execution',runId:'original-run',revision:'9007199254740993',kind,attempt:1,definitionId:'original-definition',definitionVersion:'1',inputDigest:'original-input-digest',policyRevision:'original-policy'};
- const answer=kind==='question'?{kind,answers:{exact:'é e\\u0301 🙂\\r\\n'.repeat(24000)+'ORIGINAL_ANSWER_TAIL\\r\\n'}}:kind==='approval'?{kind,decision:'approve',optionId:'once'}:{kind,decision:'revise',feedback:'Original 改訂\\r\\n',mode:'original-mode'};
- const request={expectedStoreId:input.storeId,commandId:'answer-'+kind,expectedRevision:interaction.revision,answer};
+if(input.action==='seed')for(const [name,answer] of [
+ ['question',{kind:'question',answers:{exact:'é e\\u0301 🙂\\r\\n'.repeat(24000)+'ORIGINAL_ANSWER_TAIL\\r\\n'}}],
+ ['approval',{kind:'approval',decision:'approve',optionId:'once'}],
+ ['plan_review',{kind:'plan_review',decision:'revise',feedback:'Original 改訂\\r\\n'}],
+ ['plan_reply',{kind:'plan_review',decision:'revise',feedback:'  原计划 🙂\\r\\n补充验收标准  ',asUserMessage:true}],
+]){
+ const interaction={id:'original-'+name,sessionId:'original-session',executionId:'original-execution',runId:'original-run',revision:'9007199254740993',kind:answer.kind,attempt:1,definitionId:'original-definition',definitionVersion:'1',inputDigest:'original-input-digest',policyRevision:'original-policy'};
+ const request={expectedStoreId:input.storeId,commandId:'answer-'+name,expectedRevision:interaction.revision,answer};
  data.beginAnswer({intent:{scope:{storeId:input.storeId,sessionId:'original-session',workspaceId:'original-workspace',contextSelectionId:'original-selection'},subjectId:'original-subject',interaction,observationDigest:callerDigest({original:true,interaction}),request,bodyDigest:callerDigest(request),requestDigest:answerRequestDigest(interaction.id,request)},phase:'submitting'});
  data.finishAnswer(request.commandId,'unknown');
 }
@@ -67,6 +72,7 @@ console.log(JSON.stringify({records:data.answers(),httpRequests}));
         storeId,
         profilePath: selectProfile(profile).profilePath,
         access: {
+          ...(windowsAsset ? { windowsAsset } : {}),
           profile,
           bunExecutable: process.execPath,
           bunSha256: digest(process.execPath),

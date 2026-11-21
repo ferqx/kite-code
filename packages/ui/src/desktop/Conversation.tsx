@@ -618,6 +618,8 @@ export function Conversation({
   renderMessageContent,
   renderMessageAttachments,
   renderTurnOutputs,
+  renderTurnDetails,
+  focusMessage,
   renderToolActivity,
   traceTurns = false,
   pendingTraceToolTurns,
@@ -654,6 +656,16 @@ export function Conversation({
     finalMessageId?: string;
     terminalStatus?: Message['turnTerminalStatus'];
   }) => ReactNode;
+  renderTurnDetails?: (target: {
+    turnId: string;
+    terminalStatus: NonNullable<Message['turnTerminalStatus']>;
+  }) => ReactNode;
+  focusMessage?: {
+    presentationKey: string;
+    /** Return false while the host's original message body is still being read. */
+    reveal: (element: HTMLElement) => boolean;
+    onFocused?: () => void;
+  };
   /** Host-adapted tool facts within the original grouping and reading state. */
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   /** Native conversation: group consecutive reasoning and tools around public prose. */
@@ -1089,9 +1101,11 @@ export function Conversation({
     };
     for (const group of groups) {
       const message = group[0]!;
-      // A durable child result is a readable conversation event, including between
-      // two phases of the same parent Run. Never absorb it into process collapse.
-      if (message.systemKind === 'agent_result') {
+      // Documents and child results stay visible when the elapsed process folds.
+      if (
+        message.systemKind === 'agent_result' ||
+        (traceTurns && message.toolName === 'planning.review')
+      ) {
         flushUnscoped();
         entries.push({ key: message.presentationKey ?? message.id, groups: [group] });
         continue;
@@ -1413,7 +1427,7 @@ export function Conversation({
                       ? '等待处理'
                       : activity?.status === 'waiting' &&
                           !activity.executionUnconfirmed &&
-                          !messages.some((message) => message.role === 'tool' && !message.settled)
+                          !runningTool
                         ? '正在等待'
                         : !reply &&
                             blocks.length === 0 &&
@@ -1554,6 +1568,12 @@ export function Conversation({
           )
         ) : null;
         const content = process ? [process] : renderBlocks();
+        if (lastTurnEntry && terminalStatus && (terminalStatus !== 'completed' || finalGroup))
+          content.push(
+            <Fragment key="turn-details">
+              {renderTurnDetails?.({ turnId: entry.turnId, terminalStatus })}
+            </Fragment>,
+          );
         if (reply) content.push(renderBody([reply], true));
         return (
           <section
@@ -1740,6 +1760,7 @@ export function Conversation({
     renderMessageContent,
     renderMessageAttachments,
     renderTurnOutputs,
+    renderTurnDetails,
     renderToolActivity,
     traceTurns,
     pendingTraceToolTurns,
@@ -1840,6 +1861,56 @@ export function Conversation({
     },
     [preserveReadingAnchor, writeScroll],
   );
+  const focusedMessage = useRef<typeof focusMessage>(undefined);
+  const focusTurn =
+    focusMessage &&
+    messages.find((message) => message.presentationKey === focusMessage.presentationKey)?.turnId;
+  useLayoutEffect(() => {
+    const element = viewport.current;
+    if (
+      !element ||
+      loading ||
+      !selected ||
+      !focusMessage ||
+      focusedMessage.current === focusMessage
+    )
+      return;
+    const findTarget = () =>
+      Array.from(element.querySelectorAll<HTMLElement>('[data-conversation-focus]')).find(
+        (candidate) => candidate.dataset.conversationFocus === focusMessage.presentationKey,
+      );
+    const focus = (target: HTMLElement | undefined) => {
+      if (!target || !focusMessage.reveal(target)) return false;
+      focusedMessage.current = focusMessage;
+      reading.current.follow = false;
+      jumpedMarker.current = undefined;
+      traceDisclosure.current = false;
+      writeScroll(
+        element,
+        element.scrollTop +
+          target.getBoundingClientRect().top -
+          conversationMessageNavigationTop(element),
+      );
+      if (preserveReadingAnchor) reading.current.anchor = captureConversationScrollAnchor(element);
+      setFollowing(false);
+      target.focus({ preventScroll: true });
+      focusMessage.onFocused?.();
+      return true;
+    };
+    const target = findTarget();
+    if (focus(target) || typeof MutationObserver === 'undefined') return;
+    if (!target && focusTurn) onToggle(`turn:${focusTurn}:complete`, true);
+    const observer = new MutationObserver(() => {
+      if (focus(findTarget())) observer.disconnect();
+    });
+    observer.observe(element, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-busy'],
+    });
+    return () => observer.disconnect();
+  }, [focusMessage, focusTurn, loading, selected, onToggle, writeScroll, preserveReadingAnchor]);
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">

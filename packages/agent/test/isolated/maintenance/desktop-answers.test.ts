@@ -1,9 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import {
+  fixturePermissions,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -81,7 +84,7 @@ test('actual private Node DB5 answers preserve original IDs, subject, digest and
     const original = await nodeAnswerAssets(f.root, f.profile, f.storeId),
       before = readFileSync(f.path),
       rows = states(f.path);
-    expect(original.records).toHaveLength(3);
+    expect(original.records).toHaveLength(4);
     expect(original.httpRequests).toBe(0);
     expect(original.records.every((row) => row.phase === 'unknown')).toBe(true);
     const text = (
@@ -90,6 +93,15 @@ test('actual private Node DB5 answers preserve original IDs, subject, digest and
     ).answers.exact;
     expect(Buffer.byteLength(text)).toBeGreaterThan(300000);
     expect(text.endsWith('ORIGINAL_ANSWER_TAIL\r\n')).toBe(true);
+    expect(
+      original.records.find((row) => row.intent.interaction.id === 'original-plan_reply')?.intent
+        .request.answer,
+    ).toEqual({
+      kind: 'plan_review',
+      decision: 'revise',
+      feedback: '  原计划 🙂\r\n补充验收标准  ',
+      asUserMessage: true,
+    });
     const backup = await createProfileBackup(f);
     expect(backup.manifest.version).toBe(7);
     expect(backup.manifest.assets.desktopUi.format).toEqual({
@@ -194,10 +206,14 @@ test('DB5 answer rows fail closed for forged PK, digests, phase, authority, dupl
       { kind: 'approval', decision: 'approve', optionId: 'once', grant: 'approve_once' },
       { kind: 'approval', decision: 'approve', optionId: '../forged' },
       { kind: 'approval', decision: 'deny', optionId: 'once' },
+      { kind: 'plan_review', decision: 'approve', asUserMessage: true },
+      { kind: 'plan_review', decision: 'revise', feedback: ' \r\n', asUserMessage: true },
+      { kind: 'plan_review', decision: 'revise', feedback: '有内容', asUserMessage: false },
+      { kind: 'plan_review', decision: 'deny', feedback: '有内容', asUserMessage: true },
     ]) {
       reset();
       const row = structuredClone(
-        original.find((item) => item.intent.request.commandId === 'answer-approval')!,
+        original.find((item) => item.intent.request.commandId === `answer-${answer.kind}`)!,
       );
       row.intent.request.answer = answer;
       proofs(row);
@@ -258,7 +274,7 @@ test('DB5 answer rows fail closed for forged PK, digests, phase, authority, dupl
       expect(existsSync(f.destinationRoot) ? readdirSync(f.destinationRoot) : []).toEqual([]);
     }
     reset();
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     const before = readFileSync(f.path);
     expect(await code(createProfileBackup(f))).not.toBe('success');
     expect(readFileSync(f.path)).toEqual(before);

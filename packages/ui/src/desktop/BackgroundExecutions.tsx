@@ -46,6 +46,7 @@ export interface BackgroundExecutionsProps {
   readonly stale?: boolean;
   readonly busy?: boolean;
   readonly currentOnly?: boolean;
+  readonly plan?: ReactNode;
   readonly references?: ReactNode;
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
@@ -64,6 +65,7 @@ export function BackgroundExecutions({
   stale,
   busy = false,
   currentOnly,
+  plan,
   references,
   stoppingExecutionId,
   onStop,
@@ -103,6 +105,7 @@ export function BackgroundExecutions({
           busy={busy}
           subagentDetails={subagentDetails}
         />
+        {plan}
         {references}
         {subagentDetails?.error && (
           <p role="alert" className="background-execution-error">

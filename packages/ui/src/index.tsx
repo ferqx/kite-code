@@ -237,11 +237,11 @@ export {
   type PermissionSubmissionNotice,
   PermissionSubmissionStatus,
 } from './permissions';
+export { type PlanReviewDraft, PlanReviewPanel } from './plan-review';
 export {
   describePlanReview,
-  type PlanReviewDraft,
-  PlanReviewPanel,
+  planReviewFeedbackLimit,
   serializePlanReviewAnswer,
-} from './plan-review';
+} from './plan-review-answer';
 export { type QuestionAnswerDraft, questionDraftKey } from './questionnaire';
 export { completeRunReplies } from './run-reply-copy';

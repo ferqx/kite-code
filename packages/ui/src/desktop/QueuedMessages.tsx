@@ -21,6 +21,7 @@ export interface QueuedPrompt {
 export interface QueuedMessagesProps {
   items: readonly QueuedPrompt[];
   disabled?: boolean;
+  disclosure?: { open: boolean; onOpenChange: (open: boolean) => void };
   pendingId?: string;
   onEdit: (id: string) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
@@ -46,7 +47,11 @@ export function QueuedMessages(props: QueuedMessagesProps) {
   };
   if (!props.items.length) return null;
   return (
-    <Collapsible className="composer-queue" open={open} onOpenChange={setOpen}>
+    <Collapsible
+      className="composer-queue"
+      open={props.disclosure?.open ?? open}
+      onOpenChange={props.disclosure?.onOpenChange ?? setOpen}
+    >
       <CollapsibleTrigger asChild>
         <Button type="button" variant="ghost" className="composer-queue-heading">
           <span>已排队 {props.items.length} 条</span>

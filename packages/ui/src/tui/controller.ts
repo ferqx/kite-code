@@ -22,7 +22,7 @@ import {
   type SteerCommandRequest,
 } from '@kite-ai/client';
 import { canonicalFileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
-import { describePlanReview } from '../plan-review';
+import { describePlanReview } from '../plan-review-answer';
 import {
   callerKey,
   type TuiCallerIntent,

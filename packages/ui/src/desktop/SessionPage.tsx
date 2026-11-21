@@ -237,6 +237,8 @@ export interface SessionPageProps {
   renderMessage?: (message: Message) => ReactNode;
   renderMessageContent?: (message: Message) => ReactNode;
   renderTurnOutputs?: React.ComponentProps<typeof Conversation>['renderTurnOutputs'];
+  renderTurnDetails?: React.ComponentProps<typeof Conversation>['renderTurnDetails'];
+  focusMessage?: React.ComponentProps<typeof Conversation>['focusMessage'];
   renderMessageAttachments?: (message: Message) => ReactNode;
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   traceTurns?: boolean;
@@ -272,6 +274,7 @@ export interface SessionPageProps {
 
   beforeConversation?: ReactNode;
   environmentInformation?: ReactNode;
+  onEnvironmentVisibilityChange?: (visible: boolean) => void;
   detailPanel?: { label: string; content: ReactNode; onClose: () => void };
   /** A host-owned workspace tab uses the existing tab strip and bounded tab model. */
   workspaceTab?: {
@@ -430,6 +433,20 @@ function SessionPageContent({
         ? 'overlay'
         : 'closed';
   const environmentVisible = environmentMode !== 'closed';
+  const lastMessageFocus = useRef(props.focusMessage);
+  useLayoutEffect(() => {
+    if (
+      props.focusMessage &&
+      props.focusMessage !== lastMessageFocus.current &&
+      environmentMode === 'overlay'
+    )
+      setEnvironmentPreference('closed');
+    lastMessageFocus.current = props.focusMessage;
+  }, [props.focusMessage, environmentMode]);
+  const onEnvironmentVisibilityChange = props.onEnvironmentVisibilityChange;
+  useLayoutEffect(() => {
+    onEnvironmentVisibilityChange?.(environmentVisible);
+  }, [environmentVisible, onEnvironmentVisibilityChange]);
   const animateEnvironment = environmentAnimationKey === props.readingKey;
   const previousEnvironmentFits = useRef(environmentFits);
   const previousEnvironmentMode = useRef(environmentMode);
@@ -1395,6 +1412,8 @@ function SessionPageContent({
       renderMessage={props.renderMessage}
       renderMessageContent={props.renderMessageContent}
       renderTurnOutputs={props.renderTurnOutputs}
+      renderTurnDetails={props.renderTurnDetails}
+      focusMessage={props.focusMessage}
       renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}
       traceTurns={props.traceTurns}
@@ -1734,7 +1753,8 @@ function SessionPageContent({
                                   hideContextWhenUnavailable={!!props.newConversation}
                                   scopeKey={props.composer.scopeKey ?? props.readingKey}
                                   promptHidden={
-                                    !!props.interaction && props.interactionHidesPrompt !== false
+                                    props.composer.promptHidden ||
+                                    (!!props.interaction && props.interactionHidesPrompt !== false)
                                   }
                                   inputRef={composerInput}
                                   context={

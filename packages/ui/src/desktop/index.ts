@@ -124,6 +124,11 @@ export {
 } from './markdown-parse-cache';
 export type { OutputFileSummary, OutputFilesProps } from './OutputFiles';
 export { OutputFiles, OutputReferences } from './OutputFiles';
+export {
+  PlanExecutionHistory,
+  type PlanExecutionOutcome,
+  PlanExecutionProgress,
+} from './PlanExecutionProgress';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
 export { PromptMarkdown } from './PromptMarkdown';
 export { QueuedMessages, type QueuedMessagesProps, type QueuedPrompt } from './QueuedMessages';

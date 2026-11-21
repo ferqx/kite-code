@@ -1172,6 +1172,9 @@ body {
     padding: 0 var(--conversation-inline-padding) 24px;
     flex-shrink: 0;
   }
+  .conversation-footer:has(> .bottom-controls:empty) {
+    display: none;
+  }
   .composer {
     container: conversation-composer / inline-size;
     display: flex;
@@ -1189,7 +1192,9 @@ body {
   .composer button {
     --button-radius: 9999px;
   }
-  .composer:focus-within:where(:root:not([data-input-modality="pointer"]) *) {
+  :is(.composer, .plan-review-composer):focus-within:where(
+      :root:not([data-input-modality="pointer"]) *
+    ) {
     border-color: var(--composer-focus-border-color);
     box-shadow:
       0 1px 2px var(--composer-shadow-color),
@@ -1681,7 +1686,7 @@ body {
   .ask-questionnaire-actions button[hidden] {
     display: none;
   }
-  .question-interaction {
+  .answer-interaction {
     width: 100%;
     max-width: 760px;
     margin-inline: auto;
@@ -2888,6 +2893,270 @@ body {
   line-height: var(--conversation-line-height);
   overflow-wrap: anywhere;
 }
+.kite-client .plan-review {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.kite-client .plan-review.answer-interaction {
+  padding: 8px 12px;
+  gap: 8px;
+}
+.kite-client .plan-review-composer {
+  min-width: 0;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--composer-border-color);
+  border-radius: var(--input-radius);
+  background: var(--composer-background);
+  box-shadow: 0 1px 2px var(--composer-shadow-color);
+}
+.kite-client .interaction-area > * + .plan-review-composer {
+  margin-block-start: 6px;
+}
+.kite-client .plan-review-composer > form {
+  display: grid;
+  gap: 8px;
+}
+.kite-client .plan-review-composer-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+}
+.kite-client .plan-review-composer-heading h3 {
+  margin: 0;
+  font-size: var(--ui-text-size);
+  font-weight: var(--font-weight-semibold);
+}
+.kite-client .plan-review-composer-decisions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-inline-size: 0;
+  margin: 0;
+  margin-inline-start: auto;
+  padding: 0;
+  border: 0;
+}
+.kite-client .plan-review-composer button {
+  transition-property: box-shadow;
+}
+.kite-client .plan-review-composer button[data-variant="secondary"] {
+  background: var(--control-selected);
+  color: var(--foreground);
+}
+.kite-client .plan-review-composer button[data-variant="secondary"]:hover:not(:disabled) {
+  background: var(--control-pressed);
+}
+.kite-client .plan-review-composer button[data-variant="ghost"] {
+  color: var(--muted-foreground);
+}
+.kite-client .plan-review-composer button[data-variant="ghost"]:hover:not(:disabled) {
+  background: var(--control-hover);
+  color: var(--foreground);
+}
+.kite-client .plan-review-composer button:disabled {
+  opacity: 0.5;
+}
+.kite-client .plan-review-composer .composer-action:disabled {
+  background: var(--control-hover);
+  color: var(--muted-foreground);
+}
+.kite-client .plan-review-composer p {
+  margin: 0;
+  font-size: 12px;
+}
+.kite-client .plan-review-composer-note {
+  color: var(--muted-foreground);
+}
+.kite-client .plan-review-locate {
+  justify-self: start;
+  margin-inline-start: -8px;
+  color: var(--info-foreground);
+}
+.kite-client .plan-review-composer-reply {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding-block-start: 8px;
+  border-block-start: 1px solid var(--border);
+}
+.kite-client .plan-review :where(h3, h4, h5, p, pre) {
+  margin-block: 0;
+}
+.kite-client .plan-review-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .plan-review-header h3 {
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+.kite-client .plan-review-status {
+  margin-inline-start: auto;
+}
+.kite-client .plan-review-document {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+.kite-client .plan-review-title {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.kite-client .plan-review-document-card {
+  gap: 8px;
+  padding: 10px 12px;
+}
+.kite-client .message.user[data-input-kind="interaction.answer"] {
+  margin-block-start: var(--conversation-block-gap);
+}
+.kite-client .plan-review-document-card .plan-review-document {
+  gap: 6px;
+}
+.kite-client .plan-review-document-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.kite-client .plan-review-document-heading > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-block-start: 4px;
+  color: var(--muted-foreground);
+}
+.kite-client .plan-review-document-heading .plan-review-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+}
+.kite-client .plan-review-document-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px 6px;
+  min-height: 24px;
+  max-width: 60%;
+}
+.kite-client .plan-review-document-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-align: end;
+}
+.kite-client .plan-review-document-toggle {
+  --button-radius: 9999px;
+  color: var(--muted-foreground);
+}
+.kite-client .plan-review-document-toggle:hover {
+  color: var(--foreground);
+}
+.kite-client .plan-review-document-toggle[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.kite-client .plan-review-excerpt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.kite-client .plan-review-excerpt:focus-within {
+  -webkit-line-clamp: unset;
+}
+.kite-client .plan-review-excerpt .typeset {
+  margin: 0;
+}
+.kite-client
+  .plan-review-document-card
+  :is(
+    .plan-review-excerpt,
+    .plan-review-expanded,
+    .plan-review-attachment,
+    .plan-review-feedback,
+    .plan-review-original
+  ) {
+  margin-inline-start: 22px;
+}
+.kite-client .plan-review-expanded {
+  border-block-start: 1px solid var(--border);
+  padding-block-start: 8px;
+}
+.kite-client .plan-review-reading {
+  height: auto;
+  max-height: min(360px, 32dvh);
+  padding-inline-end: 10px;
+}
+.kite-client .plan-review-reading:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.kite-client .plan-review-reading > div {
+  width: 100%;
+  table-layout: fixed;
+}
+.kite-client .plan-review-steps {
+  margin-block-start: 12px;
+}
+.kite-client .plan-review-steps h5,
+.kite-client .plan-review-feedback h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-block-end: 4px;
+}
+.kite-client .plan-review-feedback p,
+.kite-client .plan-review-source,
+.kite-client .plan-review-original pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kite-client .plan-review-form .questionnaire-choices {
+  margin-block-end: 8px;
+}
+.kite-client .plan-review-attachment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.kite-client .plan-review :is(textarea, button):disabled {
+  opacity: 0.55;
+}
+.kite-client .plan-review [role="alert"] {
+  color: var(--error-foreground);
+}
+.kite-client .plan-review-attachment [role="alert"] {
+  flex-basis: 100%;
+}
+.kite-client .plan-review-original {
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .plan-review-original > summary {
+  cursor: pointer;
+}
 .kite-client .prompt-markdown {
   --prompt-collapsed-height: max(
     120px,
@@ -3401,7 +3670,7 @@ body {
 }
 
 .kite-client
-  .conversation-footer:has(> .bottom-controls > .composer):has([data-question-interaction]) {
+  .conversation-footer:has(> .bottom-controls > .composer):has([data-answer-interaction]) {
   display: flex;
   flex-direction: column;
   max-height: min(100%, max(360px, 72%));
@@ -3423,7 +3692,11 @@ body {
     max-height: min(18vh, 156px);
   }
 }
-
+.kite-client .conversation-footer:has(.plan-review-composer) {
+  max-height: min(100%, max(300px, 65%));
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
 .kite-client .session-body {
   display: flex;
   flex: 1;
@@ -5597,6 +5870,130 @@ body {
 .kite-client .environment-information .background-execution-stop:hover:not(:disabled) {
   color: var(--destructive);
 }
+.kite-client .native-plan-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+.kite-client .native-plan-row > button,
+.kite-client .native-plan-history .native-plan-history-title {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  min-height: var(--environment-row-height, 30px);
+  height: auto;
+  gap: 6px;
+  justify-content: flex-start;
+  padding: 2px 4px;
+  text-align: left;
+  font: inherit;
+}
+.kite-client .native-plan-locate > span,
+.kite-client .native-plan-history-title > span:first-child,
+.kite-client .native-plan-progress-current {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .native-plan-row > .native-plan-locate {
+  flex: 1 1 auto;
+  width: auto;
+}
+.kite-client .native-plan-row > .native-plan-progress-toggle {
+  flex: none;
+  width: auto;
+  max-width: 58%;
+  justify-content: flex-end;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .native-plan-progress-count {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.kite-client .native-plan-environment button svg,
+.kite-client .native-plan-history button svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.kite-client .native-plan-progress-toggle[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.kite-client .native-plan-steps {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0 4px;
+  list-style: none;
+}
+.kite-client .native-plan-environment .native-plan-steps {
+  max-height: 200px;
+  overflow: auto;
+}
+.kite-client .native-plan-steps > li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+  padding-block: 2px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.kite-client .native-plan-step-title {
+  overflow-wrap: anywhere;
+}
+.kite-client :is(.native-plan-step-icon, .native-plan-step-status) {
+  color: var(--muted-foreground);
+}
+.kite-client .native-plan-step-icon {
+  display: grid;
+  height: 18px;
+  place-items: center;
+}
+.kite-client .native-plan-step-icon::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.kite-client .native-plan-step-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.kite-client .native-plan-steps > [data-status="completed"] .native-plan-step-icon {
+  color: var(--success-foreground);
+}
+.kite-client .native-plan-steps > [data-status="completed"] .native-plan-step-icon::before {
+  content: none;
+}
+.kite-client .native-plan-steps > [data-status="running"] .native-plan-step-icon {
+  color: var(--info-foreground);
+}
+.kite-client .native-plan-steps > [data-status="running"] .native-plan-step-icon::before {
+  background: currentColor;
+}
+.kite-client .native-plan-steps > [data-status="failed"] .native-plan-step-status {
+  color: var(--destructive);
+}
+.kite-client .native-plan-history {
+  min-width: 0;
+  margin-block: 2px 8px;
+}
+.kite-client .native-plan-history > button {
+  color: var(--muted-foreground);
+}
+.kite-client .native-plan-history-version {
+  margin: 4px 0 0;
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid var(--border);
+}
 @media (pointer: coarse) {
   .background-executions.environment-information {
     --environment-row-height: 44px;
@@ -5988,6 +6385,18 @@ body {
 }
 .kite-client .prompt-editor::placeholder {
   color: var(--muted-foreground);
+}
+.kite-client .plan-review-composer-reply .prompt-editor-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+.kite-client .plan-review-composer-reply .prompt-editor {
+  min-height: 32px;
+  max-height: min(20vh, 120px);
+  margin: 0;
+  padding: 4px 0;
 }
 
 .kite-client .composer-attach {

@@ -1,5 +1,6 @@
 import type { Interaction, Json } from '@kite-ai/client';
 import { type FormEvent, useId, useRef, useState } from 'react';
+import { AnswerChoices, useAnswerSubmission } from './answer-form';
 import { Button } from './desktop/components/ui/button';
 import { Textarea } from './desktop/components/ui/textarea';
 import type { ActionInputDraft } from './index';
@@ -65,16 +66,6 @@ function ChoiceInformation({ title, description }: { title: string; description:
   );
 }
 
-function ChoiceTitle({ title }: { title: string }) {
-  const recommended = title.endsWith(' (Recommended)');
-  return (
-    <span className="questionnaire-choice-title">
-      <span>{recommended ? title.slice(0, -14) : title}</span>
-      {recommended && <span className="questionnaire-recommended">推荐</span>}
-    </span>
-  );
-}
-
 export function Questionnaire({
   form,
   initialDraft,
@@ -98,9 +89,9 @@ export function Questionnaire({
         },
   );
   const current = useRef(draft);
-  const busy = useRef(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string>();
+  const { busy, submitting, error, send } = useAnswerSubmission(disabled, onSubmit, (cause) =>
+    cause instanceof Error ? cause.message : '回答提交失败',
+  );
   const formId = useId();
   const focusQuestion = useRef(false);
   const focusFreeAnswer = useRef(false);
@@ -148,20 +139,6 @@ export function Questionnaire({
     if (disabled || busy.current || current.current.step !== form.fields.length - 1) return;
     const answer = questionValues(form, fieldsForAnswer(current.current));
     if (answer) await send(answer.value as Json);
-  }
-  async function send(answer: Json) {
-    if (disabled || busy.current) return;
-    busy.current = true;
-    setSubmitting(true);
-    setError(undefined);
-    try {
-      await onSubmit(answer);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '回答提交失败');
-    } finally {
-      busy.current = false;
-      setSubmitting(false);
-    }
   }
   const cancel = form.alternative?.title === 'Cancel answering';
   return (
@@ -223,37 +200,14 @@ export function Questionnaire({
           )}
           {form.description && <p className="questionnaire-description">{form.description}</p>}
           {field.description && <p className="questionnaire-description">{field.description}</p>}
-          <div className="questionnaire-choices">
-            {field.choices.map((choice, index) => {
-              const descriptionId = `${formId}-choice-${index}`;
-              return (
-                <label
-                  className="questionnaire-choice"
-                  data-selected={input.selected === index}
-                  key={index}
-                >
-                  <input
-                    type="radio"
-                    name={`${formId}-${draft.step}`}
-                    value={index}
-                    aria-label={choice.title}
-                    aria-describedby={choice.description ? descriptionId : undefined}
-                    checked={input.selected === index}
-                    onChange={() =>
-                      edit({ ...current.current.fields[current.current.step]!, selected: index })
-                    }
-                  />
-                  <span className="questionnaire-choice-copy">
-                    <ChoiceTitle title={choice.title} />
-                    {choice.description && (
-                      <span className="questionnaire-choice-description" id={descriptionId}>
-                        {choice.description}
-                      </span>
-                    )}
-                  </span>
-                </label>
-              );
-            })}
+          <AnswerChoices
+            name={`${formId}-${draft.step}`}
+            choices={field.choices}
+            selected={input.selected}
+            onSelect={(selected) =>
+              edit({ ...current.current.fields[current.current.step]!, selected })
+            }
+          >
             {field.text && (
               <div>
                 {field.choices.length > 0 && (
@@ -320,7 +274,7 @@ export function Questionnaire({
                 )}
               </div>
             )}
-          </div>
+          </AnswerChoices>
         </div>
       </fieldset>
       <footer className="questionnaire-actions">

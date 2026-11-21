@@ -135,12 +135,23 @@ export function validateAnswerRecord(raw: unknown): NativeAnswerRecord {
       throw Error('answer_storage_unavailable');
   } else if (answer.kind === 'question') closed(answer, ['kind', 'answers']);
   else {
-    closed(answer, ['kind', 'decision', ...('feedback' in answer ? ['feedback'] : [])]);
+    closed(answer, [
+      'kind',
+      'decision',
+      ...('feedback' in answer ? ['feedback'] : []),
+      ...('asUserMessage' in answer ? ['asUserMessage'] : []),
+    ]);
     if (
       !['approve', 'deny', 'revise'].includes(
         String((answer as Record<string, unknown>).decision),
       ) ||
-      ('feedback' in answer && typeof answer.feedback !== 'string')
+      ('feedback' in answer && typeof answer.feedback !== 'string') ||
+      ('asUserMessage' in answer &&
+        (answer.asUserMessage !== true ||
+          !('feedback' in answer) ||
+          typeof answer.feedback !== 'string' ||
+          !answer.feedback.trim() ||
+          (answer as Record<string, unknown>).decision === 'deny'))
     )
       throw Error('answer_storage_unavailable');
   }

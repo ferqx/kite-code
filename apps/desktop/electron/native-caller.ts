@@ -35,6 +35,7 @@ import type {
   NativeState,
 } from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
+import { nativePlanProgress } from '../src/native-plan-progress-bridge';
 import type { OutputDraftFile } from '../src/output-files-bridge';
 import { nativeShellExitCode } from '../src/tool-messages-bridge';
 import { NativeAnswerJournal } from './answer-journal';
@@ -2433,6 +2434,34 @@ export class NativeCaller {
       case 'extensions.open':
         result = await this.extensions.open(request);
         break;
+      case 'planning.progress': {
+        const scope = this.messagePreviewScope(generation, request);
+        const subjectId = this.client.serverInfo?.subjectId;
+        const views = await this.client
+          .queryExtension(scope.sessionId, 'builtin.planning', 'planning.progress.display', {
+            runId: request.runId,
+            history: request.history,
+          })
+          .catch((error: unknown) => {
+            if (
+              error instanceof ClientError &&
+              ['permission_denied', 'session_not_found'].includes(error.code)
+            )
+              return undefined;
+            throw error;
+          });
+        const current = this.messagePreviewScope(generation, request);
+        if (
+          current.storeId !== scope.storeId ||
+          current.sessionId !== scope.sessionId ||
+          this.client.serverInfo?.subjectId !== subjectId
+        )
+          throw new ClientError('native_selection_changed');
+        result = views
+          ? nativePlanProgress(views, { ...scope, runId: request.runId, history: request.history })
+          : { kind: 'planning.progress', ...scope, runId: request.runId, plans: [] };
+        break;
+      }
       case 'extensions.query':
         result = await this.extensions.query(request);
         break;

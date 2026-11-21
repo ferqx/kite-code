@@ -852,11 +852,19 @@ export class DesktopController {
     if (frozen.kind === 'plan_review') {
       if (
         answer.kind !== 'plan_review' ||
-        Object.keys(answer).some((key) => !['kind', 'decision', 'feedback'].includes(key))
+        Object.keys(answer).some(
+          (key) => !['kind', 'decision', 'feedback', 'asUserMessage'].includes(key),
+        ) ||
+        (Object.hasOwn(answer, 'asUserMessage') && answer.asUserMessage !== true)
       )
         return Promise.reject(new ClientError('interaction_answer_invalid'));
       try {
-        answer = serializePlanReviewAnswer(frozen.request, answer.decision, answer.feedback);
+        answer = serializePlanReviewAnswer(
+          frozen.request,
+          answer.decision,
+          answer.feedback,
+          answer.asUserMessage,
+        );
       } catch {
         return Promise.reject(new ClientError('interaction_answer_invalid'));
       }

@@ -19997,6 +19997,10 @@
                       "feedback": {
                         "type": "string",
                         "maxLength": 8192
+                      },
+                      "asUserMessage": {
+                        "type": "boolean",
+                        "const": true
                       }
                     },
                     "required": ["kind", "decision"],
@@ -20311,6 +20315,10 @@
                             "feedback": {
                               "type": "string",
                               "maxLength": 8192
+                            },
+                            "asUserMessage": {
+                              "type": "boolean",
+                              "const": true
                             }
                           },
                           "required": ["kind", "decision"],
@@ -20511,6 +20519,10 @@
                   "feedback": {
                     "type": "string",
                     "maxLength": 8192
+                  },
+                  "asUserMessage": {
+                    "type": "boolean",
+                    "const": true
                   }
                 },
                 "required": ["kind", "decision"],
@@ -24149,7 +24161,7 @@
           },
           "inputKind": {
             "type": "string",
-            "enum": ["input.steer", "input.follow_up", "result.include"]
+            "enum": ["input.steer", "input.follow_up", "result.include", "interaction.answer"]
           }
         },
         "required": ["id", "sessionId", "runId", "seq", "status", "role", "content"],
@@ -29034,7 +29046,7 @@
                 },
                 "inputKind": {
                   "type": "string",
-                  "enum": ["input.steer", "input.follow_up", "result.include"]
+                  "enum": ["input.steer", "input.follow_up", "result.include", "interaction.answer"]
                 }
               },
               "required": ["id", "sessionId", "runId", "seq", "status", "role", "content"],
@@ -31563,7 +31575,7 @@
             },
             "inputKind": {
               "type": "string",
-              "enum": ["input.steer", "input.follow_up", "result.include"]
+              "enum": ["input.steer", "input.follow_up", "result.include", "interaction.answer"]
             }
           },
           "required": ["id", "sessionId", "runId", "seq", "status", "role", "content"],
@@ -32377,7 +32389,7 @@
                 },
                 "inputKind": {
                   "type": "string",
-                  "enum": ["input.steer", "input.follow_up", "result.include"]
+                  "enum": ["input.steer", "input.follow_up", "result.include", "interaction.answer"]
                 }
               },
               "required": ["id", "sessionId", "runId", "seq", "status", "role", "content"],
@@ -33515,7 +33527,7 @@
                 },
                 "inputKind": {
                   "type": "string",
-                  "enum": ["input.steer", "input.follow_up", "result.include"]
+                  "enum": ["input.steer", "input.follow_up", "result.include", "interaction.answer"]
                 }
               },
               "required": ["id", "sessionId", "runId", "seq", "status", "role", "content"],

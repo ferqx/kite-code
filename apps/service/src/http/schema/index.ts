@@ -153,6 +153,7 @@ const planReviewAnswer = z.strictObject({
   kind: z.literal('plan_review'),
   decision: z.enum(['approve', 'deny', 'revise']),
   feedback: z.string().max(8192).optional(),
+  asUserMessage: z.literal(true).optional(),
 });
 const interactionAnswer = z.discriminatedUnion('kind', [
   approvalAnswer,
@@ -1339,7 +1340,9 @@ export const schemas = {
     sourceIds: z.array(z.string()).optional(),
     originCommandId: id.optional(),
     contextSelectionId: id.optional(),
-    inputKind: z.enum(['input.steer', 'input.follow_up', 'result.include']).optional(),
+    inputKind: z
+      .enum(['input.steer', 'input.follow_up', 'result.include', 'interaction.answer'])
+      .optional(),
   }),
   Change: z.object({
     cursor: sequence,

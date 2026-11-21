@@ -22,7 +22,6 @@ type Options = {
   diagnostics: boolean;
   metadataPending?: ReadonlySet<string>;
   renderSearch?: (model: DesktopMessage, executionId: string, live: boolean) => ReactNode;
-  renderPlanReview?: (model: DesktopMessage) => (() => ReactNode) | undefined;
   renderOriginal: (message: DesktopMessage, open: boolean) => ReactNode;
   hasDeferredText?: (message: DesktopMessage) => boolean;
   agentProps?: (
@@ -271,8 +270,6 @@ export function renderNativeToolGroup(
         unverified={unverified.size > 0}
         messages={models}
         receiptDetails={(model) => {
-          if (model.toolName === 'planning.review' && model.status === 'completed')
-            return options.renderPlanReview?.(model);
           if (!options.renderSearch) return;
           const fact = displayTools.find((e) => e.messageId === model.id),
             live = options.liveTools.find((e) => e.message.id === model.id)?.execution,

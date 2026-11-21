@@ -181,14 +181,17 @@ test('original readonly cards keep saved generic answers, cancellation and exact
     );
     expect(container.textContent).toContain('原问题回答 雪🙂');
     expect(container.textContent).toContain('问题 · 已取消');
-    expect(container.textContent).toContain('本次执行已接收该回答');
-    expect(
-      JSON.parse(
-        container.querySelector('[data-interaction-id="c"] pre[data-saved-answer]')!.textContent!,
-      ).feedback,
-    ).toBe('  原反馈\r\n雪🙂  ');
+    const review = container.querySelector('[data-interaction-id="c"]')!;
+    expect(review.querySelector('[role="status"]')?.textContent).toBe('已批准');
+    expect(review.querySelector('.plan-review-feedback p')?.textContent).toBe('  原反馈\r\n雪🙂  ');
+    expect(review.querySelector('[data-saved-answer]')).toBeNull();
+    expect(review.querySelector<HTMLButtonElement>('.plan-review-document-toggle')?.disabled).toBe(
+      false,
+    );
     const answerButtons = [
-      ...container.querySelectorAll<HTMLButtonElement>('[data-interaction-id] button'),
+      ...container.querySelectorAll<HTMLButtonElement>(
+        '[data-interaction-id] button:not(.plan-review-document-toggle)',
+      ),
     ].filter((button) => button.textContent !== 'Load complete attachment');
     expect(answerButtons.length).toBeGreaterThan(0);
     expect(answerButtons.every((button) => button.disabled)).toBe(true);

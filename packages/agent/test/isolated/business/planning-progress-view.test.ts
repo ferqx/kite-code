@@ -63,15 +63,25 @@ async function fixture() {
     completePlan: false,
   });
   let acceptedRevision: string | null = '5';
+  let active = true;
   const context = {
     sessionId: 'session',
-    records: { get: async (key: string) => rows.get(key) ?? null },
+    records: {
+      get: async (key: string) => rows.get(key) ?? null,
+      list: async ({ afterKey = '', limit = 200 } = {}) =>
+        [...rows.keys()]
+          .sort()
+          .filter((key) => key > afterKey)
+          .slice(0, limit)
+          .map((key) => rows.get(key)!),
+    },
     getRun: async (id: string) =>
       id === 'run'
         ? {
             id,
             sessionId: 'session',
             originStoreId: 'store',
+            isActive: active,
             requirements: [
               {
                 extensionId: 'builtin.planning',
@@ -106,12 +116,19 @@ async function fixture() {
     }),
   } as unknown as ReadContext;
   const query = business.extension.queries!.find((item) => item.id === 'planning.progress.view')!;
+  const display = business.extension.queries!.find(
+    (item) => item.id === 'planning.progress.display',
+  )!;
   return {
     business,
     query,
+    display,
     context,
     rows,
     put,
+    finish() {
+      active = false;
+    },
     rejectProof() {
       acceptedRevision = null;
     },
@@ -162,6 +179,80 @@ test('plan approval observations preserve exact Run requirements without Agent p
   expect(disabled.content).toContain('"status":"disabled"');
   expect(disabled.content).not.toContain('Do not ask again');
   expect(disabled.content).not.toContain('phase:');
+});
+test('desktop projection returns only compact, approved steps and changes with the current version', async () => {
+  const f = await fixture();
+  const read = async (history = false) =>
+    (await f.display.execute({ runId: 'run', history }, f.context))[0]!.payload;
+  const original = f.rows.get('plan/p/1')!.value as Record<string, Json>;
+  expect(await read()).toEqual({
+    runId: 'run',
+    originStoreId: 'store',
+    plans: [
+      {
+        title: 'Exact plan',
+        reviewExecutionId: 'review',
+        planId: 'p',
+        version: 1,
+        digest: original.digest!,
+        steps: [{ id: 'one', title: 'Original step', status: 'failed' }],
+      },
+    ],
+  });
+  expect(await read(true)).toMatchObject({ plans: [] });
+  f.put('plan.current', {
+    kind: 'plan_current',
+    key: 'plan/p/2',
+    planId: 'p',
+    version: 2,
+    digest: 'draft',
+  });
+  expect(await read()).toMatchObject({ plans: [] });
+  await expect(f.display.execute({ runId: 'another-session' }, f.context)).rejects.toThrow(
+    'planning_run_mismatch',
+  );
+  f.finish();
+  expect(await read(true)).toMatchObject({ plans: [{ reviewExecutionId: 'review', version: 1 }] });
+  f.rejectProof();
+  expect(await read(true)).toMatchObject({ plans: [] });
+});
+
+test('desktop cold history keeps the last committed original progress when a later Run reused its version', async () => {
+  const f = await fixture();
+  f.finish();
+  const progress = f.rows.get('progress/p/1')!.value as Record<string, Json>;
+  f.put('progress/p/1', { ...progress, runId: 'successor', steps: { one: { status: 'running' } } });
+  const completed = { ...progress, steps: { one: { status: 'completed' } }, completePlan: true };
+  const attempted = { ...progress, steps: { one: { status: 'blocked' } } };
+  const attempts = {
+    'a-latest': { value: completed, revision: '10', status: 'succeeded' },
+    'z-earlier': { value: progress, revision: '9', status: 'succeeded' },
+    'z-conflict': { value: attempted, revision: '11', status: 'failed' },
+    'z-foreign': { value: attempted, revision: '12', status: 'succeeded' },
+  } as const;
+  for (const [id, attempt] of Object.entries(attempts))
+    f.put(`progress/p/1/attempt/${id}`, attempt.value);
+  const getExecution = f.context.getExecution;
+  f.context.getExecution = async (id) => {
+    const attempt = attempts[id as keyof typeof attempts];
+    if (!attempt) return getExecution(id);
+    return {
+      id,
+      runId: id === 'z-foreign' ? 'successor' : 'run',
+      sessionId: 'session',
+      originStoreId: 'store',
+      kind: 'tool',
+      definitionId: 'planning.update',
+      definitionVersion: '1',
+      status: attempt.status,
+      resultRevision: '2',
+      result: { details: { ...attempt.value, revision: attempt.revision } },
+    };
+  };
+  const [view] = await f.display.execute({ runId: 'run', history: true }, f.context);
+  expect(view?.payload).toMatchObject({
+    plans: [{ reviewExecutionId: 'review', version: 1, steps: [{ status: 'completed' }] }],
+  });
 });
 test('approved continuation guidance does not survive a changed plan digest or a successor Run', async () => {
   for (const change of ['digest', 'run'] as const) {

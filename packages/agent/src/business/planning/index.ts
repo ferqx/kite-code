@@ -960,7 +960,7 @@ export function createPlanningValidation(
           previous = decode(old);
         if ((old?.revision ?? null) !== value.expectedProgressRevision)
           throw new Error('plan_progress_conflict');
-        const steps = { ...(previous ? object(previous.steps) : {}) },
+        const steps = { ...(previous?.runId === runId ? object(previous.steps) : {}) },
           stepId = string(value.stepId);
         const prior = steps[stepId] ? object(steps[stepId]) : null;
         if (
@@ -1689,59 +1689,23 @@ export function createPlanningValidation(
             !run.originStoreId
           )
             throw new Error('planning_run_mismatch');
-          const state = await readPlanningState(context, {
+          const { approvalStatus, current, plan, progress } = await currentProgress(context, {
             runId,
             originStoreId: run.originStoreId,
           });
-          let current: Json = null,
-            plan: Json = null,
-            progress: Json = null;
-          if (state.status === 'approved') {
-            const pointer = decode(await context.records.get('plan.current'));
-            if (
-              !pointer ||
-              ['planId', 'version', 'digest'].some(
-                (key) => pointer[key] !== state[key as 'planId' | 'version' | 'digest'],
-              )
-            )
-              throw new Error('plan_identity_mismatch');
-            const document = decode(await context.records.get(string(pointer.key)));
-            if (
-              !document ||
-              ['planId', 'version', 'digest'].some((key) => document[key] !== pointer[key])
-            )
-              throw new Error('plan_identity_mismatch');
-            const actual = decode(
-              await context.records.get(
-                `progress/${encodeURIComponent(state.planId)}/${state.version}`,
-              ),
-            );
-            if (actual && actual.runId === runId) {
-              if (
-                actual.kind !== 'plan_progress' ||
-                ['planId', 'version', 'digest'].some((key) => actual[key] !== pointer[key])
-              )
-                throw new Error('plan_identity_mismatch');
-              progress = actual;
-            }
-            if (canonical(decode(await context.records.get('plan.current'))) !== canonical(pointer))
-              throw new Error('plan_identity_mismatch');
-            current = pointer;
-            plan = document;
-          }
           return [
             {
               extensionId: planningExtensionId,
               contentType,
               contentVersion: 1,
               summary:
-                state.status === 'approved'
+                approvalStatus === 'approved'
                   ? 'Approved current plan progress'
                   : 'Approved plan unavailable',
               payload: {
                 runId,
                 originStoreId: run.originStoreId,
-                approvalStatus: state.status,
+                approvalStatus,
                 current,
                 plan,
                 progress,
@@ -1752,8 +1716,241 @@ export function createPlanningValidation(
           ];
         },
       },
+      {
+        id: 'planning.progress.display',
+        version: '1',
+        description: 'Read approved plan steps for the current or original finished Run',
+        inputSchema: schema({ runId: text, history: { type: 'boolean' } }, ['runId']),
+        outputSchema: { type: 'array', items: { type: 'object' } },
+        async execute(input, context) {
+          const { history } = object(input);
+          const runId = string(object(input).runId);
+          const run = await context.getRun(runId);
+          if (!run || run.sessionId !== context.sessionId || !run.originStoreId)
+            throw new Error('planning_run_mismatch');
+          const scope = { runId, originStoreId: run.originStoreId };
+          const plans = [];
+          if (history && !run.isActive)
+            plans.push(...(await historicalProgress(context, scope, run.requirements)));
+          if (!history) {
+            const { plan, approval, progress } = await currentProgress(context, scope);
+            if (plan && approval) plans.push(progressDisplay(plan, approval, progress));
+          }
+          return [
+            {
+              extensionId: planningExtensionId,
+              contentType,
+              contentVersion: 1,
+              summary: 'Approved plan steps',
+              payload: { ...scope, plans },
+              artifactRefs: [],
+              actions: [],
+            },
+          ];
+        },
+      },
     ],
   };
+  function progressDisplay(
+    plan: Record<string, Json>,
+    approval: Record<string, Json>,
+    progress: Record<string, Json> | null,
+  ) {
+    if (!Array.isArray(plan.steps)) throw new Error('planning_invalid_record');
+    const steps = progress ? object(progress.steps) : {};
+    return {
+      planId: string(plan.planId),
+      version: Number(plan.version),
+      digest: string(plan.digest),
+      title: string(plan.title),
+      reviewExecutionId: string(object(approval.proof).executionId),
+      steps: plan.steps.map((value) => {
+        const step = object(value);
+        const id = string(step.id);
+        return {
+          id,
+          title: string(step.title),
+          status: Object.hasOwn(steps, id) ? string(object(steps[id]).status) : 'pending',
+        };
+      }),
+    };
+  }
+  type ProgressScope = { runId: string; originStoreId: string };
+  function matchesProgress(
+    progress: Record<string, Json> | null,
+    plan: Record<string, Json>,
+    runId: string,
+  ): progress is Record<string, Json> {
+    return (
+      !!progress &&
+      progress.kind === 'plan_progress' &&
+      progress.runId === runId &&
+      progress.planId === plan.planId &&
+      progress.version === plan.version &&
+      progress.digest === plan.digest
+    );
+  }
+  async function currentProgress(context: ReadContext, scope: ProgressScope) {
+    const state = await readPlanningState(context, scope);
+    if (state.status !== 'approved')
+      return {
+        approvalStatus: state.status,
+        current: null,
+        plan: null,
+        progress: null,
+        approval: null,
+      };
+    const key = `${encodeURIComponent(state.planId)}/${state.version}`;
+    const plan = decode(await context.records.get(`plan/${key}`));
+    const approval = decode(await context.records.get(`run/${scope.runId}/approval/${key}`));
+    const progress = decode(await context.records.get(`progress/${key}`));
+    const current = decode(await context.records.get('plan.current'));
+    if (
+      !plan ||
+      !approval ||
+      !current ||
+      current.planId !== state.planId ||
+      current.version !== state.version ||
+      current.digest !== state.digest ||
+      current.key !== `plan/${key}` ||
+      plan.planId !== state.planId ||
+      plan.version !== state.version ||
+      plan.digest !== state.digest ||
+      approval.runId !== scope.runId
+    )
+      throw new Error('plan_identity_mismatch');
+    const sameRun = progress?.runId === scope.runId;
+    const matching = matchesProgress(progress, plan, scope.runId);
+    if (sameRun && !matching) throw new Error('plan_identity_mismatch');
+    return {
+      approvalStatus: state.status,
+      current,
+      plan,
+      approval,
+      progress: matching ? progress : null,
+    };
+  }
+  async function* recordsWithPrefix(context: ReadContext, prefix: string) {
+    const limit = 32;
+    let afterKey = prefix;
+    for (;;) {
+      const page = await context.records.list({ afterKey, contentType, limit });
+      for (const record of page) {
+        if (!record.key.startsWith(prefix)) return;
+        yield record;
+        afterKey = record.key;
+      }
+      if (page.length < limit) return;
+    }
+  }
+  async function originalProgress(
+    context: ReadContext,
+    scope: ProgressScope,
+    key: string,
+    plan: Record<string, Json>,
+  ) {
+    const latest = decode(await context.records.get(key));
+    if (matchesProgress(latest, plan, scope.runId)) return latest;
+    // The plan version can be freshly approved by a later Run. Only successful
+    // original updates with a committed progress revision count as historical facts.
+    const prefix = `${key}/attempt/`;
+    let revision = 0n;
+    let saved: Record<string, Json> | null = null;
+    for await (const record of recordsWithPrefix(context, prefix)) {
+      const progress = decode(record);
+      if (!matchesProgress(progress, plan, scope.runId)) continue;
+      const execution = await context.getExecution(record.key.slice(prefix.length));
+      if (
+        execution?.status !== 'succeeded' ||
+        execution.definitionId !== 'planning.update' ||
+        execution.sessionId !== context.sessionId ||
+        execution.originStoreId !== scope.originStoreId ||
+        (execution.runId !== scope.runId && (execution.kind !== 'job' || execution.runId !== null))
+      )
+        continue;
+      const details = object(object(execution.result).details);
+      const rev = string(details.revision);
+      if (
+        !/^\d+$/.test(rev) ||
+        !Object.keys(progress).every(
+          (field) =>
+            details[field] !== undefined &&
+            canonical(details[field]!) === canonical(progress[field]!),
+        )
+      )
+        throw new Error('plan_identity_mismatch');
+      if (BigInt(rev) > revision) {
+        revision = BigInt(rev);
+        saved = progress;
+      }
+    }
+    return saved;
+  }
+  async function historicalProgress(
+    context: ReadContext,
+    scope: ProgressScope,
+    requirements: readonly Ref[] | undefined,
+  ) {
+    const plans: ReturnType<typeof progressDisplay>[] = [];
+    const requirement = requirements?.find(
+      (ref) =>
+        ref.extensionId === planningExtensionId &&
+        ref.requirementId === 'plan.required' &&
+        ref.runId === scope.runId &&
+        ref.sessionId === context.sessionId &&
+        ref.originStoreId === scope.originStoreId,
+    );
+    if (!requirement) return plans;
+    const prefix = `run/${scope.runId}/approval/`;
+    for await (const record of recordsWithPrefix(context, prefix)) {
+      const approval = decode(record)!;
+      if (
+        record.originStoreId !== scope.originStoreId ||
+        approval.kind !== 'plan_approval' ||
+        approval.runId !== scope.runId
+      )
+        continue;
+      const key = record.key.slice(prefix.length);
+      const planRecord = await context.records.get(`plan/${key}`);
+      const plan = decode(planRecord);
+      if (
+        !plan ||
+        `${encodeURIComponent(string(plan.planId))}/${plan.version}` !== key ||
+        !(await matchesPlanDigest(plan, plan.digest))
+      )
+        throw new Error('plan_identity_mismatch');
+      const request = await sealedRequest(context, plan, planRecord!, approval);
+      const answer = object(object(approval.proof).answer);
+      if (
+        !request ||
+        answer.kind !== 'plan_review' ||
+        answer.decision !== 'approve' ||
+        Object.hasOwn(answer, 'mode') ||
+        !(await proofValid(context, approval, request, requirement))
+      )
+        continue;
+      plans.push(
+        progressDisplay(
+          plan,
+          approval,
+          await originalProgress(context, scope, `progress/${key}`, plan),
+        ),
+      );
+    }
+    return plans.sort((a, b) => a.version - b.version);
+  }
+  async function matchesPlanDigest(plan: Record<string, Json>, expected: Json | undefined) {
+    return (
+      plan.digest === expected &&
+      (await digest({
+        planId: plan.planId!,
+        version: plan.version!,
+        title: plan.title!,
+        body: plan.body!,
+        steps: plan.steps!,
+      })) === expected
+    );
+  }
   async function readPlanningState(
     read: ConditionReadContext,
     identity: { runId: string; originStoreId: string },
@@ -1829,14 +2026,7 @@ export function createPlanningValidation(
     };
     const answer = object(object(approval.proof).answer);
     if (
-      plan.digest !== current.digest ||
-      (await digest({
-        planId: plan.planId!,
-        version: plan.version!,
-        title: plan.title!,
-        body: plan.body!,
-        steps: plan.steps!,
-      })) !== current.digest ||
+      !(await matchesPlanDigest(plan, current.digest)) ||
       !(await proofValid(read, approval, request, ref)) ||
       answer.kind !== 'plan_review' ||
       answer.decision !== 'approve' ||
