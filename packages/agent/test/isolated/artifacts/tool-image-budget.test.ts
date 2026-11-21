@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   type ModelAdapter,
   ModelAttemptError,
@@ -200,6 +201,157 @@ for (const scenario of ['window', 'provider-413', 'unknown'] as const)
       removeTemporaryDirectory(root);
     }
   }, 45000);
+
+test('archived image observer receives applied human steering without copying private context', async () => {
+  const root = temporaryDirectory('kite-steered-image-window-');
+  const profile = { dataRoot: join(root, 'data'), profile: 'test' };
+  const store = await openSqliteStore(profile);
+  const scope = {
+    expectedStoreId: (await store.getMetadata()).storeId,
+    sessionId: 's',
+    subjectId: 'owner',
+  };
+  const task = 'Describe the logo in the image.';
+  const superseded = 'Instead read the invoice number.';
+  const guide = 'Read only the invoice total, not the logo.';
+  const privateHost = 'PRIVATE-HOST-NOTE: unrelated context, not human guidance.';
+  const source = await createCanvas(12, 12).encode('webp');
+  const entered = Promise.withResolvers<void>(),
+    release = Promise.withResolvers<void>();
+  let opens = 0;
+  const tool = createViewImagesTool(async (path) => {
+    opens++;
+    entered.resolve();
+    await release.promise;
+    return { path, bytes: source };
+  });
+  const requests: ModelRequest[] = [];
+  let steerAtObservation: Awaited<ReturnType<typeof store.getCommand>> | undefined;
+  const finish = {
+    type: 'finish',
+    reason: 'stop',
+    usage: { inputTokens: 1, outputTokens: 1 },
+  } as const;
+  const runtime = createRuntime({
+    store,
+    artifacts: createArtifactStore({ profile, store }),
+    modelId: 'fixed',
+    // Host material is presented as user-role data in business calls, even with a
+    // colliding source id. It must not become the quoted human task in an observer.
+    sources: {
+      capture: async () => [
+        {
+          id: 'guide',
+          kind: 'audit_host',
+          scope: 'owned',
+          role: 'user',
+          placement: 'after_history',
+          digest: createHash('sha256').update(privateHost).digest('hex'),
+          content: privateHost,
+        },
+      ],
+    },
+    model: {
+      async *stream(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          yield {
+            type: 'tool_call',
+            id: 'view',
+            name: 'view_images',
+            arguments: '{"path":"fixture.webp"}',
+          };
+          yield { ...finish, reason: 'tool_calls' };
+          return;
+        }
+        // A rich single-image 413 forces a detached observer for the same pixels,
+        // without a large fixture or a second tool call.
+        if (request.tools.length && request.messages.some((m) => m.images?.length))
+          throw new ModelRequestLimitError();
+        if (!request.tools.length) steerAtObservation = await store.getCommand('guide');
+        yield { type: 'text_delta', text: 'Fixture response.' };
+        yield finish;
+      },
+    },
+    permissions: { authorize: async () => ({ allowed: true, revision: 'test' }) },
+    extensions: [{ id: 'builtin.files', version: '1', apiMajor: 1, tools: [tool] }],
+  });
+  try {
+    await runtime.createWorkspace({
+      expectedStoreId: scope.expectedStoreId,
+      id: 'w',
+      name: 'fixture',
+      rootUri: pathToFileURL(root).href,
+    });
+    await runtime.createSession({
+      ...scope,
+      commandId: 'create',
+      workspaceId: 'w',
+      title: 'steer',
+    });
+    await runtime.submitCommand({
+      ...scope,
+      commandId: 'work',
+      request: { kind: 'run.start', content: task },
+    });
+    await entered.promise;
+    const run = (await store.getView('s')).runs.find((r) => r.isActive)!;
+    for (const [commandId, content] of [
+      ['superseded', superseded],
+      ['guide', guide],
+    ] as const)
+      await runtime.submitCommand({
+        ...scope,
+        commandId,
+        request: {
+          kind: 'input.steer',
+          targetRunId: run.id,
+          contextSelectionId: run.contextSelectionId,
+          content,
+        },
+      });
+    release.resolve();
+    await runtime.waitForCommand('work', { timeoutMs: 8000 });
+    expect(await store.getRun(run.id)).toMatchObject({ status: 'completed' });
+    expect(steerAtObservation).toMatchObject({
+      id: 'guide',
+      kind: 'input.steer',
+      status: 'applied',
+      receipt: { outcome: 'input_applied', runId: run.id },
+    });
+    const messageId = (steerAtObservation!.receipt as { messageId: string }).messageId;
+    expect((await store.listMessages('s')).find((m) => m.id === messageId)).toMatchObject({
+      role: 'user',
+      runId: run.id,
+      inputKind: 'input.steer',
+      originCommandId: 'guide',
+      content: guide,
+    });
+    expect(opens).toBe(1);
+    const rejected = requests.find(
+      (r) => r.tools.length && r.messages.some((m) => m.images?.length),
+    )!;
+    for (const text of [superseded, guide, privateHost])
+      expect(rejected.messages.some((m) => m.role === 'user' && m.content === text)).toBe(true);
+    const observers = requests.filter((r) => !r.tools.length);
+    expect(observers).toHaveLength(1);
+    const observer = observers[0]!;
+    expect(observer.messages.map((m) => m.role)).toEqual(['system', 'user']);
+    expect(observer.messages[1]!.images).toHaveLength(1);
+    const observerText = observer.messages.map((m) => m.content).join('');
+    expect(observerText).not.toContain(privateHost);
+    expect(observerText).not.toContain(superseded);
+    expect(JSON.parse(observer.messages[1]!.content)).toMatchObject({
+      quotedTask: task,
+      quotedGuidance: guide,
+    });
+  } finally {
+    release.resolve();
+    await runtime.close();
+    await store.close();
+    removeTemporaryDirectory(root);
+  }
+}, 12000);
 
 test('mislabeled historical PNG with exact recorded hash and size rejects whole frame before provider dispatch', async () => {
   const root = temporaryDirectory('kite-invalid-image-frame-');

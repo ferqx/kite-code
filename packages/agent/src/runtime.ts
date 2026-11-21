@@ -9282,8 +9282,10 @@ export class AgentRuntime {
         };
       };
       const protectedImages = true;
+      const imageGuidance: ImageObservationGuidance = {};
       const messages = async () => {
         localImages.clear();
+        imageGuidance.latest = undefined;
         await receivePendingInputs();
         await this.consumeJobResults(run, owner, controller.signal);
         await selectCapabilities();
@@ -9311,6 +9313,7 @@ export class AgentRuntime {
             undefined,
             frozenModelInputLimit(run.configuration, modelId),
             protectedImages ? localImages : undefined,
+            session.parentSessionId === null ? imageGuidance : undefined,
           ),
         );
         // Do not compress a newly captured, still-undelivered image out of the selected history.
@@ -9355,6 +9358,7 @@ export class AgentRuntime {
         if (!compressionOnly && (await compress(compressible, 'automatic'))) {
           compressionSummaryMessages = [];
           localImages.clear();
+          imageGuidance.latest = undefined;
           return assembleModelContext(
             captured,
             await this.modelMessages(
@@ -9371,6 +9375,7 @@ export class AgentRuntime {
               undefined,
               frozenModelInputLimit(run.configuration, modelId),
               protectedImages ? localImages : undefined,
+              session.parentSessionId === null ? imageGuidance : undefined,
             ),
           );
         }
@@ -9800,6 +9805,17 @@ export class AgentRuntime {
                     typeof command.request.content === 'string'
                       ? command.request.content
                       : 'Describe the selected visual sources.';
+                  const latest = imageGuidance.latest;
+                  const guide =
+                    latest &&
+                    current.messages.some(
+                      (message) =>
+                        message.role === 'user' &&
+                        message.sourceIds?.length === 1 &&
+                        message.sourceIds[0] === latest.commandId,
+                    )
+                      ? latest.content
+                      : undefined;
                   const rq = observationRequest(
                     crypto.randomUUID(),
                     modelId,
@@ -9807,6 +9823,7 @@ export class AgentRuntime {
                     localImages,
                     members,
                     pixels,
+                    guide,
                   );
                   actual = rq;
                   const observation = await this.execution.model(
@@ -11985,6 +12002,7 @@ export class AgentRuntime {
     recordedTools?: ReadonlyMap<string, ModelMessage>,
     shellTokenLimit?: number,
     localImages?: Map<string, LocalImageSource>,
+    imageGuidance?: ImageObservationGuidance,
   ): Promise<ModelMessage[]> {
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
     const result = new Map<string, { seq: string; message: ModelMessage; summary?: true }>();
@@ -12071,6 +12089,25 @@ export class AgentRuntime {
       }
       for (const selectedMessage of page.messages) {
         if (selectedMessage.status !== 'complete') continue;
+        // Store's retained-input proof attests the applied input. Provider user
+        // roles alone also include summaries, mail and background results.
+        if (
+          imageGuidance &&
+          resultWork &&
+          selectedMessage.runId === resultWork.id &&
+          selectedMessage.sessionId === sessionId &&
+          selectedMessage.role === 'user' &&
+          selectedMessage.inputKind === 'input.steer' &&
+          selectedMessage.content.trim() &&
+          selectedMessage.originCommandId &&
+          selectedMessage.sourceIds?.length === 1 &&
+          selectedMessage.sourceIds[0] === selectedMessage.originCommandId &&
+          retainedInputIds.has(selectedMessage.id)
+        )
+          imageGuidance.latest = {
+            commandId: selectedMessage.originCommandId,
+            content: selectedMessage.content,
+          };
         const message =
           selectedMessage.runId === null && subjectId
             ? (
@@ -12644,6 +12681,8 @@ export class AgentRuntime {
     }
   }
 }
+
+type ImageObservationGuidance = { latest?: { commandId: string; content: string } };
 
 /** Preserve raw history while presenting each complete tool batch before later inbox data. */
 function orderModelToolResults(messages: ModelMessage[]): ModelMessage[] {
