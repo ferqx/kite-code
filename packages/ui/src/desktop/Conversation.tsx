@@ -1058,14 +1058,21 @@ export function Conversation({
     const groups: Message[][] = [];
     for (const message of shown) {
       const previous = groups.at(-1);
+      const first = previous?.[0];
       if (
-        !traceTurns &&
         !renderMessage &&
         message.role === 'tool' &&
-        previous?.[0]?.role === 'tool' &&
-        previous[0].turnId === message.turnId
+        first?.role === 'tool' &&
+        first.turnId === message.turnId &&
+        (!traceTurns ||
+          (renderToolActivity &&
+            message.turnId &&
+            !first.tracePending &&
+            !message.tracePending &&
+            first.toolName === 'spawn_agent' &&
+            message.toolName === 'spawn_agent'))
       )
-        previous.push(message);
+        previous!.push(message);
       else groups.push([message]);
     }
     // Exact Turn identities bound a process. Unscoped non-user messages between
@@ -1372,7 +1379,8 @@ export function Conversation({
             ? lastMessage
             : undefined);
         const blocks: Message[][] = [];
-        for (const message of messages) {
+        for (const group of processGroups) {
+          const message = group[0]!;
           if (message === reply) continue;
           const previous = blocks.at(-1);
           if (
@@ -1380,8 +1388,8 @@ export function Conversation({
             previous?.[0] &&
             isConversationTraceStep(previous[0])
           )
-            previous.push(message);
-          else if (!message.tracePending) blocks.push([message]);
+            previous.push(...group);
+          else if (!message.tracePending) blocks.push([...group]);
         }
         const streaming =
           lastTurnEntry &&
@@ -1422,21 +1430,24 @@ export function Conversation({
           !ended &&
           !activity?.executionUnconfirmed &&
           (!activity || activity.status === 'running' || activity.status === 'waiting');
-        const renderBody = (message: Message, showReply = false) => (
-          <div
-            key={message.presentationKey ?? message.id}
-            className={cn('agent-turn-body', message.finalReply && 'agent-turn-final')}
-          >
-            {renderGroup([message], showReply || message.finalReply ? 'result' : 'process', {
-              showTraceReply: showReply && streaming,
-              turnOutputs: message.id === finalGroup?.[0]?.id ? turnOutputs : undefined,
-            })}
-          </div>
-        );
+        const renderBody = (group: Message[], showReply = false) => {
+          const message = group[0]!;
+          return (
+            <div
+              key={message.presentationKey ?? message.id}
+              className={cn('agent-turn-body', message.finalReply && 'agent-turn-final')}
+            >
+              {renderGroup(group, showReply || message.finalReply ? 'result' : 'process', {
+                showTraceReply: showReply && streaming,
+                turnOutputs: message.id === finalGroup?.[0]?.id ? turnOutputs : undefined,
+              })}
+            </div>
+          );
+        };
         const renderBlocks = () =>
           blocks.map((block, index) => {
             const first = block[0]!;
-            if (!isConversationTraceStep(first)) return renderBody(first);
+            if (!isConversationTraceStep(first)) return renderBody(block);
             const steps = block.filter((item) => !item.tracePending);
             const tools = steps.filter((item) => item.role === 'tool');
             const currentTrace =
@@ -1531,7 +1542,7 @@ export function Conversation({
           )
         ) : null;
         const content = process ? [process] : renderBlocks();
-        if (reply) content.push(renderBody(reply, true));
+        if (reply) content.push(renderBody([reply], true));
         return (
           <section
             key={entry.key}

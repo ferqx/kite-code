@@ -23,6 +23,24 @@ export function childAgentRoleSource(): string {
   return 'You are a child Agent. To message your direct parent, use send_agent_message with target "parent" if the tool is available.';
 }
 
+export const childAgentNamingSourceId = 'agent:child-naming';
+
+export function childAgentNamingSource(sessionId: string): ContextSource {
+  const content = [
+    'When creating a new child Agent with spawn_agent, fill in task_name with a short, distinctive name for its work.',
+    'Prefer 4–6 Chinese characters (产品用法, 架构实现) or 1–3 English words (API Review). Use a concrete subject or module to distinguish similar tasks in the same batch (桌面测试, 服务测试).',
+    'Use a name explicitly given by the user verbatim. Use a longer name when needed to preserve a proper name or distinguish the work. Put the full assignment and its requirements in prompt.',
+  ].join(' ');
+  return {
+    id: childAgentNamingSourceId,
+    kind: 'agent_contract',
+    role: 'system',
+    scope: sessionId,
+    digest: createHash('sha256').update(content).digest('hex'),
+    content,
+  };
+}
+
 /** Pure trusted-host contract. These instructions never grant dispatch permission. */
 export function agentContractSource(workspaceRoot: string): ContextSource {
   const content = [

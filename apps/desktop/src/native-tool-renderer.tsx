@@ -1,4 +1,5 @@
 import {
+  ChildAgentCreationLine,
   type Conversation,
   type Message as DesktopMessage,
   ToolActivity,
@@ -49,16 +50,35 @@ export function renderNativeToolGroup(
     return fact ? [fact] : [];
   });
   const displayTargets = options.targets ?? [];
-  const agentProps = (model: DesktopMessage) =>
-    options.agentProps?.(
-      model,
-      displayTools.find((fact) => fact.messageId === model.id),
-    );
-  const childOperation = (model: (typeof group)[number]) =>
+  const factFor = (model: DesktopMessage) =>
+    displayTools.find((fact) => fact.messageId === model.id);
+  const agentProps = (model: DesktopMessage) => options.agentProps?.(model, factFor(model));
+  const keyOf = (model: DesktopMessage) => model.presentationKey ?? model.id;
+  const childOperation = (model: DesktopMessage) =>
     model.toolName === 'spawn_agent' || model.toolName === 'follow_up_agent';
-  const agentTool = (model: (typeof group)[number]) => {
+  const confirmedCreation = (model: DesktopMessage) => {
+    if (model.toolName !== 'spawn_agent' || model.status !== 'completed' || !model.turnId) return;
+    const fact = factFor(model);
+    if (
+      fact?.definitionId !== 'task.spawn' ||
+      fact.definitionVersion !== '1' ||
+      fact.status !== 'succeeded'
+    )
+      return;
+    const props = options.agentProps?.(model, fact);
+    const agent = props?.childAgent;
+    if (!agent?.identity) return;
+    return {
+      key: keyOf(model),
+      identity: agent.identity,
+      name: agent.name,
+      onOpen: props?.childDetail?.onOpen,
+    };
+  };
+  const agentTool = (model: DesktopMessage) => {
     const props = agentProps(model);
-    return childOperation(model) ? (
+    const key = keyOf(model);
+    return (
       <ToolActivity
         {...props}
         inTrace={controls.inTrace}
@@ -72,25 +92,25 @@ export function renderNativeToolGroup(
         }
         aggregate={false}
         messages={[model]}
-        expanded={controls.expandedItems[model.presentationKey ?? model.id]}
-        onToggle={(open) => controls.onToggleItem(model.presentationKey ?? model.id, open)}
-        activityId={model.presentationKey ?? model.id}
+        expanded={controls.expandedItems[key]}
+        onToggle={(open) => controls.onToggleItem(key, open)}
+        activityId={key}
         restoredExpanded={controls.restoredExpanded}
         renderChildren={() => null}
       />
-    ) : undefined;
+    );
   };
   // A verified child operation is a direct navigation row. Keep it outside
   // ordinary Tool disclosures, preserving the original tool order and the
   // independent expansion identities of ordinary segments on either side.
   // Establish segment owners before a child arrives, so ongoing rows never remount.
   if (!ordinarySegment && controls.inTrace) {
-    const agent = group.length === 1 && agentTool(group[0]!);
-    if (agent) return agent;
+    if (group.length === 1 && childOperation(group[0]!)) return agentTool(group[0]!);
   } else if (!ordinarySegment) {
     const rows: ReactNode[] = [];
     let ordinary: (typeof group)[number][] = [];
     let childBoundary: (typeof group)[number] | undefined;
+    let creationAnchor: DesktopMessage | undefined;
     let segmentIndex = 0;
     const flush = () => {
       if (!ordinary.length) return;
@@ -119,13 +139,38 @@ export function renderNativeToolGroup(
         </Fragment>,
       );
     };
-    for (const model of group) {
-      const row = agentTool(model);
-      if (row) {
-        flush();
-        rows.push(<Fragment key={model.presentationKey ?? model.id}>{row}</Fragment>);
+    for (let index = 0; index < group.length; index++) {
+      const model = group[index]!;
+      if (model.toolName !== 'spawn_agent') creationAnchor = undefined;
+      else if (!creationAnchor || creationAnchor.turnId !== model.turnId) creationAnchor = model;
+      if (!childOperation(model)) {
+        ordinary.push(model);
+        continue;
+      }
+      flush();
+      const creation = confirmedCreation(model);
+      if (!creation) {
+        rows.push(<Fragment key={keyOf(model)}>{agentTool(model)}</Fragment>);
         childBoundary = model;
-      } else ordinary.push(model);
+        continue;
+      }
+      const creations = [creation];
+      let end = index + 1;
+      while (end < group.length && group[end]!.turnId === model.turnId) {
+        const next = confirmedCreation(group[end]!);
+        if (!next) break;
+        creations.push(next);
+        end++;
+      }
+      rows.push(
+        <ChildAgentCreationLine
+          key={`child-creation:${keyOf(creationAnchor ?? model)}`}
+          creations={creations}
+        />,
+      );
+      creationAnchor = undefined;
+      index = end - 1;
+      childBoundary = group[index];
     }
     flush();
     return <>{rows}</>;

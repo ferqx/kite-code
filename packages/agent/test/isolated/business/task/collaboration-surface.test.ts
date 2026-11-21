@@ -463,7 +463,7 @@ test('six public tools reuse one child Session, preserve responsibility and obse
       let events: ModelEvent[];
       switch (stage++) {
         case 0:
-          events = call('spawn_agent', { prompt: originalAssignment });
+          events = call('spawn_agent', { prompt: originalAssignment, task_name: '交付复核' });
           break;
         case 1:
           expect(body).toMatchObject({ accepted: true, state: 'queued' });
@@ -485,6 +485,7 @@ test('six public tools reuse one child Session, preserve responsibility and obse
           expect(body.next_cursor).toBeNull();
           expect(body.items[0]).toMatchObject({
             agent_id: childId,
+            task_name: '交付复核',
             assignment_source: { content: originalAssignment },
             last_outcome: 'succeeded',
           });
@@ -512,6 +513,8 @@ test('six public tools reuse one child Session, preserve responsibility and obse
         case 6: {
           expect(body.items).toHaveLength(1);
           expect(body.items[0].agent_id).toBe(childId);
+          expect(body.items[0].task_name).toBe('交付复核');
+          expect((await store.getSession(childId))?.title).toBe('交付复核');
           expect(body.items[0].assignment_source.content).toBe(originalAssignment);
           expect(body.items[0].current_work_source.content).toBe(
             'Continue in the same saved Session',

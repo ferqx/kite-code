@@ -138,6 +138,8 @@ import {
 } from './model-body/selected-image-source';
 import {
   assembleModelContext,
+  childAgentNamingSource,
+  childAgentNamingSourceId,
   childAgentRoleSource,
   modelAgentMessage,
   modelHistory,
@@ -8908,6 +8910,7 @@ export class AgentRuntime {
       };
       let captured: ContextSource[] = [];
       let capturedRequests = new Map<string, SourceRequest>();
+      let childNaming: ContextSource | null = null;
       const capture = async (
         requests: Iterable<SourceRequest> = sourceRequests.values(),
         bindings = scope.bindings,
@@ -8946,7 +8949,7 @@ export class AgentRuntime {
             requests: requestList,
           }),
         );
-        for (const source of [childRole, continuationSource]) {
+        for (const source of [childRole, childNaming, continuationSource]) {
           if (!source) continue;
           if (sources.has(source.id)) throw new AgentError('context_source_namespace_collision');
           sources.set(source.id, source);
@@ -8954,10 +8957,25 @@ export class AgentRuntime {
         const result = [...sources.values()].sort((a, b) => a.id.localeCompare(b.id));
         return result;
       };
-      const captureModelSources = async () => {
+      const captureModelSources = async (includeChildNaming: boolean) => {
         // A Model decision depends on its own request set. Later sibling targets are
         // retained for the next Model, but cannot widen an unrelated Tool's check.
         capturedRequests = new Map(sourceRequests);
+        const spawn = scope.bindings.tools.get('task.spawn');
+        childNaming =
+          includeChildNaming &&
+          session.parentSessionId === null &&
+          spawn &&
+          !spawn.model?.hidden &&
+          isAgentCreationTaskTool({
+            id: spawn.id,
+            version: spawn.version,
+            extensionId: scope.bindings.extensions.find((extension) =>
+              extension.tools?.some((tool) => tool.id === spawn.id),
+            )?.id,
+          })
+            ? childAgentNamingSource(session.id)
+            : null;
         return capture(capturedRequests.values());
       };
       let archiveDirectoryHandoff = false;
@@ -9271,7 +9289,10 @@ export class AgentRuntime {
         await selectCapabilities();
         capturedInputVersion = inputVersion;
         capturedInboxVersion = inboxVersion;
-        captured = await captureModelSources();
+        const compressionOnly = ['context.compress', 'context.compression.reset'].includes(
+          command.kind,
+        );
+        captured = await captureModelSources(!compressionOnly);
         retainedInputMessages = [];
         compressionSummaryMessages = [];
         const assembled = assembleModelContext(
@@ -9283,9 +9304,7 @@ export class AgentRuntime {
             command.subjectId,
             false,
             undefined,
-            ['context.compress', 'context.compression.reset'].includes(command.kind)
-              ? undefined
-              : run,
+            compressionOnly ? undefined : run,
             retainedInputMessages,
             compressionSummaryMessages,
             scope.bindings.tools,
@@ -9333,10 +9352,7 @@ export class AgentRuntime {
             [],
           ).messages as ModelMessage[];
         }
-        if (
-          !['context.compress', 'context.compression.reset'].includes(command.kind) &&
-          (await compress(compressible, 'automatic'))
-        ) {
+        if (!compressionOnly && (await compress(compressible, 'automatic'))) {
           compressionSummaryMessages = [];
           localImages.clear();
           return assembleModelContext(
@@ -10129,11 +10145,20 @@ export class AgentRuntime {
             ) !== canonicalJson(resumed.modelSource.toolBehaviorBindings))
         )
           throw new AgentError('capability_refresh_required');
-        captured = await captureModelSources();
-        if (
-          canonicalJson(captured as unknown as Json) !==
-          canonicalJson(resumed.modelSource.sources ?? [])
-        )
+        const originalSources = resumed.modelSource.sources ?? [];
+        // The sealed request selects this optional instruction for the original batch.
+        // Rebuild its contents from the trusted runtime before comparing every source.
+        captured = await captureModelSources(
+          Array.isArray(originalSources) &&
+            originalSources.some(
+              (source) =>
+                source &&
+                typeof source === 'object' &&
+                !Array.isArray(source) &&
+                source.id === childAgentNamingSourceId,
+            ),
+        );
+        if (canonicalJson(captured as unknown as Json) !== canonicalJson(originalSources))
           throw new AgentError('context_refresh_required');
         capturedInputVersion = inputVersion;
       }
@@ -10147,7 +10172,7 @@ export class AgentRuntime {
         if (request.expectedCompressionId !== null) {
           await selectCapabilities();
           capturedInputVersion = inputVersion;
-          captured = await captureModelSources();
+          captured = await captureModelSources(false);
           expectedHighWaterSeq = (
             await this.options.store.getExpandedContext({
               expectedStoreId: run.originStoreId,

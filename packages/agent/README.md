@@ -22,6 +22,12 @@ Shell最终文件沿[宿主输出收集](src/business/output-collection.README.m
 
 [默认模型合同](src/model-context.ts)为主、子 Agent 提供已授权工作推进、可纠正失败、当前入口与可达调用链研究、父结果验收和收束指导。直接回答与适度交付前置，证据规则用于判断而非逐项打印成报告；委派不把约束扩展为额外报告任务。它保留原始要求、来源、压缩与未知结果约束，不添加业务完成状态或第二个 Loop。代码与符号存在不构成当前执行路径证明，子报告不因已接纳而成为正确性或权限证明。
 
+父模型的普通新请求只在实际工具目录含模型可见的内置 `task.spawn@1` 时装配独立的短命名指引。父模型通过已有 `task_name` 提交真实名称，原事务将其保存为子会话标题。续作使用同一个子会话。恢复已封存的模型请求和工具批次时，Runtime 依据原来源清单决定本批是否装配该指引，由可信代码重建内容，再照常核对完整来源和工具目录。随后新产生的模型请求使用当前规则。[命名指引](src/model-context.ts) · [Runtime 装配和恢复](src/runtime.ts) · [子会话标题写入](src/storage/sqlite/child-operations.ts)
+
+2026-11-20，macOS arm64／Bun 1.4.4，`4ef87391a` 加工作树。Service 请求、协作和冷恢复回归覆盖指引用于父模型、原样保存长短名称、续作沿用标题及拒绝无关漂移。用变更前后的 Runtime 分别封存待审批的创建请求，断进程后由当前 Runtime 恢复，原模型输入保留，每个请求只创建一次，后续新请求取得命名指引。Chrome 夹具用 10 条乱序回执核对中英文名称和长名的单行呈现及第 10 项键盘入口。[Service 请求回归](../../apps/service/test/isolated/task-configuration.test.ts) · [协作回归](test/isolated/business/task/collaboration-surface.test.ts) · [冷恢复回归](test/isolated/recovery/child-message-resume.test.ts) · [桌面回归](../../apps/desktop/test/isolated/native-session-navigation-dom.test.tsx)
+
+现有 DeepSeek 连接的三次父模型首请求样本分别返回「桌面测试入口」「服务端测试入口」、「API Review」「Packaging Review」和用户指定的「兼容性验证与产品架构联合审阅专用协作者」。五个名称均按原值受理并写入标题。取名之后的模型回复和子任务使用受控夹具。较早的完整循环抽样在 12 次真实请求后以父轮失败结束，保留该次结果与此处取名样本的验证范围。
+
 Git 工作树错误指导以[原工具分类](src/tools/git-worktree/README.md)和 mutation／Job 事实区分启动、权限与命令失败；`spawn EPERM/EACCES` 不证明用户拒绝，旧 generic 无元数据不猜原因。不得换 key、参数或工具重复尝试，部分／未知效果及未确认清理只观察原证据；此为模型指导，稳定操作记录另行保证原 key 不重放。
 
 同一默认合同区分退出与删除：工具 `exit` 仅将当前 Session 的执行根切回原逻辑 Workspace，保留工作树、分支、文件和历史，不调用 remove 或 Shell 清理；客户端仅导航则不产生执行根切换。明确具体目标的删除意图才可进入 remove，Auto 的工作树免审批不新增任务授权；客户端的实际本地导航归[Native owner](../../apps/desktop/README.md)。

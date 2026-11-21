@@ -1679,9 +1679,13 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 共享 UI／Native DOM 两整文件15项／360断言、Service响应与生成Message validator整文件6项／18断言通过；Core Task业务26整文件132项／2538断言，以及输入／派发／child result／Runtime报告恢复四文件27项／375断言通过。八 workspace typecheck、同源 API、边界和测试归属检查通过。本次资格限本机普通候选、已配置真实模型与隔离读取工具／Full选择，不外推安装发布或其他平台；修复前的失败证据保持。
 
-子 Agent 工具消息复用原 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 Trace 单行。[nativeAgentActivities / nativeAgentActivityForTool](src/native-agent-activity.ts) 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start。已成功受理的原工具回执与目录吻合后，消息补充名称和准确详情目标，创建行显示「名称 · 子agent开始工作」，其中图标应用身份配色，文字沿用默认工具消息颜色。身份待核实时用通用图标和原操作标题，继续操作沿用原标签。`childAgent` 仅含 identity／name，工具行保留原操作事实。原工具本身的失败、取消与结果未知保持自身展示。整行点击沿原右侧标签交付准确 Session／Execution，详情回调暂不可用时仅暂停该行点击。该入口直接导航，原始受理 JSON 和子日志在各自原记录中读取。
+子 Agent 工具消息使用 Trace 单行和共享身份图标。Native 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start。已成功受理的原工具回执与目录吻合后，消息补充名称和准确详情目标。单条创建显示「名称 · 子agent开始工作」，其中图标应用身份配色，文字沿用默认工具消息颜色。身份待核实时用通用图标和原操作标题，继续操作沿用原标签。`childAgent` 仅含 identity／name，工具行保留原操作事实。失败、取消和结果未知显示该次调用的结果。单条工具行点击后沿原右侧标签交付准确 Session／Execution，详情回调可用时启用入口。原始受理 JSON 和子日志在各自原记录中读取。[环境到工具的投影](src/native-agent-activity.ts)、[ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx)
 
 [环境 hook](src/native-environment.tsx) 复用原完整目录和有界展示缓存，不增加网络读取；缓存成本包含子 Agent 展示事实，同 scope 校准先保留最新已读 display，即使完整展示超过缓存预算也不闪回旧行。普通刷新保留名称、原操作和详情目标；当前任务生命周期仍用于原环境卡、停止门禁和子详情，不投影为父历史工具行状态。图标按原 Store／child Session 稳定身份与审批卡共用。
+
+Native 工具渲染将同一父轮中连续展示且由原回执和 carrier 核实的 `task.spawn@1` 成功项合为一行。身份图标在前，名称按原顺序排列，各名称沿自己的原读资格打开详情。行末的「已创建」表示父轮的创建操作成功受理。正文、思考、其他工具、待核实或不成功的创建会分隔这些行。回归覆盖身份迟到、末尾追加、邻接边界、焦点、草稿保留与准确详情。[Native 工具渲染](src/native-tool-renderer.tsx)、[单行创建组件](../../packages/ui/src/desktop/ChildAgentCreationLine.tsx)、[Native DOM 回归](test/isolated/native-session-navigation-dom.test.tsx)
+
+macOS 上的 Chrome 隔离夹具使用正式会话组件、生产样式和受控工具结果。在深浅主题中观察了身份确认及末尾追加的 45 帧，创建行和当前焦点持续保留。窄阅读列可用 Tab 滚动到后面的名称。已完成轮次展开后，「用时」、子 Agent 合并行与下一条工具摘要之间的两段布局间距均约 11.2 CSS px。
 
 [等待事件回执](electron/tool-message-fact.ts)由 Main 核对原工具、版本、注册来源和消息正文。已识别的内置等待失败与原成功摘要走同一展示事实通道；展开时用一条中文原因替代通用失败占位和原始 JSON，工具行仍按该次调用标记失败。原持久回执及给模型的结构化错误继续保留，无法核实或未识别的回执走原结果详情。回归覆盖同名非内置工具和结构化错误与原正文不一致的情况。[Main 投影测试](test/native-tool-messages.test.ts)
 

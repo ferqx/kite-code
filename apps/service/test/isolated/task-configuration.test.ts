@@ -22,7 +22,7 @@ async function until<T>(read: () => Promise<T | undefined>) {
     await Bun.sleep(5);
   }
 }
-function endpoint(role = 'worker') {
+function endpoint(role = 'worker', taskName?: string) {
   const requests: Record<string, unknown>[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -65,6 +65,7 @@ function endpoint(role = 'worker') {
             name: 'spawn_agent',
             input: {
               prompt: 'read full actual input',
+              ...(taskName === undefined ? {} : { task_name: taskName }),
               ...(role === 'worker' ? {} : { preset: role }),
             },
           },
@@ -110,6 +111,7 @@ async function fixture(
     mode?: 'full' | 'accept_edits';
     deny?: 'task' | 'carrier';
     defaultRole?: 'explore';
+    taskName?: string;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-default-task-'));
@@ -118,7 +120,7 @@ async function fixture(
   writeFileSync(join(workspace, 'input.txt'), 'actual complete private input');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   privateDirectory(profile.profilePath);
-  const a = endpoint(options.defaultRole),
+  const a = endpoint(options.defaultRole, options.taskName),
     b = endpoint();
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   const configuration = {
@@ -343,6 +345,83 @@ test('default Task uses one global factory and the actual shared Loop/model slot
     await f.close();
   }
 }, 15000);
+
+function namingInstructions(request: Record<string, unknown>) {
+  return (request.messages as { role: string; content: string | null }[]).filter(
+    (message) =>
+      message.role === 'system' &&
+      message.content?.startsWith('When creating a new child Agent with spawn_agent'),
+  );
+}
+
+test('the default service sends short naming guidance to the parent and stores supplied titles verbatim', async () => {
+  for (const taskName of ['产品用法', 'API Review', '兼容性验证与产品架构联合审阅专用协作者']) {
+    const f = await fixture({ taskName });
+    try {
+      await f.submit();
+      expect((await f.done()).status).toBe('applied');
+      const parent = f.a.requests.filter((request) => request.model === 'parent');
+      const child = f.a.requests.filter((request) => request.model === 'child-v1');
+      expect(parent.length).toBeGreaterThan(0);
+      expect(child.length).toBeGreaterThan(0);
+      for (const request of parent) {
+        const guidance = namingInstructions(request);
+        expect(guidance).toHaveLength(1);
+        expect(guidance[0]!.content).toContain('4–6 Chinese characters');
+        expect(guidance[0]!.content).toContain('1–3 English words');
+        expect(guidance[0]!.content).toContain('桌面测试, 服务测试');
+        expect(guidance[0]!.content).toContain('explicitly given by the user verbatim');
+      }
+      expect(child.flatMap(namingInstructions)).toEqual([]);
+      const spawned = (await f.store.listExecutions('s')).find(
+        (row) => row.childSessionId !== null,
+      )!;
+      expect(spawned.status).toBe('succeeded');
+      const childSessionId = spawned.childSessionId!;
+      const { items } = await f.store.listStableAgents({
+        expectedStoreId: f.base.expectedStoreId,
+        sessionId: 's',
+        extensionId: 'builtin.task',
+        subjectId: f.base.subjectId,
+      });
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        agentId: childSessionId,
+        taskName,
+        assignmentSource: { content: 'read full actual input' },
+      });
+      expect((await f.store.getView(childSessionId)).session.title).toBe(taskName);
+      await f.reopen('1');
+      expect((await f.store.getView(childSessionId)).session.title).toBe(taskName);
+    } finally {
+      await f.close();
+    }
+  }
+}, 20000);
+
+test('a parent without the selected creation tool receives no child naming guidance', async () => {
+  const f = await fixture();
+  try {
+    writeFileSync(
+      f.configurationPath,
+      JSON.stringify({
+        ...f.configuration,
+        tools: f.configuration.tools.filter((tool) => tool.id !== 'task.spawn'),
+      }),
+    );
+    await f.submit();
+    expect((await f.done()).status).toBe('applied');
+    expect(f.a.requests.length).toBeGreaterThan(0);
+    expect(f.a.requests.flatMap(namingInstructions)).toEqual([]);
+    expect(
+      f.a.requests
+        .flatMap((request) => (request.tools ?? []) as { function: { name: string } }[])
+        .some(({ function: tool }) => tool.name === 'spawn_agent'),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
+}, 10000);
 
 test('Task Tool approval does not authorize its exact child carrier Job; both ordinary cards retain real effects and once-only dispatch', async () => {
   const f = await fixture({ mode: 'accept_edits' });

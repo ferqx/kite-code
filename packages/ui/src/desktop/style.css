@@ -2139,6 +2139,7 @@ body {
   min-width: 0;
 }
 .kite-client .session-heading {
+  position: relative;
   margin-bottom: 2px;
 }
 .kite-client .session-heading .session-row {
@@ -2148,6 +2149,10 @@ body {
 }
 .kite-client :where(.session-heading) .sidebar-actions {
   padding-inline-end: 4px;
+}
+.kite-client .session-heading:has(> .session-row > svg[role="status"]) > .sidebar-actions {
+  position: absolute;
+  inset-inline-end: 0;
 }
 .kite-client .space-heading :is(.space-new-session, .space-more) > svg,
 .kite-client .session-row > .session-worktree-icon,
@@ -2161,6 +2166,10 @@ body {
 }
 .kite-client .session-row > svg[role="status"] {
   animation-duration: 2.4s;
+}
+.kite-client .session-heading:has(> .sidebar-actions) > .session-row > svg[role="status"] {
+  order: 1;
+  margin-inline: calc((var(--icon-button-size-xs) - var(--ui-icon-size)) / 2);
 }
 .kite-client .nav-label .space-add,
 .kite-client :where(.space-new-session, .space-more, .session-more) {
@@ -2189,6 +2198,12 @@ body {
 .kite-client .session-heading:is([data-menu-active], :hover) > .sidebar-actions {
   opacity: 1;
   pointer-events: auto;
+}
+.kite-client
+  .session-heading:is([data-menu-active], :hover):has(> .sidebar-actions)
+  > .session-row
+  > svg[role="status"] {
+  visibility: hidden;
 }
 @media (hover: none) {
   .kite-client :where(:not(.session-heading)) > .sidebar-actions {
@@ -3894,6 +3909,10 @@ body {
   & > .agent-turn-body > .tool-activity,
   & > .agent-turn-body > .message-group > .message:not(:has(> .message-meta)) {
     margin-block: 0;
+  }
+
+  & > .agent-turn-body > .tool-activity + .tool-activity {
+    margin-block-start: var(--conversation-block-gap);
   }
 }
 .kite-client
@@ -6459,6 +6478,48 @@ body {
 .kite-client .tool-agent-operation {
   flex: none;
   font-size: inherit;
+}
+.kite-client .child-agent-creation-line[data-grouped="true"] {
+  overflow-x: auto;
+}
+.kite-client .child-agent-creation-icons,
+.kite-client .child-agent-creation-names {
+  display: flex;
+  align-items: center;
+}
+.kite-client .child-agent-creation-icons {
+  flex: none;
+  gap: 4px;
+}
+.kite-client .child-agent-creation-line[data-grouped="true"] .child-agent-creation-names {
+  flex: none;
+}
+.kite-client
+  .child-agent-creation-line:not([data-grouped])
+  :is(.child-agent-creation-names, .child-agent-creation-link) {
+  width: 100%;
+}
+.kite-client .child-agent-creation-link {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  justify-content: flex-start;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.kite-client .child-agent-creation-link:hover:not(:disabled) {
+  background: transparent;
+  color: var(--foreground);
+}
+.kite-client
+  .child-agent-creation-line[data-grouped="true"]
+  .child-agent-creation-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.kite-client .child-agent-creation-link:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
 }
 
 /* Shared selection entry for page content and body-portalled popovers. */

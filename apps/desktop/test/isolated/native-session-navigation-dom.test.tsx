@@ -13,6 +13,7 @@ import type {
   NativeResult,
   NativeState,
 } from '../../src/native-bridge';
+import type { NativeToolMessageFact } from '../../src/tool-messages-bridge';
 import { backgroundItem } from '../background-item.fixture';
 import {
   nextDesktopPresentation,
@@ -142,6 +143,8 @@ function fixture(
         },
       ]
     : [parentMessage];
+  const extraChildren: BackgroundExecutionItem[] = [];
+  const extraToolFacts = new Map<string, NativeToolMessageFact>();
   const metadataReleases = new Set<() => void>();
   let metadataPending = pendingToolMetadata;
   let childBody:
@@ -291,15 +294,18 @@ function fixture(
               sessionId: 'root',
               workspaceId: 'w',
             },
-            entries: request.messageIds.map((messageId) => ({
-              messageId,
-              executionId:
-                messageId === 'parent-read-receipt' ? 'parent-read-tool' : 'parent-spawn-tool',
-              definitionId: messageId === 'parent-read-receipt' ? 'files.read' : 'task.spawn',
-              definitionVersion: messageId === 'parent-read-receipt' ? '4' : '1',
-              status: 'succeeded' as const,
-              resultRevision: '1',
-            })),
+            entries: request.messageIds.map(
+              (messageId) =>
+                extraToolFacts.get(messageId) ?? {
+                  messageId,
+                  executionId:
+                    messageId === 'parent-read-receipt' ? 'parent-read-tool' : 'parent-spawn-tool',
+                  definitionId: messageId === 'parent-read-receipt' ? 'files.read' : 'task.spawn',
+                  definitionVersion: messageId === 'parent-read-receipt' ? '4' : '1',
+                  status: 'succeeded' as const,
+                  resultRevision: '1',
+                },
+            ),
           };
           if (!metadataPending) return result;
           return new Promise<NativeResult>((resolve) => {
@@ -357,6 +363,9 @@ function fixture(
             ],
           };
         case 'background.open': {
+          const entries = structuredClone([item, ...extraChildren]).sort(
+            (left, right) => Number(left.seq) - Number(right.seq),
+          );
           const page = {
             kind: 'background.page' as const,
             viewGeneration: 1,
@@ -366,10 +375,10 @@ function fixture(
             readId: request.readId,
             observationId: revision,
             startIndex: 0,
-            nextIndex: 1,
-            total: 1,
+            nextIndex: entries.length,
+            total: entries.length,
             complete: true,
-            entries: [structuredClone(item)],
+            entries,
           };
           if (holdDirectory) {
             holdDirectory = false;
@@ -380,25 +389,29 @@ function fixture(
           return page;
         }
         case 'background.child.open': {
+          const detail =
+            extraChildren.find(({ execution }) => execution.id === request.executionId) ?? item;
+          const child = detail.childSession!;
+          const childRun = detail.childRun!;
           const body = Buffer.from(
             JSON.stringify({
-              item,
-              session: item.childSession,
+              item: detail,
+              session: child,
               upperSeq: '1',
               ...(request.cursor ? { afterSeq: '0' } : {}),
               messages: [
                 {
                   id: 'child-message',
-                  sessionId: 'child',
+                  sessionId: child.id,
                   seq: '1',
                   role: 'assistant',
                   status: 'incomplete',
-                  runId: item.childRun!.id,
-                  content: childText,
+                  runId: childRun.id,
+                  content: detail === item ? childText : `Progress from ${child.title}`,
                 },
               ],
               modelOutputs: [],
-              ...childBody,
+              ...(detail === item ? childBody : undefined),
             }),
           );
           bytes.set(request.readId, body);
@@ -410,9 +423,9 @@ function fixture(
             storeId: 'store',
             readId: request.readId,
             observationId: request.observationId,
-            executionId: item.execution.id,
-            childSessionId: 'child',
-            childRunId: item.childRun!.id,
+            executionId: detail.execution.id,
+            childSessionId: child.id,
+            childRunId: childRun.id,
             wireBytes: String(body.length),
             wireHash: createHash('sha256').update(body).digest('hex'),
           };
@@ -493,6 +506,47 @@ function fixture(
         content: 'Original read receipt',
       });
       item.rootSession.nextSeq = '5';
+    },
+    appendCreation(title: string, status: 'succeeded' | 'outcome_unknown' = 'succeeded') {
+      const index = parentHistory.length + 1;
+      const child = backgroundItem(index, true);
+      const childSession = child.childSession!;
+      const childRun = child.childRun!;
+      const messageId = `parent-spawn-receipt-${index}`;
+      const executionId = `parent-spawn-tool-${index}`;
+      child.run = item.run;
+      child.sourceTool = { id: executionId, definitionId: 'task.spawn', definitionVersion: '1' };
+      child.execution.parentExecutionId = executionId;
+      childSession.id = `child-${index}`;
+      childSession.title = title;
+      childSession.nextSeq = '1';
+      child.execution.childSessionId = childSession.id;
+      childRun.sessionId = childSession.id;
+      childRun.id = `child-run-${index}`;
+      parentHistory.push({
+        id: messageId,
+        sessionId: 'root',
+        runId: item.run!.id,
+        seq: String(index),
+        role: 'tool',
+        status: 'complete',
+        sourceIds: [executionId],
+        content:
+          status === 'succeeded' ? '{"accepted":true,"state":"queued"}' : 'Unknown admission',
+      });
+      extraToolFacts.set(messageId, {
+        messageId,
+        executionId,
+        definitionId: 'task.spawn',
+        definitionVersion: '1',
+        status,
+        resultRevision: '1',
+      });
+      item.rootSession.nextSeq = String(index + 1);
+      return {
+        carrier: child.execution.id,
+        confirm: () => extraChildren.push(child),
+      };
     },
     childBody: (body: NonNullable<typeof childBody>) => {
       childBody = body;
@@ -2043,6 +2097,128 @@ test('a standalone child creation among ordinary tools opens its exact read-only
     ).toEqual([]);
   } finally {
     await f.close();
+  }
+});
+
+test('Native shows adjacent confirmed child creations on one line with separate detail targets', async () => {
+  const scenario = fixture(true, true);
+  scenario.groupedParentCarrier();
+  const product = scenario.appendCreation('了解产品与使用方式');
+  const architecture = scenario.appendCreation('了解架构与实现');
+  product.confirm();
+  const childButton = (title: string) =>
+    scenario.host.querySelector<HTMLButtonElement>(
+      `.conversation button[aria-label="查看子 Agent 详情：${title}"]`,
+    );
+  const groupedLine = () =>
+    scenario.host.querySelector('.conversation .child-agent-creation-line[data-grouped]');
+  try {
+    await scenario.releaseMetadata();
+    await scenario.render();
+    await scenario.click('Original');
+    await until(() => !!childButton('了解产品与使用方式'));
+    const first = childButton('了解产品与使用方式')!;
+    const line = first.closest('.child-agent-creation-line')!;
+    const separated = childButton('Live child');
+    expect(separated).not.toBeNull();
+    expect(childButton('了解架构与实现')).toBeNull();
+    expect(groupedLine()).toBeNull();
+    await act(async () => first.focus());
+
+    architecture.confirm();
+    await scenario.update('Child prefix');
+    await until(() => !!groupedLine());
+    expect(groupedLine()).toBe(line);
+    expect(childButton('了解产品与使用方式')).toBe(first);
+    expect(first.ownerDocument.activeElement).toBe(first);
+    expect(childButton('Live child')).toBe(separated);
+    const article = first.closest('article')!;
+    const memberNames = () =>
+      [...article.querySelectorAll('.tool-agent-name')].map((name) => name.textContent);
+    expect(line.textContent).toBe('了解产品与使用方式和了解架构与实现已创建');
+    expect(memberNames()).toEqual(['了解产品与使用方式', '了解架构与实现']);
+    expect(article.querySelector('.tool-agent-operation')).toBeNull();
+    expect(article.querySelector('[aria-expanded], .tool-activity-content')).toBeNull();
+    expect(line.querySelectorAll('.child-agent-creation-icons [data-child-icon]')).toHaveLength(2);
+    const productButton = childButton('了解产品与使用方式');
+    const architectureButton = childButton('了解架构与实现');
+    expect(productButton?.disabled).toBe(false);
+    expect(architectureButton?.disabled).toBe(false);
+    await scenario.edit('Keep the current draft');
+    const input = scenario.host.querySelector('textarea.prompt-editor')!;
+
+    scenario.appendCreation('核查测试').confirm();
+    scenario.appendCreation('无法核对的创建', 'outcome_unknown');
+    scenario.appendCreation('后续独立创建').confirm();
+    await scenario.update('Child prefix');
+    await until(() => memberNames().length === 3);
+    expect(groupedLine()).toBe(line);
+    expect(memberNames()).toEqual(['了解产品与使用方式', '了解架构与实现', '核查测试']);
+    expect(childButton('了解产品与使用方式')).toBe(productButton);
+    expect(childButton('了解架构与实现')).toBe(architectureButton);
+    await until(() => !!childButton('后续独立创建'));
+    expect(article.contains(childButton('后续独立创建'))).toBe(false);
+    const unknown = scenario.host.querySelector('article[aria-label="创建子 Agent · 结果未知"]');
+    expect(unknown).not.toBeNull();
+    expect(article.contains(unknown)).toBe(false);
+    expect(scenario.host.querySelector('textarea.prompt-editor')).toBe(input);
+    expect(promptValue(input)).toBe('Keep the current draft');
+
+    for (const [title, target] of [
+      ['了解产品与使用方式', product],
+      ['了解架构与实现', architecture],
+    ] as const) {
+      await scenario.click(`查看子 Agent 详情：${title}`);
+      await until(
+        () =>
+          !!scenario.host
+            .querySelector('.session-tab-child')
+            ?.textContent?.includes(`Progress from ${title}`),
+      );
+      expect(
+        scenario.requests.filter((request) => request.method === 'background.child.open').at(-1),
+      ).toMatchObject({ executionId: target.carrier });
+      expect(groupedLine()).toBe(line);
+    }
+    expect(
+      scenario.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
+    ).toEqual([]);
+  } finally {
+    await scenario.close();
+  }
+});
+
+test('Native preserves the focused child link when an earlier creation joins the line', async () => {
+  const scenario = fixture(true, true);
+  scenario.groupedParentCarrier();
+  const earlier = scenario.appendCreation('先创建的子 Agent');
+  scenario.appendCreation('已核实的第二项').confirm();
+  scenario.appendCreation('已核实的第三项').confirm();
+  const groupedLine = () =>
+    scenario.host.querySelector('.conversation .child-agent-creation-line[data-grouped]');
+  try {
+    await scenario.releaseMetadata();
+    await scenario.render();
+    await scenario.click('Original');
+    await until(() => !!groupedLine());
+    const line = groupedLine()!;
+    const member = line.querySelector<HTMLButtonElement>(
+      'button[aria-label="查看子 Agent 详情：已核实的第二项"]',
+    )!;
+    expect(member).not.toBeNull();
+    await act(async () => member.focus());
+    earlier.confirm();
+    await scenario.update('Child prefix');
+    await until(() => line.querySelectorAll('button').length === 3);
+    expect(groupedLine() === line).toBe(true);
+    expect(member.ownerDocument.activeElement === member).toBe(true);
+    expect([...line.querySelectorAll('.tool-agent-name')].map((node) => node.textContent)).toEqual([
+      '先创建的子 Agent',
+      '已核实的第二项',
+      '已核实的第三项',
+    ]);
+  } finally {
+    await scenario.close();
   }
 });
 

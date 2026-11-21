@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
+import { childAgentNamingSourceId } from '../../../src/model-context';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { ExecutionRecord, InteractionRecord, SessionView } from '../../../src/storage/types';
@@ -61,7 +62,20 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
       expect(ready.effect.callId).toBe('original-effect-call');
       expect(readFileSync(join(directory, 'effects'), 'utf8')).toBe('');
       const originalRequests = requests(directory);
+      const originalParentRequests = originalRequests.filter((row) => row.actor === 'parent');
+      expect(originalParentRequests.length).toBeGreaterThan(0);
+      for (const { request } of originalParentRequests)
+        expect(
+          request.messages.filter((message) =>
+            message.sourceIds?.includes(childAgentNamingSourceId),
+          ),
+        ).toHaveLength(1);
       const childRequest = originalRequests.find((row) => row.actor === 'child')!.request;
+      expect(
+        childRequest.messages.some((message) =>
+          message.sourceIds?.includes(childAgentNamingSourceId),
+        ),
+      ).toBe(false);
       expect(childRequest.tools.some((tool) => tool.id === 'wait_agent_events')).toBe(false);
       expect(
         childRequest.tools.find((tool) => tool.id === 'send_agent_message')?.description,
@@ -159,6 +173,11 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
       expect(parentRequest.request.tools.some((tool) => tool.id === 'wait_agent_events')).toBe(
         true,
       );
+      expect(
+        parentRequest.request.messages.filter((message) =>
+          message.sourceIds?.includes(childAgentNamingSourceId),
+        ),
+      ).toHaveLength(1);
       expect(
         next.messages.some((message) => message.content === 'original effect exactly once'),
       ).toBe(true);

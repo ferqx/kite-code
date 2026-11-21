@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { type Browser, expect, type Locator } from 'playwright/test';
+import { type Browser, expect, type Locator, type Page } from 'playwright/test';
 import type {} from './session-shell-browser.fixture';
 
 function sampleDialogOpening(dialog: Locator) {
@@ -307,6 +307,58 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
   return { sessionRowActions: ['light', 'dark'] };
 }
 
+async function verifySessionRowLoading(page: Page) {
+  const row = page.locator('.session-row[aria-label="Session B"]');
+  const spinner = row.locator('svg[aria-label="会话运行中"]');
+  const more = page.locator('.session-more[aria-label="Session B 更多操作"]');
+  const title = row.locator('.nav-copy');
+  await spinner.waitFor();
+  assert.ok(
+    await row.evaluate((node) => node.clientWidth === node.parentElement!.clientWidth),
+    'hidden More does not take a separate layout slot',
+  );
+  const loadingBox = await spinner.boundingBox();
+  const moreBox = await more.boundingBox();
+  assert.ok(loadingBox && moreBox);
+  assert.ok(
+    Math.hypot(
+      loadingBox.x + loadingBox.width / 2 - (moreBox.x + moreBox.width / 2),
+      loadingBox.y + loadingBox.height / 2 - (moreBox.y + moreBox.height / 2),
+    ) < 0.5,
+    'the loading icon and More share one position',
+  );
+  const bounds = await title.boundingBox();
+  const sample = async (phase: string, loading: boolean, actions: boolean) => {
+    const state = {
+      loading: await spinner.isVisible(),
+      actions: await more.evaluate((node) => Number(getComputedStyle(node.parentElement!).opacity)),
+    };
+    assert.deepEqual(state, { loading, actions: Number(actions) }, phase);
+    assert.deepEqual(await title.boundingBox(), bounds, phase);
+    assert.equal(await row.getAttribute('aria-description'), '正在工作', phase);
+    return { phase, ...state };
+  };
+  const phases = [await sample('idle', true, false)];
+  await row.hover();
+  phases.push(await sample('hovered', false, true));
+  assert.equal(
+    await page.locator('.session-row[aria-label="Session A"] svg[role="status"]').isVisible(),
+    true,
+  );
+  await page.mouse.move(1100, 650);
+  phases.push(await sample('pointer left', true, false));
+  await row.hover();
+  await more.click();
+  const menu = page.locator('.session-menu[role="menu"]');
+  await menu.waitFor();
+  await page.mouse.move(1100, 650);
+  phases.push(await sample('menu open', false, true));
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'hidden' });
+  phases.push(await sample('menu closed', true, false));
+  return phases;
+}
+
 /** Exercise Native pending transitions with actual Sidebar controls and production CSS. */
 export async function verifySidebarActions(browser: Browser, url: string, artifact: string) {
   const cases = [];
@@ -318,11 +370,12 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
     const errors: string[] = [];
     page.on('pageerror', (cause) => errors.push(cause.message));
     try {
-      await page.goto(`${url}?worktree-navigation=1`);
+      await page.goto(`${url}?worktree-navigation=1&manage-sessions=1`);
       await page.waitForFunction(() => {
         const model = document.querySelector<HTMLButtonElement>('[data-model-trigger]');
         return model && !model.disabled;
       });
+      const sessionLoading = await verifySessionRowLoading(page);
       await page.evaluate(() => window.sessionShellFixture.setActive(false));
       await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).waitFor();
       const selector = '.space-add,.space-new-session,.space-more';
@@ -510,7 +563,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await hidden();
       assert.deepEqual(errors, []);
       assert.ok((await read()).every((item) => item.same));
-      cases.push({ theme, initial, overridden, picking, frames, errors });
+      cases.push({ theme, sessionLoading, initial, overridden, picking, frames, errors });
     } finally {
       await page.close();
     }
