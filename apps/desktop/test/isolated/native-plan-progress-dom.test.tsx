@@ -9,6 +9,7 @@ import type {
   NativePlanProgress,
   NativePlanProgressResult,
 } from '../../src/native-plan-progress-bridge';
+import type { NativeRunFact } from '../../src/tool-messages-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 test('plan progress retains verified steps during interruption and retires after history is shown', async () => {
@@ -35,6 +36,7 @@ test('plan progress retains verified steps during interruption and retires after
   const terminal = { ...plan, steps: [{ ...plan.steps[0]!, status: 'failed' as const }] };
   let live: (() => void) | undefined;
   let historical: (() => void) | undefined;
+  let historyReads = 0;
   const bridge = {
     async request(request: NativeRequest) {
       if (request.method !== 'planning.progress') throw Error('wrong request');
@@ -45,6 +47,8 @@ test('plan progress retains verified steps during interruption and retires after
         runId: request.runId,
         plans: [request.history ? terminal : plan],
       };
+      if (request.history && historyReads++ === 0)
+        throw Error('fixture_history_temporarily_unavailable');
       return new Promise<NativePlanProgressResult>((resolve) => {
         if (request.history) historical = () => resolve(result);
         else live = () => resolve(result);
@@ -64,6 +68,7 @@ test('plan progress retains verified steps during interruption and retires after
     historyEpoch?: number;
     waiting?: boolean;
     ended?: boolean;
+    terminalStore?: string;
     visible?: boolean;
   };
   let locations = 0;
@@ -77,6 +82,7 @@ test('plan progress retains verified steps during interruption and retires after
     historyEpoch = 0,
     waiting = false,
     ended = false,
+    terminalStore = 'store',
     visible = true,
   }: View) {
     const model = useNativePlanProgress({
@@ -88,6 +94,20 @@ test('plan progress retains verified steps during interruption and retires after
       unconfirmed: !connected,
       activeRun: ended || sessionId !== 'session' ? undefined : { id: 'run', revision },
       waitingForReview: waiting,
+      runs: ended
+        ? [
+            {
+              id: 'run',
+              sessionId,
+              originStoreId: terminalStore,
+              status: 'failed',
+              isActive: false,
+              createdAt: 1,
+              finishedAt: 2,
+              reason: null,
+            } satisfies NativeRunFact,
+          ]
+        : undefined,
     });
     return (
       <>
@@ -148,11 +168,22 @@ test('plan progress retains verified steps during interruption and retires after
     await render({});
     await act(async () => live?.());
     if (!list()) await act(async () => progress()?.click());
-    await render({ ended: true, visible: false });
+    await render({ ended: true, terminalStore: 'another-store', visible: false });
+    expect(historyReads).toBe(1);
     expect(progress()?.textContent).toContain('进行中');
+    expect(progress()?.textContent).not.toContain('本轮异常结束');
+    await render({ ended: true, visible: false });
+    expect(progress()?.textContent).toContain('本轮异常结束 · 步骤待核实');
+    expect(list()?.querySelector('li')?.dataset.status).toBe('running');
     expect(document.querySelector('.native-plan-history')).toBeNull();
+    await act(async () => progress()?.click());
+    expect(progress()?.textContent).toContain('本轮异常结束 · 步骤待核实');
+    await act(async () => progress()?.click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 550)));
+    expect(historyReads).toBe(2);
     await act(async () => historical?.());
     expect(progress()?.textContent).toContain('本轮异常结束');
+    expect(progress()?.textContent).not.toContain('步骤待核实');
     expect(list()?.querySelector('li')?.dataset.status).toBe('failed');
     expect(document.querySelector('.native-plan-history')?.textContent).toContain('查看执行步骤');
     await act(async () => document.querySelector<HTMLButtonElement>('button:last-child')?.click());

@@ -2386,6 +2386,7 @@ function NativeDesktopContent({
             : undefined,
         }
       : undefined,
+    runs: executionRuns,
     waitingForReview: waitingForPlanReview,
   });
   const [planFocus, setPlanFocus] = useState<{

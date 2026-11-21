@@ -74,7 +74,7 @@ export function PlanExecutionProgress({
     plan.steps.find((step) => step.status === 'blocked' || step.status === 'failed') ??
     plan.steps.find((step) => step.status === 'pending' || step.status === 'compensated');
   const turnStatus = outcome
-    ? outcomeLabels[outcome]
+    ? `${outcomeLabels[outcome]}${stale ? ' · 步骤待核实' : ''}`
     : stale
       ? '状态待核实'
       : done === plan.steps.length

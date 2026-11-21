@@ -2,6 +2,7 @@ import { type PlanExecutionOutcome as Outcome, PlanExecutionHistory } from '@kit
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import type { NativePlanProgress, NativePlanProgressResult } from './native-plan-progress-bridge';
+import type { NativeRunFact } from './tool-messages-bridge';
 
 type ReadProgress = (runId: string, history: boolean) => Promise<NativePlanProgressResult['plans']>;
 type ActiveRun = { id: string; revision?: string };
@@ -14,6 +15,7 @@ export function useNativePlanProgress({
   available,
   unconfirmed,
   activeRun,
+  runs,
   waitingForReview,
 }: {
   bridge?: NativeBridge;
@@ -23,6 +25,7 @@ export function useNativePlanProgress({
   available: boolean;
   unconfirmed: boolean;
   activeRun?: ActiveRun;
+  runs?: readonly NativeRunFact[];
   waitingForReview: boolean;
 }) {
   const storeId = selection?.storeId;
@@ -59,7 +62,7 @@ export function useNativePlanProgress({
     plan: NativePlanProgress;
     historyEpoch: number;
     stale: boolean;
-    outcome?: Outcome;
+    historyOutcome?: Outcome;
   }>();
   const [openId, setOpenId] = useState<string>();
   const runId = activeRun?.id;
@@ -103,7 +106,12 @@ export function useNativePlanProgress({
   const settle = useCallback(
     (owner: string, plans: readonly NativePlanProgress[], outcome: Outcome) => {
       setLive((previous) => {
-        if (!previous || previous.scope !== scope || previous.runId !== owner || previous.outcome)
+        if (
+          !previous ||
+          previous.scope !== scope ||
+          previous.runId !== owner ||
+          previous.historyOutcome
+        )
           return previous;
         const exact = plans.find(
           (plan) =>
@@ -112,7 +120,9 @@ export function useNativePlanProgress({
             plan.version === previous.plan.version &&
             plan.digest === previous.plan.digest,
         );
-        return exact ? { ...previous, plan: exact, stale: false, outcome } : previous;
+        return exact
+          ? { ...previous, plan: exact, stale: false, historyOutcome: outcome }
+          : previous;
       });
     },
     [scope],
@@ -121,13 +131,35 @@ export function useNativePlanProgress({
     live && live.scope === scope && !waitingForReview && (!runId || runId === live.runId)
       ? live
       : undefined;
+  const observedRun =
+    shown &&
+    runs?.find(
+      (run) =>
+        run.id === shown.runId &&
+        run.sessionId === sessionId &&
+        run.originStoreId === storeId &&
+        !run.isActive,
+    );
+  const status = observedRun?.status;
+  const terminalOutcome =
+    status === 'interrupted'
+      ? 'aborted'
+      : status === 'completed' || status === 'failed' || status === 'cancelled'
+        ? status
+        : undefined;
   const open = !!shown && shown.plan.reviewExecutionId === openId;
+  // Run settlement and its exact historical step read are independent facts.
   const active =
-    shown && (!shown.outcome || open)
+    shown && (!shown.historyOutcome || open)
       ? {
           ...shown,
+          outcome: shown.historyOutcome ?? terminalOutcome,
           stale:
-            !shown.outcome && (shown.stale || unconfirmed || shown.historyEpoch !== historyEpoch),
+            !shown.historyOutcome &&
+            (!!terminalOutcome ||
+              shown.stale ||
+              unconfirmed ||
+              shown.historyEpoch !== historyEpoch),
         }
       : undefined;
   const setOpen = useCallback(
