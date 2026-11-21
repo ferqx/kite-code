@@ -4163,6 +4163,47 @@ function NativeDesktopContent({
           JSON.stringify([selection.storeId, selection.session.workspaceId, sessionId]),
         );
       }
+      const cleared = clearedInputDrafts.current.get(commandId);
+      // An exact private-storage receipt already confirms this particular clear.
+      // A later edit (even a later blank), a changed view, or an ordinary accepted
+      // receipt without the committed revision keeps the established CAS path.
+      if (
+        accepted &&
+        intent.kind === 'input.follow_up' &&
+        current === generation.current &&
+        nonce === viewIntent.current &&
+        selected.current === sessionId &&
+        draftOwner.current === draftKey &&
+        savedForSend &&
+        noteDraftStates.current.get(draftKey) === savedForSend &&
+        savedForSend.revision === submittedRevision &&
+        draftRevision.current === submittedRevision &&
+        !savedForSend.uncertain &&
+        cleared?.draft === submittedDraft &&
+        draftCache.current.get(draftKey) === cleared.empty &&
+        !dirtyDrafts.current.has(draftKey) &&
+        !imageDrafts.get(draftKey).length &&
+        !imageDrafts.files(draftKey).length &&
+        !browserNotes.get(draftKey).length &&
+        value &&
+        'draft' in value &&
+        value.draft?.id === savedForSend.id &&
+        value.draft.revision === String(submittedRevision) &&
+        'consumedDraftRevision' in value &&
+        Number.isSafeInteger(value.consumedDraftRevision) &&
+        value.consumedDraftRevision === submittedRevision + 1
+      ) {
+        savedForSend.revision = value.consumedDraftRevision;
+        savedForSend.consumedCommand = undefined;
+        savedForSend.managed = true;
+        savedForSend.signature = JSON.stringify({
+          content: '',
+          browserAnnotations: [],
+          annotationImageOffset: 0,
+          outputFiles: [],
+        });
+        draftRevision.current = value.consumedDraftRevision;
+      }
     });
   }
   const approvalReadIntent = viewIntent.current,

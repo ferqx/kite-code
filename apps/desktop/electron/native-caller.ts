@@ -3679,7 +3679,38 @@ export class NativeCaller {
               ? await this.input.steer(request.sessionId, intent)
               : await this.input.followUp(request.sessionId, intent),
         );
-        if (prepared.intent.draft && result) result = { ...result, draft: prepared.intent.draft };
+        if (prepared.intent.draft && result) {
+          const draft = prepared.intent.draft;
+          const consumedDraftRevision =
+            intent.kind === 'input.follow_up' &&
+            !request.officeDocument &&
+            !localSourceCheck &&
+            !intent.images?.length &&
+            !intent.files?.length &&
+            !request.imageIds?.length &&
+            !request.fileIds?.length &&
+            !draft.browserAnnotations?.length &&
+            generation === this.generation &&
+            originalSelection === this.selection &&
+            this.selected === request.sessionId &&
+            (result.phase === 'accepted' || result.phase === 'applied')
+              ? this.privateData?.confirmedDraftConsumption?.(
+                  {
+                    storeId: prepared.intent.scope.storeId,
+                    workspaceId: prepared.intent.scope.workspaceId,
+                    rootSessionId: prepared.intent.scope.sessionId,
+                  },
+                  draft.id,
+                  intent.commandId,
+                  draft.revision,
+                )
+              : undefined;
+          result = {
+            ...result,
+            draft,
+            ...(consumedDraftRevision === undefined ? {} : { consumedDraftRevision }),
+          };
+        }
         break;
       }
       case 'cancelInput': {

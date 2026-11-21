@@ -98,6 +98,12 @@ export type PrivateData = NativeScheduledTaskData &
     readTurns(storeId: string): [string, string][];
     markTurnRead(input: Extract<NativeRequest, { method: 'session.markRead' }>): void;
     read(scope: DraftScope): NativeDraft;
+    confirmedDraftConsumption?(
+      scope: DraftScope,
+      id: string,
+      commandId: string,
+      revision: string,
+    ): number | undefined;
     consumePreparation?(revision: number, target: NativeDraft, commandId: string): void;
     save(
       scope: DraftScope,
@@ -736,12 +742,12 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     revision: number;
     from: NonNullable<NativeDraft['consumedFrom']>;
   };
-  const draftConsumptions = new Map<string, DraftConsumption>();
-  function rememberConsumption(consumed: DraftConsumption | undefined) {
+  const draftConsumptions = new Map<string, DraftConsumption & { fromSubmit: boolean }>();
+  function rememberConsumption(consumed: DraftConsumption | undefined, fromSubmit = false) {
     if (!consumed) return;
     // Publish only after COMMIT. This is a bounded hot-client CAS aid, not durable state.
     draftConsumptions.delete(consumed.id);
-    draftConsumptions.set(consumed.id, consumed);
+    draftConsumptions.set(consumed.id, { ...consumed, fromSubmit });
     if (draftConsumptions.size > 128)
       draftConsumptions.delete(draftConsumptions.keys().next().value!);
   }
@@ -1079,6 +1085,30 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           )
           .run(record.request.commandId, JSON.stringify(record));
       });
+    },
+    confirmedDraftConsumption(scope, id, commandId, revision) {
+      const proof = draftConsumptions.get(id);
+      if (
+        !proof?.fromSubmit ||
+        proof.from.commandId !== commandId ||
+        String(proof.from.revision) !== revision
+      )
+        return;
+      try {
+        const saved = readDraft(scope);
+        if (
+          saved.id === id &&
+          saved.revision === proof.revision &&
+          saved.revision === proof.from.revision + 1 &&
+          saved.content === '' &&
+          !saved.browserAnnotations?.length &&
+          !saved.outputFiles?.length
+        )
+          return saved.revision;
+      } catch {
+        // Losing an optional optimization must not overwrite the submit outcome.
+      }
+      return undefined;
     },
     consumePreparation(revision, target, commandId) {
       let consumed: DraftConsumption | undefined;
@@ -1450,7 +1480,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         attachments.consume(value);
         return value;
       });
-      rememberConsumption(consumed);
+      rememberConsumption(consumed, true);
       return result;
     },
     clearCaller(commandId) {

@@ -29,6 +29,8 @@ export interface InputSubmission {
 }
 export type InputMetadata = Omit<InputSubmission, 'intent'> & {
   draft?: { id: string; revision: string; textDigest: string };
+  /** Local desktop-only receipt for an exact, committed blank revision. */
+  consumedDraftRevision?: number;
   intent: Pick<CallerCommandRequest, 'kind' | 'expectedStoreId' | 'commandId'>;
 };
 export const inputMetadata = (value: InputSubmission): InputMetadata => {

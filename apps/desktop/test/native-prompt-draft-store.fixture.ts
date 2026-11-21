@@ -74,6 +74,16 @@ try {
       data.read(scope).consumedFrom,
       sent ? { commandId: phase, revision: 1 } : undefined,
     );
+    assert.equal(
+      data.confirmedDraftConsumption!(scope, saved.id, phase, '1'),
+      sent ? 2 : undefined,
+    );
+    assert.equal(data.confirmedDraftConsumption!(scope, saved.id, 'other', '1'), undefined);
+    assert.equal(data.confirmedDraftConsumption!(scope, saved.id, phase, '0'), undefined);
+    assert.equal(
+      data.confirmedDraftConsumption!({ ...scope, rootSessionId: 'other' }, saved.id, phase, '1'),
+      undefined,
+    );
     close();
     data = await open();
     assert.equal(data.read(scope).content, sent ? '' : saved.content);
@@ -109,6 +119,7 @@ try {
   data.save(scope, saved.revision, '发送期间新输入');
   data.finishCaller('new-edit', 'accepted');
   assert.equal(data.read(scope).content, '发送期间新输入');
+  assert.equal(data.confirmedDraftConsumption!(scope, saved.id, 'new-edit', '1'), undefined);
   checked.push('new-revision-preserved');
 
   // Model the old on-disk layout: an accepted caller and its unchanged saved prompt.
@@ -129,6 +140,7 @@ try {
   assert.equal(data.read(scope).revision, 2);
   assert.equal(data.read(scope).revision, 2);
   assert.deepEqual(data.read(scope).consumedFrom, { commandId: 'new-edit', revision: 1 });
+  assert.equal(data.confirmedDraftConsumption!(scope, saved.id, 'new-edit', '1'), undefined);
   assert.equal(
     data.callers().find((r) => r.intent.request.commandId === 'new-edit')!.phase,
     'accepted',
