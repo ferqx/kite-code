@@ -353,8 +353,8 @@ try {
         await send(index);
         if (index === 1) {
           const pane = page.locator('.history-panel .conversation-viewport');
-          const trace = pane.locator('.conversation-trace > button');
-          await trace.click();
+          const thoughtDisclosure = pane.locator('.conversation-reasoning > button').first();
+          await thoughtDisclosure.click();
           const thought = pane
             .locator('.conversation-reasoning-body')
             .getByText('ROOT_1_THOUGHT_INITIAL', { exact: true });
@@ -403,8 +403,8 @@ try {
           );
           await thought.scrollIntoViewIfNeeded();
           await page.screenshot({ path: join(switchDirectory!, 'after-tools-b.png') });
-          await pane.locator('.conversation-reasoning > button').first().press('Enter');
-          await trace.click();
+          await thoughtDisclosure.press('Enter');
+          await pane.locator('.conversation-trace > button').click();
           await pane.evaluate((element) => {
             element.scrollTop = 0;
           });

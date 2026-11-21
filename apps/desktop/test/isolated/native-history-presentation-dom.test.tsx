@@ -1355,12 +1355,11 @@ test('late verified child directory updates its direct row without replacing exp
     await f.release('runs');
     await f.release('tools');
     await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
-    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
-    const traceTriggers = [
-      ...f.host.querySelectorAll<HTMLButtonElement>('.conversation-trace-trigger'),
-    ];
-    expect(traceTriggers).toHaveLength(2);
-    for (const trigger of traceTriggers) await act(async () => trigger.click());
+    const toolDisclosure = '.tool-activity:not(.child-agent-activity) button.tool-activity-summary';
+    await f.until(() => f.host.querySelectorAll(toolDisclosure).length === 2);
+    expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
+    for (const button of f.host.querySelectorAll<HTMLButtonElement>(toolDisclosure))
+      await act(async () => button.click());
     await f.until(() => !!f.host.querySelector('.child-agent-activity'));
     const child = f.host.querySelector('.child-agent-activity')!;
     expect(child.closest('.conversation-trace')).toBeNull();
@@ -1370,7 +1369,7 @@ test('late verified child directory updates its direct row without replacing exp
     expect(f.host.textContent).not.toContain('CHILD_RECEIPT_MUST_STAY_HIDDEN');
     const ordinary = () => [
       ...f.host.querySelectorAll<HTMLElement>(
-        '.conversation-trace-steps > .tool-activity:not(.child-agent-activity)',
+        '.agent-turn .tool-activity:not(.child-agent-activity)',
       ),
     ];
     expect(ordinary()).toHaveLength(2);

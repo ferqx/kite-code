@@ -354,22 +354,24 @@ try {
         probe.violations.push(`${kind}:${probe.phase}:premature_final`);
       if (probe.phase === 'settled' && visible.includes('正在思考'))
         probe.violations.push(`${kind}:settled:thinking_after_final`);
-      const segments = [...conversation.querySelectorAll('.conversation-trace > button')].map(
-        (button) => {
-          const label = button.textContent;
-          if (
-            /^(正在回复|等待工具执行|正在等待|等待处理|正在停止|需要恢复|执行状态待确认)/.test(
-              label,
-            ) ||
-            (label.startsWith('正在思考') && !button.querySelector('[data-reasoning]'))
-          )
-            probe.violations.push(`${kind}:${probe.phase}:trace_borrowed_turn_activity`);
-          return {
-            text: label,
-            running: !!button.querySelector('[data-status="running"]'),
-          };
-        },
-      );
+      const segments = [
+        ...conversation.querySelectorAll(
+          '.conversation-trace-trigger:not(.conversation-trace-steps *)',
+        ),
+      ].map((button) => {
+        const label = button.textContent;
+        if (
+          /^(正在回复|等待工具执行|正在等待|等待处理|正在停止|需要恢复|执行状态待确认)/.test(
+            label,
+          ) ||
+          (label.startsWith('正在思考') && !button.querySelector('[data-reasoning]'))
+        )
+          probe.violations.push(`${kind}:${probe.phase}:trace_borrowed_turn_activity`);
+        return {
+          text: label,
+          running: !!button.querySelector('[data-status="running"]'),
+        };
+      });
       if (
         ['tools-complete', 'tools-complete-open', 'second-reasoning'].includes(probe.phase) &&
         (segments.length !== 2 ||
@@ -561,7 +563,7 @@ try {
   assert.ok((await content()).includes('正在思考'), 'inline reasoning keeps its own heading');
   await checkBeforeReply('inline-reasoning', 0);
   await setPhase('reasoning-open');
-  const thought = page.locator('.conversation-trace > .conversation-trace-trigger');
+  const thought = page.locator('.conversation-reasoning > button');
   const arrow = thought.locator('.conversation-trace-chevron');
   assert.equal(await arrow.evaluate((element) => getComputedStyle(element).opacity), '0');
   await thought.hover();
@@ -573,22 +575,22 @@ try {
     'manually opened public reasoning',
   );
   const reasoningBody = page.locator('.conversation-reasoning-body .typeset-chat');
-  const reasoningDisclosure = page.locator('.conversation-reasoning > button');
-  assert.equal(await reasoningDisclosure.innerText(), '思考');
-  assert.equal(await reasoningDisclosure.getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.locator('.conversation .conversation-trace-trigger').count(), 1);
+  assert.equal(await thought.innerText(), '正在思考…');
+  assert.equal(await thought.getAttribute('aria-expanded'), 'true');
   assert.equal(
-    await reasoningDisclosure.getAttribute('aria-controls'),
+    await thought.getAttribute('aria-controls'),
     await page.locator('.conversation-reasoning-body').getAttribute('id'),
     'reasoning text is owned by the independent accessible thinking step',
   );
-  await reasoningDisclosure.focus();
+  await thought.focus();
   await page.keyboard.press('Enter');
   await until(
     content,
     (value) => !value.includes('PRIVATE_REASONING_SENTINEL_INITIAL'),
     'keyboard closes only reasoning',
   );
-  assert.equal(await thought.getAttribute('aria-expanded'), 'true');
+  assert.equal(await thought.getAttribute('aria-expanded'), 'false');
   await page.keyboard.press('Space');
   await until(
     content,
@@ -677,7 +679,9 @@ try {
     gate.hold = false;
     for (const release of gate.releases.splice(0)) release();
   });
-  const traceHeadings = page.locator('.conversation-trace > .conversation-trace-trigger');
+  const traceHeadings = page.locator(
+    '.conversation-trace-trigger:not(.conversation-trace-steps *)',
+  );
   const toolHeading = traceHeadings.nth(1);
   const latestReadTitle = '已读取 read-only.txt';
   await until(

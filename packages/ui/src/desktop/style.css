@@ -3885,6 +3885,7 @@ body {
     :where([data-direct-trace-tool], .agent-turn-body)
     > :where(.tool-activity)
     > .tool-activity-summary,
+  & [data-direct-step] :where(.conversation-reasoning) .conversation-trace-line,
   & :where(.conversation-trace) > .conversation-trace-trigger > .conversation-trace-line {
     min-height: 0;
     padding-block: 0;

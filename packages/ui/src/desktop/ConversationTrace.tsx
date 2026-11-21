@@ -11,7 +11,7 @@ import {
   TraceTitle,
 } from './components/ui/trace';
 import { DeferredProcessContent } from './DeferredProcessContent';
-import { completedToolActions, completedToolCategory, toolIcon } from './ToolActivity';
+import { toolIcon } from './ToolActivity';
 import type { Message } from './types';
 
 export const traceKey = (boundary: Message) =>
@@ -45,8 +45,6 @@ export function ConversationTrace({
   id,
   label,
   running,
-  summarizeTools,
-  failed,
   notice,
   processOpen,
   expanded,
@@ -59,63 +57,35 @@ export function ConversationTrace({
   id: string;
   label: string;
   running: boolean;
-  summarizeTools: boolean;
-  failed: boolean;
   notice?: ReactNode;
   processOpen: boolean;
   expanded: Readonly<Record<string, boolean>>;
   restoredExpanded: ReadonlySet<string>;
   onToggle: (id: string, open: boolean) => void;
-  renderTool: (
-    message: Message,
-    direct: boolean,
-    traceOpen: boolean,
-    onToggle?: (open: boolean) => void,
-    summaryTitle?: string,
-  ) => ReactNode;
+  renderTool: (message: Message, parentOpen: boolean) => ReactNode;
   renderReasoning?: (message: Message, open: boolean) => ReactNode;
 }) {
   const first = steps[0];
   const grouped = steps.length > 1;
-  const firstReasoning = first?.role === 'thinking';
-  const firstHasOwnDisclosure =
-    first?.role === 'tool' &&
-    (first.toolName === 'edit_file' ||
-      first.toolName === 'wait_agent_events' ||
-      (first.webSearchReceipt && first.toolName === 'web_search'));
-  const useOwnDisclosure = !grouped && firstHasOwnDisclosure;
-  const summarizedTool =
-    summarizeTools && first?.role === 'tool' && label === completedToolCategory(first);
-  const nested = grouped || firstReasoning || summarizedTool;
   const firstTool = steps.find((step) => step.role === 'tool');
   const summaryIcon = firstTool ? toolIcon(firstTool) : BulbIcon;
   const panelId = useId();
   const firstKey = first?.presentationKey ?? first?.id;
-  // Tool and Reasoning details use the same step key in either layout.
-  const hasDetails = grouped || first?.role === 'tool' || !!first?.reasoningSource;
-  const open =
-    hasDetails &&
-    (expanded[id] ?? (firstHasOwnDisclosure && expanded[`activity:${firstKey}`])) === true;
-  const detailsOpen = processOpen && open;
-  // Older single-step reading state may only carry the outer disclosure.
+  const open = expanded[id] === true;
+  const showSteps = !grouped || open;
+  const detailsOpen = processOpen && showSteps;
+  // Older singleton layouts could save only their outer disclosure.
   useEffect(() => {
     if (grouped || !open || !firstKey) return;
     const detailKey = first?.role === 'tool' ? `activity:${firstKey}` : firstKey;
     if (expanded[detailKey] === undefined) onToggle(detailKey, true);
   }, [grouped, open, firstKey, first?.role, expanded, onToggle]);
-  function toggle(next: boolean) {
-    onToggle(id, next);
-    if (grouped || !firstKey) return;
-    if (!summarizedTool && first?.role === 'tool') {
-      onToggle(`activity:${firstKey}`, next);
-    }
-    if (next && firstReasoning && expanded[firstKey] === undefined) onToggle(firstKey, true);
-  }
+  if (!first) return null;
   const summary = (
     <TraceLine
       className="conversation-trace-line"
       data-reasoning={!firstTool || undefined}
-      status={running ? 'running' : failed ? 'error' : undefined}
+      status={running ? 'running' : undefined}
     >
       <TraceIcon>
         <HugeiconsIcon icon={summaryIcon} />
@@ -123,124 +93,107 @@ export function ConversationTrace({
       <TraceTitle title={label} aria-live="polite" aria-atomic="true">
         {label}
       </TraceTitle>
-      {hasDetails && (
-        <TraceIcon className="conversation-trace-chevron">
-          <HugeiconsIcon icon={ArrowDown01Icon} />
-        </TraceIcon>
-      )}
+      <TraceIcon className="conversation-trace-chevron">
+        <HugeiconsIcon icon={ArrowDown01Icon} />
+      </TraceIcon>
     </TraceLine>
   );
   return (
     <TraceCollapsible
       className="conversation-trace"
       data-restored-expanded={restoredExpanded.has(id) || undefined}
-      open={useOwnDisclosure || open}
-      onOpenChange={toggle}
+      open={showSteps}
+      onOpenChange={(next) => onToggle(id, next)}
     >
-      {!useOwnDisclosure && (
+      {grouped && (
         <button
           type="button"
           className="conversation-trace-trigger"
-          disabled={!hasDetails}
-          aria-controls={hasDetails ? panelId : undefined}
-          aria-expanded={hasDetails ? open : undefined}
-          onClick={() => toggle(!open)}
+          aria-controls={panelId}
+          aria-expanded={open}
+          onClick={() => onToggle(id, !open)}
         >
           {summary}
         </button>
       )}
-      {!useOwnDisclosure && notice}
-      {hasDetails && (
-        <DeferredProcessContent
-          component={TraceCollapsibleContent}
-          id={panelId}
-          data-direct-step={useOwnDisclosure || !nested || undefined}
-          open={useOwnDisclosure || open}
-          render={() => (
-            <Trace
-              className={useOwnDisclosure ? undefined : 'conversation-trace-steps'}
-              data-direct-trace-tool={useOwnDisclosure || undefined}
-              data-grouped={nested || undefined}
-            >
-              {steps.map((step, index) => {
-                const stepKey = step.presentationKey ?? step.id;
-                const direct = index === 0 && !grouped && !summarizedTool;
-                if (step.role === 'tool')
-                  return (
-                    <Fragment key={stepKey}>
-                      {useOwnDisclosure
-                        ? renderTool(
-                            step,
-                            false,
-                            processOpen,
-                            toggle,
-                            (!step.webSearchReceipt &&
-                              summarizeTools &&
-                              completedToolActions([step])) ||
-                              undefined,
-                          )
-                        : renderTool(
-                            step,
-                            direct,
-                            detailsOpen,
-                            undefined,
-                            (direct && summarizeTools && completedToolActions([step])) || undefined,
-                          )}
-                    </Fragment>
-                  );
-                const canRead = !!step.reasoningSource && !!renderReasoning;
-                const stepOpen = expanded[stepKey];
-                const reasoningOpen = canRead && (stepOpen ?? (!grouped && open));
-                const heading = (
-                  <TraceLine className="conversation-trace-line" data-reasoning>
-                    <TraceIcon>
-                      <HugeiconsIcon icon={BulbIcon} />
+      {grouped && notice}
+      <DeferredProcessContent
+        component={TraceCollapsibleContent}
+        id={panelId}
+        data-direct-step={!grouped || undefined}
+        open={grouped ? open : 'inline'}
+        render={() => (
+          <Trace
+            className={grouped ? 'conversation-trace-steps' : undefined}
+            data-direct-trace-tool={(!grouped && first.role === 'tool') || undefined}
+            data-grouped={grouped || undefined}
+          >
+            {steps.map((step) => {
+              const stepKey = step.presentationKey ?? step.id;
+              if (step.role === 'tool')
+                return <Fragment key={stepKey}>{renderTool(step, detailsOpen)}</Fragment>;
+              const canRead = !!step.reasoningSource && !!renderReasoning;
+              const stepOpen = expanded[stepKey];
+              const reasoningOpen = canRead && (stepOpen ?? (!grouped && open));
+              const heading = (
+                <TraceLine
+                  className="conversation-trace-line"
+                  data-reasoning
+                  status={!grouped && running ? 'running' : undefined}
+                >
+                  <TraceIcon>
+                    <HugeiconsIcon icon={BulbIcon} />
+                  </TraceIcon>
+                  <TraceTitle aria-live={grouped ? undefined : 'polite'}>
+                    {grouped ? (step.settled ? '已思考' : '思考') : label}
+                  </TraceTitle>
+                  {canRead && (
+                    <TraceIcon className="conversation-trace-chevron">
+                      <HugeiconsIcon icon={ArrowDown01Icon} />
                     </TraceIcon>
-                    <TraceTitle>{step.settled ? '已思考' : '思考'}</TraceTitle>
-                    {canRead && (
-                      <TraceIcon className="conversation-trace-chevron">
-                        <HugeiconsIcon icon={ArrowDown01Icon} />
-                      </TraceIcon>
-                    )}
-                  </TraceLine>
-                );
-                return (
-                  <TraceCollapsible
-                    key={stepKey}
-                    className="conversation-reasoning"
-                    data-restored-expanded={
-                      restoredExpanded.has(stepKey) ||
-                      (!grouped && stepOpen === undefined && restoredExpanded.has(id)) ||
-                      undefined
-                    }
-                    open={reasoningOpen}
-                    onOpenChange={(next) => onToggle(stepKey, next)}
-                  >
-                    {canRead ? (
-                      <TraceCollapsibleTrigger asChild>
-                        <button type="button" className="conversation-trace-trigger">
-                          {heading}
-                        </button>
-                      </TraceCollapsibleTrigger>
-                    ) : (
-                      heading
-                    )}
-                    {canRead && (
-                      <DeferredProcessContent
-                        component={TraceCollapsibleContent}
-                        open={reasoningOpen}
-                        className="conversation-reasoning-body"
-                        render={() => renderReasoning(step, detailsOpen && reasoningOpen)}
-                      />
-                    )}
-                  </TraceCollapsible>
-                );
-              })}
-            </Trace>
-          )}
-        />
-      )}
-      {useOwnDisclosure && notice}
+                  )}
+                </TraceLine>
+              );
+              return (
+                <TraceCollapsible
+                  key={stepKey}
+                  className="conversation-reasoning"
+                  data-restored-expanded={
+                    restoredExpanded.has(stepKey) ||
+                    (!grouped && stepOpen === undefined && restoredExpanded.has(id)) ||
+                    undefined
+                  }
+                  open={reasoningOpen}
+                  onOpenChange={(next) => {
+                    onToggle(stepKey, next);
+                    // Keep visible reasoning readable when a tool joins the segment.
+                    if (!grouped) onToggle(id, next);
+                  }}
+                >
+                  {canRead ? (
+                    <TraceCollapsibleTrigger asChild>
+                      <button type="button" className="conversation-trace-trigger">
+                        {heading}
+                      </button>
+                    </TraceCollapsibleTrigger>
+                  ) : (
+                    heading
+                  )}
+                  {canRead && (
+                    <DeferredProcessContent
+                      component={TraceCollapsibleContent}
+                      open={reasoningOpen}
+                      className="conversation-reasoning-body"
+                      render={() => renderReasoning(step, detailsOpen && reasoningOpen)}
+                    />
+                  )}
+                </TraceCollapsible>
+              );
+            })}
+          </Trace>
+        )}
+      />
+      {!grouped && notice}
     </TraceCollapsible>
   );
 }

@@ -442,7 +442,9 @@ test('child live Shell commands keep the same expanded row through fresh snapsho
   try {
     await render();
     await act(async () =>
-      host.querySelector<HTMLButtonElement>('.conversation-trace > button')!.click(),
+      host
+        .querySelector<HTMLButtonElement>('.shell-activity button.tool-activity-summary')!
+        .click(),
     );
     let row = host.querySelector<HTMLElement>('.shell-activity')!;
     expect(row).not.toBeNull();

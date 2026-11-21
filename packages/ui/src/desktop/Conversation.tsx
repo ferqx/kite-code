@@ -52,13 +52,7 @@ import { formatMessageTime } from './message-time';
 import { PromptMarkdown } from './PromptMarkdown';
 import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
-import {
-  completedToolActions,
-  completedToolSummary,
-  ToolActivity,
-  toolTextFailed,
-  toolTraceTitle,
-} from './ToolActivity';
+import { completedToolActions, ToolActivity, toolTraceTitle } from './ToolActivity';
 import { TurnFailure } from './TurnFailure';
 import type { Message, TurnActivity } from './types';
 import { Button } from './ui';
@@ -1136,18 +1130,12 @@ export function Conversation({
       group: Message[],
       placement: 'standalone' | 'process' | 'result' | 'trace' = 'standalone',
       {
-        directTraceDetails = false,
-        traceSummaryTitle,
         showTraceReply = false,
         parentDisclosureOpen = true,
-        onToolToggle,
         turnOutputs,
       }: {
-        directTraceDetails?: boolean;
-        traceSummaryTitle?: string;
         showTraceReply?: boolean;
         parentDisclosureOpen?: boolean;
-        onToolToggle?: (open: boolean) => void;
         turnOutputs?: ReactNode;
       } = {},
     ) => {
@@ -1170,9 +1158,7 @@ export function Conversation({
       const activityKey = aggregate
         ? `activity-group:${message.presentationGroupId ?? message.presentationKey ?? message.id}`
         : `activity:${message.presentationKey ?? message.id}`;
-      const toggle =
-        onToolToggle ??
-        ((open: boolean) => (inTrace ? onTraceToggle : onToggle)(activityKey, open));
+      const toggle = (open: boolean) => (inTrace ? onTraceToggle : onToggle)(activityKey, open);
       if (message.role === 'tool' && renderToolActivity)
         return (
           <Fragment key={activityKey}>
@@ -1180,8 +1166,6 @@ export function Conversation({
               aggregate,
               expanded: expanded[activityKey],
               inTrace,
-              directTraceDetails,
-              traceSummaryTitle,
               parentDisclosureOpen,
               activityId: activityKey,
               restoredExpanded: restoredExpanded.current,
@@ -1197,8 +1181,6 @@ export function Conversation({
           messages={group}
           aggregate={aggregate}
           inTrace={inTrace}
-          directTraceDetails={directTraceDetails}
-          traceSummaryTitle={traceSummaryTitle}
           parentDisclosureOpen={parentDisclosureOpen}
           suppressGenericFailure={
             message.toolName === 'task' &&
@@ -1464,19 +1446,15 @@ export function Conversation({
               !trailing.tracePending &&
               (!!trailing.text.trim() || !!trailing.reasoningSource) &&
               !trailing.settled;
-            const singleTool =
-              steps.length === 1 && steps[0]?.role === 'tool' ? steps[0] : undefined;
             const summary = latestTool
               ? toolTraceTitle(latestTool)
-              : singleTool
-                ? (completedToolSummary(singleTool) ?? toolTraceTitle(singleTool))
-                : tools.length
-                  ? completedToolActions(tools) || '工具执行'
-                  : thinking
-                    ? '正在思考…'
-                    : steps.some((step) => !step.settled)
-                      ? '思考'
-                      : '思考了';
+              : tools.length
+                ? completedToolActions(tools) || '工具执行'
+                : thinking
+                  ? '正在思考…'
+                  : steps.some((step) => !step.settled)
+                    ? '思考'
+                    : '思考了';
             const boundary = blocks[index - 1]?.[0];
             const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
             if (open && expanded[id] === true) trackOpen(id);
@@ -1487,8 +1465,6 @@ export function Conversation({
                 steps={steps}
                 label={summary}
                 running={!!runningTool || thinking}
-                summarizeTools={!latestTool}
-                failed={!!singleTool && toolTextFailed(singleTool)}
                 processOpen={open}
                 notice={
                   turnActive &&
@@ -1501,13 +1477,16 @@ export function Conversation({
                 expanded={expanded}
                 restoredExpanded={restoredExpanded.current}
                 onToggle={onTraceToggle}
-                renderTool={(item, direct, traceOpen, onToolToggle, traceSummaryTitle) =>
-                  renderGroup([item], 'trace', {
-                    directTraceDetails: direct,
-                    traceSummaryTitle,
-                    parentDisclosureOpen: traceOpen,
-                    onToolToggle,
-                  })
+                renderTool={(item, parentDisclosureOpen) =>
+                  renderGroup(
+                    [
+                      steps.length === 1 && !item.settled && activity?.executionUnconfirmed
+                        ? { ...item, executionUnconfirmed: true }
+                        : item,
+                    ],
+                    'trace',
+                    { parentDisclosureOpen },
+                  )
                 }
                 renderReasoning={renderReasoning}
               />

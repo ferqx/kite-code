@@ -2390,12 +2390,13 @@ test('mixed Trace keeps first-seen search, Skill, MCP category order and both se
   }
 });
 
-test('Native verified and original-reader single Trace rows receive only the completed summary copy and retain results', async () => {
+test('single Native tools keep their own card, verified target and original result reader', async () => {
   const f = fixture();
   try {
-    for (const [definitionId, completedTitle, originalTitle] of [
-      ['files.edit', '编辑了文件', '修改'],
-      ['task.events', '查看了 Agent 进展', '等待 Agent 事件'],
+    for (const [definitionId, definitionVersion, originalTitle] of [
+      ['files.edit', '2', '修改'],
+      ['task.events', '1', '等待 Agent 事件'],
+      ['files.read', '4', '读取'],
     ] as const) {
       for (const verified of [false, true]) {
         for (const status of ['succeeded', 'running', 'failed'] as const) {
@@ -2403,10 +2404,10 @@ test('Native verified and original-reader single Trace rows receive only the com
             messageId: 'single',
             executionId: 'execution',
             definitionId,
-            definitionVersion: definitionId === 'files.edit' ? '2' : '1',
+            definitionVersion,
             status,
             resultRevision: '1',
-            target: definitionId === 'files.edit' ? '已完成.txt' : undefined,
+            target: definitionId.startsWith('files.') ? '已完成.txt' : undefined,
           };
           const model = {
             ...desktopToolMessage(fact, fact.messageId, 'Original result'),
@@ -2447,10 +2448,17 @@ test('Native verified and original-reader single Trace rows receive only the com
             ),
           );
           const label = f.host.querySelector(
-            '.conversation-trace .tool-activity-summary .tool-label',
+            '.conversation-trace article.tool-activity .tool-label',
           );
-          expect(label?.textContent).toBe(status === 'succeeded' ? completedTitle : originalTitle);
+          expect(label?.textContent).toBe(
+            verified && status === 'succeeded' && definitionId.startsWith('files.')
+              ? `已${originalTitle}`
+              : originalTitle,
+          );
+          expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
           expect(f.host.querySelector('.conversation-trace-steps')).toBeNull();
+          if (definitionId === 'files.read' && verified && status === 'succeeded')
+            expect(f.host.querySelector('article.tool-activity button[aria-expanded]')).toBeNull();
           if (fact.target) expect(f.host.textContent).toContain(fact.target);
           if (!verified || definitionId === 'task.events')
             expect(f.host.textContent).toContain('Original result');
@@ -2466,8 +2474,9 @@ test('Native verified and original-reader single Trace rows receive only the com
 
 test('a single ordinary search keeps one stop notice until its execution settles', async () => {
   const f = fixture();
+  const reads: string[] = [];
   try {
-    for (const status of ['running', 'succeeded'] as const) {
+    for (const status of ['planned', 'running', 'succeeded'] as const) {
       const fact: NativeToolMessageFact = {
         definitionId: 'web.search',
         definitionVersion: '1',
@@ -2476,6 +2485,20 @@ test('a single ordinary search keeps one stop notice until its execution settles
         executionId: 'execution',
         messageId: 'search',
         resultRevision: '1',
+        authorization:
+          status === 'planned'
+            ? {
+                dispatched: false,
+                human: {
+                  interactionId: 'approval',
+                  state: 'pending',
+                  revision: '1',
+                  acceptedDecisionRevision: null,
+                  accepted: false,
+                  decision: null,
+                },
+              }
+            : { dispatched: true },
       };
       const model = {
         ...desktopToolMessage(fact, fact.messageId, ''),
@@ -2501,9 +2524,16 @@ test('a single ordinary search keeps one stop notice until its execution settles
                 diagnostics: false,
                 renderOriginal: () => null,
                 hasDeferredText: () => false,
+                renderSearch: (_model, executionId) => {
+                  reads.push(executionId);
+                  return <p>Search evidence for {executionId}</p>;
+                },
               })
             }
-            turnActivity={{ turnId: 'run', status: status === 'running' ? 'running' : 'completed' }}
+            turnActivity={{
+              turnId: 'run',
+              status: status === 'succeeded' ? 'completed' : 'running',
+            }}
             initialReading={{ top: 0, follow: false, expanded: { 'turn:run:complete': true } }}
           />,
         ),
@@ -2512,6 +2542,23 @@ test('a single ordinary search keeps one stop notice until its execution settles
         (el) => el.textContent === '已请求停止，等待执行结果。',
       );
       expect(notices).toHaveLength(status === 'running' ? 1 : 0);
+      expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
+      if (status === 'planned') {
+        expect(f.host.querySelectorAll('.tool-approval[aria-label="等待人工审批"]')).toHaveLength(
+          1,
+        );
+        expect(f.host.querySelector('article.tool-activity [data-status="running"]')).toBeNull();
+        expect(reads).toEqual([]);
+      }
+      if (status === 'running') {
+        expect(reads).toEqual([]);
+        const card = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+        await act(async () => card.click());
+        expect(f.host.textContent).toContain('Search evidence for execution');
+        expect(new Set(reads)).toEqual(new Set(['execution']));
+        expect(f.host.querySelectorAll('.conversation-turn-notice')).toHaveLength(1);
+        await act(async () => card.click());
+      }
     }
   } finally {
     await f.close();

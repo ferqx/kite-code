@@ -49,6 +49,14 @@ function tool(index: number, overrides: Partial<Execution> = {}): Execution {
   };
 }
 
+function shellLaunch(index: number) {
+  return tool(index, {
+    definitionId: 'shell.launch',
+    definitionVersion: '1',
+    toolInput: { key: 'aggregation-shell', command: 'printf aggregate' },
+  });
+}
+
 function fixture() {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
@@ -504,25 +512,31 @@ test('Native mixed tool activity keeps its first shell through receipt eviction 
   const f = fixture();
   try {
     await f.render();
-    const shell = tool(1, {
-      definitionId: 'shell.launch',
-      definitionVersion: '1',
-      toolInput: { key: 'aggregation-shell', command: 'printf aggregate' },
-    });
+    const shell = shellLaunch(1);
     await f.start([shell]);
     expect(topActivities(f.host)).toHaveLength(0);
     await f.flush();
-    collapsed(f.host);
-    const summary = f.host.querySelector('.conversation-trace-trigger');
-    await f.toggle();
+    const shellButton = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    expect(shellButton.getAttribute('aria-expanded')).toBe('false');
+    expect(f.host.querySelector('.conversation-trace-trigger')).toBeNull();
+    await act(async () => shellButton.click());
+    expect(f.host.querySelector('.shell-output')?.textContent).toContain('printf aggregate');
     await f.start([
       shell,
       tool(2, { definitionId: 'files.write', definitionVersion: '2' }),
       tool(3, { definitionId: 'custom.remote', definitionVersion: '99' }),
     ]);
-    expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
-    expect(summary?.getAttribute('aria-expanded')).toBe('true');
+    const summary = f.host.querySelector('.conversation-trace-trigger')!;
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    await f.toggle();
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
     expect(f.host.querySelector('.conversation-trace-steps')?.children).toHaveLength(3);
+    expect(f.host.querySelector('.shell-output')?.textContent).toContain('printf aggregate');
+    expect(
+      f.host
+        .querySelector('.conversation-trace-steps button.tool-activity-summary')
+        ?.getAttribute('aria-expanded'),
+    ).toBe('true');
     // The bounded View can evict the original Execution before the independent
     // receipt metadata read returns. Aggregation must not depend on its label.
     for (const index of [3, 1, 2]) {
@@ -544,21 +558,30 @@ test('Native mixed tool activity keeps its first shell through receipt eviction 
 });
 
 for (const expanded of [false, true])
-  test(`Native retains ${expanded ? 'an expanded' : 'a collapsed'} Trace beside a standalone child operation`, async () => {
+  test(`Native retains ${expanded ? 'an expanded' : 'a collapsed'} shell card beside a standalone child operation`, async () => {
     const f = fixture();
     const errors = spyOn(console, 'error');
     try {
       await f.render();
-      const first = tool(1);
+      const first = shellLaunch(1);
       await f.start([first]);
-      if (expanded) await f.toggle();
+      await f.flush();
       const activity = topActivities(f.host)[0]!;
-      const summary = activity.querySelector('.conversation-trace-trigger')!;
+      const summary = activity.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+      if (expanded) await act(async () => summary.click());
       const label = summary.querySelector('[data-slot="trace-title"]')!;
-      const firstRow = activity.querySelector('.conversation-trace-steps > :first-child');
-      expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
-      expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
-      if (expanded) expect(firstRow).not.toBeNull();
+      const output = activity.querySelector('.shell-output');
+      expect(!!output).toBe(expanded);
+      const checkFirst = () => {
+        expect(topActivities(f.host)[0] === activity).toBe(true);
+        expect(activity.querySelector('button.tool-activity-summary') === summary).toBe(true);
+        expect(summary.querySelector('[data-slot="trace-title"]') === label).toBe(true);
+        expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
+        expect(summary.getAttribute('data-status')).toBe('running');
+        expect(activity.querySelector('.shell-output') === output).toBe(true);
+        expect(activity.querySelector('.conversation-trace-trigger')).toBeNull();
+      };
+      checkFirst();
       const child = tool(2, {
         definitionId: 'task.spawn',
         definitionVersion: '1',
@@ -567,44 +590,31 @@ for (const expanded of [false, true])
       });
       await f.start([first, child]);
       expect(topActivities(f.host)).toHaveLength(1);
-      expect(topActivities(f.host)[0] === activity).toBe(true);
-      expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
+      checkFirst();
       const items = [first, child, tool(3, { status: 'running' })];
       await f.start(items);
       expect(topActivities(f.host)).toHaveLength(2);
-      expect(topActivities(f.host)[0] === activity).toBe(true);
       const nextTrace = topActivities(f.host)[1]!;
-      const nextSummary = nextTrace.querySelector('.conversation-trace-trigger')!;
+      const nextRead = nextTrace.querySelector('.tool-activity-step')!;
+      expect(nextRead.textContent).toContain('file-execution-3.ts');
       const childRow = activity.nextElementSibling;
       expect(!!childRow?.querySelector('.tool-activity')).toBe(true);
       expect(childRow?.querySelector('.conversation-trace') === null).toBe(true);
       expect(childRow?.nextElementSibling === nextTrace).toBe(true);
-      expect(activity.querySelector('.conversation-trace-trigger') === summary).toBe(true);
-      expect(summary.querySelector('[data-slot="trace-title"]') === label).toBe(true);
-      expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
-      expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
-      expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
-      if (expanded) {
-        expect(activity.querySelector('.conversation-trace-steps > :first-child')).toBe(firstRow);
-        expect(activity.querySelector('.conversation-trace-steps')?.children).toHaveLength(1);
-      } else expect(activity.querySelector('.conversation-trace-steps')).toBeNull();
       for (const refresh of [() => f.start(items), () => f.complete(2), () => f.flush()]) {
         await refresh();
-        expect(f.host.contains(activity)).toBe(true);
-        expect(summary.querySelector('[data-slot="trace-title"]') === label).toBe(true);
-        expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
-        expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
+        checkFirst();
         expect(topActivities(f.host)[1] === nextTrace).toBe(true);
-        expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
-        if (expanded) {
-          expect(activity.querySelector('.conversation-trace-steps > :first-child')).toBe(firstRow);
-        }
+        expect(nextTrace.querySelector('.tool-activity-step') === nextRead).toBe(true);
+        expect(nextRead.getAttribute('data-status')).toBe('running');
       }
       await f.complete(1);
       await f.flush();
-      expect(summary.textContent).toBe('读取了');
-      expect(summary.querySelector('[data-status="running"]')).toBeNull();
-      expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
+      expect(activity.querySelector('button.tool-activity-summary') === summary).toBe(true);
+      expect(summary.querySelector('.tool-activity-title')?.textContent).toBe('已请求运行');
+      expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
+      expect(summary.getAttribute('data-status')).not.toBe('running');
+      expect(nextRead.getAttribute('data-status')).toBe('running');
       expect(
         errors.mock.calls.some(([message]) => String(message).includes('unique "key" prop')),
       ).toBe(false);
@@ -622,23 +632,25 @@ test('a tool-call-only Model remains inside one Native activity while its histor
     await f.start([tool(1)]);
     await f.complete(1);
     await f.flush();
-    collapsed(f.host);
-    const summary = f.host.querySelector('.conversation-trace-trigger')!;
-    const title = summary.querySelector('[data-slot="trace-title"]');
-    expect(summary.textContent).toBe('已读取 file-execution-1.ts');
-    expect(summary.querySelector('[data-status="running"]')).toBeNull();
+    const activity = topActivities(f.host)[0]!;
+    const firstRead = activity.querySelector('.tool-activity-step')!;
+    const firstTitle = firstRead.querySelector('.tool-step-title')!;
+    expect(firstTitle.textContent).toBe('已读取');
+    expect(firstRead.textContent).toContain('file-execution-1.ts');
+    expect(firstRead.getAttribute('data-status')).not.toBe('running');
+    expect(activity.querySelector('.conversation-trace-trigger')).toBeNull();
     await f.appendToolCallModel();
-    collapsed(f.host);
-    expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
-    expect(summary.querySelector('[data-slot="trace-title"]')).toBe(title);
-    expect(summary.textContent).toBe('已读取 file-execution-1.ts');
-    expect(summary.querySelector('[data-status="running"]')).toBeNull();
+    expect(activity.querySelector('.tool-activity-step') === firstRead).toBe(true);
+    expect(firstRead.querySelector('.tool-step-title') === firstTitle).toBe(true);
+    expect(firstTitle.textContent).toBe('已读取');
     expect(f.host.querySelectorAll('.model-output-message')).toHaveLength(0);
     await f.finishToolCallModelAndStart([tool(2, { status: 'running' })]);
     // The current View has admitted Tool B, while the independent history GET
     // still retains its source Model as an incomplete empty assistant message.
     collapsed(f.host);
-    expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
+    expect(topActivities(f.host)[0] === activity).toBe(true);
+    const summary = activity.querySelector('.conversation-trace-trigger')!;
+    const title = summary.querySelector('[data-slot="trace-title"]')!;
     expect(summary.textContent).toBe('读取 file-execution-2.ts');
     expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
     await f.releaseHistory();

@@ -1825,9 +1825,8 @@ test('Native live tool observation failures stay silent outside explicit diagnos
     try {
       await f.render(diagnostics);
       await f.click('Original');
-      const trace = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
-      expect(trace.getAttribute('aria-expanded')).toBe('false');
-      await act(async () => trace.click());
+      expect(f.host.querySelector('.agent-turn .tool-activity-summary')).not.toBeNull();
+      expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
       await f.refreshing(true);
       const toolObservationNotices = () =>
         Array.from(f.host.querySelectorAll('.agent-turn p[role="status"]')).filter(
@@ -2049,9 +2048,7 @@ test('a standalone child creation among ordinary tools opens its exact read-only
     await f.render();
     await f.click('Original');
     await f.waitForText('已创建子 Agent · 已读取文件');
-    const trace = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
-    expect(trace.getAttribute('aria-expanded')).toBe('false');
-    await act(async () => trace.click());
+    expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
     const child = f.host.querySelector<HTMLButtonElement>(
       '.conversation .child-agent-activity button[aria-label="查看子 Agent 详情：Live child"]',
     )!;
@@ -2061,7 +2058,7 @@ test('a standalone child creation among ordinary tools opens its exact read-only
     expect(child.closest('.conversation-trace')).toBeNull();
     expect(child.querySelector('.tool-agent-operation')?.textContent).toBe('子agent开始工作');
     const ordinary = f.host.querySelector<HTMLElement>(
-      '.conversation-trace-steps > .tool-activity:not(.child-agent-activity)',
+      '.agent-turn .tool-activity:not(.child-agent-activity)',
     )!;
     expect(ordinary).not.toBeNull();
     expect(ordinary.textContent).toContain('已读取');
@@ -2086,7 +2083,8 @@ test('a standalone child creation among ordinary tools opens its exact read-only
     );
     expect(f.host.querySelector('.session-tab-child')?.textContent).toContain('Child prefix');
     expect(f.host.querySelector('.session-tab-child textarea.prompt-editor')).toBeNull();
-    expect(trace.getAttribute('aria-expanded')).toBe('true');
+    expect(ordinary.isConnected).toBe(true);
+    expect(ordinary.textContent).toContain('已读取');
     expect(
       f.requests.filter((request) => request.method === 'background.child.open'),
     ).toMatchObject([{ method: 'background.child.open', generation: 1, executionId: 'job-1' }]);

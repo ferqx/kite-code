@@ -308,13 +308,19 @@ test('Native model segments retain exact reasoning identity through prose, obser
   try {
     await draw();
     const headings = () => [
-      ...f.host.querySelectorAll<HTMLButtonElement>('.conversation-trace > button'),
+      ...f.host.querySelectorAll<HTMLButtonElement>('.conversation-reasoning > button'),
     ];
     expect(headings().map((entry) => entry.textContent)).toEqual(['思考了', '正在思考…']);
+    expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
+    expect(f.host.querySelector('[data-source]')).toBeNull();
     const firstHeading = headings()[0]!;
     await act(async () => firstHeading.click());
     const body = f.host.querySelector('[data-source="first-model-message"]')!;
-    expect(body.closest('.conversation-reasoning-body')).not.toBeNull();
+    expect(firstHeading.getAttribute('aria-controls')).toBe(
+      body.closest('.conversation-reasoning-body')!.id,
+    );
+    expect(firstHeading.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('[data-source="second-model-message"]')).toBeNull();
     for (const unconfirmed of [true, false, true, false]) {
       await draw('running', unconfirmed);
       expect(headings()[0]).toBe(firstHeading);
@@ -334,7 +340,7 @@ test('Native model segments retain exact reasoning identity through prose, obser
           await act(async () => summary.click());
         expect(headings().map((entry) => entry.textContent)).toEqual(['思考了', '思考了']);
         expect(
-          f.host.querySelector('.conversation-trace > button [data-status="running"]'),
+          f.host.querySelector('.conversation-reasoning > button [data-status="running"]'),
         ).toBeNull();
         expect(f.host.querySelectorAll('.message.assistant')).toHaveLength(1);
         expect(f.host.querySelector('.message.assistant')!.textContent).toContain(

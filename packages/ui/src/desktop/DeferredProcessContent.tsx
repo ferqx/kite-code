@@ -14,13 +14,15 @@ export function DeferredProcessContent({
   component: Content = AnimatedCollapsibleContent,
   ...props
 }: Omit<ContentProps, 'children' | 'forceMount'> & {
-  open: boolean;
+  /** Inline content is visible before a separate group disclosure exists. */
+  open: boolean | 'inline';
   render: () => ReactNode;
   component?: ComponentType<ContentProps>;
 }) {
-  const [visited, setVisited] = useState(open);
-  if (open && !visited) setVisited(true);
-  if (!open && !visited) return null;
+  const [visited, setVisited] = useState(open === true);
+  if (open === true && !visited) setVisited(true);
+  if (open === 'inline' && visited) setVisited(false);
+  if (open === false && !visited) return null;
   return (
     <Content {...props}>
       <DeferredProcessBody render={render} />
