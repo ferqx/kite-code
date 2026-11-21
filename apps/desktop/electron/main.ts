@@ -63,6 +63,7 @@ import {
   onNativeRootReady,
 } from './native-root-window';
 import { createNativeSessionSearchHost } from './native-session-search-host';
+import { createNativeSettingsHost } from './native-settings-host';
 import {
   nativeWindowMenuShortcut,
   nativeWindowMenuTemplate,
@@ -143,6 +144,7 @@ const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
 let window: NativeRootWindow | undefined, caller: NativeCaller | undefined;
 let globalDialogOwner: ReturnType<typeof createNativeGlobalDialogHost> | undefined;
 let sessionSearchOwner: ReturnType<typeof createNativeSessionSearchHost> | undefined;
+let settingsOwner: ReturnType<typeof createNativeSettingsHost> | undefined;
 let imageGalleryOwner: ReturnType<typeof createNativeImageGalleryHost> | undefined;
 let tray: Tray | undefined;
 let opening: Promise<NativeCaller> | undefined;
@@ -516,6 +518,7 @@ function finishNativeProcess(code = 0): void {
     }
   };
   retire(() => sessionSearchOwner?.dismiss());
+  retire(() => settingsOwner?.dismiss());
   retire(() => globalDialogOwner?.dismiss());
   retire(() => imageGalleryOwner?.dismiss());
   retire(() => closingTray?.destroy());
@@ -676,7 +679,9 @@ void app
       },
     };
     window = createNativeRootWindow(windowOptions);
-    const createModalView = (kind: 'global-dialog' | 'image-gallery' | 'session-search') => {
+    const createModalView = (
+      kind: 'global-dialog' | 'image-gallery' | 'session-search' | 'settings',
+    ) => {
       const view = new WebContentsView({
         webPreferences: {
           preload: join(app.getAppPath(), `${kind}-preload.cjs`),
@@ -747,9 +752,21 @@ void app
       url: new URL('session-search.html', rendererUrl).href,
       theme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
       createView: () => createModalView('session-search'),
-      higherModalActive: () => globalDialog.active() || imageGallery.active(),
+      higherModalActive: () =>
+        globalDialog.active() || imageGallery.active() || !!settingsOwner?.active(),
     });
     sessionSearchOwner = sessionSearch;
+    const settings = createNativeSettingsHost({
+      window,
+      ipcMain,
+      rootUrl: rendererUrl,
+      url: new URL('settings.html', rendererUrl).href,
+      theme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+      createView: () => createModalView('settings'),
+      higherModalActive: () =>
+        globalDialog.active() || imageGallery.active() || sessionSearch.active(),
+    });
+    settingsOwner = settings;
 
     if (process.platform === 'darwin')
       Menu.setApplicationMenu(Menu.buildFromTemplate(nativeRootWindowMenu(window)));
@@ -773,6 +790,7 @@ void app
             !globalDialog.active() &&
             !imageGallery.active() &&
             !sessionSearch.active() &&
+            !settings.active() &&
             window &&
             !window.isDestroyed() &&
             window.webContents.mainFrame.url.split('#')[0] === rendererUrl
@@ -806,7 +824,8 @@ void app
                 !quitting &&
                 !globalDialog.active() &&
                 !imageGallery.active() &&
-                !sessionSearch.active(),
+                !sessionSearch.active() &&
+                !settings.active(),
             }),
           ).getMenuItemById(request.menu)!.submenu!;
           return new Promise<void>((resolve) =>
@@ -824,6 +843,7 @@ void app
       globalDialog.syncTheme();
       imageGallery.syncTheme();
       sessionSearch.syncTheme();
+      settings.syncTheme();
       if (window && !window.isDestroyed()) {
         window.setBackgroundColor(
           windowMaterial !== 'none'

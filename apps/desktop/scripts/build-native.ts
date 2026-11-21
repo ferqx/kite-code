@@ -128,6 +128,7 @@ async function buildNativeApp(
     'global-dialog-preload',
     'image-gallery-preload',
     'session-search-preload',
+    'settings-preload',
     'trajectory-preload',
   ]) {
     const result = await Bun.build({
@@ -177,6 +178,7 @@ async function buildNativeApp(
             'global-dialog': join(root, 'global-dialog.html'),
             'image-gallery': join(root, 'image-gallery.html'),
             'session-search': join(root, 'session-search.html'),
+            settings: join(root, 'settings.html'),
             trajectory: join(root, 'trajectory.html'),
           },
           output: {

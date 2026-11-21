@@ -9,7 +9,7 @@ import type {
   NativeUserMcpResult,
   NativeUserMcpSubmission,
 } from './mcp-bridge';
-import type { NativeBridge } from './native-bridge';
+import type { NativeSettingsEditorControl, NativeSettingsRequestPort } from './native-bridge';
 import { emptyMcpDraft, mcpDraftEntry, NativeMcpAddFields } from './native-mcp-add-form';
 import { McpSourceMenu, McpToolCatalogue } from './native-mcp-components';
 import {
@@ -72,13 +72,15 @@ export function NativeMcpSettings({
   submissions,
   panelHost,
   editorControl,
+  onRequestEditorClose,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
   storeId?: string;
   submissions: readonly NativeUserMcpSubmission[];
   panelHost: HTMLElement | null;
-  editorControl?: RefObject<{ close: () => void } | null>;
+  editorControl?: RefObject<NativeSettingsEditorControl | null>;
+  onRequestEditorClose?: () => void;
 }) {
   const fieldId = useId();
   const [facts, setFacts] = useState<NativeUserMcpFacts>();
@@ -219,6 +221,18 @@ export function NativeMcpSettings({
     setError('');
     restoreFocus.current = restore;
   }
+  function requestEditorClose() {
+    if (onRequestEditorClose) onRequestEditorClose();
+    else closePanel();
+  }
+  function hasUnsavedChanges() {
+    const base = emptyMcpDraft();
+    if (panel?.kind === 'add')
+      return Object.entries(draft).some(([key, value]) =>
+        Array.isArray(value) ? value.length > 0 : value !== base[key as keyof typeof base],
+      );
+    return panel?.kind === 'source' && editingExpiry && expiry !== '';
+  }
   function settlePanel(row: NativeUserMcpSubmission, observedPanel: typeof panel) {
     if (row.phase !== 'completed' || !observedPanel || activePanel.current !== observedPanel)
       return;
@@ -287,14 +301,21 @@ export function NativeMcpSettings({
       panelHost?.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')?.focus();
     }
   }, [review, panelHost]);
+  const closeCurrent = useRef(closePanel);
+  closeCurrent.current = closePanel;
+  const dirty = useRef(false);
+  dirty.current = hasUnsavedChanges();
   useEffect(() => {
     if (!editorControl || !panel) return;
-    const control = { close: () => closePanel() };
+    const control: NativeSettingsEditorControl = {
+      close: () => closeCurrent.current(),
+      hasUnsavedChanges: () => dirty.current,
+    };
     editorControl.current = control;
     return () => {
       if (editorControl.current === control) editorControl.current = null;
     };
-  });
+  }, [editorControl, panel]);
   async function submit(operation: NativeUserMcpOperation) {
     if (!facts || flight.current) return;
     const cleanup = canCleanup(operation);
@@ -712,7 +733,7 @@ export function NativeMcpSettings({
             id={`${fieldId}-editor`}
             label={panel.kind === 'add' ? '新增 MCP' : (source?.name ?? 'MCP')}
             title={panel.kind === 'add' ? '新增 MCP' : (source?.name ?? 'MCP')}
-            onClose={() => closePanel()}
+            onClose={requestEditorClose}
           >
             <div className="catalogue-settings provider-panel-content mcp-settings">
               <div className="provider-editor right-sidebar-editor">
@@ -938,7 +959,7 @@ export function NativeMcpSettings({
                           ? setReview(undefined)
                           : addOperation
                             ? void recover(addOperation, true)
-                            : closePanel()
+                            : requestEditorClose()
                       }
                     >
                       {addOperation ? '取消添加' : '取消'}

@@ -202,6 +202,7 @@ export async function startDesktopRenderer(root: string) {
             './index.html',
             './global-dialog.html',
             './session-search.html',
+            './settings.html',
             './src/native.tsx',
           ].filter((file) => existsSync(join(root, 'apps/desktop', file))),
         },

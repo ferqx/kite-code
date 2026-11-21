@@ -278,6 +278,10 @@ export type NativeSelection = {
   readonly interactionsAfterId: string | null;
   readonly permissions?: DesktopPermissionFacts;
 };
+/** Current settings forms only need the selected session identity. */
+export type NativeSettingsSelection = Pick<NativeSelection, 'storeId' | 'viewSelection'> & {
+  session: Pick<NativeSelection['session'], 'id'>;
+};
 export type NativeDraft = {
   outputFiles?: readonly OutputDraftFile[];
   id: string;
@@ -1252,6 +1256,12 @@ export interface NativeBridge {
   request(input: NativeRequest): Promise<NativeResult>;
   watch(listener: (event: NativeEvent) => void): () => void;
 }
+/** The settings presentation does not need the full native application bridge. */
+export type NativeSettingsRequestPort = Pick<NativeBridge, 'request'>;
+export type NativeSettingsEditorControl = {
+  close: () => void;
+  hasUnsavedChanges?: () => boolean;
+};
 declare global {
   interface Window {
     readonly kiteNative?: Readonly<

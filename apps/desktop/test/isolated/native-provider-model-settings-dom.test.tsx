@@ -114,7 +114,10 @@ function deferred<T>() {
     resolve: (value: T) => resolve(value),
   };
 }
-function fixture(request: NativeBridge['request']) {
+function fixture(
+  request: NativeBridge['request'],
+  onModelWritingChange?: (writing: boolean) => void,
+) {
   const dom = new JSDOM(
     '<!doctype html><div id="settings" class="desktop-settings"><main id="root" class="settings-content"></main><div id="panel"></div></div>',
     {
@@ -177,6 +180,7 @@ function fixture(request: NativeBridge['request']) {
           providerSubmissions={providerSubmissions}
           modelSubmissions={modelSubmissions}
           onSaved={() => saved++}
+          onModelWritingChange={onModelWritingChange}
           panelHost={panelHost}
         />,
       ),
@@ -647,27 +651,32 @@ test('continuous toggles keep peer rows interactive through model continuation a
       post.resolve(publish(first, 'continuous-1'));
     }
   };
-  const f = fixture(async (input) => {
-    if (input.method === 'settings.providers.read') {
-      if (posts && ++flushes === 1) return peer.promise;
-      return structuredClone(state.providers);
-    }
-    if (input.method === 'settings.models.read') {
-      if (input.afterCommandId && ++continuations === 1) return continuation.promise;
-      return structuredClone(state.models);
-    }
-    if (input.method === 'settings.models.enabled') {
-      posts++;
-      if (posts === 1) {
-        first = input;
-        return post.promise;
+  const writing: boolean[] = [];
+  const f = fixture(
+    async (input) => {
+      if (input.method === 'settings.providers.read') {
+        if (posts && ++flushes === 1) return peer.promise;
+        return structuredClone(state.providers);
       }
-      return publish(input, `continuous-${posts}`);
-    }
-    return null;
-  });
+      if (input.method === 'settings.models.read') {
+        if (input.afterCommandId && ++continuations === 1) return continuation.promise;
+        return structuredClone(state.models);
+      }
+      if (input.method === 'settings.models.enabled') {
+        posts++;
+        if (posts === 1) {
+          first = input;
+          return post.promise;
+        }
+        return publish(input, `continuous-${posts}`);
+      }
+      return null;
+    },
+    (active) => writing.push(active),
+  );
   try {
     await f.render();
+    expect(writing).toEqual([false]);
     await act(async () =>
       f.element
         .querySelectorAll<HTMLButtonElement>('.provider-instance button[aria-label^="编辑 "]')[1]!
@@ -678,6 +687,7 @@ test('continuous toggles keep peer rows interactive through model continuation a
       c = f.toggle('c');
     await act(async () => b.click());
     expect(posts).toBe(1);
+    expect(writing).toEqual([false, true]);
     expect(b.getAttribute('aria-checked') === 'true').toBe(false);
     expect(b.disabled).toBe(false);
     expect(c.disabled).toBe(false);
@@ -698,6 +708,7 @@ test('continuous toggles keep peer rows interactive through model continuation a
     await act(async () => continuation.resolve(structuredClone(state.models)));
     expect(posts).toBe(2);
     expect(flushes).toBe(1);
+    expect(writing).toEqual([false, true]);
     expect(c.getAttribute('aria-checked') === 'true').toBe(true);
     expect(b.disabled).toBe(false);
     expect(c.disabled).toBe(false);
@@ -762,6 +773,7 @@ test('continuous toggles keep peer rows interactive through model continuation a
     expect(state.models.models.find((model) => model.id === 'b')!.enabled).toBe(true);
     expect(state.models.models.find((model) => model.id === 'c')!.enabled).toBe(true);
     expect(f.saved).toBe(2);
+    expect(writing).toEqual([false, true, false]);
     // Refresh revoked the open editor's old basis; it must not borrow the new read-set.
     expect(f.button('保存提供商配置').disabled).toBe(true);
     expect(f.calls.some((input) => input.method === 'settings.providers.save')).toBe(false);

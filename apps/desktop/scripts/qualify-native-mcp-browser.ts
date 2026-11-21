@@ -400,13 +400,19 @@ try {
   const fixture = join(root, 'driver.ts');
   writeFileSync(
     fixture,
-    readFileSync(
-      resolve(import.meta.dir, '../test/native-mcp-browser-electron.fixture.ts'),
-      'utf8',
-    ).replace(
-      "import { _electron } from 'playwright';",
-      `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../package.json'))})('playwright');`,
-    ),
+    readFileSync(resolve(import.meta.dir, '../test/native-mcp-browser-electron.fixture.ts'), 'utf8')
+      .replace(
+        "'./native-root-page.fixture'",
+        JSON.stringify(resolve(import.meta.dir, '../test/native-root-page.fixture.ts')),
+      )
+      .replace(
+        "'./native-settings-page.fixture'",
+        JSON.stringify(resolve(import.meta.dir, '../test/native-settings-page.fixture.ts')),
+      )
+      .replace(
+        "import { _electron } from 'playwright';",
+        `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../package.json'))})('playwright');`,
+      ),
   );
   const driverBuild = await Bun.build({
     entrypoints: [fixture],

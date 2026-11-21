@@ -1,7 +1,7 @@
 import { Button, Input, RightSidebar, useErrorFeedback } from '@kite-ai/ui/desktop';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { NativeBridge } from './native-bridge';
+import type { NativeSettingsRequestPort } from './native-bridge';
 import {
   isSkillMarketplaceQuery,
   type SkillMarketplaceResult,
@@ -81,7 +81,7 @@ export function NativeSkillMarketplace({
   onInstalled,
   onError: errorHandler,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
   panelId: string;
   panelHost: HTMLElement | null;
@@ -196,7 +196,7 @@ function SearchPanel({
   onClose,
   onError,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
   id: string;
   installations: ReadonlyMap<string, Installation>;

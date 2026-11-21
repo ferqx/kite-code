@@ -89,6 +89,20 @@ import {
   nativeSessionSearchRequestId,
 } from '../src/native-session-search-bridge';
 import {
+  isNativeSettingsAction,
+  isNativeSettingsReply,
+  isNativeSettingsState,
+  type NativeSettingsBridge,
+  nativeSettingsActionChannel,
+  nativeSettingsActiveChannel,
+  nativeSettingsCloseChannel,
+  nativeSettingsId,
+  nativeSettingsPresentChannel,
+  nativeSettingsReplyChannel,
+  projectNativeSettingsReply,
+  projectNativeSettingsState,
+} from '../src/native-settings-bridge';
+import {
   type NativeTrajectoryFileBridge,
   type NativeTrajectoryFileReply,
   nativeTrajectoryFileChannel,
@@ -125,6 +139,42 @@ ipcRenderer.on(nativeImageGalleryActiveChannel, (_event, active: unknown) =>
 ipcRenderer.on(nativeSessionSearchActiveChannel, (_event, active: unknown) =>
   setModalActive('session-search', active),
 );
+ipcRenderer.on(nativeSettingsActiveChannel, (_event, active: unknown) =>
+  setModalActive('settings', active),
+);
+const nativeSettings: NativeSettingsBridge = {
+  present(state, opening) {
+    const projected = projectNativeSettingsState(state);
+    if (typeof opening !== 'boolean' || !isNativeSettingsState(projected))
+      throw Error('invalid_native_settings_state');
+    ipcRenderer.send(nativeSettingsPresentChannel, projected, opening);
+  },
+  close(instanceId) {
+    if (!nativeSettingsId(instanceId)) throw Error('invalid_native_settings_request');
+    ipcRenderer.send(nativeSettingsCloseChannel, instanceId);
+  },
+  watchActions(listener) {
+    const receive = (_event: Electron.IpcRendererEvent, action: unknown) => {
+      if (isNativeSettingsAction(action)) listener(action);
+    };
+    ipcRenderer.on(nativeSettingsActionChannel, receive);
+    return () => ipcRenderer.off(nativeSettingsActionChannel, receive);
+  },
+  reply(instanceId, requestId, result) {
+    if (!nativeSettingsId(instanceId) || !nativeSettingsId(requestId))
+      throw Error('invalid_native_settings_request');
+    const projected = projectNativeSettingsReply(result);
+    ipcRenderer.send(
+      nativeSettingsReplyChannel,
+      instanceId,
+      requestId,
+      isNativeSettingsReply(projected)
+        ? projected
+        : { ok: false, code: 'invalid_native_settings_reply' },
+    );
+  },
+};
+contextBridge.exposeInMainWorld('kiteNativeSettings', nativeSettings);
 const sessionSearch: NativeSessionSearchBridge = {
   present(state, opening) {
     if (typeof opening !== 'boolean' || !isNativeSessionSearchPresentation(state))

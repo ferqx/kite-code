@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
-import type { NativeBridge } from './native-bridge';
+import type { NativeSettingsRequestPort } from './native-bridge';
 import { NativeSettingsSelect } from './native-settings-select';
 import { NativeShellSettings } from './native-shell-settings';
 
@@ -12,7 +12,7 @@ export function NativeGeneralSettings({
   onEditorChange,
   windowsShell,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
   storeId?: string;
   editor: DesktopEditor;

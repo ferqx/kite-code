@@ -16,6 +16,7 @@ export function createNativeModalSurface(options: {
   unavailable: string;
   cancel(): void;
   unavailableError(error: Error): void;
+  retainOnHide?: boolean;
 }) {
   const parent = options.window;
   const content = parent.contentView;
@@ -197,8 +198,10 @@ export function createNativeModalSurface(options: {
   };
   parent.on('resize', sync);
   content.on('bounds-changed', sync);
-  parent.on('hide', cancel);
-  parent.on('minimize', cancel);
+  if (!options.retainOnHide) {
+    parent.on('hide', cancel);
+    parent.on('minimize', cancel);
+  }
   parent.on('focus', focus);
   root.on('did-start-navigation', rootNavigation);
   root.on('render-process-gone', cancel);
@@ -229,7 +232,7 @@ export function createNativeModalSurface(options: {
     dispose,
     available: () =>
       !disposed && !parent.isDestroyed() && parent.isVisible() && !parent.isMinimized(),
-    accepts(event: IpcMainEvent) {
+    accepts(event: Pick<IpcMainEvent, 'sender' | 'senderFrame'>) {
       const contents = view?.webContents;
       return (
         !disposed &&

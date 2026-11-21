@@ -16,6 +16,14 @@
 
 2026-11-21，`5e4f80eb` 加本轮工作树，macOS arm64／Electron 44.3.0 的隔离实窗确认：鼠标在真实网页按下后打开搜索，页面原视图、边界、操作租约与截图凭据保持，搜索仍打开时原网页各收到一次按下、松开和点击。权限确认出现时取得最上层与焦点，取消后回到原查询；另核系统及手动深浅主题、窄窗、合成输入法事件、键盘选择和遮罩关闭。使用本地网页与测试目录，无模型请求，未验证 Windows 实窗或安装版。[原生搜索 Host 回归](test/isolated/native-session-search-host.test.ts)另核 Office 视图不变、迟到输入及无效结果不导航；聚焦回归共 37 项／472 断言。完整 Native shell DOM 在准确基线与本轮均为 22 通过、同名 8 失败，不计为全量通过。
 
+## 设置浮窗
+
+[设置宿主](electron/native-settings-host.ts)在同一窗口中打开独立原生视图，位于 Browser／Office 和输入屏障之上、正式确认之下。打开时不撤下底层视图，不改浏览器几何、Agent 控制或截图凭据。[根桥接](src/native-settings-root.tsx)只转发保留在原 Main 校验路径中的设置白名单请求，副视图不取得完整 Root 桥、会话目录、正文或工具执行权限；恢复仅返回当前 Store 的相关提交视图。关闭只退役本浮窗读者，不取消已发出的授权或写入。
+
+[两栏布局](src/native-settings-layout.tsx)和[设置工作区](src/native-settings-workspace.tsx)复用现有业务页和表单：宽窗左侧分类、右侧列表与详情互换；窄窗逐级进入，长表单正文独立滚动，原操作栏固定。Mac 浮窗独立留出至少 52px 顶部及 24px 底部，在最小高度也不覆盖原生窗口控制按钮。MCP 保留新增、连接管理和 OAuth 授权，提供商保留原新增／编辑与模型配置。不为设计稿添加独立通用测试接口。用户主动放弃未保存的 MCP 或提供商字段前必须确认；真实写入与授权仍使用原提交身份。
+
+2026-11-21，macOS arm64／Electron 44.3.0，隔离原生窗口验证设置层序、右侧 Browser 原视图和鼠标动作连续、权限浮层往返、深浅主题、列表与表单返回及最小窗布局。初测 800px 最小窗无法达到旧的紧凑阈值，修正后 770px 浮窗的表单占满 768px 内容区。开关／切页／菜单／确认过程有 836 帧 DOM 与样式采样并交叉核实际合成截图，未见稳定流程中闪白或错层，首个冷窗出现前未纳入帧采样。隔离 Service 的 Trace 未装能力：Root 和浮窗都返回同一 `capability_unavailable`；错误提示未闪入下一分类。同版本原生设置实窗另核默认编辑器切换、提供商校验保留输入与保存、模型启用、MCP 校验与新增，以及隔离授权回执从等待到已登录；核技能详情、网页搜索重读及跳转、Trace 无效参数反馈。该证据不等价于外部 OAuth、Windows 实窗或安装版资格。
+
 ## 办公输出文件
 
 文件卡和「输出」列表的更多菜单提供「在资源管理器中显示」。Main 使用原产物引用重新准入，沿用另存的流式校验，再从系统下载目录的 `Kite Outputs` 中选中该次创建的独立副本。每次写入独立子目录，保留原产物和之前的副本。失败时清理本次副本，通过现有 Toast 反馈。 [NativeCaller](electron/native-caller.ts) · [文件复制](electron/output-files.ts) · [定位回归](test/native-caller.test.ts)
@@ -603,7 +611,7 @@ Input、Textarea、SelectTrigger的基础外观与交互状态归[UI公共表单
 
 2026-11-01，Windows x64／Bun1.4.3，默认栏宽统一：定时任务和提供商／MCP／Skills均消费UI公共420px默认值。定时任务保留手动调宽，宽窗口缩放按像素保持栏宽，新建或编辑另一份表单恢复默认值；不足800px的内容外框统一改用覆盖布局。定时任务／SessionPage及Native页面壳／Windows菜单四个完整文件104项／1982断言、UI／Desktop类型、八文件Biome、文档结构／影响、测试归属和边界检查通过。既有[几何回归](test/session-shell-geometry.fixture.ts)在隔离生产页面核500／800／1000／1020／1280px、深浅主题十组，共1784帧：四类栏宽在可用空间足够时均为420px；500px窗口按各自内容外框收缩到293／294px，控件无横向裁切。另核覆盖与并排切换、窗口继续拉宽、草稿保留、手动拖到360px及新表单恢复420px。实际观察Windows开发窗口的任务表单及内嵌浏览器中四类面板的开合、焦点和底栏，页面零异常；截图与数据归`.cache/sidebar-width-CXQdKJ/`，不取得完整安装或其他平台原生合成资格。
 
-设置页由[Native壳](src/native.tsx)、[公共样式](src/native-tailwind.css)和[设置样式](src/native-provider-settings.css)统一布局：导航宽度直接消费UI的`NAVIGATION_MIN_WIDTH`（200px），各分类共用880px最大内容列、48px上下／32px左右留白，600px及以下仅将水平留白改为20px。`.settings-page-heading`统一标题、说明与操作区；打开右栏不按分类改写主区padding。所有设置操作使用公共shadcn Button／Input／Textarea／Select／Switch；[选择器组合](src/native-settings-select.tsx)把Select浮层挂到当前Dialog内，保留主题、焦点与Escape层级。配置读取、保存、凭据清理及原申请恢复沿原owner执行。
+设置由[浮窗布局](src/native-settings-layout.tsx)与[业务工作区](src/native-settings-workspace.tsx)渲染。各分类沿用公共按钮、输入、选择器和开关；[选择器组合](src/native-settings-select.tsx)把选项浮层挂到当前 Dialog 内，保留主题、焦点与 Escape 层级。配置读取、保存、凭据清理及原申请恢复仍沿原 owner 执行。
 
 2026-11-01，Windows x64／Bun1.4.3，`be57a4a1d`加本轮工作树：逐文件执行原[提供商](test/isolated/native-provider-settings-dom.test.tsx)、[模型](test/isolated/native-model-settings-dom.test.tsx)、[联合设置](test/isolated/native-provider-model-settings-dom.test.tsx)、[MCP](test/isolated/native-mcp-settings.test.tsx)、[Skills](test/native-skills-settings.test.tsx)、[页面壳](test/isolated/native-new-conversation-dom.test.tsx)及[共享侧栏](../../packages/ui/test/isolated/desktop-sidebar.test.tsx)，270项／4357断言通过；UI／Desktop类型、21个变更源码与测试文件的Biome、文档结构／影响、测试归属与边界检查通过。内嵌浏览器加载实际Native与生产编译CSS、独立合成bridge，逐步观察深浅主题、500／800／1280px布局、四页切换、编辑器／提供商／MCP下拉选择、模型开关、右栏开合与重开；菜单Escape只关菜单，下一次才关编辑栏，焦点返回对应入口。1280px下四页标题位置相同、均为24px，内容列880px；500px下侧栏仍200px、水平留白20px且无横向溢出，详情面板内容可读。最终页面无浏览器错误；未重验完整安装版Electron、真实Service或外部提供商，保留既有嵌套`@keyframes`编译提示。
 
@@ -617,7 +625,7 @@ Native 的会话、工具、输入、设置及浮层共用共享 `--font-ui`。m
 
 2026-10-21，macOS arm64／Bun1.4.2，`a7f629960` 工作树加本次全客户端字号核对：17个相关UI／Native测试文件以 `bun test --parallel=1 --max-concurrency=1` 执行，167项／2701断言通过；UI与Desktop类型检查、四个变更源码文件的Biome、文档结构与影响检查通过。Chrome155.0.8059.86沿实际Native与共享组件、生产编译CSS及隔离只读bridge，在深浅主题、360／767／1000／1280px下完成292组计算字号检查，覆盖设置列表和表单、删除确认、工作台、任务表单、问卷、右栏、地址输入及容器外Portal；另核12px辅助容器内组件明确的14px字号仍生效，并检查宽窄截图。Markdown的8组深浅／宽窄编译样式检查保持14px正文及原相对层级。无脚本错误；保留既有嵌套 `@keyframes` 编译提示，未运行本轮完整安装版窗口。
 
-[Native样式](src/native-tailwind.css)的窗口留白、会话标题和设置右栏与[共享面板](../../packages/ui/src/desktop/SessionPage.tsx)统一消费UI的侧栏动画参数，默认180ms／ease-out。设置导航独立于共同的`.client-content-frame`，主内容与编辑宿主在框内分配两列，编辑列消费UI的RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH（420px），在0与默认宽度之间开合；Windows材质的上下6px留白、外沿圆角和描边只由外框持有。内部栏体在动画期间保持目标宽度，避免自动聚焦遇到零宽表单时提前滚动。空编辑宿主不直接 `display:none`，透明度与可见性随退出完成；外框可用宽度不足800px时，与定时任务一样改为框内右侧覆盖，并以相同曲线位移。提供商、MCP与Skills和定时任务共用`.right-sidebar-editor`、`-body`、`-footer`的高度、独立滚动、12px内容留白及8px／12px底栏留白；标题和底栏不随内容滚动。原portal内容仍在关闭时立即卸载，原读取取消、秘密清理和焦点语义不等待动画。
+[Native 样式](src/native-tailwind.css)的窗口留白和会话右栏仍消费公共侧栏动画参数。设置不再读取 420px 右栏宽度或使用右侧滑入；它共享表单正文、底栏和滚动组件，在设置浮窗内占用同一内容列。定时任务仍保留原右栏规则。
 
 2026-11-01，Windows x64／Bun1.4.3／Electron44.3.0，右栏溢出修复：页面壳、Windows菜单、提供商、MCP、Skills、定时任务和SessionPage七个受影响完整文件206项／3298断言，UI／Desktop类型、12个变更源码与测试文件的Biome、文档结构／影响、测试归属及边界检查通过。[既有浏览器入口](test/session-shell-browser-runner.fixture.ts)扩充[几何检查](test/session-shell-geometry.fixture.ts)，仅在[隔离夹具](test/session-shell-browser.fixture.tsx)内启用Windows Mica标记；500／800／1280px、560px高、深浅主题六组共1039帧检查外框留白、标题／底栏边界、双击聚焦、滚动与重开，均通过。正文建立定位边界，将Radix隐藏表单控件留在内部滚动区，防止短窗口中聚焦带走整个栏体。实际Windows开发窗口逐步观察定时任务、提供商及MCP开合和Escape恢复；内嵌浏览器另观察窄窗下拉菜单、长表单末尾及Skills详情，标题和底栏保持可见，外层滚动量与溢出量均为零。截图与逐帧数据归`.cache/session-shell-browser-JZmv5A/`。同次入口的八组阅读区几何检查通过，但随后完整会话视觉段在`light: action opacity`断言失败（0.45与1）；以HEAD的Native、共享布局与样式源码对照构建后同样失败，未取得该完整入口通过结论，不将本轮设置证据扩展为完整会话或安装发布资格。
 
@@ -631,7 +639,7 @@ Native 的会话、工具、输入、设置及浮层共用共享 `--font-ui`。m
 
 [适配器](src/native-presentation.ts)只将生成 Client 的真实 Workspace/Session/Message 转为原 UI view model。目录状态与时间消费同快照只读 activity，缺能力或未记录的事实保持待读取／未知；完成消息不推断 final reply、Turn、Tool grouping 或执行成功。正文 slot 继续使用现有 ModelOutputMessage 与完整原身份 reader；未知格式、预览与不完整内容继续保留。正文未增加但准确Model或已有原Run事实结束时，将重新核验提示交给[共享reader](../../packages/ui/README.md)，不从宿主状态生成未完成警告或复制资格；原Main lease每次open沿Client读取当时snapshot，不按正文hash复用旧执行状态。原 Composer 的发送、草稿、model choice 和 planMode 回调沿现有 Native controller，不建立第二条提交链。
 
-显式自动测试模式中的“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原定时任务草稿页、新对话准备与首次发送、全局目录状态和时间排序、环境信息卡与只读子详情已迁入，空间移除已接原侧栏与主窗口自绘确认；空间和单会话离线历史清理已接同一公开维护，安装版五项常用维护的 macOS 已验范围见[Native owner](docs/native-release.md#macos-安装版离线维护)，这些原主入口已有正式适配，完整行为与阶段退出仍须按[PC 主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)的动态结果及剩余资格核对。
+显式自动测试模式中的“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。[设置浮窗](#设置浮窗)采用双栏和原主题偏好，模型／提供商／MCP／技能数据仍沿准确观察与原提交路径。只有真实端口提供操作 callback；工作台仍按手册隐藏。原定时任务草稿页、新对话准备与首次发送、全局目录状态和时间排序、环境信息卡与只读子详情已迁入，空间移除已接原侧栏与主窗口自绘确认；空间和单会话离线历史清理已接同一公开维护，安装版五项常用维护的 macOS 已验范围见[Native owner](docs/native-release.md#macos-安装版离线维护)，这些原主入口已有正式适配，完整行为与阶段退出仍须按[PC 主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)的动态结果及剩余资格核对。
 
 [原页面契约测试](../../packages/ui/test/desktop-page.test.tsx)迁回原 12 项展示断言；现有 Native 目录、草稿、问答与计划 DOM 只调整控件/浏览器 API，保留业务断言。源码外 [Native 候选](test/isolated/native-bundle.test.ts)与[driver](test/native-bundle-electron.fixture.ts)已核编译 CSS/字体、可操作 Composer、新 preload bridge、实际审批/任务、冷读和两层使用锁收尾。准确输入、原失败与结果归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不代表完整客户端、installed 全量、独立审查或 Windows/Linux 阶段退出。
 
@@ -709,7 +717,7 @@ Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `n
 
 [Main](electron/main.ts)创建主窗口时设置 `minWidth: 800`（Electron逻辑像素），初始尺寸保持1100×780；系统调宽受此下限约束。当前没有保存／恢复窗口尺寸的独立路径。共享页面仍适应缩放后的CSS宽度，左侧栏仅由按钮收展；header和底部个人工作区的内边距不再受900px媒体查询改写。
 
-[Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和平台属性限定窗口展示；共享 Web 页面不因此变为可拖拽。Windows／Linux 只由独立顶栏声明 drag，内容区使用剩余高度，全屏设置相对内容区定位，所有宽度的侧栏都留在该内容区内，仅由按钮收展。macOS 的顶栏元素改为左上角80×48px的绝对定位区域，不占流式高度；侧栏顶部隐藏重复品牌文字，侧栏收起时通过已有 `sidebar-visible` 状态将安全间距转移到主 header。设置侧栏顶部统一保留48px窗口操作空间，导航另留与主侧栏一致的8px顶部间距，保持键盘焦点轮廓完整；“返回应用”置于同一分类导航首项，在其下方按正常列表排列，不再单独增加横向避让。返回按钮使用共享ghost按钮，带14px返回箭头，32px高、10px图文间距，与主侧栏“新对话”规范一致；其余四个分类沿共享SettingsNavigationIcon提供齿轮、链接、插头及书本，统一14px、10px间距和左右10px内边距，宽窄窗口均与返回行的图标及文字列对齐，分类保留原36px行高；关闭设置仍恢复原会话、草稿与焦点生命周期。macOS 的侧栏、会话、右栏与设置 header 空白声明 drag，内部按钮、链接和表单控件声明 no-drag。顶栏区域在 modal 遮罩之上保留窗口操作。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
+[Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和平台属性限定窗口展示；共享 Web 页面不因此变为可拖拽。Windows／Linux 只由独立顶栏声明 drag，内容区使用剩余高度，设置由独立的原生浮窗承载，所有宽度的侧栏都留在该内容区内，仅由按钮收展。macOS 的顶栏元素改为左上角80×48px的绝对定位区域，不占流式高度；侧栏顶部隐藏重复品牌文字，侧栏收起时通过已有 `sidebar-visible` 状态将安全间距转移到主 header。设置侧栏顶部统一保留48px窗口操作空间，导航另留与主侧栏一致的8px顶部间距，保持键盘焦点轮廓完整；“返回应用”置于同一分类导航首项，在其下方按正常列表排列，不再单独增加横向避让。返回按钮使用共享ghost按钮，带14px返回箭头，32px高、10px图文间距，与主侧栏“新对话”规范一致；其余四个分类沿共享SettingsNavigationIcon提供齿轮、链接、插头及书本，统一14px、10px间距和左右10px内边距，宽窄窗口均与返回行的图标及文字列对齐，分类保留原36px行高；关闭设置仍恢复原会话、草稿与焦点生命周期。macOS 的侧栏、会话、右栏与设置 header 空白声明 drag，内部按钮、链接和表单控件声明 no-drag。顶栏区域在 modal 遮罩之上保留窗口操作。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
 
 2026-10-15 macOS／Electron 44.3.0／Bun 1.4.2 的隔离实际 Main／preload／renderer 与配套 Service 验证了整合布局：1100×780窗口的业务区从 y=0 开始，侧栏 header 高52px，原生按钮位置为 `{x:13,y:19}`；侧栏收起、设置往返、文件变更及760／550／400px窗口的窄侧栏与设置控件均避开按钮区域，草稿往返保留，页面无异常。Windows／Linux 的平台 CSS 切换核实独立32px行保留，不代替这两平台的原生窗口验证。现有窗口交互、启动与共享页面三个完整测试文件共16项／171断言、Desktop typecheck、定向 Biome 和文档检查通过；drag／no-drag 核对为计算样式证据，未进行物理鼠标拖拽验收。
 
@@ -735,11 +743,11 @@ Windows 设置页的 `.desktop-settings-header` 不再预留额外高度，`.set
 
 2026-11-01，Windows x64／Electron44.3.0：实际开发窗口前后核左栏返回行上移42px，右侧外框和菜单栏保持；独立Profile、生产renderer（诊断关闭）与原配套Service另核常规／MCP切换、顶部返回按钮及原页面恢复，窗口正常退出0，5个所属进程全部结束，零模型请求。过程图与无障碍树在本机`.cache/settings-win-sidebar-20261101/`，隔离renderer复用`.cache/scheduled-inline-time-20261101/app`。原窗口动作DOM整文件1项21断言、CSS Biome及文档检查通过；仅改CSS，不扩展安装版或其他平台资格。
 
-[窗口容器](src/native-window-frame.tsx)在进入主界面后，于 Windows 顶栏左侧绘制“文件、编辑、视图、帮助”，沿共享主题颜色和圆角，菜单按钮使用 `no-drag`，其余顶栏保持原拖动区域。菜单支持 F10、左右键与下键，以及 Alt+F／E／V／H；点击时保留原编辑器焦点与选区。macOS／Linux 主界面保留原顶栏。窗口布局由 `NativeDesktop` 明确启用，启动准备及失败页按[启动显示规则](#原启动页与初始化重试)隐藏 header，进入应用后全屏设置页继续保留菜单。
+[窗口容器](src/native-window-frame.tsx)在进入主界面后，于 Windows 顶栏左侧绘制“文件、编辑、视图、帮助”，沿共享主题颜色和圆角，菜单按钮使用 `no-drag`，其余顶栏保持原拖动区域。菜单支持 F10、左右键与下键，以及 Alt+F／E／V／H；点击时保留原编辑器焦点与选区。macOS／Linux 主界面保留原顶栏。窗口布局由 `NativeDesktop` 明确启用，启动准备及失败页按[启动显示规则](#原启动页与初始化重试)隐藏 header，进入应用后顶栏菜单保留在设置浮窗背后。
 
 [菜单 owner](electron/native-window-menu.ts)定义中文原生项，[Main](electron/main.ts)安装隐藏的窗口菜单以保留原生快捷键，再从相同模板通过 [Electron Menu.popup](https://www.electronjs.org/docs/latest/api/menu#menupopupoptions)打开对应下拉，不增加另一行菜单。编辑、缩放、全屏、隐藏与退出使用 Electron roles，退出仍经过原 `before-quit` 与 `settleDesktopQuit`。文件前三项沿固定事件返回原 renderer controller 的 `prepareConversation`、`addWorkspace` 与设置状态；Ctrl+N／O／, 在 Main 的 `before-input-event` 中按同一固定动作分发，拒绝组词、重复和额外修饰键，并阻止重复进入原生 accelerator。F10／Alt 导航留给 renderer。准备中、原 mutation 进行中或退出中不进入页面操作，迟到事件同样核当前状态。进入新对话保原草稿，不创建会话或发任务，添加空间保持原准确选择及登记路径。
 
-Windows Native 的全屏设置保留已有 `covered` 内容区的隐藏与 `inert`，设置 Dialog 使用非 modal 模式以保留顶栏的鼠标、键盘和可访问入口；其他嵌入及平台保持原 modal 模式。全屏设置不按外部鼠标或焦点事件自动关闭：下拉控件开合中的第二次按下可能被重定向到文档，焦点守卫也位于设置DOM外；`onInteractOutside`阻止默认关闭，外部pointerdown同时取消原事件的默认行为，窗口菜单文字禁止选择。正常输入框双击选词、顶栏菜单、原返回与Escape层级保持，未改公共Dialog的默认策略。
+Windows 原生设置使用独立的顶层设置视图；设置打开时 Main 不派发新对话、添加空间或重复打开设置的自定义应用菜单命令，关闭后恢复。设置不会因外部鼠标或失焦自动关闭；下拉菜单的 Escape 先退出菜单，再退出表单或设置。
 
 2026-11-01，Windows x64／Bun1.4.3，`be57a4a1d`加当前工作树：在现有development Electron44.3.0窗口复现双击“默认编辑器”退回主页面；修复后逐步核对常规下拉框双击、提供商未提交表单的输入框选词与预设下拉框双击、第一次Escape关闭编辑栏／第二次关闭设置，配置未提交并恢复原会话。原[窗口操作回归](test/isolated/native-window-actions-dom.test.tsx)在修复前以焦点守卫聚焦复现设置卸载，修复后核外部焦点／第二次pointerdown不关闭、原事件取消、菜单仍可调用及Select／设置两级Escape；整文件1项／34断言通过。连同原[页面壳](test/isolated/native-new-conversation-dom.test.tsx)共82项／1776断言、Desktop类型检查和定向Biome通过。范围为当前开发窗口及上述DOM事件，不代替完整安装发行或其他平台验证。
 
@@ -1933,7 +1941,7 @@ Skills 详情按名称、简介、独立滚动的 Markdown 正文及来源展示
 
 同日修正全局目录的执行状态误判：上述[页面DOM](test/native-skills-settings.test.tsx)15项通过，覆盖能力快照变化后仍不显示依赖信息、正文保留，以及禁用和真实来源异常提示；Desktop typecheck与本轮Biome检查通过。沿同一隔离Chrome逐步核明暗主题×1280／800px四组20阶段，移除误导徽标、“所需功能”与功能供给判断，加载、切换、滚动、刷新、关闭焦点及失败恢复均通过，零业务提交和页面异常；新截图与数据为`.cache/skills-preview-main/*-content-*.png`及`content-result.json`。本次仅改Renderer展示，Agent／Service／Client及Main门禁未变，复用上段对应证据；未操作用户应用窗口。
 
-正式 Native 全屏设置左侧的 Skills 分类是用户级全局目录，无需创建或选择 Session／Workspace，只展示用户配置及可信用户／Profile 位置的名称、摘要、来源及禁用或异常提示，不合并项目配置。[Main reader](electron/skill-catalogue-reads.ts) 封存实际 attach generation 与 Store，使用 `user_skill_catalogue` capability 和 `listUserSkills`；open 只接收 generation/read ID，open/next/close 不排队在 controller refresh 后。Main 保存原 revision/cursor，每页限 128 KiB，关闭、连接或 Store 身份变化只中止所属读取。切换 Session、观察 epoch 更新和移除 Workspace 不释放用户目录。[IPC](electron/native-ipc.ts) 不接收 renderer 提供的 Session、Workspace、路径或执行 authority。
+正式 Native 设置浮窗左侧的技能分类是用户级全局目录，无需创建或选择 Session／Workspace，只展示用户配置及可信用户／Profile 位置的名称、摘要、来源及禁用或异常提示，不合并项目配置。[Main reader](electron/skill-catalogue-reads.ts) 封存实际 attach generation 与 Store，使用 `user_skill_catalogue` capability 和 `listUserSkills`；open 只接收 generation/read ID，open/next/close 不排队在 controller refresh 后。Main 保存原 revision/cursor，每页限 128 KiB，关闭、连接或 Store 身份变化只中止所属读取。切换 Session、观察 epoch 更新和移除 Workspace 不释放用户目录。[IPC](electron/native-ipc.ts) 不接收 renderer 提供的 Session、Workspace、路径或执行 authority。
 
 [完整读取](src/native-skills.ts)复用公共 Client 的闭合用户页 verifier，穷尽同 revision 后才发布，无总目录截断。目录列表与 MCP、提供商复用标题、列表行、状态标签和控件样式；条目详情通过 `panelHost` portal 到应用最右侧的共享 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx)，`editorControl` 接入设置壳的分层 Escape。关闭恢复入口焦点，移除条目后回到刷新；身份或目录资格改变立即隐藏旧详情。[页面](src/native-skills-settings.tsx)区分可用空目录与不可用；用户 JSONC 变坏、来源不可用或刷新失败时，保留同身份上次完整目录与详情并说明尚未确认最新状态，不发布新目录前缀。Store／attach 身份改变会清理旧读取和详情，普通会话切换不重开目录。来源只说明已准入的用户配置位置，缺字段说明未记录；目录页不预读正文；正文只按详情选择读取，项目 Skill 选择、信任和实际执行由 Service 负责。
 
@@ -2573,7 +2581,7 @@ MCP 与 Skills 的目录行共用 [NativeSettingsListRow](src/native-settings-li
 
 MCP 列表行只展示服务摘要、连接状态和公共 Switch，点击服务进入默认420px的共享详情侧栏。新增表单直接提交校验后的有限操作，处理中锁定草稿；新增／删除即使先受理再完成，也只关闭对应且仍打开的同一侧栏，迟到回执不能关闭后来打开的其他详情；详情根据当前连接和登录资格只提供适用的主操作，ready 时自动只读加载工具。[展示组件](src/native-mcp-components.tsx)集中维护工具目录、参数展开和公共 DropdownMenu：连接维护、授权维护及删除按当前事实进入“更多”，删除／本机退出／远端撤销使用不同说明和确认，凭据有效期编辑按需展开。普通 hot submitting／pending 不生成操作记录卡；登录／连接的原按钮变为准确原申请的取消，新增沿原底栏取消，其他服务操作的取消收进“更多”，配置不可用时的必要取消仍留在恢复区。未知和失败仅用无底色的短行放在所属侧栏的主要内容之后、底部操作区之前，错误出现和关闭不挤动服务标题与连接按钮；确认失败只在所属侧栏打开时显示，关闭侧栏不清除原记录，也不转移到列表或其他服务；未决原操作在所属侧栏未打开时仍保留列表恢复入口。终态关闭调用原 clear，不重放业务操作。菜单 Portal 留在设置 Dialog 内，Escape 先关闭菜单，取消确认回到“更多”；关闭详情仍回到原服务行。读取失败使旧观察失效，不能据此编辑或自动读工具；切换来源、刷新观察与关闭侧栏继续隔离迟到工具响应。
 
-[设置页](src/native-mcp-settings.tsx)和新的 [Main manager](electron/user-mcp-settings.ts)消费 `user_mcp_settings`。身份只有实际 Store、认证 subject 与连接 generation，不依赖 Session／Workspace、trust 或对话目录。两个全局页在空 Store 可直接读取，普通会话选择和当前工作区移除不释放其读租约；全局身份替换、页面关闭与连接结束仍废止迟到读取。MCP 只列 user source，页面无范围切换、项目批准或项目配置行。用户从统一列表管理来源、启停、认证与连接，在共享最右侧 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx)新增服务或阅读工具参数；参数只显示实际已取得的 descriptor，不调用远端工具。
+[设置页](src/native-mcp-settings.tsx)和新的 [Main manager](electron/user-mcp-settings.ts)消费 `user_mcp_settings`。身份只有实际 Store、认证 subject 与连接 generation，不依赖 Session／Workspace、trust 或对话目录。两个全局页在空 Store 可直接读取，普通会话选择和当前工作区移除不释放其读租约；全局身份替换、页面关闭与连接结束仍废止迟到读取。MCP 只列 user source，页面无范围切换、项目批准或项目配置行。用户从统一列表管理来源、启停、认证与连接，在设置浮窗的内容列新增服务或阅读工具参数；参数只显示实际已取得的 descriptor，不调用远端工具。
 
 新增仅收无凭据 HTTP URL 或绝对 stdio command，高级声明由配置 owner 管理。Main 固定 read-set 与本次原操作，renderer 仅提供有限操作和观察 ID。Service 全局 owner 有自己的 HostMutation 与真实资源生命周期，不借用 Session Action 或建立隐藏 Workspace／Session；它不执行工具。认证、连接与真正 Agent Run 的工具授权各自独立，401 不自动 Login 或重放 RPC。关闭详情清理未提交复核和工具读取，关闭分类只释放读取，不取消已提交全局操作；取消必须明确针对原 operation ID。
 

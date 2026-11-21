@@ -13,28 +13,19 @@ import {
 } from '@kite-ai/ui';
 import {
   Button as DesktopButton,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
   ErrorFeedbackContext,
   MessageContent,
-  NAVIGATION_MIN_WIDTH,
   PlanExecutionProgress,
   PromptMarkdown,
   ReadingStateCache,
-  RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
   type SessionChildTabRequest,
   type SessionChildTarget,
   SessionPage,
   type SessionPageProps,
-  SettingsNavigationIcon,
   type TrajectoryViewState,
   WebLinkContext,
 } from '@kite-ai/ui/desktop';
 import {
-  type CSSProperties,
   type ReactNode,
   useCallback,
   useEffect,
@@ -113,7 +104,6 @@ import { NativeOperationDiff } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { useNativeFileTargets } from './native-file-targets';
 import { confirmNativeFullPermission } from './native-full-permission-confirmation';
-import { NativeGeneralSettings } from './native-general-settings';
 import { type HistoryState, NativeHistory } from './native-history';
 import { NativeImageGalleryProvider } from './native-image-gallery';
 import {
@@ -129,7 +119,6 @@ import { readNativeInteractionAttachment } from './native-interaction-attachment
 import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 import { submitLocalOfficeRequest } from './native-local-request-submit';
-import { NativeMcpSettings } from './native-mcp-settings';
 import { humanReadableOperationError, NativeToast } from './native-message';
 import { NativeMessageText } from './native-message-text';
 import { createNativeModelInputPort } from './native-model-input';
@@ -153,7 +142,6 @@ import {
   NativeDirectoryProjection,
 } from './native-presentation';
 import { afterNativePresentation } from './native-presentation-frame';
-import { NativeProviderModelSettings } from './native-provider-model-settings';
 import { nativeReadDeadline } from './native-read-deadline';
 import { NativeReasoningCache, renderNativeReasoning } from './native-reasoning';
 import { NativeRecoveryView } from './native-recovery';
@@ -162,7 +150,9 @@ import { useNativeScheduledTasks } from './native-scheduled-tasks';
 import { NativeSessionRecovery } from './native-session-recovery';
 import { NativeSessionSearch, UnavailableNativeSessionSearch } from './native-session-search';
 import { NativeSessionPanel } from './native-sessions';
-import { NativeSkillsSettings } from './native-skills-settings';
+import type { NativeSettingsState } from './native-settings-bridge';
+import { NativeSettingsRoot } from './native-settings-root';
+import { NativeSettingsWorkspace } from './native-settings-workspace';
 import { NativeStartup } from './native-startup';
 import { useNativeTheme } from './native-theme';
 import {
@@ -173,7 +163,6 @@ import {
   useNativeToolMessages,
 } from './native-tool-messages';
 import { type NativeToolRenderer, renderNativeToolGroup } from './native-tool-renderer';
-import { NativeTraceSettings } from './native-trace-settings';
 import { NativeTrajectory } from './native-trajectory';
 import {
   desktopTranscript,
@@ -190,7 +179,6 @@ import {
   NativeWebSearchActivity,
   NativeWebSearchToolDetails,
 } from './native-web-search-evidence';
-import { NativeBoundWebSearchSettings } from './native-web-search-settings';
 import { NativeWindowFrame } from './native-window-frame';
 import { NativeWorkspaceChanges } from './native-workspace-changes';
 import {
@@ -387,9 +375,7 @@ function NativeDesktopContent({
   const startupDirectoryUnavailable = useRef(false);
   const theme = useNativeTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsEditorHost, setSettingsEditorHost] = useState<HTMLDivElement | null>(null);
-  const [settingsToastHost, setSettingsToastHost] = useState<HTMLDivElement | null>(null);
-  const settingsEditorControl = useRef<{ close: () => void } | null>(null);
+  const settingsPort = nativeWindow ? window.kiteNativeSettings : undefined;
   const [toolsOpen, setToolsOpen] = useState(false);
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
   const [agentBrowserRequest, setAgentBrowserRequest] = useState(0);
@@ -667,9 +653,6 @@ function NativeDesktopContent({
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
   const [queueFocusKey, setQueueFocusKey] = useState(0);
   const [planMode, setPlanMode] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<
-    'general' | 'providers' | 'mcp' | 'skills' | 'trace' | 'webSearch'
-  >('general');
   const [editor, setEditor] = useState<DesktopEditor>('vscode');
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [, choiceChanged] = useState(0);
@@ -725,7 +708,7 @@ function NativeDesktopContent({
     viewIntent.current,
     pageIntent.current,
     settingsOpen
-      ? ['settings', settingsPage]
+      ? 'settings'
       : scheduledTasksView
         ? 'scheduled'
         : preparing
@@ -6516,14 +6499,22 @@ function NativeDesktopContent({
       <NativeWindowFrame
         showHeader={startup === 'ready'}
         applicationEnabled={
-          startup === 'ready' && !pending && !removingWorkspace && !readLifecycle.current.quitting
+          startup === 'ready' &&
+          !pending &&
+          !removingWorkspace &&
+          !settingsOpen &&
+          !readLifecycle.current.quitting
         }
         onAction={(action) => {
-          if (startupPhase.current !== 'ready' || writing.current || readLifecycle.current.quitting)
+          if (
+            startupPhase.current !== 'ready' ||
+            writing.current ||
+            readLifecycle.current.quitting ||
+            settingsOpen
+          )
             return;
           if (action === 'settings') setSettingsOpen(true);
           else {
-            setSettingsOpen(false);
             if (action === 'new-conversation') prepareConversation();
             else if (action === 'add-workspace') void addWorkspace();
           }
@@ -6582,7 +6573,6 @@ function NativeDesktopContent({
   const sessionPage = (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
-      covered={settingsOpen}
       writeClipboardText={window.kiteNative?.writeClipboardText}
       onHeaderMouseDown={(clickCount) => {
         if (clickCount === 2)
@@ -6790,7 +6780,6 @@ function NativeDesktopContent({
         <>
           <NativeToast
             key={inputErrorMessage ? 'input' : draftPersistenceMessage ? 'draft' : 'operation'}
-            container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
             message={currentToast}
             onDismiss={
               inputErrorMessage
@@ -6811,7 +6800,6 @@ function NativeDesktopContent({
             }
             notices={approvalPresentation.notices}
             paused={!!currentToast || settingsOpen}
-            container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
             onLookup={async (notice) => {
               if (
                 !state ||
@@ -6877,7 +6865,7 @@ function NativeDesktopContent({
                       workspaceId: selection.session.workspaceId,
                       contextSelectionId: selection.session.contextSelectionId,
                     }}
-                    visible={noteVisible && !settingsOpen}
+                    visible={noteVisible}
                     canRead={selection.canReadExtensions === true}
                     canInvoke={selection.canInvokeExtensions === true}
                     submissions={state.callerSubmissions}
@@ -6912,7 +6900,7 @@ function NativeDesktopContent({
                   contextSelectionId: selection.session.contextSelectionId,
                 }}
                 page={page}
-                visible={props.visible && !settingsOpen}
+                visible={props.visible}
                 canRead={selection.canReadExtensions === true}
                 canInvoke={selection.canInvokeExtensions === true}
                 submissions={state.callerSubmissions}
@@ -7845,199 +7833,60 @@ function NativeDesktopContent({
             }
           : undefined
       }
-      overlays={
-        <Dialog
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
-        >
-          <DialogContent
-            ref={setSettingsToastHost}
-            portalled={false}
-            className="desktop-settings-dialog translate-x-0 translate-y-0"
-            style={
-              {
-                '--navigation-min-width': `${NAVIGATION_MIN_WIDTH}px`,
-                '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px`,
-              } as CSSProperties
-            }
-            showCloseButton={false}
-            showOverlay={false}
-            onEscapeKeyDown={(event) => {
-              if (settingsEditorControl.current) {
-                event.preventDefault();
-                settingsEditorControl.current.close();
-              }
-            }}
-            onInteractOutside={(event) => {
-              // Full-page settings closes through navigation or Escape. A nested
-              // Select can temporarily retarget a double-click or focus to the document.
-              event.preventDefault();
-              if (event.detail.originalEvent.type === 'pointerdown')
-                event.detail.originalEvent.preventDefault();
-            }}
-          >
-            <DialogHeader className="desktop-settings-header">
-              <DialogTitle>设置</DialogTitle>
-              <DialogDescription className="sr-only">配置模型、提供商与扩展能力</DialogDescription>
-            </DialogHeader>
-            <div className="settings settings-layout desktop-settings">
-              <aside className="settings-sidebar">
-                <nav aria-label="设置分类">
-                  <DesktopButton
-                    type="button"
-                    variant="ghost"
-                    className="settings-back"
-                    onClick={() => setSettingsOpen(false)}
-                  >
-                    <SettingsNavigationIcon name="back" />
-                    <span>返回应用</span>
-                  </DesktopButton>
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'general'}
-                    onClick={() => setSettingsPage('general')}
-                  >
-                    <SettingsNavigationIcon name="general" />
-                    <span>常规</span>
-                  </DesktopButton>
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'providers'}
-                    onClick={() => setSettingsPage('providers')}
-                  >
-                    <SettingsNavigationIcon name="providers" />
-                    <span>提供商与模型</span>
-                  </DesktopButton>
-                  {directory?.canReadWebSearchSettings && (
-                    <DesktopButton
-                      type="button"
-                      variant="ghost"
-                      aria-pressed={settingsPage === 'webSearch'}
-                      onClick={() => setSettingsPage('webSearch')}
-                    >
-                      <SettingsNavigationIcon name="webSearch" />
-                      <span>网页搜索</span>
-                    </DesktopButton>
-                  )}
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'mcp'}
-                    onClick={() => setSettingsPage('mcp')}
-                  >
-                    <SettingsNavigationIcon name="mcp" />
-                    <span>MCP</span>
-                  </DesktopButton>
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'trace'}
-                    onClick={() => setSettingsPage('trace')}
-                  >
-                    <SettingsNavigationIcon name="mcp" />
-                    <span>轨迹与集成</span>
-                  </DesktopButton>
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'skills'}
-                    onClick={() => setSettingsPage('skills')}
-                  >
-                    <SettingsNavigationIcon name="skills" />
-                    <span>Skills</span>
-                  </DesktopButton>
-                </nav>{' '}
-              </aside>
-              <div className="client-content-frame settings-content-frame">
-                <div className="settings-content-panels">
-                  <div className="settings-content">
-                    {settingsPage === 'general' ? (
-                      <NativeGeneralSettings
-                        bridge={bridge}
-                        generation={generation.current}
-                        storeId={directory?.storeId}
-                        editor={editor}
-                        onEditorChange={setEditor}
-                        windowsShell={
-                          nativeWindow && document.documentElement.dataset.platform === 'windows'
-                        }
-                      />
-                    ) : settingsPage === 'webSearch' ? (
-                      directory?.canReadWebSearchSettings && !directory.unavailable ? (
-                        <NativeBoundWebSearchSettings
-                          onManageProviders={() => setSettingsPage('providers')}
-                          bridge={bridge}
-                          generation={generation.current}
-                          storeId={directory.storeId}
-                          sessionId={!preparing ? selection?.session.id : undefined}
-                        />
-                      ) : (
-                        <p role="status">当前连接不支持网页搜索设置。</p>
-                      )
-                    ) : settingsPage === 'trace' ? (
-                      directory?.storeId ? (
-                        <NativeTraceSettings
-                          bridge={bridge}
-                          generation={generation.current}
-                          storeId={directory.storeId}
-                          selection={!preparing ? selection : undefined}
-                        />
-                      ) : (
-                        <p role="status">连接可用的本机数据后管理轨迹集成。</p>
-                      )
-                    ) : settingsPage === 'skills' ? (
-                      <NativeSkillsSettings
-                        panelHost={settingsEditorHost}
-                        editorControl={settingsEditorControl}
-                        bridge={bridge}
-                        generation={generation.current}
-                        storeId={directory?.storeId}
-                      />
-                    ) : settingsPage === 'mcp' ? (
-                      <NativeMcpSettings
-                        panelHost={settingsEditorHost}
-                        editorControl={settingsEditorControl}
-                        bridge={bridge}
-                        generation={generation.current}
-                        storeId={directory?.storeId}
-                        submissions={state?.userMcpSubmissions ?? []}
-                      />
-                    ) : (
-                      <NativeProviderModelSettings
-                        key={JSON.stringify([
-                          generation.current,
-                          directory?.storeId,
-                          selection?.session.id,
-                          selection?.viewSelection,
-                        ])}
-                        panelHost={settingsEditorHost}
-                        toastHost={settingsToastHost}
-                        editorControl={settingsEditorControl}
-                        bridge={bridge}
-                        generation={generation.current}
-                        selection={selection}
-                        storeId={directory?.storeId}
-                        providerSubmissions={state?.providerSettingsSubmissions ?? []}
-                        modelSubmissions={state?.modelSettingsSubmissions ?? []}
-                        onSaved={() => setSettingsRevision((value) => value + 1)}
-                      />
-                    )}
-                  </div>
-                  <div className="settings-editor-panel" ref={setSettingsEditorHost} />
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      }
     />
   );
+  const settingsSnapshot: Omit<NativeSettingsState, 'instanceId'> = {
+    generation: generation.current,
+    storeId: directory?.storeId,
+    selection:
+      selection?.storeId && selection.storeId === directory?.storeId
+        ? {
+            storeId: selection.storeId,
+            session: { id: selection.session.id },
+            viewSelection: selection.viewSelection,
+          }
+        : undefined,
+    webSearchSessionId:
+      !preparing && selection?.storeId === directory?.storeId ? selection?.session.id : undefined,
+    canReadWebSearch: !!directory?.canReadWebSearchSettings && !directory.unavailable,
+    windowsShell: nativeWindow && document.documentElement.dataset.platform === 'windows',
+    editor,
+    appearance: theme.value,
+    theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
+    userMcpSubmissions: state?.userMcpSubmissions?.filter(
+      (entry) => entry.storeId === directory?.storeId,
+    ),
+    providerSubmissions: state?.providerSettingsSubmissions?.filter(
+      (entry) => entry.storeId === directory?.storeId,
+    ),
+    modelSubmissions: state?.modelSettingsSubmissions?.filter(
+      (entry) => entry.storeId === directory?.storeId,
+    ),
+  };
+  const settingsActions = {
+    bridge,
+    onClose: () => setSettingsOpen(false),
+    onEditorChange: setEditor,
+    onThemeChange: theme.onChange,
+    onSaved: () => setSettingsRevision((value) => value + 1),
+  };
   return windowFrame(
     <ErrorFeedbackContext.Provider value={showOperationMessage}>
       {sessionPage}
+      {settingsOpen &&
+        (settingsPort ? (
+          <NativeSettingsRoot
+            {...settingsActions}
+            port={settingsPort}
+            state={settingsSnapshot}
+            onUnavailable={() => setError('暂时无法打开设置，请重试。')}
+          />
+        ) : (
+          <NativeSettingsWorkspace
+            {...settingsActions}
+            state={{ ...settingsSnapshot, instanceId: 'local-settings' }}
+          />
+        ))}
       {sessionDialog && (
         <NativeDirectorySessionDialog
           dialog={sessionDialog}

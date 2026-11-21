@@ -170,6 +170,10 @@ test.skipIf(process.platform !== 'darwin')(
         fixture,
         readFileSync(resolve(import.meta.dir, '../native-provider-electron.fixture.ts'), 'utf8')
           .replace(
+            "'./native-settings-page.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-settings-page.fixture.ts')),
+          )
+          .replace(
             "'./native-root-page.fixture'",
             JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
           )

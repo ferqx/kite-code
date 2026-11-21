@@ -16,7 +16,7 @@ import {
   useErrorFeedback,
 } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { NativeBridge, NativeSelection } from './native-bridge';
+import type { NativeSettingsRequestPort, NativeSettingsSelection } from './native-bridge';
 import type { NativeTraceOperation, NativeTraceResult } from './native-trace-bridge';
 
 type EventKind = TraceGrantRequest['eventKinds'][number];
@@ -182,10 +182,10 @@ export function NativeTraceSettings({
   selection,
   onError: errorHandler,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
   storeId: string;
-  selection?: NativeSelection;
+  selection?: NativeSettingsSelection;
   onError?: (message: string) => void;
 }) {
   const onError = useErrorFeedback(errorHandler);

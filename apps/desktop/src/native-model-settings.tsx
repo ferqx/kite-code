@@ -14,18 +14,18 @@ import {
 } from '@kite-ai/ui/desktop';
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
-  NativeBridge,
   NativeModelSettingsFacts,
   NativeModelSettingsSubmission,
   NativeRequest,
-  NativeSelection,
+  NativeSettingsRequestPort,
+  NativeSettingsSelection,
 } from './native-bridge';
 import { nativeModelToggleQueue } from './native-model-toggle-queue';
 
 export type NativeModelSettingsProps = {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
-  selection?: NativeSelection;
+  selection?: NativeSettingsSelection;
   submissions: readonly NativeModelSettingsSubmission[];
   onSaved?: () => void | Promise<void>;
   onRecovered?: () => void;

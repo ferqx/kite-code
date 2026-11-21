@@ -486,6 +486,7 @@ body {
   }
   :is(
       .primary-navigation .button,
+      .sidebar-navigation-action,
       .space-row,
       .session-row,
       .space-new-session,
@@ -497,12 +498,14 @@ body {
     font-size: 14px;
     font-weight: 400;
   }
-  .primary-navigation .button {
+  :is(.primary-navigation .button, .sidebar-navigation-action) {
     width: 100%;
     padding: 6px 10px;
     justify-content: flex-start;
     gap: 10px;
     border: 0;
+  }
+  .primary-navigation .button {
     background: transparent;
     color: var(--navigation-foreground);
   }

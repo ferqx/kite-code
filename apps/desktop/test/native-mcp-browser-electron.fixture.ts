@@ -2,8 +2,11 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Page } from 'playwright';
 import { _electron } from 'playwright';
 import type { NativeState, NativeUserMcpSubmission } from '../src/native-bridge';
+import { nativeRootPage } from './native-root-page.fixture';
+import { openNativeSettingsPage } from './native-settings-page.fixture';
 
 type Physical = { path: string; method: string };
 type Globals = typeof globalThis & { mcpBrowserPhysical: Physical[] };
@@ -28,7 +31,7 @@ async function launch() {
     env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 15000,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 15000);
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'MCP Browser', exact: true }).waitFor();
   servicePid = Number(
@@ -77,15 +80,16 @@ async function close(trace: string) {
 }
 try {
   let page = await launch();
+  let settingsUi: Page = page;
   const state = () =>
     page.evaluate(
       async () =>
         (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
     );
-  const panel = () => page.getByRole('region', { name: 'MCP settings', exact: true });
-  const editor = () => page.locator('.settings-editor-panel').getByRole('complementary');
+  const panel = () => settingsUi.getByRole('region', { name: 'MCP settings', exact: true });
+  const editor = () => settingsUi.locator('.settings-editor-panel').getByRole('complementary');
   async function ready() {
-    await page.waitForFunction(() => {
+    await settingsUi.waitForFunction(() => {
       const button = document.querySelector<HTMLButtonElement>(
         '[aria-label="Refresh MCP settings"]',
       );
@@ -93,23 +97,23 @@ try {
     });
   }
   async function settings() {
-    if (!(await page.locator('.desktop-settings-dialog').isVisible()))
-      await page
-        .locator('.session-header')
-        .getByRole('button', { name: '设置', exact: true })
-        .click();
-    await page.getByRole('button', { name: 'MCP', exact: true }).click();
+    settingsUi = await openNativeSettingsPage(app!, page);
+    await settingsUi.getByRole('button', { name: 'MCP', exact: true }).click();
     await panel().getByRole('heading', { name: '我的 MCP', exact: true }).waitFor();
     await ready();
   }
+  async function returnToList() {
+    const back = settingsUi.getByRole('button', { name: 'MCP 连接', exact: true });
+    if (await back.isVisible()) await back.click();
+  }
   async function refresh() {
+    await returnToList();
     await ready();
     await panel().getByRole('button', { name: 'Refresh MCP settings', exact: true }).click();
     await ready();
   }
   async function manage() {
-    if (await editor().count())
-      await editor().getByRole('button', { name: '关闭', exact: true }).click();
+    await returnToList();
     await panel().getByRole('button', { name: '管理 window-oauth', exact: true }).click();
   }
   async function settle(
@@ -127,7 +131,7 @@ try {
         )
         .at(-1);
       if (row && cancelWhenAuthorized && !cancelled && (await counts()).held! > 0) {
-        await panel().getByRole('button', { name: '取消操作', exact: true }).last().click();
+        await settingsUi.getByRole('button', { name: '取消操作', exact: true }).last().click();
         cancelled = true;
       }
       if (row && !['pending', 'submitting', 'outcome_unknown'].includes(row.phase)) {
@@ -141,7 +145,7 @@ try {
         return row;
       }
       if (row) {
-        const button = panel().getByRole('button', { name: '查看结果', exact: true }).last();
+        const button = settingsUi.getByRole('button', { name: '查看结果', exact: true }).last();
         if (await button.count()) await button.click({ timeout: 500 }).catch(() => {});
       }
       assert.ok(
@@ -158,7 +162,12 @@ try {
   ) {
     await refresh();
     await manage();
-    await editor().getByRole('button', { name: label, exact: true }).click();
+    if (kind === 'authRefresh' || kind === 'clear' || kind === 'revoke') {
+      await editor().getByRole('button', { name: '更多操作', exact: true }).click();
+      await settingsUi.getByRole('menuitem', { name: label, exact: true }).click();
+    } else {
+      await editor().getByRole('button', { name: label, exact: true }).click();
+    }
     if (kind === 'clear' || kind === 'revoke')
       await editor()
         .getByRole('button', { name: 'Confirm exact MCP operation', exact: true })
@@ -187,7 +196,6 @@ try {
   assert.equal((await state()).selection, undefined);
   await settings();
   assert.equal(await panel().getByText('window-oauth', { exact: true }).count(), 1);
-  await auth('检查状态', 'authStatus');
   await presence(false);
   stage('default_browser_login_ready');
   await auth('登录', 'login');
@@ -223,16 +231,16 @@ try {
   assert.equal(afterConnect.initialize, 1);
   assert.equal(afterConnect.list, 1);
   stage('fresh_service_default_vault_resume', { counts: afterConnect, coldPosts: 0 });
-  await auth('刷新登录', 'authRefresh');
+  await auth('刷新授权', 'authRefresh');
   const refreshed = await counts();
   assert.equal(refreshed.refresh, 1);
   assert.equal(refreshed.authorize, 1);
-  await auth('清除登录', 'clear');
+  await auth('退出登录', 'clear');
   await presence(false);
   assert.equal((await counts()).revoke, 0);
   await auth('登录', 'login');
   await presence(true);
-  await auth('撤销登录', 'revoke');
+  await auth('撤销授权', 'revoke');
   await presence(false);
   const revoked = await counts();
   assert.equal(revoked.revoke, 1);
@@ -243,8 +251,6 @@ try {
   const cancelled = await counts();
   assert.equal(cancelled.held, 1);
   assert.equal(cancelled.codeExchange, 2);
-  await presence(false);
-  await auth('清除登录', 'clear');
   await presence(false);
   for (const row of submissions) {
     assert.equal(row.storeId, storeId);
@@ -293,7 +299,7 @@ try {
   stage('complete', { counts: await counts(), services: pids.length });
 } catch (error) {
   if (app) {
-    const page = await app.firstWindow();
+    const page = await nativeRootPage(app, 15000);
     writeFileSync(join(home, 'browser-window-failure.txt'), await page.locator('body').innerText());
     await page.screenshot({ path: join(home, 'browser-window-failure.png'), fullPage: true });
     await close('browser-failure-trace.zip').catch(() => {});

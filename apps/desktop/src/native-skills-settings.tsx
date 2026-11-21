@@ -3,7 +3,11 @@ import { Button, MessageContent, RightSidebar, useErrorFeedback } from '@kite-ai
 import { ApplicationConfirmationDialog } from '@kite-ai/ui/desktop/confirmation';
 import { type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { NativeBridge, NativeSkillsScope } from './native-bridge';
+import type {
+  NativeSettingsEditorControl,
+  NativeSettingsRequestPort,
+  NativeSkillsScope,
+} from './native-bridge';
 import { NativeSettingsListRow } from './native-settings-list-row';
 import { NativeSkillMarketplace } from './native-skill-marketplace';
 import { notifyNativeSkillMutation, watchNativeSkillMutations } from './native-skill-mutations';
@@ -106,12 +110,12 @@ export function NativeSkillsSettings({
   editorControl,
   onError: errorHandler,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
   storeId?: string;
   canRead?: boolean;
   panelHost: HTMLElement | null;
-  editorControl?: RefObject<{ close: () => void } | null>;
+  editorControl?: RefObject<NativeSettingsEditorControl | null>;
   onError?: (message: string) => void;
 }) {
   const onError = useErrorFeedback(errorHandler);

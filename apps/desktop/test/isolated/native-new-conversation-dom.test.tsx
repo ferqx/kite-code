@@ -3081,7 +3081,7 @@ test('a held cached Session switch restores the target draft and controls togeth
   }
 });
 
-test('settings replace the painted page without remounting its draft or re-reading the selected conversation', async () => {
+test('settings overlay the still-painted page without remounting its draft or re-reading the selected conversation', async () => {
   const f = fixture();
   async function openSettings() {
     await act(async () => {
@@ -3110,32 +3110,27 @@ test('settings replace the painted page without remounting its draft or re-readi
     const reads = [...conversationReads()];
     await openSettings();
     expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
-    const navigation = f.host.querySelector('.settings-sidebar nav')!;
-    const back = navigation.querySelector('button.settings-back')!;
-    expect(navigation.firstElementChild).toBe(back);
-    expect(back.textContent).toBe('返回应用');
-    expect(back.querySelector('svg[data-icon="inline-start"][aria-hidden="true"]')).not.toBeNull();
-    expect(f.host.querySelector('.desktop-settings-header button')).toBeNull();
+    const navigation = f.host.querySelector('.native-settings-rail nav')!;
+    expect(f.host.querySelector('.native-settings-topbar [aria-label="关闭设置"]') !== null).toBe(
+      true,
+    );
     const navigationButtons = [...navigation.querySelectorAll('button')];
     expect(navigationButtons.map((button) => button.textContent)).toEqual([
-      '返回应用',
       '常规',
+      '外观',
       '提供商与模型',
       'MCP',
+      '技能',
       '轨迹与集成',
-      'Skills',
     ]);
     for (const button of navigationButtons) {
-      expect(
-        button.querySelectorAll('svg[data-icon="inline-start"][aria-hidden="true"]'),
-      ).toHaveLength(1);
+      expect(button.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(1);
       expect(button.querySelector('svg[tabindex]')).toBeNull();
     }
-    expect(page.style.opacity).toBe('0');
-    expect(page.style.pointerEvents).toBe('none');
-    expect(page.hasAttribute('inert')).toBe(true);
-    expect(page.getAttribute('aria-hidden')).toBe('true');
-    expect(f.host.querySelector('.fixed.inset-0')).toBeNull();
+    expect(page.style.opacity).toBe('');
+    expect(page.style.pointerEvents).toBe('');
+    expect(page.hasAttribute('inert')).toBe(false);
+    expect(f.host.querySelector('.native-settings-backdrop') !== null).toBe(true);
     expect(f.input('当前会话私有草稿')).toBe(input);
     expect(promptValue(input)).toBe('unsent settings draft 雪🙂');
     const modelReads = f.calls.filter((call) => call.method === 'settings.models.read').length;
@@ -3190,7 +3185,7 @@ test('settings replace the painted page without remounting its draft or re-readi
     await f.click('管理 其他模型 的模型');
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
-      const outside = f.host.querySelector<HTMLElement>('.settings-sidebar')!;
+      const outside = f.host.querySelector<HTMLElement>('.native-settings-rail')!;
       outside.dispatchEvent(
         new f.dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0 }),
       );
@@ -3199,7 +3194,7 @@ test('settings replace the painted page without remounting its draft or re-readi
     });
     expect(f.host.querySelector('[aria-label="其他模型 的模型管理"]') === null).toBe(true);
     expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
-    await f.click('返回应用');
+    await f.click('关闭设置');
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
     expect(f.host.querySelector('.client-panels')).toBe(page);
@@ -3212,6 +3207,7 @@ test('settings replace the painted page without remounting its draft or re-readi
     expect(f.selected()).toBe('a');
     expect(conversationReads()).toEqual(reads);
     await openSettings();
+    await f.click('提供商与模型');
     expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(
       modelReads + 2,
     );
@@ -3240,7 +3236,7 @@ test('settings replace the painted page without remounting its draft or re-readi
   }
 });
 
-test('provider configuration uses the rightmost settings rail and Escape dismisses editor before settings', async () => {
+test('provider configuration replaces the list and asks before discarding a changed editor', async () => {
   const f = fixture();
   const pressEscape = async () => {
     await act(async () => {
@@ -3277,7 +3273,7 @@ test('provider configuration uses the rightmost settings rail and Escape dismiss
     const main = shell.querySelector('.settings-content')!;
     const rail = shell.querySelector('.settings-editor-panel')!;
     expect(rail.parentElement).toBe(main.parentElement);
-    expect(main.closest('.client-content-frame')).toBe(shell.lastElementChild!);
+    expect(main.parentElement?.classList.contains('native-settings-workspace')).toBe(true);
     expect(rail).toBe(main.parentElement!.lastElementChild!);
     expect(rail.querySelector('.right-sidebar form')).not.toBeNull();
     expect(rail.querySelector('form.right-sidebar-editor')).not.toBeNull();
@@ -3318,6 +3314,14 @@ test('provider configuration uses the rightmost settings rail and Escape dismiss
       (button) => button.textContent === '新增提供商',
     )!;
     await pressEscape();
+    expect(rail.querySelector('form') !== null).toBe(true);
+    expect(f.host.querySelector('.native-settings-discard') !== null).toBe(true);
+    await f.click('继续编辑');
+    expect(rail.querySelector<HTMLInputElement>('[aria-label="API key"]')!.value).toBe(
+      'escape-only-secret',
+    );
+    await pressEscape();
+    await f.click('放弃更改');
     expect(rail.querySelector('form')).toBeNull();
     expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
     expect(f.host.activeElement).toBe(origin);
@@ -3325,13 +3329,15 @@ test('provider configuration uses the rightmost settings rail and Escape dismiss
     expect(rail.querySelector<HTMLInputElement>('[aria-label="API key"]')!.value).toBe('');
     await editSecret('navigation-only-secret');
     await f.click('常规');
+    await f.click('放弃更改');
     expect(rail.querySelector('form')).toBeNull();
     await f.click('提供商与模型');
     expect(rail.querySelector('form')).toBeNull();
     await f.click('新增提供商');
     expect(rail.querySelector<HTMLInputElement>('[aria-label="API key"]')!.value).toBe('');
     await editSecret('return-only-secret');
-    await f.click('返回应用');
+    await f.click('关闭设置');
+    await f.click('放弃更改');
     expect(f.host.querySelector('.settings-editor-panel')).toBeNull();
     expect(f.input('当前会话私有草稿')).toBe(input);
     expect(promptValue(input)).toBe('provider settings draft');
@@ -5242,7 +5248,7 @@ test('persisted unknown or failed project access retains the original permission
   }
 });
 
-test('MCP and Skills share the far-right settings rail, Escape closes details first, and tab changes preserve the conversation draft', async () => {
+test('MCP and Skills share the settings content column, Escape closes details first, and tab changes preserve the conversation draft', async () => {
   const f = fixture();
   const bridge = f.dom.window.kiteNative! as NativeBridge;
   const originalRequest = bridge.request;
@@ -5349,7 +5355,7 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
     const shell = () => f.host.querySelector('.desktop-settings')!;
     const main = () => shell().querySelector('.settings-content')!;
     const rail = () => shell().querySelector('.settings-editor-panel')!;
-    expect(main().closest('.client-content-frame')).toBe(shell().lastElementChild!);
+    expect(main().parentElement?.classList.contains('native-settings-workspace')).toBe(true);
     expect(rail()).toBe(main().parentElement!.lastElementChild!);
     expect(rail().parentElement === main().parentElement).toBe(true);
     expect(main().querySelector('form, .right-sidebar')).toBeNull();
@@ -5367,7 +5373,7 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
     await openSettings();
     await f.click('MCP');
     await f.click('新增 MCP');
-    await f.click('Skills');
+    await f.click('技能');
     expect(rail().childElementCount).toBe(0);
     expect(main().querySelector('[aria-label="Skills 目录"]')).not.toBeNull();
     await f.click('查看 Shell Skill 详情');
@@ -5385,7 +5391,7 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
     expect(rail().childElementCount).toBe(0);
     await f.click('管理 server');
     expect(rail().querySelector('.right-sidebar[aria-label="server"]')).not.toBeNull();
-    await f.click('返回应用');
+    await f.click('关闭设置');
     expect(f.host.querySelector('.settings-editor-panel')).toBeNull();
     expect(f.input('当前会话私有草稿') === draft).toBe(true);
     expect(promptValue(draft)).toBe('unchanged extension-settings draft 雪🙂');

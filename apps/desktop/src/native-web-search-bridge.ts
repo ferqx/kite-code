@@ -1,5 +1,5 @@
 import type { WebSearchDisplay } from '@kite-ai/ui/desktop';
-import type { NativeBridge } from './native-bridge';
+import type { NativeSettingsRequestPort } from './native-bridge';
 import type {
   SearchDraft,
   SearchProbe,
@@ -30,7 +30,7 @@ export type NativeSearchResult =
   | { kind: 'webSearch.test'; probe: SearchProbe }
   | { kind: 'webSearch.evidence'; evidence: WebSearchDisplay | null };
 export function nativeSearchSettingsPort(
-  bridge: NativeBridge,
+  bridge: NativeSettingsRequestPort,
   scope: Scope,
   sessionId?: string,
 ): WebSearchSettingsPort {

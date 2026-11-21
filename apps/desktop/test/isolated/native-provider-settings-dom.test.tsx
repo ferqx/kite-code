@@ -11,6 +11,7 @@ import type {
   NativeRequest,
   NativeResult,
   NativeSelection,
+  NativeSettingsEditorControl,
 } from '../../src/native-bridge';
 import { compatibleProviderPresets } from '../../src/native-provider-presets';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
@@ -781,6 +782,52 @@ test('Provider editor portals into the sibling rail; cancel and close clear draf
     expect(f.field('服务地址').value).toBe('https://api.openai.com/v1');
     expect(calls.filter((call) => call.method === 'settings.providers.close')).toHaveLength(2);
     expect(calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(1);
+    expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Provider editor detects unsaved changes and defers dismissal to the settings host', async () => {
+  const f = fixture();
+  const calls: NativeRequest[] = [];
+  const bridge = {
+    request: async (input: NativeRequest) => {
+      calls.push(input);
+      return input.method === 'settings.providers.read' ? structuredClone(facts) : null;
+    },
+  };
+  const editorControl = { current: null as NativeSettingsEditorControl | null };
+  const requested: boolean[] = [];
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeProviderSettings
+          panelHost={f.panelHost}
+          bridge={bridge}
+          generation={1}
+          submissions={[]}
+          editorControl={editorControl}
+          onRequestEditorClose={() => {
+            requested.push(editorControl.current?.hasUnsavedChanges?.() ?? false);
+          }}
+        />,
+      ),
+    );
+    await f.addPreset('OpenAI');
+    const guard = editorControl.current!;
+    expect(guard.hasUnsavedChanges?.()).toBe(false);
+    await f.edit('模型名称', 'draft-model');
+    expect(editorControl.current).toBe(guard);
+    expect(guard.hasUnsavedChanges?.()).toBe(true);
+    await f.click('取消');
+    expect(requested).toEqual([true]);
+    expect(f.field('模型名称').value).toBe('draft-model');
+    await f.edit('模型名称', '');
+    expect(guard.hasUnsavedChanges?.()).toBe(false);
+    await act(async () => guard.close());
+    expect(editorControl.current).toBeNull();
+    expect(f.dom.window.document.activeElement).toBe(f.button('新增提供商'));
     expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
   } finally {
     await f.close();
@@ -2605,11 +2652,25 @@ function recoveryProvider(
     get recovered() {
       return recovered;
     },
-    render: (selected = selection, submissions = initial) =>
+    render: (
+      selected = selection,
+      submissions = initial,
+      relay?: { transport: NativeBridge['request']; retentionKey: object },
+    ) =>
       act(async () =>
         f.root.render(
           <NativeProviderSettings
-            bridge={bridge}
+            bridge={
+              relay
+                ? {
+                    request: async (input) => {
+                      calls.push(input);
+                      return relay.transport(input);
+                    },
+                  }
+                : bridge
+            }
+            retentionKey={relay?.retentionKey}
             generation={1}
             selection={selected}
             submissions={submissions}
@@ -3021,47 +3082,51 @@ for (const mismatch of [
   });
 }
 
-test('a definite Main pre-dispatch rejection recovers by ordinary GET without waiting for an intent that was never created', async () => {
-  const clock = providerRecoveryClock();
-  let reads = 0;
-  const f = recoveryProvider(async (input) => {
-    if (input.method === 'settings.providers.read')
-      return { ...facts, observationId: ++reads === 1 ? 7 : 8 };
-    if (input.method === 'settings.providers.save')
-      throw Object.assign(Error('configuration_observation_changed'), {
-        code: 'configuration_observation_changed',
-      });
-    return null;
+for (const code of ['configuration_observation_changed', 'native_settings_not_dispatched']) {
+  test(`a definite pre-dispatch rejection (${code}) recovers by ordinary GET without waiting for an intent that was never created`, async () => {
+    const clock = providerRecoveryClock();
+    let reads = 0;
+    const f = recoveryProvider(async (input) => {
+      if (input.method === 'settings.providers.read')
+        return { ...facts, observationId: ++reads === 1 ? 7 : 8 };
+      if (input.method === 'settings.providers.save') throw Object.assign(Error(code), { code });
+      return null;
+    });
+    try {
+      await f.render();
+      await f.click('编辑 OpenAI-compatible 1');
+      await f.edit('提供商名称', 'Original stale draft');
+      await f.click('保存提供商配置');
+      await clock.fire();
+      expect(reads).toBe(2);
+      expect(f.calls.filter((call) => call.method === 'state')).toHaveLength(0);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.lookup')).toHaveLength(0);
+      expect(f.recovered).toBe(1);
+      expect(f.saved).toBe(0);
+      expect(f.button('保存提供商配置').disabled).toBe(true);
+      await f.click('关闭');
+      await f.click('编辑 OpenAI-compatible 1');
+      expect(f.button('保存提供商配置').disabled).toBe(false);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
+    } finally {
+      await f.close();
+      clock.close();
+    }
   });
-  try {
-    await f.render();
-    await f.click('编辑 OpenAI-compatible 1');
-    await f.edit('提供商名称', 'Original stale draft');
-    await f.click('保存提供商配置');
-    await clock.fire();
-    expect(reads).toBe(2);
-    expect(f.calls.filter((call) => call.method === 'state')).toHaveLength(0);
-    expect(f.calls.filter((call) => call.method === 'settings.providers.lookup')).toHaveLength(0);
-    expect(f.recovered).toBe(1);
-    expect(f.saved).toBe(0);
-    expect(f.button('保存提供商配置').disabled).toBe(true);
-    await f.click('关闭');
-    await f.click('编辑 OpenAI-compatible 1');
-    expect(f.button('保存提供商配置').disabled).toBe(false);
-    expect(f.calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
-  } finally {
-    await f.close();
-    clock.close();
-  }
-});
+}
 
-for (const closeBeforeReply of [false, true]) {
-  test(`a Provider RPC with no watcher retains only its original correlation across settings close ${closeBeforeReply ? 'before' : 'after'} the lost reply`, async () => {
+for (const [closeBeforeReply, remountTransport] of [
+  [false, false],
+  [true, false],
+  [true, true],
+] as const) {
+  test(`a Provider RPC with no watcher retains only its original correlation across settings close ${closeBeforeReply ? 'before' : 'after'} the lost reply${remountTransport ? ' with a new instance-bound relay' : ''}`, async () => {
     const clock = providerRecoveryClock();
     let original: NativeProviderSubmission | undefined;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    const f = recoveryProvider(async (input) => {
+    const request: NativeBridge['request'] = async (input) => {
+      if (input.method === 'settings.providers.save') originalTransportWrites++;
       if (input.method === 'settings.providers.read') return structuredClone(facts);
       if (input.method === 'settings.providers.save') {
         original = {
@@ -3087,9 +3152,16 @@ for (const closeBeforeReply of [false, true]) {
         };
       if (input.method === 'settings.providers.lookup') return { ...original!, phase: 'applied' };
       return null;
-    });
+    };
+    const retentionKey = {};
+    let originalTransportWrites = 0;
+    const f = recoveryProvider(request);
     try {
-      await f.render();
+      await f.render(
+        undefined,
+        undefined,
+        remountTransport ? { transport: request, retentionKey } : undefined,
+      );
       await f.click('编辑 OpenAI-compatible 1');
       await f.edit('提供商名称', 'Original sent name');
       await f.edit('凭据处理', 'replace');
@@ -3098,7 +3170,19 @@ for (const closeBeforeReply of [false, true]) {
       await act(async () => f.root.render(null));
       await act(async () => release());
       expect(clock.delays).toEqual([]);
-      await f.render();
+      await f.render(
+        undefined,
+        undefined,
+        remountTransport
+          ? {
+              retentionKey,
+              transport: async (input) => {
+                if (input.method === 'settings.providers.save') throw Error('unexpected_replay');
+                return request(input);
+              },
+            }
+          : undefined,
+      );
       await f.click('编辑 OpenAI-compatible 1');
       await f.edit('凭据处理', 'replace');
       expect(f.field('API key').value).toBe('');
@@ -3110,6 +3194,7 @@ for (const closeBeforeReply of [false, true]) {
       ]);
       expect(f.calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
       expect(f.saved).toBe(1);
+      expect(originalTransportWrites).toBe(1);
       expect(clock.delays).toEqual([]);
       expect(f.field('API key').value).toBe('');
     } finally {

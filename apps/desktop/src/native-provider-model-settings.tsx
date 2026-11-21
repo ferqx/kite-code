@@ -1,9 +1,10 @@
-import { type RefObject, useCallback, useMemo, useRef, useState } from 'react';
+import { type RefObject, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
-  NativeBridge,
   NativeModelSettingsSubmission,
   NativeProviderSubmission,
-  NativeSelection,
+  NativeSettingsEditorControl,
+  NativeSettingsRequestPort,
+  NativeSettingsSelection,
 } from './native-bridge';
 import { useNativeModelSettings } from './native-model-settings';
 import {
@@ -13,26 +14,32 @@ import {
 
 export function NativeProviderModelSettings({
   bridge,
+  retentionKey,
   generation,
   selection,
   storeId = selection?.storeId,
   providerSubmissions,
   modelSubmissions,
   onSaved,
+  onModelWritingChange,
   panelHost,
   toastHost,
   editorControl,
+  onRequestEditorClose,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
+  retentionKey?: object;
   generation: number;
-  selection?: NativeSelection;
+  selection?: NativeSettingsSelection;
   storeId?: string;
   providerSubmissions: readonly NativeProviderSubmission[];
   modelSubmissions: readonly NativeModelSettingsSubmission[];
   onSaved?: () => void;
+  onModelWritingChange?: (writing: boolean) => void;
   panelHost: HTMLElement | null;
   toastHost?: HTMLElement | null;
-  editorControl?: RefObject<{ close: () => void } | null>;
+  editorControl?: RefObject<NativeSettingsEditorControl | null>;
+  onRequestEditorClose?: () => void;
 }) {
   const providerReader = useRef<(() => Promise<boolean>) | null>(null);
   const [activity, setActivity] = useState<NativeProviderSettingsActivity>({
@@ -96,9 +103,13 @@ export function NativeProviderModelSettings({
     },
   });
   blocked.current = pending || models.pending || (!models.facts && modelPending);
+  useLayoutEffect(() => {
+    onModelWritingChange?.(models.writing);
+  }, [models.writing, onModelWritingChange]);
   return (
     <NativeProviderSettings
       bridge={bridge}
+      retentionKey={retentionKey}
       generation={generation}
       selection={selection}
       submissions={providerSubmissions}
@@ -106,6 +117,7 @@ export function NativeProviderModelSettings({
       panelHost={panelHost}
       toastHost={toastHost}
       editorControl={editorControl}
+      onRequestEditorClose={onRequestEditorClose}
       models={models}
       onActivityChange={onActivityChange}
       acquireWrite={acquireWrite}

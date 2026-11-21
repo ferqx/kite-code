@@ -7,7 +7,7 @@ import type {
   NativeUserMcpResult,
   NativeUserMcpSubmission,
 } from '../../src/mcp-bridge';
-import type { NativeBridge } from '../../src/native-bridge';
+import type { NativeBridge, NativeSettingsEditorControl } from '../../src/native-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>');
@@ -1100,6 +1100,45 @@ test('tools display names and descriptions and closing the editor never cancels 
     expect(panel.textContent).toBe('');
     expect(calls.some((c) => c.method === 'settings.userMcp.cancel')).toBe(false);
   }));
+test('MCP Add publishes a stable dirty guard and delegates only explicit dismissals', async () =>
+  fixture(async ({ host, panel, calls, bridge, root }) => {
+    const editorControl = createRef<NativeSettingsEditorControl>();
+    const requested: boolean[] = [];
+    await act(async () =>
+      root.render(
+        <NativeMcpSettings
+          panelHost={panel}
+          bridge={bridge}
+          generation={1}
+          storeId="store"
+          submissions={[]}
+          editorControl={editorControl}
+          onRequestEditorClose={() => {
+            requested.push(editorControl.current?.hasUnsavedChanges?.() ?? false);
+          }}
+        />,
+      ),
+    );
+    const origin = button(host, '新增 MCP');
+    await act(async () => origin.click());
+    const guard = editorControl.current!;
+    expect(guard.hasUnsavedChanges?.()).toBe(false);
+    await act(async () => type(panel, 'Name', 'working draft'));
+    expect(editorControl.current).toBe(guard);
+    expect(guard.hasUnsavedChanges?.()).toBe(true);
+    await act(async () => button(panel, '取消').click());
+    expect(requested).toEqual([true]);
+    expect(panel.querySelector<HTMLInputElement>('[aria-label="Name"]')?.value).toBe(
+      'working draft',
+    );
+    await act(async () => type(panel, 'Name', ''));
+    expect(guard.hasUnsavedChanges?.()).toBe(false);
+    await act(async () => guard.close());
+    expect(editorControl.current).toBeNull();
+    expect(document.activeElement).toBe(origin);
+    expect(calls.some((call) => call.method === 'settings.userMcp.submit')).toBe(false);
+  }));
+
 test('late reads from a previous Store cannot replace the current global view', async () =>
   fixture(async ({ host, calls, render }) => {
     let resolveOld!: (result: NativeUserMcpResult) => void;

@@ -1,7 +1,7 @@
 import './native-web-search-settings.css';
 import { Button, SettingsNavigationIcon } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { NativeBridge } from './native-bridge';
+import type { NativeSettingsRequestPort } from './native-bridge';
 import { nativeSearchSettingsPort } from './native-web-search-bridge';
 import type { SearchView, WebSearchSettingsPort } from './web-search-settings-model';
 
@@ -13,7 +13,7 @@ export function NativeBoundWebSearchSettings({
   sessionId,
   onManageProviders,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
   storeId: string;
   sessionId?: string;

@@ -1,11 +1,11 @@
-import type { NativeBridge, NativeSkillsScope } from './native-bridge';
+import type { NativeSettingsRequestPort, NativeSkillsScope } from './native-bridge';
 
 type Listener = NativeSkillsScope & { changed: () => void };
-const listeners = new WeakMap<NativeBridge, Set<Listener>>();
+const listeners = new WeakMap<NativeSettingsRequestPort, Set<Listener>>();
 
 // A mutation can outlive its settings page. Only the current matching reader refreshes.
 export function watchNativeSkillMutations(
-  bridge: NativeBridge,
+  bridge: NativeSettingsRequestPort,
   scope: NativeSkillsScope,
   changed: () => void,
 ) {
@@ -22,7 +22,10 @@ export function watchNativeSkillMutations(
   };
 }
 
-export function notifyNativeSkillMutation(bridge: NativeBridge, scope: NativeSkillsScope) {
+export function notifyNativeSkillMutation(
+  bridge: NativeSettingsRequestPort,
+  scope: NativeSkillsScope,
+) {
   for (const listener of listeners.get(bridge) ?? []) {
     if (listener.generation === scope.generation && listener.storeId === scope.storeId)
       listener.changed();

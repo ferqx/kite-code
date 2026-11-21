@@ -2,12 +2,13 @@ import { Button, Input, RightSidebar, Textarea } from '@kite-ai/ui/desktop';
 import { type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
-  NativeBridge,
   NativeProvider,
   NativeProviderOperation,
   NativeProviderSettingsFacts,
   NativeProviderSubmission,
-  NativeSelection,
+  NativeSettingsEditorControl,
+  NativeSettingsRequestPort,
+  NativeSettingsSelection,
 } from './native-bridge';
 import { NativeConnectionModels } from './native-connection-models';
 import { NativeToast } from './native-message';
@@ -85,7 +86,7 @@ type SentProviderChange = {
 };
 // Closing settings cancels readers and timers, not an already sent intent. Retain
 // only its non-secret correlation facts so reopening the same view can query Main.
-const sentProviderChanges = new WeakMap<NativeBridge, Map<string, SentProviderChange>>();
+const sentProviderChanges = new WeakMap<object, Map<string, SentProviderChange>>();
 function matchesProviderChange(sent: SentProviderChange, entry: NativeProviderSubmission) {
   const operation = (value: NativeProviderOperation) =>
     JSON.stringify([
@@ -118,6 +119,7 @@ function rejectedBeforeProviderDispatch(code: string) {
     'configuration_intent_limit',
     'provider_settings_override',
     'invalid_request',
+    'native_settings_not_dispatched',
     'invalid_provider_name',
     'invalid_provider_endpoint',
     'invalid_model_protocol',
@@ -208,6 +210,7 @@ function directoryError(code: string) {
 
 export function NativeProviderSettings({
   bridge,
+  retentionKey = bridge,
   generation,
   selection,
   submissions,
@@ -217,22 +220,26 @@ export function NativeProviderSettings({
   toastHost,
   onError,
   editorControl,
+  onRequestEditorClose,
   refreshControl,
   models,
   revision = 0,
   onActivityChange,
   acquireWrite,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
+  /** Retains only non-secret correlation across presentation instances. */
+  retentionKey?: object;
   generation: number;
-  selection?: NativeSelection;
+  selection?: NativeSettingsSelection;
   submissions: readonly NativeProviderSubmission[];
   onSaved?: () => void;
   onRecovered?: () => void;
   panelHost: HTMLElement | null;
   toastHost?: HTMLElement | null;
   onError?: (message: string) => void;
-  editorControl?: RefObject<{ close: () => void } | null>;
+  editorControl?: RefObject<NativeSettingsEditorControl | null>;
+  onRequestEditorClose?: () => void;
   refreshControl?: RefObject<(() => Promise<boolean>) | null>;
   models?: NativeModelSettingsState;
   revision?: number;
@@ -260,6 +267,16 @@ export function NativeProviderSettings({
     [modelNames, setModelNames] = useState(''),
     [secret, setSecret] = useState('');
   const [credential, setCredential] = useState<NativeProviderOperation['credential']>('replace');
+  const initialForm = useRef<
+    | {
+        name: string;
+        protocol: Protocol;
+        baseURL: string;
+        modelNames: string;
+        credential: NativeProviderOperation['credential'];
+      }
+    | undefined
+  >(undefined);
   const [directory, setDirectory] = useState<{
     names?: string[];
     error?: string;
@@ -286,7 +303,7 @@ export function NativeProviderSettings({
     if (message) feedback.report('operation', message);
   }
   const awaitingOriginal = useRef<SentProviderChange | undefined>(
-    sentProviderChanges.get(bridge)?.get(identity),
+    sentProviderChanges.get(retentionKey)?.get(identity),
   );
   const [awaitingOriginalRecord, setAwaitingOriginalRecord] = useState(!!awaitingOriginal.current);
   const mounted = useRef(true);
@@ -432,13 +449,13 @@ export function NativeProviderSettings({
     ]);
   }
   function settleSent(submission: NativeProviderSubmission) {
-    const retained = sentProviderChanges.get(bridge)?.get(identity);
+    const retained = sentProviderChanges.get(retentionKey)?.get(identity);
     if (
       retained &&
       ['applied', 'failed'].includes(submission.phase) &&
       matchesProviderChange(retained, submission)
     )
-      sentProviderChanges.get(bridge)?.delete(identity);
+      sentProviderChanges.get(retentionKey)?.delete(identity);
   }
   function cancelRecovery() {
     clearTimeout(recovery.current.timer);
@@ -620,7 +637,7 @@ export function NativeProviderSettings({
       running: false,
       pendingSaved: undefined,
     };
-    awaitingOriginal.current = sentProviderChanges.get(bridge)?.get(identity);
+    awaitingOriginal.current = sentProviderChanges.get(retentionKey)?.get(identity);
     pendingWatchers.current.clear();
     handledTerminals.current.clear();
     setAwaitingOriginalRecord(!!awaitingOriginal.current);
@@ -648,7 +665,7 @@ export function NativeProviderSettings({
       sequence.current++;
       void bridge.request({ method: 'settings.providers.close', generation }).catch(() => {});
     };
-  }, [identity, bridge]);
+  }, [identity, bridge, retentionKey]);
   // Only a confirmed model mutation invalidates the connection observation.
   // Preserve the editor's original basis; read() never reauthorizes its draft.
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision is the explicit sibling invalidation signal.
@@ -745,14 +762,23 @@ export function NativeProviderSettings({
           }
         : undefined,
     );
-    setName(existing ? connectionLabel(entry, existing) : (preset?.label ?? presetLabel(entry)));
-    setProtocol(existing?.protocol ?? preset?.protocol ?? 'chat-completions');
-    setBaseURL(existing?.baseURL ?? preset?.baseURL ?? entry.defaultBaseURL);
-    setModelNames(existing?.modelNames.join('\n') ?? '');
+    initialForm.current = {
+      name: existing ? connectionLabel(entry, existing) : (preset?.label ?? presetLabel(entry)),
+      protocol: existing?.protocol ?? preset?.protocol ?? 'chat-completions',
+      baseURL: existing?.baseURL ?? preset?.baseURL ?? entry.defaultBaseURL,
+      modelNames: existing?.modelNames.join('\n') ?? '',
+      credential: existing?.hasCredential
+        ? 'keep'
+        : preset || entry.requiresCredential
+          ? 'replace'
+          : 'none',
+    };
+    setName(initialForm.current.name);
+    setProtocol(initialForm.current.protocol);
+    setBaseURL(initialForm.current.baseURL);
+    setModelNames(initialForm.current.modelNames);
     setSecret('');
-    setCredential(
-      existing?.hasCredential ? 'keep' : preset || entry.requiresCredential ? 'replace' : 'none',
-    );
+    setCredential(initialForm.current.credential);
     setFieldError(undefined);
     setError('');
   }
@@ -836,6 +862,21 @@ export function NativeProviderSettings({
     setFieldError(undefined);
     void bridge.request({ method: 'settings.providers.close', generation }).catch(() => {});
   }
+  function requestEditorClose() {
+    if (onRequestEditorClose) onRequestEditorClose();
+    else close();
+  }
+  const dirty = useRef(false);
+  const initial = initialForm.current;
+  dirty.current =
+    (panelMode === 'add' || panelMode === 'edit') &&
+    !!initial &&
+    (name !== initial.name ||
+      protocol !== initial.protocol ||
+      baseURL !== initial.baseURL ||
+      modelNames !== initial.modelNames ||
+      credential !== initial.credential ||
+      secret !== '');
   const closeCurrent = useRef(close);
   closeCurrent.current = close;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Switching between instances of one preset must reset field focus.
@@ -843,7 +884,7 @@ export function NativeProviderSettings({
     if (editorControl)
       editorControl.current =
         panelMode === 'add' || panelMode === 'edit'
-          ? { close: () => closeCurrent.current() }
+          ? { close: () => closeCurrent.current(), hasUnsavedChanges: () => dirty.current }
           : null;
     if (!panelMode && restoreFocus.current) {
       restoreFocus.current = false;
@@ -957,10 +998,10 @@ export function NativeProviderSettings({
       observationId: facts.observationId,
       operation: structuredClone(operation),
     };
-    let retained = sentProviderChanges.get(bridge);
+    let retained = sentProviderChanges.get(retentionKey);
     if (!retained) {
       retained = new Map();
-      sentProviderChanges.set(bridge, retained);
+      sentProviderChanges.set(retentionKey, retained);
     }
     retained.set(original, sent);
     setSecret('');
@@ -1402,7 +1443,7 @@ export function NativeProviderSettings({
               id={`${fieldId}-editor`}
               label={provider ? `${editingLabel} 配置` : '新增提供商'}
               title={panelTitle}
-              onClose={close}
+              onClose={requestEditorClose}
             >
               <div className="provider-settings provider-panel-content">
                 {!provider ? (
@@ -1417,7 +1458,11 @@ export function NativeProviderSettings({
                       </p>
                     </div>
                     <footer className="provider-editor-footer right-sidebar-editor-footer">
-                      <Button className="provider-button" type="button" onClick={close}>
+                      <Button
+                        className="provider-button"
+                        type="button"
+                        onClick={requestEditorClose}
+                      >
                         返回列表
                       </Button>
                     </footer>
@@ -1775,7 +1820,11 @@ export function NativeProviderSettings({
                       </section>
                     </div>
                     <footer className="provider-editor-footer right-sidebar-editor-footer">
-                      <Button className="provider-button" type="button" onClick={close}>
+                      <Button
+                        className="provider-button"
+                        type="button"
+                        onClick={requestEditorClose}
+                      >
                         取消
                       </Button>
                       <Button

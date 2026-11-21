@@ -1,7 +1,7 @@
 import { Button as DesktopButton } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type {
-  NativeBridge,
+  NativeSettingsRequestPort,
   NativeShellPreference,
   NativeShellSettingsFacts,
 } from './native-bridge';
@@ -17,7 +17,7 @@ export function NativeShellSettings({
   generation,
   storeId,
 }: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   generation: number;
   storeId?: string;
 }) {

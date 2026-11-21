@@ -1,8 +1,8 @@
 import type {
-  NativeBridge,
   NativeModelSettingsFacts,
   NativeModelSettingsSubmission,
   NativeRequest,
+  NativeSettingsRequestPort,
 } from './native-bridge';
 
 type Mutation = Extract<
@@ -32,11 +32,11 @@ type Snapshot = {
 
 // A detached worker still owns its original observation until its drain finishes.
 // Do not let an older settings view close a newer view's observations in this generation.
-const owners = new WeakMap<NativeBridge, Map<number, Set<NativeModelToggleQueue>>>();
-const retained = new WeakMap<NativeBridge, Map<string, NativeModelToggleQueue>>();
+const owners = new WeakMap<NativeSettingsRequestPort, Map<number, Set<NativeModelToggleQueue>>>();
+const retained = new WeakMap<NativeSettingsRequestPort, Map<string, NativeModelToggleQueue>>();
 
 export function nativeModelToggleQueue(
-  bridge: NativeBridge,
+  bridge: NativeSettingsRequestPort,
   generation: number,
   identity: string,
   storeId?: string,
@@ -95,12 +95,17 @@ export class NativeModelToggleQueue {
   private sent?: Mutation;
   private lookupHot = false;
   private awaitingUnknown?: Mutation;
-  private bridge: NativeBridge;
+  private bridge: NativeSettingsRequestPort;
   private generation: number;
   private identity: string;
   private storeId?: string;
 
-  constructor(bridge: NativeBridge, generation: number, identity: string, storeId?: string) {
+  constructor(
+    bridge: NativeSettingsRequestPort,
+    generation: number,
+    identity: string,
+    storeId?: string,
+  ) {
     this.bridge = bridge;
     this.generation = generation;
     this.identity = identity;

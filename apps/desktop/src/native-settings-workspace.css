@@ -1,0 +1,42 @@
+.native-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(7 9 12 / 53%);
+}
+.kite-client.native-settings-floating {
+  --settings-inset-top: 20px;
+  --settings-inset-bottom: 20px;
+  box-sizing: border-box;
+  position: fixed;
+  inset: calc(50% + (var(--settings-inset-top) - var(--settings-inset-bottom)) / 2) auto auto 50%;
+  z-index: 51;
+  width: min(1016px, calc(100vw - 32px));
+  height: min(732px, calc(100dvh - var(--settings-inset-top) - var(--settings-inset-bottom)));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow:
+    0 34px 110px rgb(0 0 0 / 50%),
+    0 5px 22px rgb(0 0 0 / 32%);
+}
+/* The native traffic lights sit above the renderer's content, including at minimum height. */
+html[data-settings-macos] .kite-client.native-settings-floating {
+  --settings-inset-top: 52px;
+  --settings-inset-bottom: 24px;
+}
+.kite-client.native-settings-discard {
+  z-index: 53;
+  max-width: min(420px, calc(100vw - 36px));
+}
+.native-settings-discard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

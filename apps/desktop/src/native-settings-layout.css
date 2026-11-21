@@ -1,0 +1,209 @@
+/* The owner supplies the native/window overlay; this file styles only its settings content. */
+.kite-client .native-settings-layout {
+  display: grid;
+  grid-template-columns: clamp(174px, 22%, 224px) minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  container: native-settings-card / inline-size;
+  color: var(--foreground);
+  background: var(--background);
+}
+.kite-client .native-settings-rail {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 13px;
+  border-inline-end: 1px solid var(--border);
+  background: var(--sidebar);
+}
+.kite-client .native-settings-rail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 3px 10px 23px;
+  font-size: 20px;
+  font-weight: 625;
+  letter-spacing: -0.02em;
+}
+.kite-client .native-settings-rail nav section + section {
+  margin-top: 20px;
+}
+.kite-client .native-settings-rail nav p {
+  margin: 0 10px 7px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 550;
+}
+.kite-client .native-settings-rail nav button {
+  margin-bottom: 2px;
+  color: var(--navigation-foreground, var(--foreground));
+}
+.kite-client .native-settings-rail nav button svg {
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
+  color: var(--muted-foreground);
+}
+.kite-client .native-settings-rail nav button[aria-pressed="true"] {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--primary) 10%, var(--sidebar));
+  font-weight: 625;
+}
+.kite-client .native-settings-page {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.kite-client .native-settings-topbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 10px 23px 4px;
+}
+.kite-client .native-settings-close {
+  width: 29px;
+  height: 29px;
+  border-radius: 50%;
+  background: var(--control-hover);
+  color: var(--muted-foreground);
+}
+.kite-client .native-settings-close > :where(svg) {
+  width: 15px;
+  height: 15px;
+}
+.kite-client .native-settings-topbar .native-settings-close {
+  margin-inline-start: auto;
+}
+.kite-client
+  :is(.native-settings-category-back, .native-settings-editor-back, .native-settings-narrow-close) {
+  display: none;
+}
+.kite-client
+  .native-settings-page:has(.settings-editor-panel > .right-sidebar)
+  .native-settings-editor-back {
+  display: inline-flex;
+}
+.kite-client .native-settings-workspace {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.kite-client .native-settings-layout.desktop-settings .settings-content {
+  padding: 13px 29px 24px;
+}
+.kite-client
+  .native-settings-workspace:has(.settings-editor-panel > .right-sidebar)
+  > .settings-content {
+  display: none;
+}
+.kite-client .native-settings-layout.desktop-settings .settings-editor-panel {
+  grid-area: 1 / 1;
+  min-width: 0;
+  background: transparent;
+}
+.kite-client .native-settings-layout.desktop-settings .settings-editor-panel:empty {
+  display: none;
+}
+.kite-client .native-settings-layout.desktop-settings .settings-editor-panel > .right-sidebar {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border: 0;
+  background: transparent;
+}
+.kite-client
+  .native-settings-layout.desktop-settings
+  .settings-editor-panel
+  .right-sidebar-heading {
+  min-height: 63px;
+  padding: 0 29px 13px;
+  border-block-end: 1px solid var(--border);
+}
+.kite-client .native-settings-layout .right-sidebar-heading h2 {
+  font-size: 20px;
+  font-weight: 625;
+}
+.kite-client .native-settings-page:has(.native-settings-editor-back) .right-sidebar-close {
+  display: none;
+}
+.kite-client .native-settings-layout .right-sidebar-editor-body {
+  padding: 20px 29px;
+}
+.kite-client .native-settings-layout .right-sidebar-editor-footer {
+  min-height: 57px;
+  padding: 12px 29px;
+}
+/* The native window itself stops shrinking at 800px; its inset card is narrower. */
+@container native-settings-card (max-width: 800px) {
+  .kite-client .native-settings-layout > :is(.native-settings-page, .native-settings-rail) {
+    grid-area: 1 / 1 / 2 / -1;
+  }
+  .kite-client .native-settings-layout[data-narrow-screen="page"] > .native-settings-rail,
+  .kite-client .native-settings-layout[data-narrow-screen="categories"] > .native-settings-page {
+    display: none;
+  }
+  .kite-client
+    .native-settings-layout[data-narrow-screen="categories"]
+    .native-settings-narrow-close,
+  .kite-client
+    .native-settings-page:not(:has(.settings-editor-panel > .right-sidebar))
+    .native-settings-category-back {
+    display: inline-flex;
+  }
+  .kite-client .native-settings-topbar {
+    padding-inline: 15px;
+  }
+  .kite-client .native-settings-layout.desktop-settings .settings-content,
+  .kite-client
+    .native-settings-layout.desktop-settings
+    .settings-editor-panel
+    .right-sidebar-heading,
+  .kite-client .native-settings-layout .right-sidebar-editor-body,
+  .kite-client .native-settings-layout .right-sidebar-editor-footer {
+    padding-inline: 17px;
+  }
+}
+/* Match the connected rows in the approved MCP layout without changing field owners. */
+.kite-client .native-settings-layout.desktop-settings .mcp-settings .provider-form-grid {
+  gap: 0;
+  padding-inline: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.kite-client
+  .native-settings-layout.desktop-settings
+  .mcp-settings
+  .provider-form-grid
+  .provider-field {
+  min-height: 51px;
+  padding-block: 8px;
+}
+.kite-client
+  .native-settings-layout
+  .mcp-settings
+  .provider-form-grid
+  .provider-field
+  + .provider-field {
+  border-block-start: 1px solid var(--border);
+}
+@container provider-editor (min-width: 480px) {
+  .kite-client
+    .native-settings-layout.desktop-settings
+    .mcp-settings
+    .provider-form-grid
+    .provider-field {
+    display: grid;
+    grid-template-columns: minmax(80px, 118px) minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+  }
+}

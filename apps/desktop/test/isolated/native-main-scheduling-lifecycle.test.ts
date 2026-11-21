@@ -565,6 +565,10 @@ async function mainFixture(
     './trajectory-offline-window': `${prefix}export const createTrajectoryOfflineWindow = f.unused;`,
     './image-display-host': `${prefix}export const createNativeImageDisplayHost = f.register;`,
     './native-image-gallery-host': `${prefix}export const createNativeImageGalleryHost = () => ({prewarm() {}, syncTheme() {}, dismiss() {}, active: () => false});`,
+    './native-session-search-host':
+      'export const createNativeSessionSearchHost = () => ({ syncTheme() {}, dismiss() {}, active: () => false });',
+    './native-settings-host':
+      'export const createNativeSettingsHost = () => ({ syncTheme() {}, dismiss() {}, active: () => false });',
     './native-root-window':
       prefix +
       'export const createNativeRootWindow = (...args) => new f.electron.BrowserWindow(...args); export const onNativeRootReady = (window, receive) => { window.once("ready-to-show", receive); return () => window.off("ready-to-show", receive); }; export const nativeRootWindowMenu = () => [];',

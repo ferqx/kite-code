@@ -5,11 +5,11 @@ import {
   verifyUserSkillCataloguePage,
   verifyUserSkillDocument,
 } from '@kite-ai/client';
-import type { NativeBridge } from './native-bridge';
+import type { NativeSettingsRequestPort } from './native-bridge';
 import type { NativeSkillsPage, NativeSkillsScope } from './skills-bridge';
 
 export async function readNativeSkillDocument(input: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   scope: NativeSkillsScope;
   identity: UserSkillDocumentQuery;
   signal: AbortSignal;
@@ -67,7 +67,7 @@ export async function readNativeSkillDocument(input: {
 }
 
 export async function readNativeSkillCatalogue(input: {
-  bridge: NativeBridge;
+  bridge: NativeSettingsRequestPort;
   scope: NativeSkillsScope;
   signal: AbortSignal;
   isCurrent: () => boolean;
