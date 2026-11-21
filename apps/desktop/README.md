@@ -2695,6 +2695,8 @@ Main针对同选择刷新增设私有grantScope，只沿NativeCaller已保存且
 
 ## 统一浏览器入口候选2026-10-28
 
+[后台动作验收入口](test/native-browser-background-runner.fixture.ts)是 Apple Silicon 的本机可选检查：安装锁定的 Electron、准备可执行的原生浏览器依赖并完成 Agent 构建后，在仓库根运行 `NODE_ENV=production bun apps/desktop/test/native-browser-background-runner.fixture.ts`。它使用隔离 Profile、固定回环模型和实际 Electron／Service／普通 `browser.execute`，不使用用户配置或线上模型。仅在 B 已选中、A 原页已隐藏后放行第二次工具请求；在仍停留 B 时核一次实际页面效果、同一 A Run 两个成功工具回执及持久完成事件，再切回核同一页面身份和唯一回复。2026-11-21 在 `c7c9c4b2`、macOS 27.2.1／Electron 44.3.0 通过，证据为程序输出目录下的 `browser-background-evidence.json`。不代真实模型、右栏自动重展、安装制品或托管 CI 资格。
+
 ### 浏览器加载失败页（2026-11-03）
 
 2026-11-04继续核对全部“网页显示尚未确认”来源：`prepareDocument`中的文档等待返回false只退休本次展示，不再推断网页失败；Agent Host／CDP detach只按attachment及读者current取消Agent读，普通显示继续等原文档。`did-stop-loading`退休当前读者但保留同epoch后续就绪资格；已提交页在没有新DOM-ready时，可由一次隔离世界`document.readyState`读取确认，回调核原epoch、frame、页面、真实错误及完整帧，导航／失败／关闭后的迟到结果不接管。主动停止且尚无可显示文档时，私有显示状态`stopped`呈现中性“已停止加载”；原页面就绪后正常显示，不重试导航。真实非取消的主框架provisional／load failure统一直接发布有界引擎错误页，普通loading通知不能擦除原失败；进程退出继续保留原故障反馈。

@@ -486,32 +486,34 @@ for (const { guardedReset, rejectedSummary } of [
 
 test('default reduction preflight admits settled Tool steps within one long user task and ignores source material as extra user input', async () => {
   const compressor = createSummaryCompressor();
+  const source = {
+    id: 'remote-source',
+    kind: 'remote_reference',
+    scope: 'workspace',
+    digest: 'owned-source',
+    role: 'user',
+    placement: 'after_history',
+    content: 'remote quoted source',
+  } as const;
   const input = {
     messages: [
+      // Host sources precede conversation history even with the legacy placement name.
+      { role: source.role, content: source.content, sourceIds: [source.id] },
       { role: 'user', content: 'one actual user', sourceIds: ['message'] },
-      { role: 'assistant', content: 'actual answer' },
-      { role: 'tool', content: 'actual saved output' },
-      { role: 'assistant', content: 'additional model step' },
-      { role: 'user', content: 'remote quoted source', sourceIds: ['remote-source'] },
     ],
-    sources: [
-      {
-        id: 'remote-source',
-        kind: 'remote_reference',
-        scope: 'workspace',
-        digest: 'owned-source',
-        role: 'user',
-        placement: 'after_history',
-        content: 'remote quoted source',
-      },
-    ],
+    sources: [source],
     signal: new AbortController().signal,
   } as unknown as Parameters<ContextCompressor['prepare']>[0];
-  expect(await compressor.prepare(input)).not.toBeNull();
+  expect(await compressor.prepare(input)).toBeNull();
   expect(
     await compressor.prepare({
       ...input,
-      messages: input.messages.filter((message) => message.role === 'user'),
+      messages: [
+        ...input.messages,
+        { role: 'assistant', content: 'actual answer' },
+        { role: 'tool', content: 'actual saved output' },
+        { role: 'assistant', content: 'additional model step' },
+      ],
     }),
-  ).toBeNull();
+  ).not.toBeNull();
 });
