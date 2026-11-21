@@ -32,7 +32,10 @@ function fail(): never {
 
 /** Validate the entire reviewed payload, including __LINKEDIT, not just two instructions.
  * Only codesign's three size fields and existing signature allocation may vary. */
-export function verifyMacosElectronFramework(data: Buffer, kind: 'original' | 'patched'): void {
+export function verifyMacosElectronFramework(
+  data: Buffer,
+  kind: 'original' | 'patched' | 'patched-after-signing',
+): void {
   if (kind === 'original') {
     if (
       data.length !== macosElectronResize.originalBytes ||
@@ -41,18 +44,45 @@ export function verifyMacosElectronFramework(data: Buffer, kind: 'original' | 'p
       fail();
     return;
   }
-  const signatureOffset = macosElectronResize.signatureOffset;
-  if (
-    data.length <= signatureOffset ||
-    data.length > macosElectronResize.originalBytes ||
-    data.readUInt32LE(0x2740) !== 0x1d ||
-    data.readUInt32LE(0x2744) !== 16 ||
-    data.readUInt32LE(0x2748) !== signatureOffset ||
-    data.readUInt32LE(0x274c) !== data.length - signatureOffset ||
-    data.readBigUInt64LE(0xd00) !== BigInt(data.length - 197902336) ||
-    data.readBigUInt64LE(0xcf0) !== BigInt(Math.ceil((data.length - 197902336) / 16384) * 16384)
-  )
-    fail();
+  // Only the builder's already verified signature readback gets diagnostics.
+  // Keep the first failed field bounded to a fixed label and two numeric scalars.
+  type LayoutField =
+    | 'framework_bytes_gt'
+    | 'framework_bytes_lte'
+    | 'signature_command_type'
+    | 'signature_command_bytes'
+    | 'signature_offset'
+    | 'signature_bytes'
+    | 'linkedit_file_bytes'
+    | 'linkedit_vm_bytes';
+  const rejectLayout = (
+    field: LayoutField,
+    expected: number | bigint,
+    actual: number | bigint,
+  ): never => {
+    if (kind !== 'patched-after-signing') fail();
+    throw Error(
+      `macos_electron_resize_identity_invalid:post_sign_layout:${field}:expected=${expected}:actual=${actual}`,
+    );
+  };
+  const sameLayout = (field: LayoutField, expected: number | bigint, actual: number | bigint) => {
+    if (actual !== expected) rejectLayout(field, expected, actual);
+  };
+  const { signatureOffset, originalBytes } = macosElectronResize;
+  if (data.length <= signatureOffset)
+    rejectLayout('framework_bytes_gt', signatureOffset, data.length);
+  if (data.length > originalBytes) rejectLayout('framework_bytes_lte', originalBytes, data.length);
+  sameLayout('signature_command_type', 0x1d, data.readUInt32LE(0x2740));
+  sameLayout('signature_command_bytes', 16, data.readUInt32LE(0x2744));
+  sameLayout('signature_offset', signatureOffset, data.readUInt32LE(0x2748));
+  sameLayout('signature_bytes', data.length - signatureOffset, data.readUInt32LE(0x274c));
+  const linkeditBytes = data.length - 197902336;
+  sameLayout('linkedit_file_bytes', BigInt(linkeditBytes), data.readBigUInt64LE(0xd00));
+  sameLayout(
+    'linkedit_vm_bytes',
+    BigInt(Math.ceil(linkeditBytes / 16384) * 16384),
+    data.readBigUInt64LE(0xcf0),
+  );
   for (const patch of macosElectronResize.patches)
     if (data.subarray(patch.offset, patch.offset + 4).toString('hex') !== patch.patched) fail();
   const replacements = [

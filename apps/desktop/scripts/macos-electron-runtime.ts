@@ -163,7 +163,7 @@ function patchCopiedRuntime(
     stdio: 'pipe',
   });
   const signed = readFileSync(framework);
-  verifyMacosElectronFramework(signed, 'patched');
+  verifyMacosElectronFramework(signed, 'patched-after-signing');
   const after = inventory(target),
     additions = new Set([dirname(resources), resources]);
   for (const [name, record] of snapshot) {

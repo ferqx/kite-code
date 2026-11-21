@@ -32,7 +32,7 @@ Native 构建将 Word、Excel、PPT 原件预览脚本放入桌面应用目录�
 
 CLI/TUI 由 `bun run release:build` 构建的独立 Terminal 提供。下面的组合包示例用 `--terminal` 显式选择完整 Terminal，供组合安装和 `register-cli` 使用。
 
-macOS arm64 的 Electron 仍固定44.3.0；[构建准备](../scripts/macos-electron-runtime.ts)只接受完整原始Framework SHA与封闭分发，在新候选的独立 `electron` 副本内应用[resize补丁](../patches/electron-44.3.0-macos-resize.patch)，重新进行 ad-hoc 签名及校验，再执行SQLite探针、Main构建和完整manifest。两处指令及签名以外的payload、源分发与副本独立性均复核；重新签名产生的CodeResources与最终Framework字节进入原清单，不跳过任何文件。开发入口也准备每次专属副本；不修改 `node_modules` 或已存在的不可变候选。
+macOS arm64 的 Electron 仍固定44.3.0；[构建准备](../scripts/macos-electron-runtime.ts)只接受完整原始Framework SHA与封闭分发，在新候选的独立 `electron` 副本内应用[resize补丁](../patches/electron-44.3.0-macos-resize.patch)，重新进行 ad-hoc 签名及校验，再执行SQLite探针、Main构建和完整manifest。两处指令及签名以外的payload、源分发与副本独立性均复核；重新签名产生的CodeResources与最终Framework字节进入原清单，不跳过任何文件。开发入口也准备每次专属副本；不修改 `node_modules` 或已存在的不可变候选。 系统验签成功后，如果 Framework 布局仍不符合仓库门禁，构建只报告第一条失败检查的字段名、期望值和实测数值，不输出原始字节、摘要或进程环境；该候选仍拒绝，其他核验不变。
 
 [Main准入](../electron/macos-electron-resize.ts)在 `app.whenReady` 前核实际加载Framework路径、构建时摘要、完整已审payload和两处指令，随后启用配套 `CATransactionV2`；禁用冲突、未知原始字节、半补丁或错误加载路径均拒绝。Windows、Linux及macOS非arm64沿原链路；通用app-only测试构建没有配对证明时不启用该feature。普通启动、归档、安装及回退不临时修补制品，旧候选须重新构建才包含本次优化。该同版本定点修正不提供正式签名、公证、其他引擎字节或跨平台发行资格，当前像素与集成测试范围归[Desktop owner](../README.md#固定-renderer-布局收敛2026-11-02)。
 
