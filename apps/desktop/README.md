@@ -8,11 +8,13 @@
 
 ## 侧栏会话搜索
 
-[NativeCaller](electron/native-caller.ts)原目录读取穷尽工作区与会话分页，完整成功后发布，失败不发布前缀目录。[NativeDesktop](src/native.tsx)据连接代次／Store、目录状态与当前代次的直接读取失败接入共享侧栏搜索，没有新增 Workbench 路由、后端搜索或消息正文读取。[目录投影](src/native-presentation.ts)保留登记 `rootUri` 以辨识同名项目；打开结果复用原 `onOpen/select`。
+[NativeCaller](electron/native-caller.ts)原目录读取穷尽工作区与会话分页，完整成功后发布，失败不发布前缀目录。[NativeDesktop](src/native.tsx)据连接代次／Store、目录状态与当前代次的直接读取失败接入共享侧栏搜索，没有新增 Workbench 路由、后端搜索或消息正文读取。[目录投影](src/native-presentation.ts)保留登记 `rootUri` 以辨识同名项目；打开结果复用原 `onOpen/select`。桌面搜索复用[原生模态底座](electron/native-modal-surface.ts)，使用[独立搜索视图](src/native-session-search-main.tsx)与[受限 IPC](electron/native-session-search-host.ts)；[Root 适配](src/native-session-search.tsx)持有目录、搜索排序与导航，每次只传最多 50 条当前页展示信息。结果时间沿目录的最近活动时间，IPC 传可选有限时间戳；缺失或无效时不显示，不以创建时间代替。搜索视图不具备 Service 或浏览器控制能力。搜索位于右侧网页和文件原生视图之上、权限确认与图片预览之下，不改变底层视图的可见性、几何或浏览器操作凭据。共享 Web 继续使用[本地搜索对话框](../../packages/ui/src/desktop/SessionSearch.tsx)。
 
 2026-11-17，`15bf767c0` 的隔离 Linux／Bun 1.4.4 补丁：[搜索 DOM](../../packages/ui/test/isolated/desktop-session-search.test.tsx)与[完整分页](../../packages/client/test/directory.test.ts)共12项／152断言通过，含排序刷新后保留选中身份并跟随滚动。[Native 导航](test/isolated/native-session-shell-dom.test.tsx)新增2项／23断言通过，核运行会话往返、两份草稿、零发送／停止，以及无通知的直接目录失败撤销旧结果与恢复；[目录投影](test/native-directory.test.tsx)12项／190断言、侧栏渲染3项／39断言和UI／Desktop类型检查通过。完整 Native shell 另5项失败、Sidebar另1项失败，均在未修改的准确基线同名复现。生产 Sidebar 夹具编译成功，云 Chromium 被 socket 权限阻断，工具浏览器也无法连接该环境的 loopback；完整 Native 浏览器编译受云内存限制。该云端阶段曾因Mac离线而未取得实窗资格；后续本机验证见下段，完整安装版资格仍未取得。
 
 同日，macOS arm64／Bun1.4.4／Electron44.3.0，准确基线加搜索、附件与草稿修复的隔离Native构建已完成6个搜索阶段：完整目录412个会话，空查询首批50项；跨页旧会话可按忽略大小写的多关键词查到，同名项目显示各自登记位置；打开B并编辑，再回A保留原正文和附件，键盘选择第56项后打开，Esc恢复搜索入口焦点。搜索阶段Provider请求为0，不发送或停止任务。过程与分段截图归本机 `.cache/integrated-search-electron/search-report.json` 及同目录搜索阶段截图。同轮后续附件流程曾失败，不能据搜索阶段通过称整份综合夹具成功；原失败与后续附件修复证据均保留。此范围不代证运行中任务、输入法候选、目录故障的Mac实窗组合，相关云端回归及安装版限制保持。
+
+2026-11-21，`5e4f80eb` 加本轮工作树，macOS arm64／Electron 44.3.0 的隔离实窗确认：鼠标在真实网页按下后打开搜索，页面原视图、边界、操作租约与截图凭据保持，搜索仍打开时原网页各收到一次按下、松开和点击。权限确认出现时取得最上层与焦点，取消后回到原查询；另核系统及手动深浅主题、窄窗、合成输入法事件、键盘选择和遮罩关闭。使用本地网页与测试目录，无模型请求，未验证 Windows 实窗或安装版。[原生搜索 Host 回归](test/isolated/native-session-search-host.test.ts)另核 Office 视图不变、迟到输入及无效结果不导航；聚焦回归共 37 项／472 断言。完整 Native shell DOM 在准确基线与本轮均为 22 通过、同名 8 失败，不计为全量通过。
 
 ## 办公输出文件
 

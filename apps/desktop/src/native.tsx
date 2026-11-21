@@ -156,6 +156,7 @@ import { NativeRecoveryView } from './native-recovery';
 import { NativeExecutionResult, NativeExecutionResultRead } from './native-result';
 import { useNativeScheduledTasks } from './native-scheduled-tasks';
 import { NativeSessionRecovery } from './native-session-recovery';
+import { NativeSessionSearch, UnavailableNativeSessionSearch } from './native-session-search';
 import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
 import { NativeStartup } from './native-startup';
@@ -885,15 +886,30 @@ function NativeDesktopContent({
     (!state.directory || state.directory.storeId === directory.storeId) &&
     !state.backgroundUnavailable;
   const searchGeneration = state?.generation;
+  const searchBridge = window.kiteNativeSessionSearch;
   const sessionSearch = useMemo(
     () =>
       searchStore
         ? {
             scope: JSON.stringify([searchGeneration, searchStore]),
             available: searchAvailable,
+            render: (props: import('@kite-ai/ui/desktop/session-search').SessionSearchProps) =>
+              searchBridge ? (
+                <NativeSessionSearch
+                  key={JSON.stringify([searchGeneration, searchStore])}
+                  {...props}
+                  bridge={searchBridge}
+                  onUnavailable={() => setError('暂时无法打开会话搜索，请重试。')}
+                />
+              ) : (
+                <UnavailableNativeSessionSearch
+                  {...props}
+                  onUnavailable={() => setError('暂时无法打开会话搜索，请重试。')}
+                />
+              ),
           }
         : undefined,
-    [searchStore, searchGeneration, searchAvailable],
+    [searchStore, searchGeneration, searchAvailable, setError],
   );
   const selectionRead = useRef<
     | {

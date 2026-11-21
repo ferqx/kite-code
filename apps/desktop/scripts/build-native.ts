@@ -127,6 +127,7 @@ async function buildNativeApp(
     'preload',
     'global-dialog-preload',
     'image-gallery-preload',
+    'session-search-preload',
     'trajectory-preload',
   ]) {
     const result = await Bun.build({
@@ -175,17 +176,12 @@ async function buildNativeApp(
             main: join(root, 'index.html'),
             'global-dialog': join(root, 'global-dialog.html'),
             'image-gallery': join(root, 'image-gallery.html'),
+            'session-search': join(root, 'session-search.html'),
             trajectory: join(root, 'trajectory.html'),
           },
           output: {
             entryFileNames: (chunk) =>
-              chunk.name === 'global-dialog'
-                ? 'global-dialog-renderer.js'
-                : chunk.name === 'image-gallery'
-                  ? 'image-gallery-renderer.js'
-                  : chunk.name === 'trajectory'
-                    ? 'trajectory-renderer.js'
-                    : 'renderer.js',
+              chunk.name === 'main' ? 'renderer.js' : `${chunk.name}-renderer.js`,
           },
         },
       },

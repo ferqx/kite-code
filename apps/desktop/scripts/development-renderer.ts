@@ -196,11 +196,14 @@ export async function startDesktopRenderer(root: string) {
           },
         },
         // NativeDesktop is dynamically imported after the window appearance read.
-        // Prepare it alongside both HTML entries before Electron requests them.
+        // Prepare it alongside the Root and search/confirmation HTML entries.
         warmup: {
-          clientFiles: ['./index.html', './global-dialog.html', './src/native.tsx'].filter((file) =>
-            existsSync(join(root, 'apps/desktop', file)),
-          ),
+          clientFiles: [
+            './index.html',
+            './global-dialog.html',
+            './session-search.html',
+            './src/native.tsx',
+          ].filter((file) => existsSync(join(root, 'apps/desktop', file))),
         },
         hmr: { server: http, clientPort: address.port },
         host: '127.0.0.1',

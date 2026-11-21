@@ -79,6 +79,16 @@ import {
   readNativePreviewLayoutReply,
 } from '../src/native-preview-layout-bridge';
 import {
+  isNativeSessionSearchAction,
+  isNativeSessionSearchPresentation,
+  type NativeSessionSearchBridge,
+  nativeSessionSearchActionChannel,
+  nativeSessionSearchActiveChannel,
+  nativeSessionSearchCloseChannel,
+  nativeSessionSearchPresentChannel,
+  nativeSessionSearchRequestId,
+} from '../src/native-session-search-bridge';
+import {
   type NativeTrajectoryFileBridge,
   type NativeTrajectoryFileReply,
   nativeTrajectoryFileChannel,
@@ -112,6 +122,28 @@ ipcRenderer.on(nativeGlobalDialogActiveChannel, (_event, active: unknown) =>
 ipcRenderer.on(nativeImageGalleryActiveChannel, (_event, active: unknown) =>
   setModalActive('image-gallery', active),
 );
+ipcRenderer.on(nativeSessionSearchActiveChannel, (_event, active: unknown) =>
+  setModalActive('session-search', active),
+);
+const sessionSearch: NativeSessionSearchBridge = {
+  present(state, opening) {
+    if (typeof opening !== 'boolean' || !isNativeSessionSearchPresentation(state))
+      throw Error('invalid_session_search_state');
+    ipcRenderer.send(nativeSessionSearchPresentChannel, state, opening);
+  },
+  close(requestId) {
+    if (!nativeSessionSearchRequestId(requestId)) throw Error('invalid_session_search_request');
+    ipcRenderer.send(nativeSessionSearchCloseChannel, requestId);
+  },
+  watchActions(listener) {
+    const receive = (_event: Electron.IpcRendererEvent, action: unknown) => {
+      if (isNativeSessionSearchAction(action)) listener(action);
+    };
+    ipcRenderer.on(nativeSessionSearchActionChannel, receive);
+    return () => ipcRenderer.off(nativeSessionSearchActionChannel, receive);
+  },
+};
+contextBridge.exposeInMainWorld('kiteNativeSessionSearch', sessionSearch);
 const imageGallery: NativeImageGalleryBridge = {
   present(state) {
     if (!isNativeImageGalleryPresentation(state)) throw Error('invalid_image_gallery_state');

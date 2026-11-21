@@ -8478,57 +8478,142 @@ body {
 .kite-client .nav-label .session-search-trigger {
   margin-left: auto;
 }
-.kite-client .session-search {
+.session-search-backdrop {
+  background: rgb(0 0 0 / 16%);
+  animation: none;
+}
+.kite-client.session-search {
+  --session-search-top: clamp(20px, 16dvh, 132px);
+  top: var(--session-search-top);
   display: flex;
-  flex: 1;
+  width: min(640px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(520px, calc(100dvh - var(--session-search-top) - 16px));
   flex-direction: column;
-  min-height: 0;
-  gap: 8px;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  translate: -50% 0;
+  background: var(--card);
+  box-shadow:
+    0 20px 64px rgb(0 0 0 / 22%),
+    0 2px 8px rgb(0 0 0 / 8%);
+}
+@supports (backdrop-filter: blur(1px)) {
+  @media (prefers-reduced-transparency: no-preference) {
+    .kite-client.session-search {
+      background: color-mix(in srgb, var(--card) 96%, transparent);
+      backdrop-filter: blur(20px);
+    }
+  }
 }
 .kite-client .session-search-input {
   display: flex;
+  min-height: 66px;
+  flex: none;
   align-items: center;
-  gap: 4px;
-  padding-inline: 8px;
+  gap: 12px;
+  margin-inline: 16px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.kite-client .session-search-input > svg {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.kite-client .session-search-input > input {
+  height: 44px;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--foreground);
+  font-size: clamp(18px, 4vw, 23px);
+  line-height: 1.25;
+  user-select: text;
+}
+.kite-client .session-search-input > input::placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+.kite-client .session-search-input > button {
+  flex: none;
+  color: var(--muted-foreground);
 }
 .kite-client .session-search-feedback {
   margin: 0;
-  padding-inline: 12px;
+  padding: 18px 28px;
   color: var(--muted-foreground);
   font-size: 12px;
+  line-height: 18px;
 }
 .kite-client .session-search-results {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline: 12px;
+}
+.kite-client .session-search-results[data-has-results] {
+  padding-block: 6px;
 }
 .kite-client .session-search-result {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
   width: 100%;
   height: auto;
-  min-height: 48px;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 8px 12px;
+  min-height: 46px;
+  padding: 7px 12px;
+  border-radius: var(--button-radius);
   text-align: left;
 }
 .kite-client .session-search-result[aria-selected="true"] {
-  background: var(--control-hover);
+  background: var(--control-selected);
 }
-.kite-client .session-search-result :is(strong, small) {
-  max-width: 100%;
+.kite-client .session-search-result-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.kite-client .session-search-result-label :is(strong, small) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.kite-client .session-search-result strong {
+.kite-client .session-search-result-label strong {
   font-weight: var(--font-weight-semibold);
 }
-.kite-client .session-search-result small {
+.kite-client .session-search-result-label small,
+.kite-client .session-search-result-time {
   color: var(--muted-foreground);
   font-size: 12px;
 }
+.kite-client .session-search-result-time {
+  align-self: start;
+  padding-top: 1px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .kite-client .session-search-more {
   width: 100%;
+  font-size: 12px;
+}
+.kite-client .session-search-pages {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
   font-size: 12px;
 }

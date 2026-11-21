@@ -45,6 +45,7 @@ test('native builds retain fixed renderer entries while development uses only Vi
         'preload.cjs',
         'global-dialog-preload.cjs',
         'image-gallery-preload.cjs',
+        'session-search-preload.cjs',
       ])
         expect(existsSync(join(output, file))).toBe(true);
       const preload = readFileSync(join(output, 'global-dialog-preload.cjs'), 'utf8');
@@ -59,6 +60,8 @@ test('native builds retain fixed renderer entries while development uses only Vi
           'global-dialog-renderer.js',
           'image-gallery.html',
           'image-gallery-renderer.js',
+          'session-search.html',
+          'session-search-renderer.js',
         ])
           expect(existsSync(join(output, file))).toBe(false);
         continue;
@@ -73,6 +76,17 @@ test('native builds retain fixed renderer entries while development uses only Vi
       expect(Buffer.byteLength(gallery)).toBeLessThan(500_000);
       expect(gallery).not.toContain('katex');
       expect(gallery).not.toContain('mermaid');
+      const searchHtml = readFileSync(join(output, 'session-search.html'), 'utf8');
+      expect(searchHtml).toContain('./session-search-renderer.js');
+      const searchPreload = readFileSync(join(output, 'session-search-preload.cjs'), 'utf8');
+      expect(searchPreload).toContain('kiteSessionSearchOverlay');
+      expect(searchPreload).not.toContain('kiteNative');
+      expect(searchPreload).not.toContain('kiteGlobalDialog');
+      expect(searchPreload).not.toContain('kiteImageGalleryViewer');
+      const search = readFileSync(join(output, 'session-search-renderer.js'), 'utf8');
+      expect(Buffer.byteLength(search)).toBeLessThan(500_000);
+      expect(search).not.toContain('katex');
+      expect(search).not.toContain('mermaid');
       const html = readFileSync(join(output, 'global-dialog.html'), 'utf8');
       expect(html).toContain('./global-dialog-renderer.js');
       expect(html).not.toContain('src/native-global-dialog-main.tsx');

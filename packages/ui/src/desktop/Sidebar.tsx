@@ -13,7 +13,16 @@ import {
   UserCircleIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Badge } from './components/ui/badge';
 import {
   DropdownMenu,
@@ -29,7 +38,7 @@ import {
 import { ScrollArea } from './components/ui/scroll-area';
 import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
-import { SessionSearch } from './SessionSearch';
+import { SessionSearch, type SessionSearchProps } from './SessionSearch';
 import { sessionStatusLabel } from './status';
 import type { WorkspaceSummary } from './types';
 import { Button } from './ui';
@@ -53,7 +62,11 @@ export function sessionTime(value?: string) {
 }
 
 export interface DirectoryProps {
-  sessionSearch?: { scope: string; available: boolean };
+  sessionSearch?: {
+    scope: string;
+    available: boolean;
+    render?: (props: SessionSearchProps) => ReactNode;
+  };
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
   selectedWorkspace?: string;
@@ -473,13 +486,24 @@ export function Sidebar({
 }) {
   const [searchScope, setSearchScope] = useState<string>();
   const searchTrigger = useRef<HTMLButtonElement>(null);
+  const searchId = useId();
   const searchOpen = !!props.sessionSearch && searchScope === props.sessionSearch.scope;
   useEffect(() => {
     if (searchScope !== props.sessionSearch?.scope) setSearchScope(undefined);
   }, [searchScope, props.sessionSearch?.scope]);
-  const closeSearch = (restoreFocus = true) => {
-    setSearchScope(undefined);
-    if (restoreFocus) searchTrigger.current?.focus();
+  const closeSearch = () => setSearchScope(undefined);
+  const restoreSearchFocus = () => {
+    const trigger = searchTrigger.current;
+    if (trigger?.isConnected && !trigger.closest('[hidden], [inert]'))
+      trigger.focus({ preventScroll: true });
+  };
+  const searchProps = {
+    id: searchId,
+    workspaces: props.workspaces,
+    available: !!props.sessionSearch?.available,
+    onOpen: props.onOpen,
+    onClose: closeSearch,
+    restoreFocus: restoreSearchFocus,
   };
   const newConversationSelected = activePage === 'newConversation' && !props.selectedWorkspace;
   const selectedSessionWorkspace = useMemo(
@@ -542,6 +566,8 @@ export function Sidebar({
             aria-label="搜索会话"
             title="搜索会话"
             aria-expanded={searchOpen}
+            aria-haspopup="dialog"
+            aria-controls={searchOpen && !props.sessionSearch.render ? searchId : undefined}
             onClick={() =>
               searchOpen ? closeSearch() : setSearchScope(props.sessionSearch?.scope)
             }
@@ -623,20 +649,15 @@ export function Sidebar({
           </span>
         )}
       </div>
-      {searchOpen && props.sessionSearch && (
-        <SessionSearch
-          key={props.sessionSearch.scope}
-          workspaces={props.workspaces}
-          available={props.sessionSearch.available}
-          onOpen={props.onOpen}
-          onClose={closeSearch}
-        />
-      )}
+      {searchOpen &&
+        props.sessionSearch &&
+        (props.sessionSearch.render ? (
+          props.sessionSearch.render(searchProps)
+        ) : (
+          <SessionSearch key={props.sessionSearch.scope} {...searchProps} />
+        ))}
       <TooltipProvider delayDuration={500} skipDelayDuration={300}>
-        <ScrollArea
-          className="workspace-directory"
-          style={searchOpen ? { display: 'none' } : undefined}
-        >
+        <ScrollArea className="workspace-directory">
           <div className="workspace-directory-content">
             {props.workspaces.map((workspace) => (
               <Workspace

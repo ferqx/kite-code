@@ -62,6 +62,7 @@ import {
   nativeRootWindowMenu,
   onNativeRootReady,
 } from './native-root-window';
+import { createNativeSessionSearchHost } from './native-session-search-host';
 import {
   nativeWindowMenuShortcut,
   nativeWindowMenuTemplate,
@@ -141,6 +142,7 @@ const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
     : 'none';
 let window: NativeRootWindow | undefined, caller: NativeCaller | undefined;
 let globalDialogOwner: ReturnType<typeof createNativeGlobalDialogHost> | undefined;
+let sessionSearchOwner: ReturnType<typeof createNativeSessionSearchHost> | undefined;
 let imageGalleryOwner: ReturnType<typeof createNativeImageGalleryHost> | undefined;
 let tray: Tray | undefined;
 let opening: Promise<NativeCaller> | undefined;
@@ -513,6 +515,7 @@ function finishNativeProcess(code = 0): void {
       presentationFailed = true;
     }
   };
+  retire(() => sessionSearchOwner?.dismiss());
   retire(() => globalDialogOwner?.dismiss());
   retire(() => imageGalleryOwner?.dismiss());
   retire(() => closingTray?.destroy());
@@ -673,7 +676,7 @@ void app
       },
     };
     window = createNativeRootWindow(windowOptions);
-    const createModalView = (kind: 'global-dialog' | 'image-gallery') => {
+    const createModalView = (kind: 'global-dialog' | 'image-gallery' | 'session-search') => {
       const view = new WebContentsView({
         webPreferences: {
           preload: join(app.getAppPath(), `${kind}-preload.cjs`),
@@ -737,6 +740,17 @@ void app
     });
     imageGalleryOwner = imageGallery;
     imageGallery.prewarm();
+    const sessionSearch = createNativeSessionSearchHost({
+      window,
+      ipcMain,
+      rootUrl: rendererUrl,
+      url: new URL('session-search.html', rendererUrl).href,
+      theme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+      createView: () => createModalView('session-search'),
+      higherModalActive: () => globalDialog.active() || imageGallery.active(),
+    });
+    sessionSearchOwner = sessionSearch;
+
     if (process.platform === 'darwin')
       Menu.setApplicationMenu(Menu.buildFromTemplate(nativeRootWindowMenu(window)));
     if (process.platform === 'win32') {
@@ -758,6 +772,7 @@ void app
             !quitting &&
             !globalDialog.active() &&
             !imageGallery.active() &&
+            !sessionSearch.active() &&
             window &&
             !window.isDestroyed() &&
             window.webContents.mainFrame.url.split('#')[0] === rendererUrl
@@ -790,7 +805,8 @@ void app
                 request.applicationEnabled &&
                 !quitting &&
                 !globalDialog.active() &&
-                !imageGallery.active(),
+                !imageGallery.active() &&
+                !sessionSearch.active(),
             }),
           ).getMenuItemById(request.menu)!.submenu!;
           return new Promise<void>((resolve) =>
@@ -807,6 +823,7 @@ void app
     const updateSystemBackground = () => {
       globalDialog.syncTheme();
       imageGallery.syncTheme();
+      sessionSearch.syncTheme();
       if (window && !window.isDestroyed()) {
         window.setBackgroundColor(
           windowMaterial !== 'none'

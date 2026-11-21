@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import type {
+  NativeSessionSearchAction,
+  NativeSessionSearchBridge,
+  NativeSessionSearchPresentation,
+} from '../../src/native-session-search-bridge';
+import { isNativeSessionSearchPresentation } from '../../src/native-session-search-bridge';
 import {
   nextDesktopPresentation,
   prepareDesktopDom,
@@ -49,10 +55,30 @@ function fixture(
   });
   const control = sessionSwitchBridge(options);
   Object.defineProperty(dom.window, 'kiteNative', { value: control.bridge });
+  let searchState: NativeSessionSearchPresentation | undefined;
+  let searchListener: ((action: NativeSessionSearchAction) => void) | undefined;
+  const searchBridge: NativeSessionSearchBridge = {
+    present(state, opening) {
+      expect(isNativeSessionSearchPresentation(state)).toBe(true);
+      expect(opening).toBe(!searchState);
+      searchState = state;
+    },
+    close(id) {
+      if (searchState?.requestId === id) searchState = undefined;
+    },
+    watchActions(listener) {
+      searchListener = listener;
+      return () => {
+        searchListener = undefined;
+      };
+    },
+  };
+  Object.defineProperty(dom.window, 'kiteNativeSessionSearch', { value: searchBridge });
   const host = dom.window.document.getElementById('root')!;
   let root = createRoot(host);
   const query = <T extends Element = HTMLElement>(selector: string) =>
     host.querySelector<T>(selector)!;
+  const querySearchTrigger = () => query<HTMLButtonElement>('[aria-label="搜索会话"]');
   const until = async (check: () => boolean) => {
     for (let i = 0; i < 80 && !check(); i++)
       await act(async () => {
@@ -85,6 +111,38 @@ function fixture(
     ...control,
     dom,
     host,
+    get searchState() {
+      return searchState;
+    },
+    async search(query: string) {
+      if (!searchState) await act(async () => querySearchTrigger().click());
+      await act(async () =>
+        searchListener!({
+          requestId: searchState!.requestId,
+          type: 'query',
+          query,
+          page: 0,
+        }),
+      );
+    },
+    async pickSearch() {
+      const state = searchState!;
+      const id = state.rows[0]?.session.sessionId;
+      if (!id) return;
+      await act(async () =>
+        searchListener!({
+          requestId: state.requestId,
+          type: 'select',
+          sessionId: id,
+          query: state.query,
+          page: state.page,
+        }),
+      );
+      await act(async () => nextDesktopPresentation(dom));
+    },
+    async closeSearch() {
+      await act(async () => searchListener!({ type: 'close', requestId: searchState!.requestId }));
+    },
     query,
     until,
     click,
@@ -1217,50 +1275,27 @@ test('a Main withdrawal during cold preparation remains unavailable instead of r
 
 test('session search opens the exact running session without sending or cancelling work and keeps both drafts', async () => {
   const f = fixture({ active: true });
-  const search = async (text: string) => {
-    await act(async () => f.query<HTMLButtonElement>('[aria-label="搜索会话"]').click());
-    await act(async () => {
-      const input = f.query<HTMLInputElement>('[role="combobox"]');
-      Object.getOwnPropertyDescriptor(f.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
-        input,
-        text,
-      );
-      input.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }));
-    });
-  };
-  const enter = async () => {
-    await act(async () =>
-      f.query('[role="combobox"]').dispatchEvent(
-        new f.dom.window.KeyboardEvent('keydown', {
-          key: 'Enter',
-          bubbles: true,
-          cancelable: true,
-        }),
-      ),
-    );
-    await act(async () => nextDesktopPresentation(f.dom));
-  };
   try {
     await f.render();
     await f.edit('Unsent search draft A');
     const original = f.query('.composer [role="textbox"]');
     const before = f.requests.length;
-    await search('Session B');
+    await f.search('Session B');
     expect(f.query('.breadcrumb strong').textContent).toBe('Session A');
     expect(promptValue(original)).toBe('Unsent search draft A');
     expect(
       f.requests.slice(before).filter((request) => businessMethods.has(request.method)),
     ).toEqual([]);
-    await enter();
+    await f.pickSearch();
     await f.ready('b');
     expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Draft B');
     await f.edit('Unsent search draft B');
-    await search('Session A');
-    await enter();
+    await f.search('Session A');
+    await f.pickSearch();
     await f.ready('a');
     expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Unsent search draft A');
-    await search('Session B');
-    await enter();
+    await f.search('Session B');
+    await f.pickSearch();
     await f.ready('b');
     expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Unsent search draft B');
     expect(
@@ -1271,16 +1306,9 @@ test('session search opens the exact running session without sending or cancelli
     const selected = f.requests.slice(before).filter((request) => request.method === 'select');
     expect(selected.map((request) => request.sessionId)).toEqual(['b', 'a', 'b']);
     const composer = f.query('.composer [role="textbox"]');
-    await search('not found');
-    await act(async () =>
-      f.query('[role="combobox"]').dispatchEvent(
-        new f.dom.window.KeyboardEvent('keydown', {
-          key: 'Escape',
-          bubbles: true,
-          cancelable: true,
-        }),
-      ),
-    );
+    await f.search('not found');
+    await f.closeSearch();
+    await act(async () => nextDesktopPresentation(f.dom));
     expect(f.query('.composer [role="textbox"]')).toBe(composer);
     expect(promptValue(composer)).toBe('Unsent search draft B');
     expect(f.dom.window.document.activeElement).toBe(f.query('[aria-label="搜索会话"]'));
@@ -1304,33 +1332,17 @@ test('session search withdraws stale results after a direct directory failure wi
     )!;
     expect(!!refresh).toBe(true);
     await act(async () => refresh.click());
-    await act(async () => f.query<HTMLButtonElement>('[aria-label="搜索会话"]').click());
-    const input = f.query<HTMLInputElement>('[role="combobox"]');
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(f.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
-        input,
-        'Session B',
-      );
-      input.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }));
-    });
-    expect(f.host.textContent).toContain('会话目录暂不可用');
-    expect(f.host.querySelectorAll('[role="option"]')).toHaveLength(0);
+    await f.search('Session B');
+    expect(f.searchState).toMatchObject({ available: false, total: 0, query: 'Session B' });
+    expect(f.searchState!.rows).toEqual([]);
     const before = f.requests.filter((request) => request.method === 'select').length;
-    await act(async () =>
-      input.dispatchEvent(
-        new f.dom.window.KeyboardEvent('keydown', {
-          key: 'Enter',
-          bubbles: true,
-          cancelable: true,
-        }),
-      ),
-    );
+    await f.pickSearch();
     expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(before);
     failing = false;
     await act(async () => refresh.click());
-    await f.until(() => f.host.querySelectorAll('[role="option"]').length === 1);
-    expect(input.value).toBe('Session B');
-    expect(f.host.querySelector('[role="option"]')!.textContent).toContain('Session B');
+    await f.until(() => f.searchState?.rows.length === 1);
+    expect(f.searchState!.query).toBe('Session B');
+    expect(f.searchState!.rows[0]!.session.displayName).toBe('Session B');
   } finally {
     await f.close();
   }

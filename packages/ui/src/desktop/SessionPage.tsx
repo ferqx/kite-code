@@ -221,7 +221,7 @@ function PrepareConversationLayout({ prepare }: { prepare: () => void }) {
 
 export interface SessionPageProps {
   /** Opt in only when the host reads the full directory, never a loaded prefix. */
-  sessionSearch?: { scope: string; available: boolean };
+  sessionSearch?: Parameters<typeof Sidebar>[0]['sessionSearch'];
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
   /** Confirmed navigation row while its conversation frame is still preparing. */
@@ -1236,7 +1236,7 @@ function SessionPageContent({
       <aside className="sidebar" aria-label="空间与会话">
         <MemoizedSidebar
           workspaces={props.workspaces}
-          sessionSearch={props.sessionSearch}
+          sessionSearch={props.covered ? undefined : props.sessionSearch}
           selectedWorkspace={
             !props.workbench && !props.scheduledTasks && !props.sidebarSelected
               ? props.workspaces.find(
