@@ -1438,6 +1438,18 @@ export class NativeCaller {
                 permissionChange;
               if (selectionChange && !historyOnly) this.admissionRevision++;
               if (executionChange) {
+                if (change.type === 'execution.finished' && this.selected)
+                  this.toolMessages.observeShellJobFinished(
+                    {
+                      generation: this.generation,
+                      storeId: originalStore,
+                      sessionId: this.selected,
+                      viewSelection: this.selection,
+                      historyEpoch: this.historyEpoch,
+                    },
+                    change.objectId,
+                    change.cursor,
+                  );
                 this.controller.invalidateSelection();
                 this.scheduleExecutionRefresh(signal.signal, change.cursor);
               }
@@ -1638,6 +1650,26 @@ export class NativeCaller {
             viewLoading,
           }
         : undefined;
+    const observed = this.executionObservation;
+    const executionObservation =
+      observed?.viewSelection === this.selection &&
+      observed.generation === this.generation &&
+      observed.sessionId === this.selected &&
+      observed.historyEpoch === this.historyEpoch
+        ? observed
+        : undefined;
+    // A later refresh keeps already covered hints; it cannot expose a newer
+    // event before the corresponding Store cursor has actually been observed.
+    const finishedShellJobs =
+      executionObservation &&
+      executionObservation.phase !== 'unavailable' &&
+      !unavailable &&
+      !viewLoading
+        ? this.toolMessages.shellJobCompletions(
+            executionObservation,
+            executionObservation.observedCursor,
+          )
+        : undefined;
     return {
       generation: this.generation,
       localFileReferences: this.localFileReferences,
@@ -1663,12 +1695,9 @@ export class NativeCaller {
       backgroundUnavailable: this.observationUnavailable,
       selection,
       executionObservation:
-        this.executionObservation?.viewSelection === this.selection &&
-        this.executionObservation.generation === this.generation &&
-        this.executionObservation.sessionId === this.selected &&
-        this.executionObservation.historyEpoch === this.historyEpoch
-          ? this.executionObservation
-          : undefined,
+        executionObservation && finishedShellJobs?.length
+          ? { ...executionObservation, finishedShellJobs }
+          : executionObservation,
       historyEpoch: this.historyEpoch,
       creationSubmissions: [...this.creations.values()],
       grantSubmissions: this.grants.submissions,

@@ -2574,3 +2574,244 @@ test('a single ordinary search keeps one stop notice until its execution settles
     await f.close();
   }
 });
+for (const [name, long, laterRows] of [
+  ['short', false, 0],
+  ['paged', true, 0],
+  ['last retained (199 later records)', true, 199],
+  ['evicted (200 later records)', true, 200],
+] as const)
+  test(`a warm background Shell reconciles its exact runless Job and preserves the ${name} launch row`, async () => {
+    const f = fixture();
+    const selected = selection();
+    const run = {
+      id: 'run',
+      originStoreId: 'store',
+      sessionId: 's',
+      isActive: false,
+      status: 'completed' as const,
+      createdAt: 1,
+      finishedAt: 2,
+      reason: null,
+    };
+    const turnId = JSON.stringify(['native-run', 'store', 's', run.id]);
+    const command = long ? `printf warm; ${' '.repeat(20000)}exit 7` : 'printf warm; exit 7';
+    const ref = {
+      extensionId: 'builtin.shell',
+      key: 'warm-shell',
+      sessionId: 's',
+      originStoreId: 'store',
+      executionId: 'warm-job',
+      commandId: 'warm-job-command',
+    };
+    const details = { accepted: true, shellId: ref.key, shell_id: ref.key, ref };
+    const receipt = { ...message('warm-launch', JSON.stringify(details)), toolCallId: 'warm-call' };
+    const launch: Execution = {
+      id: receipt.sourceIds![0]!,
+      originStoreId: 'store',
+      sessionId: 's',
+      runId: 'run',
+      kind: 'tool',
+      definitionId: 'shell.execute',
+      definitionVersion: '1',
+      status: 'succeeded',
+      toolCallId: receipt.toolCallId,
+      toolInput: { command, background: true },
+      result: { outcome: 'succeeded', content: receipt.content, details },
+      resultRevision: '1',
+      cancelRequestedAt: null,
+    };
+    const job: Execution = {
+      id: ref.executionId,
+      parentExecutionId: launch.id,
+      originStoreId: 'store',
+      sessionId: 's',
+      runId: null,
+      kind: 'job',
+      definitionId: 'shell.command',
+      definitionVersion: '1',
+      status: 'running',
+      result: null,
+      resultRevision: '0',
+      cancelRequestedAt: null,
+    };
+    let fullJob = job;
+    const reads: string[] = [];
+    const requests: NativeRequest[] = [];
+    const scope = {
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      storeId: 'store',
+      sessionId: 's',
+      workspaceId: 'w',
+    };
+    const manager = new NativeToolMessages(
+      {
+        verifyConnection: async () => {},
+        getExecution: async (id: string) => {
+          reads.push(id);
+          if (id === launch.id) return launch;
+          if (id === job.id) return fullJob;
+          throw Error('unexpected_execution_read');
+        },
+      } as unknown as AgentClient,
+      () => scope,
+      () => new Map([[receipt.id, receipt]]),
+    );
+    const bridge = {
+      request: async (request: NativeRequest) => {
+        requests.push(request);
+        if (request.method === 'toolMessages.list') return manager.list(request);
+        if (request.method === 'toolMessages.close') manager.close(request.readId);
+        return null;
+      },
+    } as NativeBridge;
+    const later = Array.from(
+      { length: laterRows },
+      (_, index): Execution => ({
+        ...launch,
+        id: `later-${index}`,
+        result: null,
+      }),
+    );
+    function WarmShell({
+      observed,
+      revision,
+      unavailable,
+    }: {
+      observed: Execution | undefined;
+      revision: number;
+      unavailable: boolean;
+    }) {
+      const executionView = observed ? [observed, ...later] : later;
+      const facts = useNativeToolMessages({
+        bridge,
+        generation: 1,
+        selection: unavailable ? { ...selected, viewLoading: true } : selected,
+        historyEpoch: 0,
+        messages: [receipt],
+        observationRevision: revision,
+        executions: executionView,
+        finishedShellJobs: manager.shellJobCompletions(scope, String(revision)),
+      });
+      const transcript = desktopTranscript({
+        messages: [receipt],
+        runs: [run],
+        tools: facts.entries,
+        executions: executionView,
+        storeId: 'store',
+        sessionId: 's',
+        traceTurns: true,
+      });
+      return (
+        <Conversation
+          traceTurns
+          selected
+          connected
+          loading={false}
+          messages={transcript.messages}
+          turnActivity={transcript.turnActivity}
+          saveReading={() => {}}
+          initialReading={{
+            top: 0,
+            follow: false,
+            expanded: { [`turn:${turnId}:complete`]: true },
+          }}
+          renderToolActivity={(group, controls) =>
+            renderNativeToolGroup(group, controls, {
+              tools: facts.entries,
+              retainedFact: () => undefined,
+              liveTools: [],
+              executionUnconfirmed: false,
+              observationUnavailable: false,
+              diagnostics: false,
+              renderOriginal: () => null,
+            })
+          }
+        />
+      );
+    }
+    const render = (observed: Execution | undefined, revision: number, unavailable = false) =>
+      act(async () =>
+        f.root.render(
+          <WarmShell observed={observed} revision={revision} unavailable={unavailable} />,
+        ),
+      );
+    const result = () => f.host.querySelector('.shell-result')?.textContent;
+    try {
+      await render(job, 1);
+      const row = f.host.querySelector('article.shell-activity')!;
+      const button = row.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+      const label = () => button.querySelector('.tool-label')?.textContent;
+      expect(label()).toBe('已请求运行');
+      await act(async () => {
+        button.click();
+        button.focus();
+      });
+      expect(result()).toBe('已受理');
+      const output = row.querySelector('.shell-output');
+      expect(output?.querySelector('.shell-command-text')?.textContent).toBe(command);
+      const initialReads = [...reads];
+      expect(initialReads.filter((id) => id === job.id)).toHaveLength(1);
+      expect(initialReads.filter((id) => id === launch.id)).toHaveLength(long ? 3 : 1);
+
+      fullJob = {
+        ...job,
+        status: 'failed',
+        resultRevision: '1',
+        result: { outcome: 'failed', content: 'Shell failed', details: { exitCode: 7 } },
+      };
+      const lightweight = { ...fullJob, result: null };
+      await render({ ...lightweight, runId: 'other-run' }, 2);
+      expect(result()).toBe('已受理');
+      expect(reads).toEqual(initialReads);
+      const bounded = laterRows === 200 ? undefined : lightweight;
+      if (!bounded) {
+        for (const wrong of [
+          { generation: 2 },
+          { storeId: 'other-store' },
+          { sessionId: 'other-session' },
+          { viewSelection: 3 },
+          { historyEpoch: 1 },
+        ])
+          manager.observeShellJobFinished({ ...scope, ...wrong }, job.id, '3');
+        manager.observeShellJobFinished(scope, 'unwatched-execution', '3');
+        await render(undefined, 3);
+        expect(manager.shellJobCompletions(scope, '3')).toEqual([]);
+        expect(result()).toBe('已受理');
+        expect(reads).toEqual(initialReads);
+      }
+      manager.observeShellJobFinished(scope, job.id, '4');
+      expect(manager.shellJobCompletions(scope, '3')).toEqual([]);
+      expect(manager.shellJobCompletions({ ...scope, historyEpoch: 1 }, '4')).toEqual([]);
+      expect(manager.shellJobCompletions(scope, '4')).toEqual([[job.id, '4']]);
+      if (!bounded) {
+        await render(bounded, 4, true);
+        expect(result()).toBe('已受理');
+        expect(reads).toEqual(initialReads);
+      }
+      await render(bounded, 4);
+      expect(result()).toBe('已执行 · 非零退出 · 退出码 7');
+      expect(row.querySelector('.shell-result')?.getAttribute('role')).toBe('status');
+      expect(f.host.querySelector('article.shell-activity')).toBe(row);
+      expect(row.querySelector('.shell-output')).toBe(output);
+      expect(output?.querySelector('.shell-command-text')?.textContent).toBe(command);
+      expect(f.host.ownerDocument.activeElement).toBe(button);
+      expect(label()).toBe('运行了命令');
+      manager.observeShellJobFinished(scope, job.id, '4');
+      await render(undefined, 5); // warm hint stays, recent projection no longer contains the Job
+      expect(result()).toBe('已执行 · 非零退出 · 退出码 7');
+      expect(requests.filter(({ method }) => method === 'toolMessages.list')).toHaveLength(
+        long ? 4 : 2,
+      );
+      expect(reads).toEqual([...initialReads, launch.id, job.id]);
+      expect(
+        requests.every(({ method }) =>
+          ['toolMessages.list', 'toolMessages.close'].includes(method),
+        ),
+      ).toBe(true);
+    } finally {
+      await f.close();
+      manager.release();
+    }
+  });

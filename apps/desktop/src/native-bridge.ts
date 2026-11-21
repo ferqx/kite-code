@@ -237,6 +237,8 @@ export type NativeExecutionObservation = {
   readonly session: Session;
   readonly runs: readonly Run[];
   readonly executions: readonly NativeToolExecution[];
+  /** Scoped wake hints, not Job result evidence. */
+  readonly finishedShellJobs?: readonly (readonly [executionId: string, eventCursor: string])[];
   readonly compressionProgress?: SessionView['compressionProgress'];
 };
 export type NativeSelection = {

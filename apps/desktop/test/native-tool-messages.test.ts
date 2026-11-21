@@ -2456,6 +2456,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       ...background.execution,
       id: acceptedJobId,
       parentExecutionId: background.execution.id,
+      runId: null,
       kind: 'job',
       definitionId: 'shell.command',
       status: 'succeeded',
@@ -2463,8 +2464,16 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
     };
     f.executions.set(acceptedJobId, completedJob);
     expect((await background.read()).message.shell?.jobStatus).toBe('succeeded');
-    f.executions.set(acceptedJobId, { ...completedJob, parentExecutionId: 'unrelated-tool' });
-    expect((await background.read()).message.shell?.jobStatus).toBeUndefined();
+    for (const mismatch of [
+      { id: 'different-job' },
+      { parentExecutionId: 'unrelated-tool' },
+      { runId: 'unrelated-run' },
+      { originStoreId: 'unrelated-store' },
+      { sessionId: 'unrelated-session' },
+    ]) {
+      f.executions.set(acceptedJobId, { ...completedJob, ...mismatch });
+      expect((await background.read()).message.shell?.jobStatus).toBeUndefined();
+    }
     f.executions.set(acceptedJobId, {
       ...completedJob,
       status: 'failed',
@@ -2474,6 +2483,19 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       jobStatus: 'failed',
       exitCode: 7,
     });
+    const originalBackground = f.messages.get(background.id)!;
+    f.messages.set(background.id, {
+      ...originalBackground,
+      runId: null,
+      originMessage: {
+        storeId: 'store',
+        sessionId: originalBackground.sessionId,
+        messageId: background.id,
+        runId: originalBackground.runId ?? null,
+      },
+    });
+    expect((await background.read()).message.shell?.jobStatus).toBeUndefined();
+    f.messages.set(background.id, originalBackground);
     const liveBackground = nativeLiveShellInputFact({
       ...background.execution,
       toolCallId: 'repeated',

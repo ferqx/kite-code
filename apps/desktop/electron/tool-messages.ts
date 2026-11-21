@@ -13,6 +13,7 @@ import {
   type NativeToolMessageRequest,
   type NativeToolMessageScope,
   type NativeToolRunPage,
+  nativeShellJobMatches,
   nativeShellJobSettlement,
   nativeShellOutputPageBytes,
   nativeToolMessagePageBytes,
@@ -28,6 +29,16 @@ import {
 } from './tool-message-fact';
 
 type Lease = { readId: string; scope: NativeToolMessageScope; abort: AbortController };
+type ShellJobScope = Omit<NativeToolMessageScope, 'workspaceId'>;
+const shellJobScopeKey = (scope: ShellJobScope) =>
+  JSON.stringify([
+    scope.generation,
+    scope.storeId,
+    scope.sessionId,
+    scope.viewSelection,
+    scope.historyEpoch,
+  ]);
+const shellJobWatchLimit = 128;
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -40,6 +51,7 @@ const source = (message: Message) =>
 /** Result identity is established by the Execution, never by a repeated toolCallId. */
 export class NativeToolMessages {
   private readonly reads = new Map<string, Lease>();
+  private shellJobs?: { key: string; watches: Map<string, { cursor?: string }> };
   private readonly client: AgentClient;
   private readonly current: () => NativeToolMessageScope | undefined;
   private readonly messages: () => ReadonlyMap<string, Message>;
@@ -54,6 +66,41 @@ export class NativeToolMessages {
     this.current = current;
     this.messages = messages;
     this.liveExecutions = liveExecutions;
+  }
+  private watchShellJob(scope: NativeToolMessageScope, id: string) {
+    if (id.length > 256) return;
+    const key = shellJobScopeKey(scope);
+    if (this.shellJobs?.key !== key) this.shellJobs = { key, watches: new Map() };
+    const watches = this.shellJobs.watches;
+    if (!watches.has(id)) {
+      if (watches.size >= shellJobWatchLimit) {
+        const oldest =
+          [...watches].find(([, watch]) => watch.cursor)?.[0] ?? watches.keys().next().value;
+        if (oldest) watches.delete(oldest);
+      }
+      watches.set(id, {});
+    }
+    const watch = watches.get(id)!;
+    return (discard: 'mismatch' | 'terminal') => {
+      if ((discard === 'mismatch' || !watch.cursor) && watches.get(id) === watch)
+        watches.delete(id);
+    };
+  }
+  observeShellJobFinished(scope: ShellJobScope, id: string, cursor: string) {
+    const watch =
+      this.shellJobs?.key === shellJobScopeKey(scope) ? this.shellJobs.watches.get(id) : undefined;
+    if (watch && (!watch.cursor || BigInt(watch.cursor) < BigInt(cursor))) watch.cursor = cursor;
+  }
+  shellJobCompletions(
+    scope: ShellJobScope,
+    observedCursor: string,
+  ): readonly (readonly [string, string])[] {
+    if (this.shellJobs?.key !== shellJobScopeKey(scope)) return [];
+    return [...this.shellJobs.watches].flatMap(([id, watch]) =>
+      watch.cursor && BigInt(watch.cursor) <= BigInt(observedCursor)
+        ? [[id, watch.cursor] as const]
+        : [],
+    );
   }
   private check(lease: Lease) {
     const now = this.current();
@@ -520,15 +567,28 @@ export class NativeToolMessages {
           commandOffset: input.commandOffsets?.[id] ?? 0,
         });
         if (fact) {
-          if (fact.shellJobExecutionId) {
+          if (
+            fact.shellJobExecutionId &&
+            !message.originMessage &&
+            !(input.commandOffsets?.[id] ?? 0)
+          ) {
+            // Arm the exact verified launch before the Job GET: a completion can
+            // arrive after the Store snapshot but before its response is delivered.
+            const finishWatch = this.watchShellJob(scope, fact.shellJobExecutionId);
             try {
               const job = await this.client.getExecution(fact.shellJobExecutionId, {
                 signal: lease.abort.signal,
               });
-              fact.shellJobSettlement = nativeShellJobSettlement(job, {
+              this.check(lease);
+              const identity = {
                 ...execution,
                 executionId: execution.id,
-              });
+                jobExecutionId: fact.shellJobExecutionId,
+              };
+              fact.shellJobSettlement = nativeShellJobSettlement(job, identity);
+              if (!nativeShellJobMatches(job, identity)) finishWatch?.('mismatch');
+              else if (['succeeded', 'failed', 'cancelled'].includes(job.status))
+                finishWatch?.('terminal');
             } catch {
               // The verified launch remains readable when its optional Job result is unavailable.
             }
@@ -571,6 +631,7 @@ export class NativeToolMessages {
     this.reads.delete(readId);
   }
   release() {
+    this.shellJobs = undefined;
     for (const readId of this.reads.keys()) this.close(readId);
   }
 }

@@ -2412,6 +2412,8 @@ function NativeDesktopContent({
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     observationRevision: selection?.viewGeneration ?? 0,
+    executions: executionRecords,
+    finishedShellJobs: executionObservation?.finishedShellJobs,
   });
   const submittedInteractionIds = JSON.stringify(
     (state?.selection?.interactions ?? [])

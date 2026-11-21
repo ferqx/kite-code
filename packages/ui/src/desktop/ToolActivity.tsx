@@ -737,7 +737,10 @@ function shellResultLabel(message: Message, diagnostics: boolean): string {
   // A nonzero command can still return useful diagnostic output. Keep the
   // failed receipt and its detail; describe the process fact, not task failure.
   if (
-    original === '失败' &&
+    (original === '失败' ||
+      (original === '成功' &&
+        message.shell?.operation === 'launch' &&
+        message.shell.accepted === true)) &&
     Number.isSafeInteger(exitCode) &&
     exitCode !== 0 &&
     message.shell?.jobStatus === 'failed'

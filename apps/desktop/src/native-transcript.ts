@@ -508,15 +508,16 @@ export function desktopTranscript({
       : undefined;
     const shell = factMessage?.shell;
     const jobSettlement =
-      shell?.jobExecutionId && fact && run
+      shell?.jobExecutionId && fact && run && !message.originMessage
         ? executionsById
             .get(shell.jobExecutionId)
             ?.map((job) =>
               nativeShellJobSettlement(job, {
                 executionId: fact.executionId,
                 originStoreId: run.originStoreId,
-                sessionId: message.originMessage?.sessionId ?? sessionId,
+                sessionId,
                 runId: run.id,
+                jobExecutionId: shell.jobExecutionId!,
               }),
             )
             .find(Boolean)

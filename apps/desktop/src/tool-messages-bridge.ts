@@ -221,23 +221,34 @@ export function nativeShellExitCode(execution: NativeToolExecution): number | un
   return typeof code === 'number' && Number.isSafeInteger(code) && code !== 0 ? code : undefined;
 }
 
+type ShellLaunchIdentity = Pick<NativeToolExecution, 'originStoreId' | 'sessionId' | 'runId'> & {
+  executionId: string;
+  jobExecutionId: string;
+};
+
+export function nativeShellJobMatches(
+  job: NativeToolExecution | undefined,
+  tool: ShellLaunchIdentity,
+): job is NativeToolExecution {
+  return (
+    job?.id === tool.jobExecutionId &&
+    job.kind === 'job' &&
+    job.definitionId === 'shell.command' &&
+    job.definitionVersion === '1' &&
+    job.parentExecutionId === tool.executionId &&
+    !!tool.originStoreId &&
+    job.originStoreId === tool.originStoreId &&
+    job.sessionId === tool.sessionId &&
+    // Runtime Jobs keep their parent Execution but are not attached directly to a Run.
+    (job.runId === null || job.runId === tool.runId)
+  );
+}
+
 export function nativeShellJobSettlement(
   job: NativeToolExecution | undefined,
-  tool: Pick<NativeToolExecution, 'originStoreId' | 'sessionId' | 'runId'> & {
-    executionId: string;
-  },
+  tool: ShellLaunchIdentity,
 ): NativeToolMessageFact['shellJobSettlement'] {
-  if (
-    job?.kind !== 'job' ||
-    job.definitionId !== 'shell.command' ||
-    job.definitionVersion !== '1' ||
-    job.parentExecutionId !== tool.executionId ||
-    !tool.originStoreId ||
-    job.originStoreId !== tool.originStoreId ||
-    job.sessionId !== tool.sessionId ||
-    job.runId !== tool.runId
-  )
-    return;
+  if (!nativeShellJobMatches(job, tool)) return;
   if (job.status === 'succeeded') return { jobStatus: 'succeeded' };
   const exitCode = job.shellExitCode ?? nativeShellExitCode(job);
   return job.status === 'failed' && exitCode !== undefined

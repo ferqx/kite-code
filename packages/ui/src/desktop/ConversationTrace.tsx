@@ -103,8 +103,12 @@ export function ConversationTrace({
   const singleTool = !grouped && first?.role === 'tool' ? first : undefined;
   const completedTitle =
     summarizeTools && singleTool ? completedToolSummary(singleTool) : undefined;
-  // An omitted action still needs a way to read its original row and result.
-  const omittedTool = summarizeTools && singleTool && !completedTitle ? singleTool : undefined;
+  // Keep a background launch in the same row when its later Job supplies a summary.
+  // Other omitted actions still use the disclosure for their original row and result.
+  const shell = singleTool?.shell;
+  const acceptedLaunch = shell?.operation === 'launch' && shell.accepted && !!shell.jobExecutionId;
+  const omittedTool =
+    summarizeTools && singleTool && !completedTitle && !acceptedLaunch ? singleTool : undefined;
   const showSummary = grouped || !!omittedTool;
   const firstTool = steps.find((step) => step.role === 'tool');
   const summaryIcon = firstTool ? toolIcon(firstTool) : BulbIcon;

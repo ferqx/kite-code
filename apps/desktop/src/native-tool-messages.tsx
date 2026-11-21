@@ -15,7 +15,7 @@ import type {
   NativeToolExecution,
   NativeToolMessageFact,
 } from './tool-messages-bridge';
-import { nativeShellCommandChunkBytes } from './tool-messages-bridge';
+import { nativeShellCommandChunkBytes, nativeShellJobMatches } from './tool-messages-bridge';
 import { nativeToolRequestTarget } from './tool-request-target';
 
 const emptyToolFacts: NativeToolMessageFact[] = [];
@@ -176,6 +176,8 @@ function withoutToolInput(fact: NativeToolMessageFact): NativeToolMessageFact {
       ? {
           shellInput: { operation: fact.shellInput.operation },
           shellResultVerified: undefined,
+          shellJobExecutionId: undefined,
+          shellJobSettlement: undefined,
           shellOutputReceipt: undefined,
           shellOutputLimit: undefined,
           shellDisplay: undefined,
@@ -1046,6 +1048,8 @@ export function useNativeToolMessages({
   historyEpoch,
   messages,
   observationRevision,
+  executions = selection?.executions,
+  finishedShellJobs,
   suspended = false,
 }: {
   bridge?: NativeBridge;
@@ -1054,6 +1058,8 @@ export function useNativeToolMessages({
   historyEpoch: number;
   messages: readonly Message[];
   observationRevision: number;
+  executions?: readonly NativeToolExecution[];
+  finishedShellJobs?: readonly (readonly [string, string])[];
   suspended?: boolean;
 }) {
   const storeId = selection?.storeId,
@@ -1101,6 +1107,7 @@ export function useNativeToolMessages({
         inputRevision?: string;
         callRevision?: string;
         inputReadFailed?: boolean;
+        shellJobRevision?: string;
       }
     >(),
   });
@@ -1138,6 +1145,49 @@ export function useNativeToolMessages({
   if (revisionCache.current.identity !== revisionIdentity)
     revisionCache.current = { identity: revisionIdentity, revisions };
   const inputRevisions = revisionCache.current.revisions;
+  const knownJobIds = new Set<string>();
+  if (cache.current.scope === scope && cache.current.retryRevision === retryRevision)
+    for (const message of eligible) {
+      const receipt = cache.current.read.get(message.id);
+      const id = receipt?.fact?.shellJobExecutionId;
+      if (id && sameToolReceipt(receipt.message, message)) knownJobIds.add(id);
+    }
+  const completions = new Map((finishedShellJobs ?? []).filter(([id]) => knownJobIds.has(id)));
+  const terminalJobs = (executions ?? []).filter(
+    (job) =>
+      knownJobIds.has(job.id) &&
+      !completions.has(job.id) &&
+      job.kind === 'job' &&
+      job.definitionId === 'shell.command' &&
+      job.definitionVersion === '1' &&
+      job.originStoreId === storeId &&
+      job.sessionId === sessionId &&
+      (job.status === 'succeeded' || job.status === 'failed'),
+  );
+  const jobIdentity = JSON.stringify([
+    storeId,
+    sessionId,
+    terminalJobs.map(({ id, runId, parentExecutionId, status, resultRevision }) => [
+      id,
+      runId,
+      parentExecutionId,
+      status,
+      resultRevision,
+    ]),
+    [...completions],
+  ]);
+  const jobCache = useRef({
+    identity: '',
+    jobs: new Map<string, NativeToolExecution>(),
+    completions: new Map<string, string>(),
+  });
+  if (jobCache.current.identity !== jobIdentity)
+    jobCache.current = {
+      identity: jobIdentity,
+      jobs: new Map(terminalJobs.map((job) => [job.id, job])),
+      completions,
+    };
+  const observedJobs = jobCache.current;
   useEffect(() => {
     if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
       cache.current = { scope, retryRevision, read: new Map() };
@@ -1163,13 +1213,40 @@ export function useNativeToolMessages({
       unavailable
     )
       return;
-    // A terminal receipt is immutable; its input presentation also depends on
-    // independently streamed Model declarations. Recheck only changed call proof,
-    // or a changed omission boundary when the exact Shell input is still missing.
-    // Unknown results retain their existing observation-based recalibration.
+    const shellJobRevision = (message: Message, fact: NativeToolMessageFact | undefined) => {
+      if (
+        message.originMessage ||
+        message.sessionId !== sessionId ||
+        !message.runId ||
+        !fact?.shellJobExecutionId ||
+        fact.status !== 'succeeded' ||
+        !fact.shellResultVerified ||
+        fact.shellInput?.operation !== 'launch'
+      )
+        return;
+      const jobExecutionId = fact.shellJobExecutionId;
+      const job = observedJobs.jobs.get(jobExecutionId);
+      if (
+        nativeShellJobMatches(job, {
+          executionId: fact.executionId,
+          jobExecutionId,
+          originStoreId: storeId,
+          sessionId,
+          runId: message.runId,
+        })
+      )
+        return JSON.stringify([job.id, job.status, job.resultRevision]);
+      // A previously watched Job can leave the bounded View when it finishes.
+      // Only its exact completion event merits a read; absence alone proves nothing.
+      const completion = observedJobs.completions.get(jobExecutionId);
+      return completion ? JSON.stringify([jobExecutionId, 'finished', completion]) : undefined;
+    };
+    // A terminal Tool receipt is immutable, but the separately owned Job can settle later.
+    // A settlement-only read keeps the verified command and does not page it again.
+    const settlementOnly = new Map<string, string>();
     const pending = eligible.filter((message) => {
       const previous = current.read.get(message.id);
-      return (
+      if (
         !previous ||
         previous.commandPending ||
         (!previous.inputReadFailed &&
@@ -1181,7 +1258,13 @@ export function useNativeToolMessages({
         (previous.fact?.status === 'outcome_unknown' &&
           previous.observationRevision !== observationRevision) ||
         !sameToolReceipt(previous.message, message)
-      );
+      )
+        return true;
+      const revision = shellJobRevision(message, previous.fact);
+      if (!revision || previous.fact?.shellJobSettlement || previous.shellJobRevision === revision)
+        return false;
+      settlementOnly.set(message.id, revision);
+      return true;
     });
     // Mark the new read as pending now; retaining the last error would report
     // loading=false and let background recovery restart this in-flight request.
@@ -1236,6 +1319,26 @@ export function useNativeToolMessages({
             const next: Record<string, number> = {};
             for (const message of batch) {
               let fact = page.entries.find((entry) => entry.messageId === message.id);
+              const settlementRevision = settlementOnly.get(message.id);
+              const previous = current.read.get(message.id);
+              if (settlementRevision && previous?.fact) {
+                const saved = previous.fact;
+                current.read.set(message.id, {
+                  ...previous,
+                  shellJobRevision: settlementRevision,
+                  fact:
+                    fact?.shellJobSettlement &&
+                    fact.shellJobExecutionId === saved.shellJobExecutionId &&
+                    fact.executionId === saved.executionId &&
+                    fact.resultRevision === saved.resultRevision &&
+                    fact.definitionId === saved.definitionId &&
+                    fact.definitionVersion === saved.definitionVersion &&
+                    fact.status === saved.status
+                      ? { ...saved, shellJobSettlement: fact.shellJobSettlement }
+                      : saved,
+                });
+                continue;
+              }
               const input = fact?.shellInput;
               let inputReadFailed = false;
               try {
@@ -1266,6 +1369,8 @@ export function useNativeToolMessages({
                       ...fact!,
                       shellDisplay: previous.fact.shellDisplay,
                       shellOutputError: previous.fact.shellOutputError,
+                      shellJobSettlement:
+                        fact!.shellJobSettlement ?? previous.fact.shellJobSettlement,
                     };
                   assembled.set(message.id, { command, fact: fact! });
                   if (input.commandNextOffset !== null) {
@@ -1305,6 +1410,7 @@ export function useNativeToolMessages({
                 inputRevision: inputRevisions.get(message.id)?.omission,
                 callRevision: inputRevisions.get(message.id)?.call,
                 inputReadFailed,
+                shellJobRevision: shellJobRevision(message, fact),
               });
             }
             publish(readError ? '部分工具状态尚无法核实，保留原始结果。' : undefined);
@@ -1323,10 +1429,15 @@ export function useNativeToolMessages({
             batches.push(batch.slice(0, middle), batch.slice(middle));
             continue;
           }
-          readError = true;
+          readError ||= batch.some((message) => !settlementOnly.has(message.id));
           // A command continuation cannot invalidate metadata already checked on its first page.
           for (const message of batch) {
             const previous = current.read.get(message.id);
+            const settlementRevision = settlementOnly.get(message.id);
+            if (settlementRevision && previous) {
+              current.read.set(message.id, { ...previous, shellJobRevision: settlementRevision });
+              continue;
+            }
             current.read.set(message.id, {
               message,
               fact:
@@ -1343,7 +1454,7 @@ export function useNativeToolMessages({
               inputReadFailed: true,
             });
           }
-          publish('部分工具状态尚无法核实，保留原始结果。');
+          publish(readError ? '部分工具状态尚无法核实，保留原始结果。' : undefined);
         }
       }
       if (active) publish(readError ? '部分工具状态尚无法核实，保留原始结果。' : undefined);
@@ -1369,6 +1480,7 @@ export function useNativeToolMessages({
     observationRevision,
     eligible,
     inputRevisions,
+    observedJobs,
   ]);
   const error = state.scope === scope ? state.error : undefined;
   const pendingMessageIds = new Set(
