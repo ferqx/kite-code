@@ -1218,6 +1218,10 @@ export function ToolActivity({
             message.shell?.commandPreview ??
             message.shell?.shellId)
           : toolTarget(message);
+  const planFilenameStart =
+    message.toolName === 'planning.read' && target
+      ? Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\')) + 1
+      : 0;
   const status = grouped
     ? undefined
     : ask?.cancelled
@@ -1279,8 +1283,20 @@ export function ToolActivity({
           (shell ? (
             <code className="tool-command tool-label">{shortCommand}</code>
           ) : (
-            <span className="tool-step-target" title={target}>
-              {ask ? `· ${target}` : target}
+            <span
+              className={cn('tool-step-target', planFilenameStart > 0 && 'tool-plan-path')}
+              title={target}
+            >
+              {planFilenameStart > 0 ? (
+                <>
+                  <span>{target.slice(0, planFilenameStart)}</span>
+                  <span>{target.slice(planFilenameStart)}</span>
+                </>
+              ) : ask ? (
+                `· ${target}`
+              ) : (
+                target
+              )}
             </span>
           ))}
       </TraceTitle>

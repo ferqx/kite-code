@@ -14,6 +14,7 @@ import { markdownMarkup } from '../../../../packages/ui/test/markdown-dom.fixtur
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { NativeModelOutputMessage } from '../../src/native-model-output-message';
 import { groupNativeToolMessages, liveToolMessages } from '../../src/native-tool-messages';
+import { renderNativeToolGroup } from '../../src/native-tool-renderer';
 import {
   desktopTranscript,
   nativePendingInputMessage,
@@ -218,6 +219,77 @@ const tool = (id: string): NativeToolMessageFact => ({
   status: 'succeeded',
   resultRevision: '1',
   target: `${id}.txt`,
+});
+
+test('an expanded plan-read receipt shows only its bound document location, including during cold lookup', async () => {
+  const f = fixture();
+  const body = '原计划不在读取工具中展开';
+  const request = {
+    ...message('call', 'assistant', '1', ''),
+    toolCalls: [{ id: 'read-plan', name: 'planning.read', arguments: '{}' }],
+  };
+  const receipt = {
+    ...message('plan-file', 'tool', '2', body),
+    toolCallId: 'read-plan',
+    sourceIds: ['e-plan-file'],
+  };
+  const fact: NativeToolMessageFact = {
+    ...tool('plan-file'),
+    definitionId: 'planning.read',
+    definitionVersion: '1',
+    target: '/owned/session/plan.md',
+  };
+  let bodyReads = 0;
+  const render = async (tools: NativeToolMessageFact[]) => {
+    const model = desktopTranscript({
+      messages: [request, receipt],
+      runs: [run()],
+      tools,
+      storeId: 'store',
+      sessionId: 's',
+    }).messages.find(({ id }) => id === receipt.id)!;
+    await act(async () =>
+      f.root.render(
+        renderNativeToolGroup(
+          [model],
+          {
+            activityId: 'plan-read',
+            expanded: true,
+            inTrace: true,
+            restoredExpanded: new Set(),
+            expandedItems: {},
+            onToggle: () => {},
+            onToggleItem: () => {},
+          },
+          {
+            tools,
+            retainedFact: () => undefined,
+            liveTools: [],
+            executionUnconfirmed: false,
+            observationUnavailable: false,
+            diagnostics: false,
+            hasDeferredText: () => true,
+            renderOriginal: () => {
+              bodyReads++;
+              return body;
+            },
+          },
+        ),
+      ),
+    );
+  };
+  try {
+    await render([]);
+    expect(f.host.textContent).toContain('读取计划');
+    expect(f.host.textContent).not.toContain(body);
+    await render([fact]);
+    expect(f.host.querySelector('.tool-step-target')?.textContent).toBe(fact.target!);
+    expect(f.host.textContent).not.toContain(body);
+    expect(bodyReads).toBe(0);
+    expect(f.host.querySelector('button.tool-activity-summary')).toBeNull();
+  } finally {
+    await f.close();
+  }
 });
 
 test('plan progress updates stay out of live and reopened Native transcripts', async () => {

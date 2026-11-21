@@ -4373,6 +4373,17 @@ body {
 .kite-client .tool-activity-title {
   flex-shrink: 0;
 }
+.kite-client .tool-plan-path {
+  display: inline-flex;
+}
+.kite-client .tool-plan-path > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kite-client .tool-plan-path > :last-child {
+  flex: none;
+}
 .kite-client .tool-activity-aggregate {
   --tool-aggregate-max-height: 400px;
 }

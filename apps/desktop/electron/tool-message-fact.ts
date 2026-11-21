@@ -626,6 +626,21 @@ export function nativeToolMessageFact({
     execution.definitionId,
     execution.definitionVersion,
   );
+  const planPath = details?.filePath;
+  const planLocation =
+    typeof planPath === 'string' &&
+    planPath.trim() &&
+    planPath.length <= 4096 &&
+    !/\p{Cc}/u.test(planPath)
+      ? planPath
+      : undefined;
+  const planReadTarget =
+    execution.definitionId === 'planning.read' &&
+    execution.definitionVersion === '1' &&
+    execution.status === 'succeeded'
+      ? (planLocation ??
+        (details?.current === null && details.plan === null ? '暂无计划' : undefined))
+      : undefined;
   const reinspection =
     execution.definitionId === 'files.reinspect_images' &&
     execution.definitionVersion === '1' &&
@@ -646,7 +661,7 @@ export function nativeToolMessageFact({
     ...(fileCreated ? { fileCreated: true } : {}),
     ...(agentMessageAccepted ? { agentMessageAccepted: true } : {}),
     ...(agentWait ? { agentWait } : {}),
-    target: requestTarget,
+    target: planReadTarget ?? requestTarget,
     ...(expectedTarget !== undefined && requestTarget === undefined ? { inputPending: true } : {}),
     ...(shell ? { shellInput: shell } : {}),
     ...(shell?.shellId &&

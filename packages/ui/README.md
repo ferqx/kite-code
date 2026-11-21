@@ -523,6 +523,8 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 
 [计划进度组件](src/desktop/PlanExecutionProgress.tsx)在环境卡与原轮历史复用同一份步骤行展示。环境卡的计划名称与进度共用一行，分别提供原文定位与步骤展开。右侧悬停和无障碍名称保留完整进度摘要。计划栏接收宿主给出的进度、可用性与开合状态，并在子智能体与输出之间挂载。轮次摘要在原终态和结果展示后挂载历史入口。会话定位通过原消息展示键打开折叠的轮次，正文准备后移动阅读位置和焦点。紧凑环境浮层随定位关闭。事实读取、版本和终态交接归 [Desktop owner](../../apps/desktop/README.md#native-计划入口与完整审核)。
 
+[工具行](src/desktop/ToolActivity.tsx)沿用宿主传入的计划文档位置。路径过长时省略目录中超出可用宽度的部分，文件名仍可见，悬停显示完整路径。
+
 2026-10-25，Windows x64／Bun1.4.3，`b31d05415` 加本次环境卡阈值修改：`bun test ./packages/ui/test/isolated/desktop-sidebar.test.tsx` 整文件9项／332断言通过，核新对话冷挂载、1559／1560px边界、晚到内容、手动浮层、关闭记忆及缩放恢复。UI／Desktop类型检查与定向Biome通过。Chrome155隔离夹具加载实际NativeDesktop／SessionPage和生产编译CSS，深浅主题逐步观察1440px默认关闭、手动开合、1920px自动停靠、缩窄再恢复及500px窄窗；921帧中卡片始终一份，手动开合时740px输入区位置及宽度保持，草稿保留，窄窗无横向溢出，浏览器零异常。夹具使用模拟桥接数据，未重验真实首条消息创建或完整安装版Electron；保留原嵌套关键帧编译提示。
 
 自动权限审核的当前投影读取 `authorization.check`，展示状态使用 `checking`／`auto_checking`／`queued_auto_check`；旧 `authorization.review` 及其历史展示状态仅兼容读取。TUI 与 Desktop 的实际子 Agent 均沿通用类别和相同消息组件展示，`review` 类别不建立独立 Agent 引擎。自动权限审核和标题内部 Model 不进入子 Agent 投影、数量或步骤；目录边界来自 Core 的实际记录，不依靠 UI 隐藏。权限证明与原子派发仍归 Agent，UI 不从状态授予执行权。

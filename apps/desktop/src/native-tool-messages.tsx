@@ -385,16 +385,18 @@ export function desktopToolMessage(
     fact.definitionId === 'task.message' &&
     fact.definitionVersion === '1' &&
     fact.status === 'succeeded';
+  const planRead = fact.definitionId === 'planning.read' && fact.definitionVersion === '1';
   return {
     id,
     role: 'tool',
-    text:
-      waitText ??
-      (messageAccepted
-        ? '消息已提交'
-        : shell && (fact.shellResultVerified || /^[\s\uFEFF]*[[{]/u.test(text))
-          ? ''
-          : text),
+    text: planRead
+      ? ''
+      : (waitText ??
+        (messageAccepted
+          ? '消息已提交'
+          : shell && (fact.shellResultVerified || /^[\s\uFEFF]*[[{]/u.test(text))
+            ? ''
+            : text)),
     ...(waitText ? { agentWait: true as const } : {}),
     settled: !['planned', 'dispatching', 'running'].includes(fact.status),
     ...desktopToolPresentation(fact),

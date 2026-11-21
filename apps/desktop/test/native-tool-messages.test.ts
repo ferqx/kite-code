@@ -769,6 +769,29 @@ test('plan and MCP display names retain exact versions and generic MCP fallback'
   ).toMatchObject({ title: 'MCP · search_docs', status: 'failed', text: 'actual failure' });
 });
 
+test('plan reads project the saved document location without its body', async () => {
+  const f = fixture();
+  const filePath = '/owned/session/plan.md';
+  const read = { current: { version: 2 }, plan: { body: '原计划正文' }, filePath };
+  const missing = { current: null, plan: null };
+  for (const [id, details] of [
+    ['saved-plan', read],
+    ['no-plan', missing],
+  ] as const) {
+    f.add(id, 'succeeded', id, 'planning.read');
+    const content = JSON.stringify(details);
+    f.messages.get(id)!.content = content;
+    f.executions.get(`execution-${id}`)!.result = { outcome: 'succeeded', content, details };
+  }
+  const page = await f.list(['saved-plan', 'no-plan']);
+  expect(page.entries.map(({ target }) => target)).toEqual([filePath, '暂无计划']);
+  expect(desktopToolMessage(page.entries[0]!, 'saved-plan', JSON.stringify(read))).toMatchObject({
+    toolName: 'planning.read',
+    target: filePath,
+    text: '',
+  });
+});
+
 test('Native MCP names come only from exact saved metadata; failed metadata never withdraws an original tool outcome', async () => {
   const f = fixture();
   const hash = 'a'.repeat(64),

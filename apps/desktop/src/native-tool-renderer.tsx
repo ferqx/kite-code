@@ -54,6 +54,8 @@ export function renderNativeToolGroup(
     displayTools.find((fact) => fact.messageId === model.id);
   const agentProps = (model: DesktopMessage) => options.agentProps?.(model, factFor(model));
   const keyOf = (model: DesktopMessage) => model.presentationKey ?? model.id;
+  const renderOriginal = (model: DesktopMessage, open: boolean) =>
+    model.toolName === 'planning.read' ? null : options.renderOriginal(model, open);
   const childOperation = (model: DesktopMessage) =>
     model.toolName === 'spawn_agent' || model.toolName === 'follow_up_agent';
   const savedCreation = (model: DesktopMessage) => {
@@ -228,7 +230,7 @@ export function renderNativeToolGroup(
         !aggregate && group.length === 1 ? controls.activityId : (model.presentationKey ?? model.id)
       }
       restoredExpanded={controls.restoredExpanded}
-      renderChildren={(_id, open) => options.renderOriginal(model, open)}
+      renderChildren={(_id, open) => renderOriginal(model, open)}
     />
   );
   if (!aggregate && group.length === 1 && unverified.has(group[0]!.id))
@@ -308,7 +310,7 @@ export function renderNativeToolGroup(
               </p>
             );
           return model && !model.agentWait && !model.shell && options.hasDeferredText?.(model)
-            ? options.renderOriginal(model, open)
+            ? renderOriginal(model, open)
             : null;
         }}
         renderImages={renderToolImages}

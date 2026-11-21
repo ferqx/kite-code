@@ -479,11 +479,33 @@ export function desktopTranscript({
                     fact.definitionVersion === entry.definitionVersion)),
             )
         : undefined;
-    const originalCalls = liveInput
-      ? (callsById
-          .get(JSON.stringify([run!.id, message.toolCallId]))
-          ?.filter((source) => BigInt(source.message.seq) < BigInt(message.seq)) ?? [])
-      : [];
+    const originalCalls =
+      liveInput ||
+      (!fact &&
+        !execution &&
+        message.role === 'tool' &&
+        message.sessionId === sessionId &&
+        message.sourceIds?.length === 1)
+        ? (callsById
+            .get(JSON.stringify([message.runId, message.toolCallId]))
+            ?.filter(
+              ({ message: source }) =>
+                source.originMessage?.storeId === message.originMessage?.storeId &&
+                source.originMessage?.sessionId === message.originMessage?.sessionId &&
+                source.originMessage?.runId === message.originMessage?.runId &&
+                BigInt(source.seq) < BigInt(message.seq),
+            ) ?? [])
+        : [];
+    const originalCall = originalCalls.length === 1 ? originalCalls[0] : undefined;
+    const planReadCall =
+      !fact &&
+      !execution &&
+      originalCall?.call.name === 'planning.read' &&
+      originalCall.message.status === 'complete' &&
+      originalCall.message.contentFormat !== 'unsupported';
+    const displayTool =
+      execution ??
+      (planReadCall ? { definitionId: 'planning.read', definitionVersion: '1' } : undefined);
     let inputCompatible = originalCalls.length === 0;
     const inputPresentation = liveInput ? nativeShellInputPresentation(liveInput) : undefined;
     if (
@@ -528,11 +550,14 @@ export function desktopTranscript({
         : undefined;
     const result: DesktopMessage = {
       ...(factMessage ?? model),
-      ...(execution
+      ...(displayTool
         ? desktopToolPresentation({
-            ...execution,
+            ...displayTool,
             ...(liveInput?.label ? { label: liveInput.label } : {}),
           })
+        : {}),
+      ...(displayTool?.definitionId === 'planning.read' && displayTool.definitionVersion === '1'
+        ? { text: '' }
         : {}),
       ...(inputPresentation && inputCompatible && (!fact || fact.shellInput?.command === undefined)
         ? {

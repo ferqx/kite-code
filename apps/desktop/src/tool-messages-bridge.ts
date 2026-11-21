@@ -64,7 +64,7 @@ export type NativeToolMessageFact = Pick<
   agentWait?:
     | { reason: 'events' | 'completed' | 'input' | 'timeout'; events: number; historyGap?: true }
     | { reason: 'failed'; code: (typeof nativeAgentWaitErrors)[number] };
-  /** Display only: verified original request fields, or its known version's directory default. */
+  /** Display only: verified request fields, a known directory default or the saved plan read location. */
   target?: string;
   /** Original request presentation is still being verified; never publish a partial tool row. */
   inputPending?: boolean;
