@@ -13,6 +13,7 @@ import {
 import { DeferredProcessContent } from './DeferredProcessContent';
 import { completedToolSummary, toolIcon, toolTextFailed } from './ToolActivity';
 import type { Message } from './types';
+import { webFetchBatchDisplay } from './web-fetch-batch-display';
 
 export const traceKey = (boundary: Message) =>
   `trace-after:${boundary.presentationKey ?? boundary.id}`;
@@ -110,6 +111,9 @@ export function ConversationTrace({
   const omittedTool =
     summarizeTools && singleTool && !completedTitle && !acceptedLaunch ? singleTool : undefined;
   const showSummary = grouped || !!omittedTool;
+  const summaryLabel =
+    (omittedTool?.status === 'failed' ? webFetchBatchDisplay(omittedTool)?.label : undefined) ??
+    label;
   const firstTool = steps.find((step) => step.role === 'tool');
   const summaryIcon = firstTool ? toolIcon(firstTool) : BulbIcon;
   const panelId = useId();
@@ -136,8 +140,8 @@ export function ConversationTrace({
       <TraceIcon>
         <HugeiconsIcon icon={summaryIcon} />
       </TraceIcon>
-      <TraceTitle title={label} aria-live="polite" aria-atomic="true">
-        {label}
+      <TraceTitle title={summaryLabel} aria-live="polite" aria-atomic="true">
+        {summaryLabel}
       </TraceTitle>
       <TraceIcon className="conversation-trace-chevron">
         <HugeiconsIcon icon={ArrowDown01Icon} />
@@ -185,7 +189,7 @@ export function ConversationTrace({
                       grouped
                         ? undefined
                         : omittedTool
-                          ? label
+                          ? summaryLabel
                           : (interactionTitle ?? completedTitle),
                       !!omittedTool,
                     )}

@@ -1,3 +1,12 @@
+export type WebFetchBatchPage =
+  | { readonly index: number; readonly outcome: 'succeeded' }
+  | {
+      readonly index: number;
+      readonly outcome: 'failed';
+      readonly reason?: 'invalid_url' | 'denied' | 'timeout' | 'http' | 'unavailable';
+      readonly httpStatus?: number;
+    };
+
 export interface Message {
   /** Host-confirmed attachments keep an otherwise empty user message visible. */
   readonly hasAttachments?: boolean;
@@ -174,6 +183,8 @@ export interface Message {
   readonly toolSummaryCategory?: 'mcp' | 'skill';
   /** Host has a verified, dedicated results reader for this ordinary search tool. */
   readonly webSearchReceipt?: true;
+  /** Host-verified batch page outcomes only, without addresses, bodies or action authority. */
+  readonly webFetchBatch?: { readonly pages: readonly WebFetchBatchPage[] };
   /** A verified write receipt establishes creation of a new file. */
   readonly fileCreated?: true;
   readonly toolStopping?: boolean;

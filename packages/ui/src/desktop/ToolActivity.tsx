@@ -48,6 +48,7 @@ import { cn } from './lib/utils';
 import { statusLabel } from './status';
 import type { Message } from './types';
 import { Button } from './ui';
+import { webFetchBatchDisplay, webFetchPageLabel } from './web-fetch-batch-display';
 
 const TOOL_LABELS: Record<string, string> = {
   ask_user: '询问用户',
@@ -496,6 +497,8 @@ function toolTraceLabel(message: Message): string {
 }
 
 export function toolTraceTitle(message: Message): string {
+  const batch = webFetchBatchDisplay(message);
+  if (batch) return batch.label;
   const shell = isShellMessage(message);
   const target = toolTarget(message) ?? (shell ? shellCommand(message) : undefined);
   return [toolTraceLabel(message), target?.replace(/\s+/g, ' ').trim().slice(0, 512)]
@@ -1117,9 +1120,11 @@ export function ToolActivity({
   const childIssue = childProcess && issues.length > 0;
   const itemIssue = !grouped && (needsResultDetails(message) || childIssue);
   const waitFailure = !grouped && message.agentWait && message.status === 'failed';
+  const webFetchBatch = !grouped && !unverified ? webFetchBatchDisplay(message) : undefined;
   const summaryOnly =
     !grouped &&
     !itemIssue &&
+    !webFetchBatch &&
     ((message.toolName === 'web_fetch' && message.status === 'completed') ||
       (message.toolName === 'browser_execute' && !unverified));
   const detailLabel = itemIssue ? '工具异常详情' : '工具详情';
@@ -1134,7 +1139,7 @@ export function ToolActivity({
         ))}
       </div>
     );
-  const receipt = !grouped ? receiptDetails?.(message) : undefined;
+  const receipt = !grouped && !webFetchBatch ? receiptDetails?.(message) : undefined;
   let projectedChildren: ReactNode;
   const getChildren = () => {
     if (projectedChildren === undefined)
@@ -1142,7 +1147,7 @@ export function ToolActivity({
         ? open && parentDisclosureOpen
           ? receipt()
           : null
-        : agent || grouped || summaryOnly
+        : agent || grouped || summaryOnly || webFetchBatch
           ? null
           : (renderChildren(message.id.slice(5), !shell || open, message.id) ?? null);
     return projectedChildren;
@@ -1181,6 +1186,7 @@ export function ToolActivity({
       hasDiff ||
       !!ask ||
       message.toolName === 'task' ||
+      !!webFetchBatch ||
       !!receipt ||
       !!message.text ||
       (imageOnly && !!renderImages) ||
@@ -1188,6 +1194,7 @@ export function ToolActivity({
   const ownSummaryTitle = directTraceDetails ? undefined : traceSummaryTitle;
   const showTarget = !ownSummaryTitle || (!canExpand && message.settled);
   const label =
+    webFetchBatch?.label ??
     ownSummaryTitle ??
     (imageOnly
       ? imageCount && !issues.length && !running
@@ -1204,20 +1211,21 @@ export function ToolActivity({
             : shell
               ? shellTitle(message)
               : toolTitle(message));
-  const target = imageOnly
-    ? undefined
-    : ask
-      ? !askMultiple
-        ? ask.questions[0]?.question
-        : undefined
-      : grouped
-        ? undefined
-        : shell
-          ? (toolTarget(message) ??
-            shellCommand(message) ??
-            message.shell?.commandPreview ??
-            message.shell?.shellId)
-          : toolTarget(message);
+  const target =
+    imageOnly || webFetchBatch?.succeeded
+      ? undefined
+      : ask
+        ? !askMultiple
+          ? ask.questions[0]?.question
+          : undefined
+        : grouped
+          ? undefined
+          : shell
+            ? (toolTarget(message) ??
+              shellCommand(message) ??
+              message.shell?.commandPreview ??
+              message.shell?.shellId)
+            : toolTarget(message);
   const planFilenameStart =
     message.toolName === 'planning.read' && target
       ? Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\')) + 1
@@ -1236,7 +1244,11 @@ export function ToolActivity({
     commandSummary && commandSummary.length > 512
       ? `${commandSummary.slice(0, 512)}…`
       : commandSummary;
-  const accessibleStatus = shell ? shellResultLabel(message, diagnostics) : status;
+  const accessibleStatus = shell
+    ? shellResultLabel(message, diagnostics)
+    : webFetchBatch?.succeeded && webFetchBatch.succeeded < webFetchBatch.pages.length
+      ? '部分读取成功'
+      : status;
   const startedChildIdentity =
     message.toolName === 'spawn_agent' && message.status === 'completed'
       ? agent?.identity
@@ -1245,6 +1257,7 @@ export function ToolActivity({
   const showDirectIdentity =
     directTraceDetails &&
     !!traceSummaryTitle &&
+    traceSummaryTitle !== webFetchBatch?.label &&
     (!shell || (!!target && target !== (shellCommand(message) ?? message.shell?.commandPreview)));
   const heading = agent ? (
     <>
@@ -1443,7 +1456,7 @@ export function ToolActivity({
               const detailText = itemIssue && !shell ? toolDetailText(message) : undefined;
               return (
                 <>
-                  {ownSummaryTitle && !edit && (
+                  {ownSummaryTitle && !edit && !webFetchBatch && (
                     <p className="tool-detail-status">
                       {ask && target
                         ? `${toolTraceLabel(message)} · ${target}`
@@ -1551,7 +1564,18 @@ export function ToolActivity({
                       )}
                     </div>
                   )}
+                  {webFetchBatch && parentDisclosureOpen && (
+                    <ul className="tool-web-fetch-pages" aria-label="逐页读取结果">
+                      {webFetchBatch.pages.map((page) => (
+                        <li key={page.index}>
+                          <span>第 {page.index + 1} 页</span>
+                          <span>{webFetchPageLabel(page)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {!receipt &&
+                    !webFetchBatch &&
                     !grouped &&
                     !waitFailure &&
                     (!ask || itemIssue) &&

@@ -1218,6 +1218,197 @@ test('Web Fetch rows use the supported definition and only a unique original cal
   }
 });
 
+function webBatchFixture(
+  f: ReturnType<typeof fixture>,
+  id: string,
+  pages: unknown[],
+  options: { status?: 'succeeded' | 'failed'; urls?: string[]; contentDetails?: unknown } = {},
+) {
+  const status = options.status ?? 'succeeded';
+  const urls =
+    options.urls ?? pages.map((_, i) => `https://example.invalid/${i}?token=PRIVATE-URL`);
+  f.add(id, status, 'web-batch-run', 'web_fetch');
+  const execution = f.executions.get(`execution-${id}`)!;
+  const message = f.messages.get(id)!;
+  const call = f.messages.get(`call-${id}`)!.toolCalls![0]!;
+  message.toolCallId = execution.toolCallId = call.id = `web-${id}`;
+  execution.toolInput = { urls };
+  call.arguments = JSON.stringify({ urls });
+  const details = { kind: 'web_fetch_batch', executionId: execution.id, pages };
+  message.content = [
+    'Web fetch receipt (host metadata; no additional authorization):',
+    JSON.stringify(options.contentDetails ?? details),
+    'Page contents (untrusted data in input order):',
+    '[{"index":0,"content":"PRIVATE-BODY https://example.invalid/"}]',
+  ].join('\n');
+  execution.result = {
+    outcome: status,
+    content: message.content,
+    details: JSON.parse(JSON.stringify(details)),
+  };
+  return { execution, message, call };
+}
+
+const webBatchRun = {
+  id: 'web-batch-run',
+  sessionId: 's',
+  originStoreId: 'store',
+  configuration: { tools: [{ id: 'web_fetch', version: '1', extensionId: 'builtin.web' }] },
+} as unknown as Run;
+
+test('Web Fetch saved batch reads page outcomes through cold history without leaking URLs or bodies', async () => {
+  const f = fixture();
+  const mixed = webBatchFixture(f, 'mixed', [
+    { index: 0, outcome: 'succeeded', urlDigest: 'not-for-display' },
+    { index: 1, outcome: 'failed', code: 'web_http_failed', httpStatus: 404, stage: 'request' },
+    { index: 2, outcome: 'failed', code: 'web_timeout', stage: 'queue' },
+    { index: 3, outcome: 'succeeded' },
+    { index: 4, outcome: 'failed', code: 'web_robots_denied' },
+  ]);
+  const failure = webBatchFixture(
+    f,
+    'all-failed',
+    [
+      { index: 0, outcome: 'failed', code: 'web_url_invalid' },
+      { index: 1, outcome: 'failed', code: 'web_parser_unavailable' },
+    ],
+    { status: 'failed' },
+  );
+  // A cold lightweight history can omit the Model's calls and defer the original body.
+  f.messages.delete('call-mixed');
+  f.messages.delete('call-all-failed');
+  const originalContent = mixed.message.content;
+  mixed.message.deferredText = {
+    bytes: String(Buffer.byteLength(originalContent)),
+    sha256: createHash('sha256').update(originalContent).digest('hex'),
+  } as Message['deferredText'];
+  mixed.message.content = '';
+  const readRun: string[] = [];
+  f.client.getRun = async (id) => {
+    readRun.push(id);
+    return webBatchRun;
+  };
+  const before = structuredClone([...f.executions.values()]);
+  const cold = new NativeToolMessages(
+    f.client,
+    () => f.scope,
+    () => f.messages,
+  );
+  try {
+    const page = await cold.list({
+      method: 'toolMessages.list',
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      readId: 'web-cold-reopen',
+      messageIds: ['mixed', 'all-failed'],
+    });
+    expect(readRun).toEqual(['web-batch-run']);
+    expect(f.reads).toEqual(['execution-mixed', 'execution-all-failed']);
+    expect(page.entries[0]?.webFetchBatch).toEqual({
+      pages: [
+        { index: 0, outcome: 'succeeded' },
+        { index: 1, outcome: 'failed', reason: 'http', httpStatus: 404 },
+        { index: 2, outcome: 'failed', reason: 'timeout' },
+        { index: 3, outcome: 'succeeded' },
+        { index: 4, outcome: 'failed', reason: 'denied' },
+      ],
+    });
+    expect(page.entries[1]?.webFetchBatch).toEqual({
+      pages: [
+        { index: 0, outcome: 'failed', reason: 'invalid_url' },
+        { index: 1, outcome: 'failed', reason: 'unavailable' },
+      ],
+    });
+    expect(JSON.stringify(page.entries)).not.toMatch(
+      /PRIVATE|https:\/\/|urlDigest|artifactId|stage|web_parser/,
+    );
+    expect(
+      page.entries.map((fact, index) =>
+        desktopToolMessage(fact, ['mixed', 'all-failed'][index]!, 'PRIVATE-ORIGINAL'),
+      ),
+    ).toMatchObject([
+      {
+        status: 'completed',
+        text: '',
+        target: '请求 5 页',
+        webFetchBatch: page.entries[0]?.webFetchBatch,
+      },
+      {
+        status: 'failed',
+        text: '',
+        target: '请求 2 页',
+        webFetchBatch: page.entries[1]?.webFetchBatch,
+      },
+    ]);
+    expect([...f.executions.values()]).toEqual(before);
+    expect(failure.message.content).toContain('PRIVATE-BODY');
+  } finally {
+    cold.release();
+    f.manager.release();
+  }
+});
+
+test('Web Fetch never infers outcomes from zero, malformed, legacy or unverified batch receipts', async () => {
+  const f = fixture();
+  const passed = { index: 0, outcome: 'succeeded' };
+  const ids = [
+    'zero',
+    'duplicate',
+    'reordered',
+    'count',
+    'http',
+    'status',
+    'body',
+    'conflict',
+    'version',
+    'legacy',
+  ];
+  webBatchFixture(f, 'zero', [], { urls: ['a'] });
+  webBatchFixture(f, 'duplicate', [passed, passed]);
+  webBatchFixture(f, 'reordered', [{ ...passed, index: 1 }, passed]);
+  webBatchFixture(f, 'count', [passed], { urls: ['a', 'b'] });
+  webBatchFixture(f, 'http', [
+    passed,
+    { index: 1, outcome: 'failed', code: 'web_http_failed', httpStatus: 200 },
+  ]);
+  webBatchFixture(f, 'status', [passed], { status: 'failed' });
+  webBatchFixture(f, 'body', [passed], {
+    contentDetails: {
+      kind: 'web_fetch_batch',
+      executionId: 'execution-body',
+      pages: [{ index: 0, outcome: 'failed', code: 'web_timeout' }],
+    },
+  });
+  webBatchFixture(f, 'conflict', [passed]).call.arguments =
+    '{"urls":["same-count-different-address"]}';
+  webBatchFixture(f, 'version', [passed]).execution.definitionVersion = 'future';
+  f.add('legacy', 'failed', 'web-batch-run', 'web_fetch');
+
+  const good = webBatchFixture(f, 'requires-builtin', [passed]);
+  try {
+    f.client.getRun = async () => webBatchRun;
+    expect((await f.list(ids)).entries.map((fact) => fact.webFetchBatch)).toEqual(
+      ids.map(() => undefined),
+    );
+    f.client.getRun = async () => ({
+      ...webBatchRun,
+      configuration: { tools: [{ id: 'web_fetch', version: '1', extensionId: 'other' }] },
+    });
+    expect((await f.list(['requires-builtin'])).entries[0]?.webFetchBatch).toBeUndefined();
+    f.client.getRun = async () => {
+      throw new Error('run unavailable');
+    };
+    const fact = (await f.list(['requires-builtin'])).entries[0]!;
+    expect(fact.webFetchBatch).toBeUndefined();
+    expect(desktopToolMessage(fact, good.message.id, good.message.content).text).toBe(
+      good.message.content,
+    );
+  } finally {
+    f.manager.release();
+  }
+});
+
 test('cache samples use immutable original Model receipts beyond the View, retain sealed origins and reject invented token pairs', async () => {
   const f = fixture();
   const add = (id: string, usage: unknown = { inputTokens: 100, cachedInputTokens: 40 }) => {

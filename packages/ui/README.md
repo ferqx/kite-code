@@ -318,7 +318,7 @@ Native 的 SessionPage 传入 `preserveReadingAnchor`，让 Conversation 在一�
 
 TUI [通用工具结果](src/tui/ink/ToolCardBlock.tsx)保留单行300／多行每行200字符、最多五行的有界预览；任一字符或行裁切均显示省略提示与 `Ctrl+E` 完整已保存结果入口，截取沿完整字素边界，不拆开代理对或组合 emoji。未截断内容不显示提示，原结果和执行目录读取保持完整。该规则不改变文件 diff、问答或 Shell 的各自呈现。
 
-`ToolActivity` 的已知 `web_fetch` 使用地球图标、“读取网页”和原目标的网站／路径，省略协议、user-info、query与fragment，过长目标沿原省略与title阅读。准确成功只保留工具行，不挂载结果正文或原记录reader，不提供正文展开；这不修改Tool结果、Artifact或模型输入。失败及unknown仍保各自原详情，`web_timeout`仅补充不推断阶段的中文说明并保原代码。真实failed/rejected子工具的整个标题沿`--destructive`呈现，hover／focus／展开保持；重复结果标签仅供读屏，不参与行布局。聚合标题不因子项失败取得error装饰，unknown／等待／审批提示仍独立表达。DOM回归核同一聚合身份、状态转换、URL隐私与成功正文缺席，真实生产CSS的浏览器回归核整行颜色、目标截断、原因实际可读与原滚动合同。
+`ToolActivity` 的已知 `web_fetch` 使用地球图标、“读取网页”和原目标的网站／路径，省略协议、user-info、query与fragment，过长目标沿原省略与title阅读。单页准确成功只保留工具行，不挂载结果正文或原记录reader。已核对的批量页结果在同一行展示成功页数与总页数，展开仅显示按请求顺序排列的成功或失败状态及安全原因，不挂载网页正文或重新发起读取；这不修改Tool结果、Artifact或模型输入。失败及unknown仍保各自原详情，`web_timeout`仅补充不推断阶段的中文说明并保原代码。真实failed/rejected子工具的整个标题沿`--destructive`呈现，hover／focus／展开保持；重复结果标签仅供读屏，不参与行布局。聚合标题不因子项失败取得error装饰，unknown／等待／审批提示仍独立表达。DOM回归核同一聚合身份、状态转换、URL隐私与成功正文缺席，真实生产CSS的浏览器回归核整行颜色、目标截断、原因实际可读与原滚动合同。
 
 `ToolActivity` 的 `toolDetailText` 不将 `source:auto/state:approved` 的通过理由混入工具详情；运行、成功、失败与未知结果均沿同一规则，工具原异常及 stdout／stderr 保留。批准盾牌与提示、拒绝／待人工／审批未知原因、原记录和宿主授权事实保持。纯显示筛选不删除 `Message.approval.reason`，也不更改执行状态。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)覆盖未知工具、Shell、失败／未知、重读和原错误保留。
 

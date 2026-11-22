@@ -309,7 +309,11 @@ export function renderNativeToolGroup(
                 无法读取已保存的输出。
               </p>
             );
-          return model && !model.agentWait && !model.shell && options.hasDeferredText?.(model)
+          return model &&
+            !model.agentWait &&
+            !model.shell &&
+            !model.webFetchBatch &&
+            options.hasDeferredText?.(model)
             ? renderOriginal(model, open)
             : null;
         }}

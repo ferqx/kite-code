@@ -349,6 +349,101 @@ export function nativeFileCreationCandidate(execution: Execution): boolean {
   return fileCreation(execution) !== undefined;
 }
 
+/** A single-page, cancelled or unknown outcome never becomes a batch accounting fact. */
+export function nativeWebFetchBatchCandidate(execution: Execution): boolean {
+  const details = object(object(execution.result)?.details);
+  return (
+    execution.definitionId === 'web_fetch' &&
+    execution.definitionVersion === '1' &&
+    (execution.status === 'succeeded' || execution.status === 'failed') &&
+    details?.kind === 'web_fetch_batch' &&
+    details.executionId === execution.id &&
+    Array.isArray(details.pages) &&
+    details.pages.length > 0 &&
+    details.pages.length <= 5
+  );
+}
+
+function webFetchBatch(
+  execution: Execution,
+  call: Record<string, unknown> | undefined,
+  details: Record<string, unknown> | undefined,
+  content: string,
+): NativeToolMessageFact['webFetchBatch'] {
+  const original = object(execution.toolInput);
+  const urls = original?.urls;
+  const stored = details?.pages;
+  if (
+    !original ||
+    !call ||
+    Object.hasOwn(original, 'url') ||
+    Object.hasOwn(call, 'url') ||
+    !Array.isArray(urls) ||
+    !urls.every((url) => typeof url === 'string' && url.length > 0) ||
+    !isDeepStrictEqual(urls, call.urls) ||
+    !Array.isArray(stored) ||
+    stored.length !== urls.length ||
+    content.length > 32768 ||
+    Buffer.byteLength(content) > 32768
+  )
+    return;
+  // Verify only the bounded host receipt line; never parse or return untrusted page bodies.
+  const prefix = 'Web fetch receipt (host metadata; no additional authorization):\n';
+  const header = content.slice(0, 8192);
+  const end = header.indexOf('\n', prefix.length);
+  if (
+    !header.startsWith(prefix) ||
+    end < 0 ||
+    !content.startsWith('\nPage contents (untrusted data in input order):\n', end)
+  )
+    return;
+  try {
+    if (!isDeepStrictEqual(JSON.parse(header.slice(prefix.length, end)), details)) return;
+  } catch {
+    return;
+  }
+  const pages: NonNullable<NativeToolMessageFact['webFetchBatch']>['pages'][number][] = [];
+  for (const [index, raw] of stored.entries()) {
+    const page = object(raw);
+    if (!page || page.index !== index) return;
+    if (page.outcome === 'succeeded' && page.code === undefined && page.httpStatus === undefined) {
+      pages.push({ index, outcome: 'succeeded' });
+      continue;
+    }
+    if (
+      page.outcome !== 'failed' ||
+      typeof page.code !== 'string' ||
+      !/^web_[a-z0-9_]{1,64}$/.test(page.code)
+    )
+      return;
+    if (page.code === 'web_http_failed') {
+      const status = page.httpStatus;
+      if (typeof status !== 'number' || !Number.isInteger(status) || status < 300 || status > 599)
+        return;
+      pages.push({ index, outcome: 'failed', reason: 'http', httpStatus: status });
+      continue;
+    }
+    if (page.httpStatus !== undefined) return;
+    const reason =
+      page.code === 'web_url_invalid'
+        ? 'invalid_url'
+        : page.code === 'web_timeout'
+          ? 'timeout'
+          : [
+                'web_destination_denied',
+                'web_network_denied',
+                'web_robots_denied',
+                'web_url_denied',
+              ].includes(page.code)
+            ? 'denied'
+            : 'unavailable';
+    pages.push({ index, outcome: 'failed', reason });
+  }
+  return (execution.status === 'succeeded') === pages.some((page) => page.outcome === 'succeeded')
+    ? { pages }
+    : undefined;
+}
+
 export function nativeLegacyShellOutput(execution: Execution) {
   const details = object(object(execution.result)?.details);
   return (
@@ -427,6 +522,17 @@ export function nativeToolMessageFact({
             tool?.id === execution.definitionId && tool.version === execution.definitionVersion,
         )
     : [];
+  const webBatch =
+    nativeWebFetchBatchCandidate(execution) &&
+    execution.toolCallId &&
+    execution.toolCallId === message.toolCallId &&
+    run?.id === execution.runId &&
+    run.sessionId === execution.sessionId &&
+    run.originStoreId === execution.originStoreId &&
+    registered.length === 1 &&
+    registered[0]?.extensionId === 'builtin.web'
+      ? webFetchBatch(execution, call, details, result.content)
+      : undefined;
   const fileMissing =
     execution.definitionId === 'files.read' &&
     ['4', '5'].includes(execution.definitionVersion) &&
@@ -661,6 +767,7 @@ export function nativeToolMessageFact({
     ...(fileCreated ? { fileCreated: true } : {}),
     ...(agentMessageAccepted ? { agentMessageAccepted: true } : {}),
     ...(agentWait ? { agentWait } : {}),
+    ...(webBatch ? { webFetchBatch: webBatch } : {}),
     target: planReadTarget ?? requestTarget,
     ...(expectedTarget !== undefined && requestTarget === undefined ? { inputPending: true } : {}),
     ...(shell ? { shellInput: shell } : {}),

@@ -26,6 +26,7 @@ import {
   nativeLiveShellInputFact,
   nativeToolMessageEligible,
   nativeToolMessageFact,
+  nativeWebFetchBatchCandidate,
 } from './tool-message-fact';
 
 type Lease = { readId: string; scope: NativeToolMessageScope; abort: AbortController };
@@ -528,22 +529,19 @@ export class NativeToolMessages {
           ((execution.definitionId === 'task.events' &&
             ['succeeded', 'failed'].includes(execution.status)) ||
             (execution.definitionId === 'task.message' && execution.status === 'succeeded'));
+        const optionalReceipt =
+          taskReceipt || worktreeIssue || creatingFile || nativeWebFetchBatchCandidate(execution);
         if (
           execution.runId &&
           (legacyShellOutput ||
-            worktreeIssue ||
-            creatingFile ||
-            taskReceipt ||
+            optionalReceipt ||
             (execution.status === 'succeeded' &&
               execution.definitionId === 'files.read' &&
               ['4', '5'].includes(execution.definitionVersion) &&
               object(object(execution.result)?.details)?.exists === false))
         ) {
           receiptRun = receiptRuns.get(execution.runId);
-          if (
-            !receiptRuns.has(execution.runId) ||
-            (!receiptRun && !taskReceipt && !worktreeIssue && !creatingFile)
-          ) {
+          if (!receiptRuns.has(execution.runId) || (!receiptRun && !optionalReceipt)) {
             try {
               receiptRun = await this.client.getRun(execution.runId, {
                 signal: lease.abort.signal,
@@ -552,8 +550,7 @@ export class NativeToolMessages {
             } catch (cause) {
               this.check(lease);
               // Optional receipt classification cannot withdraw the original Tool result.
-              if (!taskReceipt && !worktreeIssue && !creatingFile && !legacyShellOutput)
-                throw cause;
+              if (!optionalReceipt && !legacyShellOutput) throw cause;
             }
             receiptRuns.set(execution.runId, receiptRun);
           }

@@ -341,6 +341,7 @@ export function desktopToolMessage(
       | 'imageSourcesListed'
       | 'agentMessageAccepted'
       | 'agentWait'
+      | 'webFetchBatch'
       | 'shellInput'
       | 'shellDisplay'
       | 'shellOutputLimit'
@@ -386,18 +387,26 @@ export function desktopToolMessage(
     fact.definitionVersion === '1' &&
     fact.status === 'succeeded';
   const planRead = fact.definitionId === 'planning.read' && fact.definitionVersion === '1';
+  const webFetchBatch =
+    fact.definitionId === 'web_fetch' &&
+    fact.definitionVersion === '1' &&
+    (fact.status === 'succeeded' || fact.status === 'failed')
+      ? fact.webFetchBatch
+      : undefined;
   return {
     id,
     role: 'tool',
-    text: planRead
-      ? ''
-      : (waitText ??
-        (messageAccepted
-          ? '消息已提交'
-          : shell && (fact.shellResultVerified || /^[\s\uFEFF]*[[{]/u.test(text))
-            ? ''
-            : text)),
+    text:
+      planRead || webFetchBatch
+        ? ''
+        : (waitText ??
+          (messageAccepted
+            ? '消息已提交'
+            : shell && (fact.shellResultVerified || /^[\s\uFEFF]*[[{]/u.test(text))
+              ? ''
+              : text)),
     ...(waitText ? { agentWait: true as const } : {}),
+    ...(webFetchBatch ? { webFetchBatch } : {}),
     settled: !['planned', 'dispatching', 'running'].includes(fact.status),
     ...desktopToolPresentation(fact),
     target: fact.target,
