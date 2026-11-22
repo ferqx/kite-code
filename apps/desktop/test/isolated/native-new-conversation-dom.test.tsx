@@ -3109,11 +3109,16 @@ test('settings overlay the still-painted page without remounting its draft or re
     const page = f.host.querySelector<HTMLElement>('.client-panels')!;
     const reads = [...conversationReads()];
     await openSettings();
-    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
-    const navigation = f.host.querySelector('.native-settings-rail nav')!;
-    expect(f.host.querySelector('.native-settings-topbar [aria-label="关闭设置"]') !== null).toBe(
-      true,
+    const dialog = f.host.querySelector<HTMLElement>('.desktop-settings-dialog[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    const closeButtons = dialog!.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label="关闭设置"]',
     );
+    expect(closeButtons).toHaveLength(1);
+    const closeSettings = closeButtons[0]!;
+    expect(closeSettings.disabled).toBe(false);
+    expect(closeSettings.tabIndex).toBe(0);
+    const navigation = dialog!.querySelector('.native-settings-rail nav')!;
     const navigationButtons = [...navigation.querySelectorAll('button')];
     expect(navigationButtons.map((button) => button.textContent)).toEqual([
       '常规',
@@ -3193,8 +3198,11 @@ test('settings overlay the still-painted page without remounting its draft or re
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(f.host.querySelector('[aria-label="其他模型 的模型管理"]') === null).toBe(true);
-    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
-    await f.click('关闭设置');
+    expect(f.host.querySelector('.desktop-settings-dialog')).toBe(dialog);
+    expect(conversationReads()).toEqual(reads);
+    await act(async () => closeSettings.focus());
+    expect(f.host.activeElement).toBe(closeSettings);
+    await act(async () => closeSettings.click());
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
     expect(f.host.querySelector('.client-panels')).toBe(page);
