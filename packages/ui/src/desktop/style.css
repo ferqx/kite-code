@@ -217,7 +217,7 @@ body {
     padding: 5px 10px;
     border-radius: var(--button-radius);
   }
-  .button:hover:is(:not(:disabled), [data-read-gated="true"]),
+  .button:where(:not([data-variant="plain"])):hover:is(:not(:disabled), [data-read-gated="true"]),
   :where(.interaction-area)
     button:where(:not([data-slot])):hover:is(:not(:disabled), [data-read-gated="true"]),
   :where(.settings)
@@ -509,17 +509,24 @@ body {
     background: transparent;
     color: var(--navigation-foreground);
   }
-  .primary-navigation .button.selected,
-  .primary-navigation .button:hover:is(:not(:disabled), [data-read-gated="true"]) {
+  .primary-navigation .button:not(.sidebar-navigation-action).selected,
+  .primary-navigation
+    .button:not(.sidebar-navigation-action):hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--control-hover);
   }
   .primary-navigation .new-session:disabled:not([data-read-gated="true"]) {
     opacity: 1;
   }
-  .primary-navigation .button span {
+  .primary-navigation .button span,
+  .sidebar-navigation-action > span {
     flex: 1;
     line-height: 20px;
     text-align: left;
+  }
+  .sidebar-navigation-action {
+    color: var(--navigation-foreground, var(--foreground));
+    background: transparent;
+    transition: none;
   }
   .nav-label {
     display: flex;

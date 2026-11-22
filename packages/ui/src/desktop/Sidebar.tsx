@@ -39,6 +39,7 @@ import { ScrollArea } from './components/ui/scroll-area';
 import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
 import { SessionSearch, type SessionSearchProps } from './SessionSearch';
+import { SidebarNavigationAction } from './SidebarNavigationAction';
 import { sessionStatusLabel } from './status';
 import type { WorkspaceSummary } from './types';
 import { Button } from './ui';
@@ -520,16 +521,15 @@ export function Sidebar({
       {(actions.newSession || actions.workbench || actions.scheduledTasks) && (
         <nav className="primary-navigation" aria-label="主要导航">
           {actions.newSession && (
-            <Button
-              className={newConversationSelected ? 'new-session selected' : 'new-session'}
+            <SidebarNavigationAction
+              className="new-session"
               aria-current={newConversationSelected ? 'page' : undefined}
-              variant="ghost"
               disabled={!actions.resumeNewConversation && (props.busy || props.mutationBusy)}
               onClick={actions.resumeNewConversation ?? actions.newSession}
+              icon={<HugeiconsIcon data-icon="inline-start" icon={PencilEdit02Icon} />}
             >
-              <HugeiconsIcon data-icon="inline-start" icon={PencilEdit02Icon} />
-              <span>新对话</span>
-            </Button>
+              新对话
+            </SidebarNavigationAction>
           )}
           {actions.workbench && (
             <Button
@@ -543,15 +543,13 @@ export function Sidebar({
             </Button>
           )}
           {actions.scheduledTasks && (
-            <Button
-              variant="ghost"
-              className={activePage === 'scheduledTasks' ? 'selected' : undefined}
+            <SidebarNavigationAction
               aria-current={activePage === 'scheduledTasks' ? 'page' : undefined}
               onClick={actions.scheduledTasks}
+              icon={<HugeiconsIcon data-icon="inline-start" icon={AlarmClockIcon} />}
             >
-              <HugeiconsIcon data-icon="inline-start" icon={AlarmClockIcon} />
-              <span>定时任务</span>
-            </Button>
+              定时任务
+            </SidebarNavigationAction>
           )}
         </nav>
       )}

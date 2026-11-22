@@ -1,7 +1,8 @@
-import { Button, Input, RightSidebar, useErrorFeedback } from '@kite-ai/ui/desktop';
+import { Button, Input, useErrorFeedback } from '@kite-ai/ui/desktop';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NativeSettingsRequestPort } from './native-bridge';
+import { NativeSettingsDetail } from './native-settings-heading';
 import {
   isSkillMarketplaceQuery,
   type SkillMarketplaceResult,
@@ -260,7 +261,7 @@ function SearchPanel({
   }
 
   return (
-    <RightSidebar id={id} label="搜索 Skills" onClose={onClose}>
+    <NativeSettingsDetail id={id} label="搜索 Skills" onClose={onClose}>
       <div className="catalogue-settings skills-settings provider-panel-content">
         <div className="provider-editor right-sidebar-editor">
           <form className="skill-marketplace-search" aria-label="搜索 Skills" onSubmit={submit}>
@@ -347,6 +348,6 @@ function SearchPanel({
           </footer>
         </div>
       </div>
-    </RightSidebar>
+    </NativeSettingsDetail>
   );
 }

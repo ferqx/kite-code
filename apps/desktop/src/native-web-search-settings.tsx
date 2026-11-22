@@ -1,3 +1,4 @@
+import { NativeSettingsHeading } from './native-settings-heading';
 import './native-web-search-settings.css';
 import { Button, SettingsNavigationIcon } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -99,12 +100,7 @@ export function NativeWebSearchSettings({
       aria-label="网页搜索设置"
       aria-busy={!!busy}
     >
-      <header className="settings-page-heading">
-        <div>
-          <h2>网页搜索</h2>
-          <p>跟随模型与提供商，无需单独配置。</p>
-        </div>
-      </header>
+      <NativeSettingsHeading title="网页搜索" description="跟随模型与提供商，无需单独配置。" />
       {facts && fallback && (
         <>
           <div className="search-pref-heading">

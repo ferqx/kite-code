@@ -1,5 +1,7 @@
-import { Button, SettingsNavigationIcon } from '@kite-ai/ui/desktop';
-import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { Button, SettingsNavigationIcon, SidebarNavigationAction } from '@kite-ai/ui/desktop';
+import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { NativeSettingsDetailNavigation } from './native-settings-heading';
 import './native-settings-layout.css';
 
 export type NativeSettingsPage =
@@ -51,7 +53,35 @@ export function NativeSettingsLayout({
 }) {
   const [showCategories, setShowCategories] = useState(false);
   const categoriesNav = useRef<HTMLElement>(null);
-  const categoryBack = useRef<HTMLButtonElement>(null);
+  const backButton = useRef<HTMLButtonElement>(null);
+  const editorHost = useRef<HTMLDivElement>(null);
+  const [hasEditor, setHasEditor] = useState(false);
+  useLayoutEffect(() => {
+    const host = editorHost.current;
+    if (!host) return;
+    const readEditor = () =>
+      Array.from(host.children).some((child) => child.classList.contains('right-sidebar'));
+    let previous = readEditor();
+    setHasEditor(previous);
+    // Forms own their portals. Only observing the host's direct children keeps
+    // portal edits out of navigation and lets its one button track the view before paint.
+    const observer = new MutationObserver(() => {
+      const next = readEditor();
+      if (next === previous) return;
+      previous = next;
+      flushSync(() => setHasEditor(next));
+    });
+    observer.observe(host, { childList: true });
+    return () => observer.disconnect();
+  }, []);
+  const editorBack = hasEditor && onEditorBack;
+  const registerEditorHost = useCallback(
+    (host: HTMLDivElement | null) => {
+      editorHost.current = host;
+      setEditorHost(host);
+    },
+    [setEditorHost],
+  );
   const moveFocus = useRef(false);
   const goToCategories = () => {
     moveFocus.current = true;
@@ -62,7 +92,7 @@ export function NativeSettingsLayout({
     moveFocus.current = false;
     const target = showCategories
       ? categoriesNav.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')
-      : categoryBack.current;
+      : backButton.current;
     if (target?.getClientRects().length) target.focus();
   }, [showCategories]);
   return (
@@ -73,16 +103,6 @@ export function NativeSettingsLayout({
       <aside className="native-settings-rail">
         <div className="native-settings-rail-heading">
           <span>设置</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="native-settings-close native-settings-narrow-close"
-            aria-label="关闭设置"
-            onClick={onClose}
-          >
-            <CloseIcon />
-          </Button>
         </div>
         <nav aria-label="设置分类" ref={categoriesNav}>
           {groups.map((group) => (
@@ -92,11 +112,15 @@ export function NativeSettingsLayout({
                 const { label, icon } = categories[key];
                 if (key === 'webSearch' && !canReadWebSearch) return null;
                 return (
-                  <Button
+                  <SidebarNavigationAction
                     key={key}
-                    className="sidebar-navigation-action"
-                    variant="ghost"
-                    type="button"
+                    icon={
+                      icon === 'appearance' ? (
+                        <AppearanceIcon />
+                      ) : (
+                        <SettingsNavigationIcon name={icon} />
+                      )
+                    }
                     aria-pressed={page === key}
                     onClick={() => {
                       if (page !== key) onPageChange(key);
@@ -104,58 +128,46 @@ export function NativeSettingsLayout({
                       setShowCategories(false);
                     }}
                   >
-                    {icon === 'appearance' ? (
-                      <AppearanceIcon />
-                    ) : (
-                      <SettingsNavigationIcon name={icon} />
-                    )}
-                    <span>{label}</span>
-                  </Button>
+                    {label}
+                  </SidebarNavigationAction>
                 );
               })}
             </section>
           ))}
         </nav>
       </aside>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="native-settings-close"
+        aria-label="关闭设置"
+        onClick={onClose}
+      >
+        <CloseIcon />
+      </Button>
       <div className="native-settings-page">
         <div className="native-settings-topbar">
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="native-settings-category-back"
-            ref={categoryBack}
-            onClick={goToCategories}
+            className="native-settings-back"
+            data-back-to={editorBack ? 'list' : 'categories'}
+            ref={backButton}
+            onClick={editorBack || goToCategories}
           >
             <SettingsNavigationIcon name="back" />
-            设置
-          </Button>
-          {onEditorBack && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="native-settings-editor-back"
-              onClick={onEditorBack}
-            >
-              <SettingsNavigationIcon name="back" />
-              {listNames[page] ?? categories[page].label}
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="native-settings-close"
-            aria-label="关闭设置"
-            onClick={onClose}
-          >
-            <CloseIcon />
+            {editorBack ? (listNames[page] ?? categories[page].label) : '设置'}
           </Button>
         </div>
         <div className="native-settings-workspace">
-          <div className="settings-content">{children}</div>
-          <div className="settings-editor-panel" ref={setEditorHost} />
+          <div className="settings-content">
+            <NativeSettingsDetailNavigation.Provider value={Boolean(onEditorBack)}>
+              {children}
+            </NativeSettingsDetailNavigation.Provider>
+          </div>
+          <div className="settings-editor-panel" ref={registerEditorHost} />
         </div>
       </div>
     </div>

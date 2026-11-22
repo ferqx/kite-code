@@ -1,4 +1,4 @@
-import { Button, Input, RightSidebar, Textarea } from '@kite-ai/ui/desktop';
+import { Button, Input, Textarea } from '@kite-ai/ui/desktop';
 import { type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
@@ -21,6 +21,7 @@ import {
   compatibleProviderPresets,
 } from './native-provider-presets';
 import { useNativeSettingsFeedback } from './native-settings-feedback';
+import { NativeSettingsDetail, NativeSettingsHeading } from './native-settings-heading';
 import { NativeSettingsSelect } from './native-settings-select';
 
 export type NativeProviderSettingsActivity = {
@@ -1254,43 +1255,43 @@ export function NativeProviderSettings({
       className={`provider-settings${models ? ' provider-model-settings' : ''}`}
       aria-busy={reading || models?.reading || undefined}
     >
-      <header className="settings-page-heading">
-        <div>
-          <h2>{models ? '提供商与模型' : '提供商'}</h2>
-          <p>
-            {models ? '连接模型服务，管理可用模型。' : '连接你的模型服务，按需配置接口与模型。'}
-          </p>
-        </div>
-        <div className="provider-page-actions">
-          {!models && (
+      <NativeSettingsHeading
+        title={models ? '提供商与模型' : '提供商'}
+        description={
+          models ? '连接模型服务，管理可用模型。' : '连接你的模型服务，按需配置接口与模型。'
+        }
+        actions={
+          <div className="provider-page-actions">
+            {!models && (
+              <Button
+                className="provider-button provider-refresh"
+                type="button"
+                aria-label="刷新提供商配置"
+                disabled={reading || writing}
+                onClick={() => {
+                  feedback.reset('read');
+                  void read();
+                }}
+              >
+                <ProviderIcon name="refresh" />
+                <span>刷新配置</span>
+              </Button>
+            )}
             <Button
-              className="provider-button provider-refresh"
+              ref={addButton}
+              aria-expanded={panelMode === 'add'}
+              aria-controls={panelMode === 'add' ? `${fieldId}-editor` : undefined}
+              className="provider-button provider-save"
               type="button"
-              aria-label="刷新提供商配置"
-              disabled={reading || writing}
-              onClick={() => {
-                feedback.reset('read');
-                void read();
-              }}
+              disabled={!facts}
+              onClick={(event) => add(event.currentTarget)}
             >
-              <ProviderIcon name="refresh" />
-              <span>刷新配置</span>
+              <ProviderIcon name="plus" />
+              新增提供商
             </Button>
-          )}
-          <Button
-            ref={addButton}
-            aria-expanded={panelMode === 'add'}
-            aria-controls={panelMode === 'add' ? `${fieldId}-editor` : undefined}
-            className="provider-button provider-save"
-            type="button"
-            disabled={!facts}
-            onClick={(event) => add(event.currentTarget)}
-          >
-            <ProviderIcon name="plus" />
-            新增提供商
-          </Button>
-        </div>
-      </header>
+          </div>
+        }
+      />
       {!feedback.handled && (
         <NativeToast
           key={visibleError}
@@ -1439,10 +1440,18 @@ export function NativeProviderSettings({
           panelMode !== 'remove' &&
           panelHost &&
           createPortal(
-            <RightSidebar
+            <NativeSettingsDetail
               id={`${fieldId}-editor`}
               label={provider ? `${editingLabel} 配置` : '新增提供商'}
               title={panelTitle}
+              description={
+                provider && (
+                  <>
+                    {editingLabel} · {connection ? presetLabel(provider) : '添加新的模型连接'}
+                  </>
+                )
+              }
+              mark={provider && <ProviderMark provider={provider.id} />}
               onClose={requestEditorClose}
             >
               <div className="provider-settings provider-panel-content">
@@ -1477,13 +1486,6 @@ export function NativeProviderSettings({
                       void save();
                     }}
                   >
-                    <header className="provider-editor-heading">
-                      <ProviderMark provider={provider.id} />
-                      <div>
-                        <h3>{editingLabel}</h3>
-                        <p>{connection ? presetLabel(provider) : '添加新的模型连接'}</p>
-                      </div>
-                    </header>
                     <div className="provider-editor-body right-sidebar-editor-body">
                       {draftStale && (
                         <p className="provider-notice provider-notice-error" role="alert">
@@ -1839,7 +1841,7 @@ export function NativeProviderSettings({
                   </form>
                 )}
               </div>
-            </RightSidebar>,
+            </NativeSettingsDetail>,
             panelHost,
           )}
       </div>

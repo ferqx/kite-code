@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
 import type { NativeSettingsRequestPort } from './native-bridge';
+import { NativeSettingsHeading } from './native-settings-heading';
 import { NativeSettingsSelect } from './native-settings-select';
 import { NativeShellSettings } from './native-shell-settings';
 
@@ -22,12 +23,10 @@ export function NativeGeneralSettings({
   const fieldId = useId();
   return (
     <section className="general-settings" aria-label="常规设置">
-      <header className="settings-page-heading">
-        <div>
-          <h2>常规</h2>
-          <p>{windowsShell ? '管理文件打开方式和集成终端。' : '管理文件打开方式。'}</p>
-        </div>
-      </header>
+      <NativeSettingsHeading
+        title="常规"
+        description={windowsShell ? '管理文件打开方式和集成终端。' : '管理文件打开方式。'}
+      />
       <h3 className="settings-group-heading">{windowsShell ? '文件与终端' : '文件'}</h3>
       <div className="settings-card">
         <label className="settings-row" htmlFor={`${fieldId}-field-1`}>

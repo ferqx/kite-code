@@ -1,14 +1,4 @@
 /* Read-only Web Search preferences. Provider setup lives in the existing model settings. */
-.kite-client .desktop-settings .settings-content > .web-search-preferences {
-  max-width: 660px;
-}
-.kite-client .desktop-settings .web-search-preferences .settings-page-heading {
-  margin-block-end: 30px;
-}
-.kite-client .desktop-settings .web-search-preferences .settings-page-heading p {
-  color: var(--muted-foreground);
-  font-size: 13px;
-}
 .kite-client .search-pref-heading {
   display: flex;
   align-items: center;

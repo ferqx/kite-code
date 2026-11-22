@@ -1,5 +1,5 @@
 import type { UserMcpSettingsView, UserMcpToolsPage } from '@kite-ai/client';
-import { Button, Input, RightSidebar, SettingsActionIcon, Switch } from '@kite-ai/ui/desktop';
+import { Button, Input, SettingsActionIcon, Switch } from '@kite-ai/ui/desktop';
 import { type RefObject, useEffect, useEffectEvent, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
@@ -17,6 +17,7 @@ import {
   type McpFeedbackNotice,
   mcpFeedbackNotices,
 } from './native-mcp-feedback';
+import { NativeSettingsDetail, NativeSettingsHeading } from './native-settings-heading';
 import { NativeSettingsListRow } from './native-settings-list-row';
 
 type Source = UserMcpSettingsView['sources'][number];
@@ -642,35 +643,35 @@ export function NativeMcpSettings({
       aria-label="MCP settings"
       aria-busy={reading || undefined}
     >
-      <header className="settings-page-heading">
-        <div>
-          <h2>MCP</h2>
-          <p>连接工具服务，扩展助手的能力。</p>
-        </div>
-        <div className="provider-page-actions">
-          <Button
-            type="button"
-            className="provider-button"
-            size="icon-sm"
-            onClick={() => void read()}
-            disabled={reading || busy}
-            aria-label="Refresh MCP settings"
-            title="刷新列表"
-            ref={refreshButton}
-          >
-            <SettingsActionIcon name="refresh" />
-          </Button>
-          <Button
-            type="button"
-            className="provider-button provider-save"
-            ref={addButton}
-            disabled={!writable}
-            onClick={(event) => openPanel({ kind: 'add' }, event.currentTarget)}
-          >
-            新增 MCP
-          </Button>
-        </div>
-      </header>
+      <NativeSettingsHeading
+        title="MCP"
+        description="连接工具服务，扩展助手的能力。"
+        actions={
+          <div className="provider-page-actions">
+            <Button
+              type="button"
+              className="provider-button"
+              size="icon-sm"
+              onClick={() => void read()}
+              disabled={reading || busy}
+              aria-label="Refresh MCP settings"
+              title="刷新列表"
+              ref={refreshButton}
+            >
+              <SettingsActionIcon name="refresh" />
+            </Button>
+            <Button
+              type="button"
+              className="provider-button provider-save"
+              ref={addButton}
+              disabled={!writable}
+              onClick={(event) => openPanel({ kind: 'add' }, event.currentTarget)}
+            >
+              新增 MCP
+            </Button>
+          </div>
+        }
+      />
       {!panel && alert}
       {facts?.errors.map((value, index) => (
         <p className="provider-notice provider-notice-error" role="alert" key={`${value}/${index}`}>
@@ -729,7 +730,7 @@ export function NativeMcpSettings({
       {panel &&
         panelHost &&
         createPortal(
-          <RightSidebar
+          <NativeSettingsDetail
             id={`${fieldId}-editor`}
             label={panel.kind === 'add' ? '新增 MCP' : (source?.name ?? 'MCP')}
             title={panel.kind === 'add' ? '新增 MCP' : (source?.name ?? 'MCP')}
@@ -987,7 +988,7 @@ export function NativeMcpSettings({
                 )}
               </div>
             </div>
-          </RightSidebar>,
+          </NativeSettingsDetail>,
           panelHost,
         )}
     </section>

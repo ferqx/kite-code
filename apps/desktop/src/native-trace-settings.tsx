@@ -17,6 +17,7 @@ import {
 } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { NativeSettingsRequestPort, NativeSettingsSelection } from './native-bridge';
+import { NativeSettingsHeading } from './native-settings-heading';
 import type { NativeTraceOperation, NativeTraceResult } from './native-trace-bridge';
 
 type EventKind = TraceGrantRequest['eventKinds'][number];
@@ -465,14 +466,11 @@ export function NativeTraceSettings({
   }
   const installed = installation && installation.status !== 'uninstalled';
   return (
-    <section
-      aria-label="Trace 设置"
-      style={{ display: 'grid', gap: 20, padding: 20, maxWidth: 960, margin: '0 auto' }}
-    >
-      <header>
-        <h2>Trace 导出</h2>
-        <p>安装、配置、授权和启用分别操作。只向明确授权的目标发送执行事实与材料。</p>
-      </header>
+    <section className="native-settings-trace" aria-label="Trace 设置">
+      <NativeSettingsHeading
+        title="轨迹与集成"
+        description="管理轨迹导出。只向明确授权的目标发送执行事实与材料。"
+      />
       {error && <p role="alert">{error}</p>}
       {!onError && operationError && <p role="alert">{operationError}</p>}
       {notice && <p role="status">{notice}</p>}

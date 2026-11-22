@@ -1,5 +1,6 @@
 /* The owner supplies the native/window overlay; this file styles only its settings content. */
 .kite-client .native-settings-layout {
+  position: relative;
   display: grid;
   grid-template-columns: clamp(174px, 22%, 224px) minmax(0, 1fr);
   height: 100%;
@@ -37,17 +38,11 @@
 }
 .kite-client .native-settings-rail nav button {
   margin-bottom: 2px;
-  color: var(--navigation-foreground, var(--foreground));
 }
 .kite-client .native-settings-rail nav button svg {
   width: var(--ui-icon-size);
   height: var(--ui-icon-size);
   color: var(--muted-foreground);
-}
-.kite-client .native-settings-rail nav button[aria-pressed="true"] {
-  color: var(--foreground);
-  background: color-mix(in srgb, var(--primary) 10%, var(--sidebar));
-  font-weight: 625;
 }
 .kite-client .native-settings-page {
   display: flex;
@@ -63,7 +58,11 @@
   min-height: 52px;
   padding: 10px 23px 4px;
 }
-.kite-client .native-settings-close {
+.kite-client .native-settings-layout > .native-settings-close {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 14px;
+  inset-inline-end: 23px;
   width: 29px;
   height: 29px;
   border-radius: 50%;
@@ -74,19 +73,12 @@
   width: 15px;
   height: 15px;
 }
-.kite-client .native-settings-topbar .native-settings-close {
-  margin-inline-start: auto;
-}
-.kite-client
-  :is(.native-settings-category-back, .native-settings-editor-back, .native-settings-narrow-close) {
+.kite-client .native-settings-back[data-back-to="categories"] {
   display: none;
 }
-.kite-client
-  .native-settings-page:has(.settings-editor-panel > .right-sidebar)
-  .native-settings-editor-back {
-  display: inline-flex;
-}
 .kite-client .native-settings-workspace {
+  --settings-page-gutter: 29px;
+  --settings-title-inset: 13px;
   display: grid;
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   flex: 1;
@@ -94,7 +86,7 @@
   min-height: 0;
 }
 .kite-client .native-settings-layout.desktop-settings .settings-content {
-  padding: 13px 29px 24px;
+  padding: var(--settings-title-inset) var(--settings-page-gutter) 24px;
 }
 .kite-client
   .native-settings-workspace:has(.settings-editor-panel > .right-sidebar)
@@ -123,23 +115,56 @@
   .native-settings-layout.desktop-settings
   .settings-editor-panel
   .right-sidebar-heading {
-  min-height: 63px;
-  padding: 0 29px 13px;
+  min-height: 0;
+  padding: var(--settings-title-inset) var(--settings-page-gutter) 15px;
   border-block-end: 1px solid var(--border);
 }
-.kite-client .native-settings-layout .right-sidebar-heading h2 {
-  font-size: 20px;
-  font-weight: 625;
+.kite-client .native-settings-layout.desktop-settings .native-settings-heading-copy {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
 }
-.kite-client .native-settings-page:has(.native-settings-editor-back) .right-sidebar-close {
-  display: none;
+.kite-client
+  .native-settings-layout.desktop-settings
+  .native-settings-heading-copy
+  > div:last-child {
+  min-width: 0;
+}
+.kite-client .native-settings-layout.desktop-settings .native-settings-heading h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 29px;
+  overflow-wrap: anywhere;
+}
+.kite-client .native-settings-layout.desktop-settings .native-settings-heading :is(p, h3) {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--ui-text-size, 14px);
+  font-weight: 400;
+  line-height: 21px;
+  overflow-wrap: anywhere;
+}
+.kite-client .native-settings-layout .native-settings-detail-header > .native-settings-heading {
+  width: 100%;
+  margin: 0;
+}
+.kite-client .native-settings-layout .native-settings-detail-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.kite-client .native-settings-layout .native-settings-trace > :not(.native-settings-heading) + * {
+  margin-block-start: 20px;
 }
 .kite-client .native-settings-layout .right-sidebar-editor-body {
-  padding: 20px 29px;
+  padding: 20px var(--settings-page-gutter);
 }
 .kite-client .native-settings-layout .right-sidebar-editor-footer {
   min-height: 57px;
-  padding: 12px 29px;
+  padding: 12px var(--settings-page-gutter);
 }
 /* The native window itself stops shrinking at 800px; its inset card is narrower. */
 @container native-settings-card (max-width: 800px) {
@@ -150,25 +175,17 @@
   .kite-client .native-settings-layout[data-narrow-screen="categories"] > .native-settings-page {
     display: none;
   }
-  .kite-client
-    .native-settings-layout[data-narrow-screen="categories"]
-    .native-settings-narrow-close,
-  .kite-client
-    .native-settings-page:not(:has(.settings-editor-panel > .right-sidebar))
-    .native-settings-category-back {
+  .kite-client .native-settings-page .native-settings-back[data-back-to="categories"] {
     display: inline-flex;
   }
   .kite-client .native-settings-topbar {
     padding-inline: 15px;
   }
-  .kite-client .native-settings-layout.desktop-settings .settings-content,
-  .kite-client
-    .native-settings-layout.desktop-settings
-    .settings-editor-panel
-    .right-sidebar-heading,
-  .kite-client .native-settings-layout .right-sidebar-editor-body,
-  .kite-client .native-settings-layout .right-sidebar-editor-footer {
-    padding-inline: 17px;
+  .kite-client .native-settings-layout > .native-settings-close {
+    inset-inline-end: 15px;
+  }
+  .kite-client .native-settings-workspace {
+    --settings-page-gutter: 17px;
   }
 }
 /* Match the connected rows in the approved MCP layout without changing field owners. */

@@ -167,6 +167,7 @@ export {
 export { SettingsActionIcon } from './SettingsActionIcon';
 export { SettingsNavigationIcon } from './SettingsNavigationIcon';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
+export { SidebarNavigationAction } from './SidebarNavigationAction';
 export { statusLabel } from './status';
 export { ToolActivity, ToolRow } from './ToolActivity';
 export {

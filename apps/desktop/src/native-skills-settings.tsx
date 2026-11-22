@@ -1,5 +1,5 @@
 import type { UserSkillCataloguePage } from '@kite-ai/client';
-import { Button, MessageContent, RightSidebar, useErrorFeedback } from '@kite-ai/ui/desktop';
+import { Button, MessageContent, useErrorFeedback } from '@kite-ai/ui/desktop';
 import { ApplicationConfirmationDialog } from '@kite-ai/ui/desktop/confirmation';
 import { type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -8,6 +8,7 @@ import type {
   NativeSettingsRequestPort,
   NativeSkillsScope,
 } from './native-bridge';
+import { NativeSettingsDetail, NativeSettingsHeading } from './native-settings-heading';
 import { NativeSettingsListRow } from './native-settings-list-row';
 import { NativeSkillMarketplace } from './native-skill-marketplace';
 import { notifyNativeSkillMutation, watchNativeSkillMutations } from './native-skill-mutations';
@@ -393,37 +394,37 @@ export function NativeSkillsSettings({
       aria-label="Skills 目录"
       aria-busy={busy || undefined}
     >
-      <header className="settings-page-heading">
-        <div>
-          <h2>Skills</h2>
-          <p>查看内置和个人 Skills，或搜索并安装更多 Skills。</p>
-        </div>
-        <div className="provider-page-actions">
-          <Button
-            ref={refreshButton}
-            className="provider-button provider-refresh"
-            type="button"
-            disabled={!canRead || busy}
-            onClick={() => setRefresh((value) => value + 1)}
-          >
-            刷新 Skills 目录
-          </Button>
-          <Button
-            ref={searchButton}
-            className="provider-button provider-save"
-            type="button"
-            disabled={!canRead || !panelHost}
-            aria-expanded={searchOpen}
-            aria-controls={searchOpen ? panelId : undefined}
-            onClick={(event) => {
-              origin.current = event.currentTarget;
-              setPanel({ identity, kind: 'search' });
-            }}
-          >
-            搜索 Skills
-          </Button>
-        </div>
-      </header>
+      <NativeSettingsHeading
+        title="Skills"
+        description="查看内置和个人 Skills，或搜索并安装更多 Skills。"
+        actions={
+          <div className="provider-page-actions">
+            <Button
+              ref={refreshButton}
+              className="provider-button provider-refresh"
+              type="button"
+              disabled={!canRead || busy}
+              onClick={() => setRefresh((value) => value + 1)}
+            >
+              刷新 Skills 目录
+            </Button>
+            <Button
+              ref={searchButton}
+              className="provider-button provider-save"
+              type="button"
+              disabled={!canRead || !panelHost}
+              aria-expanded={searchOpen}
+              aria-controls={searchOpen ? panelId : undefined}
+              onClick={(event) => {
+                origin.current = event.currentTarget;
+                setPanel({ identity, kind: 'search' });
+              }}
+            >
+              搜索 Skills
+            </Button>
+          </div>
+        }
+      />
       {!available ? (
         <p className="provider-notice" role="status">
           当前服务未提供 Skills 目录。
@@ -500,10 +501,13 @@ export function NativeSkillsSettings({
       {detailId &&
         panelHost &&
         createPortal(
-          <RightSidebar
+          <NativeSettingsDetail
             id={panelId}
             label={`${entry?.name || entry?.id || 'Skill'} 详情`}
             title="Skill 详情"
+            description={entry?.name || entry?.id || 'Skill 详情'}
+            detailFocus={detailHeading}
+            extra={entry && <SkillStatus entry={entry} />}
             onClose={close}
           >
             <div
@@ -511,15 +515,6 @@ export function NativeSkillsSettings({
               aria-busy={busy || undefined}
             >
               <div className="provider-editor right-sidebar-editor">
-                <header className="provider-editor-heading skill-detail-heading">
-                  <div className="skill-detail-title">
-                    <h3 ref={detailHeading} tabIndex={-1}>
-                      {entry?.name || entry?.id || 'Skill 详情'}
-                    </h3>
-                    <span>Skill</span>
-                  </div>
-                  {entry && <SkillStatus entry={entry} />}
-                </header>
                 <div className="provider-editor-body right-sidebar-editor-body">
                   {error && !onError && (
                     <p className="provider-notice provider-notice-error" role="alert">
@@ -628,7 +623,7 @@ export function NativeSkillsSettings({
                 />
               </div>
             </div>
-          </RightSidebar>,
+          </NativeSettingsDetail>,
           panelHost,
         )}
     </section>

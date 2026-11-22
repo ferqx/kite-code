@@ -15,6 +15,7 @@ import { NativeMcpSettings } from './native-mcp-settings';
 import { NativeToast } from './native-message';
 import { NativeProviderModelSettings } from './native-provider-model-settings';
 import type { NativeSettingsState } from './native-settings-bridge';
+import { NativeSettingsHeading } from './native-settings-heading';
 import { NativeSettingsLayout, type NativeSettingsPage } from './native-settings-layout';
 import { NativeSettingsSelect } from './native-settings-select';
 import { NativeSkillsSettings } from './native-skills-settings';
@@ -139,11 +140,7 @@ export function NativeSettingsWorkspace({
               />
             ) : page === 'appearance' ? (
               <section className="general-settings" aria-label="外观设置">
-                <header className="settings-page-heading">
-                  <div>
-                    <h2>外观</h2>
-                  </div>
-                </header>
+                <NativeSettingsHeading title="外观" description="选择 Kite 的显示主题。" />
                 <div className="settings-card">
                   <label className="settings-row" htmlFor={appearanceId}>
                     <span>
@@ -173,7 +170,13 @@ export function NativeSettingsWorkspace({
                   sessionId={state.webSearchSessionId}
                 />
               ) : (
-                <p role="status">当前连接不支持网页搜索设置。</p>
+                <section className="general-settings" aria-label="网页搜索设置">
+                  <NativeSettingsHeading
+                    title="网页搜索"
+                    description="跟随模型与提供商，无需单独配置。"
+                  />
+                  <p role="status">当前连接不支持网页搜索设置。</p>
+                </section>
               )
             ) : page === 'trace' ? (
               storeId ? (
@@ -184,7 +187,10 @@ export function NativeSettingsWorkspace({
                   selection={selection}
                 />
               ) : (
-                <p role="status">连接可用的本机数据后管理轨迹集成。</p>
+                <section className="general-settings" aria-label="Trace 设置">
+                  <NativeSettingsHeading title="轨迹与集成" description="管理执行轨迹的导出。" />
+                  <p role="status">连接可用的本机数据后管理轨迹集成。</p>
+                </section>
               )
             ) : page === 'skills' ? (
               <NativeSkillsSettings

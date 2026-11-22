@@ -352,8 +352,17 @@ test('sidebar selection follows the visible page without highlighting a retained
     const current = document.querySelectorAll('.sidebar [aria-current="page"]');
     expect(current).toHaveLength(1);
     expect(current[0]!.textContent).toBe(page.label);
-    expect(current[0]!.closest('.selected')).not.toBeNull();
-    expect(document.querySelectorAll('.sidebar .selected')).toHaveLength(1);
+    const flatAction = page.label === '新对话' || page.label === '定时任务';
+    expect(current[0]!.classList.contains('sidebar-navigation-action')).toBe(flatAction);
+    if (flatAction) {
+      expect(current[0]!.getAttribute('data-variant')).toBe('plain');
+      expect(current[0]!.classList.contains('transition-none')).toBe(true);
+      expect(current[0]!.className).not.toContain('hover:');
+    }
+    expect(Boolean(current[0]!.closest('.selected'))).toBe(!flatAction);
+    const highlighted = [...document.querySelectorAll('.sidebar .selected')];
+    expect(highlighted.length > 0).toBe(!flatAction);
+    expect(highlighted.every((element) => element.contains(current[0]!))).toBe(true);
   }
 });
 
