@@ -1467,14 +1467,28 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     serverId: string,
     signal: AbortSignal,
     derivations: readonly Derivation[] = [],
+    allowUserEtagDrift = false,
   ) {
     signal.throwIfAborted();
     for (const value of derivations)
       deriveMcpSourceReadSet(value.parent, value.readSet, value.child);
-    const now = observe(source);
+    const now = observe(source),
+      { readSet } = now.capture;
+    // Only receipt settlement may tolerate an unrelated change to a valid user document.
+    // Never mask a read error, another read-set member, or the exact target check below.
+    const observedReadSet =
+      allowUserEtagDrift &&
+      expected.readSet?.user.etag &&
+      expected.readSet.user.error === null &&
+      now.state.user.exists &&
+      now.state.registry.errors.user === null &&
+      now.state.registry.errors.approval === null &&
+      now.state.registry.errors.binding === null
+        ? { ...readSet, user: { ...readSet.user, etag: expected.readSet.user.etag } }
+        : readSet;
     if (
       !expected.selection.serverIds.includes(serverId) ||
-      mcpCanonical(now.capture.readSet) !== mcpCanonical(expected.readSet)
+      mcpCanonical(observedReadSet) !== mcpCanonical(expected.readSet)
     )
       throw new McpAdapterError('mcp_source_stale');
     const server = now.capture.servers.find((server) => server.id === serverId),
@@ -2008,6 +2022,18 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       snapshotDigest,
       transportPort: port,
       assertFresh: fresh,
+      ...(!replacement &&
+      source.session.parentSessionId === null &&
+      !expected.inheritance &&
+      !state.derivations?.length &&
+      entry.server.source.kind === 'user' &&
+      transport.type === 'stdio'
+        ? {
+            assertToolResultFresh: ({ signal }: { signal: AbortSignal }) => {
+              assertSnapshot(source, expected, input.serverId, signal, [], true);
+            },
+          }
+        : {}),
     });
   }
   const sourcePort: McpScopedSourcePort = {

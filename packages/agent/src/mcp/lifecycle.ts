@@ -203,6 +203,8 @@ export interface McpScopedSourceResolution {
   transportPort: McpLifecycleTransportPort;
   /** Synchronous original-source check at the final local wire boundary. */
   assertFresh(options: { signal: AbortSignal }): void;
+  /** Separate source observation for the original, already dispatched Tool response. */
+  assertToolResultFresh?(options: { signal: AbortSignal }): void;
 }
 export interface McpScopedSourcePort {
   resolveReplacement?(
@@ -709,6 +711,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         return handle;
       }
       const { admission, server, source, jobPort, scopeId } = prepared;
+      const assertToolResultFresh = source?.assertToolResultFresh;
       const entry: Entry = {
         epoch: ++holderEpoch,
         executionId: context.executionId,
@@ -768,6 +771,16 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
             wireFresh(entry, true);
             source?.assertFresh({ signal: context.signal });
           },
+          ...(assertToolResultFresh
+            ? {
+                assertToolResultFresh: () => {
+                  wireFresh(entry);
+                  if (tickets.has(scopeId))
+                    throw new McpAdapterError('mcp_scope_transition_unconfirmed');
+                  assertToolResultFresh({ signal: context.signal });
+                },
+              }
+            : {}),
           createTransport: async () => {
             source?.assertFresh({ signal: context.signal });
             assertTicket(admission.ticket);

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { InputFileImport } from './storage/input-file-imports';
 import type { ArtifactReference, InputFileReference } from './storage/types';
 
 export interface WorkingInputScope {
@@ -35,6 +36,19 @@ export function workingInputPath(input: WorkingInputScope, name: string): string
   while (Buffer.byteLength(safeName) > 180) safeName = Array.from(safeName).slice(1).join('');
   safeName = `input-${safeName}`;
   return `.kite-inputs/${digest}/${safeName}`;
+}
+export interface WorkingInputAttachment {
+  imported: InputFileImport;
+  working: WorkingInputRecord;
+  contextSelectionId: string;
+}
+
+/** Use one URI projection for ModelInput and the trusted exact-target resolver. */
+export function workingInputUri(record: WorkingInputRecord): string {
+  return new URL(
+    record.workingRelativePath.split('/').map(encodeURIComponent).join('/'),
+    record.workspaceRootUri.endsWith('/') ? record.workspaceRootUri : `${record.workspaceRootUri}/`,
+  ).href;
 }
 export interface WorkingInputFilesPort {
   materialize(input: {

@@ -62,6 +62,8 @@ export function nativeInputErrorText(phase: 'failed' | 'unknown', reason?: strin
   if (phase === 'unknown') return '发送结果尚未确认，稍后将自动核对原提交。';
   if (reason === 'shell_asset_unavailable' || reason === 'native_asset_unavailable')
     return '本地执行环境尚未就绪，请恢复后重新发送。';
+  if (reason === 'file_native_unavailable')
+    return '本地文件处理组件不可用，消息未发送。请保留草稿和附件，待文件处理恢复后重试。';
   if (reason === 'native_request_too_large') return '消息或附件过大，请减少内容后重新发送。';
   if (reason === 'draft_changed_before_send')
     return '草稿在发送前已更新，消息没有发送。请确认当前内容后重新发送。';

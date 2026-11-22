@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import {
   type ModelAdapter,
   type ModelMessage,
@@ -95,8 +96,10 @@ import { inputFileContent, inputFileReferences } from './input-files';
 import { decodeInputImage, inputImages, matchesImageType } from './input-images';
 import {
   type PrepareWorkingInputsRequest,
+  type WorkingInputAttachment,
   type WorkingInputFilesPort,
   workingInputPath,
+  workingInputUri,
 } from './input-working-files';
 import { canonicalJson, semanticDigest } from './json';
 import {
@@ -162,6 +165,7 @@ import { intersectPermissionPolicies } from './permissions/inheritance';
 import { sealWorktreeDecision } from './permissions/worktree-authorization';
 import { formatShellResult } from './shell-result-presentation';
 import { readSourceRequestJournal, sourceRequestJournalNode } from './source-request-journal';
+import type { InputFileImport } from './storage/input-file-imports';
 import type {
   AcceptCommandInput,
   AuthorizationCheckIdentity,
@@ -4260,14 +4264,68 @@ export class AgentRuntime {
     subjectId: string;
     uri: string;
     signal?: AbortSignal;
-  }): Promise<import('./storage/input-file-imports').InputFileImport | null> {
-    const { signal, uri, ...scope } = input;
+  }): Promise<InputFileImport | null> {
+    return this.findSelectedInputFile(input, (imported) =>
+      imported.uri === input.uri ? imported : null,
+    );
+  }
+  /** A working filename alone grants nothing; match the exact bound attachment
+   * in the actual Run's selected context and the host's original preparation. */
+  async resolveWorkingInputFile(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    subjectId: string;
+    contextSelectionId: string;
+    uri: string;
+    signal?: AbortSignal;
+  }): Promise<WorkingInputAttachment | null> {
+    const requestedPath = fileURLToPath(input.uri);
+    return this.findSelectedInputFile(input, async (imported) => {
+      if (!imported.boundCommandId || imported.originStoreId !== input.expectedStoreId) return null;
+      const preparation = {
+        expectedStoreId: input.expectedStoreId,
+        sessionId: imported.sessionId,
+        subjectId: input.subjectId,
+        commandId: imported.boundCommandId,
+        importId: imported.id,
+      };
+      const working = await this.options.store.getWorkingInput(preparation);
+      if (
+        working?.state !== 'bound' ||
+        working.commandId !== preparation.commandId ||
+        working.importId !== preparation.importId ||
+        working.inputRefId !== imported.reference.id ||
+        working.workingRelativePath !== workingInputPath(preparation, imported.name) ||
+        fileURLToPath(workingInputUri(working)) !== requestedPath
+      )
+        return null;
+      return { imported, working, contextSelectionId: input.contextSelectionId };
+    });
+  }
+  private async findSelectedInputFile<T>(
+    input: {
+      expectedStoreId: string;
+      sessionId: string;
+      subjectId: string;
+      contextSelectionId?: string;
+      signal?: AbortSignal;
+    },
+    match: (imported: InputFileImport) => T | null | Promise<T | null>,
+  ): Promise<T | null> {
+    const scope = {
+      expectedStoreId: input.expectedStoreId,
+      sessionId: input.sessionId,
+      subjectId: input.subjectId,
+    };
     let afterSeq = '0',
       afterSourceId = '';
-    let contextSelectionId: string | undefined, upperSeq: string | undefined;
+    let contextSelectionId = input.contextSelectionId,
+      upperSeq: string | undefined;
     for (;;) {
       input.signal?.throwIfAborted();
-      const page = await this.options.store.getExpandedContext({
+      const page = await (input.contextSelectionId
+        ? this.options.store.getModelContext.bind(this.options.store)
+        : this.options.store.getExpandedContext.bind(this.options.store))({
         expectedStoreId: input.expectedStoreId,
         sessionId: input.sessionId,
         afterSeq,
@@ -4301,13 +4359,13 @@ export class AgentRuntime {
           });
           if (
             imported?.state === 'bound' &&
-            imported.uri === input.uri &&
             imported.name === file.name &&
             canonicalJson(imported.reference as unknown as Json) ===
               canonicalJson(file.reference as unknown as Json)
           ) {
+            const selected = await match(imported);
             input.signal?.throwIfAborted();
-            return imported;
+            if (selected !== null) return selected;
           }
         }
       }
@@ -12159,14 +12217,7 @@ export class AgentRuntime {
             if (working && working.state !== 'bound')
               throw new AgentError('input_preparation_conflict');
             // Keep the private immutable reference internal; only the selected working path is projected.
-            const uri = working
-              ? new URL(
-                  working.workingRelativePath.split('/').map(encodeURIComponent).join('/'),
-                  working.workspaceRootUri.endsWith('/')
-                    ? working.workspaceRootUri
-                    : `${working.workspaceRootUri}/`,
-                ).href
-              : imported.uri;
+            const uri = working ? workingInputUri(working) : imported.uri;
             files.push({ name: file.name, uri });
           }
           content = inputFileContent(content, files);

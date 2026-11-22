@@ -8,7 +8,12 @@ import {
   type TrustedToolBehavior,
   withOutputCollection,
 } from '@kite-ai/agent';
-import type { PublicExecution, ReadContext, ToolContext } from '@kite-ai/agent/extensions';
+import type {
+  AuthorizationRequest,
+  PublicExecution,
+  ReadContext,
+  ToolContext,
+} from '@kite-ai/agent/extensions';
 import {
   type CheckpointSource,
   createFileCheckpointing,
@@ -573,31 +578,57 @@ export function createDefaultFileCheckpointConfiguration(options: {
       });
     },
   });
+  async function inputReadScope(
+    request: Pick<AuthorizationRequest, 'sessionId' | 'executionId' | 'signal'>,
+  ) {
+    const runtime = options.runtime();
+    const actual = await runtime.getExecution(request.executionId);
+    const metadata = await runtime.getMetadata();
+    const command = actual && (await runtime.getCommand(actual.originCommandId));
+    if (
+      !actual ||
+      !command ||
+      actual.sessionId !== request.sessionId ||
+      actual.originStoreId !== metadata.storeId ||
+      command.originStoreId !== metadata.storeId ||
+      actual.kind !== 'tool' ||
+      actual.definitionId !== 'files.read' ||
+      actual.definitionVersion !== '5'
+    )
+      throw new AgentError('input_file_scope_denied');
+    return {
+      runtime,
+      actual,
+      scope: {
+        expectedStoreId: metadata.storeId,
+        sessionId: request.sessionId,
+        subjectId: command.subjectId,
+        signal: request.signal,
+      },
+    };
+  }
   const inputFiles = withInputFileReads({
     profilePath: options.profile.profilePath,
     tools: fullAccessFiles.tools,
     async resolve(request, uri) {
-      const runtime = options.runtime();
-      const actual = await runtime.getExecution(request.executionId);
-      const metadata = await runtime.getMetadata();
-      const command = actual && (await runtime.getCommand(actual.originCommandId));
+      const { runtime, scope } = await inputReadScope(request);
+      return runtime.resolveInputFile({ ...scope, uri });
+    },
+    async resolveWorking(request, uri) {
+      const { runtime, actual, scope } = await inputReadScope(request);
+      const run = actual.runId ? await runtime.getRun(actual.runId) : null;
       if (
-        !actual ||
-        !command ||
-        actual.sessionId !== request.sessionId ||
-        actual.originStoreId !== metadata.storeId ||
-        command.originStoreId !== metadata.storeId ||
-        actual.kind !== 'tool' ||
-        actual.definitionId !== 'files.read' ||
-        actual.definitionVersion !== '5'
+        !run?.isActive ||
+        run.sessionId !== actual.sessionId ||
+        run.originStoreId !== scope.expectedStoreId ||
+        run.originCommandId !== actual.originCommandId ||
+        !run.contextSelectionId
       )
-        throw new AgentError('input_file_scope_denied');
-      return runtime.resolveInputFile({
-        expectedStoreId: metadata.storeId,
-        sessionId: request.sessionId,
-        subjectId: command.subjectId,
+        return null;
+      return runtime.resolveWorkingInputFile({
+        ...scope,
+        contextSelectionId: run.contextSelectionId,
         uri,
-        signal: request.signal,
       });
     },
   });

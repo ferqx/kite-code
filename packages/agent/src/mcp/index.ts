@@ -57,6 +57,8 @@ export interface McpAdapterOptions {
   admitToolCall?: (binding: McpCallBinding, options: { signal: AbortSignal }) => Promise<void>;
   /** Trusted synchronous source fence; invoked again immediately before each captured wire call. */
   assertFresh?: () => void;
+  /** Optional host fence only for accepting an already dispatched synchronous Tool response. */
+  assertToolResultFresh?: () => void;
   /** Optional trusted transport mechanism; lifecycle invokes this only from its dispatched Job.start. */
   createTransport?: () => Promise<Transport>;
   limits?: {
@@ -115,6 +117,7 @@ export function createMcpAdapter(options: McpAdapterOptions) {
   const serverId = options.id;
   const admitToolCall = options.admitToolCall;
   const assertSourceFresh = options.assertFresh;
+  const assertToolResultFresh = options.assertToolResultFresh;
   const createTransport = options.createTransport;
   const configuration = structuredClone(options.transport);
   const maximum = options.limits?.maxFrameBytes ?? 1024 * 1024;
@@ -414,9 +417,9 @@ export function createMcpAdapter(options: McpAdapterOptions) {
       leases.add(lease);
       let released = false;
       let releaseTask: Promise<void> | undefined;
-      function check() {
+      function check(assertFresh = assertSourceFresh) {
         if (released || closed) throw new McpAdapterError('mcp_scope_released');
-        assertSourceFresh?.();
+        assertFresh?.();
       }
       let boundJobs: readonly JobDefinition[] = Object.freeze([]);
       let boundCache: Cache | undefined;
@@ -611,8 +614,8 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                   definitionId: definition.id,
                   definitionVersion: version,
                 });
-                function assertFresh() {
-                  check();
+                function assertFresh(assertSource = assertSourceFresh) {
+                  check(assertSource);
                   if (
                     cache !== captured ||
                     dead ||
@@ -666,7 +669,7 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                         actualResult: JSON.parse(JSON.stringify(result)) as Json,
                       },
                     };
-                  assertFresh();
+                  assertFresh(assertToolResultFresh);
                   return {
                     outcome: result.isError ? 'failed' : 'succeeded',
                     content: mcpToolResultContent(result),

@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Json } from '@kite-ai/agent/extensions';
+import { createWorkingInputFiles } from '@kite-ai/agent/files';
 import {
   createProfileBackup,
   inspectProfileBackup,
@@ -214,6 +215,7 @@ async function fixture(
       store,
     }),
     workspaceSerialLocks,
+    workingInputFiles: createWorkingInputFiles(),
     permissions: host.permissions!,
     extensions: host.extensions,
     resolveRunConfiguration: host.resolveRunConfiguration,
@@ -332,6 +334,7 @@ async function fixture(
           store,
         }),
         workspaceSerialLocks,
+        workingInputFiles: createWorkingInputFiles(),
         permissions: host.permissions!,
         extensions: host.extensions,
         resolveRunConfiguration: host.resolveRunConfiguration,
@@ -570,6 +573,402 @@ test('uploaded PDF pages flow through the exact file tool result to the next mod
     expect(result.modelImages).toMatchObject([
       { mediaType: 'image/png', scope: { kind: 'execution', id: reads[1]!.id } },
     ]);
+  } finally {
+    await f.close();
+  }
+}, 20000);
+
+test('working attachments project only paths and use the authorized explicit Files reader', async () => {
+  const noPayload = 'Test exact working attachment paths';
+  const prefix = 'Attached file references (user-provided data; paths do not grant permissions):\n';
+  let paths: string[] = [];
+  let textBaseRef: string | undefined, unboundPath: string;
+  const f = await fixture(
+    {},
+    ['files.read', 'files.edit'],
+    async (step, current): Promise<Call> => {
+      if (['foreign-attachment-read', 'missing-working-read'].includes(current.commandId))
+        return step === 0
+          ? { name: 'read_file', input: { path: paths[0]!, pages: '1', mode: 'image' } }
+          : null;
+      if (current.commandId === 'working-copy-edit') {
+        if (step === 0)
+          return { name: 'read_file', input: { path: paths[1]!, start_line: 1, max_lines: 1 } };
+        if (step !== 1) return null;
+        const read = (await current.store.listExecutions('s')).find(
+          (entry) =>
+            entry.originCommandId === 'working-copy-edit' && entry.definitionId === 'files.read',
+        );
+        const result = read?.result as { content: string } | undefined;
+        textBaseRef = result?.content && JSON.parse(result.content).base_ref;
+        return {
+          name: 'edit_file',
+          input: {
+            path: paths[1]!,
+            base_ref: textBaseRef!,
+            old_text: 'WORKING_VERSION',
+            new_text: 'EDITED_VERSION',
+            expected_matches: 1,
+          },
+        };
+      }
+      if (step === 0) {
+        const messages = current.requests.at(-1)?.messages as { role: string; content: string }[];
+        const attached = messages.find(
+          (message) =>
+            message.role === 'user' &&
+            typeof message.content === 'string' &&
+            message.content.includes(prefix),
+        );
+        const refs = JSON.parse(attached!.content.split(prefix)[1]!);
+        paths = refs.map((ref: { uri: string }) => fileURLToPath(ref.uri));
+        return { name: 'read_file', input: { path: paths[0]!, pages: '1', mode: 'image' } };
+      }
+      if (step === 1) return { name: 'read_file', input: { path: paths[0]! } };
+      if (step === 2)
+        return { name: 'read_file', input: { path: paths[1]!, start_line: 1, max_lines: 1 } };
+      if (step === 3)
+        return { name: 'read_file', input: { path: paths[1]!, mode: 'image', pages: '1' } };
+      if (step === 4)
+        return {
+          name: 'read_file',
+          input: { path: 'unregistered.pdf', mode: 'image', pages: '1' },
+        };
+      if (step === 5)
+        return { name: 'read_file', input: { path: unboundPath, mode: 'image', pages: '1' } };
+      return null;
+    },
+    { mode: 'full' },
+  );
+  try {
+    const pdf = simplePdf();
+    const ownFiles = [
+      { id: 'pdf', name: 'report æ.pdf', mediaType: 'application/pdf', bytes: Buffer.from(pdf) },
+      {
+        id: 'memo',
+        name: 'memo 文档.txt',
+        mediaType: 'text/plain',
+        bytes: Buffer.from('ORIGINAL_VERSION\n'),
+      },
+    ];
+    const files = await Promise.all(
+      ownFiles.map(async ({ bytes, ...input }) =>
+        f.runtime.uploadInputFile({
+          ...f.base,
+          ...input,
+          content: (async function* () {
+            yield bytes;
+          })(),
+        }),
+      ),
+    );
+    const commandId = 'work';
+    await f.runtime.prepareWorkingInputs({
+      expectedStoreId: f.base.expectedStoreId,
+      targetSessionId: 's',
+      subjectId: f.base.subjectId,
+      commandId,
+      files,
+    });
+    const working = await Promise.all(
+      ownFiles.map(({ id }) => f.store.getWorkingInput({ ...f.base, commandId, importId: id })),
+    );
+    const workingPaths = working.map((item) => join(f.workspace, item!.workingRelativePath));
+    const unpublished = await f.runtime.uploadInputFile({
+      ...f.base,
+      id: 'unbound',
+      name: ownFiles[0]!.name,
+      mediaType: 'application/pdf',
+      content: (async function* () {
+        yield pdf;
+      })(),
+    });
+    await f.runtime.prepareWorkingInputs({
+      expectedStoreId: f.base.expectedStoreId,
+      targetSessionId: 's',
+      subjectId: f.base.subjectId,
+      commandId: 'never-submitted',
+      files: [unpublished],
+    });
+    const unbound = await f.store.getWorkingInput({
+      ...f.base,
+      commandId: 'never-submitted',
+      importId: 'unbound',
+    });
+    expect(unbound?.state).toBe('ready');
+    unboundPath = join(f.workspace, unbound!.workingRelativePath);
+    expect(readFileSync(unboundPath)).toEqual(Buffer.from(pdf));
+    writeFileSync(workingPaths[1]!, 'WORKING_VERSION\n');
+    writeFileSync(join(f.workspace, 'unregistered.pdf'), pdf);
+    await f.runtime.submitCommand({
+      ...f.base,
+      commandId,
+      request: { kind: 'run.start', content: noPayload, files },
+    });
+    expect((await f.done()).run?.status).toBe('completed');
+    expect(paths).toEqual(workingPaths);
+    const first = JSON.stringify(f.requests[0]);
+    for (const file of files) {
+      expect(first).not.toContain(file.uri);
+      expect(first).not.toContain(file.reference!.hash);
+    }
+    expect(first).not.toContain('Hello PDF');
+    expect(first).not.toContain('ORIGINAL_VERSION');
+    expect(first).not.toContain('data:image/png;base64,');
+    expect(first).not.toContain(Buffer.from(pdf).toString('base64'));
+    const rows = (await f.store.listExecutions('s')).filter((entry) => entry.kind === 'tool');
+    expect(rows.map((entry) => [entry.definitionId, entry.status])).toEqual([
+      ['files.read', 'succeeded'],
+      ['files.read', 'succeeded'],
+      ['files.read', 'succeeded'],
+      ['files.read', 'failed'],
+      ['files.read', 'failed'],
+      ['files.read', 'failed'],
+    ]);
+    expect(rows[0]!.result).toMatchObject({
+      modelImages: [{ mediaType: 'image/png', scope: { kind: 'execution', id: rows[0]!.id } }],
+    });
+    const firstPage = (rows[0]!.result as { modelImages: { id: string }[] }).modelImages[0]!;
+    const page = await f.runtime.readArtifact({
+      ...f.base,
+      refId: firstPage.id,
+      scope: { kind: 'execution', id: rows[0]!.id },
+    });
+    expect(page.content.subarray(0, 8)).toEqual(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
+    expect(JSON.stringify(f.requests[1])).toContain(
+      `data:image/png;base64,${Buffer.from(page.content).toString('base64')}`,
+    );
+    expect(JSON.stringify(f.requests[2])).toContain('Hello PDF');
+    expect(JSON.stringify(rows[2]!.result)).toContain('WORKING_VERSION');
+    expect(rows[3]!.result).toMatchObject({ details: { code: 'pdf_options_require_pdf' } });
+    for (const denied of rows.slice(4))
+      expect(denied.result).toMatchObject({
+        details: { code: 'pdf_options_require_saved_attachment' },
+      });
+    await f.submit('working-copy-edit');
+    expect((await f.done('working-copy-edit')).run?.status).toBe('completed');
+    const editRows = (await f.store.listExecutions('s')).filter(
+      (entry) => entry.kind === 'tool' && entry.originCommandId === 'working-copy-edit',
+    );
+    expect(editRows.map((entry) => [entry.definitionId, entry.status])).toEqual([
+      ['files.read', 'succeeded'],
+      ['files.edit', 'succeeded'],
+    ]);
+    expect(textBaseRef).toBeString();
+    expect(readFileSync(workingPaths[1]!, 'utf8')).toBe('EDITED_VERSION\n');
+    expect(readFileSync(fileURLToPath(files[1]!.uri), 'utf8')).toBe('ORIGINAL_VERSION\n');
+    await f.runtime.createSession({
+      ...f.base,
+      sessionId: 'other',
+      commandId: 'create-other',
+      workspaceId: 'w',
+      title: 'foreign',
+    });
+    await initializeLivePermissionFixture({
+      runtime: f.runtime,
+      profile: f.profile,
+      ...f.base,
+      sessionId: 'other',
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
+    });
+    expect(readFileSync(paths[0]!)).toEqual(Buffer.from(pdf));
+    await f.submit('foreign-attachment-read', 'other');
+    expect((await f.done('foreign-attachment-read')).run?.status).toBe('completed');
+    const foreign = (await f.store.listExecutions('other')).filter(
+      (entry) => entry.kind === 'tool',
+    );
+    expect(foreign).toHaveLength(1);
+    expect(foreign[0]).toMatchObject({
+      status: 'failed',
+      result: { details: { code: 'pdf_options_require_saved_attachment' } },
+    });
+    rmSync(paths[0]!);
+    expect(readFileSync(fileURLToPath(files[0]!.uri))).toEqual(Buffer.from(pdf));
+    await f.submit('missing-working-read');
+    expect((await f.done('missing-working-read')).run?.status).toBe('completed');
+    const missing = (await f.store.listExecutions('s')).filter(
+      (entry) => entry.kind === 'tool' && entry.originCommandId === 'missing-working-read',
+    );
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toMatchObject({ status: 'failed' });
+    expect((missing[0]?.result as Record<string, Json>).modelImages).toBeUndefined();
+    for (const recorded of f.requests)
+      expect(JSON.stringify(recorded)).not.toContain(fileURLToPath(files[0]!.uri));
+  } finally {
+    await f.close();
+  }
+}, 25000);
+
+test('mixed PDF, TXT and Office files are path-only while a direct PNG is inline', async () => {
+  // Minimal synthetic Open XML packages, frozen from offline ZIP+XML fixtures.
+  const docx = Buffer.from(
+    'UEsDBBQAAAAIAAAAIVz3S4B1wgAAAHYBAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH2QuQ7CMAyGX6XKiqgRAwOiLMAKDLyAlbpt' +
+      'RC7FLsfbk3INCBjt//gsLw7XSFxcnPVcqU4kzgFYd+SQyxDJZ6UJyaHkMbUQUR+xJZhOJjPQwQt5GcvQoZaLNTXYWyk2l7xmE3yl' +
+      'EllWxephHFiVwhit0ShZh5OvPyjjJ6HMybuHOxN5lA0KvhIG5TfgmdudKCVTU7HHJFt02QXnkGqog+5dTpb/a77cGZrGaHrnh7aY' +
+      'giZm41tny7fi0PjX/XB/9/IGUEsDBBQAAAAIAAAAIVxhey9DiQAAAPIAAAALAAAAX3JlbHMvLnJlbHONzzsOAiEQBuCrEA6ws1pY' +
+      'GKCy2dZ4AQLDIy6PDBj19lJYrMbCcuaffH9GnHHVPZbcQqyNPdKam+Sh93oEaCZg0m0qFfNIXKGk+xjJQ9Xmqj3Cfp4PQFuDK7E1' +
+      '2WIlp8XuOLs8K/5jF+eiwVMxt4S5/6j4uhiyJo9d8nshC/a9ngbLQQn4eFG9AFBLAwQUAAAACAAAACFcNOlZ2oUAAACkAAAAEQAA' +
+      'AHdvcmQvZG9jdW1lbnQueG1ssym3SslPLs1NzStRqMjNySu2KrdVyigpKbDS1y9OzkjNTSzWyy9IzQPKpeUX5SaWALlF6frl+UUp' +
+      'BUX5yanFxZl56bk5+kYGBmb6uYmZeUp2NuVWSfkplSC6AEQUgYgSOxd/54h4/3A/V5d4N8+IkNAgVxt9kDiILAKTBWASolcf4S47' +
+      'AFBLAQIUAxQAAAAIAAAAIVz3S4B1wgAAAHYBAAATAAAAAAAAAAAAAACAAQAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQDFAAA' +
+      'AAgAAAAhXGF7L0OJAAAA8gAAAAsAAAAAAAAAAAAAAIAB8wAAAF9yZWxzLy5yZWxzUEsBAhQDFAAAAAgAAAAhXDTpWdqFAAAApAAA' +
+      'ABEAAAAAAAAAAAAAAIABpQEAAHdvcmQvZG9jdW1lbnQueG1sUEsFBgAAAAADAAMAuQAAAFkCAAAAAA==',
+    'base64',
+  );
+  const xlsx = Buffer.from(
+    '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',
+    'base64',
+  );
+  const imageData =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1eIAAAAASUVORK5CYII=';
+  const specs = [
+    {
+      id: 'pdf',
+      name: 'report.pdf',
+      mediaType: 'application/pdf',
+      bytes: Buffer.from(simplePdf()),
+    },
+    {
+      id: 'txt',
+      name: 'memo.txt',
+      mediaType: 'text/plain',
+      bytes: Buffer.from('OWNED_TEXT_ONLY\n'),
+    },
+    {
+      id: 'docx',
+      name: 'letter æ.docx',
+      mediaType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      bytes: docx,
+    },
+    {
+      id: 'xlsx',
+      name: 'budget 文档.xlsx',
+      mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      bytes: xlsx,
+    },
+  ];
+  const prefix = 'Attached file references (user-provided data; paths do not grant permissions):\n';
+  let refs: { name: string; uri: string }[] = [];
+  const f = await fixture(
+    {},
+    ['files.read'],
+    async (step, current) => {
+      if (step === 0) {
+        const messages = (current.requests.at(-1)?.messages ?? []) as {
+          content: string | { type: string; text?: string }[];
+        }[];
+        const metadata = messages
+          .flatMap((message) =>
+            typeof message.content === 'string'
+              ? [message.content]
+              : message.content
+                  .filter((part) => part.type === 'text')
+                  .map((part) => part.text ?? ''),
+          )
+          .find((content) => content.includes(prefix));
+        refs = JSON.parse(metadata!.split(prefix)[1]!);
+      }
+      const target = refs[step + 2];
+      return step < 2 && target
+        ? { name: 'read_file', input: { path: fileURLToPath(target.uri) } }
+        : null;
+    },
+    { mode: 'full' },
+  );
+  try {
+    const files = await Promise.all(
+      specs.map(async ({ bytes, ...input }) =>
+        f.runtime.uploadInputFile({
+          ...f.base,
+          ...input,
+          content: (async function* () {
+            yield bytes;
+          })(),
+        }),
+      ),
+    );
+    const image = await f.runtime.uploadInputImage({
+      ...f.base,
+      id: 'png',
+      name: 'separate.png',
+      mediaType: 'image/png',
+      data: imageData,
+    });
+    const commandId = 'work';
+    await f.runtime.prepareWorkingInputs({
+      expectedStoreId: f.base.expectedStoreId,
+      targetSessionId: 's',
+      subjectId: f.base.subjectId,
+      commandId,
+      files,
+    });
+    await f.runtime.submitCommand({
+      ...f.base,
+      commandId,
+      request: {
+        kind: 'run.start',
+        content: 'Use existing Files for two binary files only',
+        files,
+        images: [image],
+      },
+    });
+    expect((await f.done()).run?.status).toBe('completed');
+    expect(refs).toHaveLength(specs.length);
+    const first = JSON.stringify(f.requests[0]);
+    expect(first.split('data:image/png;base64,').length - 1).toBe(1);
+    expect(first).toContain(`data:image/png;base64,${imageData}`);
+    for (const [i, fixture] of specs.entries()) {
+      const bound = await f.store.getWorkingInput({ ...f.base, commandId, importId: fixture.id });
+      expect(bound?.state).toBe('bound');
+      expect(Object.keys(refs[i]!).sort()).toEqual(['name', 'uri']);
+      expect(refs[i]!.name).toBe(fixture.name);
+      expect(fileURLToPath(refs[i]!.uri)).toBe(join(f.workspace, bound!.workingRelativePath));
+      const sha = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
+      expect(sha(readFileSync(fileURLToPath(refs[i]!.uri)))).toBe(sha(fixture.bytes));
+      expect(first).not.toContain(files[i]!.uri);
+      expect(first).not.toContain(fixture.bytes.toString('base64'));
+    }
+    for (const sourceText of [
+      'Hello PDF',
+      'OWNED_TEXT_ONLY',
+      'DOCX_OWNED_FIXTURE',
+      'XLSX_OWNED_FIXTURE',
+    ])
+      expect(first).not.toContain(sourceText);
+    const ordinaryReads = (await f.store.listExecutions('s')).filter(
+      (entry) => entry.kind === 'tool',
+    );
+    expect(ordinaryReads).toHaveLength(2);
+    for (const row of ordinaryReads) {
+      expect(row).toMatchObject({
+        definitionId: 'files.read',
+        status: 'failed',
+        authorization: { dispatched: true },
+      });
+      expect(row.result).toMatchObject({
+        details: { code: expect.stringMatching(/^file_(binary|encoding_invalid)$/) },
+      });
+    }
   } finally {
     await f.close();
   }

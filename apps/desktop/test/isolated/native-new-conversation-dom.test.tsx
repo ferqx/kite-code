@@ -6629,6 +6629,22 @@ for (const prior of ['submitting', 'unknown', 'accepted'] as const)
     let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined;
     let release!: () => void;
     bridge.request = async (input) => {
+      if (input.method === 'input.attachments.read')
+        return {
+          kind: 'input.attachments',
+          revision: 1,
+          attachments: [
+            {
+              id: 'original-pdf',
+              kind: 'file',
+              name: 'original.pdf',
+              state: 'ready',
+              size: 3,
+              mediaType: 'application/pdf',
+              hash: 'a'.repeat(64),
+            },
+          ],
+        };
       const value = await request(input);
       if (input.method === 'submit') {
         submitted = input;
@@ -6642,17 +6658,26 @@ for (const prior of ['submitting', 'unknown', 'accepted'] as const)
           error: 'file_native_unavailable',
         };
       }
-      if (value && 'generation' in value && submitted)
+      if (value && 'generation' in value)
         return {
           ...value,
-          inputSubmissions: [
-            { sessionId: submitted.sessionId, intent: submitted.intent, phase: prior },
-          ],
+          pendingAttachmentDrafts: true,
+          ...(submitted
+            ? {
+                inputSubmissions: [
+                  { sessionId: submitted.sessionId, intent: submitted.intent, phase: prior },
+                ],
+              }
+            : {}),
         };
       return value;
     };
     try {
       await act(async () => f.root.render(<NativeDesktop />));
+      await f.until(
+        () =>
+          f.host.querySelector('form .composer-attachment-name')?.textContent === 'original.pdf',
+      );
       await f.edit('Definitely unsent attachment message', '当前会话私有草稿');
       await f.click('发送明确的新轮次');
       await f.until(() => !!submitted);
@@ -6667,7 +6692,15 @@ for (const prior of ['submitting', 'unknown', 'accepted'] as const)
           node.textContent?.includes('Definitely unsent attachment message'),
         ),
       ).toBe(false);
-      expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('发送失败');
+      const toast = f.host.querySelector('.native-toast-card');
+      expect(toast?.textContent).toContain('本地文件处理组件不可用，消息未发送');
+      expect(toast?.textContent).toContain('保留草稿和附件，待文件处理恢复后重试');
+      expect(toast?.textContent).not.toContain('检查模型');
+      expect(toast?.textContent).not.toContain('file_native_unavailable');
+      expect(f.host.querySelector('form .composer-attachment-name')?.textContent).toBe(
+        'original.pdf',
+      );
+      expect(f.host.querySelector('.turn-failure')).toBeNull();
       expect(promptValue(f.input('当前会话私有草稿'))).toBe('Later draft must stay');
       expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
     } finally {

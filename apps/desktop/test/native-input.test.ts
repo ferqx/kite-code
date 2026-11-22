@@ -247,3 +247,12 @@ test('local draft storage failures explain that no message was sent without blam
     expect(nativeInputErrorText('unknown', code)).toBe('发送结果尚未确认，稍后将自动核对原提交。');
   }
 });
+
+test('an unavailable native file component gives recovery advice for an unsent input only', () => {
+  expect(nativeInputErrorText('failed', 'file_native_unavailable')).toBe(
+    '本地文件处理组件不可用，消息未发送。请保留草稿和附件，待文件处理恢复后重试。',
+  );
+  expect(nativeInputErrorText('unknown', 'file_native_unavailable')).toBe(
+    '发送结果尚未确认，稍后将自动核对原提交。',
+  );
+});

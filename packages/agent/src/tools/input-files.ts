@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AuthorizationRequest, ToolContext, ToolDefinition } from '../extensions';
+import type { WorkingInputAttachment } from '../input-working-files';
 import { canonicalJson } from '../json';
 import type { CapabilityDescription } from '../permissions';
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
@@ -10,6 +11,10 @@ import { AgentError, type Json } from '../storage/types';
 import { pdfRecipe, readCachedPdf } from './documents/pdf';
 import { createWorkspaceFiles, type WorkspaceFiles } from './files';
 import { createFileTools } from './files-tools';
+
+type InputReadRequest = Pick<AuthorizationRequest, 'sessionId' | 'executionId' | 'signal'>;
+const isPdf = (input: InputFileImport) =>
+  input.reference.mediaType === 'application/pdf' || input.name.toLowerCase().endsWith('.pdf');
 
 const pdfReadRecovery: Readonly<Record<string, string>> = {
   pdf_options_require_saved_attachment:
@@ -24,10 +29,8 @@ const pdfReadRecovery: Readonly<Record<string, string>> = {
 export function withInputFileReads(options: {
   profilePath: string;
   tools: readonly ToolDefinition[];
-  resolve(
-    request: Pick<AuthorizationRequest, 'sessionId' | 'executionId' | 'signal'>,
-    uri: string,
-  ): Promise<InputFileImport | null>;
+  resolve(request: InputReadRequest, uri: string): Promise<InputFileImport | null>;
+  resolveWorking?(request: InputReadRequest, uri: string): Promise<WorkingInputAttachment | null>;
 }) {
   const root = resolve(options.profilePath);
   const normalized = (path: string) => (process.platform === 'win32' ? path.toLowerCase() : path);
@@ -47,16 +50,70 @@ export function withInputFileReads(options: {
     if (resolve(path) !== path || path.includes('\0')) throw new AgentError('file_path_invalid');
     return path;
   }
-  async function target(
-    request: Pick<AuthorizationRequest, 'sessionId' | 'executionId' | 'signal'>,
-    input: Json,
-  ) {
-    const path = pathOf(input);
-    if (!path) return null;
-    const imported = await options.resolve(request, pathToFileURL(path).href);
-    request.signal.throwIfAborted();
-    if (imported?.state !== 'bound' || imported.uri !== pathToFileURL(path).href)
-      throw new AgentError('input_file_scope_denied');
+  function workingPath(input: Json): string | null {
+    const path = (input as { path?: unknown } | null)?.path;
+    if (
+      typeof path !== 'string' ||
+      !isAbsolute(path) ||
+      path.includes('\0') ||
+      resolve(path) !== path
+    )
+      return null;
+    const parts = path.split(sep);
+    return parts.at(-3) === '.kite-inputs' && /^[0-9a-f]{64}$/.test(parts.at(-2) ?? '')
+      ? path
+      : null;
+  }
+  async function target(request: InputReadRequest, input: Json) {
+    const direct = pathOf(input);
+    let path: string, anchor: string, imported: InputFileImport, alias: Json | undefined;
+    if (direct) {
+      path = anchor = direct;
+      const uri = pathToFileURL(path).href;
+      const value = await options.resolve(request, uri);
+      request.signal.throwIfAborted();
+      if (value?.state !== 'bound' || value.uri !== uri)
+        throw new AgentError('input_file_scope_denied');
+      imported = value;
+    } else {
+      const candidate = workingPath(input);
+      if (!candidate || !options.resolveWorking) return null;
+      path = candidate;
+      const binding = await options.resolveWorking(request, pathToFileURL(path).href);
+      request.signal.throwIfAborted();
+      if (!binding) return null;
+      imported = binding.imported;
+      const params = input as Record<string, Json>;
+      // A normal editable text read must still observe the current working copy.
+      if (!isPdf(imported) && params.pages === undefined && params.mode === undefined) return null;
+      const working = binding.working;
+      const files = createWorkspaceFiles({
+        root: fileURLToPath(working.workspaceRootUri),
+        strictReads: true,
+      });
+      try {
+        const rootIdentity = await files.inspectRootIdentity?.();
+        const { file } = await files.inspectIdentity(working.workingRelativePath);
+        request.signal.throwIfAborted();
+        if (
+          !file ||
+          rootIdentity?.device !== working.rootIdentity.device ||
+          rootIdentity.inode !== working.rootIdentity.inode
+        )
+          throw new AgentError('input_file_scope_denied');
+        alias = {
+          contextSelectionId: binding.contextSelectionId,
+          working,
+          file,
+        } as unknown as Json;
+      } finally {
+        await files.close();
+      }
+      // The working path locates the binding; parsing a saved attachment still
+      // reads and verifies its private immutable original, not the mutable copy.
+      anchor = pathOf({ path: fileURLToPath(imported.uri) }) ?? '';
+      if (!anchor) throw new AgentError('input_file_scope_denied');
+    }
     const revision = `input-file:1:${createHash('sha256')
       .update(
         canonicalJson({
@@ -65,10 +122,11 @@ export function withInputFileReads(options: {
           importId: imported.id,
           reference: imported.reference,
           uri: imported.uri,
+          ...(alias === undefined ? {} : { alias }),
         } as unknown as Json),
       )
       .digest('hex')}`;
-    return { path, imported, revision };
+    return { path, anchor, imported, revision };
   }
   function verify(context: ToolContext, revision: string) {
     if (!context.dispatchAuthorization?.revision)
@@ -105,11 +163,12 @@ export function withInputFileReads(options: {
         definitionVersion: request.definitionVersion,
       };
       try {
-        if (!pathOf(request.input)) return null;
-        if (request.definitionId !== 'files.read' || request.definitionVersion !== '5')
+        if (request.definitionId !== 'files.read' || request.definitionVersion !== '5') {
+          if (!pathOf(request.input)) return null;
           throw new AgentError('input_file_read_only');
+        }
         const resolved = await target(request, request.input);
-        if (!resolved) throw new AgentError('input_file_scope_denied');
+        if (!resolved) return null;
         return {
           ...identity,
           hardAllowed: true,
@@ -172,17 +231,18 @@ export function withInputFileReads(options: {
                     return tool.execute(input, context);
                   }
                   verify(context, selected.revision);
-                  files = createWorkspaceFiles({ root: dirname(selected.path), strictReads: true });
+                  files = createWorkspaceFiles({
+                    root: dirname(selected.anchor),
+                    strictReads: true,
+                  });
                   const anchored = files;
-                  if (
-                    selected.imported.reference.mediaType === 'application/pdf' ||
-                    selected.imported.name.toLowerCase().endsWith('.pdf')
-                  ) {
+                  if (isPdf(selected.imported)) {
                     const params = input as Record<string, Json>;
                     if (params.offset !== undefined || params.limit !== undefined)
                       throw new AgentError('pdf_requires_page_range');
-                    const original = await anchored.readBytes(basename(selected.path), {
+                    const original = await anchored.readBytes(basename(selected.anchor), {
                       maxBytes: 256 * 1024 * 1024,
+                      signal: context.signal,
                     });
                     if (
                       original.baseline.hash !== selected.imported.reference.hash ||
@@ -266,14 +326,14 @@ export function withInputFileReads(options: {
                         return (path: string) => {
                           if (path !== selected.path)
                             throw new AgentError('file_dispatch_scope_changed');
-                          return basename(selected.path);
+                          return basename(selected.anchor);
                         };
                       if (key === 'read')
                         return async (
                           _path: string,
                           readOptions: Parameters<WorkspaceFiles['read']>[1],
                         ) => {
-                          const value = await anchored.read(basename(selected.path), {
+                          const value = await anchored.read(basename(selected.anchor), {
                             ...readOptions,
                             signal: context.signal,
                           });
