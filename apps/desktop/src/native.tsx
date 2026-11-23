@@ -185,7 +185,7 @@ import {
   isNativeWorktreeExitCommand,
   resolveNativeWorktreeExit,
 } from './native-worktree-navigation';
-import { reconciledNoteRevision } from './note-draft-revision';
+import { isCommittedPlainDraftClear, reconciledNoteRevision } from './note-draft-revision';
 import { outputDraftLabel, outputDraftUri } from './output-files-bridge';
 import { promptTextForSend } from './prompt-text';
 import { cleanupNativeTrajectoryCaches } from './trajectory-bridge';
@@ -546,6 +546,7 @@ function NativeDesktopContent({
         revision: number;
         signature?: string;
         consumedCommand?: string;
+        restoredPlain?: { snapshot: { content: string }; reading: boolean };
         uncertain?: boolean;
         managed?: boolean;
       }
@@ -1041,6 +1042,7 @@ function NativeDesktopContent({
         if (['accepted', 'applied'].includes(caller.phase)) {
           rememberConsumedDraft(caller.request.commandId, caller.scope, caller.draft);
           consumeInputDraft(caller.request.commandId, caller.scope.storeId, caller.scope.sessionId);
+          reconcileRestoredPlainDraft(caller);
         }
       if (value.directory) acceptDirectory(value.directory);
       historyEpoch.current = value.historyEpoch;
@@ -1556,10 +1558,35 @@ function NativeDesktopContent({
             );
         if (!isCurrentRead(current, epoch, nonce)) return;
         if (saved && 'content' in saved && 'revision' in saved) {
-          setDraft(
-            draftCache.current.get(imageScope(saved.storeId, sessionId))?.content ?? saved.content,
-          );
           const key = imageScope(saved.storeId, sessionId);
+          const known = noteDraftStates.current.get(key);
+          const cached = draftCache.current.get(key);
+          let restoredPlain: NonNullable<typeof known>['restoredPlain'];
+          if (
+            cached &&
+            known?.restoredPlain?.snapshot === cached &&
+            known.id === saved.id &&
+            known.workspaceId === saved.workspaceId &&
+            saved.rootSessionId === sessionId &&
+            isCommittedPlainDraftClear(saved, known.revision)
+          ) {
+            draftCache.current.set(key, { content: '' });
+          } else if (
+            saved.content &&
+            saved.storeId === value.selection?.storeId &&
+            saved.workspaceId === value.selection.session.workspaceId &&
+            saved.rootSessionId === sessionId &&
+            !saved.browserAnnotations?.length &&
+            !saved.outputFiles?.length &&
+            !saved.annotationImageOffset &&
+            (!cached ||
+              (known?.restoredPlain?.snapshot === cached && known.revision === saved.revision))
+          ) {
+            const snapshot = cached ?? { content: saved.content };
+            draftCache.current.set(key, snapshot);
+            restoredPlain = { snapshot, reading: false };
+          }
+          setDraft(draftCache.current.get(key)?.content ?? saved.content);
           browserNotesRef.current.restore(key, saved.browserAnnotations);
           imageDrafts.addFiles(
             key,
@@ -1582,7 +1609,6 @@ function NativeDesktopContent({
                 caller.draft.browserAnnotations,
                 caller.phase,
               );
-          const known = noteDraftStates.current.get(key);
           let signature =
             known?.revision === saved.revision
               ? known.signature
@@ -1622,6 +1648,7 @@ function NativeDesktopContent({
             workspaceId: saved.workspaceId,
             revision: saved.revision,
             signature,
+            restoredPlain,
             managed:
               !!saved.content ||
               !!saved.browserAnnotations?.length ||
@@ -1629,6 +1656,7 @@ function NativeDesktopContent({
               known?.managed,
           });
           draftRevision.current = saved.revision;
+          for (const caller of noteReceipts.current) reconcileRestoredPlainDraft(caller);
         }
       }
       if (isCurrentRead(current, epoch, nonce)) {
@@ -2982,6 +3010,71 @@ function NativeDesktopContent({
       proof,
     };
   }
+  function reconcileRestoredPlainDraft(caller: NativeCallerMetadata) {
+    if (!['accepted', 'applied'].includes(caller.phase)) return;
+    const { storeId, workspaceId, sessionId } = caller.scope;
+    const key = imageScope(storeId, sessionId);
+    const owner = noteDraftStates.current.get(key);
+    const restored = owner?.restoredPlain;
+    const revision = owner?.revision;
+    const current = generation.current;
+    const epoch = readLifecycle.current.epoch;
+    const nonce = viewIntent.current;
+    const isCurrent = () =>
+      isCurrentRead(current, epoch, nonce) &&
+      selected.current === sessionId &&
+      draftOwner.current === key &&
+      noteDraftStates.current.get(key) === owner &&
+      draftCache.current.get(key) === restored?.snapshot &&
+      owner?.revision === revision;
+    if (
+      !bridge ||
+      !owner ||
+      !restored ||
+      restored.reading ||
+      !isCurrent() ||
+      owner.workspaceId !== workspaceId ||
+      caller.draft?.id !== owner.id ||
+      caller.draft.revision !== String(revision)
+    )
+      return;
+    restored.reading = true;
+    void nativeReadDeadline(
+      bridge.request({ method: 'draft.read', generation: current, sessionId }),
+    )
+      .then((saved) => {
+        if (!isCurrent()) return;
+        owner.restoredPlain = undefined;
+        if (
+          !saved ||
+          !('revision' in saved) ||
+          !('content' in saved) ||
+          saved.id !== owner.id ||
+          saved.storeId !== storeId ||
+          saved.workspaceId !== workspaceId ||
+          saved.rootSessionId !== sessionId ||
+          !isCommittedPlainDraftClear(saved, owner.revision, caller.request.commandId)
+        )
+          return;
+        owner.revision = saved.revision;
+        owner.consumedCommand = undefined;
+        owner.signature = JSON.stringify({
+          content: '',
+          browserAnnotations: [],
+          annotationImageOffset: saved.annotationImageOffset ?? 0,
+          outputFiles: [],
+        });
+        draftRevision.current = saved.revision;
+        draftCache.current.set(key, { content: '' });
+        setDraft('');
+      })
+      .catch(() => {
+        // Keep the original draft if its committed clear cannot be read back.
+      })
+      .finally(() => {
+        restored.reading = false;
+      });
+  }
   function changeDraft(content: string) {
     if (!selection || selected.current !== selection.session.id) return;
     const key = imageScope(selection.storeId, selection.session.id);
@@ -3701,7 +3794,9 @@ function NativeDesktopContent({
         return observed;
       };
       const reconcile = async (knownDraft?: Awaited<ReturnType<typeof readDraft>>) => {
-        const commandId = saved.consumedCommand;
+        // After a cold open, Main may consume the exact saved revision before its
+        // receipt reaches this renderer. The matching draft read proves that transition.
+        const commandId = saved.consumedCommand ?? knownDraft?.consumedFrom?.commandId;
         if (!commandId) return false;
         const observed = knownDraft ?? (await readDraft());
         if (

@@ -725,7 +725,7 @@ export function useNativeInputImages(
   function accepted(key: string, revision: number | undefined, ids: readonly string[]) {
     // A retired callback cannot mark a new owner's receipt consumed before its
     // read-back, or prevent the current owner from reconciling the same receipt.
-    if (!active()) return;
+    if (!active() || !ids.length) return;
     const scope = savedScopes.current.get(key);
     if (!scope || revision === undefined) {
       removeIds(ids);

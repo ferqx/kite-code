@@ -1132,6 +1132,128 @@ test('cold unknown annotation keeps missing pixels and locks cards; accepted ori
   }
 });
 
+for (const outcome of ['confirmed', 'intervening edit', 'missing proof'] as const) {
+  test(`cold plain draft checks the original receipt with ${outcome}`, async () => {
+    const original: NativeDraft = {
+      id: 'original-draft',
+      storeId: 'store',
+      workspaceId: 'w',
+      rootSessionId: 'a',
+      revision: 1,
+      content: '已提交的原正文',
+    };
+    const receipt: NativeCallerMetadata = {
+      scope: { storeId: 'store', workspaceId: 'w', sessionId: 'a' },
+      request: { kind: 'run.start', expectedStoreId: 'store', commandId: 'original-accepted' },
+      subjectId: 'owner',
+      target: { kind: 'session', id: 'a' },
+      bodyDigest: 'b'.repeat(64),
+      requestDigest: 'c'.repeat(64),
+      draft: nativeDraftProof(original),
+      phase: 'unknown',
+    };
+    const readBack = deferred<NativeDraft>();
+    let restored = false;
+    const f = fixture(
+      (request) => {
+        if (request.method !== 'draft.read' || request.sessionId !== 'a') return;
+        if (restored) return readBack.promise;
+        restored = true;
+        return original;
+      },
+      false,
+      () => [receipt],
+    );
+    try {
+      await f.render();
+      await f.click('Original A');
+      const prompt = f.dom.window.document.querySelector(
+        '[role="textbox"][aria-label="当前会话私有草稿"]',
+      )!;
+      expect(promptValue(prompt)).toBe(original.content);
+      receipt.phase = 'applied';
+      await f.notify();
+      await until(
+        () =>
+          f.calls.filter((request) => request.method === 'draft.read' && request.sessionId === 'a')
+            .length === 2,
+      );
+      expect(promptValue(prompt)).toBe(original.content);
+      if (outcome === 'intervening edit')
+        await act(async () => setPromptText(prompt, '独立的新正文'));
+      await act(async () =>
+        readBack.resolve({
+          ...original,
+          revision: 2,
+          content: '',
+          consumedFrom:
+            outcome === 'missing proof'
+              ? undefined
+              : { commandId: 'original-accepted', revision: 1 },
+        }),
+      );
+      expect(promptValue(prompt)).toBe(
+        { confirmed: '', 'intervening edit': '独立的新正文', 'missing proof': original.content }[
+          outcome
+        ],
+      );
+      expect(f.calls.filter((request) => request.method === 'draft.write')).toHaveLength(0);
+      expect(f.calls.filter((request) => request.method === 'submit')).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('cold plain draft saves the next edit after Main consumes the selected revision', async () => {
+  let saved: NativeDraft = {
+    id: 'original-draft',
+    storeId: 'store',
+    workspaceId: 'w',
+    rootSessionId: 'a',
+    revision: 1,
+    content: '已提交的原正文',
+  };
+  const writes: number[] = [];
+  const f = fixture((request) => {
+    if (request.method === 'draft.read' && request.sessionId === 'a') return saved;
+    if (request.method === 'draft.write' && request.sessionId === 'a') {
+      writes.push(request.revision);
+      if (request.revision !== saved.revision) throw Error('draft_revision_conflict');
+      saved = {
+        ...saved,
+        revision: saved.revision + 1,
+        content: request.content,
+        consumedFrom: undefined,
+      };
+      return saved;
+    }
+    return undefined;
+  });
+  try {
+    await f.render();
+    await f.click('Original A');
+    const prompt = f.dom.window.document.querySelector(
+      '[role="textbox"][aria-label="当前会话私有草稿"]',
+    )!;
+    expect(promptValue(prompt)).toBe('已提交的原正文');
+    saved = {
+      ...saved,
+      revision: 2,
+      content: '',
+      consumedFrom: { commandId: 'original-accepted', revision: 1 },
+    };
+    await act(async () => setPromptText(prompt, '独立的新正文'));
+    await until(() => saved.revision === 3);
+    expect(writes).toEqual([1, 2]);
+    expect(saved.content).toBe('独立的新正文');
+    expect(promptValue(prompt)).toBe('独立的新正文');
+    expect(f.calls.filter((request) => request.method === 'submit')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a cached unavailable selection rereads the same activation and retires an accepted approval without replaying writes', async () => {
   let unavailable = false,
     recovered = false;

@@ -1,3 +1,20 @@
+import type { NativeDraft } from './native-bridge';
+
+export function isCommittedPlainDraftClear(
+  draft: NativeDraft,
+  revision: number,
+  commandId?: string,
+): boolean {
+  return (
+    draft.revision === revision + 1 &&
+    draft.consumedFrom?.revision === revision &&
+    (commandId === undefined || draft.consumedFrom.commandId === commandId) &&
+    draft.content === '' &&
+    !draft.browserAnnotations?.length &&
+    !draft.outputFiles?.length
+  );
+}
+
 /** An accepted receipt does not prove that host storage consumed a draft. */
 export function reconciledNoteRevision(
   revision: number,

@@ -925,6 +925,8 @@ Service 完成原 Runtime、HTTP 资源、正文流及 Store 收尾后，最后�
 
 普通纯文本排队输入的 Desktop 私有提交回执可附带已提交清空版本。它仅来自同一命令的本地草稿消费事务；Renderer 只更新同一草稿对象、选中会话和 generation 下未再编辑的空输入，避免对已清空版本发起多余的保存。没有该证明、视图切换或存在更新的编辑时沿用原 CAS；真实保存失败仍保留草稿及提示。
 
+冷启动后，若 Main 消费了 Renderer 刚读到的原草稿版本，下一次保存冲突时会读取同一草稿。只有确认该版本被原命令准确消费、当前为空且修订只前进一次，才以新修订保存本窗口的新内容。
+
 [Observer 回归](test/agent-browser-observer.test.ts)、[View 回归](test/agent-browser-view.test.ts)和[呈现回归](test/agent-browser-presentation.test.ts)核读身份、未知结果、换代、引用与自动打开；[面板 DOM](test/isolated/agent-browser-dom.test.tsx)、[自动呈现 DOM](test/isolated/agent-browser-native-dom.test.tsx)和[实际 Native 页面](test/isolated/native-read-ownership-dom.test.tsx)核冻结选择、Agent不中断、原正文、卡片、跨会话、失败／unknown和notes-only发送；[注释 owner](test/isolated/browser-annotation-drafts.test.ts)核数量／字节限制、冷恢复与消费版本，[ModelInput／Provider](test/isolated/browser-annotation-input.test.ts)核首请求文字＋原像素及运行中 steer，无预先 read_file。[Node 私有文件](test/isolated/private-data.test.ts)沿真实SQLite核metadata冷恢复、CAS、notes-only、unknown保留与旧回执保护新编辑。UI验证使用静态帧／本地模拟Provider和独立Electron，不授予新浏览器、真实模型或安装制品资格；上文最终v1真实后台轮是本次UI修改前的独立检查点。
 
 2026-10-27在上述macOS隔离工作树（基准982db30e加本轮未提交UI diff）实跑：16个相关文件按独立进程合计94项／897个Bun断言通过，真实Node私有SQLite／原Caller恢复另7项／162断言通过；Desktop与UI类型、定向Biome、API／边界／测试归属、文档检查通过。同进程直接组合16文件曾88通过／5失败，保留日志，不将该组合称绿。新增ModelInput／SDK测试由本地模拟transport记录实际请求格式，首请求与运行中steer均包含原文、完整说明和原JPEG，无read_file；不代表再次调用真实Luna。隔离Electron44.3.0加载真实Native renderer／样式及原preload，Main为静态无凭据测试端口；逐步核hover、选取、就地备注、卡片编辑、切B隔离、回A保留、820px卡片布局无横向溢出、深浅主题与删除。像素仅留本机；初次夹具executable未找到、会话读取前过早断言及构建原keyframes warning均保留。本轮没有新Browser owner／模型请求，旧unknown和先前v1资格边界不变。
@@ -1980,6 +1982,12 @@ Skills 详情按名称、简介、独立滚动的 Markdown 正文及来源展示
 正常发送对照最终以 `.cache/bb-first-send-control-final-electron/` 独立补测通过（1项、4断言、31.15秒）：本地保存期间原文不变，真正派发时才清空并出现一条投递占位；回执返回前输入的下一段在目标会话接管、持久保存及正常退出冷开后均完整保留。准确计数为一次 `conversation.send`、一次正文模型请求及一次独立后台标题请求，均只发给本机受控服务。中间对照夹具曾把正文与标题合计两次请求误判为重复发送，原失败归 `.cache/bb-first-send-control-electron/` 保留；最终仅修正过渡读取等待与请求分类，没有放宽正文、保存或冷恢复断言。各目录保留截图、Main／renderer时间线、回执与请求计数，QA已核本轮五对 Main／Service 全部退出。该范围不重验附件全链路、无项目、真实外部模型／MCP／Skill、安装版或其他平台资格。
 
 [退出屏障](electron/native-draft-flush.ts)只接受当前Root frame与一次nonce的确认，[受限preload](electron/preload.ts)在保存期间临时暂停Root输入。Main此阶段只允许本地正文／附件草稿读写、已有附件的图片／文件准备与释放，以及原子草稿迁移，业务提交、选择、权限与其他操作仍拒绝。退出专用等待会收齐已开始的准备、文件交给Composer采用或取消、在途迁移及所有已访问scope的持久化，不仅核当前页面；随后再次保存等待期间到达的正文。所有正文dirty／失败scope与附件的未确认本地变更都须确认，当前会话保存成功不能掩盖隐藏会话或项目的内容。已确认持久化的失效附件仍可退出并恢复，原发送准入继续拒绝，不要求先删附件才能退出；原子迁移回执未知而没有后续编辑时，仍允许沿原冷重开路径恢复，不据此重做迁移。失败或5秒超时取消退出、恢复输入并显示原生错误，核对后可重试；成功才进入原Service释放流程。系统强杀、崩溃与控制连接终止仍以最后提交事务恢复，不承诺尚未完成的内容。此变更不把问卷、计划答复或局部Office输入改为主草稿。
+
+冷开读到原发送草稿后，[Renderer](src/native.tsx)在同一 Store、工作区、会话与草稿修订的原回执确认时回读私有草稿。只有 Main 提供这次原命令已提交的清空凭据，当前显示仍是原编辑快照，才清空输入框并推进本地基线。新编辑、切走、换代或缺少凭据保留各自状态。回执和清空确认沿用原查询与草稿读写，不重新提交输入。
+
+[NativeCaller](electron/native-caller.ts)的本地草稿读写在同一根会话刷新时可以沿当前观察代次下的最后一个已确认作用域访问私有存储。切换目标、Store 或观察重置撤销该作用域。正文写入仍核对原草稿修订，已保存输出附件的业务来源继续要求新鲜 View。 [原回执 DOM 回归](test/isolated/native-read-ownership-dom.test.tsx) [草稿作用域回归](test/native-caller.test.ts)
+
+2026-11-23 在 macOS arm64 用当前源码构建普通隔离 Electron 窗口，连接配套 Service 和本地固定模型。两轮均在原提交已受理后丢弃回执，冷重开只查原命令，输入框在下一次编辑前清空，消息区各条原文最多显示一份。后续任务完成的对照和服务 View 读取仍被挂起的活动退出均通过，两轮四次正常退出为 0。活动样本在四秒延迟的 View 尚未返回时确认草稿，配套 Service 退出时结算该任务为 cancelled。两轮各有一次原文件写入，后续发送前后文件字节一致。过程记录分别在本机 `dist/acceptance/native-draft-fix-retest-completed-o0ufwznj/` 和 `dist/acceptance/native-draft-fix-retest-active-tguqnhdc/`。完成样本有一条字体 CSP 控制台提示。
 
 2026-11-17，精确 `15bf767c02645de0fd87fb6476bdba3b6639dd79` 基线的云端Linux／Bun1.4.4修复：新增[完整Native输入DOM](test/isolated/native-new-conversation-dom.test.tsx)7项67断言覆盖普通文字自动冷重挂、立即退出、清空、不同会话、离开scope保存失败拒绝退出、无项目准备正文、首发在途编辑及同Store换连接代次；[真实Node私库](test/isolated/native-prompt-draft-store.test.ts)内部18组检查覆盖冷读、Store隔离和准确消费；[退出Root／preload／IPC](test/isolated/native-draft-flush.test.ts)4项28断言、[Main退出相关](test/isolated/native-main-scheduling-lifecycle.test.ts)定向14项173断言及另8项78断言通过；随后实际Main与编译preload联接3项35断言覆盖1.2秒慢写、超时取消后重试及旧nonce迟到不能放行新退出。完整Main套件曾因资源限制终止，并保留非本退出路径的旧reload调度断言差异，不称全套通过。完整读取归属DOM为24项通过、2项原unknown传输Toast静默断言失败，这两项已在准确基线renderer同样复现；原注释消费夹具只推进独立计数却未返回真实消费后修订，现补齐空正文及原command消费凭据后通过，不放宽生产CAS。此处为云端DOM／本地存储证据，不代证实窗；后续macOS普通窗口及失败恢复事实分别见下段，完整安装版资格仍未取得。
 

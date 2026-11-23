@@ -3065,6 +3065,65 @@ test('Shell settings IPC checks sender and generation without projecting convers
   }
 });
 
+for (const type of ['session.updated', 'run.started'] as const) {
+  test(`a selected root keeps private drafts available during a held ${type} refresh and loses that scope on reset`, async () => {
+    const port = client();
+    const originalView = port.getView.bind(port);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let observation!: Parameters<AgentClient['observe']>[0];
+    let held = false;
+    port.observe = async (options) => {
+      observation = options;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    };
+    port.getView = async (id) => {
+      if (held) {
+        entered.resolve();
+        await release.promise;
+      }
+      return { ...(await originalView(id)), snapshotCursor: '1' };
+    };
+    const caller = new NativeCaller(port, () => {}, memoryPrivateData());
+    try {
+      const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+      await caller.invoke({ method: 'select', generation, sessionId: 's' });
+      const request = { generation, sessionId: 's' };
+      await caller.invoke({ method: 'draft.write', ...request, revision: 0, content: 'saved' });
+      held = true;
+      await observation.onChange?.({ ...sessionChange('s'), type });
+      await entered.promise;
+      expect(caller.state().selection?.viewLoading).toBe(true);
+      expect(await caller.invoke({ method: 'draft.read', ...request })).toMatchObject({
+        revision: 1,
+        content: 'saved',
+      });
+      expect(
+        await caller.invoke({ method: 'draft.write', ...request, revision: 1, content: 'newer' }),
+      ).toMatchObject({ revision: 2, content: 'newer' });
+      expect(
+        await code(
+          caller.invoke({ method: 'draft.write', ...request, revision: 1, content: 'stale' }),
+        ),
+      ).toBe('draft_revision_conflict');
+      await expect(
+        caller.invoke({ method: 'draft.read', ...request, workspaceId: 'other' }),
+      ).rejects.toMatchObject({ code: 'draft_association_unavailable' });
+      await observation.onReset?.('transport_reset');
+      release.resolve();
+      await expect(caller.invoke({ method: 'draft.read', ...request })).rejects.toMatchObject({
+        code: 'native_selection_changed',
+      });
+      expect(port.writes).toBe(0);
+    } finally {
+      release.resolve();
+      await caller.close();
+    }
+  });
+}
+
 test('main-private drafts require exact selection/revision; detached or late generations cannot rebind; network disposal is not owned shutdown', async () => {
   const port = client(),
     events: number[] = [],

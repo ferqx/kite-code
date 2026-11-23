@@ -108,7 +108,9 @@ export class NativeCaller {
   // conversation. This is only an in-process display candidate; attach must
   // acquire a new selection and permissions before returning it.
   private detachedSelection: Readonly<{ storeId: string; sessionId: string }> | undefined;
-  private lastView: { selection: number; snapshot: DesktopSnapshot } | undefined;
+  private lastView:
+    | { selection: number; historyEpoch: number; snapshot: DesktopSnapshot }
+    | undefined;
   private contextWorkspace:
     | { sessionId: string; selection: number; workspaceId: string }
     | undefined;
@@ -286,7 +288,7 @@ export class NativeCaller {
       lightweightSessionState: true,
       onSnapshot: (snapshot) => {
         if (snapshot.sessionId === this.selected)
-          this.lastView = { selection: this.selection, snapshot };
+          this.lastView = { selection: this.selection, historyEpoch: this.historyEpoch, snapshot };
         this.changed();
       },
       onExecutionObservation: (view) => this.observeExecution(view),
@@ -848,6 +850,25 @@ export class NativeCaller {
     if (snapshot.view.session.parentSessionId !== null)
       throw new ClientError('child_session_readonly');
     return snapshot;
+  }
+  private retainedLocalDraftView(sessionId: string) {
+    const previous = this.lastView;
+    if (
+      !this.controller.snapshot &&
+      !this.observationUnavailable &&
+      !this.permissionUnavailable &&
+      (this.refreshing || this.executionRefreshing || this.refreshRequested) &&
+      this.selected === sessionId &&
+      previous?.selection === this.selection &&
+      previous.historyEpoch === this.historyEpoch &&
+      previous.snapshot.sessionId === sessionId &&
+      previous.snapshot.view.storeId === this.client.serverInfo?.storeId &&
+      previous.snapshot.view.session.parentSessionId === null
+    ) {
+      // The local draft owner survives a refresh of this exact selection.
+      return previous.snapshot;
+    }
+    return undefined;
   }
   private availableWorkspaceScope(sessionId: string) {
     const snapshot = this.writableScope(sessionId);
@@ -1539,7 +1560,11 @@ export class NativeCaller {
   private observedSelection() {
     const fresh = this.controller.snapshot;
     if (fresh && fresh.sessionId === this.selected)
-      this.lastView = { selection: this.selection, snapshot: fresh };
+      this.lastView = {
+        selection: this.selection,
+        historyEpoch: this.historyEpoch,
+        snapshot: fresh,
+      };
     const snapshot =
       fresh?.sessionId === this.selected
         ? fresh
@@ -1920,7 +1945,11 @@ export class NativeCaller {
       !['settings.mcp.lookup', 'settings.mcp.clear', 'settings.mcp.close'].includes(request.method)
     )
       throw new ClientError('mcp_user_scope_required');
+    const localDraftRequest =
+      request.method === 'draft.read' ||
+      (request.method === 'draft.write' && !request.outputFiles?.length);
     if (
+      !(localDraftRequest && this.retainedLocalDraftView(request.sessionId)) &&
       !request.method.startsWith('background.') &&
       !request.method.startsWith('interactionHistory.') &&
       !request.method.startsWith('extensions.') &&
@@ -3955,7 +3984,10 @@ export class NativeCaller {
           break;
         }
         const originalSelection = this.selection;
-        const snapshot = this.writableScope(request.sessionId);
+        const retained = localDraftRequest
+          ? this.retainedLocalDraftView(request.sessionId)
+          : undefined;
+        const snapshot = retained ?? this.writableScope(request.sessionId);
         if (
           request.workspaceId !== undefined &&
           request.workspaceId !== snapshot.view.session.workspaceId
@@ -3991,8 +4023,23 @@ export class NativeCaller {
                 request.annotationImageOffset,
                 request.outputFiles,
               );
-        if (result && 'outputFiles' in result) {
-          for (const file of result.outputFiles ?? []) {
+        if (retained && request.method === 'draft.read' && result.outputFiles?.length) {
+          // Output attachments still depend on a fresh business View. Read the
+          // draft again after waiting so a concurrent edit retains its version.
+          await this.drainRefresh();
+          this.assertGeneration(generation);
+          const fresh = this.writableScope(request.sessionId);
+          if (
+            this.selection !== originalSelection ||
+            fresh.view.storeId !== scope.storeId ||
+            fresh.view.session.workspaceId !== scope.workspaceId ||
+            fresh.view.session.deletedAt !== null
+          )
+            throw new ClientError('output_scope_unavailable');
+          result = this.requirePrivateData().read(scope);
+        }
+        if (result.outputFiles?.length) {
+          for (const file of result.outputFiles) {
             if (file.target.storeId !== snapshot.view.storeId)
               throw new ClientError('output_scope_unavailable');
             this.assertGeneration(generation);
