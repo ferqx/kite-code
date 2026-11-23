@@ -614,7 +614,7 @@ Native 主会话最后一个轮次片段复用「用时」折叠控件与 `turn:
 
 单条 `wait_agent_events` 和 `edit_file` 可直接打开结果。单条子 Agent 等待结算后，原工具名称和结果从「工具执行」展开。形成多步思维链后列表默认收起，重新展开列表时沿原步骤 key 恢复此前的工具详情选择。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核对单条等待的标题、完成摘要和后续分组。单条思考、单条工具和组内步骤的详情共同使用折叠内容内的竖线样式，和思维链外层竖线一样按 `--ui-icon-size` 对准各自图标中心。Native 准备回复和流式回复状态与同层工具行共用 `--conversation-line-height`，文字与正文共用 `--conversation-text-size`。
 
-主会话的「用时」标题下无分隔线。轮次摘要、思考与工具摘要、正文、压缩状态及停止提示共用 `--conversation-line-height` 和 `--conversation-block-gap`。该层的简短标题采用正文行高，默认段间距约 11.2 CSS px；工具详情收展时外侧间距保持一致。外层 Trace 的首图标与正文同起点，图标槽使用 `--ui-icon-size`，多步详情的缩进由步骤列表维护。
+主会话的「用时」标题下无分隔线。轮次摘要、思考与工具摘要、正文、压缩状态及停止提示共用 `--conversation-line-height` 和 `--conversation-block-gap`。该层的简短标题采用正文行高，默认段间距约 11.2 CSS px；工具详情收展时外侧间距保持一致。外层 Trace 的首图标与正文同起点，图标槽使用 `--ui-icon-size`，多步详情的缩进由步骤列表维护。轮次、思维链、思考与工具行的折叠箭头使用相同的 6px 列间距，工具行的审批状态紧跟文字。
 
 桌面 `SessionPage` 的[阅读状态缓存](src/desktop/reading-state.ts)只保存滚动与展开数据，最多32项、256KiB估算载荷、每项512个展开ID；保存时裁剪当前消息中已不存在的展开项。`Conversation`一次建立各轮运行工具和thinking集合，避免每轮重扫全部消息。缺省切换仍卸载原消息DOM和effect；Native 通过可选 `conversationCache` 启用下述有界停用树，不保活全部会话；[阅读缓存回归](test/desktop-reading-state.test.ts)核容量、淘汰和裁剪。恢复时，各级折叠用 `data-restored-expanded` 跳过自己的展开动画；后续手动开合清除本层恢复标记。[轮次回归](test/desktop-reasoning-turns.test.tsx)与[Native 往返回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核恢复和手动选择。
 

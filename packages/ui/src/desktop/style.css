@@ -4085,7 +4085,6 @@ body {
   min-height: 32px;
   height: auto;
   padding: var(--conversation-control-padding) 0;
-  gap: 6px;
   justify-content: flex-start;
   border: 0;
   border-radius: 0;
@@ -4117,7 +4116,7 @@ body {
 .kite-client .agent-turn-summary:focus-visible > .agent-turn-status-label {
   color: var(--foreground);
 }
-.kite-client .agent-turn-chevron {
+.kite-client :is(.agent-turn-chevron, .conversation-trace-chevron, .tool-activity-chevron) {
   width: var(--ui-icon-size);
   height: var(--ui-icon-size);
   flex: none;
@@ -4300,7 +4299,6 @@ body {
   min-height: 32px;
   height: auto;
   padding: var(--conversation-control-padding) 0;
-  gap: 8px;
   justify-content: flex-start;
   border: 0;
   border-radius: var(--button-radius);
@@ -4338,13 +4336,6 @@ body {
 .kite-client .tool-activity-summary:focus-visible {
   outline: 2px solid var(--ring, var(--input));
   outline-offset: 2px;
-}
-.kite-client .tool-activity-chevron {
-  width: var(--ui-icon-size);
-  height: var(--ui-icon-size);
-  flex-shrink: 0;
-  margin-inline: 4px;
-  color: inherit;
 }
 .kite-client .tool-activity-marker-content {
   display: flex;
@@ -4706,7 +4697,6 @@ body {
   display: flex;
   grid-area: 1 / 1;
   align-items: center;
-  gap: 8px;
   width: auto;
   height: auto;
   min-height: 24px;
@@ -5616,10 +5606,13 @@ body {
   overflow: hidden;
 }
 
-/* Tool disclosure headers show their chevrons on hover, focus, and expand. */
-.kite-client .tool-activity-summary {
+.kite-client .agent-turn-summary,
+.kite-client .conversation-trace-trigger > .conversation-trace-line,
+.kite-client .tool-activity-summary,
+.kite-client .tool-file-disclosure.tool-diff-toggle {
   column-gap: 6px;
 }
+/* Tool disclosure headers show their chevrons on hover, focus, and expand. */
 .kite-client .tool-activity-chevron,
 .kite-client .tool-diff-toggle {
   opacity: 0;

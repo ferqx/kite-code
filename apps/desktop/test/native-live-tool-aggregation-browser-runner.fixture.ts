@@ -3548,6 +3548,10 @@ try {
         shellSummary,
         { height: 32 },
       );
+      const shellTitle = await shellSummary.locator('[data-slot="trace-title"]').boundingBox();
+      const shellChevron = await shellSummary.locator('.tool-activity-chevron').boundingBox();
+      assert.ok(shellTitle && shellChevron);
+      assert.equal(shellChevron.x - (shellTitle.x + shellTitle.width), 6);
       await defaultIcon(
         'tool marker',
         shellSummary.locator('.tool-activity-kind-icon'),
