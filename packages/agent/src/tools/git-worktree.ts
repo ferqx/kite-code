@@ -156,6 +156,16 @@ export const gitWorktreeRecordDefinition: RecordDefinition = {
 function errorCode(error: unknown): string {
   return error instanceof AgentError ? error.code : 'worktree_operation_unverifiable';
 }
+function resultContent(outcome: ToolResult['outcome'], details: Record<string, Json>): string {
+  const content = canonicalJson(details);
+  if (
+    outcome === 'failed' ||
+    outcome === 'outcome_unknown' ||
+    (outcome === 'cancelled' && details.mutation === 'unknown')
+  )
+    return `${content}\n${failureGuidance(outcome, details)}`;
+  return content;
+}
 function makeResult(
   input: GitWorktreeInput,
   outcome: ToolResult['outcome'],
@@ -175,23 +185,9 @@ function makeResult(
       ? { operation: { ownerExecutionId: owner, ...(ref ? { ref: asJson(ref) } : {}) } }
       : {}),
   };
-  const instruction =
-    outcome === 'outcome_unknown'
-      ? ' Observe the original operation and owner Execution. Do not start a replacement operation or use another key to recover its result.'
-      : outcome === 'failed'
-        ? ' Inspect the stated cause and preserved operation evidence before submitting a new intent.'
-        : '';
-  const guidance =
-    outcome === 'failed' || outcome === 'outcome_unknown'
-      ? failureGuidance(details.failure, details.mutation)
-      : '';
-  const permission =
-    outcome === 'failed' && details.code === 'permission_denied'
-      ? ' This request was denied under the existing authorization or capability policy. Do not infer the user refused it or automatically expand permissions.'
-      : '';
   return {
     outcome,
-    content: canonicalJson(full) + instruction + guidance + permission,
+    content: resultContent(outcome, full),
     details: full,
   };
 }
@@ -203,7 +199,7 @@ function replay(result: ToolResult): ToolResult {
   return {
     ...structuredClone(result),
     details,
-    content: canonicalJson(details) + failureGuidance(details.failure, details.mutation),
+    content: resultContent(result.outcome, details),
   };
 }
 function recordValue(
@@ -930,7 +926,7 @@ export function createGitWorktreeTool(options: GitWorktreeToolOptions): ToolDefi
         const code = errorCode(error);
         return {
           outcome: context.signal.aborted ? 'cancelled' : 'failed',
-          content: code,
+          content: `${code}: This call did not switch the session execution root.`,
           details: { code, cwdChanged: false },
         };
       }
@@ -978,10 +974,11 @@ export function createGitWorktreeTool(options: GitWorktreeToolOptions): ToolDefi
         };
         return { outcome: 'succeeded', content: canonicalJson(observation), details: observation };
       } catch (error) {
+        const code = errorCode(error);
         return {
           outcome: context.signal.aborted ? 'cancelled' : 'failed',
-          content: errorCode(error),
-          details: { code: errorCode(error), mutation: 'not_started' },
+          content: `${code}: Check the exact operation_ref and its original receipt. This observation did not start a Job.`,
+          details: { code, mutation: 'not_started' },
         };
       }
     }
@@ -1000,7 +997,7 @@ export function createGitWorktreeTool(options: GitWorktreeToolOptions): ToolDefi
     version: '1',
     model: { name: 'git_worktree', snakeCase: true },
     description:
-      'List, create, remove, use or exit Git worktrees. list accepts only action. create omits path for the persistent host root, defaults to detached HEAD, and optionally selects base_ref (Git branch/commit) and new_branch; creation does not change the session directory. use requires only action and an absolute path to a registered worktree in the same repository. exit accepts only action and returns this session to its original workspace, without deleting anything. use/exit must be the only Tool call in their Model response; on success the next Model step, Files and Shell use the same new session root. Existing Jobs and other sessions keep their directories. remove requires an absolute path and preserves branches/tags; protected, dirty or uncertain targets are refused. filesystem requests existing scope, network remains none. The host creates the intent. Observe an earlier Git mutation using action:observe and its exact operation_ref; observation starts no Job and never retries an unknown mutation.',
+      'Manage Git worktrees. list accepts only action. create defaults to detached HEAD, with optional base_ref (Git branch or commit) and new_branch. Omit path for the persistent host root. Explicit create targets must be outside operating-system temporary directories. Only a successful use or exit switches the session execution root. use requires an absolute path to a registered worktree in the same repository. exit accepts only action and returns to the original workspace without deleting anything. use and exit must each be the only tool call in their model response. After success, Files, Shell, and project instructions use the selected root. Existing Jobs and other sessions keep their directories. Use remove only when the user explicitly requests deletion of the exact worktree. Supply its absolute path. Branches and tags are preserved, and protected, dirty, or uncertain targets are refused. filesystem requests existing scope, network remains none. The host creates the intent. Use observe with the exact returned operation_ref to read an original operation. It starts no Job and never retries an unknown mutation.',
     inputSchema: gitWorktreeModelSchema as ToolDefinition['inputSchema'],
     recovery: { version: '1' },
     execute: (input, context) => run(input, context, false),

@@ -64,7 +64,7 @@ Windows 在原 Job 停止、runner 回执和原 HANDLE 关闭均确认后，等�
 
 已结算的 Windows Shell Job 从有限 stderr 尾部读取可识别的命令查找诊断。PowerShell 从命令未找到的异常记录报告具体名称，包含 `SilentlyContinue` 后仍有记录的探测。Git Bash 使用执行或 `type` 的原查找报错，也可用独立字面量 `command -v NAME`（含尾随 `|| true`）的空输出和结束状态识别未命中。脚本最终状态和退出码保持原值，单靠退出码或任意复合脚本的空输出不推断未命中。路径核对基于本次启动 PATH、Windows 用户／系统 App Paths 的默认值和 `KITE_SHELL_TOOL_DIRS` 中按分号声明的绝对目录。只检查精确文件名与常见可执行扩展，读取本地固定磁盘的文件属性，遇到重解析点即停止该路径的检查。原 Job 保存至多八个候选及来源，后续调用沿当前 Shell 授权。 [查找实现](windows-command-lookup.ts) [Windows 原生回归](../../test/isolated/jobs/windows-command-lookup.test.ts)
 
-OfficeCLI 1.0.161 与 `rg` 同放在包内 `platform/process/tools`。Agent 构建与源码安装时补齐已有构建的工具共用资产准备入口，按当前原生目标选择并核对 OfficeCLI 大小和 SHA-256。工具和许可证齐备后写入清单。Service 校验包内文件，在既有工具目录 PATH 生效的同一 Shell 中运行。Windows x64、macOS arm64／x64、Linux glibc x64／arm64 分别选择自己的程序。macOS 签名后将实际摘要写回同一清单。 [资产准备](prepare-shell-tools.ts) [本地开发](../../../../docs/development/local-development.md) [运行时](officecli-runtime.ts) [随包工具回归](../../test/isolated/jobs/ripgrep-package.test.ts)
+OfficeCLI 1.0.161 与 ripgrep 15.2.0 同放在包内 `platform/process/tools`。源码安装和 Agent 构建共用资产准备入口，按 Windows x64、macOS arm64／x64、Linux glibc x64／arm64 选择上游发行资产并核对大小和 SHA-256。rg 解包后还会核对可执行文件的大小和 SHA-256，源码运行直接读取已校验的本地缓存。工具和许可证齐备后写入清单，macOS 签名后将实际摘要写回同一清单。Service 校验包内文件，在既有工具目录 PATH 生效的同一 Shell 中运行，系统提示词记录由同一资产确认的 rg 版本。 [资产准备](prepare-shell-tools.ts) [本地开发](../../../../docs/development/local-development.md) [运行时](ripgrep.ts) [随包工具回归](../../test/isolated/jobs/ripgrep-package.test.ts)
 
 Runner 按完整转义命令行的 UTF-8 字节数选择 Git Bash 启动方式。实机 Git Bash 的 `-c` 参数在约 8 KiB 时已经出现截断。完整命令行小于 8 KiB 的脚本作为 `bash -c` 参数，其余脚本先通过本次私有标准输入管道完整接收，再由 Bash 执行。启动路径会核实脚本已送达。进入用户脚本时，标准输入已到 EOF，用户脚本可使用重定向、管道或 here-document 给子程序传入数据。实机回归覆盖低于 Win32 上限的多字节 here-document，以及超长脚本中的引号、退出码和原 Job 清理。 [Windows Job 回归](../../test/isolated/jobs/windows-shell.test.ts)
 
@@ -194,7 +194,7 @@ Linux `protectedFiles` 复用既有目录 mask；2026-11-06 后普通 Service �
 
 2026-10-24 在 Linux6.12.69-linuxkit arm64／Bun1.4.2／Bubblewrap0.12.0 的隔离容器中，12个准确整文件69项／782断言、零跳过／失败通过；包含6项真实 native namespace、正式 Service／SDK／Shell／Files 工具循环、深 coordination、缺失认证目录、Workspace／Full 新建读写、长任务四次认证原子轮换及准确 Skill 只读投影。仅测试副本补建原 Rust Files／Workflow worker 资产，network=none，只挂隔离源码副本，没有挂真实 HOME／凭据或主工作树。exact命令、环境和测试时源码摘要在 `dist/unified-evidence/linux-codex-shell-20261024.json`，原日志在同目录 `.log`；本轮证据不扩为安装发行、其他架构或全部 Linux 内核资格。
 
-随后默认 HOME 来源仅补只读物理路径归一，防止系统 HOME 别名误触专用目录规则；显式 `codexHome` 及原 namespace 执行叶未变，原真实 Linux 夹具使用的分支可复用该证据。新增来源分支由 macOS 上的 Source／Codex Connection／User Configuration 三文件38项／327断言、1项 Linux 跳过补验，覆盖合成 HOME 别名、缺失／相对路径、无目录或认证写入；原 Linux 日志和源码摘要保留测试时事实，不改写为后来代码的执行证明。
+随后默认 HOME 来源仅补只读物理路径归一，防止系统 HOME 别名误触专用目录规则；宿主显式指定的目录 及原 namespace 执行叶未变，原真实 Linux 夹具使用的分支可复用该证据。新增来源分支由 macOS 上的 凭据来源／连接／用户配置 三文件38项／327断言、1项 Linux 跳过补验，覆盖合成 HOME 别名、缺失／相对路径、无目录或认证写入；原 Linux 日志和源码摘要保留测试时事实，不改写为后来代码的执行证明。
 
 正式深 coordination 的原祖先 self-bind 若位于外层私有 mask 内，会成为不可见子挂载并被 native 严格检查拒绝。布局仅剔除这些无用途的隐藏父挂载，全部原宿主身份仍复核，准确来源 scaffold 保留，native 检查没有放宽。对应正式深路径已加入原[实际 native 夹具](../../test/isolated/jobs/linux-native-shell.test.ts)。
 
@@ -216,4 +216,4 @@ Shell 与 MCP 两个 Linux init 的 unknown-owner 固定 stderr 诊断按 `sizeo
 
 [准备层](../../test/isolated/jobs/linux-preparation.test.ts)、[原 owner mock](../../test/isolated/jobs/linux-owned-shell.test.ts)、[普通 Job 生命周期](../../test/isolated/jobs/linux-shell.test.ts)、[冷证据](../../test/isolated/jobs/linux-shell-process-evidence.test.ts)和[正式 Service 装配](../../../../apps/service/test/isolated/linux-shell-configuration.test.ts)已分别实际执行纯布局／身份、模拟内核交接、输出／取消／unknown、严格冷形状与真实配置接线；不执行 Linux 内核。[原生整文件](../../test/isolated/jobs/linux-native-shell.test.ts)定义文件／网络／fork／temp exec、自然脱离后代和准确取消的验收；[历史 Workflow 来源整例](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/service/test/isolated/skill-workflow-profile-host.test.ts)另定义原 Profile／Workspace与零启动漂移闭环，执行入口现已退役。Linux缺工具／编译／执行失败直接失败，本机platform skip及macOS通过不计Linux资格。Linux ABI／完整 installed用户链仍依原资格范围核验；Windows 默认后端见上节，RSS与完整Runtime观测仍保原退出缺口。
 
-2026-11-06 普通 Shell 路径调整：默认不再 mask Profile/config/Codex/Browser/controlBase 或整目录 runtimeReadOnlyRoots；macOS 实际Full读写及监管回归、Linux装配模拟与自定义显式保护分别验证。Linux native init 要求准确可执行文件 RO，其最小 binary bind 与资产验真保留；ordinary 变更不修改 confined 与退休 verifier 的历史合同。
+2026-11-06 普通 Shell 路径调整：默认不再 mask Profile、用户配置、本机认证、Browser 私有目录、controlBase 或整目录 runtimeReadOnlyRoots；macOS 实际Full读写及监管回归、Linux装配模拟与自定义显式保护分别验证。Linux native init 要求准确可执行文件 RO，其最小 binary bind 与资产验真保留；ordinary 变更不修改 confined 与退休 verifier 的历史合同。

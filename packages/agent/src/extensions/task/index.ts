@@ -338,7 +338,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.events',
         'wait_agent_events',
-        'Observe this mailbox or the exact work_refs returned at admission. The runtime resumes each target set automatically. history_gap means older events are unavailable. Without targets or an explicit wait_ms, return a snapshot immediately. Active targets default to at most 30000ms; finished targets or no active work return immediately. wait_ms:0 always takes a snapshot. Observation never cancels children or acknowledges results; acceptance and older results do not prove the selected work completed.',
+        'Observe this mailbox or the exact work_refs returned at admission. The runtime resumes each target set automatically. history_gap means older events are unavailable. Without targets or an explicit wait_ms, return a snapshot immediately. Active targets default to at most 30000ms; finished targets or no active work return immediately. wait_ms:0 always takes a snapshot. An empty timeout does not establish failure or completion. Keep observing the same work_refs if their result is still needed. Observation never cancels children or acknowledges results; acceptance and older results do not prove the selected work completed.',
         object(
           {
             workRefs: {

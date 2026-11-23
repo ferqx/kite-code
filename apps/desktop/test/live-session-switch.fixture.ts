@@ -134,9 +134,7 @@ export async function exerciseLiveSessionSwitches(
         body: /ROOT_\d+_(?:INITIAL_TAIL|FINAL|DONE)/.test(visibleText),
         done: /ROOT_\d+_(?:DONE|FINAL)/.test(visibleText),
         running:
-          !!viewport?.querySelector(
-            '.agent-turn-running,.response-status,.message-meta-responding',
-          ) ||
+          !!viewport?.querySelector('.agent-turn-running') ||
           document
             .querySelector('[aria-label="Run status"]')
             ?.textContent?.includes(' · active') === true,

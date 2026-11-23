@@ -8,10 +8,10 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { type OfficeCliPackageEntry, officeCliReleaseAsset } from './officecli-runtime';
 import { readOfficeCliRelease } from './prepare-officecli';
-import { ripgrepAsset } from './ripgrep';
+import { ripgrepCachePath, ripgrepReleaseAsset } from './ripgrep';
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -33,6 +33,8 @@ async function ensureAsset(
     return;
 
   const bytes = await readBytes();
+  if (bytes.length !== expected.bytes || sha256(bytes) !== expected.sha256)
+    throw Error(`shell_tool_checksum_mismatch:${path}`);
   const pending = `${path}-${randomUUID()}.tmp`;
   try {
     writeFileSync(pending, bytes, { mode: executable ? 0o755 : 0o644, flag: 'wx' });
@@ -43,14 +45,46 @@ async function ensureAsset(
   }
 }
 
+async function prepareRipgrep(asset = ripgrepReleaseAsset()): Promise<string> {
+  const path = ripgrepCachePath(asset);
+  mkdirSync(dirname(path), { recursive: true });
+  await ensureAsset(
+    path,
+    asset,
+    async () => {
+      console.error(`[shell-tools] Downloading ${asset.name}...`);
+      const response = await fetch(asset.url, { signal: AbortSignal.timeout(120_000) });
+      if (!response.ok) throw Error(`ripgrep_download_failed:${asset.name}:${response.status}`);
+      const archive = await response.bytes();
+      if (archive.length !== asset.archiveBytes || sha256(archive) !== asset.archiveSha256)
+        throw Error(`ripgrep_archive_checksum_mismatch:${asset.name}`);
+
+      if (asset.format === 'zip') {
+        // Windows ships bsdtar, which can stream a single file from the ZIP.
+        const tar = join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'tar.exe');
+        const result = Bun.spawnSync([tar, '-xOf', '-', asset.member], { stdin: archive });
+        if (result.exitCode !== 0)
+          throw Error(`ripgrep_extract_failed:${asset.name}:${result.stderr.toString()}`);
+        return result.stdout;
+      }
+      const files = await new Bun.Archive(Bun.gunzipSync(archive)).files();
+      const executable = files.get(asset.member);
+      if (!executable) throw Error(`ripgrep_extract_failed:${asset.name}`);
+      return new Uint8Array(await executable.arrayBuffer());
+    },
+    true,
+  );
+  return path;
+}
+
 export async function prepareShellTools(directory: string): Promise<void> {
-  const sourceRg = ripgrepAsset();
-  const rgBytes = readFileSync(sourceRg);
+  const release = ripgrepReleaseAsset();
+  const sourceRg = await prepareRipgrep(release);
   const rg = {
-    version: '15.0.0',
-    package: '@vscode/ripgrep',
-    packageVersion: '1.18.0',
-    sha256: sha256(rgBytes),
+    version: release.version,
+    asset: release.name,
+    upstreamSha256: release.archiveSha256,
+    sha256: release.sha256,
   };
   const office = officeCliReleaseAsset();
   const officecli: OfficeCliPackageEntry = {
@@ -68,24 +102,22 @@ export async function prepareShellTools(directory: string): Promise<void> {
     true,
   );
   await ensureAsset(
-    join(directory, basename(sourceRg)),
-    { bytes: rgBytes.length, sha256: rg.sha256 },
-    () => rgBytes,
+    join(directory, release.executable),
+    release,
+    () => readFileSync(sourceRg),
     true,
   );
 
-  const licenses = ['LICENSE-MIT.txt', 'LICENSE-PCRE2.txt', 'LICENSE-SLJIT.txt'];
-  for (const [name, path] of [
-    ['LICENSE.vscode-ripgrep', join(dirname(dirname(sourceRg)), 'LICENSE')],
-    ...licenses.map((name) => [name, join(import.meta.dir, 'ripgrep-licenses', name)] as const),
-  ] as const) {
-    const bytes = readFileSync(path);
+  const licenses = ['LICENSE-MIT.txt', 'LICENSE-PCRE2.txt', 'LICENSE-SLJIT.txt', 'UNLICENSE'];
+  for (const name of licenses) {
+    const bytes = readFileSync(join(import.meta.dir, 'ripgrep-licenses', name));
     await ensureAsset(
       join(directory, name),
       { bytes: bytes.length, sha256: sha256(bytes) },
       () => bytes,
     );
   }
+  rmSync(join(directory, 'LICENSE.vscode-ripgrep'), { force: true });
 
   // Publish the manifest after every file it describes is in place.
   const manifest = Buffer.from(
@@ -108,5 +140,7 @@ if (import.meta.main) {
         throw Error('shell_tools_output_is_not_a_directory');
     }
     await prepareShellTools(tools);
+  } else {
+    await prepareRipgrep();
   }
 }

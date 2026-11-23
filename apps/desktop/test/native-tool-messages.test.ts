@@ -2656,7 +2656,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
     delete background.details.execution;
     background.save();
     const backgroundResult = await background.read();
-    expect(backgroundResult.fact.target).toBe('启动输出任务');
+    expect(backgroundResult.fact.target).toBe(backgroundInput.command);
     expect(backgroundResult.message.shell).toEqual({
       operation: 'launch',
       accepted: true,
@@ -2718,6 +2718,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       operation: 'launch',
       command: backgroundInput.command,
     });
+    expect(liveBackground.target).toBe(backgroundInput.command);
     expect(liveBackground.shellInput?.shellId).toBeUndefined();
     f.messages.get(`call-${background.id}`)!.toolCalls![0]!.arguments = JSON.stringify({
       ...backgroundInput,

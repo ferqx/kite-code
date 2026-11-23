@@ -99,6 +99,14 @@ for (const backend of ['powershell', 'git-bash'] as const) {
         );
         const assets = await windowsShellFixture();
         const powerShell = backend === 'powershell' ? await discoverWindowsPowerShell() : undefined;
+        const rgVersionResult = Bun.spawnSync([
+          withBundledRipgrep({}).executable,
+          '--no-config',
+          '--version',
+        ]);
+        expect(rgVersionResult.exitCode).toBe(0);
+        const rgVersion = /^ripgrep ([^\s]+)/u.exec(rgVersionResult.stdout.toString())?.[1];
+        expect(rgVersion).toBe('15.2.0');
         const host = createDefaultProcessConfiguration({
           profile,
           userConfigurationPath: user,
@@ -171,7 +179,32 @@ for (const backend of ['powershell', 'git-bash'] as const) {
         const lateReview = new Promise<void>((resolve) => (releaseLateReview = resolve));
         let lateAnswerAttempted = false;
         const business: ModelAdapter = {
-          async *stream() {
+          async *stream(request) {
+            const system = request.messages.find(
+              ({ role, sourceIds }) => role === 'system' && sourceIds?.includes('agent:contract'),
+            );
+            expect(system?.content).toContain(`Workspace root: ${realpathSync(workspace)}`);
+            expect(system?.content).toContain('Operating system: Windows');
+            expect(system?.content).toContain(`Bundled ripgrep (rg) version: ${rgVersion}`);
+            if (powerShell) {
+              expect(system?.content).toContain(`Shell: Windows PowerShell ${powerShell.version}`);
+              expect(system?.content).toContain("rg -n -g 'package.json' 'name' packages apps");
+            } else {
+              expect(system?.content).toMatch(/Shell: Git Bash(?: .+)? on Windows/);
+              expect(system?.content).not.toContain('PowerShell on Windows passes wildcard paths');
+            }
+            const shellTool = request.tools?.find(({ id }) => id === 'shell_execute');
+            expect(shellTool?.description).not.toMatch(
+              /Shell:|user locale|rg --files|ripgrep.*version/i,
+            );
+            expect(shellTool?.description).toContain(
+              'perform file deletions or moves in the same shell',
+            );
+            expect(shellTool?.description).toContain('-WindowStyle Hidden');
+            if (powerShell) expect(shellTool?.description).not.toContain(powerShell.version);
+            expect(shellTool?.inputSchema.properties).toMatchObject({
+              command: { type: 'string', minLength: 1, maxLength: 262144 },
+            });
             const command = commands[index++];
             if (command !== undefined) {
               yield {

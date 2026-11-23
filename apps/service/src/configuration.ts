@@ -1357,9 +1357,10 @@ export function createDefaultProcessConfiguration(options: {
               inheritedSkills ? (inheritedSkills.installed ?? new Map()) : undefined,
             );
       signal?.throwIfAborted();
-      const makeAssembly = (workspaceRoot: string) =>
+      const makeAssembly = (workspaceRoot: string, scopedShell: typeof shell) =>
         createWorkspaceAssembly({
           workspaceRoot,
+          workingEnvironment: scopedShell.workingEnvironment,
           profile: options.profile,
           externallyRegisteredFileTools: files.tools,
           externallyRegisteredExtensions: [
@@ -1389,7 +1390,7 @@ export function createDefaultProcessConfiguration(options: {
             ...(unifiedBrowser && browser.executionAvailable ? ['browser.execute'] : []),
           ],
         });
-      const assembly = await makeAssembly(root);
+      const assembly = await makeAssembly(root, shell);
       const epochAssemblies = new Set([assembly]);
       let webBinding: ReturnType<typeof web.bind> | undefined;
       let runWeb = web;
@@ -1674,7 +1675,7 @@ export function createDefaultProcessConfiguration(options: {
           if (!pending) {
             pending = (async () => {
               const nextShell = await makeShell(bound.root);
-              const nextAssembly = await makeAssembly(bound.root);
+              const nextAssembly = await makeAssembly(bound.root, nextShell);
               epochAssemblies.add(nextAssembly);
               nextAssembly.extensions.push(...nextShell.extensions);
               if (searchBinding.extension) nextAssembly.extensions.push(searchBinding.extension);

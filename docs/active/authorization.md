@@ -164,7 +164,7 @@ backend 不可用时受限执行 clean fail closed，不影响 Full mode 的持�
 按 [Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)/[Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)，`read_file` 直接访问敏感外部 identity，或任何无法预先证明遍历范围的外部 recursive
 search 时必须完成模式感知授权：Full 直接授权、Auto 三态审查、其他模式 exact approval。授权后仍使用 sealed
 read scope，Provider 不再按 protected name 二次拒绝。
-当前 Workspace 的物理位置不影响信任，文件工具可直接读写其中 `.git`、`.env`、`.ssh`、`.codex`、
+当前 Workspace 的物理位置不影响信任，文件工具可直接读写其中 `.git`、`.env`、`.ssh`、
 `.agents` 等名称。Building 阶段的 `accept_edits` 直接放行 Workspace 内 mutation；Workspace 外
 `write_file`/`edit_file` 按 [Agent Note 0135](../../.agents/notes/implemented/simplification/2026-08-24-mode-aware-workspace-authorization-boundary.md) 进入模式路由：Full 直接授权、Auto 三态审查、Accept Edits 请求 exact
 invocation approval；批准后形成 `approved_external`，文件名与宿主祖先不得再二次拒绝。canonical/no-follow

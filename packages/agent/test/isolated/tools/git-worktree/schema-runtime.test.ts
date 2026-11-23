@@ -212,6 +212,9 @@ test('Runtime rejects action-invalid worktree calls before authorization or reco
     expect(checkpoints[2]).toEqual({ jobs: 1, records: 1, authorizedTools: 1 });
     const declared = model.requests[1]!.tools.find((tool) => tool.id === 'git_worktree');
     expect(declared?.description).toContain('list accepts only action');
+    expect(declared?.description).toContain('outside operating-system temporary directories');
+    expect(declared?.description).toContain('the only tool call in their model response');
+    expect(declared?.description).toContain('only when the user explicitly requests deletion');
     expect(declared?.description).toContain('never retries an unknown mutation');
     expect(declared?.description).toContain('filesystem requests existing scope');
     expect(declared?.inputSchema.type).toBe('object');

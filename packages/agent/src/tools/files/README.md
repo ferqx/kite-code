@@ -182,7 +182,7 @@ Agent build 将固定 CPU／平台的 `native/files/files.node`、ABI／来源�
 
 Windows DLL 固定 `/DEPENDENTLOADFLAG:0x800`，将静态依赖解析限定 System32；搬迁测试核实际 PE 的准确平台、无 delay import 与加载标志，再实际加载，不把系统 DLL 名单当作搜索路径证明。链接标志适用系统及准确 API 合同归上述 native owner，不据此扩展产品支持系统集合。
 
-2026-10-16，基于 `70cb5718` 的本任务未提交 diff，先在 `codex/native-files` 隔离验证，三方合回主工作区后复验。环境为实际 Windows x64／Bun1.4.2／Node24.15.0／Rust1.97.1 MSVC；下方43／63项等旧执行记录对应替换前后端，不能用于授予新后端资格。
+2026-10-16，基于 `70cb5718` 的本任务未提交 diff，先在隔离工作树验证，三方合回主工作区后复验。环境为实际 Windows x64／Bun1.4.2／Node24.15.0／Rust1.97.1 MSVC；下方43／63项等旧执行记录对应替换前后端，不能用于授予新后端资格。
 
 - `bun test packages/agent/test/isolated/files/native-addon.test.ts packages/agent/test/isolated/files/windows.test.ts packages/agent/test/isolated/files/path-files.test.ts packages/agent/test/isolated/files/tool-paths.test.ts packages/agent/test/isolated/files/native-path-lifetime.test.ts packages/agent/test/isolated/files/native-packaged.test.ts packages/agent/test/isolated/files/built-large.test.ts apps/service/test/isolated/files-native-boundary.test.ts`：20项通过，覆盖真实原生读写／恢复、准确授权、GC、Bun／Node 空 PATH 搬迁加载、篡改拒绝、完整 Agent 包和默认 Service 的 Full 保护拒绝。新增链接数断言及 Service 类型修正另与完整 CI 合同整文件复验，共23项361断言通过。
 - `bun test --timeout=30000 packages/agent/test/isolated/file-checkpoints/capture.test.ts`：19项267断言通过。首次与整包构建同时运行时三例达到默认5秒时限；未删断言，30秒单例时限的完整独立复验通过，平台 CI 使用同一时限。原恢复、新建反向删除、原 Run／Execution、取消、漂移和 unknown 均实际运行。

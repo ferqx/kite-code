@@ -714,7 +714,8 @@ test('model reconnection stays in its original Turn process across retries, reco
     expect(row().textContent).toContain('已重新连接模型服务');
     expect(row().getAttribute('data-status')).toBe('completed');
     expect(row().classList.contains('is-running')).toBe(false);
-    expect(f.host.querySelector('.response-status')?.textContent).toContain('正在回复');
+    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('进行中');
+    expect(f.host.querySelector('.response-status')).toBeNull();
     const completed: NativeRunFact = { ...run(), status: 'completed', isActive: false };
     const finished = await draw(
       [first, failed('second', 2), { ...third, status: 'succeeded' }],
@@ -736,11 +737,12 @@ test('model reconnection stays in its original Turn process across retries, reco
       status: 'cancelled',
       isActive: false,
     });
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+    expect(row().textContent).toContain('重新连接已停止');
+    expect(f.host.querySelector('.turn-failure')).toBeNull();
     await act(async () =>
       (f.host.querySelector('.agent-turn-summary') as HTMLButtonElement).click(),
     );
-    expect(row().textContent).toContain('重新连接已停止');
-    expect(f.host.querySelector('.turn-failure')).toBeNull();
     const receivedThenCancelled = await draw(
       [first, { ...second, status: 'cancelled' }],
       [{ ...recovered, sourceIds: ['second'] }],
@@ -1681,7 +1683,8 @@ test('ordinary Agent mail renders its verified sender and full Markdown inside o
   try {
     await act(async () => render(true));
     readable();
-    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
+    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('进行中');
+    expect(f.host.querySelector('.response-status')).toBeNull();
     await act(async () => render(false));
     expect(f.host.querySelectorAll('.agent-turn-summary')).toHaveLength(1);
     expect(f.host.querySelector('.agent-turn-summary')!.getAttribute('aria-expanded')).toBe(
@@ -1927,8 +1930,10 @@ test('a host-confirmed standalone message preserves process boundaries and one f
     expect(
       [...f.host.querySelectorAll('.agent-turn, .agent-result')].map((entry) => entry.className),
     ).toEqual(['agent-turn', 'message agent-result', 'agent-turn']);
-    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
-    expect(f.host.querySelector('.agent-turn-summary')!.textContent).toBe('处理过程');
+    expect(f.host.querySelector('.response-status')).toBeNull();
+    expect(
+      [...f.host.querySelectorAll('.agent-turn-status-label')].map((entry) => entry.textContent),
+    ).toEqual(['处理过程', '进行中']);
     await act(async () => render(false));
     expect(result().textContent).toContain('子 Agent 的实际结果');
     expect(result().closest('.agent-turn')).toBeNull();
@@ -2815,7 +2820,8 @@ test('compression keeps its DOM row and order when the hot View hands over befor
     const title = line?.querySelector('[data-slot="trace-title"]');
     const icon = row.querySelector('[data-slot="trace-icon"][aria-hidden="true"] > svg');
     const turn = row.closest('.agent-turn');
-    const response = turn?.querySelector('.response-status');
+    const statusLabel = turn?.querySelector('.agent-turn-status-label');
+    expect(statusLabel?.textContent).toBe('进行中');
     expect(icon?.tagName).toBe('svg');
     expect(line?.getAttribute('data-status')).toBe('running');
     expect(title?.textContent).toBe('压缩上下文中');
@@ -2830,7 +2836,8 @@ test('compression keeps its DOM row and order when the hot View hands over befor
     expect(line?.hasAttribute('data-status')).toBe(false);
     expect(row.querySelector('[data-slot="trace-icon"] > svg')).toBe(icon);
     expect(row.closest('.agent-turn') === turn).toBe(true);
-    expect(turn?.querySelector('.response-status') === response).toBe(true);
+    expect(turn?.querySelector('.agent-turn-status-label')).toBe(statusLabel);
+    expect(turn?.querySelector('.response-status')).toBeNull();
     // A newer streamed message can arrive before that history GET as well.
     const pending = await render({
       messages: [initial, before, after],

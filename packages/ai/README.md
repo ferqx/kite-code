@@ -34,7 +34,7 @@
 
 SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses 为7：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
 
-可信 Responses binding 的函数工具显式发送 `strict:false`，原 schema 的 `required` 和非 nullable 可选字段保持。按 [OpenAI function calling 合同](https://developers.openai.com/api/docs/guides/function-calling#strict-mode)，省略该值会尝试把 schema 归一化为严格模式；这可能使条件性可选参数被要求补齐。SDK 保留已有工具的可选、互斥和分支语义，Agent 仍按原公开 schema 验证参数并执行原权限检查。Chat Completions 的 wire 和私有 continuation envelope 版本保持。原 [Responses 回归](test/responses.test.ts)经实际 SDK 和合成 fetch 核 OpenAI／compatible／Codex 三族的 `strict:false`、原 schema 及省略 PDF 字段的两轮调用；真实 Native 文件读取证据归 [Desktop owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。
+可信 Responses binding 的函数工具显式发送 `strict:false`，原 schema 的 `required` 和非 nullable 可选字段保持。按 [OpenAI function calling 合同](https://developers.openai.com/api/docs/guides/function-calling#strict-mode)，省略该值会尝试把 schema 归一化为严格模式；这可能使条件性可选参数被要求补齐。SDK 保留已有工具的可选、互斥和分支语义，Agent 仍按原公开 schema 验证参数并执行原权限检查。Chat Completions 的 wire 和私有 continuation envelope 版本保持。原 [Responses 回归](test/responses.test.ts)经实际 SDK 和合成 fetch 核 手动连接与只读本机连接的 `strict:false`、原 schema 及省略 PDF 字段的两轮调用；真实 Native 文件读取证据归 [Desktop owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。
 
 上述为任意中立调用者的协议编码规则；当前 Agent 内置工具在交给任意 Adapter 前，已由 [Agent 工具表面](../agent/src/model-tools.README.md)转换为 `read_file` 等公开名称和参数。Agent 的公开 ModelInput/历史重建归该 owner；AI 不重复维护内置工具的语义命名表。
 
@@ -58,7 +58,7 @@ SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses �
 [SDK 请求](test/sdk.test.ts)逐值核对真实本机 HTTP、绑定后 caller 改值不影响请求、未知值/不透明绑定拒绝；[配套 Service](../../apps/service/test/isolated/configuration.test.ts)核对活动旧 Run 与后续新 Run 的实际 low/high 请求和公开历史 ModelInput。2026-10-02 与 Core metadata/Native-Browser inspector 组合29项、239断言通过；不证明生产 Provider 或设置面板资格。
 
 
-默认宿主显式传入 `provider` 时，绑定的公开 family 为 `openai`、`deepseek`、`ollama`、`codex` 或兼容默认 `openai-compatible`，与实际 endpoint/model 同时冻结；不会从模型名称猜 family。四类默认仍走明确单次 SDK compatible Chat Completions transport；OpenAI 与 compatible 可显式选择 Responses，凭据和 endpoint 不进入公开 metadata。Service 的[真实 HTTP 四路请求](../../apps/service/test/isolated/run-model-selection.test.ts)与 [Native 原 ModelInput/wire 验收](../../apps/desktop/test/isolated/native-provider-bundle.test.ts)核对绑定、临时 effort 和 child preset；不据此宣称生产 Provider 全部语义兼容。
+默认宿主显式传入 `provider` 时，绑定的公开 family 按对应工厂与显式配置确定，兼容默认是 `openai-compatible`，与实际 endpoint/model 同时冻结；不会从模型名称猜 family。四类默认仍走明确单次 SDK compatible Chat Completions transport；OpenAI 与 compatible 可显式选择 Responses，凭据和 endpoint 不进入公开 metadata。Service 的[真实 HTTP 四路请求](../../apps/service/test/isolated/run-model-selection.test.ts)与 [Native 原 ModelInput/wire 验收](../../apps/desktop/test/isolated/native-provider-bundle.test.ts)核对绑定、临时 effort 和 child preset；不据此宣称生产 Provider 全部语义兼容。
 
 
 ## DeepSeek Chat 工具续接
@@ -69,21 +69,21 @@ SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses �
 
 ## Responses 协议
 
-`createCompatibleModelBinding({ protocol: 'responses', ... })` 显式使用官方 `@ai-sdk/openai` 的 `.responses(modelId)`；省略协议继续走既有 Chat Completions。SDK 固定 `4.0.19`，匹配现有 `ai@7.0.19` 的 Provider v4 契约，避免无关 SDK 升级。它复用原 Adapter 和 Agent Loop，不手写 SSE、不引入第二执行循环，也不回退其他协议。OpenAI/compatible 可选择 Responses，Codex 的私有宿主绑定固定使用 Responses；DeepSeek/Ollama 的该选项在配置和绑定边界拒绝。
+`createCompatibleModelBinding({ protocol: 'responses', ... })` 显式使用官方 `@ai-sdk/openai` 的 `.responses(modelId)`；省略协议继续走既有 Chat Completions。SDK 固定 `4.0.19`，匹配现有 `ai@7.0.19` 的 Provider v4 契约，避免无关 SDK 升级。它复用原 Adapter 和 Agent Loop，不手写 SSE、不引入第二执行循环，也不回退其他协议。OpenAI/compatible 可选择 Responses，只读本机凭据绑定固定使用 Responses；DeepSeek/Ollama 的该选项在配置和绑定边界拒绝。
 
 每次请求保持 `maxRetries:0`、一个 SDK step 和真实 AbortSignal；Responses 设 `store:false` 并请求 `reasoning.encrypted_content`。显式 effort 同时启用 SDK `forceReasoning`，使第三方模型别名不被 SDK 名称推断静默忽略。公开 settings 保存实际协议，Responses 消息转换版本为 6。缺失 API key 不读取环境中的 OpenAI key。Provider 错误保留有限公开错误码；可能包含历史内容的 Responses SDK warning details 只保留通用诊断。
 
-完整 finish 的 SDK assistant content（包括 encrypted reasoning、summary 和 function call 的原 call ID）成为 `ModelEvent.finish.continuation`；[Agent 私有输出](../agent/src/model-output/README.md)以现有分段 Artifact 链保存并在多轮及冷恢复后回传。该 JSON 带协议、版本、路由 ID 和 endpoint/provider/model/凭据/header 绑定 SHA-256，不包含原始连接数据。Codex 的可信私有工厂另接纳认证来源与完整账户／主体身份的稳定摘要，代替会轮换的 bearer；同账户新 token 与冷重建保留原 encrypted reasoning，endpoint、模型、账户 header 或来源变化仍隔离。此选项仅供明确的 Codex Responses 绑定，普通 Provider 保持原凭据绑定。绑定变化不回放旧 opaque state，仍映射普通 assistant/tool 历史。私有 envelope 保持 version 1；回放其中 tool-call 时按准确 call ID 从原 Core toolCalls 取内部名称，再用当前请求映射编码，避免工具集合变化后旧 wire 名碰撞。encrypted reasoning、summary 和 Provider metadata 保持原值，不重写既有 Artifact；缺少匹配原调用在网络前拒绝。取消、错误、截断工具批次和未完成工具输入不发布可执行调用或私有 continuation；非空纯文本 `length` 由 Core 沿原 Run 续接，并保留该次封存的 reasoning。SDK 不执行工具。自定义 Runtime 必须提供 Artifact port 才能保存 continuation。公开 Inspector 和消息正文不展示此状态。
+完整 finish 的 SDK assistant content（包括 encrypted reasoning、summary 和 function call 的原 call ID）成为 `ModelEvent.finish.continuation`；[Agent 私有输出](../agent/src/model-output/README.md)以现有分段 Artifact 链保存并在多轮及冷恢复后回传。该 JSON 带协议、版本、路由 ID 和 endpoint/provider/model/凭据/header 绑定 SHA-256，不包含原始连接数据。本机凭据的可信私有工厂另接纳认证来源与完整账户／主体身份的稳定摘要，代替会轮换的 bearer；同账户新 token 与冷重建保留原 encrypted reasoning，endpoint、模型、账户 header 或来源变化仍隔离。此选项仅供已核验的本机凭据绑定，普通 Provider 保持原凭据绑定。绑定变化不回放旧 opaque state，仍映射普通 assistant/tool 历史。私有 envelope 保持 version 1；回放其中 tool-call 时按准确 call ID 从原 Core toolCalls 取内部名称，再用当前请求映射编码，避免工具集合变化后旧 wire 名碰撞。encrypted reasoning、summary 和 Provider metadata 保持原值，不重写既有 Artifact；缺少匹配原调用在网络前拒绝。取消、错误、截断工具批次和未完成工具输入不发布可执行调用或私有 continuation；非空纯文本 `length` 由 Core 沿原 Run 续接，并保留该次封存的 reasoning。SDK 不执行工具。自定义 Runtime 必须提供 Artifact port 才能保存 continuation。公开 Inspector 和消息正文不展示此状态。
 
 [Responses HTTP 测试](test/responses.test.ts)覆盖流式文本/推理、usage、工具结果配对、三轮历史、无可见 summary 的 encrypted reasoning、绑定隔离、取消、错误与未完成调用，以及旧 v1 continuation/新碰撞集合、原 Artifact 不变和八档 effort（含 ultar）的别名 wire；[Service 完整 wire](../../apps/service/test/isolated/responses-loop.test.ts)以真实 SQLite/Client/HTTP 核三轮工具、并行分片、冷 continuation 与新增合法工具名碰撞、六次物理断流（首次请求加5次重连）后失败收敛、永久断流明确取消、纯文本 length 续接与零重复工具效果；[默认配置](../../apps/service/test/isolated/configuration.test.ts)验证 JSONC 路由；[定时任务集成](../../apps/desktop/test/scheduled-task-runner.test.ts)验证固定模型与 Responses mock 都复用普通 Service 运行链。所有 Provider 请求均为本地模拟服务，未验证真实付费调用。
 
 官方语义参考：[OpenAI Responses](https://developers.openai.com/api/reference/resources/responses/methods/create)、[stateless reasoning](https://developers.openai.com/api/docs/guides/reasoning)、[AI SDK OpenAI provider](https://ai-sdk.dev/providers/ai-sdk-providers/openai)。
 
-Codex 的文件认证和固定 endpoint 适配由[Service 本机来源](../../apps/service/README.md#本机-codex-来源)负责，AI 只复用原 SDK Responses 单次流与工具编码，不读取本地认证或刷新 token。公开 family 明确为 `codex`；私有 bearer/账户 header 留在实际 binding。2026-10-24 在 macOS arm64／Bun 1.4.2、`2ab0a991e` 加本次工作树上，以本机默认 `gpt-6.1-sol` 做一次无工具的真实最小文字探测，固定 Codex endpoint 返回 HTTP 200、完整文本 `KITE_CODEX_OK` 和 stop finish；未发送仓库上下文。这只证明该账户该模型的这次文本连通，真实工具/付费账单/跨平台完整资格不由此推导；受控完整工具链证据归[Service 集成测试](../../apps/service/test/isolated/codex-connection.test.ts)。
+文件认证和固定端点绑定由 [Service 本机凭据](../../apps/service/README.md#本机凭据与模型绑定)负责，AI 复用 SDK Responses 的单次流与工具编码。2026-10-24 在 macOS arm64／Bun 1.4.2、`2ab0a991e` 加当时工作树上，以本机 `gpt-6.1-sol` 发出一次无工具、无仓库上下文的最小文字探测，收到 HTTP 200、完整文本与 `stop`。完整工具链采用受控传输，由 [Service 集成测试](../../apps/service/test/isolated/codex-connection.test.ts)核验。
 
 ## 原生 Web Search
 
-Service/Agent 冻结实际路由并在授权后才向中立请求附上 `nativeWebSearch`。适配器再校验精确官方 OpenAI API 端点、显式 API key、Responses、模型及所需推理设置。适配器接受 `gpt-6.2-astra`、默认／low／medium／high 的 `gpt-5`，以及未指定推理强度的 `gpt-6-luna`。Luna 的其他强度或相似模型名保留未知状态；使用原生搜索仍需在当前连接完成观察到搜索的资格测试。非官方网关、Codex 登录和未识别模型不会据名启用原生搜索。逐查询审批不使用服务端路线。
+Service/Agent 冻结实际路由并在授权后才向中立请求附上 `nativeWebSearch`。适配器再校验精确官方 OpenAI API 端点、显式 API key、Responses、模型及所需推理设置。适配器接受 `gpt-6.2-astra`、默认／low／medium／high 的 `gpt-5`，以及未指定推理强度的 `gpt-6-luna`。Luna 的其他强度或相似模型名保留未知状态；使用原生搜索仍需在当前连接完成观察到搜索的资格测试。原生搜索须同时满足上述连接与模型条件。逐查询审批不使用服务端路线。
 
 真实 SDK 以 `store:false` 宣告服务端工具，本地同名函数独立改名、复原；只有本地调用交回 Agent。搜索开始、结束、已检索 URL 和正文引用分别观察，失败／不完整不是成功。正文位置必须对应实际输出块；两个可能的字符单位产生不同可行锚点时只保留链接。原生 v2 私有历史按输出索引保存，并把工具 dialect、回传序列化器和原有连接身份一起散列；存储、账户、模型、搜索模式或文本投影不匹配时使用普通对话。它不是 ModelOutput 或 Trajectory 的新格式。
 

@@ -4,9 +4,9 @@ Status: implemented
 
 ## Problem
 既有 protected-path 规则同时服务原生 Shell、MCP executable/cwd 与五个受治理文件工具。它把 `.git`、
-`.env`、`.ssh`、`.codex`、`.agents` 等名称视为统一的拒绝身份，并把 Workspace 外读取送入审批。该模型
+`.env`、`.ssh`、`.agents` 等名称视为统一的拒绝身份，并把 Workspace 外读取送入审批。该模型
 在进程执行边界上仍有价值，但不适合用户已经选定的受信任 Workspace：项目位于
-`~/.codex/worktrees/...` 等宿主目录时，祖先名称会误伤普通 `package.json`、`AGENTS.md`；项目自身的
+工具管理的嵌套工作树目录时，祖先名称会误伤普通 `package.json`、`AGENTS.md`；项目自身的
 配置、Git metadata 与环境文件也无法由文件工具直接检查或修正。
 
 文件 Provider 已经具备 canonical/no-follow identity、read-before-edit、preimage、stale check、单次 grant、
@@ -19,7 +19,7 @@ descriptor-relative publication、大小限制与 typed failure。文件访问�
    mutation approval，不能签发 prepare/commit grant。
 2. 当前 Workspace 是用户已经选定的完整信任根，物理位置与祖先目录名称不改变该事实。五个文件工具可
    读取所有 Workspace 内容；在 Building 阶段，`accept_edits` 可直接写入 Workspace 内任何路径，包括
-   `.git`、`.env`、`.ssh`、`.codex`、`.agents` 及其大小写别名。Planning 的只读 ceiling 保持不变。
+   `.git`、`.env`、`.ssh`、`.agents` 及其大小写别名。Planning 的只读 ceiling 保持不变。
 3. Workspace 外 `write_file`/`edit_file` 在 `accept_edits` 下必须获得绑定当前 Tool invocation 与目标 operation
    的批准。Auto 可按既有 auto-review 路由产生同等单次批准；显式 Full 按其既有授权语义处理。批准后
    Pipeline 密封 `approved_external` scope，文件 protected-path 名称、additional deny 或宿主祖先名称不得
@@ -49,7 +49,7 @@ descriptor-relative publication、大小限制与 typed failure。文件访问�
 <!-- agent-note-format: alternatives-not-recorded (pre-format Agent Note) -->
 
 ## Consequences
-- 项目可位于任意当前受信任 Workspace；Codex-managed worktree 不再因 `~/.codex` 祖先误拒普通文件。
+- 项目可位于任意当前受信任 Workspace；工具管理的嵌套工作树按同一 Workspace 边界判断普通文件。
 - 文件读取不再产生 `externalRead` approval blocker；CompletionGuard 不再需要为这类审批等待。
 - 外部 mutation 的批准具有可兑现语义：批准后不会再被文件 protected-path policy 二次拒绝。
 - 文件与进程使用不同的 path authorization projection，文档和测试必须明确区分，不能把文件开放误述为

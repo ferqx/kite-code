@@ -315,8 +315,9 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
         expect(request.messages).toContainEqual({
           role: 'system',
           sourceIds: ['agent:child-role'],
-          content:
+          content: expect.stringContaining(
             'You are a child Agent. To message your direct parent, use send_agent_message with target "parent" if the tool is available.',
+          ),
         });
         childReady.release();
         await childGate.promise;

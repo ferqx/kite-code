@@ -179,7 +179,7 @@ try {
             reading:
               document.querySelector('.conversation-cache-entry')?.getAttribute('aria-busy') ===
               'true',
-            status: document.querySelector('.response-status')?.textContent ?? '',
+            status: document.querySelector('.agent-turn-running')?.textContent ?? '',
             opacity: [...CSS.highlights.entries()]
               .filter(([name]) => name.startsWith('kite-reveal-'))
               .flatMap(([name, highlight]) =>
@@ -411,7 +411,7 @@ try {
     await page.waitForTimeout(100);
     const completionStart = await page.evaluate(() => window.streamAudit.frames.length);
     await page.evaluate(() => window.renderPerformanceFixture.settle());
-    await page.waitForFunction(() => !document.querySelector('.response-status'));
+    await page.waitForFunction(() => !document.querySelector('.agent-turn-running'));
     await page.waitForTimeout(300);
     const audit = await page.evaluate(() => ({
       animations: window.streamAudit.animations,

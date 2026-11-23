@@ -102,7 +102,7 @@ Pipeline dispatcher。普通读取可以把 Workspace 外路径密封为 `pathSc
 模式 exact approval。该 scope 只允许 observe，
 不能进入 prepare/commit。Workspace 外 mutation 只有在 Policy 已批准且 sealed operation 为
 `pathScope=approved_external` 时可由 Provider 接受。Workspace 内 mutation 使用 `workspace_only`，Workspace
-物理位置和 `.git`/`.env`/`.ssh`/`.codex`/`.agents` 等名称不产生第二次拒绝。Provider 不从 mode、用户
+物理位置和 `.git`/`.env`/`.ssh`/`.agents` 等名称不产生第二次拒绝。Provider 不从 mode、用户
 字符串或未受治理的 boolean 自行扩大 mutation scope。
 
 旧进程内 `read-state` 不再是生产 freshness authority。freshness 来自 Runtime capability invocation 的
@@ -149,7 +149,7 @@ symlink、identity 漂移或越界 canonical target 仍使搜索 fail closed。
 lexical Workspace identity，但其授权语义按 operation 分开：read path evaluator 对有效路径 allow，Policy 对
 敏感 external direct read 与全部 external recursive search 追加模式感知授权；write 对 canonical
 Workspace 内目标 allow、对外部目标返回 prompt；execute 对 Workspace 内目标同样 allow，只对 Workspace 外
-identity 应用整体边界。因而当前受信任 Workspace 可位于任意宿主目录，且其中 `.git`、`.env`、`.ssh`、`.codex`、
+identity 应用整体边界。因而当前受信任 Workspace 可位于任意宿主目录，且其中 `.git`、`.env`、`.ssh`、
 `.agents` 等内容可由文件工具读写；宿主祖先名称不能降低 Workspace 信任。
 
 Builtin frozen catalog 的 entry gate 与 Pipeline 仍会在异步审批后重新捕获 canonical target。外部 read 使用只读

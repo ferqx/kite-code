@@ -8,7 +8,7 @@ Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当
 
 源码安装的 postinstall 会构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，期间显示三个构建阶段及实时 Cargo 诊断，完成后显示资产路径。需要 rustup／固定 Rust1.97.1 和本机 linker；Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C 工具链。使用 `--ignore-scripts` 安装后，先显式运行 `bun run build:files-native` 再执行文件工具测试。正式 Agent build 会把同一原生模块、ABI/hash manifest 和许可证放进制品；用户机器不需要 Rust。运行期缺失资产明确失败，不能依靠源码或即时编译回退。
 
-已有 `packages/agent/dist/jobs/shell.js` 时，`bun install` 的 postinstall 还会修复 Shell 工具目录中的 OfficeCLI、rg、许可证和 `manifest.json`。有效文件直接复用。OfficeCLI 需要补齐时优先读取 `.cache/officecli-assets`。缓存缺失或校验失败时，从 GitHub 下载当前平台的固定版本，核对大小和 SHA-256 后写入缓存。使用 `--ignore-scripts` 会跳过补齐。全新检出在安装依赖后执行 `bun run build` 生成开发所需的完整产物。 [共用资产准备入口](../../packages/agent/src/jobs/prepare-shell-tools.ts)
+`bun install` 的 postinstall 会准备源码运行使用的 ripgrep。已有 `packages/agent/dist/jobs/shell.js` 时，还会修复随包的 OfficeCLI、rg、许可证和 `manifest.json`。OfficeCLI 和 rg 分别复用 `.cache/officecli-assets` 与 `.cache/ripgrep-assets` 中的有效文件。缓存缺失或校验失败时，安装或构建从 GitHub 获取对应平台的固定发行资产，校验后写入缓存。Windows 使用系统的 `tar.exe` 读取已校验的 ripgrep ZIP。使用 `--ignore-scripts` 会跳过安装阶段的资产准备。全新检出在安装依赖后执行 `bun run build` 生成开发所需的完整产物。 [共用资产准备入口](../../packages/agent/src/jobs/prepare-shell-tools.ts)
 
 `bun run build` 准备开发 Service 所需的文档资产，包括固定版本且经摘要校验的 OfficeCLI 可执行文件、Office 与 PDF 技能、PDF helper 和 Noto Sans SC 字体。Terminal 和 Native 打包使用同一构建入口。执行 OfficeCLI 技能时，受管 Shell 从随包工具目录解析 `officecli`。 [文档资产边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
 

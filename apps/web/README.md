@@ -42,7 +42,7 @@ DOM 测试共用私有 [global descriptor 夹具](test/globals.fixture.ts)安装
 
 验证入口：`bun run --cwd apps/web typecheck`、`bun run --cwd apps/web build`、`bun test apps/web/test`。新源文件加入[依赖边界检查](../../scripts/check-unified-agent-boundary.ts)、统一测试与 workspace build/typecheck。正式入口装配本包；仓库中的 `apps/kite-web` 旧源码仍待完整迁移审查与最终退役，不能把保留目录当作现行正式启动路由。
 
-2026-10-02 在 macOS 的实际 Codex In-app Browser 中用[本机预览夹具](../../tests/fixtures/unified-agent/web-preview.ts)复核了编译资产、真实 Service/SQLite、Cookie 准入、目录与直接会话链接、有效 GFM 表格与无脚本/自动图片、完整正文复制和 Cmd+A 的历史范围。A→B→A 恢复原 scrollTop，追加一条真实消息并显式刷新后仍保留该位置；原 Context 与 Job 三种输出均按需显示。首次现场发现运行时 AJV 编译被严格 CSP 拒绝，已改为构建时静态校验器并实际重验。该证据覆盖本机默认窄视口，不能代替其他浏览器、尺寸矩阵、Electron 或正式 launcher 资格。
+2026-10-02 在 macOS 的本机应用内浏览器 中用[本机预览夹具](../../tests/fixtures/unified-agent/web-preview.ts)复核了编译资产、真实 Service/SQLite、Cookie 准入、目录与直接会话链接、有效 GFM 表格与无脚本/自动图片、完整正文复制和 Cmd+A 的历史范围。A→B→A 恢复原 scrollTop，追加一条真实消息并显式刷新后仍保留该位置；原 Context 与 Job 三种输出均按需显示。首次现场发现运行时 AJV 编译被严格 CSP 拒绝，已改为构建时静态校验器并实际重验。该证据覆盖本机默认窄视口，不能代替其他浏览器、尺寸矩阵、Electron 或正式 launcher 资格。
 
 
 会话正文现使用公共 UI `SafeMessageMarkdown`，保留完整消息并按 GFM 排版。原 HTML 显示为转义文本、图片仅显示替代文字、相对文件路径不启动本地编辑器。正文与消息阅读列同宽，不添加独立限宽或内边距；非消息区不可选中。
@@ -130,7 +130,7 @@ History 的公开 `outputBody` 只表示原输出身份与完整性／长度。�
 
 [Runtime logs DOM 测试](test/runtime-logs.test.tsx) 使用公共 Browser port，验证冻结上界、NULL metadata、错 scope/重复 cursor/closed details、stale 保留、取消/隐藏/暂停/迟到隔离、准确 Model 目标与第二次确认以及缓存预算。fake port 与 JSDOM 只证明控制器/DOM 行为，实际 Cookie Service/SDK 证据由公共接口所属资格独立核对，不代表原生浏览器或完整安装资格；正式启动路由按本页入口调用链核实。
 
-2026-10-03 本机 Codex In-app Browser 使用实际编译 Web、Cookie Gateway、Service/SQLite 与[所属预览夹具](../../tests/fixtures/unified-agent/web-preview.ts)复核日志和目录交互。新增真实事实使 cursor 从 36 到 46，已冻结日志仍保持 36，显式刷新后才显示新增项。实际 pointer/键盘调整、重载偏好、折叠恢复，以及 620×800 窄屏顶栏焦点的 Escape 均核对；首轮现场失败促成这一 Escape 修复，三文件 17/192 邻接通过。
+2026-10-03 本机应用内浏览器 使用实际编译 Web、Cookie Gateway、Service/SQLite 与[所属预览夹具](../../tests/fixtures/unified-agent/web-preview.ts)复核日志和目录交互。新增真实事实使 cursor 从 36 到 46，已冻结日志仍保持 36，显式刷新后才显示新增项。实际 pointer/键盘调整、重载偏好、折叠恢复，以及 620×800 窄屏顶栏焦点的 Escape 均核对；首轮现场失败促成这一 Escape 修复，三文件 17/192 邻接通过。
 
 后续实际 1280×800 页面有 45 条日志、两个成功 Job，展开原 Model 行后打开准确输入确认，再次确认才完整读取原 189 字节请求及 sealed 来源/授权 metadata。观察前后仍是原 3 次 Provider 调用、4 条消息、2 个 Run 和4个 Execution，cursor 保持45，页面关闭后所属进程退出。截图只在本次工具中展示，未生成独立保存图片。该资格限这次本机浏览器现场和默认源码 Service，源码外 installed、其他浏览器/平台及正式旧 launcher 仍需独立证据。
 
@@ -144,7 +144,7 @@ restore-status 需要用户明确输入原 restore ID，只读该点的原 journ
 
 [专属 reader/DOM 测试](test/file-checkpoints.test.tsx) 使用生成公共 DTO、有限 fake Browser port 与 React/JSDOM，覆盖 200+1+末空页、跨 fork 来源/当前观察、完整原点绑定、scope/游标冲突、同目标 stale、超预算不裁剪、selection/revision/关闭/隐藏与迟到隔离、准确原 restore ID、legacy blocked 和 journal/carrier 独立事实。当前全 Web 邻接 8 files/51 tests/469 assertions、类型与实际 build 通过；这些证据只证明便携 reader/DOM 与编译，不代替独立实际 Cookie Gateway/SDK、原生浏览器现场、恢复执行或正式旧 launcher 迁移资格。
 
-2026-10-04 独立[实际浏览器夹具](../../tests/fixtures/unified-agent/web-file-checkpoints-preview.ts)使用 fresh public terminal builder、packaged default Service child、owned Profile、固定 loopback Provider 和该 candidate 的完整校验 Web assets，在本机 Codex IAB 复核两 Run/两原点目录、详情及明确原 restore ID 的 v2 journal/carrier。实际独立 Ask 批准后原 250003 字节文件恢复，浏览器只读取 metadata；关闭与切 Session 的两个延迟真实 GET 被 abort，释放旧响应后另一 Session 仍是空目录。读取前后 Provider=8、cursor=124、messages=16、Runs=2、Executions=15、原 write effects=4、原文件 hash/存在性及完整 journal/carrier 全部相同。第六轮在当前 candidate `terminal-740167cc1d7bf19d175e99ae8ce39f30c553315bd5791889b9cfd7a33de8bcad` 核完整现场与 abort；第七轮再次 fresh build 得到同一 digest，复验目录/detail/status、before/after 等值及 stop 自动退出0。夹具保留前期失败日志，串行事实读取并完整关闭 owned HTTP/SQLite/child；没有拓宽原 deadline。这是当前同 Store/S/W 的本机现场证据，不冒称 fork/newStore 浏览器现场、完整恢复执行界面、源码外正式安装、其他浏览器/平台或完整 V1.3 切换。
+2026-10-04 独立[实际浏览器夹具](../../tests/fixtures/unified-agent/web-file-checkpoints-preview.ts)使用 fresh public terminal builder、packaged default Service child、owned Profile、固定 loopback Provider 和该 candidate 的完整校验 Web assets，在本机应用内浏览器 复核两 Run/两原点目录、详情及明确原 restore ID 的 v2 journal/carrier。实际独立 Ask 批准后原 250003 字节文件恢复，浏览器只读取 metadata；关闭与切 Session 的两个延迟真实 GET 被 abort，释放旧响应后另一 Session 仍是空目录。读取前后 Provider=8、cursor=124、messages=16、Runs=2、Executions=15、原 write effects=4、原文件 hash/存在性及完整 journal/carrier 全部相同。第六轮在当前 candidate `terminal-740167cc1d7bf19d175e99ae8ce39f30c553315bd5791889b9cfd7a33de8bcad` 核完整现场与 abort；第七轮再次 fresh build 得到同一 digest，复验目录/detail/status、before/after 等值及 stop 自动退出0。夹具保留前期失败日志，串行事实读取并完整关闭 owned HTTP/SQLite/child；没有拓宽原 deadline。这是当前同 Store/S/W 的本机现场证据，不冒称 fork/newStore 浏览器现场、完整恢复执行界面、源码外正式安装、其他浏览器/平台或完整 V1.3 切换。
 
 
 ## 完整后台执行与子会话观察

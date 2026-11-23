@@ -644,7 +644,10 @@ async function completed(page: Page, marker: string, expectedPosts = 1) {
       );
     }, `${marker} real assistant body and original input slot visible`);
   else await page.getByText(`DONE ${marker}`, { exact: true }).waitFor();
-  await until(async () => (await page.locator('.response-status').count()) === 0, 'no active turn');
+  await until(
+    async () => (await page.locator('.agent-turn-running').count()) === 0,
+    'no active turn',
+  );
   const facts = await readFacts();
   const identity = assertCompleted(facts, marker);
   const network = await readNativeAnomalyNetwork(application!);

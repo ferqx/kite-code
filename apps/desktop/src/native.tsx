@@ -474,7 +474,7 @@ function NativeDesktopContent({
   }>();
   const firstRef = useRef(firstSubmission);
   firstRef.current = firstSubmission;
-  const firstAcceptedDraft = useRef<{ commandId: string; draft: { content: string } } | undefined>(
+  const firstClearedDraft = useRef<{ commandId: string; draft: { content: string } } | undefined>(
     undefined,
   );
   const contextIntent = useRef(0);
@@ -853,6 +853,11 @@ function NativeDesktopContent({
   const [, recoveryVisibilityChanged] = useState(0);
   const [pending, setPending] = useState(false);
   const [sending, setSending] = useState(false);
+  const [firstSendProgress, setFirstSendProgress] = useState<{
+    commandId: string;
+    created?: true;
+  }>();
+  const sendLoading = sending && !firstSendProgress?.created;
   const latestInputCommands = useRef(new Map<string, string>());
   const [inputDeliveries, setInputDeliveries] = useState(
     new Map<
@@ -1689,14 +1694,15 @@ function NativeDesktopContent({
                   preparationDrafts.current.get(sourceKey) === source &&
                   draftCache.current.get(targetKey) === target &&
                   isCurrentRead(current, epoch, nonce);
-                await saveBrowserDraft(targetKey, sessionId, {
-                  content: target?.content ?? '',
-                  browserAnnotations: browserNotesRef.current.document(targetKey),
-                  annotationImageOffset: imageDrafts.get(targetKey).length,
-                  outputFiles: imageDrafts
-                    .files(targetKey)
-                    .flatMap((file) => (file.output ? [file.output] : [])),
-                });
+                if (!isPendingFirstDraft(targetKey))
+                  await saveBrowserDraft(targetKey, sessionId, {
+                    content: target?.content ?? '',
+                    browserAnnotations: browserNotesRef.current.document(targetKey),
+                    annotationImageOffset: imageDrafts.get(targetKey).length,
+                    outputFiles: imageDrafts
+                      .files(targetKey)
+                      .flatMap((file) => (file.output ? [file.output] : [])),
+                  });
                 if (!owns()) continue;
                 await saveBrowserDraft(
                   sourceKey,
@@ -3102,11 +3108,12 @@ function NativeDesktopContent({
       firstOpenPage.current === pageIntent.current &&
       original.creation.expectedStoreId === directory?.storeId &&
       (!original.result ||
+        original.result.phase === 'sending' ||
         original.result.phase === 'unknown' ||
         original.result.phase === 'accepted')
     )
-      // Edits belong to the first Session until its selection has taken over,
-      // including after acceptance while target reads are still pending.
+      // Edits belong to the first Session until its selection takes over,
+      // even when creation and input receipts arrive before the target reads.
       draftCache.current.set(
         imageScope(original.creation.expectedStoreId, original.creation.sessionId),
         { content },
@@ -3505,21 +3512,29 @@ function NativeDesktopContent({
     page: number,
     sendingReceipt = false,
   ) {
-    if (current !== generation.current || firstRef.current?.commandId !== original.commandId)
+    const previous = firstRef.current;
+    if (
+      current !== generation.current ||
+      previous?.commandId !== original.commandId ||
+      (value.phase === 'sending' && previous.result)
+    )
       return;
-    setFirstSubmission({ ...original, result: value });
+    const nextSubmission = { ...original, result: value };
+    firstRef.current = nextSubmission;
+    setFirstSubmission(nextSubmission);
+    if (value.creation?.phase === 'created') markFirstCreation(original.commandId);
     if (sendingReceipt && (value.phase === 'failed' || value.phase === 'unknown'))
       setSending(false);
     if (
       value.phase === 'unknown' &&
-      original.result?.phase === 'unknown' &&
-      value.creation?.phase === original.result.creation?.phase &&
-      value.creation?.input.sessionId === original.result.creation?.input.sessionId
+      previous.result?.phase === 'unknown' &&
+      value.creation?.phase === previous.result.creation?.phase &&
+      value.creation?.input.sessionId === previous.result.creation?.input.sessionId
     )
       return;
     // Directory observation is recoverable independently of the known receipt.
     // Do not turn an acknowledged submission back into unknown or stop handoff.
-    void readDirectory().catch(() => {});
+    if (value.phase !== 'sending') void readDirectory().catch(() => {});
     if (value.creation?.phase === 'created') {
       if (original.preparationScope && original.savedPreparationRevision !== undefined) {
         const saved = noteDraftStates.current.get(original.preparationScope);
@@ -3556,14 +3571,26 @@ function NativeDesktopContent({
         value.phase === 'accepted' ? false : original.plan,
       );
       const key = imageScope(value.creation.input.expectedStoreId, sessionId);
-      if (draftCache.current.get(key) === original.draft) {
-        const next = value.phase === 'accepted' ? { content: '' } : original.draft;
-        draftCache.current.set(key, next);
-        if (value.phase === 'accepted')
-          firstAcceptedDraft.current = {
-            commandId: original.commandId,
-            draft: next,
-          };
+      const cachedDraft = draftCache.current.get(key);
+      const cleared = firstClearedDraft.current;
+      if (
+        cachedDraft &&
+        (cachedDraft === original.draft ||
+          (cleared?.commandId === original.commandId && cachedDraft === cleared.draft))
+      ) {
+        const clear = value.phase === 'sending' || value.phase === 'accepted';
+        const next = clear
+          ? cachedDraft === original.draft
+            ? { content: '' }
+            : cachedDraft
+          : original.draft;
+        firstClearedDraft.current = clear
+          ? { commandId: original.commandId, draft: next }
+          : undefined;
+        if (next !== cachedDraft) {
+          draftCache.current.set(key, next);
+          if (draftOwner.current === key && selected.current === sessionId) setDraft(next.content);
+        }
       }
       if (
         (page === pageIntent.current || firstOpenPage.current === pageIntent.current) &&
@@ -3579,6 +3606,24 @@ function NativeDesktopContent({
       newDraftRevision.current === original.preparationRevision
     )
       setNewDraft((draft) => draft || original.draft.content);
+  }
+  function markFirstCreation(commandId: string) {
+    setFirstSendProgress((progress) =>
+      progress?.commandId === commandId && !progress.created
+        ? { commandId, created: true }
+        : progress,
+    );
+  }
+  function isPendingFirstDraft(key: string) {
+    // Main still owns the submitted draft until the input receipt. The empty editor is temporary.
+    const first = firstRef.current;
+    const cleared = firstClearedDraft.current;
+    return (
+      first?.result?.phase === 'sending' &&
+      cleared?.commandId === first.commandId &&
+      key === imageScope(first.creation.expectedStoreId, first.creation.sessionId) &&
+      draftCache.current.get(key) === cleared.draft
+    );
   }
   function sendFirst() {
     if (
@@ -3636,6 +3681,7 @@ function NativeDesktopContent({
     firstRef.current = undefined;
     setFirstSubmission(undefined);
     void writeInput(async () => {
+      setFirstSendProgress({ commandId: original.commandId });
       let dispatched = false;
       try {
         await saveBrowserDraft(
@@ -3717,6 +3763,8 @@ function NativeDesktopContent({
           return;
         }
         const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+        const progress =
+          firstRef.current?.commandId === original.commandId ? firstRef.current.result : undefined;
         const value: NativeConversationResult = {
           kind: 'conversation',
           commandId: original.commandId,
@@ -3727,14 +3775,15 @@ function NativeDesktopContent({
           ].includes(code)
             ? 'failed'
             : 'unknown',
-          stage: 'create',
+          stage: progress?.stage ?? 'create',
+          creation: progress?.creation,
           code: code === 'native_request_too_large' ? code : 'conversation_response_unknown',
         };
         if (firstRef.current?.commandId === original.commandId) {
-          setFirstSubmission({ ...original, result: value });
-          if (newDraftRevision.current === original.preparationRevision)
-            setNewDraft((draft) => draft || original.draft.content);
+          await acceptFirstResult(value, original, current, page, true);
         }
+      } finally {
+        setFirstSendProgress(undefined);
       }
     }, false);
   }
@@ -3911,6 +3960,7 @@ function NativeDesktopContent({
     if (
       selected.current !== selection.session.id ||
       draftOwner.current !== key ||
+      isPendingFirstDraft(key) ||
       browserNotes.blocked(key) ||
       (!(draftCache.current.get(key)?.content ?? draft) &&
         !dirtyDrafts.current.has(key) &&
@@ -4657,6 +4707,58 @@ function NativeDesktopContent({
         selected.current === firstSubmission.creation.sessionId) &&
         selection?.storeId === firstSubmission.creation.expectedStoreId &&
         selection.session.id === firstSubmission.creation.sessionId));
+  const confirmedFirstCreation =
+    firstSubmission &&
+    !firstSubmission.result &&
+    state?.creationSubmissions.find(
+      ({ input, phase }) =>
+        phase === 'created' &&
+        input.commandId === firstSubmission.creation.commandId &&
+        input.expectedStoreId === firstSubmission.creation.expectedStoreId &&
+        input.sessionId === firstSubmission.creation.sessionId &&
+        input.workspaceId === firstSubmission.creation.workspaceId,
+    );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Read the current page intent before acting on this exact creation receipt.
+  useEffect(() => {
+    const original = firstRef.current;
+    const current = state?.generation;
+    if (
+      !confirmedFirstCreation ||
+      !original ||
+      original.result ||
+      original.creation.commandId !== confirmedFirstCreation.input.commandId ||
+      current !== generation.current
+    )
+      return;
+    const page = pageIntent.current;
+    if (
+      !preparing ||
+      scheduledTasksView ||
+      firstOpenPage.current !== page ||
+      directory?.storeId !== confirmedFirstCreation.input.expectedStoreId
+    ) {
+      markFirstCreation(original.commandId);
+      return;
+    }
+    void acceptFirstResult(
+      {
+        kind: 'conversation',
+        commandId: original.commandId,
+        phase: 'sending',
+        stage: 'permission',
+        creation: confirmedFirstCreation,
+      },
+      original,
+      current,
+      page,
+    );
+  }, [
+    confirmedFirstCreation,
+    state?.generation,
+    preparing,
+    scheduledTasksView,
+    directory?.storeId,
+  ]);
   // The directory can confirm creation before the send receipt or prepared
   // readers arrive. Highlight that original page's row without changing IO.
   const firstDirectorySession =
@@ -4713,18 +4815,18 @@ function NativeDesktopContent({
           }
         : previous,
     );
-    const accepted = firstAcceptedDraft.current;
+    const cleared = firstClearedDraft.current;
     const key = imageScope(original.creation.expectedStoreId, original.creation.sessionId);
     if (
-      accepted?.commandId === original.commandId &&
-      draftCache.current.get(key) === accepted.draft &&
+      cleared?.commandId === original.commandId &&
+      draftCache.current.get(key) === cleared.draft &&
       selection?.storeId === original.creation.expectedStoreId &&
       selection.session.id === original.creation.sessionId &&
       selected.current === original.creation.sessionId
     ) {
       draftCache.current.set(key, original.draft);
       setDraft((current) => current || original.draft.content);
-      firstAcceptedDraft.current = undefined;
+      firstClearedDraft.current = undefined;
     }
   }, [firstSubmission, state?.inputSubmissions, selection, setDraft]);
   useLayoutEffect(() => {
@@ -5057,7 +5159,9 @@ function NativeDesktopContent({
   const pendingFirstReply =
     firstVisible &&
     confirmedFirstReply.current !== firstInputIdentity &&
-    (!firstSubmission.result || firstSubmission.result.phase === 'accepted') &&
+    (!firstSubmission.result ||
+      firstSubmission.result.phase === 'sending' ||
+      firstSubmission.result.phase === 'accepted') &&
     !rejectedInputs.has(firstSubmission.commandId) &&
     !state?.callerUnavailable &&
     !state?.backgroundUnavailable &&
@@ -6837,7 +6941,12 @@ function NativeDesktopContent({
           ? {
               turnId: transcript.turnActivity?.turnId ?? pendingFirstReply,
               presentationKey: pendingFirstReply,
-              status: 'preparing',
+              status:
+                firstSendProgress?.commandId === pendingFirstReply &&
+                !firstSendProgress.created &&
+                !confirmedFirstCreation
+                  ? 'creating_session'
+                  : 'preparing',
             }
           : !preparing && transcript.turnActivity
             ? {
@@ -7480,6 +7589,7 @@ function NativeDesktopContent({
                 },
                 sessionLoading: !preparing,
                 sending,
+                sendLoading,
 
                 sendDisabled:
                   !newWorkspace ||
@@ -7646,6 +7756,7 @@ function NativeDesktopContent({
                   },
                   sessionLoading,
                   sending,
+                  sendLoading,
                   // A routine history scan gates actions without removing the observed label.
                   promptHidden: waitingForPlanReview,
                   permissionWhenPromptHidden:

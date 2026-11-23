@@ -5,7 +5,7 @@ Status: implemented
 ## Problem
 受治理文件 Provider 已按 [Agent Note 0118](../feature/2026-08-18-trusted-workspace-unrestricted-file-access.md) 将 canonical Workspace 视为完整信任根，但原生 Shell sandbox、
 命令文本扫描、MCP executable/cwd evaluator 和 brokered-Git native profile 仍按 `.git`、`.env`、
-`.agents`、`.codex` 等名称拒绝 Workspace 内路径。结果是同一已授权目录通过文件工具可读写，
+`.agents` 等名称拒绝 Workspace 内路径。结果是同一已授权目录通过文件工具可读写，
 通过 `ls`、Shell child 或本地进程却被二次拒绝；大小写别名和隐藏目录又扩大了三平台差异。
 
 路径名称不是独立的授权主体。Workspace identity、整体 filesystem scope、进程能力、网络能力与

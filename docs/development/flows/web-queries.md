@@ -25,7 +25,7 @@
 | A01 路由 | 自动和关闭模式、显式模型选择、歧义配置、未知网关与受限父级逐项核对唯一选择；兼容 Responses 协议本身不授予原生搜索。[路由测试](../../../apps/service/test/isolated/web-search-routing.test.ts) |
 | A02 切换模型或账户 | 配置测试核对冻结的提供商别名、原账户、Profile、端点与凭据引用；路由测试核对重建时的绑定摘要。活跃窗口中切换账户的用户过程需在桌面复验。[配置](../../../apps/service/test/isolated/web-search-configuration.test.ts) · [路由](../../../apps/service/test/isolated/web-search-routing.test.ts) |
 | A03 同名工具 | 原生搜索活动不会再次派给本地执行器；同名普通函数与 MCP 工具仍能按原标识执行，SDK 用例核对序列化后的工具名和续轮请求。[普通工具](../../../packages/agent/test/isolated/web-search/tool.test.ts) · [SDK](../../../packages/ai/test/web-search.test.ts) |
-| A04 历史续轮 | 在本机 Responses 对端捕获下一次请求，核对同一搜索项只出现一次；Agent 用例关闭并重开原 SQLite Profile 后再次检查。真实 OpenAI/Codex 账户分别需要实测。[冷重开](../../../packages/agent/test/isolated/execution/native-web-search.test.ts) · [SDK](../../../packages/ai/test/web-search.test.ts) |
+| A04 历史续轮 | 在本机 Responses 对端捕获下一次请求，核对同一搜索项只出现一次；Agent 用例关闭并重开原 SQLite Profile 后再次检查。真实账户须按实际连接分别验证。[冷重开](../../../packages/agent/test/isolated/execution/native-web-search.test.ts) · [SDK](../../../packages/ai/test/web-search.test.ts) |
 | A05 终态 | 分别核对失败、未完整、结果未知与完成，普通回答或部分来源不能把搜索标为成功。[Agent 状态](../../../packages/agent/test/isolated/execution/native-web-search.test.ts) |
 | A06 断流 | 对端已收到 POST 后，分别在首个 SSE 事件前、搜索开始后断开，核对请求计数与无自动换线。可确证的发送前失败另按原重试规则处理。[SDK 断流](../../../packages/ai/test/web-search.test.ts) · [Agent 发送边界](../../../packages/agent/test/isolated/execution/native-web-search.test.ts) |
 | A07 外部错误及空结果 | 核对 HTTP 错误归类、重定向、响应损坏和提供商回显的敏感内容；合法的空条目列表按成功处理。[提供商测试](../../../apps/service/test/isolated/web-search-providers.test.ts) |
@@ -41,4 +41,4 @@
 | A17 原生预授权 | 核实际会话、工作区信任及 full 模式；拒绝或能力未知时检查发出的模型请求没有原生搜索声明。逐查询审批沿普通工具路线处理。[权限](../../../apps/service/test/isolated/permission-configuration.test.ts) · [请求断言](../../../packages/agent/test/isolated/execution/native-web-search.test.ts) |
 | A18 无正文时的进度 | 在本机模型流产生首段文字之前读取真实 Execution 的搜索活动；终态应停止该执行的刷新，切换时晚到结果不能覆盖新会话。实际两种桌面宿主仍需观察开始、结束和切换全过程。[流与持久进度](../../../packages/agent/test/isolated/execution/native-web-search.test.ts) |
 
-本轮本机夹具不产生真实搜索服务的账户资格。官方 OpenAI Responses 原生、独立 OpenAI 搜索、DeepSeek Search 和 Perplexity Search 各自需要显式允许的一次真实查询。Codex 登录的认证与独立 OpenAI API 账户分开，在自身真实搜索与续轮获得证据前保持未确认。Windows 和 macOS 的发布安装、生产窗口和真实账户同样需要对应平台记录。
+本轮本机夹具不产生真实搜索服务的账户资格。官方 OpenAI Responses 原生、独立 OpenAI 搜索、DeepSeek Search 和 Perplexity Search 各自需要显式允许的一次真实查询。不同认证来源的验证结果不能互相代替。Windows 和 macOS 的发布安装、生产窗口和真实账户同样需要对应平台记录。

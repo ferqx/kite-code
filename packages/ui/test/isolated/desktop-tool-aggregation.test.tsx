@@ -673,11 +673,11 @@ test('Shell cards retain the original command and output while the header stays 
     await render([original]);
     await click(summary(host));
     const button = host.querySelector('.shell-activity .tool-activity-summary')!;
-    expect(button.textContent).toContain('运行旅程校验');
     expect(button.querySelector('.tool-activity-title')?.textContent).toBe('运行命令');
     expect(button.getAttribute('data-status')).toBe('running');
-    expect(button.querySelector('.tool-command')?.textContent).not.toContain('\n');
-    expect(button.querySelector('.tool-command')?.textContent?.length).toBeLessThanOrEqual(513);
+    const preview = `${command.replace(/\s+/g, ' ').slice(0, 512)}…`;
+    expect(button.querySelector('.tool-command')?.textContent).toBe(preview);
+    expect(button.textContent).not.toContain(original.target!);
     await click(button);
     const viewport = host.querySelector('.shell-output-viewport')!;
     expect(host.querySelector('.shell-output-header .shell-command-text')?.textContent).toBe(
@@ -707,6 +707,8 @@ test('Shell cards retain the original command and output while the header stays 
     expect(host.querySelector('.shell-output-viewport')).toBe(viewport);
     expect(host.querySelector('.shell-activity .tool-activity-summary')).toBe(button);
     expect(button.querySelector('.tool-activity-title')?.textContent).toBe('已运行');
+    expect(button.querySelector('.tool-command')?.textContent).toBe(preview);
+    expect(button.textContent).not.toContain(original.target!);
     expect(host.querySelector('.shell-command-text')?.textContent).toBe(command);
     expect(host.querySelector('.shell-console-output')?.textContent).toBe('第一行\n第二行🙂\n');
     expect(host.querySelector('.shell-result')?.textContent).toBe('成功');

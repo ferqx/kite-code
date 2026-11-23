@@ -36,6 +36,48 @@ const history: ModelMessage[] = [
   { role: 'tool', toolCallId: 'call', content: 'Original complete result' },
 ];
 
+test('the trusted system context separates base instructions from the selected Shell and platform', () => {
+  const powerShell = agentContractSource('D:\\workspace', {
+    platform: 'win32',
+    ripgrepVersion: '15.0.0',
+    shell: { kind: 'powershell', version: '5.1.26100.10068', edition: 'Desktop', locale: 'zh-CN' },
+  });
+  const [system, ...messages] = assembleModelContext([powerShell], history);
+  expect(system).toMatchObject({ role: 'system', sourceIds: ['agent:contract'] });
+  const environmentHeading = '\n\n# Working environment\n';
+  const [instructions, environment] = system!.content.split(environmentHeading);
+  expect(instructions).toContain('## Changes to system instructions');
+  expect(instructions).not.toContain('Shell:');
+  expect(environment).toContain('Workspace root: D:\\workspace');
+  expect(environment).toContain('Shell: Windows PowerShell 5.1.26100.10068');
+  expect(environment).toContain('Windows user locale: zh-CN');
+  expect(environment).toContain('Bundled ripgrep (rg) version: 15.0.0');
+  expect(environment).toContain('Supply -UseBasicParsing for Invoke-WebRequest.');
+  expect(environment).toContain("rg -n -g 'package.json' 'name' packages apps");
+  expect(
+    system?.content.match(/prefer rg for text and rg --files for file discovery/g),
+  ).toHaveLength(1);
+  expect(messages).toEqual(history);
+
+  const bash = agentContractSource('D:\\workspace', {
+    platform: 'win32',
+    shell: { kind: 'git-bash', version: '5.3.15(2)-release' },
+  });
+  expect(bash.content.split(environmentHeading)[0]).toBe(instructions);
+  expect(bash.content).toContain('Shell: Git Bash 5.3.15(2)-release on Windows');
+  expect(bash.content).not.toContain('PowerShell on Windows passes wildcard paths');
+  expect(bash.digest).not.toBe(powerShell.digest);
+
+  const posix = agentContractSource('/workspace', {
+    platform: 'linux',
+    shell: { kind: 'posix', executable: '/bin/sh' },
+  });
+  expect(posix.content).toContain('Operating system: Linux\nShell: /bin/sh (POSIX)');
+  const shellUnavailable = agentContractSource('/workspace', { platform: 'linux' });
+  expect(shellUnavailable.content).toContain('Operating system: Linux');
+  expect(shellUnavailable.content).not.toContain('Shell:');
+});
+
 test('read-only task and automatic rejection guidance remain one deterministic trusted contract', () => {
   const contract = agentContractSource('/actual-workspace');
   expect(contract).toMatchObject({
@@ -48,53 +90,52 @@ test('read-only task and automatic rejection guidance remain one deterministic t
   expect(agentContractSource('/actual-workspace')).toEqual(contract);
   expect(contract.digest).toBe(createHash('sha256').update(contract.content).digest('hex'));
   expect(agentContractSource('/other-workspace').digest).not.toBe(contract.digest);
+  expect(contract.content).toContain(
+    'When using Shell to search, prefer rg for text and rg --files for file discovery. If the rg command is unavailable, use an appropriate alternative for the current shell.',
+  );
   expect(contract.content).toContain('read-only unless the user authorizes changes');
   expect(contract.content).toContain('findings in the response unless saving was requested');
   expect(contract.content).toContain(
-    'do not create placeholders or reports merely to inspect a project',
+    'Do not create project placeholders or reports for a read-only task',
   );
   expect(contract.content).toContain(
-    'Necessary temporary scripts and temporary exploration artifacts',
+    'Use temporary scripts or artifacts only as needed within existing permissions',
   );
   expect(contract.content).toContain(
-    'does not authorize retrying the denied effect through another tool or path',
+    'An automatic rejection does not authorize retrying the denied effect through another tool or path',
   );
-  expect(contract.content).toContain('original task that are already authorized');
-  expect(contract.content).toContain('Create Git worktrees only with git_worktree');
+  expect(contract.content).toContain('Continue the independent parts that remain authorized');
   expect(contract.content).toContain(
-    'never place worktree code in an operating-system temporary directory',
+    'Obtain explicit user approval before changing model-facing system instructions',
   );
-  expect(contract.content).toContain('report that limitation instead of falling back to Shell');
+  expect(contract.content).toContain('A direct request authorizes the stated change.');
   expect(contract.content).toContain(
-    'even spawn EPERM or EACCES does not prove an approval rejection',
+    'If approval is missing, describe the proposed change and wait for the user.',
   );
-  expect(contract.content).toContain('Git started and returned a nonzero exit code');
-  expect(contract.content).toContain('Do not repeat identical calls, change keys or parameters');
-  expect(contract.content).toContain('Partial or unknown effects, or unconfirmed cleanup');
-  expect(contract.content).toContain(
-    'The child receives the assignment, not everything visible to the parent',
-  );
+  expect(contract.content).toContain('The child receives the assignment and its own context.');
   expect(contract.content).toContain('use follow_up_agent on the same child');
   expect(contract.content).toContain('preserve successful effects and once-only limits');
-  expect(contract.content).toContain('An idle message alone does not resume work');
   expect(contract.content).toContain(
-    'compare the actual final target and material content against the original request',
+    'compare the actual final target and content against the request',
   );
-  expect(contract.content).toContain('Compare facts already present directly');
-  expect(contract.content).toContain('a path or execution error is not an approval rejection');
-  expect(contract.content).toContain('User approvals may be handled outside your visible messages');
-  expect(contract.content).toContain('does not prove that no approval occurred');
-  expect(contract.content).toContain('otherwise leave it unspecified');
-  expect(contract.content).toContain('Planning is a plan mode, not an Agent execution phase');
+  expect(contract.content).toContain('Recover missing evidence through permitted readers');
+  expect(contract.content).toContain('An execution or path error is not an approval rejection');
+  expect(contract.content).toContain('User approval may occur outside the visible conversation');
+  expect(contract.content).toContain(
+    'State its source or count only when the original evidence supports it',
+  );
+  expect(contract.content).toContain('Planning limits the steps a Run may take');
+  expect(contract.content).toContain('Plan approval applies to the recorded Run and plan version');
   expect(contract.content).not.toContain('actual phase');
+  expect(contract.content).toContain('When progress is missing, use read_plan if available');
+  expect(contract.content).toContain('Do not restart an operation to recover its result');
   expect(contract.content).toContain(
-    'use read_plan when available before choosing remaining steps',
+    'Current files or an accumulated git diff alone cannot attribute earlier changes',
   );
-  expect(contract.content).toContain('do not restart an operation to recover its result');
-  expect(contract.content).toContain('an accumulated git diff do not identify which changes');
   expect(contract.content).toContain(
-    'Tool declarations describe available requests; they do not grant',
+    'Tool declarations describe available requests and grant no permissions',
   );
+  expect(contract.content).not.toContain('Put your complete task report in your final reply');
   const sources = [project, runtime, contract];
   const input = assembleModelContext(sources, history);
   expect(input.filter((message) => message.role === 'system')).toEqual([
@@ -137,20 +178,13 @@ test('normal, summary and expanded admission keep host context before the real c
   expect(refreshed[2]?.content).toContain('plan_requirement: approved');
 });
 
-test('worktree guidance separates explicit session activation, exit and target deletion', () => {
+test('the system contract gives tool selection without tool-specific failure or action guidance', () => {
   const contract = agentContractSource('/source-checkout');
-  for (const text of [
-    'action use and its absolute path',
-    'Shell cd and workdir do not switch the Session execution root',
-    'action exit to return this Session to its original workspace',
-    'without deleting any directory, registration, branch or ref',
-    'only tool call in that model response',
-    'Existing Jobs, other Sessions and existing children keep their own roots',
-    'Never report a switch before the successful receipt',
-    'Invoke git_worktree.remove only when the user explicitly requests deletion of the specific target',
-    'Even when Auto mode skips approval, that does not supply user task authorization for deletion or expand the execution scope',
-  ])
-    expect(contract.content).toContain(text);
+  expect(contract.content).toContain('Create Git worktrees only with git_worktree');
+  expect(contract.content).toContain('Do not fall back to Shell or scripts');
+  expect(contract.content).not.toMatch(
+    /failure\.category|git_operation_failed|Git started and returned a nonzero exit code|git_worktree\.remove|operating-system temporary directory|only tool call in that model response|file-baseline conflict|empty timeout/,
+  );
 });
 
 test('legacy source placement remains prefix and invalid, elevated or duplicate runtime placements fail closed', () => {

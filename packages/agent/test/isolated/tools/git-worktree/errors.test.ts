@@ -127,19 +127,29 @@ test('failure protocol is closed, validates safe metadata, preserves mutation an
     details: { ...frame.details, failure: undefined, diagnostic: 'historical diagnostic' },
   };
   expect(validateFrame(historical, request)).toBe(true);
-  expect(failureGuidance(undefined, 'unknown')).toBe('');
+  const legacy = failureGuidance('failed', historical.details);
+  expect(legacy).toContain('No specific failure category was recorded');
+  expect(legacy).toContain('Observe only the original operation and Job');
+  expect(legacy).not.toContain(historical.details.diagnostic);
+  expect(legacy).not.toContain('Git started and returned a nonzero exit code');
   for (const mutation of ['partial', 'unknown', 'completed'])
-    expect(failureGuidance(frame.details.failure, mutation)).toContain(
-      'Observe only the original key and Job',
+    expect(failureGuidance('failed', { ...frame.details, mutation })).toContain(
+      'Observe only the original operation and Job',
     );
-  expect(failureGuidance({ category: 'process_start', errno: 'EPERM' }, 'not_started')).toContain(
-    'does not mean the user denied authorization',
+  expect(
+    failureGuidance('failed', {
+      failure: { category: 'process_start', errno: 'EPERM' },
+      mutation: 'not_started',
+    }),
+  ).toContain('does not mean the user denied authorization');
+  expect(failureGuidance('failed', { ...frame.details, mutation: 'not_started' })).toContain(
+    'separately authorized new request',
   );
-  expect(failureGuidance(frame.details.failure, 'not_started')).toContain(
-    'does not authorize automatic retry',
-  );
-  expect(failureGuidance(frame.details.failure, undefined)).not.toContain(
+  expect(failureGuidance('failed', { failure: frame.details.failure })).not.toContain(
     'No mutation was started',
+  );
+  expect(failureGuidance('failed', { code: 'permission_denied' })).toContain(
+    'authorization or capability policy denied this request',
   );
 });
 

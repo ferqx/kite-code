@@ -50,7 +50,7 @@ Required quality 的依赖安装、Web 资产准备与原全部检查由[CI 回�
 
 本轮 quality 下载缓存另以两个独立物理源码副本验证：均没有依赖目录、Web dist、Files 资产和 Cargo target，PATH 不含 Rust。空缓存冻结安装838个包约272.13秒；第二副本仅凭同一下载缓存以 `--offline --frozen-lockfile --ignore-scripts` 安装约33.14秒，再按原 workflow 安装命令复验通过。两者的锁文件、清单和九份原配置字节未变，八个 workspace 链接均只指向各自副本。最终在两份副本按 workflow 执行 Web 准备及原全部 quality 检查，连同当前覆盖的 docs-impact all 均通过；分别变异清单和隐藏 Web 导出后，仍准确返回 frozen-lockfile／workspace-export-invalid，恢复后边界通过。这是本机冷／热下载验证，耗时包含当时网络和磁盘条件，不代表 hosted cache action 已执行或承诺加速比例。
 
-2026-11-04，接入 FetchSession 前，基于 `b9a25f082` 加当时已有工具链改动，Windows x64：从官方分发下载独立 Bun1.4.3，与本机1.4.4使用相同源码、同样25个完整测试文件、原测试运行器的私有 runtime／HOME／TEMP和原时限串行对照。两版均21文件通过、4文件失败，失败文件与测试名相同，无新增版本失败；通过范围包含代理／Codex／模型选择与配置、提供商与网页装配、Service取消／恢复、Store／rollback／statement ACK生命周期、crash、HTTP／paired关闭、Client SSE及真实Windows sealed Bun／standalone verifier。它是有限兼容对照，不是全仓、三平台、installed或正式发布资格。
+2026-11-04，接入 FetchSession 前，基于 `b9a25f082` 加当时已有工具链改动，Windows x64：从官方分发下载独立 Bun1.4.3，与本机1.4.4使用相同源码、同样25个完整测试文件、原测试运行器的私有 runtime／HOME／TEMP和原时限串行对照。两版均21文件通过、4文件失败，失败文件与测试名相同，无新增版本失败；通过范围包含代理／本机认证／模型选择与配置、提供商与网页装配、Service取消／恢复、Store／rollback／statement ACK生命周期、crash、HTTP／paired关闭、Client SSE及真实Windows sealed Bun／standalone verifier。它是有限兼容对照，不是全仓、三平台、installed或正式发布资格。
 
 原失败保留：[恢复准备清理](../apps/service/test/isolated/recovery-preparation-ownership.test.ts)在旧seed就绪／私有ACL阶段失败；[恢复锁释放](../packages/agent/test/isolated/storage/recovery-lock-release.test.ts)的生成夹具把Windows反斜杠写进TS import，尚未进入原断言；[历史配置兼容](../packages/agent/test/isolated/recovery/run-resume-configuration-compatibility.test.ts)的approved原Execution仍为failed；[配对代理](../apps/service/test/isolated/paired-proxy.test.ts)的upper用例启动为`network_outcome_unknown`。这些失败已由两版同源实际复现，未删断言、改时限或追加skip，不记为资格通过。
 

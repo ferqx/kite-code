@@ -122,7 +122,11 @@ test('managed Agent waits isolate target sets and resume committed receipts afte
             .filter((message) => message.role === 'system')
             .map((message) => message.content)
             .join('\n');
-          expect(instructions).toContain('As a parent waiting on a child, use the exact work_refs');
+          expect(definition.description).toContain('Observe this mailbox or the exact work_refs');
+          expect(definition.description).toContain(
+            'An empty timeout does not establish failure or completion',
+          );
+          expect(instructions).not.toContain('An empty timeout');
           expect(instructions).not.toContain('next_cursor');
           yield* call('spawn_agent', { prompt: 'Child A' });
           break;

@@ -39,7 +39,11 @@ export {
 } from './linux-shell-process-evidence';
 export { bundledOfficeCliAsset } from './officecli-runtime';
 export type { ShellOutputCollection } from './output-collection';
-export { ripgrepAsset, withBundledRipgrep } from './ripgrep';
+export {
+  bundledRipgrepAsset,
+  ripgrepAsset,
+  withBundledRipgrep,
+} from './ripgrep';
 export {
   decodeMacosShellProcessEvidence,
   decodeShellProcessEvidence,

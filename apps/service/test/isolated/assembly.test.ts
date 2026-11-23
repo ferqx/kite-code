@@ -267,7 +267,7 @@ test('configuration cannot invent Tool IDs or trusted Skill roots, and disabled 
     });
     expect(assembly.snapshotFacts.skills.map(({ id }) => id)).not.toContain('disabled');
     expect(await assembly.sources.capture(request)).toEqual([
-      agentContractSource(realpathSync(f.workspace)),
+      agentContractSource(realpathSync(f.workspace), { platform: process.platform }),
       expect.objectContaining({ id: 'skills.catalogue', kind: 'skill_catalogue' }),
     ]);
   } finally {
@@ -321,7 +321,7 @@ test('private Skill selection resolves one canonical ID/name and narrows all cat
     assembly = await createWorkspaceAssembly({ ...options, selectedSkills: [] });
     expect(assembly.snapshotFacts.skills).toEqual([]);
     expect(await assembly.sources.capture(request)).toEqual([
-      agentContractSource(realpathSync(f.workspace)),
+      agentContractSource(realpathSync(f.workspace), { platform: process.platform }),
     ]);
   } finally {
     await assembly?.dispose();

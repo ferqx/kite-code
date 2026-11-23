@@ -417,24 +417,18 @@ test('the current Shell model surface has four tools and rejects hidden legacy p
       'shell_stop',
     ]);
     const lifecycle = 'Kite stops remaining child processes when the command exits';
+    const fileSafety = 'perform file deletions or moves in the same shell';
+    const hiddenHelper = 'use -WindowStyle Hidden unless the user explicitly requests';
     expect(surface.tools[0]!.description).not.toContain(lifecycle);
-    for (const dialect of ['powershell', 'git-bash'] as const) {
-      const windows = createShellExtension({
-        job: f.job,
-        permissionsSchema,
-        dialect,
-        powerShellVersion: '7.6.9',
-        gitBashVersion: '5.3.15(2)-release',
-        windowsUserLocale: 'zh-CN',
-      });
-      const tool = windows.tools!.find((tool) => tool.id === 'shell.execute')!;
-      const { description } = tool;
-      const version = dialect === 'powershell' ? 'PowerShell 7.6.9' : 'Git Bash 5.3.15(2)-release';
-      expect(description).toContain(version);
-      expect(description).toContain('Windows user locale is zh-CN.');
-      expect(description).toContain('Kite reads stdout and stderr as UTF-8.');
+    expect(surface.tools[0]!.description).not.toContain(fileSafety);
+    expect(surface.tools[0]!.description).not.toContain(hiddenHelper);
+    const windows = createShellExtension({ job: f.job, permissionsSchema, windows: true });
+    for (const tool of windows.tools!.filter(({ id }) =>
+      ['shell.execute', 'shell.launch'].includes(id),
+    )) {
+      expect(tool.description).not.toMatch(/Shell:|user locale|rg --files|ripgrep.*version/i);
       expect(tool.inputSchema.properties).toMatchObject({
-        command: { description: expect.stringContaining(version) },
+        command: { type: 'string', minLength: 1, maxLength: 262144 },
         filesystem: {
           description: expect.stringContaining('startup or bidirectional local named pipe'),
         },
@@ -444,15 +438,28 @@ test('the current Shell model surface has four tools and rejects hidden legacy p
           ),
         },
       });
-      expect(description).toContain(`${lifecycle}, including with background:true.`);
-      expect(description).toContain('flush their changes and close them before it exits');
-      expect(description).toContain(
-        'Default local named pipes can deny bidirectional access under workspace_write',
-      );
-      expect(description).toContain(
-        'supported single-process or standalone batch mode before execution',
-      );
     }
+    const { description } = windows.tools!.find(({ id }) => id === 'shell.execute')!;
+    expect(description).toContain(fileSafety);
+    expect(description).toContain('Remove-Item or Move-Item with -LiteralPath');
+    expect(description).toContain('verify that each resolved absolute target');
+    expect(description).toContain(hiddenHelper);
+    expect(description).toContain(`${lifecycle}, including with background:true.`);
+    expect(description).toContain('flush changes, and close them within the same command');
+    expect(description).toContain(
+      'Bidirectional local named pipes may be denied under workspace_write',
+    );
+    expect(description).toContain('Prefer a supported single-process or standalone batch mode');
+    const nativeGitBash = createShellExtension({
+      job: f.job,
+      permissionsSchema,
+      windows: true,
+      windowsNativeGitBash: true,
+    }).tools!.find(({ id }) => id === 'shell.execute')!;
+    expect(nativeGitBash.description).toContain('without confinement');
+    expect(nativeGitBash.description).toContain(fileSafety);
+    expect(nativeGitBash.description).toContain(lifecycle);
+    expect(nativeGitBash.description).not.toContain('Bidirectional local named pipes');
     expect(surface.request.messages[0]!.toolCalls).toEqual([
       {
         id: historical[0]!.id,
@@ -530,13 +537,21 @@ test('default foreground execution waits for one original Job and preserves its 
   try {
     const view = await f.run();
     const shell = f.model.requests[0]!.tools!.find((tool) => tool.id === 'shell_execute')!;
-    expect(shell.description).toContain(
+    expect(shell.description).not.toContain(
       'Prefer rg for text search and rg --files for file discovery',
     );
     expect(shell.description).toStartWith(
       'Execute one supervised command. Choose the filesystem request before composing the command.',
     );
+    expect(shell.description).not.toContain('execution_timeout_ms');
+    expect(shell.description).not.toContain('commands required by the active skill');
     expect(shell.inputSchema.properties).toMatchObject({
+      background: {
+        description: expect.stringContaining('returns the original shell_id and acceptance state'),
+      },
+      execution_timeout_ms: {
+        description: expect.stringContaining('excluding approval and resource queues'),
+      },
       filesystem: {
         description: expect.stringContaining(
           'Set "full_access" explicitly for commands required by the active skill, including its validation and delivery steps',

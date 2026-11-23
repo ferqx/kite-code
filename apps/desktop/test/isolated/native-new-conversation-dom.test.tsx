@@ -184,11 +184,12 @@ function fixture(
   let releaseWorkspaceRemoval: ((result: NativeWorkspaceRemoval) => void) | undefined;
   let viewGeneration = 1;
   let connectionGeneration = 1;
+  const creationSubmissions: NativeState['creationSubmissions'][number][] = [];
   const unavailableWorkspace = () =>
     options.workspaceUnavailable === true || options.workspaceUnavailable === selected;
   const state = (): NativeState => ({
     generation: connectionGeneration,
-    creationSubmissions: [],
+    creationSubmissions,
     inputSubmissions: [],
     permissionSubmissions,
     interactionSubmissions: [],
@@ -621,7 +622,7 @@ function fixture(
     refreshWhileSelecting: () => act(async () => watcher?.({ kind: 'changed', generation: 1 })),
     releaseModels: () => act(async () => releaseModels?.()),
     selected: () => selected,
-    publishFirstCreation: async () => {
+    publishFirstCreation: async (confirmed = false) => {
       const send = [...calls]
         .reverse()
         .find((call) => call.method === 'conversation.send') as Extract<
@@ -630,6 +631,7 @@ function fixture(
       >;
       if (!sessions.some((item) => item.id === send.creation.sessionId))
         sessions.push(session(send.creation.sessionId));
+      if (confirmed) creationSubmissions.push({ input: send.creation, phase: 'created' });
       publishDirectory = true;
       await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
       return send;
@@ -1928,6 +1930,8 @@ test('an original pending input precedes its Run status and reply while saved us
     // Main can observe a Run before either the submit response or user history arrives.
     await f.publishMessages([], [active]);
     assertUserFirst();
+    expect(f.host.querySelector('.conversation-turn-notice')).toBeNull();
+    expect(f.host.querySelector('.agent-turn-running')?.textContent).toMatch(/^进行中/);
     await act(async () => release?.());
     assertUserFirst();
     const reply: Message = {
@@ -1941,6 +1945,7 @@ test('an original pending input precedes its Run status and reply while saved us
     };
     await f.publishMessages([reply], [active]);
     assertUserFirst();
+    expect(f.host.querySelector('.agent-turn-running')?.textContent).toMatch(/^进行中/);
     expect(f.host.querySelector('.message.assistant')?.textContent).toContain(
       'actual original reply',
     );
@@ -2331,6 +2336,105 @@ test('first-send loading preserves editable next drafts through Session handoff 
   }
 });
 
+for (const receiptDuringSelection of [true, false])
+  test(`draft edits after creation survive the held first selection (input receipt before handoff: ${receiptDuringSelection})`, async () => {
+    const f = fixture(true, true, 'accept_edits', { deferFirstRun: true });
+    const nextDraft = '正在编辑的下一条消息';
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('在 Workspace 中新建对话');
+      await f.edit('首条已提交的消息');
+      await f.chooseModel();
+      await f.click('发送首条消息');
+      f.holdSelection();
+      const send = await f.publishFirstCreation(true);
+      await f.until(() => f.selected() === send.creation.sessionId);
+      expect(f.host.querySelector('.composer-action')?.getAttribute('aria-busy')).toBeNull();
+
+      await f.edit(nextDraft);
+      expect(promptValue(f.input())).toBe(nextDraft);
+      if (receiptDuringSelection) await f.resolve('accepted');
+      await f.releaseSelection();
+      await f.until(() => !!f.input('当前会话私有草稿'));
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(nextDraft);
+      expect(f.drafts.get(send.creation.sessionId)).toBe(nextDraft);
+
+      if (!receiptDuringSelection) await f.resolve('accepted');
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(nextDraft);
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    } finally {
+      await f.releaseSelection();
+      await f.close();
+    }
+  });
+
+for (const phase of ['accepted', 'failed'] as const)
+  test(`first-send creation ends the spinner and opens the original Session before the ${phase} input receipt`, async () => {
+    const f = fixture(true, true, 'accept_edits', { deferFirstRun: true });
+    const prompt = '等待提交的首条消息';
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('在 Workspace 中新建对话');
+      await f.edit(prompt);
+      await f.chooseModel();
+      await f.click('发送首条消息');
+      const user = f.host.querySelector('.message.user');
+      expect(user?.textContent).toContain(prompt);
+      expect(f.host.querySelector('.composer-action')?.getAttribute('aria-busy')).toBe('true');
+      expect(f.host.querySelector('.conversation-turn-notice')?.textContent).toBe('正在创建会话…');
+
+      const send = await f.publishFirstCreation(true);
+      const sessionId = send.creation.sessionId;
+      await f.until(() => !!f.input('当前会话私有草稿'));
+      expect(f.selected()).toBe(sessionId);
+      expect(f.host.querySelector('.composer-action')?.getAttribute('aria-busy')).toBeNull();
+      expect(f.host.querySelector('.conversation-turn-notice')?.textContent).toBe('正在准备回复…');
+      expect(f.host.querySelector('.message.user') === user).toBe(true);
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+      expect(
+        f.calls.some((call) => call.method === 'draft.write' && call.sessionId === sessionId),
+      ).toBe(false);
+
+      if (phase === 'accepted') {
+        await f.edit('下一条草稿', '当前会话私有草稿');
+        await act(async () => {
+          f.host
+            .querySelector('form.composer')!
+            .dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+        });
+        await f.publishMessages(
+          [],
+          [
+            {
+              id: 'running-before-send-receipt',
+              sessionId,
+              originStoreId: 'store',
+              originCommandId: send.intent.commandId,
+              isActive: true,
+              status: 'running',
+              configuration: chatRunConfiguration(),
+              createdAt: Date.now(),
+              finishedAt: null,
+              reason: null,
+            },
+          ],
+        );
+        expect(f.host.querySelector('.agent-turn-running')?.textContent).toMatch(/^进行中/);
+      }
+      await f.resolve(phase);
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(
+        phase === 'failed' ? prompt : '下一条草稿',
+      );
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+      expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(0);
+      expect(
+        f.calls.filter((call) => call.method === 'select' && call.sessionId === sessionId),
+      ).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
 test('a confirmed first Session row is selected before its send receipt and prepared readers without moving the editor focus', async () => {
   for (const held of ['selection', 'models'] as const) {
     const f = fixture(true);
@@ -2395,7 +2499,7 @@ test('a late first Session directory row and receipt cannot select over a later 
     await f.click('Other B');
     const row = f.host.querySelector('.session-row[aria-current="page"]');
     expect(row?.getAttribute('aria-label')).toBe('Other B');
-    const send = await f.publishFirstCreation();
+    const send = await f.publishFirstCreation(true);
     expect(f.host.querySelector('.session-row[aria-current="page"]')).toBe(row);
     await f.resolve('accepted');
     expect(f.host.querySelector('.session-row[aria-current="page"]')).toBe(row);
@@ -4326,7 +4430,7 @@ test('the first reply starts timing with its Run and keeps its place through dis
         user.compareDocumentPosition(status) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
       ).not.toBe(0);
     };
-    expectStatus('正在准备回复…');
+    expectStatus('正在创建会话…');
     f.holdSelection();
     const sent = await f.resolve('accepted');
     expectStatus('正在准备回复…');
@@ -4358,6 +4462,7 @@ test('the first reply starts timing with its Run and keeps its place through dis
     };
     await f.publishMessages([input], [run]);
     const progress = f.host.querySelector('.agent-turn-running');
+    const turn = progress?.closest('.agent-turn');
     expect(progress?.textContent).toMatch(/^进行中 \d+ 秒$/);
     expect(Number(progress?.textContent?.match(/\d+/)?.[0])).toBeGreaterThanOrEqual(4);
     expect(f.host.querySelector('.conversation-turn-notice')).toBeNull();
@@ -4402,9 +4507,16 @@ test('the first reply starts timing with its Run and keeps its place through dis
       },
     };
     await f.publishMessages([input, reasoning], [run]);
+    const summary = f.host.querySelector('button.agent-turn-summary');
+    expect(summary?.closest('.agent-turn') === turn).toBe(true);
+    expect(summary?.getAttribute('aria-expanded')).toBe('false');
+    expect(f.host.querySelector('.conversation-trace-line')).toBeNull();
+    await act(async () => (summary as HTMLButtonElement).click());
     const thinking = f.host.querySelector('.conversation-trace-line');
+    const expandedProgress = f.host.querySelector('.agent-turn-running');
     expect(thinking?.textContent).toBe('思考中');
-    expect(f.host.querySelector('.agent-turn-running')).toBe(progress);
+    expect(expandedProgress?.closest('button') === summary).toBe(true);
+    expect(expandedProgress?.textContent).toMatch(/^进行中 \d+ 秒$/);
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant')).toBeNull();
     const reply: Message = {
@@ -4413,10 +4525,10 @@ test('the first reply starts timing with its Run and keeps its place through dis
       outputBody: { ...reasoning.outputBody!, contentBytes: '12' },
     };
     await f.publishMessages([input, reply], [run]);
-    expect(f.host.querySelector('.agent-turn-running')).toBe(progress);
-    expect(statuses().map((entry) => entry.textContent)).toEqual(['正在回复…']);
-    const info = statuses()[0]!.closest('.message-meta');
-    expect(info).not.toBeNull();
+    expect(f.host.querySelector('.agent-turn-running') === expandedProgress).toBe(true);
+    expect(expandedProgress?.textContent).toMatch(/^进行中 \d+ 秒$/);
+    expect(statuses()).toHaveLength(0);
+    expect(f.host.querySelector('.message.assistant .message-meta')).toBeNull();
     expect(f.host.querySelector('.conversation-trace-line')).toBe(thinking);
     const visibleReply = f.host.querySelector('.message.assistant .typeset-chat');
     expect(visibleReply?.textContent).toBe('首段正文');
@@ -4432,9 +4544,8 @@ test('the first reply starts timing with its Run and keeps its place through dis
     expect(f.host.querySelector('.agent-turn-running')).toBeNull();
     expect(f.host.querySelector('.agent-turn-summary')?.textContent).toBe('用时 9 秒');
     expect(f.host.querySelector('.message.assistant .typeset-chat')).toBe(visibleReply);
-    expect(f.host.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
-      'false',
-    );
+    expect(f.host.querySelector('button.agent-turn-summary') === summary).toBe(true);
+    expect(summary?.getAttribute('aria-expanded')).toBe('true');
     await f.publishMessages(
       [
         input,
@@ -4443,7 +4554,7 @@ test('the first reply starts timing with its Run and keeps its place through dis
       [terminal],
     );
     expect(statuses()).toHaveLength(0);
-    expect(f.host.querySelector('.agent-turn .message.assistant .message-meta')).toBe(info);
+    expect(f.host.querySelector('.agent-turn-final .message-meta .message-time')).not.toBeNull();
     expect(f.host.querySelectorAll('.agent-turn-final .message.assistant')).toHaveLength(1);
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
   } finally {

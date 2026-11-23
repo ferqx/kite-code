@@ -62,7 +62,7 @@ Main继续拥有最多8个普通页面、真实输入、历史和内存session�
 
 随后单独获准的13:19实例在59.760秒内取得上述同页填写、蓝光/type光标的实际OS窗口合成及程序化屏障证据；夹具观察ACK超时、本地替身idle超时和过短的正常退出等待阻断了人工交还阶段，原Browser Job最终job_stop_unconfirmed保持unknown。仅修正隔离夹具等待与取证，未据此增加生产硬退或隐藏原生焦点，也未重开实例。实际过程、原失败、后续只读进程消失与未取得资格完整归Desktop owner；不以部分切片或mock追认完整验收，提案仍为proposed。
 
-用户随后明确要求使用真实gpt-6-luna、低思考实机验证。新隔离制品沿正式Codex Responses绑定，以普通UI选准确路由／轻度，原Run模型快照确认low；未复制认证或读取既有浏览器资料。最终59.175秒核心轮取得一次准确人工关联结果、B期间新快照及一次效果、原Run completed和Browser Job已确认停止；原脚本的revision类型误报由独立只读证据核实，原RESULT不改。另29.263秒最小Native捕帧诊断的备注即时／700ms布局正常，但不能解释前轮窄条。阶段前失败、未准入响应unknown、选择变化及Service超时收口均保留在Desktop owner；新增两层纯回归区分pre-POST拒绝和post-admission迟到ACK，不据未复现的异常修改生产逻辑。提案继续部分实施。
+用户随后明确要求使用真实gpt-6-luna、低思考实机验证。新隔离制品沿正式本机凭据的 Responses 绑定，以普通UI选准确路由／轻度，原Run模型快照确认low；未复制认证或读取既有浏览器资料。最终59.175秒核心轮取得一次准确人工关联结果、B期间新快照及一次效果、原Run completed和Browser Job已确认停止；原脚本的revision类型误报由独立只读证据核实，原RESULT不改。另29.263秒最小Native捕帧诊断的备注即时／700ms布局正常，但不能解释前轮窄条。阶段前失败、未准入响应unknown、选择变化及Service超时收口均保留在Desktop owner；新增两层纯回归区分pre-POST拒绝和post-admission迟到ACK，不据未复现的异常修改生产逻辑。提案继续部分实施。
 
 
 ## 后续实施范围（2026-10-28 用户补充）

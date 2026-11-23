@@ -172,25 +172,60 @@ export function normalizeWorktreeError(error: unknown): WorktreeError {
     error,
   );
 }
-export function failureGuidance(failure: unknown, mutation: unknown): string {
-  if (!validWorktreeFailure(failure)) return '';
-  const cause = {
-    process_start:
-      ' Check the installed Git runtime and host subprocess support. This does not mean the user denied authorization.',
-    permission_denied:
-      ' Check the original filesystem scope and target access. Do not infer a user refusal or automatically request broader access.',
-    git_command:
-      ' Check the repository state and the original Git exit code; command failure alone does not prove a permission denial.',
-    verification: ' Preserve the original evidence and resolve the reported verification failure.',
-  }[failure.category];
-  return (
-    cause +
-    (failure.cleanupUnconfirmed ? ' Resource cleanup is unconfirmed.' : '') +
-    (mutation === 'partial' || mutation === 'unknown' || mutation === 'completed'
-      ? ' Effects may already exist. Observe only the original key and Job; do not repeat creation or removal.'
-      : mutation === 'not_started'
-        ? ' No mutation was started in this observation. Repairing the cause does not authorize automatic retry.'
-        : ' Mutation effects are not established by this error classification; inspect the original operation and Job before considering any further work.') +
-    ' Do not change the key or arguments, use Shell as a fallback, or restart an accepted mutation to recover its result.'
-  );
+const categoryGuidance = {
+  process_start:
+    'The Git subprocess did not start. Check the installed Git runtime and host subprocess support. A spawn error does not mean the user denied authorization or justify requesting broader access.',
+  permission_denied:
+    'Check the original filesystem scope and target access. Do not infer a user refusal or automatically request broader access.',
+  git_command:
+    'Git started and returned a nonzero exit code. Check the original exit code and repository state. A nonzero exit alone does not establish permission denial.',
+  verification: 'Preserve the original evidence and resolve the reported verification failure.',
+} satisfies Record<WorktreeFailureCategory, string>;
+
+const codeGuidance: Readonly<Record<string, string>> = {
+  git_operation_failed:
+    'No specific failure category was recorded. Do not infer one from stderr or the generic error code.',
+  permission_denied:
+    'The existing authorization or capability policy denied this request. Do not infer a user refusal or automatically request broader access.',
+  temporary_worktree_target:
+    'Use an authorized persistent location for a new worktree. Omitting path selects the configured worktree directory.',
+  worktree_default_root_unavailable:
+    'The configured worktree directory is unavailable. Supply an authorized persistent absolute path if creation is still needed.',
+};
+
+const mutationGuidance: Readonly<Record<string, string>> = {
+  not_started: 'No mutation was started in this observation.',
+  partial: 'The mutation produced partial effects.',
+  unknown: 'Mutation effects are unconfirmed.',
+  completed: 'The mutation completed before this failure was reported.',
+};
+
+export function failureGuidance(
+  outcome: 'failed' | 'outcome_unknown' | 'cancelled',
+  { code, failure, mutation }: { code?: unknown; failure?: unknown; mutation?: unknown },
+): string {
+  const classified = validWorktreeFailure(failure) ? failure : undefined;
+  const cause = classified
+    ? categoryGuidance[classified.category]
+    : typeof code === 'string' && Object.hasOwn(codeGuidance, code)
+      ? codeGuidance[code]
+      : undefined;
+  const effectsPossible =
+    mutation === 'partial' || mutation === 'unknown' || mutation === 'completed';
+  const observeOriginal =
+    effectsPossible || outcome === 'outcome_unknown' || classified?.cleanupUnconfirmed;
+  const next = observeOriginal
+    ? 'Observe only the original operation and Job. Use the returned operation_ref when available.'
+    : 'Inspect the reported cause and resolve it before considering any separately authorized new request.';
+  return [
+    cause,
+    classified?.cleanupUnconfirmed ? 'Resource cleanup is unconfirmed.' : undefined,
+    typeof mutation === 'string' && Object.hasOwn(mutationGuidance, mutation)
+      ? mutationGuidance[mutation]
+      : undefined,
+    next,
+    'Do not replay the original operation by changing its key or arguments, or by using Shell.',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }

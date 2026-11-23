@@ -890,6 +890,16 @@ try {
       await page.waitForTimeout(350);
       await page.screenshot({ path: path.join(artifact, `${label}-${name}.png`) });
     };
+    const commandPreviewGeometry = async (item: ReturnType<typeof page.locator>) => {
+      const geometry = await item.locator('.shell-command-block').evaluate((node) => ({
+        height: node.getBoundingClientRect().height,
+        lineHeight: parseFloat(getComputedStyle(node).lineHeight),
+        scrollHeight: node.scrollHeight,
+      }));
+      assert.equal(geometry.height, geometry.lineHeight * 2, 'long command occupies two lines');
+      assert.ok(geometry.scrollHeight > geometry.height, 'long command tail is clipped');
+      return geometry;
+    };
     const iconChecks: unknown[] = [];
     const defaultIcon = async (
       name: string,
@@ -2772,40 +2782,6 @@ try {
         { method: 'toolMessages.list' }
       >[] = [];
       let coldVerification: unknown;
-      const commandTail = async (
-        item: ReturnType<typeof page.locator>,
-        aggregate: ReturnType<typeof page.locator>,
-        phase: string,
-      ) => {
-        const outer = aggregate.locator('.tool-activity-viewport').first();
-        await outer.focus();
-        await page.keyboard.press('End');
-        await stage(phase);
-        const geometry = await item.locator('.shell-command-text').evaluate((node) => {
-          const text = node.firstChild!;
-          const range = document.createRange();
-          const length = text.textContent!.length;
-          range.setStart(text, Math.max(0, length - 2));
-          range.setEnd(text, length);
-          const tail = range.getBoundingClientRect();
-          const clip = node.closest('.tool-activity-viewport')!.getBoundingClientRect();
-          return {
-            tailTop: tail.top,
-            tailBottom: tail.bottom,
-            clipTop: clip.top,
-            clipBottom: clip.bottom,
-            whiteSpace: getComputedStyle(node).whiteSpace,
-            headerHeight: node.closest('.shell-output-header')!.getBoundingClientRect().height,
-          };
-        });
-        assert.equal(geometry.whiteSpace, 'pre-wrap');
-        assert.ok(
-          geometry.tailTop >= geometry.clipTop - 1 &&
-            geometry.tailBottom <= geometry.clipBottom + 1,
-          `full command tail inaccessible in aggregate: ${JSON.stringify(geometry)}`,
-        );
-        return geometry;
-      };
       for (const [index, entry] of cases.entries()) {
         const expected = await page.evaluate((kind) => {
           window.liveAggregationPhase = `native-${kind}-live`;
@@ -2900,10 +2876,7 @@ try {
               expected.command,
               `live Shell ${phase} lost original Unicode/multiline command`,
             );
-            assert.ok(
-              state.headerHeight! > 100,
-              `live Shell ${phase} did not render original command on multiple lines`,
-            );
+            assert.equal(state.headerHeight, 52, `live Shell ${phase} changed header height`);
             assert.equal(state.successChecks, 0, `live Shell ${phase} falsely reported success`);
             if (phase === 'auto') assert.equal(state.approval, '正在自动审批');
             if (phase === 'human') assert.match(state.approval, /等待人工/);
@@ -2987,11 +2960,7 @@ try {
             const { command: _command, ...readingState } = state;
             livePhases.push({ phase, ...readingState, commandLength: state.command?.length });
           }
-          liveCommandGeometry = await commandTail(
-            item,
-            aggregate,
-            'native-execute-live-command-tail',
-          );
+          liveCommandGeometry = await commandPreviewGeometry(item);
           const outer = aggregate.locator('.tool-activity-viewport').first();
           await outer.focus();
           await page.keyboard.press('Home');
@@ -3337,11 +3306,7 @@ try {
             expected.command,
           );
           await stage('native-execute-live-cold-command-start');
-          const coldCommandGeometry = await commandTail(
-            coldItem,
-            coldAggregate,
-            'native-execute-live-cold-command-tail',
-          );
+          const coldCommandGeometry = await commandPreviewGeometry(coldItem);
           await stage('native-execute-live-cold-reopened');
           const coldState = await coldItem.evaluate((node) => ({
             title: node.querySelector('.tool-activity-title')?.textContent,
@@ -3576,10 +3541,7 @@ try {
       );
       assert.equal(headerBorder, '0px', 'Shell Header retained an internal bottom border');
       const headerBeforeScroll = await commandHeader.boundingBox();
-      assert.ok(
-        headerBeforeScroll && headerBeforeScroll.height > 60,
-        'Shell original multiline command was collapsed into a summary',
-      );
+      await commandPreviewGeometry(shell);
       const readStandaloneGeometry = () =>
         shell.evaluate((node) => {
           const measure = (element: Element) => {
@@ -3616,7 +3578,6 @@ try {
         width === 1280 ? 740 : 529,
         'icon change shrank Shell card',
       );
-      assert.equal(headerBeforeScroll?.height, 118, 'icon change shrank multiline Header');
       await Bun.write(
         path.join(artifact, `${theme}-${width}-standalone-shell-geometry.json`),
         JSON.stringify(standaloneGeometry, null, 2),

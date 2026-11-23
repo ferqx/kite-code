@@ -212,7 +212,7 @@ test('a running read settles to a neutral missing-file fact and reopens without 
   });
 });
 
-test('keyless background Shell retains purpose and original command from live input to exact accepted receipt', async () => {
+test('keyless background Shell shows the original command from live input to exact accepted receipt', async () => {
   await fixture(async ({ host, render }) => {
     const input = {
       command: "printf 'original command\\n'",
@@ -236,7 +236,9 @@ test('keyless background Shell retains purpose and original command from live in
     expect(entry.message.shell).toMatchObject({ operation: 'launch', command: input.command });
     expect(entry.message.shell?.shellId).toBeUndefined();
     await render(entry.message);
-    expect(host.querySelector('.tool-activity-summary')?.textContent).toContain(input.description);
+    const row = host.querySelector('.tool-activity-summary');
+    expect(row?.querySelector('.tool-command')?.textContent).toBe(input.command);
+    expect(row?.textContent).not.toContain(input.description);
     expect(host.textContent).not.toContain('成功');
 
     const { model, receipt, saved } = history(tool);
@@ -272,9 +274,11 @@ test('keyless background Shell retains purpose and original command from live in
       command: input.command,
     });
     expect(accepted.shell?.jobStatus).toBeUndefined();
-    await render(accepted, false, true);
+    await render({ ...accepted, presentationKey: entry.message.presentationKey }, false, true);
     expect(host.querySelectorAll('.shell-activity')).toHaveLength(1);
-    expect(host.querySelector('.tool-activity-summary')?.textContent).toContain(input.description);
+    expect(host.querySelector('.tool-activity-summary')).toBe(row);
+    expect(row?.querySelector('.tool-command')?.textContent).toBe(input.command);
+    expect(row?.textContent).not.toContain(input.description);
     expect(host.querySelector('.shell-command-text')?.textContent).toBe(input.command);
     expect(host.textContent).toContain('已受理');
     expect(host.textContent).not.toContain('命令执行成功');

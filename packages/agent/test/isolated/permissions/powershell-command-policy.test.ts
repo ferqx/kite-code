@@ -91,9 +91,11 @@ test.skipIf(!installedPowerShell7)(
       const tool = config.extensions
         .flatMap((extension) => extension.tools ?? [])
         .find((tool) => tool.id === 'shell.execute');
-      expect(tool?.description).toContain(
-        `The command language is PowerShell ${powerShell.version}.`,
-      );
+      expect(tool?.description).not.toContain(powerShell.version);
+      expect(config.workingEnvironment).toMatchObject({
+        platform: 'win32',
+        shell: { kind: 'powershell', version: powerShell.version, edition: 'Core' },
+      });
 
       const command = 'Get-Location && [Console]::WriteLine($PSVersionTable.PSVersion.ToString())';
       const policy = createPowerShellCommandPolicy(powerShell, workspaceRoot, ripgrepAsset());
@@ -420,9 +422,11 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
       const tool = configuration.extensions
         .flatMap((extension) => extension.tools ?? [])
         .find((tool) => tool.id === 'shell.execute');
-      expect(tool?.description).toContain(
-        `The command language is Windows PowerShell ${powerShell.version}.`,
-      );
+      expect(tool?.description).not.toContain(powerShell.version);
+      expect(configuration.workingEnvironment).toMatchObject({
+        platform: 'win32',
+        shell: { kind: 'powershell', version: powerShell.version, edition: 'Desktop' },
+      });
       const job = configuration.extensions
         .flatMap((extension) => extension.jobs ?? [])
         .find((definition) => definition.id === 'shell.command')!;

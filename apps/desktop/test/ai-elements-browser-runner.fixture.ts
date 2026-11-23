@@ -70,13 +70,13 @@ try {
         document.querySelector('.kite-client')!.setAttribute('data-theme', theme);
       }, theme);
       const response = page.locator('.response-status');
-      assert.equal(await response.count(), 1);
-      assert.equal(await response.isVisible(), true);
-      const responseNode = await response.elementHandle();
+      assert.equal(await response.count(), 0);
       const process = page.locator('.agent-turn[data-turn-status="running"] .agent-turn-summary');
+      const summary = await process.elementHandle();
+      assert.equal(await process.textContent(), '进行中');
       assert.equal(await process.textContent(), '处理过程');
       await process.click();
-      assert.equal(await response.isVisible(), true);
+      assert.equal(await process.textContent(), '进行中');
       assert.equal(await page.locator('.shell-activity').count(), 0);
       await process.click();
       await page.locator('.tool-activity:not(.shell-activity) .tool-activity-summary').click();
@@ -111,8 +111,8 @@ try {
       }));
       assert.ok(Math.abs(latest.top - latest.end) < 2);
       await page.evaluate(() => window.cancelFixture());
-      assert.equal(await response.count(), 1);
-      assert.equal(await response.isVisible(), true);
+      assert.equal(await response.count(), 0);
+      assert.equal(await process.textContent(), '进行中');
       assert.equal(
         await page.locator('.shell-activity .tool-activity-summary').getAttribute('aria-expanded'),
         'true',
@@ -123,7 +123,11 @@ try {
       await page.evaluate(() => window.thinkFixture());
       assert.equal(await response.textContent(), '正在思考…');
       assert.equal(
-        await responseNode!.evaluate((node) => node === document.querySelector('.response-status')),
+        await summary!.evaluate(
+          (node) =>
+            node ===
+            document.querySelector('.agent-turn[data-turn-status="running"] .agent-turn-summary'),
+        ),
         true,
       );
       assert.equal(await process.textContent(), '处理过程');
@@ -139,9 +143,14 @@ try {
       });
       await process.click();
       await page.evaluate(() => window.replyFixture());
-      assert.equal(await response.textContent(), '正在回复…');
+      assert.equal(await response.count(), 0);
+      assert.equal(await process.textContent(), '进行中');
       assert.equal(
-        await responseNode!.evaluate((node) => node === document.querySelector('.response-status')),
+        await summary!.evaluate(
+          (node) =>
+            node ===
+            document.querySelector('.agent-turn[data-turn-status="running"] .agent-turn-summary'),
+        ),
         true,
       );
       const layout = await page.evaluate(() => ({

@@ -209,7 +209,7 @@ try {
     );
     await page.waitForTimeout(350);
     const initial = await finish();
-    const response = await page.locator('.response-status').evaluate((element) => {
+    const response = await page.locator('.agent-turn-running').evaluate((element) => {
       const rect = element.getBoundingClientRect();
       let top = 0,
         bottom = innerHeight;

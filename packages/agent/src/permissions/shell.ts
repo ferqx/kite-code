@@ -4,11 +4,11 @@ import { access, lstat, open, readdir, readFile, readlink, realpath } from 'node
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
+  bundledRipgrepAsset,
   createLinuxHostShellJob,
   createMacosHostShellJob,
   createShellJob,
   createWindowsShellJob,
-  ripgrepAsset,
   type ShellOutputCollection,
   type TrustedWorkerLaunch,
 } from '@kite-ai/agent/jobs/shell';
@@ -37,6 +37,7 @@ import {
   type WindowsPowerShell,
 } from '../jobs/windows-powershell';
 import { type WindowsShellBackend, windowsUserLocale } from '../jobs/windows-shell';
+import type { WorkingEnvironment } from '../model-context';
 import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
 import type { GitWorktreeHost } from '../tools/git-worktree';
@@ -567,6 +568,7 @@ export async function createShellConfiguration(input: {
   if (!selected.length)
     return {
       extensions: [] as Extension[],
+      workingEnvironment: undefined,
       snapshot: { available: false, tools: [] as { id: string; definitionVersion: string }[] },
       describe,
       describeRequest: async (
@@ -620,7 +622,8 @@ export async function createShellConfiguration(input: {
       ...(options.windows ? { windowsRead: { gitAvailable: !!git } } : {}),
       signal: input.signal,
     });
-    const searchAsset = await asset(ripgrepAsset(), true, input.signal);
+    const ripgrep = bundledRipgrepAsset();
+    const searchAsset = await asset(ripgrep.executable, true, input.signal);
     let nativeWorker: WindowsPowerShell | undefined;
     if (native && selected.includes('git.worktree')) {
       try {
@@ -912,20 +915,7 @@ export async function createShellConfiguration(input: {
       ...(host ? { permissionsSchema } : {}),
       ...(native ? { windowsNativeGitBash: true as const } : {}),
       ...(outputCollection ? { outputCollection: true } : {}),
-      ...(windows
-        ? {
-            windowsUserLocale: windowsUserLocale(),
-            ...(windows.kind === 'powershell'
-              ? {
-                  dialect: 'powershell' as const,
-                  powerShellVersion: windows.powerShell.version,
-                  powerShellEdition:
-                    windows.powerShell.edition ??
-                    (windows.powerShell.installation ? ('Core' as const) : ('Desktop' as const)),
-                }
-              : { dialect: 'git-bash' as const, gitBashVersion: windows.bashVersion }),
-          }
-        : {}),
+      ...(windows ? { windows: true } : {}),
       ...(worktree
         ? {
             preserveJobOutput(input: import('../extensions').Json) {
@@ -1135,8 +1125,29 @@ export async function createShellConfiguration(input: {
         },
       },
     });
+    let workingEnvironment: WorkingEnvironment | undefined;
+    if (selected.includes('shell.execute') || selected.includes('shell.launch')) {
+      const locale = windows ? windowsUserLocale() : undefined;
+      workingEnvironment = {
+        platform: options.platform,
+        ripgrepVersion: ripgrep.version,
+        shell: !windows
+          ? { kind: 'posix', executable: options.shellExecutable }
+          : windows.kind === 'powershell'
+            ? {
+                kind: 'powershell',
+                version: windows.powerShell.version,
+                edition:
+                  windows.powerShell.edition ??
+                  (windows.powerShell.installation ? 'Core' : 'Desktop'),
+                locale,
+              }
+            : { kind: 'git-bash', version: windows.bashVersion, locale },
+      };
+    }
     return {
       extensions: [extension],
+      workingEnvironment,
       snapshot: {
         available: true,
         platform: options.platform,

@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { officeCliReleaseAsset } from '../../../src/jobs/officecli-runtime';
 import { readOfficeCliRelease } from '../../../src/jobs/prepare-officecli';
 import { prepareShellTools } from '../../../src/jobs/prepare-shell-tools';
-import { ripgrepAsset } from '../../../src/jobs/ripgrep';
+import { ripgrepAsset, ripgrepReleaseAsset } from '../../../src/jobs/ripgrep';
 
 test('built package supplies rg and OfficeCLI outside the repository with no ambient PATH', async () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-packaged-rg-')));
@@ -47,11 +47,14 @@ const executable=ripgrepAsset();const {env}=withBundledRipgrep({PATH:'',SystemRo
 const selected=Bun.which('rg',{PATH:env.PATH});if(selected!==executable)throw Error('packaged_rg_lookup_mismatch');
 const argv=[selected,'--no-config','-n','packaged-search-needle','source.txt'];
 const result=Bun.spawnSync(argv,{env,cwd:${JSON.stringify(root)}});if(result.exitCode!==0)throw Error(result.stderr.toString());
+const rg=Bun.spawnSync([selected,'--no-config','--version'],{env,cwd:${JSON.stringify(root)}});
+if(rg.exitCode!==0)throw Error(rg.stderr.toString());
+const rgVersion=rg.stdout.toString().split(' ')[1];
 const officecli=bundledOfficeCliAsset();
 if(Bun.which('officecli',{PATH:env.PATH})!==officecli)throw Error('packaged_officecli_lookup_mismatch');
 const office=Bun.spawnSync([officecli,'--version'],{env,cwd:${JSON.stringify(root)}});
 if(office.exitCode!==0)throw Error(office.stderr.toString());
-console.log(JSON.stringify({executable,officecli,officeCliVersion:office.stdout.toString().trim(),path:env.PATH,output:result.stdout.toString()}));`;
+console.log(JSON.stringify({executable,rgVersion,officecli,officeCliVersion:office.stdout.toString().trim(),path:env.PATH,output:result.stdout.toString()}));`;
     const child = Bun.spawn([process.execPath, '-e', code], {
       cwd: root,
       env: { SystemRoot: process.env.SystemRoot ?? '', PATH: '' },
@@ -70,6 +73,8 @@ console.log(JSON.stringify({executable,officecli,officeCliVersion:office.stdout.
     );
     expect(result.path).toBe(join(target, 'platform/process/tools'));
     expect(result.output).toBe('1:packaged-search-needle\n');
+    expect(result.rgVersion).toBe('15.2.0');
+    const rg = ripgrepReleaseAsset();
     const office = officeCliReleaseAsset();
     const tools = join(target, 'platform/process/tools');
     expect(result.officecli).toBe(join(tools, office.executable));
@@ -78,6 +83,12 @@ console.log(JSON.stringify({executable,officecli,officeCliVersion:office.stdout.
     expect(manifest).toMatchObject({
       platform: process.platform,
       arch: process.arch,
+      rg: {
+        version: result.rgVersion,
+        asset: rg.name,
+        upstreamSha256: rg.archiveSha256,
+        sha256: rg.sha256,
+      },
       officecli: { asset: office.name, upstreamSha256: office.sha256, sha256: office.sha256 },
     });
     expect(readdirSync(tools).filter((file) => file.startsWith('officecli'))).toEqual([
@@ -92,7 +103,7 @@ console.log(JSON.stringify({executable,officecli,officeCliVersion:office.stdout.
     for (const name of notices) {
       expect(readFileSync(join(officeAssets, name), 'utf8')).not.toBe('');
     }
-    for (const name of ['LICENSE-MIT.txt', 'LICENSE-PCRE2.txt', 'LICENSE-SLJIT.txt'])
+    for (const name of ['LICENSE-MIT.txt', 'LICENSE-PCRE2.txt', 'LICENSE-SLJIT.txt', 'UNLICENSE'])
       expect(
         readFileSync(join(target, 'platform/process/tools', name), 'utf8').length,
       ).toBeGreaterThan(300);
@@ -130,8 +141,8 @@ test('restores missing Shell metadata and corrupt rg while reusing a verified Of
       rg: { sha256: createHash('sha256').update(rgBytes).digest('hex') },
       officecli: { version: office.version, upstreamSha256: office.sha256, sha256: office.sha256 },
     });
-    expect(readFileSync(join(directory, 'LICENSE.vscode-ripgrep'), 'utf8')).toBe(
-      readFileSync(resolve(sourceRg, '../../LICENSE'), 'utf8'),
+    expect(readFileSync(join(directory, 'UNLICENSE'), 'utf8')).toContain(
+      'released into the public domain',
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });

@@ -409,6 +409,14 @@ process.stdout.write(JSON.stringify(frame)+'\\n');
               outcome: 'failed',
               details: { code, failure: { category }, mutation: 'not_started' },
             });
+            const guidance = {
+              process_start: 'The Git subprocess did not start.',
+              permission_denied: 'Check the original filesystem scope and target access.',
+              git_command: 'Git started and returned a nonzero exit code.',
+            }[category];
+            const feedback = model.requests[1]?.messages.find((message) => message.role === 'tool');
+            expect(feedback?.content).toContain(guidance);
+            expect(feedback?.content).toContain('No mutation was started in this observation.');
             expect(object(object(tool.result).details).code).not.toBe('permission_denied');
             if (mode === 'start_missing')
               expect(object(object(tool.result).details).failure).toMatchObject({

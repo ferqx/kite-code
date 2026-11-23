@@ -189,7 +189,7 @@ test('an uncached conversation keeps the content frame and shows only the center
   expect(html).not.toContain('class="welcome"');
 });
 
-test('an unsettled assistant message exposes reply activity outside its content', () => {
+test('an unsettled assistant message does not render a separate reply status', () => {
   const streaming = renderToStaticMarkup(
     <SessionPage
       {...base}
@@ -206,9 +206,8 @@ test('an unsettled assistant message exposes reply activity outside its content'
   expect(streaming).toContain('aria-busy="true"');
   expect(streaming).toContain('class="message assistant responding"');
   const dom = new JSDOM(streaming);
-  expect(dom.window.document.querySelector('.response-status[role="status"]')?.textContent).toBe(
-    '正在回复…',
-  );
+  expect(dom.window.document.querySelector('.response-status')).toBeNull();
+  expect(dom.window.document.querySelector('.message.assistant .message-meta')).toBeNull();
   dom.window.close();
   expect(streaming).toContain('已经生成的部分');
 

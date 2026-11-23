@@ -1,6 +1,6 @@
 # Ordinary Shell Tools
 
-模型侧提供 `shell_execute/shell_read/shell_wait/shell_stop`。启动统一为 `shell_execute({command, description?, background?, execution_timeout_ms?, workdir?, filesystem?, network?})`：默认前台等待原 Job 终态，`background:true` 返回同一 Job 的真实 `shell_id`、引用与受理状态，受理不证明启动成功或完成。描述仅供展示，省略沿用命令预览；真实命令、审批、权限与完整原调用继续保留。
+模型侧提供 `shell_execute/shell_read/shell_wait/shell_stop`。启动统一为 `shell_execute({command, description?, background?, execution_timeout_ms?, workdir?, filesystem?, network?})`：默认前台等待原 Job 终态，`background:true` 返回同一 Job 的真实 `shell_id`、引用与受理状态，受理不证明启动成功或完成。可选 `description` 随原调用保留，桌面会话工具行显示原命令摘要。真实命令、审批、权限与完整原调用继续保留。
 
 新模型不填写 `key` 或 `cancellation`。内部 key 从已持久化的 Tool execution ID 无损派生为 `sh_` 短句柄，当前 UUID 对应26字符，不建别名表或旧摘要读取分支；同一逻辑 Tool 重入仍走原 `operations.ensure`，新 Tool 即使命令相同也有独立 Job。返回的 `shell_id` 用于原操作的读取、等待和停止；`execution_id` 是原启动 Tool 的执行记录 ID，用于查询执行证据或引用计划进度，后台受理不因此证明执行成功。模型要等待已受理的后台命令时沿原 `shell_id` 调用 `shell_wait/read`；即使首次选择后台不符合任务要求，也不能为了改成前台再执行原命令。前台、后台和内部 `shell.launch` 一致提供两种身份；后续 read/wait/stop 的可信模型反馈仍显示原启动 Tool 的 `execution_id`，不把查询 Tool 或内部 Job 身份冒充原调用。模型呈现先核原 owner、引用和身份，不改写 stdout／stderr。结果未知时先核原执行，不能通过新调用找回结果。普通模型前后台均使用 attached 取消关系，原父 Command 取消传播保持。旧 `shell.launch` 内部注册、显式 key、nested permissions、timeoutMs 和 detached 契约保留，新模型目录隐藏这些旧参数；历史模型参数的投影使用原封存 descriptor，不按今日目录重写。恢复仍核原配置与执行来源，不为兼容重新派发未知效果。
 
@@ -8,11 +8,13 @@
 
 模型结果中的 `execution_id/cancellation_execution_id` 使用原 ID 的无损短表示，计划进度与执行证据入口准确解码。原 Store 回执仍保存原 ID；不做前缀搜索、近似纠错或选择最近调用，也不改变 Shell 身份与派发次数。
 
-`shell_execute` 指导模型优先使用 `rg` 和 `rg --files`。普通 Shell 的 [输出采集](shell-output.ts) 共用 Store 的 1 MiB JSON／记录预算，在运行中发布稳定前缀，随后有界保留最近输出，在原终态前按顺序发布省略量和尾部。标准输出和错误输出共用预算；两个流的省略字节分别保存。Git 工作树的受信 worker 继续使用完整帧读取。Store 和旧记录合同见 [Jobs owner](../jobs/README.md)。
+[共享系统提示](../model-context.ts)的基础工作方式段指导模型用 `rg` 搜正文、用 `rg --files` 找文件，命令不可用时选用适合当前 Shell 的替代方式。工作环境段标注随包 `rg` 的版本，并说明 PowerShell 下给 `rg` 传目录、用 `-g` 筛选文件。普通 Shell 的 [输出采集](shell-output.ts) 共用 Store 的 1 MiB JSON／记录预算，在运行中发布稳定前缀，随后有界保留最近输出，在原终态前按顺序发布省略量和尾部。标准输出和错误输出共用预算；两个流的省略字节分别保存。Git 工作树的受信 worker 继续使用完整帧读取。Store 和旧记录合同见 [Jobs owner](../jobs/README.md)。
 
 交付成品时，随包文档 helper 的 `stage` 将已保存的文件复制到当前 Job 的 `KITE_OUTPUT_DIR`，并通过标准输出向模型提供实际绝对路径和可直接用于 Markdown 的路径。随后的模型请求沿现有工具结果读取回执，归档沿原 Job 终态独立执行。 [交付命令](documents/README.md#成品路径与交付)
 
-Windows Shell 工具描述和命令参数说明使用宿主装配实际选中的方言和已核验版本，并注明已读到的 Windows 用户区域及 UTF-8 输出解码。PowerShell 的版本来自本次安装发现，Desktop／Core 指引依据真实 edition 或安装布局；缺少版本时明确未报告，不补造 5.1。权限与 Job 生命周期不按固定版本分叉。诊断指引优先采用退出状态和结构化输出。任务指定语言或区域时，使用实际程序提供的选项。 [Windows Job 运行环境](../jobs/README.md#默认-windows-git-bash)
+宿主把实际选中的方言、已核验版本、可用的 Windows 用户区域和 UTF-8 解码信息交给共享系统提示。PowerShell 的版本来自本次安装发现，Desktop／Core 指引依据真实 edition 或安装布局。工具概述说明 Job 生命周期和原句柄的用法，前后台选择、执行时限和具体权限申请由对应参数说明。诊断指引优先采用退出状态和结构化输出。任务指定语言或区域时，使用实际程序提供的选项。 [Windows Job 运行环境](../jobs/README.md#默认-windows-git-bash)
+
+Windows 工具说明要求在同一个 Shell 中解析路径并执行删除或移动。递归删除或移动前，模型核对解析后的绝对目标是否位于工作区或用户明确授权的目录。PowerShell 通过原生 cmdlet 的 `-LiteralPath` 接收路径。用 `Start-Process` 启动后台辅助程序时使用 `-WindowStyle Hidden`，用户明确要求可见交互窗口时按请求执行。
 
 原 Windows Job 的已结算查找失败回执可携带命令名与候选路径。模型展示核对原 Job 和终态身份后，提供候选绝对路径、来源及单独核验可执行文件和运行时的提示。原命令退出码、双流内容和授权证据继续归该次执行回执。依赖本地进程状态的工作先选定磁盘保存点，同次调用完成修改、保存和关闭，后续调用从磁盘重新打开核对。 [模型结果回归](../../test/isolated/tools/shell/model-presentation.test.ts)
 

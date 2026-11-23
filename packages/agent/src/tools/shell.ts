@@ -25,12 +25,8 @@ export interface ShellToolsOptions {
   readonly job: JobDefinition;
   /** Only trusted scope-aware host assembly registers this optional request. */
   readonly permissionsSchema?: Json;
-  readonly dialect?: 'git-bash' | 'powershell';
-  readonly powerShellVersion?: string;
-  readonly powerShellEdition?: 'Desktop' | 'Core';
-  readonly gitBashVersion?: string;
+  readonly windows?: true;
   readonly windowsNativeGitBash?: true;
-  readonly windowsUserLocale?: string;
   readonly outputCollection?: true;
   readonly classifyPresentation?: (command: string) => Promise<'exploration' | 'standalone'>;
   /** Internal workers consume a machine-readable frame rather than a Shell preview. */
@@ -130,46 +126,31 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
   });
   if (job.id !== 'shell.command') throw new AgentError('invalid_shell_job');
   const scopeGuidance = options.windowsNativeGitBash
-    ? ' This installed Git Bash runs with the ordinary Windows user’s file and network access. It has no read-only, workspace or offline sandbox. Do not use it for a task requiring that confinement. Keep the command within the user’s request. A narrower request does not restrict the process.'
+    ? ' This command uses ordinary Windows user file and network access without confinement. Use it only when the task permits that scope.'
     : options.permissionsSchema
-      ? ' Choose the filesystem request before composing the command. For a step required by the skill you are executing, explicitly pass filesystem:"full_access" on this call if the task allows it. Set network separately. Current authorization and hard limits determine the effective scope. Before retrying with wider scope, confirm that it addresses the error and check which effects already occurred.'
+      ? ' Choose the filesystem request before composing the command. Authorization and host limits determine the effective scope. Before requesting wider access, verify the cause and any prior effects.'
       : '';
-  const powerShellVersion = options.powerShellVersion ?? '(version not reported)';
-  const windowsPowerShell = options.powerShellEdition === 'Desktop';
-  const gitBashVersion = options.gitBashVersion ? ` ${options.gitBashVersion}` : '';
-  const locale = options.windowsUserLocale
-    ? ` Windows user locale is ${options.windowsUserLocale}.`
-    : '';
-  const windowsTextGuidance = options.dialect
-    ? `${locale} Kite reads stdout and stderr as UTF-8. Command messages, regional formats, and output encoding can vary by program. Prefer exit codes and structured output. Use the program's language or locale option when the task specifies one.`
-    : '';
-  const dialectGuidance =
-    options.dialect === 'powershell'
-      ? ` The command language is ${windowsPowerShell ? 'Windows ' : ''}PowerShell ${powerShellVersion}. Use PowerShell cmdlets and Windows paths, for example Get-ChildItem -Name, Get-Content -LiteralPath and rg.exe --files. For each required native step in a compound script or dynamic invocation, check $LASTEXITCODE immediately and exit with it on failure. Pass structured data by stdin or file when the program supports it.${windowsPowerShell ? ' Supply -UseBasicParsing for Invoke-WebRequest.' : ''}`
-      : options.dialect === 'git-bash'
-        ? ` The command language is Git Bash${gitBashVersion} on Windows. Check required steps before continuing. Use pipefail when every stage of a pipeline must succeed.`
-        : '';
-  const environmentGuidance =
-    ' Each execution starts a fresh process in the session execution root or requested workdir. Directory changes and environment assignments do not carry across calls. Keep intermediate files needed by later Jobs in the workspace.';
-  const lookupGuidance = options.dialect
-    ? ` To check an uncertain executable, run ${options.dialect === 'powershell' ? 'Get-Command NAME' : 'type NAME'} as a standalone probe and keep its diagnostics. If the result gives an absolute candidate path, check it with the program's supported version probe before considering installation.`
-    : ' If a required program is uncertain, check command resolution and a supported version probe in the same Job before using it.';
-  const windowsProcessGuidance = options.dialect
-    ? ' On Windows, Kite stops remaining child processes when the command exits, including with background:true. Before splitting a stateful workflow, identify where each step will save its data to disk. Start and use local helpers within the same running command, then flush their changes and close them before it exits. Reopen the saved file from disk in the next call before further edits or delivery.' +
-      (options.windowsNativeGitBash
-        ? ''
-        : ' Default local named pipes can deny bidirectional access under workspace_write. When available, select the CLI’s supported single-process or standalone batch mode before execution.') +
-      ' After a sharing violation, verify what was saved and wait for the process holding the file to release it before retrying.'
+  const windowsGuidance = options.windows
+    ? [
+        'On Windows, resolve paths and perform file deletions or moves in the same shell. In PowerShell, use native cmdlets such as Remove-Item or Move-Item with -LiteralPath. Pass paths as arguments instead of building command strings.',
+        'Before any recursive delete or move, verify that each resolved absolute target is within the intended workspace or a target directory explicitly authorized by the user.',
+        'For a background helper or service started with PowerShell Start-Process, use -WindowStyle Hidden unless the user explicitly requests a visible interactive window.',
+        'Kite stops remaining child processes when the command exits, including with background:true. Run helpers, flush changes, and close them within the same command. Reopen saved files in later Jobs.',
+        options.windowsNativeGitBash
+          ? ''
+          : 'Bidirectional local named pipes may be denied under workspace_write. Prefer a supported single-process or standalone batch mode.',
+        'After a sharing violation, verify what was saved and wait for the file to be released before retrying.',
+      ]
+        .filter(Boolean)
+        .join(' ')
     : '';
   const windowsFilesystemGuidance =
-    options.dialect && !options.windowsNativeGitBash
+    options.windows && !options.windowsNativeGitBash
       ? ' On Windows, request full_access for a required native helper when its startup or bidirectional local named pipe needs that scope, even for a workspace file.'
       : '';
   const outputGuidance = options.outputCollection
-    ? ' KITE_OUTPUT_DIR belongs to the current Job. Keep the verified final file in the workspace or user-requested destination. If KITE_DOCUMENTS_BUN and KITE_DOCUMENTS_HELPER are available, run the helper with stage --input <saved-file>. It copies the saved file into KITE_OUTPUT_DIR and returns its actual absolutePath and a Markdown-ready absolute path in markdownTarget. Report the saved location with [filename](<markdownTarget>), using that value exactly. Otherwise resolve the actual absolute path in Shell before reporting it and copy the saved file to KITE_OUTPUT_DIR. Files from a failed Job are not delivered.'
+    ? 'KITE_OUTPUT_DIR belongs to the current Job. Keep the verified final file in the workspace or user-requested destination. If KITE_DOCUMENTS_BUN and KITE_DOCUMENTS_HELPER are available, run the helper with stage --input <saved-file>. It copies the saved file into KITE_OUTPUT_DIR and returns its actual absolutePath and a Markdown-ready absolute path in markdownTarget. Report the saved location with [filename](<markdownTarget>), using that value exactly. Otherwise resolve the actual absolute path in Shell before reporting it and copy the saved file to KITE_OUTPUT_DIR. Files from a failed Job are not delivered.'
     : '';
-  const searchGuidance =
-    'Prefer rg for text search and rg --files for file discovery. Use alternatives when rg is unavailable.';
   const outputTokens = {
     type: 'integer',
     minimum: 1,
@@ -188,9 +169,6 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           type: 'string',
           minLength: 1,
           maxLength: 262144,
-          ...(dialectGuidance
-            ? { description: (dialectGuidance + windowsTextGuidance).trim() }
-            : {}),
         },
         workdir: {
           type: 'string',
@@ -198,12 +176,11 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           maxLength: 4096,
           pattern: '^[^\\u0000]+$',
           description:
-            'Execution directory, absolute or relative to the host fixed workspace directory. Does not change Session cwd; existing filesystem/network scopes still apply.',
+            'Working directory for this command, absolute or relative to the Session execution root. Defaults to that root.',
         },
         description: {
           type: 'string',
-          description:
-            'A short sentence describing the purpose for display. Omit to use the command preview. This does not replace the command, grant permission or change execution identity.',
+          description: 'Optional one-sentence purpose saved with the call.',
         },
         cancellation: {
           enum: ['attached', 'detached'],
@@ -217,7 +194,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
                 type: 'boolean',
                 default: false,
                 description:
-                  'Omit or use false when foreground execution is required. True returns the original command handle and acceptance state, not completion. After acceptance, use shell_wait or shell_read; never rerun the command merely to change foreground/background waiting. Cancelling the parent still cancels this command. Cannot be combined with execution_timeout_ms.',
+                  'Omit or use false to wait for completion. True returns the original shell_id and acceptance state. Confirm completion with shell_wait.',
               },
               execution_timeout_ms: {
                 type: 'integer',
@@ -357,7 +334,14 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           omitParameters: ['key', 'permissions', 'cancellation', 'timeoutMs'],
         },
         version: '1',
-        description: `Execute one supervised command.${scopeGuidance}${dialectGuidance}${windowsTextGuidance}${environmentGuidance}${lookupGuidance}${windowsProcessGuidance}${outputGuidance} ${searchGuidance} Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.`,
+        description: [
+          `Execute one supervised command.${scopeGuidance} Foreground calls return retained output on completion.`,
+          'Use the returned shell_id with shell_read, shell_wait, or shell_stop to recover output, wait, or stop the original Job. Repeating a command starts a new Job. Use execution_id for evidence and plan progress. Foreground and background calls follow parent cancellation. Create Git worktrees only with git_worktree. If it is unavailable, report the limitation.',
+          windowsGuidance,
+          outputGuidance,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
         inputSchema: schema(true),
         async execute(input, context) {
           const parsed = parseShellCommandInput(input, 'execute', !!options.permissionsSchema);
@@ -398,7 +382,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         id: 'shell.launch',
         model: { name: 'shell_launch', snakeCase: true, hidden: true },
         version: '1',
-        description: `Start one supervised command.${dialectGuidance}${windowsTextGuidance} Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion. execution_id identifies the original Tool call for evidence and plan progress; shell_id is its compact handle for shell_read, shell_wait and shell_stop. Copy returned identities exactly.${scopeGuidance}`,
+        description: `Start one supervised command. Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion. execution_id identifies the original Tool call for evidence and plan progress; shell_id is its compact handle for shell_read, shell_wait and shell_stop. Copy returned identities exactly.${scopeGuidance}`,
         inputSchema: schema(false),
         async execute(input, context) {
           const launched = await launch(input, context, 'launch');

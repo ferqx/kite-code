@@ -4,7 +4,7 @@
  * Launches the real TUI composition root with NODE_ENV=production and uses
  * the default V2 feature profile. The outbound HTTP request is the
  * evidence boundary for prompt roles, project instructions, runtime state and
- * phase-stable tool disclosure plus Runtime-owned phase policy.
+ * stable tool disclosure across Runtime-owned plan approval.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { currentPlanWorkResponses } from '../harness/current-plan';
@@ -40,6 +40,14 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
     server.setResponses([
       {
         message: {
+          tool_calls: [{ id: 'v2-project-read', name: 'read_file', args: { path: 'AGENTS.md' } }],
+        },
+      },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'v2-project-read', contentIncludes: [PROJECT_MARKER] }],
+        },
+        message: {
           tool_calls: [
             {
               id: 'v2-plan-save',
@@ -48,8 +56,8 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
                 action: 'save',
                 title: 'Inspect project rules',
                 body_markdown:
-                  'Inspect the project instructions and validate the planning workflow.',
-                steps: [{ id: 'inspect', title: 'Inspect project instructions' }],
+                  'Record the inspection of the project instructions in the fixture workspace.',
+                steps: [{ id: 'record', title: 'Record the project instruction inspection' }],
               },
             },
           ],
@@ -82,10 +90,7 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
           };
         },
       },
-      ...currentPlanWorkResponses('v2-plan-submit', ['inspect'], {
-        kind: 'read',
-        path: 'AGENTS.md',
-      }),
+      ...currentPlanWorkResponses('v2-plan-submit', ['record']),
       {
         expectedRequest: {
           toolResults: [
@@ -103,19 +108,16 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
   });
 
   test(
-    'projects V2 layers and a phase-stable tool surface through the real TUI',
+    'projects V2 layers and stable tools across plan approval through the real TUI',
     async () => {
       tui.write('\x1b[Z');
       await waitForText(() => tui.viewport(), 'Shift+Tab 退出计划模式', 5_000);
 
-      const userPrompt = 'Inspect the project rules and propose a plan.';
+      const userPrompt = 'Inspect the project rules and propose a plan to record your review.';
       await submitUserMessage(tui, server, userPrompt, { timeout: 15_000 });
-      await waitForText(() => tui.viewport(), '方案审核', 15_000);
-      // The current review starts unselected; choose the explicit Accept Edits mode.
+      await waitForText(() => tui.viewport(), '批准此计划', 15_000);
       tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '❯ 1. 在 Auto 模式下开始执行', 5_000);
-      tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '❯ 2. 在接受编辑模式下开始执行', 5_000);
+      await waitForText(() => tui.viewport(), '❯ 1. 批准此计划', 5_000);
       tui.write('\r');
       await waitForText(() => tui.viewport(), 'Production V2 request completed.', 15_000);
       expect(screenContains(tui.viewport(), 'Production V2 request completed.')).toBe(true);
@@ -140,7 +142,7 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       expect(actual!.events.filter((event) => event.type === 'run.finished')).toEqual([
         expect.objectContaining({ type: 'run.finished', status: 'completed' }),
       ]);
-      expect(server.getWorkRequestCount()).toBe(6);
+      expect(server.getWorkRequestCount()).toBe(7);
       const request = server.getWorkRequests()[0];
       expect(request).toBeDefined();
       const messages = request!.messages.map((message) => ({
@@ -148,34 +150,49 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
         content: typeof message.content === 'string' ? message.content : '',
       }));
       const systemMessages = messages.filter((message) => message.role === 'system');
-      expect(systemMessages).toHaveLength(1);
-      expect(systemMessages[0]!.content).toContain('# Instruction order');
-      expect(systemMessages[0]!.content).toContain('Cacheable runtime context:');
+      const sharedInstructions = systemMessages.filter((message) =>
+        message.content.startsWith('# Task execution and evidence'),
+      );
+      expect(sharedInstructions).toHaveLength(1);
+      expect(sharedInstructions[0]!.content).toContain('# Authority');
+      expect(sharedInstructions[0]!.content).toContain(
+        'Obtain explicit user approval before changing model-facing system instructions',
+      );
+      expect(sharedInstructions[0]!.content).toContain('# Working environment\nWorkspace root:');
+      expect(systemMessages.some((message) => message.content.includes(PROJECT_MARKER))).toBe(
+        false,
+      );
 
       const projectIndex = messages.findIndex((message) =>
         message.content.includes(PROJECT_MARKER),
       );
       const userIndex = messages.findIndex((message) => message.content === userPrompt);
       expect(projectIndex).toBeGreaterThan(systemMessages.length - 1);
-      expect(projectIndex).toBeGreaterThan(userIndex);
       expect(messages[projectIndex]!.role).toBe('user');
       expect(messages[projectIndex]!.content).toContain(
         '<project-instructions role="workspace-context">',
       );
 
-      const runtimeMessages = messages.filter((message) =>
-        message.content.includes('<runtime-state source="runtime.kernel">'),
+      const runtimeIndex = messages.findIndex((message) =>
+        message.content.startsWith('<runtime-state source="runtime.kernel">'),
       );
-      expect(runtimeMessages).toHaveLength(1);
-      expect(runtimeMessages[0]!.role).toBe('user');
-      expect(runtimeMessages[0]!.content).toContain('phase: planning');
-      expect(messages.at(-1)?.content).toBe(runtimeMessages[0]!.content);
-      const approved = server.getWorkRequests()[2]!;
+      expect(runtimeIndex).toBeGreaterThan(projectIndex);
+      expect(userIndex).toBeGreaterThan(runtimeIndex);
+      expect(messages[runtimeIndex]).toMatchObject({
+        role: 'user',
+        content: expect.stringContaining('plan_requirement: {"status":"pending"}'),
+      });
+      const approved = server.getWorkRequests()[3]!;
       expect(approved.body.tools).toEqual(request!.body.tools);
       expect(approved.messages.filter((message) => message.role === 'system')).toEqual(
         request!.messages.filter((message) => message.role === 'system'),
       );
-      expect(String(approved.messages.at(-1)?.content)).toContain('phase: building');
+      const approvedRuntime = approved.messages.find(
+        (message) =>
+          message.role === 'user' &&
+          String(message.content).startsWith('<runtime-state source="runtime.kernel">'),
+      );
+      expect(String(approvedRuntime?.content)).toMatch(/plan_requirement: \{.*"status":"approved"/);
       expect(
         server
           .getWorkRequests()
@@ -183,7 +200,7 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
           .some(
             (message) =>
               message.role === 'tool' &&
-              message.tool_call_id === 'v2-plan-submit-work-0' &&
+              message.tool_call_id === 'v2-project-read' &&
               String(message.content).includes(PROJECT_MARKER),
           ),
       ).toBe(true);
@@ -195,35 +212,27 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
               description?: string;
               parameters?: {
                 properties?: {
-                  role?: { description?: string; enum?: string[] };
+                  preset?: { description?: string; enum?: string[] };
                 };
               };
             };
           }>)
         : [];
       const toolNames = tools.map((tool) => tool.function?.name).filter(Boolean);
-      expect(toolNames).toContain('files.read');
-      expect(toolNames).toContain('planning.write');
-      expect(toolNames).toContain('files.edit');
-      expect(toolNames).toContain('files.write');
-      expect(toolNames).toContain('shell.execute');
-      expect(
-        tools.find((tool) => tool.function?.name === 'files.read')?.function?.description,
-      ).toContain('complete bodies or explicit immutable Artifact references');
-      const task = tools.find((tool) => tool.function?.name === 'task.execute')?.function;
-      expect(task?.description).toContain('benefits from an isolated sub-agent');
-      expect(task?.description).toContain('code only when the user task calls for implementation');
-      expect(task?.description).toContain('plan for read-only architecture or design planning');
-      expect(task?.description).toContain('multiple independent sibling task calls');
-      expect(task?.description).toContain('execute them concurrently');
-      expect(task?.parameters?.properties?.role?.enum).toEqual([
-        'worker',
-        'code',
-        'explore',
-        'plan',
-        'review',
-      ]);
-      expect(task?.parameters?.properties?.role?.description).toContain('Type of sub-agent');
+      expect(toolNames).toContain('read_file');
+      expect(toolNames).toContain('write_plan');
+      expect(toolNames).toContain('edit_file');
+      expect(toolNames).toContain('write_file');
+      expect(toolNames).toContain('shell_execute');
+      const readFile = tools.find((tool) => tool.function?.name === 'read_file')?.function;
+      expect(readFile?.description).toContain('start_line');
+      expect(readFile?.description).toContain('next_line');
+      const task = tools.find((tool) => tool.function?.name === 'spawn_agent')?.function;
+      expect(task?.description).toContain('Delegate a concrete scoped prompt');
+      expect(task?.parameters?.properties?.preset?.enum).toEqual(['general', 'explore']);
+      expect(task?.parameters?.properties?.preset?.description).toContain(
+        'Optional trusted preset',
+      );
     },
     TIMEOUT,
   );

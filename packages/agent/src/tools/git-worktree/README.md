@@ -46,7 +46,9 @@ Auto 下准确 `builtin.shell/git.worktree@1` Tool 不调用 generic check 或�
 
 [完整输出 reader](read-output.ts)验证原 Store/Session/Execution/Job 身份、真实终态和相符结果，固定高水位完整分页；拒绝输出丢失、游标异常、多帧、错误 token/phase、非法 UTF-8，以及 `droppedBytes:null`。可信worker的原始stdout/stderr在首层监督进程严格解码UTF-8，避免先被替换成U+FFFD再进入记录；合法的U+FFFD仍可保真。普通Shell的原解码行为保持。不使用前台 Shell 预览作为 Git 机器结果。冷重启后的原 Shell Job没有进程重连能力，不能验证时保留 `outcome_unknown`。取消及超时只作用于原 attached Job，Runtime 未确认停止时不能宣称 cancelled；残留目录、登记和分支如实返回。
 
-[错误分类](errors.ts)只给新观察到的失败增加可选 `details.failure`，工具和协议仍为1。`process_start` 来自实际 spawn 失败，`git_permission_denied/permission_denied` 来自明确文件访问拒绝，`git_command` 来自已启动 Git 的非零退出码；其余检查为 `verification`。保留有限 errno、退出码与原业务 code，不从 stderr 文本或旧 `git_operation_failed` 推测审批拒绝。新回执不发布 Git 原始 stderr，避免其中的路径、URL 或凭据进入诊断。外层 Runtime 的权限拒绝继续使用原事实，不伪造 worker 帧。清理失败保留主因及 `cleanupUnconfirmed`，mutation 和原 Job 不降级为未执行。工具回执与[默认模型合同](../../model-context.ts)要求查准确原因、不扩权、不换 key／参数／Shell 重试；稳定失败回读仍只观察原操作。
+[错误分类](errors.ts)只给新观察到的失败增加可选 `details.failure`，工具和协议仍为1。`process_start` 来自实际 spawn 失败，`git_permission_denied/permission_denied` 来自明确文件访问拒绝，`git_command` 来自已启动 Git 的非零退出码；其余检查为 `verification`。保留有限 errno、退出码与原业务 code，不从 stderr 文本或旧 `git_operation_failed` 推测审批拒绝。新回执不发布 Git 原始 stderr，避免其中的路径、URL 或凭据进入诊断。外层 Runtime 的权限拒绝继续使用原事实，不伪造 worker 帧。清理失败保留主因及 `cleanupUnconfirmed`，mutation 和原 Job 不降级为未执行。
+
+[模型回执](../git-worktree.ts)根据已记录的失败原因和变更状态附上下一步指引，稳定失败回读沿相同的呈现逻辑。没有分类的旧失败按原事实说明，部分作用、未知结果或清理未确认时引导模型通过原 `operation_ref` 观察原操作。通用[系统提示](../../model-context.ts)保留工作树的工具选择规则。创建路径、切换执行根和删除的要求由 `git_worktree` 的工具声明说明。
 
 ## 删除保护
 

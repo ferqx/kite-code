@@ -30,7 +30,7 @@ Windows原对象pin现以实际读取/遍历权限建立共享保护，区域锁
 
 [Files Node-API companion](../../packages/agent/native/files/README.md)由 Agent build 使用固定 Rust／Cargo.lock 和明确本机目标编译，与 ABI／来源／binary hash manifest 及第三方许可证一起进入同一 Terminal／Native 完整 inventory。运行期不找编译器、源码、环境或旧 FFI 替代；正式 Service 保护加载器及整个资产目录。源码构建需要 Rust/linker，用户运行制品不需要；Windows 使用静态 CRT。搬迁 Bun/Node 与完整 Agent 包的通过不代替整产品 installed／publisher／三平台资格，实际 Windows 候选仍须经过原 ACL 和完整 manifest 验证。
 
-[OfficeCLI 运行时](../../packages/agent/src/jobs/officecli-runtime.ts)由 Agent build 按平台和架构选择固定的上游发行资产，缓存命中和下载都核对大小与 SHA-256。当前目标仅封存自己的程序，PPTX、XLSX 和 DOCX 三项 OfficeCLI 技能与许可及第三方声明一同进入 Terminal／Native inventory。macOS 签名刷新包内实际摘要，清单保留上游摘要。运行期直接读取随包工具目录。实际制品与环境范围归 [Shell owner](../../packages/agent/src/jobs/README.md) 和 [办公资源 owner](../../packages/agent/src/tools/documents/README.md)。
+[OfficeCLI](../../packages/agent/src/jobs/officecli-runtime.ts) 和 [ripgrep](../../packages/agent/src/jobs/ripgrep.ts) 由 Agent build 按平台和架构选择固定的上游发行资产。缓存与下载均按各自固定的大小和 SHA-256 校验，ripgrep 另校验解包后的可执行文件。当前目标仅封存自己的程序，PPTX、XLSX 和 DOCX 三项 OfficeCLI 技能与许可及第三方声明一同进入 Terminal／Native inventory。macOS 签名刷新包内实际摘要，清单保留上游摘要。运行期直接读取随包工具目录。实际制品与环境范围归 [Shell owner](../../packages/agent/src/jobs/README.md) 和 [办公资源 owner](../../packages/agent/src/tools/documents/README.md)。
 
 2026-11-18 目录改名和技能改编后，重建本机 Windows x64 Native 候选与归档。核对包内 `docx`、`pptx`、`xlsx` 的正文摘要，以及 OfficeCLI 程序和上游许可文件。记录在本机 `.cache/kite-officecli-kite-skills-win-x64-62b9/officecli-package-proof.json`。
 

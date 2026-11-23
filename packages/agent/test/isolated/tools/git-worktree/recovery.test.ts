@@ -81,6 +81,7 @@ test('short observation locates the exact unknown owner without result metadata,
   h.setMutationStatus('outcome_unknown');
   const result = await h.tool.execute({ action: 'create', path: '/target' }, h.context(ownerId));
   expect(result.outcome).toBe('outcome_unknown');
+  expect(result.content).toContain('Observe only the original operation and Job');
   const operationRef = (result.details as { operation_ref: string }).operation_ref;
   expect(operationRef.length).toBe(26);
   const before = { ensures: h.ensures.length, writes: h.writes.length };
@@ -878,6 +879,7 @@ test('deadline after a saved prepared plan fails without dispatching mutation an
       outcome: 'failed',
       details: { code: 'worktree_timeout', mutation: 'not_started' },
     });
+    expect(result.content).toContain('No mutation was started in this observation.');
     expect(h.starts.map((request) => request.phase)).toEqual(['prepare_create']);
     expect(h.ensures).toHaveLength(1);
     expect(value(h.records.get('git-worktree/intent')).stableResult).toMatchObject({
@@ -888,6 +890,7 @@ test('deadline after a saved prepared plan fails without dispatching mutation an
     ).toBeUndefined();
     expect(await h.tool.execute(create, h.context('later'))).toMatchObject({
       outcome: 'failed',
+      content: expect.stringContaining('separately authorized new request'),
       details: { code: 'worktree_timeout', replayed: true, mutation: 'not_started' },
     });
     expect(h.ensures).toHaveLength(1);

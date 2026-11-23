@@ -4593,7 +4593,7 @@ Root 曾把两个 installed isolated 文件放入同一个 Bun 宿主，实际1p
 
 实际目录核超过200项、Browser与Native原摘要相等、完整upper／snapshot／Store／subject、原queued／active／rename事件和未知时间，cold零写／Model0。原恢复consumer仍通过实际A→B两冷Service／Cookie／`mountWebPage`读取全部plain／sealed正文、Copy／Close／切换及零重放；该DOM不代真实browser。assets实际build产出固定三资产及source-independent模块，hash／manifest与原拒绝门禁保持。
 
-本机实际Codex In-app Browser另用原公开无害 `web-preview.ts`、隔离临时SQLite、真实Service／Cookie与上述可信编译资产核：根页的方向键只focus／展示真实详情，Escape保持根路径并关详情，Enter直接进入准确`/sessions/qa-markdown`和完整History、无alert。原time为`2026-10-10T18:30:59.938Z`，本地显示同毫秒／GMT+8，未推读取时间；fixture初／末固定Model调用均3，未追加任务。页面已关闭、原stop正常exit0、临时Profile已按原finally释放。DOM与截图归 `/private/tmp/kite-web-directory-browser-20261011.json`、`.jpg`；这只证明本机默认宽度该完整入口，不外推其他浏览器／触控或Win/Linux。
+本机应用内浏览器另用原公开无害 `web-preview.ts`、隔离临时SQLite、真实Service／Cookie与上述可信编译资产核：根页的方向键只focus／展示真实详情，Escape保持根路径并关详情，Enter直接进入准确`/sessions/qa-markdown`和完整History、无alert。原time为`2026-10-10T18:30:59.938Z`，本地显示同毫秒／GMT+8，未推读取时间；fixture初／末固定Model调用均3，未追加任务。页面已关闭、原stop正常exit0、临时Profile已按原finally释放。DOM与截图归 `/private/tmp/kite-web-directory-browser-20261011.json`、`.jpg`；这只证明本机默认宽度该完整入口，不外推其他浏览器／触控或Win/Linux。
 
 产品手册、Web／UI owners、unified boundary active、原implemented directory Note、主计划和history.read evidence同步。完整根＋八workspace类型、只读Biome、docs／实际scope docs-impact、boundary／八workspace／API／test ownership及plan-evidence按本片执行；正常Git hooks独立运行，不使用no-verify。最终输入／全部日志SHA、断言保全、强制门禁和提交范围归 `/private/tmp/kite-web-directory-source-freeze-20261011.json`。
 
@@ -5359,7 +5359,7 @@ Root `/private/tmp/kite-callers-recovery-freeze.json` 冻结3856份非Markdown�
 
 Root `/private/tmp/kite-callers-argv-freeze.json` 核3856份非Markdown输入，仅三个caller文件和三份CI接线变化；原三file SHA精确匹配115文件／80CLI作业基线。共享PTY、recoveryProfile、Job夹具、所有生产／依赖／构建输入及shared14源码和完整命令不改，未变范围复用原冻结证据。实际argvreceipt `/private/tmp/kite-cli-argv-delivery.json` 绑定最终源码／原红／实际日志／wire／完整请求和正常收尾；Root另核当前CLI／TUI原请求事实、退出回执和原AST。根及八workspace类型、边界／workspace／API／ownership／文档／格式、正常hook按本轮diff收束，当前728文件／588job没有新跑完整阶段回归。手册输入／取消／恢复合同已核，无用户行为变化，无无意义手册diff；CLI owner、tests和release control同步实际方法。
 
-后续用户能力已记录：支持ChatGPT、Responses、优先本地Codex认证与缺认证时官方授权。用户最新明确要求先完成上述V1.3目标，再实施这项新增内容；当前不提前写入认证或协议实现。只读源码核对AI只有compatible chatModel，Service所有provider仍无条件compatible binding；配置、公开provider和正式连接入口没有ChatGPT认证类型。官方公开[注册授权](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)和[账号会话](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)要求应用注册／issued client与token对应；[Responses计划调用](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)要求公开api.openai.com、store:false／stream:true。没有读取真实auth.json／keychain／token，没有真实账号登录／调用。用户已确认后续先交付Kite自己的官方授权与Responses完整能力，Codex直接复用保留未闭合门禁；这一方向保留为后续实施依据，不替代当前主线。
+后续用户能力已记录：支持ChatGPT、Responses、本机凭据复用与缺认证时官方授权。用户最新明确要求先完成上述V1.3目标，再实施这项新增内容；当前不提前写入认证或协议实现。只读源码核对AI只有compatible chatModel，Service所有provider仍无条件compatible binding；配置、公开provider和正式连接入口没有ChatGPT认证类型。官方公开[注册授权](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)和[账号会话](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)要求应用注册／issued client与token对应；[Responses计划调用](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)要求公开api.openai.com、store:false／stream:true。没有读取真实auth.json／keychain／token，没有真实账号登录／调用。用户已确认后续先交付Kite自己的官方授权与Responses完整能力，本机凭据复用须单独验收；这一方向保留为后续实施依据，不替代当前主线。
 
 当前最多五个具体退出阻塞，按先完成用户能力、再取得完整资格的依赖顺序：
 
@@ -5375,7 +5375,7 @@ Root `/private/tmp/kite-callers-argv-freeze.json` 核3856份非Markdown输入，
 
 ## 2026-10-12：TUI 完整管理、模型设置与主机状态的三端测试
 
-状态：partial；上一轮已提交89357cea／10路径／3856输入零漂移，属于实质进展。本轮按最高依赖推进完整管理链，再并行完成不依赖Shell的模型／effort和主机状态。仍以完整用户行为／实际入口／原断言为验收，Windows/Linux原生后置，RSS／完整观测未闭合，不push／PR／发布／dispatch或宣布阶段退出。ChatGPT／Responses依用户最新顺序，在上述V1.3目标完成后实施；已确认的Kite官方授权优先、Codex直接复用门禁保留。
+状态：partial；上一轮已提交89357cea／10路径／3856输入零漂移，属于实质进展。本轮按最高依赖推进完整管理链，再并行完成不依赖Shell的模型／effort和主机状态。仍以完整用户行为／实际入口／原断言为验收，Windows/Linux原生后置，RSS／完整观测未闭合，不push／PR／发布／dispatch或宣布阶段退出。ChatGPT／Responses依用户最新顺序，在上述V1.3目标完成后实施；已确认的Kite官方授权优先、本机凭据复用须单独验收。
 
 [管理原整文件](../../apps/cli/test/isolated/tui-management-host.test.ts)退役Python／POSIX内嵌driver，改[共享驱动](../../apps/cli/test/fixtures/tui-management-driver.ts)。实际 `scripts/development/unified-tui.ts`／原参数／Profile／默认built Service／固定compatible Provider保持，[被动preload](../../apps/cli/test/fixtures/tui-management-observation.ts)只观察准确Service真实spawn／PID／kernel birth／实际退出，参数和stdio不替换。普通约42KiB完整正文／尾、rename、当前Context／frozen upper、held手动摘要完整原文与focus、维护期间准确follow-up、释放后原查回、reset准确失败保旧点、只读rewind前后相同、未知slash草稿逐字删除零Model、Fork原Session／selection／namespace／extensions、delete受理／stop未确认，以及Ctrl+Q／冷同一前门 `/exit`完整保持。19个原Bun expect按序保持；两个Python正常退出检查迁为两次真实exit0，原40秒整例／10秒观察／500ms pump／6秒观察＋3秒exit/EOF join保持。两所属Service按原PID／出生身份／实际code0／dead证明正常，未知Service观察不阻止独立清理持有TUI，不借未知PID；原失败与cleanup errors分别保留，不互相覆盖。
 
@@ -5407,7 +5407,7 @@ Root冻结3860份非Markdown输入，三个原整文件SHA精确匹配115文件�
 
 ## 2026-10-12：完整原生滚动的三端测试
 
-状态：partial；上一切片已正常提交4e44750b／14路径，hooks实际0／18.66秒，提交后3860份非Markdown输入零漂移、工作树干净，`/private/tmp/kite-tui-state-delivery.json`记录7pass／53expects及原42静态／20Python检查。本轮继续最高依赖的完整滚动消费者，Windows/Linux实际后置，RSS／完整观测保持；ChatGPT／Responses依已确认顺序在当前V1.3目标后实施，Kite自己的官方授权优先、Codex直接复用保留门禁。
+状态：partial；上一切片已正常提交4e44750b／14路径，hooks实际0／18.66秒，提交后3860份非Markdown输入零漂移、工作树干净，`/private/tmp/kite-tui-state-delivery.json`记录7pass／53expects及原42静态／20Python检查。本轮继续最高依赖的完整滚动消费者，Windows/Linux实际后置，RSS／完整观测保持；ChatGPT／Responses依已确认顺序在当前V1.3目标后实施，Kite自己的官方授权优先、本机凭据复用须单独验收。
 
 [原完整文件](../../apps/cli/test/isolated/tui-scrollback-pty.test.ts)退役Windows skip和[共享驱动](../../apps/cli/test/fixtures/tui-scrollback-driver.ts)替代的Python／POSIX驱动。公共TUI源码、[有限TSX port](../../apps/cli/test/fixtures/tui-scrollback-pty.tsx)字节不改；没有Service／Provider／installed或GUI终端装配。实际共享Bun PTY／ConPTY及原held `terminal.resize(40,24)`／`resize(80,24)`提供原始hex和resize顺序，原独立20,000行headless VT仍负责所有最终断言，不按共享helper的80列私有parser推导滚动位置。三轮90完成标记、40活动正文、35问题／60选项描述、上滚100行后状态／编辑／改选零重发与阅读位置、179字符paste、12行自由答案、150字符软换行与原79／9列单光标、30项Unicode JSON及12行原文JSON编辑、正文替换／clear／refresh／跨Session和stored snapshot／零mutation完整保持。
 
@@ -5432,7 +5432,7 @@ Root `/private/tmp/kite-scrollback-freeze.json`冻结3860份非Markdown输入；
 
 ## 2026-10-12：原生命周期的 VM 调用观察与严格读取
 
-状态：partial；前切片已正常提交1d65f397／10路径、hooks0／18.87秒，提交后3860份非Markdown输入零漂移且工作树干净。本轮仅收束尚未定位的RSS失败诊断；已有完整用户入口和正式调用者保持，Win/Linux实机后置，不以采样或测试窗口另立长期目标。ChatGPT／Responses仍在当前V1.3目标后按用户确认的Kite官方授权优先实施，Codex直接复用保留门禁。
+状态：partial；前切片已正常提交1d65f397／10路径、hooks0／18.87秒，提交后3860份非Markdown输入零漂移且工作树干净。本轮仅收束尚未定位的RSS失败诊断；已有完整用户入口和正式调用者保持，Win/Linux实机后置，不以采样或测试窗口另立长期目标。ChatGPT／Responses仍在当前V1.3目标后按用户确认的Kite官方授权优先实施，本机凭据复用须单独验收。
 
 先按源码纠正指标归属：[原sampler](../../scripts/runtime/unified-soak-cases.ts)读取probe自身process.memoryUsage().rss，[lifecycle](../../scripts/runtime/unified-soak-probe.ts)在同一PID持有Runtime／HTTPService／Client与SQLite Worker，循环完成／取消／重连原回执／删除。历史178814976→299614208B、+115.203125MiB是该生命周期的before指标，不是[默认Shell／Task／MCP两Service continuous](../../tests/fixtures/unified-agent/soak/continuous-default-shell.ts)。旧root `/private/tmp/kite-macos-arena-zero-20261010-ily6fko1`及后续heap-retainer临时目录目前ENOENT；旧数值与失败保历史依据，本轮没有新核验其raw。新候选与运行范围单列，不追认旧候选。
 
@@ -5512,7 +5512,7 @@ OAuth原三处独立fault／restore连接原try内各一次设置Store Worker原
 | 1 | 普通任务完成／取消／重连原回执／删除的原lifecycle RSS仍红，native owner未确定。修复真实归属后按原九点／八outer／32MiB及完整负载验收，不重复参数对照。 |
 | 2 | Runtime取消／正常停止及异常关闭的完整出生后代／activeResources／handles producer和准确cleanup receipt仍缺，须沿原资源verifier核真实来源与原handle终态。历史Source元数据Question的driver fresh帧故障虽peer／Model／凭据效果0且TUI143，原warm Service14244仍缺退出回执、packet cleanupConfirmed=false；后来正常绿不补认，不把该旧窗口设为新长期目标或扩新矩阵。 |
 | 3 | installed CLI／TUI／Native安装、真代码A→B→回退、MCP完整连接／调用／取消／退出、维护恢复与保数据卸载的Win/Linux实际资格后置Actions／用户Windows，原Shell／script verifier／文件候选后端门禁保持。完整原断言与预算验收前不授平台资格，不触发Actions。 |
-| 4 | §35全部适用场景和最终旧authority／依赖删除依赖各适用门禁；本轮当前macOS完整默认已0，37能力整体仍partial，wholeV13=false／phaseExit=false。ChatGPT／Responses按用户确认的Kite官方授权优先在当前目标后实施，Codex直接复用保门禁。 |
+| 4 | §35全部适用场景和最终旧authority／依赖删除依赖各适用门禁；本轮当前macOS完整默认已0，37能力整体仍partial，wholeV13=false／phaseExit=false。ChatGPT／Responses按用户确认的Kite官方授权优先在当前目标后实施，本机凭据复用须单独验收。 |
 
 本片闭合默认Task→carrier→后续汇报与单Run Planning的Agent权限单点装配，正式Service调用者已切换、原Service实现／Planning转发已删除，Core／SQL最终守卫保留。owner／active／能力映射和既有权限Note按实际边界同步，手册Task／Planning／授权语义核对无行为变化。code-simplification的整架构结果仍partial；本片按iteration_complete／stage／commit与正常hook收束，当前完整默认不扩大到RSS、全资源或Win/Linux资格。Goal继续active，本地提交授权不扩大到push／PR／发布／Actions。
 
@@ -5574,7 +5574,7 @@ code-simplification有界源码审查另定位两处实质冗余：[Web factory]
 | 1 | 普通任务完成／取消／Runtime停止的完整资源观测仍缺可信Bun activeResources／handles和完整出生后代来源。需要真实runtime接口／完整原生覆盖及准确terminal交接，原formal拒绝、Source旧异常事实缺失保持；不能用已知PID、FD或局部收据解除。 |
 | 2 | 原Client→HTTPService→Runtime→Store生命周期RSS真实超限，native live owner仍未知。定位真实归属并修复后按原负载、八outer／九点、32MiB与60—168分钟验收，原红不抹去，不再重复参数对照。 |
 | 3 | Win/Linux正式安装、真代码切换、MCP连接／调用／取消／退出、维护恢复及保数据卸载仍需后续Actions／用户Windows实机证据。已有接线与backend缺项保留；本机不触发Actions或授资格。 |
-| 4 | §35全部适用能力／T/E与独立迁移审查、最终legacy／依赖退役仍依赖上述条件；收束点须核最终准确输入与完整回归。本轮默认0不宣布阶段退出，37能力仍partial／wholeV13=false／phaseExit=false。ChatGPT官方授权与Responses继续按已确认顺序在V1.3之后，Codex直接复用仍保门禁。 |
+| 4 | §35全部适用能力／T/E与独立迁移审查、最终legacy／依赖退役仍依赖上述条件；收束点须核最终准确输入与完整回归。本轮默认0不宣布阶段退出，37能力仍partial／wholeV13=false／phaseExit=false。ChatGPT官方授权与Responses继续按已确认顺序在V1.3之后，本机凭据复用须单独验收。 |
 
 
 ## 2026-10-13：TUI 文件候选的平台只读后端
@@ -5620,7 +5620,7 @@ transport 保每个原完整命令，新记录／原生验证及原候选文件�
 | 1 | 普通任务完成／取消／Runtime停止仍缺可信Bun activeResources／handles、完整出生后代与准确cleanup来源；原formal拒绝和Source旧异常窗口的缺失退出事实保留，局部handle/FD/PID收据不代全集。 |
 | 2 | 原公共Client→HTTPService→Runtime→Store生命周期RSS真实超限，native live owner仍未知。修真实归属后沿原负载、八outer／九点、32MiB、60—168分钟验收，原红保留，不重复参数对照。 |
 | 3 | Win/Linux正式安装、真实版本切换、MCP连接／调用／取消／退出、维护恢复和保数据卸载仍交后续Actions／用户Windows实机；源码接线与本机skip不授资格，Windows Shell原合同门禁保留，不触发Actions。 |
-| 4 | §35全部适用能力／T/E、独立迁移审查、最终legacy／依赖退役与最终准确输入完整回归依赖上述条件。37能力仍partial，wholeV13=false／phaseExit=false；ChatGPT官方授权／Responses在V1.3之后，Codex直接复用仍保门禁。 |
+| 4 | §35全部适用能力／T/E、独立迁移审查、最终legacy／依赖退役与最终准确输入完整回归依赖上述条件。37能力仍partial，wholeV13=false／phaseExit=false；ChatGPT官方授权／Responses在V1.3之后，本机凭据复用须单独验收。 |
 
 
 ## 2026-10-13：macOS 原 Worker 收尾与准确锁交接
@@ -5639,7 +5639,7 @@ transport 保每个原完整命令，新记录／原生验证及原候选文件�
 
 本片新增闭合为macOS正式默认解析与Store收尾／原权／维护锁交接；这两个正式caller的直接terminate即结算分支已由唯一owner等待替换。产品手册的未知／取消承诺保持，技术owner／Note和三项能力partial同步；仅本地提交，原hook保留，不push／PR／Actions。当前相关文件全部0不宣称当前完整默认回归或阶段退出；fc00a2aa的732文件／591作业完整0只保当时准确输入证据。wholeDefault=false／wholeV13=false／phaseExit=false。
 
-剩余退出依赖仍按四项保留：普通任务／取消／正常关闭缺全Runtime可信activeResources／handles、出生后代全集和全部cleanup来源；原RSS +115.203125MiB >32MiB且native live owner未知，保原负载／八outer／九点／60—168分钟条件、不重复参数对照；Win/Linux正式安装、真实版本切换、MCP完整连接／Tool／cancel／exit、维护恢复／保数据卸载及Windows Shell原合同交后续Actions或用户实机，本机不dispatch；前述满足后再执行全部适用§35／T/E、独立迁移审查、最终legacy／依赖退役与最终准确输入完整回归。单线程原权事实不授JSC／VM全部回收，37能力仍partial；ChatGPT官方授权／Responses仍在V1.3之后，Codex直接复用保门禁。
+剩余退出依赖仍按四项保留：普通任务／取消／正常关闭缺全Runtime可信activeResources／handles、出生后代全集和全部cleanup来源；原RSS +115.203125MiB >32MiB且native live owner未知，保原负载／八outer／九点／60—168分钟条件、不重复参数对照；Win/Linux正式安装、真实版本切换、MCP完整连接／Tool／cancel／exit、维护恢复／保数据卸载及Windows Shell原合同交后续Actions或用户实机，本机不dispatch；前述满足后再执行全部适用§35／T/E、独立迁移审查、最终legacy／依赖退役与最终准确输入完整回归。单线程原权事实不授JSC／VM全部回收，37能力仍partial；ChatGPT官方授权／Responses仍在V1.3之后，本机凭据复用须单独验收。
 
 ## 2026-10-13：默认 Web Run 的清理所有权
 
@@ -5655,7 +5655,7 @@ transport 保每个原完整命令，新记录／原生验证及原候选文件�
 
 根与八workspace类型、最终Agent／Service类型和build、当前Biome／boundary／workspace／API／test ownership／docs／docs-impact／plan-evidence／diff均actual0。独立只读审查绑定最终index SHA bedbbc18eb49c5bf14219c20de3321eedf8e4f74b97b697c16c2318ba50d58d5、extractor SHA b0c53cc6bab7d3e7eb2d7793d18607b247a9dfa7d65047520951fd3dc33d20de、Service configuration SHA 96390e2a179d65b211d80d5258ec21a06eefd3ec9fb3aa19efcfcd1aaf55d519，接受本次已执行Run scope及准确关停链；上述通用准备custody限制保留。document-before-commit的iteration_complete／stage／commit仅核本片，正常hook仍独立执行，仅本地提交。
 
-新增闭合为macOS正式普通Web执行的失败收尾owner／Run lease／Profile维护交接；正式Run从共享extension改用Agent scope，原仅靠Tool异常而可关闭Store的路径退役。产品手册未知／取消承诺保持，owner／active／Note与能力partial同步；局部0不声明当前完整默认回归或阶段退出。RSS +115.203125MiB >32MiB／native live owner、全Runtime resources／handles／出生后代／全部cleanup来源保留，Win/Linux正式安装／版本／MCP／维护恢复／保数据卸载与Windows Shell原合同仍交后续Actions或用户实机，本机不dispatch。全适用§35／T/E、独立迁移审查、最终旧源码／依赖退役与准确输入阶段完整回归依赖这些条件；37能力partial，wholeDefault=false／wholeV13=false／phaseExit=false。ChatGPT官方授权／Responses仍在V1.3之后，Codex直接复用保门禁。
+新增闭合为macOS正式普通Web执行的失败收尾owner／Run lease／Profile维护交接；正式Run从共享extension改用Agent scope，原仅靠Tool异常而可关闭Store的路径退役。产品手册未知／取消承诺保持，owner／active／Note与能力partial同步；局部0不声明当前完整默认回归或阶段退出。RSS +115.203125MiB >32MiB／native live owner、全Runtime resources／handles／出生后代／全部cleanup来源保留，Win/Linux正式安装／版本／MCP／维护恢复／保数据卸载与Windows Shell原合同仍交后续Actions或用户实机，本机不dispatch。全适用§35／T/E、独立迁移审查、最终旧源码／依赖退役与准确输入阶段完整回归依赖这些条件；37能力partial，wholeDefault=false／wholeV13=false／phaseExit=false。ChatGPT官方授权／Responses仍在V1.3之后，本机凭据复用须单独验收。
 
 ## 2026-10-13：配置准备清理与正式维护交接
 
@@ -5675,7 +5675,7 @@ transport 保每个原完整命令，新记录／原生验证及原候选文件�
 
 原child／Run resume／report recovery／Job reconcile整文件保持实际正常恢复、原配置／freshness、后置dispose失败和lease合同，独立源码审查五个统一typed接收点；三个恢复入口的新typed返回前真实资源失败尚未逐一直接注入，不以旧case绿补该直接证据。瞬时Skills／其他I/O owner的全部close失败边界及全census仍未闭合。本片闭合的是正式准备producer→Runtime资源持有→shutdown／维护交接，退役普通cause丢custody和默认无消费者Files owner，不把单个失败窗口升级长期Goal。
 
-剩余阶段退出依赖按顺序保持四项：普通完整任务／cancel／close缺可信全Runtime resources／handles、出生后代和全部cleanup来源，前述未直接覆盖恢复返回前typed分支和其他I/O owner仍归此项；原RSS +115.203125MiB >32MiB／native live allocation owner未定位，原负载／八outer／九点／60—168分钟门禁不变，不重复参数对照；Win/Linux正式安装、实际版本切换、MCP连接／调用／cancel／exit、维护恢复／保数据卸载及Windows Shell原合同交后续Actions或用户实机，本机不dispatch；全适用§35／T/E、独立全量迁移审查、最终旧源码／依赖退役和准确输入阶段完整回归依赖以上条件。37能力partial、wholeDefault=false／wholeV13=false／phaseExit=false；ChatGPT官方授权／Responses在V1.3之后，Codex直接复用保门禁。仅本地提交，原hooks保留，不push／PR／发布。
+剩余阶段退出依赖按顺序保持四项：普通完整任务／cancel／close缺可信全Runtime resources／handles、出生后代和全部cleanup来源，前述未直接覆盖恢复返回前typed分支和其他I/O owner仍归此项；原RSS +115.203125MiB >32MiB／native live allocation owner未定位，原负载／八outer／九点／60—168分钟门禁不变，不重复参数对照；Win/Linux正式安装、实际版本切换、MCP连接／调用／cancel／exit、维护恢复／保数据卸载及Windows Shell原合同交后续Actions或用户实机，本机不dispatch；全适用§35／T/E、独立全量迁移审查、最终旧源码／依赖退役和准确输入阶段完整回归依赖以上条件。37能力partial、wholeDefault=false／wholeV13=false／phaseExit=false；ChatGPT官方授权／Responses在V1.3之后，本机凭据复用须单独验收。仅本地提交，原hooks保留，不push／PR／发布。
 
 本片最终根与八workspace类型、Agent／Service构建、当前Biome／API／boundary／workspace／test ownership／docs／docs-impact／plan-evidence／diff均actual0。独立只读审查绑定Runtime SHA ef06a4d5412f921579879b567207ac64a114fb102d06ec8fdffd4af7f9f4d0c7、assembly SHA 9b85bc27b41faacdd4e8e65a20b08b9af6f4d7442de56fc76b212946c78c596f、configuration SHA dd5e838b4a48396749fcb9e932d712c3184e42106b319dc6dff3126c3c336e21，未见新增实质错误；新child用例单文件最终SHA86e783f804e2a80580c1bff427496cd06e166b9f17743a1baeceeff3470ab58a。文档检查首轮因新Note标题需精确Consequences而actual1，已保log并只修标题，当前0；没有改断言或资格。iteration_complete／stage／commit仅授本片，正常hook仍独立执行。
 
@@ -5733,7 +5733,7 @@ Service／Runtime close 实际拒绝之后，独立 Store 取得原 Session owne
 
 截图对应原交互窗口同轮再验40效果／零取消、2次真实退出读取拒绝，quitDialogs／pageErrors／observationErrors均空，Electron0／无信号、原Service PID81280正常0／无信号。它验证当前源码退出读取修复，不反推截图安装包身份。普通产品入口、权限及恢复手册核对无行为变化；更新 Service 资产验收、测试入口、当前进度和能力证据。本片未新增正式 caller 切换或旧生产树删除，补齐当前默认集成证据及实际单文件资产交接验证。
 
-剩余阻塞按依赖保留四项：①Runtime取消／停止的可信全 resources／handles producer、全部出生后代及准确收尾来源；固定 Bun API stub 与本机符号能力限制仍在，不以已知 FD／owner 替代；②原 lifecycle RSS +115.203125 MiB 高于32 MiB，native live owner仍未定，原八outer／九点与完整60—168分钟要求保持，未另跑参数对照、formal soak 或旧大 trace；③Win/Linux正式安装、真实切换／回退、MCP完整连接调用取消退出、维护恢复及保数据卸载仍后置Actions／用户Windows，原Shell等backend门禁保留，本机不触发Actions；④§35全部适用T/E与完整独立迁移审查、最终旧路径／依赖退役仍需上述实际资格和准确支持范围，不能因当前默认0提前删除旧树。ChatGPT官方授权／Responses仍在当前V1.3之后，Codex直接复用保原门禁。
+剩余阻塞按依赖保留四项：①Runtime取消／停止的可信全 resources／handles producer、全部出生后代及准确收尾来源；固定 Bun API stub 与本机符号能力限制仍在，不以已知 FD／owner 替代；②原 lifecycle RSS +115.203125 MiB 高于32 MiB，native live owner仍未定，原八outer／九点与完整60—168分钟要求保持，未另跑参数对照、formal soak 或旧大 trace；③Win/Linux正式安装、真实切换／回退、MCP完整连接调用取消退出、维护恢复及保数据卸载仍后置Actions／用户Windows，原Shell等backend门禁保留，本机不触发Actions；④§35全部适用T/E与完整独立迁移审查、最终旧路径／依赖退役仍需上述实际资格和准确支持范围，不能因当前默认0提前删除旧树。ChatGPT官方授权／Responses仍在当前V1.3之后，本机凭据复用须单独验收。
 
 本片按 iteration_complete／stage／commit 与正常 hook 收束，仅本地提交；当前准确源码 wholeDefault=true，37能力仍partial／wholeV13=false／phaseExit=false，Goal active，无push／PR／发布／Actions。
 
@@ -5884,7 +5884,7 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 4. **Win/Linux正式安装、真实版本切换、完整MCP、维护恢复与保数据卸载。** 后续Actions/用户Windows取得实际结果，保原Windows Shell guard；本轮不dispatch、push或授平台资格。
 5. **最终正式消费者、旧路径退役与§35完整资格。** 适用T001—T114/E01—E14、真实升级/恢复/制品通过后阶段收束须完整回归；本片无新增caller架构切换或旧树删除。
 
-按 document-before-commit 核 iteration_complete/stage/commit，只做已授权本地提交。新增闭合为上述正式原查询和Native旧错误归属；37能力仍partial、wholeV13=false／phaseExit=false，Goal active。后续官方授权/Responses和未证Codex缓存复用的原范围不变。
+按 document-before-commit 核 iteration_complete/stage/commit，只做已授权本地提交。新增闭合为上述正式原查询和Native旧错误归属；37能力仍partial、wholeV13=false／phaseExit=false，Goal active。后续官方授权/Responses和本机凭据的独立验证的原范围不变。
 
 本地交付结果：`62a2f1771d4f91d08f1b895edfd34814bec7ffcb` 正常hook全部通过（20.98秒），18个准确已授权文件，提交后clean。随后执行用户已明确允许的 Instruments 本次会话诊断，仅附加直接持有句柄的 Bun PID90339；准确当前binary与原 method SHA保持，原Allocations/5秒未换参数或比较矩阵。Bun先在有限 stdin闸门等待，只有工具的唯一 `--notify-tracing-started` 事件后才运行原65,659/17,825,915字节分配与释放，确保目标及清理归属可证；允许系统提示，不使用旧no-prompt，不改永久DevToolsSecurity，不采集其他进程。
 
@@ -5911,7 +5911,7 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 4. **Win／Linux正式安装、真实版本切换、完整MCP、维护恢复和保数据卸载。** 入口为既有正式命令和客户端；验收须由后续Actions／用户Windows实际执行完整行为、保持数据和原断言。源码接线不授运行资格，原Windows Shell guard保持；本轮不push或dispatch。
 5. **最终正式消费者、旧路径退役与完整阶段资格。** 实际Terminal／Native／Web的全部适用能力须按§35、T001—T114／E01—E14和37行映射闭合；旧正式消费者和制品依赖迁移后才退役，在阶段收束运行完整默认回归。原完整默认结果按其准确旧源范围复用，本轮相关8文件不能替代最终全回归。
 
-本轮同步产品指南、Native owner和跨包读取边界；普通精确 reader 修复沿既有合同，不新增独立架构取舍 Note。文档结构／实际diff影响核对、plan evidence、test ownership、统一静态边界／8工作区／生成API、三个归属代码文件Biome及diff whitespace检查通过。影响映射本次0规则，只表示没有匹配映射，实际产品／技术语义仍由上述双方源码与owner核对。迭代／stage／commit按 document-before-commit 核准确本轮 diff，仅已授权本地交付，正常hook独立执行。wholeV13=false／phaseExit=false，Goal active；官方授权／Responses与未证Codex缓存复用仍在V1.3之后。
+本轮同步产品指南、Native owner和跨包读取边界；普通精确 reader 修复沿既有合同，不新增独立架构取舍 Note。文档结构／实际diff影响核对、plan evidence、test ownership、统一静态边界／8工作区／生成API、三个归属代码文件Biome及diff whitespace检查通过。影响映射本次0规则，只表示没有匹配映射，实际产品／技术语义仍由上述双方源码与owner核对。迭代／stage／commit按 document-before-commit 核准确本轮 diff，仅已授权本地交付，正常hook独立执行。wholeV13=false／phaseExit=false，Goal active；官方授权／Responses与本机凭据的独立验证仍在V1.3之后。
 
 
 ## 2026-10-13：Instruments 会话认证的实际边界
@@ -5928,7 +5928,7 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 
 剩余依赖仍按四项推进：①实际用户执行／停止／退出的完整resources／handles、出生后代与cleanup来源，当前必须先完成采集器**自己的**认证或证明受支持传递；②原正式客户端全lifecycle RSS，原8outer／9点／60—168分钟、32MiB与+115.203125MiB失败保持，不重跑参数对照；③Win／Linux正式安装、真实切换、完整MCP、维护恢复和保数据卸载，仍后置Actions／用户Windows；④适用§35／T001—T114／E01—E14／37能力正式接替和旧闭包退役，收束点完整回归。此次无新增完整用户能力闭合、正式caller源码切换或旧树退役，观测只取得上述实际认证边界证据。
 
-本轮只同步有效进度，不改产品、API、Store或owner合同；复用 `87169a48` 的准确8文件／24pass／413 expects及类型／静态／原窗口证据，代码／配置及运行资产按冻结输入复核。按 document-before-commit 核迭代／stage／commit，文档检查和正常hook独立执行，仅本地提交。wholeV13=false／phaseExit=false，Goal active；本轮新增的证据改变下一步：依赖实际xctrace认证，重复显式helper或同一未认证采集不产生可信观测。已请求用户在本机Terminal执行同一个原五秒有界脚本、完成采集器自己的系统认证并反馈result路径或无窗口事实；这是已有授权下所需外部交互，不再请求同意、不改系统权限。该提交时尚无用户执行结果，后续实际结果见下节。官方授权／Responses及Codex缓存复用仍在V1.3之后。
+本轮只同步有效进度，不改产品、API、Store或owner合同；复用 `87169a48` 的准确8文件／24pass／413 expects及类型／静态／原窗口证据，代码／配置及运行资产按冻结输入复核。按 document-before-commit 核迭代／stage／commit，文档检查和正常hook独立执行，仅本地提交。wholeV13=false／phaseExit=false，Goal active；本轮新增的证据改变下一步：依赖实际xctrace认证，重复显式helper或同一未认证采集不产生可信观测。已请求用户在本机Terminal执行同一个原五秒有界脚本、完成采集器自己的系统认证并反馈result路径或无窗口事实；这是已有授权下所需外部交互，不再请求同意、不改系统权限。该提交时尚无用户执行结果，后续实际结果见下节。官方授权／Responses及本机凭据复用仍在V1.3之后。
 
 ## 2026-10-13：采集器认证后附加失败与当前完整回归
 
@@ -5956,7 +5956,7 @@ Native 另一个实际问题是 [恢复面板](../../apps/desktop/src/native-rec
 
 本轮新增闭合的是正式Shell输出故障的如实失败、原错误保留及一次准确收尾，未新增正式调用者源码迁移或旧路径退役。按依赖保最多五项退出缺口：①正式执行／停止入口的原间歇SIGTERM首触发，需确证原因并保持原完整40任务成功断言；②同入口和正常退出的全部resources／handles、出生后代与cleanup来源，当前认证已完成但原binary附加失败／覆盖未证；③原正式lifecycle RSS，必须保八outer／九点／60—168分钟／32MiB，+115.203125MiB红仍未闭合；④后置Win／Linux正式安装、真实切换、MCP、维护恢复与保数据卸载，按用户Windows／后续Actions实际验收且保原guard；⑤全部适用用户能力与正式消费者接替、旧闭包退役及§35／T001—T114／E01—E14／37行映射，收束仍须对应最终输入完整回归。原native_draining窗口修复继续复用正常退出原证据，当前未在用户安装包核验版本，不把源码构建通过写成其安装包已更新。
 
-8工作区typecheck实际0；文档结构／准确diff影响、原plan evidence、test ownership、统一静态／工作区／API边界、三份归属代码Biome和whitespace检查通过。document-before-commit的iteration_complete／stage／commit只覆盖本轮七文件错误处理与文档事实；Agent根README和统一边界核对后不制造无意义diff。普通局部bug修复不新增架构Note或独立诊断目标，临时停止记录已移除。仅已授权本地提交，正常hook仍独立执行；wholeV13=false／phaseExit=false，Goal active，官方授权／Responses和未证Codex认证复用仍在V1.3之后。
+8工作区typecheck实际0；文档结构／准确diff影响、原plan evidence、test ownership、统一静态／工作区／API边界、三份归属代码Biome和whitespace检查通过。document-before-commit的iteration_complete／stage／commit只覆盖本轮七文件错误处理与文档事实；Agent根README和统一边界核对后不制造无意义diff。普通局部bug修复不新增架构Note或独立诊断目标，临时停止记录已移除。仅已授权本地提交，正常hook仍独立执行；wholeV13=false／phaseExit=false，Goal active，官方授权／Responses和本机凭据的独立验证仍在V1.3之后。
 
 
 ## 2026-10-13：正式 Context 完整历史结果显式纳入

@@ -126,9 +126,17 @@ native(
       },
     };
     const childModel: ModelAdapter = {
-      async *stream() {
-        if (childStep++ === 0) yield* call('shell_execute', { command: 'rg --files' });
-        else if (childStep === 2) yield* call('shell_execute', { command: 'ls' });
+      async *stream(request) {
+        if (childStep++ === 0) {
+          const system = request.messages.find(
+            ({ role, sourceIds }) => role === 'system' && sourceIds?.includes('agent:contract'),
+          );
+          expect(system?.content).toContain('prefer rg for text and rg --files for file discovery');
+          const shell = request.tools?.find(({ id }) => id === 'shell_execute');
+          expect(shell).toBeDefined();
+          expect(shell?.description).not.toContain('rg --files');
+          yield* call('shell_execute', { command: 'rg --files' });
+        } else if (childStep === 2) yield* call('shell_execute', { command: 'ls' });
         else if (childStep === 3)
           yield* call('shell_execute', {
             command: "rg search-needle '中文 source.txt'",

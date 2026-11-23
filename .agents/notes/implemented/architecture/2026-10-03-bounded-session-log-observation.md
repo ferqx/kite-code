@@ -28,6 +28,6 @@ Service 默认装配接 actual Store 的有限 source，只有存在该 source �
 
 实际 Core 三文件14/231覆盖原 metadata、旧/未来格式、scope、Model binding 漂移和外来 subject 导航拒绝。公共三测试78断言及六文件邻接22/413通过实际 SQLite、Native SDK、Cookie Gateway、Browser SDK 与默认 paired source main：超过200事件的固定上界、新写入仅在刷新可见、abort/cold readonly 零新业务效果。完整超过64 KiB模型请求与来源在项目源码后来变化后仍按原封存事实读取，Provider 只有原一次调用。SDK 当前2/76另核严格 DTO、MAX64、坏页/导航、512 KiB流式界及 undefined query 省略。
 
-Web DOM 资格覆盖有限按需读取、旧响应隔离、过期保页和原 Model Inspector 第二次确认。实际 Codex In-app Browser 已用编译 Web、Cookie Gateway 和原 Service/SQLite 核 fixed upper 36→46 仅在显式刷新采纳、目录 pointer/键盘/偏好/折叠和620×800顶栏焦点 Escape。首次现场 Escape 失败已修，三文件17/192邻接保原行为。后续1280×800现场准确原 Model 导航与第二次确认读取完整189字节 sealed请求；观察前后原 Provider3、Messages4、Runs2、Executions4、cursor45不变，两个真实 Job 成功且所属进程正常结束。该 source main 不是源码外 installed 制品，也不代表任意尺寸/浏览器或 Linux/Windows、正式入口退役。
+Web DOM 资格覆盖有限按需读取、旧响应隔离、过期保页和原 Model Inspector 第二次确认。本机应用内浏览器 已用编译 Web、Cookie Gateway 和原 Service/SQLite 核 fixed upper 36→46 仅在显式刷新采纳、目录 pointer/键盘/偏好/折叠和620×800顶栏焦点 Escape。首次现场 Escape 失败已修，三文件17/192邻接保原行为。后续1280×800现场准确原 Model 导航与第二次确认读取完整189字节 sealed请求；观察前后原 Provider3、Messages4、Runs2、Executions4、cursor45不变，两个真实 Job 成功且所属进程正常结束。该 source main 不是源码外 installed 制品，也不代表任意尺寸/浏览器或 Linux/Windows、正式入口退役。
 
 实际实现、边界与原日志归 [Store owner](../../../../packages/agent/src/storage/README.md)、[Service owner](../../../../apps/service/README.md)、[Client owner](../../../../packages/client/README.md)、[Web owner](../../../../apps/web/README.md)、[日志手册](../../../../docs/handbook/clients/web/guides/logs.md)与[实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。

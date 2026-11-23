@@ -54,7 +54,7 @@ const thinking = (turnId: string): Message => ({
   text: 'PRIVATE REASONING',
   settled: false,
 });
-const terminal = (turnId: string, status: 'completed' | 'cancelled' | 'aborted'): Message => ({
+const terminal = (turnId: string, status: NonNullable<Message['turnTerminalStatus']>): Message => ({
   id: `terminal:${turnId}`,
   turnId,
   role: 'system',
@@ -488,7 +488,8 @@ test('host-confirmed hidden non-tool records never create a row or invoke the bo
   expect(calls).toEqual(['first', 'tool:failure']);
   expect(document.querySelector('.message.assistant')).toBeNull();
   expect(document.body.textContent).toContain('Real failure');
-  expect(document.querySelectorAll('.response-status')).toHaveLength(1);
+  expect(document.querySelector('.agent-turn-status-label')?.textContent).toBe('进行中');
+  expect(document.querySelector('.response-status')).toBeNull();
 });
 
 test('timing-only completed turns keep exact identities and never render private markers through the host', () => {
@@ -546,7 +547,7 @@ for (const markerFirst of [true, false]) {
         : el.getAttribute('data-message-id'),
     );
     expect(entries).toEqual(['original', 'running', 'later', 'completed']);
-    expect(document.querySelector('.agent-turn')?.textContent).toContain('正在回复');
+    expect(document.querySelector('.agent-turn-status-label')?.textContent).toBe('进行中');
   });
 }
 
@@ -1106,7 +1107,11 @@ test('separate traces retain their own result or thinking while the Turn shows i
       expect(headings[0]!.getAttribute('data-status')).not.toBe('running');
       expect(headings[1]!.getAttribute('data-status') === 'running').toBe(thinking);
       expect(
-        dom.window.document.querySelector('.agent-turn > .conversation-turn-notice')?.textContent,
+        dom.window.document.querySelector(
+          status === 'waiting' || status === 'cancelling' || status === 'recovery_required'
+            ? '.agent-turn-summary > [role="status"]'
+            : '.agent-turn > .conversation-turn-notice',
+        )?.textContent,
       ).toBe(notice);
       expect(dom.window.document.body.textContent).not.toContain('PRIVATE REASONING');
       dom.window.close();
@@ -1178,8 +1183,8 @@ test('tool handoff retains the latest message until a reply or terminal ends the
     ...done,
     id: 'second-shell',
     toolName: 'shell_execute',
-    target: 'printf second',
-    shell: { operation: 'execute', jobStatus: 'succeeded' },
+    target: '查看第二条输出',
+    shell: { operation: 'execute', jobStatus: 'succeeded', commandPreview: 'printf second' },
   };
   const pending: Message = { ...thinking('run'), text: '', tracePending: 'tool' };
   const reply: Message = {
@@ -1215,6 +1220,195 @@ test('tool handoff retains the latest message until a reply or terminal ends the
     expect(heading.querySelector('[data-status="running"]')).toBeNull();
     dom.window.close();
   }
+});
+
+test('Native applies the initial live process default once and keeps its disclosure through settlement', async () => {
+  for (const manuallyClose of [false, true]) {
+    await withConversationRoot(async (host, root) => {
+      const tool: Message = {
+        id: 'shell-process',
+        turnId: 'run',
+        role: 'tool',
+        text: '',
+        toolName: 'shell_execute',
+        status: 'running',
+        settled: false,
+        shell: { operation: 'execute', command: 'pwd', jobStatus: 'running' },
+      };
+      const reply: Message = {
+        id: 'final',
+        turnId: 'run',
+        role: 'assistant',
+        text: 'Final reply',
+        settled: true,
+        finalReply: true,
+      };
+      const draw = (status: 'running' | 'waiting' | 'completed', next?: Message) =>
+        act(async () => {
+          root.render(
+            <Conversation
+              traceTurns
+              selected
+              connected
+              loading={false}
+              messages={[
+                user('first'),
+                status === 'completed'
+                  ? {
+                      ...tool,
+                      status: 'completed',
+                      settled: true,
+                      shell: { ...tool.shell!, jobStatus: 'succeeded' },
+                    }
+                  : tool,
+                ...(status === 'completed' ? [reply, terminal('run', 'completed')] : []),
+                ...(next ? [user('second'), next] : []),
+                ...(next?.status === 'failed' ? [terminal('next', 'failed')] : []),
+              ]}
+              turnActivity={{
+                turnId: next?.turnId ?? 'run',
+                status: next ? (next.status === 'failed' ? 'failed' : 'running') : status,
+              }}
+              saveReading={() => {}}
+            />,
+          );
+        });
+      await draw('running');
+      const trigger = host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      expect(trigger.textContent).toContain('进行中');
+      const row = host.querySelector('.shell-activity');
+      expect(row).not.toBeNull();
+      if (manuallyClose) await act(async () => trigger.click());
+      await draw('waiting');
+      expect(host.querySelector('button.agent-turn-summary') === trigger).toBe(true);
+      expect(trigger.getAttribute('aria-expanded')).toBe(String(!manuallyClose));
+      await draw('completed');
+      expect(host.querySelector('button.agent-turn-summary') === trigger).toBe(true);
+      expect(trigger.textContent).toContain('用时');
+      expect(trigger.getAttribute('aria-expanded')).toBe(String(!manuallyClose));
+      if (!manuallyClose) expect(host.querySelector('.shell-activity') === row).toBe(true);
+      expect(host.querySelector('.agent-turn-content')?.textContent).not.toContain('Final reply');
+      expect(host.textContent).toContain('Final reply');
+      const next = { ...tool, id: 'next-tool', turnId: 'next' };
+      await draw('completed', next);
+      const summaries = host.querySelectorAll('button.agent-turn-summary');
+      expect(summaries[0]?.getAttribute('aria-expanded')).toBe(String(!manuallyClose));
+      expect(summaries[1]?.getAttribute('aria-expanded')).toBe('false');
+      await draw('completed', { ...next, status: 'failed', settled: true });
+      expect(summaries[1]?.getAttribute('aria-expanded')).toBe('false');
+      expect(summaries[1]?.textContent).toContain('用时');
+    });
+  }
+});
+
+test('ordinary replies stay in order and mounted when interleaved tools are folded', async () => {
+  await withConversationRoot(async (host, root) => {
+    const input = user('question');
+    const firstReply: Message = {
+      id: 'first-reply',
+      role: 'assistant',
+      turnId: 'run',
+      text: 'I will read the configuration.',
+      settled: true,
+    };
+    const secondReply: Message = {
+      ...firstReply,
+      id: 'second-reply',
+      text: 'I found the entry point.',
+    };
+    const read: Message = {
+      id: 'tool:read',
+      turnId: 'run',
+      role: 'tool',
+      toolName: 'shell_execute',
+      text: '',
+      status: 'running',
+      settled: false,
+      shell: { operation: 'execute', command: 'rg --files', jobStatus: 'running' },
+    };
+    const finish = (tool: Message): Message => ({
+      ...tool,
+      status: 'completed',
+      settled: true,
+      shell: { ...tool.shell!, jobStatus: 'succeeded' },
+    });
+    const check: Message = {
+      ...read,
+      id: 'tool:check',
+      shell: { ...read.shell!, command: 'git status' },
+    };
+    const draw = (messages: Message[], status: 'running' | 'completed' = 'running') =>
+      act(async () =>
+        root.render(
+          <Conversation
+            traceTurns
+            selected
+            connected
+            loading={false}
+            messages={messages}
+            turnActivity={messages.length ? { turnId: 'run', status } : undefined}
+            saveReading={() => {}}
+          />,
+        ),
+      );
+    const replies = () => [...host.querySelectorAll('.message.assistant')];
+
+    await draw([]);
+    await draw([input, firstReply]);
+    const firstNode = replies()[0];
+    expect(firstNode?.textContent).toContain(firstReply.text);
+    await draw([input, firstReply, read]);
+    const summary = host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    expect(replies()[0]).toBe(firstNode);
+    expect(host.querySelector('.shell-activity')).toBeNull();
+
+    await draw([input, firstReply, finish(read), secondReply]);
+    const secondNode = replies()[1];
+    expect(secondNode?.textContent).toContain(secondReply.text);
+    await draw([input, firstReply, finish(read), secondReply, check]);
+    expect(replies()[1]).toBe(secondNode);
+    await act(async () => summary.click());
+    const rowText = [...host.querySelectorAll('.message.assistant, .tool-command')].map(
+      (row) => row.textContent,
+    );
+    expect(rowText).toEqual([
+      expect.stringContaining(firstReply.text),
+      'rg --files',
+      expect.stringContaining(secondReply.text),
+      'git status',
+    ]);
+    const panels = summary
+      .getAttribute('aria-controls')!
+      .split(' ')
+      .map((id) => document.getElementById(id));
+    expect(panels).toHaveLength(2);
+    expect(panels.every((node) => node?.getAttribute('data-state') === 'open')).toBe(true);
+
+    const final = { ...firstReply, id: 'final', text: 'The check is complete.', finalReply: true };
+    await draw(
+      [
+        input,
+        firstReply,
+        finish(read),
+        secondReply,
+        finish(check),
+        final,
+        terminal('run', 'completed'),
+      ],
+      'completed',
+    );
+    expect(summary.textContent).toContain('用时');
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => summary.click());
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    expect(replies()).toHaveLength(3);
+    expect(replies()[0]).toBe(firstNode);
+    expect(replies()[1]).toBe(secondNode);
+    expect(replies()[2]?.textContent).toContain(final.text);
+    expect(replies().every((node) => node.closest('.agent-turn-content') === null)).toBe(true);
+  });
 });
 
 test('reasoning keeps its own disclosure through streaming, tool updates, reconnect and completion', async () => {
@@ -1380,8 +1574,7 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
     await act(async () => draw([done, finishedSecond]));
     const completed = host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
     expect(completed.textContent).toBe('用时未知');
-    expect(completed.getAttribute('aria-expanded')).toBe('false');
-    await act(async () => completed.click());
+    expect(completed.getAttribute('aria-expanded')).toBe('true');
     expect(host.querySelector('.conversation-trace > button')?.textContent).toBe('运行了命令');
     const reasoningButtons = host.querySelectorAll('.conversation-reasoning > button');
     expect([...reasoningButtons].map((item) => item.textContent)).toEqual(['已思考', '已思考']);
@@ -1401,7 +1594,11 @@ test('reasoning keeps its own disclosure through streaming, tool updates, reconn
 });
 
 test('running trace reports progress before the first model body arrives', () => {
-  for (const status of ['preparing', 'running'] as const) {
+  for (const [status, label] of [
+    ['creating_session', '正在创建会话…'],
+    ['preparing', '正在准备回复…'],
+    ['running', '进行中'],
+  ] as const) {
     const dom = new JSDOM(
       renderToStaticMarkup(
         <Conversation
@@ -1415,9 +1612,7 @@ test('running trace reports progress before the first model body arrives', () =>
         />,
       ),
     );
-    expect(dom.window.document.querySelector('[role="status"]')?.textContent).toBe(
-      status === 'preparing' ? '正在准备回复…' : '进行中',
-    );
+    expect(dom.window.document.querySelector('[role="status"]')?.textContent).toBe(label);
     dom.window.close();
   }
   for (const unavailable of [true, false]) {
@@ -2058,8 +2253,8 @@ test('completed Trace summaries preserve original single-step disclosure and det
     [completed('images', 'view_images', { toolImageCount: 2 }), '查看了图片'],
     [
       completed('shell', 'shell_execute', {
-        shell: { operation: 'execute', jobStatus: 'succeeded' },
-        target: 'echo 已完成',
+        shell: { operation: 'execute', jobStatus: 'succeeded', command: 'echo 已完成' },
+        target: '报告完成情况',
       }),
       '运行了命令',
     ],
@@ -2079,7 +2274,11 @@ test('completed Trace summaries preserve original single-step disclosure and det
       expect(trace.querySelectorAll(':scope > .conversation-trace-trigger')).toHaveLength(0);
       expect(trace.querySelectorAll('[data-trace-line]')).toHaveLength(1);
       expect(trace.querySelector('.tool-label')?.textContent).toBe(label);
-      if (message.target && (open || !['edit', 'shell'].includes(message.id)))
+      if (message.id === 'shell') {
+        expect(trace.querySelector('.tool-command')?.textContent).toBe('echo 已完成');
+        expect(trace.querySelector('.tool-detail-status')).toBeNull();
+        expect(trace.textContent).not.toContain(message.target!);
+      } else if (message.target && (open || message.id !== 'edit'))
         expect(trace.textContent).toContain(message.target);
       if (message.id === 'edit' && open) expect(trace.textContent).toContain('+new');
       expect(trace.querySelectorAll('.conversation-trace-steps[data-grouped]')).toHaveLength(0);
@@ -2162,6 +2361,8 @@ test('completed Trace summaries preserve original single-step disclosure and det
     if (operation === 'execute') {
       expect(trace.querySelector(':scope > button')).toBeNull();
       expect(trace.querySelector('.tool-label')?.textContent).toBe('运行了命令');
+      expect(trace.querySelector('.tool-command')?.textContent).toBe('printf original-command');
+      expect(trace.textContent).not.toContain(message.target!);
     } else {
       expect(trace.querySelector(':scope > button')?.textContent).toBe('工具执行');
       expect(trace.querySelector('.conversation-trace-steps')?.textContent).toContain(

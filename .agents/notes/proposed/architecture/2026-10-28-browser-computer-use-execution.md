@@ -251,13 +251,13 @@ Native局部事件闩锁跟踪开始／提交／当前文档，Host等待时保�
 
 ## 2026-10-30 Native导航与状态归准确Main owner
 
-新普通构建首问仍在页面实际打开后因CSS前置等待中的导航变化返回`browser_page_read_stale`；固定0.39.4的navigate在Page.navigate及生命周期等待后，还要通过Runtime.evaluate读取location.href、document.title。继续为这两条表达式增加特例，会把Main已经持有的原生页面事实绑在另一套导航／JS状态上。用户进一步要求停止反复实机试错，抓重点，必要时换方案并参考Codex。
+新普通构建首问仍在页面实际打开后因CSS前置等待中的导航变化返回`browser_page_read_stale`；固定0.39.4的navigate在Page.navigate及生命周期等待后，还要通过Runtime.evaluate读取location.href、document.title。继续为这两条表达式增加特例，会把Main已经持有的原生页面事实绑在另一套导航／JS状态上。用户进一步要求停止反复实机试错，抓重点，必要时换方案。
 
 采用有限Native driver切口：原统一Browser API、技能、隔离代码环境和单Agent Loop保持；Service把Native navigate／url／title交给私有Main-owned请求，Rust继续承担已有snapshot／AX／元素能力。Main对准确原WebContents直接读原生URL／title；导航先建立一次性主框架生命周期owner，再仅派发一次Page.navigate，等本次新文档DOM-ready或准确同文档完成，最终重核原页、租约、attachment及navigation。状态回执闭合原leaseId、pageId、incarnation、navigation、url、title；初始about:blank仅可作为状态，导航仍限无凭据HTTP(S)。
 
 原观察documentReady门禁继续拒绝跨文档，不能拿它充当允许本次导航推进的等待。真正派发前才可确认not_dispatched，派发后取消、超时、销毁、改租约或丢确认保unknown；取消后排空原始CDP确认，迟到成功不能复活。Service沿同nativeResult互斥、inflight和原请求期限收口，close先取消自己的owned HTTP等待再排空，不销毁借用网页。Native capture的前后metadata也通过同一可信Main回调读取，避免内部url／title私有调用绕回Rust；原capture集合负责排空。旧unknown、真实cleanupunknown与新Run首次snapshot门禁均不改写。
 
-此处部分替代Native启动导航和metadata绕固定daemon的实现，不是全后端重写；standalone兼容路径及现有资产版本保持。公开参考只支持[稳定tab／驱动引用责任与资源所有权](https://developers.openai.com/api/docs/guides/tools-computer-use-sdk-drivers)和[Codex可操作共享内置浏览器](https://learn.chatgpt.com/docs/browser?surface=app)，没有披露其内部Electron布局或恢复算法，不能声称复制了Codex实现，也不引入SDK的新Loop或审批规则。
+此处部分替代 Native 启动导航和 metadata 绕固定 daemon 的实现。Standalone 兼容路径及现有资产版本保持。借用的页面由共享所有者管理，驱动负责稳定引用与当前观察，现有执行循环和审批规则继续生效。[驱动和资源所有权文档](https://developers.openai.com/api/docs/guides/tools-computer-use-sdk-drivers)。
 
 另据真实38次模型核验循环，当前Run变量、同页绑定和新工具结果传递均正常；固定snapshot refs仅输出role／name，state只在AX文本中。当前补通用指导：等价语义观察不再增加证据时转正式截图等合适观察，仍不足便报告限制、close并正常回复。不从name／文本正则补造可决定派发的disabled等状态，不加全局失败次数取消。Root与Native多surface的缩放合成缺口仍属独立呈现问题，两次hidden实验未取得新尺寸帧，不继续叠加该方向或用最终截图追认通过。
 

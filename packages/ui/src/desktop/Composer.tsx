@@ -219,6 +219,8 @@ export interface ComposerProps {
   hideContextWhenUnavailable?: boolean;
   submitStatus?: string;
   sending?: boolean;
+  /** The send icon can return before the submission releases the compose guard. */
+  sendLoading?: boolean;
   promptHidden?: boolean;
   /** Keep the original permission control while a business interaction owns the input. */
   permissionWhenPromptHidden?: boolean;
@@ -570,6 +572,7 @@ export function Composer(props: ComposerProps) {
       !!props.files?.length ||
       !!props.contextHasInput);
   const canSubmit = canSend && !props.readOnly && !props.readGate?.send;
+  const sendLoading = props.sendLoading ?? props.sending;
   const showStop =
     !props.sending &&
     props.active &&
@@ -1109,7 +1112,7 @@ export function Composer(props: ComposerProps) {
                   type="submit"
                   aria-label={
                     props.sendLabel ??
-                    (props.sending
+                    (sendLoading
                       ? '正在发送消息'
                       : props.submitStatus
                         ? `发送消息：${props.submitStatus}`
@@ -1119,17 +1122,17 @@ export function Composer(props: ComposerProps) {
                   }
                   title={
                     props.sendLabel ??
-                    (props.sending
+                    (sendLoading
                       ? '正在发送消息'
                       : props.submitStatus || (props.active ? '排队后续输入' : '发送消息'))
                   }
-                  aria-busy={props.sending || undefined}
+                  aria-busy={sendLoading || undefined}
                   disabled={!canSend}
                   readOnly={props.readGate?.send}
                 >
                   <HugeiconsIcon
-                    icon={props.sending ? Loading03Icon : ArrowUp02Icon}
-                    className={props.sending ? 'motion-safe:animate-spin' : undefined}
+                    icon={sendLoading ? Loading03Icon : ArrowUp02Icon}
+                    className={sendLoading ? 'motion-safe:animate-spin' : undefined}
                     strokeWidth={2}
                   />
                 </Button>

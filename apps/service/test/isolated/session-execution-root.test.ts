@@ -369,6 +369,11 @@ async function exerciseRootSwitch(
     expect(prefix(1)).not.toContain('SOURCE_ROOT_ONLY_MARKER');
     expect(prefix(6)).toContain('SOURCE_ROOT_ONLY_MARKER');
     expect(prefix(6)).not.toContain('TARGET_ROOT_ONLY_MARKER');
+    const systemContext = (index: number) =>
+      requests[index]?.messages.find(({ role }) => role === 'system')?.content;
+    expect(systemContext(1)).toContain(`Workspace root: ${realpathSync(target)}`);
+    expect(systemContext(6)).toContain(`Workspace root: ${realpathSync(source)}`);
+    expect(systemContext(1)).toContain('Shell: /bin/sh (POSIX)');
     if (mode === 'auto') {
       expect(reviews.length).toBe(2);
       expect(reviews.every((review) => review.purpose === 'shell_risk')).toBe(true);

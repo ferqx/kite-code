@@ -246,6 +246,13 @@ function shellTitle(message: Message): string {
 }
 
 function toolTarget(message: Message): string | undefined {
+  if (isShellMessage(message)) {
+    const operation = shellOperation(message);
+    const command = shellCommand(message) ?? message.shell?.commandPreview;
+    return operation === 'execute' || operation === 'launch'
+      ? command
+      : (message.target ?? command ?? message.shell?.shellId);
+  }
   if (message.toolName === 'web_fetch') {
     if (message.target && /^请求 [1-5] 页$/.test(message.target)) return message.target;
     const urls = message.arguments?.urls;
@@ -290,8 +297,6 @@ function toolTarget(message: Message): string | undefined {
     case 'edit_file':
     case 'write_file':
       return argument('path');
-    case 'shell_execute':
-      return argument('description')?.replace(/\s+/gu, ' ').trim() || argument('command');
     case 'write_plan':
     case 'update_plan':
     case 'request_plan_review':
@@ -499,8 +504,7 @@ function toolTraceLabel(message: Message): string {
 export function toolTraceTitle(message: Message): string {
   const batch = webFetchBatchDisplay(message);
   if (batch) return batch.label;
-  const shell = isShellMessage(message);
-  const target = toolTarget(message) ?? (shell ? shellCommand(message) : undefined);
+  const target = toolTarget(message);
   return [toolTraceLabel(message), target?.replace(/\s+/g, ' ').trim().slice(0, 512)]
     .filter(Boolean)
     .join(' ');
@@ -1192,7 +1196,7 @@ export function ToolActivity({
       (imageOnly && !!renderImages) ||
       Boolean(getChildren()));
   const ownSummaryTitle = directTraceDetails ? undefined : traceSummaryTitle;
-  const showTarget = !ownSummaryTitle || (!canExpand && message.settled);
+  const showTarget = shell || !ownSummaryTitle || (!canExpand && message.settled);
   const label =
     webFetchBatch?.label ??
     ownSummaryTitle ??
@@ -1220,12 +1224,7 @@ export function ToolActivity({
           : undefined
         : grouped
           ? undefined
-          : shell
-            ? (toolTarget(message) ??
-              shellCommand(message) ??
-              message.shell?.commandPreview ??
-              message.shell?.shellId)
-            : toolTarget(message);
+          : toolTarget(message);
   const planFilenameStart =
     message.toolName === 'planning.read' && target
       ? Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\')) + 1
@@ -1456,7 +1455,7 @@ export function ToolActivity({
               const detailText = itemIssue && !shell ? toolDetailText(message) : undefined;
               return (
                 <>
-                  {ownSummaryTitle && !edit && !webFetchBatch && (
+                  {ownSummaryTitle && !edit && !shell && !webFetchBatch && (
                     <p className="tool-detail-status">
                       {ask && target
                         ? `${toolTraceLabel(message)} · ${target}`

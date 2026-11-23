@@ -68,7 +68,6 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@vscode/ripgrep": "1.18.0",
     "@types/jsdom": "28.0.3",
     "@types/turndown": "5.0.6"
   }

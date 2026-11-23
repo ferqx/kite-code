@@ -56,29 +56,32 @@ function inspect(
   }
 }
 
-function expectBottomResponse(document: Document, label = '正在回复…') {
-  const responses = document.querySelectorAll('.response-status');
-  expect(responses).toHaveLength(1);
-  const response = responses[0]!;
-  expect(response.textContent).toBe(label);
-  const turn = response.closest('.agent-turn');
-  expect(turn).not.toBeNull();
-  expect(turn!.lastElementChild).toBe(response);
-  expect(response.closest('.agent-turn-process')).toBeNull();
-  expect(response.closest('.message')).toBeNull();
+const activityLabels = {
+  queued: '等待处理',
+  running: '进行中',
+  waiting: '正在等待',
+  cancelling: '正在停止',
+  recovery_required: '需要恢复',
+};
+
+function expectActivitySummary(document: Document, label: string) {
+  const summaries = document.querySelectorAll('.agent-turn-status-label');
+  expect(summaries).toHaveLength(1);
+  expect(summaries[0]?.textContent).toBe(label);
+  expect(document.querySelector('.response-status')).toBeNull();
 }
 
 for (const status of activeStatuses)
   for (const unavailable of [false, true])
-    test(`exact ${status} activity keeps one bottom response without assistant content, unavailable=${unavailable}`, () => {
+    test(`exact ${status} activity has one summary without a reply footer, unavailable=${unavailable}`, () => {
       for (const messages of [[], [user], [user, tool], [assistant('model', true), tool]])
         inspect(messages, { turnId: 'run', status, unavailable }, (document) => {
-          expectBottomResponse(document);
+          expectActivitySummary(document, activityLabels[status]);
           expect(document.body.textContent).not.toContain('上次确认状态');
         });
     });
 
-test('thinking-only and multiple model fragments keep one Turn response outside hidden reasoning', () => {
+test('confirmed thinking can appear before content and the running summary owns later fragments', () => {
   const thinking: Message = {
     id: 'thinking',
     turnId: 'run',
@@ -86,28 +89,34 @@ test('thinking-only and multiple model fragments keep one Turn response outside 
     text: 'PRIVATE_REASONING',
     settled: false,
   };
-  for (const [messages, label] of [
-    [[user, thinking], '正在思考…'],
-    [[user, thinking, assistant('first', true), assistant('second'), tool], '正在回复…'],
-  ] as const)
-    inspect([...messages], { turnId: 'run', status: 'running' }, (document) => {
-      expectBottomResponse(document, label);
+  inspect([user, thinking], { turnId: 'run', status: 'running' }, (document) => {
+    const responses = document.querySelectorAll('.response-status');
+    expect(responses).toHaveLength(1);
+    expect(responses[0]?.textContent).toBe('正在思考…');
+    expect(responses[0]?.closest('.agent-turn')?.lastElementChild).toBe(responses[0]);
+    expect(document.querySelector('.agent-turn-summary')).toBeNull();
+    expect(document.body.textContent).not.toContain('PRIVATE_REASONING');
+  });
+  inspect(
+    [user, thinking, assistant('first', true), assistant('second'), tool],
+    { turnId: 'run', status: 'running' },
+    (document) => {
+      expectActivitySummary(document, '进行中');
       expect(document.body.textContent).not.toContain('PRIVATE_REASONING');
-      if (label === '正在思考…') expect(document.querySelector('.agent-turn-summary')).toBeNull();
-      else expect(document.querySelector('.agent-turn-status-label')?.textContent).toBe('处理过程');
-    });
+    },
+  );
 });
 
-test('the same Turn split across entries owns its response only in the last entry', () => {
+test('the same Turn split across entries shows its running summary only in the last entry', () => {
   inspect(
     [assistant('first'), { ...user, id: 'interleaved' }, assistant('second')],
     { turnId: 'run', status: 'running' },
     (document) => {
       const turns = [...document.querySelectorAll('.agent-turn')];
       expect(turns).toHaveLength(2);
-      expectBottomResponse(document);
-      expect(turns[0]!.querySelector('.response-status')).toBeNull();
-      expect(turns[1]!.querySelector('.response-status')).not.toBeNull();
+      expect(turns[0]!.querySelector('.agent-turn-status-label')?.textContent).toBe('处理过程');
+      expect(turns[1]!.querySelector('.agent-turn-status-label')?.textContent).toBe('进行中');
+      expect(document.querySelector('.response-status')).toBeNull();
     },
   );
 });
@@ -146,26 +155,16 @@ test('a completed Turn collapses an unfinished assistant prefix followed by tool
   });
 });
 
-test('unscoped legacy streaming keeps its original message response fallback', () => {
+test('unscoped legacy streaming keeps its body and reserves metadata for the settled message', () => {
   inspect([{ ...assistant('legacy'), turnId: undefined }], undefined, (document) => {
-    expect(document.querySelectorAll('.response-status')).toHaveLength(1);
-    expect(document.querySelector('.message.assistant .response-status')?.textContent).toBe(
-      '正在回复…',
-    );
-    expect(document.querySelectorAll('.message.assistant .message-meta')).toHaveLength(1);
-    expect(
-      document
-        .querySelector('.response-status')
-        ?.parentElement?.classList.contains('message-meta-responding'),
-    ).toBe(true);
-    expect(document.querySelector('.message.assistant .message-time')).toBeNull();
-    expect(document.querySelector('.message.assistant .message-copy')).toBeNull();
+    expect(document.querySelector('.message.assistant')?.textContent).toBe('legacy content');
+    expect(document.querySelector('.response-status')).toBeNull();
+    expect(document.querySelector('.message.assistant .message-meta')).toBeNull();
   });
   inspect(
     [{ ...assistant('legacy', true), turnId: undefined, finalReply: true }],
     undefined,
     (document) => {
-      expect(document.querySelector('.message-meta-responding')).toBeNull();
       expect(document.querySelectorAll('.message.assistant .message-meta')).toHaveLength(1);
       expect(document.querySelector('.message.assistant .message-time')).not.toBeNull();
       expect(document.querySelector('.response-status')).toBeNull();
@@ -223,9 +222,7 @@ test('the unfinished process stays expanded through models, tools and waits; onl
     expect(response.closest('.agent-turn')?.firstElementChild).toBe(response);
     expect(host.querySelector('.agent-turn-summary')).toBeNull();
     await render([user, assistant('first')]);
-    expect(host.querySelector('.response-status')).toBe(response);
-    expect(response.textContent).toBe('正在回复…');
-    expect(host.querySelector('.agent-turn-status-label')?.textContent).toBe('处理过程');
+    expectActivitySummary(dom.window.document, '进行中');
     const process = host.querySelector('.agent-turn-process')!;
     const locked = () => {
       expect(host.querySelector('.agent-turn-process')).toBe(process);
@@ -238,8 +235,7 @@ test('the unfinished process stays expanded through models, tools and waits; onl
     await act(async () => (host.querySelector('.agent-turn-summary') as HTMLElement).click());
     locked();
     await render([user, assistant('first', true), thinking]);
-    expect(host.querySelector('.response-status')).toBe(response);
-    expect(response.textContent).toBe('正在思考…');
+    expect(host.querySelector('.response-status')?.textContent).toBe('正在思考…');
     locked();
     expect(host.textContent).not.toContain('PRIVATE_REASONING');
     await render([
@@ -248,8 +244,7 @@ test('the unfinished process stays expanded through models, tools and waits; onl
       thinking,
       { ...tool, settled: false, status: 'running' },
     ]);
-    expect(host.querySelector('.response-status')).toBe(response);
-    expect(response.textContent).toBe('正在回复…');
+    expectActivitySummary(dom.window.document, '进行中');
     for (const [messages, status] of [
       [[user, { ...assistant('first'), text: 'more streaming text' }], 'running'],
       [[user, assistant('first', true)], 'running'],
@@ -263,11 +258,9 @@ test('the unfinished process stays expanded through models, tools and waits; onl
         'waiting',
       ],
       [[user, assistant('first', true), tool, assistant('later')], 'running'],
-    ] as [Message[], TurnActivity['status']][]) {
+    ] as [Message[], 'running' | 'waiting'][]) {
       await render(messages, status);
-      expect(host.querySelectorAll('.response-status')).toHaveLength(1);
-      expect(host.querySelector('.response-status')).toBe(response);
-      expect(response.closest('.agent-turn')!.lastElementChild).toBe(response);
+      expectActivitySummary(dom.window.document, activityLabels[status]);
       locked();
     }
     await render(
@@ -353,7 +346,7 @@ test('a different completed Turn retains its own collapsed reading while the cur
   );
 });
 
-test('unconfirmed execution hides live response and busy state while a held observation restores them', () => {
+test('unconfirmed execution suppresses live announcements and busy state until observation resumes', () => {
   const messages = [user, assistant('unfinished')];
   for (const status of activeStatuses) {
     inspect(messages, { turnId: 'run', status, executionUnconfirmed: true }, (document) => {
@@ -364,7 +357,12 @@ test('unconfirmed execution hides live response and busy state while a held obse
       );
       expect(document.body.textContent).toContain('unfinished content');
     });
-    inspect(messages, { turnId: 'run', status }, (document) => expectBottomResponse(document));
+    inspect(messages, { turnId: 'run', status }, (document) => {
+      expectActivitySummary(document, activityLabels[status]);
+      expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe(
+        'true',
+      );
+    });
   }
   for (const status of ['completed', 'failed', 'cancelled'] as const)
     inspect(

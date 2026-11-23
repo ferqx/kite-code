@@ -246,6 +246,7 @@ export interface TurnActivity {
   /** Suppresses live activity without changing the persisted Turn status. */
   readonly executionUnconfirmed?: boolean;
   readonly status:
+    | 'creating_session'
     | 'preparing'
     | 'queued'
     | 'running'

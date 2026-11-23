@@ -200,7 +200,7 @@ async function installCompressionAudit() {
             agentWatch.errors.add('agent_tool_inherited_child_status');
         }
       }
-      const response = [...document.querySelectorAll('.response-status')].map((element) => ({
+      const response = [...document.querySelectorAll('.agent-turn-running')].map((element) => ({
         node: id(element),
         rect: rect(element),
         className: element.className,
@@ -283,11 +283,11 @@ async function installCompressionAudit() {
       const changes = records.flatMap((record) => {
         const changed = [...record.addedNodes, ...record.removedNodes].flatMap((node) =>
           node instanceof Element
-            ? [node, ...node.querySelectorAll('.context-compacted, .response-status')]
+            ? [node, ...node.querySelectorAll('.context-compacted, .agent-turn-running')]
             : [],
         );
         return changed
-          .filter((node) => node.matches('.context-compacted, .response-status'))
+          .filter((node) => node.matches('.context-compacted, .agent-turn-running'))
           .map((node) => ({
             node: id(node),
             connected: node.isConnected,

@@ -1006,14 +1006,14 @@ test('live child tabs retain the parent title, transcript, draft and active hist
     ).toBe(false);
     const parentReads = f.requests.filter((request) => request.method === 'messages').length;
     const childPane = f.host.querySelector('.session-tab-child')!;
-    const response = childPane.querySelector('.response-status')!;
-    expect(response.textContent).toBe('正在回复…');
+    const response = childPane.querySelector('.agent-turn-running')!;
+    expect(response?.querySelector('[role="status"]')?.textContent).toBe('进行中');
     await f.refreshing(true);
-    expect(childPane.querySelector('.response-status') === response).toBe(true);
+    expect(childPane.querySelector('.agent-turn-running') === response).toBe(true);
     f.childBody(childBody('Child prefix with live tail 雪🙂'));
     await f.update('Child prefix with live tail 雪🙂');
     await f.waitForText('Child prefix with live tail 雪🙂');
-    expect(childPane.querySelector('.response-status') === response).toBe(true);
+    expect(childPane.querySelector('.agent-turn-running') === response).toBe(true);
     expect(childPane.querySelector('.conversation-loading')).toBeNull();
     await f.refreshing(false);
     expect(f.host.textContent).toContain('Child prefix with live tail 雪🙂');
@@ -1251,53 +1251,53 @@ test('repeated reply calibrations retain controls and transcript while history f
   }
 });
 
-test('ordinary history and View refreshes retain actual streaming reply status while read failures retry', async () => {
+test('ordinary history and View refreshes retain actual active Run timer while read failures retry', async () => {
   const f = fixture(true);
   f.runningParent();
   f.streamingParent();
   try {
     await f.render();
     await f.click('Original');
-    const status = f.host.querySelector('.response-status')!,
-      label = status.querySelector('.shimmer'),
+    const status = f.host.querySelector('.agent-turn-running')!,
+      label = status.querySelector('[role="status"]'),
       permission = f.host.querySelector('[data-permission-trigger]')!,
       input = f.host.querySelector('.composer textarea.prompt-editor');
-    expect(status.textContent).toBe('正在回复…');
+    expect(status?.textContent).toMatch(/^进行中(?: \d+ 秒)?$/);
     expect(label).not.toBeNull();
     expect(f.host.querySelector('.conversation-trace')).toBeNull();
     for (let index = 0; index < 8; index++) {
       f.holdParent();
       await f.updateParent(`running reply ${index}`);
-      expect(f.host.querySelector('.response-status') === status).toBe(true);
-      expect(status.textContent).toBe('正在回复…');
-      expect(status.querySelector('.shimmer')).toBe(label);
+      expect(f.host.querySelector('.agent-turn-running') === status).toBe(true);
+      expect(status?.textContent).toMatch(/^进行中(?: \d+ 秒)?$/);
+      expect(status.querySelector('[role="status"]')).toBe(label);
       await f.releaseParent();
       await f.refreshing(true);
-      expect(status.textContent).toBe('正在回复…');
-      expect(status.querySelector('.shimmer')).toBe(label);
+      expect(status?.textContent).toMatch(/^进行中(?: \d+ 秒)?$/);
+      expect(status.querySelector('[role="status"]')).toBe(label);
       expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
       expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
       expect((permission as HTMLButtonElement).disabled).toBe(true);
       expect(f.host.querySelector('.composer textarea.prompt-editor')).toBe(input);
       await f.refreshing(false);
-      expect(status.textContent).toBe('正在回复…');
+      expect(status?.textContent).toMatch(/^进行中(?: \d+ 秒)?$/);
       expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
     }
     await f.unavailable(true);
-    expect(f.host.querySelector('.response-status')).toBe(status);
-    expect(status.textContent).toBe('正在回复…');
-    expect(status.querySelector('.shimmer')).toBe(label);
+    expect(f.host.querySelector('.agent-turn-running')).toBe(status);
+    expect(status?.textContent).toMatch(/^进行中(?: \d+ 秒)?$/);
+    expect(status.querySelector('[role="status"]')).toBe(label);
     expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe('上次确认状态');
     expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
     expect(f.host.querySelector('[data-permission-trigger]')).toBeNull();
     await f.unavailable(false);
-    expect(status.textContent).toBe('正在回复…');
+    expect(status?.textContent).toMatch(/^进行中(?: \d+ 秒)?$/);
     f.failParent();
     await f.updateParent('held after failure');
     const updatesAtFailure = f.requests.filter(({ method }) => method === 'messages').length;
-    expect(f.host.querySelector('.response-status')).toBe(status);
-    expect(status.textContent).toBe('正在回复…');
-    expect(status.querySelector('.shimmer')).toBe(label);
+    expect(f.host.querySelector('.agent-turn-running')).toBe(status);
+    expect(status?.textContent).toMatch(/^进行中(?: \d+ 秒)?$/);
+    expect(status.querySelector('[role="status"]')).toBe(label);
     expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe('上次确认状态');
     expect(f.host.textContent).not.toContain('历史尚未完整校准');
     expect(f.host.textContent).not.toContain('重新加载会话');
@@ -1310,7 +1310,7 @@ test('ordinary history and View refreshes retain actual streaming reply status w
       () =>
         f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled === false,
     );
-    expect(status.textContent).toBe('正在回复…');
+    expect(status?.textContent).toMatch(/^进行中(?: \d+ 秒)?$/);
     expect(f.host.textContent).toContain('held after failure');
     expect(f.requests.filter(({ method }) => method === 'messages').length).toBeGreaterThan(
       updatesAtFailure,

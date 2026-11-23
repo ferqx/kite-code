@@ -105,7 +105,7 @@ export function nativeToolRequestTarget(
       return /^请求 [1-5] 页$/.test(text('url') ?? '') ? undefined : text('url');
     case 'shell.execute':
     case 'shell.launch':
-      return text('description')?.replace(/\s+/gu, ' ').trim() || text('command');
+      return text('command');
     case 'shell.read':
     case 'shell.wait':
     case 'shell.stop':

@@ -361,9 +361,7 @@ try {
       ].map((button) => {
         const label = button.textContent;
         if (
-          /^(正在回复|等待工具执行|正在等待|等待处理|正在停止|需要恢复|执行状态待确认)/.test(
-            label,
-          ) ||
+          /^(进行中|等待工具执行|正在等待|等待处理|正在停止|需要恢复|执行状态待确认)/.test(label) ||
           (label === '思考中' && !button.querySelector('[data-status="running"]'))
         )
           probe.violations.push(`${kind}:${probe.phase}:trace_borrowed_turn_activity`);
@@ -518,9 +516,9 @@ try {
       `${label}: only actual prose rendered`,
     );
     assert.equal(
-      await page.locator('.conversation .response-status').filter({ hasText: '正在回复' }).count(),
+      await page.locator('.conversation .response-status').count(),
       0,
-      `${label}: no replying before actual body`,
+      `${label}: running timer is the only reply status`,
     );
     assert.deepEqual((await probe()).violations, [], `${label}: no transient disclosure`);
   };

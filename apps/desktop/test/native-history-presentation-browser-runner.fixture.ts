@@ -37,7 +37,6 @@ type Frame = {
     height: number;
     expanded: string | null;
     summaryTag: string | null;
-    summaryRole: string | null;
     staticSummary: boolean;
     processToggles: number;
   }[];
@@ -177,7 +176,9 @@ try {
           height: rect?.height ?? null,
           left: rect?.left ?? null,
           footer: footer ? [footer.x, footer.y, footer.width, footer.height] : null,
-          messages: [...(viewport?.querySelectorAll('.message') ?? [])].map((element) => {
+          messages: [
+            ...(viewport?.querySelectorAll('.message, .conversation-trace-trigger') ?? []),
+          ].map((element) => {
             const box = element.getBoundingClientRect();
             return {
               node: nodeId(element),
@@ -194,7 +195,6 @@ try {
               height: element.getBoundingClientRect().height,
               expanded: summary?.getAttribute('aria-expanded') ?? null,
               summaryTag: summary?.tagName ?? null,
-              summaryRole: summary?.getAttribute('role') ?? null,
               staticSummary: summary?.classList.contains('agent-turn-summary-static') ?? false,
               processToggles: element.querySelectorAll('button.agent-turn-summary').length,
             };
@@ -315,14 +315,13 @@ try {
     assert.equal(
       initial.turns.filter(
         (turn) =>
-          turn.summaryTag === 'DIV' &&
-          turn.summaryRole === 'status' &&
-          turn.staticSummary &&
-          turn.expanded === null &&
-          turn.processToggles === 0,
+          turn.summaryTag === 'BUTTON' &&
+          turn.expanded === 'true' &&
+          !turn.staticSummary &&
+          turn.processToggles === 1,
       ).length,
       1,
-      `${label}: active process did not retain its static read-only summary`,
+      `${label}: active process did not initialize expanded with a disclosure`,
     );
     assert.equal(
       initial.messages.filter((message) => message.text.includes(marker)).length,
@@ -330,8 +329,8 @@ try {
       `${label}: incomplete human history`,
     );
     assert.ok(
-      initial.messages.some((message) => message.text === '搜索内容读取文件'),
-      `${label}: search v3 and file reads were not aggregated`,
+      initial.messages.some((message) => message.text === '读取了文件'),
+      `${label}: file reads were not aggregated`,
     );
     for (let index = 0; index < variant.turns; index++)
       assert.ok(

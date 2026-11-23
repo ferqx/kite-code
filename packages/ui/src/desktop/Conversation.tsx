@@ -15,6 +15,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -109,9 +110,15 @@ function isTurnFailure(message: Message): boolean {
 function isOngoingTurn(activity?: TurnActivity): boolean {
   return (
     !!activity &&
-    ['preparing', 'queued', 'running', 'waiting', 'cancelling', 'recovery_required'].includes(
-      activity.status,
-    )
+    [
+      'creating_session',
+      'preparing',
+      'queued',
+      'running',
+      'waiting',
+      'cancelling',
+      'recovery_required',
+    ].includes(activity.status)
   );
 }
 
@@ -155,6 +162,8 @@ function turnElapsedMilliseconds(startedAtMs?: number, endedAtMs?: number): numb
   return endedAtMs - startedAtMs;
 }
 
+const runningTurnLabel = '进行中';
+
 function RunningTurnStatus({ startedAtMs }: { startedAtMs?: number }) {
   const { readActive } = useConversationActivity();
   const [now, setNow] = useState(Date.now);
@@ -172,12 +181,10 @@ function RunningTurnStatus({ startedAtMs }: { startedAtMs?: number }) {
   }, [readActive, startedAtMs]);
   const elapsed = turnElapsedMilliseconds(startedAtMs, Math.max(now, startedAtMs ?? now));
   return (
-    <div className="agent-turn-summary agent-turn-summary-static agent-turn-running">
-      <span className="agent-turn-status-label">
-        <span role="status">进行中</span>
-        {elapsed !== undefined && ` ${formatTurnElapsed(elapsed + 1000)}`}
-      </span>
-    </div>
+    <span className="agent-turn-status-label agent-turn-running">
+      <span role="status">{runningTurnLabel}</span>
+      {elapsed !== undefined && ` ${formatTurnElapsed(elapsed + 1000)}`}
+    </span>
   );
 }
 
@@ -204,11 +211,13 @@ function TurnSummary({
   label,
   open,
   disabled,
+  contentIds,
   children,
 }: {
   label: string;
   open: boolean;
   disabled?: boolean;
+  contentIds?: string;
   children: ReactNode;
 }) {
   return (
@@ -219,6 +228,7 @@ function TurnSummary({
           variant="ghost"
           disabled={disabled}
           aria-label={`${label}，${open ? '收起' : '展开'}本轮处理过程`}
+          {...(contentIds ? { 'aria-controls': contentIds } : {})}
         >
           {children}
           <TraceIcon className="agent-turn-chevron" data-icon="inline-end">
@@ -246,7 +256,6 @@ const MessageItem = memo(function MessageItem({
   childDetail,
   renderContent,
   renderAttachments,
-  showResponseStatus = true,
   showMetadata = true,
   turnOutputs,
 }: {
@@ -265,7 +274,6 @@ const MessageItem = memo(function MessageItem({
   childDetail?: { readonly label: string; readonly onOpen: () => void };
   renderContent?: (message: Message) => ReactNode;
   renderAttachments?: (message: Message) => ReactNode;
-  showResponseStatus?: boolean;
   showMetadata?: boolean;
   turnOutputs?: ReactNode;
 }) {
@@ -442,8 +450,8 @@ const MessageItem = memo(function MessageItem({
         {message.text && <pre>{message.text}</pre>}
       </article>
     );
-  const timestamp = formatMessageTime(message.createdAtMs, metadataNow);
-  const responding = showResponseStatus && message.role === 'assistant' && !message.settled;
+  const hasMetadata = showMetadata && (message.role !== 'assistant' || message.settled);
+  const timestamp = hasMetadata ? formatMessageTime(message.createdAtMs, metadataNow) : undefined;
   return (
     <article
       className={cn(
@@ -455,8 +463,8 @@ const MessageItem = memo(function MessageItem({
         },
       )}
       data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
-      onPointerEnter={showMetadata ? () => setMetadataNow(Date.now()) : undefined}
-      onFocus={showMetadata ? () => setMetadataNow(Date.now()) : undefined}
+      onPointerEnter={hasMetadata ? () => setMetadataNow(Date.now()) : undefined}
+      onFocus={hasMetadata ? () => setMetadataNow(Date.now()) : undefined}
       data-agent-result-source={agentResult?.sourceId}
       data-agent-message-id={agentMessage?.messageId}
       data-input-kind={message.inputKind}
@@ -540,42 +548,25 @@ const MessageItem = memo(function MessageItem({
           </>
         )}
       </CodeCopyEligibilityContext.Provider>
-      {responding && !showMetadata && (
-        <small className="response-status" role="status">
-          <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
-            正在回复…
-          </span>
-        </small>
-      )}
       {turnOutputs}
-      {showMetadata && (
-        <footer className={cn('message-meta', responding && 'message-meta-responding')}>
-          {responding ? (
-            <small className="response-status" role="status">
-              <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
-                正在回复…
-              </span>
-            </small>
+      {hasMetadata && (
+        <footer className="message-meta">
+          {copyText && (
+            <MessageCopyButton
+              text={copyText}
+              copyRole={copyRole}
+              writeClipboardText={writeClipboardText}
+            />
+          )}
+          {timestamp ? (
+            <time className="message-time" dateTime={timestamp.dateTime} title={timestamp.full}>
+              <span aria-hidden="true">{timestamp.label}</span>
+              <span className="sr-only">{timestamp.full}</span>
+            </time>
           ) : (
-            <>
-              {copyText && (
-                <MessageCopyButton
-                  text={copyText}
-                  copyRole={copyRole}
-                  writeClipboardText={writeClipboardText}
-                />
-              )}
-              {timestamp ? (
-                <time className="message-time" dateTime={timestamp.dateTime} title={timestamp.full}>
-                  <span aria-hidden="true">{timestamp.label}</span>
-                  <span className="sr-only">{timestamp.full}</span>
-                </time>
-              ) : (
-                <span className="message-time" title="没有可核实的消息记录时间">
-                  时间未知
-                </span>
-              )}
-            </>
+            <span className="message-time" title="没有可核实的消息记录时间">
+              时间未知
+            </span>
           )}
         </footer>
       )}
@@ -674,6 +665,7 @@ export function Conversation({
   pendingTraceToolTurns?: ReadonlySet<string>;
   renderReasoning?: (message: Message, open: boolean) => ReactNode;
 }) {
+  const traceContentId = useId();
   const presented = useRef(false);
   // Keep the first large tree interruptible by a later navigation. Once shown,
   // history and streaming changes always reconcile against the current reading.
@@ -734,6 +726,7 @@ export function Conversation({
   const [following, setFollowing] = useState(reading.current.follow);
   const [expanded, setExpanded] = useState(reading.current.expanded);
   const committedOpenTurns = useRef<readonly string[]>([]);
+  const committedTraceProcesses = useRef<ReadonlyMap<string, boolean>>(new Map());
   if (previousResume.current !== readingActivity.resume) {
     previousResume.current = readingActivity.resume;
     traceDisclosure.current = false;
@@ -890,6 +883,7 @@ export function Conversation({
   const restoredMarkerSignature = JSON.stringify([...restoredExpanded.current].sort());
   // biome-ignore lint/correctness/useExhaustiveDependencies: Marker ref contents and the loading-driven restore lifecycle both invalidate the retained projection.
   const projection = useMemo(() => {
+    const initializingTraceSession = !presented.current && !loading;
     const visibleToolIds = new Set(
       messages.filter(isVisibleTool).map((message) => message.id.slice(5)),
     );
@@ -1154,13 +1148,11 @@ export function Conversation({
       {
         directTraceDetails = false,
         traceSummaryTitle,
-        showTraceReply = false,
         parentDisclosureOpen = true,
         turnOutputs,
       }: {
         directTraceDetails?: boolean;
         traceSummaryTitle?: string;
-        showTraceReply?: boolean;
         parentDisclosureOpen?: boolean;
         turnOutputs?: ReactNode;
       } = {},
@@ -1271,7 +1263,6 @@ export function Conversation({
             writeClipboardText={writeClipboardText}
             renderContent={renderMessageContent}
             renderAttachments={renderMessageAttachments}
-            showResponseStatus={traceTurns ? showTraceReply : placement === 'standalone'}
             showMetadata={placement !== 'process' || message.role === 'user'}
             copyText={
               agentResult?.contentComplete && placement === 'standalone'
@@ -1287,7 +1278,11 @@ export function Conversation({
         </div>
       );
     };
-    const renderEntry = (entry: (typeof entries)[number], openTurns: string[]) => {
+    const renderEntry = (
+      entry: (typeof entries)[number],
+      openTurns: string[],
+      traceProcesses: Map<string, boolean>,
+    ) => {
       if (!entry.turnId)
         return (
           <Fragment key={entry.key}>{entry.groups.map((group) => renderGroup(group))}</Fragment>
@@ -1324,6 +1319,12 @@ export function Conversation({
       const aborted = terminalStatus === 'aborted';
       const runningTool = runningToolTurns.has(entry.turnId);
       const waitingForContent = processGroups.length === 0;
+      const preparationLabel =
+        activity?.status === 'creating_session'
+          ? '正在创建会话…'
+          : activity?.status === 'preparing'
+            ? '正在准备回复…'
+            : undefined;
       const thinking =
         thinkingTurns.has(entry.turnId) ||
         (waitingForContent && activity?.responsePhase === 'thinking');
@@ -1387,7 +1388,7 @@ export function Conversation({
           !activity.executionUnconfirmed &&
           (!activity.unavailable || timing?.turnStartedAtMs !== undefined);
         // Keep the trailing live body and its saved final reply under the same
-        // keyed parent, outside the process that closes on settlement.
+        // keyed parent, outside the process disclosure.
         const reply =
           finalGroup?.[0] ??
           ((!showElapsed || completed) && lastMessage?.role === 'assistant'
@@ -1396,7 +1397,6 @@ export function Conversation({
         const blocks: Message[][] = [];
         for (const group of processGroups) {
           const message = group[0]!;
-          if (message === reply) continue;
           const previous = blocks.at(-1);
           if (
             isConversationTraceStep(message) &&
@@ -1406,12 +1406,13 @@ export function Conversation({
             previous.push(...group);
           else if (!message.tracePending) blocks.push([...group]);
         }
-        const streaming =
-          lastTurnEntry &&
-          !ended &&
-          !activity?.executionUnconfirmed &&
-          (!activity || activity.status === 'running') &&
-          reply?.streaming === true;
+        const segments: { start: number; blocks: Message[][]; collapsible: boolean }[] = [];
+        for (const [index, block] of blocks.entries()) {
+          const collapsible = block[0]!.role !== 'assistant';
+          const previous = segments.at(-1);
+          if (collapsible && previous?.collapsible) previous.blocks.push(block);
+          else segments.push({ start: index, blocks: [block], collapsible });
+        }
         const waitingLabel = lastTurnEntry
           ? failed && !failureGroups.length
             ? '本轮异常结束'
@@ -1431,16 +1432,35 @@ export function Conversation({
                         ? '正在等待'
                         : !reply &&
                             blocks.length === 0 &&
-                            activity?.status === 'preparing' &&
-                            !activity.executionUnconfirmed &&
-                            !activity.unavailable
-                          ? '正在准备回复…'
+                            !activity?.executionUnconfirmed &&
+                            !activity?.unavailable
+                          ? preparationLabel
                           : undefined
           : undefined;
         const turnKey = `turn:${entry.turnId}:complete`;
-        const open = !showElapsed || (expanded[turnKey] ?? incompleteFailure);
-        if (showElapsed && blocks.length > 0 && open) trackOpen(turnKey);
-        const statusContent = <span className="agent-turn-status-label">{finishedLabel}</span>;
+        const hasProcess =
+          lastTurnEntry &&
+          (showElapsed || ongoing) &&
+          segments.some((segment) => segment.collapsible);
+        const open =
+          expanded[turnKey] ??
+          committedTraceProcesses.current.get(turnKey) ??
+          ((initializingTraceSession && ongoing) || incompleteFailure);
+        if (lastTurnEntry && (ongoing || showElapsed)) traceProcesses.set(turnKey, open);
+        if (lastTurnEntry && open && (hasProcess || ongoing)) trackOpen(turnKey);
+        const processLabel = showElapsed
+          ? finishedLabel
+          : showRunning
+            ? runningTurnLabel
+            : (waitingLabel ?? '处理过程');
+        const waitingInSummary = hasProcess && !showElapsed && !!waitingLabel && !showRunning;
+        const statusContent = showRunning ? (
+          <RunningTurnStatus startedAtMs={timing?.turnStartedAtMs} />
+        ) : (
+          <span className="agent-turn-status-label" role={waitingInSummary ? 'status' : undefined}>
+            {processLabel}
+          </span>
+        );
         const turnActive =
           !ended &&
           !activity?.executionUnconfirmed &&
@@ -1453,156 +1473,172 @@ export function Conversation({
               className={cn('agent-turn-body', message.finalReply && 'agent-turn-final')}
             >
               {renderGroup(group, showReply || message.finalReply ? 'result' : 'process', {
-                showTraceReply: showReply && streaming,
                 turnOutputs: message.id === finalGroup?.[0]?.id ? turnOutputs : undefined,
               })}
             </div>
           );
         };
-        const renderBlocks = () =>
-          blocks.map((block, index) => {
-            const first = block[0]!;
-            if (!isConversationTraceStep(first)) return renderBody(block);
-            const steps = block.filter((item) => !item.tracePending);
-            const tools = steps.filter((item) => item.role === 'tool');
-            const currentTrace =
-              ongoing && !ended && lastTurnEntry && !reply && index === blocks.length - 1;
-            const interaction = turnActive ? traceInteractionTitle(tools) : undefined;
-            const runningTool = turnActive ? latestRunningTraceTool(tools) : undefined;
-            const trailing = block.at(-1);
-            const activeReasoning =
-              turnActive && currentTrace && (!activity || activity.status === 'running')
-                ? steps.find(
-                    (step) =>
-                      step.role === 'thinking' &&
-                      !step.settled &&
-                      !step.executionUnconfirmed &&
-                      (step.reasoningActive ??
-                        (step === trailing && (!!step.text.trim() || !!step.reasoningSource))),
-                  )
-                : undefined;
-            const latestTool = currentTrace ? tools.at(-1) : undefined;
-            const completedSummary =
-              !interaction && !runningTool && !activeReasoning && !currentTrace;
-            const summary =
-              interaction ??
-              (runningTool
-                ? toolTraceTitle(runningTool)
-                : activeReasoning
-                  ? '思考中'
-                  : latestTool
-                    ? toolTraceTitle(latestTool)
-                    : tools.length
-                      ? completedToolActions(tools) || '工具执行'
-                      : '处理过程');
-            const boundary = blocks[index - 1]?.[0];
-            const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
-            if (open && expanded[id] === true) trackOpen(id);
-            return (
-              <ConversationTrace
-                key={id}
-                id={id}
-                steps={steps}
-                label={summary}
-                running={!interaction && (!!runningTool || !!activeReasoning)}
-                activeReasoning={activeReasoning}
-                interactionTitle={interaction}
-                summarizeTools={completedSummary}
-                processOpen={open}
-                notice={
-                  turnActive &&
-                  block.some((item) => item.toolStopping && !item.executionUnconfirmed) && (
-                    <p className="conversation-turn-notice" role="status">
-                      已请求停止，等待执行结果。
-                    </p>
-                  )
-                }
-                expanded={expanded}
-                restoredExpanded={restoredExpanded.current}
-                onToggle={onTraceToggle}
-                renderTool={(item, parentDisclosureOpen, traceSummaryTitle, directTraceDetails) =>
-                  renderGroup(
-                    [
-                      steps.length === 1 && !item.settled && activity?.executionUnconfirmed
-                        ? { ...item, executionUnconfirmed: true }
-                        : item,
-                    ],
-                    'trace',
-                    { parentDisclosureOpen, traceSummaryTitle, directTraceDetails },
-                  )
-                }
-                renderReasoning={renderReasoning}
-              />
-            );
-          });
-        const process = showElapsed ? (
-          blocks.length > 0 ? (
-            <Collapsible
-              key={turnKey}
-              asChild
-              open={open}
-              onOpenChange={(next) => onTraceToggle(turnKey, next)}
-            >
-              <div
-                className="agent-turn-process"
-                data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
-              >
-                <TurnSummary
-                  label={finishedLabel}
-                  open={open}
-                  disabled={!open && pendingTraceToolTurns?.has(entry.turnId)}
-                >
-                  {statusContent}
-                </TurnSummary>
-                <DeferredProcessContent
-                  open={open}
-                  className="agent-turn-content"
-                  render={() => <div className="conversation-trace-process">{renderBlocks()}</div>}
-                />
-              </div>
-            </Collapsible>
-          ) : (
-            <div key={turnKey} className="agent-turn-summary agent-turn-summary-static">
-              {statusContent}
-            </div>
-          )
+        const renderBlock = (block: Message[], index: number) => {
+          const first = block[0]!;
+          if (!isConversationTraceStep(first)) return renderBody(block, first === reply);
+          const steps = block.filter((item) => !item.tracePending);
+          const tools = steps.filter((item) => item.role === 'tool');
+          const currentTrace =
+            ongoing && !ended && lastTurnEntry && !reply && index === blocks.length - 1;
+          const interaction = turnActive ? traceInteractionTitle(tools) : undefined;
+          const runningTool = turnActive ? latestRunningTraceTool(tools) : undefined;
+          const trailing = block.at(-1);
+          const activeReasoning =
+            turnActive && currentTrace && (!activity || activity.status === 'running')
+              ? steps.find(
+                  (step) =>
+                    step.role === 'thinking' &&
+                    !step.settled &&
+                    !step.executionUnconfirmed &&
+                    (step.reasoningActive ??
+                      (step === trailing && (!!step.text.trim() || !!step.reasoningSource))),
+                )
+              : undefined;
+          const latestTool = currentTrace ? tools.at(-1) : undefined;
+          const completedSummary =
+            !interaction && !runningTool && !activeReasoning && !currentTrace;
+          const summary =
+            interaction ??
+            (runningTool
+              ? toolTraceTitle(runningTool)
+              : activeReasoning
+                ? '思考中'
+                : latestTool
+                  ? toolTraceTitle(latestTool)
+                  : tools.length
+                    ? completedToolActions(tools) || '工具执行'
+                    : '处理过程');
+          const boundary = blocks[index - 1]?.[0];
+          const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
+          if (open && expanded[id] === true) trackOpen(id);
+          return (
+            <ConversationTrace
+              key={id}
+              id={id}
+              steps={steps}
+              label={summary}
+              running={!interaction && (!!runningTool || !!activeReasoning)}
+              activeReasoning={activeReasoning}
+              interactionTitle={interaction}
+              summarizeTools={completedSummary}
+              processOpen={!hasProcess || open}
+              notice={
+                turnActive &&
+                block.some((item) => item.toolStopping && !item.executionUnconfirmed) && (
+                  <p className="conversation-turn-notice" role="status">
+                    已请求停止，等待执行结果。
+                  </p>
+                )
+              }
+              expanded={expanded}
+              restoredExpanded={restoredExpanded.current}
+              onToggle={onTraceToggle}
+              renderTool={(item, parentDisclosureOpen, traceSummaryTitle, directTraceDetails) =>
+                renderGroup(
+                  [
+                    steps.length === 1 && !item.settled && activity?.executionUnconfirmed
+                      ? { ...item, executionUnconfirmed: true }
+                      : item,
+                  ],
+                  'trace',
+                  { parentDisclosureOpen, traceSummaryTitle, directTraceDetails },
+                )
+              }
+              renderReasoning={renderReasoning}
+            />
+          );
+        };
+        const processId = (start: number) =>
+          `${traceContentId}-${encodeURIComponent(JSON.stringify(entry.key))}-${start}`;
+        const process = hasProcess ? (
+          <TurnSummary
+            label={processLabel}
+            open={open}
+            disabled={showElapsed && !open && pendingTraceToolTurns?.has(entry.turnId)}
+            contentIds={segments
+              .filter((segment) => segment.collapsible)
+              .map(({ start }) => processId(start))
+              .join(' ')}
+          >
+            {statusContent}
+          </TurnSummary>
+        ) : showElapsed || showRunning ? (
+          <div key={turnKey} className="agent-turn-summary agent-turn-summary-static">
+            {statusContent}
+          </div>
         ) : null;
-        const content = process ? [process] : renderBlocks();
+        const content = segments.flatMap(({ start, blocks: section, collapsible }) => {
+          const renderSection = () =>
+            section.map((block, index) => renderBlock(block, start + index));
+          if (!hasProcess || !collapsible) return renderSection();
+          const boundary = blocks[start - 1]?.[0];
+          return [
+            <DeferredProcessContent
+              key={boundary ? `process:${traceKey(boundary)}` : turnKey}
+              id={processId(start)}
+              open={open}
+              className="agent-turn-content"
+              render={() => <div className="conversation-trace-process">{renderSection()}</div>}
+            />,
+          ];
+        });
         if (lastTurnEntry && terminalStatus && (terminalStatus !== 'completed' || finalGroup))
           content.push(
             <Fragment key="turn-details">
               {renderTurnDetails?.({ turnId: entry.turnId, terminalStatus })}
             </Fragment>,
           );
-        if (reply) content.push(renderBody([reply], true));
+        if (finalGroup) content.push(renderBody(finalGroup, true));
         return (
-          <section
+          <Collapsible
+            asChild
             key={entry.key}
-            className="agent-turn conversation-trace-turn"
-            data-turn-status={
-              terminalStatus ?? activity?.status ?? (completed ? 'completed' : 'unknown')
-            }
+            open={hasProcess && open}
+            onOpenChange={(next) => onTraceToggle(turnKey, next)}
           >
-            {showRunning && <RunningTurnStatus startedAtMs={timing?.turnStartedAtMs} />}
-            {content}
-            {!finalGroup && turnOutputs}
-            {waitingLabel && (
-              <small
-                className={cn('conversation-turn-notice', cancelled && 'conversation-turn-stopped')}
-                role="status"
-              >
-                {waitingLabel}
-              </small>
-            )}
-          </section>
+            <section
+              className={cn(
+                'agent-turn conversation-trace-turn',
+                hasProcess && 'agent-turn-process',
+              )}
+              data-restored-expanded={
+                (hasProcess && restoredExpanded.current.has(turnKey)) || undefined
+              }
+              data-turn-status={
+                terminalStatus ?? activity?.status ?? (completed ? 'completed' : 'unknown')
+              }
+            >
+              {process}
+              {content}
+              {!finalGroup && turnOutputs}
+              {waitingLabel && !waitingInSummary && (
+                <small
+                  className={cn(
+                    'conversation-turn-notice',
+                    cancelled && 'conversation-turn-stopped',
+                  )}
+                  role="status"
+                >
+                  {waitingLabel}
+                </small>
+              )}
+            </section>
+          </Collapsible>
         );
       }
-      const responseLabel =
-        active && thinking && !runningTool && (!activity || activity.status === 'running')
+      const liveNote = responding
+        ? active && thinking && !runningTool && (!activity || activity.status === 'running')
           ? '正在思考…'
-          : waitingForContent && activity?.responsePhase === 'preparing'
-            ? '正在准备回复…'
-            : '正在回复…';
+          : waitingForContent
+            ? (preparationLabel ??
+              (activity?.responsePhase === 'preparing' ? '正在准备回复…' : undefined))
+            : undefined
+        : undefined;
       const label = !lastTurnEntry
         ? '处理过程'
         : diagnostics &&
@@ -1624,7 +1660,9 @@ export function Conversation({
                     ? '正在等待'
                     : activity?.status === 'queued'
                       ? '等待处理'
-                      : '处理过程';
+                      : responding && !liveNote
+                        ? runningTurnLabel
+                        : '处理过程';
       const showProcess = processGroups.length > 0;
       // Failed/interrupted work without a final reply stays readable by default.
       // Explicit reading choices still win; a final reply preserves normal collapse.
@@ -1713,7 +1751,7 @@ export function Conversation({
           )}
           {!showProcess &&
             (finalGroup || failureGroups.length === 0) &&
-            (!responding || label !== '处理过程') && (
+            (!liveNote || label !== '处理过程') && (
               <div className="agent-turn-summary agent-turn-summary-static" role="status">
                 {statusContent}
               </div>
@@ -1724,10 +1762,10 @@ export function Conversation({
             </div>
           )}
           {!finalGroup && turnOutputs}
-          {responding && (
+          {liveNote && (
             <small className="response-status" role="status">
               <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
-                {responseLabel}
+                {liveNote}
               </span>
             </small>
           )}
@@ -1773,10 +1811,12 @@ export function Conversation({
     restoredMarkerSignature,
     loading,
     preserveReadingAnchor,
+    traceContentId,
   ]);
   const { empty, busy } = projection;
-  const { entryContent, openTurns, markers } = useMemo(() => {
+  const { entryContent, openTurns, traceProcesses, markers } = useMemo(() => {
     const openTurns: string[] = [];
+    const traceProcesses = new Map<string, boolean>();
     const markers: ConversationMessageMarker[] = [];
     const entryContent = projection.entries.map((entry) => {
       const message = entry.groups[0]?.[0];
@@ -1788,7 +1828,8 @@ export function Conversation({
             message.text.slice(0, 80).replace(/\s+/g, ' ').trim() ||
             (message.hasAttachments ? '附件' : ''),
         });
-      if (!preserveReadingAnchor && !isMarker) return projection.renderEntry(entry, openTurns);
+      if (!preserveReadingAnchor && !isMarker)
+        return projection.renderEntry(entry, openTurns, traceProcesses);
       const Entry = entry.turnId ? ConversationTurnEntry : 'div';
       return (
         <Entry
@@ -1800,15 +1841,16 @@ export function Conversation({
           }
           data-conversation-message-marker={isMarker ? entry.key : undefined}
         >
-          {projection.renderEntry(entry, openTurns)}
+          {projection.renderEntry(entry, openTurns, traceProcesses)}
         </Entry>
       );
     });
-    return { entryContent, openTurns, markers };
+    return { entryContent, openTurns, traceProcesses, markers };
   }, [projection, preserveReadingAnchor, messageNavigation, loading]);
   useLayoutEffect(() => {
     committedOpenTurns.current = openTurns;
-  }, [openTurns]);
+    committedTraceProcesses.current = traceProcesses;
+  }, [openTurns, traceProcesses]);
   const markerKeys = JSON.stringify(markers.map((marker) => marker.key));
   // Refresh the targets when the mounted input identities change or the cached DOM reconnects.
   useLayoutEffect(() => {

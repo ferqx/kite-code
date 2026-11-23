@@ -1002,9 +1002,6 @@ body {
     margin-top: var(--message-meta-offset);
     white-space: nowrap;
   }
-  .message-meta > .response-status {
-    margin-top: 0;
-  }
   .message-meta {
     position: absolute;
     top: 100%;
@@ -1039,8 +1036,7 @@ body {
     margin-bottom: calc(var(--icon-button-size-sm) + var(--message-meta-offset) + 8px);
   }
   .message:hover .message-meta,
-  .message:focus-within .message-meta,
-  .message-meta-responding {
+  .message:focus-within .message-meta {
     opacity: 1;
   }
   .message-meta::before {
@@ -4150,7 +4146,7 @@ body {
   margin: var(--conversation-block-gap) 0 32px;
   transition: margin-top var(--collapsible-collapse-duration) var(--collapsible-collapse-easing);
 }
-.kite-client .conversation-trace-turn > .agent-turn-process > .agent-turn-summary-row,
+.kite-client .conversation-trace-turn > .agent-turn-summary-row,
 .kite-client .conversation-trace-turn > .agent-turn-summary-static {
   box-shadow: none;
 }
@@ -4159,10 +4155,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .kite-client .conversation-trace-turn {
-  & > .agent-turn-process > .agent-turn-summary-row > .agent-turn-summary,
+  & > .agent-turn-summary-row > .agent-turn-summary,
   & > .agent-turn-summary-static,
   & > .conversation-turn-notice,
-  & .response-status,
   &
     :where([data-direct-trace-tool], .agent-turn-body)
     > :where(.tool-activity)
@@ -4176,10 +4171,6 @@ body {
 
   & > .conversation-turn-notice {
     display: block;
-  }
-
-  & .response-status {
-    height: auto;
   }
 }
 .kite-client .conversation-trace-process {
@@ -4198,21 +4189,28 @@ body {
     margin-block-start: var(--conversation-block-gap);
   }
 }
-.kite-client
-  .conversation-trace-turn
-  > :is(.agent-turn-process, .agent-turn-summary-static)
-  + .agent-turn-body {
+.kite-client .conversation-trace-turn > * + .agent-turn-body {
   margin-block-start: var(--conversation-block-gap);
 
   & .message.assistant {
     margin-block-start: 0;
   }
 }
+.kite-client
+  .conversation-trace-turn
+  > .agent-turn-body:not(:last-child)
+  .message.assistant[data-final-reply="false"] {
+  margin-block-end: 0;
+}
 .kite-client .conversation-trace-turn > * + .conversation-turn-stopped {
   margin-block-start: var(--conversation-block-gap);
 }
 .kite-client
   .agent-turn:has(> .agent-turn-process[data-state="open"])
+  > .agent-turn-final
+  .message.assistant,
+.kite-client
+  .conversation-trace-turn.agent-turn-process[data-state="open"]
   > .agent-turn-final
   .message.assistant {
   transition-duration: var(--collapsible-expand-duration);
@@ -4890,8 +4888,16 @@ body {
   line-height: 18px;
   font-weight: 400;
 }
-.kite-client .shell-command-text {
+.kite-client .shell-command-block {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   font: 13px / 22px var(--font-mono, monospace);
+}
+.kite-client .shell-command-text {
+  font: inherit;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -4936,7 +4942,7 @@ body {
   min-width: 0;
 }
 .kite-client .tool-activity-aggregate .shell-output-scroll {
-  /* Keep output compact; the full multiline header is readable in the outer aggregate. */
+  /* Keep the output viewport inside the outer aggregate. */
   max-height: calc(var(--tool-aggregate-max-height) - 148px);
 }
 .kite-client .shell-output [data-slot="code-block-code"] {

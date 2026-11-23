@@ -20,6 +20,7 @@ import {
   createProjectSources,
   KnowledgeReadCleanupError,
   type SourceRequest,
+  type WorkingEnvironment,
 } from '@kite-ai/agent/sources';
 import type { InstalledUserSkill } from './installed-user-skills';
 import { createConfiguredSkillSource } from './skill-source';
@@ -40,6 +41,7 @@ function object(input: Json): JsonObject {
 /** Per-Run host registrations. Configuration chooses capabilities but never creates trusted roots or permission. */
 export async function createWorkspaceAssembly(options: {
   workspaceRoot: string;
+  workingEnvironment?: WorkingEnvironment;
   profile: ProfileSelection;
   toolIds: readonly string[];
   toolConfigurations?: readonly JsonObject[];
@@ -342,8 +344,12 @@ export async function createWorkspaceAssembly(options: {
       },
     });
     project = projectSource;
+    const contract = agentContractSource(
+      root,
+      options.workingEnvironment ?? { platform: process.platform },
+    );
     const captureSources = async (requests: readonly SourceRequest[]): Promise<ContextSource[]> => {
-      const result = [agentContractSource(root), ...(await projectSource.captureBatch!(requests))];
+      const result = [{ ...contract }, ...(await projectSource.captureBatch!(requests))];
       if (!requests.length) return result;
       const current = await catalogue();
       const bodies = new Map<string, Awaited<ReturnType<typeof body>>>();
