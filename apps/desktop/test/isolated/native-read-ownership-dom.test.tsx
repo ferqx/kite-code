@@ -1254,6 +1254,75 @@ test('cold plain draft saves the next edit after Main consumes the selected revi
   }
 });
 
+test('cold plain draft saves retyped original text after an obsolete conflict read', async () => {
+  const original: NativeDraft = {
+    id: 'original-draft',
+    storeId: 'store',
+    workspaceId: 'w',
+    rootSessionId: 'a',
+    revision: 1,
+    content: '已提交的原正文',
+  };
+  let saved = original;
+  const conflictRead = deferred<NativeDraft>();
+  let held = false;
+  const writes: { revision: number; content: string }[] = [];
+  const nextText = '独立的新正文';
+  const f = fixture((request) => {
+    if (request.method === 'draft.read' && request.sessionId === 'a') {
+      if (writes.length && !held) {
+        held = true;
+        return conflictRead.promise;
+      }
+      return saved;
+    }
+    if (request.method === 'draft.write' && request.sessionId === 'a') {
+      writes.push({ revision: request.revision, content: request.content });
+      if (request.revision !== saved.revision) throw Error('draft_revision_conflict');
+      saved = {
+        ...saved,
+        revision: saved.revision + 1,
+        content: request.content,
+        consumedFrom: undefined,
+      };
+      return saved;
+    }
+    return undefined;
+  });
+  try {
+    await f.render();
+    await f.click('Original A');
+    const prompt = f.dom.window.document.querySelector(
+      '[role="textbox"][aria-label="当前会话私有草稿"]',
+    )!;
+    expect(promptValue(prompt)).toBe(original.content);
+    saved = {
+      ...original,
+      revision: 2,
+      content: '',
+      consumedFrom: { commandId: 'original-accepted', revision: 1 },
+    };
+    await act(async () => setPromptText(prompt, nextText));
+    await until(() => held);
+    expect(writes).toEqual([{ revision: 1, content: nextText }]);
+    await act(async () => setPromptText(prompt, original.content));
+    expect(promptValue(prompt)).toBe(original.content);
+    expect(saved.content).toBe('');
+    await act(async () => conflictRead.resolve(saved));
+    await until(() => saved.revision === 3);
+    expect(writes).toEqual([
+      { revision: 1, content: nextText },
+      { revision: 2, content: original.content },
+    ]);
+    expect(saved.content).toBe(original.content);
+    expect(promptValue(prompt)).toBe(original.content);
+    expect(f.calls.filter((request) => request.method === 'submit')).toHaveLength(0);
+  } finally {
+    conflictRead.resolve(saved);
+    await f.close();
+  }
+});
+
 test('a cached unavailable selection rereads the same activation and retires an accepted approval without replaying writes', async () => {
   let unavailable = false,
     recovered = false;

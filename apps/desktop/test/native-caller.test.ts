@@ -3124,6 +3124,89 @@ for (const type of ['session.updated', 'run.started'] as const) {
   });
 }
 
+test('selected root composer draft is retired when another client deletes the session', async () => {
+  const port = client();
+  const data = memoryPrivateData();
+  const originalView = port.getView.bind(port);
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let observation!: Parameters<AgentClient['observe']>[0];
+  let holdNext = false;
+  let deleted = false;
+  port.observe = async (options) => {
+    observation = options;
+    await new Promise<void>((resolve) =>
+      options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+    );
+  };
+  port.getView = async (id) => {
+    if (id === 's' && deleted) throw new ClientError('session_not_found');
+    const view = await originalView(id);
+    if (id === 's' && holdNext) {
+      holdNext = false;
+      entered.resolve();
+      await release.promise;
+    }
+    return view;
+  };
+  const caller = new NativeCaller(port, () => {}, data);
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const request = { generation, sessionId: 's' };
+    await caller.invoke({ method: 'select', ...request });
+    const before = data.save(
+      { storeId: 'store', workspaceId: 'w', rootSessionId: 's' },
+      0,
+      'retain',
+    );
+    holdNext = true;
+    await observation.onChange?.(sessionChange('s', '1'));
+    await entered.promise;
+    deleted = true;
+    await observation.onChange?.({ ...sessionChange('s', '2'), type: 'session.delete_requested' });
+
+    await expect(caller.invoke({ method: 'draft.read', ...request })).rejects.toMatchObject({
+      code: 'draft_association_unavailable',
+    });
+    await expect(
+      caller.invoke({ method: 'draft.write', ...request, revision: 1, content: 'after delete' }),
+    ).rejects.toMatchObject({ code: 'draft_association_unavailable' });
+
+    release.resolve();
+    await waitForCallerState(
+      caller,
+      (state) => state.selection?.viewLoading === false && !state.selection.permissionUnavailable,
+    );
+    expect(caller.state().selection?.session.deletedAt).toBeNull();
+    await expect(caller.invoke({ method: 'draft.read', ...request })).rejects.toMatchObject({
+      code: 'draft_association_unavailable',
+    });
+    await expect(
+      caller.invoke({ method: 'draft.write', ...request, revision: 1, content: 'from stale view' }),
+    ).rejects.toMatchObject({ code: 'draft_association_unavailable' });
+    expect(
+      await caller.invoke({ method: 'draft.original', generation, draftId: before.id }),
+    ).toEqual({
+      ...before,
+      association: 'unavailable',
+    });
+    await caller.invoke({ method: 'select', generation, sessionId: 'other' });
+    expect(
+      await caller.invoke({
+        method: 'draft.write',
+        generation,
+        sessionId: 'other',
+        revision: 0,
+        content: 'other draft',
+      }),
+    ).toMatchObject({ revision: 1, content: 'other draft' });
+    expect(port.writes).toBe(0);
+  } finally {
+    release.resolve();
+    await caller.close();
+  }
+});
+
 test('main-private drafts require exact selection/revision; detached or late generations cannot rebind; network disposal is not owned shutdown', async () => {
   const port = client(),
     events: number[] = [],

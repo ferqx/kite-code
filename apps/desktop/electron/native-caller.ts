@@ -98,6 +98,8 @@ export class NativeCaller {
   private readonly outputSources: NativeOutputSources;
   private generation = 0;
   private selection = 0;
+  // A held View may predate a committed deletion of this exact selection.
+  private deletedDraftSelection: number | undefined;
   private activation: { id: number; sessionId: string; selection: number } | undefined;
   private selectionActivation?: {
     key: string;
@@ -851,6 +853,10 @@ export class NativeCaller {
       throw new ClientError('child_session_readonly');
     return snapshot;
   }
+  private assertDraftAssociationLive(sessionId: string) {
+    if (this.selected === sessionId && this.deletedDraftSelection === this.selection)
+      throw new ClientError('draft_association_unavailable');
+  }
   private retainedLocalDraftView(sessionId: string) {
     const previous = this.lastView;
     if (
@@ -1422,6 +1428,8 @@ export class NativeCaller {
               )
                 this.outputFilesRevision++;
               if (change.type === 'session.delete_requested') {
+                if (change.sessionId && change.sessionId === this.selected)
+                  this.deletedDraftSelection = this.selection;
                 if (change.sessionId)
                   this.privateData?.attachments?.deleteSession(
                     this.client.serverInfo!.storeId!,
@@ -1948,6 +1956,8 @@ export class NativeCaller {
     const localDraftRequest =
       request.method === 'draft.read' ||
       (request.method === 'draft.write' && !request.outputFiles?.length);
+    if (request.method === 'draft.read' || request.method === 'draft.write')
+      this.assertDraftAssociationLive(request.sessionId);
     if (
       !(localDraftRequest && this.retainedLocalDraftView(request.sessionId)) &&
       !request.method.startsWith('background.') &&
@@ -3983,6 +3993,7 @@ export class NativeCaller {
               : this.requirePrivateData().save(scope, request.revision, request.content);
           break;
         }
+        this.assertDraftAssociationLive(request.sessionId);
         const originalSelection = this.selection;
         const retained = localDraftRequest
           ? this.retainedLocalDraftView(request.sessionId)
@@ -4012,6 +4023,7 @@ export class NativeCaller {
           }
         }
         if (this.selection !== originalSelection) throw new ClientError('output_scope_unavailable');
+        this.assertDraftAssociationLive(request.sessionId);
         result =
           request.method === 'draft.read'
             ? this.requirePrivateData().read(scope)
@@ -4028,6 +4040,7 @@ export class NativeCaller {
           // draft again after waiting so a concurrent edit retains its version.
           await this.drainRefresh();
           this.assertGeneration(generation);
+          this.assertDraftAssociationLive(request.sessionId);
           const fresh = this.writableScope(request.sessionId);
           if (
             this.selection !== originalSelection ||
@@ -4048,6 +4061,7 @@ export class NativeCaller {
             await this.prepareOfficeDraft(file, generation);
             if (this.selection !== originalSelection)
               throw new ClientError('output_scope_unavailable');
+            this.assertDraftAssociationLive(request.sessionId);
           }
         }
         break;

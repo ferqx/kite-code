@@ -925,7 +925,7 @@ Service 完成原 Runtime、HTTP 资源、正文流及 Store 收尾后，最后�
 
 普通纯文本排队输入的 Desktop 私有提交回执可附带已提交清空版本。它仅来自同一命令的本地草稿消费事务；Renderer 只更新同一草稿对象、选中会话和 generation 下未再编辑的空输入，避免对已清空版本发起多余的保存。没有该证明、视图切换或存在更新的编辑时沿用原 CAS；真实保存失败仍保留草稿及提示。
 
-冷启动后，若 Main 消费了 Renderer 刚读到的原草稿版本，下一次保存冲突时会读取同一草稿。只有确认该版本被原命令准确消费、当前为空且修订只前进一次，才以新修订保存本窗口的新内容。
+冷启动后，若 Main 消费了 Renderer 刚读到的原草稿版本，下一次保存冲突时会读取同一草稿。只有确认该版本被原命令准确消费、当前为空且修订只前进一次，才以新修订保存本窗口的新内容。 采纳该清空凭据时同步更新已保存的内容基线；后续改回与原文相同的内容，仍认作新草稿并保存。
 
 [Observer 回归](test/agent-browser-observer.test.ts)、[View 回归](test/agent-browser-view.test.ts)和[呈现回归](test/agent-browser-presentation.test.ts)核读身份、未知结果、换代、引用与自动打开；[面板 DOM](test/isolated/agent-browser-dom.test.tsx)、[自动呈现 DOM](test/isolated/agent-browser-native-dom.test.tsx)和[实际 Native 页面](test/isolated/native-read-ownership-dom.test.tsx)核冻结选择、Agent不中断、原正文、卡片、跨会话、失败／unknown和notes-only发送；[注释 owner](test/isolated/browser-annotation-drafts.test.ts)核数量／字节限制、冷恢复与消费版本，[ModelInput／Provider](test/isolated/browser-annotation-input.test.ts)核首请求文字＋原像素及运行中 steer，无预先 read_file。[Node 私有文件](test/isolated/private-data.test.ts)沿真实SQLite核metadata冷恢复、CAS、notes-only、unknown保留与旧回执保护新编辑。UI验证使用静态帧／本地模拟Provider和独立Electron，不授予新浏览器、真实模型或安装制品资格；上文最终v1真实后台轮是本次UI修改前的独立检查点。
 
@@ -1985,7 +1985,7 @@ Skills 详情按名称、简介、独立滚动的 Markdown 正文及来源展示
 
 冷开读到原发送草稿后，[Renderer](src/native.tsx)在同一 Store、工作区、会话与草稿修订的原回执确认时回读私有草稿。只有 Main 提供这次原命令已提交的清空凭据，当前显示仍是原编辑快照，才清空输入框并推进本地基线。新编辑、切走、换代或缺少凭据保留各自状态。回执和清空确认沿用原查询与草稿读写，不重新提交输入。
 
-[NativeCaller](electron/native-caller.ts)的本地草稿读写在同一根会话刷新时可以沿当前观察代次下的最后一个已确认作用域访问私有存储。切换目标、Store 或观察重置撤销该作用域。正文写入仍核对原草稿修订，已保存输出附件的业务来源继续要求新鲜 View。 [原回执 DOM 回归](test/isolated/native-read-ownership-dom.test.tsx) [草稿作用域回归](test/native-caller.test.ts)
+[NativeCaller](electron/native-caller.ts)的本地草稿读写在同一根会话刷新时可以沿当前观察代次下的最后一个已确认作用域访问私有存储。切换目标、Store 或观察重置撤销该作用域。已观察到当前会话被删除时，正文草稿立即失去会话关联；尚未返回的旧 View 不恢复该关联，私有草稿仍可查原文。正文写入仍核对原草稿修订，已保存输出附件的业务来源继续要求新鲜 View。 [原回执 DOM 回归](test/isolated/native-read-ownership-dom.test.tsx) [草稿作用域回归](test/native-caller.test.ts)
 
 2026-11-23 在 macOS arm64 用当前源码构建普通隔离 Electron 窗口，连接配套 Service 和本地固定模型。两轮均在原提交已受理后丢弃回执，冷重开只查原命令，输入框在下一次编辑前清空，消息区各条原文最多显示一份。后续任务完成的对照和服务 View 读取仍被挂起的活动退出均通过，两轮四次正常退出为 0。活动样本在四秒延迟的 View 尚未返回时确认草稿，配套 Service 退出时结算该任务为 cancelled。两轮各有一次原文件写入，后续发送前后文件字节一致。过程记录分别在本机 `dist/acceptance/native-draft-fix-retest-completed-o0ufwznj/` 和 `dist/acceptance/native-draft-fix-retest-active-tguqnhdc/`。完成样本有一条字体 CSP 控制台提示。
 

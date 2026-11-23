@@ -3807,8 +3807,18 @@ function NativeDesktopContent({
         )
           throw Error('browser_draft_save_unconfirmed');
         const previous = saved.revision;
-        saved.revision = reconciledNoteRevision(previous, commandId, observed);
-        return saved.revision !== previous;
+        const revision = reconciledNoteRevision(previous, commandId, observed);
+        if (revision === previous) return false;
+        // The exact committed clear updates the durable baseline even if this
+        // write has been superseded. A later edit may retype the consumed text.
+        saved.revision = revision;
+        saved.signature = JSON.stringify({
+          content: observed.content,
+          browserAnnotations: observed.browserAnnotations ?? [],
+          annotationImageOffset: observed.annotationImageOffset ?? 0,
+          outputFiles: observed.outputFiles ?? [],
+        });
+        return true;
       };
       await reconcile();
       if (!ownsSnapshot()) return;
@@ -3853,8 +3863,9 @@ function NativeDesktopContent({
               result = observed;
             } else {
               // Only an acknowledged input may advance a changed draft baseline.
-              if (!(await reconcile(observed))) throw cause;
+              const advanced = await reconcile(observed);
               if (!ownsSnapshot()) return;
+              if (!advanced) throw cause;
               expectedRevision = saved.revision;
               result = await write();
             }
