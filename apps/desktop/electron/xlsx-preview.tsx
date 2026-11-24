@@ -19,7 +19,7 @@ import {
 
 const rowHeader = 43;
 const columnHeader = 25;
-const fitCellBudget = 16384;
+const minFitScale = 0.75;
 
 function offsets(count: number, size: (index: number) => number) {
   const values = new Float64Array(count + 1);
@@ -132,7 +132,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
   const date1904 = workbook.properties.date1904 === true;
   const viewport = useRef<HTMLDivElement>(null);
   const grid = useRef<HTMLTableElement>(null);
-  const [box, setBox] = useState({ width: 800, height: 600 });
+  const [box, setBox] = useState({ width: 800, height: 600, pixelRatio: devicePixelRatio });
   const [scroll, setScroll] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const [range, setRange] = useState<Range>();
@@ -155,11 +155,16 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
     { pointerId: number; previous: Range | undefined; previousSerial: number } | undefined
   >(undefined);
   const offsetsBySheet = useRef(new Map<number, { x: number; y: number }>());
-  const totalWidth = cols.at(-1)!;
-  const fitScale = Math.max(1, box.width - rowHeader - 1) / Math.max(1, totalWidth);
-  // Keep the viewport virtualized for large sheets at very small fit scales.
-  const fitFloor = (rows.length - 1) * (cols.length - 1) > fitCellBudget ? 0.5 : 0;
-  const scale = zoom === 'fit' ? Math.min(1, Math.max(fitFloor, fitScale)) : zoom;
+  const snap = (value: number) => Math.round(value * box.pixelRatio) / box.pixelRatio;
+  const headerWidth = snap(rowHeader);
+  const headerHeight = snap(columnHeader);
+  const fitScale = (box.width - headerWidth - 1) / Math.max(1, cols.at(-1)!);
+  const scale = zoom === 'fit' ? Math.min(1, Math.max(minFitScale, fitScale)) : zoom;
+  // Snap shared edges so the virtual sizes, painted grid and hit targets agree.
+  const columnEdge = (index: number) => snap(rowHeader + cols[index]! * scale);
+  const rowEdge = (index: number) => snap(columnHeader + rows[index]! * scale);
+  const width = (from: number, to = from) => columnEdge(to + 1) - columnEdge(from);
+  const height = (from: number, to = from) => rowEdge(to + 1) - rowEdge(from);
   const views = sheet.views ?? [];
   const view = views.find((value) => value.state === 'frozen');
   const frozenRows = visibleFrozen(view?.ySplit ?? 0, rows, box.height / scale);
@@ -167,8 +172,8 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
   const rowVirtual = useVirtualizer({
     count: rows.length - 1,
     getScrollElement: () => viewport.current,
-    estimateSize: (index) => (rows[index + 1]! - rows[index]!) * scale,
-    paddingStart: columnHeader,
+    estimateSize: height,
+    paddingStart: headerHeight,
     overscan: 4,
     initialRect: box,
     rangeExtractor: (value) => pinnedRange(value, frozenRows),
@@ -177,25 +182,49 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
     horizontal: true,
     count: cols.length - 1,
     getScrollElement: () => viewport.current,
-    estimateSize: (index) => (cols[index + 1]! - cols[index]!) * scale,
-    paddingStart: rowHeader,
+    estimateSize: width,
+    paddingStart: headerWidth,
     overscan: 3,
     initialRect: box,
     rangeExtractor: (value) => pinnedRange(value, frozenCols),
   });
   useLayoutEffect(() => {
     const element = viewport.current!;
-    const resized = () => setBox({ width: element.clientWidth, height: element.clientHeight });
+    const resized = () => {
+      const width = element.clientWidth;
+      const height = element.clientHeight;
+      const pixelRatio = devicePixelRatio;
+      setBox((previous) =>
+        previous.width === width && previous.height === height && previous.pixelRatio === pixelRatio
+          ? previous
+          : { width, height, pixelRatio },
+      );
+    };
+    let resolution = matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
+    const resolutionChanged = () => {
+      resolution.removeEventListener('change', resolutionChanged);
+      resolution = matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
+      resolution.addEventListener('change', resolutionChanged);
+      syncViewport();
+    };
+    // Apply an iframe resize before Chromium paints the previous scale in the new viewport.
+    const syncViewport = () => flushSync(resized);
+    resolution.addEventListener('change', resolutionChanged);
+    window.addEventListener('resize', syncViewport);
     const observer = new ResizeObserver(resized);
     observer.observe(element);
     resized();
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncViewport);
+      resolution.removeEventListener('change', resolutionChanged);
+    };
   }, []);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Recalculate the cached axis measurements when their size estimates change.
   useLayoutEffect(() => {
     rowVirtual.measure();
     colVirtual.measure();
-  }, [rows, cols, scale, rowVirtual, colVirtual]);
+  }, [rows, cols, scale, box.pixelRatio, rowVirtual, colVirtual]);
   useLayoutEffect(() => {
     const offset = offsetsBySheet.current.get(sheet.id) ?? { x: 0, y: 0 };
     viewport.current?.scrollTo(offset.x, offset.y);
@@ -321,10 +350,8 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
     return () => document.removeEventListener('keydown', keys);
   });
 
-  const x = (col: number) => rowHeader + cols[col]! * scale + (col < frozenCols ? scroll.x : 0);
-  const y = (row: number) => columnHeader + rows[row]! * scale + (row < frozenRows ? scroll.y : 0);
-  const width = (from: number, to = from) => (cols[to + 1]! - cols[from]!) * scale;
-  const height = (from: number, to = from) => (rows[to + 1]! - rows[from]!) * scale;
+  const x = (col: number) => columnEdge(col) + (col < frozenCols ? scroll.x : 0);
+  const y = (row: number) => rowEdge(row) + (row < frozenRows ? scroll.y : 0);
   const virtualRows = rowVirtual.getVirtualItems();
   const virtualCols = colVirtual.getVirtualItems();
   const rendered = new Set<string>();
@@ -332,9 +359,9 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
   const frame = viewport.current?.getBoundingClientRect();
   let trigger: { left: number; top: number } | undefined;
   if (editable && !busy && drag.current === undefined && hit && frame && viewport.current) {
-    const left = frame.left + rowHeader;
+    const left = frame.left + headerWidth;
     const right = frame.left + viewport.current.clientWidth;
-    const top = frame.top + columnHeader;
+    const top = frame.top + headerHeight;
     const bottom = frame.top + viewport.current.clientHeight;
     const outside =
       hit.x + hit.width <= left || hit.x >= right || hit.y + hit.height <= top || hit.y >= bottom;
@@ -413,8 +440,8 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
           aria-colcount={cols.length - 1}
           className={`xlsx-plane${views[0]?.showGridLines === false ? ' xlsx-no-grid' : ''}`}
           style={{
-            width: Math.max(box.width, totalWidth * scale + rowHeader),
-            height: Math.max(box.height, rows.at(-1)! * scale + columnHeader),
+            width: columnEdge(cols.length - 1),
+            height: rowEdge(rows.length - 1),
             fontSize: 13 * scale,
           }}
         >
@@ -425,8 +452,8 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
                 style={{
                   left: scroll.x,
                   top: scroll.y,
-                  width: rowHeader,
-                  height: columnHeader,
+                  width: headerWidth,
+                  height: headerHeight,
                   zIndex: 7,
                 }}
               />
@@ -441,7 +468,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
                         left: x(index),
                         top: scroll.y,
                         width: width(index),
-                        height: columnHeader,
+                        height: headerHeight,
                         fontSize: Math.min(11, width(index) / 2),
                         zIndex: index < frozenCols ? 6 : 5,
                       }}
@@ -462,7 +489,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
                     style={{
                       left: scroll.x,
                       top: y(row),
-                      width: rowHeader,
+                      width: headerWidth,
                       height: height(row),
                       fontSize: Math.min(11, height(row) * 0.8),
                       zIndex: row < frozenRows ? 6 : 5,
@@ -624,8 +651,8 @@ const css = [
   'html,body,#office-preview{margin:0;height:100%;overflow:hidden}',
   'body{background:var(--office-background);color:#111;font-family:Arial,sans-serif}',
   '#office-preview{display:flex;flex-direction:column}',
-  '.xlsx-viewport{flex:1;min-height:0;overflow:auto;position:relative;outline:none;overscroll-behavior:contain;user-select:none}',
-  '.xlsx-plane{display:block;position:relative;overflow:hidden;background:#fff;color-scheme:light;border-spacing:0}',
+  '.xlsx-viewport{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;position:relative;outline:none;overscroll-behavior:contain;user-select:none}',
+  '.xlsx-plane{display:block;position:relative;min-width:100%;min-height:100%;overflow:hidden;background:#fff;color-scheme:light;border-spacing:0}',
   '.xlsx-plane thead,.xlsx-plane tbody,.xlsx-plane tr{display:contents}',
   '.xlsx-cell,.xlsx-header{position:absolute;box-sizing:border-box;display:flex;align-items:center;overflow:hidden}',
   '.xlsx-cell{background:#fff;border:solid #d6d9dc;border-width:0 1px 1px 0;white-space:nowrap;cursor:cell;overflow:visible}',

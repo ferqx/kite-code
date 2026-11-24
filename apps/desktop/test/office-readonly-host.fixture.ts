@@ -27,6 +27,15 @@ app.on('web-contents-created', (_, contents) => {
 const hash = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 const pause = () => new Promise((r) => setTimeout(r, 80));
 type Point = { x: number; y: number };
+type ExcelFitFrame = {
+  dpr: number;
+  viewport: number[];
+  scroll: number[];
+  edges: number[];
+  gap: number[];
+  font: number;
+  tabTop: number;
+};
 async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean) {
   for (let i = 0; i < 100; i++) {
     const v = await fn();
@@ -385,13 +394,13 @@ void app
         primary.webContents.executeJavaScript(
           `document.querySelector(${JSON.stringify(zoomTrigger)})?.textContent.trim()`,
         );
-      const wheel = async (deltaY: number, modifiers: number) => {
+      const wheel = async (deltaY: number, modifiers: number, deltaX = 0) => {
         const bounds = await frameBounds();
         return primary.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
           type: 'mouseWheel',
           x: Math.round(bounds.x + bounds.width / 2),
           y: Math.round(bounds.y + bounds.height / 2),
-          deltaX: 0,
+          deltaX,
           deltaY,
           modifiers,
         });
@@ -516,6 +525,72 @@ void app
       );
       checks.push('excel-scrollbar-theme');
       await verifyZoom('excel', 'control', '.xlsx-viewport');
+      const fitWidths = [640, 580, 540, 512, 440, 360, 320, 360, 440, 512, 580, 640];
+      const fitSamples = [];
+      for (const width of fitWidths) {
+        await primary.webContents.executeJavaScript(
+          `document.querySelector('.client-content-frame').style.width = '${width}px'`,
+        );
+        await until(frameBounds, (bounds) => Math.abs(bounds.width - width) < 2);
+        const frames = (await doc()!.executeJavaScript(`(async () => {
+          const viewport = document.querySelector('.xlsx-viewport');
+          const first = viewport.querySelector('[data-row="0"][data-col="0"]');
+          const next = viewport.querySelector('[data-row="1"][data-col="1"]');
+          const tab = document.querySelector('.xlsx-tabs');
+          const frames = [];
+          for (let i = 0; i < 6; i++) {
+            await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+            const rect = first.getBoundingClientRect(), adjacent = next.getBoundingClientRect();
+            frames.push({
+              dpr: devicePixelRatio,
+              viewport: [viewport.clientWidth, viewport.clientHeight, viewport.scrollWidth, viewport.scrollHeight],
+              scroll: [viewport.scrollLeft, viewport.scrollTop],
+              edges: [rect.left, rect.right, rect.top, rect.bottom],
+              gap: [adjacent.left - rect.right, adjacent.top - rect.bottom],
+              font: parseFloat(getComputedStyle(first).fontSize),
+              tabTop: tab.getBoundingClientRect().top,
+            });
+          }
+          return frames;
+        })()`)) as ExcelFitFrame[];
+        fitSamples.push({ width, frames });
+        if ([512, 320].includes(width)) await capture(`excel-fit-${width}`);
+        if (width === 320) {
+          const scrollLeft = () =>
+            doc()!.executeJavaScript("document.querySelector('.xlsx-viewport').scrollLeft");
+          await wheel(0, 0, 300);
+          await until(scrollLeft, (offset) => Number(offset) > 0);
+          assert.equal(await previewZoom(), 'fit');
+          assert.equal(
+            await doc()!.executeJavaScript(`(() => {
+              const last = document.querySelector('[data-row="0"][data-col="7"]');
+              const r = last.getBoundingClientRect();
+              return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('td') === last;
+            })()`),
+            true,
+          );
+          await wheel(0, 0, -300);
+          await until(scrollLeft, (offset) => offset === 0);
+        }
+      }
+      await writeFile(join(root, 'excel-fit-frames.json'), JSON.stringify(fitSamples, null, 2));
+      for (const { width, frames } of fitSamples) {
+        const settled = frames.at(-1)!;
+        assert.ok(settled.font >= 9.75, `unreadable fit text at ${width}px: ${settled.font}px`);
+        for (const frame of frames) {
+          assert.deepEqual(frame, settled, `unstable fit at ${width}px`);
+          for (const edge of frame.edges)
+            assert.ok(Math.abs(edge * frame.dpr - Math.round(edge * frame.dpr)) < 0.025);
+          assert.ok(frame.gap.every((gap) => Math.abs(gap) < 0.025));
+        }
+        assert.equal(settled.viewport[2]! > settled.viewport[0]!, width <= 440);
+      }
+      assert.deepEqual(fitSamples[0]?.frames.at(-1), fitSamples.at(-1)?.frames.at(-1));
+      await primary.webContents.executeJavaScript(
+        "document.querySelector('.client-content-frame').style.width = ''",
+      );
+      await until(frameBounds, (bounds) => bounds.width === initial.width);
+      checks.push('excel-narrow-fit-grid-stays-readable-and-stable');
       const point = (address: string) =>
         until<Point | null>(
           () =>

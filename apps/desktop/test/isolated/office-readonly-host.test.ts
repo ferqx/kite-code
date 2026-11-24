@@ -206,8 +206,9 @@ test.skipIf(process.platform !== 'win32')(
       expect(receipt.viewsDestroyed).toBe(true);
       expect(receipt.normalSandbox).toBe(true);
       expect(receipt.previewWasVisible).toBe(true);
-      expect(receipt.checks).toHaveLength(20);
+      expect(receipt.checks).toHaveLength(21);
       expect(receipt.checks).toContain('excel-scoped-zoom-input-and-ordinary-scroll');
+      expect(receipt.checks).toContain('excel-narrow-fit-grid-stays-readable-and-stable');
       expect(receipt.checks).toContain('pdf-scoped-zoom-input-and-ordinary-scroll');
       expect(receipt.checks).toContain('pdf-chromium-touchpad-pinch');
       expect(receipt.checks).toContain('word-scoped-zoom-input-and-ordinary-scroll');
