@@ -1,6 +1,7 @@
 import type { OutputFilesPage, OutputFileTarget } from '@kite-ai/client';
 import {
   ConversationTurnElementContext,
+  InitialTurnOutputPresentationContext,
   type OutputFileSummary,
   OutputFiles,
   type OutputFilesProps,
@@ -158,14 +159,18 @@ export function useNativeOutputFiles(input: {
     revision: number;
     activation: number;
   }>();
-  const sources =
+  const [failedSourceRead, setFailedSourceRead] = useState<string>();
+  const sourceReadKey = JSON.stringify([rootKey, activation]);
+  const observedSources =
     input.available === false
-      ? []
+      ? undefined
       : sourceState?.key === key &&
           sourceState.activation === activation &&
           (displayRevision === undefined || sourceState.revision === displayRevision)
         ? sourceState.sources
-        : (cache.get<NativeOutputSource[]>(`sources/${rootKey}`) ?? []);
+        : cache.get<NativeOutputSource[]>(`sources/${rootKey}`);
+  const sources = observedSources ?? [];
+  const sourcesChecked = observedSources !== undefined || failedSourceRead === sourceReadKey;
   useEffect(() => {
     if (input.available === false || !input.bridge || !input.storeId || !input.sessionId) return;
     const cached = cache.get<NativeOutputSource[]>(`sources/${rootKey}`);
@@ -208,6 +213,7 @@ export function useNativeOutputFiles(input: {
         });
       } catch {
         if (cancelled) return;
+        setFailedSourceRead(sourceReadKey);
         retry = setTimeout(
           () => {
             void read();
@@ -232,6 +238,7 @@ export function useNativeOutputFiles(input: {
     input.available,
     activation,
     sourceRevision,
+    sourceReadKey,
   ]);
   useEffect(() => {
     setRequest((previous) => (previous?.scope === key ? previous : undefined));
@@ -270,9 +277,15 @@ export function useNativeOutputFiles(input: {
       void input.onEdit(file, context).catch(() => input.onError?.('无法附加文件，请重试'));
     },
   };
-  const hasCards = (sessionId: string | undefined, runId: string) =>
-    cache.valid(rootKey) &&
-    !!cache.peek<FilePage>(`window/${outputWindowKey(rootKey, sessionId, runId)}`)?.items.length;
+  const readable = !!(
+    input.bridge &&
+    input.storeId &&
+    input.sessionId &&
+    input.available !== false
+  );
+  const cachedWindow = (window: string) =>
+    cache.valid(rootKey) ? cache.peek<FilePage>(`window/${window}`) : undefined;
+  const hasCards = (window: string) => !!cachedWindow(window)?.items.length;
   return {
     closeFile: (file: SessionFileTarget) => {
       if ('handleId' in file)
@@ -317,12 +330,17 @@ export function useNativeOutputFiles(input: {
       const runId = nativeOutputRunId(turnId, input.storeId, input.sessionId);
       if (!runId) return null;
       const childSources = sources.filter((source) => source.parentRunId === runId);
+      const windows = [
+        outputWindowKey(rootKey, input.sessionId, runId),
+        ...childSources.map((source) => outputWindowKey(rootKey, source.sessionId, source.runId)),
+      ];
       return (
         <TurnOutputSlot
           key={`${key}/${turnId}`}
-          hasCards={() =>
-            hasCards(input.sessionId, runId) ||
-            childSources.some((source) => hasCards(source.sessionId, source.runId))
+          readable={readable}
+          hasCards={() => windows.some(hasCards)}
+          ready={(checked) =>
+            sourcesChecked && windows.every((window) => checked.has(window) || cachedWindow(window))
           }
         >
           <OutputFileReader {...input} {...reader} runId={runId} actions={actions} />
@@ -342,21 +360,30 @@ export function useNativeOutputFiles(input: {
     },
     renderChildTurnOutputs: (sessionId: string, { turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, sessionId);
-      return runId &&
-        sources.some((source) => source.sessionId === sessionId && source.runId === runId) ? (
+      if (!runId) return null;
+      const admitted = sources.some(
+        (source) => source.sessionId === sessionId && source.runId === runId,
+      );
+      if (!admitted && sourcesChecked) return null;
+      const window = outputWindowKey(rootKey, sessionId, runId);
+      return (
         <TurnOutputSlot
           key={`${key}/${sessionId}/${runId}`}
-          hasCards={() => hasCards(sessionId, runId)}
+          readable={readable}
+          hasCards={() => admitted && hasCards(window)}
+          ready={(checked) => sourcesChecked && (checked.has(window) || !!cachedWindow(window))}
         >
-          <OutputFileReader
-            {...input}
-            {...reader}
-            sessionId={sessionId}
-            runId={runId}
-            actions={actions}
-          />
+          {admitted && (
+            <OutputFileReader
+              {...input}
+              {...reader}
+              sessionId={sessionId}
+              runId={runId}
+              actions={actions}
+            />
+          )}
         </TurnOutputSlot>
-      ) : null;
+      );
     },
     renderFile: ({ target: source }: { target: SessionFileTarget }) =>
       'handleId' in source ? (
@@ -387,11 +414,34 @@ export function useNativeOutputFiles(input: {
 const turnObservers = new WeakMap<Element, IntersectionObserver>();
 const turnReaders = new WeakMap<Element, (nearby: boolean) => void>();
 const TurnOutputReadContext = createContext(true);
-function TurnOutputSlot({ children, hasCards }: { children: ReactNode; hasCards: () => boolean }) {
+const TurnOutputCheckContext = createContext<((window: string) => void) | undefined>(undefined);
+
+function TurnOutputSlot({
+  children,
+  readable,
+  hasCards,
+  ready,
+}: {
+  children: ReactNode;
+  readable: boolean;
+  hasCards: () => boolean;
+  ready: (checked: ReadonlySet<string>) => boolean;
+}) {
   const turn = useContext(ConversationTurnElementContext);
   // Undefined until the first visit. Afterwards retain the cards while new reads follow visibility.
   const [nearby, setNearby] = useState<boolean>();
   const active = useConversationReadActive();
+  const release = useContext(InitialTurnOutputPresentationContext);
+  const releaseRef = useRef(release);
+  releaseRef.current = release;
+  const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
+  const markChecked = useCallback((window: string) => {
+    setChecked((previous) => (previous.has(window) ? previous : new Set([...previous, window])));
+  }, []);
+  const pending = !!release && active && readable && !ready(checked);
+  useLayoutEffect(() => {
+    if (!pending) release?.();
+  }, [pending, release]);
   useEffect(() => {
     if (!active) return;
     const target = turn?.current;
@@ -411,18 +461,29 @@ function TurnOutputSlot({ children, hasCards }: { children: ReactNode; hasCards:
       );
       turnObservers.set(viewport, observer);
     }
-    turnReaders.set(target, (visible) =>
-      setNearby((previous) => (visible || previous !== undefined ? visible : undefined)),
-    );
+    turnReaders.set(target, (visible) => {
+      setNearby((previous) => (visible || previous !== undefined ? visible : undefined));
+      if (!visible) releaseRef.current?.();
+    });
     observer.observe(target);
     return () => {
       observer.unobserve(target);
       turnReaders.delete(target);
     };
   }, [active, turn]);
-  // A remount can display covered cards before either fresh reads or visibility are admitted.
-  if (nearby === undefined && !hasCards()) return null;
-  return <TurnOutputReadContext value={nearby === true}>{children}</TurnOutputReadContext>;
+  // Keep the original reply mounted so releasing it preserves the reading geometry and identity.
+  return (
+    <>
+      {pending && <span hidden data-turn-outputs-pending="" />}
+      {(nearby !== undefined || hasCards()) && (
+        <TurnOutputReadContext value={nearby === true}>
+          <TurnOutputCheckContext value={pending ? markChecked : undefined}>
+            {children}
+          </TurnOutputCheckContext>
+        </TurnOutputReadContext>
+      )}
+    </>
+  );
 }
 function outputWindowKey(rootKey: string, sessionId?: string, runId?: string) {
   return JSON.stringify([rootKey, sessionId, runId]);
@@ -452,6 +513,9 @@ function OutputFileReader(input: OutputReaderInput) {
   const active = useConversationReadActive();
   const nearby = useContext(TurnOutputReadContext);
   const readActive = active && nearby;
+  const markChecked = useContext(TurnOutputCheckContext);
+  const reportChecked = useRef(markChecked);
+  reportChecked.current = markChecked;
   useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
   const scopeValid = input.cache.valid(input.rootKey);
   const windowKey = outputWindowKey(input.rootKey, input.sessionId, input.runId);
@@ -474,6 +538,9 @@ function OutputFileReader(input: OutputReaderInput) {
     (page: FilePage) => savePage({ key: windowKey, cache: input.cache, page }),
     [windowKey, input.cache],
   );
+  useLayoutEffect(() => {
+    if (page && saved.key === windowKey) markChecked?.(windowKey);
+  }, [markChecked, page, saved.key, windowKey]);
   const pageRef = useRef(page);
   pageRef.current = page;
   const [loading, setLoading] = useState(false);
@@ -510,106 +577,99 @@ function OutputFileReader(input: OutputReaderInput) {
       }
     }
     setLoading(true);
-    const timer = setTimeout(() => {
-      const query = (beforeKey?: string) =>
-        input.cache.read(
-          JSON.stringify(['page', windowKey, retryRevision, beforeKey]),
-          async () => {
-            const result = await input.bridge!.request({
-              method: 'outputs.query',
-              generation: input.generation,
-              scope: { storeId: input.storeId!, sessionId: input.sessionId! },
-              runId: input.runId,
-              limit: 50,
-              beforeKey,
-            });
-            if (
-              !result ||
-              !('kind' in result) ||
-              !('page' in result) ||
-              result.kind !== 'outputs.page' ||
-              result.page.scope.storeId !== input.storeId ||
-              result.page.scope.sessionId !== input.sessionId ||
-              !outputPageMatches(result.page, {
-                storeId: input.storeId,
-                sessionId: input.sessionId,
-                runId: input.runId,
-              })
-            )
-              throw Error('output_scope_changed');
-            const { items, nextCursor, revision } = result.page;
-            return { items, nextCursor, revision } satisfies FilePage;
-          },
-        );
-      void query(readCursor)
-        .then(async (head) => {
-          if (cancelled) return;
-          const previous = pageRef.current;
-          if (readCursor && previous && previous.revision !== head.revision) {
-            // Never merge a continuation from a different storage snapshot.
-            setRetryRevision((value) => value + 1);
-            return;
+    const query = (beforeKey?: string) =>
+      input.cache.read(JSON.stringify(['page', windowKey, retryRevision, beforeKey]), async () => {
+        const result = await input.bridge!.request({
+          method: 'outputs.query',
+          generation: input.generation,
+          scope: { storeId: input.storeId!, sessionId: input.sessionId! },
+          runId: input.runId,
+          limit: 50,
+          beforeKey,
+        });
+        if (
+          !result ||
+          !('kind' in result) ||
+          !('page' in result) ||
+          result.kind !== 'outputs.page' ||
+          result.page.scope.storeId !== input.storeId ||
+          result.page.scope.sessionId !== input.sessionId ||
+          !outputPageMatches(result.page, {
+            storeId: input.storeId,
+            sessionId: input.sessionId,
+            runId: input.runId,
+          })
+        )
+          throw Error('output_scope_changed');
+        const { items, nextCursor, revision } = result.page;
+        return { items, nextCursor, revision } satisfies FilePage;
+      });
+    void query(readCursor)
+      .then(async (head) => {
+        if (cancelled) return;
+        const previous = pageRef.current;
+        if (readCursor && previous && previous.revision !== head.revision) {
+          // Never merge a continuation from a different storage snapshot.
+          setRetryRevision((value) => value + 1);
+          return;
+        }
+        let incoming = head;
+        if (!readCursor) {
+          // Rebuild the loaded window atomically. Retaining an old tail can resurrect
+          // a superseded delivery that the authoritative head no longer contains.
+          const wanted = Math.max(50, previous?.items.length ?? 0, loadedCount.current);
+          const seen = new Set<string>();
+          while (incoming.nextCursor && incoming.items.length < wanted) {
+            if (cancelled) return;
+            const cursor = incoming.nextCursor;
+            if (seen.has(cursor)) throw Error('output_cursor_repeated');
+            seen.add(cursor);
+            const next = await query(cursor);
+            if (cancelled) return;
+            if (next.revision !== incoming.revision) throw Error('output_snapshot_changed');
+            incoming = {
+              ...incoming,
+              nextCursor: next.nextCursor,
+              items: [
+                ...incoming.items,
+                ...next.items.filter(
+                  (item) =>
+                    !incoming.items.some((old) => outputTargetKey(old) === outputTargetKey(item)),
+                ),
+              ],
+            };
           }
-          let incoming = head;
-          if (!readCursor) {
-            // Rebuild the loaded window atomically. Retaining an old tail can resurrect
-            // a superseded delivery that the authoritative head no longer contains.
-            const wanted = Math.max(50, previous?.items.length ?? 0, loadedCount.current);
-            const seen = new Set<string>();
-            while (incoming.nextCursor && incoming.items.length < wanted) {
-              if (cancelled) return;
-              const cursor = incoming.nextCursor;
-              if (seen.has(cursor)) throw Error('output_cursor_repeated');
-              seen.add(cursor);
-              const next = await query(cursor);
-              if (cancelled) return;
-              if (next.revision !== incoming.revision) throw Error('output_snapshot_changed');
-              incoming = {
+        }
+        if (cancelled) return;
+        const updated =
+          previous && readCursor
+            ? {
                 ...incoming,
-                nextCursor: next.nextCursor,
                 items: [
-                  ...incoming.items,
-                  ...next.items.filter(
+                  ...previous.items,
+                  ...incoming.items.filter(
                     (item) =>
-                      !incoming.items.some((old) => outputTargetKey(old) === outputTargetKey(item)),
+                      !previous.items.some((old) => outputTargetKey(old) === outputTargetKey(item)),
                   ),
                 ],
-              };
-            }
-          }
-          if (cancelled) return;
-          const updated =
-            previous && readCursor
-              ? {
-                  ...incoming,
-                  items: [
-                    ...previous.items,
-                    ...incoming.items.filter(
-                      (item) =>
-                        !previous.items.some(
-                          (old) => outputTargetKey(old) === outputTargetKey(item),
-                        ),
-                    ),
-                  ],
-                }
-              : incoming;
-          input.cache.set(`window/${windowKey}`, updated);
-          setPage(updated);
-          readFailures.current = 0;
-        })
-        .catch(() => {
-          if (cancelled) return;
-          retry = setTimeout(
-            () => setRetryRevision((value) => value + 1),
-            500 * 2 ** Math.min(readFailures.current++, 4),
-          );
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    }, 100);
+              }
+            : incoming;
+        input.cache.set(`window/${windowKey}`, updated);
+        setPage(updated);
+        readFailures.current = 0;
+      })
+      .catch(() => {
+        if (cancelled) return;
+        reportChecked.current?.(windowKey);
+        retry = setTimeout(
+          () => setRetryRevision((value) => value + 1),
+          500 * 2 ** Math.min(readFailures.current++, 4),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
-      clearTimeout(timer);
       clearTimeout(retry);
       cancelled = true;
     };

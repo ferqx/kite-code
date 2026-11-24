@@ -32,7 +32,7 @@
 
 ## 侧栏显隐浏览器回归
 
-[侧栏回归](../apps/desktop/test/isolated/sidebar-actions-browser.test.ts)由默认 `bun run test` 和 Required unit 收集，在独立进程中以 `NODE_ENV=production` 构建实际 Native 页面及生产 CSS。它沿[既有浏览器夹具](../apps/desktop/test/session-shell-browser-runner.fixture.ts)的 `--sidebar-actions` 分支检查深浅主题、发送逐帧显隐、添加空间等待与取消、DOM 保留、键盘／菜单及触屏；按钮最高优先级透明度的变异也不能使父容器中的隐藏操作显现。没有浏览器时测试失败，不静默跳过。
+[侧栏回归](../apps/desktop/test/isolated/sidebar-actions-browser.test.ts)由默认 `bun run test` 和 Required unit 收集，在独立进程中以 `NODE_ENV=production` 构建实际 Native 页面及生产 CSS。它沿[既有浏览器夹具](../apps/desktop/test/session-shell-browser-runner.fixture.ts)的 `--sidebar-actions` 分支检查深浅主题的标题按钮常驻与样式一致、发送逐帧显隐、添加空间等待与取消、DOM 保留、键盘／菜单及触屏；按钮最高优先级透明度的变异也不能使父容器中的隐藏操作显现。没有浏览器时测试失败，不静默跳过。
 
 本机可使用已安装的 Google Chrome；安装了当前锁定 Playwright 配套 Chromium 时自动优先使用它。Required unit 使用 `bun apps/desktop/node_modules/playwright/cli.js install --with-deps chromium` 准备配套浏览器，通过固定的 `PLAYWRIGHT_BROWSERS_PATH` 供安装与隔离 HOME 下的测试共同读取。定向命令为 `bun test apps/desktop/test/isolated/sidebar-actions-browser.test.ts`；纯 DOM 测试继续核原事件、菜单和节点合同，不替代此处的真实 CSS 绘制断言。该夹具使用隔离 bridge，不调用模型、原生目录选择器或用户数据，也不代表完整安装窗口资格。
 

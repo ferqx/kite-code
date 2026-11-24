@@ -17,7 +17,11 @@ export {
   type BackgroundExecutionsProps,
 } from './BackgroundExecutions';
 export { ChildAgentCreationLine } from './ChildAgentCreationLine';
-export { Conversation, ConversationTurnElementContext } from './Conversation';
+export {
+  Conversation,
+  ConversationTurnElementContext,
+  InitialTurnOutputPresentationContext,
+} from './Conversation';
 export { Alert, AlertDescription, AlertTitle } from './components/ui/alert';
 export {
   AlertDialog,

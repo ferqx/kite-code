@@ -10,7 +10,13 @@ import '../src/native-tailwind.css';
 import '../src/native-startup.css';
 import '@kite-ai/ui/desktop/style.css';
 
-export type PresentationPhase = 'selection' | 'history' | 'runs' | 'tools';
+export type PresentationPhase =
+  | 'selection'
+  | 'history'
+  | 'runs'
+  | 'tools'
+  | 'outputs'
+  | 'liveOutputs';
 export interface PresentationEvent {
   kind: 'request' | 'release';
   phase: PresentationPhase;
@@ -23,6 +29,7 @@ export interface PresentationEvent {
 }
 export interface HistoryPresentationFixture {
   events: PresentationEvent[];
+  finishLiveTurn(): void;
   release(phase: PresentationPhase): void;
   pending(): Partial<Record<PresentationPhase, number>>;
 }
@@ -37,8 +44,10 @@ const count = Number(params.get('turns') ?? 4);
 if (!Number.isInteger(count) || count < 2 || count > 40) throw Error('invalid_fixture_turns');
 const target = params.get('mode') === 'initial' ? 'a' : 'b';
 const viewAll = params.get('viewAll') === 'true';
+const turnOutputs = params.has('turnOutputs');
 const control = sessionSwitchBridge({
   active: true,
+  ...(turnOutputs ? { protocol: 'chat-completions' as const } : {}),
   initialSelection: params.get('mode') !== 'initial',
 });
 const base = backgroundItem();
@@ -50,7 +59,7 @@ for (const sessionId of ['a', 'b']) {
   const runs: Run[] = [];
   for (let index = 0; index < count; index++) {
     const runId = `run-${sessionId}-${index}`;
-    const active = index === count - 1;
+    const active = !turnOutputs && index === count - 1;
     runs.push({
       ...base.run!,
       id: runId,
@@ -112,10 +121,12 @@ for (const sessionId of ['a', 'b']) {
   runLists.set(sessionId, runs);
 }
 const events: PresentationEvent[] = [];
+const liveRunId = 'run-a-live';
+let failedOutputRead = false;
 const pending = new Map<PresentationPhase, (() => void)[]>();
 const released = new Set<PresentationPhase>();
 const gate = async (sessionId: string, phase: PresentationPhase) => {
-  if (sessionId !== target || released.has(phase)) return;
+  if ((sessionId !== target && phase !== 'liveOutputs') || released.has(phase)) return;
   await new Promise<void>((resolve) => {
     const queue = pending.get(phase) ?? [];
     queue.push(resolve);
@@ -126,6 +137,56 @@ const sessionFor = (request: Extract<NativeRequest, { method: 'messages' }>) => 
 const bridge: NativeBridge = {
   ...control.bridge,
   async request(request) {
+    if (turnOutputs && request.method === 'outputs.sources')
+      return { kind: 'outputs.sources', scope: request.scope, sources: [] };
+    if (turnOutputs && request.method === 'outputs.query') {
+      const { scope, runId } = request;
+      const sessionId = scope.sessionId;
+      const live = sessionId === 'a' && runId === liveRunId;
+      const ownerRunId = live ? liveRunId : `run-${sessionId}-1`;
+      const hasFile = runId === ownerRunId;
+      if (hasFile) {
+        events.push({
+          kind: 'request',
+          phase: live ? 'liveOutputs' : 'outputs',
+          sessionId,
+          time: performance.now(),
+        });
+        if (params.has('failOutputs') && !failedOutputRead) {
+          failedOutputRead = true;
+          throw Error('fixture_outputs_unavailable');
+        }
+        if (live) await gate(sessionId, 'liveOutputs');
+        else if (sessionId === target) await gate(sessionId, 'outputs');
+        else await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      return {
+        kind: 'outputs.page',
+        page: {
+          scope,
+          revision: '1',
+          collections: [],
+          items: hasFile
+            ? [
+                {
+                  ...scope,
+                  ownerRunId,
+                  fileId: live ? 'live-presentation' : 'presentation',
+                  locator: {
+                    kind: 'delivery',
+                    key: live ? 'delivery/2/job/presentation' : 'delivery/1/job/presentation',
+                  },
+                  name: live ? 'Output-live.pptx' : `Output-${sessionId}.pptx`,
+                  size: '12',
+                  mediaType:
+                    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                  publishedAt: '2026-11-24T00:00:00Z',
+                },
+              ]
+            : [],
+        },
+      };
+    }
     if (request.method === 'messages') {
       const sessionId = sessionFor(request);
       const remaining = histories
@@ -166,13 +227,30 @@ const bridge: NativeBridge = {
       }
       return structuredClone({
         ...result,
+        ...(turnOutputs
+          ? {
+              outputFilesDisplay: {
+                epoch: 1,
+                storeId: 'store',
+                subjectId: 'fixture-subject',
+                roots: ['a', 'b'].map((id) => ({ sessionId: id, revision: 1 })),
+              },
+            }
+          : {}),
         selection: {
           ...result.selection,
           session: {
             ...result.selection.session,
             nextSeq: String(histories.get(sessionId)!.length + 1),
           },
-          runs: viewAll ? runLists.get(sessionId)! : runLists.get(sessionId)!.slice(-1),
+          runs: turnOutputs
+            ? runLists.get(sessionId)!.map((run) => ({
+                ...run,
+                configuration: result.selection!.runs[0]?.configuration,
+              }))
+            : viewAll
+              ? runLists.get(sessionId)!
+              : runLists.get(sessionId)!.slice(-1),
         },
       });
     }
@@ -249,6 +327,35 @@ const bridge: NativeBridge = {
 };
 window.historyPresentationFixture = {
   events,
+  finishLiveTurn() {
+    const messages = histories.get('a')!;
+    const runs = runLists.get('a')!;
+    const prior = runs.at(-1)!;
+    runs.push({
+      ...prior,
+      id: liveRunId,
+      originCommandId: 'command-a-live',
+      rootWorkCommandId: 'command-a-live',
+      rootWorkSeq: String(count + 1),
+      createdAt: prior.finishedAt! + 1,
+      finishedAt: prior.finishedAt! + 2,
+    });
+    for (const [role, content] of [
+      ['user', 'Create an output in the current conversation'],
+      ['assistant', 'LIVE-REPLY-a'],
+    ] as const) {
+      messages.push({
+        id: `a-live-${role}`,
+        sessionId: 'a',
+        runId: liveRunId,
+        seq: String(messages.length + 1),
+        role,
+        status: 'complete',
+        content,
+      });
+    }
+    control.publish();
+  },
   release(phase) {
     events.push({ kind: 'release', phase, time: performance.now() });
     released.add(phase);

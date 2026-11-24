@@ -632,19 +632,17 @@ export function Sidebar({
           </DropdownMenu>
         )}
         {actions.addWorkspace && (
-          <span className="sidebar-actions">
-            <Button
-              className="ghost space-add"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="添加空间"
-              title="添加空间"
-              disabled={props.mutationBusy}
-              onClick={actions.addWorkspace}
-            >
-              <HugeiconsIcon icon={Add01Icon} />
-            </Button>
-          </span>
+          <Button
+            className="space-add"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="添加空间"
+            title="添加空间"
+            disabled={props.mutationBusy}
+            onClick={actions.addWorkspace}
+          >
+            <HugeiconsIcon icon={Add01Icon} />
+          </Button>
         )}
       </div>
       {searchOpen &&

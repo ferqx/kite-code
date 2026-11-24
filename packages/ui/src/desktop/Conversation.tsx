@@ -258,6 +258,7 @@ const MessageItem = memo(function MessageItem({
   renderAttachments,
   showMetadata = true,
   turnOutputs,
+  synchronizeTurnOutputs = false,
 }: {
   message: Message;
   expanded?: boolean;
@@ -276,8 +277,17 @@ const MessageItem = memo(function MessageItem({
   renderAttachments?: (message: Message) => ReactNode;
   showMetadata?: boolean;
   turnOutputs?: ReactNode;
+  synchronizeTurnOutputs?: boolean;
 }) {
   const [metadataNow, setMetadataNow] = useState(() => Date.now());
+  // The first saved snapshot can coordinate with outputs. New replies never wait here.
+  const [awaitInitialOutputs, setAwaitInitialOutputs] = useState(
+    synchronizeTurnOutputs && message.finalReply === true && !!turnOutputs,
+  );
+  const releaseInitialOutputs = useCallback(() => setAwaitInitialOutputs(false), []);
+  useLayoutEffect(() => {
+    if (awaitInitialOutputs && !turnOutputs) releaseInitialOutputs();
+  }, [awaitInitialOutputs, releaseInitialOutputs, turnOutputs]);
   // Raw model reasoning is never part of the readable transcript.
   if (message.role === 'thinking') return null;
   if (message.role === 'tool') return null;
@@ -548,7 +558,11 @@ const MessageItem = memo(function MessageItem({
           </>
         )}
       </CodeCopyEligibilityContext.Provider>
-      {turnOutputs}
+      <InitialTurnOutputPresentationContext
+        value={awaitInitialOutputs ? releaseInitialOutputs : undefined}
+      >
+        {turnOutputs}
+      </InitialTurnOutputPresentationContext>
       {hasMetadata && (
         <footer className="message-meta">
           {copyText && (
@@ -573,6 +587,10 @@ const MessageItem = memo(function MessageItem({
     </article>
   );
 });
+
+export const InitialTurnOutputPresentationContext = createContext<(() => void) | undefined>(
+  undefined,
+);
 
 export const ConversationTurnElementContext = createContext<
   RefObject<HTMLDivElement | null> | undefined
@@ -883,7 +901,7 @@ export function Conversation({
   const restoredMarkerSignature = JSON.stringify([...restoredExpanded.current].sort());
   // biome-ignore lint/correctness/useExhaustiveDependencies: Marker ref contents and the loading-driven restore lifecycle both invalidate the retained projection.
   const projection = useMemo(() => {
-    const initializingTraceSession = !presented.current && !loading;
+    const initializingConversation = !presented.current && !loading;
     const visibleToolIds = new Set(
       messages.filter(isVisibleTool).map((message) => message.id.slice(5)),
     );
@@ -1250,6 +1268,7 @@ export function Conversation({
         <div key={message.presentationKey ?? message.id} className="message-group">
           <MessageItem
             turnOutputs={turnOutputs}
+            synchronizeTurnOutputs={initializingConversation}
             message={childWithUniqueSteps(message)}
             childDetail={childDetail(message)}
             childTools={
@@ -1445,7 +1464,7 @@ export function Conversation({
         const open =
           expanded[turnKey] ??
           committedTraceProcesses.current.get(turnKey) ??
-          ((initializingTraceSession && ongoing) || incompleteFailure);
+          ((initializingConversation && ongoing) || incompleteFailure);
         if (lastTurnEntry && (ongoing || showElapsed)) traceProcesses.set(turnKey, open);
         if (lastTurnEntry && open && (hasProcess || ongoing)) trackOpen(turnKey);
         const processLabel = showElapsed

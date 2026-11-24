@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { act, type ComponentProps } from 'react';
+import { act, type ComponentProps, useContext } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ConversationActivityContext,
@@ -617,6 +617,57 @@ test.each([
       ],
     });
     expect(document.querySelectorAll('[data-output-turn]')).toHaveLength(0);
+  } finally {
+    await view.close();
+  }
+});
+
+test('only replies from the first saved snapshot can wait for outputs', async () => {
+  const reply: Message = {
+    id: 'live',
+    presentationKey: 'reply',
+    role: 'assistant',
+    turnId: 'run',
+    text: 'Live reply',
+    settled: false,
+  };
+  const history: Message = {
+    id: 'history',
+    role: 'assistant',
+    turnId: 'history',
+    text: 'Historical reply',
+    settled: true,
+    finalReply: true,
+  };
+  const view = await fixture([history, reply], false);
+  const { InitialTurnOutputPresentationContext } = await import('../../src/desktop/Conversation');
+  function OutputGate() {
+    const release = useContext(InitialTurnOutputPresentationContext);
+    return <span data-output-gate={release ? 'waiting' : 'open'} />;
+  }
+  try {
+    await view.render({
+      traceTurns: true,
+      turnActivity: { turnId: 'run', status: 'running' },
+      renderTurnOutputs: () => <OutputGate />,
+    });
+    const live = view.host.querySelector('[data-message-id="live"]');
+    expect(live?.textContent).toContain('Live reply');
+    expect(
+      view.host.querySelector('[data-message-id="history"] [data-output-gate="waiting"]'),
+    ).not.toBeNull();
+    const saved = { ...reply, id: 'saved', settled: true, finalReply: true };
+    await view.render({
+      messages: [history, saved, { ...saved, id: 'new', presentationKey: 'new', turnId: 'new' }],
+      turnActivity: { turnId: 'run', status: 'completed' },
+    });
+    expect(view.host.querySelector('[data-message-id="saved"]')).toBe(live);
+    expect(live?.querySelector('[data-output-gate]')?.getAttribute('data-output-gate')).toBe(
+      'open',
+    );
+    expect(
+      view.host.querySelector('[data-message-id="new"] [data-output-gate="open"]'),
+    ).not.toBeNull();
   } finally {
     await view.close();
   }

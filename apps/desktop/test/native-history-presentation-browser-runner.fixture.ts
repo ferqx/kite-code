@@ -63,10 +63,21 @@ type CaseReport = Variant & {
   cachedOriginal?: number[];
   cachedReturned?: number[];
 };
+type OutputFrame = {
+  phase: 'cold' | 'slow' | 'warm' | 'live';
+  time: number;
+  node: number;
+  pending: boolean;
+  visible: boolean;
+  files: string[];
+  bottom: number;
+};
 declare global {
   interface Window {
     historyPresentationFrames: Frame[];
     historyPresentationPhase: string;
+    outputFrames: OutputFrame[];
+    outputPhase: OutputFrame['phase'];
   }
 }
 
@@ -115,7 +126,17 @@ const server = Bun.serve({
   },
 });
 const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel: 'chrome' });
-const report = { browser: browser.version(), cases: [] as CaseReport[] };
+const report = {
+  browser: browser.version(),
+  cases: [] as CaseReport[],
+  outputPresentation: [] as {
+    theme: string;
+    frames: OutputFrame[];
+    events: PresentationEvent[];
+    failedReadFrames: OutputFrame[];
+  }[],
+};
+const outputsOnly = process.argv.includes('--turn-outputs');
 const variants: Variant[] = [
   { mode: 'initial', turns: 4, width: 1320, order: ['runs', 'tools'] },
   { mode: 'initial', turns: 4, width: 1440, order: ['tools', 'runs'], theme: 'dark' },
@@ -125,7 +146,159 @@ const variants: Variant[] = [
   { mode: 'switch', turns: 40, width: 1440, order: ['tools', 'runs'], reducedMotion: 'reduce' },
 ];
 try {
-  for (const variant of variants) {
+  if (outputsOnly) {
+    for (const theme of ['dark', 'light'] as const) {
+      const page = await browser.newPage({
+        viewport: { width: 1360, height: 900 },
+        colorScheme: theme,
+      });
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.addInitScript(() => {
+        window.outputFrames = [];
+        window.outputPhase = 'cold';
+        const nodes = new WeakMap<Element, number>();
+        let next = 1;
+        function sample() {
+          const phase = window.outputPhase;
+          const marker = {
+            cold: 'REPLY-a-1',
+            slow: 'REPLY-b-1',
+            warm: 'REPLY-a-1',
+            live: 'LIVE-REPLY-a',
+          }[phase];
+          const replies = [...document.querySelectorAll('.agent-turn-final .message.assistant')];
+          const reply = replies.find(
+            (candidate) =>
+              candidate.textContent?.includes(marker) && candidate.getClientRects().length > 0,
+          );
+          const viewport = reply?.closest('.conversation-viewport');
+          if (reply && viewport) {
+            if (!nodes.has(reply)) nodes.set(reply, next++);
+            window.outputFrames.push({
+              phase,
+              time: performance.now(),
+              node: nodes.get(reply)!,
+              pending: !!reply.querySelector('[data-turn-outputs-pending]'),
+              visible: getComputedStyle(reply).visibility === 'visible',
+              files: [...reply.querySelectorAll('.output-file-name')].map(
+                (node) => node.textContent ?? '',
+              ),
+              bottom: viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight,
+            });
+          }
+          requestAnimationFrame(sample);
+        }
+        requestAnimationFrame(sample);
+      });
+      await page.goto(new URL('?mode=switch&turns=2&viewAll=true&turnOutputs=1', server.url).href);
+      const first = page
+        .locator('.agent-turn-final .message.assistant')
+        .filter({ hasText: 'REPLY-a-1' });
+      await first.locator('.output-file-card').waitFor();
+      await page.screenshot({ path: path.join(artifact, `outputs-${theme}-cold.png`) });
+      await page.evaluate(() => {
+        for (const phase of ['selection', 'history', 'runs', 'tools'] as const)
+          window.historyPresentationFixture.release(phase);
+        window.outputPhase = 'slow';
+      });
+      await page.getByRole('button', { name: 'Session B', exact: true }).click();
+      const second = page
+        .locator('.agent-turn-final .message.assistant')
+        .filter({ hasText: 'REPLY-b-1' });
+      await page.waitForFunction(() => window.historyPresentationFixture.pending().outputs === 1);
+      await page.waitForFunction(() => {
+        const pending = window.outputFrames.find(
+          (frame) => frame.phase === 'slow' && frame.pending,
+        );
+        return pending && performance.now() - pending.time >= 220;
+      });
+      assert.equal(await second.isVisible(), false);
+      assert.equal(await second.locator('.output-file-card').count(), 0);
+      await page.screenshot({ path: path.join(artifact, `outputs-${theme}-slow.png`) });
+      await page.evaluate(() => window.historyPresentationFixture.release('outputs'));
+      await second.locator('.output-file-card').waitFor();
+      await page.screenshot({ path: path.join(artifact, `outputs-${theme}-resolved.png`) });
+      await page.evaluate(() => {
+        window.outputPhase = 'warm';
+      });
+      await page.getByRole('button', { name: 'Session A', exact: true }).click();
+      await first.locator('.output-file-card').waitFor();
+      await page.screenshot({ path: path.join(artifact, `outputs-${theme}-warm.png`) });
+      await page.evaluate(() => {
+        window.outputPhase = 'live';
+        window.historyPresentationFixture.finishLiveTurn();
+      });
+      const latest = page
+        .locator('.agent-turn-final .message.assistant')
+        .filter({ hasText: 'LIVE-REPLY-a' });
+      await page.waitForFunction(
+        () => window.historyPresentationFixture.pending().liveOutputs === 1,
+      );
+      await latest.waitFor({ state: 'visible' });
+      assert.equal(await latest.locator('.output-file-card').count(), 0);
+      await page.screenshot({ path: path.join(artifact, `outputs-${theme}-live.png`) });
+      await page.evaluate(() => window.historyPresentationFixture.release('liveOutputs'));
+      await latest.locator('.output-file-card').waitFor();
+      await page.screenshot({ path: path.join(artifact, `outputs-${theme}-live-resolved.png`) });
+      const { frames, events } = await page.evaluate(() => ({
+        frames: window.outputFrames,
+        events: window.historyPresentationFixture.events,
+      }));
+      const cold = frames.filter((frame) => frame.phase === 'cold');
+      const slow = frames.filter((frame) => frame.phase === 'slow');
+      const warm = frames.filter((frame) => frame.phase === 'warm');
+      const live = frames.filter((frame) => frame.phase === 'live');
+      assert.ok(cold.some((frame) => frame.pending && !frame.visible));
+      assert.deepEqual(cold.find((frame) => frame.visible)?.files, ['Output-a.pptx']);
+      assert.deepEqual(warm[0]?.files, ['Output-a.pptx']);
+      assert.ok(warm[0]?.visible);
+      const firstSlowReply = slow.findIndex((frame) => frame.visible);
+      assert.ok(firstSlowReply > 0);
+      assert.ok(slow.slice(firstSlowReply).every((frame) => frame.visible));
+      assert.deepEqual(slow[firstSlowReply]?.files, ['Output-b.pptx']);
+      assert.deepEqual(slow.at(-1)?.files, ['Output-b.pptx']);
+      assert.ok(Math.abs(slow.at(-1)!.bottom) <= 1);
+      assert.equal(new Set(slow.map((frame) => frame.node)).size, 1);
+      assert.ok(live[0]?.visible);
+      assert.deepEqual(live[0].files, []);
+      assert.ok(live.every((frame) => frame.visible && !frame.pending));
+      assert.deepEqual(live.at(-1)?.files, ['Output-live.pptx']);
+      assert.equal(new Set(live.map((frame) => frame.node)).size, 1);
+      assert.equal(
+        events.filter((event) => event.phase === 'outputs' && event.sessionId === 'a').length,
+        1,
+      );
+      assert.equal(await page.locator('.native-toast-card').count(), 0);
+      assert.deepEqual(errors, []);
+      await page.goto(
+        new URL('?mode=switch&turns=2&viewAll=true&turnOutputs=1&failOutputs=1', server.url).href,
+      );
+      await first.waitFor({ state: 'visible' });
+      await first.locator('.output-file-card').waitFor();
+      await page.screenshot({ path: path.join(artifact, `outputs-${theme}-recovered.png`) });
+      const failedReadFrames = await page.evaluate(() => window.outputFrames);
+      const firstRecoveredReply = failedReadFrames.findIndex((frame) => frame.visible);
+      assert.ok(firstRecoveredReply >= 0);
+      assert.deepEqual(failedReadFrames[firstRecoveredReply]?.files, []);
+      assert.ok(failedReadFrames.slice(firstRecoveredReply).every((frame) => frame.visible));
+      assert.deepEqual(failedReadFrames.at(-1)?.files, ['Output-a.pptx']);
+      assert.deepEqual(errors, []);
+      report.outputPresentation.push({ theme, frames, events, failedReadFrames });
+      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      console.log(
+        JSON.stringify({
+          theme,
+          cold: cold.length,
+          slow: slow.length,
+          warm: warm.length,
+          live: live.length,
+        }),
+      );
+      await page.close();
+    }
+  }
+  for (const variant of outputsOnly ? [] : variants) {
     const label = `${variant.mode}-${variant.turns}-${variant.width}-${variant.order.join('-')}-${variant.viewAll ? 'view-all' : 'partial-view'}-${variant.theme ?? 'light'}-${variant.reducedMotion ?? 'no-preference'}`;
     const page = await browser.newPage({
       viewport: { width: variant.width, height: 1000 },

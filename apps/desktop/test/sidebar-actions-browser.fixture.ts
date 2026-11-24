@@ -378,46 +378,67 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       const sessionLoading = await verifySessionRowLoading(page);
       await page.evaluate(() => window.sessionShellFixture.setActive(false));
       await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).waitFor();
-      const selector = '.space-add,.space-new-session,.space-more';
+      const rowActions = '.space-new-session,.space-more';
+      const selector = `.session-search-trigger,.space-add,${rowActions}`;
+      const search = page.getByRole('button', { name: '搜索会话', exact: true });
+      const add = page.getByRole('button', { name: '添加空间', exact: true });
+      const appearance = (button: Locator) =>
+        button.evaluate((node) => {
+          const { backgroundColor, borderRadius, boxShadow, color, height, width } =
+            getComputedStyle(node);
+          const icon = node.querySelector('svg')!;
+          return {
+            backgroundColor,
+            borderRadius,
+            boxShadow,
+            color,
+            height,
+            width,
+            iconSize: [getComputedStyle(icon).width, getComputedStyle(icon).height],
+          };
+        });
       await page.evaluate((selector) => {
-        const nodes = [...document.querySelectorAll(selector)];
-        Reflect.set(window, 'sidebarActionNodes', nodes);
-        Reflect.set(
-          window,
-          'sidebarActionGroups',
-          nodes.map((node) => node.closest('.sidebar-actions')),
-        );
-      }, selector);
-      const read = () =>
-        page.locator(selector).evaluateAll((nodes) =>
-          nodes.map((node, index) => {
-            const group = node.closest('.sidebar-actions')!;
+        const original = [...document.querySelectorAll(selector)].map((node) => ({
+          node,
+          parent: node.parentElement,
+        }));
+        Reflect.set(window, 'readSidebarActions', () =>
+          [...document.querySelectorAll<HTMLButtonElement>(selector)].map((node, index) => {
+            const parent = node.parentElement!;
             const buttonOpacity = Number(getComputedStyle(node).opacity);
-            const groupOpacity = Number(getComputedStyle(group).opacity);
+            const groupOpacity = Number(getComputedStyle(parent).opacity);
             return {
               opacity: buttonOpacity * groupOpacity,
               buttonOpacity,
               groupOpacity,
-              disabled: (node as HTMLButtonElement).disabled,
-              same:
-                node === Reflect.get(window, 'sidebarActionNodes')[index] &&
-                group === Reflect.get(window, 'sidebarActionGroups')[index],
+              disabled: node.disabled,
+              same: node === original[index]?.node && parent === original[index].parent,
             };
           }),
         );
+      }, selector);
+      type ActionSample = {
+        opacity: number;
+        buttonOpacity: number;
+        groupOpacity: number;
+        disabled: boolean;
+        same: boolean;
+      };
+      const read = () =>
+        page.evaluate(() => Reflect.get(window, 'readSidebarActions')() as ActionSample[]);
       const shown = async (target: string, opacity: number) => {
         await page.waitForFunction(
           ({ target, opacity }) =>
             [...document.querySelectorAll(target)].every(
               (node) =>
                 Number(getComputedStyle(node).opacity) *
-                  Number(getComputedStyle(node.closest('.sidebar-actions')!).opacity) ===
+                  Number(getComputedStyle(node.parentElement!).opacity) ===
                 opacity,
             ),
           { target, opacity },
         );
       };
-      const hidden = () => shown(selector, 0);
+      const hidden = () => shown(rowActions, 0);
       // Keep the real Native handlers, holding only the external picker/submission response.
       await page.evaluate(() => {
         const bridge = window.sessionShellFixture.bridge;
@@ -437,104 +458,109 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await page.mouse.move(1100, 650);
       await hidden();
       const initial = await read();
-      assert.equal(initial.length, 5);
+      assert.deepEqual(
+        initial.map((item) => item.opacity),
+        [1, 1, 0, 0, 0, 0],
+      );
+      const header = page.locator('.nav-label');
+      const headerStyle = await appearance(search);
+      assert.deepEqual(await appearance(add), headerStyle);
+      await header.screenshot({ path: path.join(artifact, `sidebar-${theme}-header-idle.png`) });
+      await search.hover();
+      await expect
+        .poll(async () => (await appearance(search)).backgroundColor)
+        .not.toBe(headerStyle.backgroundColor);
+      await search.evaluate(async (node) => {
+        await Promise.all(node.getAnimations().map((animation) => animation.finished));
+      });
+      const hoverStyle = await appearance(search);
+      await add.hover();
+      await expect.poll(() => appearance(add)).toEqual(hoverStyle);
+      await header.screenshot({ path: path.join(artifact, `sidebar-${theme}-header-hover.png`) });
+      await page.mouse.move(1100, 650);
+      await expect.poll(() => appearance(add)).toEqual(headerStyle);
+      await search.focus();
+      await page.keyboard.press('Tab');
+      await expect(add).toBeFocused();
+      assert.equal(await add.evaluate((node) => node.matches(':focus-visible')), true);
+      await page.keyboard.press('Shift+Tab');
+      await expect(search).toBeFocused();
       // Even a stronger button opacity must not take ownership of row visibility.
-      const override = await page.addStyleTag({ content: `${selector}{opacity:1!important}` });
+      const override = await page.addStyleTag({ content: `${rowActions}{opacity:.65!important}` });
       await hidden();
       const overridden = await read();
-      assert.ok(overridden.every((item) => item.buttonOpacity === 1 && item.groupOpacity === 0));
+      assert.ok(
+        overridden.slice(2).every((item) => item.buttonOpacity === 0.65 && item.groupOpacity === 0),
+      );
       await override.evaluate((node) => node.parentNode?.removeChild(node));
       // Clicking Add must not reveal either workspace's actions while the picker is open.
-      await page.locator('.nav-label').hover();
-      await page.getByRole('button', { name: '添加空间', exact: true }).click();
+      await page.locator('.composer textarea').click();
+      await add.click();
       await page.waitForFunction(
         () => Reflect.get(window, 'sidebarHeldMethod') === 'workspace.pick',
       );
-      await shown('.space-add', 0.45);
+      await expect(add).toBeDisabled();
       const picking = await read();
-      assert.ok(picking.every((item) => item.disabled));
-      assert.ok(picking.slice(1).every((item) => item.opacity === 0));
-      await page.mouse.move(1100, 650);
-      // Add retains focus; only its own title row may remain visible.
-      await page.locator('.space-heading').first().hover();
-      await shown('.workspace-group:first-child .space-new-session', 0.45);
-      assert.ok((await read()).slice(3).every((item) => item.opacity === 0));
-      await page.evaluate(() => Reflect.get(window, 'releaseSidebarAction')());
-      await page.waitForFunction(
-        () => !document.querySelector<HTMLButtonElement>('.space-add')!.disabled,
+      assert.deepEqual(
+        picking.slice(0, 2).map((item) => item.opacity),
+        [1, 1],
       );
+      assert.ok(picking.slice(1).every((item) => item.disabled));
+      assert.ok(picking.slice(2).every((item) => item.opacity === 0));
+      await page.mouse.move(1100, 650);
+      await header.screenshot({ path: path.join(artifact, `sidebar-${theme}-header-picker.png`) });
+      await page.locator('.space-heading').first().hover();
+      await shown('.workspace-group:first-child .space-new-session', 1);
+      assert.ok((await read()).slice(4).every((item) => item.opacity === 0));
+      await page.evaluate(() => Reflect.get(window, 'releaseSidebarAction')());
+      await expect(add).toBeEnabled();
       await page.locator('.composer textarea').click();
       await hidden();
       // Sample every painted frame through sending, pending and response recovery.
-      await page.evaluate((selector) => {
-        const state = {
-          active: true,
-          frames: [] as {
-            opacity: number;
-            buttonOpacity: number;
-            groupOpacity: number;
-            disabled: boolean;
-            same: boolean;
-          }[][],
-        };
+      await page.evaluate(() => {
+        const read = Reflect.get(window, 'readSidebarActions') as () => ActionSample[];
+        const state = { active: true, frames: [] as ActionSample[][] };
         Reflect.set(window, 'sidebarActionFrames', state);
         const tick = () => {
           if (!state.active) return;
-          state.frames.push(
-            [...document.querySelectorAll<HTMLButtonElement>(selector)].map((node, index) => {
-              const group = node.closest('.sidebar-actions')!;
-              const buttonOpacity = Number(getComputedStyle(node).opacity);
-              const groupOpacity = Number(getComputedStyle(group).opacity);
-              return {
-                opacity: buttonOpacity * groupOpacity,
-                buttonOpacity,
-                groupOpacity,
-                disabled: node.disabled,
-                same:
-                  node === Reflect.get(window, 'sidebarActionNodes')[index] &&
-                  group === Reflect.get(window, 'sidebarActionGroups')[index],
-              };
-            }),
-          );
+          state.frames.push(read());
           requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
-      }, selector);
-      await page.locator('.composer textarea').fill('Check sidebar visibility');
+      });
+      // Send the fixture's saved draft so this case can focus on the pending submission.
+      const draft = page.locator('.composer textarea');
+      await expect(draft).toHaveValue('Draft A');
       await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
       await page.waitForFunction(() => Reflect.get(window, 'sidebarHeldMethod') === 'submit');
-      await page.waitForFunction(
-        () => document.querySelector<HTMLButtonElement>('.space-add')!.disabled,
-      );
+      await expect(add).toBeDisabled();
       await page.screenshot({ path: path.join(artifact, `sidebar-${theme}-sending.png`) });
       await page.evaluate(() => Reflect.get(window, 'releaseSidebarAction')());
-      await page.waitForFunction(
-        () => !document.querySelector<HTMLButtonElement>('.space-add')!.disabled,
-      );
+      await expect(add).toBeEnabled();
+      await expect(draft).toHaveValue('Draft A');
       await hidden();
       const frames = await page.evaluate(() => {
         const state = Reflect.get(window, 'sidebarActionFrames');
         state.active = false;
-        return state.frames as {
-          opacity: number;
-          buttonOpacity: number;
-          groupOpacity: number;
-          disabled: boolean;
-          same: boolean;
-        }[][];
+        return state.frames as ActionSample[][];
       });
-      assert.ok(frames.some((frame) => frame.every((item) => item.disabled)));
-      assert.ok(frames.some((frame) => frame.every((item) => !item.disabled)));
+      assert.ok(frames.some((frame) => frame.slice(1).every((item) => item.disabled)));
+      assert.ok(frames.some((frame) => frame.slice(1).every((item) => !item.disabled)));
       assert.ok(
         frames.every(
-          (frame) =>
-            frame.length === initial.length &&
-            frame.every(
+          ([search, add, ...rows]) =>
+            rows.length === initial.length - 2 &&
+            search?.same &&
+            search.opacity === 1 &&
+            add?.same &&
+            add.groupOpacity === 1 &&
+            add.opacity === 1 &&
+            rows.every(
               (item) =>
                 item.opacity === 0 &&
                 item.groupOpacity === 0 &&
                 item.same &&
-                item.buttonOpacity === (item.disabled ? 0.45 : 1),
+                item.buttonOpacity === 1,
             ),
         ),
       );
@@ -549,7 +575,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         true,
       );
       await shown('.workspace-group:first-child .space-new-session', 1);
-      assert.ok((await read()).slice(3).every((item) => item.opacity === 0));
+      assert.ok((await read()).slice(4).every((item) => item.opacity === 0));
       await page.locator('.space-heading').first().hover();
       await page.locator('.space-more').first().click();
       await page.mouse.move(1100, 650);
@@ -557,7 +583,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         await page.locator('.space-heading').first().getAttribute('data-menu-active'),
         'true',
       );
-      assert.ok((await read()).slice(1, 3).every((item) => item.opacity === 1));
+      assert.ok((await read()).slice(2, 4).every((item) => item.opacity === 1));
       await page.keyboard.press('Escape');
       await page.locator('.composer textarea').click();
       await hidden();
@@ -580,7 +606,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
           nodes.every(
             (node) =>
               Number(getComputedStyle(node).opacity) *
-                Number(getComputedStyle(node.closest('.sidebar-actions')!).opacity) ===
+                Number(getComputedStyle(node.parentElement!).opacity) ===
               1,
           ),
         ),
@@ -605,8 +631,8 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
           nodes.every(
             (node) =>
               (node as HTMLButtonElement).disabled &&
-              Number(getComputedStyle(node).opacity) === 0.45 &&
-              Number(getComputedStyle(node.closest('.sidebar-actions')!).opacity) === 1,
+              Number(getComputedStyle(node).opacity) === 1 &&
+              Number(getComputedStyle(node.parentElement!).opacity) === 1,
           ),
         ),
     );

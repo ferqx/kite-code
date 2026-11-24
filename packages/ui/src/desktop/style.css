@@ -2136,10 +2136,6 @@ body {
   ) {
   background: var(--control-pressed);
 }
-.kite-client .nav-label .space-add,
-.kite-client
-  .nav-label
-  .space-add:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]),
 .kite-client
   :is(.space-heading, .session-heading)
   .button:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]) {
@@ -2182,13 +2178,9 @@ body {
   order: 1;
   margin-inline: calc((var(--icon-button-size-xs) - var(--ui-icon-size)) / 2);
 }
-.kite-client .nav-label .space-add,
 .kite-client :where(.space-new-session, .space-more, .session-more) {
   color: var(--muted-foreground);
 }
-.kite-client
-  .nav-label
-  .space-add:is(:hover, :focus-visible):is(:not(:disabled), [data-read-gated="true"]),
 .kite-client
   :is(.space-heading, .session-heading)
   :where(.space-new-session, .space-more, .session-more):is(:hover, :focus-visible):is(
@@ -2197,14 +2189,13 @@ body {
   ) {
   color: var(--foreground);
 }
-/* Reveal the container; button opacity belongs exclusively to disabled feedback. */
+/* The container keeps hidden row actions independent of button styles. */
 .kite-client .sidebar-actions {
   display: inline-flex;
   flex: none;
   opacity: 0;
   pointer-events: none;
 }
-.kite-client :is(.nav-label:hover, .nav-label:focus-within) > .sidebar-actions,
 .kite-client .space-heading:is([data-menu-active], :hover, :focus-within) > .sidebar-actions,
 .kite-client .session-heading:is([data-menu-active], :hover) > .sidebar-actions {
   opacity: 1;
@@ -2227,9 +2218,7 @@ body {
   outline-offset: -1px;
 }
 .kite-client
-  :where(.space-add, .space-new-session, .space-more, .session-more):disabled:not(
-    [data-read-gated="true"]
-  ) {
+  :where(.space-new-session, .space-more, .session-more):disabled:not([data-read-gated="true"]) {
   pointer-events: none;
 }
 .kite-client .space-name-muted {
@@ -8532,6 +8521,9 @@ body {
   overflow-wrap: anywhere;
 }
 
+.kite-client .message.assistant:has(> [data-turn-outputs-pending]) {
+  visibility: hidden;
+}
 .turn-output-files {
   margin-block: 12px;
 }

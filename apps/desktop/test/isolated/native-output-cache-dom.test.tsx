@@ -66,6 +66,7 @@ test('shared output views restore unchanged turns immediately while invalidating
     childPresent = true,
     fail = false;
   let content = 'old';
+  let pendingReplacement: Promise<void> | undefined;
   let freeze = false,
     showCold = true;
   let retainedView: ReactNode;
@@ -86,7 +87,8 @@ test('shared output views restore unchanged turns immediately while invalidating
         versions.sources(request.scope.sessionId, sources);
         return { kind: 'outputs.sources', scope: request.scope, sources };
       }
-      if (request.method === 'outputs.query')
+      if (request.method === 'outputs.query') {
+        if (pendingReplacement) await pendingReplacement;
         return {
           kind: 'outputs.page',
           page: {
@@ -108,6 +110,7 @@ test('shared output views restore unchanged turns immediately while invalidating
             ],
           },
         };
+      }
       return null;
     },
   } as NativeBridge;
@@ -271,25 +274,32 @@ test('shared output views restore unchanged turns immediately while invalidating
     await render('a');
     await settle();
     expect(cards()).toHaveLength(1);
-    const beforeReplacement = calls.length;
-    owner = 'other-user';
-    await render('a');
-    expect(cards()).toHaveLength(0);
-    await settle();
+    const replaceScope = async (replace: () => void) => {
+      const outstanding = Promise.withResolvers<void>();
+      const beforeReplacement = calls.length;
+      pendingReplacement = outstanding.promise;
+      try {
+        replace();
+        await render('a');
+        expect(calls.slice(beforeReplacement).some((r) => r.method === 'outputs.query')).toBe(true);
+        expect(cards()).toHaveLength(0);
+      } finally {
+        pendingReplacement = undefined;
+        await act(async () => outstanding.resolve());
+      }
+      expect(document.querySelector('[data-turn] .output-file-card')).not.toBeNull();
+    };
+    await replaceScope(() => {
+      owner = 'other-user';
+    });
     expect(document.body.textContent).toContain('other-user-a-new.txt');
-    expect(calls.length).toBeGreaterThan(beforeReplacement);
-    store = 'other-store';
-    await render('a');
-    expect(cards()).toHaveLength(0);
-    await settle();
-    generation++;
-    await render('a');
-    expect(cards()).toHaveLength(0);
-    await settle();
-    versions.reset();
-    await render('a');
-    expect(cards()).toHaveLength(0);
-    await settle();
+    await replaceScope(() => {
+      store = 'other-store';
+    });
+    await replaceScope(() => {
+      generation++;
+    });
+    await replaceScope(() => versions.reset());
     expect(calls.every((r) => r.method === 'outputs.sources' || r.method === 'outputs.query')).toBe(
       true,
     );

@@ -132,6 +132,9 @@ test('file references show only files across reads, pagination, and scope change
     await act(async () => {
       root.render(<Harness />);
     });
+    expect(calls.some((call) => call.method === 'outputs.query' && call.runId === 'run')).toBe(
+      true,
+    );
     await act(async () => {
       await Bun.sleep(130);
     });
@@ -158,9 +161,6 @@ test('file references show only files across reads, pagination, and scope change
       ['另存为', '在资源管理器中显示'],
     );
     expect(calls.every((call) => call.method.startsWith('outputs.'))).toBe(true);
-    expect(calls.some((call) => call.method === 'outputs.query' && call.runId === 'run')).toBe(
-      true,
-    );
     const save = menu.querySelector<HTMLElement>('[role="menuitem"]')!;
     await act(async () => save.click());
     expect(document.querySelector('.native-toast-card')?.textContent).toContain('另存失败');
@@ -200,14 +200,14 @@ test('file references show only files across reads, pagination, and scope change
         (item) => item.textContent === label,
       );
       expect(button).toBeDefined();
-      await act(() => button!.click());
+      await act(async () => button!.click());
       await settle();
     };
     const turnOutputs = () => document.querySelector('[data-testid="turn-outputs"]')!;
     queryPage = () => {
       throw Error('output_query_failed');
     };
-    await act(() => root.render(<Harness sessionId="no-outputs" />));
+    await act(async () => root.render(<Harness sessionId="no-outputs" />));
     expect(turnOutputs().childNodes).toHaveLength(0);
     expect(references()).toBeNull();
     await settle();
@@ -218,27 +218,18 @@ test('file references show only files across reads, pagination, and scope change
     let lateBatch = false;
     queryPage = (request) => {
       const all = Array.from({ length: lateBatch ? 200 : 100 }, (_, i) =>
-        file((lateBatch ? 199 : 99) - i),
+        file((lateBatch ? 199 : 99) - i, request.scope.sessionId),
       );
       const offset = Number(request.beforeKey ?? 0);
       return {
         ...page,
+        scope: request.scope,
         items: all.slice(offset, offset + 50),
         collections: [],
         nextCursor: offset + 50 < all.length ? String(offset + 50) : undefined,
       };
     };
     await act(async () => root.render(<Harness sessionId="pages" revision={2} />));
-    // Return the exact selected scope, as the host does.
-    const filePages = queryPage;
-    queryPage = (request) => {
-      const next = filePages(request);
-      return {
-        ...next,
-        scope: request.scope,
-        items: next.items.map((item) => ({ ...item, sessionId: request.scope.sessionId })),
-      };
-    };
     await settle();
     await click('加载更多');
     expect(references()?.querySelectorAll('li')).toHaveLength(100);
