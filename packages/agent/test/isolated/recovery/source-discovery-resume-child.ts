@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
+import { registerSkillReadTool } from '../../../src/execution/definition-owner';
+import type { Extension, ToolDefinition } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
 import { createRuntime, type RunConfiguration } from '../../../src/runtime';
 import { createProjectSources } from '../../../src/sources';
@@ -14,7 +16,7 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
-export function discoveryBinding(directory: string) {
+export function discoveryBinding(directory: string, withSkill = false) {
   const workspace = join(directory, 'workspace');
   const files = createWorkspaceFiles({ root: workspace });
   const sources = createProjectSources({
@@ -42,6 +44,20 @@ export function discoveryBinding(directory: string) {
       return tool.execute(...args);
     },
   }));
+  const extensions: Extension[] = [{ id: 'builtin.files', version: '1', apiMajor: 1, tools }];
+  if (withSkill) {
+    const tool: ToolDefinition = {
+      id: 'skills.load',
+      version: '1',
+      description: 'Read the fixture Skill.',
+      inputSchema: { type: 'object', additionalProperties: false },
+      async execute() {
+        return { outcome: 'succeeded', content: readFileSync(join(workspace, 'SKILL.md'), 'utf8') };
+      },
+    };
+    registerSkillReadTool(tool);
+    extensions.push({ id: 'builtin.skills', version: '1', apiMajor: 1, tools: [tool] });
+  }
   const configuration: RunConfiguration = {
     modelId: 'fixed',
     snapshot: { fixture: 'source-discovery-resume' },
@@ -53,13 +69,19 @@ export function discoveryBinding(directory: string) {
           yield finish;
           return;
         }
-        for (const [id, name, path] of [
-          ['package', 'read_file', 'package.json'],
-          ['apps', 'read_file', 'apps/app-evidence.txt'],
-          ['packages', 'read_file', 'packages/package-evidence.txt'],
-          ['docs', 'read_file', 'docs/AGENTS.md'],
-        ])
-          yield { type: 'tool_call', id: id!, name: name!, arguments: JSON.stringify({ path }) };
+        const calls = withSkill
+          ? ([
+              ['skill', 'skills.load', {}],
+              ['write', 'write_file', { path: 'stale.txt', content: 'Stale change.' }],
+            ] as const)
+          : ([
+              ['package', 'read_file', { path: 'package.json' }],
+              ['apps', 'read_file', { path: 'apps/app-evidence.txt' }],
+              ['packages', 'read_file', { path: 'packages/package-evidence.txt' }],
+              ['docs', 'read_file', { path: 'docs/AGENTS.md' }],
+            ] as const);
+        for (const [id, name, input] of calls)
+          yield { type: 'tool_call', id, name, arguments: JSON.stringify(input) };
         yield { ...finish, type: 'finish', reason: 'tool_calls' };
       },
     },
@@ -69,7 +91,7 @@ export function discoveryBinding(directory: string) {
         return { allowed: true, revision: 'owned' };
       },
     },
-    extensions: [{ id: 'builtin.files', version: '1', apiMajor: 1, tools }],
+    extensions,
   };
   return {
     configuration,
@@ -102,7 +124,7 @@ if (import.meta.main) {
   }
   const wrapped = new Proxy(store, {
     get(target, key) {
-      if (key === 'finishExecution' && boundary === 'response')
+      if (key === 'finishExecution' && boundary !== 'results')
         return async (input: Parameters<Store['finishExecution']>[0]) => {
           const value = await target.finishExecution(input);
           if ((await target.getExecution(input.executionId))?.kind === 'model')
@@ -126,7 +148,7 @@ if (import.meta.main) {
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
-  const fixture = discoveryBinding(directory);
+  const fixture = discoveryBinding(directory, boundary === 'skill_and_write');
   const runtime = createRuntime({
     store: wrapped,
     artifacts: createArtifactStore({ profile, store: wrapped }),

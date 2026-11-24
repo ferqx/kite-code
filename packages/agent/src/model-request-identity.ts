@@ -21,3 +21,23 @@ export function matchesModelRequestIdentity(source: Record<string, unknown>, exe
     binding.requestId === executionId
   );
 }
+
+export function isOrdinaryContextRefreshRequest(
+  source: Record<string, unknown>,
+  executionId: unknown,
+) {
+  return (
+    matchesModelRequestIdentity(source, executionId) &&
+    ![
+      'nativeWebSearch',
+      'humanInputInterpretation',
+      'compressionId',
+      'imageWindow',
+      'imageAvailabilityProjection',
+      'retry',
+      'overflowRecovery',
+    ].some((key) => Object.hasOwn(source, key))
+  );
+}
+
+export const contextRefreshCancellation = 'model_context_reassembled_before_dispatch';

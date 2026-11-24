@@ -291,54 +291,176 @@ test('paired default assembly binds real files/source freshness and never dispat
   }
 });
 
-test('paired Skills load/resource are ordinary Tools and knowledge/source IDs never execute linked scripts', async () => {
+test.each([
+  ['workspace text', 'data.txt', null],
+  ['external text', 'data.txt', 'context_refresh_required'],
+  ['workspace PDF options', 'data.txt', 'context_refresh_required'],
+] as const)(
+  'paired default %s read uses its verified route when the visible Skill directory changes',
+  async (route, file, rejected) => {
+    const call = { name: 'read_file', input: { path: file } as { path: string; pages?: string } };
+    const provider = endpoint([call, undefined]);
+    const f = await setup(
+      provider,
+      ['files.read', 'skills.load'],
+      [{ id: 'guide', path: 'guide' }],
+      true,
+    );
+    const skill = join(f.workspace, 'guide');
+    const guide = (description: string) =>
+      `---\nname: Guide\ndescription: ${description}\n---\nUnrelated Skill text`;
+    try {
+      mkdirSync(skill);
+      writeFileSync(join(skill, 'SKILL.md'), guide('Original task reference'));
+      if (route === 'external text') call.input.path = join(f.root, file);
+      if (route === 'workspace PDF options') call.input.pages = '1';
+      writeFileSync(
+        join(route === 'external text' ? f.root : f.workspace, file),
+        'EXACT FILE MARKER',
+      );
+      await run(f);
+      await until(async () => existsSync(join(f.profile.profilePath, 'permission-entered')));
+      writeFileSync(join(skill, 'SKILL.md'), guide('New task reference'));
+      writeFileSync(join(f.profile.profilePath, 'permission-release'), 'release');
+      const view = await finished(f);
+      expect(view.runs[0]?.status).toBe('completed');
+      const tool = view.executions.filter(({ kind }) => kind === 'tool');
+      expect(tool).toHaveLength(1);
+      if (rejected) {
+        expect(tool[0]).toMatchObject({
+          status: 'failed',
+          authorization: { dispatched: false },
+          result: { details: { code: rejected } },
+        });
+        expect(JSON.stringify(tool[0]?.result)).not.toContain('EXACT FILE MARKER');
+      } else {
+        expect(tool[0]).toMatchObject({ status: 'succeeded', authorization: { dispatched: true } });
+        expect(JSON.stringify(tool[0]?.result)).toContain('EXACT FILE MARKER');
+      }
+      expect(provider.requests).toHaveLength(2);
+    } finally {
+      writeFileSync(join(f.profile.profilePath, 'permission-release'), 'release');
+      await f.close();
+      provider.close();
+    }
+  },
+  15000,
+);
+
+test('paired Skills reuse exact knowledge until compaction removes it and preserve the original receipts', async () => {
+  const load = { name: 'load_skill', input: { skill_id: 'guide' } };
+  const read = {
+    name: 'read_skill_resource',
+    input: { skill_id: 'guide', path: 'scripts/helper.sh' },
+  };
   const provider = endpoint([
-    {
-      name: 'load_skill',
-      input: { skill_id: 'guide' },
-    },
-    {
-      name: 'read_skill_resource',
-      input: {
-        skill_id: 'guide',
-        path: 'scripts/helper.sh',
-      },
-    },
+    load,
+    read,
+    read,
+    load,
+    undefined,
+    load,
+    read,
+    undefined,
+    undefined, // Manual summary intentionally omits the knowledge itself.
+    load,
+    read,
+    undefined,
   ]);
   const f = await setup(provider, ['skills.load', 'skills.resource'], []);
   try {
     const skill = join(f.workspace, 'skills/guide');
+    const body =
+      '---\nname: Guide\ndescription: summary-only-marker\n---\nbody-on-demand-marker\n[helper](scripts/helper.sh)\n';
+    const resource = `echo harmless > ${join(f.workspace, 'must-not-run')}\n`;
     mkdirSync(join(skill, 'scripts'), { recursive: true });
-    writeFileSync(
-      join(skill, 'SKILL.md'),
-      '---\nname: Guide\ndescription: summary-only-marker\n---\nbody-on-demand-marker\n[helper](scripts/helper.sh)\n',
-    );
-    writeFileSync(
-      join(skill, 'scripts/helper.sh'),
-      `echo harmless > ${join(f.workspace, 'must-not-run')}\n`,
-    );
+    writeFileSync(join(skill, 'SKILL.md'), body);
+    writeFileSync(join(skill, 'scripts/helper.sh'), resource);
     const file = join(f.profile.profilePath, 'config.jsonc');
     const config = JSON.parse(readFileSync(file, 'utf8'));
     config.skills = [{ id: 'guide', path: 'skills/guide' }];
     writeFileSync(file, JSON.stringify(config));
     await run(f);
-    const view = await finished(f);
-    expect(provider.requests).toHaveLength(3);
+    await finished(f);
+    expect(provider.requests).toHaveLength(5);
+    const messageCopies = (request: number, content: string) =>
+      (provider.requests[request]!.messages as { content: unknown; role: string }[]).filter(
+        (message) =>
+          message.content === content ||
+          (message.role === 'user' &&
+            typeof message.content === 'string' &&
+            (message.content.startsWith('Skill ') ||
+              message.content.startsWith('Current Skill resource ')) &&
+            message.content.endsWith(`\n${content}`)),
+      ).length;
     expect(JSON.stringify(provider.requests[0]!.messages)).toContain('summary-only-marker');
-    expect(JSON.stringify(provider.requests[0]!.messages)).not.toContain('body-on-demand-marker');
-    expect(JSON.stringify(provider.requests[1]!.messages)).toContain('body-on-demand-marker');
-    expect(JSON.stringify(provider.requests[2]!.messages)).toContain('must-not-run');
-    expect(existsSync(join(f.workspace, 'must-not-run'))).toBe(false);
-    expect(
-      view.executions
-        .filter((execution) => execution.kind === 'tool')
-        .map((execution) => execution.status),
-    ).toEqual(['succeeded', 'succeeded']);
-    const modelExecutions = (await f.store.getView('session')).executions.filter(
-      (execution) => execution.kind === 'model',
-    );
+    expect(messageCopies(0, body)).toBe(0);
+    expect(messageCopies(1, body)).toBe(1);
+    for (const request of [2, 3, 4]) {
+      expect(messageCopies(request, body)).toBe(1);
+      expect(messageCopies(request, resource)).toBe(1);
+    }
+    const first = await f.store.getView('session');
+    const modelExecutions = first.executions.filter((execution) => execution.kind === 'model');
     expect(JSON.stringify(modelExecutions[1]!.decisionSource)).toContain('skill.body:guide');
     expect(JSON.stringify(modelExecutions[2]!.decisionSource)).toContain('skill.resource:guide:');
+
+    const { client } = f.handle;
+    const waitCompleted = async (commandId: string) => {
+      await until(async () =>
+        (await client.getView('session')).runs.some(
+          (run) => run.originCommandId === commandId && !run.isActive,
+        ),
+      );
+      expect(
+        (await client.getView('session')).runs.find((run) => run.originCommandId === commandId),
+      ).toMatchObject({ status: 'completed' });
+    };
+    await client.startRun('session', {
+      commandId: 'reuse',
+      kind: 'run.start',
+      content: 'Use the known guide again.',
+      expectedStoreId: f.storeId,
+    });
+    await waitCompleted('reuse');
+    expect(provider.requests).toHaveLength(8);
+    expect(messageCopies(5, body)).toBe(1);
+    expect(messageCopies(5, resource)).toBe(1);
+
+    const context = await client.getContext('session', { storeId: f.storeId });
+    await client.compressContext('session', {
+      commandId: 'compact',
+      expectedStoreId: f.storeId,
+      expectedContextSelectionId: context.selection.id,
+    });
+    await waitCompleted('compact');
+    expect((await client.getContext('session', { storeId: f.storeId })).compression?.trigger).toBe(
+      'manual',
+    );
+    await client.startRun('session', {
+      commandId: 'reload',
+      kind: 'run.start',
+      content: 'Read the guide needed for this task.',
+      expectedStoreId: f.storeId,
+    });
+    await waitCompleted('reload');
+    expect(provider.requests).toHaveLength(12);
+    expect(messageCopies(9, body)).toBe(0);
+    expect(messageCopies(9, resource)).toBe(0);
+    expect(messageCopies(11, body)).toBe(1);
+    expect(messageCopies(11, resource)).toBe(1);
+
+    const results = (await f.store.listExecutions('session')).filter(
+      (execution) => execution.kind === 'tool',
+    );
+    expect(results.map(({ status }) => status)).toEqual(Array(8).fill('succeeded'));
+    expect(results[0]!.result).toMatchObject({ content: body });
+    expect(results[1]!.result).toMatchObject({ content: resource });
+    for (const request of results.slice(2, 6))
+      expect(request.result).toMatchObject({ details: { alreadyLoaded: true } });
+    expect(results[6]!.result).toMatchObject({ content: body });
+    expect(results[7]!.result).toMatchObject({ content: resource });
+    expect(existsSync(join(f.workspace, 'must-not-run'))).toBe(false);
   } finally {
     await f.close();
     provider.close();

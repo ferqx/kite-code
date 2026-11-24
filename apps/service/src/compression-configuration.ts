@@ -31,16 +31,24 @@ export interface SummaryCompressionOptions {
   readonly validateExpanded?: (input: CompressionInput) => Promise<boolean>;
 }
 function fixedContext(input: CompressionInput) {
-  const history = new Set(modelHistory(input.sources, input.messages));
-  const userInputKey = (message: CompressionInput['messages'][number]) =>
-    JSON.stringify([message.content, message.sourceIds, message.images]);
-  const retained = new Set(input.retainedMessages?.map(userInputKey));
-  return input.messages.filter(
-    (message) =>
-      message.role === 'system' ||
-      !history.has(message) ||
-      (message.role === 'user' && retained.has(userInputKey(message))),
-  );
+  if (input.replacementMessages) return input.replacementMessages;
+  const history = modelHistory(input.sources, input.messages);
+  return [
+    ...input.messages.slice(0, input.messages.length - history.length),
+    ...history.filter(({ role }) => role === 'system'),
+    ...(input.retainedMessages ?? []),
+  ];
+}
+
+function retainedMessageKey(message: CompressionInput['messages'][number]) {
+  return JSON.stringify([
+    message.role,
+    message.sourceIds,
+    message.content,
+    message.images?.map(({ mediaType, data }) => [mediaType, data]),
+    message.toolCallId,
+    message.toolCalls?.map(({ id, name, arguments: args }) => [id, name, args]),
+  ]);
 }
 
 /** A pure default algorithm. All actual Model calls and publication remain in Agent Core. */
@@ -50,13 +58,17 @@ export function createSummaryCompressor(
   const window =
     estimateModelContext({ messages: [], tools: [] }, options.automatic).contextWindowTokens ??
     DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const threshold = options.automatic?.thresholdTokens ?? Math.max(1, Math.ceil(window * 0.75));
-  if (!Number.isSafeInteger(threshold) || threshold <= 0)
+  const waterline = options.automatic?.thresholdTokens ?? Math.max(1, Math.ceil(window * 0.75));
+  if (!Number.isSafeInteger(waterline) || waterline <= 0)
     throw new AgentError('invalid_compression_threshold');
-  const resetInputBudget = modelInputCapacity(
+  const { usableInputTokens, reservedOutputTokens } = modelInputCapacity(
     options.automatic,
     options.automatic?.requestMaxOutputTokens,
-  ).usableInputTokens;
+  );
+  const threshold = Math.min(waterline, usableInputTokens ?? Number.POSITIVE_INFINITY);
+  const oldWindowFits = (input: CompressionInput, inputTokens: number) =>
+    !input.recoveringOverflow &&
+    (usableInputTokens === undefined || inputTokens <= usableInputTokens);
   // Core passes the same frozen validation input to both hooks. Avoid tokenizing twice.
   const reports = new WeakMap<object, import('@kite-ai/trajectory').CompressionAccounting>();
   const accounting = (input: CompressionInput & { readonly summary: string }) => {
@@ -92,18 +104,28 @@ export function createSummaryCompressor(
               messages: input.messages,
               tools: input.tools ?? options.automatic!.tools ?? [],
             };
-            if (projectModelContext(request, input.tokenBaseline).totalInputTokens < threshold)
-              return false;
+            const projection = projectModelContext(request, input.tokenBaseline);
+            if (!input.recoveringOverflow && projection.totalInputTokens < threshold) return false;
             const fixed = fixedContext(input);
-            const history = input.messages.filter((message) => !fixed.includes(message));
-            const irreducible =
-              estimateModelContext({ messages: fixed, tools: request.tools }).estimate
-                .totalInputTokens >= threshold ||
-              (!history.some(
-                (message) => message.role === 'assistant' || message.role === 'tool',
-              ) &&
-                history.filter((message) => message.role === 'user').length < 2);
-            if (irreducible) throw new AgentError('compression_insufficient_space');
+            const retained = new Set((input.retainedMessages ?? []).map(retainedMessageKey));
+            const history = modelHistory(input.sources, input.messages).filter(
+              (message) => message.role !== 'system' && !retained.has(retainedMessageKey(message)),
+            );
+            const beforeTokens =
+              projection.source === 'local_estimate'
+                ? projection.totalInputTokens
+                : estimateModelContext(request).estimate.totalInputTokens;
+            const fixedTokens = estimateModelContext({ messages: fixed, tools: request.tools })
+              .estimate.totalInputTokens;
+            const originalFits = oldWindowFits(input, projection.totalInputTokens);
+            const limit = originalFits
+              ? threshold
+              : (usableInputTokens ?? Number.POSITIVE_INFINITY);
+            const irreducible = fixedTokens >= Math.min(limit, beforeTokens) || !history.length;
+            if (irreducible) {
+              if (originalFits) return false;
+              throw new AgentError('compression_insufficient_space');
+            }
             return true;
           }
         : undefined),
@@ -112,9 +134,23 @@ export function createSummaryCompressor(
         ? async (input: CompressionInput & { readonly summary: string }) => {
             if (options.automatic && input.trigger === 'automatic') {
               const report = accounting(input);
-              if (report.afterTokens >= report.beforeTokens)
+              const canUseOriginal = oldWindowFits(
+                input,
+                projectModelContext(
+                  {
+                    modelId: input.modelId ?? '',
+                    messages: input.messages,
+                    tools: input.tools ?? options.automatic.tools ?? [],
+                  },
+                  input.tokenBaseline,
+                ).totalInputTokens,
+              );
+              if (report.afterTokens >= report.beforeTokens) {
+                if (canUseOriginal) return false;
                 throw new AgentError('compression_not_reducing');
-              if (report.afterTokens >= threshold)
+              }
+              if (canUseOriginal && report.afterTokens >= threshold) return false;
+              if (usableInputTokens !== undefined && report.afterTokens > usableInputTokens)
                 throw new AgentError('compression_insufficient_space');
             }
             return options.validateSummary ? options.validateSummary(input) : true;
@@ -122,16 +158,21 @@ export function createSummaryCompressor(
         : undefined,
     expanded =
       options.validateExpanded?.bind(options) ??
-      (resetInputBudget === undefined
+      (usableInputTokens === undefined
         ? undefined
         : async (input: CompressionInput) =>
             estimateModelContext({
               messages: input.messages,
               tools: input.tools ?? options.automatic?.tools ?? [],
-            }).estimate.totalInputTokens <= resetInputBudget);
+            }).estimate.totalInputTokens <= usableInputTokens);
   return Object.freeze({
     id: 'standard-summary',
     version: '1',
+    windowBudget: Object.freeze({
+      usableInputTokens,
+      recentHistoryTokens: Math.min(15_000, Math.floor((usableInputTokens ?? window) * 0.15)),
+      ...(reservedOutputTokens === undefined ? {} : { summaryReserveTokens: reservedOutputTokens }),
+    }),
     async prepare(input: CompressionInput) {
       const history = modelHistory(input.sources, input.messages).filter(
         (message) => message.role !== 'system',

@@ -307,6 +307,7 @@ export async function runInternalModelCall(options: {
       toolCalls: [],
       usage,
       executionId: execution.id,
+      stepId: execution.stepId,
       finishReason: 'stop',
     };
   } catch (error) {

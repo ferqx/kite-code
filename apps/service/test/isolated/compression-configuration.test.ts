@@ -427,11 +427,7 @@ for (const { guardedReset, rejectedSummary, knownWindow } of [
       );
       expect(
         retainedUsers.map((message) => [message.role, message.content, message.sourceIds]),
-      ).toEqual([
-        ['user', 'Original actual user', ['work']],
-        ['user', '新任务：Additional settled user turn', ['additional-history']],
-        ['user', '新任务：Next explicit work', ['next']],
-      ]);
+      ).toEqual([['user', '新任务：Next explicit work', ['next']]]);
       expect(actual.request.messages.indexOf(retainedUsers[0]!)).toBeGreaterThan(
         actual.request.messages.findIndex((message) => message.sourceIds?.includes(compression.id)),
       );
@@ -469,6 +465,9 @@ for (const { guardedReset, rejectedSummary, knownWindow } of [
         expect(resetRun.reason).toBe('compression_reset_unsafe');
         expect(resetContext.compression).toEqual(compression);
       }
+      const storedResetCompression = (
+        await store.getSelectedContext({ expectedStoreId, sessionId: 's' })
+      ).compression;
       await service.close();
       closed = true;
       const cold = await openSqliteStore({
@@ -480,7 +479,7 @@ for (const { guardedReset, rejectedSummary, knownWindow } of [
         const cursor = (await cold.getMetadata()).lastChangeCursor;
         expect(
           (await cold.getSelectedContext({ expectedStoreId, sessionId: 's' })).compression,
-        ).toEqual(resetContext.compression);
+        ).toEqual(storedResetCompression);
         expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
         expect(requests).toHaveLength(4);
       } finally {

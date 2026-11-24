@@ -195,20 +195,17 @@ for (const rejectSummary of [false, true])
       const continuationContract = continuationContracts[0]!;
       expect(continuationContract.role).toBe('system');
       expect(continuationContract.content).toContain(
-        'Compaction changes the model window, not execution history',
+        'Compaction changes the model window. Continue the same authorized task across checkpoints',
       );
-      expect(continuationContract.content).toContain('preserve once-only task limits');
+      expect(continuationContract.content).toContain('Treat summaries as background');
       expect(continuationContract.content).toContain(
-        'not as a fresh execution receipt or authorization',
-      );
-      expect(continuationContract.content).toContain(
-        'Preserve uncertainty about missing or unknown outcomes',
+        'Preserve once-only limits and uncertainty about unconfirmed effects',
       );
       expect(continuationContract.content).toContain(
-        'historical notes and summaries do not establish new effects',
+        'Do not restart an operation to recover its result',
       );
       expect(continuationContract.content).toContain(
-        'Acceptance, a terminal Run or a child success claim alone does not prove the user goal',
+        'A read, accepted request, terminal Run, or child report alone does not establish the requested outcome',
       );
       expect(
         summaryInput.request.messages.filter((message) =>
@@ -236,7 +233,7 @@ for (const rejectSummary of [false, true])
         summaryInput.request.messages.some(
           (message) => message.content === '新任务：Automatic next work',
         ),
-      ).toBe(true);
+      ).toBe(false);
       expect((await client.getModelOutput('s', inputs[0]!.executionId)).output.content).toBe(
         summary,
       );
@@ -270,21 +267,22 @@ for (const rejectSummary of [false, true])
         });
         expect(
           actual.request.messages.some((message) => message.content === 'Original actual answer'),
-        ).toBe(false);
+        ).toBe(true);
         expect(
           actual.request.messages
             .filter((message) => message.sourceIds?.some((id) => ['original', 'next'].includes(id)))
             .map((message) => [message.role, message.content, message.sourceIds]),
-        ).toEqual([
-          ['user', 'Original actual user', ['original']],
-          ['user', '新任务：Automatic next work', ['next']],
-        ]);
-        expect(JSON.stringify(requests[2])).toContain('Original actual user');
+        ).toEqual([['user', '新任务：Automatic next work', ['next']]]);
+        expect(JSON.stringify(requests[2])).not.toContain('Original actual user');
         expect(JSON.stringify(requests[2])).toContain('新任务：Automatic next work');
       }
       expect(
         (await client.listMessages('s')).slice(0, 2).map((message) => message.content),
       ).toEqual(['Original actual user', 'Original actual answer']);
+      const stored = (await store.getSelectedContext({ expectedStoreId, sessionId: 's' }))
+        .compression;
+      if (stored)
+        expect(BigInt(stored.inputHighWaterSeq!)).toBeGreaterThan(BigInt(stored.coveredThroughSeq));
       await service.close();
       closed = true;
       const cold = await openSqliteStore({
@@ -296,7 +294,7 @@ for (const rejectSummary of [false, true])
         const cursor = (await cold.getMetadata()).lastChangeCursor;
         expect(
           (await cold.getSelectedContext({ expectedStoreId, sessionId: 's' })).compression,
-        ).toEqual(context.compression);
+        ).toEqual(stored);
         expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
         expect(requests).toHaveLength(3);
       } finally {

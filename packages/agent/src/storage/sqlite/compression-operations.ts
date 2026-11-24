@@ -25,6 +25,27 @@ export function activeCompression(
     ? (JSON.parse(String(row.request_json)) as CompressionRecord)
     : undefined;
 }
+function contextAddedAfter(
+  db: SqliteOperations,
+  sessionId: string,
+  upper: bigint,
+  summaryMessageId: string | null = null,
+) {
+  return (
+    db.row(
+      'SELECT id FROM message WHERE session_id=? AND seq>? AND (? IS NULL OR id<>?) LIMIT 1',
+      sessionId,
+      upper,
+      summaryMessageId,
+      summaryMessageId,
+    ) ||
+    db.row(
+      "SELECT id FROM context_snapshot WHERE session_id=? AND kind='result_ref' AND seq>? AND COALESCE(json_extract(request_json,'$.pendingInput'),0)=0 LIMIT 1",
+      sessionId,
+      upper,
+    )
+  );
+}
 export function beginCompression(
   db: SqliteOperations,
   input: Parameters<Store['beginCompression']>[0],
@@ -64,11 +85,29 @@ export function beginCompression(
         record.contextSelectionId !== input.expectedContextSelectionId ||
         canonicalJson(record.compressor as unknown as Json) !==
           canonicalJson(input.compressor as unknown as Json) ||
+        (input.window &&
+          (record.inputHighWaterSeq !== input.window.inputHighWaterSeq ||
+            record.coveredThroughSeq !== input.window.coveredThroughSeq ||
+            record.recentHistoryTokens !== input.window.recentHistoryTokens)) ||
         record.trigger !== input.trigger
       )
         throw new AgentError('compression_conflict');
       return record;
     }
+    const inputHighWaterSeq = input.window?.inputHighWaterSeq ?? String(session.next_seq);
+    const coveredThroughSeq = input.window?.coveredThroughSeq ?? inputHighWaterSeq;
+    const recentHistoryTokens = input.window?.recentHistoryTokens;
+    if (
+      !/^(0|[1-9][0-9]{0,18})$/.test(inputHighWaterSeq) ||
+      !/^(0|[1-9][0-9]{0,18})$/.test(coveredThroughSeq) ||
+      BigInt(coveredThroughSeq) > BigInt(inputHighWaterSeq) ||
+      BigInt(inputHighWaterSeq) > BigInt(session.next_seq!) ||
+      (recentHistoryTokens !== undefined &&
+        (!Number.isSafeInteger(recentHistoryTokens) || recentHistoryTokens < 0))
+    )
+      throw new AgentError('compression_configuration_invalid');
+    if (contextAddedAfter(db, String(session.id), BigInt(inputHighWaterSeq)))
+      throw new AgentError('compression_context_changed');
     const selectionFilter = filter(selected(db, session), 'seq');
     if (
       db.row(
@@ -80,15 +119,17 @@ export function beginCompression(
       throw new AgentError('compression_content_unsupported');
     if (
       !db.row(
-        `SELECT id FROM message WHERE session_id=? AND seq>? AND status='complete' AND ${historyOnlyCompression()} AND ${selectionFilter.sql} LIMIT 1`,
+        `SELECT id FROM message WHERE session_id=? AND seq>? AND seq<=? AND status='complete' AND ${historyOnlyCompression()} AND ${selectionFilter.sql} LIMIT 1`,
         session.id!,
         BigInt(current?.coveredThroughSeq ?? '0'),
+        BigInt(coveredThroughSeq),
         ...selectionFilter.args,
       ) &&
       !db.row(
-        `SELECT id FROM context_snapshot WHERE session_id=? AND kind='result_ref' AND seq>? AND COALESCE(json_extract(request_json,'$.pendingInput'),0)=0 AND ${selectionFilter.sql} LIMIT 1`,
+        `SELECT id FROM context_snapshot WHERE session_id=? AND kind='result_ref' AND seq>? AND seq<=? AND COALESCE(json_extract(request_json,'$.pendingInput'),0)=0 AND ${selectionFilter.sql} LIMIT 1`,
         session.id!,
         BigInt(current?.coveredThroughSeq ?? '0'),
+        BigInt(coveredThroughSeq),
         ...selectionFilter.args,
       )
     )
@@ -102,7 +143,9 @@ export function beginCompression(
       originStoreId: input.expectedStoreId,
       modelExecutionId: input.executionId,
       runId: input.runId,
-      coveredThroughSeq: String(session.next_seq),
+      coveredThroughSeq,
+      ...(input.window ? { inputHighWaterSeq } : {}),
+      ...(recentHistoryTokens === undefined ? {} : { recentHistoryTokens }),
       publishedSeq: '0',
       previousCompressionId: current?.id ?? null,
       compressor: input.compressor,
@@ -205,20 +248,11 @@ export function commitCompression(
     );
     // Command admission shares next_seq with Messages. A queued follow-up is not
     // part of this Run's input until applied; validate actual context additions.
+    const inputHighWater = BigInt(record.inputHighWaterSeq ?? record.coveredThroughSeq);
     if (
       !modelMessage ||
-      BigInt(modelMessage.seq!) <= BigInt(record.coveredThroughSeq) ||
-      db.row(
-        'SELECT id FROM message WHERE session_id=? AND seq>? AND id<>? LIMIT 1',
-        record.sessionId,
-        BigInt(record.coveredThroughSeq),
-        modelMessage.id!,
-      ) ||
-      db.row(
-        "SELECT id FROM context_snapshot WHERE session_id=? AND kind='result_ref' AND seq>? AND COALESCE(json_extract(request_json,'$.pendingInput'),0)=0 LIMIT 1",
-        record.sessionId,
-        BigInt(record.coveredThroughSeq),
-      )
+      BigInt(modelMessage.seq!) <= inputHighWater ||
+      contextAddedAfter(db, record.sessionId, inputHighWater, String(modelMessage.id))
     )
       throw new AgentError('compression_context_changed');
     const previous = activeCompression(

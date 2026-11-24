@@ -3,6 +3,7 @@ import {
   ModelAccessError,
   type ModelAdapter,
   ModelAttemptError,
+  ModelContextOverflowError,
   type ModelRequest,
   ModelRequestLimitError,
 } from '@kite-ai/ai';
@@ -84,6 +85,8 @@ export interface ModelResponse {
   toolCalls: ToolCall[];
   usage: Json;
   executionId: string;
+  /** Step of the committed response, including after a retry or refresh. */
+  stepId: string;
   finishReason?: string;
 }
 /** Core dispatch facts are separate from the extension-controlled ToolResult payload. */
@@ -203,6 +206,8 @@ export interface ExecutionScope {
   /** Size of the actual complete Model tool batch, supplied by Core rather than Tool input. */
   toolBatchSize?: number;
   modelRetry?: import('../model-attempt').ModelRetrySource;
+  contextRefreshOf?: string;
+  overflowRecovery?: import('../compression-window').ContextOverflowRecovery;
   compressionId?: string;
   /** Core-owned state at the boundary before this replaceable Model attempt. */
   continuation?: Json;
@@ -211,7 +216,7 @@ export interface ExecutionScope {
   workspaceId: string;
   signal: AbortSignal;
   decisionSources?: readonly ContextSource[];
-  checkFreshness?: () => Promise<void>;
+  checkFreshness?: (toolExecutionId?: string) => Promise<void>;
   onRequirementsRegistered?: (transition: RequirementRegistrationTransition) => Promise<void>;
   checkpoint?: () => Promise<void>;
   bindings?: ScopedBindings;
@@ -1218,6 +1223,8 @@ export class UnifiedExecution {
             ? { humanInputInterpretation: { ...scope.humanInputInterpretation } }
             : {}),
           ...(scope.modelRetry ? { retry: { ...scope.modelRetry } } : {}),
+          ...(scope.contextRefreshOf ? { contextRefreshOf: scope.contextRefreshOf } : {}),
+          ...(scope.overflowRecovery ? { overflowRecovery: { ...scope.overflowRecovery } } : {}),
           ...(scope.compressionId
             ? {
                 compressionId: scope.compressionId,
@@ -1579,17 +1586,27 @@ export class UnifiedExecution {
         toolCalls: calls,
         usage: finish.usage,
         executionId,
+        stepId: settled.stepId,
         finishReason: finish.reason,
       };
     } catch (error) {
+      const attemptFailure = ModelAttemptError.isInstance(error) ? error : undefined;
       const nativeFailure = !nativeSent
         ? 'safe'
         : search?.observed
           ? 'unsafe'
-          : finish || !ModelAttemptError.isInstance(error)
+          : finish || !attemptFailure
             ? 'unknown'
-            : (error.retrySafety ?? 'unknown');
+            : attemptFailure.retrySafety;
       const unsafeSearch = nativeFailure !== 'safe';
+      const providerMessage =
+        scope.signal.aborted ||
+        cancelledByStoreAdmission ||
+        unsafeSearch ||
+        windowFenceFailed ||
+        observation
+          ? undefined
+          : attemptFailure?.providerMessage;
       if (unsafeSearch) await search?.interrupted().catch(() => {});
       if (dispatched && (content || reasoning) && !output)
         await this.options.store
@@ -1616,21 +1633,28 @@ export class UnifiedExecution {
                 ? modelInvoked
                   ? 'image_window_outcome_unknown'
                   : 'image_window_not_dispatched'
-                : ModelRequestLimitError.isInstance(error)
-                  ? 'model_request_body_too_large'
-                  : observation && ModelAttemptError.isInstance(error)
-                    ? 'image_observation_outcome_unknown'
-                    : error instanceof AgentError || error instanceof ModelAccessError
-                      ? error.code
-                      : ModelAttemptError.isInstance(error)
-                        ? error.message
-                        : 'model_failed',
+                : ModelContextOverflowError.isInstance(error)
+                  ? 'model_context_overflow'
+                  : ModelRequestLimitError.isInstance(error)
+                    ? 'model_request_body_too_large'
+                    : observation && attemptFailure
+                      ? 'image_observation_outcome_unknown'
+                      : error instanceof AgentError || error instanceof ModelAccessError
+                        ? error.code
+                        : attemptFailure
+                          ? attemptFailure.message
+                          : 'model_failed',
             incomplete: true,
             ...((windowScope || scope.imageAvailabilityProjection) && !modelInvoked
               ? { dispatchCommitted: false }
               : {}),
-            ...(ModelAttemptError.isInstance(error) && error.detail
-              ? { modelFailure: { detail: error.detail } }
+            ...(attemptFailure?.detail || providerMessage
+              ? {
+                  modelFailure: {
+                    ...(attemptFailure?.detail ? { detail: attemptFailure.detail } : {}),
+                    ...(providerMessage ? { providerMessage } : {}),
+                  },
+                }
               : {}),
             // Core-local dispatch proof, never a field supplied by the Adapter.
             ...(error instanceof InputProcessingDecidedAdmission && !dispatched
@@ -1652,8 +1676,7 @@ export class UnifiedExecution {
         throw new AgentError(
           modelInvoked ? 'image_window_outcome_unknown' : 'image_window_not_dispatched',
         );
-      if (observation && ModelAttemptError.isInstance(error))
-        throw new AgentError('image_observation_outcome_unknown');
+      if (observation && attemptFailure) throw new AgentError('image_observation_outcome_unknown');
       if (error instanceof ModelAccessError) throw new AgentError(error.code);
       throw error;
     } finally {
@@ -1698,9 +1721,13 @@ export class UnifiedExecution {
     planned?: ExecutionRecord,
   ): Promise<ToolExecutionResult> {
     const executionId = planned?.id ?? crypto.randomUUID();
+    const toolScope =
+      'run' in scope && scope.checkFreshness
+        ? { ...scope, checkFreshness: () => scope.checkFreshness!(executionId) }
+        : scope;
     let outcome: ToolExecutionResult | undefined, failure: unknown;
     try {
-      outcome = await this.liveScope(scope, executionId, (bound) =>
+      outcome = await this.liveScope(toolScope, executionId, (bound) =>
         this.performTool(
           bound,
           definition,

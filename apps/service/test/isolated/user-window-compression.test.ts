@@ -16,7 +16,7 @@ import { initializeLivePermissionFixture } from '../fixtures/live-permission-fix
 for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
   test(`user provider window and compression threshold survive default SDK assembly: ${mode}`, async () => {
     const contextWindow = mode === 'default-256k' ? undefined : 1048576;
-    const expectedWindow = contextWindow ?? 262144;
+    const expectedWindow = contextWindow;
     const shouldCompress = mode === 'explicit-threshold';
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-user-window-compression-')));
     const workspace = join(root, 'workspace');
@@ -25,6 +25,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       5000,
     );
     writeFileSync(join(workspace, 'evidence.txt'), evidence);
+    writeFileSync(join(workspace, 'active-evidence.txt'), 'LATEST_UNCONSUMED_EVIDENCE\n');
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
     const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
     const capturedDefinitions: ToolDefinition[] = [];
@@ -44,24 +45,28 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
         );
         if (summary) summaries++;
         else decisions++;
+        const reading = !summary && (decisions === 1 || (shouldCompress && decisions === 2));
         const delta = summary
           ? { content: 'Original evidence summarized.' }
-          : decisions === 1
+          : reading
             ? {
                 tool_calls: [
                   {
                     index: 0,
-                    id: 'read-evidence',
+                    id: `read-evidence-${decisions}`,
                     type: 'function',
                     function: {
                       name: 'read_file',
-                      arguments: JSON.stringify({ path: 'evidence.txt', max_lines: 5000 }),
+                      arguments: JSON.stringify({
+                        path: decisions === 1 ? 'evidence.txt' : 'active-evidence.txt',
+                        limit: 5000,
+                      }),
                     },
                   },
                 ],
               }
             : { content: 'Understood the current project from the original evidence.' };
-        const reason = !summary && decisions === 1 ? 'tool_calls' : 'stop';
+        const reason = reading ? 'tool_calls' : 'stop';
         const frame = (value: unknown, finish_reason: string | null) =>
           `data: ${JSON.stringify({ id: 'owned', object: 'chat.completion.chunk', created: 1, model: 'deepseek-v4-flash', choices: [{ index: 0, delta: value, finish_reason }] })}\n\n`;
         return new Response(`${frame(delta, null)}${frame({}, reason)}data: [DONE]\n\n`, {
@@ -145,8 +150,8 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       expect(view.runs).toHaveLength(1);
       expect(view.runs[0]).toMatchObject({ status: 'completed', isActive: false, reason: null });
       expect(summaries).toBe(shouldCompress ? 1 : 0);
-      expect(decisions).toBe(2);
-      expect(requests).toHaveLength(shouldCompress ? 3 : 2);
+      expect(decisions).toBe(shouldCompress ? 3 : 2);
+      expect(requests).toHaveLength(shouldCompress ? 4 : 2);
       const evidenceRequest = requests.find((request) =>
         request.messages.some(
           (message) =>
@@ -169,7 +174,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
         )?.modelCapabilities?.contextWindowTokens,
       ).toBe(expectedWindow);
       const models = view.executions.filter((execution) => execution.kind === 'model');
-      expect(models).toHaveLength(shouldCompress ? 3 : 2);
+      expect(models).toHaveLength(shouldCompress ? 4 : 2);
       const retainedPresentations = [
         {
           id: 'fixture.retained-presentations',
@@ -185,10 +190,20 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       ];
       const compression = (await store.getSelectedContext({ expectedStoreId, sessionId: 's' }))
         .compression;
-      if (shouldCompress)
+      if (shouldCompress) {
         expect(compression).toMatchObject({ trigger: 'automatic', runId: view.runs[0]!.id });
-      else expect(compression).toBeUndefined();
-      expect(view.executions.filter((execution) => execution.kind === 'tool')).toHaveLength(1);
+        expect(
+          requests
+            .at(-1)!
+            .messages.some(
+              ({ role, content }) =>
+                role === 'tool' && String(content).includes('LATEST_UNCONSUMED_EVIDENCE'),
+            ),
+        ).toBe(true);
+      } else expect(compression).toBeUndefined();
+      expect(view.executions.filter((execution) => execution.kind === 'tool')).toHaveLength(
+        shouldCompress ? 2 : 1,
+      );
       expect(
         (await store.getView('s')).executions.every(
           (execution) => execution.status === 'succeeded',
@@ -199,7 +214,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       expect((await store.getView('s')).executions.map((execution) => execution.id)).toEqual(
         executionIds,
       );
-      expect(requests).toHaveLength(shouldCompress ? 3 : 2);
+      expect(requests).toHaveLength(shouldCompress ? 4 : 2);
       await runtime.close();
       const retainedStore = await openSqliteStore({
         dataRoot: profile.dataRoot,
@@ -229,7 +244,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
         configurationPath,
         JSON.stringify({ model: null, compression: { thresholdTokens: 1 } }),
       );
-      // A true cold host without the original formatter declines the forecast.
+      // A cold host can reuse the recorded presentation carried by the sealed request.
       const unavailableStore = await openSqliteStore({
         dataRoot: profile.dataRoot,
         profile: profile.profile,
@@ -246,13 +261,9 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       });
       const originalInput = { ...scope, executionId: models.at(-1)!.id };
       try {
-        let unavailableError: unknown;
-        try {
-          await unavailable.readContextEstimate(originalInput);
-        } catch (error) {
-          unavailableError = error;
-        }
-        expect(unavailableError).toMatchObject({ code: 'context_estimate_unavailable' });
+        const sealedEstimate = await unavailable.readContextEstimate(originalInput);
+        expect(sealedEstimate.contextWindowTokens).toBe(estimate.contextWindowTokens);
+        expect(sealedEstimate.totalInputTokens).toBe(estimate.totalInputTokens);
         expect((await unavailable.readModelInput(originalInput)).request.modelId).toBe(
           (view.runs[0]!.configuration as { modelId: string }).modelId,
         );
@@ -285,7 +296,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
         expect((await coldStore.getView('s')).executions.map((execution) => execution.id)).toEqual(
           executionIds,
         );
-        expect(requests).toHaveLength(shouldCompress ? 3 : 2);
+        expect(requests).toHaveLength(shouldCompress ? 4 : 2);
       } finally {
         await cold.close();
       }

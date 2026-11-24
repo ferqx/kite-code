@@ -198,13 +198,14 @@ test('per-Run host assembly discovers summaries only, binds actual versions and 
     const current = await assembly.sources.capture(request);
     const updated = current.find((source) => source.id === 'skills.catalogue')!;
     expect(updated.content).toBe(original.content);
-    expect(updated.digest).not.toBe(original.digest);
+    expect(updated.digest).toBe(original.digest);
     expect(JSON.stringify(current)).not.toContain('new-body-marker');
     writeFileSync(join(skill, 'SKILL.md'), '---\nname: Guide\ndescription: New summary\n---\n');
     const renamed = (await assembly.sources.capture(request)).find(
       (source) => source.id === 'skills.catalogue',
     )!;
     expect(renamed.content).toContain('New summary');
+    expect(renamed.digest).not.toBe(original.digest);
   } finally {
     await assembly?.dispose();
     f.close();
@@ -427,6 +428,13 @@ test('selected canonical source identity cannot silently disappear when a truste
     await expect(assembly.sources.capture(request)).rejects.toMatchObject({
       code: 'skill_version_changed',
     });
+    const load = assembly.extensions
+      .find(({ id }) => id === 'builtin.skills')!
+      .tools!.find(({ id }) => id === 'skills.load')!;
+    const result = await load.execute({ id: 'selected' }, {
+      signal: new AbortController().signal,
+    } as ToolContext);
+    expect(result).toMatchObject({ outcome: 'failed', details: { code: 'skill_version_changed' } });
   } finally {
     await assembly?.dispose();
     f.close();

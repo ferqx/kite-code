@@ -34,11 +34,13 @@
 
 | 持久事实 | 恢复动作 |
 | --- | --- |
-| planned Model 尚未派发 | 复用完整封存请求与原 Execution |
+| planned Model 尚未派发且原来源仍一致 | 复用完整封存请求与原 Execution |
+| 根 Run 普通 Model 尚未派发且只发生可重组的内容变化 | 核准入、根目录和无派生效果后退役原尝试，使用同一 Run 保存唯一后继的原请求谱系 |
 | Model 从未派发，因已应用 steer 被准确取消替代 | 核原 Command／Message／应用回执与 superseded IDs，使用当前历史创建新请求，原取消尝试不重放 |
 | Model running/dispatching，或最后一次 failed/incomplete，且没有派生 Tool/Job | 保留 partial 和旧身份；原子结束未闭合尝试，下一请求创建新 Execution 与 retry lineage |
 | 完整 Model 与已结算 Tool | 使用完整输出和准确原结果，不重发模型段或已确认效果 |
 | 自动压缩 Model 中断、完整摘要尚未发布 | pending 不进入上下文；保留上个已发布点，按普通压缩边界创建新摘要尝试 |
+| 超限恢复摘要从未派发，或摘要已成功但尚未发布 | 保存未派发尝试的结算事实，按同一原拒绝重新准备摘要，保留一次减量业务派发资格 |
 | 压缩已经发布 | 沿原 selected 点读取，不因恢复重复摘要 |
 | child queued / dispatching 但尚未激活 | 原 carrier 继续普通槽位和激活事务；不重复登记 child |
 | child 已激活 / 已结束但 carrier 未结算 | 原 Loop 继续 / 只承接原结果；原 Run 与 deadline 不变 |
@@ -47,7 +49,13 @@
 
 `task.execute` 的 continuation 复用 immutable OperationRef 与幂等创建，再观察准确原 carrier。Core 不按业务工具名称放行；版本须同时匹配原封存来源、Run manifest 和当前可信实现。未声明的旧调用没有这项资格。子审批继续原 Interaction/Execution/attempt，并重新经过当前权限。Auto reviewer 的特殊活动闭包没有据此取得一般 worker 恢复资格。
 
-已应用 steer 可在旧 planned Model 取消后、新请求尚未保存前遇到进程退出。恢复仅接受准确 `superseded_by_user_input`、从未派发且无派生效果的 Model，并核原 Run／selection、steer digest、完整 Message 和应用回执确实包含该 Execution。父到子 steer 另复核真实 sender／carrier 与父子来源；两项 Agent marker 同时损坏也不能降级成人类输入。已派发、unknown、其他取消原因、旧停止或来源不符继续拒绝。恢复从当前历史读取已应用原文，创建新 Model；不复用已经失效的旧请求。
+已应用 steer 可在旧 planned Model 取消后、新请求尚未保存前遇到进程退出。引导替代分支要求准确 `superseded_by_user_input`、从未派发且无派生效果，并核原 Run／selection、steer digest、完整 Message 和应用回执确实包含该 Execution。父到子 steer 另复核真实 sender／carrier 与父子来源。恢复从当前历史读取已应用原文，创建新 Model。
+
+可重组内容变化使用独立的私有退役证明。Store 在当前已接管的 owner 世代核原恢复回执、最新 planned Model、原配置与封存输入、当前根、取消及无派生效果，保存原尝试的取消结果。首个后继计划必须携带准确 `contextRefreshOf`，计划事务只让同一证明领用一次。全量与增量恢复审计核原证明和后继关系。两次提交之间重启会继续准备，后继已保存时恢复其准确身份。该分支适用于已验证的根普通业务请求。供应商重连、超限减量、摘要、图片和原生搜索沿各自原恢复资格计数。 [实际进程退出回归](../../../test/isolated/recovery/run-resume-repeated-runtime.test.ts)
+
+若原请求准备退役时已有队首用户引导，Store 在同一事务按原输入合同应用引导，并将未派发请求结算为由已应用引导替代。Runtime 从同一 Run 的新历史准备下一请求。后继尚未封存时退出，Store 的引导替代证明保留同根同源项目 Skill 的预派发恢复资格。已派发后继的冷接续根据原 Model 封存的 Skill 来源核对当前同根同源内容。已参与决策的项目 Skill 必须与封存正文摘要一致。仅出现在目录中的未固定项目 Skill 用实际可见目录核验。原 Run 配置、其他能力、授权和接管 CAS 仍按已封存事实核对。 [默认 Service 冷重启回归](../../../../../apps/service/test/isolated/run-resume.test.ts)
+
+队首为已受理的 `result.include` 时，Store 保存原内容退役证明。新请求组装前，Runtime 沿已有输入队列按顺序应用原结果及后续引导。收到结果后再次冷开仍用原结果身份与版本，同一退役证明只保存一个后继。
 
 Host 在父 Loop 重入前把全部原操作登记到同一 operation 目录，共同启动 barrier 之后才进入观察，防止 ensure 再启动 queued carrier。恢复和普通执行共用 Run binding lease、Job 观察、ChildSlots、取消域与 disposer。父 Run 先结束时，已受理的直接子 Agent 与普通后台 Job 监督仍持有配置；恢复后的根任务交回同一个持 owner 的普通任务泵，后台 Job 继续运行期间，同会话新人类任务可以执行。原执行及其配置清理由 Host 原目录持有，包含恢复后按当前权限新建的普通后台 Job；全部落定才允许释放 root owner，终态子只读结果也释放其配置。普通及恢复路径统一在 owner 释放前核 Host 监督寿命和清理失败；晚到 disposer 失败保留原 root 锁并停止调度，不以 terminal ledger 代替清理确认。子 Run 离线时间不暂停 30 分钟期限，已经超期先取消结算，零新模型调用。
 
@@ -56,6 +64,10 @@ Host 在父 Loop 重入前把全部原操作登记到同一 operation 目录，�
 有Artifact宿主的新Model在原 `decision_source_json` 封存version3 continuation：原Run/selection、[完整来源请求增量链](../../source-request-journal.ts)的准确链头和同工具相同参数失败streak。每批只发布首次出现的完整输入，后续Model/摘要/重试不重复保存累计输入；压缩不清除早期请求。恢复按原顺序完整核链的Artifact metadata/hash/size、Store/Session/subject/Workspace/Run、重复输入与无环关系；可信Model封存链头不由Provider opaque continuation或扩展Artifact提供。热Model共享Core冻结值，host每次capture得到独立输入副本；现行captureBatch仍保一个完整准确集合，不承诺常量RSS。
 
 版本2的原完整inline集合和准确派发失败分类仍可读；版本1按旧规则计数，恢复时保来源请求并从原历史派发事实重建streak，不直接沿用或清零。具备Artifact时旧集合迁入首个增量节点，无Artifact的Core继续v2小型checkpoint。sourceBody仍承担大来源正文传输，预览不复制checkpoint。当前Model的Tool批次按声明顺序结算一次，恢复保留原失败序列但不恢复五次失败硬停规则；真实失败与未知回执继续交给普通 Loop 解释；缺continuation的旧记录继续完整历史重建，未知版本/范围拒绝。[增量回归](../../../test/isolated/context/source-request-journal.test.ts)与原SIGKILL回归分别核保存增长、完整捕获和准确恢复。
+
+新封存额外保存本次来源组装的历史上界。接续准确 Model 时，只按上界、封存请求的目录范围和 Skill 身份恢复原来源，继续核对当前可用内容及原摘要。没有该上界的旧封存用完整原请求及原来源身份确定范围。原决策之后已完成的读取从下一次新业务决策开始纳入，保留原 Tool 回执和先后顺序。
+
+原 Model 已成功并产生待处理的内置 Skill 读取时，Core 核原 Tool 注册、Run 配置和能力后接续原调用。知识适配器按目标来源核验读取，同批其他待派发 Tool 在实际派发时复核原决策的来源。当批次含已经派发的可接续 Tool 时，先完整核验原检查点。已完成调用沿用原回执。[冷恢复回归](../../../test/isolated/recovery/source-discovery-resume.test.ts)核对项目指令更新后原 Skill 继续读取，同批旧文件写入保持未派发。
 
 这里的 Core continuation 与 Adapter 的 opaque continuation 分属不同字段。尚未派发 Model 的恢复读取经过原 scope/hash 核验的私有完整请求，不能使用已移除 opaque 字段的公开 Inspector 投影；中断或失败尝试仍创建新的 Execution，并从完整已确认历史恢复 Adapter 状态。公开 Inspector、reviewer 语义历史继续不暴露此私有字段。[真实强杀回归](../../../test/isolated/recovery/run-resume-runtime.test.ts)覆盖带大 opaque 状态的 planned/running/failed 边界、原效果只执行一次及恢复前后的公开投影。
 

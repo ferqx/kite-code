@@ -1,5 +1,20 @@
+import type { ToolDefinition } from '../extensions';
 import type { Store } from '../storage/port';
 import type { ExecutionRecord, Json } from '../storage/types';
+
+const skillReaders = new WeakMap<ToolDefinition['execute'], string>();
+
+/** Register the host's knowledge-only adapter. Core sealing preserves the actual callback. */
+export function registerSkillReadTool(tool: ToolDefinition): void {
+  skillReaders.set(tool.execute, tool.id);
+}
+
+export function isRegisteredSkillReadTool(tool: ToolDefinition): boolean {
+  return (
+    (tool.id === 'skills.load' || tool.id === 'skills.resource') &&
+    skillReaders.get(tool.execute) === tool.id
+  );
+}
 
 /** Owner identity comes only from the original Run's captured registration. */
 export function capturedToolOwner(

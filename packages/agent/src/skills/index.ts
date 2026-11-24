@@ -10,6 +10,7 @@ import {
   type KnowledgeReadScope,
 } from '../platform/knowledge-reads';
 
+export { registerSkillReadTool } from '../execution/definition-owner';
 export { KnowledgeReadCleanupError, type KnowledgeReadScope } from '../platform/knowledge-reads';
 
 export interface SkillSummary {

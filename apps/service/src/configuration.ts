@@ -57,7 +57,7 @@ import {
 } from '@kite-ai/agent/planning';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { createSessionTitleExtension } from '@kite-ai/agent/session-title';
-import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
+import { KnowledgeReadCleanupError, skillKnowledgeSourceId } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import type { RunRecord } from '@kite-ai/agent/storage';
 import { WebFetchError, webExtractorAssets, webFetchBatchLimits } from '@kite-ai/agent/web-fetch';
@@ -208,6 +208,8 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
       browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
       shellSnapshot: snapshot.shell,
       executionRoot: snapshot.executionRoot,
+      actualCapabilities: snapshot.actualCapabilities,
+      projectSkillBindings: snapshot.projectSkillBindings,
       modelTransportSnapshot: snapshot.modelTransport ?? null,
       ...(Object.hasOwn(snapshot, 'readOnlyTaskSource')
         ? { readOnlyTaskSource: snapshot.readOnlyTaskSource }
@@ -215,6 +217,47 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
       ...(defaultAutoReview ? { defaultAutoReview } : {}),
     },
   };
+}
+
+function recoverProjectSkillCapabilityFacts(
+  assembly: Awaited<ReturnType<typeof createWorkspaceAssembly>>,
+  saved: Json | undefined,
+  matchesSealedSkill?: (id: string, version: string) => boolean,
+) {
+  const { snapshotFacts, projectSkillBindings } = assembly;
+  if (
+    !saved ||
+    typeof saved !== 'object' ||
+    Array.isArray(saved) ||
+    !Array.isArray(saved.skills) ||
+    saved.skills.length !== snapshotFacts.skills.length
+  )
+    return snapshotFacts;
+  const mutable = new Set(projectSkillBindings.map(({ id }) => id));
+  const { digest: _currentDigest, ...facts } = snapshotFacts;
+  const skills = facts.skills.map((entry, index) => {
+    const original = (saved.skills as Json[])[index];
+    if (
+      !mutable.has(entry.id) ||
+      !original ||
+      typeof original !== 'object' ||
+      Array.isArray(original) ||
+      original.id !== entry.id ||
+      typeof original.version !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(original.version) ||
+      (matchesSealedSkill && !matchesSealedSkill(entry.id, entry.version))
+    )
+      return entry;
+    return { ...entry, version: original.version };
+  });
+  const original = { ...facts, skills };
+  const exact = {
+    ...original,
+    digest: createHash('sha256').update(JSON.stringify(original)).digest('hex'),
+  };
+  return planningSnapshotDigest(exact as unknown as Json) === planningSnapshotDigest(saved)
+    ? exact
+    : snapshotFacts;
 }
 
 const assemblyKeys = ['modelId', 'models', 'tools', 'skills', 'mcp'];
@@ -413,12 +456,21 @@ export function createDefaultProcessConfiguration(options: {
     Object.freeze({
       id: selectedCompressor.id,
       version: selectedCompressor.version,
+      ...(selectedCompressor.windowBudget
+        ? { windowBudget: Object.freeze({ ...selectedCompressor.windowBudget }) }
+        : {}),
       prepare: selectedCompressor.prepare.bind(selectedCompressor),
       ...(selectedCompressor.shouldCompress
         ? { shouldCompress: selectedCompressor.shouldCompress.bind(selectedCompressor) }
         : {}),
       ...(selectedCompressor.validateSummary
         ? { validateSummary: selectedCompressor.validateSummary.bind(selectedCompressor) }
+        : {}),
+      ...(selectedCompressor.validateSummaryReport
+        ? {
+            validateSummaryReport:
+              selectedCompressor.validateSummaryReport.bind(selectedCompressor),
+          }
         : {}),
       ...(selectedCompressor.validateExpanded
         ? { validateExpanded: selectedCompressor.validateExpanded.bind(selectedCompressor) }
@@ -903,6 +955,8 @@ export function createDefaultProcessConfiguration(options: {
       signal: AbortSignal;
       runIdentity?: { runId: string; sessionId: string };
       newChildTurn?: boolean;
+      allowProjectSkillContentChange?: true;
+      sealedSkillSources?: readonly ContextSource[];
     },
   ) => {
     let modelTransport: Awaited<ReturnType<typeof resolveModelTransport>> | undefined;
@@ -1085,11 +1139,8 @@ export function createDefaultProcessConfiguration(options: {
           let saved = manifest.snapshot as Record<string, Json> | undefined;
           if (saved?.kind === 'human_input_processing')
             saved = saved.originalConfiguration as Record<string, Json>;
-          // The new metadata producer only uses the original activated Service binding.
-          selected.modelCapabilities = {
-            contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
-            ...selected.modelCapabilities,
-          };
+          const digest = modelBindingDigest(selected);
+          // Older seals included the maintenance estimate when the model declared no window.
           if (
             manifest.modelId !== selected.id ||
             !saved ||
@@ -1098,7 +1149,16 @@ export function createDefaultProcessConfiguration(options: {
             typeof saved.configuration !== 'object' ||
             Array.isArray(saved.configuration) ||
             createConfigurationSnapshot(saved.configuration).digest !== saved.digest ||
-            saved.modelBindingDigest !== modelBindingDigest(selected) ||
+            (saved.modelBindingDigest !== digest &&
+              (selected.modelCapabilities?.contextWindowTokens !== undefined ||
+                saved.modelBindingDigest !==
+                  modelBindingDigest({
+                    ...selected,
+                    modelCapabilities: {
+                      ...selected.modelCapabilities,
+                      contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+                    },
+                  }))) ||
             planningSnapshotDigest(saved.modelTransport ?? null) !==
               planningSnapshotDigest(modelTransport.snapshot)
           )
@@ -1124,12 +1184,6 @@ export function createDefaultProcessConfiguration(options: {
           } as unknown as Json,
         } satisfies RunConfiguration;
       }
-      // Freeze the host's declared default along with this Run's actual model.
-      // Core's generic configuration leaf still preserves absent metadata verbatim.
-      selected.modelCapabilities = {
-        contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
-        ...selected.modelCapabilities,
-      };
       if (recovery?.searchPresent && !recovery.searchRoute)
         throw new AgentError('recovery_configuration_unavailable');
       const searchBinding = await search.bind({
@@ -1631,9 +1685,10 @@ export function createDefaultProcessConfiguration(options: {
         ): NonNullable<RunConfiguration['sources']> => ({
           async capture(
             request: Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0],
+            sourceSelection,
           ) {
             return [
-              ...(await assembly.sources.capture(request)),
+              ...(await assembly.sources.capture(request, sourceSelection)),
               ...(await selectedSources.sources.capture(request)),
               ...(mcpResourceSource ? [mcpResourceSource] : []),
               ...(readOnlyTaskSource ? [structuredClone(readOnlyTaskSource)] : []),
@@ -1641,6 +1696,7 @@ export function createDefaultProcessConfiguration(options: {
           },
           async captureBatch(
             requests: readonly Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0][],
+            sourceSelection,
           ) {
             const sources = new Map<string, ContextSource>();
             const append = (values: ContextSource[]) => {
@@ -1653,8 +1709,10 @@ export function createDefaultProcessConfiguration(options: {
               }
             };
             if (assembly.sources.captureBatch)
-              append(await assembly.sources.captureBatch(requests));
-            else for (const request of requests) append(await assembly.sources.capture(request));
+              append(await assembly.sources.captureBatch(requests, sourceSelection));
+            else
+              for (const request of requests)
+                append(await assembly.sources.capture(request, sourceSelection));
             for (const request of requests) append(await selectedSources.sources.capture(request));
             if (mcpResourceSource) append([mcpResourceSource]);
             if (readOnlyTaskSource) append([structuredClone(readOnlyTaskSource)]);
@@ -1725,6 +1783,59 @@ export function createDefaultProcessConfiguration(options: {
           }
           return pending;
         };
+        let actualCapabilities = assembly.snapshotFacts;
+        if (
+          recovery &&
+          (recovery.allowProjectSkillContentChange || recovery.sealedSkillSources) &&
+          policyRuntime &&
+          rootSelection &&
+          recovery.projectSkillBindings !== undefined &&
+          planningSnapshotDigest(recovery.projectSkillBindings) ===
+            planningSnapshotDigest(assembly.projectSkillBindings as unknown as Json) &&
+          planningSnapshotDigest(recovery.executionRoot ?? null) ===
+            planningSnapshotDigest(rootSelection.binding as unknown as Json)
+        ) {
+          const currentRoot = await resolveSessionExecutionRoot(policyRuntime, {
+            sessionId: session.id,
+          });
+          if (currentRoot.revision === rootSelection.revision) {
+            let matchesSealedSkill: ((id: string, version: string) => boolean) | undefined;
+            if (!recovery.allowProjectSkillContentChange && recovery.sealedSkillSources) {
+              const sealedSkills = new Map(
+                recovery.sealedSkillSources.map((source) => [source.id, source]),
+              );
+              const catalogue = sealedSkills.get('skills.catalogue');
+              const sameCatalogue =
+                catalogue?.kind === 'skill_catalogue' &&
+                (
+                  await assembly.sources.capture({
+                    sessionId: session.id,
+                    workspaceId: workspace.id,
+                    definitionId: 'runtime.workspace_context',
+                    input: null,
+                  })
+                ).some(
+                  (current) =>
+                    current.id === catalogue.id &&
+                    current.kind === catalogue.kind &&
+                    current.scope === catalogue.scope &&
+                    current.content === catalogue.content,
+                );
+              matchesSealedSkill = (id, version) => {
+                const loaded = sealedSkills.get(skillKnowledgeSourceId(id));
+                if (loaded?.kind !== 'skill') return sameCatalogue;
+                // Project document versions are the SHA-256 of the loaded UTF-8 body.
+                if (loaded.digest !== version) throw new AgentError('run_configuration_mismatch');
+                return true;
+              };
+            }
+            actualCapabilities = recoverProjectSkillCapabilityFacts(
+              assembly,
+              recovery.actualCapabilities,
+              matchesSealedSkill,
+            );
+          }
+        }
         return {
           ...runPermissions,
           ...(searchBinding.nativeWebSearch
@@ -1859,7 +1970,10 @@ export function createDefaultProcessConfiguration(options: {
                 : (skillSelection ?? null),
               resolvedIds: assembly.snapshotFacts.skills.map((entry) => entry.id),
             },
-            actualCapabilities: assembly.snapshotFacts,
+            actualCapabilities,
+            ...(!recovery || recovery.projectSkillBindings !== undefined
+              ? { projectSkillBindings: assembly.projectSkillBindings }
+              : {}),
             ...(modelHiddenToolIds.length ? { modelHiddenToolIds } : {}),
             mcp: { ...selectedMcp.snapshot, sources: selectedSources.snapshot },
             shell: shell.snapshot,
@@ -1983,6 +2097,8 @@ export function createDefaultProcessConfiguration(options: {
         ...recovery,
         signal: input.signal,
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
+        allowProjectSkillContentChange: input.allowProjectSkillContentChange,
+        sealedSkillSources: input.sealedSkillSources,
       },
     );
   };

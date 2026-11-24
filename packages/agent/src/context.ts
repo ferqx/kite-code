@@ -19,6 +19,32 @@ export interface SourceRequest {
   definitionId: string;
   input: Json;
 }
+
+export function skillKnowledgeSourceId(skillId: string, path?: string): string {
+  if (path === undefined) return `skill.body:${skillId}`;
+  // Resource paths may contain colons, so only an unescaped colon separates the Skill ID.
+  const id = skillId.replaceAll('%', '%25').replaceAll(':', '%3A');
+  return `skill.resource:${id}:${path}`;
+}
+
+export function skillKnowledgeModelContent(sourceId: string, content: string): string {
+  const continuation =
+    'This knowledge is already available for the current task. After compaction, use it to satisfy the original request without making the same read again.';
+  if (sourceId.startsWith('skill.body:')) {
+    const id = sourceId.slice('skill.body:'.length);
+    return `Skill instructions already loaded for ${JSON.stringify({ skill_id: id })}. ${continuation}\n${content}`;
+  }
+  if (sourceId.startsWith('skill.resource:')) {
+    const resource = sourceId.slice('skill.resource:'.length);
+    const separator = resource.indexOf(':');
+    if (separator === -1) return content;
+    const id = resource.slice(0, separator).replaceAll('%3A', ':').replaceAll('%25', '%');
+    const path = resource.slice(separator + 1);
+    return `Current Skill resource for ${JSON.stringify({ skill_id: id, path })}. This file is reference data for the current task. Follow the actual user request and use this data where relevant. ${continuation}\n${content}`;
+  }
+  return content;
+}
+
 export function assertContextSource(source: ContextSource): void {
   if (
     !source ||
@@ -37,17 +63,48 @@ export function assertContextSource(source: ContextSource): void {
   )
     throw new AgentError('context_source_invalid');
 }
+export interface SkillReadSelection {
+  readonly skillId: string;
+  readonly path?: string;
+  /** Host fingerprint of the originally selected catalogue entry, when recorded. */
+  readonly catalogueDigest?: string;
+  readonly version: string;
+}
+
 /** Host-owned applicable sources. Extensions and HTTP callers cannot assert freshness. */
 export interface ContextSources {
-  capture(request: SourceRequest): Promise<ContextSource[]>;
+  capture(request: SourceRequest, selection?: ContextSourceSelection): Promise<ContextSource[]>;
   /** Complete requests at one checkpoint. No cross-checkpoint cache or discarded inputs. */
-  captureBatch?(requests: readonly SourceRequest[]): Promise<ContextSource[]>;
+  captureBatch?(
+    requests: readonly SourceRequest[],
+    selection?: ContextSourceSelection,
+  ): Promise<ContextSource[]>;
+}
+
+export interface ContextSourceSelection {
+  /** The committed receipts selected at the same upper bound as Model history. */
+  readonly skillReads: readonly SkillReadSelection[];
+  /** Preserve a legacy catalogue digest only if the host can recompute it for the sealed decision. */
+  readonly sealedSkillCatalogueDigest?: string;
+  /** A recovered decision may only capture its original set of Skill bodies. */
+  readonly skillBodyIds?: ReadonlySet<string>;
+  /** Current Run resources whose confirmed reads are still in the business window. */
+  readonly skillResourceIds: ReadonlySet<string>;
+  /** Trusted dispatch-time observation. Capture only this target's project instructions. */
+  readonly workspaceRead?: SourceRequest;
+  /** Most recent covered reads first. Their optional full text shares the recent history budget. */
+  readonly coveredSkillResources?: Readonly<{ ids: readonly string[]; tokens: number }>;
 }
 
 /** A single trusted pure algorithm slot. It describes a recorded Model call; never calls a Provider. */
 export interface ContextCompressor {
   readonly id: string;
   readonly version: string;
+  readonly windowBudget?: Readonly<{
+    usableInputTokens?: number;
+    recentHistoryTokens: number;
+    summaryReserveTokens?: number;
+  }>;
   prepare(input: CompressionInput): Promise<{
     instructions: string;
     snapshot: Json;
@@ -74,10 +131,13 @@ export interface CompressionInput {
   readonly run: Readonly<import('./storage/types').RunRecord>;
   readonly session: Readonly<import('./storage/types').SessionRecord>;
   readonly messages: readonly import('@kite-ai/ai').ModelMessage[];
-  /** Original, source-proven user and parent-Agent task inputs retained verbatim after compression.
-   * These are already present in messages; include their cost in the replacement context.
-   * Retention is context, not a new submission or authorization. */
+  /** Includes exact retained user/parent task inputs and current Run's brief Skill receipts.
+   * Account for these in the replacement context. Retention is context, not new work or authorization. */
   readonly retainedMessages?: readonly import('@kite-ai/ai').ModelMessage[];
+  /** Frozen replacement without the summary, when using a bounded history window. */
+  readonly replacementMessages?: readonly import('@kite-ai/ai').ModelMessage[];
+  /** The provider rejected the original decision before producing a response. */
+  readonly recoveringOverflow?: true;
   /** During actual-output validation: exact neutral summary text later projected into context. */
   readonly renderedSummary?: string;
   readonly modelId?: string;
@@ -103,6 +163,7 @@ export function sealCompressor(
   return Object.freeze({
     id: value.id,
     version: value.version,
+    ...(value.windowBudget ? { windowBudget: Object.freeze({ ...value.windowBudget }) } : {}),
     prepare: value.prepare.bind(value),
     ...(value.validateSummary ? { validateSummary: value.validateSummary.bind(value) } : {}),
     ...(value.validateSummaryReport

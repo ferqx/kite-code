@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import { createClient, type ResumeRunRequest } from '@kite-ai/client';
 import { startService } from '../../src';
 import { resumeBinding } from '../fixtures/run-resume-binding';
@@ -298,3 +299,215 @@ test('SIGKILL with complete original Model and pending approval resumes original
     rmSync(root, { recursive: true, force: true });
   }
 }, 15000);
+
+test.each([
+  'loaded Skill',
+  'unread Skill',
+  'new steer',
+  'new steer before a second exit',
+  'queued result and steer before a second exit',
+] as const)('original Run continues across context refresh and a cold boundary with %s', async (mode) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-resume-context-')));
+  const profile = { dataRoot: join(root, 'data'), profile: 'test' };
+  const workspace = join(root, 'workspace');
+  const document = join(workspace, 'guide/SKILL.md');
+  const skill = (body: string) =>
+    `---\nname: Guide\ndescription: Original project guide\n---\n${body}\n`;
+  mkdirSync(join(workspace, 'guide'), { recursive: true });
+  writeFileSync(document, skill('Guide V1'));
+  writeFileSync(join(workspace, 'AGENTS.md'), 'Original project instruction.');
+  writeFileSync(join(workspace, 'seed.txt'), 'Original seeded data.');
+  writeFileSync(join(workspace, 'target.txt'), 'Original target data.');
+
+  const requests: string[] = [];
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const index = requests.length;
+      requests.push(JSON.stringify(await request.json()));
+      const call =
+        index === 0 && mode !== 'unread Skill'
+          ? { name: 'load_skill', arguments: JSON.stringify({ skill_id: 'guide' }) }
+          : index < 2
+            ? {
+                name: 'read_file',
+                arguments: JSON.stringify({ path: index === 0 ? 'seed.txt' : 'target.txt' }),
+              }
+            : undefined;
+      const chunk = (delta: object, finish_reason: string | null) =>
+        `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+      return new Response(
+        chunk(
+          call
+            ? { tool_calls: [{ index: 0, id: `call-${index}`, type: 'function', function: call }] }
+            : { content: 'Original work completed.' },
+          null,
+        ) +
+          chunk({}, call ? 'tool_calls' : 'stop') +
+          'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    },
+  });
+  const fixture = fileURLToPath(
+    new URL('../fixtures/run-resume-context-child.ts', import.meta.url),
+  );
+  const endpoint = new URL('v1', server.url).href;
+  type Cut = { execution: ExecutionRecord; expectedOwnerGeneration: string };
+  const start = (phase: string, cut?: Cut) =>
+    Bun.spawn(
+      [
+        process.execPath,
+        fixture,
+        root,
+        endpoint,
+        phase,
+        ...(cut ? [cut.execution.runId!, cut.expectedOwnerGeneration] : []),
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+  const crashAt = async (phase: string, previous?: Cut): Promise<Cut> => {
+    const child = start(phase, previous);
+    try {
+      const cut: Cut = JSON.parse(await bounded(firstLine(child.stdout)));
+      child.kill('SIGKILL');
+      expect(await bounded(child.exited)).toBe(137);
+      expect(child.signalCode).toBe('SIGKILL');
+      return cut;
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await child.exited;
+      expect(await new Response(child.stderr).text()).toBe('');
+    }
+  };
+  const finish = async (phase: string, previous: Cut) => {
+    const child = start(phase, previous);
+    try {
+      const exit = await bounded(child.exited);
+      expect(await new Response(child.stderr).text()).toBe('');
+      expect(exit).toBe(0);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await child.exited;
+    }
+  };
+  try {
+    const original = await crashAt('seed');
+    expect(requests).toHaveLength(1);
+    let successor: Cut | undefined;
+    if (mode === 'queued result and steer before a second exit') {
+      writeFileSync(join(workspace, 'AGENTS.md'), 'Current project instruction.');
+      const retired = await crashAt('include-cut', original);
+      expect(retired.execution).toMatchObject({
+        id: original.execution.id,
+        status: 'cancelled',
+        modelDispatched: false,
+        result: { content: 'model_context_reassembled_before_dispatch' },
+      });
+      expect(requests).toHaveLength(1);
+      await finish('finish', retired);
+      const decision = requests[1]!;
+      const included = decision.indexOf(
+        'Explicitly include the selected historical execution result',
+      );
+      expect(decision).toContain('Current project instruction.');
+      expect(included).toBeGreaterThanOrEqual(0);
+      expect(decision.indexOf('Apply this correction after the selected result.')).toBeGreaterThan(
+        included,
+      );
+    } else if (mode === 'new steer' || mode === 'new steer before a second exit') {
+      if (mode === 'new steer') {
+        writeFileSync(join(workspace, 'AGENTS.md'), 'Current project instruction.');
+        await finish('steer', original);
+        expect(requests[1]).toContain('Current project instruction.');
+      } else {
+        writeFileSync(document, skill('Guide V2'));
+        const steered = await crashAt('steer-cut', original);
+        expect(steered.execution.id).toBe(original.execution.id);
+        expect(requests).toHaveLength(1);
+        await finish('finish', steered);
+        expect(requests[1]).toContain('Guide V2');
+      }
+      expect(requests[1]).toContain('Apply this latest correction while resuming the work.');
+    } else {
+      writeFileSync(document, skill('Guide V2'));
+      successor = await crashAt('successor', original);
+      expect(requests).toHaveLength(2);
+      expect(successor.execution.runId).toBe(original.execution.runId);
+      if (mode === 'loaded Skill') {
+        expect(requests[1]).toContain('Guide V2');
+        writeFileSync(document, skill('Guide V3'));
+        await finish('reject', successor);
+        expect(requests).toHaveLength(2);
+        const readback = await openSqliteStore({ ...profile, mode: 'readonly' });
+        try {
+          const session = (await readback.getSession('s'))!;
+          successor = { ...successor, expectedOwnerGeneration: session.ownerGeneration };
+        } finally {
+          await readback.close();
+        }
+        writeFileSync(document, skill('Guide V2'));
+      } else {
+        expect(requests[1]).not.toContain('Guide V2');
+        expect(successor.execution.decisionSource).toMatchObject({
+          modelExecutionId: original.execution.id,
+        });
+      }
+      await finish('finish', successor);
+    }
+    expect(requests).toHaveLength(3);
+
+    const store = await openSqliteStore(profile);
+    try {
+      const view = await store.getView('s');
+      expect(view.runs).toHaveLength(1);
+      expect(view.runs[0]).toMatchObject({ id: original.execution.runId, status: 'completed' });
+      const tools = view.executions.filter((execution) => execution.kind === 'tool');
+      expect(tools).toHaveLength(2);
+      expect(tools.every((execution) => execution.status === 'succeeded')).toBe(true);
+      if (successor)
+        expect(await store.getExecution(successor.execution.id)).toMatchObject({
+          status: 'succeeded',
+          authorization: { dispatched: true },
+        });
+      if (mode === 'new steer' || mode === 'new steer before a second exit') {
+        expect(await store.getCommand('correction')).toMatchObject({ status: 'applied' });
+        expect(await store.getExecution(original.execution.id)).toMatchObject({
+          status: 'cancelled',
+          modelDispatched: false,
+          result: { content: 'superseded_by_user_input' },
+        });
+      }
+      if (mode === 'queued result and steer before a second exit') {
+        const source = tools.find(({ definitionId }) => definitionId === 'skills.load')!;
+        const included = await store.getCommand('include-original');
+        const steer = await store.getCommand('after-include');
+        expect(included).toMatchObject({
+          status: 'applied',
+          receipt: {
+            outcome: 'result_included',
+            executionId: source.id,
+            resultRevision: source.resultRevision,
+            runId: original.execution.runId,
+          },
+        });
+        expect(steer).toMatchObject({ status: 'applied', receipt: { supersededExecutionIds: [] } });
+        expect(requests[1]).toContain(source.id);
+        const successors = (await store.listExecutions('s')).filter(
+          ({ kind, decisionSource }) =>
+            kind === 'model' &&
+            (decisionSource as { contextRefreshOf?: string } | null)?.contextRefreshOf ===
+              original.execution.id,
+        );
+        expect(successors).toHaveLength(1);
+        expect(successors[0]).toMatchObject({ status: 'succeeded', modelDispatched: true });
+      }
+    } finally {
+      await store.close();
+    }
+  } finally {
+    server.stop(true);
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 25000);

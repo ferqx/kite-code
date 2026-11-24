@@ -3,23 +3,26 @@ import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { AgentError, ConfigurationPreparationCleanupError } from '@kite-ai/agent';
 import type { JsonObject, NamedConfiguration } from '@kite-ai/agent/config';
+import { estimateModelContext } from '@kite-ai/agent/context-estimate';
 import {
   defineExtension,
   type Extension,
   type Json,
+  type ToolContext,
   type ToolDefinition,
   type ToolResult,
 } from '@kite-ai/agent/extensions';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
-import { SkillError, type SkillSummary } from '@kite-ai/agent/skills';
+import { registerSkillReadTool, SkillError, type SkillSummary } from '@kite-ai/agent/skills';
 import {
   agentContractSource,
   type ContextSource,
   type ContextSources,
   createProjectSources,
   KnowledgeReadCleanupError,
-  type SourceRequest,
+  skillKnowledgeModelContent,
+  skillKnowledgeSourceId,
   type WorkingEnvironment,
 } from '@kite-ai/agent/sources';
 import type { InstalledUserSkill } from './installed-user-skills';
@@ -29,18 +32,45 @@ const fileIds = ['files.read', 'files.write', 'files.edit'];
 const optionalFileIds = ['files.view_images', 'files.reinspect_images'];
 const skillIds = ['skills.load', 'skills.resource'];
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-function source(
-  id: string,
-  kind: string,
-  content: string,
-  revisionContent = content,
-): ContextSource {
-  return { id, kind, scope: 'run-knowledge', digest: digest(revisionContent), content };
+function source(id: string, kind: string, content: string): ContextSource {
+  return { id, kind, scope: 'run-knowledge', digest: digest(content), content };
 }
 function object(input: Json): JsonObject {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     throw new AgentError('skill_input_invalid');
   return input;
+}
+
+async function skillContentAlreadyVisible(
+  context: ToolContext,
+  definitionId: string,
+  sourceId: string,
+  version: string,
+  catalogueDigest: string,
+  body: string,
+): Promise<boolean> {
+  if (await context.hasDecisionSkillSource?.(sourceId, body)) return true;
+  const results = await context.readDecisionToolResults?.();
+  return (
+    results?.some(({ execution, content }) => {
+      if (
+        execution.definitionId !== definitionId ||
+        execution.status !== 'succeeded' ||
+        content !== body
+      )
+        return false;
+      const details = (
+        execution.result as {
+          details?: { sourceId?: string; version?: string; catalogueDigest?: string };
+        } | null
+      )?.details;
+      return (
+        details?.sourceId === sourceId &&
+        details.version === version &&
+        (details.catalogueDigest === undefined || details.catalogueDigest === catalogueDigest)
+      );
+    }) ?? false
+  );
 }
 
 /** Per-Run host registrations. Configuration chooses capabilities but never creates trusted roots or permission. */
@@ -191,18 +221,21 @@ export async function createWorkspaceAssembly(options: {
       version: entry.version,
     }));
     const selectedIds = new Set(selectedBindings.map((entry) => entry.id));
-    const loaded = new Set<string>();
-    const loadedResources = new Map<string, { skillId: string; path: string }>();
     const allowed = [...(options.allowedCapabilities ?? [])].filter((id) =>
       selectedToolIds.includes(id),
     );
-    async function catalogue() {
+    async function catalogue(targetId?: string) {
       const current = await skillSource.list();
       for (const row of current.states) {
-        if (selectedIds.has(row.id) && row.state !== 'available')
+        if (
+          (targetId === undefined || row.id === targetId) &&
+          selectedIds.has(row.id) &&
+          row.state !== 'available'
+        )
           throw new AgentError(row.reason ?? 'skill_not_discovered');
       }
       for (const original of selectedBindings) {
+        if (targetId !== undefined && original.id !== targetId) continue;
         const entry = current.entries.find((entry) => configuredId(entry) === original.id);
         if (
           !entry ||
@@ -221,7 +254,9 @@ export async function createWorkspaceAssembly(options: {
         }));
     }
     async function find(id: string, entries?: Awaited<ReturnType<typeof catalogue>>) {
-      const entry = (entries ?? (await catalogue())).find((entry) => entry.id === id);
+      const entry = selectedIds.has(id)
+        ? (entries ?? (await catalogue(id))).find((entry) => entry.id === id)
+        : undefined;
       if (!entry) {
         const unavailable = initial.states.find(
           (row) => row.id === id && row.state === 'unavailable',
@@ -259,10 +294,13 @@ export async function createWorkspaceAssembly(options: {
         parameterNames: { id: 'skill_id' },
         omitParameters: ['version'],
       },
-      description:
+      description: [
         id === 'skills.load'
-          ? 'Load selected Skill knowledge on demand; never execute its resources. Wait for a successful result and read the returned guidance before planning dependent tool calls. Do not batch dependent commands with this call.'
-          : 'Read a declared Skill resource as knowledge; never execute code. Wait for a successful result and read the returned guidance before planning dependent tool calls. Do not batch dependent commands with this call.',
+          ? 'Load selected Skill knowledge on demand; never execute its resources.'
+          : 'Read a declared Skill resource as knowledge; never execute code.',
+        'Reuse the full text if already in context. After compaction, read it again only if it is missing and needed.',
+        'Wait for a successful result and read the returned guidance before planning dependent tool calls. Do not batch dependent commands with this call.',
+      ].join(' '),
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -286,25 +324,17 @@ export async function createWorkspaceAssembly(options: {
           if (context.signal.aborted)
             return { outcome: 'cancelled', content: 'cancelled_after_skill_read' };
           if (id === 'skills.load') {
-            loaded.add(value.id);
-            let alreadyLoaded = await context.hasDecisionSkillBody?.(value.id, selected.body);
-            const previous = alreadyLoaded ? [] : await context.readDecisionToolResults?.();
-            alreadyLoaded ||= previous?.some(({ execution, content }) => {
-              if (
-                execution.definitionId !== 'skills.load' ||
-                execution.status !== 'succeeded' ||
-                content !== selected.body
-              )
-                return false;
-              const details = (
-                execution.result as { details?: { skillId?: string; version?: string } }
-              )?.details;
-              return (
-                details !== undefined &&
-                details.skillId === value.id &&
-                details.version === selected.version
-              );
-            });
+            const sourceId = skillKnowledgeSourceId(value.id);
+            const alreadyLoaded = await skillContentAlreadyVisible(
+              context,
+              id,
+              sourceId,
+              selected.version,
+              digest(selected.id),
+              selected.body,
+            );
+            if (context.signal.aborted)
+              return { outcome: 'cancelled', content: 'cancelled_after_skill_read' };
             return {
               outcome: 'succeeded',
               content: alreadyLoaded
@@ -313,9 +343,12 @@ export async function createWorkspaceAssembly(options: {
               details: {
                 skillId: value.id,
                 version: selected.version,
-                sourceId: `skill.body:${value.id}`,
+                sourceId,
+                catalogueDigest: digest(selected.id),
                 resources: selected.resources as unknown as Json,
-                ...(alreadyLoaded ? { alreadyLoaded: true } : {}),
+                ...(alreadyLoaded
+                  ? { alreadyLoaded: true, verifiedModelContentDigest: digest(selected.body) }
+                  : {}),
               },
             };
           }
@@ -326,16 +359,29 @@ export async function createWorkspaceAssembly(options: {
             path: value.path,
             availableCapabilities: allowed,
           });
+          const sourceId = skillKnowledgeSourceId(value.id, value.path);
+          const alreadyLoaded = await skillContentAlreadyVisible(
+            context,
+            id,
+            sourceId,
+            resource.version,
+            digest(selected.id),
+            resource.body,
+          );
           if (context.signal.aborted)
             return { outcome: 'cancelled', content: 'cancelled_after_skill_read' };
-          loaded.add(value.id);
-          loadedResources.set(`${value.id}:${value.path}`, { skillId: value.id, path: value.path });
           return {
             outcome: 'succeeded',
-            content: resource.body,
+            content: alreadyLoaded
+              ? 'already_loaded: The complete Skill resource is already in this request.'
+              : resource.body,
             details: {
               version: resource.version,
-              sourceId: `skill.resource:${value.id}:${value.path}`,
+              sourceId,
+              catalogueDigest: digest(selected.id),
+              ...(alreadyLoaded
+                ? { alreadyLoaded: true, verifiedModelContentDigest: digest(resource.body) }
+                : {}),
             },
           };
         } catch (error) {
@@ -375,7 +421,12 @@ export async function createWorkspaceAssembly(options: {
       root,
       options.workingEnvironment ?? { platform: process.platform },
     );
-    const captureSources = async (requests: readonly SourceRequest[]): Promise<ContextSource[]> => {
+    const captureSources: NonNullable<ContextSources['captureBatch']> = async (
+      requests,
+      selection,
+    ) => {
+      if (selection?.workspaceRead)
+        return [{ ...contract }, ...(await projectSource.capture(selection.workspaceRead))];
       const result = [{ ...contract }, ...(await projectSource.captureBatch!(requests))];
       if (!requests.length) return result;
       const current = await catalogue();
@@ -396,36 +447,89 @@ export async function createWorkspaceAssembly(options: {
       }));
       if (summaries.length) {
         const visible = summaries.map(({ version: _version, ...summary }) => summary);
-        // Detect changes to knowledge even when all visible catalogue fields stay the same.
-        result.push(
-          source(
-            'skills.catalogue',
-            'skill_catalogue',
-            JSON.stringify(visible),
-            JSON.stringify(summaries),
-          ),
+        const catalogueSource = source(
+          'skills.catalogue',
+          'skill_catalogue',
+          JSON.stringify(visible),
         );
+        const sealedDigest = selection?.sealedSkillCatalogueDigest;
+        // Recompute the legacy identity to recover an unchanged request recorded before this split.
+        if (
+          sealedDigest !== undefined &&
+          sealedDigest !== catalogueSource.digest &&
+          sealedDigest === digest(JSON.stringify(summaries))
+        )
+          catalogueSource.digest = sealedDigest;
+        result.push(catalogueSource);
       }
-      for (const id of [...loaded].sort()) {
-        const selected = await checkpointBody(id);
-        result.push(source(`skill.body:${id}`, 'skill', selected.body));
-      }
-      for (const [key, selected] of [...loadedResources.entries()].sort(([a], [b]) =>
-        a.localeCompare(b),
-      )) {
-        const skill = await checkpointBody(selected.skillId);
-        const resource = await skillSource.readResource({
+      const entries = new Map(current.map((entry) => [entry.id, entry]));
+      const bodyIds = new Set<string>();
+      const resources = new Map<string, { skillId: string; path: string }>();
+      const readResource = (skill: Awaited<ReturnType<typeof body>>, path: string) =>
+        skillSource.readResource({
           skillId: skill.id,
           version: skill.version,
-          path: selected.path,
+          path,
           availableCapabilities: allowed,
         });
-        result.push(source(`skill.resource:${key}`, 'skill_resource', resource.body));
+      const legacyResources = new Map<string, Awaited<ReturnType<typeof readResource>>>();
+      for (const read of selection?.skillReads ?? []) {
+        const entry = entries.get(read.skillId);
+        const definition = read.path === undefined ? 'skills.load' : 'skills.resource';
+        if (!selectedToolIds.includes(definition) || !entry) continue;
+        if (read.catalogueDigest !== undefined) {
+          if (read.catalogueDigest !== digest(entry.sourceId)) continue;
+        } else if (read.path === undefined && read.version !== entry.version) {
+          continue;
+        }
+        if (read.path !== undefined) {
+          const skill = await checkpointBody(read.skillId);
+          if (!skill.resources.some(({ path }) => path === read.path)) continue;
+          const sourceId = skillKnowledgeSourceId(read.skillId, read.path);
+          if (read.catalogueDigest === undefined) {
+            const resource = await readResource(skill, read.path);
+            if (resource.version !== read.version) continue;
+            legacyResources.set(sourceId, resource);
+          }
+          resources.set(sourceId, { skillId: read.skillId, path: read.path });
+        }
+        bodyIds.add(read.skillId);
+      }
+      for (const id of [...bodyIds].sort()) {
+        const sourceId = skillKnowledgeSourceId(id);
+        if (selection?.skillBodyIds && !selection.skillBodyIds.has(sourceId)) continue;
+        const selected = await checkpointBody(id);
+        result.push(source(sourceId, 'skill', selected.body));
+      }
+      const resourceIds = new Set([
+        ...(selection?.skillResourceIds ?? []),
+        ...(selection?.coveredSkillResources?.ids ?? []),
+      ]);
+      let coveredTokens = selection?.coveredSkillResources?.tokens ?? 0;
+      for (const sourceId of resourceIds) {
+        const selected = resources.get(sourceId);
+        if (!selected) continue;
+        const covered = selection && !selection.skillResourceIds.has(sourceId);
+        if (covered && coveredTokens === 0) break;
+        const skill = await checkpointBody(selected.skillId);
+        const resource =
+          legacyResources.get(sourceId) ?? (await readResource(skill, selected.path));
+        if (covered) {
+          const cost = estimateModelContext({
+            messages: [
+              { role: 'user', content: skillKnowledgeModelContent(sourceId, resource.body) },
+            ],
+            tools: [],
+          }).estimate.totalInputTokens;
+          if (cost > coveredTokens) continue;
+          coveredTokens -= cost;
+        }
+        result.push(source(sourceId, 'skill_resource', resource.body));
       }
       return result;
     };
     const sources: ContextSources = {
-      capture: (request) => captureSources([request]),
+      capture: (request, selection) => captureSources([request], selection),
       captureBatch: captureSources,
     };
     const extensions: Extension[] = [];
@@ -442,8 +546,10 @@ export async function createWorkspaceAssembly(options: {
       configured.length ||
       selectedEntries.length ||
       selectedToolIds.some((id) => skillIds.includes(id))
-    )
+    ) {
+      tools.forEach(registerSkillReadTool);
       extensions.push(defineExtension({ id: 'builtin.skills', version: '1', apiMajor: 1, tools }));
+    }
     const actualTools = new Map([
       ...(externalFiles ?? []).map((tool) => [tool.id, tool] as const),
       ...[...extensions, ...externalExtensions].flatMap((extension) =>
@@ -486,6 +592,19 @@ export async function createWorkspaceAssembly(options: {
       })),
       allowedCapabilities: allowed,
     };
+    const projectSkillBindings = selectedEntries.flatMap((entry) => {
+      const id = configuredId(entry) ?? entry.id;
+      const path = relative(root, entry.location);
+      return isAbsolute(entry.location) &&
+        path &&
+        !isAbsolute(path) &&
+        path !== '..' &&
+        !path.startsWith(`..${sep}`) &&
+        !skillSource.installedBinding(entry) &&
+        configured.find((skill) => skill.id === id)?.digest === undefined
+        ? [{ id, source: digest(entry.id), path }]
+        : [];
+    });
     return {
       extensions,
       toolIds: [...selectedToolIds],
@@ -502,6 +621,7 @@ export async function createWorkspaceAssembly(options: {
         ),
       ],
       dispose,
+      projectSkillBindings,
       snapshotFacts: { ...snapshotFacts, digest: digest(JSON.stringify(snapshotFacts)) },
     };
   } catch (error) {

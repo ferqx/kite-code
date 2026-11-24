@@ -6,6 +6,7 @@ import {
   type ContextSource,
   type ContextSources,
   type SourceRequest,
+  skillKnowledgeModelContent,
 } from '../context';
 import type { StandaloneScope, ToolScope, UnifiedExecution } from '../execution';
 import { readExecutionToolOwner } from '../execution/definition-owner';
@@ -1297,25 +1298,60 @@ export class ExtensionHost {
           throw new AgentError('model_input_scope_denied');
         return snapshot;
       })());
+    let skillDispatch: Promise<boolean> | undefined;
+    const verifiedSkillDispatch = () =>
+      (skillDispatch ??= (async () => {
+        const [model, tool] = await Promise.all([
+          this.options.store.getExecution(modelExecutionId),
+          this.options.store.getExecution(executionId),
+        ]);
+        return (
+          model?.kind === 'model' &&
+          model.status === 'succeeded' &&
+          model.modelDispatched === true &&
+          model.runId === scope.run.id &&
+          model.sessionId === command.sessionId &&
+          model.originStoreId === command.originStoreId &&
+          tool?.kind === 'tool' &&
+          tool.runId === model.runId &&
+          tool.sessionId === model.sessionId &&
+          tool.stepId === model.stepId &&
+          tool.originStoreId === model.originStoreId &&
+          (tool.decisionSource as Record<string, Json> | null)?.modelExecutionId === model.id
+        );
+      })());
     let visible: ReturnType<NonNullable<ActionContext['readDecisionToolResults']>> | undefined;
     return {
       ...context,
       ...(extension.id === 'builtin.skills'
         ? {
-            async hasDecisionSkillBody(skillId: string, content: string) {
-              const { request } = await decisionInput();
+            async hasDecisionSkillSource(sourceId: string, content: string) {
+              if (!(await verifiedSkillDispatch())) return false;
+              const { request, metadata } = await decisionInput();
+              const projected = skillKnowledgeModelContent(sourceId, content);
+              const captured = metadata.context?.sources.some(
+                (source) =>
+                  source.id === sourceId &&
+                  source.digest === createHash('sha256').update(content).digest('hex'),
+              );
               return request.messages.some(
                 (message) =>
-                  message.role === 'system' &&
+                  captured &&
+                  (message.role === 'system' || message.role === 'user') &&
                   message.sourceIds?.length === 1 &&
-                  message.sourceIds[0] === `skill.body:${skillId}` &&
-                  message.content === content,
+                  message.sourceIds[0] === sourceId &&
+                  (message.content === projected ||
+                    message.content === content ||
+                    (captured &&
+                      message.role === 'system' &&
+                      message.content.endsWith(`\n${content}`))),
               );
             },
           }
         : {}),
       readDecisionToolResults: () =>
         (visible ??= (async () => {
+          if (extension.id === 'builtin.skills' && !(await verifiedSkillDispatch())) return [];
           const snapshot = await decisionInput();
           const seen = new Set<string>();
           const results: Awaited<
@@ -1334,8 +1370,21 @@ export class ExtensionHost {
               execution.sessionId === command.sessionId &&
               execution.originStoreId === command.originStoreId &&
               execution.authorization?.dispatched === true
-            )
+            ) {
+              if (extension.id === 'builtin.skills') {
+                if (execution.status !== 'succeeded') continue;
+                const original = await this.options.store.getExecution(id);
+                if (
+                  !original ||
+                  original.callId !== message.toolCallId ||
+                  canonicalJson(
+                    (original.decisionSource as Record<string, Json> | null)?.executionRoot ?? null,
+                  ) !== canonicalJson(source.executionRoot ?? null)
+                )
+                  continue;
+              }
               results.push({ execution, content: message.content });
+            }
           }
           return results;
         })()),

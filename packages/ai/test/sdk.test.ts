@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
-import { ModelAttemptError, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import {
+  ModelAttemptError,
+  ModelContextOverflowError,
+  type ModelEvent,
+  type ModelRequest,
+} from '@kite-ai/ai';
 import {
   createCompatibleModelBinding,
   createSdkModelAdapter,
@@ -40,6 +45,7 @@ function chunk(delta: unknown, finish: string | null = null, usage?: unknown) {
 function endpoint(
   response: (incoming: Request) => Response | Promise<Response>,
   preset?: SdkModelPreset,
+  protocol?: 'responses',
 ) {
   const bodies: unknown[] = [];
   let calls = 0;
@@ -57,6 +63,7 @@ function endpoint(
     baseURL: `http://127.0.0.1:${server.port}/v1`,
     modelId: 'fake',
     apiKey: 'fixture-secret',
+    protocol,
     fetch: Object.assign(
       (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
         transportSignal = init?.signal;
@@ -306,6 +313,154 @@ test('repeated Provider usage is replaced by the final snapshot rather than adde
       type: 'finish',
       usage: { inputTokens: 31, outputTokens: 7, totalTokens: 38, raw: last },
     });
+    expect(data.calls).toBe(1);
+  } finally {
+    await data.close();
+  }
+});
+
+test.each([
+  {
+    make: () =>
+      Response.json(
+        { error: { message: 'Input context too long for this worker.' } },
+        { status: 400 },
+      ),
+    message: 'HTTP 400 · Input context too long for this worker.',
+  },
+  {
+    make: () =>
+      Response.json(
+        { error: { code: 'PRIVATE_WINDOW', message: 'Input exceeds this worker window.' } },
+        { status: 422 },
+      ),
+    message: 'HTTP 422 · PRIVATE_WINDOW · Input exceeds this worker window.',
+  },
+  {
+    make: () =>
+      Response.json({ detail: 'The selected worker is loading its model.' }, { status: 409 }),
+    message: 'HTTP 409 · The selected worker is loading its model.',
+  },
+  {
+    make: () =>
+      new Response('No inference slots are available.', {
+        status: 503,
+        headers: { 'content-type': 'text/plain' },
+      }),
+    message: 'HTTP 503 · No inference slots are available.',
+  },
+  {
+    make: () =>
+      sse(
+        'data: {"error":{"code":"PRIVATE_WORKER","message":"Worker failed before inference."}}\n\n',
+      ),
+    message: 'PRIVATE_WORKER · Worker failed before inference.',
+  },
+  {
+    make: () =>
+      Response.json(
+        { error: { code: 'PRIVATE_AUTH', message: 'Server echoed fixture-secret.' } },
+        { status: 422 },
+      ),
+    message: 'HTTP 422 · PRIVATE_AUTH',
+  },
+  {
+    make: () =>
+      Response.json(
+        { error: { message: 'Invalid payload. Project instructions' } },
+        { status: 422 },
+      ),
+    message: 'HTTP 422',
+  },
+  {
+    make: () =>
+      new Response('<html>Private proxy diagnostic</html>', {
+        status: 502,
+        headers: { 'content-type': 'text/html' },
+      }),
+    message: 'HTTP 502',
+  },
+])('keeps a bounded display diagnostic for compatible endpoint failures: $message', async ({
+  make,
+  message,
+}) => {
+  const data = endpoint(make);
+  try {
+    const result = await collect(data.adapter);
+    expect(ModelAttemptError.isInstance(result.error)).toBe(true);
+    expect(result.error).toMatchObject({ providerMessage: message });
+    expect(JSON.stringify(result.error)).not.toMatch(
+      /fixture-secret|Project instructions|127\.0\.0\.1|<html>/,
+    );
+    expect(result.events).toEqual([]);
+    expect(data.calls).toBe(1);
+  } finally {
+    await data.close();
+  }
+});
+
+test('only the explicit context_length_exceeded code qualifies a known context overflow', async () => {
+  const data = endpoint(() =>
+    Response.json(
+      { error: { code: 'context_length_exceeded', message: 'Context too long.' } },
+      { status: 400 },
+    ),
+  );
+  try {
+    const result = await collect(data.adapter);
+    expect(ModelContextOverflowError.isInstance(result.error)).toBe(true);
+    expect(data.calls).toBe(1);
+  } finally {
+    await data.close();
+  }
+});
+
+for (const protocol of ['chat-completions', 'responses'] as const) {
+  test.each([
+    'PRIVATE_CONTEXT',
+    'context_length_exceeded',
+  ] as const)(`${protocol} HTTP 200 error event retains the distinct provider code %s`, async (code) => {
+    const error = {
+      code,
+      type: 'invalid_request_error',
+      message: 'Worker rejected the context.',
+      param: 'input',
+    };
+    const frame =
+      protocol === 'responses' ? { type: 'error', sequence_number: 0, error } : { error };
+    const data = endpoint(
+      () => sse(`data: ${JSON.stringify(frame)}\n\n`),
+      undefined,
+      protocol === 'responses' ? protocol : undefined,
+    );
+    try {
+      const result = await collect(data.adapter);
+      expect(result.events).toEqual([]);
+      if (code === 'context_length_exceeded')
+        expect(ModelContextOverflowError.isInstance(result.error)).toBe(true);
+      else
+        expect(result.error).toMatchObject({
+          providerMessage: 'PRIVATE_CONTEXT · Worker rejected the context.',
+        });
+      expect(data.calls).toBe(1);
+    } finally {
+      await data.close();
+    }
+  });
+}
+
+test('a structured stream error after sampled output preserves the failed attempt', async () => {
+  const data = endpoint(() =>
+    sse(
+      chunk({ content: 'Partial reply' }) +
+        'data: {"error":{"code":"context_length_exceeded","message":"Worker aborted the stream."}}\n\n',
+    ),
+  );
+  try {
+    const result = await collect(data.adapter);
+    expect(ModelAttemptError.isInstance(result.error)).toBe(true);
+    expect(result.events).toContainEqual({ type: 'text_delta', text: 'Partial reply' });
+    expect(result.events.some(({ type }) => type === 'finish')).toBe(false);
     expect(data.calls).toBe(1);
   } finally {
     await data.close();

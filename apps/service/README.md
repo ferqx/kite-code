@@ -118,6 +118,8 @@ Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短
 
 默认装配注册[Agent 命名扩展](../../packages/agent/src/business/session-title/index.ts)。beforeRun 短 Action 保存 fallback 并登记唯一 detached Job；原 Run 激活后独立生成，原 Run 正式成功后发布。不创建 child Agent，不等待完成前远端钩子。Service model-only resolver 接收原 Run 和 AbortSignal，核原配置封存摘要、所选模型绑定（含 Provider 身份）及实际路由摘要，重新读取当前凭据和宿主 ceiling；同 ID 新配置不能静默替换。只构造无工具独立绑定，不复用主 Run lease 或重新扫描知识。资源域、32KiB／10码点与真实 drain 归 Agent；自动元数据不推进 controlRevision。
 
+模型绑定摘要以实际声明的窗口为准，模型未声明时，标题读取运行记录也兼可核对早期封存时填入 256K 的摘要。256K 估算用于压缩维护，标题资格仍依赖原模型身份、配置和路由。
+
 2026-11-09，Windows x64／Bun1.4.4，4a527742c 加当前工作树，[完整 Service 命名 HTTP](test/isolated/session-title.test.ts)宿主7项／125断言通过：实际 compatible SDK 所选模型、默认／注入 ceiling、派发前拒绝零标题请求、超过4KiB完整结果、封存后同 ID 模型替换拒绝、fallback、目录／正文隔离、配置池单次关闭和冷读零调用。并行请求按实际标题指令识别用途，不依赖到达下标。独立预算、未知发布及本机Native过程的实际证据分别归下述测量、Agent和Desktop owner。
 
 ### 生命周期性能测量
@@ -216,13 +218,13 @@ Context 提供 `POST /v1/sessions/{id}/context/compress` 和 `/context/compressi
 
 [默认 compatible SDK 压缩](test/isolated/compression-configuration.test.ts)与[自动分支](test/isolated/compression-automatic-configuration.test.ts)两个完整文件在本机 Windows x64/Bun 1.4.2 为 6 项／134 条断言通过，包含五个实际 SDK 场景与一个纯准备资格场景：45KiB 自定义说明完整进入实际请求、真实摘要与覆盖来源、后续 Model 精确采用摘要、可信摘要拒绝后的旧输入继续、两种 reset 预检、压缩/reset 物理丢 202 回复只查原命令且各一次 POST、冷只读零 Provider，以及单任务已结算 Tool 历史可压缩。Profile 由真实 Store 创建私有 ACL，不以 POSIX mkdir mode 代替 Windows 权限。该资格使用临时 profile、固定本地模型与临时凭据 backend，不代替真实模型压缩质量、目标窗口计数、正式调用者或完整平台资格。
 
-默认 Run binding 按原选中模型元数据启用自动压缩。用户模型条目兼容 `contextWindow`，同时提供时优先采用 `contextWindowTokens`；选中模型未声明窗口时，在该 Run 快照封存前明确写入 256K（262144 token）默认值。输入达到总窗口 75% 时触发，默认阈值 196608，1M 窗口阈值 786432。可选 JSONC `compression.thresholdTokens` 为正安全整数，随配置快照冻结并覆盖比例。触发与摘要后验证采用同一阈值；系统／可信来源／实际工具目录本身已超阈值，或缩小后仍达阈值时，以 `compression_insufficient_space` 结束原 Run。自动摘要按相同本地估算验证真实缩小，非缩小返回 `compression_not_reducing`；这两种错误保原历史、终止原执行，不走已知临时摘要失败的降级重试。摘要指令只保真正未完成的用户要求，不将未读参考文件变成义务。自定义可信 compressor 和手动选择保原合同。边界与真实 Core 停机分别见[窗口回归](test/isolated/compression-window.test.ts)、[原 Run 停机](test/isolated/compression-window-runtime.test.ts)；[用户窗口接线](test/isolated/user-window-compression.test.ts)覆盖真实本地 SDK 的 1M 别名、256K 缺省与自定义阈值；[长任务](test/isolated/long-running-compression.test.ts)继续覆盖完整 Files 和临时摘要失败。
+默认 Run binding 以冻结模型配置和实际业务输出预留计算可用输入。优先读取 `contextWindowTokens`，兼容 `contextWindow`，未声明窗口时按 256K 计算维护水位。有效水位是已知可用输入与配置 `compression.thresholdTokens` 或默认总窗口 75% 两者中的较小值。软水位处无法获得缩小的摘要时，仍可用的原窗口继续工作。SDK 将明确的 `context_length_exceeded` 与 HTTP 413、普通重连分别记录。Core 对同一决策最多派发一次更小的业务恢复请求，冷恢复复用原拒绝和压缩身份。窗口和输出预留未知时，默认估算只用于维护。具体证据见[预算回归](test/isolated/compression-window.test.ts)、[受控 SDK 超限](test/isolated/agent-context-window.test.ts)和[长任务回归](test/isolated/long-running-compression.test.ts)。
 
 默认算法通过可选 `prepare.measurement` 和 `validateSummaryReport` 交付冻结输入的触发观察及同口径前后本地估算；同一个验证输入复用计数计算，旧 `validateSummary` 仍须通过。人工压缩可记录实际前后值，但不因此新增自动缩小门禁。公开 `CompressionRecord.compression` 与 Trajectory attributes 共用有限合同，HTTP／Client 不丢 adopted 或准确统计，原版本不变；未采用结果不作为已释放上下文，旧算法缺值不推算。统计、原事务采用状态和准确摘要材料的完整边界归[压缩 owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)。本次 macOS／Bun 1.4.4、当前工作树经隔离本地假 Provider 的压缩 HTTP／automatic／window-runtime／Evidence 四文件共 10 项／265 断言通过；纯窗口 25 项／76 断言区分原基线、同口径前后和另一份真实摘要。不使用用户 Profile 或付费 Provider，不能替代目标模型 tokenizer／质量或 Native 体验资格。
 
 公共 `modelRetry` 接受无本地上限的 `maxAttempts:null` 和任意实际正 attempt；旧有限上界仍可读取。Service 不替 Core 决定重试次数，生成 Client/OpenAPI 与 TUI 显示同源更新。主／子 Run 的工具失败都保存原调用并交回下一 Model，不按五次同参失败硬停，也不自动重放未知效果；来源数量不再由装配层另设 256 门槛。权限、格式、namespace、真实来源 read-set 与未知效果守卫保持。
 
-压缩后 Core 会独立保留经过原来源证明的真实用户及父到子任务输入，见[压缩 owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)。默认算法以 `CompressionInput.retainedMessages` 匹配完整原输入并计入固定成本；自动触发前及摘要后的窗口校验均包含它们，不能用一份遗漏引导的短摘要证明已腾出空间。Service 复用 Core 纯 `modelHistory` 识别实际 Host 组装边界，避免同 ID 历史被排除或误算固定成本。摘要承接事实、必要的已读引用细节与未完成要求，较新用户／父 Agent 的明确纠正按原来源和顺序生效；没有按自然语言引用永久固定全部工具正文，也不增加权限。窗口回归核父到子多来源原文成本、无剩余空间、非缩小和 Host ID 碰撞，HTTP／SDK 压缩回归核摘要与独立原用户来源同时进入后续请求。
+压缩后 Core 保留当前 Run 和明确续接的前一 Run 的原始输入、下一次决策待消费的工具及已纳入结果。标准摘要器将后继窗口的来源、保留尾部、Skill 回执和实际工具目录计入缩减估算。近期原文的初始可选预算为 `min(15000, floor(可用输入 × 0.15))`，缺省时用总窗口估算。必要内容和摘要预留接近容量时，可先让出该尾部。文件调用关联的目录规则按拟保留窗口捕获，并在发布前复核。Skill 正文按用户级指导组装，资料优先使用等值的原 Tool 回执，回填时明确标注来源。当前任务明确引用的已读资料优先保留，其他已覆盖资料使用剩余的近期预算。原输入和原执行依然通过既有记录查询。 [Core 压缩 owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)
 
 实际 Model 输入读取入口为 `GET /v1/sessions/{id}/model-inputs?storeId=...` 和 `GET /v1/sessions/{id}/executions/{executionId}/model-input?storeId=...`。主体只由 Service 宿主提供，闭合 query 不接受 path、Artifact ref/hash 或 renderer 主体。目录需要准确 Session，每页最多 200 项的固定上界 keyset 可以取得第 201 次之后的调用；正文使用 Core 的原请求读取，不捕获现在来源、读取现在配置或调用 Model。大正文由 [model-input-response.ts](src/model-input-response.ts) 在原内容核实后分为 64KiB wire chunks，带完整 size/SHA，保留 no-store；Client 成功 EOF 核实后才发布全文，不以便利 JSON 大小静默裁剪。
 
@@ -423,9 +425,11 @@ W09 二进制内容使用 `GET /v1/sessions/{id}/artifacts/{refId}?storeId=&scop
 
 默认全局登记 `@kite-ai/agent/files` 的 6 个 `files.*` Tool，每 Run 装配针对实际持久 Workspace root 选择这组定义，以及普通 version-1 `skills.load`/`skills.resource`。`effective.tools` 选择准确 ID；禁用项不在目录，未知 ID 拒绝新 Run，明确选择的 builtin version 必须匹配实际注册版本（`files.read@3`）。非空 Tool/Skill `options` 当前不支持，局部失败，不显示为未实际应用的 effective 设置。可信额外 Tool ID 只能经宿主 `knownToolIds` 提供，Runtime 仍核真实注册。配置不能提供 root、权限、Tool 实现或 capability grant。
 
-显式配置的 Skills 使用 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。路径越界和重复物理位置局部不可用。用户安装目录按[同源知识目录](#同源-skill-知识目录)接入。可选 digest 固定 Skill 字节。模型看到的 `skills.catalogue` 包含技能身份、摘要与依赖。宿主计算目录来源摘要时同时使用原版本；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。Skill 工具描述要求先等待成功结果、读取指导，再规划依赖工具调用，不将依赖命令与该知识加载同批发送；这只是模型指导，不代替来源新鲜度检查，也不自动重放已退休调用。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
+显式配置的 Skills 使用 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。路径越界和重复物理位置局部不可用。用户安装目录按[同源知识目录](#同源-skill-知识目录)接入。可选 digest 固定 Skill 字节。模型看到的 `skills.catalogue` 包含技能身份、摘要与依赖。目录来源摘要使用模型可见字段与实际能力，冻结的旧目录按可核实的原摘要恢复；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。Skill 工具描述要求先等待成功结果、读取指导，再规划依赖工具调用，不将依赖命令与该知识加载同批发送；这只是模型指导，不代替来源新鲜度检查，也不自动重放已退休调用。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
 
 默认 Run 的完整来源请求接入 `captureBatch`：项目来源按全部原定义/输入核实际目标，Skill catalogue及已加载正文仅在该检查点复用；下一检查点重新捕获。所选 MCP 来源继续对每个原请求执行现有 scope/read-set 核验，Workflow fork fence仍在捕获前检查。总唯一 source和冲突摘要门禁保持，不能按 Tool 名丢弃不同文件输入。[默认长任务](test/isolated/long-run-sources.test.ts)经正式 paired 装配、公开 Client和 compatible SDK 完成同 Run 的 257 次不同 Files读取，完整原指令进入 18 次实际请求，两次冷历史读取零重放；[公开长历史接续](test/isolated/long-run-resume.test.ts)另核 4096 次原效果后恢复同一 Run。两项证据不替代 installed客户端、真实 Provider或平台资格。
+
+宿主按实际适配器注册 `skills.load` 与 `skills.resource` 为知识读取。派发核当前能力、用户输入与授权，读取阶段核所选 Skill 的规范身份、固定摘要及声明路径。独立读取在其他来源变化后继续执行，未固定版本的项目 Skill 可取得原位置的新正文。随后组装的 Model 读取新上下文与已完成回执。[混合批次回归](test/isolated/skill-context-compression.test.ts)同时核对读取成功、未声明资源拒绝、过时的文件写入未派发。
 
 [Workspace 装配](src/assembly.ts)在向项目来源选择 Files 目标时先核路径是否位于原根目录；越界目标只保留根说明捕获，由原 Files 边界返回普通拒绝结果，让同一 Run 的模型继续解释。该筛选不授予外部文件权限，也不吞掉必需根说明或内部目录的读取失败。[回归](test/isolated/assembly-file-denial.test.ts)核实际拒绝、下一 Model、无外部正文／说明、跨盘路径和坏根说明仍失败关闭。
 
@@ -850,6 +854,10 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 ## 同源 Skill 知识目录
 
+默认装配从 Runtime 取得冻结选区内的已提交读取回执。装配时再核技能真实来源、选择、绑定与声明路径，并分别取得正文和本次采用的资源。适配器读出内容到 Store 提交之间，兄弟调用仍使用原封存来源。已确认的普通原生工作区 `files.read` 使用目标自己的项目指令校验，附件、Plan、PDF、外部文件及效果工具沿完整派发合同。[同定义实际路由回归](test/isolated/assembly-http.test.ts)
+
+默认恢复装配核对当前可信根、规范来源、选择及未固定资格。根普通 Model 尚未派发或已退役时，可为同源正文变化重组。后继 Model 已成功时，待执行工具按该 Model 已封存的正文摘要接续。目录中未参与该决策的 Skill 以原封存的可见目录核对。符合条件的版本用于重算原配置 CAS，实际读取仍核当前文件和权限。安装项、固定摘要、根变化及缺少原来源证明的记录继续完整核配置。 [恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)
+
 用户级正文预览使用独立 `user_skill_document` capability 与 `GET /v1/config/user/skills/document`，参数仅为 Store、技能ID、正文版本及目录revision。`readUserDocument` 沿同一用户配置和已核来源重新发现，拒绝旧revision、换版、已禁用、未发现及重复来源，只返回准确身份与最多1MiB UTF-8正文；不接收路径，不返回资源入口。缺少执行依赖仍可阅读说明，原 `load/resource` 的依赖检查保持。目录分页仍只传元数据，读取正文不创建 Session、Run、Command、模型请求或技能激活。实现与持续取舍见[正文预览决定](../../.agents/notes/implemented/feature/2026-11-04-native-skill-document-preview.md)。
 
 [assembly](src/assembly.ts) 的 `skills.load/resource` 将模型参数 `id` 映射为 `skill_id`，读取资源时另带 `path`。公开 schema 不接收 `version` 或 `description`。宿主调用保留可选版本并继续验证准确来源。多余字段沿闭合 schema 返回准确校验失败，未进入 SkillSource；后续调用使用当前 schema 继续。已有历史输入及封存请求保留原记录，不因字段移除而改写或重发，Tool／Protocol 版本保持。执行描述仅由 [Browser 工具](../../packages/agent/src/tools/browser/README.md)声明。
@@ -1070,7 +1078,7 @@ Session closed query 新增可选 `snapshotCursor`；续页元数据变化返回
 [web-permissions](test/isolated/web-permissions.test.ts)实际验证默认 Auto 的可信 Web fetch 零审核／零审批卡且取得实际正文；请求批准的人工卡前零 DNS/socket，Full 常规 fetch，网络关闭与未信任 Workspace 在 DNS/socket 前拒绝，SSRF 检查拒绝危险解析结果且不建立 socket，不因模式放宽。局部与完整 macOS 证据归[权限 owner](../../packages/agent/src/permissions/README.md)，Linux/Windows 原生资格与 RSS/完整观测门禁保留。
 
 
-默认 Workspace assembly 显式装配 Agent 的纯 `agentContractSource`，根和 child 使用同一稳定静态规则／可缓存事实。项目文件内容由 Agent 来源适配器标为历史之后的 user 数据，Planning 动态状态沿实际 Run 的唯一尾部来源；Service 不生成计划状态或权限规则。普通请求、压缩和展开共用 Agent 的来源组装，完整内容／freshness 与原业务门禁继续独立核验，详见[Agent 上下文 owner](../../packages/agent/README.md)。
+默认 Workspace assembly 显式装配 Agent 的纯 `agentContractSource`，根和 child 使用同一稳定静态规则／可缓存事实。项目文件内容由 Agent 来源适配器标为历史之后的 user 数据，Planning 动态状态沿实际 Run 的唯一尾部来源；Service 不生成计划状态或权限规则。普通请求、压缩和展开共用 Agent 的来源组装，完整内容／freshness 与原业务门禁继续独立核验，详见[Agent 上下文 owner](../../packages/agent/README.md)。技能正文及声明资料由当前 Run 按需捕获，封存输入已含准确原文时重复读取返回 `already_loaded`，具体复用和压缩规则见 [Skills owner](../../packages/agent/src/skills/README.md)。
 
 ## 终端展示的新增只读字段
 
@@ -1089,7 +1097,7 @@ SQLite 增量恢复证明由 Agent Store 的正常事务维护，公开 HTTP 保
 
 ## 上下文统计观察
 
-`GET /v1/sessions/{id}/context/estimate?storeId=...&executionId=...` 复用原 Model 输入的主体／Store／Session 权限，以完整当前所选历史和已保存来源布局返回下一请求预测及本会话累计实际用量。查询不初始化 Provider、不捕获现在来源、不写 Store；Client 验证目标、基线与加总关系。默认压缩沿 Core 当次实际工具与已核实输入基线加新增估算，采用明确窗口或 256K 缺省的总量 75%，显式 `compression.thresholdTokens` 覆盖比例；摘要快照保存数字投影及阈值出处。口径与失效规则见 [Core owner](../../packages/agent/src/context-estimate.README.md)，验证见[完整会话与冷读取](test/isolated/context-token-estimate.test.ts)。
+`GET /v1/sessions/{id}/context/estimate?storeId=...&executionId=...` 以原 Model 输入的主体、Store、Session 权限读取所选历史和已封存来源布局，返回预测和本会话累计实际用量。查询为只读。默认自动压缩使用当次实际工具和可复用的实测输入基线加新增估算，按本次模型的有效维护水位判断。摘要记录保留触发投影和同口径的替换估算。 [Core 用量规则](../../packages/agent/src/context-estimate.README.md) · [冷读取回归](test/isolated/context-token-estimate.test.ts)
 
 
 ## 普通输入与旧处理记录

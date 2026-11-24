@@ -553,6 +553,93 @@ export function callContextSelection(
       return db.rollback(error);
     }
   }
+  if (method === 'readRunSkillReceipts') {
+    const input = args[0] as Parameters<Store['readRunSkillReceipts']>[0];
+    return db.db.transaction(() => {
+      db.identity(input.expectedStoreId);
+      const current = session(db, input.sessionId);
+      if (current.context_selection_id !== input.selectionId)
+        throw new AgentError('context_selection_changed');
+      if (subject(db, input.sessionId) !== input.subjectId)
+        throw new AgentError('context_scope_denied');
+      const upper = decimal(input.upperSeq ?? String(current.next_seq));
+      const after = decimal(input.afterSeq ?? '0');
+      if (upper > BigInt(current.next_seq!) || after > upper) throw new AgentError('cursor_ahead');
+      const messages = filter(selected(db, current), 'm.seq');
+      return db
+        .rows(
+          `SELECT m.id AS receipt_message_id, m.seq AS receipt_seq, e.id AS execution_id,
+                  json_extract(e.decision_source_json,'$.executionRoot') AS execution_root,
+                  json_extract(e.intent_json,'$.id') AS skill_id,
+                  CASE WHEN e.adapter_id='skills.resource' THEN json_extract(e.intent_json,'$.path') END AS resource_path,
+                  json_extract(e.result_json,'$.details.version') AS version,
+                  json_extract(e.result_json,'$.details.sourceId') AS source_id,
+                  json_extract(e.result_json,'$.details.catalogueDigest') AS catalogue_digest,
+                  json_type(e.result_json,'$.details.alreadyLoaded')='true' AS already_loaded,
+                  CASE WHEN model.id IS NOT NULL THEN json_extract(e.result_json,'$.details.verifiedModelContentDigest') END AS verified_model_content_digest
+           FROM message m JOIN execution e ON e.id=json_extract(m.source_json,'$.sourceIds[0]')
+           JOIN run r ON r.id=m.run_id AND r.session_id=m.session_id
+           LEFT JOIN execution model ON model.id=json_extract(e.decision_source_json,'$.modelExecutionId')
+             AND model.kind='model' AND model.state='succeeded' AND model.dispatched=1
+             AND model.run_id=e.run_id AND model.session_id=e.session_id AND model.origin_store_id=e.origin_store_id
+             AND model.root_work_command_id=e.root_work_command_id AND model.root_work_seq=e.root_work_seq
+             AND model.step_id=e.step_id
+           WHERE m.session_id=? AND m.run_id=? AND r.origin_store_id=? AND r.context_selection_id=?
+             AND e.session_id=m.session_id AND e.run_id=m.run_id AND e.origin_store_id=r.origin_store_id
+             AND e.root_work_command_id=r.root_work_command_id AND e.root_work_seq=r.root_work_seq
+             AND (e.context_selection_id IS NULL OR e.context_selection_id=r.context_selection_id)
+             AND e.kind='tool' AND m.role='tool' AND m.status='complete'
+             AND json_array_length(m.source_json,'$.sourceIds')=1
+             AND json_extract(m.source_json,'$.toolCallId')=e.call_id
+             AND e.adapter_id IN ('skills.load','skills.resource') AND e.dispatched=1
+             AND e.state='succeeded' AND json_extract(e.result_json,'$.outcome')='succeeded'
+             AND json_type(e.intent_json,'$.id')='text'
+             AND (e.adapter_id='skills.load' OR json_type(e.intent_json,'$.path')='text')
+             AND json_type(e.result_json,'$.details.version')='text'
+             AND json_type(e.result_json,'$.details.sourceId')='text'
+             AND COALESCE(json_type(e.decision_source_json,'$.executionRoot'),'null') IN ('object','null')
+             AND CASE WHEN json_type(e.decision_source_json,'$.modelExecutionId')='text' THEN
+               (SELECT CASE WHEN COUNT(*)=1 THEN MAX(binding.value ->> '$.extensionId') END
+                FROM json_each(model.decision_source_json,'$.toolBindings') binding
+                WHERE binding.type='object' AND binding.value ->> '$.id'=e.adapter_id
+                  AND binding.value ->> '$.version'=e.definition_version)='builtin.skills'
+             ELSE
+               EXISTS (SELECT 1 FROM json_each(r.config_json,'$.tools') tool
+                 WHERE tool.type='object' AND tool.value ->> '$.id'=e.adapter_id
+                   AND tool.value ->> '$.version'=e.definition_version
+                   AND tool.value ->> '$.extensionId'='builtin.skills')
+               AND EXISTS (SELECT 1 FROM json_each(r.config_json,'$.extensions') extension
+                 WHERE extension.type='object' AND extension.value ->> '$.id'='builtin.skills')
+             END
+             AND m.seq>? AND m.seq<=? AND ${messages.sql}
+           ORDER BY m.seq`,
+          input.sessionId,
+          input.runId,
+          input.expectedStoreId,
+          input.selectionId,
+          after,
+          upper,
+          ...messages.args,
+        )
+        .map((row) => ({
+          messageId: String(row.receipt_message_id),
+          seq: String(row.receipt_seq),
+          executionId: String(row.execution_id),
+          executionRoot: row.execution_root === null ? null : parse<Json>(row.execution_root),
+          skillId: String(row.skill_id),
+          ...(typeof row.resource_path === 'string' ? { path: row.resource_path } : {}),
+          version: String(row.version),
+          recordedSourceId: String(row.source_id),
+          ...(typeof row.catalogue_digest === 'string'
+            ? { catalogueDigest: row.catalogue_digest }
+            : {}),
+          alreadyLoaded: Boolean(row.already_loaded),
+          ...(typeof row.verified_model_content_digest === 'string'
+            ? { verifiedModelContentDigest: row.verified_model_content_digest }
+            : {}),
+        }));
+    })();
+  }
   if (method === 'readSelectedToolLocators') {
     const i = args[0] as Parameters<Store['readSelectedToolLocators']>[0];
     return db.db.transaction(() => {
@@ -580,7 +667,7 @@ export function callContextSelection(
     })();
   }
   if (['getSelectedContext', 'getExpandedContext', 'getModelContext'].includes(method)) {
-    const input = args[0] as Parameters<Store['getSelectedContext']>[0];
+    const input = args[0] as Parameters<Store['getModelContext']>[0];
     db.db.run('BEGIN');
     try {
       db.identity(input.expectedStoreId);
@@ -638,12 +725,29 @@ export function callContextSelection(
       const covered = compression ? BigInt(compression.coveredThroughSeq) : 0n;
       const modelContext = method === 'getModelContext';
       const identifyInputs = modelContext || method === 'getExpandedContext';
+      const retainedRuns =
+        modelContext &&
+        (input.boundRetainedInputs || compression?.inputHighWaterSeq !== undefined) &&
+        input.retainedInputRunIds !== undefined
+          ? new Set(input.retainedInputRunIds)
+          : undefined;
+      const restrictedCoverage = retainedRuns && compression?.inputHighWaterSeq !== undefined;
+      const coveredInputs = restrictedCoverage
+        ? `role='user' AND (
+            run_id IN (SELECT value FROM json_each(?)) OR EXISTS (
+              SELECT 1 FROM run r WHERE r.id=message.run_id AND r.session_id=message.session_id
+                AND r.origin_store_id=? AND r.is_active=0
+                AND r.status IN ('interrupted','cancelled','failed')
+            )
+          )`
+        : "role='user'";
       const messageRows = db.rows(
-        `SELECT * FROM message WHERE session_id=? AND seq>? AND seq<=? AND status='complete' AND ${mf.sql} AND ${historyOnlyCompression()} AND ${modelContext ? `(seq>${covered} OR role='user')` : `seq>${covered}`} ORDER BY seq LIMIT ?`,
+        `SELECT * FROM message WHERE session_id=? AND seq>? AND seq<=? AND status='complete' AND ${mf.sql} AND ${historyOnlyCompression()} AND ${modelContext ? `(seq>${covered} OR (${coveredInputs}))` : `seq>${covered}`} ORDER BY seq LIMIT ?`,
         input.sessionId,
         after,
         upper,
         ...mf.args,
+        ...(restrictedCoverage ? [JSON.stringify([...retainedRuns]), input.expectedStoreId] : []),
         messageLimit + 1,
       );
       const sourceRows = db.rows(
@@ -655,6 +759,7 @@ export function callContextSelection(
         sourceLimit + 1,
       );
       const messages: ReturnType<SqliteOperations['message']>[] = [];
+      const verifiedInputMessageIds: string[] = [];
       const retainedInputMessageIds: string[] = [];
       const resultSources: ResultContextSource[] = [];
       const inputSubject = identifyInputs ? subject(db, input.sessionId) : undefined;
@@ -698,7 +803,11 @@ export function callContextSelection(
           break;
         }
         messages.push(value);
-        if (originalInput) retainedInputMessageIds.push(value.id);
+        if (originalInput) {
+          if (modelContext) verifiedInputMessageIds.push(value.id);
+          if (!retainedRuns || retainedRuns.has(String(row.run_id)))
+            retainedInputMessageIds.push(value.id);
+        }
         scannedMessageSeq = String(row.seq);
         scannedMessages++;
         bytes += size;
@@ -718,6 +827,7 @@ export function callContextSelection(
         ...(compression ? { compression } : {}),
         highWaterSeq: upper,
         messages,
+        ...(modelContext ? { verifiedInputMessageIds } : {}),
         ...(identifyInputs ? { retainedInputMessageIds } : {}),
         resultSources,
         nextAfterSeq: modelContext

@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type ModelAdapter,
+  ModelContextOverflowError,
   type ModelMessage,
   type ModelRequest,
   ModelRequestLimitError,
@@ -20,9 +22,18 @@ import { semanticReviewContent, semanticReviewContext } from './authorization-re
 import { isBrowserOrchestrator } from './browser-tool-identity';
 import { openAutomaticTitleOperation } from './business/session-title/operation';
 import {
+  type CompressionHistory,
+  type ContextOverflowRecovery,
+  type HistoryPosition,
+  inputTokens,
+  selectCompressionCoverage,
+  shortenSummaryHistory,
+} from './compression-window';
+import {
   assertContextSource,
   type ContextCompressor,
   type ContextSource,
+  type ContextSourceSelection,
   type ContextSources,
   type SourceRequest,
   sealCompressor,
@@ -34,6 +45,12 @@ import {
   frozenTokenModel,
   projectModelContext,
 } from './context-estimate';
+import {
+  latestSkillReceipts,
+  readSkillReceipts,
+  type SkillReceiptCursor,
+  skillReceiptMessage,
+} from './context-skill-receipts';
 import {
   PendingUserCancellation,
   type ScopedBindings,
@@ -51,7 +68,7 @@ import {
 import { ChangeWaits } from './execution/change-waits';
 import { ChildSlots } from './execution/child-slots';
 import { ControlObservation } from './execution/control-observation';
-import { readExecutionToolOwner } from './execution/definition-owner';
+import { isRegisteredSkillReadTool, readExecutionToolOwner } from './execution/definition-owner';
 import {
   browserContinuationSource,
   inheritHostRevocation,
@@ -151,7 +168,11 @@ import {
 import { modelExecutionId } from './model-identifier';
 import { modelOutputReference, readModelOutput } from './model-output';
 import { modelReference } from './model-reference';
-import { matchesModelRequestIdentity } from './model-request-identity';
+import {
+  contextRefreshCancellation,
+  isOrdinaryContextRefreshRequest,
+  matchesModelRequestIdentity,
+} from './model-request-identity';
 import { formatChildResult } from './model-result-presentation';
 import {
   captureModelRequestMetadata,
@@ -464,6 +485,13 @@ function sealSources(sources: ContextSources | undefined): ContextSources | unde
   });
 }
 
+interface RunHistorySnapshot extends CompressionHistory {
+  skillReads?: Awaited<ReturnType<typeof readSkillReceipts>>;
+  skillProjection?: readonly { sourceId: string; executionId: string }[];
+  skillReceiptCursor?: SkillReceiptCursor;
+  executionRoot?: Json;
+}
+
 type RunBinding = {
   nativeWebSearch?: ScopedBindings['nativeWebSearch'];
   verifiedSessionCompressionTarget?: true;
@@ -484,14 +512,39 @@ type RunBinding = {
   readStepCapabilities?: StepCapabilitiesReader;
   dispose?: () => Promise<void>;
 };
+function rejectedContextOverflow(
+  execution: ExecutionRecord | null | undefined,
+): execution is ExecutionRecord {
+  const result = execution?.result as Record<string, Json> | null | undefined;
+  return (
+    execution?.kind === 'model' &&
+    execution.status === 'failed' &&
+    result?.code === 'model_context_overflow' &&
+    !result.firstOutput &&
+    !result.content &&
+    !result.reasoning &&
+    !result.modelOutput
+  );
+}
+
 type RunExecutionCheckpoint = {
+  resumeCommandId?: string;
+  contextRefreshOf?: string;
   modelRetry?: ModelRetrySource;
+  overflow?: {
+    recovery: ContextOverflowRecovery;
+    stage: 'compress' | 'dispatch' | 'finished';
+    unsentSummaryExecutionId?: string;
+  };
   loop?: LoopContext['checkpoint'];
   toolFailureStreak?: ToolFailureStreak;
   plannedModel?: ExecutionRecord;
   plannedTools: ReadonlyMap<string, ExecutionRecord>;
   modelRequest?: ModelRequest;
   modelSource?: Record<string, Json>;
+  allowProjectSkillContentChange?: true;
+  sealedSkillSources?: readonly ContextSource[];
+  sourceHistoryUpperSeq?: string;
   sourceRequests: readonly SourceRequest[];
   sourceRequestJournal?: import('./model-body').ModelBodyReference | null;
   completionGuidance?: {
@@ -566,6 +619,10 @@ export interface RuntimeOptions {
     readonly session: Readonly<SessionRecord>;
     readonly workspace: Readonly<WorkspaceRecord>;
     readonly signal: AbortSignal;
+    /** The verified root checkpoint is an ordinary, never-dispatched Model or its audited cancellation. */
+    readonly allowProjectSkillContentChange?: true;
+    /** Trusted Skill sources from the last dispatched Model's sealed decision. */
+    readonly sealedSkillSources?: readonly ContextSource[];
   }) => Promise<RunConfiguration>;
   /** Restores only an explicitly registered Job query implementation, never a Model binding. */
   resolveRecoveryJobConfiguration?: (input: {
@@ -5432,6 +5489,33 @@ export class AgentRuntime {
       subjectId,
     };
     const source = await this.readResumeModelSource(last, subjectId, signal);
+    const cancellation =
+      last.status === 'cancelled'
+        ? (last.result as Record<string, Json> | null)?.content
+        : undefined;
+    // The Store has already verified the source and audited either cancellation proof.
+    if (
+      state.session.parentSessionId === null &&
+      last.modelDispatched === false &&
+      (last.status === 'planned' ||
+        cancellation === contextRefreshCancellation ||
+        cancellation === 'superseded_by_user_input') &&
+      isOrdinaryContextRefreshRequest(source, last.id)
+    )
+      result.allowProjectSkillContentChange = true;
+    if (
+      state.session.parentSessionId === null &&
+      last.modelDispatched &&
+      Array.isArray(source.sources)
+    ) {
+      const skills = (source.sources as unknown as ContextSource[]).filter(
+        (entry) =>
+          entry?.scope === 'run-knowledge' &&
+          (entry.kind === 'skill' || entry.kind === 'skill_catalogue'),
+      );
+      for (const skill of skills) assertContextSource(skill);
+      if (skills.length) result.sealedSkillSources = skills;
+    }
     // Before removal, an ordinary Run could pause at an in-band input
     // interpreter without a processing Run configuration. Retire that exact
     // verified checkpoint before a fresh-model retry discards its source.
@@ -5465,6 +5549,9 @@ export class AgentRuntime {
         (continuation.version !== 1 && continuation.version !== 2 && continuation.version !== 3) ||
         continuation.runId !== state.run.id ||
         continuation.contextSelectionId !== state.run.contextSelectionId ||
+        (continuation.sourceHistoryUpperSeq !== undefined &&
+          (typeof continuation.sourceHistoryUpperSeq !== 'string' ||
+            !/^(?:0|[1-9][0-9]{0,18})$/.test(continuation.sourceHistoryUpperSeq))) ||
         (continuation.version === 3
           ? continuation.sourceRequestJournal === undefined
           : !Array.isArray(continuation.sourceRequests)) ||
@@ -5474,6 +5561,7 @@ export class AgentRuntime {
         (saved.count === 0 ? saved.signature !== null : typeof saved.signature !== 'string')
       )
         throw new AgentError('run_continuation_invalid');
+      result.sourceHistoryUpperSeq = continuation.sourceHistoryUpperSeq as string | undefined;
       if (currentContinuation) {
         streak.count = Number(saved.count);
         streak.signature = saved.signature as string | null;
@@ -5700,8 +5788,74 @@ export class AgentRuntime {
     }
     result.sourceRequests = [...requests.values()];
     result.toolFailureStreak = streak;
+    const savedOverflow = source.overflowRecovery as unknown as ContextOverflowRecovery | undefined;
+    if (savedOverflow !== undefined && (source.compressionId || last.status !== 'succeeded')) {
+      if (
+        !savedOverflow ||
+        typeof savedOverflow.executionId !== 'string' ||
+        !Number.isSafeInteger(savedOverflow.inputTokens) ||
+        savedOverflow.inputTokens < 1
+      )
+        throw new AgentError('run_continuation_invalid');
+      const rejected = await executionForResume(savedOverflow.executionId);
+      if (
+        !rejectedContextOverflow(rejected) ||
+        rejected.id === last.id ||
+        rejected.runId !== state.run.id ||
+        rejected.sessionId !== state.session.id ||
+        rejected.originStoreId !== state.run.originStoreId
+      )
+        throw new AgentError('run_continuation_invalid');
+      const selected = source.compressionId
+        ? await this.options.store.getModelContext({ ...scope, messageLimit: 1, sourceLimit: 1 })
+        : undefined;
+      const summaryResult = last.result as Record<string, Json> | null;
+      const replaceableSummary =
+        source.compressionId &&
+        (last.status === 'planned' ||
+          last.status === 'succeeded' ||
+          (last.status === 'failed' &&
+            summaryResult?.code === 'compression_summary_not_dispatched' &&
+            summaryResult.dispatchCommitted === false &&
+            !summaryResult.firstOutput &&
+            summaryResult.content === ''));
+      result.overflow = {
+        recovery: savedOverflow,
+        stage:
+          (last.status === 'planned' && !source.compressionId) ||
+          (selected?.compression &&
+            selected.compression.id === source.compressionId &&
+            last.status === 'succeeded')
+            ? 'dispatch'
+            : replaceableSummary
+              ? 'compress'
+              : 'finished',
+        ...(source.compressionId && last.status === 'planned'
+          ? { unsentSummaryExecutionId: last.id }
+          : {}),
+      };
+    } else if (!source.compressionId && !source.imageWindow && rejectedContextOverflow(last)) {
+      const rejected = await this.readOriginalModelInput({
+        ...scope,
+        executionId: last.id,
+        signal,
+      });
+      result.overflow = {
+        stage: 'compress',
+        recovery: {
+          executionId: last.id,
+          inputTokens: estimateModelContext(rejected.request).estimate.totalInputTokens,
+        },
+      };
+    }
     if (freshModel) {
-      if (!source.compressionId && !source.imageWindow && last.status !== 'cancelled') {
+      if (cancellation === contextRefreshCancellation) result.contextRefreshOf = last.id;
+      if (
+        !result.overflow &&
+        !source.compressionId &&
+        !source.imageWindow &&
+        last.status !== 'cancelled'
+      ) {
         const previousRetry = source.retry as unknown as ModelRetrySource | undefined;
         if (
           previousRetry &&
@@ -5814,13 +5968,13 @@ export class AgentRuntime {
     result.plannedTools = tools;
     result.loop = {
       kind: 'response',
-      stepId: last.stepId,
       response: {
         content: output.content,
         reasoning: output.reasoning,
         toolCalls: output.toolCalls,
         usage: {},
         executionId: last.id,
+        stepId: last.stepId,
         finishReason: (last.result as Record<string, Json> | null)?.finishReason as
           | string
           | undefined,
@@ -5904,6 +6058,12 @@ export class AgentRuntime {
               session: freeze(structuredClone(state.session)),
               workspace: freeze(structuredClone(workspace)),
               signal: controller.signal,
+              ...(prepared.sealedSkillSources
+                ? { sealedSkillSources: freeze(structuredClone(prepared.sealedSkillSources)) }
+                : {}),
+              ...(prepared.allowProjectSkillContentChange
+                ? { allowProjectSkillContentChange: true as const }
+                : {}),
             }),
           );
           preparationResources = resolved;
@@ -6099,7 +6259,7 @@ export class AgentRuntime {
           committed.run,
           binding,
           controller,
-          prepared,
+          { ...prepared, resumeCommandId: committed.command.id },
         );
         startGroup();
         complete(committed.command);
@@ -8928,6 +9088,10 @@ export class AgentRuntime {
           delivered: [...completionGuidance].map(([extensionId, key]) => ({ extensionId, key })),
           pending: continuationDirective,
         };
+        const sourceBoundary: Record<string, Json> =
+          historySnapshot.inputHighWaterSeq === undefined
+            ? {}
+            : { sourceHistoryUpperSeq: historySnapshot.inputHighWaterSeq };
         if (this.options.artifacts) {
           if (pendingSourceRequests.length) {
             sourceRequestJournal = await this.publishBody(
@@ -8950,6 +9114,7 @@ export class AgentRuntime {
             version: 3,
             runId: run.id,
             contextSelectionId: run.contextSelectionId,
+            ...sourceBoundary,
             sourceRequestJournal: sourceRequestJournal as unknown as Json,
             toolFailureStreak: { ...failureStreak },
             completionGuidance: guidance,
@@ -8959,6 +9124,7 @@ export class AgentRuntime {
           version: 2,
           runId: run.id,
           contextSelectionId: run.contextSelectionId,
+          ...sourceBoundary,
           sourceRequests: [...sourceRequests.entries()]
             .filter(([key]) => key !== 'model')
             .map(([, request]) => request as unknown as Json),
@@ -8968,11 +9134,13 @@ export class AgentRuntime {
       };
       let captured: ContextSource[] = [];
       let capturedRequests = new Map<string, SourceRequest>();
+      let sourceSelection: ContextSourceSelection | undefined;
       let childNaming: ContextSource | null = null;
       const capture = async (
         requests: Iterable<SourceRequest> = sourceRequests.values(),
         bindings = scope.bindings,
         hostSources?: Map<string, ContextSource>,
+        selection = sourceSelection,
       ) => {
         const configuredSources = bindings.sources;
         const sources = new Map<string, ContextSource>();
@@ -8996,10 +9164,10 @@ export class AgentRuntime {
           }
         };
         if (configuredSources?.captureBatch)
-          addHostSources(await configuredSources.captureBatch(requestList));
+          addHostSources(await configuredSources.captureBatch(requestList, selection));
         if (!configuredSources?.captureBatch)
           for (const request of requestList)
-            addHostSources((await configuredSources?.capture(request)) ?? []);
+            addHostSources((await configuredSources?.capture(request, selection)) ?? []);
         addSources(
           await this.extensionHost.contextSourcesBatch({
             command,
@@ -9015,10 +9183,142 @@ export class AgentRuntime {
         const result = [...sources.values()].sort((a, b) => a.id.localeCompare(b.id));
         return result;
       };
-      const captureModelSources = async (includeChildNaming: boolean) => {
+      const projectToolPath = ({ definitionId, input }: SourceRequest) => {
+        if (
+          !['files.read', 'files.write', 'files.edit'].includes(definitionId) ||
+          !input ||
+          typeof input !== 'object' ||
+          Array.isArray(input) ||
+          typeof input.path !== 'string'
+        )
+          return undefined;
+        return input.path;
+      };
+      type SealedModelSources = {
+        sources: readonly ContextSource[];
+        request: ModelRequest;
+        upperSeq?: string;
+      };
+      const sourceProjection = ({
+        recentMessages,
+        cutoff,
+        sealed,
+        recentHistoryTokens = windowBudget?.recentHistoryTokens ?? 0,
+      }: {
+        recentMessages?: readonly ModelMessage[];
+        cutoff?: bigint;
+        sealed?: SealedModelSources;
+        recentHistoryTokens?: number;
+      }) => {
+        const requests = new Map(sourceRequests);
+        if (recentMessages) {
+          const recentPaths = new Set<string>();
+          for (const message of recentMessages) {
+            for (const call of message.toolCalls ?? []) {
+              const path = projectToolPath(toolSourceRequest(call));
+              if (path !== undefined) recentPaths.add(path);
+            }
+          }
+          for (const [key, request] of requests) {
+            const path = projectToolPath(request);
+            if (path !== undefined && !recentPaths.has(path)) requests.delete(key);
+          }
+        }
+        let receipts = historySnapshot.skillReads ?? [];
+        if (sealed?.upperSeq === undefined && sealed) {
+          // A legacy seal without a historical upper bound may rely only on original
+          // receipt identities carried by that very request, never later reads.
+          const original = new Set(
+            sealed.request.messages.flatMap(({ role, content, sourceIds }) =>
+              role === 'tool' ||
+              (role === 'user' &&
+                content.startsWith('Completed Skill read (historical execution data):\n'))
+                ? (sourceIds ?? [])
+                : [],
+            ),
+          );
+          receipts = receipts.filter(({ executionId }) => original.has(executionId));
+        }
+        const skillReads = latestSkillReceipts(receipts);
+        if (sealed)
+          return {
+            requests,
+            selection: {
+              skillReads,
+              sealedSkillCatalogueDigest: sealed.sources.find(
+                ({ kind, id, scope }) =>
+                  kind === 'skill_catalogue' &&
+                  id === 'skills.catalogue' &&
+                  scope === 'run-knowledge',
+              )?.digest,
+              skillBodyIds: new Set(
+                sealed.sources.filter(({ kind }) => kind === 'skill').map(({ id }) => id),
+              ),
+              skillResourceIds: new Set(
+                sealed.sources.filter(({ kind }) => kind === 'skill_resource').map(({ id }) => id),
+              ),
+            },
+          };
+        const resources = skillReads.filter(({ path }) => path !== undefined);
+        if (cutoff === undefined || !recentMessages)
+          return {
+            requests,
+            selection: {
+              skillReads,
+              skillResourceIds: new Set(resources.map(({ sourceId }) => sourceId)),
+            },
+          };
+        const activeResourceIds = new Set(
+          resources
+            .filter(
+              ({ path, seq }) =>
+                BigInt(seq) > cutoff ||
+                retainedInputMessages.some(({ content }) => content.includes(path!)),
+            )
+            .map(({ sourceId }) => sourceId),
+        );
+        const selection: ContextSourceSelection = {
+          skillReads,
+          skillResourceIds: activeResourceIds,
+          coveredSkillResources: {
+            ids: resources
+              .filter(({ sourceId }) => !activeResourceIds.has(sourceId))
+              .reverse()
+              .map(({ sourceId }) => sourceId),
+            tokens:
+              recentHistoryTokens === 0
+                ? 0
+                : Math.max(0, recentHistoryTokens - inputTokens(recentMessages)),
+          },
+        };
+        return { requests, selection };
+      };
+      const prepareModelSources = async (
+        includeChildNaming: boolean,
+        sealed?: SealedModelSources,
+      ) => {
+        const cutoff =
+          historySnapshot.boundedCheckpoint && historySnapshot.previousCoverage
+            ? BigInt(historySnapshot.previousCoverage)
+            : undefined;
+        const recent =
+          cutoff === undefined
+            ? undefined
+            : sealed
+              ? modelHistory(sealed.sources, sealed.request.messages)
+              : selectedHistory.filter(
+                  (_, index) => BigInt(historySnapshot.positions![index]!.seq) > cutoff,
+                );
+        const projection = sourceProjection({
+          recentMessages: recent,
+          cutoff,
+          sealed,
+          recentHistoryTokens: historySnapshot.previousRecentHistoryTokens,
+        });
         // A Model decision depends on its own request set. Later sibling targets are
         // retained for the next Model, but cannot widen an unrelated Tool's check.
-        capturedRequests = new Map(sourceRequests);
+        capturedRequests = projection.requests;
+        sourceSelection = projection.selection;
         const spawn = scope.bindings.tools.get('task.spawn');
         childNaming =
           includeChildNaming &&
@@ -9034,15 +9334,23 @@ export class AgentRuntime {
           })
             ? childAgentNamingSource(session.id)
             : null;
+      };
+      const captureModelSources = async (includeChildNaming: boolean) => {
+        await prepareModelSources(includeChildNaming);
         return capture(capturedRequests.values());
       };
       let archiveDirectoryHandoff = false;
       let lastAutomaticFailure: string | undefined;
       let retainedInputMessages: ModelMessage[] = [];
       let compressionSummaryMessages: ModelMessage[] = [];
+      const skillReceiptCursor: SkillReceiptCursor = { scope: '', upperSeq: 0n, receipts: [] };
+      let historySnapshot: RunHistorySnapshot = {};
+      let selectedHistory: readonly ModelMessage[] = [];
+      const windowBudget = selectedCompressor?.windowBudget;
       const compress = async (
         originalMessages: ModelMessage[],
         trigger: 'manual' | 'automatic',
+        overflow?: ContextOverflowRecovery,
       ) => {
         if (!selectedCompressor || (trigger === 'automatic' && !selectedCompressor.shouldCompress))
           return false;
@@ -9061,7 +9369,6 @@ export class AgentRuntime {
             );
           }
         };
-        await checkCompressionFreshness();
         const focus =
           command.kind === 'context.compress'
             ? ((command.request as { focus?: string }).focus ?? null)
@@ -9075,23 +9382,120 @@ export class AgentRuntime {
           },
           scope.bindings.tools,
         ).request;
+        const tokenBaseline = await this.readTokenBaseline(
+          run,
+          modelId,
+          originalMessages,
+          command.subjectId,
+          controller.signal,
+        );
+        const inputProjection = projectModelContext(presented, tokenBaseline);
+        const conversation = modelHistory(captured, originalMessages);
+        const useBoundedCoverage = windowBudget && !archiveDirectoryHandoff;
+        const recentHistoryTokens = windowBudget?.recentHistoryTokens ?? 0;
+        const retainedInputs = new Set(retainedInputMessages);
+        const isExactInput = (index: number) => retainedInputs.has(selectedHistory[index]!);
+        const planWindow = async (recentTokens: number) => {
+          const window = useBoundedCoverage
+            ? selectCompressionCoverage(conversation, historySnapshot, run.id, recentTokens)
+            : undefined;
+          const boundary = window ? BigInt(window.coveredThroughSeq) : undefined;
+          const inTail = (index: number) =>
+            boundary !== undefined && BigInt(historySnapshot.positions![index]!.seq) > boundary;
+          const keep = (_: ModelMessage, index: number) =>
+            !window || inTail(index) || isExactInput(index);
+          const retained = useBoundedCoverage ? conversation.filter(keep) : retainedInputMessages;
+          const skillReceipts =
+            useBoundedCoverage && !window
+              ? []
+              : latestSkillReceipts(
+                  historySnapshot.skillReads ?? [],
+                  window?.coveredThroughSeq,
+                ).map(skillReceiptMessage);
+          const replacementScope =
+            window && boundary !== undefined
+              ? sourceProjection({
+                  recentMessages: selectedHistory.filter((_, index) => inTail(index)),
+                  cutoff: boundary,
+                  recentHistoryTokens: recentTokens,
+                })
+              : undefined;
+          const sourcesChange =
+            replacementScope &&
+            (replacementScope.requests.size !== capturedRequests.size ||
+              [...replacementScope.requests.keys()].some((key) => !capturedRequests.has(key)) ||
+              historySnapshot.skillReads?.some(({ path }) => path !== undefined));
+          const replacementSources = sourcesChange
+            ? await capture(
+                replacementScope.requests.values(),
+                scope.bindings,
+                undefined,
+                replacementScope.selection,
+              )
+            : window
+              ? captured
+              : undefined;
+          return {
+            window: window && { ...window, recentHistoryTokens: recentTokens },
+            boundary,
+            inTail,
+            retainedMessages: [...retained, ...skillReceipts],
+            replacementScope: sourcesChange ? replacementScope : undefined,
+            replacementSources,
+            replacementMessages: replacementSources
+              ? assembleModelContext(
+                  replacementSources,
+                  [...selectedHistory.filter(keep), ...skillReceipts],
+                  historySnapshot.skillProjection,
+                )
+              : undefined,
+          };
+        };
+        const recentTokens =
+          trigger === 'manual'
+            ? 0
+            : overflow
+              ? Math.min(recentHistoryTokens, Math.floor(overflow.inputTokens * 0.15))
+              : recentHistoryTokens;
+        const replacementLimit = Math.min(
+          windowBudget?.usableInputTokens ?? Number.POSITIVE_INFINITY,
+          overflow?.inputTokens ?? Number.POSITIVE_INFINITY,
+        );
+        let plannedWindow = await planWindow(recentTokens);
+        if (
+          plannedWindow.replacementMessages &&
+          recentTokens > 0 &&
+          Number.isFinite(replacementLimit) &&
+          estimateModelContext({
+            messages: plannedWindow.replacementMessages,
+            tools: presented.tools,
+          }).estimate.totalInputTokens +
+            (windowBudget?.summaryReserveTokens ?? 1024) >=
+            replacementLimit
+        )
+          plannedWindow = await planWindow(0);
+        const {
+          window,
+          boundary,
+          inTail,
+          retainedMessages,
+          replacementMessages,
+          replacementScope,
+          replacementSources,
+        } = plannedWindow;
         const input = {
           command: freeze(structuredClone(command)),
           run: freeze(structuredClone(run)),
           session: freeze(structuredClone(session)),
           messages: freeze(structuredClone(presented.messages)),
-          retainedMessages: freeze(structuredClone(retainedInputMessages)),
+          retainedMessages: freeze(structuredClone(retainedMessages)),
+          ...(replacementMessages
+            ? { replacementMessages: freeze(structuredClone(replacementMessages)) }
+            : {}),
+          ...(overflow ? { recoveringOverflow: true as const } : {}),
           modelId,
           tools: freeze(structuredClone(presented.tools)),
-          tokenBaseline: freeze(
-            await this.readTokenBaseline(
-              run,
-              modelId,
-              originalMessages,
-              command.subjectId,
-              controller.signal,
-            ),
-          ),
+          tokenBaseline: freeze(tokenBaseline),
           sources: freeze(structuredClone(captured)),
           trigger,
           focus,
@@ -9102,6 +9506,7 @@ export class AgentRuntime {
             ? await semanticDigest({
                 selection: session.contextSelectionId,
                 compressor: { id: selectedCompressor.id, version: selectedCompressor.version },
+                rejectedExecutionId: overflow?.executionId ?? null,
                 messages: originalMessages as unknown as Json,
               })
             : undefined;
@@ -9127,11 +9532,16 @@ export class AgentRuntime {
           phase: 'preparing',
         };
         try {
+          await checkCompressionFreshness();
           if (
             trigger === 'automatic' &&
             (await selectedCompressor.shouldCompress?.(input)) !== true
           )
             return false;
+          if (useBoundedCoverage && !window)
+            throw new AgentError(
+              trigger === 'manual' ? 'compression_not_reducible' : 'compression_insufficient_space',
+            );
           this.compressionProgress.set(session.id, progress);
           const prepared = await selectedCompressor.prepare(input);
           if (!prepared) {
@@ -9145,6 +9555,63 @@ export class AgentRuntime {
             Buffer.byteLength(canonicalJson(prepared.snapshot)) > 32768
           )
             throw new AgentError('compression_configuration_invalid');
+          const summaryHistory = conversation.filter((_, index) => !inTail(index));
+          const newerSkillResources = new Set(
+            boundary === undefined
+              ? []
+              : (historySnapshot.skillReads ?? [])
+                  .filter(({ path, seq }) => path !== undefined && BigInt(seq) > boundary)
+                  .map(({ sourceId }) => sourceId),
+          );
+          const summarySources = captured.filter(
+            ({ id, kind }) => kind !== 'skill_resource' || !newerSkillResources.has(id),
+          );
+          const instruction: ModelMessage = {
+            role: 'user',
+            content: [
+              prepared.instructions,
+              window
+                ? 'This request contains the history selected for summarization. The later conversation and any pending tool results will be supplied separately. Earlier independent tasks belong to the history of this session. Do not carry their requirements forward as the current assignment.'
+                : '',
+              focus ? `Focus (user data): ${focus}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            sourceIds: [`compression-${requestId}`],
+          };
+          const summaryLimit = Math.min(
+            windowBudget?.usableInputTokens ?? Number.POSITIVE_INFINITY,
+            overflow ? overflow.inputTokens - 1 : Number.POSITIVE_INFINITY,
+          );
+          const exactSummaryInputs = new Set(
+            useBoundedCoverage
+              ? conversation.filter((_, index) => isExactInput(index))
+              : retainedInputMessages,
+          );
+          let summaryMessages = assembleModelContext(
+            summarySources,
+            [...summaryHistory, instruction],
+            historySnapshot.skillProjection,
+          );
+          if (
+            overflow ||
+            (Number.isFinite(summaryLimit) && inputTokens(summaryMessages) > summaryLimit)
+          ) {
+            summaryMessages = assembleModelContext(
+              summarySources,
+              [...shortenSummaryHistory(summaryHistory, exactSummaryInputs), instruction],
+              historySnapshot.skillProjection,
+            );
+            if (inputTokens(summaryMessages) > summaryLimit) {
+              if (
+                !overflow &&
+                trigger === 'automatic' &&
+                inputProjection.totalInputTokens <= summaryLimit
+              )
+                return false;
+              throw new AgentError('compression_insufficient_space');
+            }
+          }
           stage = 'store';
           const pending = await this.options.store.beginCompression({
             expectedStoreId: run.originStoreId,
@@ -9152,6 +9619,7 @@ export class AgentRuntime {
             runId: run.id,
             executionId: requestId,
             expectedContextSelectionId: session.contextSelectionId,
+            ...(window ? { window } : {}),
             compressor: {
               id: selectedCompressor.id,
               version: selectedCompressor.version,
@@ -9183,15 +9651,7 @@ export class AgentRuntime {
             modelId,
             signal: controller.signal,
             getTools: () => [],
-            getMessages: async () =>
-              assembleModelContext(captured, [
-                ...modelHistory(captured, originalMessages),
-                {
-                  role: 'user',
-                  content: prepared.instructions + (focus ? `\nFocus (user data): ${focus}` : ''),
-                  sourceIds: [pending.id],
-                },
-              ]),
+            getMessages: async () => summaryMessages,
             executeTool: async () => {
               throw new AgentError('compression_summary_invalid');
             },
@@ -9204,6 +9664,7 @@ export class AgentRuntime {
                 {
                   ...scope,
                   compressionId: pending.id,
+                  ...(overflow ? { overflowRecovery: overflow } : {}),
                   ...(preserveDirectory ? { imageArchiveDirectory: true as const } : {}),
                   decisionSources: captured,
                   checkFreshness: checkCompressionFreshness,
@@ -9245,6 +9706,19 @@ export class AgentRuntime {
           stage = 'store';
           progress.phase = 'validating';
           await checkCompressionFreshness();
+          if (
+            replacementScope &&
+            replacementSources &&
+            canonicalJson(
+              (await capture(
+                replacementScope.requests.values(),
+                scope.bindings,
+                undefined,
+                replacementScope.selection,
+              )) as unknown as Json,
+            ) !== canonicalJson(replacementSources as unknown as Json)
+          )
+            throw new AgentError('context_refresh_required');
           await this.options.store.commitCompression({
             expectedStoreId: run.originStoreId,
             owner,
@@ -9267,6 +9741,7 @@ export class AgentRuntime {
               'compression_summary_invalid',
               'compression_configuration_invalid',
               'compression_no_new_messages',
+              'compression_context_changed',
               'context_refresh_required',
               'capability_refresh_required',
               'input_pending',
@@ -9309,6 +9784,14 @@ export class AgentRuntime {
           }
           controller.signal.throwIfAborted();
           lastAutomaticFailure = fingerprint;
+          if (
+            overflow &&
+            error instanceof AgentError &&
+            ['input_pending', 'superseded_by_user_input', 'compression_context_changed'].includes(
+              error.code,
+            )
+          )
+            return 'refresh' as const;
           return false;
         } finally {
           if (this.compressionProgress.get(session.id) === progress)
@@ -9341,7 +9824,37 @@ export class AgentRuntime {
       };
       const protectedImages = true;
       const imageGuidance: ImageObservationGuidance = {};
-      const messages = async () => {
+      const readSelectedModelHistory = async (compressionOnly: boolean, upperSeq?: string) => {
+        retainedInputMessages = [];
+        compressionSummaryMessages = [];
+        historySnapshot = {
+          ...(windowBudget ? { boundInputs: true } : {}),
+          skillReceiptCursor,
+          executionRoot: (scope.bindings.executionRoot ?? null) as unknown as Json,
+        };
+        selectedHistory = await this.modelMessages(
+          run.sessionId,
+          run.originStoreId,
+          controller.signal,
+          command.subjectId,
+          false,
+          upperSeq,
+          compressionOnly ? undefined : run,
+          retainedInputMessages,
+          compressionSummaryMessages,
+          scope.bindings.tools,
+          undefined,
+          frozenModelInputLimit(run.configuration, modelId),
+          protectedImages ? localImages : undefined,
+          session.parentSessionId === null ? imageGuidance : undefined,
+          historySnapshot,
+        );
+        return selectedHistory;
+      };
+      const messages = async (
+        overflow?: ContextOverflowRecovery,
+        skipAutomatic = false,
+      ): Promise<ModelMessage[]> => {
         localImages.clear();
         imageGuidance.latest = undefined;
         await receivePendingInputs();
@@ -9352,28 +9865,9 @@ export class AgentRuntime {
         const compressionOnly = ['context.compress', 'context.compression.reset'].includes(
           command.kind,
         );
+        const history = await readSelectedModelHistory(compressionOnly);
         captured = await captureModelSources(!compressionOnly);
-        retainedInputMessages = [];
-        compressionSummaryMessages = [];
-        const assembled = assembleModelContext(
-          captured,
-          await this.modelMessages(
-            run.sessionId,
-            run.originStoreId,
-            controller.signal,
-            command.subjectId,
-            false,
-            undefined,
-            compressionOnly ? undefined : run,
-            retainedInputMessages,
-            compressionSummaryMessages,
-            scope.bindings.tools,
-            undefined,
-            frozenModelInputLimit(run.configuration, modelId),
-            protectedImages ? localImages : undefined,
-            session.parentSessionId === null ? imageGuidance : undefined,
-          ),
-        );
+        const assembled = assembleModelContext(captured, history, historySnapshot.skillProjection);
         // Do not compress a newly captured, still-undelivered image out of the selected history.
         // For confirmed history the compressor sees the same bounded, source-attributed notes.
         let compressible = assembled;
@@ -9413,31 +9907,21 @@ export class AgentRuntime {
             [],
           ).messages as ModelMessage[];
         }
-        if (!compressionOnly && (await compress(compressible, 'automatic'))) {
-          compressionSummaryMessages = [];
-          localImages.clear();
-          imageGuidance.latest = undefined;
-          return assembleModelContext(
-            captured,
-            await this.modelMessages(
-              run.sessionId,
-              run.originStoreId,
-              controller.signal,
-              command.subjectId,
-              false,
-              undefined,
-              run,
-              undefined,
-              compressionSummaryMessages,
-              scope.bindings.tools,
-              undefined,
-              frozenModelInputLimit(run.configuration, modelId),
-              protectedImages ? localImages : undefined,
-              session.parentSessionId === null ? imageGuidance : undefined,
-            ),
-          );
+        if (compressionOnly || skipAutomatic || !selectedCompressor?.shouldCompress)
+          return compressible;
+        const compressed = await compress(compressible, 'automatic', overflow);
+        // An admitted input invalidates the old summary, not the one reduced
+        // business dispatch. Rebuild from the persisted correction.
+        if (compressed === 'refresh') return messages(overflow);
+        if (!compressed) {
+          if (overflow) throw new AgentError('model_context_overflow');
+          return compressible;
         }
-        return compressible;
+        localImages.clear();
+        imageGuidance.latest = undefined;
+        const nextHistory = await readSelectedModelHistory(false);
+        captured = await captureModelSources(true);
+        return assembleModelContext(captured, nextHistory, historySnapshot.skillProjection);
       };
       const checkFreshness = async () => {
         if (inputVersion !== capturedInputVersion) throw new AgentError('superseded_by_user_input');
@@ -9503,13 +9987,59 @@ export class AgentRuntime {
       };
       let toolAdmission: ReturnType<typeof createToolDispatchBatch> | undefined;
       let toolBatchSize: number | undefined;
+      let recoveredContextRefreshOf = resumed?.contextRefreshOf;
       let recoveredModelRetry = resumed?.modelRetry;
+      let recoveredOverflow = resumed?.overflow;
+      const recoveredResponse = resumed?.loop?.kind === 'response' ? resumed.loop : undefined;
+      const isSkillRead = (definition: ToolDefinition | undefined, modelExecutionId: string) => {
+        if (!definition || !isRegisteredSkillReadTool(definition)) return false;
+        if (recoveredResponse?.response.executionId !== modelExecutionId) return true;
+        const bindings = resumed?.modelSource?.toolBindings;
+        return (
+          Array.isArray(bindings) &&
+          bindings.some(
+            (tool) =>
+              tool &&
+              typeof tool === 'object' &&
+              !Array.isArray(tool) &&
+              tool.extensionId === 'builtin.skills' &&
+              tool.id === definition.id &&
+              tool.version === definition.version,
+          )
+        );
+      };
       const loopContext: LoopContext = {
         toolFailureStreak: failureStreak,
         checkpoint: resumed?.loop,
         modelId,
         signal: controller.signal,
-        getMessages: messages,
+        getMessages: async () => {
+          if (recoveredOverflow?.stage === 'finished')
+            throw new AgentError('model_context_overflow');
+          if (recoveredOverflow?.stage === 'compress') {
+            if (recoveredOverflow.unsentSummaryExecutionId)
+              await this.options.store.finishExecution({
+                expectedStoreId: run.originStoreId,
+                owner,
+                executionId: recoveredOverflow.unsentSummaryExecutionId,
+                status: 'failed',
+                result: {
+                  code: 'compression_summary_not_dispatched',
+                  dispatchCommitted: false,
+                  incomplete: true,
+                  content: '',
+                  reasoning: '',
+                },
+              });
+            const rebuilt = await messages(recoveredOverflow.recovery);
+            recoveredOverflow = { ...recoveredOverflow, stage: 'dispatch' };
+            return rebuilt;
+          }
+          return messages(
+            undefined,
+            recoveredOverflow?.stage === 'dispatch' || recoveredContextRefreshOf !== undefined,
+          );
+        },
         getTools: modelTools,
         prepareToolCalls: registerToolRequests,
         beginToolBatch: (calls, signal, cancel) => {
@@ -9541,10 +10071,10 @@ export class AgentRuntime {
               canonicalJson(outputLengthContinuation(tail.sourceIds[0]!) as unknown as Json)
               ? tail.sourceIds[0]!
               : undefined;
-          const retryMessages = async () => {
+          const retryMessages = async (overflow?: ContextOverflowRecovery) => {
             // Refresh persisted history, current human input, capabilities and Sources
             // normally. Only the loop's non-persistent length suffix is restored.
-            const fresh = await messages();
+            const fresh = await messages(overflow);
             if (!lengthSourceId) return fresh;
             const source = await this.options.store.getExecution(lengthSourceId);
             const result = source?.result;
@@ -9694,6 +10224,8 @@ export class AgentRuntime {
           let modelRetry = recoveredModelRetry;
           recoveredModelRetry = undefined;
           let providerAttempt = modelRetry?.attempt ?? 1;
+          let overflowRecovery = recoveredOverflow?.recovery;
+          recoveredOverflow = undefined;
           const rememberGuidanceDelivery = () => {
             if (
               continuationDirective &&
@@ -9750,6 +10282,8 @@ export class AgentRuntime {
             let selectedForRequest: LocalImageSource[] = [];
             let actual = current;
             const query = localImages.size ? await windowQuery() : undefined;
+            if (query && recoveredContextRefreshOf)
+              throw new AgentError('run_continuation_invalid');
             const freshImageScope = async () => {
               await checkFreshness();
               if (query) {
@@ -9908,6 +10442,27 @@ export class AgentRuntime {
                   assertImageReceipt(members, next.confirmed);
                 }
               }
+              const usableInput = wireWindow ? undefined : windowBudget?.usableInputTokens;
+              if (overflowRecovery || usableInput !== undefined) {
+                const sizedRequest = createModelToolSurface(actual, scope.bindings.tools).request;
+                if (
+                  overflowRecovery &&
+                  estimateModelContext(sizedRequest).estimate.totalInputTokens >=
+                    overflowRecovery.inputTokens
+                )
+                  throw new AgentError('model_context_overflow');
+                if (usableInput !== undefined) {
+                  const baseline = await this.readTokenBaseline(
+                    run,
+                    modelId,
+                    actual.messages,
+                    command.subjectId,
+                    controller.signal,
+                  );
+                  if (projectModelContext(sizedRequest, baseline).totalInputTokens > usableInput)
+                    throw new AgentError('compression_insufficient_space');
+                }
+              }
               const response = await this.execution.model(
                 {
                   ...scope,
@@ -9921,6 +10476,10 @@ export class AgentRuntime {
                       }
                     : {}),
                   ...(modelRetry ? { modelRetry } : {}),
+                  ...(recoveredContextRefreshOf
+                    ? { contextRefreshOf: recoveredContextRefreshOf }
+                    : {}),
+                  ...(overflowRecovery ? { overflowRecovery } : {}),
                   continuation: await continuationState(),
                 },
                 model!,
@@ -9931,8 +10490,40 @@ export class AgentRuntime {
                   : undefined,
               );
               rememberGuidanceDelivery();
+              recoveredContextRefreshOf = undefined;
               return response;
             } catch (error) {
+              if (
+                recoveredContextRefreshOf &&
+                (await this.options.store.getExecution(actual.requestId))
+              )
+                recoveredContextRefreshOf = undefined;
+              if (ModelContextOverflowError.isInstance(error)) {
+                controller.signal.throwIfAborted();
+                if (wireWindow || overflowRecovery) throw new AgentError('model_context_overflow');
+                const failed = await this.options.store.getExecution(actual.requestId);
+                if (
+                  !rejectedContextOverflow(failed) ||
+                  failed.runId !== run.id ||
+                  failed.sessionId !== run.sessionId ||
+                  failed.originStoreId !== run.originStoreId
+                )
+                  throw new AgentError('model_context_overflow');
+                overflowRecovery = {
+                  executionId: actual.requestId,
+                  inputTokens: estimateModelContext(
+                    createModelToolSurface(actual, scope.bindings.tools).request,
+                  ).estimate.totalInputTokens,
+                };
+                current = {
+                  ...current,
+                  requestId: crypto.randomUUID(),
+                  messages: await retryMessages(overflowRecovery),
+                  tools: modelTools(),
+                };
+                attempt++;
+                continue;
+              }
               if (wireWindow && ModelRequestLimitError.isInstance(error)) {
                 const failed = await this.options.store.getExecution(actual.requestId);
                 if (
@@ -9961,6 +10552,7 @@ export class AgentRuntime {
                 throw new AgentError('model_request_body_too_large');
               const retryReason = modelRetryReason(error);
               if (wireWindow && retryReason) throw new AgentError('image_delivery_outcome_unknown');
+              if (overflowRecovery && retryReason) throw error;
               if (retryReason) {
                 controller.signal.throwIfAborted();
                 const previous = await this.options.store.getExecution(current.requestId);
@@ -10013,12 +10605,17 @@ export class AgentRuntime {
                 ].includes(error.code)
               )
                 throw error;
+              if (
+                overflowRecovery &&
+                (await this.options.store.getExecution(actual.requestId))?.authorization?.dispatched
+              )
+                throw error;
               await waitForModelRetry(attempt + 2, controller.signal);
               controller.signal.throwIfAborted();
               current = {
                 ...request,
                 requestId: crypto.randomUUID(),
-                messages: await messages(),
+                messages: await messages(undefined, overflowRecovery !== undefined),
                 tools: modelTools(),
               };
               attempt++;
@@ -10034,17 +10631,155 @@ export class AgentRuntime {
           const decisionInputVersion = capturedInputVersion;
           const decisionCapabilities = capabilityFingerprint;
           const decisionBindings = scope.bindings;
+          const decisionSelection = sourceSelection;
           const definition = decisionBindings.tools.get(call.name);
+          const skillRead = isSkillRead(definition, source);
+          const readBehavior =
+            definition?.id === 'files.read'
+              ? decisionBindings.toolBehaviors?.find(
+                  ({ capability, workspaceRead }) =>
+                    workspaceRead &&
+                    capability.kind === 'tool' &&
+                    capability.definitionId === definition.id &&
+                    capability.definitionVersion === definition.version,
+                )
+              : undefined;
           const digestSources = (sources: ContextSource[]) =>
             semanticDigest(JSON.parse(JSON.stringify(sources)) as Json);
           let continuationSources = decisionSources;
           let decisionDigest = await digestSources(continuationSources);
-          const checkToolDecision = async () => {
+          const checkWorkspaceRead = async (executionId: string): Promise<boolean> => {
+            const workspaceRead = readBehavior?.workspaceRead;
+            if (!workspaceRead || !decisionBindings.executionRoot) return false;
+            const [model, tool] = await Promise.all([
+              this.options.store.getExecution(source),
+              this.options.store.getExecution(executionId),
+            ]);
+            if (
+              model?.kind !== 'model' ||
+              model.status !== 'succeeded' ||
+              model.modelDispatched !== true ||
+              model.runId !== run.id ||
+              model.sessionId !== run.sessionId ||
+              model.originStoreId !== run.originStoreId ||
+              model.stepId !== stepId ||
+              tool?.kind !== 'tool' ||
+              tool.status !== 'planned' ||
+              tool.runId !== run.id ||
+              tool.sessionId !== run.sessionId ||
+              tool.originStoreId !== run.originStoreId ||
+              tool.stepId !== stepId ||
+              tool.callId !== call.id ||
+              tool.definitionId !== definition?.id ||
+              tool.definitionVersion !== definition.version ||
+              canonicalJson(tool.input) !== canonicalJson(request.input)
+            )
+              return false;
+            const modelSource = model.decisionSource as Record<string, Json>;
+            const toolSource = tool.decisionSource as Record<string, Json>;
+            const expectedRoot = canonicalJson(decisionBindings.executionRoot as unknown as Json);
+            if (
+              toolSource?.modelExecutionId !== model.id ||
+              canonicalJson(toolSource.executionRoot ?? null) !== expectedRoot ||
+              canonicalJson(modelSource?.executionRoot ?? null) !== expectedRoot ||
+              !Array.isArray(modelSource?.toolBindings) ||
+              !modelSource.toolBindings.some(
+                (value) =>
+                  canonicalJson(value) ===
+                  canonicalJson({
+                    id: definition.id,
+                    version: definition.version,
+                    extensionId: 'builtin.files',
+                  }),
+              ) ||
+              !Array.isArray(modelSource.toolBehaviorBindings) ||
+              !modelSource.toolBehaviorBindings.some(
+                (value) =>
+                  canonicalJson(value) ===
+                  canonicalJson(this.reviewBinding(readBehavior) as unknown as Json),
+              )
+            )
+              return false;
+            const route = await workspaceRead({
+              kind: 'tool',
+              sessionId: run.sessionId,
+              runId: run.id,
+              executionId,
+              definitionId: definition.id,
+              definitionVersion: definition.version,
+              input: request.input,
+              signal,
+            });
+            if (!route) return false;
+            if (canonicalJson(route.root as unknown as Json) !== expectedRoot)
+              throw new AgentError('execution_root_changed');
+            const root = fileURLToPath(route.root.effectiveRootUri);
+            const contains = (directory: string, path: string) => {
+              const child = relative(directory, path);
+              return child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+            };
+            const project = (source: ContextSource) =>
+              source.kind === 'project_instruction' &&
+              source.id.startsWith(`project:${scope.workspaceId}:`) &&
+              source.role === 'user' &&
+              source.placement === 'after_history';
+            const knowledge = (source: ContextSource) =>
+              source.scope === 'run-knowledge' &&
+              (source.kind === 'skill' ||
+                source.kind === 'skill_resource' ||
+                source.kind === 'skill_catalogue');
+            const previous = continuationSources.filter(
+              (source) =>
+                !knowledge(source) &&
+                (!project(source) ||
+                  (contains(root, source.scope) && contains(source.scope, dirname(route.path)))),
+            );
+            const hostSources = new Map<string, ContextSource>();
+            const current = await capture(
+              decisionRequests.values(),
+              decisionBindings,
+              hostSources,
+              {
+                ...(decisionSelection ?? { skillReads: [], skillResourceIds: new Set<string>() }),
+                workspaceRead: request,
+              },
+            );
+            const known = new Set(previous.map(({ id }) => id));
+            const additions = current.filter(({ id }) => !known.has(id));
+            const previouslyObserved = [...modelRequests.values()].flatMap((entry) => {
+              const path = projectToolPath(entry);
+              return path === undefined ? [] : [resolve(root, path)];
+            });
+            if (
+              (await digestSources(current.filter(({ id }) => known.has(id)))) !==
+                (await digestSources(previous)) ||
+              additions.some(
+                (source) =>
+                  !project(source) ||
+                  source.scope === root ||
+                  canonicalJson(source as unknown as Json) !==
+                    canonicalJson((hostSources.get(source.id) ?? null) as unknown as Json) ||
+                  previouslyObserved.some((path) => contains(source.scope, path)),
+              )
+            )
+              throw new AgentError('context_refresh_required');
+            return true;
+          };
+          const checkToolDecision = async (executionId?: string) => {
             if (inputVersion !== decisionInputVersion)
               throw new AgentError('superseded_by_user_input');
             await checkCapabilities(decisionCapabilities);
+            // The host Skill adapter validates the requested knowledge at the point of read.
+            // Sibling results and other Model sources are not authority for that read.
+            if (skillRead) return;
+            if (executionId && (await checkWorkspaceRead(executionId))) return;
             const hostSources = new Map<string, ContextSource>();
-            const current = await capture(decisionRequests.values(), decisionBindings, hostSources);
+            const current = await capture(
+              decisionRequests.values(),
+              decisionBindings,
+              hostSources,
+              decisionSelection,
+            );
             if ((await digestSources(current)) === decisionDigest) return;
             const known = new Set(continuationSources.map((source) => source.id));
             const additions = current.filter((source) => !known.has(source.id));
@@ -10061,8 +10796,14 @@ export class AgentRuntime {
               ) &&
               (await digestSources(current.filter((source) => known.has(source.id)))) ===
                 decisionDigest &&
-              (await digestSources(await capture(modelRequests.values(), decisionBindings))) ===
-                decisionDigest
+              (await digestSources(
+                await capture(
+                  modelRequests.values(),
+                  decisionBindings,
+                  undefined,
+                  decisionSelection,
+                ),
+              )) === decisionDigest
             )
               // A scoped read observes new instructions without pretending the old Model
               // already used them. The next Model captures them with the actual results.
@@ -10138,7 +10879,12 @@ export class AgentRuntime {
             if (inputVersion !== decisionInputVersion)
               throw new AgentError('superseded_by_user_input');
             await checkCapabilities(decisionCapabilities);
-            const current = await capture(decisionRequests.values(), decisionBindings);
+            const current = await capture(
+              decisionRequests.values(),
+              decisionBindings,
+              undefined,
+              decisionSelection,
+            );
             if (current.length !== continuationSources.length)
               throw new AgentError('context_refresh_required');
             for (const previous of continuationSources) {
@@ -10220,21 +10966,117 @@ export class AgentRuntime {
             ) !== canonicalJson(resumed.modelSource.toolBehaviorBindings))
         )
           throw new AgentError('capability_refresh_required');
-        const originalSources = resumed.modelSource.sources ?? [];
-        // The sealed request selects this optional instruction for the original batch.
-        // Rebuild its contents from the trusted runtime before comparing every source.
-        captured = await captureModelSources(
-          Array.isArray(originalSources) &&
-            originalSources.some(
-              (source) =>
-                source &&
-                typeof source === 'object' &&
-                !Array.isArray(source) &&
-                source.id === childAgentNamingSourceId,
-            ),
-        );
-        if (canonicalJson(captured as unknown as Json) !== canonicalJson(originalSources))
-          throw new AgentError('context_refresh_required');
+        const originalSources = (resumed.modelSource.sources ?? []) as unknown as ContextSource[];
+        if (!Array.isArray(originalSources)) throw new AgentError('run_continuation_invalid');
+        for (const source of originalSources) assertContextSource(source);
+        const pendingReads = recoveredResponse?.response.toolCalls
+          .filter(
+            (call) => !recoveredResponse.settledCalls.some(({ callId }) => callId === call.id),
+          )
+          .map(
+            (call) =>
+              isSkillRead(
+                scope.bindings.tools.get(call.name),
+                recoveredResponse.response.executionId,
+              ) ||
+              (call.name === 'files.read' &&
+                scope.bindings.toolBehaviors?.some(
+                  ({ capability, workspaceRead }) =>
+                    capability.kind === 'tool' &&
+                    capability.definitionId === call.name &&
+                    workspaceRead,
+                ) === true),
+          );
+        // A completed Model can hand off pending Skill reads to their own validation.
+        // Already dispatched continuations still need the full original checkpoint proof.
+        const checkAtDispatch =
+          pendingReads?.some(Boolean) &&
+          [...resumed.plannedTools.values()].every((tool) => tool.status === 'planned');
+        if (
+          !checkAtDispatch ||
+          !pendingReads?.every(Boolean) ||
+          recoveredResponse?.response.toolCalls.some(({ name }) => name === 'files.read')
+        ) {
+          await readSelectedModelHistory(false, resumed.sourceHistoryUpperSeq);
+          await prepareModelSources(
+            originalSources.some(({ id }) => id === childAgentNamingSourceId),
+            {
+              sources: originalSources,
+              request: resumed.modelRequest,
+              upperSeq: resumed.sourceHistoryUpperSeq,
+            },
+          );
+          if (!checkAtDispatch) {
+            const hostSources = new Map<string, ContextSource>();
+            const current = await capture(capturedRequests.values(), scope.bindings, hostSources);
+            const old = new Map(originalSources.map((item) => [item.id, item]));
+            const next = new Map(current.map((item) => [item.id, item]));
+            const equal = (a: ContextSource | undefined, b: ContextSource | undefined) =>
+              canonicalJson((a ?? null) as unknown as Json) ===
+              canonicalJson((b ?? null) as unknown as Json);
+            const changed = [...new Set([...old.keys(), ...next.keys()])].filter(
+              (id) => !equal(old.get(id), next.get(id)),
+            );
+            if (changed.length) {
+              const planned = resumed.plannedModel;
+              const project = (source: ContextSource | undefined) =>
+                !source ||
+                (source.id.startsWith(`project:${scope.workspaceId}:`) &&
+                  source.kind === 'project_instruction' &&
+                  source.role === 'user' &&
+                  source.placement === 'after_history');
+              const contentOnly = changed.every((id) => {
+                const before = old.get(id),
+                  after = next.get(id);
+                if (after && !equal(after, hostSources.get(id))) return false;
+                if (project(before) && project(after)) return true;
+                if (
+                  !before ||
+                  !after ||
+                  before.kind !== after.kind ||
+                  before.scope !== 'run-knowledge' ||
+                  after.scope !== before.scope ||
+                  before.role !== after.role ||
+                  before.placement !== after.placement
+                )
+                  return false;
+                return (
+                  before.kind === 'skill' ||
+                  before.kind === 'skill_resource' ||
+                  (id === 'skills.catalogue' &&
+                    before.kind === 'skill_catalogue' &&
+                    before.content === after.content)
+                );
+              });
+              if (
+                !resumed.resumeCommandId ||
+                planned?.status !== 'planned' ||
+                planned.modelDispatched !== false ||
+                session.parentSessionId !== null ||
+                !isOrdinaryContextRefreshRequest(resumed.modelSource, planned.id) ||
+                !contentOnly ||
+                canonicalJson(resumed.modelSource.executionRoot ?? null) !==
+                  canonicalJson((scope.bindings.executionRoot ?? null) as unknown as Json)
+              )
+                throw new AgentError('context_refresh_required');
+              controller.signal.throwIfAborted();
+              const disposition = await this.options.store.retireUnsentModelForContextRefresh({
+                expectedStoreId: run.originStoreId,
+                owner,
+                runId: run.id,
+                executionId: planned.id,
+                resumeCommandId: resumed.resumeCommandId,
+                expectedConfiguration: run.configuration,
+                expectedInput: planned.input,
+                expectedDecisionSource: planned.decisionSource,
+              });
+              recoveredContextRefreshOf = disposition === 'steered' ? undefined : planned.id;
+              if (disposition === 'steered') inputVersion++;
+              loopContext.checkpoint = undefined;
+            }
+          }
+        }
+        captured = originalSources;
         capturedInputVersion = inputVersion;
       }
 
@@ -12093,7 +12935,7 @@ export class AgentRuntime {
     subjectId?: string,
     expanded = false,
     fixedUpperSeq?: string,
-    resultWork?: Pick<RunRecord, 'id' | 'rootWorkCommandId' | 'rootWorkSeq'>,
+    resultWork?: Pick<RunRecord, 'id' | 'rootWorkCommandId' | 'rootWorkSeq' | 'originCommandId'>,
     retainedInputMessages?: ModelMessage[],
     compressionSummaryMessages?: ModelMessage[],
     definitions: ReadonlyMap<string, ToolDefinition> = this.tools,
@@ -12101,9 +12943,26 @@ export class AgentRuntime {
     shellTokenLimit?: number,
     localImages?: Map<string, LocalImageSource>,
     imageGuidance?: ImageObservationGuidance,
+    historySnapshot?: RunHistorySnapshot,
   ): Promise<ModelMessage[]> {
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
-    const result = new Map<string, { seq: string; message: ModelMessage; summary?: true }>();
+    const retainedInputRunIds = resultWork ? [resultWork.id] : [];
+    if (resultWork && !expanded) {
+      const command = await this.options.store.getCommand(resultWork.originCommandId);
+      if (command?.kind === 'input.follow_up' && command.sessionId === sessionId) {
+        const predecessorId = (command.request as { afterRunId?: string | null }).afterRunId;
+        const predecessor = predecessorId && (await this.options.store.getRun(predecessorId));
+        if (predecessor && predecessor.sessionId === sessionId)
+          retainedInputRunIds.push(predecessor.id);
+      }
+    }
+    const result = new Map<string, HistoryPosition & { message: ModelMessage }>();
+    const historicalSkillReads: {
+      execution: ExecutionRecord;
+      sourceId: string;
+      catalogueDigest: string;
+    }[] = [];
+    const verifiedInputIds = new Set<string>();
     const retainedInputIds = new Set<string>();
     const historyRuns = new Map<string, RunRecord | null>();
     const historyCommands = new Map<string, CommandRecord | null>();
@@ -12113,8 +12972,11 @@ export class AgentRuntime {
     let contextSelectionId: string | undefined;
     let upperSeq: string | undefined = fixedUpperSeq;
     let compressionThroughSeq: string | undefined;
+    let boundedCheckpoint = false;
+    let previousRecentHistoryTokens: number | undefined;
     while (true) {
       const page: import('./storage/types').SelectedContextPage & {
+        verifiedInputMessageIds?: string[];
         retainedInputMessageIds?: string[];
       } = await (expanded
         ? this.options.store.getExpandedContext.bind(this.options.store)
@@ -12125,15 +12987,24 @@ export class AgentRuntime {
         afterSourceId,
         ...(contextSelectionId === undefined ? {} : { contextSelectionId }),
         ...(upperSeq === undefined ? {} : { upperSeq }),
+        ...(!expanded
+          ? {
+              retainedInputRunIds,
+              ...(historySnapshot?.boundInputs ? { boundRetainedInputs: true as const } : {}),
+            }
+          : {}),
         messageLimit: 200,
         sourceLimit: 100,
         byteLimit: 8 * 1024 * 1024,
       });
       contextSelectionId ??= page.selection.id;
       upperSeq ??= page.highWaterSeq;
+      for (const id of page.verifiedInputMessageIds ?? page.retainedInputMessageIds ?? [])
+        verifiedInputIds.add(id);
       for (const id of page.retainedInputMessageIds ?? []) retainedInputIds.add(id);
       if (page.compression && !result.has(page.compression.id)) {
         compressionThroughSeq = page.compression.coveredThroughSeq;
+        boundedCheckpoint = page.compression.inputHighWaterSeq !== undefined;
         if (!subjectId) throw new AgentError('compression_scope_denied');
         const original = await this.options.store.getCompressionOrigin({
           expectedStoreId: storeId,
@@ -12141,6 +13012,14 @@ export class AgentRuntime {
           subjectId,
           compressionId: page.compression.id,
         });
+        previousRecentHistoryTokens = original.recentHistoryTokens;
+        if (
+          previousRecentHistoryTokens !== undefined &&
+          (!boundedCheckpoint ||
+            !Number.isSafeInteger(previousRecentHistoryTokens) ||
+            previousRecentHistoryTokens < 0)
+        )
+          throw new AgentError('compression_unverifiable');
         const execution = await this.options.store.getExecution(original.modelExecutionId);
         if (
           !execution ||
@@ -12393,6 +13272,42 @@ export class AgentRuntime {
           for (const id of message.sourceIds ?? []) {
             const execution = await this.options.store.getExecution(id);
             const value = execution?.result;
+            if (
+              historySnapshot &&
+              resultWork &&
+              execution?.kind === 'tool' &&
+              (execution.definitionId === 'skills.load' ||
+                execution.definitionId === 'skills.resource') &&
+              execution.status === 'succeeded' &&
+              execution.authorization?.dispatched &&
+              execution.originStoreId === storeId &&
+              execution.sessionId === sessionId &&
+              execution.runId === message.runId &&
+              execution.runId !== resultWork.id &&
+              execution.callId === message.toolCallId &&
+              message.sourceIds?.length === 1 &&
+              canonicalJson(
+                (execution.decisionSource as Record<string, Json> | null)?.executionRoot ?? null,
+              ) === canonicalJson(historySnapshot.executionRoot ?? null)
+            ) {
+              const receipt = value as {
+                outcome?: string;
+                content?: string;
+                details?: { sourceId?: string; catalogueDigest?: string };
+              } | null;
+              const details = receipt?.details;
+              if (
+                receipt?.outcome === 'succeeded' &&
+                receipt.content === message.content &&
+                typeof details?.sourceId === 'string' &&
+                typeof details.catalogueDigest === 'string'
+              )
+                historicalSkillReads.push({
+                  execution,
+                  sourceId: details.sourceId,
+                  catalogueDigest: details.catalogueDigest,
+                });
+            }
             const sealed = recordedTools?.get(id);
             if (
               sealed &&
@@ -12618,11 +13533,13 @@ export class AgentRuntime {
               if (!historicalSession) throw new AgentError('historical_input_unverifiable');
               const agentInput = historicalSession.parentSessionId !== null;
               if (
-                (agentInput && !retainedInputIds.has(selectedMessage.id)) ||
+                (agentInput && !verifiedInputIds.has(selectedMessage.id)) ||
                 (!agentInput &&
                   (historicalInput.kind === 'child.start' || message.sourceIds.length !== 1))
               )
                 throw new AgentError('historical_input_unverifiable');
+              if (verifiedInputIds.has(selectedMessage.id))
+                retainedInputIds.add(selectedMessage.id);
               let carrierExecutionId: string | undefined;
               if (historicalInput.kind === 'child.start') {
                 const carrierId = message.sourceIds[1];
@@ -12674,6 +13591,7 @@ export class AgentRuntime {
         }
         result.set(selectedMessage.id, {
           seq: selectedMessage.seq,
+          runId: selectedMessage.runId,
           message: {
             role: message.role,
             content,
@@ -12737,6 +13655,7 @@ export class AgentRuntime {
             : undefined;
         result.set(source.id, {
           seq: source.seq,
+          resultSource: true,
           message: {
             role: 'user',
             content:
@@ -12758,6 +13677,48 @@ export class AgentRuntime {
         });
       }
       if (page.nextAfterSeq === null && page.nextAfterSourceId === null) {
+        if (resultWork && subjectId && (compressionThroughSeq || historySnapshot)) {
+          const receipts = await readSkillReceipts(
+            this.options.store,
+            {
+              expectedStoreId: storeId,
+              sessionId,
+              subjectId,
+              selectionId: contextSelectionId,
+              runId: resultWork.id,
+              upperSeq,
+            },
+            historySnapshot?.executionRoot,
+            historySnapshot?.skillReceiptCursor,
+          );
+          if (compressionThroughSeq) {
+            // The original provider's covered assistant is gone. Represent a verified
+            // receipt at its original position without reconstructing a tool call.
+            for (const receipt of latestSkillReceipts(receipts, compressionThroughSeq))
+              result.set(receipt.messageId, {
+                seq: receipt.seq,
+                message: skillReceiptMessage(receipt),
+              });
+          }
+          if (historySnapshot) {
+            historySnapshot.skillReads = receipts;
+            const selected = new Map(
+              latestSkillReceipts(receipts).map((receipt) => [
+                receipt.sourceId,
+                receipt.catalogueDigest,
+              ]),
+            );
+            const projected: { executionId: string; sourceId: string }[] = [...receipts];
+            for (const { execution, sourceId, catalogueDigest } of historicalSkillReads) {
+              if (
+                selected.get(sourceId) === catalogueDigest &&
+                (await readExecutionToolOwner(this.options.store, execution)) === 'builtin.skills'
+              )
+                projected.push({ executionId: execution.id, sourceId });
+            }
+            historySnapshot.skillProjection = projected;
+          }
+        }
         const coveredThrough =
           compressionThroughSeq === undefined ? undefined : BigInt(compressionThroughSeq);
         const ordered = [...result.entries()].sort(([, a], [, b]) => {
@@ -12772,7 +13733,16 @@ export class AgentRuntime {
         retainedInputMessages?.push(
           ...ordered.filter(([id]) => retainedInputIds.has(id)).map(([, value]) => value.message),
         );
-        return orderModelToolResults(ordered.map(([, value]) => value.message));
+        const messages = orderModelToolResults(ordered.map(([, value]) => value.message));
+        if (historySnapshot) {
+          const positions = new Map(ordered.map(([, value]) => [value.message, value]));
+          historySnapshot.inputHighWaterSeq = upperSeq;
+          historySnapshot.previousCoverage = compressionThroughSeq;
+          historySnapshot.boundedCheckpoint = boundedCheckpoint;
+          historySnapshot.previousRecentHistoryTokens = previousRecentHistoryTokens;
+          historySnapshot.positions = messages.map((message) => positions.get(message)!);
+        }
+        return messages;
       }
       const nextSeq = page.nextAfterSeq ?? upperSeq;
       const nextSourceId = page.nextAfterSourceId ?? page.resultSources.at(-1)?.id ?? afterSourceId;

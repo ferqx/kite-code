@@ -17,14 +17,16 @@ import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import { discoveryBinding } from './source-discovery-resume-child';
 
-for (const boundary of ['response', 'results'])
-  test(`real SIGKILL ${boundary} resumes mixed readonly discovery without duplicated IO or refresh failures`, async () => {
+for (const boundary of ['response', 'results', 'skill_and_write'])
+  test(`real SIGKILL ${boundary} verifies read admission at the original decision boundary`, async () => {
+    const withSkill = boundary === 'skill_and_write';
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-discovery-resume-')));
     for (const name of ['', 'apps', 'packages', 'docs'])
       mkdirSync(join(directory, 'workspace', name), { recursive: true });
     writeFileSync(join(directory, 'workspace', 'AGENTS.md'), 'Original root rule.');
     writeFileSync(join(directory, 'workspace', 'docs/AGENTS.md'), 'Original local docs rule.');
     writeFileSync(join(directory, 'workspace', 'package.json'), '{"name":"actual-discovery"}');
+    if (withSkill) writeFileSync(join(directory, 'workspace', 'SKILL.md'), 'Verified Skill text.');
     writeFileSync(join(directory, 'workspace', 'apps/app-evidence.txt'), 'apps evidence');
     writeFileSync(
       join(directory, 'workspace', 'packages/package-evidence.txt'),
@@ -53,16 +55,17 @@ for (const boundary of ['response', 'results'])
       const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8'));
       child.kill('SIGKILL');
       expect(await child.exited).not.toBe(0);
+      if (withSkill) writeFileSync(join(directory, 'workspace', 'AGENTS.md'), 'Fresh root rule.');
       const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
       store = await openSqliteStore(profile);
       const before = await store.listExecutions('s');
       expect(before.filter((item) => item.kind === 'tool')).toHaveLength(
-        boundary === 'response' ? 0 : 4,
+        boundary === 'results' ? 4 : 0,
       );
       expect(before.find((item) => item.id === ready.executionId)?.status).toBe(
-        boundary === 'response' ? 'succeeded' : 'planned',
+        boundary === 'results' ? 'planned' : 'succeeded',
       );
-      fixture = discoveryBinding(directory);
+      fixture = discoveryBinding(directory, withSkill);
       runtime = createRuntime({
         store,
         artifacts: createArtifactStore({ profile, store }),
@@ -82,6 +85,26 @@ for (const boundary of ['response', 'results'])
       });
       expect((await store.getView('s')).runs).toHaveLength(1);
       const tools = (await store.listExecutions('s')).filter((item) => item.kind === 'tool');
+      if (withSkill) {
+        expect(tools).toHaveLength(2);
+        expect(tools.find(({ callId }) => callId === 'skill')).toMatchObject({
+          status: 'succeeded',
+          authorization: { dispatched: true },
+          decisionSource: { modelExecutionId: ready.executionId },
+        });
+        expect(tools.find(({ callId }) => callId === 'write')).toMatchObject({
+          status: 'failed',
+          authorization: { dispatched: false },
+          result: { details: { code: 'context_refresh_required', adapterAttempted: false } },
+        });
+        expect(readFileSync(join(directory, 'io.jsonl'), 'utf8')).toBe('');
+        expect(existsSync(join(directory, 'workspace', 'stale.txt'))).toBe(false);
+        const models = readFileSync(join(directory, 'models.jsonl'), 'utf8').trim().split('\n');
+        expect(models).toHaveLength(2);
+        expect(models[1]).toContain('Fresh root rule.');
+        expect(models[1]).toContain('Verified Skill text.');
+        return;
+      }
       expect(tools).toHaveLength(4);
       expect(
         tools.every(

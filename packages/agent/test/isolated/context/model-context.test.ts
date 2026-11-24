@@ -1,7 +1,11 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from '@kite-ai/ai';
-import { assertContextSource, type ContextSource } from '../../../src/context';
+import {
+  assertContextSource,
+  type ContextSource,
+  skillKnowledgeSourceId,
+} from '../../../src/context';
 import {
   agentContractSource,
   assembleModelContext,
@@ -98,23 +102,115 @@ test('an identical captured Skill body appears once, with the original tool rece
     { role: 'tool', toolCallId: 'skill', sourceIds: ['skill-receipt'], content: original.content },
     { role: 'tool', toolCallId: 'file', sourceIds: ['file-receipt'], content: original.content },
   ];
-  const input = assembleModelContext([original], calls);
+  const receipts = [{ executionId: 'skill-receipt', sourceId: original.id }];
+  const input = assembleModelContext([original], calls, receipts);
   expect(input[0]).toMatchObject({
-    role: 'system',
-    content: original.content,
+    role: 'user',
     sourceIds: [original.id],
   });
+  expect(input[0]?.content).toStartWith(
+    'Skill instructions already loaded for {"skill_id":"packing"}.',
+  );
+  expect(input[0]?.content).toEndWith(`\n${original.content}`);
   expect(input[2]).toMatchObject({
     toolCallId: 'skill',
     sourceIds: ['skill-receipt'],
-    content: 'The full instructions for Skill packing are included in the current context.',
+    content: 'The full instructions for Skill packing are included above under Skill instructions.',
   });
   expect(input[3]).toEqual(calls[2]);
   expect(calls[1]!.content).toBe(original.content);
   expect(assembleModelContext([], calls)).toEqual(calls);
-  expect(assembleModelContext([{ ...original, content: 'New version.' }], calls)[2]).toEqual(
-    calls[1],
+  const updated = assembleModelContext([{ ...original, content: 'New version.' }], calls, receipts);
+  expect(updated[2]).toMatchObject({ toolCallId: 'skill', sourceIds: ['skill-receipt'] });
+  expect(updated[2]?.content).toStartWith('Historical Skill read');
+  expect(updated[2]?.content).not.toContain(original.content);
+  expect(assembleModelContext([original], calls)[2]).toEqual(calls[1]);
+});
+
+test('an exact Skill resource is presented as its tool result or as attributed reference data', () => {
+  const resource: ContextSource = {
+    id: skillKnowledgeSourceId('packing', 'a:check.md'),
+    kind: 'skill_resource',
+    scope: 'work',
+    digest: 'current-resource-digest',
+    content: 'Confirm the address on the parcel.',
+  };
+  const calls: ModelMessage[] = [
+    {
+      role: 'assistant',
+      content: '',
+      toolCalls: [
+        {
+          id: 'public',
+          name: 'read_skill_resource',
+          arguments: '{"skill_id":"packing","path":"a:check.md"}',
+        },
+        { id: 'old', name: 'skills.resource', arguments: '{"id":"packing","path":"a:check.md"}' },
+        { id: 'other', name: 'skills.resource', arguments: '{"id":"packing:a","path":"check.md"}' },
+      ],
+    },
+    {
+      role: 'tool',
+      toolCallId: 'public',
+      sourceIds: ['original-resource-result'],
+      content: resource.content,
+    },
+    { role: 'tool', toolCallId: 'old', content: 'Earlier revision of the same resource.' },
+    { role: 'tool', toolCallId: 'other', content: resource.content },
+  ];
+  const receipts = [{ executionId: 'original-resource-result', sourceId: resource.id }];
+  const assembled = assembleModelContext([resource], calls, receipts);
+  expect(assembled).toEqual(calls);
+  expect(modelHistory([resource], assembled)).toEqual(calls);
+  expect(assembleModelContext([], calls)).toEqual(calls);
+  const originalCall = calls[0]!;
+  const repeat: ModelMessage = {
+    ...calls[1]!,
+    toolCallId: 'repeat',
+    sourceIds: ['repeat-resource-result'],
+  };
+  const repeated = assembleModelContext(
+    [resource],
+    [
+      {
+        ...originalCall,
+        toolCalls: [...originalCall.toolCalls!, { ...originalCall.toolCalls![0]!, id: 'repeat' }],
+      },
+      ...calls.slice(1),
+      repeat,
+    ],
+    [...receipts, { executionId: 'repeat-resource-result', sourceId: resource.id }],
   );
+  expect(repeated[1]).toEqual(calls[1]);
+  expect(repeated.at(-1)).toMatchObject({
+    toolCallId: 'repeat',
+    sourceIds: ['repeat-resource-result'],
+    content: 'The identical Skill resource was provided in an earlier tool result.',
+  });
+  expect(repeat.content).toBe(resource.content);
+  const resumed = assembleModelContext([resource], history);
+  expect(resumed[0]).toMatchObject({ role: 'user', sourceIds: [resource.id] });
+  expect(resumed[0]?.content).toStartWith(
+    'Current Skill resource for {"skill_id":"packing","path":"a:check.md"}.',
+  );
+  expect(resumed[0]?.content).toContain(
+    'After compaction, use it to satisfy the original request without making the same read again.',
+  );
+  expect(resumed[0]?.content).toEndWith(`\n${resource.content}`);
+  expect(modelHistory([resource], resumed)).toEqual(history);
+
+  const changed = assembleModelContext(
+    [{ ...resource, content: 'Current revision.' }],
+    calls,
+    receipts,
+  );
+  expect(changed[0]?.content).toEndWith('\nCurrent revision.');
+  expect(changed[2]).toMatchObject({
+    toolCallId: 'public',
+    sourceIds: ['original-resource-result'],
+  });
+  expect(changed[2]?.content).toStartWith('Historical Skill read');
+  expect(changed.slice(3)).toEqual(calls.slice(2));
 });
 
 test('read-only task and automatic rejection guidance remain one deterministic trusted contract', () => {

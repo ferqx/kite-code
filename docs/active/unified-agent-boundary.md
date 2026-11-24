@@ -337,9 +337,9 @@ Session rename/delete 为原 root creator 的 Decimal64 控制 CAS。原命令�
 
 Context 压缩为单选可信算法 slot，通过同一 Loop 的记录 Model Execution 保存完整输入、覆盖范围与摘要出处；提交前原上下文仍有效。后续输入使用带原 source ID 的低权限摘要，原历史、Model/Artifact 引用和 contextSelectionId 不因压缩改标。人工完成与摘要 publication 同一最终事务；自动失败保留旧选择，未变化的输入不立即无限重试。重置须由原 slot 对完整展开输入和当前工具定义明确预检，缺少或拒绝预检保留活动点并且零 Provider。普通 Service 以冻结模型显式配置的输入预算和本地估算作默认预检，独立于自动压缩水位。slot 的实际摘要校验、目录 fingerprint、来源新鲜度、取消与必要条件仍在发布前核对，不把结构完整当作已知模型窗口安全。HTTP/Client 只保存原受理意图，真实终态查原 Run；未知回执不重发。默认 pure 算法和实际 SDK 子场景见[Service owner](../../apps/service/README.md)。
 
-公共 Message 可带只读 `compression` 显示身份，仅由同 Session/Run 的准确 Model 与 snapshot 推导；已发布、失败、取消和未发布分开。压缩 Model 的完整正文不具最终回复资格，普通模型正文也不能先于实际 Run completed 取得最终回复资格。默认已知窗口使用总窗口 75% 水位，不能缩小或无继续空间的摘要以明确原 Run 失败收束；未知窗口维护点不成为 Provider 容量上限。
+公共 Message 的 `compression` 来自同 Session/Run 的实际 Model 与 snapshot，区分已发布、失败、取消和未发布。摘要 Model 正文只作为压缩证据，普通最终回复须等待 Run 完成。默认维护水位受本次已知可用输入限制；仍可用的原窗口允许继续。明确的供应商 token 超限使用单次缩短恢复，通常传输问题沿既有重连路径。
 
-压缩覆盖不抹除真实用户及父到子任务输入的模型可见性。Core 在原 selection／高水位中按真实 Command／应用回执及 sealed Fork 出处保留人类原文；父到子初始任务和后续指示另核 sender Tool、carrier Job、真实父子／root 与原配置输入，保留 Agent 来源而不取得人类引导身份。模型顺序为摘要、已覆盖原输入原序、未覆盖尾部；私有 `retainedInputMessageIds` 不进入 HTTP／SelectedContext schema，也不表示授权。普通邮件、子回报与工具资料由摘要承接，旧终态输入仍受原历史授权边界约束。Core 与默认 Service 复用准确 Host 组装边界，不能仅凭裸 Source ID 排除或固定普通历史。缩减和窗口校验包含完整保留成本，不能静默裁剪原指示；来源与定向回归归[压缩 owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)。
+标准压缩分别保存摘要覆盖序号和输入冻结序号。实际发布前按冻结序号核对新 Message 与已纳入结果。Runtime 保留经 Command、应用回执或父子出处核实的当前任务原文和显式前驱原文。Tool 调用和配对结果共同处于覆盖区或尾部，尚待消费的已纳入结果留在尾部。较早独立任务由摘要和近期历史交接，模型先接收摘要和需保留的出处，再接收未覆盖尾部。用量预测使用同一投影。冻结序号与保留证明留在 Core，公共 SelectedContext 保持原合同。 [压缩 owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)
 
 Native 原压缩／重置查询沿原 Command receipt 使用公共精确 Run reader；当前 View 只承担实际 scope 准入，有限近期 Run 目录的缺项不抹除原执行。调用者核原 Run／Store／Session／Command，原受理与执行状态分开，GET 失败不替换已核事实或触发新的执行；具体入口与验证归[Native owner](../../apps/desktop/README.md)。公共 API、Store 格式和原维护写入门禁保持。
 
@@ -519,6 +519,12 @@ Web Search 的原生搜索由现有模型请求执行，普通搜索沿 Tool 审
 加密推理状态与 SDK assistant parts 只作为不透明 continuation，沿已有私有 ModelOutput Artifact 链保存、恢复并传回匹配的 endpoint/provider/model/账户/header/路由绑定；它不授予工具执行权限，也不作为用户可见消息或 Inspector 正文。取消、流异常、截断工具批次及未完成压缩不提交可重放状态；非空纯文本 length 仍按长任务续接保存原文本段与其私有 continuation，由下一 Model Execution 继续。技术契约与测试见 [AI owner](../../packages/ai/README.md) 和 [ModelOutput owner](../../packages/agent/src/model-output/README.md)。
 
 纯文本 length 后的可重试失败重新准备当前来源时，不得丢失原 Loop 续写指令或复用过期全量请求。临时尾项只在同原 Store/Run/工作/Command 的成功 length 输出与新历史唯一原正文核对后恢复，不增加权限。若当前已发布摘要准确覆盖原正文，则核同 selection 覆盖上界与原输出证明后退役尾项，只用新摘要，不回灌旧历史；错属或无法核对时拒绝继续。具体实现和回归归 [Agent owner](../../packages/agent/README.md)。
+
+私有或兼容模型服务的诊断由 AI 适配器从有依据的错误响应提取，经限定长度及敏感信息过滤后随原失败 Model 保存。轻量会话状态按原执行身份投影 `modelFailure.providerMessage`，桌面和 TUI 在原轮次消费此事实。重连、容量恢复和权限判断由结构化信号决定。 [AI owner](../../packages/ai/README.md) · [恢复手册](../handbook/features/recovery.md)
+
+Core 用同一选区与历史上界读取已提交 Skill 回执，核 Store、主体、Run、工具及执行根。同批内置 Skill 读取核自己的实际来源。默认 Service 的可信原生工作区普通读取核原 Model／Tool、实际路由、工作根及目标适用的项目指令。写入、受保护分支与未证实的绑定继续复核完整原决策来源。最终 Store 权限、取消与必要条件仍按原派发合同。
+
+接续首先核准确原封存请求。根任务普通 Model 的可证未派发、无派生效果和同源内容变化可持久退役该尝试，原 Run 最多保存一个对应后继。退役切点已有受理引导时，同一事务应用原引导。后继完成后，工具仍沿实际成功 Model 的 Step、原调用和已封存 Skill 内容确认恢复资格。上下文超限的减量派发、摘要发布与已确认工具效果沿各自独立证明。 [恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md) · [压缩 owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)
 
 活动 Run 目录的 `executionOwner: held/unheld/unknown` 仍是只读锁观察，SQL 与锁观察各有时点；GET/SSE 不写状态。Native 选中或重连、TUI 明确选中和 CLI 继续已有会话时，独立调用受 capability 控制的会话核实接口；TUI 观察流重连只读校准，不重复核实写入。Core 按原 Store、主体、root、generation 复核整组并取得准确原 OS 排他锁后，原子 fence 并保存 owner 丢失状态：活动 Run 中断，已尝试 Model 失败，Tool／Job 效果不明保 unknown，原未派发工作和未被接纳的交互结束等待。已完成结果、答案与 accepted decision 保持。私有 checkpoint 保原安全恢复边界，公开读只见结算状态；显式接续仍须完整资格核验，核实本身零派发。普通新任务和后续输入也在 Runtime 中先校验准确原请求，再自动走相同核实与历史闭合；已落定回执不触发额外生命周期写入。客户端的可恢复读取和原申请查询在后台退避重试，不在会话消息外追加异常文字或临时核对操作；失败或证据不足保留原消息及后端准入限制，未知效果不成为成功或清理证明。完整协议与维护规则归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)，取舍见[决定](../../.agents/notes/implemented/architecture/2026-10-22-session-state-reconciliation.md)。
 

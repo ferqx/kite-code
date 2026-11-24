@@ -94,6 +94,10 @@ export interface CompressionRecord {
   modelExecutionId: string;
   runId: string;
   coveredThroughSeq: string;
+  /** Frozen input observation used for publication. Older checkpoints covered the full input. */
+  inputHighWaterSeq?: string;
+  /** Optional recent-history and covered-resource allowance selected for this bounded checkpoint. */
+  recentHistoryTokens?: number;
   publishedSeq: string;
   previousCompressionId: string | null;
   compressor: { id: string; version: string; snapshot: Json };
@@ -367,6 +371,8 @@ export interface ExecutionAuthorizationObservation {
   };
 }
 export interface ExecutionRecord {
+  /** Private Store fact for Model execution. Tool authorization has its own observation. */
+  modelDispatched?: boolean;
   authorization?: ExecutionAuthorizationObservation;
   resultAcceptance: {
     runId: string | null;

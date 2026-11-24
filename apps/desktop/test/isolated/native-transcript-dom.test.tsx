@@ -1163,6 +1163,169 @@ test('five failed reconnections expose one expandable human-readable error in th
   }
 });
 
+test('private provider diagnostics survive the lightweight session state and appear once in the original Turn', async () => {
+  const { mkdtempSync, realpathSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { pathToFileURL } = await import('node:url');
+  const { createRuntime } = await import('@kite-ai/agent');
+  const { selectProfile } = await import('@kite-ai/agent/profile');
+  const { openSqliteStore } = await import('@kite-ai/agent/sqlite');
+  const { createCompatibleModelBinding, createSdkModelAdapter } = await import('@kite-ai/ai/sdk');
+  const { createClient } = await import('@kite-ai/client');
+  const { startService } = await import('@kite-ai/service');
+  const folder = realpathSync(mkdtempSync(`${tmpdir()}/kite-provider-failure-`));
+  const profile = selectProfile({ dataRoot: folder, profile: 'test' });
+  const store = await openSqliteStore(profile);
+  const storeId = (await store.getMetadata()).storeId;
+  const retryObserved = Promise.withResolvers<void>();
+  const releaseRetry = Promise.withResolvers<void>();
+  const diagnostic = 'Current model worker accepts up to 4096 tokens.';
+  const original = 'Keep this original user request in the same Turn.';
+  let calls = 0;
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch() {
+      const attempt = ++calls;
+      if (attempt === 2) {
+        retryObserved.resolve();
+        await releaseRetry.promise;
+      }
+      return Response.json(
+        {
+          error: {
+            code: 'PRIVATE_WORKER_LIMIT',
+            message: attempt === 6 ? diagnostic : 'The request was rejected by this worker.',
+            request: { key: 'local-provider-test-credential', messages: [original] },
+          },
+        },
+        { status: 422 },
+      );
+    },
+  });
+  const model = createCompatibleModelBinding({
+    baseURL: `http://127.0.0.1:${provider.port}/v1`,
+    modelId: 'private-worker',
+    apiKey: 'local-provider-test-credential',
+  });
+  const runtime = createRuntime({
+    store,
+    modelId: 'private-worker',
+    model: createSdkModelAdapter({ models: new Map([['private-worker', model]]) }),
+    permissions: { authorize: async () => ({ allowed: true, revision: 'owned' }) },
+  });
+  const target = {
+    dataRoot: profile.dataRoot,
+    name: profile.profile,
+    accessKey: profile.profileAccessKey,
+  };
+  const service = await startService({
+    runtime,
+    profile: target,
+    buildId: 'private-error',
+    subjectId: 'owner',
+  });
+  const client = createClient({
+    endpoint: service.endpoint,
+    token: service.bootstrap.token,
+    expected: {
+      profile: target,
+      apiMajor: 1,
+      requiredCapabilities: ['commands', 'sessions', 'session_state'],
+    },
+  });
+  const f = fixture();
+  const draw = async () => {
+    const state = await client.getSessionState('s');
+    const { messages } = await client.getView('s');
+    const transcript = desktopTranscript({
+      messages,
+      runs: state.runs,
+      executions: state.executions,
+      tools: [],
+      storeId,
+      sessionId: 's',
+    });
+    await act(async () => {
+      f.root.render(
+        <Conversation {...transcript} selected connected loading={false} saveReading={() => {}} />,
+      );
+    });
+    return state;
+  };
+  try {
+    await client.connect();
+    await client.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      name: 'owned',
+      rootUri: pathToFileURL(folder).href,
+    });
+    await client.createSession({
+      expectedStoreId: storeId,
+      sessionId: 's',
+      workspaceId: 'w',
+      commandId: 'create',
+      title: 'Private model',
+    });
+    await client.startRun('s', {
+      expectedStoreId: storeId,
+      commandId: 'work',
+      kind: 'run.start',
+      content: original,
+    });
+    await Promise.race([
+      retryObserved.promise,
+      runtime.waitForCommand('work', { timeoutMs: 5000 }).then(() => {
+        throw Error('Retry did not start');
+      }),
+    ]);
+    const pending = await draw();
+    expect(pending.runs[0]?.isActive).toBe(true);
+    expect(f.host.querySelector('.model-connection')?.textContent).toContain(
+      '正在重新连接模型服务',
+    );
+    expect(f.host.querySelector('[aria-label="重连失败详情"]')).toBeNull();
+    releaseRetry.resolve();
+    await runtime.waitForCommand('work', { timeoutMs: 10000 });
+    const terminal = await draw();
+    expect(terminal.runs[0]).toMatchObject({
+      status: 'failed',
+      reason: 'model_reconnect_exhausted',
+    });
+    expect(terminal.executions).toHaveLength(6);
+    expect(terminal.executions.at(-1)?.result).toMatchObject({
+      code: 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable',
+      modelFailure: { providerMessage: `HTTP 422 · PRIVATE_WORKER_LIMIT · ${diagnostic}` },
+    });
+    expect(JSON.stringify(terminal.executions)).not.toMatch(
+      /local-provider-test-credential|compressionId|"messages"/,
+    );
+    const open = async () => {
+      const trigger = f.host.querySelector<HTMLButtonElement>('[aria-label="展开重连失败详情"]')!;
+      await act(async () => trigger.click());
+      expect(f.host.querySelector('[aria-label="重连失败详情"]')?.textContent).toBe(
+        `模型服务返回 HTTP 422 · PRIVATE_WORKER_LIMIT · ${diagnostic}`,
+      );
+    };
+    await open();
+    expect(f.host.textContent).toContain(original);
+    expect(f.host.querySelectorAll('.model-connection')).toHaveLength(1);
+    expect(f.host.querySelector('.is-running')).toBeNull();
+    await act(async () => f.root.render(null));
+    await draw();
+    await open();
+    expect(calls).toBe(6);
+  } finally {
+    releaseRetry.resolve();
+    await f.close();
+    await service.close();
+    await store.close();
+    provider.stop(true);
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test.each([
   'failed',
   'cancelled',

@@ -453,7 +453,7 @@ export interface ActionContext extends ReadContext {
   /** Same-owner receipts actually present in the sealed request that selected this tool, newest first. */
   readDecisionToolResults?(): Promise<readonly { execution: PublicExecution; content: string }[]>;
   /** Trusted Skill source actually present in the same sealed request. */
-  hasDecisionSkillBody?(skillId: string, content: string): Promise<boolean>;
+  hasDecisionSkillSource?(sourceId: string, content: string): Promise<boolean>;
   readonly artifacts?: ArtifactWriter;
   readonly records: ReadContext['records'] & {
     write(value: ExtensionRecordWrite): Promise<ExtensionRecord>;

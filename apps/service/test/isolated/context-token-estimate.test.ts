@@ -24,9 +24,15 @@ for (const mode of ['high', 'zero', 'missing', 'many'] as const)
       summaries = 0;
     const observations: { baseline: number | undefined; compress: boolean }[] = [];
     const base = createSummaryCompressor({ automatic: {} });
+    const archiveInput = 'Separate archived test evidence. '.repeat(1000);
     const model: ModelAdapter = {
       async *stream(request) {
         calls++;
+        if (request.messages.at(-1)?.content === archiveInput) {
+          yield { type: 'text_delta', text: 'Archived.' };
+          yield { type: 'finish', reason: 'stop', usage: { inputTokens: 0, outputTokens: 5000 } };
+          return;
+        }
         const summary = request.messages.some((message) =>
           message.content.startsWith('Summarize the preceding recorded conversation'),
         );
@@ -117,6 +123,14 @@ for (const mode of ['high', 'zero', 'missing', 'many'] as const)
         workspaceId: 'w',
         title: 'tokens',
       });
+      if (mode === 'high') {
+        await runtime.submitCommand({
+          ...scope,
+          commandId: 'archive',
+          request: { kind: 'run.start', content: archiveInput },
+        });
+        await runtime.waitForCommand('archive', { timeoutMs: 8000 });
+      }
       await runtime.submitCommand({
         ...scope,
         commandId: 'work',

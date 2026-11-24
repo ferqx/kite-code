@@ -90,7 +90,7 @@ export interface Message {
     };
   };
   /** Human-readable terminal transport facts; never raw Provider errors or logs. */
-  readonly modelConnectionFailure?: { readonly description: string; readonly suggestion: string };
+  readonly modelConnectionFailure?: { readonly description: string; readonly suggestion?: string };
   /** Exact terminal fact for a hidden Turn marker; independent of message status. */
   readonly turnTerminalStatus?: 'completed' | 'failed' | 'cancelled' | 'aborted';
   readonly approval?: {

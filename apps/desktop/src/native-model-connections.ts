@@ -45,6 +45,8 @@ function readableFailure(execution: NativeToolExecution) {
   const result = execution.result;
   const failure =
     result && typeof result === 'object' && !Array.isArray(result) ? result.modelFailure : null;
+  const message = providerFailureText(execution);
+  if (message) return { description: `模型服务返回 ${message}` };
   const detail =
     failure && typeof failure === 'object' && !Array.isArray(failure) ? failure.detail : null;
   if (typeof detail === 'string' && Object.hasOwn(failures, detail))
@@ -55,6 +57,20 @@ function readableFailure(execution: NativeToolExecution) {
     : code === 'MODEL_ATTEMPT_RETRYABLE_FAILURE:stream_incomplete'
       ? failures.stream_incomplete
       : failures.connection_failed;
+}
+
+export function providerFailureText(execution: NativeToolExecution | undefined) {
+  if (!execution || !retryable(execution)) return undefined;
+  const result = execution.result;
+  const failure =
+    result && typeof result === 'object' && !Array.isArray(result) ? result.modelFailure : null;
+  const message =
+    failure && typeof failure === 'object' && !Array.isArray(failure)
+      ? failure.providerMessage
+      : null;
+  return typeof message === 'string' && message.length > 0 && message.length <= 512
+    ? message
+    : undefined;
 }
 function retryable(execution: NativeToolExecution) {
   const result = execution.result;

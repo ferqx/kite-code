@@ -951,6 +951,46 @@ export function createDefaultFileCheckpointConfiguration(options: {
         configurationDigest: createHash('sha256')
           .update('private-external-read-before-auto-review')
           .digest('hex'),
+        async workspaceRead(request) {
+          const input = object(request.input);
+          if (
+            typeof input?.path !== 'string' ||
+            input.path.toLowerCase().endsWith('.pdf') ||
+            input.pages !== undefined ||
+            input.mode !== undefined ||
+            (await images.describeRequest(request)) ||
+            (await planFiles.describeRequest(request)) ||
+            (await inputFiles.describeRequest(request)) ||
+            (await fullAccessFiles.describeReadRequest(request))
+          )
+            return null;
+          const { binding, root } = await resolveSessionExecutionRoot(options.runtime(), request);
+          const native = createWorkspaceFiles({
+            root,
+            protectReads: true,
+            protectedPaths: await protectedPaths(root, options.profile, options.runtimeAssets()),
+          });
+          try {
+            const path = native.relativePath(input.path);
+            if (!path || path.toLowerCase().split('/').includes('.kite-inputs')) return null;
+            const physical = await native.inspectRootIdentity?.();
+            if (
+              physical?.device !== binding.identity?.dev ||
+              physical?.inode !== binding.identity?.ino
+            )
+              throw new AgentError('execution_root_changed');
+            await native.inspectIdentity(path);
+            request.signal.throwIfAborted();
+            return { root: binding, path: resolve(root, path) };
+          } catch (error) {
+            request.signal.throwIfAborted();
+            if (error instanceof AgentError && error.code === 'execution_root_changed') throw error;
+            // Preserve the normal route and its own failure for unproven paths.
+            return null;
+          } finally {
+            await native.close();
+          }
+        },
         async prepareTool(request, decision) {
           // Scoped input/plan/image adapters keep their own authorization contracts.
           if (

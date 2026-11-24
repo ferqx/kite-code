@@ -14,18 +14,20 @@ import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
-for (const window of [4096, undefined])
-  test(`SDK assembly repeatedly compresses one task after an interrupted summary; ${window ? `declared window=${window}` : 'unknown window with explicit threshold=32768'}`, async () => {
+for (const window of [70000, undefined])
+  test(`SDK assembly repeatedly compresses one task after an interrupted summary; ${window ? `declared window=${window}` : 'unknown window'}`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-long-compression-')));
     const workspace = join(root, 'workspace');
     mkdirSync(workspace);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
     const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
-    for (let i = 1; i <= 3; i++)
-      writeFileSync(
-        join(workspace, `input-${i}.txt`),
-        `Original tool evidence ${i}\n`.repeat(5500),
-      );
+    writeFileSync(join(workspace, 'AGENTS.md'), 'ROOT_RULE_STAYS\n');
+    for (let i = 1; i <= 5; i++) {
+      const directory = join(workspace, `area-${i}`);
+      mkdirSync(directory);
+      writeFileSync(join(directory, 'AGENTS.md'), `TARGET_RULE_${i}_END\n`);
+      writeFileSync(join(directory, 'input.txt'), `Original tool evidence ${i}\n`.repeat(2900));
+    }
     const requests: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[] = [];
     let summaries = 0,
       decisions = 0;
@@ -54,7 +56,7 @@ for (const window of [4096, undefined])
             content: `Original task and exact evidence summarized at checkpoint ${summaries}`,
           };
           reason = 'stop';
-        } else if (++decisions <= 3) {
+        } else if (++decisions <= 5) {
           delta = {
             tool_calls: [
               {
@@ -63,7 +65,7 @@ for (const window of [4096, undefined])
                 type: 'function',
                 function: {
                   name: 'read_file',
-                  arguments: JSON.stringify({ path: `input-${decisions}.txt`, max_lines: 10000 }),
+                  arguments: JSON.stringify({ path: `area-${decisions}/input.txt`, limit: 2900 }),
                 },
               },
             ],
@@ -82,7 +84,7 @@ for (const window of [4096, undefined])
       join(profile.profilePath, 'config.jsonc'),
       JSON.stringify({
         modelId: 'fixed',
-        ...(window === undefined ? { compression: { thresholdTokens: 32768 } } : {}),
+        compression: { thresholdTokens: 32768 },
         tools: [{ id: 'files.read', definitionVersion: '5' }],
         models: [
           {
@@ -147,7 +149,7 @@ for (const window of [4096, undefined])
         subjectId: 'owner',
         request: {
           kind: 'run.start',
-          content: 'Complete all three evidence reads in this original task',
+          content: 'Complete all five evidence reads in this original task',
         },
       });
       await runtime.waitForCommand('work', { timeoutMs: 15000 });
@@ -169,22 +171,30 @@ for (const window of [4096, undefined])
         );
       expect(view.runs).toHaveLength(1);
       expect(view.runs[0]).toMatchObject({ status: 'completed', reason: null, deadlineAt: null });
-      expect(decisions).toBe(4);
-      expect(summaries).toBe(3);
+      expect(decisions).toBe(6);
+      expect(summaries).toBeGreaterThanOrEqual(3);
       const context = await store.getSelectedContext({ expectedStoreId, sessionId: 's' });
       expect(context.compression).toMatchObject({ trigger: 'automatic', runId: view.runs[0]!.id });
       expect(context.compression!.previousCompressionId).not.toBeNull();
       const normalRequests = requests.filter((request) => request.tools?.length);
-      expect(JSON.stringify(normalRequests[1]!.messages)).toContain('Original tool evidence 1');
-      expect(JSON.stringify(normalRequests.at(-1)!.messages)).toContain(
-        'summarized at checkpoint 3',
-      );
+      for (let i = 1; i <= 5; i++)
+        expect(JSON.stringify(normalRequests[i]!.messages)).toContain(
+          `Original tool evidence ${i}`,
+        );
+      const latest = JSON.stringify(normalRequests.at(-1)!.messages);
+      expect(latest).toContain(`summarized at checkpoint ${summaries}`);
+      expect(latest).toContain('ROOT_RULE_STAYS');
+      expect(latest).toContain('TARGET_RULE_5_END');
+      expect(latest).not.toContain('TARGET_RULE_1_END');
       const failed = view.executions.filter(
         (execution) => execution.kind === 'model' && execution.status === 'failed',
       );
       expect(failed).toHaveLength(1);
-      expect(view.executions.filter((execution) => execution.kind === 'tool')).toHaveLength(3);
-      expect(await store.listMessages('s')).toHaveLength(10);
+      expect(view.executions.filter((execution) => execution.kind === 'tool')).toHaveLength(5);
+      const originals = (await store.listMessages('s')).filter(
+        (message) => message.role === 'tool',
+      );
+      expect(originals).toHaveLength(5);
     } finally {
       await runtime.close();
       provider.stop(true);

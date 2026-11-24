@@ -76,7 +76,6 @@ export interface LoopContext {
     | { kind: 'model'; stepId: string; request: ModelRequest }
     | {
         kind: 'response';
-        stepId: string;
         response: ModelResponse;
         settledCalls: readonly (ToolExecutionResult & { callId: string })[];
       };
@@ -103,7 +102,6 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
     context.signal.throwIfAborted();
     const initial = checkpoint;
     checkpoint = undefined;
-    const stepId = initial?.stepId ?? crypto.randomUUID();
     const response =
       initial?.kind === 'response'
         ? initial.response
@@ -119,7 +117,7 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
                   ],
                   tools: context.getTools(),
                 },
-            stepId,
+            initial?.stepId ?? crypto.randomUUID(),
           );
     if (!response.toolCalls.length) {
       if (response.finishReason === 'length') {
@@ -154,7 +152,12 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
                 : undefined;
             const outcome =
               settled ??
-              (await context.executeTool(call, stepId, response.executionId, batch.signal));
+              (await context.executeTool(
+                call,
+                response.stepId,
+                response.executionId,
+                batch.signal,
+              ));
             const { result } = outcome;
             results.set(call.id, outcome);
             if (settled) await context.restoreToolCall?.(call);

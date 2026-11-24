@@ -412,13 +412,14 @@ function TuiHistory({
       if (execution.kind === 'model')
         return (
           execution.status === 'failed' &&
-          !messages.some(
-            (message) =>
-              message.sessionId === execution.sessionId &&
-              message.runId === execution.runId &&
-              (message.outputBody?.executionId === execution.id ||
-                message.sourceIds?.includes(execution.id)),
-          )
+          (terminalModelProviderMessage(execution, snapshot?.view) !== undefined ||
+            !messages.some(
+              (message) =>
+                message.sessionId === execution.sessionId &&
+                message.runId === execution.runId &&
+                (message.outputBody?.executionId === execution.id ||
+                  message.sourceIds?.includes(execution.id)),
+            ))
         );
       if (
         !testDiagnostics &&
@@ -1396,6 +1397,48 @@ function phaseElapsed(
     ? timing.finishedAt - timing.startedAt
     : undefined;
 }
+
+function terminalModelProviderMessage(execution: Execution, view: SessionView | undefined) {
+  const result = execution.result;
+  const failure =
+    result && typeof result === 'object' && !Array.isArray(result) ? result.modelFailure : null;
+  const message =
+    failure && typeof failure === 'object' && !Array.isArray(failure)
+      ? failure.providerMessage
+      : null;
+  if (
+    typeof message !== 'string' ||
+    !message.length ||
+    message.length > 512 ||
+    execution.kind !== 'model' ||
+    execution.status !== 'failed' ||
+    !view ||
+    execution.originStoreId !== view.storeId ||
+    execution.sessionId !== view.session.id ||
+    !view.runs.some(
+      (run) =>
+        run.id === execution.runId &&
+        run.originStoreId === execution.originStoreId &&
+        run.sessionId === execution.sessionId &&
+        run.status === 'failed' &&
+        !run.isActive &&
+        run.reason === 'model_reconnect_exhausted',
+    )
+  )
+    return undefined;
+  const latest = view.executions
+    .filter(
+      (item) =>
+        item.kind === 'model' &&
+        item.runId === execution.runId &&
+        item.sessionId === execution.sessionId &&
+        item.originStoreId === execution.originStoreId &&
+        !isSessionTitleExecution(item, view.executions),
+    )
+    .at(-1);
+  return latest?.id === execution.id ? message : undefined;
+}
+
 function TuiExecution({
   execution,
   snapshot,
@@ -1416,6 +1459,7 @@ function TuiExecution({
   if (execution.kind === 'model' && snapshot) {
     const retry = observedModelRetry(execution, snapshot.view.executions);
     const result = execution.result;
+    const providerMessage = terminalModelProviderMessage(execution, snapshot.view);
     return (
       <Box flexDirection="column" marginBottom={1}>
         {retry && (
@@ -1426,12 +1470,13 @@ function TuiExecution({
         )}
         <Text color="red">
           {terminalText(
-            result &&
+            providerMessage ??
+              (result &&
               typeof result === 'object' &&
               !Array.isArray(result) &&
               typeof result.code === 'string'
-              ? result.code
-              : t('Model failed'),
+                ? result.code
+                : t('Model failed')),
           )}
         </Text>
       </Box>

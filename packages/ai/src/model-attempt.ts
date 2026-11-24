@@ -1,4 +1,4 @@
-/** Sanitized transport-only failure; never contains Provider bodies, URLs or credentials. */
+/** Safe failure classification and optional bounded provider diagnostic. */
 const marker = Symbol.for('@kite-ai/ai.ModelAttemptError.v1');
 const details = [
   'connection_refused',
@@ -13,19 +13,24 @@ export type ModelAttemptDetail = (typeof details)[number];
 export class ModelAttemptError extends Error {
   readonly reason: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
   readonly detail?: ModelAttemptDetail;
+  declare readonly providerMessage?: string;
   readonly retrySafety: 'safe' | 'unknown' | 'unsafe';
   constructor(
     reason: ModelAttemptError['reason'],
     detail?: ModelAttemptDetail,
     retrySafety: ModelAttemptError['retrySafety'] = 'unknown',
+    providerMessage?: string,
   ) {
     super(`MODEL_ATTEMPT_RETRYABLE_FAILURE:${reason}`);
     if (detail !== undefined && !details.includes(detail))
       throw new Error('invalid_model_failure_detail');
+    if (providerMessage !== undefined && !validProviderMessage(providerMessage))
+      throw new Error('invalid_model_provider_message');
     this.name = 'ModelAttemptError';
     this.reason = reason;
     this.detail = detail;
     this.retrySafety = retrySafety;
+    if (providerMessage !== undefined) this.providerMessage = providerMessage;
     Object.defineProperty(this, marker, { value: true });
   }
   /** The independently built AI root and SDK entries can own distinct constructors. */
@@ -36,10 +41,20 @@ export class ModelAttemptError extends Error {
       value[marker] === true &&
       ['safe', 'unknown', 'unsafe'].includes(value.retrySafety) &&
       (value.detail === undefined || details.includes(value.detail)) &&
+      (value.providerMessage === undefined || validProviderMessage(value.providerMessage)) &&
       ['provider_unavailable', 'connection_failed', 'stream_incomplete'].includes(value.reason) &&
       value.message === `MODEL_ATTEMPT_RETRYABLE_FAILURE:${value.reason}`
     );
   }
+}
+
+function validProviderMessage(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 512 &&
+    !/[\p{Cc}\p{Cf}]/u.test(value)
+  );
 }
 
 /** Only known system codes; never inspect or retain remote messages, URLs or bodies. */

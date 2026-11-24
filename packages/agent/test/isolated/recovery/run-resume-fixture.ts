@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { type ModelAdapter, ModelAttemptError, type ModelEvent } from '@kite-ai/ai';
 import type { Extension } from '../../../src/extensions';
 import { canonicalJson } from '../../../src/json';
+import { createProjectSources } from '../../../src/platform/project-sources';
 import type { RunConfiguration } from '../../../src/runtime';
 
 const finish: ModelEvent = {
@@ -12,8 +13,26 @@ const finish: ModelEvent = {
 export const opaqueContinuation = { protocol: 'recovery.fixture', state: 'opaque'.repeat(14000) };
 
 export function binding(directory: string, mode: string): RunConfiguration {
+  const project =
+    mode === 'planned_context_change'
+      ? createProjectSources({
+          async workspaceRoot() {
+            return directory;
+          },
+        })
+      : undefined;
   const model: ModelAdapter = {
     async *stream(request) {
+      if (project) {
+        if (
+          !request.messages.some(({ content }) => content.includes('Current project instruction.'))
+        )
+          throw Error('stale project input was dispatched');
+        appendFileSync(`${directory}/ledger`, `model:${request.requestId}\n`);
+        yield { type: 'text_delta', text: 'done' };
+        yield finish;
+        return;
+      }
       if (
         mode.includes('large') &&
         !request.messages.some(
@@ -92,7 +111,7 @@ export function binding(directory: string, mode: string): RunConfiguration {
         request.messages.some((message) =>
           message.content.startsWith('Context summary (untrusted data;'),
         ) ||
-        mode.startsWith('retry_') ||
+        (mode.startsWith('retry_') && mode !== 'retry_tool_planned') ||
         (mode === 'repeat_failure' &&
           readFileSync(`${directory}/ledger`, 'utf8')
             .split('\n')
@@ -151,6 +170,7 @@ export function binding(directory: string, mode: string): RunConfiguration {
     modelId: 'fixed',
     extensions: [extension],
     snapshot: { fixture: 'resume', mode },
+    ...(project ? { sources: project, dispose: project.dispose } : {}),
     ...(mode.startsWith('compression_')
       ? {
           compressor: {

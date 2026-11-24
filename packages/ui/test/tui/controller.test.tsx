@@ -113,6 +113,70 @@ function fixture() {
   };
   return { port, writes, cancels, reads: () => reads };
 }
+
+test('the terminal provider diagnostic stays in the original TUI turn, including a partial reply', async () => {
+  const f = fixture();
+  const base = snapshot();
+  const original = base.view.runs[0]!;
+  const diagnostic = 'HTTP 422 · WORKER_LIMIT · This worker accepts up to 4096 tokens.';
+  const current: TuiSnapshot = {
+    ...base,
+    messages: [
+      { ...base.messages[0]!, role: 'user', content: 'Original request' },
+      {
+        ...base.messages[0]!,
+        id: 'partial-reply',
+        seq: '2',
+        status: 'incomplete',
+        content: 'Saved partial reply',
+        sourceIds: ['final-attempt'],
+      },
+    ],
+  };
+  current.view.executions = [
+    {
+      id: 'final-attempt',
+      originStoreId: 'store',
+      sessionId: 'a',
+      runId: original.id,
+      kind: 'model',
+      definitionId: 'private-worker',
+      definitionVersion: '1',
+      status: 'failed',
+      resultRevision: '1',
+      cancelRequestedAt: null,
+      result: {
+        code: 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable',
+        incomplete: true,
+        modelFailure: { providerMessage: diagnostic },
+      },
+    },
+  ];
+  f.port.readSession = async (id) => (id === 'a' ? structuredClone(current) : snapshot(id, false));
+  const controller = new TuiController(f.port);
+  await controller.select('a');
+  const app = render(<TuiSession controller={controller} />);
+  try {
+    await Bun.sleep(40);
+    expect(app.lastFrame()).not.toContain('WORKER_LIMIT');
+    current.view.runs = [
+      { ...original, status: 'failed', isActive: false, reason: 'model_reconnect_exhausted' },
+    ];
+    await controller.refresh();
+    await Bun.sleep(40);
+    expect(app.lastFrame()).toContain('Saved partial reply');
+    expect(app.lastFrame()).toContain(diagnostic);
+    expect(app.lastFrame()?.match(/WORKER_LIMIT/g)).toHaveLength(1);
+    await controller.select('b');
+    await Bun.sleep(40);
+    expect(app.lastFrame()).not.toContain('WORKER_LIMIT');
+    expect(f.writes).toHaveLength(0);
+  } finally {
+    app.unmount();
+    controller.dispose();
+  }
+});
+
 test('completed parent and current unfinished Jobs stay separate through clear, stale reads and Session selection', async () => {
   const f = fixture();
   let current = snapshot('a', false);

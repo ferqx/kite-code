@@ -68,7 +68,7 @@ export function ModelConnection({
           <AnimatedCollapsibleContent className="tool-activity-content">
             <section className="turn-failure-details" aria-label="重连失败详情">
               <p>{failure.description}</p>
-              <p>{failure.suggestion}</p>
+              {failure.suggestion && <p>{failure.suggestion}</p>}
             </section>
           </AnimatedCollapsibleContent>
         )}

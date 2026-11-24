@@ -14,6 +14,8 @@ const [directory, mode, recoveryPhase] = process.argv.slice(2) as [
   string | undefined,
 ];
 if (!recoveryPhase) writeFileSync(join(directory, 'ledger'), '');
+if (!recoveryPhase && mode === 'planned_context_change')
+  writeFileSync(join(directory, 'AGENTS.md'), 'Original project instruction.');
 const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
 const store = await openSqliteStore(profile);
 const expectedStoreId = (await store.getMetadata()).storeId;
@@ -42,6 +44,18 @@ let groupActivations = 0;
 const groupApprovals = new Set<string>();
 const wrapped = new Proxy(store, {
   get(target, key) {
+    if (key === 'retireUnsentModelForContextRefresh' && recoveryPhase === 'retirement')
+      return async (input: Parameters<Store['retireUnsentModelForContextRefresh']>[0]) => {
+        await store.retireUnsentModelForContextRefresh(input);
+        await stop(input.executionId);
+      };
+    if (key === 'planExecution' && recoveryPhase === 'replacement')
+      return async (input: Parameters<Store['planExecution']>[0]) => {
+        const execution = await store.planExecution(input);
+        if ((execution.decisionSource as { contextRefreshOf?: string } | null)?.contextRefreshOf)
+          await stop(execution.id);
+        return execution;
+      };
     if (key === 'requestInteraction' && mode === 'group_approval')
       return async (input: Parameters<Store['requestInteraction']>[0]) => {
         const result = await store.requestInteraction(input);
@@ -157,13 +171,14 @@ const wrapped = new Proxy(store, {
           }
           dispatchedModels++;
           if (
-            mode.startsWith('planned_') ||
+            (mode.startsWith('planned_') &&
+              (!recoveryPhase || mode !== 'planned_context_change')) ||
             (['length_planned', 'retry_planned', 'continuation_planned'].includes(mode) &&
               dispatchedModels === 2) ||
             (mode === 'length_history' && dispatchedModels === 3)
           )
             await stop(ex.id);
-        }
+        } else if (ex?.kind === 'tool' && mode === 'retry_tool_planned') await stop(ex.id);
         return store.markDispatching(input);
       };
     if (key === 'finishExecution')
@@ -222,7 +237,12 @@ const runtime = createRuntime({
   ...(mode.startsWith('group_') ? groupOptions(directory, mode) : {}),
 });
 if (recoveryPhase) {
-  const original = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8'));
+  const original = JSON.parse(
+    readFileSync(
+      join(directory, recoveryPhase === 'replacement' ? 'ready-retirement.json' : 'ready.json'),
+      'utf8',
+    ),
+  );
   await runtime.resumeRun({
     ...original,
     commandId: `resume-child-${recoveryPhase}`,

@@ -22,7 +22,9 @@ async function fixture(summary: string, options: Partial<RuntimeOptions> = {}) {
     store,
     artifacts: createArtifactStore({ profile, store }),
     modelId: 'fixed',
-    compressor: createSummaryCompressor({ automatic: { contextWindowTokens: 1000 } }),
+    compressor: createSummaryCompressor({
+      automatic: { contextWindowTokens: 3600, maxOutputTokens: 700 },
+    }),
     model: {
       async *stream(request) {
         requests.push(request);
@@ -95,7 +97,7 @@ async function fixture(summary: string, options: Partial<RuntimeOptions> = {}) {
 
 for (const scenario of [
   { reason: 'compression_not_reducing', summary: 'Evidence '.repeat(6000) },
-  { reason: 'compression_insufficient_space', summary: 'Evidence '.repeat(1000) },
+  { reason: 'compression_insufficient_space', summary: 'Evidence '.repeat(1900) },
 ]) {
   test(`real Core stops at ${scenario.reason} without publishing or requesting another Model`, async () => {
     const f = await fixture(scenario.summary);
@@ -111,7 +113,11 @@ for (const scenario of [
       expect(run).toMatchObject({ status: 'failed', reason: scenario.reason });
       expect(f.requests).toHaveLength(2);
       expect(f.requests[1]!.tools).toHaveLength(0);
-      expect(f.requests[1]!.messages.some((message) => message.content === f.original)).toBe(true);
+      expect(
+        f.requests[1]!.messages.some((message) =>
+          message.content.includes('"historicalExcerpt":true'),
+        ),
+      ).toBe(true);
       const selected = await f.store.getModelContext({
         expectedStoreId: f.expectedStoreId,
         sessionId: 's',
@@ -131,7 +137,7 @@ for (const scenario of [
           .totalInputTokens;
       if (scenario.reason === 'compression_insufficient_space') {
         expect(tokens(scenario.summary)).toBeLessThan(tokens(f.original));
-        expect(tokens(scenario.summary)).toBeGreaterThanOrEqual(750);
+        expect(tokens(scenario.summary)).toBeGreaterThan(1876);
       }
       const after = await f.store.listMessages('s');
       expect(after.some((message) => message.id === originalMessage.id)).toBe(true);
@@ -148,7 +154,9 @@ for (const scenario of [
 
 test('fixed source and Tool overhead above a tiny window fails the real Run with zero Model calls', async () => {
   const f = await fixture('must never be requested', {
-    compressor: createSummaryCompressor({ automatic: { contextWindowTokens: 32 } }),
+    compressor: createSummaryCompressor({
+      automatic: { contextWindowTokens: 32, maxOutputTokens: 1 },
+    }),
     sources: {
       async capture() {
         return [

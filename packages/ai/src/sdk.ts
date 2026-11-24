@@ -25,7 +25,8 @@ import type {
 import { isModelImage } from './index';
 import { ModelAccessError } from './model-access';
 import { ModelAttemptError, modelConnectionDetail } from './model-attempt';
-import { ModelRequestLimitError } from './model-request-limit';
+import { ModelContextOverflowError, ModelRequestLimitError } from './model-request-limit';
+import { providerDeclaredContextOverflow, providerFailureMessage } from './provider-failure';
 import {
   type ModelAdapterSnapshot,
   type ReasoningEffort,
@@ -43,6 +44,7 @@ const compatibleSnapshots = new WeakMap<
   object,
   { family: string; modelId: string; protocol: Protocol }
 >();
+const providerDiagnosticCredentials = new WeakMap<object, readonly string[]>();
 const officialSearchBindings = new WeakSet<object>();
 const nativeToolName = 'web_search';
 const nativeDialect = 'openai-web-search';
@@ -419,6 +421,7 @@ export function createSdkModelAdapter(options: {
       const model = models.get(request.modelId);
       if (!model) throw new Error('model_not_bound');
       const provider = compatibleSnapshots.get(model as object);
+      const diagnosticCredentials = providerDiagnosticCredentials.get(model as object) ?? [];
       const native = request.nativeWebSearch;
       if (
         native &&
@@ -432,6 +435,8 @@ export function createSdkModelAdapter(options: {
       const search = native ? new NativeWebSearchStream() : undefined;
       const deepSeek = deepSeekBindings.get(model as object);
       const privateOutput = deepSeek && new DeepSeekReasoning();
+      let receivedOutput = false;
+      let streamFailureMessage: string | undefined;
       let assistantText = '';
       const rawBinding =
         typeof model === 'object' && model !== null ? responseBindings.get(model) : undefined;
@@ -560,6 +565,25 @@ export function createSdkModelAdapter(options: {
           switch (part.type) {
             case 'raw': {
               const value = part.rawValue;
+              const frame = wireObject(value);
+              if (
+                provider &&
+                !search &&
+                (frame?.error !== undefined ||
+                  frame?.type === 'error' ||
+                  frame?.type === 'response.failed')
+              ) {
+                if (
+                  !finished &&
+                  !receivedOutput &&
+                  !privateOutput?.text &&
+                  providerDeclaredContextOverflow(frame)
+                )
+                  throw new ModelContextOverflowError();
+                streamFailureMessage =
+                  providerFailureMessage(frame, diagnosticCredentials, request) ??
+                  streamFailureMessage;
+              }
               privateOutput?.observe(value);
               if (search)
                 for (const observation of search.read(value))
@@ -585,17 +609,21 @@ export function createSdkModelAdapter(options: {
               }
               break;
             case 'text-delta':
+              receivedOutput = true;
               search?.text(part.text);
               if (privateOutput) assistantText += part.text;
               yield { type: 'text_delta', text: part.text };
               break;
             case 'reasoning-delta':
+              receivedOutput = true;
               if (!privateOutput) yield { type: 'reasoning_delta', text: part.text };
               break;
             case 'tool-input-delta':
+              receivedOutput = true;
               argumentsById.set(part.id, (argumentsById.get(part.id) ?? '') + part.delta);
               break;
             case 'tool-call': {
+              receivedOutput = true;
               if (
                 part.providerExecuted &&
                 search &&
@@ -695,6 +723,7 @@ export function createSdkModelAdapter(options: {
               if (!completedCalls.has(part.toolCallId)) throw new Error('invalid_model_tool_call');
               break;
             case 'tool-input-start':
+              receivedOutput = true;
               if (part.providerExecuted) {
                 if (!search || part.toolName !== nativeToolName)
                   throw new Error('invalid_model_tool_call');
@@ -717,9 +746,19 @@ export function createSdkModelAdapter(options: {
         if (!finished) throw new ModelAttemptError('stream_incomplete');
       } catch (error) {
         signal.throwIfAborted();
+        if (ModelContextOverflowError.isInstance(error)) throw error;
         const retrySafety = search ? (search.seenSearch() ? 'unsafe' : 'unknown') : 'safe';
-        if (ModelAttemptError.isInstance(error))
-          throw search ? new ModelAttemptError(error.reason, error.detail, retrySafety) : error;
+        if (ModelAttemptError.isInstance(error)) {
+          if (search) throw new ModelAttemptError(error.reason, error.detail, retrySafety);
+          if (streamFailureMessage && !error.providerMessage)
+            throw new ModelAttemptError(
+              error.reason,
+              error.detail,
+              error.retrySafety,
+              streamFailureMessage,
+            );
+          throw error;
+        }
         if (APICallError.isInstance(error)) {
           if (native?.required && error.statusCode !== undefined)
             throw Object.assign(new Error('search_http_error'), {
@@ -727,6 +766,13 @@ export function createSdkModelAdapter(options: {
               retrySafety,
             });
           if (error.statusCode === 413 && !search) throw new ModelRequestLimitError();
+          if (
+            error.statusCode === 400 &&
+            !search &&
+            !receivedOutput &&
+            providerDeclaredContextOverflow(error.data)
+          )
+            throw new ModelContextOverflowError();
           if (error.statusCode === 401 || error.statusCode === 403)
             throw new ModelAccessError(error.statusCode);
           throw new ModelAttemptError(
@@ -739,10 +785,18 @@ export function createSdkModelAdapter(options: {
                   ? 'service_unavailable'
                   : modelConnectionDetail(error),
             retrySafety,
+            provider && !search
+              ? (streamFailureMessage ??
+                  providerFailureMessage(error.data, diagnosticCredentials, request, {
+                    status: error.statusCode,
+                    headers: error.responseHeaders,
+                    body: error.responseBody,
+                  }))
+              : undefined,
           );
         }
-        // Provider errors may contain request bodies/URLs. Do not expose them at
-        // this neutral boundary, include them as causes, or print them.
+        // Local validation has its own error boundary. Arbitrary exception text
+        // and causes are never used as a provider diagnostic.
         if (
           error instanceof Error &&
           [
@@ -760,7 +814,12 @@ export function createSdkModelAdapter(options: {
           throw error;
         // Provider failures reconnect by default, including unrecognized native
         // transport errors. The Runtime owns the bounded retry and close proof.
-        throw new ModelAttemptError('connection_failed', modelConnectionDetail(error), retrySafety);
+        throw new ModelAttemptError(
+          'connection_failed',
+          modelConnectionDetail(error),
+          retrySafety,
+          streamFailureMessage,
+        );
       }
     },
   };
@@ -956,6 +1015,13 @@ export function createCompatibleModelBinding(options: {
           : 'openai-compatible',
       modelId: options.modelId,
       protocol,
+    }),
+  );
+  providerDiagnosticCredentials.set(
+    model,
+    [options.apiKey, ...Object.values(options.headers ?? {})].flatMap((value) => {
+      const credential = value?.trim();
+      return credential ? [credential.replace(/^Bearer\s+/i, '')] : [];
     }),
   );
   return model;

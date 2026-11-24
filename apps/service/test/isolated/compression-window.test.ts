@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test';
 import type { CompressionInput } from '@kite-ai/agent';
-import { estimateModelContext, projectModelContext } from '@kite-ai/agent/context-estimate';
+import {
+  estimateModelContext,
+  modelInputCapacity,
+  projectModelContext,
+} from '@kite-ai/agent/context-estimate';
 import type { ModelMessage, ModelTool } from '@kite-ai/ai';
 import { createSummaryCompressor } from '../../src/compression-configuration';
 
@@ -94,11 +98,25 @@ function measured(tokens: number): CompressionInput {
 for (const tokens of [7499, 7500, 7501]) {
   test(`automatic maintenance uses 75 percent of the total window at ${tokens} measured tokens`, async () => {
     const compressor = createSummaryCompressor({
-      automatic: { contextWindowTokens: 10000, maxOutputTokens: 8000 },
+      automatic: { contextWindowTokens: 10000, maxOutputTokens: 1000 },
     });
     expect(await compressor.shouldCompress!(measured(tokens))).toBe(tokens >= 7500);
   });
 }
+
+test('automatic maintenance clamps an explicit trigger to the usable request input', async () => {
+  const capabilities = { contextWindowTokens: 128000, maxOutputTokens: 16000 };
+  const requestMaxOutputTokens = 32000;
+  const usable = modelInputCapacity(capabilities, requestMaxOutputTokens).usableInputTokens!;
+  expect(usable).toBe(93440);
+  const compressor = createSummaryCompressor({
+    automatic: { ...capabilities, requestMaxOutputTokens, thresholdTokens: 97000 },
+  });
+  expect(compressor.windowBudget?.usableInputTokens).toBe(usable);
+  expect(await compressor.shouldCompress!(measured(usable - 1))).toBe(false);
+  expect(await compressor.shouldCompress!(measured(usable))).toBe(true);
+  expect((await compressor.prepare(measured(usable)))?.measurement?.thresholdTokens).toBe(usable);
+});
 
 for (const tokens of [32768, 196607, 196608]) {
   test(`undeclared windows default to 256K with a 75 percent trigger at ${tokens}`, async () => {
@@ -106,6 +124,33 @@ for (const tokens of [32768, 196607, 196608]) {
     expect(await compressor.shouldCompress!(measured(tokens))).toBe(tokens >= 196608);
   });
 }
+
+test('an output reservation does not turn an undeclared window into a hard budget', async () => {
+  const compressor = createSummaryCompressor({
+    automatic: { requestMaxOutputTokens: 128000 },
+  });
+  expect(compressor.windowBudget?.usableInputTokens).toBeUndefined();
+  expect(compressor.validateExpanded).toBeUndefined();
+  expect(await compressor.shouldCompress!(measured(196607))).toBe(false);
+  expect(await compressor.shouldCompress!(measured(196608))).toBe(true);
+});
+
+test('hard capacity can accept a reduced window still above the maintenance target', async () => {
+  const compressor = createSummaryCompressor({
+    automatic: { contextWindowTokens: 6000, maxOutputTokens: 512, thresholdTokens: 1000 },
+  });
+  const current: ModelMessage = { role: 'user', content: 'Required evidence. '.repeat(700) };
+  const value = input(
+    [current, { role: 'assistant', content: 'Settled history evidence. '.repeat(2000) }],
+    { retainedMessages: [current] },
+  );
+  expect(await compressor.shouldCompress!(value)).toBe(true);
+  const validation = { ...value, summary: 'Earlier evidence reviewed.' };
+  expect(await compressor.validateSummary!(validation)).toBe(true);
+  const accounting = (await compressor.validateSummaryReport!(validation)).accounting!;
+  expect(accounting.afterTokens).toBeGreaterThan(1000);
+  expect(accounting.afterTokens).toBeLessThan(compressor.windowBudget!.usableInputTokens!);
+});
 
 for (const contextWindowTokens of [undefined, 1048576])
   test(`an explicit token threshold overrides 75 percent for window ${contextWindowTokens ?? 'default'}`, async () => {
@@ -123,22 +168,24 @@ for (const contextWindowTokens of [undefined, 1048576])
     });
   });
 
-test('an explicit token threshold also governs summary validation and rejects irreducible loops', async () => {
+test('a summary missing the maintenance target leaves a usable original window selected', async () => {
   const compressor = createSummaryCompressor({
-    automatic: { contextWindowTokens: 1048576, thresholdTokens: 100 },
+    automatic: { contextWindowTokens: 1048576, maxOutputTokens: 16000, thresholdTokens: 100 },
   });
   const value = input([{ role: 'assistant', content: 'Original source evidence. '.repeat(2000) }]);
-  await expect(
-    compressor.validateSummary!({ ...value, summary: 'Reduced evidence. '.repeat(300) }),
-  ).rejects.toMatchObject({ code: 'compression_insufficient_space' });
-  await expect(
-    compressor.shouldCompress!(
+  const summary = 'Reduced evidence. '.repeat(300);
+  expect(await compressor.validateSummary!({ ...value, summary })).toBe(false);
+  expect(await compressor.validateSummary!({ ...value, summary, recoveringOverflow: true })).toBe(
+    true,
+  );
+  expect(
+    await compressor.shouldCompress!(
       input([
         { role: 'system', content: 'Mandatory source. '.repeat(300) },
         { role: 'assistant', content: 'Finished evidence' },
       ]),
     ),
-  ).rejects.toMatchObject({ code: 'compression_insufficient_space' });
+  ).toBe(false);
   for (const thresholdTokens of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])
     expect(() => createSummaryCompressor({ automatic: { thresholdTokens } })).toThrow(
       'invalid_compression_threshold',
@@ -153,7 +200,9 @@ test('an extremely small window rejects fixed context before preparing or reques
   expect(
     estimateModelContext({ messages: [messages[0]!], tools }).estimate.totalInputTokens,
   ).toBeGreaterThan(24);
-  const compressor = createSummaryCompressor({ automatic: { contextWindowTokens: 32 } });
+  const compressor = createSummaryCompressor({
+    automatic: { contextWindowTokens: 32, maxOutputTokens: 1 },
+  });
   let prepared = 0;
   let modelCalls = 0;
   const performCompression = async () => {
@@ -180,9 +229,10 @@ test('automatic summary validation rejects a non-reducing result using the real 
     estimateModelContext({ messages: [{ role: 'user', content: summary }], tools }).estimate
       .totalInputTokens,
   ).toBeGreaterThan(estimateModelContext({ messages, tools }).estimate.totalInputTokens);
-  await expect(compressor.validateSummary!({ ...input(messages), summary })).rejects.toMatchObject({
-    code: 'compression_not_reducing',
-  });
+  expect(await compressor.validateSummary!({ ...input(messages), summary })).toBe(false);
+  await expect(
+    compressor.validateSummary!({ ...input(messages), summary, recoveringOverflow: true }),
+  ).rejects.toMatchObject({ code: 'compression_not_reducing' });
 });
 
 test('a reducing summary still fails when mandatory sources and actual Tools leave no working space', async () => {
@@ -209,13 +259,15 @@ test('a reducing summary still fails when mandatory sources and actual Tools lea
   };
   const fixedTokens = estimateModelContext({ messages: [fixedMessage], tools: actualTools })
     .estimate.totalInputTokens;
-  const window = Math.ceil((fixedTokens + 40) / 0.75);
+  const window = fixedTokens + 40 + 1024 + 512;
   const messages: ModelMessage[] = [
     fixedMessage,
     { role: 'assistant', content: 'Complete project evidence. '.repeat(1000) },
   ];
   const summary = 'Retained project evidence. '.repeat(100);
-  const compressor = createSummaryCompressor({ automatic: { contextWindowTokens: window } });
+  const compressor = createSummaryCompressor({
+    automatic: { contextWindowTokens: window, maxOutputTokens: 512 },
+  });
   const value = input(messages, { sources: [source], tools: actualTools });
   expect(await compressor.shouldCompress!(value)).toBe(true);
   expect(
@@ -316,9 +368,35 @@ test('source-proven retained user inputs consume fixed window space before a sum
     [retained, { role: 'assistant', content: 'Finished tool evidence. '.repeat(1000) }],
     { retainedMessages: [structuredClone(retained)] },
   );
-  await expect(compressor.shouldCompress!(value)).rejects.toMatchObject({
-    code: 'compression_insufficient_space',
-  });
+  expect(await compressor.shouldCompress!(value)).toBe(false);
+});
+
+test('a measured trigger skips the summary request when newly retained evidence alone prevents reduction', async () => {
+  const task: ModelMessage = { role: 'user', content: 'Read the Skill.', sourceIds: ['task'] };
+  const messages: ModelMessage[] = [task, { role: 'assistant', content: 'Read done.' }];
+  const receipt: ModelMessage = {
+    role: 'user',
+    content: 'Completed Skill read (historical execution data): {"outcome":"succeeded"}',
+    sourceIds: ['original-execution'],
+  };
+  const localBefore = estimateModelContext({ messages, tools }).estimate.totalInputTokens;
+  const fixed = estimateModelContext({ messages: [task, receipt], tools }).estimate
+    .totalInputTokens;
+  expect(fixed).toBeGreaterThan(localBefore);
+  const threshold = fixed + 1;
+  const compressor = createSummaryCompressor({ automatic: { thresholdTokens: threshold } });
+  expect(
+    await compressor.shouldCompress!(
+      input(messages, {
+        retainedMessages: [structuredClone(task), receipt],
+        tokenBaseline: {
+          executionId: 'measured-request',
+          request: { modelId: 'fixed', messages, tools },
+          inputTokens: threshold + 1,
+        },
+      }),
+    ),
+  ).toBe(false);
 });
 
 test('post-summary preflight includes the original guide even when the summary omits it', async () => {
@@ -339,9 +417,7 @@ test('post-summary preflight includes the original guide even when the summary o
   ];
   const value = input(messages, { retainedMessages: [structuredClone(retained)] });
   expect(await compressor.shouldCompress!(value)).toBe(true);
-  await expect(compressor.validateSummary!({ ...value, summary })).rejects.toMatchObject({
-    code: 'compression_insufficient_space',
-  });
+  expect(await compressor.validateSummary!({ ...value, summary })).toBe(false);
   const fitting = createSummaryCompressor({
     automatic: { thresholdTokens: fixedTokens + 1000 },
   });
@@ -357,9 +433,9 @@ test('retaining original guides cannot hide a non-reducing replacement behind a 
   const messages: ModelMessage[] = [retained, { role: 'assistant', content: 'Done.' }];
   const value = input(messages, { retainedMessages: [structuredClone(retained)] });
   const compressor = createSummaryCompressor({ automatic: {} });
-  await expect(
-    compressor.validateSummary!({ ...value, summary: 'Derived background. '.repeat(20) }),
-  ).rejects.toMatchObject({ code: 'compression_not_reducing' });
+  expect(
+    await compressor.validateSummary!({ ...value, summary: 'Derived background. '.repeat(20) }),
+  ).toBe(false);
 });
 
 test('a summary sharing a source string does not acquire the retained original input cost', async () => {
@@ -408,17 +484,18 @@ test('parent-Agent task and correction originals remain fixed costs with their d
     { retainedMessages: structuredClone(originals) },
   );
   const tooSmall = createSummaryCompressor({ automatic: { thresholdTokens: fixedTokens - 1 } });
-  await expect(tooSmall.shouldCompress!(value)).rejects.toMatchObject({
-    code: 'compression_insufficient_space',
-  });
+  expect(await tooSmall.shouldCompress!(value)).toBe(false);
   const fitting = createSummaryCompressor({ automatic: { thresholdTokens: fixedTokens + 1000 } });
   expect(await fitting.shouldCompress!(value)).toBe(true);
   expect(
     await fitting.validateSummary!({ ...value, summary: 'Completed background evidence.' }),
   ).toBe(true);
-  await expect(
-    fitting.validateSummary!({ ...value, summary: 'Derived background evidence. '.repeat(1000) }),
-  ).rejects.toMatchObject({ code: 'compression_insufficient_space' });
+  expect(
+    await fitting.validateSummary!({
+      ...value,
+      summary: 'Derived background evidence. '.repeat(1000),
+    }),
+  ).toBe(false);
   expect(value.retainedMessages).toEqual(originals);
 });
 

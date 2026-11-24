@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+2026-11-24：[有界上下文决定](2026-11-24-bounded-agent-context.md)细化覆盖与输入冻结边界、当前任务原文保留、Skill 资料角色及明确超限的一次恢复。本文关于原 Model ledger、发布事务、不可变历史、准确权限与取消证明继续适用。
+
 2026-10-15：[持续执行决定](2026-10-15-long-running-agent-continuation.md)细化默认 Service 的自动触发、单任务内压缩与失败指纹生命周期：相同失败输入只让出一次普通决策边界，不能永久禁用。本文关于实际 Model ledger、不可变历史、低信任摘要、事务和未知发布的理由继续适用。
 
 可信单选 ContextCompressor 只给纯算法描述；手动/自动在原 defaultLoop/UnifiedExecution 内使用普通有来源的 Model。context_snapshot 保存有限 pending 描述、已发布原范围引用和 reset marker；没有新增基础表或第二 Loop。覆盖范围由原 selection 及序列上界确定，原 Model 请求/完整 Artifact/usage 保留。summary 以低信任 user 来源进入下一请求，不授 Tool 权限。压缩不增加 contextSelectionId。

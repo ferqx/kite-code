@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isImageObservation } from '../../execution/image-window';
 import { canonicalJson } from '../../json';
+import {
+  contextRefreshCancellation,
+  isOrdinaryContextRefreshRequest,
+} from '../../model-request-identity';
 import type { Store } from '../port';
 import {
   AgentError,
@@ -14,10 +18,17 @@ import { transferAuthorizationCheckOwnership } from './authorization-check';
 import { verifyFirstActivation } from './child-first-activation';
 import { assertConfigurationReads } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
+import { applyInputWork } from './input-operations';
 import { identity as modelIdentity, sessionScope } from './model-input-operations';
 import type { SqliteOperations } from './operations';
 import { closeAbandonedOwnerTitles } from './owner-dispatch';
-import { assertEffectFreeModel, assertHistoricalExecution } from './recovery-audit-validation';
+import {
+  assertEffectFreeModel,
+  assertHistoricalExecution,
+  contextRefreshSeal,
+  matchesContextRefreshResume,
+} from './recovery-audit-validation';
+import { getSessionExecutionRoot } from './session-execution-root';
 import { withReconciledFrontier } from './session-reconciliation';
 import { automaticTitleEffect } from './session-title-scope';
 
@@ -729,6 +740,99 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
         lease.instanceId,
       );
       return;
+    }
+    if (method === 'retireUnsentModelForContextRefresh') {
+      const input = value as Parameters<Store['retireUnsentModelForContextRefresh']>[0];
+      db.identity(input.expectedStoreId);
+      const run = db.row('SELECT * FROM run WHERE id=?', input.runId);
+      if (!run) throw new AgentError('run_resume_checkpoint_changed');
+      const sessionId = String(run.session_id);
+      const original = db.active(input.owner, String(run.origin_command_id), input.runId);
+      const session = db.owner(input.owner, sessionId);
+      assertNoExecutionGroupFence(db, sessionId);
+      const model = db.row(
+        "SELECT * FROM execution WHERE run_id=? AND kind='model' ORDER BY rowid DESC LIMIT 1",
+        input.runId,
+      );
+      const source = input.expectedDecisionSource as Record<string, Json> | null;
+      if (
+        session.parent_id !== null ||
+        !['run.start', 'input.follow_up'].includes(String(original.kind)) ||
+        session.context_selection_id !== run.context_selection_id ||
+        run.config_json !== canonicalJson(input.expectedConfiguration) ||
+        model?.id !== input.executionId ||
+        model.session_id !== sessionId ||
+        model.origin_store_id !== input.expectedStoreId ||
+        model.origin_command_id !== original.id ||
+        model.root_work_command_id !== run.root_work_command_id ||
+        model.root_work_seq !== run.root_work_seq ||
+        model.parent_execution_id !== null ||
+        model.state !== 'planned' ||
+        Number(model.dispatched) !== 0 ||
+        model.result_json !== null ||
+        model.interaction_binding_json !== null ||
+        String(model.owner_generation) !== input.owner.generation ||
+        !source ||
+        !isOrdinaryContextRefreshRequest(source, model.id) ||
+        model.decision_source_json !== canonicalJson(source) ||
+        model.intent_json !== canonicalJson(input.expectedInput) ||
+        !matchesContextRefreshResume(db, model, input.resumeCommandId) ||
+        db.row(
+          "SELECT id FROM interaction WHERE execution_id=? AND state IN ('pending','answered') LIMIT 1",
+          model.id!,
+        )
+      )
+        throw new AgentError('run_resume_checkpoint_changed');
+      const root = getSessionExecutionRoot(db, { sessionId });
+      const originalRoot = source.executionRoot as Record<string, Json> | undefined;
+      if (
+        originalRoot
+          ? originalRoot.sessionId !== root.sessionId ||
+            originalRoot.workspaceId !== root.workspaceId ||
+            originalRoot.effectiveRootUri !== root.effectiveRootUri ||
+            originalRoot.epoch !== root.epoch ||
+            (root.identity &&
+              canonicalJson(originalRoot.identity ?? null) !== canonicalJson(root.identity))
+          : root.epoch !== '0'
+      )
+        throw new AgentError('execution_root_changed');
+      assertEffectFreeModel(db, model);
+      const pending = db.row(
+        `SELECT id,kind FROM command WHERE input_target_run_id=?
+         AND kind IN ('input.steer','result.include') AND status='accepted' AND cancelled=0
+         ORDER BY COALESCE(pending_order,seq),seq LIMIT 1`,
+        input.runId,
+      );
+      if (pending?.kind === 'input.steer') {
+        applyInputWork(db, {
+          expectedStoreId: input.expectedStoreId,
+          owner: input.owner,
+          commandId: String(pending.id),
+          runId: input.runId,
+          kind: 'steer',
+        });
+        return 'steered';
+      }
+      // A queued result is published by the regular input drain before the replacement Model is built.
+      if (BigInt(model.result_revision!) >= 9223372036854775807n)
+        throw new AgentError('sequence_exhausted');
+      const result = canonicalJson({
+        outcome: 'cancelled',
+        content: contextRefreshCancellation,
+        details: {
+          code: contextRefreshCancellation,
+          adapterAttempted: false,
+          resumeCommandId: input.resumeCommandId,
+          requestSeal: contextRefreshSeal(model),
+        },
+      });
+      db.run(
+        "UPDATE execution SET state='cancelled',result_json=?,result_revision=result_revision+1 WHERE id=?",
+        result,
+        model.id!,
+      );
+      db.event(sessionId, String(model.id), 'execution.finished');
+      return 'retired';
     }
     const input = value as Parameters<Store['commitRunResume']>[0],
       lease = input.lease;

@@ -31,6 +31,7 @@ for (const mode of [
   'retry_planned',
   'retry_failed',
   'retry_lineage',
+  'retry_tool_planned',
   'running_model',
   'running_large',
   'compression_running',
@@ -403,7 +404,7 @@ for (const mode of [
             : 1,
       );
       expect(ledger.filter((v) => v.startsWith('model:')).length).toBe(
-        ['continuation_running', 'continuation_failed'].includes(seedMode)
+        ['continuation_running', 'continuation_failed', 'retry_tool_planned'].includes(seedMode)
           ? 3
           : seedMode === 'retry_lineage'
             ? 5
@@ -445,6 +446,25 @@ for (const mode of [
       }
       expect((await store.getRun(ready.runId))!.status).toBe('completed');
       const after = (await store.getView('s')).executions;
+      if (mode === 'retry_tool_planned') {
+        const [failedModel, successfulModel] = original.filter(({ kind }) => kind === 'model');
+        expect(failedModel?.status).toBe('failed');
+        expect(successfulModel).toMatchObject({
+          status: 'succeeded',
+          decisionSource: { retry: { previousExecutionId: failedModel!.id, attempt: 2 } },
+        });
+        const plannedTool = original.find(({ id }) => id === ready.executionId);
+        expect(plannedTool).toMatchObject({
+          kind: 'tool',
+          status: 'planned',
+          stepId: successfulModel!.stepId,
+          decisionSource: { modelExecutionId: successfulModel!.id },
+          authorization: { dispatched: false },
+        });
+        expect(after.filter(({ kind }) => kind === 'tool')).toMatchObject([
+          { id: ready.executionId, status: 'succeeded', authorization: { dispatched: true } },
+        ]);
+      }
       if (mode === 'retry_lineage') {
         expect(
           after.find((execution) => execution.id === ready.executionId)!.decisionSource,

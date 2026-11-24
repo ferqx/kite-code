@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
-import { matchesModelRequestIdentity } from '../../model-request-identity';
+import {
+  contextRefreshCancellation,
+  isOrdinaryContextRefreshRequest,
+  matchesModelRequestIdentity,
+} from '../../model-request-identity';
 import { AgentError, type Json } from '../types';
 import { validateAgentSource } from './agent-input-operations';
 import type { SqliteOperations } from './operations';
@@ -50,6 +54,117 @@ export function assertEffectFreeModel(db: SqliteOperations, execution: AuditRow)
     )
   )
     throw new AgentError('run_resume_checkpoint_unavailable');
+}
+
+export function contextRefreshSeal(execution: AuditRow): string {
+  return createHash('sha256')
+    .update(
+      canonicalJson([execution.intent_json as string, execution.decision_source_json as string]),
+    )
+    .digest('hex');
+}
+
+export function matchesContextRefreshResume(
+  db: SqliteOperations,
+  e: AuditRow,
+  resumeId: string,
+): boolean {
+  const resume = db.row(
+    "SELECT * FROM command WHERE id=? AND kind='run.resume' AND status='applied'",
+    resumeId,
+  );
+  const original = db.row('SELECT subject_id FROM command WHERE id=?', e.origin_command_id!);
+  const lease = parse(resume?.run_resume_lease_json);
+  const receipt = parse(resume?.receipt_json);
+  return (
+    !!resume &&
+    !!original &&
+    resume.session_id === e.session_id &&
+    resume.origin_store_id === e.origin_store_id &&
+    resume.subject_id === original.subject_id &&
+    lease?.kind === 'run_resume' &&
+    lease.commandId === resumeId &&
+    lease.runId === e.run_id &&
+    lease.sessionId === e.session_id &&
+    lease.generation === String(e.owner_generation) &&
+    receipt?.outcome === 'run_resumed' &&
+    receipt.boundary === 'before_model_dispatch' &&
+    receipt.runId === e.run_id &&
+    receipt.originalCommandId === e.origin_command_id
+  );
+}
+
+function assertContextRefreshCancellation(db: SqliteOperations, e: AuditRow): void {
+  const source = parse(e.decision_source_json);
+  const result = parse(e.result_json);
+  const details = result?.details as Record<string, Json> | undefined;
+  const session = db.row('SELECT parent_id FROM session WHERE id=?', e.session_id!);
+  if (
+    e.state !== 'cancelled' ||
+    Number(e.dispatched) !== 0 ||
+    e.parent_execution_id !== null ||
+    session?.parent_id !== null ||
+    !source ||
+    !isOrdinaryContextRefreshRequest(source, e.id) ||
+    result?.outcome !== 'cancelled' ||
+    result.content !== contextRefreshCancellation ||
+    details?.code !== contextRefreshCancellation ||
+    details.adapterAttempted !== false ||
+    details.requestSeal !== contextRefreshSeal(e) ||
+    typeof details.resumeCommandId !== 'string' ||
+    !matchesContextRefreshResume(db, e, details.resumeCommandId)
+  )
+    throw new AgentError('run_resume_checkpoint_unavailable');
+  assertEffectFreeModel(db, e);
+  const successor = db.row(
+    `SELECT id,session_id,origin_store_id,root_work_command_id,root_work_seq,decision_source_json
+    FROM execution WHERE run_id=? AND kind='model'
+    AND rowid>(SELECT rowid FROM execution WHERE id=?) ORDER BY rowid LIMIT 1`,
+    e.run_id!,
+    e.id!,
+  );
+  if (successor) {
+    const next = parse(successor.decision_source_json);
+    if (
+      !next ||
+      next.contextRefreshOf !== e.id ||
+      !isOrdinaryContextRefreshRequest(next, successor.id) ||
+      successor.session_id !== e.session_id ||
+      successor.origin_store_id !== e.origin_store_id ||
+      successor.root_work_command_id !== e.root_work_command_id ||
+      successor.root_work_seq !== e.root_work_seq ||
+      canonicalJson(next.executionRoot ?? null) !== canonicalJson(source.executionRoot ?? null)
+    )
+      throw new AgentError('run_resume_checkpoint_unavailable');
+  }
+}
+
+export function assertContextRefreshPlan(
+  db: SqliteOperations,
+  runId: string,
+  executionId: string,
+  value: Json,
+): void {
+  const source = value as Record<string, Json> | null;
+  const tail = db.row(
+    "SELECT id,state,CASE WHEN state='cancelled' THEN json_extract(result_json,'$.content') END AS cancellation FROM execution WHERE run_id=? AND kind='model' ORDER BY rowid DESC LIMIT 1",
+    runId,
+  );
+  const awaitingReplacement = tail?.cancellation === contextRefreshCancellation;
+  if (!awaitingReplacement && source?.contextRefreshOf === undefined) return;
+  const previous = awaitingReplacement
+    ? db.row('SELECT * FROM execution WHERE id=?', tail.id!)
+    : undefined;
+  if (
+    !previous ||
+    !source ||
+    source.contextRefreshOf !== previous.id ||
+    !isOrdinaryContextRefreshRequest(source, executionId) ||
+    canonicalJson(source.executionRoot ?? null) !==
+      canonicalJson(parse(previous.decision_source_json)?.executionRoot ?? null)
+  )
+    throw new AgentError('run_resume_checkpoint_changed');
+  assertContextRefreshCancellation(db, previous);
 }
 
 /** Only a proven applied steer can retire this exact, never-dispatched Model. */
@@ -162,7 +277,8 @@ export function assertHistoricalExecution(
   if (e.kind !== 'model' || ['planned', 'dispatching', 'running'].includes(String(e.state))) return;
   const result = parse(e.result_json);
   if (e.state === 'cancelled') {
-    assertSupersededModel(db, e);
+    if (result?.content === contextRefreshCancellation) assertContextRefreshCancellation(db, e);
+    else assertSupersededModel(db, e);
   } else if (e.state === 'failed') {
     if (result?.incomplete !== true || typeof result.content !== 'string')
       throw new AgentError('run_resume_checkpoint_unavailable');

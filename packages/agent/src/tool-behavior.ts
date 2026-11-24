@@ -11,7 +11,7 @@ import type {
   ToolResult,
 } from './extensions';
 import type { CapabilityBinding, GrantCandidate } from './permission-grants';
-import { AgentError } from './storage/types';
+import { AgentError, type SessionExecutionRoot } from './storage/types';
 
 /** Serializable identity of trusted code selected for an exact registered definition. */
 export interface ToolBehaviorBinding {
@@ -59,6 +59,11 @@ export interface TrustedToolBehavior extends ToolBehaviorBinding {
     request: AuthorizationRequest,
     decision: PermissionDecision,
   ): Promise<PreparedToolExecution | null>;
+  /** Proves this exact invocation uses the ordinary native workspace read route. */
+  workspaceRead?(request: AuthorizationRequest): Promise<{
+    root: SessionExecutionRoot;
+    path: string;
+  } | null>;
   readonly autoReview?: 'check' | 'none';
   readonly grantSatisfiesDefaultCheck?: true;
   prepareReview?(
@@ -129,6 +134,8 @@ export function createToolBehaviorRegistry(input: {
       !/^[a-f0-9]{64}$/.test(behavior.configurationDigest) ||
       (behavior.prepareTool !== undefined &&
         (behavior.capability.kind !== 'tool' || typeof behavior.prepareTool !== 'function')) ||
+      (behavior.workspaceRead !== undefined &&
+        (behavior.capability.kind !== 'tool' || typeof behavior.workspaceRead !== 'function')) ||
       (behavior.executionConfirmation !== undefined &&
         typeof behavior.executionConfirmation !== 'function') ||
       (behavior.autoReview !== undefined && !['check', 'none'].includes(behavior.autoReview)) ||

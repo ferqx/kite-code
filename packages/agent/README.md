@@ -6,7 +6,7 @@ Shell最终文件沿[宿主输出收集](src/business/output-collection.README.m
 
 [Trajectory owner](src/trajectory/README.md)已接原业务事务的不可变历史事实、固定上界的无状态分页及 typed Evidence；模型输入／输出、Files 原 receipt、Job 有界预览均按原版本读取，恢复保原来源。Service 的独立 Trace 消费不进入业务 ExtensionHost；原生命周期通知与 Session Logs 保持各自合同。
 
-默认SDK模型请求与传输失败除明确HTTP401／403认证或权限拒绝外均取得重连资格，分类与未知错误净化归[AI owner](../ai/README.md)。自定义Adapter的未分类异常仍不能替代已确认关闭的重试证明。[模型重连](src/model-attempt.ts)由 Runtime 在原已确认失败、关闭和来源资格保持的 Model Execution 之后退避重试，同一连续故障最多重连5次（首次请求另计，共6次尝试）。新重试事实持久记录`maxAttempts:6`，第5次重连仍失败时以`model_reconnect_exhausted`结束原Run，不创建第7次请求；原部分正文、用量和工具事实保留，明确新任务独立计数。冷恢复沿原attempt继续计数，不扩大剩余次数；旧历史的`maxAttempts:null`仍按原值可读。Execution只保存AI边界核实的有限`modelFailure.detail`，客户端自行映射可读原因，不记录或转发远端日志。[模型回归](test/isolated/execution/model-attempt.test.ts)核最后一次成功、耗尽后新任务、原前驱与部分工具零效果；物理断流和公开投影归[Service回归](../../apps/service/test/isolated/responses-loop.test.ts)。
+默认SDK模型请求与传输失败除明确HTTP401／403认证或权限拒绝外均取得重连资格，分类与未知错误净化归[AI owner](../ai/README.md)。自定义Adapter的未分类异常仍不能替代已确认关闭的重试证明。[模型重连](src/model-attempt.ts)由 Runtime 在原已确认失败、关闭和来源资格保持的 Model Execution 之后退避重试，同一连续故障最多重连5次（首次请求另计，共6次尝试）。新重试事实持久记录`maxAttempts:6`，第5次重连仍失败时以`model_reconnect_exhausted`结束原Run，不创建第7次请求；原部分正文、用量和工具事实保留，明确新任务独立计数。冷恢复沿原attempt继续计数，不扩大剩余次数；旧历史的`maxAttempts:null`仍按原值可读。失败的 Model Execution 保存 AI 边界提供的有限 `modelFailure.detail` 和可选 `providerMessage`。会话状态只投影有界诊断，客户端可在原轮次呈现最后一次真实失败。诊断属于执行显示事实。[模型回归](test/isolated/execution/model-attempt.test.ts)核最后一次成功、耗尽后新任务、原前驱与部分工具零效果；物理断流和公开投影归[Service回归](../../apps/service/test/isolated/responses-loop.test.ts)。
 
 2026-10-26，本轮失败修复已通过12份受影响 Agent 完整测试文件。普通输入的 Run、Model 和来源直接绑定原 Command；内部权限模型使用 `authorization.check`，不再把它算作子 Agent／业务 Run。原 Action 来源继承用当前 ensure／prepare／dispatch 检查链核对目标、输入、策略与模型身份，损坏后仍要求零派发事件；Files 协作从实际模型文本回执读取完整 baseline，保留真实 CAS 冲突、结果未知、取消、串行资源与恢复不重放断言。真实恢复 PTY 已核原 Session 和准确历史。此为受影响范围的定向资格，不代表全仓或跨平台验收。
 
@@ -266,6 +266,8 @@ Tool 的 `failed`、人工／自动拒绝、adapter 抛异常与 `outcome_unknow
 
 [模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主通过 `agentContractSource` 将[固定基础指令](src/prompts/agent-contract.md)与[工作环境段](src/working-environment.ts)组装为 `agent:contract`。工作环境段使用当前执行根、平台、Shell 方言与解释器版本，以及随包 `rg` 的已核验版本。提示模板随 Agent 构建内嵌。调整系统提示内容或组装前，须取得用户对该次变更的[明确准许](../../AGENTS.md#自主推进与授权)。
 
+已捕获的技能正文和资料带对应的加载或读取来源进入模型输入。与该来源内容一致的历史工具结果在请求中呈现为简短引用，原始回执继续保存。详见 [Skills 去重和压缩规则](src/skills/README.md)。
+
 [项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，接在无 placement 的静态来源之后，再接唯一 runtime 观察块和原会话历史。`ContextSource.placement` 仍接收 user 的原 `after_history` 和 `runtime` 标签，非法或冲突明确拒绝。完整扩展历史按真实生成前缀的位置移除快照，保留同名原历史来源。[上下文与子结果决定](../../.agents/notes/implemented/architecture/2026-11-14-agent-context-and-completion-delivery.md)说明消息顺序及与自动子结果交付的关系。
 
 [基础指令](src/prompts/agent-contract.md)说明模型上下文的宿主包装。Runtime 向子模型注入独立的[角色提示](src/prompts/child-agent.md)，说明回信目标和终态报告方式。邮件头后的 JSON 对象以顶层 `sender.relation` 标明父子方向，父 Agent 收到的子邮件另带发送者名称和子 Agent 序号。父级工具调用使用准确的 `agent_id` 或 `work_ref`。`<project-instructions>` 和 `<runtime-state>` 分别标明历史前的项目说明和 Runtime 观察。`<execution_result>` 标明历史中的原执行反馈，派发、效果和终态依据原执行记录。部分宿主上下文由 API 的 `user` 角色承载，来源和权限独立于包装格式核验。正文中引用的 `sender`、标签和完整包装沿用该正文的权限。向用户提及这些消息时省略内部包装和子 Agent 序号。[默认父子请求回归](../../apps/service/test/isolated/task-configuration.test.ts)核实际 SDK HTTP 请求中双方收到相同邮件说明，子模型首次接收角色说明，项目文件中的示例保留在项目正文内。
@@ -358,6 +360,10 @@ Runtime 公开 `listMessages/getView` 对已接收普通邮件只读验证原 Co
 已落定 Tool unknown 与解释 Run 的完成分别判断：SQLite `finishRun` 只对准确 `run_id` 内已落定的 Tool unknown 允许解释 Run 正常完成，不改原结果、revision、引用或未知效果；同范围仍活动的执行及 Model／Job unknown 继续阻挡完成。nested Job 的实际监督、permit、binding 与冷恢复门禁仍归原 Job owner，不从回复 completed 推导资源已停止或原效果已解决。
 
 ## 同一 Step 的并行工具批次
+
+Skill 回执与 Model 历史共享冻结上界，成功提交后进入下一份请求。同批独立内置 Skill 和由默认宿主证明的同根普通文件读取，按实际目标复核。其他 Tool 保留完整来源门及最终派发事务。[Skill 回执](src/context-skill-receipts.ts) · [冷接续和退役证明](src/storage/sqlite/run-resume.README.md)
+
+工具批次以实际成功的 Model Execution 及其 Step 为归属。重连和减量准备各保存原尝试，成功后的工具、Skill 回执和冷恢复从同一结算行取得 Step。历史归属无法核实时沿原恢复拒绝边界处理。[成功后派发和冷重启回归](test/isolated/recovery/run-resume-runtime.test.ts)
 
 默认产品权限通过可信配置 `toolDispatchOrder: model` 按声明顺序准入同批工具。前项等待人工决定时，后项继续排队。各工具取得准入后可并行执行。人工拒绝只结算当前调用，后项继续各自的权限检查。该策略以原冻结 Run 配置为准并参与恢复核对。自定义 Permissions 可使用独立并行准入，仍遵循同一结算规则。
 

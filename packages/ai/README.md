@@ -20,7 +20,7 @@
 
 可选入口 `@kite-ai/ai/sdk` 通过 `createSdkModelAdapter` 绑定显式 SDK LanguageModels。每次流请求只有一次 Provider 尝试，使用 `maxRetries: 0` 和 `stepCountIs(1)`。工具声明不带执行回调；完整调用在 finish 后交给 Agent Loop 授权。消息正文、assistant 工具调用与配对工具结果映射到 SDK 消息。来源 ID、请求 ID 和定义版本仍作为宿主出处保留在原中立请求中；凭据与 Provider 绑定配置不会成为 ModelRequest 字段或流事件。
 
-`createCompatibleModelBinding` 是接受显式 endpoint、模型和私有凭据的宿主工厂，直到流请求开始才建立连接。兼容用量转换保留缺失测量：未知输入/输出 token 数为 `null`，缺失的可选计数不输出。遇到过滤或未知终态原因、不完整调用、传输错误或缺少 Provider finish 的流时，适配器明确失败；不伪造 stop、不重试，也不执行工具。它抑制 SDK 错误日志，只返回公开错误码，不携带可能包含敏感请求详情的 Provider 原因。真实 AbortSignal 传递到 HTTP 传输。
+`createCompatibleModelBinding` 是接受显式 endpoint、模型和私有凭据的宿主工厂，直到流请求开始才建立连接。兼容用量转换保留缺失测量：未知输入/输出 token 数为 `null`，缺失的可选计数不输出。遇到过滤或未知终态原因、不完整调用、传输错误或缺少 Provider finish 的流时，适配器明确失败；不伪造 stop、不重试，也不执行工具。它抑制 SDK 错误日志，交付公开失败分类。兼容服务提供可展示的错误时，额外保留有限的状态、错误码和短消息。真实 AbortSignal 传递到 HTTP 传输。
 
 适配器用 Chat Completions 的 `tool_calls[].index` 和 Responses 的 `output_index` 确定模型调用顺序。SDK 即使先收到后项的工具名称或完成事件，也在完整批次验证后按原索引交给 Agent Loop。索引冲突或缺少配对时，整批以不完整模型响应结束。重送 Responses 历史时，适配器按原 `toolCalls` 映射已保存的工具片段并保留 Provider 标识。Agent 同顺序交回配对回执。[Chat Completions 请求回归](test/sdk.test.ts)覆盖延迟名称与索引冲突，[Responses 请求回归](../../apps/service/test/isolated/responses-loop.test.ts)核乱序到达、工具实际结算和请求里的调用／回执顺序。
 
@@ -42,7 +42,9 @@ SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses �
 
 2026-10-16 在 Windows x64／Bun 1.4.2 的本次修复工作树，经用户明确授权向 DeepSeek 官方 deepseek-v4-flash 发送两次对照，均仅“你好”及原失败请求中的八个工具定义，不含原系统／项目上下文或 reasoning_effort。两份实际请求只有函数名不同：六个旧名称不合语法时返回400／invalid_request_error，转换后返回200且完整流结束；不执行工具，不改用户配置。该有限实测确认工具名缺陷和修复效果，不证明真实文件工具执行、其他模型或全部 Provider 兼容性；详细计数和证据限制见上述决定。
 
-[ModelAttemptError](src/model-attempt.ts)对模型请求及传输失败默认提供重连资格，不再依赖已知系统错误码或 SDK 的 `isRetryable` 白名单；明确 HTTP 401／403 认证或权限拒绝立即失败；真实 HTTP 413 单独成为非普通重连类型 `ModelRequestLimitError`（固定 kind/status，无原错误正文、URL、headers 或 cause），交给宿主决定有界请求重规划，不重复发送同一超限请求。不从错误文字推断 413，429、5xx 与普通断连仍走原重连合同。不从远端正文、错误文字或缺失状态猜权限拒绝。请求前的本地历史校验、取消和响应完整性校验保持各自边界。可选`detail`仍只接受固定枚举，从真实HTTP状态或有界cause链的已知系统code提取超时、拒绝连接、域名解析、传输中断、频率受限及服务不可用；新增覆盖网络断开／不可达及Bun连接别名，未知错误只给通用原因，400等非服务端状态不猜具体detail，也不保存远端message、body、URL、headers或原错误对象。SDK 每次仍是零内部重试；[Agent](../agent/README.md)在真实原 Execution 已失败、关闭及来源资格保持时决定下一尝试，同串故障最多重连5次，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。Provider 的 `length` 原样交付 Core，由 Core 区分纯文本续接、截断工具批次和不可发布的截断摘要；AI 包不自行续轮。用户确认的默认策略与取舍见[重连决定](../../.agents/notes/implemented/bug-fix/2026-11-05-default-model-reconnection.md)。
+[ModelAttemptError](src/model-attempt.ts)对模型请求及传输失败默认提供重连资格，不再依赖已知系统错误码或 SDK 的 `isRetryable` 白名单；明确 HTTP 401／403 认证或权限拒绝立即失败；真实 HTTP 413 单独成为非普通重连类型 `ModelRequestLimitError`（固定 kind/status，无原错误正文、URL、headers 或 cause），交给宿主决定有界请求重规划，不重复发送同一超限请求。不从错误文字推断 413，429、5xx 与普通断连仍走原重连合同。不从远端正文、错误文字或缺失状态猜权限拒绝。请求前的本地历史校验、取消和响应完整性校验保持各自边界。可选`detail`仍只接受固定枚举，从真实HTTP状态或有界cause链的已知系统code提取超时、拒绝连接、域名解析、传输中断、频率受限及服务不可用；新增覆盖网络断开／不可达及Bun连接别名，可信绑定的远端错误信封和明确的纯文本 HTTP 响应可以提供单行 `providerMessage`，用于原会话诊断，最长 512 个 UTF-16 单位。适配器过滤已知凭据、链接、控制字符和可识别的请求回显，仅提取可展示字段。原 HTTP 错误信封、异常对象与连接元数据留在适配器边界。重连资格与超限判断继续使用结构化信号。SDK 每次仍是零内部重试；[Agent](../agent/README.md)在真实原 Execution 已失败、关闭及来源资格保持时决定下一尝试，同串故障最多重连5次，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。Provider 的 `length` 原样交付 Core，由 Core 区分纯文本续接、截断工具批次和不可发布的截断摘要；AI 包不自行续轮。用户确认的默认策略与取舍见[重连决定](../../.agents/notes/implemented/bug-fix/2026-11-05-default-model-reconnection.md)。
+
+HTTP 400 或兼容供应商的流内拒绝在尚无模型输出、未使用供应商原生搜索且携带结构化 `context_length_exceeded` 时抛出 `ModelContextOverflowError`。已经开始输出的流继续按原失败边界结算。Core 将明确的 token 超限与普通重连分别记录，并对同一决策进行一次通过预检的缩短恢复。 [明确超限回归](../../apps/service/test/isolated/agent-context-window.test.ts)
 
 验证：`bun test packages/ai/test/` 和 `bun run --cwd packages/ai typecheck`。
 

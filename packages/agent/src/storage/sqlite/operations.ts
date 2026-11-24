@@ -180,6 +180,7 @@ import { getPendingInputQueue, mutatePendingInputQueue } from './pending-input-q
 import { callPermissionGrant, verifyPermissionGrantDispatch } from './permission-grants';
 import { closeReconciledHistory } from './reconciliation-admission';
 import { RecoveryAudit } from './recovery-audit';
+import { assertContextRefreshPlan } from './recovery-audit-validation';
 import { matchesStoppedModelProof, stoppedModelHistory } from './recovery-history';
 import { recoverSession } from './recovery-operations';
 import { initializeRunRecord } from './requirement-initialization';
@@ -992,9 +993,18 @@ export class SqliteOperations {
           : {
               code: String(row.model_failure_code),
               incomplete: row.model_incomplete === 1 || row.model_incomplete === 1n,
-              ...(row.model_failure_detail == null
-                ? {}
-                : { modelFailure: { detail: String(row.model_failure_detail) } }),
+              ...(row.model_failure_detail != null || row.model_provider_message != null
+                ? {
+                    modelFailure: {
+                      ...(row.model_failure_detail == null
+                        ? {}
+                        : { detail: String(row.model_failure_detail) }),
+                      ...(row.model_provider_message == null
+                        ? {}
+                        : { providerMessage: String(row.model_provider_message) }),
+                    },
+                  }
+                : {}),
             },
     };
   }
@@ -1007,6 +1017,7 @@ export class SqliteOperations {
     const proof = accepted ? (parse(accepted.request_json) as Record<string, Json>) : null;
     const authorization = executionAuthorizationObservation(this, row);
     return {
+      ...(row.kind === 'model' ? { modelDispatched: Boolean(row.dispatched) } : {}),
       resultAcceptance: accepted
         ? {
             runId: typeof proof?.targetRunId === 'string' ? proof.targetRunId : null,
@@ -1239,6 +1250,7 @@ export class SqliteOperations {
       case 'beginRunResume':
       case 'commitRunResume':
       case 'releaseRunResumeLease':
+      case 'retireUnsentModelForContextRefresh':
       case 'beginRunRequirementsInitialization':
         return callRunResume(this, method, args[0]);
       case 'registerRunRequirements':
@@ -1934,7 +1946,11 @@ export class SqliteOperations {
               throw new AgentError('execution_conflict');
             return this.execution(prior);
           }
-          if (input.kind === 'model') verifyCompressionModel(this, input);
+          if (input.kind === 'model') {
+            verifyCompressionModel(this, input);
+            if (input.runId)
+              assertContextRefreshPlan(this, input.runId, input.executionId, input.decisionSource);
+          }
           const inheritedRequirements =
             input.runId === null && parent
               ? parent.run_id === null
@@ -1983,6 +1999,7 @@ export class SqliteOperations {
       case 'consumeJobResult':
       case 'includeResult':
       case 'getModelContext':
+      case 'readRunSkillReceipts':
       case 'getExpandedContext':
       case 'readSelectedToolLocators':
       case 'getSelectedContext':
@@ -2901,7 +2918,11 @@ export class SqliteOperations {
                   THEN json_extract(result_json,'$.incomplete') END AS model_incomplete,
                 CASE WHEN kind='model' AND state='failed' AND json_valid(result_json)
                   AND length(json_extract(result_json,'$.modelFailure.detail'))<=128
-                  THEN json_extract(result_json,'$.modelFailure.detail') END AS model_failure_detail
+                  THEN json_extract(result_json,'$.modelFailure.detail') END AS model_failure_detail,
+                CASE WHEN kind='model' AND state='failed' AND json_valid(result_json)
+                  AND json_type(result_json,'$.modelFailure.providerMessage')='text'
+                  AND length(CAST(json_extract(result_json,'$.modelFailure.providerMessage') AS BLOB))<=2048
+                  THEN json_extract(result_json,'$.modelFailure.providerMessage') END AS model_provider_message
               `
                   : '*'
               } FROM execution WHERE rowid IN (

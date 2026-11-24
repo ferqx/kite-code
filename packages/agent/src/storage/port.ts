@@ -423,6 +423,16 @@ export interface Store {
     started: true;
   }>;
   releaseRunResumeLease(lease: import('./types').RunResumeLease): Promise<void>;
+  retireUnsentModelForContextRefresh(
+    input: OwnedWrite & {
+      resumeCommandId: string;
+      runId: string;
+      executionId: string;
+      expectedConfiguration: Json;
+      expectedInput: Json;
+      expectedDecisionSource: Json;
+    },
+  ): Promise<'retired' | 'steered'>;
   beginRunRequirementsInitialization(input: OwnedWrite & { runId: string }): Promise<RunRecord>;
   sealJobRecoveryManifest(
     input: OwnedWrite & { executionId: string; manifest: Json },
@@ -1261,6 +1271,11 @@ export interface Store {
       runId: string;
       executionId: string;
       expectedContextSelectionId: string;
+      window?: {
+        coveredThroughSeq: string;
+        inputHighWaterSeq: string;
+        recentHistoryTokens?: number;
+      };
       compressor: { id: string; version: string; snapshot: Json };
       trigger: 'manual' | 'automatic';
       measurement?: Omit<
@@ -1287,8 +1302,40 @@ export interface Store {
     },
   ): Promise<{ reset: boolean }>;
   getModelContext(
-    input: Parameters<Store['getSelectedContext']>[0],
-  ): Promise<SelectedContextPage & { retainedInputMessageIds: string[] }>;
+    input: Parameters<Store['getSelectedContext']>[0] & {
+      retainedInputRunIds?: readonly string[];
+      boundRetainedInputs?: true;
+    },
+  ): Promise<
+    SelectedContextPage & {
+      verifiedInputMessageIds: string[];
+      retainedInputMessageIds: string[];
+    }
+  >;
+  /** Original selected Tool messages for dispatched, successful Skill reads in one Run. */
+  readRunSkillReceipts(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    subjectId: string;
+    selectionId: string;
+    runId: string;
+    afterSeq?: string;
+    upperSeq?: string;
+  }): Promise<
+    {
+      messageId: string;
+      seq: string;
+      executionId: string;
+      executionRoot: Json;
+      skillId: string;
+      path?: string;
+      version: string;
+      recordedSourceId: string;
+      catalogueDigest?: string;
+      alreadyLoaded: boolean;
+      verifiedModelContentDigest?: string;
+    }[]
+  >;
   /** Selected complete Tool message identities only. No prompt, configuration, or model/image body is read. */
   readSelectedToolLocators(input: {
     expectedStoreId: string;

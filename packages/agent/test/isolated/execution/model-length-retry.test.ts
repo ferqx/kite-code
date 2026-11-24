@@ -106,6 +106,11 @@ async function fixture(
         yield { type: 'text_delta', text: 'failed-transient-prefix' };
         throw new ModelAttemptError('stream_incomplete');
       }
+      if (mode === 'fresh' && requests.length === 4) {
+        yield { type: 'tool_call', id: 'read-after-length', name: 'owned.read', arguments: '{}' };
+        yield { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 1, outputTokens: 1 } };
+        return;
+      }
       yield { type: 'text_delta', text: 'completed after exact continuation' };
       yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
     },
@@ -144,8 +149,8 @@ async function fixture(
             description: 'Read an actual owned fixture fact once',
             inputSchema: { type: 'object' },
             async execute() {
-              toolReads++;
-              return { outcome: 'succeeded', content: 'actual-owned-tool-before-length' };
+              const phase = toolReads++ === 0 ? 'before' : 'after';
+              return { outcome: 'succeeded', content: `actual-owned-tool-${phase}-length` };
             },
           },
         ],
@@ -232,8 +237,8 @@ test('length continuation survives exact Provider retry with full persisted part
     });
     f.releaseRead.release();
     await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
-    expect(f.requests).toHaveLength(4);
-    const [, first, continuation, retried] = f.requests;
+    expect(f.requests).toHaveLength(5);
+    const [, first, continuation, retried, completed] = f.requests;
     const suffix = outputLengthContinuation(first!.requestId);
     expect(continuation!.messages.at(-1)).toEqual(suffix);
     expect(retried!.messages.at(-1)).toEqual(suffix);
@@ -251,7 +256,7 @@ test('length continuation survives exact Provider retry with full persisted part
       { role: 'assistant', content: f.partial, sourceIds: [first!.requestId], toolCalls: [] },
     ]);
     expect(Buffer.byteLength(f.partial)).toBeGreaterThan(64 * 1024);
-    expect(f.toolReads).toBe(1);
+    expect(f.toolReads).toBe(2);
     const originalTool = (await f.store.getView('s')).executions.find(
       (execution) => execution.definitionId === 'owned.read',
     )!;
@@ -284,11 +289,24 @@ test('length continuation survives exact Provider retry with full persisted part
     const done = await f.store.getView('s');
     expect(done.runs).toHaveLength(1);
     expect(done.runs[0]).toMatchObject({ status: 'completed', rootWorkCommandId: 'work' });
+    const retriedModel = done.executions.find(({ id }) => id === retried!.requestId)!;
+    expect(done.executions.find(({ callId }) => callId === 'read-after-length')).toMatchObject({
+      status: 'succeeded',
+      stepId: retriedModel.stepId,
+      decisionSource: { modelExecutionId: retriedModel.id },
+    });
+    expect(completed!.messages).toContainEqual(
+      expect.objectContaining({
+        role: 'tool',
+        toolCallId: 'read-after-length',
+        content: 'actual-owned-tool-after-length',
+      }),
+    );
     expect(
       done.executions
         .filter((execution) => execution.kind === 'model')
         .map((execution) => execution.status),
-    ).toEqual(['succeeded', 'succeeded', 'failed', 'succeeded']);
+    ).toEqual(['succeeded', 'succeeded', 'failed', 'succeeded', 'succeeded']);
     const full = await f.runtime.readModelOutput({ ...f.input, executionId: first!.requestId });
     expect(full.output.complete).toBe(true);
     expect(full.output.content).toBe(f.partial);

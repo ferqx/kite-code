@@ -768,6 +768,7 @@ test('real direct children retain parent steer and follow-up across compression 
       };
       expect(header.child).toEqual({
         agentId: raw.details.childSessionId,
+        dispatch_id: source.executionId,
         runId: raw.details.runId,
         status: raw.details.status,
         outcome: raw.outcome,

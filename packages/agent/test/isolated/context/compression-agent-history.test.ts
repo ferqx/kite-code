@@ -17,8 +17,13 @@ function gate() {
   });
   return { promise, release };
 }
-for (const terminal of ['failed', 'cancelled'] as const)
-  test(`compressed child history retains terminal ${terminal} assignments and steers as Agent data`, async () => {
+for (const { terminal, bounded } of [
+  { terminal: 'failed', bounded: false },
+  { terminal: 'cancelled', bounded: false },
+  { terminal: 'failed', bounded: true },
+  { terminal: 'cancelled', bounded: true },
+] as const)
+  test(`compressed child history retains terminal ${terminal} assignments and steers with bounded coverage ${bounded}`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-agent-history-')));
     const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
     const store = await openSqliteStore(profile);
@@ -41,6 +46,7 @@ for (const terminal of ['failed', 'cancelled'] as const)
     const compressor: ContextCompressor = {
       id: 'fixture.agent-history',
       version: '1',
+      ...(bounded ? { windowBudget: { usableInputTokens: 100_000, recentHistoryTokens: 0 } } : {}),
       async shouldCompress(input) {
         return !compressed && input.run.id !== failedRunId && !!failedRunId;
       },
@@ -55,7 +61,9 @@ for (const terminal of ['failed', 'cancelled'] as const)
     const child: ModelAdapter = {
       async *stream(request, options) {
         if (
-          request.messages.some((message) => message.content === 'CONTROLLED_AGENT_HISTORY_SUMMARY')
+          request.messages.some((message) =>
+            message.content.startsWith('CONTROLLED_AGENT_HISTORY_SUMMARY'),
+          )
         ) {
           summaries.push(structuredClone(request));
           yield {
@@ -148,6 +156,19 @@ for (const terminal of ['failed', 'cancelled'] as const)
             });
             const next = (follow.receipt as unknown as { ref: OperationRef }).ref;
             await ctx.operations.wait(next, { timeoutMs: 5000 });
+            if (bounded) {
+              const predecessor = await ctx.operations.readAgent(next);
+              const third = await ctx.operations.sendAgentInput(next, {
+                mode: 'follow_up',
+                key: 'third-work',
+                afterRunId: predecessor.run!.id,
+                contextSelectionId: predecessor.contextSelectionId,
+                content: 'Handle the third delegated task.',
+              });
+              const thirdRef = (third.receipt as unknown as { ref: OperationRef }).ref;
+              await ctx.operations.wait(thirdRef, { timeoutMs: 5000 });
+              expect((await ctx.operations.readAgent(thirdRef)).run?.status).toBe('completed');
+            }
             return { outcome: 'succeeded', content: 'Actual follow-up completed' };
           },
         },
@@ -220,9 +241,9 @@ for (const terminal of ['failed', 'cancelled'] as const)
         request: { kind: 'run.start', content: 'Delegate actual bounded work' },
       });
       await runtime.waitForCommand('work', { timeoutMs: 10000 });
-      expect(requests).toHaveLength(3);
+      expect(requests).toHaveLength(bounded ? 4 : 3);
       expect(summaries).toHaveLength(1);
-      const actual = requests[2]!;
+      const actual = requests.at(-1)!;
       const oldMessages = actual.messages.filter(
         (message) => message.sourceIds?.includes(oldStart) || message.sourceIds?.includes(steerId),
       );

@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { ModelMessage } from '@kite-ai/ai';
-import type { ContextSource } from './context';
+import { type ContextSource, skillKnowledgeModelContent, skillKnowledgeSourceId } from './context';
 import { canonicalJson } from './json';
 import agentContractMarkdown from './prompts/agent-contract.md' with { type: 'text' };
 import childAgentMarkdown from './prompts/child-agent.md' with { type: 'text' };
@@ -70,48 +70,109 @@ export function agentContractSource(
   };
 }
 
-/** One placement algorithm for normal calls, compression and expanded-history admission. */
-export function assembleModelContext(
+interface SkillRead {
+  sourceId: string;
+  skillId: string;
+  body: boolean;
+}
+
+function skillContent(sources: readonly ContextSource[]) {
+  return new Map(
+    sources
+      .filter((source) => source.kind === 'skill' || source.kind === 'skill_resource')
+      .map((source) => [source.id, source.content]),
+  );
+}
+
+function projectSkillReads(
   sources: readonly ContextSource[],
   history: readonly ModelMessage[],
-): ModelMessage[] {
-  const skills = new Map(
-    sources
-      .filter((source) => source.kind === 'skill' && source.id.startsWith('skill.body:'))
-      .map((source) => [source.id.slice('skill.body:'.length), source.content]),
-  );
-  if (skills.size === 0) return [...modelContextPrefix(sources), ...history];
-  const loads = new Map<string, string>();
-  const projected = history.map((message) => {
+  receipts: ReadonlyMap<string, string>,
+) {
+  const knowledge = skillContent(sources);
+  const notices = new Map<ModelMessage, string>();
+  const resourcesInToolResults = new Set<string>();
+  if (!knowledge.size || !receipts.size) return { notices, resourcesInToolResults };
+  const reads = new Map<string, SkillRead>();
+  for (const message of history) {
     if (message.role === 'assistant') {
       for (const call of message.toolCalls ?? []) {
-        loads.delete(call.id);
-        if (call.name !== 'skills.load' && call.name !== 'load_skill') continue;
+        reads.delete(call.id);
+        const body = call.name === 'skills.load' || call.name === 'load_skill';
+        if (!body && call.name !== 'skills.resource' && call.name !== 'read_skill_resource')
+          continue;
         try {
           const input = JSON.parse(call.arguments);
-          const id = input?.id ?? input?.skill_id;
-          if (typeof id === 'string') loads.set(call.id, id);
+          const skillId = input?.id ?? input?.skill_id;
+          if (typeof skillId !== 'string' || (!body && typeof input?.path !== 'string')) continue;
+          reads.set(call.id, {
+            sourceId: skillKnowledgeSourceId(skillId, body ? undefined : input.path),
+            skillId,
+            body,
+          });
         } catch {}
       }
     }
     if (message.role === 'tool' && message.toolCallId) {
-      const id = loads.get(message.toolCallId);
-      loads.delete(message.toolCallId);
-      if (id && skills.get(id) === message.content)
-        return {
-          ...message,
-          content: `The full instructions for Skill ${id} are included in the current context.`,
-        };
+      const read = reads.get(message.toolCallId);
+      reads.delete(message.toolCallId);
+      if (
+        !read ||
+        message.sourceIds?.length !== 1 ||
+        receipts.get(message.sourceIds[0]!) !== read.sourceId
+      )
+        continue;
+      const current = knowledge.get(read.sourceId);
+      if (current === undefined) continue;
+      const bodyNotice = `The full instructions for Skill ${read.skillId} are included above under Skill instructions.`;
+      const resourceNotice = 'The identical Skill resource was provided in an earlier tool result.';
+      if (current === message.content) {
+        if (read.body) notices.set(message, bodyNotice);
+        else if (resourcesInToolResults.has(read.sourceId)) notices.set(message, resourceNotice);
+        else resourcesInToolResults.add(read.sourceId);
+      } else if (message.content !== bodyNotice && message.content !== resourceNotice) {
+        notices.set(
+          message,
+          `Historical Skill read for ${read.skillId}. The original text is retained in this tool execution. Use the current Skill text supplied in this request.`,
+        );
+      }
     }
-    return message;
-  });
-  return [...modelContextPrefix(sources), ...projected];
+  }
+  return { notices, resourcesInToolResults };
 }
 
-function modelContextPrefix(sources: readonly ContextSource[]): ModelMessage[] {
+/** One placement algorithm for normal calls, compression and expanded-history admission. */
+export function assembleModelContext(
+  sources: readonly ContextSource[],
+  history: readonly ModelMessage[],
+  skillReads: readonly { executionId: string; sourceId: string }[] = [],
+): ModelMessage[] {
+  const { notices, resourcesInToolResults } = projectSkillReads(
+    sources,
+    history,
+    new Map(skillReads.map(({ executionId, sourceId }) => [executionId, sourceId])),
+  );
+  const projected = notices.size
+    ? history.map((message) => {
+        const content = notices.get(message);
+        return content === undefined ? message : { ...message, content };
+      })
+    : history;
+  return [...modelContextPrefix(sources, resourcesInToolResults), ...projected];
+}
+
+function modelContextPrefix(
+  sources: readonly ContextSource[],
+  resourcesInToolResults: ReadonlySet<string>,
+): ModelMessage[] {
   const message = (source: ContextSource): ModelMessage => ({
-    role: source.role ?? 'system',
-    content: source.content,
+    role: ['skill', 'skill_resource', 'skill_catalogue'].includes(source.kind)
+      ? 'user'
+      : (source.role ?? 'system'),
+    content:
+      source.kind === 'skill' || source.kind === 'skill_resource'
+        ? skillKnowledgeModelContent(source.id, source.content)
+        : source.content,
     sourceIds: [source.id],
   });
   const runtime = sources.filter((source) => source.placement === 'runtime');
@@ -119,7 +180,13 @@ function modelContextPrefix(sources: readonly ContextSource[]): ModelMessage[] {
   // Project/plan data stays at its original trust level. Moving the captured
   // context ahead of history preserves the actual latest user or Tool input.
   return [
-    ...sources.filter((source) => !source.placement).map(message),
+    ...sources
+      .filter(
+        (source) =>
+          !source.placement &&
+          (source.kind !== 'skill_resource' || !resourcesInToolResults.has(source.id)),
+      )
+      .map(message),
     ...sources.filter((source) => source.placement === 'after_history').map(message),
     ...(runtime.length
       ? [
@@ -143,11 +210,14 @@ export function modelHistory(
   messages: readonly ModelMessage[],
 ): ModelMessage[] {
   // Strip only owned prefix slots. A real input can have the same source ID or bytes.
-  const prefix = modelContextPrefix(sources);
+  const resources = new Set(
+    sources.filter(({ kind }) => kind === 'skill_resource').map(({ id }) => id),
+  );
+  const prefix = modelContextPrefix(sources, new Set());
   let start = 0;
   for (const expected of prefix) {
-    if (!isDeepStrictEqual(messages[start], expected)) break;
-    start++;
+    if (isDeepStrictEqual(messages[start], expected)) start++;
+    else if (!resources.has(expected.sourceIds?.[0] ?? '')) break;
   }
   return messages.slice(start);
 }
