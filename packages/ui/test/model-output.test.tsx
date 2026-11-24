@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { ClientError, type Message, type ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
-import { act } from 'react';
+import { act, type ReactNode, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ModelOutputMessage,
@@ -118,7 +118,7 @@ test('host verified snapshots render immediately, suspend safely, and reject mis
     onContent: (text: string | undefined) => content.push(text),
   };
   try {
-    await f.render(props);
+    await f.render(props, () => expect(content.at(-1)).toBe('Verified child tail🙂'));
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('Verified child tail🙂');
     expect(f.host.querySelector('.model-output-message > p')!.textContent).toBe('完整回复');
     expect(f.host.textContent).not.toContain('Model output');
@@ -262,6 +262,10 @@ async function domFixture() {
   });
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
+  function LayoutCheck({ children, check }: { children: ReactNode; check?: () => void }) {
+    useLayoutEffect(() => check?.(), [check]);
+    return children;
+  }
   return {
     host,
     renderCached: async (
@@ -285,8 +289,14 @@ async function domFixture() {
       );
       await act(async () => accounting.flush());
     },
-    render: (props: ModelOutputMessageProps) =>
-      act(async () => root.render(<ModelOutputMessage {...props} />)),
+    render: (props: ModelOutputMessageProps, check?: () => void) =>
+      act(async () =>
+        root.render(
+          <LayoutCheck check={check}>
+            <ModelOutputMessage {...props} />
+          </LayoutCheck>,
+        ),
+      ),
     click: async (label: string) =>
       act(async () =>
         [...host.querySelectorAll('button')].find((b) => b.textContent === label)!.click(),

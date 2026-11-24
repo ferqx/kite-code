@@ -1,25 +1,17 @@
-import {
-  ArrowRight01Icon,
-  Attachment01Icon,
-  File01Icon,
-  FileImageIcon,
-  FilePenIcon,
-  FileQuestionMarkIcon,
-  FileSpreadsheetIcon,
-  FileTextIcon,
-  MoreHorizontalIcon,
-  Pdf01Icon,
-  Ppt01Icon,
-} from '@hugeicons/core-free-icons';
+import { ArrowRight01Icon, Attachment01Icon, MoreHorizontalIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
+import { ButtonGroup } from './components/ui/button-group';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
 import { Spinner } from './components/ui/spinner';
+import { FileTypeIcon } from './FileTypeIcon';
+import { outputFileFormat } from './output-file-format';
 import type { SessionOutputFileTarget } from './SessionTabs';
 import { Button } from './ui';
 
@@ -35,77 +27,9 @@ export interface OutputFileSummary extends SessionOutputFileTarget {
 export interface OutputFilesProps {
   items: readonly OutputFileSummary[];
   onOpen: (file: OutputFileSummary) => void;
+  onOpenInApp?: (file: OutputFileSummary) => Promise<void>;
   onSave: (file: OutputFileSummary) => void;
   onReveal?: (file: OutputFileSummary) => Promise<void>;
-}
-function fileType(file: OutputFileSummary) {
-  const extension = file.name.split('.').pop()?.toLowerCase();
-  const labels: Record<string, string> = {
-    doc: 'Word 文档',
-    docx: 'Word 文档',
-    xls: 'Excel 工作簿',
-    xlsx: 'Excel 工作簿',
-    ppt: '演示文稿',
-    pptx: '演示文稿',
-    pdf: 'PDF 文档',
-    txt: '文本文件',
-    md: 'Markdown 文档',
-    csv: 'CSV 表格',
-    json: 'JSON 文件',
-    zip: 'ZIP 压缩包',
-  };
-  if (extension && labels[extension]) return labels[extension];
-  if (file.mediaType.startsWith('image/')) return '图片';
-  if (file.mediaType.startsWith('audio/')) return '音频';
-  if (file.mediaType.startsWith('video/')) return '视频';
-  return '文件';
-}
-function referenceIcon(file: OutputFileSummary) {
-  const extension = file.name.split('.').pop()?.toLowerCase();
-  const mime = (file.mediaType.toLowerCase().split(';')[0] ?? '').trim();
-  if (
-    ['doc', 'docx', 'odt', 'rtf'].includes(extension ?? '') ||
-    [
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.oasis.opendocument.text',
-      'application/rtf',
-    ].includes(mime)
-  )
-    return FilePenIcon;
-  if (
-    ['xls', 'xlsx', 'ods', 'csv', 'tsv'].includes(extension ?? '') ||
-    [
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.oasis.opendocument.spreadsheet',
-      'text/csv',
-      'text/tab-separated-values',
-    ].includes(mime)
-  )
-    return FileSpreadsheetIcon;
-  if (
-    ['ppt', 'pptx', 'odp'].includes(extension ?? '') ||
-    [
-      'application/vnd.ms-powerpoint',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'application/vnd.oasis.opendocument.presentation',
-    ].includes(mime)
-  )
-    return Ppt01Icon;
-  if (extension === 'pdf' || mime === 'application/pdf') return Pdf01Icon;
-  if (
-    ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'tiff', 'avif'].includes(extension ?? '') ||
-    mime.startsWith('image/')
-  )
-    return FileImageIcon;
-  if (
-    ['txt', 'md', 'markdown', 'json', 'xml', 'yaml', 'yml', 'log'].includes(extension ?? '') ||
-    mime.startsWith('text/') ||
-    ['application/json', 'application/xml'].includes(mime)
-  )
-    return FileTextIcon;
-  return FileQuestionMarkIcon;
 }
 function fileIdentity(file: OutputFileSummary) {
   return JSON.stringify([
@@ -127,11 +51,25 @@ function collectionTime(value: string) {
   const pad = (n: number, width = 2) => String(n).padStart(width, '0');
   return `收集于 ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
 }
+function FileNameParts({ name }: { name: string }) {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return <span>{name}</span>;
+  return (
+    <>
+      <span>{name.slice(0, dot)}</span>
+      <span className="output-file-extension">{name.slice(dot)}</span>
+    </>
+  );
+}
 function OutputFileMenu({
   file,
   onSave,
   onReveal,
-}: Partial<Pick<OutputFilesProps, 'onSave' | 'onReveal'>> & { file: OutputFileSummary }) {
+  withOpenButton = false,
+}: Partial<Pick<OutputFilesProps, 'onSave' | 'onReveal'>> & {
+  file: OutputFileSummary;
+  withOpenButton?: boolean;
+}) {
   const [revealing, setRevealing] = useState(false);
   const label = `${file.name} 的更多操作`;
   async function reveal() {
@@ -147,8 +85,8 @@ function OutputFileMenu({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          variant="ghost"
-          size="icon-xs"
+          variant={withOpenButton ? 'outline' : 'ghost'}
+          size={withOpenButton ? 'icon' : 'icon-xs'}
           aria-label={label}
           aria-busy={revealing || undefined}
         >
@@ -160,65 +98,101 @@ function OutputFileMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" aria-label={label}>
-        {onSave && <DropdownMenuItem onSelect={() => onSave(file)}>另存为</DropdownMenuItem>}
-        {onReveal && (
-          <DropdownMenuItem disabled={revealing} onSelect={() => void reveal()}>
-            在资源管理器中显示
-          </DropdownMenuItem>
-        )}
+        <DropdownMenuGroup>
+          {onSave && <DropdownMenuItem onSelect={() => onSave(file)}>另存为</DropdownMenuItem>}
+          {onReveal && (
+            <DropdownMenuItem disabled={revealing} onSelect={() => void reveal()}>
+              在资源管理器中显示
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 function FileRow({
   file,
-  distinguish = false,
-  ...props
-}: Omit<OutputFilesProps, 'items'> & { file: OutputFileSummary; distinguish?: boolean }) {
-  const titleId = useId();
-  const detailId = useId();
-  const sourceId = useId();
+  distinguish,
+  onOpen,
+  onOpenInApp,
+  onSave,
+  onReveal,
+}: Omit<OutputFilesProps, 'items'> & { file: OutputFileSummary; distinguish: boolean }) {
+  const id = useId();
+  const titleId = `${id}-name`;
+  const sourceId = `${id}-source`;
+  const detailId = `${id}-detail`;
+  const opening = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const format = outputFileFormat(file.name, file.mediaType);
   const description =
     [file.sourceLabel ? sourceId : '', distinguish ? detailId : ''].filter(Boolean).join(' ') ||
     undefined;
+  async function open() {
+    if (!onOpenInApp) {
+      onOpen(file);
+      return;
+    }
+    if (opening.current) return;
+    opening.current = true;
+    setBusy(true);
+    try {
+      await onOpenInApp(file);
+    } finally {
+      opening.current = false;
+      setBusy(false);
+    }
+  }
   return (
     <li className="output-file-card" aria-labelledby={titleId} aria-describedby={description}>
-      <span className="output-file-icon" aria-hidden="true">
-        <HugeiconsIcon icon={File01Icon} />
-      </span>
-      <div className="output-file-description">
-        <span id={titleId} className="output-file-name" title={file.name}>
-          {file.name}
-        </span>
-        <small>{fileType(file)}</small>
-        {file.sourceLabel && <small id={sourceId}>{file.sourceLabel}</small>}
-        {distinguish && (
-          <small id={detailId} className="output-file-distinction">
-            {collectionTime(file.publishedAt)} · {file.size} 字节
-          </small>
-        )}
-      </div>
       <Button
-        className="output-file-open"
-        onClick={() => props.onOpen(file)}
-        aria-label={`打开 ${file.name}`}
+        className="output-file-preview"
+        variant="plain"
+        onClick={() => onOpen(file)}
+        aria-label={`预览 ${file.name}`}
         aria-describedby={description}
       >
-        打开
+        <FileTypeIcon kind={format.kind} className="output-file-icon size-6" />
+        <span className="output-file-description">
+          <span id={titleId} className="output-file-name" title={file.name}>
+            <FileNameParts name={file.name} />
+          </span>
+          <small className="output-file-type">{format.label}</small>
+          {file.sourceLabel && <small id={sourceId}>{file.sourceLabel}</small>}
+          {distinguish && (
+            <small id={detailId} className="output-file-distinction">
+              {collectionTime(file.publishedAt)} ·{' '}
+              <span className="whitespace-nowrap">{file.size} 字节</span>
+            </small>
+          )}
+        </span>
       </Button>
-      <OutputFileMenu file={file} onSave={props.onSave} onReveal={props.onReveal} />
+      <ButtonGroup className="output-file-actions" aria-label={file.name}>
+        <Button
+          className="output-file-open"
+          variant="outline"
+          onClick={open}
+          aria-label={`打开 ${file.name}`}
+          aria-describedby={description}
+          aria-busy={busy || undefined}
+          aria-disabled={busy || undefined}
+        >
+          打开
+        </Button>
+        <OutputFileMenu file={file} onSave={onSave} onReveal={onReveal} withOpenButton />
+      </ButtonGroup>
     </li>
   );
 }
-export function OutputFiles(props: OutputFilesProps) {
-  if (!props.items.length) return null;
-  const repeated = duplicateNames(props.items);
+export function OutputFiles({ items, ...actions }: OutputFilesProps) {
+  if (!items.length) return null;
+  const repeated = duplicateNames(items);
   return (
     <section className="turn-output-files" aria-label="本次产出">
       <ul>
-        {props.items.map((file) => (
+        {items.map((file) => (
           <FileRow
-            {...props}
+            {...actions}
             key={fileIdentity(file)}
             file={file}
             distinguish={repeated.has(file.name)}
@@ -244,33 +218,27 @@ export function OutputReferences(
         <span>输出</span>
       </h3>
       <ul>
-        {props.items.map((file) => {
-          const dot = file.name.lastIndexOf('.');
-          return (
-            <li key={fileIdentity(file)}>
-              <button
-                type="button"
-                className="output-reference-link"
-                title={[file.name, file.sourceLabel].filter(Boolean).join(' · ')}
-                aria-label={`打开 ${file.name}${file.sourceLabel ? `，${file.sourceLabel}` : ''}${repeated.has(file.name) ? `，${collectionTime(file.publishedAt)}，${file.size} 字节` : ''}`}
-                onClick={() => props.onOpen(file)}
-              >
-                <HugeiconsIcon icon={referenceIcon(file)} aria-hidden="true" />
-                <span className="output-reference-name">
-                  <span>{dot > 0 ? file.name.slice(0, dot) : file.name}</span>
-                  {dot > 0 && (
-                    <span className="output-reference-extension">{file.name.slice(dot)}</span>
-                  )}
-                  {file.sourceLabel && (
-                    <span className="output-reference-source">{` · ${file.sourceLabel}`}</span>
-                  )}
-                </span>
-                {!props.onReveal && <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />}
-              </button>
-              {props.onReveal && <OutputFileMenu file={file} onReveal={props.onReveal} />}
-            </li>
-          );
-        })}
+        {props.items.map((file) => (
+          <li key={fileIdentity(file)}>
+            <button
+              type="button"
+              className="output-reference-link"
+              title={[file.name, file.sourceLabel].filter(Boolean).join(' · ')}
+              aria-label={`打开 ${file.name}${file.sourceLabel ? `，${file.sourceLabel}` : ''}${repeated.has(file.name) ? `，${collectionTime(file.publishedAt)}，${file.size} 字节` : ''}`}
+              onClick={() => props.onOpen(file)}
+            >
+              <FileTypeIcon kind={outputFileFormat(file.name, file.mediaType).kind} />
+              <span className="output-reference-name">
+                <FileNameParts name={file.name} />
+                {file.sourceLabel && (
+                  <span className="output-reference-source">{` · ${file.sourceLabel}`}</span>
+                )}
+              </span>
+              {!props.onReveal && <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />}
+            </button>
+            {props.onReveal && <OutputFileMenu file={file} onReveal={props.onReveal} />}
+          </li>
+        ))}
       </ul>
       {props.onMore && (
         <Button

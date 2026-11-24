@@ -1,5 +1,5 @@
 // Explicit production-renderer fixture. No Service, user Store or diagnostic entrypoint.
-import type { Message, Run } from '@kite-ai/client';
+import type { Message, OutputFileTarget, Run } from '@kite-ai/client';
 import { createRoot } from 'react-dom/client';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeRequest } from '../src/native-bridge';
@@ -29,6 +29,8 @@ export interface PresentationEvent {
 }
 export interface HistoryPresentationFixture {
   events: PresentationEvent[];
+  openInAppTargets: OutputFileTarget[];
+  finishOpenInApp(error?: string): void;
   finishLiveTurn(): void;
   release(phase: PresentationPhase): void;
   pending(): Partial<Record<PresentationPhase, number>>;
@@ -57,6 +59,10 @@ const tools = new Map<string, NativeToolMessageFact>();
 for (const sessionId of ['a', 'b']) {
   const messages: Message[] = [];
   const runs: Run[] = [];
+  const outputSummary =
+    sessionId === 'b'
+      ? '| 文件 | 格式 |\n| --- | --- |\n| 演示文稿示例 | PPT |'
+      : '- 表格示例\n- 演示文稿示例\n- 文档示例';
   for (let index = 0; index < count; index++) {
     const runId = `run-${sessionId}-${index}`;
     const active = !turnOutputs && index === count - 1;
@@ -114,13 +120,15 @@ for (const sessionId of ['a', 'b']) {
     add(
       'reply',
       'assistant',
-      `REPLY-${sessionId}-${index}\n\n${'完整回复包含正常段落、中文与 **Markdown**，用来检查阅读位置是否稳定。'.repeat(5)}`,
+      `REPLY-${sessionId}-${index}\n\n${'完整回复包含正常段落、中文与 **Markdown**，用来检查阅读位置是否稳定。'.repeat(5)}${turnOutputs ? `\n\n${outputSummary}` : ''}`,
     );
   }
   histories.set(sessionId, messages);
   runLists.set(sessionId, runs);
 }
 const events: PresentationEvent[] = [];
+const openInAppTargets: OutputFileTarget[] = [];
+let finishOpening: ((error?: string) => void) | undefined;
 const liveRunId = 'run-a-live';
 let failedOutputRead = false;
 const pending = new Map<PresentationPhase, (() => void)[]>();
@@ -137,6 +145,16 @@ const sessionFor = (request: Extract<NativeRequest, { method: 'messages' }>) => 
 const bridge: NativeBridge = {
   ...control.bridge,
   async request(request) {
+    if (turnOutputs && request.method === 'outputs.openInApp') {
+      openInAppTargets.push(request.target);
+      return new Promise<null>((resolve, reject) => {
+        finishOpening = (error) => {
+          finishOpening = undefined;
+          if (error) reject(Error(error));
+          else resolve(null);
+        };
+      });
+    }
     if (turnOutputs && request.method === 'outputs.sources')
       return { kind: 'outputs.sources', scope: request.scope, sources: [] };
     if (turnOutputs && request.method === 'outputs.query') {
@@ -327,6 +345,11 @@ const bridge: NativeBridge = {
 };
 window.historyPresentationFixture = {
   events,
+  openInAppTargets,
+  finishOpenInApp(error) {
+    if (!finishOpening) throw Error('fixture_output_open_not_pending');
+    finishOpening(error);
+  },
   finishLiveTurn() {
     const messages = histories.get('a')!;
     const runs = runLists.get('a')!;

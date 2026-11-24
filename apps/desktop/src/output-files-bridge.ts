@@ -173,7 +173,7 @@ export type NativeOutputRequest =
       limit?: number;
     }
   | {
-      method: 'outputs.save' | 'outputs.reveal' | 'outputs.info';
+      method: 'outputs.save' | 'outputs.reveal' | 'outputs.openInApp' | 'outputs.info';
       generation: number;
       target: OutputFileTarget;
     }

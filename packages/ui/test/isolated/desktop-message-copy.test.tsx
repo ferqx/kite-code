@@ -207,12 +207,20 @@ test('actual Conversation copies only original settled user and host-confirmed f
       ),
     );
   const buttons = () => [...host.querySelectorAll<HTMLButtonElement>('button.message-copy')];
+  const defaultFooterMessage = () =>
+    host.querySelector('.message-meta[data-default-visible]')?.closest('[data-message-id]');
   const click = async (button: HTMLButtonElement) =>
     act(async () => {
       button.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
     });
   try {
+    await render(messages.slice(0, 1));
+    expect(defaultFooterMessage()).toBeUndefined();
+    await render(messages.slice(0, -1));
+    expect(defaultFooterMessage()?.getAttribute('data-message-id')).toBe('a2');
     await render(messages);
+    expect(defaultFooterMessage()?.getAttribute('data-message-id')).toBe('preview');
+    expect(defaultFooterMessage()?.querySelector('.message-copy')).toBeNull();
     const time = host.querySelector('.message.user time')!;
     expect(time.getAttribute('datetime')).toBe(new Date(1234567890000).toISOString());
     expect(time.getAttribute('title')).toContain('2009年');

@@ -545,6 +545,7 @@ test('a saved prompt takes over its submission DOM without changing Markdown, se
   const text = '# 提示词\n\n**说明：**后文\n\n- 列表\n\n```ts\nconst x = 1;\n```';
   const saved: Message = {
     ...message('saved-message', 'user', '1', text),
+    createdAt: 1_790_000_000_000,
     originCommandId: 'business-command',
     humanInput: { inputCommandId: 'business-input', publicCommandId: 'public-command' },
   };
@@ -574,6 +575,9 @@ test('a saved prompt takes over its submission DOM without changing Markdown, se
     );
     await render([pending]);
     const article = f.host.querySelector('.message.user')!;
+    const footer = article.querySelector('.message-meta')!;
+    expect(footer.hasAttribute('data-default-visible')).toBe(false);
+    expect(footer.textContent).toBe('');
     const body = article.querySelector('.prompt-markdown')!;
     const original = markdownMarkup(body);
     const copy = body.querySelector('[data-slot="code-block-copy-button"]');
@@ -587,6 +591,12 @@ test('a saved prompt takes over its submission DOM without changing Markdown, se
     ]) {
       await render(messages);
       expect(f.host.querySelector('.message.user')).toBe(article);
+      expect(article.querySelector('.message-meta')).toBe(footer);
+      expect(footer.querySelector('time')?.dateTime).toBe(
+        messages[0]?.pendingSave ? undefined : new Date(saved.createdAt!).toISOString(),
+      );
+      expect(footer.hasAttribute('data-default-visible')).toBe(false);
+      expect(footer.textContent).not.toContain('时间未知');
       expect(article.querySelector('.prompt-markdown')).toBe(body);
       expect(markdownMarkup(body)).toBe(original);
       expect(body.querySelector('[data-slot="code-block-copy-button"]')).toBe(copy);
@@ -604,6 +614,9 @@ test('a saved prompt takes over its submission DOM without changing Markdown, se
     expect(f.host.querySelector('.prompt-markdown')).toBe(body);
     await render(project([saved, second]), 'cold');
     expect(f.host.querySelectorAll('.prompt-markdown')).toHaveLength(2);
+    expect(f.host.querySelector('.message.user time')?.getAttribute('datetime')).toBe(
+      new Date(saved.createdAt!).toISOString(),
+    );
     expect(markdownMarkup(f.host.querySelector('.prompt-markdown')!)).toBe(original);
     expect(
       project([

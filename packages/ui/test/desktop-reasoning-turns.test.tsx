@@ -1222,7 +1222,7 @@ test('tool handoff retains the latest message until a reply or terminal ends the
   }
 });
 
-test('Native applies the initial live process default once and keeps its disclosure through settlement', async () => {
+test('each live Native turn shows its process immediately and retains the reading choice through settlement', async () => {
   for (const manuallyClose of [false, true]) {
     await withConversationRoot(async (host, root) => {
       const tool: Message = {
@@ -1277,6 +1277,9 @@ test('Native applies the initial live process default once and keeps its disclos
       const trigger = host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
       expect(trigger.getAttribute('aria-expanded')).toBe('true');
       expect(trigger.textContent).toContain('进行中');
+      expect(trigger.closest('.agent-turn-process')?.getAttribute('data-instant-open')).toBe(
+        'true',
+      );
       const row = host.querySelector('.shell-activity');
       expect(row).not.toBeNull();
       if (manuallyClose) await act(async () => trigger.click());
@@ -1292,12 +1295,20 @@ test('Native applies the initial live process default once and keeps its disclos
       expect(host.textContent).toContain('Final reply');
       const next = { ...tool, id: 'next-tool', turnId: 'next' };
       await draw('completed', next);
-      const summaries = host.querySelectorAll('button.agent-turn-summary');
+      const summaries = host.querySelectorAll<HTMLButtonElement>('button.agent-turn-summary');
       expect(summaries[0]?.getAttribute('aria-expanded')).toBe(String(!manuallyClose));
-      expect(summaries[1]?.getAttribute('aria-expanded')).toBe('false');
+      const nextSummary = summaries[1]!;
+      const nextProcess = nextSummary.closest('.agent-turn-process')!;
+      expect(nextSummary.getAttribute('aria-expanded')).toBe('true');
+      expect(nextProcess.getAttribute('data-instant-open')).toBe('true');
+      expect(nextProcess.querySelectorAll('.shell-activity')).toHaveLength(1);
+      if (manuallyClose) {
+        await act(async () => nextSummary.click());
+        expect(nextProcess.hasAttribute('data-instant-open')).toBe(false);
+      }
       await draw('completed', { ...next, status: 'failed', settled: true });
-      expect(summaries[1]?.getAttribute('aria-expanded')).toBe('false');
-      expect(summaries[1]?.textContent).toContain('用时');
+      expect(nextSummary.getAttribute('aria-expanded')).toBe(String(!manuallyClose));
+      expect(nextSummary.textContent).toContain('用时');
     });
   }
 });
@@ -1360,9 +1371,11 @@ test('ordinary replies stay in order and mounted when interleaved tools are fold
     expect(firstNode?.textContent).toContain(firstReply.text);
     await draw([input, firstReply, read]);
     const summary = host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
-    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
     expect(replies()[0]).toBe(firstNode);
-    expect(host.querySelector('.shell-activity')).toBeNull();
+    expect(host.querySelector('.shell-activity')).not.toBeNull();
+    await act(async () => summary.click());
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
 
     await draw([input, firstReply, finish(read), secondReply]);
     const secondNode = replies()[1];

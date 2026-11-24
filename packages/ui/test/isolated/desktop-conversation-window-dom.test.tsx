@@ -52,13 +52,14 @@ async function fixture(count = 220) {
   const host = dom.window.document.getElementById('root')!;
   const rows = () => [...host.querySelectorAll<HTMLElement>('[data-conversation-entry-key]')];
   const rowHeight = () => 30;
+  let viewportHeight = 100;
   const isViewport = (node: HTMLElement) => node.classList.contains('conversation-viewport');
   const scrollPositions = new WeakMap<HTMLElement, number>();
   Object.defineProperties(dom.window.HTMLElement.prototype, {
     clientHeight: {
       configurable: true,
       get() {
-        return isViewport(this) ? 100 : 0;
+        return isViewport(this) ? viewportHeight : 0;
       },
     },
     scrollHeight: {
@@ -92,7 +93,7 @@ async function fixture(count = 220) {
         : this.classList.contains('reading-column')
           ? -(viewport?.scrollTop ?? 0)
           : 0;
-    const height = isViewport(this) ? 100 : index >= 0 ? rowHeight() : 0;
+    const height = isViewport(this) ? viewportHeight : index >= 0 ? rowHeight() : 0;
     return {
       x: 0,
       y: top,
@@ -132,6 +133,9 @@ async function fixture(count = 220) {
     rows,
     render,
     viewport,
+    setViewportHeight(height: number) {
+      viewportHeight = height;
+    },
     resize() {
       for (const observer of resizeObservers)
         observer.callback([], observer as unknown as ResizeObserver);
@@ -232,28 +236,29 @@ test('message navigation uses every input identity and preserves delivery handof
     await f.render({ loading: false, messages: [] });
     expect(navigation()).toBeNull();
     await f.render({ messages: messages(1) });
-    await click(markers()[0]!);
-    expect(f.host.querySelector('.jump-latest')).toBeNull();
+    expect(navigation()).toBeNull();
+    f.setViewportHeight(20);
+    await act(async () => f.resize());
+    expect(markers()).toHaveLength(1);
+    f.setViewportHeight(100);
+    await act(async () => f.resize());
+    expect(navigation()).toBeNull();
   } finally {
     await f.close();
   }
 });
 
-test('paging through overflowing message markers keeps the transcript and highlight in place', async () => {
+test('scrolling overflowing message markers keeps the transcript and highlight in place', async () => {
   const f = await fixture(140);
-  const earlier = () =>
-    f.host.querySelector<HTMLButtonElement>('[aria-label="查看更早的消息刻度"]')!;
-  const later = () => f.host.querySelector<HTMLButtonElement>('[aria-label="查看更新的消息刻度"]')!;
   try {
     await f.render({ messageNavigation: true });
     const list = f.host.querySelector<HTMLElement>('.conversation-marker-list')!;
+    expect(list.classList.contains('scroll-fade-y')).toBe(true);
     const markers = [...list.querySelectorAll('button')];
-    let navigationHeight = 148;
-    let listHeight = 120;
+    expect(list.closest('nav')!.querySelectorAll('button')).toHaveLength(markers.length);
     let markerScroll = 0;
-    Object.defineProperty(list.parentElement!, 'clientHeight', { get: () => navigationHeight });
     Object.defineProperties(list, {
-      clientHeight: { get: () => listHeight },
+      clientHeight: { value: 120 },
       scrollHeight: { value: markers.length * 10 },
       scrollTop: {
         get: () => markerScroll,
@@ -270,29 +275,17 @@ test('paging through overflowing message markers keeps the transcript and highli
     });
     await act(async () => f.resize());
     expect(list.scrollTop).toBe(1280);
-    expect(later().getAttribute('aria-disabled')).toBe('true');
     const transcriptTop = f.viewport().scrollTop;
-    await act(async () => earlier().click());
-    expect(list.scrollTop).toBe(1160);
-    expect(f.viewport().scrollTop).toBe(transcriptTop);
-    expect(markers.at(-1)!.getAttribute('aria-current')).toBe('location');
-    await act(async () => later().click());
-    expect(list.scrollTop).toBe(1280);
     await act(async () => {
       list.scrollTop = 0;
       list.dispatchEvent(new f.dom.window.Event('scroll'));
     });
-    expect(earlier().getAttribute('aria-disabled')).toBe('true');
+    expect(list.scrollTop).toBe(0);
     expect(f.viewport().scrollTop).toBe(transcriptTop);
+    expect(markers.at(-1)!.getAttribute('aria-current')).toBe('location');
     await act(async () => markers[1]!.click());
     expect(markers[1]!.getAttribute('aria-current')).toBe('location');
     expect(f.row('u-1')!.getBoundingClientRect().top).toBe(12);
-
-    navigationHeight = 1505;
-    listHeight = 1477;
-    await act(async () => f.resize());
-    expect(earlier()).toBeNull();
-    expect(later()).toBeNull();
   } finally {
     await f.close();
   }

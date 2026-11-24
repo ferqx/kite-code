@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { chromium } from 'playwright';
+import { chromium, type Locator } from 'playwright';
 import { build } from 'vite';
 import type {
   HistoryPresentationFixture,
@@ -72,6 +72,37 @@ type OutputFrame = {
   files: string[];
   bottom: number;
 };
+
+async function assertOutputSpacing(reply: Locator, lastBlockSelector: string) {
+  const spacing = await reply.evaluate((article, selector) => {
+    const markdown = article.querySelector('.typeset-chat')!;
+    const lastBlock = markdown.lastElementChild;
+    if (!lastBlock?.matches(selector)) throw Error(`Expected ${selector} before the attachments`);
+    const files = article
+      .querySelector(':scope > .turn-output-files > ul')!
+      .getBoundingClientRect();
+    const footer = article.querySelector(':scope > .message-meta')!.getBoundingClientRect();
+    const textStyle = getComputedStyle(markdown);
+    return {
+      above: files.top - lastBlock.getBoundingClientRect().bottom,
+      below: footer.top - files.bottom,
+      fontSize: parseFloat(textStyle.fontSize),
+      trim: textStyle.getPropertyValue('text-box-trim'),
+    };
+  }, lastBlockSelector);
+  assert.equal(spacing.trim, 'trim-end');
+  assert.ok(Math.abs(spacing.above - spacing.fontSize * 1.6) < 0.1, JSON.stringify(spacing));
+  assert.ok(Math.abs(spacing.below - spacing.fontSize * 0.8) < 0.1, JSON.stringify(spacing));
+  return spacing.above;
+}
+
+function messageFooterOpacity(message: Locator) {
+  return message.locator(':scope > .message-meta').evaluate(async (footer) => {
+    await Promise.all(footer.getAnimations().map((animation) => animation.finished));
+    return getComputedStyle(footer).opacity;
+  });
+}
+
 declare global {
   interface Window {
     historyPresentationFrames: Frame[];
@@ -137,6 +168,7 @@ const report = {
   }[],
 };
 const outputsOnly = process.argv.includes('--turn-outputs');
+const navigationOnly = process.argv.includes('--message-navigation');
 const variants: Variant[] = [
   { mode: 'initial', turns: 4, width: 1320, order: ['runs', 'tools'] },
   { mode: 'initial', turns: 4, width: 1440, order: ['tools', 'runs'], theme: 'dark' },
@@ -146,6 +178,67 @@ const variants: Variant[] = [
   { mode: 'switch', turns: 40, width: 1440, order: ['tools', 'runs'], reducedMotion: 'reduce' },
 ];
 try {
+  if (navigationOnly) {
+    const page = await browser.newPage({
+      viewport: { width: 1360, height: 1600 },
+      colorScheme: 'dark',
+    });
+    const navigation = page.getByRole('navigation', { name: '会话消息导航' });
+    const viewport = page.locator('.conversation-viewport');
+    const overflow = () => viewport.evaluate((node) => node.scrollHeight > node.clientHeight);
+    await page.goto(new URL('?mode=switch&turns=2&viewAll=true', server.url).href);
+    await page.getByText('SESSION-A 第 2 轮：检查会话渲染', { exact: true }).waitFor();
+    assert.equal(await overflow(), false);
+    assert.equal(await navigation.count(), 0);
+    await page.setViewportSize({ width: 1360, height: 420 });
+    await navigation.waitFor();
+    assert.equal(await overflow(), true);
+    await page.setViewportSize({ width: 1360, height: 1600 });
+    await navigation.waitFor({ state: 'detached' });
+    assert.equal(await overflow(), false);
+
+    await page.setViewportSize({ width: 1360, height: 700 });
+    await page.goto(new URL('?mode=switch&turns=40&viewAll=true', server.url).href);
+    const last = navigation.getByRole('button', { name: /^第 40 条已加载的用户消息/ });
+    await last.waitFor({ state: 'attached' });
+    assert.equal(await navigation.getByRole('button').count(), 40);
+    const list = navigation.locator('.conversation-marker-list');
+    const sizes = await list.evaluate((node) => {
+      const rail = node.closest('nav')!;
+      const style = getComputedStyle(rail);
+      const limits = parseFloat(style.top) + parseFloat(style.bottom);
+      const available = rail.parentElement!.clientHeight - limits;
+      return {
+        height: rail.getBoundingClientRect().height,
+        available,
+        mask: getComputedStyle(node).maskImage,
+        scrollbar: getComputedStyle(node).scrollbarWidth,
+        overflow: node.scrollHeight - node.clientHeight,
+      };
+    });
+    assert.ok(Math.abs(sizes.height - sizes.available / 2) < 1, JSON.stringify(sizes));
+    assert.notEqual(sizes.mask, 'none');
+    assert.equal(sizes.scrollbar, 'none');
+    assert.ok(sizes.overflow > 0);
+    await viewport.evaluate((node) => {
+      node.scrollTop = 0;
+    });
+    await page.getByRole('button', { name: '回到最新消息' }).waitFor();
+    const first = navigation.getByRole('button', { name: /^第 1 条已加载的用户消息/ });
+    const initialScroll = await viewport.evaluate((node) => node.scrollTop);
+    await first.press('End');
+    assert.ok(await list.evaluate((node) => node.scrollTop > 0));
+    await last.press('Home');
+    assert.equal(await list.evaluate((node) => node.scrollTop), 0);
+    await list.hover();
+    await page.mouse.wheel(0, 100);
+    await page.waitForFunction(
+      () => (document.querySelector('.conversation-marker-list')?.scrollTop ?? 0) > 0,
+    );
+    assert.equal(await viewport.evaluate((node) => node.scrollTop), initialScroll);
+    await page.screenshot({ path: path.join(artifact, 'message-navigation.png') });
+    await page.close();
+  }
   if (outputsOnly) {
     for (const theme of ['dark', 'light'] as const) {
       const page = await browser.newPage({
@@ -195,7 +288,160 @@ try {
       const first = page
         .locator('.agent-turn-final .message.assistant')
         .filter({ hasText: 'REPLY-a-1' });
-      await first.locator('.output-file-card').waitFor();
+      const firstFile = first.locator('.output-file-card');
+      await firstFile.waitFor();
+      assert.equal(await messageFooterOpacity(first), '1');
+      const afterList = await assertOutputSpacing(first, 'ul');
+      const blockGaps = await first.evaluate((reply) => {
+        const turn = reply.closest('.conversation-trace-turn')!;
+        const summary = turn.querySelector(':scope > .agent-turn-summary-row > button')!;
+        const firstBody = turn.querySelector(':scope > .agent-turn-body .typeset-chat')!;
+        const markdown = reply.querySelector('.typeset-chat')!;
+        const [paragraph, nextParagraph, bullets] = markdown.children;
+        const gap = (before: Element, after: Element) =>
+          after.getBoundingClientRect().top - before.getBoundingClientRect().bottom;
+        return {
+          expected: parseFloat(getComputedStyle(markdown).fontSize) * 0.8,
+          measured: {
+            summaryToText: gap(summary, firstBody),
+            betweenParagraphs: gap(paragraph!, nextParagraph!),
+            paragraphToBullets: gap(nextParagraph!, bullets!),
+          },
+        };
+      });
+      for (const [section, gap] of Object.entries(blockGaps.measured)) {
+        assert.ok(
+          Math.abs(gap - blockGaps.expected) < 0.1,
+          `${theme} ${section}: expected ${blockGaps.expected}px, got ${gap}px`,
+        );
+      }
+      const rowPaint = () =>
+        firstFile.evaluate((row) => {
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d')!;
+          context.fillStyle = getComputedStyle(row.parentElement!).backgroundColor;
+          context.fillRect(0, 0, 1, 1);
+          context.fillStyle = getComputedStyle(row).backgroundColor;
+          context.fillRect(0, 0, 1, 1);
+          return [...context.getImageData(0, 0, 1, 1).data];
+        });
+      await page.mouse.move(0, 0);
+      const restingPaint = await rowPaint();
+      const actions = firstFile.getByRole('group', { name: 'Output-a.pptx' });
+      const menuTrigger = actions.getByRole('button', { name: /更多操作/ });
+      const open = actions.getByRole('button', { name: /^打开 / });
+      const fileLabel = firstFile.getByRole('button', { name: /^预览 / });
+      const nameBounds = await fileLabel.locator('.output-file-name').boundingBox();
+      const typeBounds = await fileLabel.getByText('PPT 演示文稿', { exact: true }).boundingBox();
+      const iconBounds = await fileLabel.locator('.output-file-icon').boundingBox();
+      assert.ok(nameBounds && typeBounds && iconBounds);
+      assert.equal(nameBounds.x, typeBounds.x);
+      assert.ok(typeBounds.y - nameBounds.y - nameBounds.height >= 3);
+      assert.ok(nameBounds.x - iconBounds.x - iconBounds.width >= 9);
+      assert.deepEqual([iconBounds.width, iconBounds.height], [24, 24]);
+      await firstFile.screenshot({ path: path.join(artifact, `outputs-${theme}-row.png`) });
+      const actionPaint = () =>
+        actions.evaluate((element) => getComputedStyle(element).backgroundColor);
+      const buttonPaints = () =>
+        actions.evaluate((group) =>
+          [...group.querySelectorAll('button')].map(
+            (button) => getComputedStyle(button).backgroundColor,
+          ),
+        );
+      const restingActions = await actionPaint();
+      const restingButtons = await buttonPaints();
+      const openBounds = await open.boundingBox();
+      const menuBounds = await menuTrigger.boundingBox();
+      assert.ok(openBounds && menuBounds);
+      assert.ok(Math.abs(openBounds.x + openBounds.width - menuBounds.x) < 1);
+      assert.equal(openBounds.y, menuBounds.y);
+      assert.equal(openBounds.height, menuBounds.height);
+      assert.equal(menuBounds.width, menuBounds.height);
+      assert.equal(await open.getAttribute('data-variant'), 'outline');
+      assert.equal(await menuTrigger.getAttribute('data-variant'), 'outline');
+      assert.equal(
+        await open.evaluate((element) => getComputedStyle(element).borderInlineEndWidth),
+        '1px',
+      );
+      assert.equal(
+        await menuTrigger.evaluate((element) => getComputedStyle(element).borderInlineStartWidth),
+        '0px',
+      );
+      await actions.screenshot({ path: path.join(artifact, `outputs-${theme}-actions.png`) });
+      await fileLabel.hover();
+      const hoveredPaint = await rowPaint();
+      assert.notDeepEqual(hoveredPaint, restingPaint, `${theme} output row hover must be visible`);
+      assert.deepEqual(await buttonPaints(), restingButtons);
+      assert.equal(await actionPaint(), restingActions);
+      await open.hover({ position: { x: 2, y: openBounds.height / 2 } });
+      assert.deepEqual(await rowPaint(), restingPaint);
+      const openHover = await buttonPaints();
+      assert.notEqual(openHover[0], restingButtons[0]);
+      assert.equal(openHover[1], restingButtons[1]);
+      assert.equal(await actionPaint(), restingActions);
+      await actions.screenshot({ path: path.join(artifact, `outputs-${theme}-open-hover.png`) });
+      await menuTrigger.hover();
+      assert.deepEqual(await rowPaint(), restingPaint);
+      const menuHover = await buttonPaints();
+      assert.equal(menuHover[0], restingButtons[0]);
+      assert.notEqual(menuHover[1], restingButtons[1]);
+      assert.equal(await actionPaint(), restingActions);
+      await actions.screenshot({ path: path.join(artifact, `outputs-${theme}-menu-hover.png`) });
+      await menuTrigger.click();
+      const menu = page.getByRole('menu', { name: /更多操作/ });
+      await menu.getByRole('group').getByRole('menuitem', { name: '另存为' }).waitFor();
+      await page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'hidden' });
+      await fileLabel.hover();
+      assert.deepEqual(await rowPaint(), hoveredPaint);
+      await open.hover();
+      assert.deepEqual(await rowPaint(), restingPaint);
+      await page.mouse.down();
+      try {
+        const pressed = await open.evaluate(async (button) => {
+          await Promise.all(button.getAnimations().map((animation) => animation.finished));
+          return {
+            active: button.matches(':active'),
+            background: getComputedStyle(button).backgroundColor,
+          };
+        });
+        assert.deepEqual(pressed, { active: true, background: openHover[0] });
+        assert.equal(await actionPaint(), restingActions);
+        assert.deepEqual(await rowPaint(), restingPaint);
+      } finally {
+        await page.mouse.move(0, 0);
+        await page.mouse.up();
+      }
+      assert.deepEqual(await rowPaint(), restingPaint);
+      assert.equal(await actionPaint(), restingActions);
+      assert.deepEqual(await buttonPaints(), restingButtons);
+      await fileLabel.locator('.output-file-name').hover();
+      assert.deepEqual(await rowPaint(), hoveredPaint);
+      assert.deepEqual(await buttonPaints(), restingButtons);
+      await open.click();
+      await actions.locator('.output-file-open[aria-busy="true"]').waitFor();
+      const opened = await page.evaluate(() => window.historyPresentationFixture.openInAppTargets);
+      assert.equal(opened.length, 1);
+      assert.equal(opened[0]?.sessionId, 'a');
+      assert.equal(opened[0]?.fileId, 'presentation');
+      assert.deepEqual(opened[0]?.locator, {
+        kind: 'delivery',
+        key: 'delivery/1/job/presentation',
+      });
+      await page.evaluate(() => window.historyPresentationFixture.finishOpenInApp());
+      await actions.locator('.output-file-open[aria-busy="true"]').waitFor({ state: 'hidden' });
+      assert.equal(await page.locator('.native-toast-card').count(), 0);
+      await open.press('Enter');
+      await actions.locator('.output-file-open[aria-busy="true"]').waitFor();
+      await page.evaluate(() =>
+        window.historyPresentationFixture.finishOpenInApp('output_open_in_app_failed'),
+      );
+      const toast = page.getByText('桌面应用未能打开文件，请检查系统默认应用', { exact: true });
+      await toast.waitFor();
+      await actions.locator('.output-file-open[aria-busy="true"]').waitFor({ state: 'hidden' });
+      await page.locator('.native-toast-close').click();
+      await toast.waitFor({ state: 'hidden' });
+      await page.mouse.move(0, 0);
       await page.screenshot({ path: path.join(artifact, `outputs-${theme}-cold.png`) });
       await page.evaluate(() => {
         for (const phase of ['selection', 'history', 'runs', 'tools'] as const)
@@ -218,6 +464,7 @@ try {
       await page.screenshot({ path: path.join(artifact, `outputs-${theme}-slow.png`) });
       await page.evaluate(() => window.historyPresentationFixture.release('outputs'));
       await second.locator('.output-file-card').waitFor();
+      const afterTable = await assertOutputSpacing(second, '.markdown-table-scroll');
       await page.screenshot({ path: path.join(artifact, `outputs-${theme}-resolved.png`) });
       await page.evaluate(() => {
         window.outputPhase = 'warm';
@@ -237,9 +484,31 @@ try {
       );
       await latest.waitFor({ state: 'visible' });
       assert.equal(await latest.locator('.output-file-card').count(), 0);
+      assert.equal(await messageFooterOpacity(latest), '1');
+      assert.equal(await messageFooterOpacity(first), '0');
+      await page.mouse.move(0, 0);
+      assert.equal(
+        await messageFooterOpacity(
+          page
+            .locator('.message.user')
+            .filter({ hasText: 'Create an output in the current conversation' }),
+        ),
+        '0',
+      );
+      const textToFooter = await latest.evaluate((reply) => {
+        const body = reply.querySelector('.typeset-chat')!;
+        const footer = reply.querySelector(':scope > .message-meta')!;
+        return {
+          distance: footer.getBoundingClientRect().top - body.getBoundingClientRect().bottom,
+          expected: parseFloat(getComputedStyle(body).fontSize) * 0.8,
+        };
+      });
+      assert.ok(Math.abs(textToFooter.distance - textToFooter.expected) < 0.1);
       await page.screenshot({ path: path.join(artifact, `outputs-${theme}-live.png`) });
       await page.evaluate(() => window.historyPresentationFixture.release('liveOutputs'));
       await latest.locator('.output-file-card').waitFor();
+      assert.equal(await messageFooterOpacity(latest), '1');
+      const afterParagraph = await assertOutputSpacing(latest, 'p');
       await page.screenshot({ path: path.join(artifact, `outputs-${theme}-live-resolved.png`) });
       const { frames, events } = await page.evaluate(() => ({
         frames: window.outputFrames,
@@ -293,12 +562,14 @@ try {
           slow: slow.length,
           warm: warm.length,
           live: live.length,
+          blockGaps,
+          attachmentSpacing: { afterList, afterTable, afterParagraph },
         }),
       );
       await page.close();
     }
   }
-  for (const variant of outputsOnly ? [] : variants) {
+  for (const variant of outputsOnly || navigationOnly ? [] : variants) {
     const label = `${variant.mode}-${variant.turns}-${variant.width}-${variant.order.join('-')}-${variant.viewAll ? 'view-all' : 'partial-view'}-${variant.theme ?? 'light'}-${variant.reducedMotion ?? 'no-preference'}`;
     const page = await browser.newPage({
       viewport: { width: variant.width, height: 1000 },

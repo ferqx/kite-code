@@ -38,6 +38,7 @@ export {
 } from './components/ui/alert-dialog';
 export { Attachment, AttachmentMedia, AttachmentTitle } from './components/ui/attachment';
 export { Badge } from './components/ui/badge';
+export { ButtonGroup } from './components/ui/button-group';
 export {
   Dialog,
   DialogClose,

@@ -257,6 +257,7 @@ const MessageItem = memo(function MessageItem({
   renderContent,
   renderAttachments,
   showMetadata = true,
+  showMetadataByDefault = false,
   turnOutputs,
   synchronizeTurnOutputs = false,
 }: {
@@ -276,6 +277,7 @@ const MessageItem = memo(function MessageItem({
   renderContent?: (message: Message) => ReactNode;
   renderAttachments?: (message: Message) => ReactNode;
   showMetadata?: boolean;
+  showMetadataByDefault?: boolean;
   turnOutputs?: ReactNode;
   synchronizeTurnOutputs?: boolean;
 }) {
@@ -564,7 +566,7 @@ const MessageItem = memo(function MessageItem({
         {turnOutputs}
       </InitialTurnOutputPresentationContext>
       {hasMetadata && (
-        <footer className="message-meta">
+        <footer className="message-meta" data-default-visible={showMetadataByDefault || undefined}>
           {copyText && (
             <MessageCopyButton
               text={copyText}
@@ -577,7 +579,7 @@ const MessageItem = memo(function MessageItem({
               <span aria-hidden="true">{timestamp.label}</span>
               <span className="sr-only">{timestamp.full}</span>
             </time>
-          ) : (
+          ) : message.pendingSave ? null : (
             <span className="message-time" title="没有可核实的消息记录时间">
               时间未知
             </span>
@@ -715,8 +717,12 @@ export function Conversation({
   const markerTargets = useRef<HTMLElement[]>([]);
   const jumpedMarker = useRef<string | undefined>(undefined);
   const [activeMarker, setActiveMarker] = useState<string>();
+  const [navigationOverflow, setNavigationOverflow] = useState(false);
   const syncMessageNavigation = useCallback((element: HTMLElement) => {
     if (!markerTargets.current.length) return;
+    const overflowing = element.clientHeight > 0 && element.scrollHeight > element.clientHeight;
+    setNavigationOverflow(overflowing);
+    if (!overflowing) return;
     setActiveMarker(
       jumpedMarker.current ??
         currentConversationMessage(markerTargets.current, element, reading.current.follow),
@@ -1047,6 +1053,7 @@ export function Conversation({
       if (message.role === 'tool') runningToolTurns.add(message.turnId);
     }
     const finalReplyByTurn = new Map<string, Message>();
+    let latestFinalReply: Message | undefined;
     const timingByTurn = new Map(
       messages
         .filter((message) => message.systemKind === 'turn_timing' && message.turnId)
@@ -1070,8 +1077,10 @@ export function Conversation({
         message.settled &&
         message.finalReply &&
         message.text
-      )
+      ) {
         finalReplyByTurn.set(message.turnId, message);
+        latestFinalReply = message;
+      }
     }
     const assistantTurnCopies = new Map(
       [...finalReplyByTurn.values()].map((message) => [
@@ -1283,6 +1292,7 @@ export function Conversation({
             renderContent={renderMessageContent}
             renderAttachments={renderMessageAttachments}
             showMetadata={placement !== 'process' || message.role === 'user'}
+            showMetadataByDefault={placement === 'result' && message === latestFinalReply}
             copyText={
               agentResult?.contentComplete && placement === 'standalone'
                 ? (message.copyText ?? undefined)
@@ -1464,7 +1474,7 @@ export function Conversation({
         const open =
           expanded[turnKey] ??
           committedTraceProcesses.current.get(turnKey) ??
-          ((initializingConversation && ongoing) || incompleteFailure);
+          (ongoing || incompleteFailure);
         if (lastTurnEntry && (ongoing || showElapsed)) traceProcesses.set(turnKey, open);
         if (lastTurnEntry && open && (hasProcess || ongoing)) trackOpen(turnKey);
         const processLabel = showElapsed
@@ -1625,6 +1635,9 @@ export function Conversation({
                 'agent-turn conversation-trace-turn',
                 hasProcess && 'agent-turn-process',
               )}
+              data-instant-open={
+                (hasProcess && ongoing && expanded[turnKey] === undefined) || undefined
+              }
               data-restored-expanded={
                 (hasProcess && restoredExpanded.current.has(turnKey)) || undefined
               }
@@ -1737,7 +1750,7 @@ export function Conversation({
             >
               <div
                 className="agent-turn-process"
-                data-live={!settled || undefined}
+                data-instant-open={!settled || undefined}
                 data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
               >
                 {settled ? (
@@ -2036,7 +2049,7 @@ export function Conversation({
                 ))}
             </div>
           </section>
-          {markers.length > 0 && (
+          {navigationOverflow && markers.length > 0 && (
             <ConversationMessageNavigation
               markers={markers}
               activeKey={activeMarker}

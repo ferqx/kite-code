@@ -71,8 +71,8 @@ async function checkFileReference(page: import('playwright').Page, width: number
     fontSize: '13px',
     fits: true,
   };
-  const checkUnderline = () =>
-    link.evaluate((node) => {
+  const checkUnderline = (target = link) =>
+    target.evaluate((node) => {
       const {
         textDecorationLine,
         textDecorationStyle,
@@ -87,6 +87,30 @@ async function checkFileReference(page: import('playwright').Page, width: number
       };
     });
   const underline = { line: 'underline', style: 'dashed', thickness: '0.65px', softened: true };
+  const checkFileLinkStyles = async (theme: string) => {
+    for (const [target, kind] of [
+      [plainLink, 'code'],
+      [namedLink, 'code'],
+      [deliveryLink, 'presentation'],
+      [delivery.getByRole('button', { name: '门店运营示例' }), 'spreadsheet'],
+      [delivery.getByRole('button', { name: '项目简报示例' }), 'document'],
+      [delivery.getByRole('button', { name: '查看调整后的预览' }), 'image'],
+    ] as const) {
+      const icon = target.locator('svg.file-reference-icon');
+      assert.equal(await icon.getAttribute('data-file-kind'), kind);
+      assert.equal(await icon.getAttribute('aria-hidden'), 'true');
+      assert.equal((await checkUnderline(target)).line, 'none');
+      await icon.hover();
+      assert.deepEqual(await checkUnderline(target), underline);
+      if (kind === 'image') {
+        await delivery.screenshot({
+          path: path.join(artifact, `file-links-${theme}-${width}.png`),
+        });
+      }
+      await page.mouse.move(0, 0);
+      assert.equal((await checkUnderline(target)).line, 'none');
+    }
+  };
   const visibility = async () =>
     link.evaluate((node) => {
       const { color, textDecorationLine, textDecorationStyle } = getComputedStyle(node);
@@ -128,10 +152,7 @@ async function checkFileReference(page: import('playwright').Page, width: number
   await deliveryLink.waitFor();
   assert.equal(await delivery.locator('a[href]').count(), 0);
   assert.equal(await delivery.getByText('旧引用', { exact: true }).count(), 1);
-  assert.equal(
-    await deliveryLink.evaluate((node) => getComputedStyle(node).textDecorationLine),
-    'underline',
-  );
+  await checkFileLinkStyles('light');
   assert.deepEqual(await region.locator('code').allTextContents(), [text, plainPath, 'waitMs: 0']);
   await region.getByText('waitMs: 0', { exact: true }).waitFor();
   const original = await link.elementHandle();
@@ -197,6 +218,7 @@ async function checkFileReference(page: import('playwright').Page, width: number
   );
   await page.mouse.move(0, 0);
   await page.getByRole('button', { name: '切换主题', exact: true }).click();
+  await checkFileLinkStyles('dark');
   assert.deepEqual(await visibility(), {
     color: 'rgb(101, 153, 227)',
     textDecorationLine: 'none',
@@ -227,7 +249,7 @@ async function checkFileReference(page: import('playwright').Page, width: number
     text,
     text,
     plainPath,
-    plainPath + ':802',
+    `${plainPath}:802`,
     'D:/演示项目/新品 #1 终稿 %23.pptx',
   ]);
 }

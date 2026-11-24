@@ -261,6 +261,7 @@ const control = {
       status: 'complete',
       seq: String(histories.get(id)!.length + 1),
       content: pending.intent.content,
+      createdAt: Date.now(),
       humanInput: {
         inputCommandId: `business-${sequence}`,
         publicCommandId: pending.intent.commandId,

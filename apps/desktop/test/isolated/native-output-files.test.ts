@@ -37,12 +37,14 @@ test('output IPC accepts exact locators and rejects paths, fake references and m
     generation: 1,
     target,
   });
-  const reveal = { method: 'outputs.reveal' as const, generation: 1, target };
-  expect(decodeNativeRequest(reveal)).toEqual(reveal);
-  expect(() => decodeNativeRequest({ ...reveal, destination: 'report.txt' })).toThrow();
-  expect(() =>
-    decodeNativeRequest({ ...reveal, target: { ...target, path: 'report.txt' } }),
-  ).toThrow();
+  for (const method of ['outputs.reveal', 'outputs.openInApp'] as const) {
+    const request = { method, generation: 1, target };
+    expect(decodeNativeRequest(request)).toEqual(request);
+    expect(() => decodeNativeRequest({ ...request, destination: 'report.txt' })).toThrow();
+    expect(() =>
+      decodeNativeRequest({ ...request, target: { ...target, path: 'report.txt' } }),
+    ).toThrow();
+  }
   expect(() =>
     decodeNativeRequest({
       method: 'outputs.save',

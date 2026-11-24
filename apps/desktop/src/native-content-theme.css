@@ -19,7 +19,6 @@
 
 .kite-client .client-main-panel {
   --ui-text-size: 13px;
-  --conversation-text-size: 14px;
   --markdown-inline-code-radius: 5px;
   font-size: var(--ui-text-size);
   color: var(--foreground);
@@ -54,14 +53,13 @@
 }
 
 .kite-client .client-main-panel .typeset-chat {
-  --markdown-block-gap: 12px;
   --markdown-rule: var(--border);
   font-size: var(--conversation-text-size);
   font-weight: 430;
   line-height: 1.625;
 }
 
-.kite-client .client-main-panel .typeset-chat :is(a, .file-link):not(.file-reference) {
+.kite-client .client-main-panel .typeset-chat a[href] {
   text-decoration-line: underline;
   text-underline-offset: 3px;
 }

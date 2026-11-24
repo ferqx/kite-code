@@ -40,7 +40,7 @@ Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../pac
 
 会话文件沿 Native 字节准备 → Service 流式导入 → Store 原消息事务绑定 → Files 精确对象权限 → Artifact／模型结果交接。Blob、可变工作文件和可重建缓存职责分开；会话路径不扩大 Shell／普通外部文件工具的 Profile 权限。Plan 文件编辑经原 Planning Action 保存新版本，文件事实不能替代原 Run／版本批准。PDF 页图由准确 Tool Execution 的不可变 Artifact 进入中立 tool 消息，协议视觉载体不产生人类授权。跨介质发布保留 pending／unknown；备份 v20 保存最新实际工作文件和明确缺失，恢复生成新 Store。详细合同分别归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)、[维护](../../packages/agent/src/maintenance/README.md)和 [AI](../../packages/ai/README.md#图片消息)。
 
-Desktop 办公文件预览仍由 Main 校验当前会话、文件及源版本。沙箱 iframe 的资源地址仅绑定本次预览和准确子帧，取消／替换撤销资源资格。宿主将命中预览的触控板缩放增量单向传给该帧，接收侧核对直属父窗口，缩放只改变预览比例。选区只作描述证据，明确发送仍走可信输入和原命令身份。 [预览机制与验证](../../apps/desktop/README.md#预览工具栏与修改请求)
+Desktop 办公文件预览仍由 Main 校验当前会话、文件及源版本。文件卡的系统打开入口只接受原产物目标，Main 验证当前窗口和准入，按支持的文件格式将独立校验副本交给系统应用。沙箱 iframe 的资源地址仅绑定本次预览和准确子帧，取消／替换撤销资源资格。宿主将命中预览的触控板缩放增量单向传给该帧，接收侧核对直属父窗口，缩放只改变预览比例。选区只作描述证据，明确发送仍走可信输入和原命令身份。 [预览机制与验证](../../apps/desktop/README.md#预览工具栏与修改请求)
 
 Plan 切回先前 ID 时仅从同 Session 已封存版本解析该目标文件，核原登记、摘要与实际基线，再沿原 publication／current CAS 保存新版本；不因文件存在而覆盖或恢复旧批准。Service 上传正文 reader 归现有 HTTP 关闭取消域，原 admission 持有至调用结算；关闭触发的提前结束不构成完整上传，已进入发布的原调用不因关闭重放。准确失败窗口与回归分别归上述 Planning owner 及 [Service owner](../../apps/service/README.md)。
 

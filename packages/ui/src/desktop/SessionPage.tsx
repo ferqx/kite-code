@@ -249,6 +249,8 @@ export interface SessionPageProps {
   loading: boolean;
   /** Cold history waits for its initial grouping without pausing an existing reading. */
   initialPresentationPending?: boolean;
+  /** Briefly hold the first reveal while mounted readers finish, without interrupting their work. */
+  initialPresentationHoldMs?: number;
   /** Reveal the first message tree and footer together after host data and layout preparation. */
   synchronizePresentation?: boolean;
   /** A same-scope readonly footer can accompany an existing retained message tree immediately. */
@@ -1336,7 +1338,8 @@ function SessionPageContent({
     ? JSON.stringify([props.conversationCache?.scope, props.readingKey])
     : undefined;
   const bypassedPresentation = useRef<string | undefined>(undefined);
-  if (!props.synchronizePresentation) bypassedPresentation.current = visiblePresentationIdentity;
+  if (!props.synchronizePresentation && !props.loading)
+    bypassedPresentation.current = visiblePresentationIdentity;
   else if (bypassedPresentation.current !== visiblePresentationIdentity)
     bypassedPresentation.current = undefined;
   const presentationIdentity = props.synchronizePresentation
@@ -1345,6 +1348,7 @@ function SessionPageContent({
   const [presentation, setPresentation] = useState({
     identity: presentationIdentity,
     ready: !props.synchronizePresentation || welcoming,
+    holdExpired: false,
   });
   if (presentation.identity !== presentationIdentity)
     setPresentation({
@@ -1354,11 +1358,32 @@ function SessionPageContent({
         !props.synchronizePresentation ||
         welcoming ||
         bypassedPresentation.current === presentationIdentity,
+      holdExpired: false,
     });
+  const canPresent = !props.loading && !props.initialPresentationPending;
+  const presentationHold =
+    presentationIdentity &&
+    canPresent &&
+    !props.retainedPresentation &&
+    !presentation.ready &&
+    !presentation.holdExpired
+      ? props.initialPresentationHoldMs
+      : undefined;
+  useEffect(() => {
+    if (!presentationHold) return;
+    const timer = setTimeout(() => {
+      setPresentation((previous) =>
+        previous.identity === presentationIdentity && !previous.ready
+          ? { ...previous, holdExpired: true }
+          : previous,
+      );
+    }, presentationHold);
+    return () => clearTimeout(timer);
+  }, [presentationHold, presentationIdentity]);
   const presentationGuard = useRef({ identity: presentationIdentity, ready: false });
   presentationGuard.current = {
     identity: presentationIdentity,
-    ready: !!props.retainedPresentation || (!props.loading && !props.initialPresentationPending),
+    ready: !!props.retainedPresentation || (canPresent && !presentationHold),
   };
   const finishPresentation = useCallback((identity: string | undefined) => {
     if (presentationGuard.current.identity !== identity || !presentationGuard.current.ready) return;

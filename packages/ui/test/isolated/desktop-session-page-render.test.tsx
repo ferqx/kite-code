@@ -68,7 +68,14 @@ test('a new page presents its first message tree and composer together, includin
   for (const retained of [false, true]) {
     const host = document.getElementById('root')!;
     const root = createRoot(host);
-    const show = (id: string, loading = false, grouping = false, tasks = false, preview = false) =>
+    const show = (
+      id: string,
+      loading = false,
+      grouping = false,
+      tasks = false,
+      preview = false,
+      holdMs?: number,
+    ) =>
       act(async () =>
         root.render(
           <SessionPage
@@ -87,6 +94,7 @@ test('a new page presents its first message tree and composer together, includin
             ]}
             loading={loading}
             initialPresentationPending={grouping}
+            initialPresentationHoldMs={holdMs}
             synchronizePresentation
             retainedPresentation={preview}
             conversationCache={
@@ -155,6 +163,24 @@ test('a new page presents its first message tree and composer together, includin
       expect(pending()).toBe(false);
       expect(host.querySelector('.composer') === currentComposer).toBe(true);
       expect(composer !== null).toBe(true);
+
+      await show('reply-ready', false, false, false, false, 250);
+      expect(pending()).toBe(true);
+      expect(host.textContent).toContain('Body reply-ready');
+      await show('reply-ready');
+      expect(pending()).toBe(false);
+      await show('reply-ready', false, false, false, false, 250);
+      expect(pending()).toBe(false);
+
+      await show('reply-slow', false, false, false, false, 250);
+      expect(pending()).toBe(true);
+      await act(async () => {
+        await Bun.sleep(270);
+      });
+      expect(pending()).toBe(false);
+
+      await show('reply-warm', false, false, false, true, 250);
+      expect(pending()).toBe(false);
       expect(frames.every((frame) => frame.history === frame.footer)).toBe(true);
     } finally {
       observer.disconnect();
@@ -203,6 +229,7 @@ test('enabling history presentation for an already visible Session does not hide
     expect(editor.value).toBe('下一条草稿');
     await show('a', true, false);
     expect(host.querySelector('textarea.prompt-editor')).toBe(editor);
+    await show('b', false, true);
     await show('b', true, true);
     expect(host.querySelector('[data-presentation-pending]')).not.toBeNull();
     expect(host.querySelector('.conversation-footer')?.hasAttribute('inert')).toBe(true);

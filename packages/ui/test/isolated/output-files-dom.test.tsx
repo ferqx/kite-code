@@ -55,17 +55,24 @@ function mount() {
   root = createRoot(host);
   return host;
 }
-test('compact cards keep exact same-name identity for opening, saving and revealing', async () => {
+test('compact rows open from the filename and keep same-name actions on the exact file', async () => {
   mount();
   const one = file('报告.docx', 'one'),
     two = file('报告.docx', 'two');
   const calls: [string, OutputFileSummary][] = [];
+  let finishOpen: (() => void) | undefined;
   let finishReveal: (() => void) | undefined;
   await act(() =>
     root!.render(
       <OutputFiles
         items={[one, two]}
-        onOpen={(f) => calls.push(['open', f])}
+        onOpen={(f) => calls.push(['preview', f])}
+        onOpenInApp={(f) => {
+          calls.push(['openInApp', f]);
+          return new Promise<void>((resolve) => {
+            finishOpen = resolve;
+          });
+        }}
         onSave={(f) => calls.push(['save', f])}
         onReveal={(f) => {
           calls.push(['reveal', f]);
@@ -87,10 +94,24 @@ test('compact cards keep exact same-name identity for opening, saving and reveal
   expect(document.getElementById(cards[1]!.getAttribute('aria-labelledby')!)?.textContent).toBe(
     '报告.docx',
   );
-  await act(() =>
-    cards[1]!.querySelector<HTMLButtonElement>('[aria-label="打开 报告.docx"]')!.click(),
-  );
-  expect(calls).toEqual([['open', two]]);
+  const open = cards[1]!.querySelector<HTMLButtonElement>('[aria-label="打开 报告.docx"]')!;
+  const group = cards[1]!.querySelector('[role="group"][data-slot="button-group"]')!;
+  expect(group.getAttribute('aria-label')).toBe('报告.docx');
+  expect(cards[1]!.querySelectorAll('button')).toHaveLength(3);
+  expect(group.querySelectorAll('button')).toHaveLength(2);
+  const preview = cards[1]!.querySelector<HTMLButtonElement>('[aria-label="预览 报告.docx"]')!;
+  await act(() => preview.querySelector<HTMLElement>('.output-file-name')!.click());
+  await act(() => {
+    open.click();
+    open.click();
+  });
+  expect(open.getAttribute('aria-busy')).toBe('true');
+  expect(calls).toEqual([
+    ['preview', two],
+    ['openInApp', two],
+  ]);
+  await act(async () => finishOpen!());
+  expect(open.hasAttribute('aria-busy')).toBe(false);
   const more = cards[1]!.querySelector<HTMLButtonElement>('[aria-label="报告.docx 的更多操作"]')!;
   const openMenu = () =>
     act(() => {
@@ -99,7 +120,8 @@ test('compact cards keep exact same-name identity for opening, saving and reveal
     });
   await openMenu();
   const menu = document.querySelector('[role="menu"]')!;
-  const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const itemGroup = menu.querySelector('[role="group"]')!;
+  const items = [...itemGroup.querySelectorAll<HTMLElement>('[role="menuitem"]')];
   expect(items.map((item) => item.textContent)).toEqual(['另存为', '在资源管理器中显示']);
   expect(menu.querySelector('[role="separator"]')).toBeNull();
   await act(() => items[0]!.click());
@@ -124,18 +146,37 @@ test('compact cards keep exact same-name identity for opening, saving and reveal
     finishReveal!();
   });
   expect(more.hasAttribute('aria-busy')).toBe(false);
-  expect(calls).toHaveLength(3);
+  expect(calls).toHaveLength(4);
 });
-test('all file formats retain open and fallback type without claiming export', async () => {
+test('file descriptions and icons use the same format, with MIME fallback', async () => {
   mount();
-  const files = ['a.xlsx', 'b.PPTX', 'c.pdf', 'd.txt', 'e.unknown'].map((name) => file(name));
+  const cases = [
+    ['a.xlsx', 'application/msword', 'spreadsheet', 'Excel 工作簿'],
+    ['b.PPTX', 'application/octet-stream', 'presentation', 'PPT 演示文稿'],
+    ['c.ppt', 'application/octet-stream', 'presentation', 'PPT 演示文稿'],
+    ['d.pdf', 'application/octet-stream', 'pdf', 'PDF 文档'],
+    ['e.txt', 'application/octet-stream', 'text', '文本文件'],
+    ['logo.PNG', 'application/octet-stream', 'image', 'PNG 图片'],
+    ['diagram.svg', 'application/octet-stream', 'image', 'SVG 矢量图'],
+    ['README.md', 'text/plain', 'markdown', 'Markdown 文档'],
+    ['configuration.json', 'application/octet-stream', 'code', 'JSON 文件'],
+    ['source.ts', 'application/octet-stream', 'code', '源代码'],
+    ['bundle.zip', 'application/octet-stream', 'archive', 'ZIP 压缩包'],
+    ['recording.mp3', 'application/octet-stream', 'audio', '音频文件'],
+    ['clip.mp4', 'application/octet-stream', 'video', '视频文件'],
+    ['no-extension', ' IMAGE/JPEG ; quality=90 ', 'image', 'JPEG 图片'],
+    ['picture.unknown', 'image/example', 'image', '图片'],
+    ['unrecognized', 'application/octet-stream', 'unknown', '文件'],
+  ] as const;
+  const files = cases.map(([name, mediaType]) => ({ ...file(name), mediaType }));
   await act(() => root!.render(<OutputFiles items={files} onOpen={() => {}} onSave={() => {}} />));
   expect(
-    [...document.querySelectorAll('.output-file-description small')].map(
-      (node) => node.textContent,
-    ),
-  ).toEqual(['Excel 工作簿', '演示文稿', 'PDF 文档', '文本文件', '文件']);
-  expect(document.querySelectorAll('.output-file-open')).toHaveLength(5);
+    [...document.querySelectorAll('.output-file-card')].map((row) => [
+      row.querySelector('.output-file-icon')?.getAttribute('data-file-kind'),
+      row.querySelector('.output-file-type')?.textContent,
+    ]),
+  ).toEqual(cases.map(([, , kind, label]) => [kind, label]));
+  expect(document.querySelectorAll('.output-file-open')).toHaveLength(files.length);
 });
 test('empty file lists stay hidden and references expose the loaded files and their next page', async () => {
   mount();
@@ -255,7 +296,20 @@ test('environment shows count-free headings and file links for populated groups'
 
 test('reference links distinguish document formats and unknown fallback from heading', async () => {
   mount();
-  const cases = ['a.DOCX', 'b.xlsx', 'c.pptx', 'd.pdf', 'e.png', 'f.txt', 'g.unknown'];
+  const cases = [
+    'a.DOCX',
+    'b.xlsx',
+    'c.pptx',
+    'd.pdf',
+    'e.png',
+    'f.txt',
+    'g.unknown',
+    'f.md',
+    'g.ts',
+    'h.zip',
+    'i.mp3',
+    'j.mp4',
+  ];
   const icons: string[] = [];
   for (const name of cases) {
     await act(() =>
@@ -281,6 +335,11 @@ test('reference links distinguish document formats and unknown fallback from hea
     ['application/pdf', 3],
     ['image/png', 4],
     ['text/plain', 5],
+    ['text/markdown', 7],
+    ['application/javascript', 8],
+    ['application/zip', 9],
+    ['audio/mpeg', 10],
+    ['video/mp4', 11],
   ] as const) {
     await act(() =>
       root!.render(

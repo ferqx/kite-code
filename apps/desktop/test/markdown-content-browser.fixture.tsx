@@ -226,7 +226,7 @@ function Fixture() {
                   <MessageContent
                     text={
                       referenceClosed
-                        ? '[D:\\演示项目\\新品 #1 终稿 %23.pptx](<D:/演示项目/新品 #1 终稿 %2523.pptx>) · [旧引用](sandbox:/mnt/data/新品.pptx)'
+                        ? '[D:\\演示项目\\新品 #1 终稿 %23.pptx](<D:/演示项目/新品 #1 终稿 %2523.pptx>) · [旧引用](sandbox:/mnt/data/新品.pptx)\n\n- [门店运营示例](exports/门店运营示例.xlsx)\n- [项目简报示例](/workspace/项目简报示例.docx)\n- [查看调整后的预览](exports/预览.png)'
                         : '已核验成品。'
                     }
                     streaming={!referenceClosed}

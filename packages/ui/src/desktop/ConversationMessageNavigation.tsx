@@ -1,4 +1,5 @@
-import { type KeyboardEvent, memo, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, memo, useLayoutEffect, useRef } from 'react';
+import { ScrollArea } from './components/ui/scroll-area';
 
 export type ConversationMessageMarker = { key: string; preview: string };
 
@@ -62,17 +63,6 @@ export const ConversationMessageNavigation = memo(function ConversationMessageNa
   onJump: (key: string) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
-  const [{ earlier, later }, setOverflow] = useState({ earlier: false, later: false });
-  const updateOverflow = useCallback((list: HTMLElement) => {
-    const available = list.parentElement?.clientHeight ?? 0;
-    // Compare with the whole rail so the paging buttons cannot keep themselves visible.
-    const overflowing = available > 0 && list.scrollHeight > available;
-    const earlier = overflowing && list.scrollTop > 1;
-    const later = overflowing && list.scrollHeight - list.clientHeight - list.scrollTop > 1;
-    setOverflow((previous) =>
-      previous.earlier === earlier && previous.later === later ? previous : { earlier, later },
-    );
-  }, []);
   const activeIndex = markers.findIndex(({ key }) => key === activeKey);
   const markerCount = markers.length;
   useLayoutEffect(() => {
@@ -83,7 +73,6 @@ export const ConversationMessageNavigation = memo(function ConversationMessageNa
       const visibleMarker = list.querySelector(':focus-visible') ?? marker;
       if (visibleMarker instanceof HTMLElement && list.clientHeight > 0)
         revealMarker(list, visibleMarker);
-      updateOverflow(list);
     };
     let previousHeight = list.clientHeight;
     reveal();
@@ -95,29 +84,15 @@ export const ConversationMessageNavigation = memo(function ConversationMessageNa
     });
     observer.observe(list);
     return () => observer.disconnect();
-  }, [activeIndex, markerCount, updateOverflow]);
-  const pageMarkers = (direction: -1 | 1) => {
-    const list = listRef.current;
-    if (!list) return;
-    list.scrollTop += direction * list.clientHeight;
-    updateOverflow(list);
-  };
+  }, [activeIndex, markerCount]);
   return (
     <nav className="conversation-message-navigation" aria-label="会话消息导航">
-      {(earlier || later) && (
-        <button
-          className="conversation-marker-page earlier"
-          type="button"
-          aria-label="查看更早的消息刻度"
-          aria-disabled={!earlier}
-          tabIndex={earlier ? 0 : -1}
-          onClick={earlier ? () => pageMarkers(-1) : undefined}
-        />
-      )}
-      <div
-        ref={listRef}
-        className="conversation-marker-list"
-        onScroll={(event) => updateOverflow(event.currentTarget)}
+      <ScrollArea
+        nativeScrollbars
+        fade="y"
+        className="conversation-marker-scroll-area"
+        viewportRef={listRef}
+        viewportClassName="conversation-marker-list"
       >
         {markers.map(({ key, preview }, index) => {
           const active = index === activeIndex;
@@ -135,17 +110,7 @@ export const ConversationMessageNavigation = memo(function ConversationMessageNa
             />
           );
         })}
-      </div>
-      {(earlier || later) && (
-        <button
-          className="conversation-marker-page later"
-          type="button"
-          aria-label="查看更新的消息刻度"
-          aria-disabled={!later}
-          tabIndex={later ? 0 : -1}
-          onClick={later ? () => pageMarkers(1) : undefined}
-        />
-      )}
+      </ScrollArea>
     </nav>
   );
 });

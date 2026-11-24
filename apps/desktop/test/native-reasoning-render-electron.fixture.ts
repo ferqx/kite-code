@@ -354,6 +354,19 @@ try {
         probe.violations.push(`${kind}:${probe.phase}:premature_final`);
       if (probe.phase === 'settled' && visible.includes('思考中'))
         probe.violations.push(`${kind}:settled:thinking_after_final`);
+      if (kind === 'frame' && probe.phase === 'first-reasoning') {
+        const reveal = conversation.querySelector(
+          '.conversation-trace-turn > .agent-turn-content > .collapsible-motion-reveal',
+        );
+        const inner = reveal?.firstElementChild;
+        if (
+          reveal &&
+          inner &&
+          (reveal.getAnimations().length > 0 ||
+            reveal.getBoundingClientRect().height < inner.scrollHeight - 1)
+        )
+          probe.violations.push(`${kind}:${probe.phase}:turn_process_opening_motion`);
+      }
       const segments = [
         ...conversation.querySelectorAll(
           '.conversation-trace-trigger:not(.conversation-trace-steps *)',
@@ -559,6 +572,12 @@ try {
     'real reasoning first output',
   );
   await until(content, (value) => value.includes('思考中'), 'first reasoning painted');
+  assert.equal(
+    await page
+      .locator('.conversation-trace-turn .agent-turn-summary')
+      .getAttribute('aria-expanded'),
+    'true',
+  );
   await page.waitForTimeout(300);
   assert.ok((await content()).includes('思考中'), 'inline reasoning keeps its own heading');
   await checkBeforeReply('inline-reasoning', 0);
@@ -904,6 +923,10 @@ try {
   assert.equal((await counts()).calls, 3);
   assert.ok((await counts()).toolObserved);
   assert.deepEqual(warm.closedFrames, [], 'completed collapsed trace must not paint tool details');
+  const openElapsed = page.getByRole('button', { name: /^用时 .*收起本轮处理过程$/ });
+  assert.equal(await openElapsed.count(), 1, 'the completed Turn retains its live disclosure');
+  await openElapsed.click();
+  await page.locator('.conversation .conversation-trace').first().waitFor({ state: 'detached' });
   await setPhase('manual-open');
   const elapsed = page.getByRole('button', { name: /^用时 .*展开本轮处理过程$/ });
   assert.equal(await elapsed.count(), 1);
@@ -990,7 +1013,8 @@ try {
     'stage prose keeps its original place',
   );
   await page.getByRole('button', { name: /^用时 .*收起本轮处理过程$/ }).click();
-  await until(content, (value) => !value.includes('PUBLIC_STAGE_PROSE'), 'elapsed process closes');
+  await page.locator('.conversation .conversation-trace').first().waitFor({ state: 'detached' });
+  assert.ok((await content()).includes('PUBLIC_STAGE_PROSE'), 'stage prose survives process close');
 
   await setPhase('history');
   await select('Other Stream', 'other');

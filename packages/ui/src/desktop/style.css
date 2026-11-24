@@ -834,7 +834,6 @@ body {
     --navigation-top: 12px;
     --navigation-bottom: 12px;
     --marker-height: 2px;
-    --marker-page-height: 14px;
     --marker-area-height: max(0px, calc(100% - var(--navigation-top) - var(--navigation-bottom)));
     position: absolute;
     z-index: 1;
@@ -845,12 +844,17 @@ body {
     display: flex;
     flex-direction: column;
     block-size: max-content;
-    max-block-size: var(--marker-area-height);
+    max-block-size: calc(var(--marker-area-height) / 2);
   }
-  .conversation-marker-list {
-    position: relative;
+  .conversation-marker-scroll-area {
+    display: flex;
+    flex-direction: column;
     min-block-size: 0;
-    overflow: auto;
+  }
+  .conversation-message-navigation .conversation-marker-list {
+    position: relative;
+    block-size: auto;
+    min-block-size: 0;
     overscroll-behavior-y: contain;
     scrollbar-width: none;
   }
@@ -879,28 +883,6 @@ body {
   }
   .conversation-marker-list button:is(:hover, :focus-visible, [aria-current])::before {
     opacity: 0.62;
-  }
-  .conversation-message-navigation .conversation-marker-page {
-    flex: 0 1 var(--marker-page-height);
-    min-block-size: 0;
-    height: var(--marker-page-height);
-    overflow: clip;
-  }
-  .conversation-marker-page::before {
-    content: "";
-    width: 5px;
-    height: 5px;
-    border-block-start: 1px solid currentColor;
-    border-inline-start: 1px solid currentColor;
-    opacity: 0.6;
-    transform: translateY(1px) rotate(45deg);
-  }
-  .conversation-marker-page.later::before {
-    transform: translateY(-1px) rotate(225deg);
-  }
-  .conversation-marker-page[aria-disabled="true"] {
-    opacity: 0.25;
-    cursor: default;
   }
   .conversation-message-navigation button:focus-visible {
     outline: 1px solid currentColor;
@@ -1017,6 +999,10 @@ body {
     > .message-group
     > .message.assistant[data-final-reply="false"]:has(> .message-meta) {
     margin-bottom: calc(var(--icon-button-size-sm) + var(--message-meta-offset) + 8px);
+  }
+  .message-meta[data-default-visible] {
+    opacity: 1;
+    transition: none;
   }
   .message:hover .message-meta,
   .message:focus-within .message-meta {
@@ -3410,26 +3396,23 @@ body {
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
 }
-.kite-client .typeset-chat :is(a[href], .absolute-file-link) {
+.kite-client .typeset-chat a[href] {
   text-decoration-line: underline;
   text-decoration-color: color-mix(in srgb, currentColor 60%, transparent);
 }
-.kite-client .typeset-chat .absolute-file-link:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
-}
-.kite-client .typeset-chat :is(a, .file-link):is(:hover, :focus-visible) {
+.kite-client .typeset-chat a[href]:is(:hover, :focus-visible) {
   text-decoration-line: underline;
   text-decoration-color: currentColor;
 }
-.kite-client .typeset-chat .file-reference {
+.kite-client .typeset-chat :is(a, button).file-link {
   color: var(--info-foreground);
   text-decoration-line: none;
   text-decoration-style: dashed;
   text-decoration-thickness: 0.65px;
   overflow-wrap: anywhere;
 }
-.kite-client .typeset-chat .file-reference:is(:hover, :focus-visible) {
+.kite-client .typeset-chat :is(a, button).file-link:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
   text-decoration-color: color-mix(in srgb, currentColor 70%, transparent);
 }
 .kite-client .typeset-chat .file-reference-icon {
@@ -3443,7 +3426,7 @@ body {
   font-size: 13px;
   text-align: center;
 }
-.kite-client .typeset-chat .file-reference:focus-visible {
+.kite-client .typeset-chat :is(a, button).file-link:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
@@ -4114,6 +4097,14 @@ body {
   margin: var(--conversation-block-gap) 0 32px;
   transition: margin-top var(--collapsible-collapse-duration) var(--collapsible-collapse-easing);
 }
+.kite-client .agent-turn-final .message.assistant:has(> .message-meta) {
+  margin-block-end: 8px;
+}
+.kite-client .agent-turn-final .message.assistant > .message-meta {
+  position: relative;
+  top: auto;
+  margin-block-start: var(--conversation-block-gap);
+}
 .kite-client .conversation-trace-turn > .agent-turn-summary-row,
 .kite-client .conversation-trace-turn > .agent-turn-summary-static {
   box-shadow: none;
@@ -4568,7 +4559,7 @@ body {
   > .collapsible-motion-content[data-state="open"]
   > .collapsible-motion-reveal,
 .kite-client
-  .agent-turn-process[data-live="true"]
+  .agent-turn-process[data-instant-open="true"]
   > .collapsible-motion-content[data-state="open"]
   > .collapsible-motion-reveal {
   transition: none;
@@ -6941,6 +6932,42 @@ body {
   outline-offset: -1px;
 }
 
+.button-group {
+  display: inline-flex;
+  align-items: stretch;
+
+  > :focus-visible {
+    position: relative;
+    z-index: 1;
+  }
+
+  &[data-orientation="horizontal"] {
+    > :not(:first-child) {
+      border-inline-start-width: 0;
+      border-start-start-radius: 0;
+      border-end-start-radius: 0;
+    }
+    > :not(:last-child) {
+      border-start-end-radius: 0;
+      border-end-end-radius: 0;
+    }
+  }
+
+  &[data-orientation="vertical"] {
+    flex-direction: column;
+
+    > :not(:first-child) {
+      border-block-start-width: 0;
+      border-start-start-radius: 0;
+      border-start-end-radius: 0;
+    }
+    > :not(:last-child) {
+      border-end-start-radius: 0;
+      border-end-end-radius: 0;
+    }
+  }
+}
+
 /* Shared selection entry for page content and body-portalled popovers. */
 .pill-select-trigger,
 .kite-client .pill-select-trigger {
@@ -8504,63 +8531,126 @@ body {
   visibility: hidden;
 }
 .turn-output-files {
-  margin-block: 12px;
+  margin-block: var(--conversation-block-gap);
 }
-.turn-output-files ul {
+.kite-client .agent-turn-final .message.assistant:has(> .turn-output-files) .typeset-chat {
+  /* Space from the last baseline or the outer edge of the final block. */
+  text-box: trim-end text alphabetic;
+
+  > :last-child {
+    margin-block-end: 0;
+  }
+}
+.kite-client .agent-turn-final .message.assistant > .turn-output-files {
+  margin-block: calc(var(--conversation-block-gap) * 2) 0;
+}
+.kite-client .turn-output-files > ul {
   list-style: none;
   padding: 0;
   margin: 0;
-  display: grid;
-  gap: 8px;
-}
-.kite-client .agent-turn-final .message.assistant:has(> .turn-output-files) {
-  margin-bottom: 8px;
-}
-.kite-client .agent-turn-final .message.assistant:has(> .turn-output-files) > .message-meta {
-  position: relative;
-  top: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--button-radius);
+  background: var(--card);
+  overflow: clip;
 }
 .output-file-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-width: 0;
-  padding: 12px;
-  margin: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
+  padding: 6px 10px;
 }
-.output-file-icon {
-  display: grid;
-  place-items: center;
-  flex: 0 0 36px;
-  height: 40px;
-  color: var(--muted-foreground);
-  border-radius: 8px;
-  background: var(--muted);
+.output-file-card + .output-file-card {
+  border-block-start: 1px solid var(--border);
 }
-.output-file-icon svg {
-  width: 22px;
-  height: 22px;
+.output-file-card:hover:not(:has(> .output-file-actions:hover)) {
+  background: var(--control-hover);
 }
-.output-file-description {
-  display: grid;
-  gap: 2px;
+.kite-client .output-file-card > .output-file-preview {
+  --control-pressed: transparent;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex: 1;
   min-width: 0;
+  min-height: 36px;
+  height: auto;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  text-align: start;
 }
-.output-file-name {
+.output-file-actions {
+  --button-radius: 10px;
+  flex: none;
+  border-radius: var(--button-radius);
+  background: color-mix(in srgb, var(--foreground) 3%, var(--card));
+}
+.kite-client .output-file-actions > .button {
+  --control-hover: transparent;
+  --control-pressed: transparent;
+  border-color: color-mix(in srgb, var(--foreground) 15%, transparent);
+  background: transparent;
+  font-weight: 500;
+  transition: none;
+}
+.kite-client .output-file-actions:hover > .button {
+  --control-hover: inherit;
+
+  &:hover {
+    --control-pressed: var(--control-hover);
+  }
+}
+.kite-client .output-file-open[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.7;
+}
+.output-file-icon {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.output-file-icon[data-file-kind="document"] {
+  color: light-dark(#185abd, #85b5ff);
+}
+.output-file-icon[data-file-kind="spreadsheet"] {
+  color: light-dark(#147348, #63d59a);
+}
+.output-file-icon[data-file-kind="presentation"] {
+  color: light-dark(#b43f26, #ff9b75);
+}
+.output-file-icon[data-file-kind="pdf"] {
+  color: light-dark(#b7252c, #ff838a);
+}
+.output-file-icon[data-file-kind="image"] {
+  color: light-dark(#146b72, #78cdd3);
+}
+.output-file-icon[data-file-kind="markdown"],
+.output-file-icon[data-file-kind="code"] {
+  color: light-dark(#5947a4, #b9adfa);
+}
+.output-file-icon[data-file-kind="archive"] {
+  color: light-dark(#8a570e, #e8b667);
+}
+.output-file-icon[data-file-kind="audio"],
+.output-file-icon[data-file-kind="video"] {
+  color: light-dark(#913b69, #ed9ccb);
+}
+.output-file-description {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.output-file-type {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
 }
-.output-file-description small {
+.output-file-card .output-file-description small {
+  display: block;
   color: var(--muted-foreground);
-}
-.output-file-open {
-  flex-shrink: 0;
 }
 
 .kite-client .environment-information .output-reference-more {
@@ -8589,19 +8679,30 @@ body {
   height: 16px;
   flex: none;
 }
+.output-file-name,
 .output-reference-name {
   display: flex;
-  flex: 1;
   min-width: 0;
 }
+.output-file-name {
+  max-width: 100%;
+  white-space: nowrap;
+}
+.output-reference-name {
+  flex: 1;
+}
+.output-file-preview .output-file-name > span,
 .output-reference-link .output-reference-name > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.output-reference-name .output-reference-extension {
+.output-file-extension {
   flex: none;
   max-width: 45%;
+}
+.output-file-name > .output-file-extension {
+  max-width: min(100%, max(45%, 7ch));
 }
 .output-reference-source {
   max-width: 50%;

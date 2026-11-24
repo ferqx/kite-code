@@ -673,10 +673,10 @@ test('only replies from the first saved snapshot can wait for outputs', async ()
   }
 });
 
-test('final reply metadata stays in flow after output files', () => {
+test('final reply metadata stays in flow with or without output files', () => {
   const css = readFileSync(new URL('../../src/desktop/style.css', import.meta.url), 'utf8');
   const rule = css.match(
-    /\.kite-client \.agent-turn-final \.message\.assistant:has\(> \.turn-output-files\) > \.message-meta \{[^}]*\}/,
+    /\.kite-client \.agent-turn-final \.message\.assistant > \.message-meta \{[^}]*\}/,
   )?.[0];
   expect(rule).toBeDefined();
   const dom = new JSDOM(
@@ -691,7 +691,7 @@ test('final reply metadata stays in flow after output files', () => {
         .position,
     ).toBe('absolute');
     dom.window.document.querySelector('.turn-output-files')!.remove();
-    expect(dom.window.getComputedStyle(footer).position).toBe('absolute');
+    expect(dom.window.getComputedStyle(footer).position).toBe('relative');
   } finally {
     dom.window.close();
   }

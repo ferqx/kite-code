@@ -67,7 +67,7 @@ import { NativeInputQueue } from './native-input-queue';
 import { NativeProcessOwner } from './native-processes';
 import { NativeOfficeEditor } from './office-editor';
 import { NativeOutputDisplayVersions } from './output-display-versions';
-import { createOutputRevealPath, saveOutputFile } from './output-files';
+import { canOpenOutputInApp, createOutputCopyPath, saveOutputFile } from './output-files';
 import { NativeOutputSources } from './output-sources';
 import type { StoredPendingAttachment } from './pending-attachments';
 import { NativePermissionGrants } from './permission-grants';
@@ -2217,6 +2217,7 @@ export class NativeCaller {
       case 'outputs.preview.control':
       case 'outputs.save':
       case 'outputs.reveal':
+      case 'outputs.openInApp':
       case 'localPreview.open':
       case 'localPreview.release':
       case 'localPreview.check':
@@ -4359,7 +4360,7 @@ export class NativeCaller {
     request: { generation: number; target: OutputFileTarget },
     pick: (name: string) => Promise<string | undefined>,
     checkSender: () => void,
-    onSaved?: (path: string) => void,
+    onSaved?: (path: string) => void | Promise<void>,
   ) {
     const resolved = await this.admitOutputTarget(request.generation, request.target);
     const access = this.outputTargetCheck(request.generation, request.target);
@@ -4374,13 +4375,18 @@ export class NativeCaller {
     await saveOutputFile(this.client, request.target, destination, current);
     if (onSaved) {
       current();
-      onSaved(destination);
+      await onSaved(destination);
     }
     return { kind: 'outputs.saved' as const, cancelled: false };
   }
-  async revealOutput(
+  async operateOutputCopy(
     request: { generation: number; target: OutputFileTarget },
-    host: { downloadsDirectory: () => string; showItemInFolder: (path: string) => void },
+    host: {
+      downloadsDirectory: () => string;
+      showItemInFolder: (path: string) => void;
+      openPath: (path: string) => Promise<string>;
+    },
+    action: 'reveal' | 'openInApp',
     checkSender: () => void,
   ) {
     let destination: string | undefined;
@@ -4388,11 +4394,20 @@ export class NativeCaller {
       await this.saveOutput(
         request,
         async (name) => {
-          destination = await createOutputRevealPath(host.downloadsDirectory(), name);
+          if (action === 'openInApp' && !canOpenOutputInApp(name)) {
+            throw Error('output_open_in_app_unsupported');
+          }
+          destination = await createOutputCopyPath(host.downloadsDirectory(), name);
           return destination;
         },
         checkSender,
-        (path) => host.showItemInFolder(path),
+        async (path) => {
+          if (action === 'reveal') {
+            host.showItemInFolder(path);
+          } else if (await host.openPath(path)) {
+            throw Error('output_open_in_app_failed');
+          }
+        },
       );
     } catch (error) {
       if (destination) {

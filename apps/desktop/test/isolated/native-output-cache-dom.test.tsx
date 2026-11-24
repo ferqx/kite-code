@@ -198,7 +198,7 @@ test('shared output views restore unchanged turns immediately while invalidating
     expect(cards()).toHaveLength(3);
     await act(async () =>
       document
-        .querySelector<HTMLButtonElement>('[data-turn] [aria-label="打开 user-a-child-old.txt"]')!
+        .querySelector<HTMLButtonElement>('[data-turn] [aria-label="预览 user-a-child-old.txt"]')!
         .click(),
     );
     expect(latest!.request).toBeUndefined();
@@ -212,7 +212,7 @@ test('shared output views restore unchanged turns immediately while invalidating
     expect(calls).toHaveLength(beforeReturn);
     await act(async () =>
       document
-        .querySelector<HTMLButtonElement>('[data-turn] [aria-label="打开 user-a-child-old.txt"]')!
+        .querySelector<HTMLButtonElement>('[data-turn] [aria-label="预览 user-a-child-old.txt"]')!
         .click(),
     );
     expect(latest!.request?.target).toMatchObject({ sessionId: 'a-child', fileId: 'file' });

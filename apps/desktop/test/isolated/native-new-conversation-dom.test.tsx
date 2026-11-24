@@ -4420,6 +4420,7 @@ test('the first reply starts timing with its Run and keeps its place through dis
     await f.chooseModel();
     await f.click('发送首条消息');
     const user = f.host.querySelector('.message.user')!;
+    const footer = user.querySelector('.message-meta')!;
     const status = f.host.querySelector('.conversation-turn-notice')!;
     const expectStatus = (label: string) => {
       expect(f.host.querySelector('.conversation-turn-notice')).toBe(status);
@@ -4431,11 +4432,14 @@ test('the first reply starts timing with its Run and keeps its place through dis
       ).not.toBe(0);
     };
     expectStatus('正在创建会话…');
+    expect(footer.textContent).toBe('');
+    expect(footer.hasAttribute('data-default-visible')).toBe(false);
     f.holdSelection();
     const sent = await f.resolve('accepted');
     expectStatus('正在准备回复…');
     await f.releaseSelection();
     expectStatus('正在准备回复…');
+    expect(footer.textContent).toBe('');
 
     const createdAt = Date.now() - 3_000;
     const run: Run = {
@@ -4459,8 +4463,12 @@ test('the first reply starts timing with its Run and keeps its place through dis
       status: 'complete',
       originCommandId: run.originCommandId,
       content: sent.intent.content,
+      createdAt,
     };
     await f.publishMessages([input], [run]);
+    expect(user.querySelector('.message-meta')).toBe(footer);
+    expect(footer.querySelector('time')?.dateTime).toBe(new Date(createdAt).toISOString());
+    expect(footer.hasAttribute('data-default-visible')).toBe(false);
     const progress = f.host.querySelector('.agent-turn-running');
     const turn = progress?.closest('.agent-turn');
     expect(progress?.textContent).toMatch(/^进行中 \d+ 秒$/);

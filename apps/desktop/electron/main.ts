@@ -1032,9 +1032,10 @@ void app
           throw Error('native_draining');
       },
       openEditorUrl: (url) => shell.openExternal(url),
-      outputReveal: {
+      outputFiles: {
         downloadsDirectory: () => app.getPath('downloads'),
         showItemInFolder: (path) => shell.showItemInFolder(path),
+        openPath: (path) => shell.openPath(path),
       },
       ...(process.platform === 'win32'
         ? {

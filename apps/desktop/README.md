@@ -28,6 +28,8 @@
 
 ## 办公输出文件
 
+Windows 和 macOS 的会话文件卡共用 Main 的「打开」请求，由系统默认应用接收副本。它沿用「在资源管理器中显示」的独立副本路径，重新核对当前连接、窗口、产物来源和文件身份，完成流式字节校验后将副本交给系统默认应用。仅办公、常见文档和媒体等数据格式可直接从该入口交给系统。失败时清理本次副本，当前会话通过 Toast 反馈。点击文件名仍在 Kite 预览原产物。Windows x64 的隔离 Electron 验证中，一份字节核对一致的合成 PPT 副本由系统默认 PowerPoint 实际打开。
+
 PDF 分页预览收到 `pdf_font_invalid` 时在内容区提示换用嵌入可用字体的版本。已收集文件仍可按原字节另存。
 
 文件卡和「输出」列表的更多菜单提供「在资源管理器中显示」。Main 使用原产物引用重新准入，沿用另存的流式校验，再从系统下载目录的 `Kite Outputs` 中选中该次创建的独立副本。每次写入独立子目录，保留原产物和之前的副本。失败时清理本次副本，通过现有 Toast 反馈。 [NativeCaller](electron/native-caller.ts) · [文件复制](electron/output-files.ts) · [定位回归](test/native-caller.test.ts)
@@ -463,7 +465,7 @@ Agent输出图片与消息本地图片链接在[右侧预览](electron/output-pr
 
 [模型重连投影](src/native-model-connections.ts)消费同 Store／Session／Run 的公开 Execution `modelRetry` 及有限可重试失败码，在[原轮次投影](src/native-transcript.ts)中生成 `model_connection` 系统过程行。原前驱链聚合最多5次重连，次数显示不包含首次请求；位置保持在首次失败尝试的部分正文之后、重试输出和后续工作之前；收到输出即结算连接状态，不等待整轮完成。取消与停止中状态分别表达，已经收到输出的连接成功事实不被后续取消改写。它只负责展示，不新增重试、写入、工具定义或协议版本；恢复派发仍由后端原合同控制。后端以`model_reconnect_exhausted`确认耗尽后，原行结算为“重连失败”，通过[共享重连行](../../packages/ui/src/desktop/ModelConnection.tsx)展开有限分类映射的中文原因和建议，移除同Turn外重复的通用失败提示；正常重连、成功和取消不提供错误详情。当前 View 未包含的旧尝试不由正文或耗时猜补。[原轮次 DOM 回归](test/isolated/native-transcript-dom.test.tsx)覆盖作用域、因果位置、重试接管、折叠、恢复、停止及冷读。
 
-轮次摘要沿[共享 Conversation](../../packages/ui/src/desktop/Conversation.tsx)使用中性进度和耗时。已有处理过程时，可通过进行中的进度或结束后的「用时」开合。打开会话时默认展开当前进行中的过程，结束时沿同一阅读状态保留开合。结束后显示已核实用时，无可靠时间时显示「用时未知」。真实失败和重连原因可在过程内阅读。
+轮次摘要沿[共享 Conversation](../../packages/ui/src/desktop/Conversation.tsx)使用中性进度和耗时。已有处理过程时，可通过进行中的进度或结束后的「用时」开合。每轮开始执行后，过程首次可显示时默认展开，无展开动画。结算时沿同一阅读状态保留开合。结束后显示已核实用时，无可靠时间时显示「用时未知」。真实失败和重连原因可在过程内阅读。
 
 普通客户端的[异常提示](../../packages/ui/src/desktop/TurnFailure.tsx)使用公共 Alert，以中性信息图标、圆角细边框和灰色正文显示详细原因与检查建议。Native 在原因未知时说明记录不足，已知项目说明读取失败时保留准确说明。模型服务明确拒绝普通请求体过大时提示请求大小及可用操作，不猜测为图片错误或自动重发原请求。主会话按原轮次顺序保留异常提示，思维链维持用户的展开选择。原输入拒绝尚无 Run 时继续保留未启动事实。原失败码及恢复诊断限于隔离诊断制品，重发仍由用户操作。
 
@@ -722,6 +724,8 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，无
 2026-10-20 Windows x64／Bun1.4.3，`5dba8a6b` 加本次配色改动：上述两个主题整文件8项／60断言、Desktop typecheck、定向Biome与文档检查通过。Chrome155以隔离的原 Native 会话夹具和实际 Vite／Tailwind 编译样式，核深浅主题×实色／Mica／Vibrancy样式分支×1280／500px共12种组合，主体、标题与输入框色值正确、主体前景对比度保持，宽窗菜单与设置的有效底色正确、透明分支的导航和根承载层保持透明，无页面异常或横向溢出。原 macOS 整窗口夹具的色值断言已同步；本轮浏览器检查不代替实际系统材质合成或完整安装版窗口资格。
 
 ## 原消息复制与标题栏缩放
+
+冷开已结束的会话时，[Native](src/native.tsx)仅对最新一条待核实的普通最终回复请求首屏等待。正文不超过 64 KiB 且原读取准入已具备时，[SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)沿现有加载指示最多等待 250 ms，原正文读取器保持挂载并按同一身份读取。完整正文和复制资格就绪即展示历史及输入区，超时先展示已有历史。缓存回切和已展示页面保持当前阅读。
 
 Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。Windows／Linux 的沉浸式窗口顶栏单独占32px，内容区从 y=32px 开始；Mica 会话面板另按下文圆角留白内缩。macOS 将原生窗口按钮与48px业务 header 整合，内容区从 y=0 开始，不再额外保留32px空行。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:17}`，与业务 header 垂直居中。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
 
@@ -1377,7 +1381,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效果记录2162帧：三组普通动画各15次，仅新增文字处出现0.25到1之间的透明度；减少动态效果为0次。稳定块正文DOM变更为0，上翻后的连续追加与缓存返回保持400px位置，回到底部后完成仍跟随，正文范围无裁剪、页面无横向溢出或脚本错误。逐阶段截图核正文、输入草稿、处理状态及完成交接，产物在`.cache/streaming-render-J6e67q/`。首轮runner用原Markdown源码等待展示文字而超时，失败帧保留在`.cache/streaming-render-KQ4ro6/`；修正展示文本等待后通过。390px试探出现原有布局裁剪，核[Main](electron/main.ts)的800px下限与原内容面板最小宽度后，最终按实际桌面尺寸验收，未改窗口布局。Windows窗口观察工具因无法核实浏览器URL停止，不将该次观察计为整窗口验收；本轮证据为隔离生产renderer及真实浏览器，未重验安装版Electron、真实Provider、系统断网或其他平台。保留既有嵌套`@keyframes`编译提示。
 
-[消息适配](src/native-presentation.ts)将公开 `Message.createdAt` 交给 UI 的 `createdAtMs`，Agent 邮件和结果的专用展示分支也保留已提供的时间，缺失时不补造；旧输入的真实业务副本接管原行时，保留原输入的记录时间、独立同文与原业务身份。普通刷新、完整正文读取和重开不生成客户端替代时间；尚未保存或历史缺失时保持未知。共享 Conversation 仅在原消息边界显示信息栏，Turn 过程内的 Agent 正文和普通邮件不渲染复制／时间及其留白，用户引导、过程外最终回复与独立结果的原边界保持；该显示选择不删除宿主时间事实。[时间投影回归](test/native-message-time.test.ts)核字段与接管，具体格式与布局由 [UI owner](../../packages/ui/README.md)和[桌面手册](../../docs/handbook/clients/desktop/README.md)负责。
+[消息适配](src/native-presentation.ts)将公开 `Message.createdAt` 交给 UI 的 `createdAtMs`，Agent 邮件和结果的专用展示分支也保留已提供的时间，缺失时不补造；旧输入的真实业务副本接管原行时，保留原输入的记录时间、独立同文与原业务身份。普通刷新、完整正文读取和重开不生成客户端替代时间。首发、已有会话及引导共用原投递占位，在已保存消息接管前隐藏时间文本，保留信息栏的布局空间；历史记录缺少来源时显示未知。共享 Conversation 仅在原消息边界显示信息栏，Turn 过程内的 Agent 正文和普通邮件不渲染复制／时间及其留白，用户引导、过程外最终回复与独立结果的原边界保持；该显示选择不删除宿主时间事实。[时间投影回归](test/native-message-time.test.ts)核字段与接管，具体格式与布局由 [UI owner](../../packages/ui/README.md)和[桌面手册](../../docs/handbook/clients/desktop/README.md)负责。
 
 2026-10-23，Windows x64／Bun1.4.3：时间投影2项通过（含原输入时间未知时不借用较晚业务时间），原[会话消息 DOM](test/isolated/native-transcript-dom.test.tsx)整文件9项／143断言通过；隔离 Chrome 的输入接管、流式、重开、日期与阅读位置证据见 [UI owner](../../packages/ui/README.md)。本次新增 Service／Client 的时间字段，开发运行需完整重启客户端以加载 Main 与配套 Service 的新协议资产；不以 renderer HMR 代替主进程更新，完整安装包未在本轮重验。
 

@@ -207,7 +207,7 @@ test('parent and child reference lists preserve source identity through late res
     ).toBe(true);
     const card = first().querySelector('.output-file-card')!;
     await act(async () => {
-      card.querySelector<HTMLButtonElement>('[aria-label="打开 同名.xlsx"]')!.click();
+      card.querySelector<HTMLButtonElement>('[aria-label="预览 同名.xlsx"]')!.click();
     });
     expect(latest!.request?.target).toEqual({
       storeId: 'store',

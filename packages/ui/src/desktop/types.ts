@@ -42,6 +42,8 @@ export interface Message {
   readonly copyText?: string | null;
   /** Client-local delivery state used before the runtime projection owns the message. */
   readonly delivery?: 'sending' | 'failed' | 'unknown';
+  /** Local input echo that has not been replaced by its saved message yet. */
+  readonly pendingSave?: boolean;
   readonly systemKind?:
     | 'compaction'
     | 'ask'

@@ -252,6 +252,26 @@ export function useNativeOutputFiles(input: {
         value: { target: target(file), title: file.name, requestId: ++sequence.current },
       });
     },
+    onOpenInApp: async (file: OutputFileSummary) => {
+      if (currentKey.current !== key || !cache.valid(rootKey)) return;
+      try {
+        await input.bridge?.request({
+          method: 'outputs.openInApp',
+          generation: input.generation,
+          target: target(file),
+        });
+      } catch (error) {
+        if (currentKey.current !== key || !cache.valid(rootKey)) return;
+        const code = error instanceof Error ? error.message : undefined;
+        input.onError?.(
+          code === 'output_open_in_app_unsupported'
+            ? '此格式无法从 Kite 直接交给桌面应用打开，可使用「另存为」'
+            : code === 'output_open_in_app_failed'
+              ? '桌面应用未能打开文件，请检查系统默认应用'
+              : '无法在桌面应用中打开文件，请重试',
+        );
+      }
+    },
     onSave: (file: OutputFileSummary) => {
       if (currentKey.current !== key || !cache.valid(rootKey)) return;
       void input.bridge
@@ -701,6 +721,7 @@ function OutputFileReader(input: OutputReaderInput) {
       <OutputFiles
         items={items}
         onOpen={input.actions.onOpen}
+        onOpenInApp={input.actions.onOpenInApp}
         onSave={input.actions.onSave}
         onReveal={input.actions.onReveal}
       />

@@ -20,7 +20,7 @@ function truncateFilenamePart(part: string, maxBytes: number) {
   return bytes.toString('utf8', 0, end);
 }
 
-function outputRevealName(name: string) {
+function outputCopyName(name: string) {
   let cleaned = Array.from(name, (character) =>
     character.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(character) ? '_' : character,
   )
@@ -43,13 +43,59 @@ function outputRevealName(name: string) {
   return cleaned || 'output';
 }
 
-/** Reserve a private destination so reveals cannot replace a user's previous copy. */
-export async function createOutputRevealPath(downloadsDirectory: string, name: string) {
+const desktopDocumentExtensions = new Set([
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
+  '.odt',
+  '.ods',
+  '.odp',
+  '.rtf',
+  '.pdf',
+  '.txt',
+  '.md',
+  '.csv',
+  '.tsv',
+  '.json',
+  '.xml',
+  '.yaml',
+  '.yml',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.tif',
+  '.tiff',
+  '.avif',
+  '.heic',
+  '.mp3',
+  '.wav',
+  '.m4a',
+  '.flac',
+  '.ogg',
+  '.mp4',
+  '.mov',
+  '.webm',
+  '.mkv',
+  '.zip',
+]);
+
+export function canOpenOutputInApp(name: string) {
+  return desktopDocumentExtensions.has(extname(outputCopyName(name)).toLowerCase());
+}
+
+/** Reserve an independent destination for the new desktop copy. */
+export async function createOutputCopyPath(downloadsDirectory: string, name: string) {
   await mkdir(downloadsDirectory, { recursive: true });
   const root = join(await realpath(downloadsDirectory), 'Kite Outputs');
   await mkdir(root, { recursive: true });
-  if (!(await lstat(root)).isDirectory()) throw Error('output_reveal_directory_invalid');
-  return join(await mkdtemp(join(root, 'file-')), outputRevealName(name));
+  if (!(await lstat(root)).isDirectory()) throw Error('output_copy_directory_invalid');
+  return join(await mkdtemp(join(root, 'file-')), outputCopyName(name));
 }
 
 /** A destination is host-selected, never supplied by the renderer. EOF + integrity precede rename. */

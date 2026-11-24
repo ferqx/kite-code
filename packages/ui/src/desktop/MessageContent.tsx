@@ -2,7 +2,6 @@ import {
   Alert02Icon,
   AlertCircleIcon,
   BulbIcon,
-  File01Icon,
   InformationCircleIcon,
   Notification01Icon,
 } from '@hugeicons/core-free-icons';
@@ -27,11 +26,13 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { useConversationReadActive } from '../conversation-activity';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
+import { FileTypeIcon } from './FileTypeIcon';
 import { incrementalMarkdown, incrementalMarkdownComponents } from './incremental-markdown';
 import { MarkdownCodeBlock } from './MarkdownCodeBlock';
 import { desktopMarkdownSemantics, markdownFileLineReference } from './markdown-extensions';
 import { desktopKatexOptions, wrapMarkdownMath } from './markdown-math';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
+import { outputFileFormat } from './output-file-format';
 
 import { decorateWebSearchAnchors, type WebSearchAnchor } from './web-search-citations';
 
@@ -249,6 +250,7 @@ function MarkdownFileLink({
       aria-disabled={!readActive || !openFile || undefined}
       onClick={activate}
     >
+      <FileTypeIcon kind={outputFileFormat(path).kind} className="file-reference-icon" />
       {children}
     </button>
   );
@@ -289,7 +291,7 @@ function MarkdownReference({
             }
           }}
         >
-          <HugeiconsIcon icon={File01Icon} className="file-reference-icon" aria-hidden="true" />
+          <FileTypeIcon kind={outputFileFormat(path).kind} className="file-reference-icon" />
           {children}
           {`（第 ${line} 行）`}
         </a>

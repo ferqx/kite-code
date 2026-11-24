@@ -27,7 +27,7 @@ import {
   presentableRun,
 } from './tool-messages-bridge';
 
-export function nativeInputTurnId(
+function nativeInputTurnId(
   commandId: string,
   scope: { storeId: string; sessionId: string; targetRunId?: string },
   selection: NativeSelection | undefined,
@@ -62,6 +62,7 @@ export function nativePendingInputMessage(
     settled: phase === 'accepted',
     copyText: null,
     delivery: phase === 'accepted' ? undefined : phase,
+    pendingSave: true,
   };
 }
 

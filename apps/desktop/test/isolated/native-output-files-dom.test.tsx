@@ -73,6 +73,7 @@ test('file references show only files across reads, pagination, and scope change
         return { kind: 'outputs.sources', scope: request.scope, sources: [] };
       if (request.method === 'outputs.save') throw Error('output_save_failed');
       if (request.method === 'outputs.reveal') throw Error('output_reveal_failed');
+      if (request.method === 'outputs.openInApp') throw Error('output_open_in_app_failed');
       if (request.method === 'outputs.query') {
         if (queryPage) return { kind: 'outputs.page', page: queryPage(request) };
         if (hold && request.scope.sessionId === 'old')
@@ -145,6 +146,29 @@ test('file references show only files across reads, pagination, and scope change
     )!;
     await act(() => link.click());
     expect(document.querySelector('[data-testid="opened-file"]')?.textContent).toBe('file-0');
+    const preview = document.querySelector<HTMLButtonElement>(
+      '.output-file-card [aria-label="预览 session-report-1.docx"]',
+    )!;
+    await act(() => preview.click());
+    expect(document.querySelector('[data-testid="opened-file"]')?.textContent).toBe('file-1');
+    const openInApp = document.querySelector<HTMLButtonElement>(
+      '.output-file-card [aria-label="打开 session-report-0.docx"]',
+    )!;
+    await act(async () => openInApp.click());
+    expect(calls.at(-1)).toEqual({
+      method: 'outputs.openInApp',
+      generation: 1,
+      target: {
+        storeId: 'store',
+        sessionId: 'session',
+        fileId: 'file-0',
+        locator: file(0).locator,
+      },
+    });
+    expect(document.querySelector('.native-toast-card')?.textContent).toContain('检查系统默认应用');
+    expect(document.querySelector('[data-testid="opened-file"]')?.textContent).toBe('file-1');
+    await act(() => document.querySelector<HTMLButtonElement>('.native-toast-close')!.click());
+    await act(() => link.click());
     const moreLabel = '[aria-label="session-report-0.docx 的更多操作"]';
     const openFileActions = (moreAction: HTMLButtonElement) =>
       act(() => {
@@ -282,10 +306,10 @@ test('file references show only files across reads, pagination, and scope change
     expect(output.querySelectorAll('li')).toHaveLength(1);
     expect(output.textContent).toContain('替换后的文件.xlsx');
     expect(output.textContent).not.toContain('report-199');
-    const newOpen = output.querySelector<HTMLButtonElement>(
-      '[aria-label="打开 替换后的文件.xlsx"]',
+    const newPreview = output.querySelector<HTMLButtonElement>(
+      '[aria-label="预览 替换后的文件.xlsx"]',
     )!;
-    await act(() => newOpen.click());
+    await act(() => newPreview.click());
     expect(document.querySelector('[data-testid="opened-file"]')?.textContent).toBe('file-999');
     queryPage = (request) => ({
       ...page,

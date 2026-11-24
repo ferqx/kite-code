@@ -5,7 +5,15 @@ import {
   type ModelOutputSnapshot,
   type Run,
 } from '@kite-ai/client';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Button } from './desktop/ui';
 import { SafeMessageMarkdown } from './markdown';
 
@@ -193,9 +201,9 @@ export function ModelOutputMessage({
     : undefined;
 
   const installed = useRef({ identity, suspended, verifiedSnapshot });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Read activity changes abort in-flight reads while retaining already verified content.
   useEffect(() => {
     current.current = identity;
-    if (suspended || !readActive) callbacks.current.onContent?.(undefined);
     generation.current++;
     request.current?.abort();
     request.current = undefined;
@@ -216,12 +224,14 @@ export function ModelOutputMessage({
       request.current?.abort();
       request.current = undefined;
       if (terminalRefresh.current?.pending) terminalRefresh.current = undefined;
-      callbacks.current.onContent?.(undefined);
     };
   }, [identity, suspended, verifiedSnapshot, readActive]);
+  // Publish alongside the rendered body so the host can update copy eligibility before paint.
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new message scope must publish its content even if the host reuses the same verified snapshot object.
-  useEffect(() => {
-    callbacks.current.onContent?.(readActive ? full?.output.content : undefined);
+  useLayoutEffect(() => {
+    const publish = callbacks.current.onContent;
+    publish?.(readActive ? full?.output.content : undefined);
+    return () => publish?.(undefined);
   }, [full, identity, readActive]);
   function close() {
     callbacks.current.onClose?.();

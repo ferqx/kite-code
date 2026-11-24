@@ -166,7 +166,6 @@ import { type NativeToolRenderer, renderNativeToolGroup } from './native-tool-re
 import { NativeTrajectory } from './native-trajectory';
 import {
   desktopTranscript,
-  nativeInputTurnId,
   nativePendingInputMessage,
   nativeReplyKey,
   useNativeRuns,
@@ -5286,33 +5285,27 @@ function NativeDesktopContent({
       firstSubmission.result?.phase !== 'failed' &&
       !rejectedInputs.has(firstSubmission.commandId)
     ) {
-      const turnId = nativeInputTurnId(
+      const pending = nativePendingInputMessage(
         firstSubmission.commandId,
         {
           storeId: firstSubmission.creation.expectedStoreId,
           sessionId: firstSubmission.creation.sessionId,
+          kind: 'run.start',
+          text: firstSubmission.text,
         },
+        firstSubmission.result?.phase ?? 'sending',
         selection,
       );
-      const ownTurn = turnId ? models.findIndex((model) => model.turnId === turnId) : -1;
+      const ownTurn = pending.turnId
+        ? models.findIndex((model) => model.turnId === pending.turnId)
+        : -1;
       // An explicit first-input retry keeps its created Session and earlier saved input.
       // Place the new attempt after that history, ahead of its own observed activity.
       const position =
         ownTurn >= 0 ? ownTurn : models.some((model) => model.role === 'user') ? models.length : 0;
       models.splice(position, 0, {
-        id: firstSubmission.commandId,
-        ...(turnId ? { turnId } : {}),
-        role: 'user',
-        text: firstSubmission.text,
+        ...pending,
         hasAttachments: !!(firstSubmission.files?.length || firstSubmission.images?.length),
-        settled: firstSubmission.result?.phase === 'accepted',
-        copyText: null,
-        delivery:
-          firstSubmission.result?.phase === 'accepted'
-            ? undefined
-            : firstSubmission.result?.phase === 'unknown'
-              ? 'unknown'
-              : 'sending',
       });
     }
     return groupNativeToolMessages(models);
@@ -5346,6 +5339,31 @@ function NativeDesktopContent({
     () => new Map(displayMessages.map((message) => [message.id, message])),
     [displayMessages],
   );
+  let latestFinalReply: (typeof messageModels)[number] | undefined;
+  for (let index = messageModels.length - 1; index >= 0; index--) {
+    const message = messageModels[index]!;
+    if (message.role === 'assistant' && message.finalReply && message.settled && message.text) {
+      latestFinalReply = message;
+      break;
+    }
+  }
+  const pendingFinalBody =
+    latestFinalReply?.copyText === null
+      ? messagesById.get(latestFinalReply.id)?.outputBody
+      : undefined;
+  const waitingForFirstReplyBody =
+    selection?.canReadModelOutput &&
+    transcriptComplete &&
+    !transcriptUnavailable &&
+    !transcript.turnActivity &&
+    !pendingInputModels.length &&
+    !state?.callerUnavailable &&
+    !state?.backgroundUnavailable &&
+    !directory?.unavailable &&
+    pendingFinalBody?.complete &&
+    pendingFinalBody.readAvailability !== 'unsupported' &&
+    Number(pendingFinalBody.contentBytes) > 0 &&
+    Number(pendingFinalBody.contentBytes) <= 64 * 1024;
   const planHistoryRuns = new Map<string, string>();
   if (planSelection) {
     for (const model of messageModels) {
@@ -6896,6 +6914,7 @@ function NativeDesktopContent({
               fileTargets.loading))
       }
       synchronizePresentation={!preparing && !frame.preparation && !(firstVisible && !firstSaved)}
+      initialPresentationHoldMs={waitingForFirstReplyBody ? 250 : undefined}
       retainedPresentation={!!cachedComposer}
       renderMessageContent={renderNativeMessage}
       renderMessageAttachments={renderNativeAttachments}

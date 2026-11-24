@@ -14,7 +14,9 @@ Composer 的普通文件附件可接收宿主提供的 `error`，在原附件处
 
 ## 输出文件展示
 
-[Conversation](src/desktop/Conversation.tsx) 的 `renderTurnOutputs` 只挂在该轮最后已确认 finalReply 之后；没有最终回复的失败／终态轮次放在最后该轮区域之后。会话首次呈现时，已保存的最终回复给宿主的附件槽提供一次呈现交接，等候期间保留正文节点和布局。随后到达的最终回复直接显示，文件交接沿原阅读锚点和折叠过程。最终回复有输出列表时，按正文、文件列表、复制／时间栏的顺序参与正常布局，不与操作栏重叠。[OutputFiles](src/desktop/OutputFiles.tsx) 只展示交付文件和文件操作。未进入整理的 producer_failed 由原工具执行轨迹展示。主卡通常仅显示文件名、类型和“打开”；同一展示列表内重名卡额外显示收集时间（本地时间，精确到毫秒）和字节大小，时间无效时明确未知，不按名称或时间合并、重排或判定最终版本，不暗示已导出到用户目录。文件卡的更多菜单提供「另存为」，宿主提供定位动作时也显示「在资源管理器中显示」。「输出」和 Shell 列表、子智能体使用同一级区块，标题只显示图标和名称。「输出」复用当前会话的权威输出列表。已加载文件可在四行高的列表里滚动查看，有后续页时可加载更多。列表读取失败时保留已核实的条目，每个文件以可键盘聚焦的单行链接呈现，点击文件名直接打开准确产物；窄栏优先保留文件扩展名，title 提供全名。宿主提供定位动作时，文件行的更多菜单以同一文件引用调用。宿主负责可信元数据、另存、定位和准确引用，不向公共组件传 ArtifactReference。 Native 可在父轮和输出区组合已授权子 Agent 的原产物，公共组件只显示宿主提供的 `sourceLabel`（子名称及来源轮次），继续以原 Store／Session／fileId／locator 作为文件身份；同名、同字节或不同子来源不合并。各来源保留独立分页。目录和文件页读取失败时保留原列表，沿单在途、最长八秒间隔的退避自动重读。切换来源取消原读取。子详情复用同一文件卡，暂停阅读保留已显示卡片，不发起新的读取。授权子树、父轮映射、迟到隔离和子来源编辑转入父草稿归 [Native owner](../../apps/desktop/README.md#办公输出文件)，显示标签不授予任何读取或操作权限。
+桌面对话的普通 Markdown 块、工具过程与相邻正文、轮次附件和回复底部工具栏共用 `--conversation-block-gap`，按正文字号的 0.8 倍计算。轮次附件列表与上一块正文之间使用两倍基础间距。带附件的最终回复通过 CSS `text-box-trim` 消除末行下方的行高留白，表格与代码块按外框底部对齐。最终回复的复制及时间栏始终参与正常布局，与上方正文或附件的距离为基础段间距。
+
+[Conversation](src/desktop/Conversation.tsx) 的 `renderTurnOutputs` 只挂在该轮最后已确认 finalReply 之后；没有最终回复的失败／终态轮次放在最后该轮区域之后。会话首次呈现时，已保存的最终回复给宿主的附件槽提供一次呈现交接，等候期间保留正文节点和布局。随后到达的最终回复直接显示，文件交接沿原阅读锚点和折叠过程。最终回复有输出列表时，按正文、文件列表、复制／时间栏的顺序参与正常布局。[OutputFiles](src/desktop/OutputFiles.tsx) 只展示交付文件和文件操作。未进入整理的 producer_failed 由原工具执行轨迹展示。轮次产出共用一个列表外框，行间用分隔线。公共 [ButtonGroup](src/desktop/components/ui/button-group.tsx) 将右侧的「打开」和省略号组成两个相接的描边按钮，分别触发打开文件和更多菜单。两按钮之间保留一道边框。文件名和类型归入独立的预览按钮。宿主提供桌面打开动作时，「打开」交给宿主处理，等待期间按钮保留焦点并阻止重复触发。「打开」和省略号按钮分别使用公共按钮的悬停反馈。指针停在按钮组内时，列表项使用默认底色。其他行内区域由列表项绘制整行悬停底色。[文件格式识别](src/desktop/output-file-format.ts)统一提供类型说明与图标，先按可识别的扩展名匹配，再以 MIME 类型回退。轮次列表与「输出」栏共用图标识别和保留扩展名的布局，轮次文件说明文字与图标颜色随格式显示。文件名与类型固定分两行显示，左侧图标等比显示为 24px。窄栏中文件名优先保留扩展名。同一展示列表内重名卡额外显示收集时间（本地时间，精确到毫秒）和字节大小，时间无效时明确未知，不按名称或时间合并、重排或判定最终版本，不暗示已导出到用户目录。文件卡的更多菜单使用公共 DropdownMenuGroup 容纳「另存为」及宿主提供的「在资源管理器中显示」。「输出」和 Shell 列表、子智能体使用同一级区块，标题只显示图标和名称。「输出」复用当前会话的权威输出列表。已加载文件可在四行高的列表里滚动查看，有后续页时可加载更多。列表读取失败时保留已核实的条目，每个文件以可键盘聚焦的单行链接呈现，点击文件名直接打开准确产物；窄栏优先保留文件扩展名，title 提供全名。宿主提供定位动作时，文件行的更多菜单以同一文件引用调用。宿主负责可信元数据、另存、定位和准确引用，不向公共组件传 ArtifactReference。 Native 可在父轮和输出区组合已授权子 Agent 的原产物，公共组件只显示宿主提供的 `sourceLabel`（子名称及来源轮次），继续以原 Store／Session／fileId／locator 作为文件身份；同名、同字节或不同子来源不合并。各来源保留独立分页。目录和文件页读取失败时保留原列表，沿单在途、最长八秒间隔的退避自动重读。切换来源取消原读取。子详情复用同一文件卡，暂停阅读保留已显示卡片，不发起新的读取。授权子树、父轮映射、迟到隔离和子来源编辑转入父草稿归 [Native owner](../../apps/desktop/README.md#办公输出文件)，显示标签不授予任何读取或操作权限。
 
 [SessionTabs](src/desktop/SessionTabs.tsx) 的 file 标签按 Store／Session／fileId 去重，与原标签共用八项容量；只有明确打开动作激活标签，后台文件到达不会打开侧栏。文件页仅在活动可见时挂载，宿主负责原生预览生命周期。相关回归归原 [Conversation 呈现](test/isolated/desktop-conversation-presentation.test.tsx) 与 [会话标签](test/isolated/desktop-session-tabs.test.tsx)：Linux／Bun 1.4.4，2026-11-11 工作树分别9项／152断言与31项／465断言通过。DOM证据不代替实际Electron窗口验收。
 
@@ -97,7 +99,7 @@ Desktop 入口导出公共 shadcn Input、Textarea、Select 和 Switch 供 Nativ
 
 Desktop入口导出现有[Popover](src/desktop/components/ui/popover.tsx)的 Root、Content 与 Trigger，供宿主组合按钮锚定浮层；Content可选 `container` 转交原Radix Portal，未指定时仍沿原body目标。Native设置将浮层挂在当前设置Dialog内，保留主题和焦点范围并避开卡片／滚动区裁剪；浮层状态和配置操作仍归宿主。
 
-[MessageCopyButton](src/desktop/MessageCopyButton.tsx)沿公共 `icon-sm` 使用28px按钮、14px图标及统一8px圆角，默认、成功和失败状态保持相同尺寸；不再单独指定按钮宽高。`--control-gap: 4px` 统一控制按钮与时间的横向间距，`--message-meta-offset: 2px` 保留用户气泡／Agent正文到信息栏的垂直间距；含信息栏的消息保留 `28 + 2 + 8 = 38px` 底部空间，确保工具栏与下一条消息至少间隔8px。悬停／聚焦显示和准确原文复制继续沿原生命周期。
+[MessageCopyButton](src/desktop/MessageCopyButton.tsx)沿公共 `icon-sm` 使用28px按钮、14px图标及统一8px圆角，默认、成功和失败状态保持相同尺寸；不再单独指定按钮宽高。`--control-gap: 4px` 统一控制按钮与时间的横向间距，`--message-meta-offset: 2px` 保留用户气泡／Agent正文到信息栏的垂直间距；含信息栏的消息保留 `28 + 2 + 8 = 38px` 底部空间，确保工具栏与下一条消息至少间隔8px。最新一轮已确认最终回复的信息栏直接显示。共享全文阅读器在绘制前交付当前已核实正文，复制按钮与完整正文同帧出现。用户消息和较早回复在悬停或键盘聚焦时显示。复制仍使用原文及现有准入条件。
 
 [Conversation](src/desktop/Conversation.tsx)的 `.message-meta` 将复制与时间放在正文下方同一行，用户消息反向排列为时间在左、复制在右。渲染按真实位置区分独立消息、Turn 过程和轮次结果；过程内的非用户正文不生成信息栏，悬停／聚焦也不补出时间或复制，因此不会触发信息栏的额外间距。首条输入、用户引导、过程外最终回复及独立 Agent 结果沿原规则显示，最终正文复制资格不变。被动时间显示不恢复任何复制或读取资格。信息栏使用 `user-select: none`，聊天全选寻找正文端点时同样排除它。[时间格式](src/desktop/message-time.ts)只接宿主 `Message.createdAtMs`，按本地日历区分当天、昨天、本年日期和其他年份；不以24小时差推断昨天，完整 `time` 语义保留 ISO instant、秒与原时刻 UTC 偏移。悬停／聚焦消息重新计算日期标签；缺失或无效时间保持未知，不调用当前时间补造来源。格式回归见[日期边界](test/desktop-message-time.test.ts)，复制与全选回归沿原[消息复制文件](test/isolated/desktop-message-copy.test.tsx)。
 
@@ -129,7 +131,7 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 [Conversation](src/desktop/Conversation.tsx)将宿主确认的 `model_connection` 系统消息与工具放在所属 Turn 的处理过程中，共用 Trace 行组件及原折叠、阅读位置；连接等待期间由过程行表达实际重连活动。连接事实、次数及因果位置归 [Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)，UI 不推断网络状态。[ModelConnection](src/desktop/ModelConnection.tsx)仅在宿主确认重连耗尽并提供可读原因时显示详情折叠按钮；正常重连、成功及取消保持普通过程行，详情随原阅读状态保留。非重连的会话执行异常（包括启动、上下文及底层逻辑异常）由[TurnFailure](src/desktop/TurnFailure.tsx)在普通客户端统一使用公共[Alert](src/desktop/components/ui/alert.tsx)，只显示详细原因／建议，不显示可见标题；采用中性圆形信息图标、16px圆角、细边框及灰色说明，图标20px，内边距16px。无障碍名称仍保留准确异常摘要，不渲染聊天message或伪造Tool行；未知原因明确说明现有记录无法核实，技术详情继续受原构建诊断门禁控制；[诊断回归](test/desktop-diagnostics.test.tsx)核开发与生产均无折叠按钮或内部错误码。
 
-轮次摘要在所有终态统一只显示原已核实用时，缺少可靠时间时显示“用时未知”；进行中沿原阶段文字，摘要不按失败、停止、中断或恢复状态着色。真实`data-turn-status`、取消／恢复资格及过程内错误保持，失败细节仍可展开阅读。有准确 `turnId` 的 `turn_failure` 与其他过程记录一起进入原 Turn 的折叠内容，不再独立渲染在结果区域；正常完成／主动停止仍默认收起；失败或异常中断且同Turn没有已核实最终回复时默认展开，外层过程不设高度上限，显式阅读选择优先。默认由整Turn的finalReply集合决定，不只检查当前片段；异常Alert不能覆盖准确的中断／取消／完成终态。冷读与原时间身份沿原合同。没有 Turn 的原输入拒绝通过 Native 的 Toast 提示。会话正文中的失败以原 Turn 为依据。首条输入、明确最终回复及独立 Agent 结果仍按原业务边界显示；[过程回归](test/desktop-reasoning-turns.test.tsx)和[Native 投影回归](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)核失败正文的过程归属与冷重开。
+轮次摘要在所有终态统一只显示原已核实用时，缺少可靠时间时显示“用时未知”；进行中沿原阶段文字，摘要不按失败、停止、中断或恢复状态着色。真实`data-turn-status`、取消／恢复资格及过程内错误保持，失败细节仍可展开阅读。有准确 `turnId` 的 `turn_failure` 与其他过程记录一起进入原 Turn 的折叠内容，不再独立渲染在结果区域；冷打开会话时，正常完成／主动停止的过程默认收起，失败或异常中断且同Turn没有已核实最终回复时默认展开，外层过程不设高度上限，显式阅读选择优先。默认由整Turn的finalReply集合决定，不只检查当前片段；异常Alert不能覆盖准确的中断／取消／完成终态。冷读与原时间身份沿原合同。没有 Turn 的原输入拒绝通过 Native 的 Toast 提示。会话正文中的失败以原 Turn 为依据。首条输入、明确最终回复及独立 Agent 结果仍按原业务边界显示；[过程回归](test/desktop-reasoning-turns.test.tsx)和[Native 投影回归](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)核失败正文的过程归属与冷重开。
 
 2026-11-05，Windows x64／Bun1.4.4，轮次摘要调整通过过程、响应、投影、阅读滚动及Native轮次五文件69项／2174断言，UI／Desktop类型和定向Biome通过。隔离生产组件与编译CSS逐步观察执行中→失败收起→展开真实原因→停止／中断／成功→冷重挂及深浅主题；各终态只显示“用时38秒”，实际终态仍分别保留，失败正文仍在原过程内。摘要深色computed color为`rgb(181,181,181)`，浅色为`rgb(102,102,102)`，无状态红色、重复摘要或过程外失败正文。材料归本机`.cache/turn-summary-audit-20261105`，临时入口沿原过程审查夹具；不代表完整Electron安装制品或其他平台验收。
 
@@ -150,6 +152,8 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 宿主可通过 `initialPresentationPending` 延迟尚未呈现的 Conversation 首次内容提交，让已保存消息和结构事实同时进入原轮次布局；UI不读取或推断轮次／工具事实。第一次可读 layout commit 后该标记不再遮住正文，普通流式更新、缓存恢复和阅读滚动继续原行为；换 readingKey 或DOM淘汰后重新挂载才重新等待。Native的失败、缓存及首条输入豁免由 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)负责；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)核首次等待、后续更新、重新挂载及原滚动生命周期。
 
 [SessionPage](src/desktop/SessionPage.tsx)的 `synchronizePresentation` 将初次消息和 footer 作为同一可见提交；[Conversation](src/desktop/Conversation.tsx)完成布局后回报准确 scope／readingKey，旧页回调不能提前放开新页。宿主已有同会话只读输入区快照时传 `retainedPresentation`，现存缓存树恢复即可立即一起显示，不等待后台读取；正文 DOM 被淘汰时，新树仍须完成准备，不能只放开输入区。已经显示的同页普通刷新不重新隐藏；未启用屏障时同样记录准确的页面身份，同scope首发历史接管随后启用屏障，不重新隐藏history／footer或临时施加inert。身份变化立即撤销该豁免，新会话仍按原规则等待；记录身份不引发未启用屏障页面的额外render。footer 几何由前置 sibling 的 layout effect 在缓存消息恢复滚动前确定，避免首帧以旧输入区高度夹紧阅读位置；ResizeObserver 继续跟随实际尺寸变化，不使用固定延时。缓存预算及 `readActive`／`interactive` 准入保持，显示快照不授予读取或写入资格。[页面回归](test/isolated/desktop-session-page-render.test.tsx)分别核冷页、完整缓存、仅输入区缓存、首次分组与普通刷新时消息和 footer 的同步可见性；Native过程证据见 [Desktop owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。
+
+`initialPresentationHoldMs` 仅延后尚未呈现的历史和输入区，已挂载的正文读取器在等待期间仍可工作。宿主撤下等待或达到期限后，同一页面沿原首屏回调显示。侧栏选择仍在加载的目标时，不把前一个准备页计入目标首屏。已显示的页面与可直接恢复的缓存沿原路径处理。
 
 准备期的 history／footer 共用 `presentationStyle`，同时设置 `visibility:hidden` 和父层 `opacity:0`，并沿原 `inert` 关闭交互。按钮的 `transition-all` 会过渡继承的 visibility，使父层已隐藏时子控件短暂保持可见；父层透明度将整个子树一起停止绘制，几何测量与原 DOM 继续保留。完成准备后同步撤下此样式；缓存已就绪和普通刷新沿原显示路径。验证逐项核对子控件的 computed visibility 及祖先透明度，原仅检查 Composer 父节点的结果不足以排除残影；修前／修后及真实开发窗口证据归上述 Desktop owner。
 
@@ -177,7 +181,7 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 桌面正文的网页链接和已确认的输出文件动作默认显示下划线。输出链接只向宿主提交解析出的单个文件名。宿主用原轮次的已核实产物提供另存动作，未绑定的标签按普通文字排版。Markdown 原文、选中复制和流式语法处理沿用现有路径。
 
-文件引用展示由 `MessageContent` 负责。反引号内的路径保留为行内代码。显式 Markdown 文件链接沿用作者标签，带行号时显示文件图标、行号和悬停／焦点提示，并在悬停或键盘聚焦时显示虚线下划线。宿主可提供当前项目的 `fileRootUri` 供提示展示，原相对路径和可选行号仍独立交给 `openFile`。读权限暂停时关闭提示并禁止激活。未提供 `openFile` 时带行号的链接保留标签文本。具体排版、打开资格与验证见 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
+文件引用展示由 `MessageContent` 负责。反引号内的路径保留为行内代码。显式 Markdown 文件链接沿用作者标签，并按目标路径的扩展名复用附件列表的 [FileTypeIcon](src/desktop/FileTypeIcon.tsx)。普通状态无下划线，悬停或键盘聚焦时显示细虚线。带行号的引用额外显示行号与悬停或焦点提示。宿主可提供当前项目的 `fileRootUri` 供提示展示，原相对路径和可选行号仍独立交给 `openFile`。读权限暂停时关闭提示并禁止激活。未提供 `openFile` 时带行号的链接保留标签文本。具体排版、打开资格与验证见 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
 
 行内文件图标和任务复选框按 `em` 跟随字号，并以当前字体的大写字高 `cap` 为参照对齐文字基线。设置导航等具备独立图标槽的控件以文字行盒和图标框的中心对齐。失败提示的图标沿首行行高居中，描述换行后继续对齐首行。
 
@@ -268,7 +272,7 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 桌面会话的标题栏、正文与输入区留白、消息气泡、刻度和新对话控件使用同一套基础样式。正文和输入区保留 740px 最大宽度，随分栏可用空间自然收缩。标题栏与输入区的实测高度继续决定正文和刻度的可用空间。
 
-[SessionPage](src/desktop/SessionPage.tsx)为主会话启用[消息导航](src/desktop/ConversationMessageNavigation.tsx)。刻度来自已挂载的主输入，沿用消息展示身份，发送占位交给持久消息时保留同一刻度。刻度条在标题栏和输入区之间居中，按两者之间的可用高度判断是否溢出。溢出时以独立滚动区和翻页按钮浏览，恢复足够高度后收起翻页按钮。正文阅读位置或可用高度变化时显示对应的当前刻度，键盘操作期间保持焦点刻度可见。点击刻度写入原正文滚动区并保存阅读锚点，历史补入、缓存恢复与回到最新消息沿用 [Conversation](src/desktop/Conversation.tsx) 的阅读状态。
+[SessionPage](src/desktop/SessionPage.tsx)为主会话启用[消息导航](src/desktop/ConversationMessageNavigation.tsx)。刻度来自已挂载的主输入，沿用消息展示身份，发送占位交给持久消息时保留同一刻度。正文 viewport 高度不足时才挂载刻度条。刻度条在标题栏和输入区之间居中，高度最多为可读空间的 50%。内部复用 ScrollArea 的纵向渐隐，隐藏原生滚动条；刻度溢出时可独立滚动。正文阅读位置或可用高度变化时显示对应的当前刻度，键盘操作期间保持焦点刻度可见。点击刻度写入原正文滚动区并保存阅读锚点，历史补入、缓存恢复与回到最新消息沿用 [Conversation](src/desktop/Conversation.tsx) 的阅读状态。
 
 `Composer.confirmFullPermission`是可选宿主确认port：提供时使用宿主异步确认及AbortSignal，只有准确当前scope／权限／回调与严格true才调用原权限变更；取消、失效与卸载退休确认，失败显示有限可重试说明。没有port的Web／共享调用保留原DOM确认及风险文案。普通模式菜单的原门控保持，仅本地完全访问确认在途禁止重复选择。[权限DOM回归](test/isolated/permissions-dom.test.tsx)核宿主与Web两条路径；Native专用自绘浮层与原有权限命令分离，实际身份／窗口和像素资格归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
 
@@ -449,7 +453,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。`autoRead` 失败保留原文和错误说明，不发布未核验的全文复制内容；缺省不提供“重新读取”按钮，Web 的显式 `autoReadRetry` 差异见下文正文读取契约，Native 保持缺省。显式完整 reader 沿用原操作。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
 
-[桌面 Markdown](src/desktop/MessageContent.tsx)通过显式 Markdown 链接接收项目相对路径，带正整数行号的文件链接从目标地址提取行号。行内代码和代码块沿 Markdown 语义显示。带宿主文件回调时，带行号的文件链接显示可换行的蓝色标签，悬停或键盘聚焦时带细虚线下划线。点击或按 Enter 分别交付路径和可选行号。当前阅读准入失效时暂停操作。无回调时带行号的链接显示标签文本。[Markdown 回归](test/markdown.test.tsx)覆盖预解析树、源码保留及渲染边界。
+[桌面 Markdown](src/desktop/MessageContent.tsx)通过显式 Markdown 链接接收项目相对路径，带正整数行号的文件链接从目标地址提取行号。行内代码和代码块沿 Markdown 语义显示。点击文件链接或聚焦后按 Enter 会交付路径和可选行号。当前阅读准入失效时暂停操作。[Markdown 回归](test/markdown.test.tsx)覆盖预解析树、源码保留及渲染边界。
 
 [Code Block](src/desktop/components/ui/code-block.tsx)与[Trace](src/desktop/components/ui/trace.tsx)使用官方 shadcn/ui 的 Radix 源码结构，分别适配现有 Button、Hugeicons 和语义 token。[MarkdownCodeBlock](src/desktop/MarkdownCodeBlock.tsx)只接块级代码，保留原 `pre > code`、语言类、缩进与换行；保持单个代码容器，显式语言按token高亮，不拆行；Mermaid图表使用同一标题与准确源码复制，正文仍走固定Markdown parser与安全规则。语言标题和复制操作由 Code Block parts 组合，表格身份保持。[Markdown 回归](test/markdown.test.tsx)和[代码块回归](test/isolated/desktop-code-block.test.tsx)核语言、准确复制、原安全限制与复制资格。 CodeBlock的Header／Footer间距通过同父前置／后续兄弟关系决定，取消3条无界group-has样式规则，避免长消息分批追加时将整个agent-turn反复标为样式失效；保留default／sm及现有Shell／Markdown的最终padding覆盖，源码复制与读取准入不参与这些选择器。
 
@@ -610,7 +614,7 @@ Native 主会话启用 [ConversationTrace](src/desktop/ConversationTrace.tsx)，
 
 [Conversation](src/desktop/Conversation.tsx)按本段的宿主事实依次选择待回答／人工审批、最近开始且仍在执行的工具、当前「思考中」、交接期末条工具或结束摘要。两个可操作等待可以共存。已提交待确认、未派发、自动审核及已失去观察资格分别呈现。原等待／工具在可读边界出现后继续保有自己的状态。创建子 Agent、计划审阅及实际子 Agent 来信／结果沿原位置独立呈现，其他子 Agent 工具留在思维链内。思考行原位更新活动状态，模型／工具交接标记本身不生成步骤。原消息和阅读身份随回执接管。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)覆盖等待优先级、消息归属、精确思考、跨段活动及详情收展。
 
-Native 主会话最后一个轮次片段在进行中和结算后共用折叠控件及 `turn:<id>:complete` 阅读状态。会话初始化时当前过程默认展开，已打开会话中新轮次从收起开始，原开合状态延续到结算。折叠时延迟构造过程，各段思维链仍沿原阅读 key 开合。普通回复正文按原顺序显示在过程段之间，前后的过程段共用该轮的折叠状态。冷打开时，宿主可在已保存工具尚待首次核实期间禁用该轮的展开按钮，已显示的正文和展开过程继续可读。流式末段和同一消息的最终回复复用正文节点。没有可展开过程时显示静态耗时。[Native 历史回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核对冷打开、展开及缓存恢复。
+Native 主会话最后一个轮次片段在进行中和结算后共用折叠控件及 `turn:<id>:complete` 阅读状态。每个活动轮次的过程默认展开。过程首次可显示时，`data-instant-open` 让内容直接达到完整高度。用户手动开合沿用过渡，开合状态延续到结算。折叠时延迟构造过程，各段思维链仍沿原阅读 key 开合。普通回复正文按原顺序显示在过程段之间，前后的过程段共用该轮的折叠状态。冷打开时，宿主可在已保存工具尚待首次核实期间禁用该轮的展开按钮，已显示的正文和展开过程继续可读。流式末段和同一消息的最终回复复用正文节点。没有可展开过程时显示静态耗时。[Native 历史回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核对冷打开、展开及缓存恢复。
 
 单条 `wait_agent_events` 和 `edit_file` 可直接打开结果。单条子 Agent 等待结算后，原工具名称和结果从「工具执行」展开。形成多步思维链后列表默认收起，重新展开列表时沿原步骤 key 恢复此前的工具详情选择。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核对单条等待的标题、完成摘要和后续分组。单条思考、单条工具和组内步骤的详情共同使用折叠内容内的竖线样式，和思维链外层竖线一样按 `--ui-icon-size` 对准各自图标中心。Native 准备回复和流式回复状态与同层工具行共用 `--conversation-line-height`，文字与正文共用 `--conversation-text-size`。
 
