@@ -440,23 +440,23 @@ export function createFileTools(
           parameters.path === undefined
             ? parameters
             : { ...parameters, path: files.relativePath(string(parameters.path)) };
-        if (d.name === 'read' && typeof selected.path === 'string') {
-          if (selected.path.toLowerCase().endsWith('.pdf')) {
-            return await readPdfToolResult({
-              path: string(parameters.path),
-              request: selected,
-              context,
-              source: await files.readBytes(selected.path, {
-                maxBytes: 256 * 1024 * 1024,
-                signal: context.signal,
-              }),
-            });
-          }
-          if (selected.pages !== undefined) throw new AgentError('pdf_options_require_pdf');
-        }
         let value: unknown;
+        let pdfSource: Awaited<ReturnType<WorkspaceFiles['readBytes']>> | undefined;
         try {
-          value = await d.call(selected, context);
+          if (
+            d.name === 'read' &&
+            typeof selected.path === 'string' &&
+            selected.path.toLowerCase().endsWith('.pdf')
+          ) {
+            pdfSource = await files.readBytes(selected.path, {
+              maxBytes: 256 * 1024 * 1024,
+              signal: context.signal,
+            });
+          } else {
+            if (d.name === 'read' && selected.pages !== undefined)
+              throw new AgentError('pdf_options_require_pdf');
+            value = await d.call(selected, context);
+          }
         } catch (error) {
           if (
             d.name === 'read' &&
@@ -470,6 +470,13 @@ export function createFileTools(
           throw error;
         }
         if (d.name === 'read') context.signal.throwIfAborted();
+        if (pdfSource)
+          return await readPdfToolResult({
+            path: string(parameters.path),
+            request: selected,
+            context,
+            source: pdfSource,
+          });
         if (d.name === 'read') return await createFileReadResult(value as FileSnapshot, context);
         const mutationResult =
           d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot) : undefined;

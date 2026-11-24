@@ -442,6 +442,64 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const) {
   }, 20000);
 }
 
+test('ordinary missing PDF reaches the next model and completes the original Agent Run', async () => {
+  const path = 'missing-report.pdf';
+  const observation = 'File does not exist: "missing-report.pdf".';
+  const finalText = 'Controlled file journey finished.';
+  const f = await fixture({
+    mode: 'auto',
+    forbidHumanApproval: true,
+    task: () => 'Check whether missing-report.pdf exists and report the observation.',
+    program: (_body, step) => (step === 0 ? { name: 'read_file', input: { path } } : null),
+  });
+  try {
+    await f.run();
+    const command = await f.store.getCommand('work');
+    expect(command?.status).toBe('applied');
+    const runId = (command?.receipt as { runId: string }).runId;
+    const run = await f.store.getRun(runId);
+    const rows = (await f.store.listExecutions('s')).filter((row) => row.runId === runId);
+    expect(run).toMatchObject({ status: 'completed', isActive: false });
+    expect(rows.filter((row) => row.kind === 'model').map((row) => row.status)).toEqual([
+      'succeeded',
+      'succeeded',
+    ]);
+    expect(f.requests).toHaveLength(2);
+    expect(f.reviewRequests()).toBe(0);
+    expect(
+      (await f.runtime.listMessages('s')).filter(
+        (message) => message.role === 'assistant' && message.content === finalText,
+      ),
+    ).toHaveLength(1);
+    expect(existsSync(join(f.workspace, path))).toBe(false);
+    const tools = rows.filter((row) => row.kind === 'tool');
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      definitionId: 'files.read',
+      input: { path },
+      authorization: { dispatched: true },
+    });
+    expect(tools[0]!.authorization?.check).toBeUndefined();
+    expect({
+      status: tools[0]!.status,
+      result: tools[0]!.result,
+      nextToolMessages: f.requests[1]!.messages.filter((message) => message.role === 'tool').map(
+        (message) => message.content,
+      ),
+    }).toEqual({
+      status: 'succeeded',
+      result: {
+        outcome: 'succeeded',
+        content: observation,
+        details: { path, exists: false },
+      },
+      nextToolMessages: [observation],
+    });
+  } finally {
+    await f.close();
+  }
+}, 20000);
+
 test('Full actual Service writes and edits an external file with native baselines and immutable Artifacts without checkpointing it', async () => {
   const first = 'before external 😀\r\n';
   const edited = 'after external 😀\r\n';

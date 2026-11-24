@@ -490,37 +490,40 @@ export function withFullAccessFiles(options: {
                   });
                   if (read) {
                     const parameters = input as Record<string, Json>;
-                    if (selected.path.toLowerCase().endsWith('.pdf')) {
-                      result = await readPdfToolResult({
-                        path: selected.path,
-                        request: parameters,
-                        context,
-                        source: await native.readBytes(selected.relativePath, {
+                    let snapshot: FileSnapshot | undefined;
+                    let pdfSource: Awaited<ReturnType<WorkspaceFiles['readBytes']>> | undefined;
+                    try {
+                      if (selected.path.toLowerCase().endsWith('.pdf')) {
+                        pdfSource = await native.readBytes(selected.relativePath, {
                           maxBytes: 256 * 1024 * 1024,
                           signal: context.signal,
-                        }),
-                      });
-                    } else {
-                      if (parameters.pages !== undefined)
-                        throw new AgentError('pdf_options_require_pdf');
-                      let snapshot: FileSnapshot | undefined;
-                      try {
+                        });
+                      } else {
+                        if (parameters.pages !== undefined)
+                          throw new AgentError('pdf_options_require_pdf');
                         snapshot = await native.read(selected.relativePath, {
                           offset: parameters.offset === undefined ? 1 : Number(parameters.offset),
                           limit: parameters.limit === undefined ? 200 : Number(parameters.limit),
                           signal: context.signal,
                         });
-                      } catch (error) {
-                        if (codeOf(error) !== 'ENOENT') throw error;
-                        context.signal.throwIfAborted();
                       }
-                      result = snapshot
+                    } catch (error) {
+                      if (codeOf(error) !== 'ENOENT') throw error;
+                      context.signal.throwIfAborted();
+                    }
+                    result = pdfSource
+                      ? await readPdfToolResult({
+                          path: selected.path,
+                          request: parameters,
+                          context,
+                          source: pdfSource,
+                        })
+                      : snapshot
                         ? await createFileReadResult(absolute(snapshot), context, {
                             fileScope: 'external_path',
                             workspaceCheckpoint: false,
                           })
                         : createMissingFileReadResult(selected.path);
-                    }
                   } else {
                     const adapter = new Proxy(native, {
                       get(_source, property) {

@@ -45,20 +45,22 @@ function fixture() {
     path: string,
     mode: 'full' | 'auto' | 'accept_edits' = 'full',
     extra: Partial<ToolContext> = {},
+    pages?: string,
   ) {
+    const input = { path, ...(pages === undefined ? {} : { pages }) };
     const tool = full.tools.find((value) => value.id === 'files.read')!;
     const request: AuthorizationRequest = {
       kind: 'tool',
       definitionId: tool.id,
       definitionVersion: tool.version,
-      input: { path },
+      input,
       executionId: 'read',
       sessionId: 's',
       runId: 'r',
       signal: new AbortController().signal,
     };
     const capability = await reads.describeRequest(request);
-    return tool.execute({ path }, {
+    return tool.execute(input, {
       executionId: 'read',
       runId: 'r',
       sessionId: 's',
@@ -124,6 +126,30 @@ test('ordinary workspace and external missing reads are explicit observations, d
   }
 });
 
+test.each([
+  ['workspace', 'default'],
+  ['workspace', '1'],
+  ['external', 'default'],
+  ['external', '1'],
+] as const)('ordinary missing PDF is an absence observation: %s, pages=%s', async (scope, pages) => {
+  const f = fixture();
+  try {
+    const path =
+      scope === 'workspace' ? 'missing/deep.pdf' : join(f.external, 'missing', 'deep.pdf');
+    const result = await f.read(path, 'full', {}, pages === 'default' ? undefined : pages);
+    expect(result).toEqual({
+      outcome: 'succeeded',
+      content: `File does not exist: ${JSON.stringify(path)}.`,
+      details: { path, exists: false },
+    });
+    expect(f.tools.find((tool) => tool.id === 'files.read')!.formatModelResult!({ result })).toBe(
+      result.content,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
 test('external missing preflight remains readable but protected missing paths and protected aliases do not', async () => {
   const f = fixture();
   try {
@@ -173,11 +199,13 @@ test('private factories, invalid paths, cancellation and Artifact ENOENT retain 
       executionId: 'read',
       runId: 'r',
     } as ToolContext;
-    const privateMissing = await privateTools
-      .find((tool) => tool.id === 'files.read')!
-      .execute({ path: 'private-reference.txt' }, context);
-    expect(privateMissing.outcome).toBe('failed');
-    expect(privateMissing.details).toEqual({ code: 'ENOENT' });
+    for (const path of ['private-reference.txt', 'private-reference.pdf']) {
+      const privateMissing = await privateTools
+        .find((tool) => tool.id === 'files.read')!
+        .execute({ path }, context);
+      expect(privateMissing.outcome).toBe('failed');
+      expect(privateMissing.details).toEqual({ code: 'ENOENT' });
+    }
     expect((await f.read('../outside.txt')).outcome).toBe('failed');
     const controller = new AbortController();
     controller.abort();
