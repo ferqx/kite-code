@@ -148,6 +148,8 @@ Shell 工厂通过本包既有 `@kite-ai/agent/jobs/shell` 与 `/shell` 公共�
 
 默认普通 Shell 不再自动添加路径保护，风险材料读取也不因 Profile/config/运行资产位置额外拒绝；仍仅捕获原 Workspace 内有限直接脚本并核资产身份，现有非常危险系统命令兜底保持。自定义可信 host 的 `protectedRoots` 仍只接受目录；可缺失或正常轮换的私有认证名称独立经 `protectedFiles` 交给同一 Jobs 边界，既不读取秘密正文，也不改变授权或恢复语义。macOS 核父目录身份并在 Seatbelt 持续拒绝准确名称；Linux 沿原 namespace 保护专用物理认证目录，保留正常 Shell，冻结 qualification 为 `linux_owned_pid_namespace_bubblewrap_private_directories`。缺失目录仅在真正已授权 Job 派发时受控预留，宽根重叠或可重定向来源仅拒绝原 Job，不是普通 Run 的全局门禁。详情与实际环境归[Jobs owner](../jobs/README.md#linux-宿主与严格补偿源码)。
 
+macOS 普通 Shell 将启动目录与写入范围独立传给 Seatbelt。受限写入仍以可信会话当前的工作区或已选工作树为根，并保留原任务专属临时目录；命令的工作目录不改变这个授权根。已核准的 Full、读取范围及网络范围保持不变。
+
 Shell 与私有文件适配器的最终证明共用内部 [dispatch-scope](dispatch-scope.ts) 遍历器，只解释原 permission-intersection 的 version、parent/child 顺序与最多8192节点。普通外部只读不再消费该遍历器。Shell 继续核 Job 和 filesystem/network 交集，私有引用继续核原准确范围；遍历结果不建立新 grant。[消费者回归](../../test/isolated/permissions/dispatch-scope.test.ts)核双上界、叶身份、8192边界、错误顺序及原错误码。
 
 [shell-command-policy.ts](shell-command-policy.ts) 使用本包固定 `tree-sitter-bash 0.25.1` 与 `web-tree-sitter 0.25.10` WASM。有限字面量 AST 与危险扫描分开，保原 cwd 分支预算与资产完整性校验；动态或不透明命令不取得安全证明，由实际系统范围约束，越界失败不自动扩权重跑。两个公开 entry 均进入本包 build；正式制品按 Agent manifest 复制完整解析依赖。
