@@ -2,6 +2,7 @@ import type { ArtifactRef, ToolContext, ToolDefinition, ToolResult } from '../ex
 import { modelReference, readModelReference } from '../model-reference';
 import type { Json } from '../storage/types';
 import { AgentError } from '../storage/types';
+import { pdfPages, readPdfToolResult } from './documents/read-tool';
 import type { FileBaseline, FileSnapshot, WorkspaceFiles } from './files';
 import { formatFileReadResult } from './files/model-result';
 
@@ -19,7 +20,7 @@ const path = {
   type: 'string',
   maxLength: 4096,
   description:
-    'Path relative to the fixed workspace root, or an absolute path inside that workspace. No .. segments; paths outside the workspace are rejected.',
+    'Workspace-relative or absolute file path. Omit .. segments and use paths allowed by the current file scope.',
 };
 const referenceSchema = { type: 'string', minLength: 1, maxLength: 4096 };
 const fileDefinitions = { 'files.read': ['4', '5'], 'files.write': ['3'], 'files.edit': ['2'] };
@@ -57,6 +58,7 @@ async function fileParameters(
   input: Record<string, Json>,
   context: ToolContext,
   files: WorkspaceFiles,
+  mutation: boolean,
 ): Promise<Record<string, Json>> {
   const value = { ...input };
   if (value.baseRef !== undefined) {
@@ -65,6 +67,29 @@ async function fileParameters(
       files.relativePath(path),
     );
     delete value.baseRef;
+  } else if (mutation && context.readDecisionToolResults) {
+    const selected = files.relativePath(string(value.path));
+    for (const { execution } of await context.readDecisionToolResults()) {
+      if (
+        execution.status !== 'succeeded' ||
+        !fileDefinitions[execution.definitionId as keyof typeof fileDefinitions]?.includes(
+          execution.definitionVersion ?? '',
+        )
+      )
+        continue;
+      const result = execution.result as { content?: string } | null;
+      let candidate: Record<string, Json>;
+      try {
+        candidate = object(JSON.parse(result?.content ?? 'null'));
+        if (typeof candidate.path !== 'string' || files.relativePath(candidate.path) !== selected)
+          continue;
+      } catch {
+        continue;
+      }
+      if (candidate.baseline !== undefined)
+        value.base = baseline(candidate.baseline) as unknown as Json;
+      break;
+    }
   }
   for (const field of ['content', 'find', 'replace']) {
     const reference = value[`${field}Ref`];
@@ -142,17 +167,17 @@ function baseline(value: Json | undefined): FileBaseline | null {
 export function fileFailureAdvice(code: string): string | undefined {
   const advice: Readonly<Record<string, string>> = {
     file_input_invalid:
-      'The file request has invalid arguments. Check the declared field names, types, required fields and mutually exclusive text or Artifact inputs before a separately authorized corrected request.',
+      'The file request has invalid arguments. Check the declared field names, types and required fields before a separately authorized corrected request.',
     file_read_range_invalid:
-      'The requested line range is invalid. start_line and max_lines must be positive safe integers; omit them to use their declared defaults. Correct the range without changing the intended file.',
+      'The requested line range is invalid. offset and limit must be positive safe integers; omit them to use their declared defaults. Correct the range without changing the intended file.',
     file_edit_invalid:
-      'Supply a nonempty old_text, a string new_text and the exact base_ref from a successful read or mutation. expected_matches defaults to 1; explicitly set the exact positive count for multiple matches. Use declared text or content references, never reconstruct baseline objects.',
+      'Supply a nonempty old_string and a string new_string. Use replace_all only for a request to replace every exact match.',
     file_edit_match_conflict:
-      'The exact old_text occurrence count does not equal expected_matches. This edit did not publish a change. Check the exact text and intended match count against an authorized current read and its complete-file baseline before a separately authorized corrected edit; do not broaden the requested replacement.',
+      'The old_string did not match exactly once. This edit did not publish a change. Check the exact text after reading the current file. Use replace_all only if every exact match should change.',
     file_baseline_invalid:
-      'The file version reference could not be resolved. Copy base_ref from a successful authorized read of this exact path; do not construct a baseline object.',
+      'The file baseline is unavailable. Read the same path before requesting the change.',
     ENOENT:
-      'The target file or a required parent directory does not exist. Omit base_ref to create a new file and missing accepted parents; never pass null. Replacement and edit require an existing file and its exact base_ref. Verify the exact target before another authorized attempt.',
+      'The target file or a required parent directory does not exist. Verify the path. Use write_file to create a new file when the task calls for it.',
     ENOTDIR:
       'A parent path component is a file or a link instead of a usable directory. Inspect the exact parent chain; do not repeat the same target unchanged or select a different target without task authorization.',
     EACCES:
@@ -239,6 +264,7 @@ export function createFileTools(
       required: ['path'],
       properties: {
         path,
+        pages: pdfPages,
         offset: {
           type: 'integer',
           minimum: 1,
@@ -251,7 +277,7 @@ export function createFileTools(
           maximum: Number.MAX_SAFE_INTEGER,
           default: 200,
           description:
-            'Maximum lines to return; defaults to 200. Continue by passing returned next_line as start_line (raw JSON fallback: selection.nextOffset), or request explicit max_lines.',
+            'Maximum lines to return; defaults to 200. Continue by passing returned next_line as offset (raw JSON fallback: selection.nextOffset), or request explicit limit.',
         },
       },
       call: (i, context) =>
@@ -290,7 +316,7 @@ export function createFileTools(
     },
     {
       name: 'edit',
-      required: ['path', 'baseRef'],
+      required: ['path'],
       oneOf: [
         { required: ['find'], not: { required: ['findRef'] } },
         { required: ['findRef'], not: { required: ['find'] } },
@@ -302,9 +328,11 @@ export function createFileTools(
         findRef: referenceSchema,
         replaceRef: referenceSchema,
         occurrences: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER, default: 1 },
+        replaceAll: { type: 'boolean' },
         baseRef: referenceSchema,
       },
       call: async (i, context) => {
+        if (i.base === undefined) throw new AgentError('tool_reference_unavailable');
         const b = baseline(i.base);
         if (!b || (i.occurrences !== undefined && typeof i.occurrences !== 'number'))
           throw new AgentError('file_input_invalid');
@@ -314,7 +342,14 @@ export function createFileTools(
         const path = string(i.path),
           occurrences = i.occurrences === undefined ? 1 : (i.occurrences as number);
         return mutation({ operation: 'edit', path, base: b }, context, () =>
-          files.edit({ path, base: b, find, replace, occurrences }),
+          files.edit({
+            path,
+            base: b,
+            find,
+            replace,
+            occurrences,
+            ...(i.replaceAll === true ? { replaceAll: true } : {}),
+          }),
         );
       },
     },
@@ -324,21 +359,11 @@ export function createFileTools(
     write: 'write_file',
     edit: 'edit_file',
   };
-  const modelParameters: Record<string, Record<string, string>> = {
-    read: { offset: 'start_line', limit: 'max_lines' },
-    edit: {
-      find: 'old_text',
-      replace: 'new_text',
-      occurrences: 'expected_matches',
-      findRef: 'old_text_ref',
-      replaceRef: 'new_text_ref',
-    },
-  };
   const descriptions: Record<string, string> = {
-    read: 'Read UTF-8 file lines. Line numbers start at 1; return at most 200 lines by default. Continue by passing returned next_line as start_line (raw JSON fallback: selection.nextOffset). The returned base_ref binds the complete file identity and version and is required for later modifications.',
+    read: 'Read UTF-8 file lines with one-based offset and limit (default 200). Pass next_line as offset to continue. For an authorized PDF, use pages and omit offset and limit. The default is page 1, and a request returns up to four page images with any available text. A missing ordinary file returns exists:false. The runtime retains the exact editable file baseline for later writes.',
     write:
-      'Create or replace a complete UTF-8 file. Omit base_ref only to create a new file. Missing parent directories within the accepted file scope are created through the same protected no-follow boundary. Replacing a file requires the exact base_ref returned by its successful read or previous mutation and existing parents. Supply exactly one of content or content_ref.',
-    edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its exact base_ref. expected_matches defaults to 1 and must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable old_text_ref and new_text_ref returned for Artifact bodies.',
+      'Create a UTF-8 file or replace its complete content. To replace an existing file, read the same path first. Missing parent directories within the allowed file scope can be created. The runtime checks for concurrent changes before writing. Verify the original result before proceeding after a write with unknown outcome.',
+    edit: 'Replace literal old_string with new_string after reading the same path. Use replace_all only when every exact match should change. Otherwise old_string must match exactly once. The runtime checks for concurrent changes before publishing. After a confirmed conflict, read the current file before deciding on a new edit.',
   };
   return definitions.map((d) => ({
     id: `files.${d.name}`,
@@ -346,7 +371,26 @@ export function createFileTools(
       name: modelNames[d.name]!,
       snakeCase: true,
       resultVersion: '1',
-      ...(modelParameters[d.name] ? { parameterNames: modelParameters[d.name] } : {}),
+      ...(d.name === 'edit'
+        ? { parameterNames: { find: 'old_string', replace: 'new_string' } }
+        : {}),
+      ...(d.name !== 'read'
+        ? {
+            inputSchema: {
+              type: 'object',
+              additionalProperties: false,
+              required: d.name === 'edit' ? ['path', 'find', 'replace'] : ['path', 'content'],
+              properties: (d.name === 'edit'
+                ? {
+                    path,
+                    find: d.properties.find!,
+                    replace: d.properties.replace!,
+                    replaceAll: d.properties.replaceAll!,
+                  }
+                : { path, content: d.properties.content! }) as Record<string, Json>,
+            },
+          }
+        : {}),
     },
     formatModelResult:
       d.name === 'read'
@@ -355,14 +399,14 @@ export function createFileTools(
             if (result.outcome !== 'succeeded') return;
             const value = object(JSON.parse(result.content));
             if (typeof value.base_ref !== 'string') return;
-            const { baseline: _baseline, ...metadata } = value;
+            const { baseline: _baseline, base_ref: _reference, ...metadata } = value;
             return JSON.stringify(metadata);
           },
     ...(capture && (d.name === 'write' || d.name === 'edit')
       ? { resources: { serial: { scope: 'workspace' as const, key: 'files.mutation' } } }
       : {}),
     version: d.name === 'read' ? '4' : d.name === 'write' ? '3' : '2',
-    description: `${descriptions[d.name]} Paths are relative to the fixed workspace root or absolute inside it, never relative to Shell cwd.`,
+    description: `${descriptions[d.name]} Paths are relative to the fixed workspace root, independent of the Shell working directory. Absolute paths are subject to the current file permissions.`,
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -391,11 +435,25 @@ export function createFileTools(
       if (context.signal.aborted)
         return { outcome: 'cancelled', content: 'cancelled_before_file_io' };
       try {
-        const parameters = await fileParameters(object(input), context, files);
+        const parameters = await fileParameters(object(input), context, files, d.name !== 'read');
         const selected =
           parameters.path === undefined
             ? parameters
             : { ...parameters, path: files.relativePath(string(parameters.path)) };
+        if (d.name === 'read' && typeof selected.path === 'string') {
+          if (selected.path.toLowerCase().endsWith('.pdf')) {
+            return await readPdfToolResult({
+              path: string(parameters.path),
+              request: selected,
+              context,
+              source: await files.readBytes(selected.path, {
+                maxBytes: 256 * 1024 * 1024,
+                signal: context.signal,
+              }),
+            });
+          }
+          if (selected.pages !== undefined) throw new AgentError('pdf_options_require_pdf');
+        }
         let value: unknown;
         try {
           value = await d.call(selected, context);
@@ -523,7 +581,7 @@ export function createFileTools(
                 ? 'cancelled'
                 : 'failed',
           content: baselineConflict
-            ? 'file_baseline_conflict: This invocation did not publish its requested change because its supplied baseline or create-only precondition was rejected. The baseline describes the complete file identity and version; this conflict does not prove that another edit targeted the same text. Compare each invocation using its own requested change and receipt. Earlier read content is historical; this failure does not report the current file content. Other successful operations are not rolled back. Do not infer that the file still has its earlier values. Before any separately authorized new edit, read the current file and use its fresh complete-file baseline.' +
+            ? 'file_baseline_conflict: This invocation did not publish its requested change because the retained file baseline or create precondition no longer matched. This conflict does not prove that another edit targeted the same text. Earlier read content is historical; this failure does not report the current file content. Other successful operations are not rolled back. Before any separately authorized new edit, read the same path again so the runtime can use its current baseline.' +
               (error instanceof Error && error.message !== mutationCode ? ` ${error.message}` : '')
             : mutationNext
               ? `${mutationCode}${failedPath === undefined ? '' : ` (${JSON.stringify(failedPath)})`}: ${error instanceof Error && error.message !== mutationCode ? `${error.message} ` : ''}${mutationNext}`

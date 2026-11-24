@@ -496,6 +496,13 @@ type WorkspaceChangesProps = {
   generation: number;
   selection: NativeSelection;
   refreshKey?: string;
+  fileSelection?: { current: WorkspaceChangeSelection | undefined };
+};
+
+export type WorkspaceChangeSelection = {
+  scope: string;
+  repositoryIdentity: string | undefined;
+  path: string;
 };
 
 /** The visible Git tab owns a bounded read, independent of saved tool receipts. */
@@ -508,20 +515,28 @@ export function NativeWorkspaceChanges(props: WorkspaceChangesProps) {
     selection.session.id,
     selection.session.workspaceId,
   ]);
-  return <WorkspaceChangesView key={scope} {...props} />;
+  return <WorkspaceChangesView key={scope} {...props} scope={scope} />;
 }
 
 function WorkspaceChangesView({
   bridge,
   generation,
   selection,
+  scope,
   refreshKey = '',
-}: WorkspaceChangesProps) {
+  fileSelection,
+}: WorkspaceChangesProps & { scope: string }) {
   const viewSelection = selection.viewSelection ?? selection.viewGeneration;
   const storeId = selection.storeId;
   const sessionId = selection.session.id;
   const workspaceId = selection.session.workspaceId;
-  const [selectedPath, setSelectedPath] = useState<string>();
+  const [selectedFile, setSelectedFile] = useState(() => {
+    const remembered = fileSelection?.current;
+    return remembered?.repositoryIdentity && remembered.scope === scope ? remembered : undefined;
+  });
+  useLayoutEffect(() => {
+    if (fileSelection) fileSelection.current = selectedFile;
+  }, [fileSelection, selectedFile]);
   const [layout, setLayout] = useState<'split' | 'unified'>('split');
   const [query, setQuery] = useState('');
   const currentQuery = useRef(query);
@@ -616,8 +631,11 @@ function WorkspaceChangesView({
           throw Error('workspace_change_identity_mismatch');
         failures = 0;
         const bounded = boundedWorkspaceChanges(value.entries);
-        setSelectedPath((previous) => {
-          const selected = previous && bounded.entries.find((entry) => entry.path === previous);
+        setSelectedFile((previous) => {
+          const selected =
+            previous &&
+            previous.repositoryIdentity === value.repositoryIdentity &&
+            bounded.entries.find((entry) => entry.path === previous.path);
           return selected && filterWorkspaceChanges([selected], currentQuery.current).length
             ? previous
             : undefined;
@@ -684,7 +702,7 @@ function WorkspaceChangesView({
         ++epoch;
         pending = false;
         close();
-        setSelectedPath(undefined);
+        setSelectedFile(undefined);
         setState({ bridge, loading: true });
         schedule(0);
         return;
@@ -766,8 +784,18 @@ function WorkspaceChangesView({
           page={current.page}
           query={query}
           onQueryChange={setQuery}
-          selectedPath={selectedPath}
-          onSelectPath={setSelectedPath}
+          selectedPath={
+            selectedFile?.repositoryIdentity === current.page.repositoryIdentity
+              ? selectedFile?.path
+              : undefined
+          }
+          onSelectPath={(path) =>
+            setSelectedFile(
+              path
+                ? { scope, repositoryIdentity: current.page?.repositoryIdentity, path }
+                : undefined,
+            )
+          }
           layout={layout}
           onLayoutChange={setLayout}
           refreshing={current.loading}

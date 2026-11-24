@@ -78,6 +78,45 @@ test('the trusted system context separates base instructions from the selected S
   expect(shellUnavailable.content).not.toContain('Shell:');
 });
 
+test('an identical captured Skill body appears once, with the original tool receipt still attributable', () => {
+  const original: ContextSource = {
+    id: 'skill.body:packing',
+    kind: 'skill',
+    scope: 'work',
+    digest: 'packing-digest',
+    content: 'Confirm the parcel before printing the label.',
+  };
+  const calls: ModelMessage[] = [
+    {
+      role: 'assistant',
+      content: '',
+      toolCalls: [
+        { id: 'skill', name: 'skills.load', arguments: '{"id":"packing"}' },
+        { id: 'file', name: 'files.read', arguments: '{"path":"packing.txt"}' },
+      ],
+    },
+    { role: 'tool', toolCallId: 'skill', sourceIds: ['skill-receipt'], content: original.content },
+    { role: 'tool', toolCallId: 'file', sourceIds: ['file-receipt'], content: original.content },
+  ];
+  const input = assembleModelContext([original], calls);
+  expect(input[0]).toMatchObject({
+    role: 'system',
+    content: original.content,
+    sourceIds: [original.id],
+  });
+  expect(input[2]).toMatchObject({
+    toolCallId: 'skill',
+    sourceIds: ['skill-receipt'],
+    content: 'The full instructions for Skill packing are included in the current context.',
+  });
+  expect(input[3]).toEqual(calls[2]);
+  expect(calls[1]!.content).toBe(original.content);
+  expect(assembleModelContext([], calls)).toEqual(calls);
+  expect(assembleModelContext([{ ...original, content: 'New version.' }], calls)[2]).toEqual(
+    calls[1],
+  );
+});
+
 test('read-only task and automatic rejection guidance remain one deterministic trusted contract', () => {
   const contract = agentContractSource('/actual-workspace');
   expect(contract).toMatchObject({

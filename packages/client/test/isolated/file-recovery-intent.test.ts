@@ -42,7 +42,10 @@ const identity: FileRecoveryIdentity & { contextSelectionId: string } = {
   contextSelectionId: 'selected-current',
 };
 let counter = 0;
-async function plan(scope: FileRecoveryIntent['scope'] = 'both') {
+async function plan(
+  scope: FileRecoveryIntent['scope'] = 'both',
+  executionRoot?: FileRecoveryIntent['checkpoint']['boundary']['executionRoot'],
+) {
   const n = ++counter;
   return planFileRecoveryIntent({
     scope,
@@ -65,6 +68,7 @@ async function plan(scope: FileRecoveryIntent['scope'] = 'both') {
           messageSeq: '0',
           triggerMessageId: 'original-trigger',
           triggerSeq: '3',
+          ...(executionRoot ? { executionRoot } : {}),
         },
       },
       boundary: { messageId: 'selected-message', seq: '9007199254740993' },
@@ -76,6 +80,19 @@ async function plan(scope: FileRecoveryIntent['scope'] = 'both') {
       : {}),
   });
 }
+
+test('recovery intents retain a new checkpoint execution root for all three scopes', async () => {
+  const executionRoot = { epoch: '3', identity: { device: '1', inode: '2' } };
+  for (const scope of ['session', 'code', 'both'] as const) {
+    const intent = await plan(scope, executionRoot);
+    const saved = await parseFileRecoveryIntent(JSON.parse(JSON.stringify(intent)));
+    expect(saved.checkpoint.boundary.executionRoot).toEqual(executionRoot);
+    expect(canonicalFileRecoveryIntent(saved)).toBe(canonicalFileRecoveryIntent(intent));
+  }
+  await expect(
+    plan('code', { ...executionRoot, identity: { device: '1', inode: '9' } }),
+  ).rejects.toThrow('file_recovery_intent_invalid');
+});
 function command(
   i: FileRecoveryIntent,
   leg: 'code' | 'fork',

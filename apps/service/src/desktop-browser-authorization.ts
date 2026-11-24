@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentRuntime } from '@kite-ai/agent';
 import {
+  type BrowserOpenIntent,
   type BrowserSharedPageIdentity,
   browserExtensionId,
   browserModelIntentKey,
+  isBrowserOrchestrator,
 } from '@kite-ai/agent/browser';
 import type {
   AcceptedInformation,
@@ -26,7 +28,7 @@ type Host = Pick<
   | 'beginSessionExport'
   | 'readSessionExportPage'
 >;
-type Intent = { key: string; url: string };
+type Intent = BrowserOpenIntent;
 type Proposal = {
   requestId: string;
   state: 'question' | 'ready' | 'committed' | 'cancelled' | 'expired';
@@ -42,6 +44,7 @@ type DispatchProof = {
   policyDigest?: string;
 };
 type Saved = {
+  newPage?: true;
   requestId: string;
   executionId: string;
   sessionId: string;
@@ -222,6 +225,7 @@ function parseProposal(value: unknown, saved: Saved): Proposal {
     value.requireExisting !== saved.requireExisting ||
     !samePageIdentity(value.existingPage, saved.existingPage) ||
     (saved.existingPage !== undefined && value.page.id !== saved.existingPage.pageId) ||
+    (saved.newPage && value.page.kind !== 'new') ||
     (saved.requireExisting === true &&
       (value.page.kind !== 'existing' || normalizedUrl(value.page.url) !== saved.url))
   )
@@ -269,6 +273,7 @@ export function createDesktopBrowserAuthorization(options: {
   releasedPage?(
     sessionId: string,
     url?: string,
+    identity?: BrowserSharedPageIdentity,
   ): Readonly<{ url: string; identity?: BrowserSharedPageIdentity }> | null | undefined;
   invalidateMissingReleasedPage?(sessionId: string, identity: BrowserSharedPageIdentity): void;
 }) {
@@ -285,8 +290,7 @@ export function createDesktopBrowserAuthorization(options: {
       : null;
     if (
       parent?.kind !== 'tool' ||
-      parent.definitionId !== 'browser.execute' ||
-      parent.definitionVersion !== '1' ||
+      !isBrowserOrchestrator(parent.definitionId, parent.definitionVersion) ||
       !parent.runId ||
       parent.sessionId !== execution.sessionId ||
       parent.originStoreId !== execution.originStoreId ||
@@ -337,7 +341,9 @@ export function createDesktopBrowserAuthorization(options: {
       own.cancelRequestedAt !== null ||
       !object(own.input) ||
       (own.input.key ?? browserModelIntentKey(own.id)) !== intent.key ||
-      normalizedUrl(own.input.url) !== intent.url
+      normalizedUrl(own.input.url) !== intent.url ||
+      own.input.newPage !== intent.newPage ||
+      !samePageIdentity(own.input.existingPage, intent.existingPage)
     )
       throw Error('browser_page_grant_scope_invalid');
     context.signal.throwIfAborted();
@@ -983,6 +989,8 @@ export function createDesktopBrowserAuthorization(options: {
           saved.attempt !== own.attempt ||
           saved.key !== intent.key ||
           saved.url !== intent.url ||
+          saved.newPage !== intent.newPage ||
+          (intent.existingPage && !samePageIdentity(saved.existingPage, intent.existingPage)) ||
           (saved.dispatch !== undefined && !sameDispatch(saved.dispatch, authorized)))
       )
         return result('browser_page_grant_intent_conflict');
@@ -1005,7 +1013,8 @@ export function createDesktopBrowserAuthorization(options: {
           | null
           | undefined;
         try {
-          released = options.releasedPage?.(own.sessionId, intent.url);
+          if (!intent.newPage)
+            released = options.releasedPage?.(own.sessionId, intent.url, intent.existingPage);
         } catch (error) {
           // The trusted metadata lookup is passive and runs before any remote intent.
           if (
@@ -1017,6 +1026,8 @@ export function createDesktopBrowserAuthorization(options: {
             return result(error.message);
           throw error;
         }
+        if (intent.existingPage && !samePageIdentity(released?.identity, intent.existingPage))
+          return result('browser_page_existing_missing');
         const requireExisting = normalizedUrl(released?.url) === intent.url,
           existingPage =
             requireExisting && pageIdentity(released?.identity)
@@ -1033,7 +1044,9 @@ export function createDesktopBrowserAuthorization(options: {
           rootWorkCommandId: own.rootWorkCommandId,
           rootWorkSeq: own.rootWorkSeq,
           subjectId: own.subjectId,
-          ...intent,
+          key: intent.key,
+          url: intent.url,
+          ...(intent.newPage ? { newPage: true as const } : {}),
           ...(requireExisting ? { requireExisting: true as const } : {}),
           ...(existingPage ? { existingPage } : {}),
           state: 'preparing',
@@ -1076,6 +1089,7 @@ export function createDesktopBrowserAuthorization(options: {
                 executionId: saved.executionId,
                 browserId: saved.key,
                 url: saved.url,
+                ...(saved.newPage ? { newPage: true } : {}),
                 ...(saved.requireExisting ? { requireExisting: true } : {}),
                 ...(saved.existingPage ? { existingPage: { ...saved.existingPage } } : {}),
               },

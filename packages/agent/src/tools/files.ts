@@ -143,6 +143,7 @@ export interface WorkspaceFiles {
     find: string;
     replace: string;
     occurrences: number;
+    replaceAll?: boolean;
   }): Promise<FileSnapshot>;
   list(input?: {
     path?: string;
@@ -1144,14 +1145,15 @@ export function createWorkspaceFiles(options: {
         at !== -1;
         at = original.content.indexOf(input.find, cursor)
       ) {
-        if (++count > input.occurrences) fail('file_edit_match_conflict');
+        if (++count > input.occurrences && !input.replaceAll) fail('file_edit_match_conflict');
         const part = original.content.slice(cursor, at);
         bytes += Buffer.byteLength(part) + Buffer.byteLength(input.replace);
         if (max !== undefined && bytes > max) fail('file_too_large');
         pieces.push(part, input.replace);
         cursor = at + input.find.length;
       }
-      if (count !== input.occurrences) fail('file_edit_match_conflict');
+      if (input.replaceAll ? count === 0 : count !== input.occurrences)
+        fail('file_edit_match_conflict');
       const tail = original.content.slice(cursor);
       if (max !== undefined && bytes + Buffer.byteLength(tail) > max) fail('file_too_large');
       pieces.push(tail);

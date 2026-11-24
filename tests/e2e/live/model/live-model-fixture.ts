@@ -29,6 +29,12 @@ export interface LiveModelAttemptFailure {
   reason: ModelAttemptError['reason'] | 'model_failed';
 }
 
+export interface LiveModelWireResponse {
+  status: number;
+  tools: string[];
+  transportFailure?: { name: string; code?: string };
+}
+
 /** Preserve only the SDK's finite neutral classification, never an arbitrary error payload. */
 export function describeLiveModelAttemptFailure(
   requestId: string,
@@ -106,7 +112,7 @@ export async function createLiveModelFixture(options: {
   observe?(state: {
     event: string;
     requests: readonly ModelRequest[];
-    wire: readonly { status: number; tools: string[] }[];
+    wire: readonly LiveModelWireResponse[];
     usage: readonly ModelUsage[];
     metadata: Readonly<Record<string, unknown>>;
   }): void;
@@ -138,7 +144,7 @@ export async function createLiveModelFixture(options: {
   const requests: ModelRequest[] = [];
   const calls: ModelToolCall[] = [];
   const usage: ModelUsage[] = [];
-  const wire: { status: number; tools: string[] }[] = [];
+  const wire: LiveModelWireResponse[] = [];
   const wireRequests: {
     physicalIndex: number;
     requestId: string | null;
@@ -253,7 +259,7 @@ export async function createLiveModelFixture(options: {
         tools.every((name) => /^[a-z][a-z0-9_]{0,63}$/.test(name)),
         'wire_name_invalid',
       );
-      const observation = { status: 0, tools };
+      const observation: LiveModelWireResponse = { status: 0, tools };
       const physicalIndex = wire.length;
       options.beforeWireRequest?.({
         physicalIndex,
@@ -285,6 +291,14 @@ export async function createLiveModelFixture(options: {
           ? await options.transportResponse(response, physicalIndex)
           : response;
       } catch (error) {
+        const name = error instanceof Error ? error.name : '';
+        const code = (error as { code?: unknown } | undefined)?.code;
+        observation.transportFailure = {
+          name: ['AbortError', 'TimeoutError', 'TypeError'].includes(name) ? name : 'Error',
+          ...(typeof code === 'string' && /^(?:E[A-Z][A-Z_]{1,31}|[A-Z]+_[A-Z_]{1,32})$/.test(code)
+            ? { code }
+            : {}),
+        };
         observe('http_transport_failed');
         if (options.preserveSdkAttemptErrors) throw error;
         throw Error('live_model_transport_failed');

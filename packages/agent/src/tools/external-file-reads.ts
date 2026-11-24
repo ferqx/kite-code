@@ -196,8 +196,7 @@ export function withExternalFileReads(options: {
           ? tool
           : {
               ...tool,
-              description:
-                'Read UTF-8 file lines, at most 200 by default. Paths are relative to the fixed workspace root or absolute, including outside the workspace. Continue with start_line/max_lines. Workspace reads return a complete-file baseline for later edits; external reads are read-only and have no baseline or workspace checkpoint. Permission rules and protected private/runtime paths still apply. External reads do not load project instructions.',
+              description: `${tool.description} External reads do not grant write permission or load project instructions. External files are outside workspace checkpoints.`,
               inputSchema: {
                 ...tool.inputSchema,
                 properties: {

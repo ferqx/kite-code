@@ -94,6 +94,10 @@ export function mergeTrajectoryPresentation(
     (update.readingAnchor.eventId !== rendered.readingAnchor.eventId ||
       update.readingAnchor.offset !== rendered.readingAnchor.offset ||
       update.readingAnchor.scrollTop !== rendered.readingAnchor.scrollTop);
+  const filteredAnchorChanged =
+    sameReader &&
+    canonicalSerialize(update.filteredReadingAnchor ?? null) !==
+      canonicalSerialize(rendered.filteredReadingAnchor ?? null);
   if (
     !modeChanged &&
     !tabChanged &&
@@ -113,7 +117,8 @@ export function mergeTrajectoryPresentation(
     !detailAnchorChanged &&
     !expandedChanged &&
     !selectedChanged &&
-    !anchorChanged
+    !anchorChanged &&
+    !filteredAnchorChanged
   )
     return current;
   return {
@@ -175,5 +180,8 @@ export function mergeTrajectoryPresentation(
     ...(expandedChanged ? { expandedEventIds: [...update.expandedEventIds] } : {}),
     ...(selectedChanged ? { selectedEventId: update.selectedEventId } : {}),
     ...(anchorChanged ? { readingAnchor: { ...update.readingAnchor } } : {}),
+    ...(filteredAnchorChanged && update.filteredReadingAnchor
+      ? { filteredReadingAnchor: { ...update.filteredReadingAnchor } }
+      : {}),
   };
 }

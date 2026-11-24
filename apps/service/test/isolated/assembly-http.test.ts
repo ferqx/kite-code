@@ -388,9 +388,12 @@ test('Skill dependency claims do not grant a host capability and unknown selecte
   }
 });
 
-test('Skill tools reject removed description arguments, continue with selectors and preserve original historical calls', async () => {
-  const oldLoad = { skill_id: 'guide', description: '读取任务技能' },
-    oldResource = { skill_id: 'guide', path: 'reference.md', description: '阅读任务参考' };
+test.each([
+  ['description', '读取任务技能'],
+  ['version', 'a'.repeat(64)],
+])('Skill tools reject the removed %s field, continue with selectors and preserve original historical calls', async (key, value) => {
+  const oldLoad = { skill_id: 'guide', [key]: value },
+    oldResource = { skill_id: 'guide', path: 'reference.md', [key]: value };
   const provider = endpoint([
     { name: 'load_skill', input: oldLoad },
     { name: 'load_skill', input: { skill_id: 'guide' } },
@@ -426,7 +429,9 @@ test('Skill tools reject removed description arguments, continue with selectors 
     for (const name of ['load_skill', 'read_skill_resource']) {
       const schema = declarations.find((tool) => tool.function.name === name)!.function.parameters;
       expect(schema.required).toEqual(name === 'load_skill' ? ['skill_id'] : ['skill_id', 'path']);
-      expect(schema.properties).not.toHaveProperty('description');
+      expect(Object.keys(schema.properties).sort()).toEqual(
+        name === 'load_skill' ? ['skill_id'] : ['path', 'skill_id'],
+      );
       expect(schema.additionalProperties).toBe(false);
     }
     const executions = (await f.store.listExecutions('session')).filter(

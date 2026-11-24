@@ -52,6 +52,8 @@ Auto 下准确 `builtin.shell/git.worktree@1` Tool 不调用 generic check 或�
 
 ## 删除保护
 
+[工具](../git-worktree.ts)在只读准备后检查 Git 公共元数据目录和目标检出目录都处于当前工作区写权限内，再接纳变更 Job。[Shell 宿主](../../permissions/shell.ts)按实际权限在派发前复核同一冻结删除计划，覆盖旧计划和权限收窄。任何一处越界时返回权限不足，Git 删除未开始，原登记和检出目录均保留。
+
 [worker](worker.ts)仅删除同仓库、唯一登记且定位双向一致的 linked worktree，保护主树、当前来源、locked/prunable、嵌套树和 Git 元数据。prepare 保存根、pointer 内容、admin、HEAD、登记及文件系统代际，变更前重新比较。索引冲突、gitlink、assume-unchanged、skip-worktree、tracked/untracked/ignored 内容、额外空目录、链接、特殊文件及不完整扫描都拒绝。
 
 status 为空不单独证明 tracked 内容安全。每个普通 stage-0 文件通过不跟随链接的只读 FD 交给 Git 重新计算内容 OID，并匹配索引中的真实 blob；stored blob 也完整流式读取和核验对象 OID，缺失或正文损坏均拒绝。文件哈希保留 CRLF、ident、working-tree-encoding 等 Git 内建 clean 转换，外部 filter 继续禁用；POSIX 另核实际 owner executable 位，不沿用 `core.filemode=false` 的忽略。读取前后、目录扫描及提交检查后重核文件代际，stat 缓存不参与内容证明。Windows 继续以原生 reparse 和内容检查为准，不承诺 POSIX executable 位语义。

@@ -63,6 +63,8 @@ export function toolResultPresentation(input: {
     ['shell.execute', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].includes(id)
   ) {
     const modelOutput = details.outputFormat === 'model-preview';
+    const shortSession =
+      typeof details.session_id === 'number' && content.session_id === details.session_id;
     if (modelOutput) {
       if (
         !['shell.execute', 'shell.read'].includes(id) ||
@@ -71,7 +73,7 @@ export function toolResultPresentation(input: {
         ['stdout', 'stderr', 'output'].some((key) => details[key] !== undefined)
       )
         return;
-    } else if (canonicalJson(content) !== canonicalJson(details)) return;
+    } else if (!shortSession && canonicalJson(content) !== canonicalJson(details)) return;
     const ref = object(details.ref),
       observed = object(details.execution),
       output = object(details.output);
@@ -104,7 +106,11 @@ export function toolResultPresentation(input: {
           : ['accepted', 'cancelRequested', 'timedOut', 'truncated', 'terminal'],
         'boolean',
       ),
-      ...(!modelOutput ? pick(details, ['stdout', 'stderr', 'droppedBytes'], 'string') : {}),
+      ...(shortSession && typeof content.output === 'string'
+        ? { stdout: content.output }
+        : !modelOutput
+          ? pick(details, ['stdout', 'stderr', 'droppedBytes'], 'string')
+          : {}),
       ...(typeof operationDetails?.exitCode === 'number'
         ? { exitCode: operationDetails.exitCode }
         : {}),
@@ -126,6 +132,23 @@ export function toolResultPresentation(input: {
       ...pick(details, ['truncated'], 'boolean'),
       ...pick(details, ['characters'], 'number'),
       ...(typeof args.url === 'string' ? { url: args.url } : {}),
+    };
+  } else if (
+    extension === 'builtin.browser' &&
+    version === '1' &&
+    id.startsWith('browser.structured.')
+  ) {
+    if (
+      !Array.isArray(details.operations) ||
+      canonicalJson(content) !== canonicalJson(details.value ?? null)
+    )
+      return;
+    const observation = object(content.observation) ?? content;
+    view = {
+      kind: 'browser',
+      operation: 'execute',
+      ...pick(observation, ['title', 'url'], 'string'),
+      ...(typeof observation.snapshot === 'string' ? { text: observation.snapshot } : {}),
     };
   } else if (extension === 'builtin.browser' && version === '1' && id === 'browser.execute') {
     if (

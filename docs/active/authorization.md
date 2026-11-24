@@ -41,7 +41,7 @@ Auto 复用沿既有 Command／policy evidence，不新增授权账本。已有�
 
 当前 Store formatMajor=1，使用本轮独立 reviewed baseline。profile.json 的 schemaChecksum 在打开 SQLite 前排除不匹配的历史结构，数据库仍独立核完整 schema/checksum；不转换、清空或改写原库。API 保持 `/v1` 并原位替换字段，不保留旧答案／旧回执 reader；Tool／Job 定义和 worktree worker 协议版本保持。具体消费及撤销合同归[grant owner](../../packages/agent/src/storage/sqlite/permission-grants.README.md)。
 
-用户2026-10-29进一步确认：准确内置浏览器能力免自动审核和用户审批，不受三种模式的常规逐项审批分支影响。可信capability工厂及policy双重核固定builtin.browser@1定义，保真实effects和硬能力、页面／任务／租约／取消／unknown约束；Service／Workflow不把审批重新加回，也不把网络输入伪装只读。Native新任务正常释放控制并final，不装配人工等待／Continue；新消息新Run在VM准入前等原Job准确收口，只以真实acquire保留的私有pageId／incarnation重新绑定原页，URL不代替身份，新引用重新取得；同URL别页、身份替换或缺页不能作为替代。Main网页所有权独立于租约／任务，观察切换不关闭网页。旧拒绝、Question和unknown不转为新控制权，原安全事实和历史格式保留。
+用户2026-10-29进一步确认：准确内置浏览器能力免自动审核和用户审批，不受三种模式的常规逐项审批分支影响。可信capability工厂及policy双重核固定builtin.browser@1定义，保真实effects和硬能力、页面／任务／租约／取消／unknown约束；Service／Workflow不把审批重新加回，也不把网络输入伪装只读。Native新任务正常释放控制并final，不装配人工等待／Continue；新消息新Run在VM准入前等原Job准确收口，只以真实acquire保留的私有pageId／incarnation重新绑定原页，URL不代替身份，新引用重新取得；同URL别页、身份替换或缺页不能作为替代。Main网页所有权独立于租约／任务，观察切换不关闭网页。 Native 用户停止浏览器任务时，经同 Store、同 Session、同主体和页面代次校验，取消该租约绑定的原 Run。模型只可释放自己的浏览器控制。旧拒绝、Question和unknown不转为新控制权，原安全事实和历史格式保留。
 
 原任务身份由[resolveExecutionRun](../../packages/agent/src/execution/task-origin.ts)在Core统一沿有界、同Store／Session／RootWork／主体父链解析；嵌套Operation的runId保持真实null，通用审核上下文也可读取已验证的原任务，不再把直接runId缺失当作任务必然不可用。权限读取的任务／计划仍是证据，不是grant。
 

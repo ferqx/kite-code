@@ -507,6 +507,7 @@ test('tree selection made during a held seek survives the verified cursor commit
   ));
 
 test.each([
+  'trajectory_bundle_evidence_omitted',
   'trajectory_evidence_missing',
   'trajectory_evidence_unavailable',
   'trajectory_bundle_section_integrity',
@@ -529,7 +530,10 @@ test.each([
         '思考',
       );
       await act(async () => new Promise((resolve) => setTimeout(resolve, 5)));
-      expect(host.textContent).toContain(evidenceCode);
+      if (evidenceCode === 'trajectory_bundle_evidence_omitted') {
+        expect(host.textContent).toContain('此包未包含该材料。');
+        expect(host.textContent).not.toContain('重试读取材料');
+      } else expect(host.textContent).toContain(evidenceCode);
       expect(host.textContent).not.toContain('轨迹读取未完成');
       expect(calls.filter((call) => call.method === 'evidence.open')).toHaveLength(2);
       expect(calls.filter((call) => call.method === 'events')).toHaveLength(1);

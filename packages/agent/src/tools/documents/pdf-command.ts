@@ -7,6 +7,7 @@ import {
   PDFDocument,
   PDFDropdown,
   type PDFFont,
+  PDFName,
   PDFOptionList,
   PDFTextField,
 } from 'pdf-lib';
@@ -45,6 +46,43 @@ const text = (value: unknown): string =>
 async function bytes(path: unknown, max = 256 * 1024 * 1024) {
   if (typeof path !== 'string') return fail();
   return readBoundedDocument(path, max);
+}
+
+export async function inspectPdfFields(source: string, signal: AbortSignal) {
+  signal.throwIfAborted();
+  const document = await PDFDocument.load(await bytes(source), { updateMetadata: false });
+  signal.throwIfAborted();
+  const fields = document.getForm().getFields();
+  if (fields.length > 1000) fail('pdf_field_report_limit');
+  const report = {
+    success: true,
+    pages: document.getPageCount(),
+    fields: fields.map((field) => {
+      const name = field.getName();
+      if (field instanceof PDFTextField)
+        return { name, type: 'text', value: field.getText() ?? null };
+      if (field instanceof PDFCheckBox) {
+        const value = field.acroField.dict.get(PDFName.of('V'));
+        const widgets = field.acroField.getWidgets();
+        if (widgets.length > 1000) fail('pdf_field_report_limit');
+        return {
+          name,
+          type: 'checkbox',
+          value: value instanceof PDFName ? value.toString() : null,
+          widgets: widgets.map((widget) => ({
+            appearance: widget.getAppearanceState()?.toString() ?? null,
+            onValue: widget.getOnValue()?.toString() ?? null,
+          })),
+        };
+      }
+      if (field instanceof PDFDropdown || field instanceof PDFOptionList)
+        return { name, type: 'choice', value: field.getSelected(), options: field.getOptions() };
+      return { name, type: 'unsupported' };
+    }),
+  };
+  if (Buffer.byteLength(JSON.stringify(report)) > 1024 * 1024) fail('pdf_field_report_limit');
+  signal.throwIfAborted();
+  return report;
 }
 function lines(value: string, font: PDFFont, size: number, width: number) {
   const result: string[] = [];

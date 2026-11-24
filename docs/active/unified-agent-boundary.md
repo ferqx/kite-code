@@ -204,6 +204,8 @@ QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完
 
 Agent Browser 沿原 Tool／browser.session Job／Query／Action 保持所属Session与未知操作合同。原生所有权按平台由Linux PID namespace或macOS独占launchd coalition提供；Native侧栏只观察最新帧，切会话不取消Job。平台、资产、预算、准确停止及本轮真实证据归[Browser owner](../../packages/agent/src/tools/browser/README.md)，不改变公开API或Tool版本，也不把手动网页标签变成Agent执行权。
 
+Native 结构化 Browser 的进程槽归实际页面 Job，模型操作沿活动 Run 保管观察与元素身份。内部脚本入口另以 `browser.code_session` Job 保管代码 worker 和它的进程槽。两者共用准确页面准入和原操作回执。
+
 MCP 的 resources/prompts、live-only `mcp.catalogue.refresh` 均是普通 Tool/Action，绑定准确原 connection Job/key/configDigest/generation，read/get 再核成功目录 Execution 与 descriptor digest。刷新不冷连接、不变更原 connection 记录；新 schema 在下一安全 Step 生效。runless 调用从真实 Session/Workspace 核当前 selected-server 后才委托外部权限，宽权限不能跳过来源范围。独立 `builtin.mcp.management` 的 `mcp.servers` Query 与 `mcp.server.select` Action 只管理 trusted programmatic registry 的选择；真实六字段 read-set/Workspace identity 与 HostMutation 保原未知回执。默认原始来源、项目批准与认证绑定按[来源提案](../../.agents/notes/proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)继续实施，OAuth原认证合同归[认证边界](mcp-authentication.md)，Native完整设置由[Desktop owner](../../apps/desktop/README.md#native-mcp-完整设置)维护；完整浏览器/vault和平台资格仍按实际验收核对。
 
 公开 HTTP DTO 的来源为[Service schema](../../apps/service/src/http/schema/index.ts)，生成到 Client 目录与 OpenAPI；领域/SQL记录通过明确投影连接，不能直接成为 renderer 契约。正式客户端切换完成前，HTTP/Client 的交付只覆盖证据记录的切片。新的连接必须核对启动前选择的目标与必需接口，Store 写身份仍在各自事务内核对。
@@ -228,7 +230,7 @@ MCP 的完整 schema 编译及参数／结果校验继续由所属 Worker 负责
 
 受管 Agent Browser 沿 [Service 默认装配](../../apps/service/README.md#受管-browser-默认装配) → [Agent Browser Extension／Controller](../../packages/agent/src/tools/browser/README.md) → 原 `browser.session` Job 与进程监督，Native 沿既有 Extension Query／Action 和 Main 已核实 scope 观察／操作。兼容独立浏览器由原进程 owner 管理；Native 普通页候选由 Main 持有同一 WebContentsView，只有经准确许可取得的租约才能自动化。两条路径不新增模型 Loop、Core 业务表或 renderer 控制旁路。`browser.view` 只读且不启动资源；网页、renderer、工具参数不能提供 Session authority、原生路径、CDP 或登录状态文件。宿主禁用是权限硬上限，Full 模式和 JSONC 不能解除。
 
-新 Native 默认浏览器候选经全局内置 `computer-use` → `browser.execute` → `browser.code_session` 与原工具 Operations 派发；旧冻结与显式原子配置保持。生成代码只在 macOS Seatbelt 限制的独立 Bun 进程运行，宿主 API 等待时由准确进程身份暂停，恢复前核原目标及逐项权限；缺资产或隔离能力返回 unavailable。代码Job只终止VM与当前子调用，Browser Job独立监督原Run并收口准确租约；新Run在VM准入前等待旧终态Job真实stop／dispose，unknown不被替换。首次Native导航unknown仅在Main准确release回执、原transport完整关闭及原Run终态均证实后，允许下一Run按actualURL／原pageId／incarnation重新绑定，先取得新snapshot；旧unknown及业务效果不改写，其它URL／旧引用／输入在新观察前拒绝。业务操作unknown或真实cleanupunknown无此资格。共享页确认释放后的lastKnown元数据没有旧控制权或存在证明，本Run新候选id只允许首次snapshot经原open重新绑定；Service将原acquire获得的私有pageId／incarnation随同URL已释放目标耐久收紧为requireExisting，Main精确重核原页，缺失／身份替换／变址不能创建、导航或刷新；普通新URL新建页，不导航覆盖原页，UI scope清理仅撤下呈现，Main页面寿命独立于Run／租约；onRunEnd通知不承担清理保证。正式 PNG 由原 Tool Artifact／modelImages 核身份后进入现有两种 wire，Main 的私有 capture proof 不作为公开调试入口。模型观察、控制装饰和显式冻结注释分别调度。原子操作已派发后的 unknown、取消与页面效果保持原事实，不由代码批次失败抹除；具体边界和实机剩余范围见 [Browser owner](../../packages/agent/src/tools/browser/README.md)及 [Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
+新 Native 的结构化浏览器工具沿原 Tool／Job／Main 页面授权执行。模型只持有任务范围内的页面、当前元素或截图引用，授权仍由准确 Run、Page、代次、控制权和原结果链核验。已确认释放的页面凭原 Main 身份重新绑定；同址页互不替代。首次导航效果未知时，只有原清理与页身份均核实才可取得新只读观察。已派发效果未知与取消分别保留。正式 PNG 沿原 Artifact／modelImages 通道交付。维护细节和资格见 [Browser owner](../../packages/agent/src/tools/browser/README.md) 与 [Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
 
 Native浏览器的navigate／url／title沿原transport改由Main-owned driver处理：真实WebContents是页面状态与导航权威，Service用原nativeResult互斥／inflight／取消和闭合六字段回执核对原lease、pageId、incarnation及navigation。Main只派发一次原始Page.navigate并等本次主框架真实就绪；原观察门禁仍拒跨文档，派发前拒绝与派发后unknown分别保存。Native capture metadata也共用Main事实，回调留在可信Host。现有Rust语义读取、独立浏览器、统一Browser API、Agent Loop和审批豁免保持；没有添加新的公开工具或提升协议版本。源合同、理由与实际资格归上述Browser／Service／Desktop owner。
 
@@ -329,7 +331,7 @@ Session rename/delete 为原 root creator 的 Decimal64 控制 CAS。原命令�
 
 [原始 Session 导出](../../packages/agent/src/storage/sqlite/export/README.md)通过 begin/page/text/final verify 冻结同 Worker 的 root/主体/Store、全局 cursor、data_version 与 11 个 section 完整高水位/计数。每个短只读事务复核原 manifest；可观察提交、换 Worker、缺行、范围错误或取消均不发布完成标记，不持跨请求生产事务。未知内容与 provenance 保原文本；仅实际文本列 descriptor 提供准确 byte-range，不扫描 payload 推授权。SDK 核每页完整性与全文 EOF/hash，最后 Core proof 成功才发布 records/text completion；Artifact 仅保原 scope 引用，媒体核验、数据库备份和文件原子发布另由各自 owner 负责。
 
-Context 压缩为单选可信算法 slot，通过同一 Loop 的记录 Model Execution 保存完整输入、覆盖范围与摘要出处；提交前原上下文仍有效。后续输入使用带原 source ID 的低权限摘要，原历史、Model/Artifact 引用和 contextSelectionId 不因压缩改标。人工完成与摘要 publication 同一最终事务；自动失败保留旧选择，未变化的输入不立即无限重试。重置须由原 slot 对完整展开输入明确预检，缺少或拒绝预检保留活动点并且零 Provider。slot 的实际摘要校验、目录 fingerprint、来源新鲜度、取消与必要条件仍在发布前核对，不把结构完整当作已知模型窗口安全。HTTP/Client 只保存原受理意图，真实终态查原 Run；未知回执不重发。默认 pure 算法和实际 SDK 子场景见[Service owner](../../apps/service/README.md)。
+Context 压缩为单选可信算法 slot，通过同一 Loop 的记录 Model Execution 保存完整输入、覆盖范围与摘要出处；提交前原上下文仍有效。后续输入使用带原 source ID 的低权限摘要，原历史、Model/Artifact 引用和 contextSelectionId 不因压缩改标。人工完成与摘要 publication 同一最终事务；自动失败保留旧选择，未变化的输入不立即无限重试。重置须由原 slot 对完整展开输入和当前工具定义明确预检，缺少或拒绝预检保留活动点并且零 Provider。普通 Service 以冻结模型显式配置的输入预算和本地估算作默认预检，独立于自动压缩水位。slot 的实际摘要校验、目录 fingerprint、来源新鲜度、取消与必要条件仍在发布前核对，不把结构完整当作已知模型窗口安全。HTTP/Client 只保存原受理意图，真实终态查原 Run；未知回执不重发。默认 pure 算法和实际 SDK 子场景见[Service owner](../../apps/service/README.md)。
 
 公共 Message 可带只读 `compression` 显示身份，仅由同 Session/Run 的准确 Model 与 snapshot 推导；已发布、失败、取消和未发布分开。压缩 Model 的完整正文不具最终回复资格，普通模型正文也不能先于实际 Run completed 取得最终回复资格。默认已知窗口使用总窗口 75% 水位，不能缩小或无继续空间的摘要以明确原 Run 失败收束；未知窗口维护点不成为 Provider 容量上限。
 
@@ -543,7 +545,7 @@ Native首次页面授权候选在原browser.open Tool内先取得既有持久Que
 
 ## Trajectory 与 Trace 独立消费者边界
 
-普通 Shell 的 1 MiB 输出保留预算覆盖原 Job 的头尾及省略区间。Store 沿原输出事件顺序发布稳定前缀，原终态前追加省略记录和保留的尾部，公开游标继续读取已发布记录。模型输出预算应用于 `shell_execute` 和 `shell_read` 保存并发送给模型的同一输出段。桌面工具卡复用该段，旧回执走原预算投影。Main 在原工具消息核验时准备延迟 Shell 输出，桌面展开直接呈现。完整读取游标仍绑定原 Job 的有界输出记录。采集和呈现的当前合同归 [Jobs owner](../../packages/agent/src/jobs/README.md) 与 [Shell tools](../../packages/agent/src/tools/shell.README.md)。
+普通 Shell 的 1 MiB 输出保留预算覆盖原 Job 的头尾及省略区间。Store 沿原输出事件顺序发布稳定前缀，原终态前追加省略记录和保留的尾部，公开游标继续读取已发布记录。模型输出预算应用于 `exec_command` 和 `poll_command` 保存并发送给模型的同一输出段。桌面工具卡复用该段，旧回执走原预算投影。Main 在原工具消息核验时准备延迟 Shell 输出，桌面展开直接呈现。完整读取游标仍绑定原 Job 的有界输出记录。采集和呈现的当前合同归 [Jobs owner](../../packages/agent/src/jobs/README.md) 与 [Shell tools](../../packages/agent/src/tools/shell.README.md)。
 
 [Trajectory](../../packages/trajectory/README.md)与[Trace SDK](../../packages/trace-extension-sdk/README.md)是明确新增的两个 workspace，根清单共十包。纯协议保存闭合事件／Evidence／完整性、固定上界分页、原来源身份和确定性投影；SDK公共入口只承担有限消费、broker context与明确ACK／reject，不提供通用CAS／outbox。纯入口不导入Agent、SQLite、Provider、React、Electron或宿主网络／文件I/O；SDK本地打包叶与guest入口分别检查。
 

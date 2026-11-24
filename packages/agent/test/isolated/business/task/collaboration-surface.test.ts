@@ -405,7 +405,7 @@ test('exact work references keep old completion separate and cannot interrupt a 
   }
 }, 15000);
 
-test('six public tools reuse one child Session, preserve responsibility and observe real completion without consuming it', async () => {
+test('public collaboration tools reuse one child Session, preserve responsibility and observe real completion without consuming it', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-collaboration-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   const storeId = (await store.getMetadata()).storeId;
@@ -435,6 +435,9 @@ test('six public tools reuse one child Session, preserve responsibility and obse
   let stage = 0,
     childCalls = 0,
     childId = '',
+    childTarget = '',
+    firstDispatch = '',
+    secondDispatch = '',
     firstWaitSeq = '0';
   const expectedNames = [
     'follow_up_agent',
@@ -442,110 +445,145 @@ test('six public tools reuse one child Session, preserve responsibility and obse
     'list_agents',
     'send_agent_message',
     'spawn_agent',
-    'wait_agent_events',
+    'wait_agent',
   ];
+  let parentFailure: unknown;
   const parent: ModelAdapter = {
     async *stream(request) {
-      expect(request.tools.map((tool) => tool.id).sort()).toEqual(expectedNames);
-      const spawn = request.tools.find((tool) => tool.id === 'spawn_agent')!;
-      expect(spawn.description).toContain('Default role worker: General trusted child');
-      expect(spawn.inputSchema).toMatchObject({
-        properties: {
-          preset: {
-            enum: ['investigator'],
-            description: expect.stringContaining('investigator: Custom read-only capabilities'),
+      try {
+        expect(request.tools.map((tool) => tool.id).sort()).toEqual(expectedNames);
+        const spawn = request.tools.find((tool) => tool.id === 'spawn_agent')!;
+        expect(spawn.description).toContain('Default role worker: General trusted child');
+        expect(spawn.inputSchema).toMatchObject({
+          properties: {
+            agent_type: {
+              enum: ['investigator'],
+              description: expect.stringContaining('investigator: Custom read-only capabilities'),
+            },
           },
-        },
-      });
-      expect(spawn.description).not.toContain('Unopened private role');
-      expect(JSON.stringify(spawn.inputSchema)).not.toContain('Unopened private role');
-      const last = request.messages.filter((message) => message.role === 'tool').at(-1);
-      const encoded = last?.content.includes('Complete artifact body:\n')
-        ? last.content.split('Complete artifact body:\n')[1]!
-        : last?.content;
-      const body = encoded ? JSON.parse(encoded) : null;
-      let events: ModelEvent[];
-      switch (stage++) {
-        case 0:
-          events = call('spawn_agent', { prompt: originalAssignment, task_name: '交付复核' });
-          break;
-        case 1:
-          expect(body).toMatchObject({ accepted: true, state: 'queued' });
-          childId = body.agent_id;
-          events = call('wait_agent_events', { wait_ms: 10000 });
-          break;
-        case 2:
-          expect(body.reason).toBe('events');
-          expect(body.events).toContainEqual(
-            expect.objectContaining({ kind: 'completed', agent_id: childId }),
-          );
-          expect(body).not.toHaveProperty('next_cursor');
-          firstWaitSeq = body.events.at(-1).seq;
-          expect(firstWaitSeq).toMatch(/^[1-9][0-9]*$/);
-          events = call('list_agents', { limit: 1 });
-          break;
-        case 3:
-          expect(body.items).toHaveLength(1);
-          expect(body.next_cursor).toBeNull();
-          expect(body.items[0]).toMatchObject({
-            agent_id: childId,
-            task_name: '交付复核',
-            assignment_source: { content: originalAssignment },
-            last_outcome: 'succeeded',
-          });
-          events = call('follow_up_agent', {
-            agent_id: childId,
-            content: 'Continue in the same saved Session',
-          });
-          break;
-        case 4:
-          expect(body).toMatchObject({
-            accepted: true,
-            agent_id: childId,
-            mode: 'new_turn',
-            state: 'queued',
-          });
-          events = call('wait_agent_events', { wait_ms: 10000 });
-          break;
-        case 5:
-          expect(body.reason).toBe('events');
-          expect(
-            body.events.every((event: { seq: string }) => BigInt(event.seq) > BigInt(firstWaitSeq)),
-          ).toBe(true);
-          events = call('list_agents', { agent_ids: [childId], limit: 1 });
-          break;
-        case 6: {
-          expect(body.items).toHaveLength(1);
-          expect(body.items[0].agent_id).toBe(childId);
-          expect(body.items[0].task_name).toBe('交付复核');
-          expect((await store.getSession(childId))?.title).toBe('交付复核');
-          expect(body.items[0].assignment_source.content).toBe(originalAssignment);
-          expect(body.items[0].current_work_source.content).toBe(
-            'Continue in the same saved Session',
-          );
-          expect(body.next_cursor).toBeNull();
-          const replayCursor = (await store.getMetadata()).lastChangeCursor;
-          const replay = await applyAgentCommand(originalFollowUpInput!);
-          expect(replay.receipt).toMatchObject({
-            accepted: true,
-            agentId: childId,
-            mode: 'new_turn',
-            state: 'queued',
-          });
-          expect((await store.getMetadata()).lastChangeCursor).toBe(replayCursor);
-          expect(
-            (await store.listExecutions('root')).filter(
-              (execution) => execution.childSessionId === childId,
-            ),
-          ).toHaveLength(2);
-          events = [finish];
-          break;
+        });
+        expect(spawn.description).not.toContain('Unopened private role');
+        expect(JSON.stringify(spawn.inputSchema)).not.toContain('Unopened private role');
+        const last = request.messages.filter((message) => message.role === 'tool').at(-1);
+        const encoded = last?.content.includes('Complete artifact body:\n')
+          ? last.content.split('Complete artifact body:\n')[1]!
+          : last?.content.startsWith('Immutable content references')
+            ? last.content.split('\n').at(-1)!
+            : last?.content;
+        const body = encoded ? JSON.parse(encoded) : null;
+        let events: ModelEvent[];
+        switch (stage++) {
+          case 0:
+            events = call('spawn_agent', { message: originalAssignment, task_name: '交付复核' });
+            break;
+          case 1: {
+            expect(body).toMatchObject({ accepted: true, state: 'queued' });
+            childTarget = body.target;
+            firstDispatch = body.dispatch_id;
+            const directory = await store.listStableAgents({
+              expectedStoreId: storeId,
+              sessionId: 'root',
+              subjectId: 'owner',
+              extensionId: 'builtin.task',
+            });
+            childId = directory.items[0]!.agentId;
+            expect(childTarget).toBe(`a${directory.items[0]!.seq}`);
+            events = call('wait_agent', { timeout_ms: 10000 });
+            break;
+          }
+          case 2: {
+            expect(body.reason).toBe('events');
+            expect(body.events).toContainEqual(
+              expect.objectContaining({
+                kind: 'completed',
+                target: childTarget,
+                dispatch_id: firstDispatch,
+              }),
+            );
+            expect(body).not.toHaveProperty('next_cursor');
+            const execution = await store.getExecution(last!.sourceIds![0]!);
+            firstWaitSeq = (
+              execution?.result as { details: { agentEventObservation: { nextSeq: string } } }
+            ).details.agentEventObservation.nextSeq;
+            expect(firstWaitSeq).toMatch(/^[1-9][0-9]*$/);
+            events = call('list_agents', {});
+            break;
+          }
+          case 3:
+            expect(body.items).toHaveLength(1);
+            expect(body).not.toHaveProperty('next_cursor');
+            expect(body.items[0]).toMatchObject({
+              target: childTarget,
+              task_name: '交付复核',
+              assignment_source: { content: originalAssignment },
+              last_outcome: 'succeeded',
+            });
+            events = call('follow_up_agent', {
+              target: childTarget,
+              message: 'Continue in the same saved Session',
+            });
+            break;
+          case 4:
+            expect(body).toMatchObject({
+              accepted: true,
+              target: childTarget,
+              mode: 'new_turn',
+              state: 'queued',
+            });
+            secondDispatch = body.dispatch_id;
+            expect(secondDispatch).not.toBe(firstDispatch);
+            events = call('wait_agent', { timeout_ms: 10000 });
+            break;
+          case 5:
+            expect(body.reason).toBe('events');
+            expect(body.events).toContainEqual(
+              expect.objectContaining({
+                kind: 'completed',
+                target: childTarget,
+                dispatch_id: secondDispatch,
+              }),
+            );
+            expect(body.events).not.toContainEqual(
+              expect.objectContaining({ dispatch_id: firstDispatch }),
+            );
+            events = call('list_agents', {});
+            break;
+          case 6: {
+            expect(body.items).toHaveLength(1);
+            expect(body.items[0].target).toBe(childTarget);
+            expect(body.items[0].task_name).toBe('交付复核');
+            expect((await store.getSession(childId))?.title).toBe('交付复核');
+            expect(body.items[0].assignment_source.content).toBe(originalAssignment);
+            expect(body.items[0].current_work_source.content).toBe(
+              'Continue in the same saved Session',
+            );
+            expect(body).not.toHaveProperty('next_cursor');
+            const replayCursor = (await store.getMetadata()).lastChangeCursor;
+            const replay = await applyAgentCommand(originalFollowUpInput!);
+            expect(replay.receipt).toMatchObject({
+              accepted: true,
+              agentId: childId,
+              mode: 'new_turn',
+              state: 'queued',
+            });
+            expect((await store.getMetadata()).lastChangeCursor).toBe(replayCursor);
+            expect(
+              (await store.listExecutions('root')).filter(
+                (execution) => execution.childSessionId === childId,
+              ),
+            ).toHaveLength(2);
+            events = [finish];
+            break;
+          }
+          default:
+            events = [finish];
+            break;
         }
-        default:
-          events = [finish];
-          break;
+        for (const event of events) yield event;
+      } catch (error) {
+        parentFailure = error;
+        throw error;
       }
-      for (const event of events) yield event;
     },
   };
   const child: ModelAdapter = {
@@ -609,6 +647,7 @@ test('six public tools reuse one child Session, preserve responsibility and obse
       request: { kind: 'run.start', content: 'coordinate' },
     });
     const result = await runtime.waitForCommand('work', { timeoutMs: 25000 });
+    if (parentFailure) throw parentFailure;
     expect((await store.getRun((result.receipt as { runId: string }).runId))?.status).toBe(
       'completed',
     );
@@ -659,18 +698,32 @@ test('six public tools reuse one child Session, preserve responsibility and obse
       ]);
     database.run("UPDATE session SET next_seq=9007199254741000 WHERE id='root'");
     database.close();
-    const page = await store.listStableAgents({
-      expectedStoreId: storeId,
-      sessionId: 'root',
-      extensionId: 'builtin.task',
-      subjectId: 'owner',
-      limit: 1,
-    });
+    const anchor = '9007199254740993';
+    const target = { agentId: childId, seq: anchor };
+    const [directory, byId, byAnchor, laterDispatch, childScope, foreignSubject] =
+      await Promise.allSettled([
+        store.listStableAgents({ ...mailbox, limit: 1 }),
+        store.readAgentTargets({ ...mailbox, agentIds: [childId] }),
+        store.readAgentTargets({ ...mailbox, anchor }),
+        store.readAgentTargets({ ...mailbox, anchor: '9007199254740994' }),
+        store.readAgentTargets({ ...mailbox, sessionId: childId, anchor }),
+        store.readAgentTargets({ ...mailbox, subjectId: 'foreign', agentIds: [childId] }),
+      ]);
     const restore = openFaultDatabase(join(root, 'data', 'test', 'core.db'));
     for (const command of commands)
       restore.run('UPDATE command SET seq=? WHERE id=?', [command.seq, command.id]);
     restore.run("UPDATE session SET next_seq=? WHERE id='root'", [originalSequence]);
     restore.close();
+    expect(byId).toEqual({ status: 'fulfilled', value: [target] });
+    expect(byAnchor).toEqual({ status: 'fulfilled', value: [target] });
+    expect(laterDispatch).toEqual({ status: 'fulfilled', value: [] });
+    expect(childScope).toEqual({ status: 'fulfilled', value: [] });
+    expect(foreignSubject).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'agent_unavailable' },
+    });
+    if (directory.status === 'rejected') throw directory.reason;
+    const page = directory.value;
     expect(page.items).toHaveLength(1);
     expect(page.items[0]?.agentId).toBe(childId);
     expect(page.nextAfterSeq).toBeNull();
@@ -1182,7 +1235,7 @@ test('later ordinary turn can guide, message and interrupt its existing direct c
   }
 }, 30000);
 
-test('public schema is exactly six closed prompt tools, with optional registered presets and sustained mailbox waiting', async () => {
+test('public schema is exactly six closed collaboration tools, with optional registered agent types and sustained mailbox waiting', async () => {
   const { createModelToolSurface } = await import('../../../../src/model-tools');
   const surface = (presets?: string[]) => {
     const tools = createTaskExtension({
@@ -1214,23 +1267,18 @@ test('public schema is exactly six closed prompt tools, with optional registered
     'list_agents',
     'send_agent_message',
     'spawn_agent',
-    'wait_agent_events',
+    'wait_agent',
   ]);
   const spawn = general.tools.find((tool) => tool.id === 'spawn_agent')!;
-  expect(spawn.inputSchema.required).toEqual(['prompt']);
-  expect(Object.keys(spawn.inputSchema.properties!)).toEqual(['prompt', 'task_name']);
+  expect(spawn.inputSchema.required).toEqual(['message', 'task_name']);
+  expect(Object.keys(spawn.inputSchema.properties!)).toEqual(['message', 'task_name']);
   expect(spawn.inputSchema.additionalProperties).toBe(false);
   expect(spawn.description).toContain('Default role worker: General child');
   expect(spawn.description).not.toContain('Trusted read-only preset');
   const followUp = general.tools.find((tool) => tool.id === 'follow_up_agent')!;
-  expect(followUp.description).toContain('owned collaborator');
-  expect(followUp.description).toContain('including from a later parent turn');
-  expect(followUp.description).toContain('current tool authorization');
-  expect(followUp.description).not.toContain('Same-work');
-  expect(followUp.description).not.toContain('Cross-work active guidance is rejected');
-  expect(followUp.description).toContain('The same agent_id spans turns');
-  expect(followUp.description).toContain('at admission, not its completion');
-  expect(followUp.description).toContain('No preset change');
+  expect(followUp.inputSchema.required).toEqual(['target', 'message']);
+  expect(followUp.inputSchema.additionalProperties).toBe(false);
+  expect(followUp.description).toContain('same Session');
   const message = general.tools.find((tool) => tool.id === 'send_agent_message')!;
   expect(message.description).toContain('acknowledges queue acceptance only');
   expect(message.description).toContain(
@@ -1244,7 +1292,7 @@ test('public schema is exactly six closed prompt tools, with optional registered
   expect(
     preset.tools.find((tool) => tool.id === 'spawn_agent')!.inputSchema.properties,
   ).toMatchObject({
-    preset: {
+    agent_type: {
       enum: ['read_only'],
       description: expect.stringContaining('read_only: Trusted read-only preset'),
     },
@@ -1264,23 +1312,23 @@ test('public schema is exactly six closed prompt tools, with optional registered
     preset.decode({
       id: 'unknown',
       name: 'spawn_agent',
-      arguments: '{"prompt":"read","preset":"invented"}',
+      arguments: '{"task_name":"Verify","message":"read","agent_type":"invented"}',
     }).model?.error,
   ).toBe('invalid_tool_arguments');
   expect(
     general.decode({
       id: 'identity',
       name: 'spawn_agent',
-      arguments: '{"prompt":"read","key":"forged"}',
+      arguments: '{"task_name":"Verify","message":"read","key":"forged"}',
     }).model?.error,
   ).toBe('invalid_tool_arguments');
-  for (const input of [{}, { wait_ms: 0 }, { wait_ms: 30001 }])
+  for (const input of [{}, { timeout_ms: 0 }, { timeout_ms: 30001 }])
     expect(
-      general.decode({ id: 'wait', name: 'wait_agent_events', arguments: JSON.stringify(input) })
-        .model?.error,
+      general.decode({ id: 'wait', name: 'wait_agent', arguments: JSON.stringify(input) }).model
+        ?.error,
     ).toBeUndefined();
   expect(
-    general.tools.find((tool) => tool.id === 'wait_agent_events')!.inputSchema.properties,
+    general.tools.find((tool) => tool.id === 'wait_agent')!.inputSchema.properties,
   ).not.toHaveProperty('task_ids');
 });
 

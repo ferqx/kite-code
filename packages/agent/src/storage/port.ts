@@ -338,6 +338,9 @@ export interface Store {
   listStableAgents(
     input: import('./agent-collaboration').ListStableAgentsInput,
   ): Promise<import('./agent-collaboration').StableAgentPage>;
+  readAgentTargets(
+    input: import('./agent-collaboration').ReadAgentTargetsInput,
+  ): Promise<{ agentId: string; seq: string }[]>;
   listAgentEvents(
     input: import('./agent-collaboration').ListAgentEventsInput,
   ): Promise<import('./agent-collaboration').AgentEventPage>;

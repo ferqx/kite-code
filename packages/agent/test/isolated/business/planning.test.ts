@@ -545,6 +545,66 @@ test('denied plan preserves its receipt and stops the original work without anot
   }
 });
 
+test('shutdown of a pending review leaves no unresolved effect blocking a new Run', async () => {
+  const f = await fixture({ requirePlan: true }, async (step, f) => {
+    if (step === 0) return call('write_plan', modelPlan(null));
+    if (step !== 1) throw new Error('unexpected_model_after_pending_review');
+    const plan = (await f.record('plan.current'))!.value as Record<string, Json>;
+    return call('request_plan_review', { plan_ref: await f.planRef(plan) });
+  });
+  try {
+    await f.submit();
+    const card = await f.pending();
+    await f.runtime.close();
+    const store = await openSqliteStore({ dataRoot: join(f.root, 'data'), profile: 'new' });
+    let calls = 0;
+    const cold = createRuntime({
+      store,
+      artifacts: createArtifactStore({
+        profile: { dataRoot: join(f.root, 'data'), profile: 'new' },
+        store,
+      }),
+      modelId: 'fixed',
+      modelConcurrency: 1,
+      model: {
+        async *stream() {
+          calls++;
+          yield finish;
+        },
+      },
+      permissions: {
+        async authorize() {
+          return { allowed: true, revision: 'host-1' };
+        },
+      },
+    });
+    try {
+      expect(await store.getExecution(card.executionId)).toMatchObject({ status: 'cancelled' });
+      expect(await cold.getInteraction({ ...f.base, interactionId: card.id })).toMatchObject({
+        state: 'cancelled',
+        acceptedDecisionRevision: null,
+      });
+      expect(await store.getRun(card.runId!)).toMatchObject({ status: 'cancelled' });
+      expect(calls).toBe(0);
+      expect(f.effects).toBe(0);
+      await cold.submitCommand({
+        ...f.base,
+        commandId: 'new-after-review',
+        request: { kind: 'run.start', content: '请单独核对今天的交班记录。' },
+      });
+      const command = await cold.waitForCommand('new-after-review');
+      expect(calls).toBe(1);
+      expect(await store.getRun((command.receipt as { runId: string }).runId)).toMatchObject({
+        status: 'completed',
+      });
+    } finally {
+      await cold.close();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test('actual plan denial stops its work while empty revision preserves next-Model feedback; invalid answers grant no effects', async () => {
   for (const answer of [
     { kind: 'plan_review', decision: 'deny', feedback: '拒绝当前方案\n e\u0301' },

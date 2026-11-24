@@ -78,6 +78,7 @@ import {
   listAgentEvents,
   listAgentSummaries,
   listStableAgents,
+  readAgentTargets,
 } from './child-query-operations';
 import { compressionDisplay } from './compression-display';
 import {
@@ -1542,6 +1543,8 @@ export class SqliteOperations {
         return applyAgentCommand(this, args[0] as Parameters<Store['applyAgentCommand']>[0]);
       case 'listStableAgents':
         return listStableAgents(this, args[0] as Parameters<Store['listStableAgents']>[0]);
+      case 'readAgentTargets':
+        return readAgentTargets(this, args[0] as Parameters<Store['readAgentTargets']>[0]);
       case 'listAgentEvents':
         return listAgentEvents(this, args[0] as Parameters<Store['listAgentEvents']>[0]);
       case 'queueAgentMessage':

@@ -684,7 +684,7 @@ $env:KITE_RUN_LIVE_MODEL_TOOLS = '1'
 bun tests/e2e/live/model/model-tools-all.live.ts --mode=auto --model=gpt-6-luna --reasoning-effort=medium --output=D:/absolute/new/report.json
 ```
 
-当前9组为`files-shell`、`question`、`planning`、`skills`、`mcp`、`web`、`agents`、`images`、`worktree-list`；`--scenario=<组名>`只验证该组，省略才覆盖31个公开工具族及动态MCP。Worktree本组只核真实list，创建／移除及其单次确认由独立入口负责。不换模型、协议，不改写模型回复或外围自动重试；没有测试轮次上限不意味着忽略真实失败或unknown。问答和计划通过真实公开Interaction API回答，由测试operator选择首项／批准，不能当作真人或客户端视觉验收。原报告和历史有限预算资格保持各自事实。
+当前9组为 `files-shell`、`question`、`planning`、`skills`、`mcp`、`web`、`agents`、`images`、`worktree-list`。`--scenario=<组名>` 只验证该组。默认运行核对这些业务实际消费的新工具结果和动态 MCP，`reinspect_images` 核对目录，功能由原图片复验入口负责。Worktree 本组只核真实列表。`--user-configuration=<绝对路径>` 读取指定配置文档的默认提供商、模型和档位，可用于选择已授权的 OpenAI Responses 配置；它和 `--model` 本地登录模式各自独立。问答和计划走真实 Interaction API，由测试 operator 回答或批准。
 
 最大200项过滤的Task游标回归为108字符，核完整scope改变及越界均拒绝；Shell／Browser沿相同scope摘要绑定，域读者继续核原位置。
 
@@ -705,10 +705,10 @@ bun tests/e2e/live/model/model-tools-all.live.ts --extended --mode=auto --model=
 
 [扩展用例](model-tools-extended-cases.ts)分别核对以下行为：
 
-- `files-conflict`：中文／空格路径、三行分页的完整基线、准确旧基线拒绝、重新读取后的编辑与其余全文保全。
+- `files-conflict` 核中文／空格路径、`offset/limit` 三行分页、宿主选用的完整旧基线被拒、重新读取后编辑及其余全文保全。
 - `permission-switch-workdir`：同一真实命令运行期间通过普通 Client CAS 切换三种权限模式，原效果只发生一次；显式目录进入实际执行，后续省略目录仍使用固定 workspace。
 - `worktree-mutation-observe`：三模式真实 Git 创建、短引用观察和清洁删除；观察定位原 owner 且零新 Job，两次变更各只执行一次，Session cwd 保持。
-- `shell-isolation`、`execution-timeout`：两个真实后台Job、有限等待零取消、准确单任务停止及兄弟存活、自然完成、执行期限触发清理及后续命令继续。
+- `shell-isolation`、`command-wait-timeout` 核两个真实 Job、有限等待到期后的持续活动、按原数字会话号只停止指定任务、兄弟 Job 自然完成及后续命令继续。
 - `agents-parallel-mail`、`agent-interrupt-reuse`：实际重叠的子轮次、消息接纳到准确活动Run、独立随机文件结果，以及准确中断原Shell、同一Agent追发成功且旧操作零重放。
 - `approval-deny`、`approval-external`：原拒绝使本轮cancelled、原生零派发／文件零效果；原Tool和Job分别批准后，准确完整文件范围只执行一次。
 - `active-guidance`：真实Shell执行期间投递两条HTTP用户引导，同一Run按原Command/Source顺序接纳，实际后继模型收到两条原文并报告最终纠正。

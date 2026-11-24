@@ -44,6 +44,8 @@ Source 审批 Host、完整安全分页和跨 Session 原申请 journal 已接�
 
 Ctrl+C 保存中断意图，并用原 `expectedStoreId`/commandId 精确提交一次 cancel；即使尚无 runId，也不取消别的当前 Run。执行终态与 cancel 受理分开输出。`CommandOutcome.cancellationAttempted` 只在实际尝试提交原取消请求后为 true（丢失回执也保留）；宿主跨观察轮次依据该事实停止再次提交，不能以 signal 已 aborted 推断取消已经发送。信号在异步读取 Interaction 期间到达而本轮先返回 waiting 时，下一次观察仍须处理该取消意图。配套进程真实退出由 launcher 独立拥有，网络断开不停止 Service。
 
+共享进程同时观察同一 journal 时，[本地观察器](host/caller-journal.ts)验证已保存的原意图并直接返回重复 phase。实际 phase 变化仍在锁内重新读取和保存，重复轮询期间其他调用者的写锁不会使前台观察提前退出。
+
 验证：`bun run --cwd apps/cli typecheck`、`build`、`test` 和根 [thin-clients](../../tests/isolated/unified-agent/thin-clients.test.ts) 真实 Service 测试。P2 非交互调用者不替代 P5 完整终端交互或三平台发行验收。
 
 P3 `CLIOptions.answerInteraction` 是宿主显式注入的异步回答接口，参数为当前真实 Interaction 与网络截止 signal；CLI 不自行打开 stdin。运行期间读取原根 Session 的 pending 页，处理一次 ID/revision（包括实际 child 来源的根投影），回答固定原 presentationSessionId/Store/ID/revision 与稳定 answer commandId。输出 `answer saved`、`answer accepted; execution pending` 与最终实际 Run/Execution 分开；丢失回答响应只查询保存的 answer command，不重新提交。

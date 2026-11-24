@@ -72,6 +72,7 @@ async function fixture(
     unconfirmedTransportClose?: boolean;
     endBeforeSnapshot?: boolean;
     realCodes?: string[];
+    callNames?: string[];
     callInputs?: Record<string, Json>[];
     largeSnapshot?: boolean;
     sharedPage?: boolean;
@@ -463,7 +464,11 @@ async function fixture(
   });
   const extension = {
     ...browser,
-    tools: [...browser.tools!, ...execution.tools],
+    tools: [...browser.tools!, ...execution.tools].map((tool) =>
+      tool.model && tool.id.startsWith('browser.structured.') !== (options.callNames !== undefined)
+        ? { ...tool, model: { ...tool.model, hidden: true } }
+        : tool,
+    ),
     jobs: [
       ...browser.jobs!.map((job) =>
         job.id !== 'browser.session' || !options.earlyBrowserOutcome
@@ -503,7 +508,7 @@ async function fixture(
   const calls = programs.map((_, index) => ({
     type: 'tool_call' as const,
     id: `batch-${index}`,
-    name: 'browser_execute',
+    name: options.callNames?.[index] ?? 'browser_execute',
     arguments: JSON.stringify(
       options.callInputs?.[index] ?? {
         code: options.realCodes?.[index] ?? String(index),
@@ -1235,6 +1240,38 @@ test('process capacity one returns exact unavailable before either Job and the L
   }
 });
 
+test('structured navigation and observation share one page Job with one process slot', async () => {
+  const f = await fixture([open, open], {
+    processConcurrency: 1,
+    callNames: ['browser_navigate', 'browser_snapshot'],
+    callInputs: [{ url: 'https://example.test/' }, {}],
+  });
+  try {
+    const until = Date.now() + 2000;
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    const executions = await f.store.listExecutions('session');
+    for (const id of ['browser.structured.navigate', 'browser.structured.snapshot']) {
+      const tool = executions.find((entry) => entry.definitionId === id);
+      expect(tool).toMatchObject({ status: 'succeeded' });
+      expect(JSON.parse((tool!.result as { content: string }).content)).toMatchObject({
+        url: 'https://example.test/',
+      });
+    }
+    expect(executions.filter((entry) => entry.kind === 'job')).toEqual([
+      expect.objectContaining({ definitionId: 'browser.session', status: 'cancelled' }),
+    ]);
+    expect(f.authorizations).not.toContain('browser.code_session');
+    expect(f.states).toEqual([]);
+    expect(f.executorCalls).toEqual([]);
+    expect(f.transportCloses).toBe(1);
+    expect(f.owners).toBe(1);
+    expect(f.controller.view('session')?.state).toBe('closed');
+    expect(f.runtime.getLifecycleState()).toMatchObject({ busy: false, reasons: [] });
+  } finally {
+    await f.close();
+  }
+});
+
 test('capacity two with an externally occupied slot waits and cancels without late navigation', async () => {
   const f = await fixture([open], {
     processConcurrency: 2,
@@ -1510,12 +1547,24 @@ test('an explicit read stays a known failure while its already bound Browser Job
   }
 });
 
-for (const beforeNavigate of [true, false])
-  test(`cancelling startup preserves its exact original result without a premature snapshot (beforeNavigate=${beforeNavigate})`, async () => {
+for (const [beforeNavigate, structured] of [
+  [true, false],
+  [false, false],
+  [true, true],
+  [false, true],
+] as const)
+  test(`cancelling startup preserves its exact original result without a premature snapshot (beforeNavigate=${beforeNavigate}, structured=${structured})`, async () => {
     const f = await fixture([open], {
       deferNavigation: !beforeNavigate,
       deferReady: beforeNavigate,
       waitForCompletion: false,
+      ...(structured
+        ? {
+            processConcurrency: 1,
+            callNames: ['browser_navigate'],
+            callInputs: [{ url: 'https://example.test/' }],
+          }
+        : {}),
     });
     try {
       await startingDecision(f, beforeNavigate);
@@ -1531,7 +1580,10 @@ for (const beforeNavigate of [true, false])
       f.releaseNavigation();
       const rows = await f.store.listExecutions('session');
       const original = rows.find((row) => row.definitionId === 'browser.session')!,
-        outer = rows.find((row) => row.definitionId === 'browser.execute')!;
+        outer = rows.find(
+          (row) =>
+            row.definitionId === (structured ? 'browser.structured.navigate' : 'browser.execute'),
+        )!;
       expect(original.status).toBe(beforeNavigate ? 'cancelled' : 'outcome_unknown');
       expect(outer.status).toBe(original.status);
       expect((outer.result as unknown as ToolResult).content).toContain(
@@ -1551,6 +1603,8 @@ for (const beforeNavigate of [true, false])
       expect(obj(retained).executionId).toBe(original.id);
       expect(obj(retained).result).toEqual(original.result);
       expect(rows.some((row) => row.definitionId === 'browser.snapshot')).toBe(false);
+      if (structured)
+        expect(rows.some((row) => row.definitionId === 'browser.code_session')).toBe(false);
       expect(f.model.requests).toHaveLength(1);
       expect(
         f.native.filter((value) =>

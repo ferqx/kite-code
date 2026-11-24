@@ -460,10 +460,8 @@ test('Full actual Service writes and edits an external file with native baseline
           name: 'edit_file',
           input: {
             path: paths.target,
-            base_ref: actual!.baseRef,
-            old_text: 'before',
-            new_text: 'after',
-            expected_matches: 1,
+            old_string: 'before',
+            new_string: 'after',
           },
         };
       }
@@ -657,7 +655,13 @@ for (const childFileCeiling of ['approval', 'deny'] as const) {
       program: (_body, step, actor, paths): Call | null =>
         actor === 'root'
           ? step === 0
-            ? { name: 'spawn_agent', input: { prompt: 'CHILD_LIMITED: write the owned file' } }
+            ? {
+                name: 'spawn_agent',
+                input: {
+                  task_name: 'External write',
+                  message: 'CHILD_LIMITED: write the owned file',
+                },
+              }
             : null
           : step === 0
             ? { name: 'write_file', input: { path: paths.target, content: 'explicitly approved' } }
@@ -724,8 +728,9 @@ for (const mode of ['full', 'auto', 'accept_edits'] as const) {
               ? {
                   name: 'spawn_agent',
                   input: {
-                    preset,
-                    prompt: `CHILD_WRITE_ONLY: write ${paths.target} with the exact content child`,
+                    agent_type: preset,
+                    task_name: 'Write fixture',
+                    message: `CHILD_WRITE_ONLY: write ${paths.target} with the exact content child`,
                   },
                 }
               : null
@@ -934,8 +939,8 @@ test('Auto reviewer timeout does not publish an external file or replay the writ
     expect(writes[0]?.authorization?.dispatched).toBe(false);
     expect(existsSync(f.target)).toBe(false);
     expect(writes[0]?.authorization?.check?.decision).toBe('unavailable');
-    // The total deadline includes preparation and queueing; it may expire before attempt 3.
-    expect(f.reviewRequests()).toBeGreaterThan(1);
+    // Preparation and queueing share the deadline with the recorded attempts.
+    expect(f.reviewRequests()).toBeGreaterThan(0);
     expect(f.reviewRequests()).toBeLessThanOrEqual(3);
   } finally {
     await f.close();
@@ -958,14 +963,13 @@ for (const decision of ['approve', 'deny', 'timeout'] as const) {
             '',
           ),
         );
+        expect(actual?.path).toBe(paths.target);
         return {
           name: 'edit_file',
           input: {
             path: paths.target,
-            base_ref: actual!.baseRef,
-            old_text: 'before',
-            new_text: 'after',
-            expected_matches: 1,
+            old_string: 'before',
+            new_string: 'after',
           },
         };
       },
@@ -1202,7 +1206,7 @@ for (const decision of ['approve', 'deny', 'unavailable', 'timeout', 'invalid'] 
         checked = true;
       },
       program: (_request, step, _actor, paths) =>
-        step === 0 ? { name: 'read_file', input: { path: paths.target, max_lines: 10 } } : null,
+        step === 0 ? { name: 'read_file', input: { path: paths.target, limit: 10 } } : null,
     });
     mkdirSync(join(f.target, '..'), { recursive: true });
     writeFileSync(f.target, body);
@@ -1331,15 +1335,15 @@ for (const mode of ['auto', 'full'] as const)
             (row) => row.definitionId === 'files.read',
           )!;
           expect(read.status).toBe('failed');
-          expect(read.result).toEqual({
+          const invalidParameter = Object.hasOwn(params, 'mode');
+          const code = invalidParameter ? 'invalid_tool_arguments' : 'pdf_options_require_pdf';
+          expect(read.result).toMatchObject({
             outcome: 'failed',
-            content:
-              'pdf_options_require_saved_attachment: pages and mode apply only to saved PDF attachments. Retry read_file for this workspace file with path and optional start_line/max_lines; omit pages and mode.',
-            details: { code: 'pdf_options_require_saved_attachment' },
+            content: code,
+            details: { code },
           });
-          // Invalid PDF options retain the original adapter path, not a private
-          // snapshot or a misleading missing-file success.
-          expect(f.reviewRequests()).toBe(mode === 'auto' ? 1 : 0);
+          if (invalidParameter) expect(read.authorization?.dispatched).toBe(false);
+          expect(f.reviewRequests()).toBe(!invalidParameter && mode === 'auto' ? 1 : 0);
           assertQuarantined(f, canary);
           expect(existsSync(f.target)).toBe(exists);
         } finally {

@@ -1,3 +1,4 @@
+import { isBrowserOrchestrator } from '../../browser-tool-identity';
 import { sealBrowserContinuationAction } from '../../execution/host-control';
 import type {
   ActionContext,
@@ -81,8 +82,7 @@ export function createBrowserHumanCoordinator(options: {
       const parent = own.parentExecutionId ? await host.getExecution(own.parentExecutionId) : null;
       if (
         parent?.kind !== 'tool' ||
-        parent.definitionId !== 'browser.execute' ||
-        parent.definitionVersion !== '1' ||
+        !isBrowserOrchestrator(parent.definitionId, parent.definitionVersion) ||
         !parent.runId ||
         parent.sessionId !== own.sessionId ||
         parent.originStoreId !== own.originStoreId ||
@@ -341,8 +341,8 @@ export function createBrowserHumanCoordinator(options: {
               !(
                 source.runId === null &&
                 bound(ancestor) &&
-                ancestor?.definitionId === 'browser.execute' &&
-                ancestor.definitionVersion === '1' &&
+                ancestor &&
+                isBrowserOrchestrator(ancestor.definitionId, ancestor.definitionVersion) &&
                 ancestor.runId === ref.runId
               ))
           )

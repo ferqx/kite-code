@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AuthorizationRequest, ToolContext, ToolDefinition } from '../extensions';
 import type { WorkingInputAttachment } from '../input-working-files';
@@ -8,7 +8,7 @@ import type { CapabilityDescription } from '../permissions';
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import type { InputFileImport } from '../storage/input-file-imports';
 import { AgentError, type Json } from '../storage/types';
-import { pdfRecipe, readCachedPdf } from './documents/pdf';
+import { pdfPages, readPdfToolResult } from './documents/read-tool';
 import { createWorkspaceFiles, type WorkspaceFiles } from './files';
 import { createFileTools } from './files-tools';
 
@@ -17,12 +17,8 @@ const isPdf = (input: InputFileImport) =>
   input.reference.mediaType === 'application/pdf' || input.name.toLowerCase().endsWith('.pdf');
 
 const pdfReadRecovery: Readonly<Record<string, string>> = {
-  pdf_options_require_saved_attachment:
-    'pages and mode apply only to saved PDF attachments. Retry read_file for this workspace file with path and optional start_line/max_lines; omit pages and mode.',
-  pdf_options_require_pdf:
-    'This saved attachment is not a PDF. Retry read_file with path and optional start_line/max_lines; omit pages and mode.',
-  pdf_requires_page_range:
-    'This saved attachment is a PDF. Retry read_file with path and optional pages/mode; omit start_line and max_lines.',
+  pdf_options_require_pdf: 'This file is not a PDF. Use optional offset and limit to read text.',
+  pdf_requires_page_range: 'Use pages for this PDF. Omit offset and limit.',
 };
 
 /** Trusted exact-target adapter. It grants no directory capability to ordinary file tools. */
@@ -31,6 +27,7 @@ export function withInputFileReads(options: {
   tools: readonly ToolDefinition[];
   resolve(request: InputReadRequest, uri: string): Promise<InputFileImport | null>;
   resolveWorking?(request: InputReadRequest, uri: string): Promise<WorkingInputAttachment | null>;
+  workspaceRoot?(request: InputReadRequest): Promise<string>;
 }) {
   const root = resolve(options.profilePath);
   const normalized = (path: string) => (process.platform === 'win32' ? path.toLowerCase() : path);
@@ -52,17 +49,16 @@ export function withInputFileReads(options: {
   }
   function workingPath(input: Json): string | null {
     const path = (input as { path?: unknown } | null)?.path;
+    if (typeof path !== 'string' || path.includes('\0')) return null;
+    const normalizedPath = normalize(path);
+    const parts = normalizedPath.split(sep);
     if (
-      typeof path !== 'string' ||
-      !isAbsolute(path) ||
-      path.includes('\0') ||
-      resolve(path) !== path
+      parts.at(-3)?.toLowerCase() !== '.kite-inputs' ||
+      !/^[0-9a-f]{64}$/i.test(parts.at(-2) ?? '')
     )
       return null;
-    const parts = path.split(sep);
-    return parts.at(-3) === '.kite-inputs' && /^[0-9a-f]{64}$/.test(parts.at(-2) ?? '')
-      ? path
-      : null;
+    if (normalizedPath !== path) throw new AgentError('file_path_invalid');
+    return path;
   }
   async function target(request: InputReadRequest, input: Json) {
     const direct = pathOf(input);
@@ -78,12 +74,27 @@ export function withInputFileReads(options: {
     } else {
       const candidate = workingPath(input);
       if (!candidate || !options.resolveWorking) return null;
-      path = candidate;
+      const params = input as Record<string, Json>;
+      const requestsPdf =
+        candidate.toLowerCase().endsWith('.pdf') ||
+        params.pages !== undefined ||
+        params.mode !== undefined;
+      path = isAbsolute(candidate)
+        ? candidate
+        : options.workspaceRoot
+          ? resolve(await options.workspaceRoot(request), candidate)
+          : '';
+      if (!path) {
+        if (requestsPdf) throw new AgentError('input_file_scope_denied');
+        return null;
+      }
       const binding = await options.resolveWorking(request, pathToFileURL(path).href);
       request.signal.throwIfAborted();
-      if (!binding) return null;
+      if (!binding) {
+        if (requestsPdf) throw new AgentError('input_file_scope_denied');
+        return null;
+      }
       imported = binding.imported;
-      const params = input as Record<string, Json>;
       // A normal editable text read must still observe the current working copy.
       if (!isPdf(imported) && params.pages === undefined && params.mode === undefined) return null;
       const working = binding.working;
@@ -195,23 +206,14 @@ export function withInputFileReads(options: {
           : {
               ...tool,
               version: '5',
-              description: `${tool.description} Saved attachments are immutable. For workspace files and non-PDF attachments, omit pages and mode; use start_line/max_lines for text lines. For saved PDF attachments, omit start_line/max_lines and use pages="1-3" and mode="text" or "image"; default is physical page 1 as text. Up to 20 text pages or 4 images per call. Empty extracted text does not mean the page is blank.`,
+              model: { name: 'read_file', ...tool.model, omitParameters: ['mode'] },
+              description: `${tool.description} Use pages for an authorized PDF, including workspace files and saved attachments. Default is the first page; up to four pages per request. PDF results include page images and available text. Use offset and limit for ordinary text files.`,
               inputSchema: {
                 ...tool.inputSchema,
                 properties: {
                   ...(tool.inputSchema.properties as Record<string, Json>),
-                  pages: {
-                    type: 'string',
-                    pattern: '^[1-9][0-9]*(-[1-9][0-9]*)?$',
-                    maxLength: 32,
-                    description:
-                      'Saved PDF attachments only: physical page range, starting at 1. Omit for workspace files and non-PDF attachments.',
-                  },
-                  mode: {
-                    enum: ['text', 'image'],
-                    description:
-                      'Saved PDF attachments only: extract text or render page images. Omit for workspace files and non-PDF attachments.',
-                  },
+                  pages: pdfPages,
+                  mode: { enum: ['text', 'image'] },
                   path: {
                     type: 'string',
                     maxLength: 4096,
@@ -224,12 +226,7 @@ export function withInputFileReads(options: {
                 let files: WorkspaceFiles | undefined;
                 try {
                   const selected = await target(context, input);
-                  if (!selected) {
-                    const request = input as { pages?: string; mode?: string };
-                    if (request.pages !== undefined || request.mode !== undefined)
-                      throw new AgentError('pdf_options_require_saved_attachment');
-                    return tool.execute(input, context);
-                  }
+                  if (!selected) return await tool.execute(input, context);
                   verify(context, selected.revision);
                   files = createWorkspaceFiles({
                     root: dirname(selected.anchor),
@@ -249,71 +246,25 @@ export function withInputFileReads(options: {
                       String(original.baseline.size) !== selected.imported.reference.size
                     )
                       throw new AgentError('artifact_content_mismatch');
-                    const parsed = await readCachedPdf(
-                      original.bytes,
-                      {
-                        pages: params.pages as string | undefined,
-                        mode: params.mode as string | undefined,
+                    return await readPdfToolResult({
+                      path: selected.path,
+                      request: {
+                        ...params,
+                        ...(params.mode === undefined && !context.readDecisionToolResults
+                          ? { mode: 'text' }
+                          : {}),
                       },
-                      {
+                      context,
+                      source: original,
+                      cache: {
                         profilePath: options.profilePath,
                         storeId: selected.imported.originStoreId,
-                        sourceHash: original.baseline.hash,
                       },
-                      context.signal,
-                    );
-                    if ((await target(context, input))?.revision !== selected.revision)
-                      throw new AgentError('file_dispatch_scope_changed');
-                    if (!context.artifacts)
-                      throw new AgentError('artifact_publication_unavailable');
-                    const modelImages = [];
-                    for (const page of parsed.pages)
-                      if (page.image)
-                        modelImages.push(
-                          await context.artifacts.publish({
-                            key: `pdf-page-${page.number}`,
-                            content: page.image,
-                            mediaType: 'image/png',
-                          }),
-                        );
-                    const content = JSON.stringify({
-                      path: selected.path,
-                      sourceHash: original.baseline.hash,
-                      recipe: pdfRecipe,
-                      totalPages: parsed.totalPages,
-                      nextPage: parsed.nextPage,
-                      mode: params.mode ?? 'text',
-                      pages: parsed.pages.map((page) => ({
-                        number: page.number,
-                        label: page.label,
-                        text: page.text,
-                        extraction: page.image
-                          ? 'page_image'
-                          : page.text.length
-                            ? 'text_extracted_reading_order_not_guaranteed'
-                            : 'no_extractable_text',
-                      })),
+                      async verify() {
+                        if ((await target(context, input))?.revision !== selected.revision)
+                          throw new AgentError('file_dispatch_scope_changed');
+                      },
                     });
-                    const reference = await context.artifacts.publish({
-                      key: 'pdf-read-result',
-                      content: Buffer.from(content),
-                      mediaType: 'application/json',
-                    });
-                    return {
-                      outcome: 'succeeded',
-                      content:
-                        content.length < 65536
-                          ? content
-                          : JSON.stringify({
-                              path: selected.path,
-                              totalPages: parsed.totalPages,
-                              nextPage: parsed.nextPage,
-                              pages: parsed.pages.map((page) => page.number),
-                            }),
-                      artifactRefs: [reference, ...modelImages],
-                      modelContent: { kind: 'artifact', reference, encoding: 'utf-8' },
-                      ...(modelImages.length ? { modelImages } : {}),
-                    };
                   }
                   if (
                     (input as Record<string, Json>).pages !== undefined ||

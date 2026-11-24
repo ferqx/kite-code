@@ -6,7 +6,6 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
 import type { JobDefinition, JobEvent } from '../../../../src/extensions';
-import { modelIdentifier } from '../../../../src/model-identifier';
 import { openSqliteStore } from '../../../../src/sqlite';
 import { createShellExtension } from '../../../../src/tools/shell';
 
@@ -26,18 +25,15 @@ function calls(...items: [string, Record<string, unknown>][]): ModelEvent[] {
     { ...finish, reason: 'tool_calls' },
   ];
 }
-function shellHandle(request: ModelRequest): string {
+function shellHandle(request: ModelRequest): number {
   for (const message of [...request.messages].reverse()) {
     if (message.role !== 'tool') continue;
-    const handle = /shell_id:\s*("(?:[^"\\]|\\.)*")/.exec(message.content);
-    if (handle) return JSON.parse(handle[1]!);
     try {
       const result = JSON.parse(message.content);
-      const id = result.shell_id ?? result.shellId;
-      if (typeof id === 'string') return id;
+      if (Number.isSafeInteger(result.session_id)) return result.session_id;
     } catch {}
   }
-  throw Error('shell_handle_missing_from_actual_model_feedback');
+  throw Error('shell_session_missing_from_actual_model_feedback');
 }
 async function fixture(responses: ModelEvent[][], startFailure = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-shell-reference-')));
@@ -82,7 +78,7 @@ async function fixture(responses: ModelEvent[][], startFailure = false) {
         responses[index] = (responses[index] ?? []).map((event) => {
           if (event.type !== 'tool_call') return event;
           const input = JSON.parse(event.arguments);
-          if (input.shell_id === 'original-shell') input.shell_id = shellHandle(request);
+          if (input.session_id === 'original-shell') input.session_id = shellHandle(request);
           return { ...event, arguments: JSON.stringify(input) };
         });
         yield* model.stream(request, options);
@@ -155,10 +151,13 @@ async function fixture(responses: ModelEvent[][], startFailure = false) {
   };
 }
 
-for (const tool of ['shell_read', 'shell_wait', 'shell_stop'])
+for (const [tool, definitionId] of [
+  ['poll_command', 'shell.read'],
+  ['terminate_session', 'shell.stop'],
+] as const)
   test(`${tool} missing reference remains a correctable failure in the actual Loop`, async () => {
     const input = {
-      shell_id: 'noop-probe',
+      session_id: 998,
     };
     const f = await fixture([
       calls([tool, input], ['fixture.read', {}]),
@@ -170,23 +169,21 @@ for (const tool of ['shell_read', 'shell_wait', 'shell_stop'])
     try {
       const view = await f.run();
       expect(view.runs[0]!.status).toBe('completed');
-      const failed = view.executions.find(
-        (e) => e.definitionId === tool.replace('shell_', 'shell.'),
-      )!;
+      const failed = view.executions.find((e) => e.definitionId === definitionId)!;
       expect(failed.status).toBe('failed');
       expect(failed.result).toMatchObject({
         outcome: 'failed',
-        details: { code: 'shell_reference_not_found', shellId: 'noop-probe' },
+        details: { code: 'shell_reference_not_found', shellId: 998 },
       });
       expect(view.executions.find((e) => e.definitionId === 'fixture.read')!.status).toBe(
         'succeeded',
       );
       expect(f.model.requests).toHaveLength(2);
       const feedback = f.model.requests[1]!.messages.find(
-        (m) => m.role === 'tool' && m.content.includes('noop-probe'),
+        (m) => m.role === 'tool' && m.content.includes('998'),
       )!;
       expect(feedback.content).toContain('did not start or stop');
-      expect(feedback.content).toContain('do not invent an ID');
+      expect(feedback.content).toContain('exec_command');
       expect(f.counts()).toEqual({ starts: 0, cancels: 0, probes: 1 });
     } finally {
       await f.close();
@@ -195,9 +192,9 @@ for (const tool of ['shell_read', 'shell_wait', 'shell_stop'])
 
 test('wrong reference does not alter or restart an existing original Job', async () => {
   const f = await fixture([
-    calls(['shell_execute', { command: 'controlled command' }]),
-    calls(['shell_read', { shell_id: 'wrong-shell' }], ['shell_stop', { shell_id: 'wrong-shell' }]),
-    calls(['shell_read', { shell_id: 'original-shell' }]),
+    calls(['exec_command', { cmd: 'controlled command' }]),
+    calls(['poll_command', { session_id: 997 }], ['terminate_session', { session_id: 997 }]),
+    calls(['poll_command', { session_id: 'original-shell' }]),
     [finish],
   ]);
   try {
@@ -219,22 +216,31 @@ test('wrong reference does not alter or restart an existing original Job', async
       .messages.find((message) => message.sourceIds?.includes(read.id))!;
     expect(feedback.toolCallId).toBe(read.callId);
     expect(feedback.sourceIds).toEqual([read.id]);
-    expect(feedback.content).toContain('The command finished.');
-    expect(feedback.content).toContain(`shell_id: ${JSON.stringify(saved.details.ref.key)}`);
+    expect(JSON.parse(feedback.content)).toMatchObject({
+      session_id: 1,
+      status: 'succeeded',
+      terminal: true,
+    });
   } finally {
     await f.close();
   }
 });
 
-for (const background of [false, true])
-  test(`shell_execute background=${background} gives two same-command calls distinct original Jobs`, async () => {
+for (const yieldTime of [undefined, 0])
+  test(`exec_command yield ${yieldTime ?? 'default'} assigns two distinct session IDs`, async () => {
     const f = await fixture([
       calls(
-        ['shell_execute', { command: 'same read', background, description: 'First operation' }],
-        ['shell_execute', { command: 'same read', background, description: 'Second operation' }],
+        [
+          'exec_command',
+          { cmd: 'same read', yield_time_ms: yieldTime, description: 'First operation' },
+        ],
+        [
+          'exec_command',
+          { cmd: 'same read', yield_time_ms: yieldTime, description: 'Second operation' },
+        ],
         ['fixture.read', {}],
       ),
-      calls(['shell_read', { shell_id: 'original-shell' }]),
+      calls(['poll_command', { session_id: 'original-shell' }]),
       [finish],
     ]);
     try {
@@ -257,11 +263,10 @@ for (const background of [false, true])
               typeof result.content !== 'string'
             )
               throw Error('original_shell_result_unavailable');
-            const details = result.details as Record<string, string>;
-            const handle = details.shell_id ?? details.shellId;
-            expect(handle).toBe(`sh_${modelIdentifier(execution.id)}`);
-            expect(handle).toHaveLength(26);
-            return handle;
+            const details = result.details as Record<string, unknown>;
+            expect(Number.isSafeInteger(details.session_id)).toBe(true);
+            expect(details.execution_id).toBe(execution.id);
+            return details.session_id;
           }),
         ).size,
       ).toBe(2);
@@ -275,8 +280,11 @@ for (const background of [false, true])
       )!;
       expect(feedback.toolCallId).toBe(read.callId);
       expect(feedback.sourceIds).toEqual([read.id]);
-      expect(feedback.content).toContain('The command finished.');
-      expect(feedback.content).toContain('shell_id:');
+      expect(JSON.parse(feedback.content)).toMatchObject({
+        session_id: expect.any(Number),
+        status: 'succeeded',
+        terminal: true,
+      });
       expect(
         (
           await f.store.readExecutionGroupSafety({
@@ -292,10 +300,7 @@ for (const background of [false, true])
   });
 
 test('an attempted Shell with unknown business outcome remains unknown after confirmed cleanup', async () => {
-  const f = await fixture(
-    [calls(['shell_execute', { command: 'controlled command' }]), [finish]],
-    true,
-  );
+  const f = await fixture([calls(['exec_command', { cmd: 'controlled command' }]), [finish]], true);
   try {
     const view = await f.run();
     expect(view.runs[0]!.status).toBe('completed');
@@ -310,8 +315,8 @@ test('an attempted Shell with unknown business outcome remains unknown after con
       (message) => message.toolCallId === originalTool.callId,
     )!;
     expect(feedback.sourceIds).toEqual([originalTool.id]);
-    expect(feedback.content).toContain('command result could not be confirmed');
-    expect(feedback.content).toContain('Do not restart it');
+    expect(feedback.content).toContain('outcome_unknown');
+    expect(feedback.content).toContain('do not repeat it');
     expect(f.counts().starts).toBe(1);
     expect(readFileSync(join(f.root, 'effects'), 'utf8')).toBe('start\n');
   } finally {
@@ -320,10 +325,10 @@ test('an attempted Shell with unknown business outcome remains unknown after con
 });
 
 test('a failure reading local reference storage stays unknown in the actual Runtime', async () => {
-  const f = await fixture([calls(['shell_read', { shell_id: 'original' }]), [finish]]);
+  const f = await fixture([calls(['poll_command', { session_id: 999 }]), [finish]]);
   const read = f.store.getExtensionRecord.bind(f.store);
   f.store.getExtensionRecord = async (input) => {
-    if (input.extensionId === 'builtin.shell' && input.key === 'shell/original')
+    if (input.extensionId === 'builtin.shell' && input.key === 'shell-session/999')
       throw Error('original_reference_storage_unavailable');
     return read(input);
   };

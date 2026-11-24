@@ -16,7 +16,7 @@
 
 自动压缩的已知 Provider 或纯算法失败，在原 Model 的 Store/Session/Run/generation、压缩身份与成功或失败终态可核实时保留旧上下文并继续原工作。单独取消自动摘要 Execution 也可沿旧上下文继续，但必须同时核实际摘要为 cancelled、持久取消时间存在、结果码为 `execution_cancel_requested`，并保上述完整身份；Provider 自报相同错误码且没有准确持久取消证明时拒绝降级。手动压缩、SQL 写入失败、无法核实的 dispatch/unknown、整个 Run 取消和未知 Part 不走这个降级。最近失败的完整输入指纹只让出一次普通决策边界，随后清除；相同上下文以后仍可再次压缩，新增输入或显式手动操作可直接重试，不能形成永久禁用或尝试额度。长度截断的摘要仍视为失败，不将部分摘要发布。`getModelContext` 和 `getExpandedContext` 在只读快照内核支持的 Part 格式；普通历史查询仍保留未知原事实。压缩 Model 的历史消息不能成为普通配对边界或 Fork 的可执行来源。
 
-`Runtime.resetCompressionContext` 封原 selection 与 `expectedCompressionId`（无活动点为 null）。存在活动点时，可信 slot 必须对完整展开历史与 Context 贡献执行 `validateExpanded` 窗口预检；没有实现、拒绝、取消或并发输入均保原点。清点与管理 Run 完成在同事务核准确高水位/CAS，保全部历史与 selection，零 Provider；无活动点是明确 noop。新工作在随后正常安全边界读取恢复的所选历史，不读取压缩 Model 的历史消息。
+`Runtime.resetCompressionContext` 封原 selection 与 `expectedCompressionId`（无活动点为 null）。存在活动点时，可信 slot 必须对完整展开历史、Context 贡献及当前模型可见工具执行 `validateExpanded` 窗口预检；没有实现、拒绝、取消或并发输入均保原点。清点与管理 Run 完成在同事务核准确高水位/CAS，保全部历史与 selection，零 Provider；无活动点是明确 noop。新工作在随后正常安全边界读取恢复的所选历史，不读取压缩 Model 的历史消息。
 
 Fork 可复制当前活动压缩点的 SQL 来源引用，保持原 `originSessionId/originCompressionId`、Model/Run/Artifact scope，不复制 blob 授权或原执行资格。`getCompressionOrigin` 根据真实创建命令/主体及 SQL 原记录验证链接；Model 输入从原 Model 的完整结果读取正文，调用者知道 hash 或伪造 JSON 不授予读取权。Rewind 的新 selection 不暗继承原活动点。readonly 查询不会压缩、reset、获取 owner、重新 capture 来源或调用 Provider。
 

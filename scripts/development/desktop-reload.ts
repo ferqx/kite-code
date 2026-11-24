@@ -1,12 +1,14 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { createServer, type Socket } from 'node:net';
 import { homedir } from 'node:os';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import type { DevelopmentServiceReload } from '../../apps/desktop/electron/development';
+import { agentBrowserRuntimeAssets } from '../../packages/agent/src/tools/browser/assets';
 
 export {
   startDesktopRenderer,
@@ -242,6 +244,7 @@ export async function buildDevelopmentService(
   privateDirectory(services);
   privateDirectory(directory);
   const browserConfiguration = join(root, 'apps/service/src/browser-configuration.ts');
+  let browserManifest: string | undefined;
   if (existsSync(browserConfiguration)) {
     // Both locators are compiled into this exact Service entry. Its guardian and
     // executor worker must share the same current sources on first load and reload.
@@ -265,6 +268,28 @@ export async function buildDevelopmentService(
         naming: 'worker.js',
       });
       if (!executor.success) throw new AggregateError(executor.logs);
+      const browserAssets = (() => {
+        if (process.platform !== 'darwin' && process.platform !== 'linux') return undefined;
+        try {
+          const require = createRequire(join(root, 'packages/agent/package.json'));
+          return agentBrowserRuntimeAssets(require.resolve('agent-browser/package.json'));
+        } catch {
+          // Keep Browser unavailable when this host has no installed native dependency.
+          return undefined;
+        }
+      })();
+      if (browserAssets) {
+        const [manifest, executable, license] = browserAssets;
+        const vendor = join(directory, 'agent-browser');
+        const bin = join(vendor, 'bin');
+        mkdirSync(bin, { recursive: true });
+        browserManifest = join(vendor, 'package.json');
+        const program = join(bin, basename(executable));
+        copyFileSync(manifest, browserManifest);
+        copyFileSync(license, join(vendor, 'LICENSE'));
+        copyFileSync(executable, program);
+        chmodSync(program, 0o755);
+      }
     } catch (error) {
       throw new AggregateError([error], 'development_browser_assets_build_failed');
     }
@@ -277,7 +302,12 @@ export async function buildDevelopmentService(
       target: 'bun',
       packages: 'bundle',
       external: ['@kite-ai/*'],
-      define: { __KITE_SERVICE_STARTUP_TIMING__: 'true' },
+      define: {
+        __KITE_SERVICE_STARTUP_TIMING__: 'true',
+        ...(browserManifest
+          ? { __KITE_DEVELOPMENT_AGENT_BROWSER_MANIFEST__: JSON.stringify(browserManifest) }
+          : {}),
+      },
       plugins: [
         {
           name: 'development-process-assets',

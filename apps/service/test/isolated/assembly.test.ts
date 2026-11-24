@@ -76,6 +76,8 @@ test('Skill tools expose only knowledge selectors and original internal inputs r
     for (const id of ['skills.load', 'skills.resource']) {
       const tool = tools.find((candidate) => candidate.id === id)!;
       expect(tool.version).toBe('1');
+      expect(tool.inputSchema.properties).toHaveProperty('version');
+      expect(tool.model?.omitParameters).toContain('version');
       expect(tool.description).toContain(
         'Wait for a successful result and read the returned guidance before planning dependent tool calls.',
       );
@@ -176,11 +178,13 @@ test('per-Run host assembly discovers summaries only, binds actual versions and 
       allowedCapabilities: [],
     });
     const sources = await assembly.sources.capture(request);
-    expect(sources.some((source) => source.kind === 'skill_catalogue')).toBe(true);
+    const original = sources.find((source) => source.kind === 'skill_catalogue')!;
+    expect(JSON.parse(original.content)[0]).not.toHaveProperty('version');
     expect(JSON.stringify(sources)).toContain('Safe summary');
     expect(JSON.stringify(sources)).not.toContain('private-body-marker');
     expect(assembly.snapshotFacts.allowedCapabilities).toEqual([]);
     expect(assembly.snapshotFacts.skills[0]!.requiredCapabilities).toEqual([]);
+    expect(assembly.snapshotFacts.skills[0]!.version).toMatch(/^[a-f0-9]{64}$/);
     expect(
       assembly.extensions.flatMap((extension) => extension.tools?.map((tool) => tool.id) ?? []),
     ).toContain('files.write');
@@ -189,17 +193,18 @@ test('per-Run host assembly discovers summaries only, binds actual versions and 
     ).toBe('3');
     writeFileSync(
       join(skill, 'SKILL.md'),
-      '---\nname: Guide\ndescription: New summary\n---\nnew-body-marker\n',
+      '---\nname: Guide\ndescription: Safe summary\n---\nnew-body-marker\n',
     );
     const current = await assembly.sources.capture(request);
-    expect(JSON.stringify(current)).toContain('New summary');
+    const updated = current.find((source) => source.id === 'skills.catalogue')!;
+    expect(updated.content).toBe(original.content);
+    expect(updated.digest).not.toBe(original.digest);
     expect(JSON.stringify(current)).not.toContain('new-body-marker');
-    expect(current.find((source) => source.id === 'skills.catalogue')!.digest).not.toBe(
-      sources.find((source) => source.id === 'skills.catalogue')!.digest,
-    );
-    expect(assembly.snapshotFacts.skills[0]!.version).toBe(
-      JSON.parse(sources.find((source) => source.id === 'skills.catalogue')!.content)[0].version,
-    );
+    writeFileSync(join(skill, 'SKILL.md'), '---\nname: Guide\ndescription: New summary\n---\n');
+    const renamed = (await assembly.sources.capture(request)).find(
+      (source) => source.id === 'skills.catalogue',
+    )!;
+    expect(renamed.content).toContain('New summary');
   } finally {
     await assembly?.dispose();
     f.close();

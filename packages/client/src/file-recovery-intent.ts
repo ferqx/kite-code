@@ -70,11 +70,19 @@ const phases = new Set<FileRecoveryPhase>([
 function invalid(): never {
   throw new ClientError('file_recovery_intent_invalid');
 }
-function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
+function object(
+  value: unknown,
+  keys: readonly string[],
+  optional: readonly string[] = [],
+): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid();
   const record = value as Record<string, unknown>;
   const actualKeys = Object.keys(record);
-  if (actualKeys.length !== keys.length || actualKeys.some((key) => !keys.includes(key))) invalid();
+  if (
+    keys.some((key) => !Object.hasOwn(record, key)) ||
+    actualKeys.some((key) => !keys.includes(key) && !optional.includes(key))
+  )
+    invalid();
   return record;
 }
 function text(value: unknown, max = 128): asserts value is string {
@@ -104,17 +112,21 @@ function boundary(value: unknown, nullable: boolean) {
 function checkpoint(value: unknown) {
   const p = object(value, ['id', 'boundary', 'workspace']);
   if (typeof p.id !== 'string' || !/^[a-f0-9]{64}$/.test(p.id)) invalid();
-  const b = object(p.boundary, [
-    'storeId',
-    'workspaceId',
-    'sessionId',
-    'runId',
-    'contextSelectionId',
-    'messageId',
-    'messageSeq',
-    'triggerMessageId',
-    'triggerSeq',
-  ]);
+  const b = object(
+    p.boundary,
+    [
+      'storeId',
+      'workspaceId',
+      'sessionId',
+      'runId',
+      'contextSelectionId',
+      'messageId',
+      'messageSeq',
+      'triggerMessageId',
+      'triggerSeq',
+    ],
+    ['executionRoot'],
+  );
   for (const key of [
     'storeId',
     'workspaceId',
@@ -136,6 +148,12 @@ function checkpoint(value: unknown) {
   const w = object(p.workspace, ['device', 'inode']);
   for (const v of Object.values(w))
     if (typeof v !== 'string' || !/^(0|[1-9][0-9]*)$/.test(v)) invalid();
+  if (Object.hasOwn(b, 'executionRoot')) {
+    const root = object(b.executionRoot, ['epoch', 'identity']);
+    decimal(root.epoch);
+    const rootIdentity = object(root.identity, ['device', 'inode']);
+    if (rootIdentity.device !== w.device || rootIdentity.inode !== w.inode) invalid();
+  }
 }
 function frozen<T>(value: T): T {
   if (value && typeof value === 'object') {

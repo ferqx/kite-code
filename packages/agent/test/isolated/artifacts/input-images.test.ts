@@ -71,6 +71,19 @@ test('image-only input persists scoped references, resolves original bytes on la
       data: png,
     });
     expect(image.reference.size).toBe(String(Buffer.from(png, 'base64').length));
+    const bytes = Buffer.from(png, 'base64');
+    for (const size of [48, bytes.length - 1]) {
+      await errorCode(
+        runtime.uploadInputImage({
+          ...scope,
+          id: 'truncated',
+          name: '截断标签.png',
+          mediaType: 'image/png',
+          data: bytes.subarray(0, size).toString('base64'),
+        }),
+        'input_image_invalid',
+      );
+    }
     await errorCode(
       runtime.submitCommand({
         ...scope,

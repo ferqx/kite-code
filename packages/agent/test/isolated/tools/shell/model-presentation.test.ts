@@ -431,7 +431,8 @@ test('a bounded output preview remains explicitly incomplete and recovers the sa
   f.details.truncated = true;
   const body = render(f)!;
   expect(body).toContain('This output is incomplete');
-  expect(body).toContain('shell_read with the original shell_id');
+  expect(body).toContain('Inspect the original execution for retained output');
+  expect(body).not.toContain('shell_read');
   expect(body).toContain('do not rerun');
   expect(body).toContain(f.details.stdout as string);
 });
@@ -462,10 +463,13 @@ test('a smaller receiving model trims a saved Shell output without rewriting the
   expect(smaller).toContain('end\n');
   expect(smaller).not.toContain(saved);
   expect(smaller).not.toContain('\uFFFD');
-  const output = smaller.slice(smaller.indexOf('stdout:'), smaller.indexOf('\nUse shell_read'));
+  const output = smaller.slice(
+    smaller.indexOf('stdout:'),
+    smaller.indexOf('\nInspect the original'),
+  );
   expect(Buffer.byteLength(output)).toBeLessThanOrEqual(400);
   const smallest = formatShellResult({ ...f, modelTokenLimit: 1 })!;
-  expect(smallest).toContain('\n…\nUse shell_read');
+  expect(smallest).toContain('\n…\nInspect the original execution');
   expect(f.result.content).toBe(saved);
 });
 
@@ -584,9 +588,12 @@ for (const droppedBytes of ['9', null])
     expect(smaller).toContain(warning);
     expect(smaller).toContain('Model output preview omitted');
     expect(smaller).toContain('Output cursor:');
-    expect(smaller).toContain('same input cursor');
+    expect(smaller).toContain('Inspect the original execution for its retained output');
     expect(canonicalJson(f.result)).toBe(before);
-    const output = smaller.slice(smaller.indexOf('\n\n') + 2, smaller.indexOf('\nUse the same'));
+    const output = smaller.slice(
+      smaller.indexOf('\n\n') + 2,
+      smaller.indexOf('\nInspect the original'),
+    );
     expect(Buffer.byteLength(output)).toBeLessThanOrEqual(400);
     f.details.outputGaps = [];
     expect(formatShellResult({ ...f, modelTokenLimit: 100 })).not.toContain(warning);

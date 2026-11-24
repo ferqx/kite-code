@@ -1,10 +1,10 @@
-# Agent Browser：受控代码入口与受监督网页操作
+# Agent Browser
 
 本模块的[扩展入口](index.ts)、[统一执行工具](execute.ts)、[Controller](controller.ts)和[原生适配](native.ts)将固定的 `agent-browser@0.39.4`（Apache-2.0，源码 `04ba5264dade678062c3cdcce0f4f293e748249f`）接入现有 Agent Extension／Tool／Job／Query／Action 边界。Agent 仍使用原 Loop 和权限策略；浏览器不启动另一套模型决策循环。Native 共享页继续由 Main 持有，Job 取得准确页面租约；网页不获得 Runtime／IPC／本机文件权限。
 
 ## 范围与可用性
 
-- Native 新 Run 的模型入口由 Service 选择 `browser.execute`，沿[内置 computer-use 技能](../../skills/builtin.ts)指导页面选择、准确控制绑定、观察、操作、核实与释放；浏览器不进入审批，技能不签发控制身份。默认目录、显式旧配置与冻结恢复选择归[Service owner](../../../../../apps/service/README.md#受管-browser-默认装配)。CLI/TUI 的独立浏览器兼容路径保留。
+- Native 新 Run 由 Service 选择结构化工具，内置 [computer-use](../../skills/builtin.ts) 指导模型使用原普通网页、核对控件并验证网站效果。浏览器按真实任务和页面权限执行，所需运行资产由 [Service owner](../../../../../apps/service/README.md#受管-browser-默认装配) 装配。
 - 兼容 `browser.open` 仍创建受原 Operations 管理的 `browser.session` Job，返回受理身份而不是伪造启动完成。只接受 HTTP(S)，不接受凭据 URL、可执行路径、任意 CLI 参数、脚本、CDP 地址或登录状态路径。
 - 兼容 `browser.snapshot` 获取该 Session 已拥有浏览器的当前 generation／seq／元素引用；`browser.navigate`、`browser.click`、`browser.fill`、`browser.scroll` 操作准确目标，`browser.close` 请求关闭。统一入口在宿主内生成这些内部身份，不要求模型维护代次、seq 或幂等 key。
 - 原生适配支持 Linux x64／arm64、Bun 下的 PID namespace，以及 macOS x64／arm64、Bun 下的独占 launchd resource coalition。Linux 需要 bubblewrap 和原生 init；macOS 复用固定 stdio guardian 资产，以独立 Browser 身份运行。独立浏览器路径还需系统 Chrome／Chromium 和宿主预查；Native 共享页复用 Main 的 Electron 页面。Windows 仍明确 unavailable，不降级为只杀命令行或进程组。Linux 实现与 macOS 本轮实测分别取得各自范围的证据，不相互代证。
@@ -13,11 +13,26 @@
 
 可选原子模型入口只使用 `page_ref/element_ref`：open 返回页面引用；snapshot 返回当前页面及元素引用；navigate/scroll/close/request_human 复制 page_ref，click/fill 复制 element_ref。引用封装当前 Store/Session/Run、准确 browserId/代次和元素 seq，原 controller 继续核新鲜度及控制权；跨范围或无效引用在原生输入前明确失败，不改投最新页面。人工继续的原结果提供新代次 page_ref，必须重新 snapshot。默认 Native 模型目录仍使用统一入口；其封闭内部调用保显式 key/代次合同，独立纯模型 Schema 拒绝模型填写这些内部字段。
 
-## 统一执行入口与隔离环境
+## 模型入口
+
+| 操作 | 参数 |
+| --- | --- |
+| `browser_navigate` | `url` |
+| `browser_snapshot`、`browser_screenshot` | 无参数，观察当前准确页面 |
+| `browser_click`、`browser_type` | `target`，填写另含 `text` |
+| `browser_fill_form` | `fields:[{name,target,type,value}]`，逐项核对原元素，返回已完成项与新观察 |
+| `browser_tabs` | `action:list/new/select/close`，新页用 `url`，选择或释放用 `tab_id` |
+| `browser_press`、`browser_wait` | `key` 或 `text,timeout_ms?` |
+| `browser_history`、`browser_dialog` | `action`，处理对话框使用列表返回的 `target` |
+| `browser_pointer` | `action,image_ref,from,to?`，绑定本次正式截图 |
+
+元素引用取当前任务快照。批量填写按原页面和每次观察核对底层元素身份，失败返回已确认字段；尚未确认的效果先在原页观察。同地址的多个页面分别使用其实际身份。切换在已确认释放原页控制后绑定准确目标。正式截图可以与仍然有效的语义快照配合。私有控制、输入派发、未知效果和取消核原 Job 记录。
+
+## 内部代码环境与历史回执
 
 失败批次保留失败前已有的受限 console output 和原子 Tool 的准确执行身份／状态，模型可以区分已完成动作、失败动作及未执行部分；后续失败不撤销前面的效果。实际 executor 抛错／关闭也通过私有有限错误 carrier 保留原输出，只接受可信 carrier，不复制任意异常 message／cause 或仿造 output。已派发 native 失败保留安全 transport cause，并继续为 `outcome_unknown`，不能据停止代码环境推定网站效果已知。评价错误仍保原 evaluation 类别及反馈，界面与协议版本不变。[执行回归](../../../test/isolated/browser/execute.test.ts)、[executor](../../../test/isolated/browser/executor.test.ts)及[controller](../../../test/isolated/browser/controller.test.ts)核失败前输出进入下一 Model、一次原派发与私有异常负例。
 
-[browser.execute](execute.ts) 的模型调用接受 `{code,description?}`；description 可省略，不因长度或空白拒绝工具执行。完整原文随调用保存；工具行独立清理空白并截取最多40个Unicode字符，空值使用普通浏览器标签。该说明不传入解释器，也不作为结果或控制权证明，工具版本仍为1。在同一 Store／Session／Run 的热环境中保留顶层 await、变量和页面句柄；同 Run 的批次排队，共用一个 `browser.code_session` Job。Core 提供冻结的总 `resourceCapacity`；总 process 容量小于2时在创建环境／Job前准确 unavailable。代码环境按该 Core 对象共享最多 `floor(process/2)` 张准入票据，创建前可取消等待；同 Run 复用，代码进程真实关闭及原 host 调用达到终态后释放。未确认代码关闭或在途清理保票，不借用或假释放原 Core process permit，也不把已结束的网站业务 unknown 变成跨会话新 fence。环境不能从冷记录重建或重放代码。`browser.open()` 返回宿主签发的 opaque page；`browser.pages()`只为当前Session已在Agent控制下的页面提供可用id。曾成功绑定的Native共享页在确认释放后另可返回`state:released/bindingRequired:true/lastKnown:true`、有界旧URL／标题及本Run当前VM新签发的不透明候选id。它没有旧租约／元素引用，不证明当前存在；列出候选及`browser.page(id)`工厂均不做I/O。新任务首次snapshot才沿原open子调用取得新绑定并实际观察，Controller只从可信transport的真实acquire保留私有pageId／incarnation；Main用这对身份寻找原存活页，URL仅作附加校验，不按可见性或相同网址改投另一标签。缺页、替换或变址直接失败，不新建、导航或刷新；私有身份不进入Model页列表或句柄。绑定前的其它页面方法拒绝派发；旧Run候选也失效。空列表只说明当前没有控制句柄或已知释放描述，不能推断用户浏览标签已经消失。元素引用由宿主映射到原目标与观察 seq，导航、重新观察、接管及代次变化使旧引用失效。按键、选择、悬停、等待、对话框和有限坐标操作由[页面 API 适配](page-api.ts)调用固定后端，没有任意 selector／页面脚本／CDP／Cookie 接口。
+原 [browser.execute](execute.ts) 仍服务内部代码环境与冻结历史。历史请求的 code 和可选 description 继续按原记录读取。结构化 Tool 直接从 Host 调用同一原子执行路径，由活动 Run 监督观察状态，用原 `browser.session` Job 持有页面控制并占用进程槽。脚本 worker、双进程槽准入与 `browser.code_session` 仅用于内部脚本入口。原页面授权、在途取消、准确释放和未知操作回执适用于两个入口。
 
 已确认释放的共享页元数据按真实pageId／incarnation分别保留，每Session最多8页、最多128个Session；它不保存控制租约，不查询Main库存，不证明页面当前仍存在。新Run候选按目标规范URL选择，不能固定取列表第一项。A后打开B仍须能列出A并沿原identity重新绑定；同URL有多个已知identity时在派发前明确歧义，不以最近释放页或当前可见页替代。旧Controller单页接口保持兼容，unknown及同Run释放门禁仍由原状态负责。
 
@@ -26,6 +41,8 @@ Main对准确existing-only准入确认`browser_page_existing_missing`，且Servi
 该错误只涉及所选候选；结果说明与内置知识允许重列一次pages，对唯一匹配当前任务的其它候选取得新snapshot，不凭顺序／最近／可见性猜测。真实隔离worker三Run反例核缺失A后的原B仍可在同Run绑定，B原identity及表单值保留，没有额外导航、替代页或输入重放。没有唯一匹配、同URL歧义、原unknown与清理未确认的限制不变；该合同不证明模型每次会选对候选。
 
 普通fresh open仅复用唯一准确URL目标，多个相同URL且没有原页身份时明确歧义；不同URL创建新页，不能通过后续navigate覆盖原用户页。唯一从未导航、从未取得租约的初始空白标签可用于初始化。明确page.navigate继续导航当前准确页，页面上限不变。Browser Job、代码环境与Main网页分别拥有生命周期；控制释放不销毁Main页面，UI隐藏／卸载不释放该页面所有权。
+
+Native 用户发出的 `browser.close` Action 从当前准确浏览器租约读取原 Run，匹配 Action 的 Session、Store、操作者及浏览器代次后，沿 Core `run.cancel` 写入取消。Browser Job 仍负责关闭原控制，普通页面保留。旧操作回执和后来取得的页面租约不能更改本次取消目标。模型经 `page.close()` 释放页面时，继续只结束浏览器控制，使模型能给出其正常回复。
 
 导航、观察、输入和截图逐项沿原 `operations.ensure` 派发独立child Tool，保留真实effects、准确页面／任务／控制权、取消和结果核实；固定内置浏览器定义在三种模式下免审核／审批。批次结果保存原 Command／Execution 与 outcome；请求开始前即登记待清理 Operation。首次打开立即保留原Browser Job ref，未取得绑定句柄或Job仍等资源时可取消准确申请，不能在失败后迟到启动；绑定成功后的显式读取失败不再当作整个打开失败。每批代码在执行前耐久登记原 Execution 意图，重入原未解决批次只返回 unknown。拒绝、失败、取消或未知效果停止后继操作，代码 catch 不能重新获得派发权；中断后的结果从原 child 执行回填，不能用通用 abort 覆盖真实 unknown。
 

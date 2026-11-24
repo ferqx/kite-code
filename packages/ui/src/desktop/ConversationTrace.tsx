@@ -118,8 +118,12 @@ export function ConversationTrace({
   const summaryIcon = firstTool ? toolIcon(firstTool) : BulbIcon;
   const panelId = useId();
   const firstKey = first?.presentationKey ?? first?.id;
+  // A running singleton can acquire a group disclosure while its details are
+  // being read. Keep that first step mounted until the reader closes the group.
+  const firstDetailKey = first?.role === 'tool' ? `activity:${firstKey}` : firstKey;
   const open =
-    (expanded[id] ?? (omittedTool ? expanded[`activity:${firstKey}`] : undefined)) === true;
+    (expanded[id] ??
+      ((grouped || omittedTool) && firstDetailKey ? expanded[firstDetailKey] : undefined)) === true;
   const showSteps = !showSummary || open;
   const detailsOpen = processOpen && showSteps;
   // Older singleton layouts could save only their outer disclosure.

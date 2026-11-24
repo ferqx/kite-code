@@ -199,6 +199,43 @@ test('slash vocabulary preserves original menu tails and rejects unsupported man
   await f.controller.routeCommand('/exit');
   expect(f.quits).toBe(1);
 });
+
+test('manual compression rechecks a stale root before submitting its exact context selection', async () => {
+  const f = fixture();
+  let reads = 0;
+  f.port.readSession = async (id) => {
+    const current = snapshot(id);
+    return ++reads === 1
+      ? {
+          ...current,
+          domains: {
+            execution: { phase: 'fresh', cursor: '1' },
+            admission: { phase: 'refreshing' },
+          },
+        }
+      : current;
+  };
+  try {
+    await f.controller.select('a');
+    expect(f.controller.state.snapshotStale).toBe(true);
+    f.controller.setDraft('/compact preserve this context');
+    await f.controller.routeCommand('/compact preserve this context');
+    expect(reads).toBe(2);
+    expect(f.writes).toEqual([
+      expect.objectContaining({
+        kind: 'context.compress',
+        sessionId: 'a',
+        request: expect.objectContaining({
+          expectedContextSelectionId: 'selected',
+          focus: 'preserve this context',
+        }),
+      }),
+    ]);
+    expect(f.controller.state.draft).toBe('');
+  } finally {
+    f.controller.dispose();
+  }
+});
 test('session and active include freeze actual revisions and target; queued is not completed', async () => {
   const f = fixture(true);
   await f.controller.select('a');

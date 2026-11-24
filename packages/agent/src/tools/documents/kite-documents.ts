@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { SaxesParser } from 'saxes';
 import { stageDocument } from './document-export';
-import { createPdfDocument } from './pdf-command';
+import { createPdfDocument, inspectPdfFields } from './pdf-command';
 
 function checkPlainXlsxFormula(input: unknown) {
   const fail = () => {
@@ -69,7 +69,7 @@ function checkPlainXlsxFormula(input: unknown) {
 const options = new Map<string, string>();
 try {
   const command = process.argv[2];
-  if (command !== 'pdf' && command !== 'stage' && command !== 'xlsx-formula-guard')
+  if (!['pdf', 'pdf-fields', 'stage', 'xlsx-formula-guard'].includes(command ?? ''))
     throw Error('documents_command_invalid');
   for (let i = 3; i < process.argv.length; i += 2) {
     const key = process.argv[i]!,
@@ -83,7 +83,7 @@ try {
   if (!input || (command === 'pdf' ? !out : out !== undefined))
     throw Error('documents_arguments_invalid');
   let spec: unknown;
-  if (command !== 'stage') {
+  if (command === 'pdf' || command === 'xlsx-formula-guard') {
     const chunks: Buffer[] = [];
     let length = 0;
     for await (const chunk of input === '-' ? process.stdin : createReadStream(input)) {
@@ -105,7 +105,9 @@ try {
         ? await stageDocument(input, controller.signal)
         : command === 'pdf'
           ? await createPdfDocument({ spec, out: out!, signal: controller.signal })
-          : checkPlainXlsxFormula(spec);
+          : command === 'pdf-fields'
+            ? await inspectPdfFields(input, controller.signal)
+            : checkPlainXlsxFormula(spec);
     console.log(JSON.stringify(result));
   } finally {
     process.removeListener('SIGTERM', stop);

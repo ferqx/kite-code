@@ -81,7 +81,7 @@ HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core �
 
 ## 受管 Browser 默认装配
 
-[Browser 装配](src/browser-configuration.ts)把固定 `agent-browser@0.39.4` 后端接入现有 `builtin.browser` Extension。[普通默认选择](src/configuration-defaults.ts)在后端可用时，为接入 Main 普通页通道的 Native 新 Run 默认选择一个 `browser.execute`（模型名称 `browser_execute`），并选入原 `skills.load/resource` 读取入口；CLI／TUI 的独立浏览器兼容路径保留原 `browser.open/navigate/snapshot/click/fill/scroll/close`。最小嵌入宿主仍只默认选择 `ask_user`。JSONC 只选择既有 Tool ID，不能提供 executable、启动参数、CDP、普通浏览器 Profile 或认证路径；用户／Workspace 的 `browser` 配置与非空 Tool options 拒绝。可信宿主的 `browser:false` 是实际权限上限，JSONC 和 Full 模式不能解除。
+[Browser 装配](src/browser-configuration.ts)把固定 `agent-browser@0.39.4` 接入原 `builtin.browser` Extension。现有 macOS Native 新 Run 按实际页面宿主可用性准入结构化模型工具和内置技能。内部脚本执行器单独校验 worker 和 guardian 资产。原编排器和原子派发身份留在工具宿主，并沿准确页面授权、租约及取消路径执行。默认与内部装配边界见 [Browser owner](../../packages/agent/src/tools/browser/README.md#模型入口)。
 
 [每 Run 装配](src/configuration.ts)把统一入口依赖的原子 Tool 留在真实执行允许集及 `actualCapabilities`，经原 Operations、权限和执行记录逐 API 派发；`modelHiddenToolIds` 只收敛模型目录，不移除内部定义或授予权限。显式旧工具选择继续使用旧目录；冻结旧 Run 的配置、定义版本、宿主指纹和呈现选择在恢复时复核，默认迁移不改写旧记录。用户明确禁用统一入口的必要内部依赖时返回 `browser_dependency_disabled`，不能为凑齐能力静默解除禁用。
 
@@ -210,7 +210,7 @@ Session 原始记录导出使用可选 `session_exports` 与四个有限 GET：`
 
 Context 提供 `POST /v1/sessions/{id}/context/compress` 和 `/context/compression/reset`。人工压缩携原 Store、Command、selection 和可选完整 `focus`；说明没有 4096 字符算法门禁，HTTP 仍遵守宿主统一 JSON 传输预算并明确拒绝超限，不能裁剪后提交。重置另携原 `expectedCompressionId`（无活动点为 null）。202 只表示原命令受理，最终结果读取该命令的实际 Run；丢回复只查询原 ID。SelectedContext 的有限 `compression` 记录保留原 Store/Session、实际 Model Execution、覆盖范围、旧点引用及算法快照，原历史和实际模型正文保持可读。
 
-默认装配的 `createSummaryCompressor` 从公开 `/configuration` 导出，纯描述摘要请求；所有实际模型调用与发布仍由同一 Core 执行。宿主可明确选择一个可信 `compressor`，启动时绑定其 `prepare/shouldCompress/validateSummary/validateSummaryReport/validateExpanded`，后来改对象或 JSONC 字段不能替换回调。多个候选冲突明确拒绝。`shouldCompress` 缺省不自动触发；`validateSummary` 可基于宿主准确模型事实拒绝真实输出，`validateExpanded` 必须明确返回 true 才允许清除活动点。默认算法没有准确 tokenizer/window 事实，不把字节量当 token，不宣称目标窗口资格。摘要在后续请求中按带准确 source ID 的低权限用户数据呈现，不获得 Tool 或审批权。默认维护说明明确自身仅用于本次内部 checkpoint，不改变业务目标或父委派，也不把禁止执行／工具的本次限制延续到后继请求；摘要应交接原任务。实际 SDK 自动压缩回归核维护请求绑定原压缩来源、没有成为独立业务历史或新 Command，原输入来源与后继请求保持；另核摘要请求和后继真实 HTTP 采用相同可信 contract，原 Tool 退出窗口不授权重放、原次数限制继续有效，历史承接与当前状态／新回执／授权保持区别。固定模型断言证明实际请求边界，真实模型是否遵循由原窗口独立核验。
+默认装配的 `createSummaryCompressor` 从公开 `/configuration` 导出，纯描述摘要请求；所有实际模型调用与发布仍由同一 Core 执行。宿主可明确选择一个可信 `compressor`，启动时绑定其 `prepare/shouldCompress/validateSummary/validateSummaryReport/validateExpanded`，后来改对象或 JSONC 字段不能替换回调。多个候选冲突明确拒绝。`shouldCompress` 缺省不自动触发；`validateSummary` 可基于宿主准确模型事实拒绝真实输出，`validateExpanded` 必须明确返回 true 才允许清除活动点。普通宿主的默认预检仅在本次冻结模型明确提供窗口和输出预留时运行，优先用实际请求输出上限，扣除现有安全余量，并以完整展开后的上下文与当前可见工具 Schema 做本地 token 估算。预算未知或不足时保留原活动点。估算使用本地 tokenizer；Reset 预检不发 Provider 请求。摘要在后续请求中按带准确 source ID 的低权限用户数据呈现，不获得 Tool 或审批权。默认维护说明明确自身仅用于本次内部 checkpoint，不改变业务目标或父委派，也不把禁止执行／工具的本次限制延续到后继请求；摘要应交接原任务。实际 SDK 自动压缩回归核维护请求绑定原压缩来源、没有成为独立业务历史或新 Command，原输入来源与后继请求保持；另核摘要请求和后继真实 HTTP 采用相同可信 contract，原 Tool 退出窗口不授权重放、原次数限制继续有效，历史承接与当前状态／新回执／授权保持区别。固定模型断言证明实际请求边界，真实模型是否遵循由原窗口独立核验。
 
 [默认权限整文件](test/isolated/permission-configuration.test.ts)以显式注入的自定义任务审核器覆盖只读项目探索的自动拒绝场景：实际 resolver、compatible SDK、SQLite与Files执行读取→占位写入被拒→模型取得具体原因→继续读取→最终答复。默认风险审核不以任务语义审查 Files；此用例验证保留的自定义审核合同。目标写入未派发、adapter零调用、原配置字节保持；没有人工卡或自动cancelCommand，后续读取仍经原策略。历史记录：2026-10-25，macOS arm64／Bun1.4.2，`bfdb6a273`加当时工作树，原完整文件11项／147断言通过；Provider是本机受控HTTP服务，不是付费真实模型。自动与人工拒绝的权限边界归[Agent权限owner](../../packages/agent/src/permissions/README.md)。
 
@@ -423,7 +423,7 @@ W09 二进制内容使用 `GET /v1/sessions/{id}/artifacts/{refId}?storeId=&scop
 
 默认全局登记 `@kite-ai/agent/files` 的 6 个 `files.*` Tool，每 Run 装配针对实际持久 Workspace root 选择这组定义，以及普通 version-1 `skills.load`/`skills.resource`。`effective.tools` 选择准确 ID；禁用项不在目录，未知 ID 拒绝新 Run，明确选择的 builtin version 必须匹配实际注册版本（`files.read@3`）。非空 Tool/Skill `options` 当前不支持，局部失败，不显示为未实际应用的 effective 设置。可信额外 Tool ID 只能经宿主 `knownToolIds` 提供，Runtime 仍核真实注册。配置不能提供 root、权限、Tool 实现或 capability grant。
 
-显式配置的 Skills 使用 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。路径越界和重复物理位置局部不可用。用户安装目录按[同源知识目录](#同源-skill-知识目录)接入。可选 digest 固定 Skill 字节。摘要/版本/依赖事实进入 `skills.catalogue`；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。Skill 工具描述要求先等待成功结果、读取指导，再规划依赖工具调用，不将依赖命令与该知识加载同批发送；这只是模型指导，不代替来源新鲜度检查，也不自动重放已退休调用。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
+显式配置的 Skills 使用 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。路径越界和重复物理位置局部不可用。用户安装目录按[同源知识目录](#同源-skill-知识目录)接入。可选 digest 固定 Skill 字节。模型看到的 `skills.catalogue` 包含技能身份、摘要与依赖。宿主计算目录来源摘要时同时使用原版本；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。Skill 工具描述要求先等待成功结果、读取指导，再规划依赖工具调用，不将依赖命令与该知识加载同批发送；这只是模型指导，不代替来源新鲜度检查，也不自动重放已退休调用。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
 
 默认 Run 的完整来源请求接入 `captureBatch`：项目来源按全部原定义/输入核实际目标，Skill catalogue及已加载正文仅在该检查点复用；下一检查点重新捕获。所选 MCP 来源继续对每个原请求执行现有 scope/read-set 核验，Workflow fork fence仍在捕获前检查。总唯一 source和冲突摘要门禁保持，不能按 Tool 名丢弃不同文件输入。[默认长任务](test/isolated/long-run-sources.test.ts)经正式 paired 装配、公开 Client和 compatible SDK 完成同 Run 的 257 次不同 Files读取，完整原指令进入 18 次实际请求，两次冷历史读取零重放；[公开长历史接续](test/isolated/long-run-resume.test.ts)另核 4096 次原效果后恢复同一 Run。两项证据不替代 installed客户端、真实 Provider或平台资格。
 
@@ -596,7 +596,7 @@ Model 必须有准确 kind 的允许项，不给同名 Tool 授权。所有非 M
 
 [test/isolated/child-configuration.test.ts](test/isolated/child-configuration.test.ts) 使用实际本机 compatible HTTP 端点、临时 SQLite、单 Model 槽、真实 Workspace 文件与受控许可/Job barrier，验证旧 child route、新 carrier Workspace 配置覆盖、source freshness、准确角色版本、父权限拒绝零文件效果、独立 carrier Job Ask 与 Model-only/trust 拒绝、可选 modelId 继承原父身份、失败前零 child Session/Provider、warm 重试、真实 Store 冷重开查回以及后台 Job 延迟释放绑定。未调用付费模型或用户凭据。此切片只交付可信默认装配，不声明产品 `task` Tool、满容量立即失败、期限、追加邮箱、正式客户端入口或跨平台资格已完成。
 
-默认协作由同一可信 `child` 声明与全局 `builtin.task` Extension 装配。主 Agent 的协作目录提供 `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent`、`wait_agent_events`、`list_agents` 六项；子角色按自身选择提供管理与观察能力，不提供创建工具。注册的 `task.*@1` 定义保存准确输入与独立 carrier。默认 generic worker 接收 `prompt`，注册的其他可信角色可选 `preset`；JSONC 不定义角色或扩大 Tool/权限。目录以稳定 child Session ID 分页，并提供完整原始职责、当前职责和末次结果来源；正文较大时通过准确 Tool scope Artifact 提供完整模型来源。原 OperationRef/旧工具只保留内部可信调用与历史恢复。
+默认协作由可信 child 声明和 `builtin.task` 装配。主 Agent 使用 `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent`、`wait_agent`、`list_agents`。公开目标绑定直接协作者，新增轮次独立归属其派发标识。完整 child 配置、权限、来源和接纳语义由原执行记录负责。
 
 [默认配置测试](test/isolated/task-configuration.test.ts)使用真实 compatible SDK、SQLite、Workspace Files 与单 Model 槽，验证六工具目录、稳定 Agent 与职责来源、独立 carrier Ask、父策略拒绝零 child Provider、原 Command 重试零效果、角色版本与旧记录保持。默认三个槽位、三十分钟期限、unknown/fence 与取消最终门禁不因模型表面变化放宽。Mailbox completion 来自持久事实，等待不消费结果，真实人类输入直接通过原普通 Command 与 steer/follow-up 安全边界唤醒等待。
 
@@ -852,7 +852,7 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 用户级正文预览使用独立 `user_skill_document` capability 与 `GET /v1/config/user/skills/document`，参数仅为 Store、技能ID、正文版本及目录revision。`readUserDocument` 沿同一用户配置和已核来源重新发现，拒绝旧revision、换版、已禁用、未发现及重复来源，只返回准确身份与最多1MiB UTF-8正文；不接收路径，不返回资源入口。缺少执行依赖仍可阅读说明，原 `load/resource` 的依赖检查保持。目录分页仍只传元数据，读取正文不创建 Session、Run、Command、模型请求或技能激活。实现与持续取舍见[正文预览决定](../../.agents/notes/implemented/feature/2026-11-04-native-skill-document-preview.md)。
 
-[assembly](src/assembly.ts) 的 `skills.load/resource` 只声明知识身份、可选版本及资源路径，不声明或要求 `description`；公开参数继续将 `id` 映射为 `skill_id`。多余字段沿闭合 schema 返回准确校验失败，未进入 SkillSource；后续调用使用当前 schema 继续。已有历史输入及封存请求保留原记录，不因字段移除而改写或重发，Tool／Protocol 版本保持。执行描述仅由 [Browser 工具](../../packages/agent/src/tools/browser/README.md)声明。
+[assembly](src/assembly.ts) 的 `skills.load/resource` 将模型参数 `id` 映射为 `skill_id`，读取资源时另带 `path`。公开 schema 不接收 `version` 或 `description`。宿主调用保留可选版本并继续验证准确来源。多余字段沿闭合 schema 返回准确校验失败，未进入 SkillSource；后续调用使用当前 schema 继续。已有历史输入及封存请求保留原记录，不因字段移除而改写或重发，Tool／Protocol 版本保持。执行描述仅由 [Browser 工具](../../packages/agent/src/tools/browser/README.md)声明。
 
 2026-10-31 参数收窄验证：[装配](test/isolated/assembly.test.ts)与[paired SDK／HTTP](test/isolated/assembly-http.test.ts)核公开及内部 schema 均无该字段、无描述正常读取、多余字段零派发失败后继续，以及原输入在存储、后续模型历史和公开 GET 中保留。相关 Service／CLI／Builtin 8文件38项通过，Service／Agent／CLI类型、定向格式与文档检查通过；这些是本地受控 Provider 及真实 Service HTTP 证据，本轮未调用真实模型或操作用户客户端。
 
@@ -1051,7 +1051,7 @@ Service 在任何 vault 效果前核完整原 readSet，发现后和 JSONC 短 C
 普通工具继续绑定准确 namespace ID/version、原权限及派发链；[Agent 模型工具表面](../../packages/agent/src/model-tools.README.md)在所有 ModelAdapter 边界统一提供 `read_file` 等公开名称与 snake_case 参数，再将完整调用还原到内部工具。公开 ModelInput 按当时封存的表面重建名称、schema 与历史，内部 assembly/执行仍绑定原 ID/version；[AI adapter](../../packages/ai/README.md)只继续负责通用协议编码。[普通 paired 宿主回归](test/isolated/configuration.test.ts)核真实公开 wire、准确基线编辑、原内部授权与后续历史；[显式真实模型测试](../../tests/e2e/live/model/README.md)另核单一默认模型，不将两类证据混作全部 Provider 资格。
 
 
-模型使用base_ref、plan_ref/progress_ref、MCP各类ref及准确子工作引用，领域owner从原回执解析完整身份。Service的Plan／Output文件适配器与最终目录描述使用同一合同，不保旧模型字段。MCP准入经leaf只读原成功回执取得server，再核原来源和当前选取；派发前仍核完整binding、owner和descriptor，不由短引用授予权限。动态Tool归属使用原Model冻结的toolBindings。实现取舍与字段归[模型工具owner](../../packages/agent/src/model-tools.README.md)，未新增审批轮次、固定等待或版本升级。
+文件覆盖、文本编辑、技能去重与 Shell 续读以本次封存请求的原可见回执为证据。计划及 MCP 继续绑定原 Plan、资源和连接引用。协作目标和浏览器引用由各宿主验证原身份、当前权限与执行范围。当前界面与参数归[模型工具 owner](../../packages/agent/src/model-tools.README.md)。
 
 [Native MCP 测试装配](test/native-mcp-process.fixture.ts)仅由 Terminal builder 的固定 `native-mcp-loopback` 选项在构建前写入，网络选项和可选公开测试证书均进入 inventory/digest；普通 main/daemon 不选择它。该候选保默认权限、默认 OS vault 和系统 opener，但 loopback/证书网络不是生产默认资格。实际窗口及人工浏览器资格的入口和限制归 [Desktop owner](../desktop/README.md#native-mcp-完整设置)。
 

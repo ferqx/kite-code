@@ -30,13 +30,31 @@ import {
 import { launchPairedService } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
-function readToolBaseRef(content: unknown): string {
-  const reference = /^base_ref=(.*)$/m.exec(String(content));
-  expect(reference).not.toBeNull();
-  const value: unknown = JSON.parse(reference![1]!);
-  expect(typeof value).toBe('string');
-  return value as string;
+function reviewRequest(body: Record<string, unknown>) {
+  if (Array.isArray(body.tools)) return undefined;
+  const messages = body.messages as { role: string; content: string }[];
+  try {
+    const payload = JSON.parse(
+      messages
+        .slice()
+        .reverse()
+        .find((message) => message.role === 'user')?.content ?? '{}',
+    );
+    if (payload.purpose === 'authorization_check' || payload.purpose === 'shell_risk')
+      return payload as {
+        purpose: 'authorization_check' | 'shell_risk';
+        target?: { definitionId: string; input?: { path?: string } };
+      };
+  } catch {
+    // Session-title requests do not have a structured review payload.
+  }
+  return undefined;
 }
+
+const approveFileOperation = JSON.stringify({
+  decision: 'approve_once',
+  reason: 'The request targets the exact synthetic file used in this test.',
+});
 
 function gate() {
   let resolve!: () => void;
@@ -145,6 +163,7 @@ test('paired host streams saved attachments through scoped read_file and rejects
   const bytes = Buffer.from('\ufeff中文附件\r\nSAVED_ATTACHMENT_BYTES\r\n');
   let path = '';
   const requests: Record<string, unknown>[] = [];
+  const reviews: unknown[] = [];
   const chunk = (delta: unknown, reason: string | null) =>
     `data: ${JSON.stringify({ id: 'saved-file', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
   const provider = Bun.serve({
@@ -152,6 +171,8 @@ test('paired host streams saved attachments through scoped read_file and rejects
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as Record<string, unknown>;
+      const review = reviewRequest(body);
+      if (review) reviews.push(review.target);
       if (Array.isArray(body.tools)) requests.push(body);
       const call = Array.isArray(body.tools) && requests.length % 2 === 1;
       return new Response(
@@ -167,7 +188,7 @@ test('paired host streams saved attachments through scoped read_file and rejects
                   },
                 ],
               }
-            : { content: 'Read completed' },
+            : { content: review ? approveFileOperation : 'Read completed' },
           null,
         ) +
           chunk({}, call ? 'tool_calls' : 'stop') +
@@ -245,12 +266,16 @@ test('paired host streams saved attachments through scoped read_file and rejects
       (view) => view.runs.some((run) => run.originCommandId === 'foreign-read' && !run.isActive),
     );
     expect(requests).toHaveLength(4);
+    expect(reviews).toEqual([
+      expect.objectContaining({ definitionId: 'files.read', input: { path } }),
+    ]);
     expect(JSON.stringify(requests[3]!.messages)).not.toContain('SAVED_ATTACHMENT_BYTES');
     const foreignFeedback = (
       requests[3]!.messages as { role: string; tool_call_id?: string; content?: string }[]
     ).find((message) => message.role === 'tool' && message.tool_call_id === 'read-3')!;
     expect(foreignFeedback).toBeDefined();
-    expect(foreignFeedback.content).toContain('not among the exact files selected');
+    expect(foreignFeedback.content).toContain('outside the current conversation scope');
+    expect(foreignFeedback.content).toContain('attachment made available in this conversation');
     expect(foreignFeedback.content).toContain('This request was not executed');
     expect(foreignFeedback.content).toContain('do not bypass a refusal');
     expect(foreignFeedback.content).not.toContain('input_file_scope_denied');
@@ -333,40 +358,28 @@ test('ordinary host defaults select only available Shell and Task capabilities a
     expect(ids).not.toContain('execution_evidence.read');
 });
 
-test('ordinary paired default Auto host edits with an exact baseline without risk review, preserves public schemas and internal inputs, and respects explicit disable', async () => {
+test('ordinary paired Auto reads directly and reviews exact-baseline edits while preserving schemas and explicit disable', async () => {
   const f = fixture();
   const marker = 'owned fresh-profile project source';
   writeFileSync(join(f.workspace, 'source.txt'), marker);
   const requests: Record<string, unknown>[] = [];
-  const reviews: Record<string, unknown>[] = [];
+  const reviews: NonNullable<ReturnType<typeof reviewRequest>>[] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as Record<string, unknown>;
       if (!Array.isArray(body.tools)) {
-        const messages = body.messages as { role: string; content: string }[];
-        let purpose: string | undefined;
-        try {
-          const payload = JSON.parse(
-            messages
-              .slice()
-              .reverse()
-              .find((message) => message.role === 'user')?.content ?? '{}',
-          );
-          if (['authorization_check', 'shell_risk'].includes(payload.purpose)) {
-            purpose = payload.purpose;
-            reviews.push(payload);
-          }
-        } catch {}
+        const review = reviewRequest(body);
+        if (review) reviews.push(review);
         const content =
-          purpose === 'shell_risk'
+          review?.purpose === 'shell_risk'
             ? JSON.stringify({
                 risk: 'critical',
                 reason: 'Unexpected file risk review invocation.',
               })
-            : purpose === 'authorization_check'
-              ? JSON.stringify({ decision: 'reject', reason: 'Unexpected file review invocation.' })
+            : review?.purpose === 'authorization_check'
+              ? approveFileOperation
               : 'Project read';
         const chunk = (delta: unknown, finish: string | null) =>
           `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
@@ -387,18 +400,9 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       ];
       if (names.some((name) => !/^[a-zA-Z0-9_-]{1,64}$/.test(name)))
         return Response.json({ error: { message: 'invalid function name' } }, { status: 400 });
-      const readTool = tools.find((tool) => tool.function.parameters.properties.start_line);
+      const readTool = tools.find((tool) => tool.function.parameters.properties.offset);
       const call = requests.length <= 2;
       const edit = requests.length === 2;
-      const priorResult = edit
-        ? {
-            baseRef: readToolBaseRef(
-              (body.messages as { role: string; content: unknown }[]).find(
-                (message) => message.role === 'tool',
-              )!.content,
-            ),
-          }
-        : undefined;
       const chunk = (delta: unknown, finish: string | null) =>
         `data: ${JSON.stringify({ id: 'fresh-host', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
       return new Response(
@@ -416,12 +420,10 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
                         edit
                           ? {
                               path: 'source.txt',
-                              base_ref: priorResult!.baseRef,
-                              old_text: 'owned',
-                              new_text: 'verified',
-                              expected_matches: 1,
+                              old_string: 'owned',
+                              new_string: 'verified',
                             }
-                          : { path: 'source.txt', start_line: 1, max_lines: 200 },
+                          : { path: 'source.txt', offset: 1, limit: 200 },
                       ),
                     },
                   },
@@ -457,7 +459,15 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
     const view = await child.finished('read-project');
     expect(view.commandRun.status).toBe('completed');
     expect(requests).toHaveLength(3);
-    expect(reviews).toHaveLength(0);
+    expect(reviews).toEqual([
+      expect.objectContaining({
+        purpose: 'authorization_check',
+        target: expect.objectContaining({
+          definitionId: 'files.edit',
+          input: expect.objectContaining({ path: 'source.txt' }),
+        }),
+      }),
+    ]);
     expect(
       (await child.handle.client.listInteractions('session', { storeId: child.storeId }))
         .interactions,
@@ -468,7 +478,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       mode: 'readonly',
     });
     const executions = await reader.listExecutions('session');
-    expect(executions.filter((row) => row.kind === 'model' && row.runId === null)).toHaveLength(0);
+    expect(executions.filter((row) => row.kind === 'model' && row.runId === null)).toHaveLength(1);
     expect(
       (
         ((await reader.getView('session')).runs[0]!.configuration as Record<string, unknown>)
@@ -486,7 +496,6 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       path: 'source.txt',
       find: 'owned',
       replace: 'verified',
-      occurrences: 1,
     });
     const savedRead = JSON.parse(String((read.result as { content: string }).content)) as {
       base_ref: string;
@@ -498,7 +507,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       device: expect.any(String),
       inode: expect.any(String),
     });
-    expect((edit.input as Record<string, unknown>).baseRef).toBe(savedRead.base_ref);
+    expect(edit.input).not.toHaveProperty('baseRef');
     expect(edit.input).not.toHaveProperty('base');
     const history = requests[2]!.messages as {
       role: string;
@@ -507,18 +516,41 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
     const calls = history.flatMap((message) => message.tool_calls ?? []);
     expect(calls.map((call) => call.function.name)).toEqual(['read_file', 'edit_file']);
     expect(JSON.parse(calls[1]!.function.arguments)).toMatchObject({
-      base_ref: readToolBaseRef(
-        (requests[1]!.messages as { role: string; content: unknown }[]).find(
-          (message) => message.role === 'tool',
-        )!.content,
-      ),
-      old_text: 'owned',
-      new_text: 'verified',
-      expected_matches: 1,
+      old_string: 'owned',
+      new_string: 'verified',
     });
-    const names = (requests[0]!.tools as { function: { name: string } }[]).map(
-      (tool) => tool.function.name,
-    );
+    expect(JSON.parse(calls[1]!.function.arguments)).not.toHaveProperty('base_ref');
+    const declarations = (
+      requests[0]!.tools as {
+        function: {
+          name: string;
+          description: string;
+          parameters: { properties: Record<string, { description?: string }> };
+        };
+      }[]
+    ).map((tool) => tool.function);
+    const files = {
+      read_file: { fields: ['limit', 'offset', 'pages', 'path'], hint: 'Pass next_line as offset' },
+      write_file: { fields: ['content', 'path'], hint: 'read the same path first' },
+      edit_file: {
+        fields: ['new_string', 'old_string', 'path', 'replace_all'],
+        hint: 'Replace literal old_string with new_string',
+      },
+    };
+    for (const [name, { fields, hint }] of Object.entries(files)) {
+      const tool = declarations.find((entry) => entry.name === name)!;
+      expect(Object.keys(tool.parameters.properties).sort()).toEqual(fields);
+      expect(tool.description).toContain(hint);
+      expect(tool.description).not.toMatch(
+        /\b(?:start_line|max_lines|base_ref|content_ref|old_text|new_text|expected_matches)\b/,
+      );
+      expect(tool.description).not.toMatch(/external reads.*read-only/i);
+      expect(tool.description.match(/outside workspace checkpoints/g)).toHaveLength(1);
+      expect(tool.parameters.properties.path?.description).toContain(
+        'including ordinary external files',
+      );
+    }
+    const names = declarations.map((tool) => tool.name);
     const browserViews = await child.handle.client.queryExtension(
       'session',
       'builtin.browser',
@@ -545,7 +577,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       'spawn_agent',
       'send_agent_message',
       'follow_up_agent',
-      'wait_agent_events',
+      'wait_agent',
       'list_agents',
       'interrupt_agent',
       ...browserNames,
@@ -586,17 +618,12 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
     const nextTools = requests.at(-1)!.tools as {
       function: { parameters: { properties: Record<string, unknown> } };
     }[];
-    expect(nextTools.some((tool) => tool.function.parameters.properties.start_line)).toBe(false);
+    expect(nextTools.some((tool) => tool.function.parameters.properties.offset)).toBe(false);
     expect(nextNames).not.toContain('web_fetch');
     expect(nextNames).not.toContain('spawn_agent');
     expect(nextNames).not.toContain('send_agent_message');
     expect(nextNames).toEqual(
-      expect.arrayContaining([
-        'follow_up_agent',
-        'wait_agent_events',
-        'list_agents',
-        'interrupt_agent',
-      ]),
+      expect.arrayContaining(['follow_up_agent', 'wait_agent', 'list_agents', 'interrupt_agent']),
     );
     expect(nextTools.some((tool) => tool.function.parameters.properties.text)).toBe(false);
   } finally {
@@ -1318,6 +1345,7 @@ test('ordinary paired host reads an external user-file reference through the uni
   writeFileSync(path, `[fixture]\r\nmarker=${marker}\r\n`);
   writeFileSync(join(f.root, 'AGENTS.md'), 'OUTSIDE_PROJECT_INSTRUCTIONS_MUST_NOT_BE_CAPTURED');
   const requests: Record<string, unknown>[] = [];
+  const reviews: ReturnType<typeof reviewRequest>[] = [];
   const chunk = (delta: unknown, reason: string | null) =>
     `data: ${JSON.stringify({ id: 'external-read', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
   const provider = Bun.serve({
@@ -1325,6 +1353,11 @@ test('ordinary paired host reads an external user-file reference through the uni
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as Record<string, unknown>;
+      const review = reviewRequest(body);
+      if (review) {
+        expect(JSON.stringify(body.messages)).not.toContain(marker);
+        reviews.push(review);
+      }
       if (Array.isArray(body.tools)) requests.push(body);
       const call = Array.isArray(body.tools) && requests.length === 1;
       return new Response(
@@ -1340,7 +1373,7 @@ test('ordinary paired host reads an external user-file reference through the uni
                   },
                 ],
               }
-            : { content: 'External read finished' },
+            : { content: review ? approveFileOperation : 'External read finished' },
           null,
         ) +
           chunk({}, call ? 'tool_calls' : 'stop') +
@@ -1374,6 +1407,12 @@ test('ordinary paired host reads an external user-file reference through the uni
       'completed',
     );
     expect(requests).toHaveLength(2);
+    expect(reviews).toEqual([
+      expect.objectContaining({
+        purpose: 'authorization_check',
+        target: expect.objectContaining({ definitionId: 'files.read', input: { path } }),
+      }),
+    ]);
     const names = (requests[0]!.tools as { function: { name: string } }[]).map(
       (tool) => tool.function.name,
     );

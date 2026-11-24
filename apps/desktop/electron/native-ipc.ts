@@ -2093,6 +2093,7 @@ export function registerNativeIpc(options: {
           )
             throw Error('local_preview_replaced');
           const source = await file.reference(interaction.sourceHash);
+          const selection = inline.context.selection;
           const frozen = JSON.stringify(inline);
           const check = async () => {
             assertNativeSender(event, options.window(), options.rendererUrl);
@@ -2118,12 +2119,21 @@ export function registerNativeIpc(options: {
               request.requestId,
             ]),
             request.intent.commandId,
-            () =>
-              caller.submitLocalPreview(
+            async () => {
+              const image = await preview!.readLocalPdfSelectionImage(
+                request.previewId,
+                request.generation,
+                request.handleId,
+                source.sourceHash,
+                selection,
+              );
+              return caller.submitLocalPreview(
                 request,
-                localPdfRequestContent(inline.prompt, source, inline.context),
+                localPdfRequestContent(inline.prompt, source, inline.context, !!image),
                 check,
-              ),
+                image,
+              );
+            },
           );
         }
       } else if (request.method === 'outputs.preview.interaction') {

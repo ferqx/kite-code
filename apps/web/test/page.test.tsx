@@ -368,15 +368,20 @@ test('React browser page navigates directory, renders all 201 history messages a
     const beforeFailure = f.state.reads;
     f.state.fail = true;
     await f.click(f.button('Refresh history'));
-    await settle(() => f.state.reads > beforeFailure);
-    expect(f.dom.window.document.body.textContent).not.toContain('Stale');
+    await settle(() =>
+      f.dom.window.document.body.textContent!.includes('Cannot reach the local Kite service'),
+    );
+    expect(f.state.reads).toBeGreaterThan(beforeFailure);
     expect(f.dom.window.document.querySelectorAll('[data-message-id]')).toHaveLength(201);
-    expect(f.dom.window.document.body.textContent).not.toContain('Last known history');
-    expect(f.dom.window.document.body.textContent).not.toContain('Current read unavailable');
+    expect(f.dom.window.document.body.textContent).toContain('run kite web');
     const beforeRecovery = f.state.reads;
     f.state.fail = false;
     await f.click(f.button('Refresh history'));
-    await settle(() => f.state.reads >= beforeRecovery + 2);
+    await settle(
+      () =>
+        !f.dom.window.document.body.textContent!.includes('Cannot reach the local Kite service'),
+    );
+    expect(f.state.reads).toBeGreaterThanOrEqual(beforeRecovery + 2);
     await f.choose('b');
     await settle(() => f.dom.window.document.querySelector('h1')?.textContent === 'Session b');
     f.dom.window.history.pushState(null, '', '/sessions/a');

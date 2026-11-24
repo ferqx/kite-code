@@ -58,10 +58,30 @@ export interface BrowserSharedPageIdentity {
   readonly pageId: string;
   readonly incarnation: string;
 }
+export const browserOpenPageProperties: Record<string, Json> = {
+  existingPage: {
+    type: 'object',
+    required: ['pageId', 'incarnation'],
+    properties: {
+      pageId: { type: 'string', minLength: 1, maxLength: 128 },
+      incarnation: { type: 'string', minLength: 1, maxLength: 128 },
+    },
+    additionalProperties: false,
+  },
+  newPage: { const: true },
+};
+export type BrowserOpenIntent = {
+  key: string;
+  url: string;
+  existingPage?: BrowserSharedPageIdentity;
+  newPage?: true;
+};
 export type BrowserControlOperation =
   | { action: 'snapshot' | 'capture' | 'back' | 'forward' | 'reload' | 'dialogs' }
   | { action: 'press'; key: string }
   | { action: 'hover'; ref: string; seq: string }
+  | { action: 'check' | 'uncheck'; ref: string; seq: string }
+  | { action: 'setvalue'; ref: string; seq: string; value: string }
   | { action: 'select'; ref: string; seq: string; values: string[] }
   | { action: 'wait'; text: string; timeoutMs: number }
   | { action: 'dialog'; dialogRef: string; response: 'accept' | 'dismiss' }
@@ -86,8 +106,17 @@ export interface BrowserController {
   prepareRun?(sessionId: string, runId: string): Promise<void>;
   /** Confirmed released shared-page metadata only; no current existence or control proof. */
   releasedPages?(sessionId: string): readonly BrowserReleasedPage[];
+  /** Host-only identity of the current, exactly bound page. */
+  activePageIdentity?(
+    sessionId: string,
+    target: BrowserTarget,
+  ): BrowserSharedPageIdentity | undefined;
   /** Exact canonical URL, or the last closed page when omitted. Ambiguous identities are refused. */
-  releasedPage?(sessionId: string, url?: string): BrowserReleasedPage | null;
+  releasedPage?(
+    sessionId: string,
+    url?: string,
+    identity?: BrowserSharedPageIdentity,
+  ): BrowserReleasedPage | null;
   /** Trusted Main-confirmed missing original only. Removes metadata, never retries or grants control. */
   invalidateMissingReleasedPage?(sessionId: string, identity: BrowserSharedPageIdentity): boolean;
   /** Internal semantic API. Public v1 Tool inputs and compatibility behavior are unchanged. */
@@ -140,7 +169,17 @@ export interface BrowserController {
     seq: string,
     ref: string | null,
   ): Promise<ToolResult>;
-  close(sessionId: string, target: BrowserTarget): Promise<ToolResult>;
+  close(
+    sessionId: string,
+    target: BrowserTarget,
+    options?: { switchPage?: true },
+  ): Promise<ToolResult>;
+  /** Explicit user stop on the exact browser lease, including its owning Run. */
+  stopTask?(
+    sessionId: string,
+    target: BrowserTarget,
+    actionExecutionId: string,
+  ): Promise<ToolResult>;
 }
 export const browserExtensionId = 'builtin.browser';
 export const browserViewContentType = 'application/vnd.kite.browser-view+json';

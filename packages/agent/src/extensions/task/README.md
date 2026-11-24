@@ -4,18 +4,18 @@
 
 | 模型名称 | 内部 ID | 行为 |
 | --- | --- | --- |
-| `spawn_agent` | `task.spawn` | 以 `prompt` 创建异步 child，可选 `task_name` 和可信 `preset` |
-| `send_agent_message` | `task.message` | 给直接 child 或 parent 排队消息，不自行开新轮 |
-| `follow_up_agent` | `task.follow_up` | 给 queued/running child 引导，或在 idle child 原 Session 开始明确新轮 |
-| `wait_agent_events` | `task.events` | 仅主 Agent 观察自身邮箱的事件摘要，Runtime 自动续读 |
-| `list_agents` | `task.list` | 读取稳定协作者目录和完整来源，不改变执行或已读事实 |
-| `interrupt_agent` | `task.interrupt` | 请求取消首次受理选中的准确 carrier |
+| `spawn_agent(task_name,message,agent_type?)` | `task.spawn` | 创建异步协作者，返回稳定 `target` 和原派发标识 |
+| `send_agent_message(target,message)` | `task.message` | 给直接协作者或直接父级排队消息 |
+| `follow_up_agent(target,message)` | `task.follow_up` | 引导现有工作，或让空闲协作者在原 Session 开始新轮 |
+| `wait_agent(timeout_ms?)` | `task.events` | 主 Agent 观察父邮箱，宿主推进观察位置 |
+| `list_agents()` | `task.list` | 读取稳定协作者目录、当前派发与最近完整结果 |
+| `interrupt_agent(target)` | `task.interrupt` | 取消受理时原事务选中的活动或排队工作 |
 
 六个定义均保持 v1。工厂为 `createTaskExtension({roles, defaultRole?, presets?})`；模型不能传内部 key、Run、selection、配置 ID、权限或 detached。`task_name` 只作显示，不参与身份、去重或授权。旧工具及 `role/resultDisposition/after_turn` 参数不再可用。
 
 ## 身份、权限和预设
 
-`agent_id` 是稳定 child Session ID。spawn 和 follow-up 返回准确 carrier 的 `work_ref`；运行中引导返回原工作引用，idle 新轮返回新引用。interrupt 可传 `work_ref`，原 Store 写事务同时核当前 carrier；旧轮引用不能中断后来的工作。同一协作者可以经历多轮工作；普通父轮次结束不取消已受理 child。每次 Tool invocation 派生受理身份，准确重试查询原持久回执，不重复创建工作或将迟到中断改投新轮。
+`target` 由所属父会话的准确目录锚点派生。同一协作者多轮复用 target，每次新轮使用独立 `dispatch_id`。宿主按直接父子关系、Store 与主体解析，实际停止与续派由原事务选择工作。底层 Session、WorkRef 和原调用回执仍持久保存。
 
 `work_ref` 是原 carrier Execution ID 的无损短表示，不重复编码 child、Command、key 等可抄错字段。通用 Host 从原 `operation.agent` Command 与原 Store Operation 记录核得 `PublicExecution.operationRef`，再由现有 `readAgent` 核直接父子及控制权；不查“最新工作”、不纠正相近 ID。引用核验全部只读，失败返回 `invalid_work_reference`；写命令在该阶段明确 `accepted:false`，不会把尚未调用的命令误称为接纳未知。实际受理后的丢回执仍保持未知。
 

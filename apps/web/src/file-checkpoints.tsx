@@ -1,5 +1,6 @@
 import {
   ClientError,
+  canonicalModelBody,
   type FileCheckpointArtifact,
   type FileCheckpointBaseline,
   type FileCheckpointDetail,
@@ -12,7 +13,6 @@ type ListPage = FileCheckpointPage;
 type Detail = FileCheckpointDetail;
 type RestoreStatus = FileRestoreStatus;
 type Point = ListPage['payload']['items'][number]['checkpoint'];
-type Boundary = Point['boundary'];
 interface Observation {
   storeId: string;
   sessionId: string;
@@ -238,16 +238,7 @@ export class FileCheckpointReader {
       this.identity(detail);
       this.pointIdentity(detail.payload.checkpoint);
       budget(detail);
-      if (
-        detail.payload.checkpoint.id !== target.checkpoint.id ||
-        detail.payload.checkpoint.workspace.device !== target.checkpoint.workspace.device ||
-        detail.payload.checkpoint.workspace.inode !== target.checkpoint.workspace.inode ||
-        Object.keys(target.checkpoint.boundary).some(
-          (key) =>
-            detail.payload.checkpoint.boundary[key as keyof Boundary] !==
-            target.checkpoint.boundary[key as keyof Boundary],
-        )
-      )
+      if (canonicalModelBody(detail.payload.checkpoint) !== canonicalModelBody(target.checkpoint))
         conflict();
       return (state) => ({ ...state, detail: detail.payload });
     });

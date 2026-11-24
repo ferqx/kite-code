@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import { bundledOfficeSkillDirectory } from '../../../../src/skills/office-source';
 import { createBuiltinSkillSources } from '../../../../src/skills/registry';
 
@@ -31,6 +32,7 @@ test.each(officeSkills)('packaged %s skill loads its pinned document', async (ke
   const loaded = await source.load({ id, version: entry!.version });
   if (key === 'pdf') {
     expect(loaded.body).toContain('KITE_OFFICE_SKILLS_DIR');
+    expect(loaded.body).toContain('pdf-fields --input filled.pdf');
     expect(loaded.body).toContain('report its actual absolute path');
   } else {
     const path = join(bundledOfficeSkillDirectory()!, key, 'SKILL.md');
@@ -76,6 +78,60 @@ test.each([
   expect(loaded.resources).toContainEqual({ id: resource.id, path });
   expect(resource.body).toContain(sample);
   await source.dispose();
+});
+
+test('PDF field inspection reads saved values and distinguishes checkbox appearance from malformed data', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pdf-fields-test-'));
+  try {
+    const source = join(root, 'form.pdf');
+    const document = await PDFDocument.create();
+    const page = document.addPage();
+    const form = document.getForm();
+    form.createTextField('Trip').setText('NX-4827');
+    const checked = form.createCheckBox('Checked');
+    checked.addToPage(page);
+    checked.check();
+    const invalid = form.createCheckBox('Malformed');
+    invalid.addToPage(page);
+    invalid.acroField.dict.set(PDFName.of('V'), PDFString.of('Yes'));
+    const choice = form.createDropdown('Dock');
+    choice.addOptions(['North', 'South']);
+    choice.select('North');
+    await writeFile(source, await document.save());
+    const before = await readFile(source);
+    const inspect = Bun.spawnSync([
+      process.execPath,
+      '--no-install',
+      verifier,
+      'pdf-fields',
+      '--input',
+      source,
+    ]);
+    expect(inspect.exitCode).toBe(0);
+    expect(JSON.parse(inspect.stdout.toString())).toEqual({
+      success: true,
+      pages: 1,
+      fields: [
+        { name: 'Trip', type: 'text', value: 'NX-4827' },
+        {
+          name: 'Checked',
+          type: 'checkbox',
+          value: '/Yes',
+          widgets: [{ appearance: '/Yes', onValue: '/Yes' }],
+        },
+        {
+          name: 'Malformed',
+          type: 'checkbox',
+          value: null,
+          widgets: [{ appearance: '/Off', onValue: '/Yes' }],
+        },
+        { name: 'Dock', type: 'choice', value: ['North'], options: ['North', 'South'] },
+      ],
+    });
+    expect(await readFile(source)).toEqual(before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('stable exporter bounds bytes, denies links and leaves no partial output on cancellation', async () => {

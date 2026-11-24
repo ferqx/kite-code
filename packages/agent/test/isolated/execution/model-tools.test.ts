@@ -252,7 +252,7 @@ test('Agent tools expose exactly the current six definitions and reject retired 
     'send_message',
     'followup_task',
     'wait_agents',
-    'wait_agent',
+    'wait_agent_events',
     'run_agent',
     'read_agent',
     'cancel_agent_task',
@@ -263,19 +263,19 @@ test('Agent tools expose exactly the current six definitions and reject retired 
       'tool_not_available',
     );
   }
-  const event = surface.tools.find((tool) => tool.id === 'wait_agent_events')!;
-  expect(Object.keys(event.inputSchema.properties!)).toEqual(['work_refs', 'wait_ms']);
+  const event = surface.tools.find((tool) => tool.id === 'wait_agent')!;
+  expect(Object.keys(event.inputSchema.properties!)).toEqual(['timeout_ms']);
   expect(
     surface.decode({
       id: 'valid',
-      name: 'wait_agent_events',
-      arguments: '{"wait_ms":0}',
+      name: 'wait_agent',
+      arguments: '{"timeout_ms":0}',
     }).arguments,
   ).toBe('{"waitMs":0}');
   for (const [name, args] of [
     ['spawn_agent', { prompt: 'work', key: 'old', role: 'worker', result_disposition: 'required' }],
-    ['wait_agent_events', { task_ids: ['old'] }],
-    ['wait_agent_events', { cursor: '12', wait_ms: 0 }],
+    ['wait_agent', { task_ids: ['old'] }],
+    ['wait_agent', { work_refs: ['old'], wait_ms: 0 }],
     ['interrupt_agent', { task_id: 'old', target_run_id: 'old', command_id: 'old' }],
   ] as const) {
     expect(

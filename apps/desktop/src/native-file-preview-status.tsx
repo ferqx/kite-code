@@ -30,6 +30,8 @@ export function filePreviewFailure(error?: unknown): PreviewFailure {
       return { message: '文件超出预览大小限制' };
     case 'preview_office_archive_invalid':
       return { message: '无法读取文件结构' };
+    case 'pdf_font_invalid':
+      return { message: 'PDF 字体无法读取，请使用嵌入可用字体的版本' };
     default:
       return { message: '预览失败', retry: true };
   }

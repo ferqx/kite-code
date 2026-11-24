@@ -103,7 +103,7 @@ test('range and edit-argument errors explain the model parameter contract withou
     expect(read.outcome).toBe('failed');
     expect(read.details).toEqual({ code: 'file_read_range_invalid' });
     const rangeText = presented(read);
-    expect(rangeText).toContain('start_line and max_lines must be positive safe integers');
+    expect(rangeText).toContain('offset and limit must be positive safe integers');
     expect(rangeText).not.toContain('permission denied');
     const edit = await f.call('edit', {
       path: 'source.txt',
@@ -124,8 +124,8 @@ test('range and edit-argument errors explain the model parameter contract withou
       occurrences: 1,
     });
     expect(emptyText.details).toMatchObject({ code: 'file_edit_invalid' });
-    expect(emptyText.content).toContain('nonempty old_text');
-    expect(emptyText.content).toContain('expected_matches defaults to 1');
+    expect(emptyText.content).toContain('nonempty old_string');
+    expect(emptyText.content).toContain('Use replace_all only');
     expect(readFileSync(join(f.workspace, 'source.txt'), 'utf8')).toBe('original\n');
   } finally {
     await f.close();
@@ -148,7 +148,7 @@ test('edit match conflicts and complete-file baseline conflicts retain distinct 
     expect(mismatch.outcome).toBe('failed');
     expect(mismatch.details).toMatchObject({ code: 'file_edit_match_conflict' });
     expect(mismatch.content).toContain('This edit did not publish a change');
-    expect(mismatch.content).toContain('do not broaden the requested replacement');
+    expect(mismatch.content).toContain('Use replace_all only if every exact match should change');
     expect(readFileSync(path, 'utf8')).toBe('same\nsame\n');
     noParentNotice(mismatch);
     writeFileSync(path, 'current\n');
@@ -191,13 +191,9 @@ test('supported Full external operations explain OS/path failure without imposin
         signal: f.context.signal,
         input,
       };
-      const capability = (await api.describeRequest(request, { mode: 'full' })) ?? {
-        kind: 'tool',
-        definitionId: id,
-        definitionVersion: tool.version,
-        revision: 'accepted-external-read',
-        hardAllowed: true,
-      };
+      const capability =
+        (await api.describeRequest(request, { mode: 'full' })) ??
+        (await reads.describeRequest(request));
       return tool.execute(input, {
         ...f.context,
         dispatchAuthorization: {
@@ -222,7 +218,9 @@ test('supported Full external operations explain OS/path failure without imposin
     });
     expect(missing.outcome).toBe('failed');
     expect(missing.details).toMatchObject({ code: 'ENOENT', fileScope: 'external_path' });
-    expect(missing.content).toContain('Replacement and edit require an existing file');
+    expect(missing.content).toContain(
+      'The target file or a required parent directory does not exist',
+    );
     noParentNotice(missing);
     const invalid = await execute('files.read', { path: `${f.external}/./source.txt` });
     expect(invalid.details).toMatchObject({ code: 'file_path_invalid' });

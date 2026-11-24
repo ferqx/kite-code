@@ -56,6 +56,7 @@ export function formatChildResult(input: {
   origin: { executionId: string; resultRevision: string; storeId: string };
   inclusion: string;
   body?: string;
+  target?: string;
 }): string | undefined {
   const { execution, result, origin, inclusion, body } = input;
   const details = object(result.details);
@@ -198,7 +199,8 @@ export function formatChildResult(input: {
     origin,
     inclusion,
     child: {
-      agentId: details.childSessionId,
+      ...(input.target ? { target: input.target } : { agentId: details.childSessionId }),
+      dispatch_id: origin.executionId,
       runId: details.runId,
       status: details.status,
       outcome: result.outcome,

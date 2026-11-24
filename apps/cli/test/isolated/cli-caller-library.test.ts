@@ -64,6 +64,16 @@ test('actual library run requires durable host port; original new Work request s
     expect(await runNonInteractive(['work', 's', JSON.stringify(request)], options)).toBe(3);
     expect(f.calls()).toBe(calls);
     expect(f.rows("SELECT count(*) AS n FROM command WHERE id='library-work'")).toEqual([{ n: 1 }]);
+    // A sibling CLI can hold the shared journal lock while publishing its own intent.
+    const siblingWrite = acquireProfileDataLock(access, 'tui_private');
+    try {
+      await expect(options.caller.lookup('s', request)).resolves.toMatchObject({
+        id: request.commandId,
+        status: 'applied',
+      });
+    } finally {
+      siblingWrite.release();
+    }
     const interrupt = new AbortController();
     const cancelled = await observeCommand(
       's',

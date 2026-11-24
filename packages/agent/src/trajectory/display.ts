@@ -201,6 +201,32 @@ export function toolTrajectoryDisplay(input: {
     )
       display.summary = `${args.urls.length} 个网页`;
   } else if (extension === 'builtin.browser' && version === '1') {
+    if (id.startsWith('browser.structured.')) {
+      const action = id.slice('browser.structured.'.length);
+      const labels: Record<string, string> = {
+        navigate: '打开网页',
+        snapshot: '读取网页',
+        click: '点击网页元素',
+        type: '填写网页字段',
+        fill_form: '填写网页表单',
+        tabs: '管理浏览器标签页',
+        screenshot: '截取网页图像',
+        press: '发送浏览器按键',
+        wait: '等待网页状态',
+        dialog: '处理网页对话框',
+        history: '浏览网页历史',
+        pointer: '操作网页图像',
+      };
+      if (labels[action]) {
+        const url = safeUrl(args.url);
+        return trajectoryDisplaySchema.parse({
+          kind: 'browser',
+          operation: 'execute',
+          title: labels[action],
+          ...(url ? { summary: url } : {}),
+        });
+      }
+    }
     const operation = id.startsWith('browser.') ? id.slice(8) : '';
     const parsed = trajectoryDisplaySchema.shape.operation.safeParse(operation);
     if (

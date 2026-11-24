@@ -40,6 +40,11 @@ export type ListStableAgentsInput = WriteContext &
     upperSeq?: string;
     limit?: number;
   };
+export type ReadAgentTargetsInput = Pick<
+  ListStableAgentsInput,
+  'expectedStoreId' | 'sessionId' | 'subjectId' | 'extensionId'
+> &
+  ({ agentIds: string[] } | { anchor: string });
 export interface ApplyAgentCommandInput extends EnsureOperationInput {
   commandId: string;
   agentId: string;

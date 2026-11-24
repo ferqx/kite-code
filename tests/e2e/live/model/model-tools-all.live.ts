@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
+import { createRuntime, prepareOutputDirectory, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { withBundledRipgrep } from '@kite-ai/agent/jobs/shell';
@@ -22,19 +22,21 @@ import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/wi
 import { privateDirectory } from '../../../fixtures/test-filesystem';
 import { liveModelSelection, liveReasoningEffort } from './approval-feedback-fixture';
 import { liveCodeEvidence } from './live-code-evidence';
-import { createLiveModelFixture } from './live-model-fixture';
+import { createLiveModelFixture, type LiveModelWireResponse } from './live-model-fixture';
 import {
   extendedToolGroups,
   parseAllToolMode,
   recoveredContextRefresh,
   runExtendedToolCases,
-  stoppedOriginalBackgroundShell,
+  stoppedOriginalShellSession,
   type ToolScenarioOptions,
 } from './model-tools-extended-cases';
 
 // Explicit live artifact only. No production flags, model substitution, response edits or outer retry.
 const args = process.argv.slice(2);
 const output = args.find((arg) => arg.startsWith('--output='))?.slice(9);
+const userConfigurations = args.filter((arg) => arg.startsWith('--user-configuration='));
+const userConfigurationPath = userConfigurations[0]?.slice('--user-configuration='.length);
 const selectedScenario = args.find((arg) => arg.startsWith('--scenario='))?.slice(11);
 const mode = parseAllToolMode(args);
 const modelArgument = args.find((arg) => arg.startsWith('--model='))?.slice(8);
@@ -68,6 +70,9 @@ const selected = new Set(
 if (
   process.env.KITE_RUN_LIVE_MODEL_TOOLS !== '1' ||
   args.filter((arg) => arg.startsWith('--output=')).length !== 1 ||
+  userConfigurations.length > 1 ||
+  (userConfigurationPath !== undefined &&
+    (!isAbsolute(userConfigurationPath) || selectedModel !== 'default')) ||
   args.filter((arg) => arg.startsWith('--scenario=')).length > 1 ||
   args.filter((arg) => arg === '--extended').length > 1 ||
   args.filter((arg) => arg.startsWith('--mode=')).length > 1 ||
@@ -75,6 +80,7 @@ if (
   args.filter((arg) => arg.startsWith('--reasoning-effort=')).length > 1 ||
   args.length !==
     1 +
+      userConfigurations.length +
       Number(selectedScenario !== undefined) +
       Number(args.includes('--extended')) +
       args.filter((arg) => arg.startsWith('--mode=')).length +
@@ -101,16 +107,15 @@ const expected = [
   'git_worktree',
   'write_file',
   'edit_file',
-  'shell_execute',
-  'shell_read',
-  'shell_wait',
-  'shell_stop',
+  'exec_command',
+  'poll_command',
+  'terminate_session',
   'ask_user',
   'web_fetch',
   'spawn_agent',
   'send_agent_message',
   'follow_up_agent',
-  'wait_agent_events',
+  'wait_agent',
   'list_agents',
   'interrupt_agent',
   'read_plan',
@@ -128,6 +133,7 @@ const expected = [
   'list_mcp_prompts',
   'get_mcp_prompt',
 ] as const;
+const declaredTools = new Set<string>([...expected, 'reinspect_images']);
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -136,7 +142,8 @@ function check(value: unknown, point: string): asserts value {
   if (!value) throw Error(`all_tools_${point}`);
 }
 const started = Date.now();
-const wire: { status: number; tools: string[]; phase: 'business' | 'review' }[] = [];
+const wire: (LiveModelWireResponse & { phase: 'business' | 'review' })[] = [];
+const loggedTransportFailures = new Set<LiveModelWireResponse>();
 let physicalRequests = 0;
 const scenarios: Record<string, unknown>[] = [];
 const interactions: { sessionId: string; definitionId: string; kind: string; decision: string }[] =
@@ -358,6 +365,7 @@ try {
     presetOverride?: Parameters<typeof createLiveModelFixture>[0]['presetOverride'],
   ) {
     return createLiveModelFixture({
+      ...(userConfigurationPath ? { userConfigurationPath } : {}),
       requestTimeoutMs: null,
       signal,
       preserveSdkAttemptErrors: true,
@@ -368,13 +376,27 @@ try {
           }
         : {}),
       ...(presetOverride ? { presetOverride } : {}),
-      beforeWireRequest() {
+      beforeWireRequest({ body }) {
         physicalRequests++;
+        writeFileSync(join(root, `http-${physicalRequests}-${phase}.json`), body, { mode: 0o600 });
       },
       observe(state) {
-        for (const event of state.wire)
-          if (!wire.includes(event as (typeof wire)[number]))
-            wire.push(Object.assign(event, { phase }));
+        for (const event of state.wire) {
+          const entry = Object.assign(event, { phase });
+          if (!wire.includes(entry)) wire.push(entry);
+          if (entry.transportFailure && !loggedTransportFailures.has(entry)) {
+            loggedTransportFailures.add(entry);
+            console.error(
+              JSON.stringify({
+                event: 'http_transport_failed',
+                index: wire.indexOf(entry) + 1,
+                phase,
+                status: entry.status,
+                ...entry.transportFailure,
+              }),
+            );
+          }
+        }
       },
     });
   }
@@ -529,7 +551,7 @@ try {
   const workspaceSerialLocks = createWorkspaceSerialLocks(profile);
   cleanup.push({ name: 'workspace_locks', close: () => workspaceSerialLocks.close() });
   host.bindWorkspaceSerialLocks?.(workspaceSerialLocks);
-  const runtime = createRuntime({
+  const runtime: ReturnType<typeof createRuntime> = createRuntime({
     ...host,
     store,
     workspaceSerialLocks,
@@ -538,6 +560,9 @@ try {
     permissions: host.permissions!,
     supportsExtensionInputs: host.supportsExtensionInputs,
     supportsSelectedSkills: host.supportsSelectedSkills,
+    outputCollections: {
+      prepare: (context, identity) => prepareOutputDirectory(runtime, context, identity),
+    },
     async resolveRunConfiguration(input) {
       const binding = await resolveRun(input);
       return instrument(binding);
@@ -788,7 +813,7 @@ try {
           'edit_effect',
         );
         check(readFileSync(join(workspace, 'result.txt'), 'utf8') === 'verified\n', 'write_effect');
-        check(stoppedOriginalBackgroundShell(executions), 'shell_stop_not_confirmed');
+        check(stoppedOriginalShellSession(executions), 'shell_stop_not_confirmed');
       }
       if (id === 'web') {
         check(webRequests > 0, 'real_owned_web_request_missing');
@@ -934,7 +959,7 @@ try {
   });
   await runCase(
     'files-shell',
-    `Use the actual tools for this synthetic test. With shell_execute run ls, rg --files docs, and rg -n -F -- '[a-z]+' docs; use filesystem:"workspace_write",network:"none". Read source.txt via read_file, edit message=before to message=after using its exact base_ref returned by read_file, and create result.txt containing exactly verified followed by a newline using write_file. Also use read_file to read the absolute external file ${JSON.stringify(join(root, 'external.txt'))}. Then shell_execute with background:true one command: echo BACKGROUND_STARTED; sleep 120 with the same workspace/no-network permissions. Using its returned shell_id, call shell_read, shell_wait with wait_ms:0, shell_stop with only that shell_id, then shell_wait until its actual cancellation is terminal. Use all four Shell tools and all three file tools. Copy exact returned references; the host owns cancellation intent identity. Do not relaunch an existing command. Finally report observed search and file results, the external token, and confirmed background stop. Be concise.`,
+    `Use the actual tools for this synthetic test. With exec_command run ls, rg --files docs, and rg -n -F -- '[a-z]+' docs; use filesystem:"workspace_write",network:"none". Read source.txt via read_file, use edit_file to replace old_string "message=before" with new_string "message=after", and create result.txt containing exactly verified followed by a newline using write_file. Also use read_file to read the absolute external file ${JSON.stringify(join(root, 'external.txt'))}. Then use exec_command with yield_time_ms:0 to start one command: echo BACKGROUND_STARTED; sleep 120 with the same workspace/no-network permissions. Use its returned numeric session_id with poll_command to see BACKGROUND_STARTED. Use terminate_session on that same session_id, and poll again only if the stop result is nonterminal. Do not relaunch the existing command. Finally report the actual search and file results, external token, and confirmed stop. Be concise.`,
   );
   await runCase(
     'question',
@@ -942,7 +967,7 @@ try {
   );
   await runCase(
     'planning',
-    'Use all four planning tools. First read_plan. Then write_plan with plan_id coverage (omit expected_plan_ref for this first creation), title Coverage plan, body One bounded verification step, steps:[{id:"verify",title:"Run the synthetic check"}]. Read the saved plan and progress with read_plan, then request_plan_review with the exact returned plan_ref. Wait for approval. After approval use shell_execute to run printf "PLAN_VERIFIED\\n" with workspace_write/no-network permissions. Mark verify completed with update_plan_progress using the actual successful shell_execute execution_id as evidence, the exact returned plan_ref; the host binds the current Run, so omit run_id, progress_ref:null and complete_plan:true. Read the final plan and report actual completion. Never invent an execution identity.',
+    'Use all four planning tools. First read_plan. Then write_plan with plan_id coverage (omit expected_plan_ref for this first creation), title Coverage plan, body One bounded verification step, steps:[{id:"verify",title:"Run the synthetic check"}]. Read the saved plan and progress with read_plan, then request_plan_review with the exact returned plan_ref. Wait for approval. After approval use exec_command to run printf "PLAN_VERIFIED\\n" with workspace_write/no-network permissions. Mark verify completed with update_plan_progress using the actual successful exec_command execution_id as evidence, the exact returned plan_ref; the host binds the current Run, so omit run_id, progress_ref:null and complete_plan:true. Read the final plan and report actual completion. Never invent an execution identity.',
     true,
   );
   await runCase(
@@ -959,7 +984,7 @@ try {
   );
   await runCase(
     'agents',
-    'Use all six collaborator tools. Spawn exactly one collaborator with prompt:"Calculate 17 * 19; reply with exactly 323." Wait for completion with wait_agent_events using the returned work_ref in work_refs, and list_agents for the returned agent_id, reading its complete result. Once idle, send_agent_message to that same agent_id with "For your next turn, preserve the first answer in history"; this alone must not start a turn. Call interrupt_agent on the idle collaborator and inspect the idle result. Then follow_up_agent on the SAME agent_id with "Calculate 23 * 29; reply with exactly 667." Wait for its second completion with wait_agent_events using the new work_ref in work_refs and list_agents for the same ID. Read the complete second result. Do not create a second agent, use a preset, invent IDs or use old tool names. If a child fails, immediately report that failure without retries, more messages or more waits. Finally report both actual answers only if both child turns succeeded.',
+    'Use all six collaborator tools. Use spawn_agent with task_name:"calculator" and message:"Calculate 17 * 19; reply with exactly 323." Wait for the accepted dispatch with wait_agent and inspect it using list_agents. Once idle, use send_agent_message with the original target and message:"For your next turn, preserve the first answer in history". Call interrupt_agent on that idle target and inspect its result. Then follow_up_agent on the same target with message:"Calculate 23 * 29; reply with exactly 667." Use wait_agent and list_agents to observe that new dispatch and read its complete result. If a child fails, report that failure without retries. Finally report both actual answers only if both runs succeeded.',
   );
   await runCase(
     'images',
@@ -1032,10 +1057,9 @@ try {
       'read_file',
       'write_file',
       'edit_file',
-      'shell_execute',
-      'shell_read',
-      'shell_wait',
-      'shell_stop',
+      'exec_command',
+      'poll_command',
+      'terminate_session',
     ],
     question: ['ask_user'],
     planning: ['read_plan', 'write_plan', 'request_plan_review', 'update_plan_progress'],
@@ -1049,7 +1073,7 @@ try {
         name.endsWith('_agent') ||
         name.endsWith('_agents') ||
         name === 'send_agent_message' ||
-        name === 'wait_agent_events',
+        name === 'wait_agent',
     ),
   };
   const required = selectedScenario
@@ -1068,9 +1092,7 @@ try {
   const baselineMcp = selectedScenario === 'mcp' || (!selectedScenario && !extended);
   if (baselineMcp) check(dynamic.length === 1, 'dynamic_tool_missing');
   check(
-    [...names].every(
-      (name) => expected.includes(name as (typeof expected)[number]) || dynamic.includes(name),
-    ),
+    [...names].every((name) => declaredTools.has(name) || dynamic.includes(name)),
     'unaccounted_registered_tool',
   );
   if (baselineMcp)
@@ -1089,6 +1111,7 @@ try {
     error instanceof Error && /^[a-z0-9_-]+$/.test(error.message)
       ? error.message
       : 'all_tools_attempt_failed';
+  console.error(JSON.stringify({ event: 'run_failed', error: report.error }));
   process.exitCode = 1;
 } finally {
   process.off('SIGINT', interrupt);
@@ -1117,7 +1140,7 @@ try {
   const dynamicTools = [...called].filter((name) => name.startsWith('mcp_'));
   report.dynamicTools = dynamicTools;
   report.unexpectedTools = [...names].filter(
-    (name) => !expected.includes(name as (typeof expected)[number]) && !dynamicTools.includes(name),
+    (name) => !declaredTools.has(name) && !dynamicTools.includes(name),
   );
   report.rpc = rpc;
   report.durationMs = Date.now() - started;

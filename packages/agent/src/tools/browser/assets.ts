@@ -34,10 +34,11 @@ export function agentBrowserExecutableName(): string | undefined {
 }
 
 /** Installed native dependency only. Never execute a PATH entry, project script or npx fallback. */
-function installedAssets() {
+function installedAssets(ownedManifest?: string) {
   try {
     const manifest = realpathSync(
-      desktopAsset('assets/agent-browser/package.json') ??
+      ownedManifest ??
+        desktopAsset('assets/agent-browser/package.json') ??
         require.resolve('agent-browser/package.json'),
     );
     if (statSync(manifest).size > 65536) throw unavailable();
@@ -51,15 +52,15 @@ function installedAssets() {
     if (!executable.startsWith(`${root}${sep}`) || !statSync(executable).isFile())
       throw unavailable();
     const license = realpathSync(join(root, 'LICENSE'));
-    return { executable, files: [manifest, executable, license] as readonly string[] };
+    return { executable, files: [manifest, executable, license] as const };
   } catch {
     throw unavailable();
   }
 }
-export function agentBrowserExecutableAsset(): string {
-  return installedAssets().executable;
+export function agentBrowserExecutableAsset(ownedManifest?: string): string {
+  return installedAssets(ownedManifest).executable;
 }
 /** Host includes these exact immutable installation paths in its existing runtime protection. */
-export function agentBrowserRuntimeAssets(): readonly string[] {
-  return installedAssets().files;
+export function agentBrowserRuntimeAssets(ownedManifest?: string) {
+  return installedAssets(ownedManifest).files;
 }

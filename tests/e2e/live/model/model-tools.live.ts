@@ -220,7 +220,7 @@ async function main() {
     });
     const extensions: Extension[] =
       scenario === 'files'
-        ? [{ id: 'live.files', version: '1', apiMajor: 1, tools: createFileTools(files) }]
+        ? [{ id: 'builtin.files', version: '1', apiMajor: 1, tools: createFileTools(files) }]
         : [task];
     const runtime = createRuntime({
       store,
@@ -266,11 +266,11 @@ async function main() {
       const prompts =
         scenario === 'files'
           ? [
-              'Work only in this synthetic workspace. Read source.txt starting at line 1 (at most 20 lines). Use its exact returned complete-file baseline to edit message=before to message=after with exactly one match. Create result.txt with exactly verified and a trailing newline, using the tool for creating files. Complete all steps with the provided tools, then briefly confirm.',
+              'Work only in this synthetic workspace. Read source.txt starting at line 1 (at most 20 lines). Use edit_file on the same path to replace message=before with message=after exactly once after the read. Create result.txt with exactly verified and a trailing newline, using the tool for creating files. Complete all steps with the provided tools, then briefly confirm.',
               'Read source.txt and result.txt again using the tools and confirm their actual contents. Keep the final response short.',
             ]
           : [
-              'Use the six collaborator tools to perform this bounded synthetic test. First spawn exactly one collaborator with only prompt: "Calculate 17 * 19; reply with exactly 323." Retain its returned agent_id. Wait for its completion using wait_agent_events with a finite wait_ms, then list_agents filtered to that agent_id and read its complete result, which must be 323. Once it is truly idle, send_agent_message to it with "For your next turn, preserve the first answer in your history"; this message alone must not start a turn. Use interrupt_agent on that idle collaborator and observe the idle outcome. Then follow_up_agent on the SAME agent_id with "Calculate 23 * 29; reply with exactly 667." Wait for the second completion using wait_agent_events with the new work_ref in work_refs, then list_agents for the same ID and read the new complete result. Do not create a second collaborator, use a preset, use old tool names or invent IDs. Finally briefly report both verified answers.',
+              'Use the six collaborator tools for this synthetic task. With spawn_agent, use task_name "Calculator" and message "Calculate 17 * 19; reply with exactly 323." Keep the returned target and dispatch_id. Use wait_agent with a finite timeout_ms and list_agents to verify that target completed its first assignment. Once idle, use send_agent_message with "For your next turn, preserve the first answer in your history", then interrupt_agent to check it is idle. Use follow_up_agent on the same target with "Calculate 23 * 29; reply with exactly 667." Match its new dispatch_id to completion in wait_agent, then list_agents to read the result. Create exactly one collaborator and report both verified answers.',
             ];
       for (const [index, content] of prompts.entries()) {
         const commandId = `run-${index}`;
@@ -340,7 +340,7 @@ async function main() {
           ? ['read_file', 'edit_file', 'write_file']
           : [
               'spawn_agent',
-              'wait_agent_events',
+              'wait_agent',
               'list_agents',
               'send_agent_message',
               'interrupt_agent',
@@ -373,7 +373,10 @@ async function main() {
           'internal_authorization_missing',
         );
         const editCall = observedCalls.find((call) => call.name === 'edit_file')!;
-        check(JSON.parse(editCall.arguments).old_text === 'message=before', 'public_edit_mismatch');
+        check(
+          JSON.parse(editCall.arguments).old_string === 'message=before',
+          'public_edit_mismatch',
+        );
       } else {
         check(
           observedCalls.filter((call) => call.name === 'spawn_agent').length === 1,
@@ -474,7 +477,7 @@ async function main() {
           'list_agents',
           'send_agent_message',
           'spawn_agent',
-          'wait_agent_events',
+          'wait_agent',
         ];
         const processingIds = new Set<string>();
         for (const row of executions.filter((row) => row.kind === 'model')) {

@@ -58,10 +58,31 @@ export function decodeInputImage(data: string, mediaType: string): Uint8Array {
   if (
     bytes.length > 16 * 1024 * 1024 ||
     bytes.toString('base64') !== data ||
-    !matchesImageType(bytes, mediaType)
+    !validInputImage(bytes, mediaType)
   )
     throw new AgentError('input_image_invalid');
   return bytes;
+}
+
+/** Check the PNG container before admitting it to a streamed model request. */
+export function validInputImage(bytes: Uint8Array, mediaType: string): boolean {
+  if (!matchesImageType(bytes, mediaType)) return false;
+  if (mediaType !== 'image/png') return true;
+
+  // The signature and IHDR alone also match files truncated before image data.
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(8) !== 13 || !view.getUint32(16) || !view.getUint32(20)) return false;
+  let hasImageData = false;
+  for (let offset = 8; offset + 12 <= bytes.length; ) {
+    const length = view.getUint32(offset);
+    const type = view.getUint32(offset + 4);
+    const end = offset + 12 + length;
+    if (end > bytes.length) return false;
+    if (type === 0x49444154 && length > 0) hasImageData = true; // IDAT
+    if (type === 0x49454e44) return hasImageData && length === 0 && end === bytes.length; // IEND
+    offset = end;
+  }
+  return false;
 }
 
 export function matchesImageType(bytes: Uint8Array, mediaType: string): boolean {

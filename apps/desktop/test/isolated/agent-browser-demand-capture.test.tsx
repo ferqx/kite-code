@@ -25,12 +25,13 @@ async function setup(
   ) => Promise<void>,
 ) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
-  const restore = prepareDesktopDom(dom);
   const globals = {
     window: globalThis.window,
     document: globalThis.document,
     navigator: globalThis.navigator,
+    IntersectionObserver: globalThis.IntersectionObserver,
   };
+  const restore = prepareDesktopDom(dom, { browserPanelIntersects: true });
   Object.assign(globalThis, {
     window: dom.window,
     document: dom.window.document,
@@ -204,6 +205,49 @@ test('opening annotation-only from a frame-less ordinary view captures once and 
     expect(x.f.submitted).toHaveLength(1);
   } finally {
     release();
+    await x.cleanup();
+  }
+});
+
+test('annotation waits for its own intersection when the toolbar already has a fresh frame-less view', async () => {
+  const x = await setup();
+  const { createAgentBrowserObservationOwner } = await import(
+    '../../src/agent-browser-observation-owner'
+  );
+  let intersect: (() => void) | undefined;
+  globalThis.IntersectionObserver = class {
+    constructor(callback: IntersectionObserverCallback) {
+      intersect = () =>
+        callback(
+          [{ isIntersecting: true } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver,
+        );
+    }
+    observe() {}
+    disconnect() {}
+  } as unknown as typeof IntersectionObserver;
+  let toolbarHasView = false;
+  const toolbar = createAgentBrowserObservationOwner(
+    x.f.bridge,
+    browserScope,
+    (state) => {
+      toolbarHasView = state.fresh && !!state.view;
+    },
+    true,
+  );
+  toolbar.start(true);
+  try {
+    await x.until(() => toolbarHasView);
+    await x.render();
+    expect(x.f.submitted).toHaveLength(0);
+    expect(intersect).toBeDefined();
+    await x.flush(() => intersect!());
+    await x.until(() => x.f.submitted.length === 1);
+    expect(x.f.submitted[0]).toMatchObject({ actionId: 'browser.capture' });
+    await x.decode();
+    expect(x.f.submitted).toHaveLength(1);
+  } finally {
+    toolbar.stop();
     await x.cleanup();
   }
 });

@@ -19,6 +19,7 @@ import { AgentError } from '../storage/types';
 import { failureGuidance } from './git-worktree/errors';
 import { parseWorktreeRootRequest, type WorktreeRootRequest } from './git-worktree/execution-root';
 import { notifyWorktreeCreated } from './git-worktree/notification';
+import { removePathsWithinWorkspace } from './git-worktree/paths';
 import {
   buildWorkerCommand,
   decodeWorkerRequest,
@@ -859,6 +860,24 @@ export function createGitWorktreeTool(options: GitWorktreeToolOptions): ToolDefi
                 input,
                 'failed',
                 { code: 'worktree_registered_workspace', mutation: 'not_started' },
+                value!.ownerExecutionId,
+              ),
+              true,
+            );
+          // Git can remove its registration even when the sandbox denies unlinking the checkout.
+          if (
+            input.permissions.filesystem === 'workspace_write' &&
+            !removePathsWithinWorkspace(configuration.sourceCwd, frame.plan)
+          )
+            return finish(
+              makeResult(
+                input,
+                'failed',
+                {
+                  code: 'worktree_permission_denied',
+                  message: 'The target checkout and its Git metadata both require write access.',
+                  mutation: 'not_started',
+                },
                 value!.ownerExecutionId,
               ),
               true,

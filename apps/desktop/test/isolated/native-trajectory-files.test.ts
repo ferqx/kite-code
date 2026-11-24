@@ -344,12 +344,12 @@ test('replacing the local bundle revokes every old lease and rejects a late old 
   expect(f.closes()).toBe(1);
 });
 
-test('a verified event/ref without a packaged section reports material missing and closes its original file owner', async () => {
+test('a verified event/ref without a packaged section reports omission and closes its original file owner', async () => {
   const f = await localFile();
   try {
     await expect(
       f.files.invoke({ method: 'evidence.open', bundleId: f.bundleId, request: f.query }),
-    ).rejects.toThrow('trajectory_evidence_missing');
+    ).rejects.toThrow('trajectory_bundle_evidence_omitted');
   } finally {
     await f.files.close();
     await f.files.close();

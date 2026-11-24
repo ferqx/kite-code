@@ -83,6 +83,8 @@ prepare 重建完整 preview、读原 records/list，并调用 scoped `requireEx
 
 旧 point 保留原 body、ID、revision 和既有元数据；可选字段只用于读取这些既有记录，不迁移、重写、清空或补造旧 identity。默认 Service 对旧点仅接受原 epoch zero 证明，并继续核 point.workspace 的实际物理身份。Tool 和 namespace 版本均未递增。
 
+[客户端恢复意图](../../../../client/src/file-recovery-intent.ts)保存新点的完整执行根，并核对其物理身份与 point.workspace；历史意图仍按保存时的结构核对。[Web 只读详情](../../../../../apps/web/src/file-checkpoints.tsx)按完整记录值匹配目录与详情，包括执行根和点位边界。
+
 只读目录与历史 metadata 保留其他根的点；代码 preview／restore 必须匹配当前已核物理根，不会把旧相对路径套到新根。完整 sealed timeline 保留所有根的 capture 与 restore，核各原来源后按可信物理 identity 分开计算文件 baseline；restore journal 的根来自准确原 point，不来自同名路径或当前 Session。返回同一原物理根后可以恢复旧点，即使中途存在另一根的同名文件变更或恢复 journal；缺失、损坏、原 source 失配及未确认事件仍 fail-closed。历史证明不要求重新打开无关 worktree，当前恢复根则必须重新验证；recovery-boundary 的 session-only 分支读取不取得代码恢复权限。
 
 定向回归见 [root metadata](../../../test/isolated/file-checkpoints/execution-root.test.ts) 与 [capture](../../../test/isolated/file-checkpoints/capture.test.ts)：同一 Run／trigger 的三个根 epoch、跨根零发布、各根切回恢复、其他根 journal 隔离及旧记录原样读取。实际命令与结果由本次交付记录说明，不外推未运行客户端流程。

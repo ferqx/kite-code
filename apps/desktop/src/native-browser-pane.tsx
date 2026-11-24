@@ -86,6 +86,11 @@ function requestError(cause: unknown): string | undefined {
   return '浏览器暂不可用，请完全退出并重新启动应用后重试。';
 }
 
+function hasPageSurface(state: NativeBrowserState): boolean {
+  // The control menu needs the selected pane before the first document commits.
+  return !!state.url || (state.loading && !!state.control?.browserId);
+}
+
 export function NativeBrowserPane({
   id,
   visible,
@@ -205,7 +210,7 @@ export function NativeBrowserPane({
     if (active instanceof HTMLElement && toolbar.current?.contains(active)) active.blur();
   }, [visible]);
 
-  const external = !!state.url;
+  const external = hasPageSurface(state);
   useLayoutEffect(() => {
     const node = viewport.current;
     if (!host?.browserRequest || !node || (!presentationScope && !draft)) return;
@@ -284,7 +289,7 @@ export function NativeBrowserPane({
         !owned() ||
         !current.current.visible ||
         current.current.annotating ||
-        !current.current.state.url ||
+        !hasPageSurface(current.current.state) ||
         !pageToken ||
         current.current.state.error ||
         current.current.state.display === 'failed' ||
@@ -595,12 +600,12 @@ export function NativeBrowserPane({
             onReload={() => void request({ action: 'reload', id })}
           />
         )}
-        {state.error !== 'load_failed' && (!state.url || state.display !== 'ready') && (
+        {state.error !== 'load_failed' && (!external || state.display !== 'ready') && (
           <section
             className="native-browser-start"
-            aria-label={state.url || initialHint?.url ? '网页加载' : '浏览器起始页'}
+            aria-label={external || initialHint?.url ? '网页加载' : '浏览器起始页'}
           >
-            {state.url || initialHint?.url ? (
+            {external || initialHint?.url ? (
               error ? (
                 <p role="alert">{error}</p>
               ) : state.display === 'stopped' ? (

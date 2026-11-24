@@ -99,6 +99,7 @@ export function AgentBrowserPanel({
   const composingAddress = useRef(false);
   const [message, setMessage] = useState('');
   const updateVisibility = useRef<((visible?: boolean) => void) | undefined>(undefined);
+  const [observing, setObserving] = useState(false);
   const [decoded, setDecoded] = useState('');
   const current = useRef({ identity, visible, canInvoke, scope, submissions });
   current.current = { identity, visible, canInvoke, scope, submissions };
@@ -117,6 +118,7 @@ export function AgentBrowserPanel({
     setDecoded('');
     annotationStarted.current = '';
     if (!canRead) {
+      setObserving(false);
       setState({ fresh: false, loading: false, available: false, pending: false });
       return;
     }
@@ -131,8 +133,11 @@ export function AgentBrowserPanel({
     );
     observer.current = owner;
     let intersects = typeof IntersectionObserver === 'undefined';
-    const update = (visible = current.current.visible) =>
-      owner.setVisible(visible && intersects && document.visibilityState !== 'hidden');
+    const update = (visible = current.current.visible) => {
+      const next = visible && intersects && document.visibilityState !== 'hidden';
+      owner.setVisible(next);
+      setObserving(next);
+    };
     updateVisibility.current = update;
     const intersection =
       typeof IntersectionObserver === 'undefined'
@@ -141,7 +146,8 @@ export function AgentBrowserPanel({
             intersects = entries.some((entry) => entry.isIntersecting);
             update();
           });
-    owner.start(current.current.visible && intersects && document.visibilityState !== 'hidden');
+    owner.start(false);
+    update();
     if (host.current) intersection?.observe(host.current);
     const visibilityChanged = () => update();
     document.addEventListener('visibilitychange', visibilityChanged);
@@ -177,7 +183,8 @@ export function AgentBrowserPanel({
   useEffect(() => {
     // Capture admission can settle without a new view; that settlement rechecks freezing.
     void captureRevision;
-    if (!annotationOnly || !visible || annotationStarted.current === identity) return;
+    // The toolbar can already have a fresh shared view before this panel is visible.
+    if (!annotationOnly || !visible || !observing || annotationStarted.current === identity) return;
     if (frozen) {
       annotationStarted.current = identity;
       return;
@@ -211,6 +218,7 @@ export function AgentBrowserPanel({
   }, [
     annotationOnly,
     visible,
+    observing,
     identity,
     frozen,
     state.scopeKey,

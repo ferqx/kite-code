@@ -1,3 +1,4 @@
+import { isBrowserOrchestrator } from '../browser-tool-identity';
 import type { AuthorizationRequest } from '../extensions';
 import type { CapabilityDescription, CapabilityEffect } from './index';
 
@@ -90,7 +91,8 @@ export function isBuiltinBrowserApprovalExempt(
   definitionVersion?: string,
 ) {
   if (definitionVersion !== '1') return false;
-  if (kind === 'tool') return browserTools.has(definitionId);
+  if (kind === 'tool')
+    return browserTools.has(definitionId) || isBrowserOrchestrator(definitionId, definitionVersion);
   if (kind === 'action') return browserActions.has(definitionId);
   return (
     kind === 'job' &&
@@ -119,7 +121,7 @@ export function builtinCapability(
         return { effects: ['read'], safeRead: true };
       if (kind === 'tool' && ['browser.snapshot', 'browser.image'].includes(definitionId))
         return { effects: ['read'], safeRead: true };
-      if (kind === 'tool' && definitionId === 'browser.execute')
+      if (kind === 'tool' && isBrowserOrchestrator(definitionId, definitionVersion))
         // This exact builtin only orchestrates the sandboxed interpreter. Each
         // Browser API dispatch owns its actual external effects and permission.
         return { effects: [], safeRead: true };

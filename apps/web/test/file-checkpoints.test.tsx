@@ -494,6 +494,39 @@ test('fork source boundary remains original while only outer current Store/S/W a
   reader.dispose();
 });
 
+test('checkpoint detail compares a cloned execution root by value and rejects root drift', async () => {
+  const original = item();
+  const listed = {
+    ...original,
+    checkpoint: {
+      ...original.checkpoint,
+      boundary: {
+        ...original.checkpoint.boundary,
+        executionRoot: { epoch: '3', identity: { device: '1', inode: '2' } },
+      },
+    },
+  };
+  let epoch = '3';
+  const reader = new FileCheckpointReader(
+    port({
+      async getFileCheckpoint() {
+        const checkpoint = structuredClone(listed.checkpoint);
+        checkpoint.boundary.executionRoot.epoch = epoch;
+        return { ...scope, payload: { ...detail().payload, checkpoint } };
+      },
+    }),
+    scope,
+    () => {},
+  );
+  await reader.select(listed);
+  expect(reader.state.detail?.checkpoint.boundary.executionRoot?.epoch).toBe('3');
+  epoch = '4';
+  await reader.select(listed);
+  expect(reader.state.error.detail).toBe('file_checkpoint_scope_conflict');
+  expect(reader.state.detail?.checkpoint.boundary.executionRoot?.epoch).toBe('3');
+  reader.dispose();
+});
+
 test('DOM reads explicit original restore metadata and editing its target aborts late status without a write', async () => {
   const calls: string[] = [];
   let signal: AbortSignal | undefined;

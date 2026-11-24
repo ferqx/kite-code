@@ -76,7 +76,7 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
           message.sourceIds?.includes(childAgentNamingSourceId),
         ),
       ).toBe(false);
-      expect(childRequest.tools.some((tool) => tool.id === 'wait_agent_events')).toBe(false);
+      expect(childRequest.tools.some((tool) => tool.id === 'wait_agent')).toBe(false);
       expect(
         childRequest.tools.find((tool) => tool.id === 'send_agent_message')?.description,
       ).toContain('A successful result acknowledges queue acceptance only');
@@ -165,14 +165,12 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
       expect(childRequests).toHaveLength(2);
       expect(childRequests[0]!.request).toEqual(childRequest);
       const next = childRequests[1]!.request;
-      expect(next.tools.some((tool) => tool.id === 'wait_agent_events')).toBe(false);
+      expect(next.tools.some((tool) => tool.id === 'wait_agent')).toBe(false);
       expect(next.tools).toEqual(childRequest.tools);
       const parentRequest = requests(directory)
         .filter((row) => row.actor === 'parent')
         .at(-1)!;
-      expect(parentRequest.request.tools.some((tool) => tool.id === 'wait_agent_events')).toBe(
-        true,
-      );
+      expect(parentRequest.request.tools.some((tool) => tool.id === 'wait_agent')).toBe(true);
       expect(
         parentRequest.request.messages.filter((message) =>
           message.sourceIds?.includes(childAgentNamingSourceId),

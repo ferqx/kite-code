@@ -382,12 +382,9 @@ function TuiHistory({
     state.snapshot?.view.session.workspaceId,
     state.sessionId,
     state.preferences.resolvedLanguage,
-    state.preferences.theme,
-    state.preferences.colorPreset,
     facts.modelName,
     facts.effort,
     testDiagnostics,
-    columns,
     controller.displayGeneration,
     [...collapsed],
   ]);
@@ -2326,8 +2323,14 @@ function TuiSessionView({
       hideLive={cardChooser}
     />
   );
-  const withHistory = (panel: ReactNode) => (
-    <Box flexDirection="column">
+  const withHistory = (panel: ReactNode, fitViewport = false) => (
+    <Box
+      flexDirection="column"
+      maxHeight={
+        fitViewport ? Math.max(1, Math.min(rows - 1, availableRows ?? rows - 1)) : undefined
+      }
+      overflowY={fitViewport ? 'hidden' : undefined}
+    >
       {history}
       {panel}
     </Box>
@@ -2343,7 +2346,7 @@ function TuiSessionView({
       <TuiMcpPanel key={state.sessionId} controller={controller} onCancelTask={cancelTask} />,
     );
   if (state.panel === 'theme' || state.panel === 'language')
-    return withHistory(<TuiPreferencePanel key={state.panel} controller={controller} />);
+    return withHistory(<TuiPreferencePanel key={state.panel} controller={controller} />, true);
   if (state.panel === 'status') return withHistory(<TuiStatusPanel controller={controller} />);
   if (state.panel === 'recovery')
     return withHistory(<TuiRecoveryPanel key={state.sessionId} controller={controller} />);

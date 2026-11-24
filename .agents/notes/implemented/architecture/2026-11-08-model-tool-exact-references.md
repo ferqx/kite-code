@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+[模型工具参数与原执行证据](2026-11-23-model-tool-parameters-and-observation.md)更新文件、Shell、协作和浏览器的模型输入形态。本记录继续说明准确回执、计划及 MCP 引用的来源、权限和未知效果边界。
+
 按用户确认的参数对照收敛公开表面，当前合同归[模型工具 owner](../../../../packages/agent/src/model-tools.README.md)。文件、正文、计划和MCP引用定位原成功派发回执，并核实际owner、Store、Session、原Run、对象和修订。进度另绑定当前Run；父子Session不互借。Worktree和子工作引用定位原扩展意图／OperationRef，原Store读者继续核范围。Browser页面／元素引用封装准确页面、原代次和快照位置，原controller核本任务、控制权和新鲜度；人工继续的原结果另提供新代次引用。
 
 引用只是定位信息，不能携带批准、放宽当前模式、选择最新对象或重放原操作。公开Schema拒绝旧模型字段，不新增旧数据读取或迁移。仍在使用的内部Browser步骤保显式key/代次输入；模型声明可提供独立纯Schema，由现有表面投影和原Core输入校验分别核验，不另设执行前处理平台。

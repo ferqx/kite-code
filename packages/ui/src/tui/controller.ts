@@ -5739,8 +5739,8 @@ export class TuiController {
       }
       return;
     }
-    const snapshot = this.value.snapshot,
-      management = this.port.management;
+    let snapshot = this.value.snapshot;
+    const management = this.port.management;
     if (command.kind === 'clear') {
       this.clearDisplay();
       consumeCommand();
@@ -5847,6 +5847,30 @@ export class TuiController {
       consumeCommand();
       await this.openFileRecovery();
       return;
+    }
+    if (
+      (command.kind === 'compact' || command.kind === 'compact_reset') &&
+      management &&
+      snapshot &&
+      this.value.snapshotStale &&
+      !this.value.observationError &&
+      snapshot.view.session.parentSessionId === null &&
+      snapshot.view.session.rootSessionId === snapshot.view.session.id
+    ) {
+      // A finished reply can render before its execution and admission reads
+      // catch up. Recheck this selection before creating a management request.
+      const generation = this.generation;
+      const previousManagement = this.value.management;
+      await this.refresh(['execution', 'admission']);
+      if (
+        this.disposed ||
+        generation !== this.generation ||
+        this.value.management !== previousManagement ||
+        this.value.sessionId !== commandSession ||
+        (commandSession && (this.draftVersions.get(commandSession) ?? 0) !== commandDraftVersion)
+      )
+        return;
+      snapshot = this.value.snapshot;
     }
     if (
       !management ||

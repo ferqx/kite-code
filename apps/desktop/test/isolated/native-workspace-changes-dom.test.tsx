@@ -9,7 +9,10 @@ import type {
   NativeResult,
   NativeSelection,
 } from '../../src/native-bridge';
-import { NativeWorkspaceChanges } from '../../src/native-workspace-changes';
+import {
+  NativeWorkspaceChanges,
+  type WorkspaceChangeSelection,
+} from '../../src/native-workspace-changes';
 import type {
   NativeWorkspaceChange,
   NativeWorkspaceChangeDetail,
@@ -49,10 +52,12 @@ async function fixture(entries = Array.from({ length: 65 }, (_, index) => change
   const listeners = new Set<(event: NativeEvent) => void>();
   const heldDetails: { readId: string; release: () => void }[] = [];
   const heldLists: (() => void)[] = [];
+  const fileSelection: { current: WorkspaceChangeSelection | undefined } = { current: undefined };
   const state = {
     entries,
     sessionId: 'one',
     viewSelection: 1,
+    repositoryIdentity: 'repository-a',
     listMode: 'normal' as 'normal' | 'held' | 'failure' | 'nonrepo' | 'mismatch' | 'filters',
     detailMode: 'normal' as 'normal' | 'held' | 'failure' | 'mismatch',
     detailReason: undefined as NativeWorkspaceChangeDetail['reason'],
@@ -85,6 +90,7 @@ async function fixture(entries = Array.from({ length: 65 }, (_, index) => change
             workspaceId: 'w',
           },
           repository: state.listMode !== 'nonrepo',
+          repositoryIdentity: state.repositoryIdentity,
           truncated: state.truncated,
           entries: state.listMode === 'nonrepo' ? [] : state.entries,
         };
@@ -135,6 +141,7 @@ async function fixture(entries = Array.from({ length: 65 }, (_, index) => change
               } as NativeSelection
             }
             refreshKey={state.refreshKey}
+            fileSelection={fileSelection}
           />
         ) : null,
       );
@@ -227,6 +234,44 @@ async function fixture(entries = Array.from({ length: 65 }, (_, index) => change
 function requestCount(requests: NativeRequest[], method: NativeRequest['method']) {
   return requests.filter((item) => item.method === method).length;
 }
+
+test('reopening changes revalidates the selected path and uses only an ID from the new list', async () => {
+  const f = await fixture([change(0)]);
+  try {
+    await f.render();
+    await f.select(0);
+    expect(f.host.textContent).toContain('current-change-0');
+    const reads = f.requests.filter(
+      (request) =>
+        request.method === 'workspaceChanges.list' || request.method === 'workspaceChanges.detail',
+    );
+    await f.render(false);
+    for (const read of reads)
+      expect(f.requests).toContainEqual({
+        method: 'workspaceChanges.close',
+        generation: 1,
+        readId: read.readId,
+      });
+    const hiddenRequests = f.requests.length;
+    await f.settle();
+    expect(f.requests).toHaveLength(hiddenRequests);
+
+    f.state.entries = [change(90, 'src/0.txt')];
+    await f.render();
+    expect(f.host.textContent).toContain('current-change-90');
+    expect(
+      f.host.querySelector('[data-change-id="change-90"]')?.getAttribute('aria-selected'),
+    ).toBe('true');
+    await f.render(false);
+    const detailReads = requestCount(f.requests, 'workspaceChanges.detail');
+    f.state.repositoryIdentity = 'repository-b';
+    await f.render();
+    expect(f.host.textContent).toContain('选择文件查看差异');
+    expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(detailReads);
+  } finally {
+    await f.cleanup();
+  }
+});
 
 test('workspace tree is metadata-first and fixed-page bounded; selecting a new file closes the old read', async () => {
   const f = await fixture();
@@ -582,8 +627,8 @@ test('refresh revalidates only the selected path and keeps layout; missing paths
     ).toBe('双栏');
     await f.render(false);
     await f.render();
-    expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
-    expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(4);
+    expect(f.host.textContent).toContain('current-change-0');
+    expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(5);
   } finally {
     await f.cleanup();
   }

@@ -73,6 +73,8 @@ The final attached-domain read is bounded to 32 edges. If that boundary still ha
 
 `child-query-operations.listStableAgents` 沿现有 child Session/operation Command 创建血缘聚合，首次 carrier seq 为固定锚点；目录当前状态仍读取最近准确 carrier/child-start Run，终态与未知结果分别投影。分页使用Decimal64、固定上界、limit+1和整体ID归属核实。职责与最近输入保完整原文，Host 将原结果 Artifact完整展开到调用者的受验证Tool正文；没有另建Agent registry，也不从摘要取得执行资格。
 
+`readAgentTargets` 从同一创建血缘按首个 carrier seq 或子 Session 读取外露标识所需的两项值。父 Session、主体、Store 与扩展共同限定查询。Host 解析模型传入的 `target`、Runtime 呈现消息和子结果都使用该查询。当前工作选择继续由原操作事务核实。
+
 `agent-input-operations.applyAgentCommand` 的原 invocation 查回、当前目标选择与实际steer/newturn/interrupt共享一个最终写事务。idle新轮通过原ensureAgent在同事务创建carrier；并行第二调用看到已受理queued代次并排入该轮。queued引导以 `agent.queued_input` Command绑定原carrier，实际activation后一次写入该准确Run，源取消则拒绝；原取消域同时清理这些待输入事实。原成功回执保存接受时state与模式，重试不追逐后来Run。
 
 `listAgentEvents` 从实际持久change_event读取成功确认邮件和carrier终态，按cursor返回实际事件与nextSeq；读取不确认、不创建Source、不调用Provider。replayFloor之前的查询明确cursor_expired，Host给出可核实恢复边界。等待和结果接纳沿不同水位与事务，真实carrier结算继续核附着Job、unknown、期限与owner。

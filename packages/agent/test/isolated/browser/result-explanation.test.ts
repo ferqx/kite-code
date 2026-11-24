@@ -2,6 +2,19 @@ import { expect, test } from 'bun:test';
 import type { Json, ToolResult } from '../../../src/extensions';
 import { explainBrowserExecutionResult } from '../../../src/tools/browser/result-explanation';
 
+test('structured recovery names only the current browser tools and preserves the original failure', () => {
+  for (const code of ['browser_page_existing_missing', 'browser_page_recovery_required']) {
+    const result = explainBrowserExecutionResult(
+      { outcome: 'failed', content: code },
+      'structured',
+    );
+    expect(result.content).toContain('browser_tabs');
+    expect(result.content).not.toContain('browser.pages()');
+    expect(result.content).not.toContain('browser.open(');
+    expect(result.details).toMatchObject({ code, diagnostic: { originalContent: code } });
+  }
+});
+
 test('browser explanations use action language while retaining original diagnostics and uncertainty', () => {
   for (const code of [
     'browser_page_preflight_failed',

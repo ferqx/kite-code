@@ -1255,20 +1255,91 @@ export class ExtensionHost {
       requirements: 'run' in scope ? scope.run.requirements : scope.requirements,
       bindings: scope.bindings,
     };
-    return this.actionContext(
-      await this.readContext(
-        command.sessionId,
-        extension.id,
-        undefined,
-        command.subjectId,
-        command.originStoreId,
-      ),
+    const read = await this.readContext(
+      command.sessionId,
+      extension.id,
+      undefined,
+      command.subjectId,
+      command.originStoreId,
+    );
+    const context = this.actionContext(
+      read,
       standalone,
       extension,
       definition,
       executionId,
       source,
     );
+    if (
+      !['builtin.files', 'builtin.skills', 'builtin.shell'].includes(extension.id) ||
+      !('run' in scope) ||
+      !source ||
+      typeof source !== 'object' ||
+      Array.isArray(source) ||
+      source.kind !== 'model_decision' ||
+      typeof source.modelExecutionId !== 'string' ||
+      !this.options.forkSourceReaders
+    )
+      return context;
+    const modelExecutionId = source.modelExecutionId;
+    const readers = this.options.forkSourceReaders;
+    let decision: ReturnType<typeof readers.readModelInput> | undefined;
+    const decisionInput = () =>
+      (decision ??= (async () => {
+        scope.signal.throwIfAborted();
+        const snapshot = await readers.readModelInput({
+          expectedStoreId: command.originStoreId,
+          sessionId: command.sessionId,
+          subjectId: command.subjectId,
+          executionId: modelExecutionId,
+        });
+        if (snapshot.runId !== scope.run.id || snapshot.confirmation !== 'succeeded')
+          throw new AgentError('model_input_scope_denied');
+        return snapshot;
+      })());
+    let visible: ReturnType<NonNullable<ActionContext['readDecisionToolResults']>> | undefined;
+    return {
+      ...context,
+      ...(extension.id === 'builtin.skills'
+        ? {
+            async hasDecisionSkillBody(skillId: string, content: string) {
+              const { request } = await decisionInput();
+              return request.messages.some(
+                (message) =>
+                  message.role === 'system' &&
+                  message.sourceIds?.length === 1 &&
+                  message.sourceIds[0] === `skill.body:${skillId}` &&
+                  message.content === content,
+              );
+            },
+          }
+        : {}),
+      readDecisionToolResults: () =>
+        (visible ??= (async () => {
+          const snapshot = await decisionInput();
+          const seen = new Set<string>();
+          const results: Awaited<
+            ReturnType<NonNullable<ActionContext['readDecisionToolResults']>>
+          >[number][] = [];
+          for (const message of [...snapshot.request.messages].reverse()) {
+            scope.signal.throwIfAborted();
+            if (message.role !== 'tool' || message.sourceIds?.length !== 1) continue;
+            const id = message.sourceIds[0]!;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            const execution = await read.getExecution(id);
+            if (
+              execution?.kind === 'tool' &&
+              execution.extensionId === extension.id &&
+              execution.sessionId === command.sessionId &&
+              execution.originStoreId === command.originStoreId &&
+              execution.authorization?.dispatched === true
+            )
+              results.push({ execution, content: message.content });
+          }
+          return results;
+        })()),
+    };
   }
   hasActiveOperations(sessionId: string): boolean {
     return [...this.operationSessions.values()].includes(sessionId);
@@ -2331,6 +2402,14 @@ export class ExtensionHost {
             });
           return actual;
         },
+        readAgentTargets: (options) =>
+          this.options.store.readAgentTargets({
+            ...options,
+            expectedStoreId: scope.command.originStoreId,
+            sessionId: scope.command.sessionId,
+            extensionId: extension.id,
+            subjectId: scope.command.subjectId,
+          }),
         listStableAgents: async (options = {}) => {
           const page = await this.options.store.listStableAgents({
             expectedStoreId: scope.command.originStoreId,

@@ -99,7 +99,7 @@ function installPdf(railInstaller: typeof installPageRail) {
     };
     trigger.style.left = `${Math.max(4, Math.min(innerWidth - 90, x))}px`;
     trigger.style.top = `${Math.max(4, Math.min(innerHeight - 32, y))}px`;
-    trigger.hidden = false;
+    trigger.hidden = request !== 0;
   };
   const draw = () => {
     text.replaceChildren();
@@ -282,9 +282,10 @@ function installPdf(railInstaller: typeof installPageRail) {
     if (e.isTrusted) begin();
   });
   window.addEventListener('resize', () => {
-    if (request) invalidate();
-    else hide();
+    if (!request) hide();
     size();
+    // Open requests keep their page-relative selection. Only its screen anchor moves.
+    if (request) place();
   });
   const controller = {
     page: () => page,

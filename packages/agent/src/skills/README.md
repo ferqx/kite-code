@@ -12,9 +12,9 @@
 
 正文指导模型绑定准确页面、观察、操作、核实后释放控制并正常final。内置浏览器在三种模式下都不进入审核或人工审批，页面文字、图片和工具观察不提供指令或控制权，未知效果只能沿原结果核实。需要用户处理时在最终结论说明，保留网页，不发起requestHuman／human_wait／Continue或空查询维持原Run；用户下一条消息创建新Run，通过pages的本Run新候选id及browser.page(id).snapshot重新绑定并观察，旧变量／元素引用不沿用。候选只是lastKnown描述与受限绑定目标；列表／工厂无I/O，首次snapshot由Main核仍存在且URL匹配的旧页，不新建、导航或刷新，缺失／变址明确失败。空列表也不能证明浏览标签消失。旧人工协议只为显式兼容或历史收口保留，新Native装配没有它们。实现及资格归[Service Browser装配](../../../../apps/service/README.md#受管-browser-默认装配)和[Agent Browser](../tools/browser/README.md)。
 
-内置资源读取示例仅使用技能身份和资源路径，可按原合同指定版本，不包含执行描述。Browser API 的 `browser_execute` 调用保留 `description`，要求使用用户语言填写最多10字的本次动作短句；该字段的公开必填／旧内部可选合同归 [模型工具表面](../model-tools.README.md)，不进入页面执行权限。
+模型用 `load_skill(skill_id)` 加载技能正文，用 `read_skill_resource(skill_id,path)` 读取声明资源。宿主按当前有权使用的原来源解析内容。若本次封存 Model 请求已经包含同一来源的完整正文，重复加载返回 `already_loaded`。同一正文来自已加载来源和工具历史时，模型请求只携带一份正文，原工具回执继续保留。正文被压缩或不再可见时重新提供，内部来源身份与能力检查继续生效。
 
-后续真实模型曾填入不存在的资源版本并调用未定义的 `browser.help()`。正文现直接给出原 `read_skill_resource` 的准确内置身份与声明路径，允许省略可选版本，不引导猜摘要、空代码或帮助 API；资源仍由原来源核版本与能力，没有新增工具或别名。API 说明同时约定解释器只交付有限错误类型和消息，不包含栈或任意拒绝对象。API现明确使用observation.elements中的opaque ref，而非snapshot内的eN后端标记；初始、继续及核实示例只输出有限相关文本与元素，普通可恢复批次保留变量／页面，结束环境的实际结果另核。[内置源回归](../../test/isolated/skills/builtin-computer-use.test.ts)核该指导；真实开发实例随后成功读取同一声明资源，后续人工继续的实际缺口仍归 Desktop owner，不能以资源读取成功代称全流程通过。
+后续真实模型曾填入不存在的资源版本并调用未定义的 `browser.help()`。正文现直接给出原 `read_skill_resource` 的准确内置身份与声明路径，避免猜摘要、使用空代码或调用帮助 API；资源仍由原来源核版本与能力，没有新增工具或别名。API 说明同时约定解释器只交付有限错误类型和消息，不包含栈或任意拒绝对象。API现明确使用observation.elements中的opaque ref，而非snapshot内的eN后端标记；初始、继续及核实示例只输出有限相关文本与元素，普通可恢复批次保留变量／页面，结束环境的实际结果另核。[内置源回归](../../test/isolated/skills/builtin-computer-use.test.ts)核该指导；真实开发实例随后成功读取同一声明资源，后续人工继续的实际缺口仍归 Desktop owner，不能以资源读取成功代称全流程通过。
 
 等价语义观察不再增加证据时，正文与资源指导模型改用一次合适的独立观察，例如正式截图；仍不足则说明限制，核对close的实际释放结果并正常回复。不得只更换变量或文本切片重复读取，也不能点击已disabled的控件后推定状态改变；这属于通用指导，不是新的Loop、全局次数取消或从文本补造派发权限。真实模型是否遵循仍归Desktop实际过程证据。
 

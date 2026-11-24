@@ -324,6 +324,46 @@ function indexEntry<T>(groups: Map<string, T[]>, key: string, value: T) {
 }
 
 /** Original Conversation presentation from exact public Run ownership and confirmed tool receipts. */
+function nativeRunFailure(reason: string | null, interrupted: boolean) {
+  switch (reason) {
+    case 'context_source_unavailable':
+      return {
+        summary: '工作区上下文读取失败',
+        text: '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。',
+      };
+    case 'necessary_condition_unsatisfied':
+      return {
+        summary: '本轮完成条件未满足',
+        text: '本轮尚未满足必要完成条件，无法确认为完成。已保存的回复和工具执行结果保留；请先核对尚未完成的要求与实际结果，再决定如何继续。',
+      };
+    case 'service_shutdown':
+      return {
+        summary: 'Kite 服务已退出',
+        text: 'Kite 服务退出时停止了本轮执行。请先核对已保存的回复和工具执行结果，再决定是否重新发送。',
+      };
+    case 'model_authentication_failed':
+      return {
+        summary: '模型服务认证失败',
+        text: '模型服务拒绝了当前连接的凭据。请检查或更新模型连接的凭据后重新发送。已保存的工具执行结果仍可核对。',
+      };
+    case 'model_permission_denied':
+      return {
+        summary: '模型服务拒绝访问',
+        text: '当前模型连接没有这次请求所需的权限。请检查该连接对所选模型的访问权限，再决定是否重新发送。',
+      };
+    default:
+      return interrupted
+        ? {
+            summary: '本轮执行已中断',
+            text: '本轮执行已中断，未生成最终回复。请先核对本轮工具执行结果，再决定是否重新发送。',
+          }
+        : {
+            summary: '本轮异常结束',
+            text: '本轮未能生成最终回复，当前记录未提供可核实的错误原因。请检查模型连接和配置；重新发送前，先核对本轮工具执行结果，避免重复操作。',
+          };
+  }
+}
+
 export function desktopTranscript({
   messages: history,
   runs,
@@ -761,6 +801,7 @@ export function desktopTranscript({
   }
   for (const run of observed.values()) {
     const turnId = identity(run.id);
+    const stoppedByService = run.status === 'cancelled' && run.reason === 'service_shutdown';
     modeled.push({
       id: `native-run-timing:${turnId}`,
       presentationKey:
@@ -786,32 +827,17 @@ export function desktopTranscript({
         text: '',
         settled: true,
         turnTerminalStatus:
-          run.status === 'interrupted'
+          run.status === 'interrupted' || stoppedByService
             ? 'aborted'
             : (run.status as 'completed' | 'failed' | 'cancelled'),
       });
-    if (!run.isActive && (run.status === 'failed' || run.status === 'interrupted')) {
+    if (
+      !run.isActive &&
+      (run.status === 'failed' || run.status === 'interrupted' || stoppedByService)
+    ) {
       const failure =
         nativeImageFailure(run.reason) ??
-        (run.reason === 'context_source_unavailable'
-          ? {
-              summary: '工作区上下文读取失败',
-              text: '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。',
-            }
-          : run.reason === 'necessary_condition_unsatisfied'
-            ? {
-                summary: '本轮完成条件未满足',
-                text: '本轮尚未满足必要完成条件，无法确认为完成。已保存的回复和工具执行结果保留；请先核对尚未完成的要求与实际结果，再决定如何继续。',
-              }
-            : run.status === 'interrupted'
-              ? {
-                  summary: '本轮执行已中断',
-                  text: '本轮执行已中断，未生成最终回复。请先核对本轮工具执行结果，再决定是否重新发送。',
-                }
-              : {
-                  summary: '本轮异常结束',
-                  text: '本轮未能生成最终回复，当前记录未提供可核实的错误原因。请检查模型连接和配置；重新发送前，先核对本轮工具执行结果，避免重复操作。',
-                });
+        nativeRunFailure(run.reason, run.status === 'interrupted');
       let last = -1;
       for (let index = 0; index < modeled.length; index++) {
         const message = modeled[index]!;

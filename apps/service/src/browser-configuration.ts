@@ -12,6 +12,7 @@ import {
   createBrowserExtension,
   createBrowserHumanCoordinator,
   createUnavailableBrowserController,
+  isBrowserOrchestrator,
   type NativeBrowserTransportOptions,
   nativeBrowserUnavailableReason,
 } from '@kite-ai/agent/browser';
@@ -30,6 +31,13 @@ import {
   type DesktopBrowserEndpoint,
 } from './desktop-browser';
 import { createDesktopBrowserAuthorization } from './desktop-browser-authorization';
+
+declare const __KITE_DEVELOPMENT_AGENT_BROWSER_MANIFEST__: string | undefined;
+
+const developmentBrowserManifest =
+  typeof __KITE_DEVELOPMENT_AGENT_BROWSER_MANIFEST__ === 'string'
+    ? __KITE_DEVELOPMENT_AGENT_BROWSER_MANIFEST__
+    : undefined;
 
 /** Programmatic host policy only. Never read these assets, limits or private roots from JSONC. */
 export type BrowserConfigurationOptions = NativeBrowserTransportOptions;
@@ -110,11 +118,11 @@ export function createBrowserConfiguration(options: {
       };
   } else if (process.platform === 'darwin') {
     try {
-      const native = agentBrowserExecutableAsset(),
+      const native = executable(agentBrowserExecutableAsset(developmentBrowserManifest)),
         browserPath = options.desktopBrowser ? native : installedBrowser();
       const guardianPath = executable(mcpStdioGuardianAsset(), false),
         bunExecutable = executable(process.execPath);
-      if (!browserPath) unavailableReason = 'browser_executable_unavailable';
+      if (!native || !browserPath) unavailableReason = 'browser_executable_unavailable';
       else if (!guardianPath || !bunExecutable)
         unavailableReason = 'browser_process_boundary_unavailable';
       else {
@@ -124,7 +132,12 @@ export function createBrowserConfiguration(options: {
           darwin: { guardianPath, bunExecutable },
           runtimeDirectory: options.privateDirectory,
         };
-        runtimeAssets = [...agentBrowserRuntimeAssets(), browserPath, guardianPath, bunExecutable];
+        runtimeAssets = [
+          ...agentBrowserRuntimeAssets(developmentBrowserManifest),
+          browserPath,
+          guardianPath,
+          bunExecutable,
+        ];
       }
     } catch {
       unavailableReason = 'browser_runtime_unavailable';
@@ -133,10 +146,10 @@ export function createBrowserConfiguration(options: {
     unavailableReason = nativeBrowserUnavailableReason() ?? 'browser_native_platform_unavailable';
   else {
     try {
-      const native = agentBrowserExecutableAsset();
-      runtimeAssets = agentBrowserRuntimeAssets();
+      const native = executable(agentBrowserExecutableAsset(developmentBrowserManifest));
+      runtimeAssets = agentBrowserRuntimeAssets(developmentBrowserManifest);
       const browserPath = options.desktopBrowser ? native : installedBrowser();
-      if (!browserPath) unavailableReason = 'browser_executable_unavailable';
+      if (!native || !browserPath) unavailableReason = 'browser_executable_unavailable';
       else {
         const bubblewrapPath = ['/usr/bin/bwrap', '/bin/bwrap']
           .map((path) => executable(path))
@@ -182,7 +195,8 @@ export function createBrowserConfiguration(options: {
       ? createDesktopBrowserAuthorization({
           runtime: options.runtime,
           call: createDesktopBrowserClient(options.desktopBrowser),
-          releasedPage: (sessionId, url) => controller?.releasedPage?.(sessionId, url),
+          releasedPage: (sessionId, url, identity) =>
+            controller?.releasedPage?.(sessionId, url, identity),
           invalidateMissingReleasedPage: (sessionId, identity) => {
             controller?.invalidateMissingReleasedPage?.(sessionId, identity);
           },
@@ -198,8 +212,8 @@ export function createBrowserConfiguration(options: {
       ? await runtime?.getExecution(open.parentExecutionId)
       : undefined;
     return !!(
-      code?.definitionId === 'browser.execute' &&
-      code.definitionVersion === '1' &&
+      code &&
+      isBrowserOrchestrator(code.definitionId, code.definitionVersion) &&
       code.runId &&
       code.sessionId === context.sessionId &&
       code.originStoreId === job?.originStoreId &&
@@ -248,8 +262,8 @@ export function createBrowserConfiguration(options: {
   } catch {
     /* accurate unavailable at leaf dispatch */
   }
-  const executionAvailable =
-    available && process.platform === 'darwin' && !!workerPath && !!guardianPath;
+  const structuredAvailable = available && process.platform === 'darwin';
+  const executionAvailable = structuredAvailable && !!workerPath && !!guardianPath;
   const execution = createBrowserExecution({
     controller,
     createExecutor(scope) {
@@ -315,19 +329,23 @@ export function createBrowserConfiguration(options: {
     ],
   };
   const capabilities: CapabilityDescription[] = [
-    ...(extension.tools ?? []).map((tool) => ({
-      kind: 'tool' as const,
-      definitionId: tool.id,
-      definitionVersion: tool.version,
-      revision: `${extension.id}:${extension.version}:${tool.version}`,
-      hardAllowed: enabled && available && (tool.id !== 'browser.execute' || executionAvailable),
-      ...(unavailableReason
-        ? { denialReason: unavailableReason }
-        : tool.id === 'browser.execute' && !executionAvailable
-          ? { denialReason: 'browser_executor_unavailable' }
-          : {}),
-      ...builtinCapability(extension.id, tool.id, 'tool', '', tool.version),
-    })),
+    ...(extension.tools ?? []).map((tool) => {
+      let denialReason = unavailableReason;
+      if (!denialReason && isBrowserOrchestrator(tool.id, tool.version)) {
+        if (tool.id === 'browser.execute' && !executionAvailable)
+          denialReason = 'browser_executor_unavailable';
+        else if (!structuredAvailable) denialReason = 'browser_runtime_unavailable';
+      }
+      return {
+        kind: 'tool' as const,
+        definitionId: tool.id,
+        definitionVersion: tool.version,
+        revision: `${extension.id}:${extension.version}:${tool.version}`,
+        hardAllowed: enabled && available && !denialReason,
+        ...(denialReason ? { denialReason } : {}),
+        ...builtinCapability(extension.id, tool.id, 'tool', '', tool.version),
+      };
+    }),
     ...(extension.jobs ?? []).map((job) => ({
       kind: 'job' as const,
       definitionId: job.id,
@@ -355,6 +373,7 @@ export function createBrowserConfiguration(options: {
   return {
     extension,
     available,
+    structuredAvailable,
     executionAvailable,
     capabilities,
     toolIds: extension.tools.map((tool) => tool.id),

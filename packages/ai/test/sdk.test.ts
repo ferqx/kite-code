@@ -528,6 +528,8 @@ for (const protocol of ['chat-completions', 'responses'] as const) {
     expect(JSON.stringify(result.error)).not.toContain('fixture-secret');
     if (![401, 403, 408, 429].includes(status) && status < 500)
       expect(result.error).toMatchObject({ reason: 'provider_unavailable', detail: undefined });
+    if (status === 401) expect(result.error).toMatchObject({ code: 'model_authentication_failed' });
+    if (status === 403) expect(result.error).toMatchObject({ code: 'model_permission_denied' });
   });
 }
 

@@ -176,9 +176,22 @@ const record = (value: Json | undefined): Record<string, Json> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
 const known = (value: Json | undefined): string | undefined =>
   typeof value === 'string' && Object.hasOwn(explanations, value) ? value : undefined;
+const structuredExplanations: Readonly<Record<string, string>> = {
+  browser_page_binding_required:
+    'Use browser_tabs to select this exact retained tab and obtain its current snapshot before sending input.',
+  browser_page_recovery_required:
+    'The original page is retained after its first navigation lost confirmation. Use browser_tabs to list and select the exact tab marked observation_required before any new opening or input. Do not replay the earlier navigation.',
+  browser_page_observation_required:
+    'Take a fresh browser_snapshot on the exact original tab before input or a screenshot. The earlier navigation result remains unknown.',
+  browser_stale_element:
+    'The element reference is stale. Take a fresh browser_snapshot and use the current target. Earlier confirmed actions keep their effects.',
+};
 
 /** Pure display only. Never changes outcome, dispatch facts, original results or recovery authority. */
-export function explainBrowserExecutionResult(result: ToolResult): ToolResult {
+export function explainBrowserExecutionResult(
+  result: ToolResult,
+  surface?: 'structured',
+): ToolResult {
   if (result.outcome === 'succeeded') return result;
   const details = record(result.details);
   let originalCode = known(result.content) ?? known(details?.code);
@@ -226,7 +239,7 @@ export function explainBrowserExecutionResult(result: ToolResult): ToolResult {
     code = 'browser_execution_stopped';
   if (!code) return result;
   const unknown = result.outcome === 'outcome_unknown' || originalUnknown;
-  let content = explanations[code]!;
+  let content = (surface === 'structured' && structuredExplanations[code]) || explanations[code]!;
   if (
     !unknown &&
     result.outcome === 'failed' &&
@@ -243,7 +256,9 @@ export function explainBrowserExecutionResult(result: ToolResult): ToolResult {
       ' The last action sent to the browser may or may not have completed; its result remains unknown. Do not replay it, retry it under another key, or automatically create or refresh a replacement page.';
   else if (result.outcome === 'failed' && code === 'browser_page_existing_missing')
     content +=
-      ' The old candidate is invalid. List browser.pages() once more to inspect the remaining candidates. If another candidate uniquely matches the page intended by the current user task, construct a fresh browser.page(candidate.id) handle and take a new snapshot. If no unique candidate matches, explain that limitation. Do not choose by list order, recency or visibility, guess between same-URL pages, navigate another page or replay earlier actions. If the current user task clearly requests opening a known URL and does not depend on the original page state, use a separate browser.open(theActualUrl) call and take a fresh snapshot of the new page. Do not replay earlier input or unknown actions. A connection failure or identity mismatch does not permit this recovery, and this result does not clear an unknown result or unconfirmed cleanup.';
+      surface === 'structured'
+        ? ' List the remaining pages with browser_tabs. Select a tab only if its identity matches the requested page. An independently authorized fresh opening can use browser_navigate if it does not depend on the missing page state. Preserve any unknown outcome or unconfirmed cleanup.'
+        : ' The old candidate is invalid. List browser.pages() once more to inspect the remaining candidates. If another candidate uniquely matches the page intended by the current user task, construct a fresh browser.page(candidate.id) handle and take a new snapshot. If no unique candidate matches, explain that limitation. Do not choose by list order, recency or visibility, guess between same-URL pages, navigate another page or replay earlier actions. If the current user task clearly requests opening a known URL and does not depend on the original page state, use a separate browser.open(theActualUrl) call and take a fresh snapshot of the new page. Do not replay earlier input or unknown actions. A connection failure or identity mismatch does not permit this recovery, and this result does not clear an unknown result or unconfirmed cleanup.';
   else if (result.outcome === 'cancelled')
     content += ' This step was cancelled; that does not undo any earlier completed actions.';
   const rawCode =

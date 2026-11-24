@@ -1,5 +1,6 @@
 import {
   boundModelHistory,
+  ModelAccessError,
   type ModelAdapter,
   ModelAttemptError,
   type ModelRequest,
@@ -1619,7 +1620,7 @@ export class UnifiedExecution {
                   ? 'model_request_body_too_large'
                   : observation && ModelAttemptError.isInstance(error)
                     ? 'image_observation_outcome_unknown'
-                    : error instanceof AgentError
+                    : error instanceof AgentError || error instanceof ModelAccessError
                       ? error.code
                       : ModelAttemptError.isInstance(error)
                         ? error.message
@@ -1653,6 +1654,7 @@ export class UnifiedExecution {
         );
       if (observation && ModelAttemptError.isInstance(error))
         throw new AgentError('image_observation_outcome_unknown');
+      if (error instanceof ModelAccessError) throw new AgentError(error.code);
       throw error;
     } finally {
       release?.();

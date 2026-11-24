@@ -34,7 +34,7 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
     url: 'http://localhost',
     pretendToBeVisual: true,
   });
-  const restore = prepareDesktopDom(dom);
+  const restore = prepareDesktopDom(dom, { browserPanelIntersects: true });
   const prior = {
     window: globalThis.window,
     document: globalThis.document,

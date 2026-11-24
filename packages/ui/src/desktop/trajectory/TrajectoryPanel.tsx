@@ -320,6 +320,7 @@ export function TrajectoryPanel(props: TrajectoryPanelProps) {
   );
   const activeFilters =
     filters.types.length !== 5 || filters.childAgents === false || filters.metadataQuery !== '';
+  const readingAnchor = activeFilters ? state.filteredReadingAnchor : state.readingAnchor;
   const index = useMemo(
     () => buildTrajectoryWorkbenchIndex(scopes?.projection ?? projected, tree, { loopParts: true }),
     [scopes, projected, tree],
@@ -517,6 +518,7 @@ export function TrajectoryPanel(props: TrajectoryPanelProps) {
   const factPresentation = useRef<{
     scope: string;
     controls: string;
+    filtered: boolean;
     revision: string;
     cursor: string;
     rowIds: string[];
@@ -539,13 +541,24 @@ export function TrajectoryPanel(props: TrajectoryPanelProps) {
     const adjusted = incoming
       ? trajectoryFactAnchor(previous.rowIds, rows, previous.scrollTop, workbench.byId)
       : undefined;
+    const filterTransition =
+      previous?.scope === presentationScope && previous.filtered !== activeFilters;
     if (
       adjusted !== undefined ||
+      filterTransition ||
       restored.current?.identity !== identity ||
       restored.current.viewport !== element
     ) {
       // Docking details replaces the list viewport; restore it before its first paint.
-      element.scrollTop = adjusted ?? state.readingAnchor.scrollTop;
+      const anchoredIndex =
+        filterTransition && !activeFilters && readingAnchor?.eventId
+          ? rows.findIndex((row) => row.id === readingAnchor.eventId)
+          : -1;
+      element.scrollTop =
+        adjusted ??
+        (readingAnchor && anchoredIndex >= 0
+          ? anchoredIndex * 38 - readingAnchor.offset
+          : (readingAnchor?.scrollTop ?? 0));
       setScrollTop(element.scrollTop);
       if (element.clientHeight) setHeight(element.clientHeight);
       restored.current = { identity, viewport: element };
@@ -553,6 +566,7 @@ export function TrajectoryPanel(props: TrajectoryPanelProps) {
     factPresentation.current = {
       scope: presentationScope,
       controls: presentationControls,
+      filtered: activeFilters,
       revision: factRevision,
       cursor: state.cursor,
       rowIds: rows.map((row) => row.id),
@@ -805,13 +819,14 @@ export function TrajectoryPanel(props: TrajectoryPanelProps) {
             setScrollTop(element.scrollTop);
             if (element.clientHeight) setHeight(element.clientHeight);
             const index = Math.floor(element.scrollTop / 38);
+            const anchor = {
+              eventId: rows[index]?.id ?? null,
+              offset: -(element.scrollTop % 38),
+              scrollTop: element.scrollTop,
+            };
             onStateChange({
               ...state,
-              readingAnchor: {
-                eventId: rows[index]?.nodeId ?? null,
-                offset: -(element.scrollTop % 38),
-                scrollTop: element.scrollTop,
-              },
+              ...(activeFilters ? { filteredReadingAnchor: anchor } : { readingAnchor: anchor }),
             });
           },
         }}

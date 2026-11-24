@@ -1,4 +1,8 @@
-import type { AgentEventPage, ListAgentEventsInput } from '../agent-collaboration';
+import type {
+  AgentEventPage,
+  ListAgentEventsInput,
+  ReadAgentTargetsInput,
+} from '../agent-collaboration';
 import type { Store } from '../port';
 import { AgentError, type AgentSummary, type AgentSummaryPage } from '../types';
 import type { SqliteOperations } from './operations';
@@ -16,6 +20,18 @@ const directAgentSource = `FROM command c JOIN execution e ON e.origin_command_i
   JOIN session s ON s.id=e.child_session_id
   WHERE c.kind='operation.agent' AND c.session_id=? AND c.subject_id=?
   AND e.origin_store_id=c.origin_store_id AND s.parent_id=c.session_id`;
+const stableAgentSource = `${directAgentSource} AND c.origin_store_id=? AND c.extension_id=?`;
+
+function validateAgentIds(ids: string[]) {
+  if (
+    !Array.isArray(ids) ||
+    !ids.length ||
+    ids.length > 200 ||
+    ids.some((id) => typeof id !== 'string' || !id) ||
+    new Set(ids).size !== ids.length
+  )
+    throw new AgentError('invalid_request');
+}
 
 /** Rank distinct children by their first committed operation, including retained deleted children. */
 export function directAgentOrdinal(
@@ -169,6 +185,34 @@ export function listAgentSummaries(
 }
 
 /** Stable collaborators are ordinary child Sessions, anchored at their first operation Command. */
+/** Resolve immutable directory anchors without reading the mutable work summary. */
+export function readAgentTargets(db: SqliteOperations, input: ReadAgentTargetsInput) {
+  db.identity(input.expectedStoreId);
+  const scope = [input.sessionId, input.subjectId, input.expectedStoreId, input.extensionId];
+  const anchors = `SELECT s.id, MIN(c.seq) AS anchor ${stableAgentSource}`;
+  let rows: ReturnType<SqliteOperations['rows']>;
+  if ('anchor' in input) {
+    const anchor = decimal(input.anchor);
+    rows = db.rows(
+      `WITH selected AS (SELECT s.id ${stableAgentSource} AND c.seq=?)
+       ${anchors} AND s.id IN (SELECT id FROM selected) GROUP BY s.id HAVING MIN(c.seq)=?`,
+      ...scope,
+      anchor,
+      ...scope,
+      anchor,
+    );
+  } else {
+    validateAgentIds(input.agentIds);
+    rows = db.rows(
+      `${anchors} AND s.id IN (${input.agentIds.map(() => '?').join(',')}) GROUP BY s.id ORDER BY anchor`,
+      ...scope,
+      ...input.agentIds,
+    );
+    if (rows.length !== input.agentIds.length) throw new AgentError('agent_unavailable');
+  }
+  return rows.map((row) => ({ agentId: String(row.id), seq: String(row.anchor) }));
+}
+
 export function listStableAgents(
   db: SqliteOperations,
   input: import('../agent-collaboration').ListStableAgentsInput,
@@ -190,16 +234,8 @@ export function stableAgentsBody(
   const limit = input.limit ?? 100;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)
     throw new AgentError('invalid_request');
-  if (
-    input.agentIds !== undefined &&
-    (!Array.isArray(input.agentIds) ||
-      !input.agentIds.length ||
-      input.agentIds.length > 200 ||
-      input.agentIds.some((id) => typeof id !== 'string' || !id) ||
-      new Set(input.agentIds).size !== input.agentIds.length)
-  )
-    throw new AgentError('invalid_request');
-  const base = `${directAgentSource} AND c.origin_store_id=? AND c.extension_id=?`;
+  if (input.agentIds !== undefined) validateAgentIds(input.agentIds);
+  const base = stableAgentSource;
   const args = [input.sessionId, input.subjectId, input.expectedStoreId, input.extensionId];
   if (input.agentIds) {
     for (const id of input.agentIds) {

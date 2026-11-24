@@ -1,8 +1,8 @@
 # Workspace 文件 leaf
 
-模型 read 的 `base_ref` 定位原成功派发回执中的完整文件基线，即使只读一段也绑定整个文件。write 接受 `path,base_ref?,content` 或互斥的 `content_ref`；省略 base_ref 仅表示创建，不接受 null 或隐式覆盖。edit 必填准确 base_ref，正文与 `old_text_ref/new_text_ref` 分别互斥；`expected_matches` 默认1，多处替换必须显式填写准确正数。成功修改返回新 base_ref。模型不能重建 hash/device/inode 或借另一路径、会话、失效修订的引用；CAS、no-follow、当前权限和特殊 Plan／Output owner 继续核原状态。
+模型使用 `read_file(path,offset?,limit?,pages?)`、`write_file(path,content)` 或 `edit_file(path,old_string,new_string,replace_all?)`。编辑默认要求唯一匹配，显式 `replace_all:true` 可替换全部匹配。工作区、获准的外部文件和 Plan 私有路径由各自负责适配器执行。
 
-正文引用只定位原 Tool 的真实不可变 Artifact，核原 Store/Session/Run、结果修订与 Artifact scope；读取中取消仍在文件发布前生效。原始回执保完整基线，模型呈现使用 base_ref；Service 覆盖描述与同一公开 Schema 一致，不保旧模型字段降级。
+对覆盖和编辑，宿主从本次封存 Model 请求按同路径选择最近的准确读取或修改回执，并验证原结果修订、读取身份及完整基线。即使只读取数行，写入也核整个文件的原身份和字节摘要。已存在路径缺少可用基线时先读取；文件变化时返回冲突，以新读核实后再决定是否修改。显式 `write_plan` 仍从读取结果取得原 `file_base_ref`。
 
 默认宿主不再提供 Files 的 `outputDirectory` 或 `session_files` 上下文。Files 仅按真实目标路径读写，成功写入不自动成为附件；交付只由成功 Shell 调用的当前 `KITE_OUTPUT_DIR` 收集。用户指定保存位置保持，不为附件展示擅自重定向；需要附件时在同次 Shell 中校验并导出。既有记录、快照及备份不删除，历史附件仍沿准确 Artifact 引用读取。
 
@@ -128,7 +128,7 @@ Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存
 
 不支持视觉的端点明确失败、不改为纯文本或切换协议；两协议受控 HTTP 400 的准确请求与错误证据归 [AI 图片消息](../../../../ai/README.md#图片消息)。
 
-Native 工作副本入口下，非图片附件随已应用的输入只提交名称和工作路径给模型，不借此解析或发布正文。[输入文件](../input-files.ts)验证所选消息中的准确原件路径，或在原 Run 上下文核对工作路径对应的已绑定准备记录；工作路径不授予目录权限，不暴露私有原件地址。PDF 专用读取通过显式工具操作打开不可变原件，核完整 hash／size、引用和派发快照；私有目录的其他路径仍拒绝。普通工作副本文本读取、编辑沿现有权限、严格 UTF-8、完整 baseline 和范围读取。`read_file` 的 `pages` 与 `mode=text|image` 只适用于保存的 PDF 附件，默认第 1 页；每次最多 20 页文字或 4 张页图，返回物理页码、标签、总页数和 nextPage。工作区文件和非 PDF 附件按 `start_line/max_lines` 读取，省略上述两个 PDF 参数；PDF 附件省略行范围。不匹配的参数组合仍失败，结果保留 `details.code` 并给出明确的省略／重选参数方法，取消不提供重试指示。公开说明与各字段描述保持一致，实际 schema 的可选语义由 [AI Responses adapter](../../../../ai/README.md)保留。页图每边最多 2048 像素，单批结果最多 16 MiB，源文件最多 256 MiB，不进行 OCR。
+Native 工作副本入口下，非图片附件随已应用的输入只提交名称和工作路径给模型，不借此解析或发布正文。[输入文件](../input-files.ts)验证所选消息中的准确原件路径，或在原 Run 上下文核对工作路径对应的已绑定准备记录；工作路径不授予目录权限，不暴露私有原件地址。PDF 读取通过显式工具操作打开不可变原件，核完整 hash／size、引用和派发快照。附件工作路径必须在当前上下文有绑定，绝对路径和相对于原工作区的路径都遵守该边界。普通工作区 PDF 按当前文件权限读取；私有目录的其他路径仍拒绝。普通工作副本文本读取、编辑沿现有权限、严格 UTF-8、完整 baseline 和范围读取。`read_file` 的 `pages` 与 `mode=text|image` 只适用于保存的 PDF 附件，默认第 1 页；每次最多 20 页文字或 4 张页图，返回物理页码、标签、总页数和 nextPage。工作区文件和非 PDF 附件按 `start_line/max_lines` 读取，省略上述两个 PDF 参数；PDF 附件省略行范围。不匹配的参数组合仍失败，结果保留 `details.code` 并给出明确的省略／重选参数方法，取消不提供重试指示。公开说明与各字段描述保持一致，实际 schema 的可选语义由 [AI Responses adapter](../../../../ai/README.md)保留。页图每边最多 2048 像素，单批结果最多 16 MiB，源文件最多 256 MiB，不进行 OCR。
 
 [PDF Worker](../documents/pdf-worker.ts)使用固定 PDF.js 6.4.299、本地字体／CMap／WASM 与 Canvas；禁用文档网络、XFA 和系统字体回退。解析在独立可取消 Worker 执行，同时最多两次，单次 60 秒；Worker 不是 OS 沙箱，仍需安装制品及平台资源资格。原提取顺序不保证复杂多栏／表格语义。缓存键含完整源 hash、Store、配方、页范围、模式和 Worker 摘要，命中前仍核原件权限和全字节。缓存不进入历史：实际交给模型的正文及页图分别保存为准确 Tool Execution 的 Artifact。中立 `tool` 消息保存视觉结果来源；Responses 使用原工具结果的图像部分，Chat Completions 保留原工具配对并追加明确标记为工具数据的视觉载体，不产生人类输入或批准。
 
@@ -144,7 +144,7 @@ Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF W
 
 此前 Windows 本机联验曾覆盖附件→PDF→Artifact→后继模型 wire、旧 Files 输出编辑、历史快照、Fork 独立副本及备份恢复；旧输出生成／编辑特性已移除，该记录不是新入口验收。两协议 wire 不等于真实视觉模型识别资格。测试入口为 [Service 文件／Plan 联验](../../../../../apps/service/test/isolated/planning-configuration.test.ts)、[真实 PDF Worker](../../../test/isolated/files/pdf.test.ts)与 [AI 图片协议](../../../../ai/test/input-images.test.ts)。
 
-模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file`；外部普通文件也由 `read_file` 读取，`read_file/write_file/edit_file` 在 Auto 经过自动审核、请求批准模式在工作区内直接执行且外部路径请求用户批准，Full 按有效权限执行。读取使用 `start_line/max_lines`，编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline 和权限合同保持原样，Workspace 检查点只覆盖原工作区。目录、文件查找和正文搜索使用 Shell 与内置 rg。
+模型接口由可信 `ToolDefinition.model` 投影。`read_file` 使用 `path/offset/limit/pages`；`write_file` 使用 `path/content`；`edit_file` 使用 `path/old_string/new_string/replace_all`。覆盖或编辑从请求中已见过的同路径结果选择完整基线，冲突后重新读取。Files 定义负责操作说明，Service 装配追加实际授权和附件范围。外部普通文件经同一只读工具读取。Auto、请求批准和 Full 继续按各自权限核验外部路径。内部 `files.*` 的 ID、定义版本、完整 baseline 与工作区检查点沿原合同执行。目录、文件查找和正文搜索使用 Shell 与内置 rg。
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将三个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。按当前模式获准的外部范围由下文适配器接入，不改变这个固定根。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
@@ -162,7 +162,7 @@ Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF W
 
 2026-10-25，Windows x64／Bun1.4.3，`aefb47472` 加本次查询 diff：同一仓库、同一原生后端的只读前后对照中，`packages/agent/**/README.md` 查找由2762ms降至289ms（均41项），`packages` 中的 `autoReview` 内容搜索由20017ms降至4809ms（均返回30条，实际检查文件由2348降至1172）；根 `AGENTS.md` 查找为1192ms，仅返回3个未忽略路径。忽略域变化意味着不承诺两种模式返回相同产物命中，`respect_ignore:false` 可明确读取原普通范围。入口与结果保留于本机 `.cache/file-query-performance.ts`／`.cache/file-query-performance.json`；这是当前本机文件查询对照，不代表所有工作区、完整客户端切换延迟或内存峰值。Files五份完整回归50项744断言通过，覆盖原生六工具、父规则继承／否定、分页、宏任务取消、目录联接拒绝与关闭边界；Windows 的链接夹具使用真实目录 junction，POSIX 保原 symlink。
 
-模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `start_line`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部读取沿同一呈现路径：按当前模式获准的安全可编辑目标展示真实完整基线，其他只读结果不补造编辑基线。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
+模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `offset`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部读取沿同一呈现路径：按当前模式获准的安全可编辑目标展示真实完整基线，其他只读结果不补造编辑基线。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
 
 内部 `WorkspaceFiles.search` 的 `path` 可选择普通文件或目录，省略、空字符串和 `.` 选择工作区根。它按字面文本匹配；文件名查找使用内部 `glob`。`mode:files` 每文件只返回一次路径、完整 baseline 与首命中行，`mode:content` 返回命中行及上下文。省略 mode 保持 `content`；`limit/maxLineChars` 可省略以保留全部命中及完整长行。这些内部参数和游标不是已退役模型工具的继续入口。
 
@@ -240,7 +240,7 @@ Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他�
 
 [Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行三个 Files 模型工具与内部目录／检索 API、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip。2026-10-16 在 Windows x64／Bun1.4.2，基于 `84b17867` 的本轮未提交 diff，本次路径、变更预览、检查点与 Native 工具展示六文件43项535断言通过（正常用户权限，51.69秒，包含实际会话的重复反斜杠输入），包含原生六工具、字节恢复、绝对路径 Core／完整 Artifact 和真实组件 DOM。原用例的 CRLF 搜索断言改为保留实际 `\r`，大正文夹具明确超过1MiB后才断言 Artifact，未降低验证要求。该结果不证明正式安装、完整 Service／客户端或其他平台。共享默认装配及恢复后新 Store 的原验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
 
-Model 可调用的 `files.read` 缺省 `limit=200`，将 `next_line` 传给 `start_line` 续读（原 JSON 回退为 `selection.nextOffset`）；显式 limit 保原请求。该默认页仅控制返回范围，不改变低层全文读取、完整文件验证或累计读取能力。
+模型 `read_file` 默认从第 1 行读 200 行，把返回的 `next_line` 作为下次 `offset`。PDF 在同一只读入口以 `pages` 选择页面，复用文件来源、权限和 [Documents 解析](../documents/README.md)，交付可用文本和正式页面图像。
 
 默认没有整文件、原文、搜索匹配数或长行总额度。读取使用固定 64 KiB 字节块，严格增量 UTF-8 解码、完整 hash 与前后 FD 事实校验；默认 read 返回全部剩余行。宿主显式 `maxFileBytes` 可声明该宿主的单文件能力约束，未设置时不回退为旧 8 MiB。真实内存、磁盘、IO 与字符串表示能力仍可能局部失败，不把它们假装 Provider 窗口。二进制控制字节采样检查和严格 UTF-8 保留，BOM/CRLF 不规范化；search 不将已识别二进制当文本。
 

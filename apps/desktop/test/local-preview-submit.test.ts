@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test';
-import { LocalPreviewSubmissions, localPdfRequestContent } from '../electron/local-preview-submit';
+import {
+  LocalPreviewSubmissions,
+  localPdfRegionPixels,
+  localPdfRequestContent,
+} from '../electron/local-preview-submit';
 
 test('local annotation ownership never dispatches twice after lost or rejected result', async () => {
   const submissions = new LocalPreviewSubmissions<string>();
@@ -47,4 +51,23 @@ test('local PDF content represents original reference and untrusted selection, n
   expect(content).toContain('不覆盖原件');
   expect(content).toContain('a\\n\\"b.pdf');
   expect(content).not.toContain('fileId');
+});
+
+test('local PDF visual selection crops inward at the rendered page boundary', () => {
+  const selection = {
+    kind: 'pdf' as const,
+    page: 2,
+    pageBasis: 'pdf-rendered' as const,
+    scope: 'region' as const,
+    rects: [{ x: 0.151, y: 0.201, width: 0.849, height: 0.4 }],
+  };
+  expect(localPdfRegionPixels(selection, { width: 100, height: 100 })).toEqual({
+    x: 16,
+    y: 21,
+    width: 84,
+    height: 39,
+  });
+  expect(() =>
+    localPdfRegionPixels({ ...selection, rects: [] }, { width: 100, height: 100 }),
+  ).toThrow('local_preview_selection_unavailable');
 });

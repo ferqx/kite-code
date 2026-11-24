@@ -4,7 +4,7 @@
 
 浏览器使用 [Client Browser 子入口](../../packages/client/src/browser.ts)，同源 HttpOnly/SameSite cookie 与固定页面身份。Native bearer/profile 路径不进入浏览器。Service 的[有限只读 Gateway](../service/src/development-web.ts)拥有 listener 和可读投影；转发具名目录、所选会话状态、分页 History、当前选择 Context、准确 Job output、原 Model input/output、Runtime logs 与恢复点 metadata，写入、审批、取消、SSE、配置/凭据与任意路径不转发。关闭页面或观察器只释放读取和浏览器访问，不取消 Session，也不关闭执行 Service。
 
-`WebController` 仅轮询可见的所选活动会话，默认 2000ms，同一次读取为 single flight。切换 Session 和 document 可见性取消所属读取，迟到 success/error 不能覆盖新选择。失败保留同一选择的完整旧 snapshot 和内部 stale/error 事实；活动与空闲会话的失败读均在页面可见时持续退避重试，最高间隔30秒，不在消息区外显示旧快照／历史不可用等文案，也不把失败伪装为空历史。状态依据真实 `Run.isActive`，不从字符串标签猜运行权。
+`WebController` 仅轮询可见的所选活动会话，默认 2000ms，同一次读取为 single flight。切换 Session 和 document 可见性取消所属读取，迟到 success/error 不能覆盖新选择。失败保留同一选择的完整旧 snapshot 和内部 stale/error 事实；活动与空闲会话的失败读均在页面可见时持续退避重试，最高间隔30秒，读取遇到连接错误时在历史标题下提示刷新；服务换地址时通过 `kite web` 进入新地址。原消息与阅读位置继续保留，读取成功后收起提示。状态依据真实 `Run.isActive`，不从字符串标签猜运行权。
 
 首次打开会话时，Web 按 Session 的序号上界读取完整历史。完整页和增量页都从每页 200 项开始。响应超出字节预算时，在同一游标和消息位置减半页长重试，后续页沿用缩小后的页长。单项仍然超限时保留已有快照并报告读取失败。
 

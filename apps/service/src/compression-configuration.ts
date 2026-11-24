@@ -4,7 +4,11 @@ import {
   type ContextCompressor,
   modelHistory,
 } from '@kite-ai/agent';
-import { estimateModelContext, projectModelContext } from '@kite-ai/agent/context-estimate';
+import {
+  estimateModelContext,
+  modelInputCapacity,
+  projectModelContext,
+} from '@kite-ai/agent/context-estimate';
 import type { ModelTool } from '@kite-ai/ai';
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 256 * 1024;
@@ -49,6 +53,10 @@ export function createSummaryCompressor(
   const threshold = options.automatic?.thresholdTokens ?? Math.max(1, Math.ceil(window * 0.75));
   if (!Number.isSafeInteger(threshold) || threshold <= 0)
     throw new AgentError('invalid_compression_threshold');
+  const resetInputBudget = modelInputCapacity(
+    options.automatic,
+    options.automatic?.requestMaxOutputTokens,
+  ).usableInputTokens;
   // Core passes the same frozen validation input to both hooks. Avoid tokenizing twice.
   const reports = new WeakMap<object, import('@kite-ai/trajectory').CompressionAccounting>();
   const accounting = (input: CompressionInput & { readonly summary: string }) => {
@@ -112,7 +120,15 @@ export function createSummaryCompressor(
             return options.validateSummary ? options.validateSummary(input) : true;
           }
         : undefined,
-    expanded = options.validateExpanded?.bind(options);
+    expanded =
+      options.validateExpanded?.bind(options) ??
+      (resetInputBudget === undefined
+        ? undefined
+        : async (input: CompressionInput) =>
+            estimateModelContext({
+              messages: input.messages,
+              tools: input.tools ?? options.automatic?.tools ?? [],
+            }).estimate.totalInputTokens <= resetInputBudget);
   return Object.freeze({
     id: 'standard-summary',
     version: '1',

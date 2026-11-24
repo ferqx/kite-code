@@ -94,7 +94,11 @@ function ownedShellTarget(
     return;
   if (['shell.execute', 'shell.launch'].includes(String(row.adapter_id))) {
     if (starter.id !== row.id) return;
-  } else if (object(parsed(row.intent_json))?.shellId !== ref.key) return;
+  } else {
+    const selected = object(parsed(row.intent_json))?.shellId;
+    const shortSession = object(object(parsed(starter.result_json))?.details)?.session_id;
+    if (typeof selected === 'number' ? selected !== shortSession : selected !== ref.key) return;
+  }
   return target;
 }
 

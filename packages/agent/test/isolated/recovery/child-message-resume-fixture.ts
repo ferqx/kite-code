@@ -90,7 +90,8 @@ export function childMessageResumeOptions(
           type: 'tool_call',
           id: 'original-child-call',
           name: 'spawn_agent',
-          arguments: '{"prompt":"Execute the original effect once and report its result."}',
+          arguments:
+            '{"task_name":"Original effect","message":"Execute the original effect once and report its result."}',
         };
         yield { ...finish, reason: 'tool_calls' };
         return;

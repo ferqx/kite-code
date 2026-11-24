@@ -135,7 +135,7 @@ export class NativeTrajectoryFiles {
               section.evidenceId === query.evidenceId &&
               section.contentVersion === query.contentVersion,
           );
-          if (section?.kind !== 'evidence') throw Error('trajectory_evidence_missing');
+          if (section?.kind !== 'evidence') throw Error('trajectory_bundle_evidence_omitted');
           const length = parseDecimal64(section.bytes);
           // Reserve the validated section size before reading so concurrent opens share a budget.
           if (length > BigInt(maximumEvidenceBytes - this.evidenceBytes))

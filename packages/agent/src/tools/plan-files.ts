@@ -210,7 +210,11 @@ export function withPlanFileTools(options: {
                           mutate(value.base, (body) => {
                             if (!value.find) throw new AgentError('file_input_invalid');
                             const pieces = body.split(value.find);
-                            if (pieces.length - 1 !== value.occurrences)
+                            if (
+                              value.replaceAll
+                                ? pieces.length === 1
+                                : pieces.length - 1 !== value.occurrences
+                            )
                               throw new AgentError('file_edit_match_conflict');
                             return pieces.join(value.replace);
                           });

@@ -99,6 +99,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'acceptAgentInput',
   'applyAgentCommand',
   'listStableAgents',
+  'readAgentTargets',
   'listAgentEvents',
   'queueAgentMessage',
   'readAgentMessageTarget',

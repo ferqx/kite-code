@@ -151,6 +151,7 @@ const knownPreflight = new Set([
   'plan_file_recovery_required',
   'file_baseline_conflict',
   'plan_steps_invalid',
+  'plan_step_id_duplicate',
   'plan_identity_mismatch',
   'plan_missing',
   'plan_step_missing',
@@ -648,11 +649,9 @@ export function createPlanningValidation(
         if ((current?.version ?? null) !== value.expectedVersion)
           throw new Error('plan_version_conflict');
         const steps = value.steps;
-        if (
-          !Array.isArray(steps) ||
-          new Set(steps.map((s) => string(object(s).id))).size !== steps.length
-        )
-          throw new Error('plan_steps_invalid');
+        if (!Array.isArray(steps)) throw new Error('plan_steps_invalid');
+        if (new Set(steps.map((step) => string(object(step).id))).size !== steps.length)
+          throw new Error('plan_step_id_duplicate');
         const version = Number(current?.version ?? 0) + 1;
         const plan = {
           planId: string(value.planId),
@@ -862,7 +861,23 @@ export function createPlanningValidation(
           await write(context, bodyRecordKey, seal, true);
           request = attachmentRequest(current, seal);
         }
-        const proof = await accepted(context, 'plan_review', request);
+        let proof: AcceptedInformation;
+        try {
+          proof = await accepted(context, 'plan_review', request);
+        } catch (error) {
+          // This wait precedes every approval write. Preserve cancellation of the
+          // exact live review without classifying interrupted approval writes as safe.
+          if (
+            context.signal.aborted &&
+            error === context.signal.reason &&
+            error instanceof AgentError &&
+            ['cancel_requested', 'execution_cancel_requested', 'service_shutdown'].includes(
+              error.code,
+            )
+          )
+            return { outcome: 'cancelled', content: error.code };
+          throw error;
+        }
         if (
           proof.answer.kind !== 'plan_review' ||
           !['approve', 'revise', 'deny'].includes(proof.answer.decision) ||

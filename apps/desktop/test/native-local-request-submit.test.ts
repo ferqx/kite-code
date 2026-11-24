@@ -61,6 +61,7 @@ test('local annotation rejects stale session/model before any IPC and accepts jo
 test('explicit pre-dispatch source refusal is failed, but duplicate ownership remains unknown', async () => {
   for (const [code, status] of [
     ['local_preview_changed', 'failed'],
+    ['local_preview_selection_unavailable', 'failed'],
     ['local_preview_request_submitted', 'unknown'],
   ] as const) {
     const bridge = {

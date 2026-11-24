@@ -5,13 +5,13 @@ import { additionalFailureExplanations } from './tool-failure-causes';
 const explanations: Readonly<Record<string, string>> = {
   ...additionalFailureExplanations,
   invalid_shell_arguments:
-    'The command arguments are invalid. background=true cannot be combined with execution_timeout_ms. Use the declared filesystem and network values independently.',
+    'The command arguments are invalid. Check the current tool schema and use the declared filesystem and network values independently.',
   shell_reference_not_found:
-    'The original shell_id was not found. Use a handle returned by shell_execute; do not restart a command to recover its output.',
+    'The original Shell session was not found. Use the session_id returned by exec_command for this conversation.',
   shell_unverifiable:
-    'The original command result could not be verified. Use its original shell_id to inspect it; do not restart it.',
+    'The original command result could not be verified. Inspect the original recorded execution and any retained output; do not restart the command.',
   shell_output_conflict:
-    'The retained command output could not be verified. Keep the original shell_id and do not rerun the command to recover output.',
+    'The retained command output could not be verified. Inspect the original recorded execution and do not rerun the command to recover output.',
   shell_stop_unavailable:
     'Stopping this command is not available through the current interface. Do not assume it has stopped.',
   capability_not_allowed: 'This operation is not available with the current tools and permissions.',
@@ -66,13 +66,13 @@ const explanations: Readonly<Record<string, string>> = {
   file_encoding_invalid:
     'The file does not have valid text in the supported encoding. Do not report a partial or guessed decoding as the original contents.',
   file_input_invalid:
-    'The file request has invalid arguments. Check the declared field names, types, required fields and mutually exclusive text or Artifact inputs before a separately authorized corrected request.',
+    'The file request has invalid arguments. Check the current tool schema before a separately authorized corrected request.',
   file_read_range_invalid:
-    'The requested line range is invalid. start_line and max_lines must be positive safe integers; omit them to use their declared defaults. Correct the range without changing the intended file.',
+    'The requested line range is invalid. offset and limit must be positive safe integers; omit them to use their declared defaults. Correct the range without changing the intended file.',
   file_edit_invalid:
-    'The edit arguments are invalid. Supply a nonempty old_text, a string new_text, a positive integer expected_matches and the exact complete-file baseline, using the declared text or Artifact fields.',
+    'The edit arguments are invalid. Supply a nonempty old_string and a string new_string. Use replace_all only when every exact match should change.',
   file_baseline_invalid:
-    'The supplied baseline is invalid. Use the complete baseline from the exact original file read; do not invent or partially reconstruct it.',
+    'The runtime could not verify an editable baseline for this path. Read the same path before deciding on a separately authorized change.',
   file_path_invalid:
     'The path is invalid for this file tool. Check the exact path against its declared scope and path syntax. This error does not grant a different target or broader scope.',
   file_path_protected:
@@ -82,7 +82,7 @@ const explanations: Readonly<Record<string, string>> = {
   file_not_regular:
     'The target is not a regular file. Check whether the path names a directory, link or other object.',
   file_edit_match_conflict:
-    'The reported error concerns the old_text occurrence count and expected_matches. Inspect the original result and complete-file baseline; this error code alone does not establish whether a change was published.',
+    'The reported error concerns the count of exact matches for old_string. The error code alone does not establish whether a change was published. Verify the original result and read the same path before deciding how to continue.',
   file_root_changed:
     'The original bound directory identity changed. Verify the original scope before further operations; do not retry against a replacement directory.',
   file_publish_outcome_unknown:
@@ -90,17 +90,17 @@ const explanations: Readonly<Record<string, string>> = {
   input_file_read_only:
     'Message attachments are read-only. This request cannot modify the attachment.',
   input_file_scope_denied:
-    'This attachment is not among the exact files selected for the current message. Use only the supplied attachment references.',
+    'This attachment is outside the current conversation scope. Use an attachment made available in this conversation or an ordinary authorized workspace file.',
   output_file_scope_denied:
     'This target is outside the permitted output directory. Use the registered output path and its creation rules.',
   file_dispatch_scope_changed:
     'The file authorization or target identity changed before publication could be verified. Inspect the original result and current scope before continuing.',
   skill_input_invalid:
-    'The skill request has invalid arguments. Use the declared skill ID, version and resource fields.',
+    'Use skill_id from the current catalogue. For read_skill_resource, also use the path declared by that skill.',
   skill_not_discovered:
     'The requested skill is not in the current trusted catalogue. Use an actually discovered skill.',
   skill_version_changed:
-    'The selected skill changed since it was captured. Refresh its current catalogue and read the current version; do not reuse stale instructions.',
+    'The selected skill changed since it was captured. Refresh the catalogue and load the current skill by its skill_id before using its instructions.',
   skill_resource_not_declared:
     'This resource is not declared by the selected skill. Use a resource path from its actual declaration.',
   skill_capability_missing:

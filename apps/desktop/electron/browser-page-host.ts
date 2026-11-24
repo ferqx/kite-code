@@ -147,6 +147,7 @@ type Grant = {
   url: string;
   requireExisting?: true;
   existingPage?: { pageId: string; incarnation: string };
+  newPage?: true;
   state: GrantState;
   page: { kind: 'existing' | 'new'; id?: string; title: string; url: string };
   selection?: BrowserGrantScope;
@@ -379,6 +380,8 @@ export class NativeBrowserPageHost {
         !['storeId', 'sessionId', 'executionId', 'browserId'].every((key) => id(input[key])) ||
         !http(input.url) ||
         (input.requireExisting !== undefined && input.requireExisting !== true) ||
+        (input.newPage !== undefined &&
+          (input.newPage !== true || input.requireExisting === true)) ||
         (input.existingPage !== undefined &&
           (input.requireExisting !== true ||
             !record(input.existingPage) ||
@@ -396,6 +399,7 @@ export class NativeBrowserPageHost {
             (key) => grant![key as 'url'] !== input[key],
           ) ||
           grant.requireExisting !== input.requireExisting ||
+          grant.newPage !== input.newPage ||
           grant.existingPage?.pageId !==
             (input.existingPage as typeof grant.existingPage)?.pageId ||
           grant.existingPage?.incarnation !==
@@ -457,7 +461,8 @@ export class NativeBrowserPageHost {
       const matches = owned.filter((page) =>
         sameUrl(this.grantContext?.describe(page.port.id)?.url, String(input.url)),
       );
-      if (!existingPage && matches.length > 1) throw hostError('browser_page_existing_ambiguous');
+      if (!input.newPage && !existingPage && matches.length > 1)
+        throw hostError('browser_page_existing_ambiguous');
       const blank = owned.filter((page) => {
         const url = this.grantContext?.describe(page.port.id)?.url;
         return (
@@ -469,9 +474,11 @@ export class NativeBrowserPageHost {
           (url === '' || url === 'about:blank')
         );
       });
-      const target = existingPage
-        ? owned.find((page) => page.port.id === existingPage.pageId)
-        : (matches[0] ?? (blank.length === 1 ? blank[0] : undefined));
+      const target = input.newPage
+        ? undefined
+        : existingPage
+          ? owned.find((page) => page.port.id === existingPage.pageId)
+          : (matches[0] ?? (blank.length === 1 ? blank[0] : undefined));
       const detail = target && this.grantContext.describe(target.port.id);
       if (input.requireExisting) {
         if (!target) throw hostError('browser_page_existing_missing');
@@ -488,6 +495,7 @@ export class NativeBrowserPageHost {
         executionId: String(input.executionId),
         browserId: String(input.browserId),
         url: String(input.url),
+        ...(input.newPage === true ? { newPage: true as const } : {}),
         ...(input.requireExisting ? { requireExisting: true } : {}),
         ...(existingPage ? { existingPage: { ...existingPage } } : {}),
         state: target && armed.includes(target) ? 'ready' : 'question',
@@ -1057,6 +1065,7 @@ export class NativeBrowserPageHost {
         'url',
         'requireExisting',
         'existingPage',
+        'newPage',
       ],
       inspectGrant: ['requestId'],
       commitGrant: [

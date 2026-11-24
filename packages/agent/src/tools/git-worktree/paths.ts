@@ -60,6 +60,13 @@ export function containsPath(parent: string, child: string): boolean {
     (!isAbsolute(childRelative) && childRelative !== '..' && !childRelative.startsWith(`..${sep}`))
   );
 }
+
+export function removePathsWithinWorkspace(
+  workspace: string,
+  plan: { commonDir: string; targetPath: string },
+): boolean {
+  return containsPath(workspace, plan.commonDir) && containsPath(workspace, plan.targetPath);
+}
 export interface PathIdentity {
   dev: string;
   ino: string;

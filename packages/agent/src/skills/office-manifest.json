@@ -38,8 +38,8 @@
       "files": [
         {
           "path": "FORMS.md",
-          "bytes": 11857,
-          "sha256": "d5df5757e23634cd8a1a37e092af6c3b3b63afb3fd3ce86337fce9017cc3ee9f"
+          "bytes": 13071,
+          "sha256": "6d60ca79718050f02e76216c7a4479c79f381dacfe765b0cd0074552105cd4b8"
         },
         {
           "path": "LICENSE.txt",
@@ -53,8 +53,8 @@
         },
         {
           "path": "SKILL.md",
-          "bytes": 8058,
-          "sha256": "d1c7caf5f35eb7d37877dd7fc33a095037be2b34fb5d2f7f4d43bde3165bb4ee"
+          "bytes": 9709,
+          "sha256": "2ca703fa10f685793be9a0a5ea81537746892193cdfd218570a8c232a084947e"
         },
         {
           "path": "scripts/check_bounding_boxes.py",

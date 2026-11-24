@@ -214,7 +214,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
           },
         },
       ];
-    if (scenario === 'auto-remove')
+    if (scenario === 'auto-remove' || scenario === 'workspace-remove')
       return [
         {
           name: 'git_worktree',
@@ -222,7 +222,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
             action: 'remove',
 
             path: target,
-            ...writeScope,
+            ...(scenario === 'workspace-remove' ? { filesystem: 'workspace_write' } : writeScope),
           },
         },
       ];
@@ -928,6 +928,19 @@ native(
       ).toMatchObject({ outcome: 'succeeded' });
       const tracked = join(f.target, 'tracked.txt');
       const checkedOut = readFileSync(tracked);
+      const registeredBefore = f.git('worktree', 'list', '--porcelain');
+      const outside = await f.run('workspace-remove', 'auto');
+      expect(
+        outside.executions.find((row) => row.definitionId === 'git.worktree')?.result,
+      ).toMatchObject({
+        outcome: 'failed',
+        details: { code: 'worktree_permission_denied', mutation: 'not_started' },
+      });
+      expect(outside.executions.filter((row) => row.definitionId === 'shell.command')).toHaveLength(
+        1,
+      );
+      expect(f.git('worktree', 'list', '--porcelain')).toBe(registeredBefore);
+      expect(readFileSync(tracked)).toEqual(checkedOut);
       writeFileSync(tracked, 'local dirty contents\n');
       const dirty = await f.run('dirty-remove', 'auto');
       expect(

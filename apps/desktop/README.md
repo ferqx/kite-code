@@ -26,6 +26,8 @@
 
 ## 办公输出文件
 
+PDF 分页预览收到 `pdf_font_invalid` 时在内容区提示换用嵌入可用字体的版本。已收集文件仍可按原字节另存。
+
 文件卡和「输出」列表的更多菜单提供「在资源管理器中显示」。Main 使用原产物引用重新准入，沿用另存的流式校验，再从系统下载目录的 `Kite Outputs` 中选中该次创建的独立副本。每次写入独立子目录，保留原产物和之前的副本。失败时清理本次副本，通过现有 Toast 反馈。 [NativeCaller](electron/native-caller.ts) · [文件复制](electron/output-files.ts) · [定位回归](test/native-caller.test.ts)
 
 2026-11-19 在 Windows x64／Electron 44.3.0 的隔离窗口验证了两处入口、复制期间的进行中状态和失败反馈。聊天文件卡从两份同名样本中选择第二份，检查了副本的实际字节与资源管理器的选中项。输出列表使用损坏流复验失败提示和本次副本清理。当前开发窗口重启后载入新的 Main。 [客户端回归](test/isolated/native-output-files-dom.test.tsx)
@@ -395,7 +397,7 @@ accepted 后若原 Command 最终被权威拒绝，且完整冻结历史与 Run 
 
 开发热更新后的旧 preload 可能缺少 `fileReferences`，旧 Main 也可能拒绝图片暂存方法。[窗口适配器](src/native-input-images.ts)把原 `invalid_native_request/native_host_operation_unavailable` 识别为附件接口尚未加载；缺少文件路径解析 port 时以有限 `file_picker_restart_required` 错误交给共享 Composer，图片暂存直接保留明确的完全退出／重新启动提示。普通选择失败仍可重试，不展示原错误细节、不清草稿或重发。取消选择返回空列表。[窗口回归](test/isolated/native-input-images-dom.test.tsx)与[编辑器回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)分别核旧协议、普通失败、取消和原草稿保持；主进程仍按原开发边界显式重新启动。
 
-直接图片经[封闭 IPC](electron/native-ipc.ts)分块进入 [NativeInputImages](electron/input-images.ts)：每条输入最多 10 张，每张 16 MiB，窗口保留总量最多 128 张／64 MiB，核连续 offset、完整大小与 SHA-256。UI 在读取前拦截超量；[草稿 owner](src/native-input-images.ts)再次核已有与新增，IPC／Main 发布独立核每次输入的数量。Renderer 在任何读取前预留全部已选图片的窗口预算，跨添加批次串行准备；[原生异步编码](src/input-image-encoding.ts)以可取消 FileReader 完成摘要读取及 32KiB Base64 分块，避免逐字节字符串数组和整图 Data URL，摘要 buffer 不跨后续编码保留。移除或退出取消所属 reader，排队任务不再读取。Main 在原输入 journal 准备前，按准确 Store/Session 发布图片 Artifact，只把稳定引用放入正式命令；Provider 请求由 AI 转为内联 Base64，不使用外部托管或 Provider file ID。原 Command 与未知回执继续按原查询处理，不在窗口重开时重放上传或发送。未发送图片与本地普通附件按当前Store／workspace／会话保存与冷恢复，不因重开自动发送；成功受理按已确认版本清理此次冻结的附件 ID。
+直接图片经[封闭 IPC](electron/native-ipc.ts)分块进入 [NativeInputImages](electron/input-images.ts)：每条输入最多 10 张，每张 16 MiB，窗口保留总量最多 128 张／64 MiB，核连续 offset、完整大小与 SHA-256。UI 在读取前拦截超量；[草稿 owner](src/native-input-images.ts)再次核已有与新增，IPC／Main 发布独立核每次输入的数量。Renderer 在任何读取前预留全部已选图片的窗口预算，跨添加批次串行准备；[原生异步编码](src/input-image-encoding.ts)以可取消 FileReader 完成摘要读取及 32KiB Base64 分块，避免逐字节字符串数组和整图 Data URL，摘要 buffer 不跨后续编码保留。移除或退出取消所属 reader，排队任务不再读取。Main 在原输入 journal 准备前，按准确 Store/Session 发布图片 Artifact，只有准入成功才把稳定引用放入正式命令。截断 PNG 在上传准入阶段失败，原草稿和图片仍可编辑，失败批次不进入模型请求。Provider 请求由 AI 转为内联 Base64，不使用外部托管或 Provider file ID。原 Command 与未知回执继续按原查询处理，不在窗口重开时重放上传或发送。未发送图片与本地普通附件按当前Store／workspace／会话保存与冷恢复，不因重开自动发送；成功受理按已确认版本清理此次冻结的附件 ID。
 
 历史图片由 [Main reader](electron/input-image-reads.ts)从已观察的准确用户 Message 取得引用，不接受 renderer 自报 Artifact；每次核 generation/viewSelection/historyEpoch，完整 Client Artifact 校验后分块交付。[Renderer](src/native-user-images.tsx)再次核大小／EOF／SHA，在可见区域前后 160px 内自动准备 blob 缩略图；原图读取等待 close 回执，预览准备完成后才接纳下一项，同窗口 bridge 按序执行。图片加载、错误与重试共用固定预览区域；同一观察范围内的普通历史同步只暂停新的读取，不卸载原卡片或已验证预览。远离区域或隐藏窗口取消所属排队／读取并释放 URL，回到可见区域时重新按当前观察校验。切换会话仍取消未完成读取，但图片 key 只含 generation、原消息及图片引用身份，不使用 viewSelection／historyEpoch；已核验 URL 由有界缓存 owner 持有，返回时复用原 img，淘汰或真正移除时释放，缩略图编码与RGBA像素估算一起计入原 UI 预算。CSP 仍只允许本地 blob 图片，不开放远程图片源。
 
@@ -891,6 +893,14 @@ Service 完成原 Runtime、HTTP 资源、正文流及 Store 收尾后，最后�
 
 ## Agent 浏览器观察与人工操作
 
+普通 Native 的「停止浏览器任务」先按当前页面租约找到原 Run，并用操作人的权限提交原 Run 取消。随后收束浏览器代码和页面控制 Job，普通网页与表单留在原标签。模型主动释放页面仍可继续输出最终回复。菜单代次变化、原租约无法核实或取消回执未知时沿原控制反馈，不能以浏览器 Job 结束推断整轮已停止。执行归属见 [Browser owner](../../packages/agent/src/tools/browser/README.md)。
+
+首次导航等待网页提交期间，[NativePane](src/native-browser-pane.tsx)仍按当前受控页提交所选标签的布局，Main 可以核对该页的控制菜单。此时内容区显示加载指示，网页显示继续等待自身文档就绪及原生首帧。切换标签、离开会话或收起侧栏沿当前布局撤销流程。
+
+[注释面板](src/agent-browser-panel.tsx)在自身确认可见后，才使用工具栏共享的当前浏览器状态请求首次冻结。这样可在工具栏已经读到新鲜状态、注释面板稍后进入可见区时完成原请求。历史注释仍需重新选取画面才能在冷开后发送。
+
+macOS 和 Linux 的桌面开发制品从锁定的依赖复制原生 Browser 程序到每次构建的私有 Service 目录，并赋予独立副本执行权限。Service 在接纳 Browser 能力前校验程序可执行。已打包的 Native 程序继续由发行构建准备。
+
 2026-10-27，macOS27.0.1／arm64、Electron44.3.0、Chrome156.0.8078.48：独立可见Electron制品使用实际NativeDesktop／preload／IPC／NativeCaller和真实Service／SQLite，renderer保持sandbox=true、contextIsolation=true、nodeIntegration=false。UI私有数据使用测试夹具的Node SQLite内存端口，运行／模型／浏览器结果保存在真实Core；不是正式安装版或普通用户Profile验收。客户端实际目录核所选route enabled／configured，API model=`gpt-6-luna`；沿现有只读本机连接使用原授权。
 
 客户端输入本地页面自然语言任务后，第一成功轮由模型自主执行10个浏览器Tool；最终窗口轮10次真实模型请求、9个浏览器Tool全部成功，实际填写 `Kite Luna real value`、点击一次后显示 `Clicked once`，下滚500再回顶并给出最终回复。A在真实慢导航期间切B，保持B至原Run完成；回A后明确重开只读观察面板，核同一browserId及generation、仅一个Browser Job和一次目标导航，没有重发。实际窗口再核接管、选择元素、备注连同原有草稿保留且未发送、交还及显式关闭；四个人工Action成功，原Job取消且报告完整树清理，Service正常关闭后私有会话目录为空。等待原命令核实的短暂pending提示沿原查询路径处理，不重复提交；最后截图包含关闭后的中间显示，最终Core回执另行核对。截图仅留本机内部检查。
@@ -935,7 +945,7 @@ Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密�
 
 ## 原文件变更面板与编辑器
 
-2026-11-09，按用户确认的参考图规则，变更标签在原可拖动分栏内采用紧凑编辑器与右侧目录树，不新增窗口或执行权。首次打开按62%准备宽度，之后保留用户拖动，最多85%；窄栏改为上下布局，文件树仍可访问。目录树可筛选、折叠和键盘导航，每页固定50个节点而非累积挂载，最多1000条文件元数据、2048个目录节点与24层目录；超出目录／深度预算时保留全部已准入文件，以剩余相对路径简化展示并提示，不改变不透明观察ID。每次只保留选中文件正文；选中、过滤排除、关闭和scope变化撤旧reader，迟到结果不能替代新正文。刷新后只按重新核准的同路径恢复选择意图，跨会话不复用；布局选择可跨同视图文件与刷新保留；筛选值跨同scope手动刷新、窗口聚焦和消息更新保留，刷新后不再匹配的选择立即关闭。不同scope重置，不缓存多份正文。
+2026-11-09，按用户确认的参考图规则，变更标签在原可拖动分栏内采用紧凑编辑器与右侧目录树，不新增窗口或执行权。首次打开按62%准备宽度，之后保留用户拖动，最多85%；窄栏改为上下布局，文件树仍可访问。目录树可筛选、折叠和键盘导航，每页固定50个节点而非累积挂载，最多1000条文件元数据、2048个目录节点与24层目录；超出目录／深度预算时保留全部已准入文件，以剩余相对路径简化展示并提示，不改变不透明观察ID。每次只保留选中文件正文；选中、过滤排除、关闭和scope变化撤旧reader，迟到结果不能替代新正文。刷新或侧栏重开后，只在当前会话与重新核准的同一执行仓库内按同路径恢复选择意图，每次用新列表获得的观察 ID 读取。隐藏期间不保留旧读取；布局选择可跨同视图文件与刷新保留；筛选值跨同scope手动刷新、窗口聚焦和消息更新保留，刷新后不再匹配的选择立即关闭。不同scope重置，不缓存多份正文。
 
 共享diff以双栏／统一方式呈现真实保留内容及原行号，操作记录与HEAD工作区的列标题明确不同。已保留上下文可以折叠，后端省略内容不可展开；计数仅是预览，仓库树没有未经读取的完整增删总数。语法色使用有限同步词法标记，不加载语法库或网络资源；具体字节、行、单行与token上限归[UI owner](../../packages/ui/README.md#文件差异的按需与有界显示)。详情切换不从当前文件重建历史，不改文件工具、审批、Git写入或编辑器授权。
 
@@ -3555,6 +3565,8 @@ PDF 文件预览沿受校验的逐页接口按需读取，在独立 `kite-previe
 消息中的本地文件链接沿原 message/run、工作区或受管理目录与保护根授权检查。非代码文件通过有界只读 handle 在右侧预览，不注册为输出产物，不附加另存或原文件写入权限；代码仍走原编辑器。本地 PDF 可以提交标注要求，Main 从原 handle 构造原路径及准确选区上下文，而不是伪造产物 target。handle 绑定当前会话与代际及文件身份，每次读取、PDF 分页前后重新校验授权与源文件，关闭标签或切会话释放；当前显示另有周期权限复核。原文件替换、内容变更或权限撤销时失效，不静默转读新文件。PDF 使用安全快照和现有 PNG 渲染器，不启用浏览器 PDF 插件。
 
 本地 PDF 读取授权仍由 Main 持有，只把已校验的有限快照字节交给经过连接身份核验的回环 Service（拒绝远程 endpoint 与 HTTP 重定向）。PDF 页解析复用 Bun 的原有隔离 worker/严格缓存 IO，不在 Electron 中加载 Bun 原生运行依赖；Service 不接受源路径、不登记输出或 Artifact。返回页面前再次核原句柄授权及文件身份。Word 只读导航监听渲染器分页状态与代次，不依赖编辑交互轮询后才显示缩略图。
+
+PDF 请求输入打开时保留原页和归一化选区坐标。窗口尺寸改变后，根据同一选区重新计算输入框位置。原页来源失效仍结束请求。本地 PDF 页或区域请求明确发送时，[Main 预览](electron/output-preview.ts)从原摘要对应的逐页缓存取得 PNG。区域按物理页坐标向内裁剪，仅将所选画面注册为原命令的图片输入。[提交路径](electron/native-ipc.ts)按原预览、句柄和冻结请求核验，完整 PDF 只用于回环预览。文字选区沿用明确摘录。原命令的回执未知时仅查回原身份，独立主草稿和附件不参与提交。
 
 选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照。每轮产物查询失败不插入提示，空列表不挂载占位；主动整理操作的实际失败仍在原位置反馈。「输出」列表读取失败时保留仍可核实的文件，并在后台重读。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。
 

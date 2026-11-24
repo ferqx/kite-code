@@ -39,7 +39,7 @@ test('PDF rejects unreasonable page counts before creating resources', () => {
     expect(() => pdfPreviewHtml(count)).toThrow('preview_pdf_page_budget');
 });
 
-test('PDF page request freezes navigation and releases only its matching serial', () => {
+test('PDF page request keeps its selection across resize and releases only its matching serial', () => {
   const dom = new JSDOM(pdfPreviewHtml(2), { runScripts: 'outside-only' });
   const w = dom.window;
   Object.assign(w, { structuredClone });
@@ -57,6 +57,15 @@ test('PDF page request freezes navigation and releases only its matching serial'
     scope: 'page',
     rects: [],
   });
+  Object.defineProperty(w, 'innerWidth', { value: 480 });
+  w.dispatchEvent(new w.Event('resize'));
+  const resized = w.eval(
+    'kiteOfficeInteraction.read()',
+  ) as import('../electron/office-preview-interaction').OfficeInteraction;
+  expect(resized.floatingRequest).toBe(first.floatingRequest);
+  expect(resized.floatingSelection).toEqual(first.floatingSelection);
+  expect(resized.requestInvalidated).toBeUndefined();
+  expect(w.document.querySelector('button.request')?.hasAttribute('hidden')).toBe(true);
   (w.document.querySelector('[data-page="2"]') as HTMLButtonElement).click();
   expect(img.getAttribute('src')).toBe('page-1.png');
   w.eval(`kiteOfficeInteraction.releaseScope(${first.floatingRequest! + 1})`);

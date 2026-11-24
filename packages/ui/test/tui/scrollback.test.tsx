@@ -844,7 +844,8 @@ test('late verified giant body replaces its preview in original Static order bef
     stdout.columns = 60;
     stdout.emit('resize');
     await pause();
-    expect(bytes.replace(/\s+/g, '')).toContain(toolResult);
+    expect(bytes).not.toContain('\u001b[3J');
+    expect(bytes).not.toContain('LONG_TOOL_RESULT_');
     expect(
       Math.max(
         ...Bun.stripANSI(bytes)

@@ -5054,11 +5054,34 @@ test('local PDF prepare guard throws without a row and cannot replace an existin
   expect(sends).toBe(1);
 });
 
-test('local PDF submit uses Main content and original journal without uploading or consuming composer', async () => {
+test('local PDF submit journals the Main selection image once without consuming the composer', async () => {
   const port = client(),
     data = memoryPrivateData();
   let sends = 0,
-    guards = 0;
+    guards = 0,
+    uploads = 0;
+  const selectionImage = Buffer.from('the verified crop');
+  const reference = {
+    id: 'crop',
+    storeId: 'store',
+    sessionId: 's',
+    subjectId: 'local-user',
+    scope: { kind: 'session' as const, id: 's' },
+    hash: 'a'.repeat(64),
+    size: String(selectionImage.length),
+    mediaType: 'image/png' as const,
+  };
+  port.uploadInputImage = async (sessionId, input) => {
+    uploads++;
+    expect(sessionId).toBe('s');
+    expect(input).toMatchObject({
+      data: selectionImage.toString('base64'),
+      expectedStoreId: 'store',
+      name: 'PDF 选区.png',
+      mediaType: 'image/png',
+    });
+    return { name: input.name, reference };
+  };
   port.startRun = async () => {
     sends++;
     throw new ClientError('network_error');
@@ -5090,23 +5113,36 @@ test('local PDF submit uses Main content and original journal without uploading 
       },
     };
     expect(
-      await caller.submitLocalPreview(request, 'Main trusted original reference', async () => {
-        guards++;
-      }),
+      await caller.submitLocalPreview(
+        request,
+        'Main trusted original reference',
+        async () => {
+          guards++;
+        },
+        selectionImage,
+      ),
     ).toMatchObject({ phase: 'unknown' });
     expect(guards).toBe(2);
     expect(sends).toBe(1);
+    expect(uploads).toBe(1);
     expect(data.callers()[0]?.intent.request).toMatchObject({
       content: 'Main trusted original reference',
+      images: [{ name: 'PDF 选区.png', reference }],
     });
     expect(data.callers()[0]?.intent.request).not.toHaveProperty('files');
     expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toEqual(
       before,
     );
     await expect(
-      caller.submitLocalPreview(request, 'Main trusted original reference', async () => {}),
+      caller.submitLocalPreview(
+        request,
+        'Main trusted original reference',
+        async () => {},
+        selectionImage,
+      ),
     ).rejects.toThrow('caller_clear_unconfirmed');
     expect(sends).toBe(1);
+    expect(uploads).toBe(1);
   } finally {
     await caller.close();
   }

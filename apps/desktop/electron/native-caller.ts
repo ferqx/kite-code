@@ -1884,6 +1884,7 @@ export class NativeCaller {
     request: Extract<NativeRequest, { method: 'localPreview.submit' }>,
     content: string,
     check: () => Promise<void>,
+    image?: Buffer,
   ): Promise<NativeResult> {
     if (request.intent.files?.length || request.intent.images?.length)
       throw new ClientError('local_preview_request_invalid');
@@ -1895,11 +1896,13 @@ export class NativeCaller {
         intent: { ...request.intent, content },
       },
       check,
+      image,
     );
   }
   async invoke(
     request: NativeRequest,
     localSourceCheck?: () => Promise<void>,
+    localSelectionImage?: Buffer,
   ): Promise<NativeResult> {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
@@ -3675,6 +3678,17 @@ export class NativeCaller {
         if (localSourceCheck) await localSourceCheck();
         let intent = request.intent;
         try {
+          if (localSelectionImage) {
+            const id = createHash('sha256').update(intent.commandId).digest('hex');
+            const image = await this.client.uploadInputImage(request.sessionId, {
+              expectedStoreId: snapshot.view.storeId,
+              id: `local-pdf-${id}`,
+              name: 'PDF 选区.png',
+              mediaType: 'image/png',
+              data: localSelectionImage.toString('base64'),
+            });
+            intent = { ...intent, images: [image] };
+          }
           if (request.imageIds?.length) {
             const images = await this.images.publish(
               this.client,

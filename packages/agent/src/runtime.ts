@@ -17,6 +17,7 @@ import {
   authorizationCheckOutputRefId,
 } from './authorization-check-output';
 import { semanticReviewContent, semanticReviewContext } from './authorization-review-context';
+import { isBrowserOrchestrator } from './browser-tool-identity';
 import { openAutomaticTitleOperation } from './business/session-title/operation';
 import {
   assertContextSource,
@@ -93,7 +94,7 @@ import {
 } from './extensions/lifecycle';
 import { isAgentCreationTaskTool, isRootAgentObservationTaskTool } from './extensions/task/roles';
 import { inputFileContent, inputFileReferences } from './input-files';
-import { decodeInputImage, inputImages, matchesImageType } from './input-images';
+import { decodeInputImage, inputImages, matchesImageType, validInputImage } from './input-images';
 import {
   type PrepareWorkingInputsRequest,
   type WorkingInputAttachment,
@@ -6743,7 +6744,7 @@ export class AgentRuntime {
       )
         throw new AgentError('input_image_scope_mismatch');
       const bytes = await this.readBody(image.reference, signal, storeId);
-      if (!matchesImageType(bytes, image.reference.mediaType))
+      if (!validInputImage(bytes, image.reference.mediaType))
         throw new AgentError('input_image_invalid');
       result.push({
         mediaType: image.reference.mediaType,
@@ -7039,8 +7040,7 @@ export class AgentRuntime {
           parent?.kind !== 'tool' ||
           (!open.runId && parent.id !== open.parentExecutionId) ||
           !parent.runId ||
-          (!open.runId &&
-            (parent.definitionId !== 'browser.execute' || parent.definitionVersion !== '1')) ||
+          (!open.runId && !isBrowserOrchestrator(parent.definitionId, parent.definitionVersion)) ||
           !['dispatching', 'running', 'succeeded'].includes(parent.status) ||
           parent.rootWorkCommandId !== job.rootWorkCommandId ||
           parent.rootWorkSeq !== job.rootWorkSeq
@@ -10299,6 +10299,8 @@ export class AgentRuntime {
               run: freeze(structuredClone(run)),
               session: freeze(structuredClone(session)),
               messages: freeze(structuredClone(assembleModelContext(captured, expanded))),
+              modelId,
+              tools: freeze(structuredClone(modelTools())),
               sources: freeze(structuredClone(captured)),
               trigger: 'manual',
               focus: null,
@@ -10982,6 +10984,11 @@ export class AgentRuntime {
     return result.completion;
   }
   private async drain(options: RuntimeShutdownOptions): Promise<void> {
+    // Wake live waiters with their exact stop reason before closing shared notifications.
+    for (const live of this.active.values())
+      live.controller.abort(new AgentError('service_shutdown'));
+    for (const live of this.activeExecutions.values())
+      live.controller.abort(new AgentError('service_shutdown'));
     for (const pending of this.deferredReports.values())
       pending.controller.abort(new AgentError('runtime_draining'));
     this.changeWaits.close();
@@ -10991,12 +10998,6 @@ export class AgentRuntime {
     this.pendingSessions.clear();
     this.nextDispatchPoll.clear();
     this.dispatchFailures.clear();
-    // Stop only this instance's actual handles before waiting on contended durable
-    // writes. Their cancellation receipts, results and cleanup still drain below.
-    for (const live of this.active.values())
-      live.controller.abort(new AgentError('service_shutdown'));
-    for (const live of this.activeExecutions.values())
-      live.controller.abort(new AgentError('service_shutdown'));
     await this.controlTask?.catch(() => {});
     if (this.admissions) await new Promise<void>((resolve) => this.admissionWaiters.add(resolve));
     for (const [commandId, active] of this.active) {
@@ -11726,6 +11727,24 @@ export class AgentRuntime {
     }
     return canonicalJson({ ...input.result, content_refs: references });
   }
+  private async modelAgentTarget(
+    expectedStoreId: string,
+    sessionId: string,
+    subjectId: string,
+    childSessionId: string,
+  ) {
+    const targets = await this.options.store
+      .readAgentTargets({
+        expectedStoreId,
+        sessionId,
+        subjectId,
+        extensionId: 'builtin.task',
+        agentIds: [childSessionId],
+      })
+      .catch(() => undefined);
+    const item = targets?.[0];
+    return item ? `a${item.seq}` : undefined;
+  }
   private async formatModelResult(
     input:
       | {
@@ -11889,7 +11908,20 @@ export class AgentRuntime {
     }
     try {
       if (input.kind === 'child') {
-        const child = formatChildResult(input);
+        const carrier = input.execution;
+        let target: string | undefined;
+        if (carrier.childSessionId && carrier.definitionId?.startsWith('agent/')) {
+          const ownerCommand = await this.options.store.getCommand(carrier.originCommandId);
+          if (ownerCommand?.subjectId) {
+            target = await this.modelAgentTarget(
+              String(carrier.originStoreId),
+              carrier.sessionId,
+              ownerCommand.subjectId,
+              carrier.childSessionId,
+            );
+          }
+        }
+        const child = formatChildResult({ ...input, target });
         if (child) return child;
         const { execution, result } = input;
         if (
@@ -11918,7 +11950,7 @@ export class AgentRuntime {
             ...(input.body === undefined ? {} : { body: input.body }),
           });
           if (failure)
-            return `Collaborator ${JSON.stringify(execution.childSessionId)}:\n${failure}`;
+            return `Collaborator ${JSON.stringify({ target, dispatch_id: execution.id })}:\n${failure}`;
         }
         if (
           execution.kind === 'job' &&
@@ -11934,6 +11966,14 @@ export class AgentRuntime {
             if (started) {
               const startedDetails = started.details as Record<string, Json> | undefined;
               const ref = startedDetails?.ref;
+              if (typeof startedDetails?.session_id === 'number')
+                return JSON.stringify({
+                  session_id: startedDetails.session_id,
+                  execution_id: modelExecutionId(starter.id),
+                  status: execution.status,
+                  terminal: true,
+                  guidance: 'Use poll_command with this session_id for remaining retained output.',
+                });
               const details: Record<string, Json> = {
                 ref: ref!,
                 execution: execution as unknown as Json,
@@ -11973,7 +12013,7 @@ export class AgentRuntime {
                 return typeof details.stdout === 'string' ||
                   details.outputFormat === 'model-preview'
                   ? presented
-                  : `${presented}\nUse shell_read with this shell_id to read the retained output; do not rerun the command.`;
+                  : `${presented}\nInspect the original execution for retained output; do not rerun the command.`;
             }
           }
         }
@@ -12271,12 +12311,23 @@ export class AgentRuntime {
             subjectId: original.subjectId,
             scope: original.scope,
           });
-          content = modelAgentMessage(mail.sender, {
-            messageId: mail.id,
-            sourceSessionId: mail.sourceSessionId,
-            sourceExecutionId: mail.sourceExecutionId,
-            content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
-          });
+          content = modelAgentMessage(
+            mail.sender,
+            {
+              messageId: mail.id,
+              sourceSessionId: mail.sourceSessionId,
+              sourceExecutionId: mail.sourceExecutionId,
+              content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+            },
+            mail.sender.relation === 'child'
+              ? await this.modelAgentTarget(
+                  storeId,
+                  message.sessionId,
+                  origin.subjectId,
+                  mail.sourceSessionId,
+                )
+              : undefined,
+          );
         }
         let images: import('@kite-ai/ai').ModelImage[] = [];
         if (message.images !== undefined) {

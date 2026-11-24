@@ -13,6 +13,7 @@ import type { CapabilityDescription, PermissionPolicySnapshot } from '../permiss
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import { AgentError, type Json } from '../storage/types';
 import type { PreparedToolExecution } from '../tool-behavior';
+import { readPdfToolResult } from './documents/read-tool';
 import { withExternalFileReads } from './external-file-reads';
 import { createWorkspaceFiles, type FileSnapshot, type WorkspaceFiles } from './files';
 import {
@@ -489,29 +490,43 @@ export function withFullAccessFiles(options: {
                   });
                   if (read) {
                     const parameters = input as Record<string, Json>;
-                    let snapshot: FileSnapshot | undefined;
-                    try {
-                      snapshot = await native.read(selected.relativePath, {
-                        offset: parameters.offset === undefined ? 1 : Number(parameters.offset),
-                        limit: parameters.limit === undefined ? 200 : Number(parameters.limit),
-                        signal: context.signal,
+                    if (selected.path.toLowerCase().endsWith('.pdf')) {
+                      result = await readPdfToolResult({
+                        path: selected.path,
+                        request: parameters,
+                        context,
+                        source: await native.readBytes(selected.relativePath, {
+                          maxBytes: 256 * 1024 * 1024,
+                          signal: context.signal,
+                        }),
                       });
-                    } catch (error) {
-                      if (codeOf(error) !== 'ENOENT') throw error;
-                      context.signal.throwIfAborted();
+                    } else {
+                      if (parameters.pages !== undefined)
+                        throw new AgentError('pdf_options_require_pdf');
+                      let snapshot: FileSnapshot | undefined;
+                      try {
+                        snapshot = await native.read(selected.relativePath, {
+                          offset: parameters.offset === undefined ? 1 : Number(parameters.offset),
+                          limit: parameters.limit === undefined ? 200 : Number(parameters.limit),
+                          signal: context.signal,
+                        });
+                      } catch (error) {
+                        if (codeOf(error) !== 'ENOENT') throw error;
+                        context.signal.throwIfAborted();
+                      }
+                      result = snapshot
+                        ? await createFileReadResult(absolute(snapshot), context, {
+                            fileScope: 'external_path',
+                            workspaceCheckpoint: false,
+                          })
+                        : createMissingFileReadResult(selected.path);
                     }
-                    result = snapshot
-                      ? await createFileReadResult(absolute(snapshot), context, {
-                          fileScope: 'external_path',
-                          workspaceCheckpoint: false,
-                        })
-                      : createMissingFileReadResult(selected.path);
                   } else {
                     const adapter = new Proxy(native, {
                       get(_source, property) {
                         if (property === 'relativePath')
                           return (path: string) => {
-                            if (path !== selected.originalPath)
+                            if (path !== selected.originalPath && path !== selected.path)
                               throw new AgentError('file_path_invalid');
                             return selected.relativePath;
                           };

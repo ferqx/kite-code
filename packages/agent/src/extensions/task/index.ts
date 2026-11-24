@@ -1,7 +1,8 @@
 import { canonicalJson } from '../../json';
 import { modelCursor, readModelCursor } from '../../model-cursor';
+import { readModelIdentifier } from '../../model-identifier';
 import { AgentError } from '../../storage/types';
-import type { Extension, Json, ToolContext, ToolResult } from '../index';
+import type { Extension, Json, ToolContext, ToolDefinition, ToolResult } from '../index';
 import { isChildPreparationFailure } from './preparation-failure';
 import { defaultTaskRoleId } from './roles';
 import { agentWorkReference, readAgentWorkReference } from './work-reference';
@@ -74,6 +75,28 @@ export function createTaskExtension(options: TaskOptions): Extension {
   const content = { type: 'string', minLength: 1, maxLength: 1048576 };
   const agentId = { type: 'string', minLength: 1, maxLength: 128 };
   const cursor = { type: 'string', minLength: 1, maxLength: 4096 };
+  const shortTarget = { type: 'string', pattern: '^a[1-9][0-9]{0,18}$' };
+  async function targetId(context: ToolContext, target: string) {
+    if (!/^a[1-9][0-9]{0,18}$/.test(target)) return target;
+    if (!context.operations.readAgentTargets) throw new AgentError('agent_unavailable');
+    const seq = BigInt(target.slice(1));
+    if (seq > 9223372036854775807n) throw new AgentError('agent_unavailable');
+    try {
+      const items = await context.operations.readAgentTargets({ anchor: String(seq) });
+      if (items[0]?.seq === String(seq)) return items[0].agentId;
+    } catch (error) {
+      if (!(error instanceof AgentError) || error.code !== 'invalid_cursor') throw error;
+    }
+    throw new AgentError('agent_unavailable');
+  }
+  async function targets(context: ToolContext, ids: string[]) {
+    const result = new Map<string, string>();
+    if (ids.length && context.operations.readAgentTargets) {
+      const items = await context.operations.readAgentTargets({ agentIds: [...new Set(ids)] });
+      for (const item of items) result.set(item.agentId, `a${item.seq}`);
+    }
+    return result;
+  }
   const workReference = {
     type: 'string',
     pattern: '^aw_(?:u[A-Za-z0-9_-]{22}|s[A-Za-z0-9_-]+)$',
@@ -115,7 +138,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
     cursor_expired:
       'The observation cursor is no longer retained. Pass resume_after_seq as cursor when provided, or restart observation. Existing Agent work may still be running.',
     agent_unavailable:
-      'The requested Agent is unavailable in this parent scope. Check its exact agent_id against list_agents; do not invent an ID or create a replacement to recover an unknown result.',
+      'The requested Agent is unavailable in this parent scope. Use a target returned by list_agents. Do not create a replacement to recover an unknown result.',
     target_changed:
       'The selected Agent work changed or ended before this request could be accepted. Observe its current state before making a new request.',
     operation_conflict:
@@ -203,15 +226,73 @@ export function createTaskExtension(options: TaskOptions): Extension {
     schema: Readonly<Record<string, Json>>,
     command: boolean,
     execute: (input: Json, context: ToolContext) => Promise<ToolResult>,
-  ) => {
+  ): ToolDefinition => {
     const guarded = safe(command, execute);
+    const model: ToolDefinition['model'] = { name, snakeCase: true, resultVersion: '1' };
+    const projections: Record<string, Omit<NonNullable<ToolDefinition['model']>, 'name'>> = {
+      'task.spawn': {
+        parameterNames: { prompt: 'message', ...(presets.length ? { preset: 'agent_type' } : {}) },
+        requiredParameters: ['taskName'],
+      },
+      'task.follow_up': {
+        parameterNames: { agentId: 'target', content: 'message' },
+        inputSchema: object({ agentId: shortTarget, content }, ['agentId', 'content']),
+      },
+      'task.interrupt': {
+        parameterNames: { agentId: 'target' },
+        inputSchema: object({ agentId: shortTarget }, ['agentId']),
+      },
+      'task.message': {
+        parameterNames: { agentId: 'target', content: 'message' },
+        inputSchema: object(
+          { agentId: { type: 'string', pattern: '^(?:parent|a[1-9][0-9]{0,18})$' }, content },
+          ['agentId', 'content'],
+        ),
+      },
+      'task.events': {
+        parameterNames: { waitMs: 'timeout_ms' },
+        inputSchema: object(
+          { waitMs: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } },
+          [],
+        ),
+      },
+      'task.list': { inputSchema: object({}, []) },
+    };
     return {
       id,
       version: '1',
-      model: {
-        name,
-        snakeCase: true,
-        ...(id === 'task.events' ? { omitParameters: ['cursor'] } : {}),
+      model: { ...model, ...projections[id] },
+      formatModelResult({ result }) {
+        if (result.outcome !== 'succeeded' || !result.details) return;
+        const details = value(result.details);
+        const project = (row: Record<string, Json>) => {
+          const { agent_id: _agentId, work_ref, last_result_work_ref, seq: _seq, ...visible } = row;
+          return {
+            ...visible,
+            ...(typeof work_ref === 'string'
+              ? { dispatch_id: readModelIdentifier(work_ref.slice(3)) }
+              : {}),
+            ...(typeof last_result_work_ref === 'string'
+              ? { last_result_dispatch_id: readModelIdentifier(last_result_work_ref.slice(3)) }
+              : {}),
+          };
+        };
+        if (id === 'task.events')
+          return canonicalJson({
+            reason: details.reason!,
+            ...(details.history_gap ? { history_gap: true } : {}),
+            events: Array.isArray(details.events)
+              ? details.events.map((event) => project(value(event)))
+              : [],
+          });
+        if (id === 'task.list')
+          return canonicalJson({
+            items: Array.isArray(details.items)
+              ? details.items.map((item) => project(value(item)))
+              : [],
+            ...(details.next_cursor ? { truncated: true } : {}),
+          });
+        return canonicalJson(project(details));
       },
       description,
       inputSchema: schema,
@@ -223,14 +304,16 @@ export function createTaskExtension(options: TaskOptions): Extension {
     (kind: 'follow_up' | 'interrupt') => async (input: Json, context: ToolContext) => {
       const args = value(input);
       if (!context.operations.applyAgentCommand) throw new AgentError('operation_unverifiable');
+      const selected = text(args, 'agentId');
+      const agentId = await targetId(context, selected);
       const expectedWork =
         args.workRef === undefined
           ? undefined
           : await readAgentWorkReference(args.workRef, context);
-      if (expectedWork && expectedWork.childSessionId !== args.agentId)
+      if (expectedWork && expectedWork.childSessionId !== agentId)
         throw new AgentError('input_target_changed');
       const receipt = await context.operations.applyAgentCommand({
-        agentId: text(args, 'agentId'),
+        agentId,
         kind,
         ...(expectedWork ? { expectedWork } : {}),
         ...(kind === 'follow_up' ? { content: text(args, 'content') } : {}),
@@ -238,6 +321,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       return result({
         accepted: receipt.accepted,
         agent_id: receipt.agentId,
+        ...(/^a[1-9][0-9]*$/.test(selected) ? { target: selected } : {}),
         state: receipt.state,
         work_ref: agentWorkReference(receipt.ref),
         ...(receipt.mode ? { mode: receipt.mode } : {}),
@@ -252,7 +336,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.spawn',
         'spawn_agent',
-        `Delegate a concrete scoped prompt to a reusable child Agent. Default role ${defaultRole}: ${roles.get(defaultRole)!.description} Choose a registered preset whose capabilities can perform the required steps; a role never adds tools or permissions beyond the parent selection and child ceiling. Include the exact targets, required content or format, once-only limits and fallback conditions the child needs; referring to user instructions not included in the prompt does not transmit them. Review the actual result against the original request before adopting completion claims. task_name is display only. Acceptance may remain queued. Parent normal completion does not cancel the child. No Provider, permission or Run identity can be supplied.`,
+        `Delegate a concrete scoped message to a reusable child Agent. Default role ${defaultRole}: ${roles.get(defaultRole)!.description} Choose a registered agent_type capable of the required work within the parent tool and permission ceiling. Include exact targets, deliverables and once-only limits. The returned target identifies this child for later commands. Acceptance can be queued. The finished report arrives separately in the parent mailbox.`,
         object(
           {
             prompt: content,
@@ -288,9 +372,11 @@ export function createTaskExtension(options: TaskOptions): Extension {
             cancellation: 'attached',
             continuation: { kind: 'agent_completion' },
           });
+          const [agent] = await targets(context, ref.childSessionId ? [ref.childSessionId] : []);
           return result({
             accepted: true,
             agent_id: ref.childSessionId!,
+            ...(agent ? { target: agent[1] } : {}),
             work_ref: agentWorkReference(ref),
             state: 'queued',
           });
@@ -299,7 +385,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.follow_up',
         'follow_up_agent',
-        'Continue the same owned collaborator for concrete remaining work, including from a later parent turn, subject to current tool authorization. State the exact discrepancy and correction, preserving successful effects and once-only limits; do not restart completed work. Running or queued work receives guidance at a safe boundary; idle starts one ordinary new turn in the same Session. The same agent_id spans turns. accepted and state describe this request at admission, not its completion; earlier results or completed events for that agent do not prove this follow-up finished. No preset change.',
+        'Continue the child identified by target. Active work receives guidance at a safe boundary. An idle child starts a new turn in the same Session. Acceptance is separate from completion. Compare the dispatch identity with the resulting report before adopting the result.',
         object({ agentId, content }, ['agentId', 'content']),
         true,
         command('follow_up'),
@@ -328,8 +414,9 @@ export function createTaskExtension(options: TaskOptions): Extension {
           const args = value(input);
           if (!context.operations.sendStableAgentMessage)
             throw new AgentError('operation_unverifiable');
+          const selected = args.target === 'parent' ? 'parent' : text(args, 'agentId');
           await context.operations.sendStableAgentMessage(
-            args.target === 'parent' ? 'parent' : text(args, 'agentId'),
+            await targetId(context, selected),
             text(args, 'content'),
           );
           return result({ accepted: true, delivery: 'queued' });
@@ -337,8 +424,8 @@ export function createTaskExtension(options: TaskOptions): Extension {
       ),
       make(
         'task.events',
-        'wait_agent_events',
-        'Observe this mailbox or the exact work_refs returned at admission. The runtime resumes each target set automatically. history_gap means older events are unavailable. Without targets or an explicit wait_ms, return a snapshot immediately. Active targets default to at most 30000ms; finished targets or no active work return immediately. wait_ms:0 always takes a snapshot. An empty timeout does not establish failure or completion. Keep observing the same work_refs if their result is still needed. Observation never cancels children or acknowledges results; acceptance and older results do not prove the selected work completed.',
+        'wait_agent',
+        'Wait for any new event in the parent mailbox. Defaults to 30000ms; zero returns immediately. The runtime resumes the observation automatically. Complete child reports are delivered separately. An empty timeout does not establish failure or completion. A timeout does not stop child work.',
         object(
           {
             workRefs: {
@@ -375,8 +462,12 @@ export function createTaskExtension(options: TaskOptions): Extension {
           const waited = await context.operations.waitAgentEvents({
             ...(typeof afterSeq === 'string' ? { afterSeq } : {}),
             ...(refs ? { workRefs: refs } : {}),
-            waitMs: typeof args.waitMs === 'number' ? args.waitMs : refs ? 30000 : 0,
+            waitMs: typeof args.waitMs === 'number' ? args.waitMs : 30000,
           });
+          const senderTargets = await targets(
+            context,
+            waited.events.map((event) => event.agentId),
+          );
           const visible = {
             reason: waited.reason,
             ...(afterSeq === undefined ? {} : { next_cursor: waited.nextSeq }),
@@ -384,6 +475,9 @@ export function createTaskExtension(options: TaskOptions): Extension {
             events: waited.events.map((event) => ({
               seq: event.seq,
               agent_id: event.agentId,
+              ...(senderTargets.has(event.agentId)
+                ? { target: senderTargets.get(event.agentId)! }
+                : {}),
               kind: event.kind,
               ...(event.workRef ? { work_ref: agentWorkReference(event.workRef) } : {}),
               ...(event.outcome ? { outcome: event.outcome } : {}),
@@ -402,7 +496,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.list',
         'list_agents',
-        'Read a stable direct-child directory anchored at first creation, with responsibility and recent-work sources. Fixed upper_seq bounds identities, each page reflects current status. current_work_source describes current work; last_outcome and last_result_source describe the most recent terminal result, which may precede current queued/running/waiting work. Do not label that older result as completion of a new follow-up. No activation, result consumption or Model request. Source content is the complete original text in this verified Tool body.',
+        'List the current direct children, stable targets and last known work. A previous result can precede the current queued or running work. This is an observation only.',
         object(
           {
             agentIds: {
@@ -438,11 +532,12 @@ export function createTaskExtension(options: TaskOptions): Extension {
           const page = await context.operations.listStableAgents({
             ...(args.agentIds ? { agentIds: args.agentIds as string[] } : {}),
             ...position,
-            ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
+            limit: typeof args.limit === 'number' ? args.limit : 200,
           });
           const details = {
             items: page.items.map((item) => ({
               agent_id: item.agentId,
+              target: `a${item.seq}`,
               task_name: item.taskName,
               assignment_summary: item.assignmentSummary,
               assignment_source: item.assignmentSource,

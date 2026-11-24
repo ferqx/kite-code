@@ -4,7 +4,15 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OutputFileSummary, OutputFileTarget } from '@kite-ai/client';
-import { app, protocol, screen, session, WebContentsView, webContents } from 'electron';
+import {
+  app,
+  nativeImage,
+  protocol,
+  screen,
+  session,
+  WebContentsView,
+  webContents,
+} from 'electron';
 import { filePreviewFormat } from '../src/file-preview-format';
 import { type ImageZoomControl, validateImageZoom } from '../src/image-zoom';
 import {
@@ -32,6 +40,7 @@ import {
 import { createImageDisplayRegionResource } from './image-display-region-resource';
 import { renderImageDisplay } from './image-display-service';
 import { imageDisplayViewportScript } from './image-display-viewport';
+import { localPdfRegionPixels } from './local-preview-submit';
 import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
 import { waitForNativeFrame } from './native-frame-readiness';
 import { addNativeWindowView, focusNativeWindowContent } from './native-overlay-layer';
@@ -99,6 +108,7 @@ export class NativeOutputPreview {
     hostedImage?: boolean;
     pdf?: boolean;
     pdfPageCount?: number;
+    loadPdfPage?: (page: number) => Promise<Buffer>;
     pdfLayers?: Map<number, PdfTextLayer>;
     check?: () => void;
     officeKind?: OfficePreviewKind;
@@ -257,6 +267,7 @@ export class NativeOutputPreview {
             active.pdfLayers!.set(page, layer);
           },
         );
+        active.loadPdfPage = loadPage;
         for (let page = 1; page <= first.totalPages; page++) {
           files.push({
             path: `page-${page}.png`,
@@ -827,6 +838,33 @@ export class NativeOutputPreview {
     );
     if (this.active !== active) throw Error('preview_replaced');
     return { ...result, handleId };
+  }
+  async readLocalPdfSelectionImage(
+    id: string,
+    generation: number,
+    handleId: string,
+    sourceHash: string,
+    selection: Extract<NonNullable<OfficeEditContext['selection']>, { kind: 'pdf' }>,
+  ): Promise<Buffer | undefined> {
+    const active = this.active;
+    if (
+      !active?.loadPdfPage ||
+      active.id !== id ||
+      active.generation !== generation ||
+      active.localHandleId !== handleId ||
+      active.sourceHash !== sourceHash ||
+      active.target
+    )
+      throw Error('local_preview_replaced');
+    if (selection.scope === 'text') return undefined;
+    const page = await active.loadPdfPage(selection.page);
+    if (this.active !== active) throw Error('local_preview_replaced');
+    if (selection.scope === 'page') return page;
+    const image = nativeImage.createFromBuffer(page);
+    const clipped = image.crop(localPdfRegionPixels(selection, image.getSize())).toPNG();
+    if (!clipped.length || clipped.length > 16 * 1024 * 1024)
+      throw Error('local_preview_selection_unavailable');
+    return clipped;
   }
   private async readInteractionState(id: string, generation: number, consumeRequest = true) {
     const active = this.active;

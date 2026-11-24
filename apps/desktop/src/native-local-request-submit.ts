@@ -45,6 +45,11 @@ export async function submitLocalOfficeRequest(options: {
         : error instanceof Error
           ? error.message
           : '';
+    if (code === 'local_preview_selection_unavailable')
+      return {
+        status: 'failed',
+        message: '无法准备所选区域的画面，请重新选择后发送。本次未提交。',
+      };
     if (
       [
         'local_preview_changed',

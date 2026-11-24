@@ -70,6 +70,12 @@ export const additionalFailureExplanations: Readonly<Record<string, string>> = {
     'The supplied complete-file baseline or create-only condition does not match the target. Check the original result and authorized current file before another separately authorized change.',
   plan_steps_invalid:
     'The proposed plan steps do not satisfy the declared plan structure. Check the step identifiers and required fields.',
+  plan_step_id_duplicate:
+    'Two or more plan steps use the same id. Give each step a unique id before proposing the plan again.',
+  mcp_source_stale:
+    'The MCP source changed after this connection was established. Ask the user to reconnect the source from the client before using its current tools.',
+  mcp_historical_connection_unavailable:
+    'No current MCP connection matches the saved reference. Ask the user to open MCP settings in the client and connect or reconnect the server. Use the current tools once the client confirms the connection is ready.',
   plan_identity_mismatch:
     'The supplied plan identity, version or digest does not match the current plan. Read the current plan before deciding how to continue.',
   plan_missing:

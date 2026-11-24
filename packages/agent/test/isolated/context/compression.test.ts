@@ -96,6 +96,10 @@ async function fixture(
         }
       : {}),
     async validateExpanded(input) {
+      if (options.step) {
+        expect(input.modelId).toBe('fixed');
+        expect(input.tools).toEqual([]);
+      }
       if (options.changeStepOnReset) capabilityVersion++;
       return (
         options.resetSafe !== false &&

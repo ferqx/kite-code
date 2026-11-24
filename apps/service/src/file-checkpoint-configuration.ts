@@ -13,6 +13,7 @@ import type {
   PublicExecution,
   ReadContext,
   ToolContext,
+  ToolDefinition,
 } from '@kite-ai/agent/extensions';
 import {
   type CheckpointSource,
@@ -610,6 +611,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
   const inputFiles = withInputFileReads({
     profilePath: options.profile.profilePath,
     tools: fullAccessFiles.tools,
+    workspaceRoot: fileScope.workspaceRoot,
     async resolve(request, uri) {
       const { runtime, scope } = await inputReadScope(request);
       return runtime.resolveInputFile({ ...scope, uri });
@@ -813,15 +815,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
     },
   });
   const fileScopeDescription =
-    'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. Files read_file/write_file/edit_file use the current permission mode. Auto reads ordinary workspace files directly; ordinary external text reads are privately captured first, known missing files return without review, and existing bytes are released only after automatic authorization; writes and edits request automatic authorization; Request Approval allows workspace operations and requests user approval for ordinary external paths; Full allows ordinary paths subject to inherited policy. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files follow their separate declared scope. External files are outside workspace checkpoints.';
-  const descriptions: Readonly<Record<string, string>> = {
-    'files.read':
-      'Read UTF-8 file lines, at most 200 by default. start_line begins at 1; continue with next_line. Editable workspace reads return base_ref bound to the complete file even for a partial read. Authorized ordinary external reads return base_ref only for targets supported by safe native editing. A reference never grants write permission. A known missing file returns exists:false, not empty contents or an edit reference. For workspace and non-PDF files, omit pages/mode and use start_line/max_lines. Saved PDF attachments use pages and mode=text|image, omit line parameters; default is page 1 text, at most 20 text pages or 4 images. Empty extracted text does not prove a blank page.',
-    'files.write':
-      'Create or replace a complete UTF-8 file. Omit base_ref entirely only to create a new file; never pass null or a baseline object. Existing targets reject create-only requests. Missing accepted parents can be created through the original native boundary. Replacement requires the exact base_ref returned by read_file or a successful mutation of this path. Supply exactly one of content or content_ref. Preserve the exact target and complete contents.',
-    'files.edit':
-      'Replace exact non-overlapping literal text using the exact base_ref returned by read_file or a successful mutation of this path. expected_matches defaults to 1; multiple matches require the explicit exact positive count. Supply each of old_text/new_text or its corresponding immutable old_text_ref/new_text_ref, never both text and reference for the same field. Preserve the exact target and intended change.',
-  };
+    'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. Files read_file/write_file/edit_file use the current permission mode. Auto reads ordinary workspace files directly; ordinary external text reads are privately captured first, known missing files return without review, and existing bytes are released only after automatic authorization; writes and edits request automatic authorization; Request Approval allows workspace operations and requests user approval for ordinary external paths; Full allows ordinary paths subject to inherited policy. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files follow their separate declared scope. External files are outside workspace checkpoints and do not contribute project instructions.';
   const reinspectionScope = async (ctx: ToolContext) => {
     const runtime = options.runtime(),
       e = await runtime.getExecution(ctx.executionId);
@@ -888,23 +882,31 @@ export function createDefaultFileCheckpointConfiguration(options: {
           ctx.signal,
         ),
   );
-  const tools = [...planFiles.tools!, images.tool, reinspect].map((tool) => {
-    const description = descriptions[tool.id];
-    if (!description) return tool;
+  const fileDescriptions = new Map(extension.tools?.map((tool) => [tool.id, tool.description]));
+  function describeFilePath(schema: ToolDefinition['inputSchema']): ToolDefinition['inputSchema'] {
+    const properties = object(schema.properties ?? null)!;
     return {
-      ...tool,
-      description: `${description} ${fileScopeDescription} Files read/write/edit operations do not collect attachments. Use Files for the requested working or saved file location; final attachments are collected only from a successful Shell execution’s current KITE_OUTPUT_DIR. Preserve user-specified locations and permissions; never redirect them merely to obtain an attachment. Do not use Files to write a previous Shell staging path or reuse it in another Shell call.`,
-      inputSchema: {
-        ...tool.inputSchema,
-        properties: {
-          ...(tool.inputSchema.properties as Record<string, Json>),
-          path: {
-            ...((tool.inputSchema.properties as Record<string, Json>).path as Record<string, Json>),
-            description:
-              'Workspace-relative or absolute file path, including ordinary external files. Ordinary external paths use Request Approval human approval or effective Full authorization. Auto privately reads external text first, reports a known missing file without review, and reviews before releasing existing bytes; write/edit still require Auto review. Exact saved attachment, current Plan paths retain their separate scope; other private/protected paths are denied.',
-          },
+      ...schema,
+      properties: {
+        ...properties,
+        path: {
+          ...object(properties.path ?? null),
+          description:
+            'Workspace-relative or absolute file path, including ordinary external files. External paths follow the current permission mode. Exact saved attachments and current Plan files follow their declared scope; other protected paths are denied.',
         },
       },
+    };
+  }
+  const tools = [...planFiles.tools!, images.tool, reinspect].map((tool) => {
+    const operation = fileDescriptions.get(tool.id);
+    if (operation === undefined) return tool;
+    return {
+      ...tool,
+      description: `${operation} ${fileScopeDescription} Files read/write/edit operations do not collect attachments. Use Files for the requested working or saved file location; final attachments are collected only from a successful Shell execution’s current KITE_OUTPUT_DIR. Preserve user-specified locations and permissions; never redirect them merely to obtain an attachment. Do not use Files to write a previous Shell staging path or reuse it in another Shell call.`,
+      inputSchema: describeFilePath(tool.inputSchema),
+      ...(tool.model?.inputSchema
+        ? { model: { ...tool.model, inputSchema: describeFilePath(tool.model.inputSchema) } }
+        : {}),
     };
   });
   const restore = outputs.actions?.find((action) => action.id === 'files.checkpoint.restore');

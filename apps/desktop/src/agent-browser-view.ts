@@ -218,6 +218,7 @@ export function agentBrowserErrorMessage(code: string): string {
     browser_frame_unavailable: '暂时无法获取网页画面；旧画面不能用于操作。',
     browser_action_outcome_unknown: '上一次浏览器操作的结果未知，不能重复执行。',
     browser_stop_unconfirmed: '尚未确认浏览器进程已经停止。',
+    browser_run_stop_unconfirmed: '尚未确认原浏览器任务的会话轮次已停止。',
   };
   return messages[code] ?? '浏览器当前无法继续工作，请先核实主机状态。';
 }

@@ -247,6 +247,10 @@ export function useTrajectoryMaterials({
             cause instanceof Error && /^[a-z][a-z0-9_]{0,100}$/.test(cause.message)
               ? cause.message
               : 'trajectory_evidence_unavailable';
+          if (reason === 'trajectory_bundle_evidence_omitted') {
+            commit(index, { ...base, status: 'missing', notice: '此包未包含该材料。' });
+            continue;
+          }
           commit(index, {
             ...base,
             status: 'unavailable',

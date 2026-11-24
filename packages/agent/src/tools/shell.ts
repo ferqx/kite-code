@@ -1,11 +1,12 @@
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shellOutputPreview } from '@kite-ai/trajectory';
+import { shellOutputGapMessage, shellOutputPreview } from '@kite-ai/trajectory';
 import type {
   Extension,
   JobDefinition,
   Json,
   OperationRef,
+  PublicExecution,
   ToolContext,
   ToolResult,
 } from '../extensions';
@@ -48,6 +49,9 @@ const object = (properties: Record<string, Json>, required: string[]) => ({
   additionalProperties: false,
 });
 const contentType = 'application/vnd.kite.shell-reference+json';
+const counterType = 'application/vnd.kite.shell-session-counter+json';
+const sessionIdSchema = { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER };
+const yieldSchema = { type: 'integer', minimum: 0, maximum: 30000 };
 function args(input: Json): Record<string, Json> {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     throw new AgentError('invalid_shell_arguments');
@@ -89,17 +93,150 @@ function savedOutput(
     },
   };
 }
-function missingReference(shellId: string): ToolResult {
+function missingReference(shellId: string | number): ToolResult {
   return {
     outcome: 'failed',
-    content: `Shell reference "${shellId}" was not found in the available history. Use the shell_id returned by a successful shell_execute or shell_launch call; do not invent an ID or restart an earlier command to recover its result. This lookup did not start or stop a command.`,
+    content: `Shell session ${shellId} is unavailable in this conversation. Use the session_id returned by exec_command. This lookup did not start or stop a command.`,
     details: { code: 'shell_reference_not_found', shellId },
   };
 }
-async function reference(context: ToolContext, key: string): Promise<{ ref: OperationRef } | null> {
-  const record = await context.records.get(`shell/${key}`);
+async function reference(
+  context: ToolContext,
+  key: string | number,
+): Promise<{ ref: OperationRef } | null> {
+  const record = await context.records.get(
+    typeof key === 'number' ? `shell-session/${key}` : `shell/${key}`,
+  );
   if (!record || record.contentType !== contentType || record.contentVersion !== 1) return null;
   return { ref: args(record.value).ref as unknown as OperationRef };
+}
+async function registerSession(context: ToolContext, ref: OperationRef): Promise<number> {
+  const key = 'shell-session-counter';
+  for (;;) {
+    context.signal.throwIfAborted();
+    const prior = await context.records.get(key);
+    const sessionId = Number(prior?.value ?? 0) + 1;
+    if (!Number.isSafeInteger(sessionId)) throw new AgentError('shell_session_limit');
+    try {
+      await context.records.write({
+        key,
+        expectedRevision: prior?.revision ?? null,
+        contentType: counterType,
+        contentVersion: 1,
+        value: sessionId,
+      });
+    } catch (error) {
+      if (error instanceof AgentError && error.code === 'record_revision_conflict') continue;
+      throw error;
+    }
+    await context.records.write({
+      key: `shell-session/${sessionId}`,
+      expectedRevision: null,
+      contentType,
+      contentVersion: 1,
+      value: { ref: ref as unknown as Json },
+    });
+    return sessionId;
+  }
+}
+const isTerminal = (execution: PublicExecution) =>
+  ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status);
+
+async function waitSession(context: ToolContext, ref: OperationRef, duration: number) {
+  if (duration > 0) {
+    try {
+      return await context.operations.wait(ref, { timeoutMs: duration, signal: context.signal });
+    } catch (error) {
+      if (!(error instanceof AgentError) || error.code !== 'wait_timeout') throw error;
+    }
+  }
+  const execution = await context.operations.get(ref);
+  if (!execution) throw new AgentError('shell_unverifiable');
+  return execution;
+}
+
+async function sessionOutput(input: {
+  context: ToolContext;
+  ref: OperationRef;
+  sessionId: number;
+  execution: PublicExecution;
+  args: Record<string, Json>;
+  starter?: true;
+}): Promise<ToolResult> {
+  const { context, ref, sessionId, execution, args: parameters, starter } = input;
+  let afterSeq = '0';
+  let offset = 0;
+  if (!starter) {
+    const receipts = await context.readDecisionToolResults?.();
+    for (const { execution: previous } of receipts ?? []) {
+      if (!['shell.execute', 'shell.read'].includes(previous.definitionId ?? '')) continue;
+      const prior = (previous.result as { details?: Record<string, Json> } | null)?.details;
+      if (prior?.session_id !== sessionId) continue;
+      const position = prior.outputPosition as { afterSeq: string; offset: number } | undefined;
+      if (position) ({ afterSeq, offset } = position);
+      break;
+    }
+  }
+  const page = await context.operations.readOutput(ref, { afterSeq, limit: 200 });
+  let remaining = Math.max(
+    4,
+    Math.min(Number(parameters.max_output_tokens ?? 10000), context.modelInputTokenLimit ?? 10000) *
+      4,
+  );
+  const output: string[] = [];
+  for (const part of page.items) {
+    if (part.executionId !== ref.executionId) throw new AgentError('shell_output_conflict');
+    const gap =
+      part.droppedBytes !== '0' && (part.stream === 'stdout' || part.stream === 'stderr')
+        ? `${shellOutputGapMessage({ stream: part.stream, droppedBytes: part.droppedBytes })}\n`
+        : '';
+    const content = gap + part.content;
+    const text = content.slice(offset);
+    if (Buffer.byteLength(text) > remaining) {
+      const characters: string[] = [];
+      for (const character of text) {
+        const size = Buffer.byteLength(character);
+        if (size > remaining) break;
+        characters.push(character);
+        remaining -= size;
+        offset += character.length;
+      }
+      output.push(characters.join(''));
+      break;
+    }
+    remaining -= Buffer.byteLength(text);
+    output.push(text);
+    afterSeq = part.throughSeq;
+    offset = 0;
+  }
+  const terminal = isTerminal(execution);
+  const hasMore = offset > 0 || BigInt(afterSeq) < BigInt(page.highWaterSeq);
+  const original = execution.result as { content?: string; details?: Record<string, Json> } | null;
+  const exitCode = original?.details?.exitCode;
+  const failure =
+    original?.details?.supervisorFailure ?? original?.details?.code ?? original?.content;
+  const visible = {
+    session_id: sessionId,
+    status: execution.status,
+    terminal,
+    has_more: hasMore,
+    output: output.join(''),
+    ...(terminal && typeof exitCode === 'number' ? { exit_code: exitCode } : {}),
+    ...(terminal && typeof failure === 'string' && /^[a-z][a-z0-9_]{1,127}$/.test(failure)
+      ? { error_code: failure }
+      : {}),
+    ...(starter ? { execution_id: context.executionId } : {}),
+  };
+  return {
+    outcome: starter && terminal ? (execution.status as ToolResult['outcome']) : 'succeeded',
+    content: canonicalJson(visible),
+    details: {
+      ...visible,
+      ref: ref as unknown as Json,
+      execution: execution as unknown as Json,
+      outputPosition: { afterSeq, offset },
+    },
+  };
 }
 /** Pure registrations. Only the ordinary Job.start path may start a process. */
 export function createShellExtension(options: ShellToolsOptions): Extension {
@@ -135,7 +272,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         'On Windows, resolve paths and perform file deletions or moves in the same shell. In PowerShell, use native cmdlets such as Remove-Item or Move-Item with -LiteralPath. Pass paths as arguments instead of building command strings.',
         'Before any recursive delete or move, verify that each resolved absolute target is within the intended workspace or a target directory explicitly authorized by the user.',
         'For a background helper or service started with PowerShell Start-Process, use -WindowStyle Hidden unless the user explicitly requests a visible interactive window.',
-        'Kite stops remaining child processes when the command exits, including with background:true. Run helpers, flush changes, and close them within the same command. Reopen saved files in later Jobs.',
+        'Kite stops remaining child processes when the command exits. Run helpers, flush changes, and close them within the same command. Reopen saved files in later Jobs.',
         options.windowsNativeGitBash
           ? ''
           : 'Bidirectional local named pipes may be denied under workspace_write. Prefer a supported single-process or standalone batch mode.',
@@ -190,6 +327,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         ...(foreground
           ? {
               max_output_tokens: outputTokens,
+              yield_time_ms: yieldSchema,
               background: {
                 type: 'boolean',
                 default: false,
@@ -232,14 +370,6 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       },
       foreground ? ['command'] : ['key', 'command'],
     ),
-    ...(foreground
-      ? {
-          not: {
-            properties: { background: { const: true } },
-            required: ['background', 'execution_timeout_ms'],
-          },
-        }
-      : {}),
   });
   async function launch(
     input: Json,
@@ -322,6 +452,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     jobs: [job],
     records: [
       { contentType, contentVersion: 1, schema: object({ ref: { type: 'object' } }, ['ref']) },
+      { contentType: counterType, contentVersion: 1, schema: sessionIdSchema },
       ...(options.gitWorktree ? [gitWorktreeRecordDefinition] : []),
     ],
     tools: [
@@ -329,31 +460,63 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       {
         id: 'shell.execute',
         model: {
-          name: 'shell_execute',
+          name: 'exec_command',
           snakeCase: true,
-          omitParameters: ['key', 'permissions', 'cancellation', 'timeoutMs'],
+          parameterNames: { command: 'cmd' },
+          inputSchema: schema(true),
+          omitParameters: [
+            'key',
+            'permissions',
+            'cancellation',
+            'timeoutMs',
+            'background',
+            'execution_timeout_ms',
+          ],
         },
         version: '1',
         description: [
-          `Execute one supervised command.${scopeGuidance} Foreground calls return retained output on completion.`,
-          'Use the returned shell_id with shell_read, shell_wait, or shell_stop to recover output, wait, or stop the original Job. Repeating a command starts a new Job. Use execution_id for evidence and plan progress. Foreground and background calls follow parent cancellation. Create Git worktrees only with git_worktree. If it is unavailable, report the limitation.',
+          `Run one supervised command and wait up to yield_time_ms (default 1000ms) for a result.${scopeGuidance}`,
+          'Use the returned numeric session_id with poll_command for further output or terminate_session to stop it. Use execution_id as planning evidence. A poll continues the original command and a new exec_command starts separate work. Commands follow parent cancellation. Create Git worktrees only with git_worktree.',
           windowsGuidance,
           outputGuidance,
         ]
           .filter(Boolean)
           .join('\n\n'),
-        inputSchema: schema(true),
+        inputSchema: {
+          ...schema(true),
+          not: {
+            properties: { background: { const: true } },
+            required: ['background', 'execution_timeout_ms'],
+          },
+        },
         async execute(input, context) {
           const parsed = parseShellCommandInput(input, 'execute', !!options.permissionsSchema);
           if (!parsed)
             return {
               outcome: 'failed',
               content:
-                'invalid_shell_arguments: No command was started. background:true cannot be combined with a foreground execution deadline. Use valid independent filesystem/network values; legacy permissions and timeoutMs cannot be mixed with their new fields.',
+                'invalid_shell_arguments: No command was started. Check the current tool schema and supply valid independent filesystem and network values.',
               details: { code: 'invalid_shell_arguments' },
             };
           const launched = await launch(input, context, 'execute');
           if ('outcome' in launched) return launched;
+          const yieldMs = args(input).yield_time_ms;
+          if (typeof yieldMs === 'number' || context.readDecisionToolResults) {
+            const ref = launched.ref as unknown as OperationRef;
+            const sessionId = await registerSession(context, ref);
+            return sessionOutput({
+              context,
+              ref,
+              sessionId,
+              execution: await waitSession(
+                context,
+                ref,
+                typeof yieldMs === 'number' ? yieldMs : 1000,
+              ),
+              args: args(input),
+              starter: true,
+            });
+          }
           if (parsed.background) return result(launched);
           const ref = launched.ref as unknown as OperationRef;
           const completed = await completeForegroundShell(
@@ -391,12 +554,26 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       },
       {
         id: 'shell.read',
-        model: { name: 'shell_read', snakeCase: true },
+        model: {
+          name: 'poll_command',
+          snakeCase: true,
+          parameterNames: { shellId: 'session_id' },
+          inputSchema: object(
+            {
+              shellId: sessionIdSchema,
+              yield_time_ms: yieldSchema,
+              max_output_tokens: outputTokens,
+            },
+            ['shellId'],
+          ),
+        },
         version: '1',
-        description: 'Read exact durable Shell status and keyset output; never restart it.',
+        description:
+          'Wait for the specified command up to yield_time_ms (default 1000ms) and read retained output from its last delivered position. Use zero for an immediate poll.',
         inputSchema: object(
           {
-            shellId: idSchema,
+            shellId: { anyOf: [idSchema, sessionIdSchema] },
+            yield_time_ms: yieldSchema,
             cursor: { type: 'string', minLength: 1, maxLength: 4096 },
             limit: { type: 'integer', minimum: 1, maximum: 200 },
             max_output_tokens: outputTokens,
@@ -410,10 +587,19 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
             !validShellOutputTokens(inputArgs.max_output_tokens)
           )
             throw new AgentError('invalid_shell_arguments');
-          const shellId = text(inputArgs, 'shellId');
+          const shellId =
+            typeof inputArgs.shellId === 'number' ? inputArgs.shellId : text(inputArgs, 'shellId');
           const resolved = await reference(context, shellId);
           if (!resolved) return missingReference(shellId);
           const { ref } = resolved;
+          if (typeof shellId === 'number')
+            return sessionOutput({
+              context,
+              ref,
+              sessionId: shellId,
+              execution: await waitSession(context, ref, Number(inputArgs.yield_time_ms ?? 1000)),
+              args: inputArgs,
+            });
           const execution = await context.operations.get(ref);
           if (!execution) throw new AgentError('shell_unverifiable');
           const scope = { kind: 'shell_output', ref: ref as unknown as Json };
@@ -453,6 +639,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         id: 'shell.wait',
         model: {
           name: 'shell_wait',
+          hidden: true,
           snakeCase: true,
           parameterNames: { timeoutMs: 'wait_ms' },
         },
@@ -489,25 +676,52 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       },
       {
         id: 'shell.stop',
-        model: { name: 'shell_stop', snakeCase: true },
+        model: {
+          name: 'terminate_session',
+          snakeCase: true,
+          parameterNames: { shellId: 'session_id' },
+          inputSchema: object({ shellId: sessionIdSchema }, ['shellId']),
+        },
         version: '1',
         description:
-          'Request cancellation of one exact shell_id. The host binds the cancellation intent and returns its receipt; acceptance alone does not confirm that the command stopped. Inspect the original Shell before any new execution.',
+          'Request cancellation of the original command by its numeric session_id and observe the result. A nonterminal response requires further polling of the same session.',
         inputSchema: object(
           {
-            shellId: idSchema,
+            shellId: { anyOf: [idSchema, sessionIdSchema] },
           },
           ['shellId'],
         ),
         async execute(input, context) {
           const inputArgs = args(input);
-          const shellId = text(inputArgs, 'shellId');
+          const shellId =
+            typeof inputArgs.shellId === 'number' ? inputArgs.shellId : text(inputArgs, 'shellId');
           const resolved = await reference(context, shellId);
           if (!resolved) return missingReference(shellId);
           const { ref } = resolved;
           if (!context.operations.cancel) throw new AgentError('shell_stop_unavailable');
           const commandId = `shell-stop-${context.executionId}`;
           const receipt = await context.operations.cancel(ref, { commandId });
+          if (typeof shellId === 'number') {
+            const execution = await waitSession(context, ref, 30000);
+            const visible = {
+              session_id: shellId,
+              status: execution.status,
+              terminal: isTerminal(execution),
+              cancel_requested: true,
+            };
+            return {
+              outcome: execution.status === 'outcome_unknown' ? 'outcome_unknown' : 'succeeded',
+              content: canonicalJson(visible),
+              details: {
+                ...visible,
+                cancelRequested: true,
+                command_id: commandId,
+                cancellation_execution_id: context.executionId,
+                ref: ref as unknown as Json,
+                execution: execution as unknown as Json,
+              },
+            };
+          }
           return result({
             cancelRequested: true,
             command_id: commandId,

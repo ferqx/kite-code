@@ -15,6 +15,7 @@ import {
   type RuntimeOptions,
 } from '@kite-ai/agent';
 import { createAskUserExtension } from '@kite-ai/agent/ask-user';
+import { browserStructuredToolIds } from '@kite-ai/agent/browser';
 import {
   ConfigurationError,
   type CredentialBackend,
@@ -1185,7 +1186,7 @@ export function createDefaultProcessConfiguration(options: {
                   ? mcp.extension
                   : undefined
                 : selection.toolIds?.includes('browser.execute') &&
-                    browser.executionAvailable &&
+                    browser.structuredAvailable &&
                     browser.toolIds.includes(id) &&
                     browser.extension.id === 'builtin.browser' &&
                     browser.extension.version === '1'
@@ -1243,17 +1244,28 @@ export function createDefaultProcessConfiguration(options: {
       const browserRunSnapshot = unifiedBrowser
         ? { ...browser.snapshot, execution: 'isolated-browser-code-1' }
         : browser.snapshot;
-      const browserInternalTools = browser.toolIds.filter((id) => id !== 'browser.execute');
-      const modelHiddenToolIds = unifiedBrowser
-        ? browserInternalTools.filter(
-            (id) => !toolIds.includes(id) || selection?.inheritedModelHiddenToolIds?.includes(id),
-          )
-        : [];
+      const structuredBrowserTools = new Set<string>(browserStructuredToolIds);
+      const browserInternalTools = browser.toolIds.filter(
+        (id) => id !== 'browser.execute' && !structuredBrowserTools.has(id),
+      );
+      const modelHiddenToolIds = [
+        ...new Set([
+          ...(selection?.inheritedModelHiddenToolIds ?? []).filter((id) => toolIds.includes(id)),
+          ...(unifiedBrowser ? ['browser.execute', ...browserInternalTools] : []),
+        ]),
+      ];
       if (unifiedBrowser) {
         for (const id of browserInternalTools) {
           if (effective.tools?.some((tool) => tool.id === id && tool.enabled === false))
             throw new AgentError('browser_dependency_disabled');
           if (!toolIds.includes(id)) toolIds.push(id);
+        }
+        for (const id of structuredBrowserTools) {
+          if (
+            !effective.tools?.some((tool) => tool.id === id && tool.enabled === false) &&
+            !toolIds.includes(id)
+          )
+            toolIds.push(id);
         }
       }
       task.validateSelection(toolIds);
@@ -1387,7 +1399,7 @@ export function createDefaultProcessConfiguration(options: {
           ],
           allowedCapabilities: [
             ...(options.allowedToolCapabilities ?? []),
-            ...(unifiedBrowser && browser.executionAvailable ? ['browser.execute'] : []),
+            ...(unifiedBrowser && browser.structuredAvailable ? ['browser.execute'] : []),
           ],
         });
       const assembly = await makeAssembly(root, shell);

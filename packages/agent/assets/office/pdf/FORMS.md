@@ -1,4 +1,25 @@
-**CRITICAL: You MUST complete these steps in order. Do not skip ahead to writing code.**
+# Kite managed fillable forms
+
+Use the bundled document helper for text, checkbox and choice fields. Run `pdf-fields --input source.pdf` through the helper to read exact field names and saved values. Work from the attached source copy and save a new interactive PDF. Write a JSON specification like this:
+
+```json
+{
+  "operation": "edit",
+  "source": "source.pdf",
+  "fields": {
+    "Trip reference": "NX-4827",
+    "Pallet inspection confirmed": true
+  }
+}
+```
+
+Run the `pdf --input spec.json --out filled.pdf` command shown in [SKILL.md](SKILL.md). A checkbox uses `true` or `false`. Keep untargeted fields out of the specification. Run `pdf-fields --input filled.pdf` to confirm the saved fields before staging. A checked box has a PDF name in `value`, and each widget's `appearance` matches its `onValue`. An unchecked box and its widgets use `/Off`. A missing or invalid saved value reports `null`.
+
+The managed helper does not support selecting or reordering pages in the same edit as changing fields. For additional form inspection or workflows, use the Python instructions below when their dependencies are already available.
+
+# Python-based inspection and editing
+
+This workflow requires the Python dependencies used by the supplied scripts. Follow the steps in order when using those scripts.
 
 If you need to fill out a PDF form, first check to see if the PDF has fillable form fields. Run this script from this file's directory:
  `python scripts/check_fillable_fields.py <file.pdf>`, and depending on the result go to either the "Fillable fields" or "Non-fillable fields" and follow those instructions.

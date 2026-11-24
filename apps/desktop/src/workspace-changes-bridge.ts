@@ -18,6 +18,7 @@ export type NativeWorkspaceChangePage = {
   readId: string;
   scope: NativeWorkspaceChangeScope;
   repository: boolean;
+  repositoryIdentity?: string;
   entries: NativeWorkspaceChange[];
   truncated: boolean;
 };

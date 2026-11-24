@@ -38,6 +38,13 @@ export function createBrowserControlTool(controller: BrowserController): ToolDef
             key: { ...text(96), pattern: browserPressKeyPattern },
           }),
           object({ action: { const: 'hover' }, ref, seq }),
+          object({ action: { enum: ['check', 'uncheck'] }, ref, seq }),
+          object({
+            action: { const: 'setvalue' },
+            ref,
+            seq,
+            value: { type: 'string', maxLength: 16384 },
+          }),
           object({
             action: { const: 'select' },
             ref,

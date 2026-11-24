@@ -23,6 +23,7 @@ import type {
   NativeWebSearchCapability,
 } from './index';
 import { isModelImage } from './index';
+import { ModelAccessError } from './model-access';
 import { ModelAttemptError, modelConnectionDetail } from './model-attempt';
 import { ModelRequestLimitError } from './model-request-limit';
 import {
@@ -727,7 +728,7 @@ export function createSdkModelAdapter(options: {
             });
           if (error.statusCode === 413 && !search) throw new ModelRequestLimitError();
           if (error.statusCode === 401 || error.statusCode === 403)
-            throw new Error('model_transport_failed');
+            throw new ModelAccessError(error.statusCode);
           throw new ModelAttemptError(
             error.statusCode === undefined ? 'connection_failed' : 'provider_unavailable',
             error.statusCode === 429

@@ -29,6 +29,7 @@ import {
   type BrowserTarget,
   type BrowserView,
   browserJobId,
+  browserOpenPageProperties,
 } from './types';
 
 const object = (value: unknown): Record<string, Json> =>
@@ -144,7 +145,8 @@ export function createBrowserController(options: {
   /** Trusted Job/Run selection, never a public Tool parameter. */
   observationMode?: (context: JobContext) => Promise<'preview' | 'on-demand'>;
   /** Trusted assembly only. The original Browser Job owns its Run-bound lease. */
-  runtime?: () => Pick<AgentRuntime, 'getExecution' | 'getRun' | 'getCommand'>;
+  runtime?: () => Pick<AgentRuntime, 'getExecution' | 'getRun' | 'getCommand'> &
+    Partial<Pick<AgentRuntime, 'cancelRun'>>;
 }): BrowserController {
   const sessions = new Map<string, Session>();
   const closedViews = new Map<
@@ -210,14 +212,21 @@ export function createBrowserController(options: {
       ? []
       : (releasedPages.get(sessionId) ?? []);
   };
-  const releasedPage = (sessionId: string, url?: string) => {
+  const releasedPage = (sessionId: string, url?: string, identity?: BrowserSharedPageIdentity) => {
+    const exact = (page: BrowserReleasedPage) =>
+      !identity ||
+      (page.identity?.pageId === identity.pageId &&
+        page.identity.incarnation === identity.incarnation);
     const recovery = closedViews.get(sessionId)?.recovery;
     if (url !== undefined) {
       if (recovery && !recovery.activated) throw Error('browser_page_recovery_required');
       const required = (releasedPages.get(sessionId) ?? []).filter(
         (page) => page.observationRequired,
       );
-      if (required.length && !required.some((page) => page.url === canonicalUrl(url)))
+      if (
+        required.length &&
+        !required.some((page) => page.url === canonicalUrl(url) && exact(page))
+      )
         throw Error('browser_page_recovery_required');
     }
     if (url === undefined) {
@@ -252,7 +261,9 @@ export function createBrowserController(options: {
     }
     const normalized = canonicalUrl(url);
     if (!normalized) return null;
-    const matches = knownReleased(sessionId).filter((page) => page.url === normalized);
+    const matches = knownReleased(sessionId).filter(
+      (page) => page.url === normalized && exact(page),
+    );
     if (matches.length > 1) throw Error('browser_page_existing_ambiguous');
     return matches[0] ? copyReleased(matches[0]) : null;
   };
@@ -317,9 +328,9 @@ export function createBrowserController(options: {
       ? state
       : undefined;
   };
-  const stop = (state: Session): Promise<StopConfirmation> => {
+  const stop = (state: Session, switchPage = false): Promise<StopConfirmation> => {
     if (state.stopping) return state.stopping;
-    state.released = true;
+    if (!switchPage) state.released = true;
     state.view.state = state.uncertain ? 'outcome_unknown' : 'closing';
     invalidate(state);
     for (const wake of [...state.controlListeners]) wake();
@@ -716,6 +727,7 @@ export function createBrowserController(options: {
       properties: {
         browserId: { type: 'string', minLength: 1, maxLength: 128 },
         url: { type: 'string', minLength: 1, maxLength: 8192 },
+        ...browserOpenPageProperties,
       },
       required: ['browserId', 'url'],
       additionalProperties: false,
@@ -738,9 +750,17 @@ export function createBrowserController(options: {
       if (sessions.has(context.sessionId)) throw Error('browser_session_already_owned');
       const released = closedViews.get(context.sessionId);
       const previouslyReleasedRun = released?.releasedRunId;
-      const existingOnly = options.sharedPage
-        ? releasedPage(context.sessionId, destination.href)
-        : null;
+      const identity = value.existingPage as BrowserSharedPageIdentity | undefined;
+      if (
+        value.newPage &&
+        (identity || knownReleased(context.sessionId).some((page) => page.observationRequired))
+      )
+        throw Error('browser_page_recovery_required');
+      const existingOnly =
+        options.sharedPage && !value.newPage
+          ? releasedPage(context.sessionId, destination.href, identity)
+          : null;
+      if (identity && !existingOnly) throw Error('browser_page_existing_missing');
       if (sessions.size >= 8) throw Error('browser_session_capacity');
       let transportAvailable!: () => void;
       const state: Session = {
@@ -1139,13 +1159,17 @@ export function createBrowserController(options: {
                   ? { action: 'fill', selector: `@${element}`, value: command.value }
                   : command.action === 'click' || command.action === 'hover'
                     ? { action: command.action, selector: `@${element}` }
-                    : command.action === 'select'
-                      ? { action: 'select', selector: `@${element}`, values: command.values }
-                      : command.action === 'press'
-                        ? { action: 'press', key: command.key }
-                        : command.action === 'wait'
-                          ? { action: 'wait', text: command.text, timeout: command.timeoutMs }
-                          : { action: command.action };
+                    : command.action === 'check' || command.action === 'uncheck'
+                      ? { action: command.action, selector: `@${element}` }
+                      : command.action === 'setvalue'
+                        ? { action: 'setvalue', selector: `@${element}`, value: command.value }
+                        : command.action === 'select'
+                          ? { action: 'select', selector: `@${element}`, values: command.values }
+                          : command.action === 'press'
+                            ? { action: 'press', key: command.key }
+                            : command.action === 'wait'
+                              ? { action: 'wait', text: command.text, timeout: command.timeoutMs }
+                              : { action: command.action };
         let data: Record<string, Json>;
         if (command.action === 'pointer') {
           if (!state.transport?.pointer) return failed('browser_pointer_unavailable');
@@ -1307,6 +1331,12 @@ export function createBrowserController(options: {
       const view = sessions.get(sessionId)?.view ?? closedViews.get(sessionId)?.view;
       return view ? structuredClone(view) : null;
     },
+    activePageIdentity(sessionId, target) {
+      const state = get(sessionId, target);
+      if (state?.view.state === 'agent' && state.sharedPageIdentity)
+        return { ...state.sharedPageIdentity };
+      return undefined;
+    },
     releasedPage,
     invalidateMissingReleasedPage(sessionId, identity) {
       const pages = releasedPages.get(sessionId);
@@ -1421,9 +1451,77 @@ export function createBrowserController(options: {
       state.view.selectedAnnotation = annotation;
       return succeeded(asJson(publicStatus(state.view)));
     },
-    async close(sessionId, target) {
+    async close(sessionId, target, options) {
       const state = get(sessionId, target);
       if (!state) return failed('browser_stale_or_foreign_target');
+      const switchPage = options?.switchPage === true;
+      if (
+        switchPage &&
+        (state.view.state !== 'agent' ||
+          state.released ||
+          state.uncertain ||
+          state.recoveryObservationRequired)
+      )
+        return failed('browser_page_observation_required');
+      const confirmation = await stop(state, switchPage);
+      if (switchPage && confirmation.status === 'stopped') {
+        try {
+          await disposeState(state);
+        } catch {
+          return unknown('browser_stop_unconfirmed');
+        }
+      }
+      return confirmation.status === 'stopped'
+        ? succeeded({ closed: true, browserId: target.browserId })
+        : unknown('browser_stop_unconfirmed');
+    },
+    async stopTask(sessionId, target, actionExecutionId) {
+      const state = get(sessionId, target);
+      const owner = state?.owner;
+      if (!state || !owner || !options.sharedPage) return controller.close(sessionId, target);
+      const host = options.runtime!();
+      const action = await host.getExecution(actionExecutionId);
+      const command = action && (await host.getCommand(action.originCommandId));
+      const request = object(command?.request);
+      const input = object(request.input);
+      if (
+        action?.sessionId !== sessionId ||
+        action.originStoreId !== owner.storeId ||
+        action.definitionId !== 'builtin.browser/browser.close' ||
+        action.cancelRequestedAt !== null ||
+        command?.kind !== 'extension.invoke' ||
+        command.sessionId !== sessionId ||
+        command.originStoreId !== owner.storeId ||
+        command.subjectId !== owner.subjectId ||
+        command.cancelRequestedAt !== null ||
+        request.actionId !== 'browser.close' ||
+        input.browserId !== target.browserId ||
+        input.generation !== target.generation
+      )
+        return failed('browser_stale_or_foreign_target');
+      let current: Awaited<ReturnType<typeof ownerState>>;
+      try {
+        current = await ownerState(state);
+      } catch {
+        if (get(sessionId, target) === state) await stop(state);
+        return unknown('browser_run_stop_unconfirmed');
+      }
+      if (get(sessionId, target) !== state) return failed('browser_stale_or_foreign_target');
+      if (current?.run.isActive && current.command.cancelRequestedAt === null) {
+        try {
+          if (!host.cancelRun) throw Error('browser_run_stop_unavailable');
+          await host.cancelRun({
+            expectedStoreId: owner.storeId,
+            sessionId,
+            runId: owner.runId,
+            commandId: randomUUID(),
+            subjectId: command.subjectId,
+          });
+        } catch {
+          await stop(state);
+          return unknown('browser_run_stop_unconfirmed');
+        }
+      }
       const confirmation = await stop(state);
       return confirmation.status === 'stopped'
         ? succeeded({ closed: true, browserId: target.browserId })

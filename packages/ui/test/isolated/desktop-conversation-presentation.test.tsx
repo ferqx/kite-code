@@ -352,6 +352,52 @@ test('changed message bytes, host renderers and current Turn facts replace the p
   }
 });
 
+test('a new trace step preserves the focused details of the open original tool', async () => {
+  const first: Message = {
+    id: 'first',
+    turnId: 'r',
+    role: 'tool',
+    text: 'Original output',
+    toolName: 'shell_execute',
+    status: 'running',
+    settled: false,
+  };
+  const f = await fixture([first], false);
+  try {
+    await f.render({
+      traceTurns: true,
+      turnActivity: { turnId: 'r', status: 'running' },
+      renderToolActivity: ([item], controls) => (
+        <button
+          type="button"
+          data-tool={item?.id}
+          aria-expanded={controls.expanded === true}
+          onClick={() => controls.onToggle(!controls.expanded)}
+        >
+          {item?.text}
+        </button>
+      ),
+    });
+    const original = f.host.querySelector<HTMLButtonElement>('[data-tool="first"]')!;
+    await act(() => {
+      original.focus();
+      original.click();
+    });
+    await f.render({
+      messages: [
+        first,
+        { ...first, id: 'later', text: 'Later output', toolName: 'read_file', settled: true },
+      ],
+    });
+    expect(f.host.querySelector('[data-tool="first"]')).toBe(original);
+    expect(f.dom.window.document.activeElement).toBe(original);
+    expect(original.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('[data-tool="later"]')?.textContent).toBe('Later output');
+  } finally {
+    await f.close();
+  }
+});
+
 test('explicit expansion and restoration markers invalidate projection while manual re-opening restores normal animation', async () => {
   const messages: Message[] = [
     { id: 'user', role: 'user', text: 'Question', settled: true },

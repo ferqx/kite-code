@@ -42,6 +42,7 @@ import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
 import type { GitWorktreeHost } from '../tools/git-worktree';
 import { parseWorktreeRootRequest } from '../tools/git-worktree/execution-root';
+import { removePathsWithinWorkspace } from '../tools/git-worktree/paths';
 import {
   buildPowerShellWorkerCommand,
   digest,
@@ -985,7 +986,6 @@ export async function createShellConfiguration(input: {
                 throw new AgentError('worktree_permission_denied');
               await worktree!.verify(context.signal);
               context.signal.throwIfAborted();
-              dispatched = true;
               const requested = commandRequest(
                 {
                   kind: 'job',
@@ -1006,6 +1006,13 @@ export async function createShellConfiguration(input: {
                 network: 'none',
               });
               try {
+                if (
+                  worker.phase === 'remove' &&
+                  executionScope(context).filesystem === 'workspace_write' &&
+                  !removePathsWithinWorkspace(cwd, worker.plan!)
+                )
+                  throw new JobStartError(undefined, 'worktree_permission_denied');
+                dispatched = true;
                 return await job.start({ command }, context);
               } finally {
                 workerScopes.delete(context.executionId);

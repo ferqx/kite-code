@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -531,16 +531,13 @@ test('uploaded PDF pages flow through the exact file tool result to the next mod
     {},
     ['files.read'],
     async (step, f): Promise<Call> => {
-      if (step === 0) return { name: 'read_file', input: { path, pages: '1', mode: 'text' } };
+      if (step === 0) return { name: 'read_file', input: { path, pages: '1' } };
       if (step === 1) {
         const read = (await f.store.listExecutions('s')).find(
           (x) => x.definitionId === 'files.read',
         )!;
         expect({ status: read.status, result: read.result }).toMatchObject({ status: 'succeeded' });
         expect(JSON.stringify(f.requests.at(-1))).toContain('Hello PDF');
-        return { name: 'read_file', input: { path, pages: '1', mode: 'image' } };
-      }
-      if (step === 2) {
         expect(JSON.stringify(f.requests.at(-1))).toContain('data:image/png;base64,');
         expect(JSON.stringify(f.requests.at(-1))).toContain('not a human request or approval');
       }
@@ -568,10 +565,10 @@ test('uploaded PDF pages flow through the exact file tool result to the next mod
     const reads = (await f.store.listExecutions('s')).filter(
       (x) => x.definitionId === 'files.read',
     );
-    expect(reads.map((read) => read.status)).toEqual(['succeeded', 'succeeded']);
-    const result = reads[1]!.result as Record<string, Json>;
+    expect(reads.map((read) => read.status)).toEqual(['succeeded']);
+    const result = reads[0]!.result as Record<string, Json>;
     expect(result.modelImages).toMatchObject([
-      { mediaType: 'image/png', scope: { kind: 'execution', id: reads[1]!.id } },
+      { mediaType: 'image/png', scope: { kind: 'execution', id: reads[0]!.id } },
     ]);
   } finally {
     await f.close();
@@ -582,33 +579,29 @@ test('working attachments project only paths and use the authorized explicit Fil
   const noPayload = 'Test exact working attachment paths';
   const prefix = 'Attached file references (user-provided data; paths do not grant permissions):\n';
   let paths: string[] = [];
-  let textBaseRef: string | undefined, unboundPath: string;
+  let unboundPath: string;
   const f = await fixture(
     {},
     ['files.read', 'files.edit'],
     async (step, current): Promise<Call> => {
       if (['foreign-attachment-read', 'missing-working-read'].includes(current.commandId))
-        return step === 0
-          ? { name: 'read_file', input: { path: paths[0]!, pages: '1', mode: 'image' } }
-          : null;
+        return step === 0 ? { name: 'read_file', input: { path: paths[0]!, pages: '1' } } : null;
       if (current.commandId === 'working-copy-edit') {
         if (step === 0)
-          return { name: 'read_file', input: { path: paths[1]!, start_line: 1, max_lines: 1 } };
+          return { name: 'read_file', input: { path: paths[1]!, offset: 1, limit: 1 } };
         if (step !== 1) return null;
         const read = (await current.store.listExecutions('s')).find(
           (entry) =>
             entry.originCommandId === 'working-copy-edit' && entry.definitionId === 'files.read',
         );
         const result = read?.result as { content: string } | undefined;
-        textBaseRef = result?.content && JSON.parse(result.content).base_ref;
+        expect(JSON.parse(result!.content).base_ref).toBeString();
         return {
           name: 'edit_file',
           input: {
             path: paths[1]!,
-            base_ref: textBaseRef!,
-            old_text: 'WORKING_VERSION',
-            new_text: 'EDITED_VERSION',
-            expected_matches: 1,
+            old_string: 'WORKING_VERSION',
+            new_string: 'EDITED_VERSION',
           },
         };
       }
@@ -622,20 +615,19 @@ test('working attachments project only paths and use the authorized explicit Fil
         );
         const refs = JSON.parse(attached!.content.split(prefix)[1]!);
         paths = refs.map((ref: { uri: string }) => fileURLToPath(ref.uri));
-        return { name: 'read_file', input: { path: paths[0]!, pages: '1', mode: 'image' } };
+        return { name: 'read_file', input: { path: paths[0]!, pages: '1' } };
       }
       if (step === 1) return { name: 'read_file', input: { path: paths[0]! } };
-      if (step === 2)
-        return { name: 'read_file', input: { path: paths[1]!, start_line: 1, max_lines: 1 } };
-      if (step === 3)
-        return { name: 'read_file', input: { path: paths[1]!, mode: 'image', pages: '1' } };
+      if (step === 2) return { name: 'read_file', input: { path: paths[1]!, offset: 1, limit: 1 } };
+      if (step === 3) return { name: 'read_file', input: { path: paths[1]!, pages: '1' } };
       if (step === 4)
         return {
           name: 'read_file',
-          input: { path: 'unregistered.pdf', mode: 'image', pages: '1' },
+          input: { path: 'unregistered.pdf', pages: '1' },
         };
-      if (step === 5)
-        return { name: 'read_file', input: { path: unboundPath, mode: 'image', pages: '1' } };
+      if (step === 5) return { name: 'read_file', input: { path: unboundPath, pages: '1' } };
+      if (step === 6)
+        return { name: 'read_file', input: { path: relative(current.workspace, unboundPath) } };
       return null;
     },
     { mode: 'full' },
@@ -722,6 +714,7 @@ test('working attachments project only paths and use the authorized explicit Fil
       ['files.read', 'succeeded'],
       ['files.read', 'succeeded'],
       ['files.read', 'failed'],
+      ['files.read', 'succeeded'],
       ['files.read', 'failed'],
       ['files.read', 'failed'],
     ]);
@@ -741,10 +734,22 @@ test('working attachments project only paths and use the authorized explicit Fil
     expect(JSON.stringify(f.requests[2])).toContain('Hello PDF');
     expect(JSON.stringify(rows[2]!.result)).toContain('WORKING_VERSION');
     expect(rows[3]!.result).toMatchObject({ details: { code: 'pdf_options_require_pdf' } });
-    for (const denied of rows.slice(4))
-      expect(denied.result).toMatchObject({
-        details: { code: 'pdf_options_require_saved_attachment' },
-      });
+    expect(rows[4]!.result).toMatchObject({
+      modelImages: [{ mediaType: 'image/png', scope: { kind: 'execution', id: rows[4]!.id } }],
+    });
+    expect(
+      rows.slice(5).map((row) => ({
+        path: (row.input as Record<string, Json>).path,
+        dispatched: row.authorization?.dispatched,
+        reason: (row.result as { details?: { reason?: string } }).details?.reason,
+      })),
+    ).toEqual(
+      [unboundPath, relative(f.workspace, unboundPath)].map((path) => ({
+        path,
+        dispatched: false,
+        reason: 'input_file_scope_denied',
+      })),
+    );
     await f.submit('working-copy-edit');
     expect((await f.done('working-copy-edit')).run?.status).toBe('completed');
     const editRows = (await f.store.listExecutions('s')).filter(
@@ -754,7 +759,6 @@ test('working attachments project only paths and use the authorized explicit Fil
       ['files.read', 'succeeded'],
       ['files.edit', 'succeeded'],
     ]);
-    expect(textBaseRef).toBeString();
     expect(readFileSync(workingPaths[1]!, 'utf8')).toBe('EDITED_VERSION\n');
     expect(readFileSync(fileURLToPath(files[1]!.uri), 'utf8')).toBe('ORIGINAL_VERSION\n');
     await f.runtime.createSession({
@@ -782,7 +786,7 @@ test('working attachments project only paths and use the authorized explicit Fil
     expect(foreign).toHaveLength(1);
     expect(foreign[0]).toMatchObject({
       status: 'failed',
-      result: { details: { code: 'pdf_options_require_saved_attachment' } },
+      result: { details: { reason: 'input_file_scope_denied' } },
     });
     rmSync(paths[0]!);
     expect(readFileSync(fileURLToPath(files[0]!.uri))).toEqual(Buffer.from(pdf));
@@ -1032,15 +1036,12 @@ test('ordinary workspace write and edit keep snapshots without becoming turn att
           (e) => e.definitionId === 'files.read',
         )!;
         expect(read.status).toBe('succeeded');
-        const value = JSON.parse(String((read.result as Record<string, Json>).content));
         return {
           name: 'edit_file',
           input: {
             path: 'working.md',
-            base_ref: value.base_ref,
-            old_text: 'Draft',
-            new_text: 'Final',
-            expected_matches: 1,
+            old_string: 'Draft',
+            new_string: 'Final',
           },
         };
       }
@@ -1115,7 +1116,7 @@ test('ordinary file tools edit the exact Plan before approval through its owner;
         expect(value.content).toBe('External changed 中文 plan');
         return {
           name: 'write_file',
-          input: { path, base_ref: value.base_ref, content: 'Revised 中文 plan' },
+          input: { path, content: 'Revised 中文 plan' },
         };
       }
       if (step === 4) {
@@ -1628,15 +1629,12 @@ test('ordinary Plan file edit after approval creates v2 and cannot spend the ori
           (e) => e.definitionId === 'files.read',
         )!;
         expect(read.status).toBe('succeeded');
-        const value = JSON.parse(String((read.result as Record<string, Json>).content));
         return {
           name: 'edit_file',
           input: {
             path: planPath,
-            base_ref: value.base_ref,
-            old_text: 'Original approved',
-            new_text: 'Changed unapproved',
-            expected_matches: 1,
+            old_string: 'Original approved',
+            new_string: 'Changed unapproved',
           },
         };
       }
@@ -1983,7 +1981,7 @@ test.each([
             ? { path: outputPath }
             : name === 'write_file'
               ? { path: outputPath, content: 'not a delivery' }
-              : { path: outputPath, base_ref: 'untrusted-reference', old_text: 'a', new_text: 'b' },
+              : { path: outputPath, old_string: 'a', new_string: 'b' },
       };
     },
     { mode: 'full' },

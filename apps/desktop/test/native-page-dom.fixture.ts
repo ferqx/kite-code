@@ -38,7 +38,7 @@ export function promptValue(element: Element | null | undefined) {
 }
 
 /** Browser APIs used by the retained desktop layout; these do not simulate Native facts or writes. */
-export function prepareDesktopDom(dom: JSDOM) {
+export function prepareDesktopDom(dom: JSDOM, { browserPanelIntersects = false } = {}) {
   const stylePrototype = Object.getPrototypeOf(dom.window.document.createElement('div').style);
   const clip = Object.getOwnPropertyDescriptor(stylePrototype, 'clip')!;
   // Radix uses a zero clipping rectangle for visually hidden controls. Keep that
@@ -87,7 +87,20 @@ export function prepareDesktopDom(dom: JSDOM) {
     removeEventListener: dom.window.removeEventListener.bind(dom.window),
     dispatchEvent: dom.window.dispatchEvent.bind(dom.window),
     IntersectionObserver: class {
-      observe() {}
+      private readonly callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        if (!browserPanelIntersects || !target.matches('.agent-browser-panel')) return;
+        queueMicrotask(() => {
+          if (target.isConnected)
+            this.callback(
+              [{ target, isIntersecting: true } as IntersectionObserverEntry],
+              this as unknown as IntersectionObserver,
+            );
+        });
+      }
       unobserve() {}
       disconnect() {}
     },

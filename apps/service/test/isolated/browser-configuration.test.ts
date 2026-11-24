@@ -120,6 +120,7 @@ test('host factory and repeated Query are inert; missing assets produce a finite
     expect(browser.runtimeAssets).toEqual([...new Set(expectedAssets)]);
     const reason = nativeBrowserUnavailableReason();
     expect(browser.available).toBe(reason === undefined);
+    expect(browser.structuredAvailable).toBe(browser.available && process.platform === 'darwin');
     expect(browser.snapshot.unavailableReason).toBe(reason);
     expect(
       browser.capabilities
@@ -127,7 +128,13 @@ test('host factory and repeated Query are inert; missing assets produce a finite
           (capability) =>
             !['browser.execute', 'browser.code_session'].includes(capability.definitionId),
         )
-        .every((capability) => capability.hardAllowed === (reason === undefined)),
+        .every(
+          (capability) =>
+            capability.hardAllowed ===
+            (capability.definitionId.startsWith('browser.structured.')
+              ? browser.structuredAvailable
+              : browser.available),
+        ),
     ).toBe(true);
     expect(
       browser.capabilities.find((capability) => capability.definitionId === 'browser.execute')
@@ -551,3 +558,29 @@ test('missing Browser assets are absent from defaults while explicit selection f
     await f.close();
   }
 }, 20000);
+
+for (const [browserEnabled, reason] of [
+  [false, 'browser_disabled_by_host'],
+  ['missing', 'browser_runtime_unavailable'],
+] as const)
+  test(`a structured browser call respects the page host ceiling: ${reason}`, async () => {
+    const f = await fixture(browserEnabled);
+    try {
+      f.configuration.tools = [{ id: 'browser.structured.navigate', enabled: true }];
+      f.save();
+      f.emit({ name: 'browser_navigate', input: { url: 'https://example.test/' } });
+      expect((await f.run()).run?.status).toBe('completed');
+      const executions = await f.store.listExecutions('s', 100);
+      const tool = executions.find(
+        (execution) => execution.definitionId === 'browser.structured.navigate',
+      );
+      expect(tool?.status).toBe('failed');
+      expect(JSON.stringify(tool?.result)).toContain(reason);
+      expect(executions.some((execution) => execution.definitionId === 'browser.session')).toBe(
+        false,
+      );
+      expect(existsSync(f.browser.runtimeDirectory!)).toBe(false);
+    } finally {
+      await f.close();
+    }
+  }, 20000);

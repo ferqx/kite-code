@@ -4,6 +4,8 @@
 
 ## 构建与操作
 
+POSIX Terminal 构建为锁定 `agent-browser` 包中当前宿主的原生程序设置 `0755`，校验 inventory 时使用制品中的实际权限。源依赖及其他包文件按各自的权限规则处理。
+
 Git Worktree 的独立 `tools/git-worktree/worker.js`、无 preload 配置、SHA256 manifest 与空 hooks 目录由 Agent 的同一次 build 发布，Terminal 在 build 时严格校验并纳入原文件库存。空目录由准确 worker/config/manifest 三文件闭包派生；现有 manifest v1不变，搬迁、Windows Native 私有复制和 Native/Terminal 解包只重建这个固定空目录，缺失、内容或链接都不能取得能力。Windows原生 pin 同时固定这份派生目录，保持原祖先和文件验证。
 
 2026-11-06，`8e350f99` 加本轮差量、macOS arm64／Bun1.4.4／Git2.54.0，[完整 Terminal bundle](../../../tests/isolated/unified-agent/terminal-bundle.test.ts)1项1923断言通过：全新构建、归档、源码输出删除、重定位和临时安装后，用安装Bun/公开包和真实SQLite执行 `git_worktree` list/create/remove→5个原Shell Job，完整帧返回真实仓库、创建内容和删除事实，并确认新分支保留，再继续原CLI/daemon/维护旅程。隔离子进程显式使用回环测试代理旁路，避免本机OS SOCKS配置在到达受控Provider前拒绝；生产代理规则未改。macOS Git实际程序在首次Host装配封存，避免Apple调度桩的沙箱外xcrun缓存写入；未扩大权限或放宽异常stderr门禁。Linux/Windows实机制品、完整三平台资格仍未取得。

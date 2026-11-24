@@ -499,6 +499,47 @@ test('the same Root toolbar owns empty, navigation loading, drawable content and
   }
 });
 
+test('a managed first navigation owns the visible pane before its URL commits', async () => {
+  const f = await fixture({ ...loaded(), url: '', display: undefined, canGoBack: false });
+  try {
+    await f.show();
+    expect(f.layouts).toHaveLength(0);
+    expect(document.body.textContent).toContain('Start tools');
+    await f.update({ loading: true, pageToken: 'blank-tab-loading' });
+    expect(f.layouts).toHaveLength(0);
+    expect(document.body.textContent).toContain('Start tools');
+
+    await f.update({
+      loading: true,
+      pageToken: 'first-managed-navigation',
+      control: {
+        phase: 'agent',
+        sessionId: scope.sessionId,
+        incarnation: 'page-incarnation',
+        browserId: 'browser',
+        navigation: 2,
+      },
+    });
+    expect(f.layouts.at(-1)).toMatchObject({
+      id: 'page',
+      pageToken: 'first-managed-navigation',
+      bounds: { x: 600, width: 400 },
+    });
+    expect(document.querySelector('[aria-label="网页加载中"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain('Start tools');
+
+    await f.show({ visible: false });
+    expect(f.withdrawals.at(-1)).toMatchObject({ id: 'page', bounds: null });
+    await f.show({ visible: true });
+    expect(f.layouts.at(-1)?.pageToken).toBe('first-managed-navigation');
+    await f.update({ url: 'https://example.test/first', display: 'ready', loading: false });
+    expect(document.querySelector('.native-browser-start')).toBeNull();
+    expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
 for (const failure of ['layout', 'request'] as const)
   test(`refresh ${failure} scope retirement stays quiet and the current page can recover`, async () => {
     const f = await fixture();

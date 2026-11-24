@@ -1247,6 +1247,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     const recordKey = `connection/${server.id}/${request.key}`;
     const prior = await context.records.get(recordKey);
     assertTicket(ticket);
+    const priorDigest = object(prior?.value).configDigest;
     if (
       prior &&
       (prior.originStoreId !== own.originStoreId ||
@@ -1255,9 +1256,16 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         prior.contentType !== contentType ||
         prior.contentVersion !== 1 ||
         object(prior.value).serverId !== server.id ||
-        object(prior.value).configDigest !== server.configDigest)
+        typeof priorDigest !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(priorDigest))
     )
       return { outcome: 'failed', content: 'operation_unverifiable' };
+    if (prior && priorDigest !== server.configDigest)
+      return {
+        outcome: 'failed',
+        content: 'mcp_source_stale',
+        details: { adapterAttempted: false },
+      };
     let entry = live.get(scopeKey(own.originStoreId, context.sessionId, server.id));
     if (prior) {
       const original = (prior.value as { operationRef?: OperationRef }).operationRef;

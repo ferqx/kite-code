@@ -98,7 +98,8 @@ function toolTitle(message: Message): string {
     return label;
   if (message.toolName === 'edit_file' && message.status === 'completed' && message.changeConfirmed)
     return '已编辑';
-  if (message.toolName === 'browser_execute') return '已完成浏览器操作';
+  if (message.toolName === 'browser_execute' && message.status === 'completed')
+    return '已完成浏览器操作';
   return /^(读取|写入|修改|查找|列出|加载|运行|查看|搜索|使用|请求|更新|编写|创建|继续|调用|询问)/.test(
     label,
   )

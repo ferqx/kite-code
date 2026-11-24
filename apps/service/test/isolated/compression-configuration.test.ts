@@ -17,12 +17,13 @@ import {
 } from '@kite-ai/service/configuration';
 import { startService } from '../../src';
 
-for (const { guardedReset, rejectedSummary } of [
+for (const { guardedReset, rejectedSummary, knownWindow } of [
   { guardedReset: false, rejectedSummary: false },
+  { guardedReset: false, rejectedSummary: false, knownWindow: true },
   { guardedReset: true, rejectedSummary: false },
   { guardedReset: false, rejectedSummary: true },
 ])
-  test(`default compatible SDK manual compression is recorded and source-bound; ${rejectedSummary ? 'trusted summary validation rejects publication without changing context' : guardedReset ? 'trusted window preflight permits safe reset' : 'unknown window preserves the active summary without a Provider call'}`, async () => {
+  test(`default compatible SDK manual compression is recorded and source-bound; ${rejectedSummary ? 'trusted summary validation rejects publication without changing context' : guardedReset ? 'trusted window preflight permits safe reset' : knownWindow ? 'the configured model budget permits safe reset' : 'unknown window preserves the active summary without a Provider call'}`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-compression-'))),
       workspace = join(root, 'workspace');
     mkdirSync(workspace);
@@ -61,6 +62,9 @@ for (const { guardedReset, rejectedSummary } of [
             provider: 'compatible',
             model: 'fixed',
             baseURL: `${provider.url.href}v1`,
+            ...(knownWindow
+              ? { modelCapabilities: { contextWindowTokens: 32768, maxOutputTokens: 2048 } }
+              : {}),
           },
         ],
         compression: { automatic: true, validateExpanded: true },
@@ -87,6 +91,14 @@ for (const { guardedReset, rejectedSummary } of [
           expect(
             input.messages.some((message) => message.content === 'Original actual answer'),
           ).toBe(true);
+          const bounded = createSummaryCompressor({
+            automatic: {
+              contextWindowTokens: 4096,
+              maxOutputTokens: 1024,
+              requestMaxOutputTokens: 3072,
+            },
+          });
+          expect(await bounded.validateExpanded?.(input)).toBe(false);
           return true;
         },
       }),
@@ -443,8 +455,8 @@ for (const { guardedReset, rejectedSummary } of [
       )!;
       const resetContext = await client.getContext('s', { storeId: expectedStoreId });
       expect(requests).toHaveLength(4);
-      if (guardedReset) {
-        expect(preflights).toBe(1);
+      if (guardedReset || knownWindow) {
+        expect(preflights).toBe(guardedReset ? 1 : 0);
         expect(resetRun.reason).toBeNull();
         expect(resetRun.status).toBe('completed');
         expect(resetContext.compression).toBeUndefined();

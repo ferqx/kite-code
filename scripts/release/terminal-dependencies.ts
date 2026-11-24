@@ -383,7 +383,13 @@ export function copyTerminalDependencies(input: {
         if (process.platform !== 'win32')
           mkdirSync(dirname(target), { recursive: true, mode: 0o755 });
         copyFileSync(canonical, target);
-        if (process.platform !== 'win32') chmodSync(target, stat.mode & 0o777);
+        if (process.platform !== 'win32')
+          chmodSync(
+            target,
+            browserBin && dirname(target) === browserBin && basename(target) === browserExecutable
+              ? 0o755
+              : stat.mode & 0o777,
+          );
       } else fail('asset_invalid');
     };
     copy(node.source, packageTarget, new Set());

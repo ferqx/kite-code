@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants, watch } from 'node:fs';
 import { copyFile, lstat, mkdir, mkdtemp, open, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -709,6 +709,9 @@ export class NativeWorkspaceChanges {
       await this.checkFilters(lease, root);
       await this.checkAttributes(lease, root);
       page.repository = true;
+      page.repositoryIdentity = createHash('sha256')
+        .update(JSON.stringify([lease.rootUri, lease.rootRevision, root, lease.identity]))
+        .digest('hex');
       page.truncated ||= status.truncated || records.length > 1000;
       await this.checkExecutionRoot(lease);
       this.rememberExecutionRoot(lease);

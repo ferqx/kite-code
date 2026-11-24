@@ -45,7 +45,7 @@ Worker 是纯 schema 缓存，不持有 Model/process 资源许可。一秒空�
 
 模型连接只填 `server_id`，返回 `connection_ref`；refresh、资源／提示词 list 复制该引用，read/get 分别复制 `resource_ref/prompt_ref`，get 的 arguments 默认空对象。来源目录用 cursor，搜索呈现唯一 callable 名与原输入 Schema；远端 Tool 的业务参数不改。引用核原成功回执、实际 owner、Store/Session、修订、原连接和准确 descriptor；动态加入的工具从其原 Model 持久 toolBindings 核归属，不要求它出现在 Run 最初目录，也不借当前目录恢复旧身份。
 
-宿主把模型连接意图保存到原 namespace；新的模型调用只观察仍存活的准确原连接，冷启动或未确认原结果不生成新 key 重连。用户明确重连产生的实际替代连接可被后续 connect 观察，不能将旧引用改绑到它。内部管理 Action 保当前显式 key 合同。来源准入从不透明引用提取的 hint 只用于收窄选择；原引用仍封存在输入，派发前核原回执与完整配置／代次，hint 不授予权限。
+宿主把模型连接意图保存到原 namespace；新的模型调用只观察仍存活的准确原连接，冷启动或未确认原结果不生成新 key 重连。原连接回执能核实时，配置摘要漂移返回 `mcp_source_stale`，保留旧连接及原引用。用户明确重连产生的实际替代连接可被后续 connect 观察，不能将旧引用改绑到它。模型收到 `mcp_historical_connection_unavailable` 时，工具失败呈现会引导用户在客户端 MCP 设置连接或重连，原结果码、连接意图和后续调用准入保持。内部管理 Action 保当前显式 key 合同。来源准入从不透明引用提取的 hint 只用于收窄选择；原引用仍封存在输入，派发前核原回执与完整配置／代次，hint 不授予权限。
 
 ## 当前 HTTP OAuth 与原申请
 

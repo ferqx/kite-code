@@ -1,4 +1,4 @@
-import type { Interaction, Message } from '@kite-ai/client';
+import { ClientError, type Interaction, type Message } from '@kite-ai/client';
 import {
   InteractionCard,
   isMcpSourceReview,
@@ -180,7 +180,7 @@ import {
   NativeWebSearchToolDetails,
 } from './native-web-search-evidence';
 import { NativeWindowFrame } from './native-window-frame';
-import { NativeWorkspaceChanges } from './native-workspace-changes';
+import { NativeWorkspaceChanges, type WorkspaceChangeSelection } from './native-workspace-changes';
 import {
   isNativeWorktreeExitCommand,
   resolveNativeWorktreeExit,
@@ -631,6 +631,7 @@ function NativeDesktopContent({
   >();
   const [activeChildTab, setActiveChildTab] = useState<SessionChildTarget & { parent: string }>();
   const childReadings = useRef(new ReadingStateCache());
+  const workspaceChangeSelection = useRef<WorkspaceChangeSelection | undefined>(undefined);
   const trajectoryReadings = useRef(new NativeDisplayCache<TrajectoryViewState>());
   useEffect(() => {
     if (globalThis.indexedDB) void cleanupNativeTrajectoryCaches().catch(() => {});
@@ -700,6 +701,7 @@ function NativeDesktopContent({
     viewIntent = useRef(0),
     pageIntent = useRef(0),
     firstOpenPage = useRef<number | undefined>(undefined),
+    scheduledOpenPage = useRef<{ page: number; nonce: number } | undefined>(undefined),
     draftRevision = useRef(0),
     writing = useRef(false);
   const errorPresentationScope = JSON.stringify([
@@ -1346,6 +1348,7 @@ function NativeDesktopContent({
     const nonce = ++viewIntent.current,
       current = generation.current,
       epoch = readLifecycle.current.epoch;
+    if (keepTaskPage) scheduledOpenPage.current = { page: pageIntent.current, nonce };
     selected.current = sessionId;
     history.current?.close();
     // Revoke actions now; any retained target display remains presentation only.
@@ -1361,10 +1364,14 @@ function NativeDesktopContent({
     // save before Main changes its selected authority. Never write it into the target.
     await savedDraft.catch(() => {});
     if (!isCurrentRead(current, epoch, nonce)) return;
-    await readSelection(sessionId, current, nonce, epoch, {
-      freshPresentation,
-      admitted,
-    });
+    try {
+      await readSelection(sessionId, current, nonce, epoch, { freshPresentation, admitted });
+    } catch (error) {
+      // The existing read recovery can confirm this same activation. Keep the
+      // schedule page visible while the selected conversation is being verified.
+      const code = error instanceof ClientError ? error.code : (error as Error)?.message;
+      if (!keepTaskPage || code !== 'native_selection_changed') throw error;
+    }
   }
   async function exitWorktree() {
     if (
@@ -1668,6 +1675,15 @@ function NativeDesktopContent({
         setFailedReads((previous) =>
           previous.selection ? { ...previous, selection: undefined } : previous,
         );
+        if (
+          scheduledOpenPage.current?.page === pageIntent.current &&
+          scheduledOpenPage.current.nonce === nonce
+        ) {
+          scheduledOpenPage.current = undefined;
+          pageIntent.current++;
+          setScheduledTasksView(false);
+          setPreparing(false);
+        }
         // A recovered first selection completes the same handoff as its initial
         // read. Keep this here so an automatic retry cannot leave preparing set.
         if (
@@ -2046,6 +2062,7 @@ function NativeDesktopContent({
     | {
         scope: string;
         cardId: string;
+        draftKey: string;
         executionId: string;
         request: Interaction['request'];
         content?: string;
@@ -2059,7 +2076,6 @@ function NativeDesktopContent({
           state.generation,
           selection.storeId,
           selection.session.id,
-          selection.viewSelection ?? selection.viewGeneration,
           state.historyEpoch ?? 0,
         ])
       : undefined;
@@ -5421,7 +5437,7 @@ function NativeDesktopContent({
         }
         planDocument={
           lastPlanDocument.current?.scope === planDocumentScope &&
-          lastPlanDocument.current?.cardId === interaction.id
+          lastPlanDocument.current?.draftKey === draftKey
             ? lastPlanDocument.current
             : undefined
         }
@@ -5430,12 +5446,13 @@ function NativeDesktopContent({
             ? (change) => {
                 const previous = lastPlanDocument.current;
                 lastPlanDocument.current = {
-                  ...(previous?.cardId === interaction.id && previous.scope === planDocumentScope
+                  ...(previous?.draftKey === draftKey && previous.scope === planDocumentScope
                     ? previous
                     : {}),
                   ...change,
                   scope: planDocumentScope,
                   cardId: interaction.id,
+                  draftKey,
                   executionId: interaction.executionId,
                   request: interaction.request,
                 };
@@ -6240,14 +6257,7 @@ function NativeDesktopContent({
     active: scheduledTasksView,
     revision: settingsRevision,
     workspaces: loadedWorkspaces,
-    onOpen: async (sessionId) => {
-      const original = pageIntent.current;
-      await select(sessionId, true, true);
-      if (pageIntent.current !== original) return;
-      pageIntent.current++;
-      setScheduledTasksView(false);
-      setPreparing(false);
-    },
+    onOpen: (sessionId) => select(sessionId, true, true),
   });
   const renderNativeAttachments: NonNullable<SessionPageProps['renderMessageAttachments']> = (
     model,
@@ -7212,6 +7222,7 @@ function NativeDesktopContent({
             bridge={bridge}
             generation={state?.generation ?? generation.current}
             selection={selection}
+            fileSelection={workspaceChangeSelection}
           />
         ) : undefined
       }

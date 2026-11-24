@@ -417,6 +417,8 @@ export function WebPage({
   const identityFailure = /(?:identity_mismatch|store_changed|connection_not_admitted)$/.test(
     update?.error ?? '',
   );
+  const connectionError =
+    update?.error === 'browser_read_unavailable' || update?.error === 'browser_session_unavailable';
   return (
     <div
       className="web-page"
@@ -636,6 +638,13 @@ export function WebPage({
               </div>
               {copyStatus && <p role="status">{copyStatus}</p>}
               {update.phase === 'loading' && <p role="status">Loading history</p>}
+              {connectionError && (
+                <p role="status">
+                  Cannot reach the local Kite service.
+                  {snapshot && ' Showing the last saved view.'} Try Refresh history. If Kite
+                  restarted at a new address, run <code>kite web</code> to open it.
+                </p>
+              )}
               {snapshot && (
                 <>
                   <section aria-label="Run status">

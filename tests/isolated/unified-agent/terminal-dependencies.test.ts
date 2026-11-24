@@ -15,6 +15,10 @@ import {
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
+import {
+  agentBrowserExecutableName,
+  agentBrowserVersion,
+} from '../../../packages/agent/src/tools/browser/assets';
 import { copyTerminalDependencies } from '../../../scripts/release/terminal-dependencies';
 
 function pkg(
@@ -189,6 +193,47 @@ test('finite installed graph preserves multiversion, peer contexts, aliases, cyc
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform === 'win32' || !agentBrowserExecutableName())(
+  'terminal makes only the selected POSIX agent-browser binary executable',
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-terminal-browser-deps-'));
+    try {
+      const repositoryRoot = join(root, 'source');
+      const destination = join(root, 'bundle/node_modules');
+      const manifest = {
+        name: '@kite-ai/fixture',
+        version: '1',
+        dependencies: { 'agent-browser': agentBrowserVersion },
+      };
+      const source = pkg(join(repositoryRoot, 'fixture'), manifest);
+      const target = pkg(join(destination, '@kite-ai/fixture'), manifest);
+      const browser = pkg(join(repositoryRoot, 'node_modules/agent-browser'), {
+        name: 'agent-browser',
+        version: agentBrowserVersion,
+      });
+      const filename = `bin/${agentBrowserExecutableName()}`;
+      mkdirSync(join(browser, 'bin'));
+      writeFileSync(join(browser, filename), 'native asset', { mode: 0o644 });
+      writeFileSync(join(browser, 'bin/helper.js'), 'unrelated', { mode: 0o644 });
+      const report = copyTerminalDependencies({
+        repositoryRoot,
+        destination,
+        workspacePackages: [{ name: manifest.name, source, destination: target }],
+      });
+      const staged = join(
+        destination,
+        report.packages.find((p) => p.name === 'agent-browser')!.destination,
+      );
+      expect(readFileSync(join(staged, filename), 'utf8')).toBe('native asset');
+      expect(lstatSync(join(staged, filename)).mode & 0o777).toBe(0o755);
+      expect(lstatSync(join(staged, 'bin/helper.js')).mode & 0o111).toBe(0);
+      expect(lstatSync(join(browser, filename)).mode & 0o111).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test('real locked terminal workspace graph copies actual native assets and resolves production npm outside the repository', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-terminal-real-deps-'));

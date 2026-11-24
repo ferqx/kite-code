@@ -188,7 +188,8 @@ function auxiliaryNodes(root: TrajectoryTreeNode): Set<string> {
     const browser =
       parent.display?.kind === 'browser' &&
       ((parent.definitionId === 'browser.open' && step.definitionId === 'browser.session') ||
-        (parent.definitionId === 'browser.execute' &&
+        ((parent.definitionId === 'browser.execute' ||
+          parent.definitionId?.startsWith('browser.structured.')) &&
           step.definitionId === 'browser.code_session'));
     if (worktree || browser) result.add(node.id);
   }

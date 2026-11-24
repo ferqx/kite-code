@@ -1409,7 +1409,13 @@ test('filters use AND, empty sets remain empty, excluded selection retains its e
   expect(h.state().filters!.types).not.toContain('model');
   expect(detail().textContent).toContain('EXACT retry-result-version');
   expect(h.opened).toHaveLength(reads);
+  await act(() => {
+    viewport.scrollTop = 0;
+    viewport.dispatchEvent(new dom.window.Event('scroll', { bubbles: true }));
+  });
+  expect(h.state().readingAnchor.scrollTop).toBe(83);
   await click('清除筛选');
+  expect(viewport.scrollTop).toBe(83);
   expect(node(thinkingId)).toBeDefined();
   expect(h.state().selectedNodeId).toBe(thinkingId);
   expect(h.state().selectedObservationId).toBe(selectedObservation);

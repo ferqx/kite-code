@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -17,6 +18,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { mcpStdioGuardianAsset } from '../../../packages/agent/src/mcp/stdio-port';
+import { agentBrowserExecutableAsset } from '../../../packages/agent/src/tools/browser/assets';
 import { buildDevelopmentService } from '../../../scripts/development/desktop-reload';
 
 const repository = realpathSync(join(import.meta.dir, '../../..'));
@@ -140,6 +142,15 @@ test('actual development Service builds the current browser executor worker besi
     const main = readFileSync(join(directory, 'main.js'), 'utf8');
     expect(main).toContain('./tools/browser/executor/worker.js');
     expect(main).not.toMatch(/from ["']@kite-ai\/agent\/browser\/executor["']/);
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      const manifest = join(directory, 'agent-browser/package.json');
+      const executable = agentBrowserExecutableAsset(manifest);
+      const source = agentBrowserExecutableAsset();
+      expect(main).toContain(manifest);
+      expect(sha(executable)).toBe(sha(source));
+      expect(lstatSync(executable).mode & 0o777).toBe(0o755);
+      expect(lstatSync(executable).ino).not.toBe(lstatSync(source).ino);
+    }
   } finally {
     rmSync(output, { recursive: true, force: true });
   }

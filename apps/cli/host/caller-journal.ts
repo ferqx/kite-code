@@ -254,16 +254,26 @@ export function openCallerJournal(input: {
     },
     record(intent, phase) {
       if (!phases.includes(phase)) throw unavailable();
-      finite(() =>
-        mutate((rows) => {
-          const old = rows.find((row) => row.intent.request.commandId === intent.request.commandId);
-          if (!old || callerCanonical(old.intent) !== callerCanonical(parseCallerIntent(intent)))
+      finite(() => {
+        const original = parseCallerIntent(intent);
+        const saved = (rows: RecoveryRecord[]) => {
+          const row = rows.find(
+            (item) => item.intent.request.commandId === original.request.commandId,
+          );
+          if (!row || callerCanonical(row.intent) !== callerCanonical(original))
             throw unavailable();
+          return row;
+        };
+        // Repeated checks of an already saved phase are reads. A sibling caller can
+        // publish its own intent without interrupting this caller's observation.
+        if (saved(read().records).phase === phase) return;
+        mutate((rows) => {
+          const old = saved(rows);
           if (old.phase === phase) return { result: undefined, changed: false };
           old.phase = phase;
           return { result: undefined, changed: true };
-        }),
-      );
+        });
+      });
     },
     clear(intent) {
       finite(() =>

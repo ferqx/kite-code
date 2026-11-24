@@ -110,6 +110,13 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     );
     expect(document.querySelector('.native-file-preview-error button')).toBeNull();
     await act(async () => root.render(null));
+    failure = 'pdf_font_invalid';
+    await show();
+    expect(document.querySelector('.native-file-preview-error p')?.textContent).toBe(
+      'PDF 字体无法读取，请使用嵌入可用字体的版本',
+    );
+    expect(document.querySelector('.native-file-preview-error button')).toBeNull();
+    await act(async () => root.render(null));
     failure = 'file_read_failed';
     await show(true);
     expect(document.querySelector('[aria-label="请求修改"]')).toBeNull();

@@ -47,6 +47,7 @@ export interface TrajectoryViewState {
   expandedNodeIds?: string[];
   detailScrollTop?: number;
   readingAnchor: { eventId: string | null; offset: number; scrollTop: number };
+  filteredReadingAnchor?: TrajectoryViewState['readingAnchor'];
 }
 export function initialTrajectoryViewState(
   descriptor: TrajectorySnapshot | null = null,

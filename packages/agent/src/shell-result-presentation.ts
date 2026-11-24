@@ -122,7 +122,7 @@ export function formatShellResult(input: {
   if (details.accepted === true && !observed) {
     lines.push(
       'The command was accepted for background execution. Completion has not been confirmed.',
-      'Observe this command with shell_wait or shell_read using its shell_id. Changing how you wait does not require another execution; do not rerun it to turn background work into foreground work.',
+      'Inspect the original recorded execution for its later status and retained output. Do not start another command to change how it is observed.',
     );
   } else if (observed) {
     const status = String(observed.status);
@@ -301,13 +301,8 @@ export function formatShellResult(input: {
   if (!preview) return;
   if (preview.text) {
     lines.push('', preview.text);
-    if (preview.limited || details.outputLimited === true) {
-      if (cursorLine)
-        lines.push(
-          'Use the same input cursor with a smaller page limit or a larger output budget to inspect this retained page.',
-        );
-      else lines.push('Use shell_read with the original shell_id to inspect the retained output.');
-    }
+    if (preview.limited || details.outputLimited === true)
+      lines.push('Inspect the original execution for its retained output.');
   }
   if (cursorLine) lines.push(cursorLine);
   if (execution.definitionId === 'shell.stop' && details.cancellation_execution_id === execution.id)
@@ -318,7 +313,7 @@ export function formatShellResult(input: {
     (typeof details.droppedBytes === 'string' && details.droppedBytes !== '0')
   )
     lines.push(
-      'This output is incomplete. Use shell_read with the original shell_id to read retained output; do not rerun the command.',
+      'This output is incomplete. Inspect the original execution for retained output; do not rerun the command.',
     );
   if (result.outcome === 'outcome_unknown' && observed?.status !== 'outcome_unknown')
     lines.push(failureOutcomeExplanation('outcome_unknown')!);

@@ -252,7 +252,10 @@ function TrajectoryOwner({
         selectedNodeId: latest.selectedNodeId,
         mode: player.state.mode,
         ...(windowAfter !== undefined && windowAfter !== state.pageAfterCursor
-          ? { readingAnchor: { eventId: null, offset: 0, scrollTop: 0 } }
+          ? {
+              readingAnchor: { eventId: null, offset: 0, scrollTop: 0 },
+              filteredReadingAnchor: undefined,
+            }
           : {}),
       });
       setFailure('');
@@ -500,7 +503,9 @@ function TrajectoryOwner({
             merged.requestTab !== current.requestTab ||
             merged.workbenchTab !== current.workbenchTab ||
             merged.detailOpen !== current.detailOpen);
-        const readingHistory = merged.readingAnchor.scrollTop !== current.readingAnchor.scrollTop;
+        const readingHistory =
+          merged.readingAnchor.scrollTop !== current.readingAnchor.scrollTop ||
+          merged.filteredReadingAnchor?.scrollTop !== current.filteredReadingAnchor?.scrollTop;
         if ((readingDetail || readingHistory) && controller.current?.state.mode === 'live')
           controller.current.setMode('history');
         save({ ...merged, mode: controller.current?.state.mode ?? merged.mode });

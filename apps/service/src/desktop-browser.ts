@@ -251,6 +251,7 @@ export function createDesktopBrowserTransport(
     pending: number;
     possibleEffects: number;
     optionalWebMcp: boolean;
+    strictElement: boolean;
     failure?: BrowserTransportError;
   };
   let nativeCommand: NativeCommand | undefined;
@@ -282,9 +283,15 @@ export function createDesktopBrowserTransport(
     operation: () => Promise<T>,
     reading = false,
     optionalWebMcp = false,
+    strictElement = false,
   ): Promise<T> {
     if (nativeCommand) throw new BrowserTransportError('browser_native_busy', false);
-    const current: NativeCommand = { pending: 0, possibleEffects: 0, optionalWebMcp };
+    const current: NativeCommand = {
+      pending: 0,
+      possibleEffects: 0,
+      optionalWebMcp,
+      strictElement,
+    };
     nativeCommand = current;
     let value: T | undefined,
       cause: unknown,
@@ -424,6 +431,15 @@ export function createDesktopBrowserTransport(
               signal.throwIfAborted();
               if (evidence?.failure)
                 throw new BrowserTransportError('browser_page_command_stopped', false);
+              // The pinned engine's role/name fallback queries the AX tree when
+              // an exact node detached between observation and dispatch.
+              if (evidence?.strictElement && request.method === 'Accessibility.getFullAXTree') {
+                evidence.failure = new DesktopBrowserRequestError(
+                  'browser_stale_element',
+                  'not_dispatched',
+                );
+                throw evidence.failure;
+              }
               const effect = !readCdp.has(request.method);
               if (evidence && effect) evidence.possibleEffects++;
               try {
@@ -755,6 +771,7 @@ export function createDesktopBrowserTransport(
           command.headless === true &&
           command.engine === 'chrome' &&
           command.webmcp === false,
+        typeof command.selector === 'string' && /^@e[1-9][0-9]*$/.test(command.selector),
       );
       if (command.action === 'launch' && (answer as any)?.success === true)
         await call({ op: 'confirm', leaseId: lease!.leaseId }, signal);

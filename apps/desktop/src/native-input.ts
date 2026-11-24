@@ -65,6 +65,12 @@ export function nativeInputErrorText(phase: 'failed' | 'unknown', reason?: strin
   if (reason === 'file_native_unavailable')
     return '本地文件处理组件不可用，消息未发送。请保留草稿和附件，待文件处理恢复后重试。';
   if (reason === 'native_request_too_large') return '消息或附件过大，请减少内容后重新发送。';
+  if (reason === 'input_image_invalid')
+    return '无法读取某张图片，消息未发送。请移除损坏或格式不符的图片，再重新发送。';
+  if (reason === 'git_workspace_dirty')
+    return '项目里有未提交的改动，消息未发送。请先处理这些改动，再切换分支。';
+  if (reason === 'git_active_work')
+    return '当前项目还有任务在运行，消息未发送。请等待任务结束后再切换分支。';
   if (reason === 'draft_changed_before_send')
     return '草稿在发送前已更新，消息没有发送。请确认当前内容后重新发送。';
   if (

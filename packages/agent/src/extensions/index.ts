@@ -366,6 +366,9 @@ export interface Operations {
     upperSeq?: string;
     limit?: number;
   }): Promise<import('../storage/agent-collaboration').StableAgentPage>;
+  readAgentTargets?(
+    options: { agentIds: string[] } | { anchor: string },
+  ): Promise<readonly { agentId: string; seq: string }[]>;
   waitAgentEvents?(options?: {
     afterSeq?: string;
     waitMs?: number | null;
@@ -447,6 +450,10 @@ export interface Operations {
 export interface ActionContext extends ReadContext {
   readonly executionId: string;
   readonly signal: AbortSignal;
+  /** Same-owner receipts actually present in the sealed request that selected this tool, newest first. */
+  readDecisionToolResults?(): Promise<readonly { execution: PublicExecution; content: string }[]>;
+  /** Trusted Skill source actually present in the same sealed request. */
+  hasDecisionSkillBody?(skillId: string, content: string): Promise<boolean>;
   readonly artifacts?: ArtifactWriter;
   readonly records: ReadContext['records'] & {
     write(value: ExtensionRecordWrite): Promise<ExtensionRecord>;

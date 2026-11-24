@@ -8,7 +8,29 @@ license: Complete terms in LICENSE.txt
 
 ## Overview
 
-This guide covers essential PDF processing operations using Python libraries and command-line tools. For advanced features, JavaScript libraries, and detailed examples, see REFERENCE.md. If you need to fill out a PDF form, read FORMS.md and follow its instructions.
+In Kite's managed Shell, use the bundled PDF helper for A4 generation, page operations and edits to existing text, checkbox and choice fields. It uses the bundled Bun and font assets. The Python examples below apply when their dependencies are already available.
+
+## Kite managed PDF workflow
+
+For a form, inspect the source fields, write an operation specification, and use a new output path. Reopen the saved field data using the same command before staging it. For other PDF operations, use the generation and staging commands.
+
+```sh
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf-fields --input source.pdf
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf --input spec.json --out filled.pdf
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf-fields --input filled.pdf
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" stage --input filled.pdf
+```
+
+```powershell
+& $env:KITE_DOCUMENTS_BUN --no-install $env:KITE_DOCUMENTS_HELPER pdf-fields --input source.pdf
+& $env:KITE_DOCUMENTS_BUN --no-install $env:KITE_DOCUMENTS_HELPER pdf --input spec.json --out filled.pdf
+& $env:KITE_DOCUMENTS_BUN --no-install $env:KITE_DOCUMENTS_HELPER pdf-fields --input filled.pdf
+& $env:KITE_DOCUMENTS_BUN --no-install $env:KITE_DOCUMENTS_HELPER stage --input filled.pdf
+```
+
+For fillable forms, read the managed workflow in [FORMS.md](FORMS.md). Use the exact field names and JSON booleans for checkboxes. A visual check mark alone cannot verify that the field is checked in the saved form. Keep page order for a form-fill edit. If the user requires both reordering and interactive field edits in the same deliverable, report the managed helper's limitation before substituting another deliverable.
+
+Verify the saved PDF before staging it. Use the returned `markdownTarget` verbatim in the file link. For operations outside the bundled helper, see [REFERENCE.md](REFERENCE.md).
 
 ## Quick Start
 

@@ -1791,6 +1791,102 @@ function runOwnerFixture(foreign = false) {
   };
 }
 
+test('explicit Native browser stop cancels the original Run with the verified user authority', async () => {
+  const owner = runOwnerFixture();
+  const fake = transport();
+  const cancellations: Parameters<import('../../../src/runtime').AgentRuntime['cancelRun']>[0][] =
+    [];
+  let input: Json = {};
+  let subjectId = 'other-user';
+  const controller = createBrowserController({
+    sharedPage: true,
+    createTransport: () => fake.native,
+    observationMode: async () => 'on-demand',
+    runtime: () => ({
+      ...owner.host,
+      getExecution: async (id) =>
+        id === 'stop-action'
+          ? {
+              ...(await owner.host.getExecution('job'))!,
+              id,
+              definitionId: 'builtin.browser/browser.close',
+              originCommandId: 'stop-command',
+            }
+          : owner.host.getExecution(id),
+      getCommand: async (id) =>
+        id === 'stop-command'
+          ? {
+              ...(await owner.host.getCommand(id))!,
+              kind: 'extension.invoke',
+              sessionId: 'session',
+              subjectId,
+              request: { actionId: 'browser.close', input },
+            }
+          : owner.host.getCommand(id),
+      async cancelRun(request) {
+        cancellations.push(request);
+        return (await owner.host.getCommand(request.commandId))!;
+      },
+    }),
+  });
+  const signal = new AbortController().signal;
+  const handle = await controller.job.start(
+    { browserId: 'browser', url: 'https://example.test/' },
+    { sessionId: 'session', executionId: 'job', signal },
+  );
+  cleanups.push(() => controller.job.cancel(handle));
+  await controller.command('session', controller.view('session')!, { action: 'snapshot' }, signal);
+  const { browserId, generation } = controller.view('session')!;
+  const target = { browserId, generation };
+  input = target;
+
+  expect((await controller.stopTask!('session', target, 'stop-action')).outcome).toBe('failed');
+  expect(cancellations).toEqual([]);
+  expect(fake.closes).toBe(0);
+  subjectId = 'user';
+  expect((await controller.stopTask!('session', target, 'stop-action')).outcome).toBe('succeeded');
+  expect(cancellations).toEqual([
+    {
+      expectedStoreId: 'store',
+      sessionId: 'session',
+      runId: 'run',
+      subjectId: 'user',
+      commandId: expect.any(String),
+    },
+  ]);
+  expect(fake.closes).toBe(1);
+});
+
+test('model browser close only releases its browser lease even with a Run owner', async () => {
+  const owner = runOwnerFixture();
+  const fake = transport();
+  let cancellationAttempted = false;
+  const controller = createBrowserController({
+    sharedPage: true,
+    createTransport: () => fake.native,
+    observationMode: async () => 'on-demand',
+    runtime: () => ({
+      ...owner.host,
+      async cancelRun() {
+        cancellationAttempted = true;
+        throw Error('model close must not cancel the Run');
+      },
+    }),
+  });
+  const signal = new AbortController().signal;
+  const handle = await controller.job.start(
+    { browserId: 'browser', url: 'https://example.test/' },
+    { sessionId: 'session', executionId: 'job', signal },
+  );
+  cleanups.push(() => controller.job.cancel(handle));
+  await controller.command('session', controller.view('session')!, { action: 'snapshot' }, signal);
+  expect((await controller.close('session', controller.view('session')!)).outcome).toBe(
+    'succeeded',
+  );
+  expect(cancellationAttempted).toBe(false);
+  expect(fake.closes).toBe(1);
+});
+
 for (const end of ['completed', 'cancelled', 'unverifiable'] as const)
   test(`the original Browser Job retains a human page while its Run waits and closes on ${end}`, async () => {
     const owner = runOwnerFixture(),

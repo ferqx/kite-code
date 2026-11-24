@@ -53,6 +53,18 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'skills.load': [['1'], '加载技能'],
   'skills.resource': [['1'], '读取技能资料'],
   'browser.execute': [['1'], '浏览器操作'],
+  'browser.structured.navigate': [['1'], '打开网页'],
+  'browser.structured.snapshot': [['1'], '读取网页'],
+  'browser.structured.click': [['1'], '点击网页元素'],
+  'browser.structured.type': [['1'], '填写网页字段'],
+  'browser.structured.fill_form': [['1'], '填写网页表单'],
+  'browser.structured.tabs': [['1'], '管理浏览器标签页'],
+  'browser.structured.screenshot': [['1'], '截取网页图像'],
+  'browser.structured.press': [['1'], '发送浏览器按键'],
+  'browser.structured.wait': [['1'], '等待网页状态'],
+  'browser.structured.dialog': [['1'], '处理网页对话框'],
+  'browser.structured.history': [['1'], '浏览网页历史'],
+  'browser.structured.pointer': [['1'], '操作网页图像'],
 };
 const exploration = new Set(['files.read']);
 const standalone = new Set(['task.spawn', 'planning.review']);
@@ -97,7 +109,10 @@ export function desktopToolPresentation(
             'skills.resource': 'read_skill_resource',
             'browser.execute': 'browser_execute',
           } as Record<string, string>
-        )[fact.definitionId] ?? fact.definitionId)
+        )[fact.definitionId] ??
+        (fact.definitionId.startsWith('browser.structured.')
+          ? 'browser_execute'
+          : fact.definitionId))
       : undefined,
     title: label ? label[1] : mcp ? (fact.label ?? 'MCP 工具') : fact.definitionId,
     ...(known && fact.definitionId.startsWith('shell.')

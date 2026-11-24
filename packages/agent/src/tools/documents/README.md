@@ -20,6 +20,7 @@ Excel 编辑后，先在工作副本上复核重要汇总格。内置 XLSX 技�
 
 ~~~sh
 "$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf --input spec.json --out report.pdf
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf-fields --input report.pdf
 "$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" stage --input report.pdf
 ~~~
 
@@ -27,7 +28,7 @@ Excel 编辑后，先在工作副本上复核重要汇总格。内置 XLSX 技�
 
 [稳定导出](document-export.ts)用打开的普通文件身份、固定字节上限、读前后 size/mtime/ctime 核验和目标父目录下私有临时子目录中的排他临时文件。fsync 后复查原路径身份，再在同一目标文件系统排他发布，已有同名目标保持原内容。失败或取消清理本次临时文件与目录。当前执行成功结束后的自动归档由 Shell 输出 owner 负责。
 
-[PDF adapter](pdf-command.ts)固定 pdf-lib 1.17.1 与 fontkit 1.1.0。create 使用 A4、固定字号、随包 Noto SansSC 的 wght=400 实例子集、真实字宽换行和显式页面，超限返回 layout_overflow。merge 和 edit 支持页面选择（拆分、删除、重排）、旋转、文字/PNG/JPEG 叠加及 text/checkbox/dropdown/option-list 表单；页面重组与表单填写不能同时指定。不支持任意正文原位编辑、自动重排、HTML 转 PDF 或复杂跨页表格。
+[PDF adapter](pdf-command.ts)固定 pdf-lib 1.17.1 与 fontkit 1.1.0。create 使用 A4、固定字号、随包 Noto SansSC 的 wght=400 实例子集、真实字宽换行和显式页面，超限返回 layout_overflow。merge 和 edit 支持页面选择（拆分、删除、重排）、旋转、文字/PNG/JPEG 叠加及 text/checkbox/dropdown/option-list 表单；页面重组与表单填写不能同时指定。内置 PDF 技能优先提供随包助手的填表与归档命令，复选框使用 JSON 布尔值；可选的 Python 表单检查依赖以当前 Shell 已有能力为准。不支持任意正文原位编辑、自动重排、HTML 转 PDF 或复杂跨页表格。
 
 固定变量字体不能直接按默认实例子集化：fontkit 1.1.0 会把原字体的奇数字形偏移截为短 loca，文字虽可提取，页图却缺字。显式实例化重编码可避开此偏移问题，但 encoder 仍会漏写末尾连续 flag 的计数，导致 B/D/P/X/x 等空白。[随包补丁](../../../../../patches/@pdf-lib%2Ffontkit@1.1.0.patch)仅给 ESM/UMD 两个入口补齐该计数，沿根 patchedDependencies 和 lockfile 可复现安装，保留原 MIT 许可；不修改字体 hash、不引入运行时或构建依赖。[编码回归](../../../test/isolated/tools/documents/fontkit-subset.test.ts)独立读取合成 glyf，核无重复、255边界及跨轮廓的 flags、点数和坐标。官方 fontkit 2.0.4 的同一 encoder 仍缺该收尾，换版本并不能单独修复；同版本静态 OTF 的 CFF 子集也会产生无效字体警告。全字体嵌入对照约 11.4MB，不作为交付方案，修后两页中文长文仍是小体积子集。
 

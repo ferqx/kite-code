@@ -29,8 +29,13 @@ const fileIds = ['files.read', 'files.write', 'files.edit'];
 const optionalFileIds = ['files.view_images', 'files.reinspect_images'];
 const skillIds = ['skills.load', 'skills.resource'];
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-function source(id: string, kind: string, content: string): ContextSource {
-  return { id, kind, scope: 'run-knowledge', digest: digest(content), content };
+function source(
+  id: string,
+  kind: string,
+  content: string,
+  revisionContent = content,
+): ContextSource {
+  return { id, kind, scope: 'run-knowledge', digest: digest(revisionContent), content };
 }
 function object(input: Json): JsonObject {
   if (!input || typeof input !== 'object' || Array.isArray(input))
@@ -252,6 +257,7 @@ export async function createWorkspaceAssembly(options: {
         name: id === 'skills.load' ? 'load_skill' : 'read_skill_resource',
         snakeCase: true,
         parameterNames: { id: 'skill_id' },
+        omitParameters: ['version'],
       },
       description:
         id === 'skills.load'
@@ -281,14 +287,35 @@ export async function createWorkspaceAssembly(options: {
             return { outcome: 'cancelled', content: 'cancelled_after_skill_read' };
           if (id === 'skills.load') {
             loaded.add(value.id);
+            let alreadyLoaded = await context.hasDecisionSkillBody?.(value.id, selected.body);
+            const previous = alreadyLoaded ? [] : await context.readDecisionToolResults?.();
+            alreadyLoaded ||= previous?.some(({ execution, content }) => {
+              if (
+                execution.definitionId !== 'skills.load' ||
+                execution.status !== 'succeeded' ||
+                content !== selected.body
+              )
+                return false;
+              const details = (
+                execution.result as { details?: { skillId?: string; version?: string } }
+              )?.details;
+              return (
+                details !== undefined &&
+                details.skillId === value.id &&
+                details.version === selected.version
+              );
+            });
             return {
               outcome: 'succeeded',
-              content: selected.body,
+              content: alreadyLoaded
+                ? 'already_loaded: The complete Skill instructions are already in this request.'
+                : selected.body,
               details: {
                 skillId: value.id,
                 version: selected.version,
                 sourceId: `skill.body:${value.id}`,
                 resources: selected.resources as unknown as Json,
+                ...(alreadyLoaded ? { alreadyLoaded: true } : {}),
               },
             };
           }
@@ -367,8 +394,18 @@ export async function createWorkspaceAssembly(options: {
         description,
         requiredCapabilities,
       }));
-      if (summaries.length)
-        result.push(source('skills.catalogue', 'skill_catalogue', JSON.stringify(summaries)));
+      if (summaries.length) {
+        const visible = summaries.map(({ version: _version, ...summary }) => summary);
+        // Detect changes to knowledge even when all visible catalogue fields stay the same.
+        result.push(
+          source(
+            'skills.catalogue',
+            'skill_catalogue',
+            JSON.stringify(visible),
+            JSON.stringify(summaries),
+          ),
+        );
+      }
       for (const id of [...loaded].sort()) {
         const selected = await checkpointBody(id);
         result.push(source(`skill.body:${id}`, 'skill', selected.body));

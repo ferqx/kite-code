@@ -1,6 +1,6 @@
 # Ordinary Shell Tools
 
-模型侧提供 `shell_execute/shell_read/shell_wait/shell_stop`。启动统一为 `shell_execute({command, description?, background?, execution_timeout_ms?, workdir?, filesystem?, network?})`：默认前台等待原 Job 终态，`background:true` 返回同一 Job 的真实 `shell_id`、引用与受理状态，受理不证明启动成功或完成。可选 `description` 随原调用保留，桌面会话工具行显示原命令摘要。真实命令、审批、权限与完整原调用继续保留。
+模型侧使用 `exec_command(cmd,workdir?,yield_time_ms?,max_output_tokens?,description?,filesystem?,network?)`、`poll_command(session_id,yield_time_ms?,max_output_tokens?)` 和 `terminate_session(session_id)`。每次启动创建原受管 Job，返回会话内整数 ID、当前状态及已留存输出。启动和续读默认等待 1000ms，允许 0 至 30000ms。原受管命令为非交互，stdin 由宿主关闭。可选 `description` 随原调用保留，桌面会话工具行显示原命令摘要。
 
 新模型不填写 `key` 或 `cancellation`。内部 key 从已持久化的 Tool execution ID 无损派生为 `sh_` 短句柄，当前 UUID 对应26字符，不建别名表或旧摘要读取分支；同一逻辑 Tool 重入仍走原 `operations.ensure`，新 Tool 即使命令相同也有独立 Job。返回的 `shell_id` 用于原操作的读取、等待和停止；`execution_id` 是原启动 Tool 的执行记录 ID，用于查询执行证据或引用计划进度，后台受理不因此证明执行成功。模型要等待已受理的后台命令时沿原 `shell_id` 调用 `shell_wait/read`；即使首次选择后台不符合任务要求，也不能为了改成前台再执行原命令。前台、后台和内部 `shell.launch` 一致提供两种身份；后续 read/wait/stop 的可信模型反馈仍显示原启动 Tool 的 `execution_id`，不把查询 Tool 或内部 Job 身份冒充原调用。模型呈现先核原 owner、引用和身份，不改写 stdout／stderr。结果未知时先核原执行，不能通过新调用找回结果。普通模型前后台均使用 attached 取消关系，原父 Command 取消传播保持。旧 `shell.launch` 内部注册、显式 key、nested permissions、timeoutMs 和 detached 契约保留，新模型目录隐藏这些旧参数；历史模型参数的投影使用原封存 descriptor，不按今日目录重写。恢复仍核原配置与执行来源，不为兼容重新派发未知效果。
 
@@ -30,7 +30,7 @@ Windows 工具说明要求在同一个 Shell 中解析路径并执行删除或�
 
 `filesystem` 和 `network` 是独立的顶层申请，省略分别为 `workspace_write`、`none`；只填一个不会开放另一个。`network:internet` 包括 localhost、127.0.0.1、::1、局域网和互联网；风险通过不为 `network:none` 申请增加联网能力。`filesystem:full_access` 申请外部写入，不切换 Full 审批模式，也不自动扩大实际执行范围。默认普通宿主不再额外遮挡 Profile、配置、认证、controlBase 或整目录运行资产；自定义显式保护及 confined 宿主仍沿其原约束。原权限模块统一解析新申请与旧 Job 输入，执行器仍只使用最终接纳的授权证明。description 不进入风险模型输入、命令语义指纹或 Job input；原调用参数和完整性绑定仍保真。
 
-前台期限省略时不设置执行截止时限。显式 `execution_timeout_ms` 从首次观察原 Job 进入 `dispatching/running` 起计算，审批和资源排队的 `planned` 等待不消耗执行预算；主／子 Agent 使用同一前台完成路径。观察派发使用短段等待，会有轮询与宿主调度延迟，不承诺从原生进程实际启动瞬间精确计时或毫秒级硬实时保证。时钟启动后不因后续等待或状态观察而重置；期限到达仍只取消同一原 Job，并继续等待其真实停止证据。未派发就终态拒绝或取消的 Job 直接保留原结果，不误标执行超时。用户取消仍在等待期间生效，不因尚未派发而失去响应。[前台回归](../../test/isolated/tools/shell/foreground.test.ts)使用真实 Runtime／SQLite／POSIX Shell，核人工等待超过执行预算后批准仍只执行一次，以及派发后超预算仍取消并确认原进程组停止；该 POSIX 证据不代替其他平台或完整原生进程树资格。
+内部调用的显式执行期限从原 Job 进入派发或运行后计算。模型入口的 `yield_time_ms` 只控制本次观察时长，时间到后原 Job 继续。用户取消、后台清理和实际停止证明沿原执行路径。
 
 原装 Windows Git Bash 的工具说明明确指出它没有文件或网络沙箱；若任务必须由系统强制窄范围，不应选择它。非完全模式不能把旧 detached 调用转为原装用户进程；正常后台运行仍跟随父操作。其他支持范围请求的宿主在工具说明开头和参数中要求 Agent 先选范围。当前技能所需的执行、验证和交付步骤在任务允许时显式申请 `filesystem:full_access`，遵守用户指定的较窄范围。普通工作区命令使用 `workspace_write`。Windows 本地辅助进程的启动和双向管道可能需要完整文件范围，即使源文件在工作区内。本地文件和管道操作使用 `network:none`。Windows 工作区命令失败且原 Job 确认已清理时，模型反馈标明原实际范围，提示先核实受限原因和落盘效果再申请新调用。执行范围由本次授权、当前模式和硬上限决定。
 
@@ -44,9 +44,9 @@ Windows 工具说明要求在同一个 Shell 中解析路径并执行删除或�
 
 默认宿主装配由 Service 显式选择 macOS host Shell：真实最终权限、固定 Seatbelt 与独占 launchd coalition 覆盖允许 fork／setsid／orphan 的本次子树。原 Job 终态还须完成准确原根 reap、注册清理和 broker 实际 exit/close；完整当前边界及有限历史 evidence 归 [Jobs owner](../jobs/README.md#默认-macos-宿主-shell)。普通 POSIX 工厂的 groupStopped 继续只证明原组，固定 confined 工厂继续 deny-fork。Linux／Windows 当前运行资格按重构计划延后，不从 macOS 结果推定。[Shell 工具测试](../../test/isolated/tools/shell/README.md)分别证明工厂语义与真实 Runtime/SQLite 的引用失败；实际 SDK／guardian 装配证据归 Service 的 `shell-configuration.test.ts`。
 
-本地 `shell/<shell_id>` 记录明确不存在，或记录类型／版本不匹配时，`shell.read/wait/stop` 返回 `failed/shell_reference_not_found`，提示使用原启动回执中的真实 ID。该预查没有启动或取消 Job，普通 Loop 可将失败和同批其他真实结果交给下一次模型纠正。它不重试原命令、不改写目标 Job，也不从反馈字段取得权限。记录读取本身失败、取得原引用后无法核实执行、输出读取或取消异常仍按原未知／失败边界处理，不因错误名称相似而降级。
+模型会话 ID 映射到唯一原 Job。找不到当前会话记录时返回可纠正的 `shell_reference_not_found`。续读从模型输入中已有的最近同 Job 输出位置继续，按输出上限分页并明确 `has_more` 与 `terminal`。保留区段丢失用原输出间隔提示。记录无法核实或停止效果未知时保留相应状态。
 
-每次新执行由运行时从原 Tool 身份派生新内部 key，恢复旧输出使用返回的原 `shell_id` 读取；旧可信调用的显式 key 合同保持。`operations.ensure` 确认该 key 已属于其他请求、并在建立新 Command／Job 前返回 `operation_conflict` 时，前台／后台入口均返回准确 `failed`，说明本次没有启动新 Job，并提示先读取原操作。只在这一步捕获这一已知冲突；取得引用后的存储、等待与监督异常，以及实际效果未知，仍按原边界处理。[引用回归](../../test/isolated/tools/shell/reference-runtime.test.ts)核同批正常工具继续、原 Job 不重放、新授权操作可用新 key 执行，以及真实未知不降级。
+每次新执行由原 Tool 身份绑定内部 key，并用会话记录登记整数 ID。停止意图由宿主派生、提交给原 Job，并返回观测到的状态。未达终态时继续轮询同一会话。旧记录在历史中按其原标识查询。
 
 `git_worktree` 由同一个 `builtin.shell` Extension 的 `git.worktree@1` 提供，只有 `list/create/remove`；选中它也装配内部 `shell.command@1`，不会连带开放模型 Shell。实际算法、冻结意图、原 ref 恢复和删除保护见 [Worktree owner](git-worktree/README.md)。普通 Shell 的参数、版本、前后台和取消契约保持。
 
