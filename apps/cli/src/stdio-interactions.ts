@@ -48,6 +48,7 @@ function supportsQuestion(schema: unknown, depth = 0): schema is Record<string, 
           'maximum',
           'minItems',
           'maxItems',
+          'uniqueItems',
         ].includes(key),
     )
   )
@@ -112,6 +113,17 @@ function supportsQuestion(schema: unknown, depth = 0): schema is Record<string, 
     return false;
   if (schema.type === 'object' && schema.properties === undefined) return false;
   if (schema.type === 'array' && schema.items === undefined) return false;
+  if (
+    schema.uniqueItems !== undefined &&
+    (schema.uniqueItems !== true ||
+      schema.type !== 'array' ||
+      typeof schema.maxItems !== 'number' ||
+      schema.maxItems < 1 ||
+      schema.maxItems > 32 ||
+      !record(schema.items) ||
+      schema.items.type !== 'string')
+  )
+    return false;
   return (
     schema.type !== undefined ||
     Object.hasOwn(schema, 'const') ||
@@ -177,6 +189,7 @@ function matchesQuestion(schema: Record<string, unknown>, value: unknown, depth 
   if (schema.type === 'array')
     return (
       Array.isArray(value) &&
+      (schema.uniqueItems !== true || new Set(value).size === value.length) &&
       value.every((item) =>
         matchesQuestion(schema.items as Record<string, unknown>, item, depth + 1),
       ) &&

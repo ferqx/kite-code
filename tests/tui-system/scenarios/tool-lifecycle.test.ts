@@ -74,6 +74,7 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
                         label: 'Red',
                         description: 'Choose a warm primary color.',
                       },
+                      { label: 'Green', description: 'Choose a natural color.' },
                     ],
                   },
                 ],

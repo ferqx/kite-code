@@ -424,6 +424,7 @@ async function askAfterFailure(f: Fixture, cause: string, question: string): Pro
               description: '读取当前原件并重新取得准确批准。',
             },
             { label: '停止任务', description: '保留当前文件和失败证据，停止本次执行。' },
+            { label: '仅查看证据', description: '只读核对当前文件和失败原因。' },
           ],
         },
       ],

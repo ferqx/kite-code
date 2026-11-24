@@ -13,7 +13,7 @@ import {
   setPromptText,
 } from './native-page-dom.fixture';
 
-test('Native page keeps original question drafts across sessions, missing pages and read failure; only the exact accepted answer clears its draft', async () => {
+test('Native keeps question drafts and hides a submitted card while the original receipt resolves in the background', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -73,6 +73,9 @@ test('Native page keeps original question drafts across sessions, missing pages 
     posts = 0;
   let watcher: ((event: NativeEvent) => void) | undefined;
   let submissions: NativeState['interactionSubmissions'] = [];
+  const lookupIds: string[] = [];
+  const { promise: holdAnswer, resolve: releaseAnswer } = Promise.withResolvers<void>();
+  const { promise: lookedUp, resolve: recordLookup } = Promise.withResolvers<void>();
   const state = (): NativeState => ({
     generation: 1,
     creationSubmissions: [],
@@ -165,6 +168,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
       if (input.method === 'interaction.answer') {
         posts++;
         const card = cards[selected]!;
+        await holdAnswer;
         submissions = [
           {
             interaction: card,
@@ -178,6 +182,10 @@ test('Native page keeps original question drafts across sessions, missing pages 
           },
         ];
         return null;
+      }
+      if (input.method === 'lookupInteraction') {
+        lookupIds.push(input.commandId);
+        recordLookup();
       }
       return null;
     },
@@ -250,19 +258,22 @@ test('Native page keeps original question drafts across sessions, missing pages 
     expect(text().value).toBe('  original A\n雪🙂  ');
     await click('提交回答');
     expect(posts).toBe(1);
+    expect(submissions).toHaveLength(0);
+    expect(text()).toBeNull();
     expect(promptValue(mainInput())).toBe(updatedMainDraft);
+    await click('Question B');
+    expect(text().value).toBe('other B');
+    await act(async () => releaseAnswer());
+    await refresh();
     expect(submissions[0]!.intent.answer).toEqual({
       kind: 'question',
       answers: '  original A\n雪🙂  ',
     });
-    await click('Question B');
-    expect(text().value).toBe('other B');
+    await act(async () => Promise.race([lookedUp, Bun.sleep(2000)]));
+    expect(lookupIds).toContain('original-answer');
     await click('Question A');
-    expect(text().value).toBe('  original A\n雪🙂  ');
-    expect(
-      [...host.querySelectorAll('button')].find((button) => button.textContent === '提交回答')!
-        .disabled,
-    ).toBe(true);
+    expect(text()).toBeNull();
+    expect(host.querySelector('.question-submission')).toBeNull();
     expect(posts).toBe(1);
     await click('Question B');
     const original = submissions[0]!;
@@ -290,7 +301,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
     await refresh();
     expect(text().value).toBe('other B');
     await click('Question A');
-    expect(text().value).toBe('');
+    expect(text()).toBeNull();
     await click('Question B');
     expect(text().value).toBe('other B');
     cards.b = { ...cards.b!, revision: '2', inputDigest: 'replacement-input' };
@@ -311,6 +322,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
     );
     expect(posts).toBe(1);
   } finally {
+    releaseAnswer();
     await act(async () => root.unmount());
     restoreLayoutGlobals();
     dom.window.close();

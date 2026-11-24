@@ -265,7 +265,10 @@ function savedToolInput(
       execution.definitionId,
       execution.definitionVersion,
     ) === undefined &&
-      !(execution.definitionVersion === '1' && execution.definitionId.startsWith('shell.')))
+      !(
+        execution.definitionVersion === '1' &&
+        (execution.definitionId.startsWith('shell.') || execution.definitionId === 'ask_user')
+      ))
   )
     return;
   const original = source(message);
@@ -289,7 +292,23 @@ function savedToolInput(
   // may still be incomplete; it cannot hide this request or invent another one.
   return object(execution.toolInput);
 }
-function ask(input: Record<string, unknown> | undefined, content: string) {
+function askQuestions(input: Record<string, unknown> | undefined) {
+  const items = input?.questions;
+  if (!Array.isArray(items) || items.length < 1 || items.length > 3) return [];
+  const questions = items.flatMap((value, index) => {
+    const question = object(value);
+    return typeof question?.question === 'string' && question.question.trim()
+      ? [{ id: `q${index + 1}`, question: question.question.trim() }]
+      : [];
+  });
+  return questions.length === items.length ? questions : [];
+}
+
+function ask(
+  input: Record<string, unknown> | undefined,
+  content: string,
+  savedInput: Record<string, unknown> | undefined,
+) {
   let result: Record<string, unknown> | undefined;
   try {
     result = object(JSON.parse(content));
@@ -297,15 +316,10 @@ function ask(input: Record<string, unknown> | undefined, content: string) {
     return;
   }
   if (!result) return;
+  const callQuestions = askQuestions(input);
+  const savedQuestions = askQuestions(savedInput);
   const questions =
-    Array.isArray(input?.questions) && input.questions.length >= 1 && input.questions.length <= 3
-      ? input.questions.flatMap((value, index) => {
-          const question = object(value);
-          return typeof question?.question === 'string' && question.question.trim()
-            ? [{ id: `q${index + 1}`, question: question.question.trim() }]
-            : [];
-        })
-      : [];
+    !savedQuestions.length || isDeepStrictEqual(callQuestions, savedQuestions) ? callQuestions : [];
   if (result.cancelled === true && Object.keys(result).length === 1)
     return { questions, cancelled: true };
   const answers = object(result.answers);
@@ -313,16 +327,26 @@ function ask(input: Record<string, unknown> | undefined, content: string) {
     Object.keys(result).length !== 2 ||
     typeof result.answer !== 'string' ||
     !answers ||
-    Object.entries(answers).some(
-      ([key, value]) => !/^q[1-3]$/.test(key) || typeof value !== 'string',
-    ) ||
     !Object.keys(answers).length ||
     (questions.length &&
       (Object.keys(answers).length !== questions.length ||
         questions.some((question) => !Object.hasOwn(answers, question.id))))
   )
     return;
-  return { questions, summary: result.answer, answers: answers as Record<string, string> };
+  const labels: Record<string, string> = {};
+  for (const [key, value] of Object.entries(answers)) {
+    if (!/^q[1-3]$/.test(key)) return;
+    if (typeof value === 'string') labels[key] = value;
+    else if (
+      Array.isArray(value) &&
+      value.length >= 1 &&
+      value.length <= 5 &&
+      value.every((label) => typeof label === 'string')
+    )
+      labels[key] = value.join(', ');
+    else return;
+  }
+  return { questions, summary: result.answer, answers: labels };
 }
 
 export function nativeToolMessageEligible(
@@ -802,7 +826,7 @@ export function nativeToolMessageFact({
     ...(execution.definitionId === 'ask_user' &&
     execution.definitionVersion === '1' &&
     execution.status === 'succeeded'
-      ? { ask: ask(call, message.content) }
+      ? { ask: ask(call, result.content, object(execution.toolInput)) }
       : {}),
   };
   if (message.deferredText && shell && commandOffset === 0) {

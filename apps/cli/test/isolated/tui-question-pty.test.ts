@@ -208,6 +208,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
                                   label: 'Second original route',
                                   description: 'Second route description',
                                 },
+                                { label: 'Third route', description: 'Third route description' },
                               ],
                             },
                             {
@@ -221,6 +222,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
                                   label: 'Full detail',
                                   description: 'Give the complete original text',
                                 },
+                                { label: 'Summary', description: 'Give a summary' },
                               ],
                             },
                             {
@@ -235,6 +237,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
                                   label: 'Alternative delivery',
                                   description: 'Use an alternative route',
                                 },
+                                { label: 'Deferred delivery', description: 'Deliver later' },
                               ],
                             },
                           ],

@@ -29,6 +29,7 @@ test.skipIf(process.platform !== 'darwin')(
           options: [
             { label: answers.q1, description: '迁入原客户端实现', recommended: true },
             { label: '其他实现', description: '另一种选择' },
+            { label: '暂缓迁移', description: '保留两个实现以便核对' },
           ],
         },
         {
@@ -36,6 +37,7 @@ test.skipIf(process.platform !== 'darwin')(
           options: [
             { label: '选项一', description: '第一项' },
             { label: '选项二', description: '第二项' },
+            { label: '选项三', description: '第三项' },
           ],
         },
       ],

@@ -4,34 +4,38 @@ export function AnswerChoices({
   name,
   choices,
   selected,
+  multiple = false,
+  selectedChoices,
   onSelect,
   children,
 }: {
   name: string;
-  choices: readonly { title: string; description?: string }[];
+  choices: readonly { title: string; description?: string; recommended?: boolean }[];
   selected?: number;
+  multiple?: boolean;
+  selectedChoices?: readonly number[];
   onSelect: (index: number) => void;
   children?: ReactNode;
 }) {
   return (
     <div className="questionnaire-choices">
-      {choices.map(({ title, description }, index) => {
+      {choices.map(({ title, description, recommended }, index) => {
         const descriptionId = `${name}-choice-${index}`;
-        const recommended = title.endsWith(' (Recommended)');
+        const checked = multiple ? selectedChoices?.includes(index) === true : selected === index;
         return (
-          <label className="questionnaire-choice" data-selected={selected === index} key={index}>
+          <label className="questionnaire-choice" data-selected={checked} key={index}>
             <input
-              type="radio"
+              type={multiple ? 'checkbox' : 'radio'}
               name={name}
               value={index}
               aria-label={title}
               aria-describedby={description ? descriptionId : undefined}
-              checked={selected === index}
+              checked={checked}
               onChange={() => onSelect(index)}
             />
             <span className="questionnaire-choice-copy">
               <span className="questionnaire-choice-title">
-                <span>{recommended ? title.slice(0, -14) : title}</span>
+                <span>{title}</span>
                 {recommended && <span className="questionnaire-recommended">推荐</span>}
               </span>
               {description && (

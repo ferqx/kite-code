@@ -85,8 +85,10 @@ import {
   type QuestionDraft,
   questionAnswer,
   questionDraft,
+  questionEditingText,
   questionForm,
   questionValue,
+  toggleQuestionChoice,
 } from './question';
 import {
   QuestionMaterial,
@@ -1913,7 +1915,9 @@ function TuiSessionView({
       ? sourceCommand.id
       : undefined;
   const form =
-    card?.kind === 'question' && !sourceQuestion ? questionForm(card.request) : undefined;
+    card?.kind === 'question' && !sourceQuestion
+      ? questionForm(card.request, card.definitionId === 'ask_user')
+      : undefined;
   const questionSubmission = card?.kind === 'question' ? controller.answerPhase(card) : undefined;
   let question = questionDrafts.current.get(approvalKey);
   if (form && !question) {
@@ -1996,7 +2000,7 @@ function TuiSessionView({
         return;
       const field = form.fields[question.step]!,
         draft = question.fields[question.step]!;
-      if (field.text && (!field.choices.length || draft.selected === field.choices.length)) {
+      if (questionEditingText(field, draft)) {
         draft.buffer.insert(text, true);
         draft.skipped = false;
         renderQuestion((n) => n + 1);
@@ -2145,8 +2149,8 @@ function TuiSessionView({
           }
           const field = form.fields[question.step]!,
             draft = question.fields[question.step]!;
-          const editing =
-            field.text && (!field.choices.length || draft.selected === field.choices.length);
+          const editing = questionEditingText(field, draft);
+          const inputLabel = field.textWithChoices ? `[x] ${t('Custom answer')}` : t('Answer');
           if (key.meta && input.toLowerCase() === 's' && !field.required) {
             draft.skipped = !draft.skipped;
             renderQuestion((n) => n + 1);
@@ -2156,7 +2160,7 @@ function TuiSessionView({
           const choiceArrow = field.choices.length > 0 && (key.upArrow || key.downArrow);
           const inputRow =
             choiceArrow && editing
-              ? draft.buffer.row(questionInputWidth(stdout.columns, t('Answer')), display)
+              ? draft.buffer.row(questionInputWidth(stdout.columns, inputLabel), display)
               : undefined;
           const navigateChoice =
             choiceArrow &&
@@ -2166,18 +2170,50 @@ function TuiSessionView({
             if (question.step > 0) question.step--;
             else void controller.cancelInteraction(card);
           } else if (key.tab && field.text && field.choices.length) {
-            draft.selected = editing ? 0 : field.choices.length;
+            if (field.textWithChoices) {
+              draft.editingText = !editing;
+              draft.selected = field.choices.length;
+              draft.cursor = editing ? 0 : field.choices.length;
+            } else if (field.multiple) {
+              draft.selected = editing ? undefined : field.choices.length;
+              draft.cursor = editing ? 0 : field.choices.length;
+              if (!editing) draft.selectedChoices = undefined;
+            } else {
+              draft.selected = editing ? 0 : field.choices.length;
+            }
             draft.skipped = false;
           } else if (key.tab && !field.required) {
             draft.skipped = !draft.skipped;
           } else if (navigateChoice) {
             const count = field.choices.length + (field.text ? 1 : 0);
-            draft.selected =
-              draft.selected === undefined
+            const current = field.multiple ? draft.cursor : draft.selected;
+            const next =
+              current === undefined
                 ? key.downArrow
                   ? 0
                   : count - 1
-                : (draft.selected + (key.downArrow ? 1 : count - 1)) % count;
+                : (current + (key.downArrow ? 1 : count - 1)) % count;
+            if (field.multiple) {
+              draft.cursor = next;
+              if (field.textWithChoices) draft.editingText = false;
+              else if (editing) draft.selected = undefined;
+            } else {
+              draft.selected = next;
+            }
+            draft.skipped = false;
+          } else if (field.multiple && !editing && input === ' ' && draft.cursor !== undefined) {
+            if (draft.cursor === field.choices.length) {
+              if (field.textWithChoices) {
+                const checked = draft.selected !== draft.cursor;
+                draft.selected = checked ? draft.cursor : undefined;
+                draft.editingText = checked;
+              } else {
+                draft.selected = draft.cursor;
+                draft.selectedChoices = undefined;
+              }
+            } else {
+              draft.selectedChoices = toggleQuestionChoice(draft.selectedChoices, draft.cursor);
+            }
             draft.skipped = false;
           } else if (key.return && !key.shift && !key.meta) {
             if (!questionValue(field, draft)) {
@@ -2192,7 +2228,7 @@ function TuiSessionView({
                 void controller.answer(card, value);
             }
           } else if (editing) {
-            const width = questionInputWidth(stdout.columns, t('Answer'));
+            const width = questionInputWidth(stdout.columns, inputLabel);
             if (key.leftArrow) draft.buffer.horizontal(-1);
             else if (key.rightArrow) draft.buffer.horizontal(1);
             else if (key.home) draft.buffer.boundary(false, width, display);

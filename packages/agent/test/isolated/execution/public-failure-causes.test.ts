@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import {
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension, ToolDefinition, ToolResult } from '../../../src/extensions';
 import { createRuntime } from '../../../src/runtime';
@@ -25,7 +26,7 @@ for (const entry of [
   {
     name: 'Ask semantic validation',
     code: 'invalid_ask_user_arguments',
-    hint: 'Put the recommended option first; omit option-level recommendation flags.',
+    hint: 'Set recommended: true on at most one option per question.',
   },
   {
     name: 'Ask answer',
@@ -72,7 +73,7 @@ for (const entry of [
   },
 ] as const) {
   test(`the next Model receives a clear ${entry.name} without rewriting its original receipt`, async () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-public-failure-cause-'));
+    const root = temporaryDirectory('kite-public-failure-cause-');
     const profile = { dataRoot: root, profile: 'test' };
     const store = await openSqliteStore(profile);
     const expectedStoreId = (await store.getMetadata()).storeId;
@@ -102,8 +103,9 @@ for (const entry of [
             {
               question: 'Choose one?',
               options: [
-                { label: 'First', description: 'First option', recommended: true },
-                { label: 'Second', description: 'Second option', recommended: true },
+                { label: 'First', description: 'First option', recommended: 'yes' },
+                { label: 'Second', description: 'Second option' },
+                { label: 'Third', description: 'Third option' },
               ],
             },
           ],
@@ -184,7 +186,7 @@ for (const entry of [
       );
     } finally {
       await runtime.close();
-      rmSync(root, { recursive: true });
+      removeTemporaryDirectory(root);
     }
   });
 }

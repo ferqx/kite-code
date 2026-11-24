@@ -1,7 +1,7 @@
 // Fixed public explanations only. These descriptions neither establish effects nor grant retries.
 export const additionalFailureExplanations: Readonly<Record<string, string>> = {
   invalid_ask_user_arguments:
-    'The question arguments are invalid. Supply one to three questions, each with two to three labeled and described options. Put the recommended option first; omit option-level recommendation flags.',
+    'The question arguments are invalid. Supply one to three questions, each with three to four labeled and described options. If present, multiple must be a boolean. Set recommended: true on at most one option per question.',
   invalid_ask_user_answer:
     'The received answer does not match the offered options. Check the original question and answer; do not invent a selection.',
   cancel_requested:

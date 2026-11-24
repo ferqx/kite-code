@@ -1,12 +1,15 @@
-type Choice = { value: unknown; title: string; description?: string };
+type Choice = { value: unknown; title: string; description?: string; recommended?: boolean };
 export type QuestionField = {
   key?: string;
   title?: string;
   description?: string;
   choices: Choice[];
+  multiple?: true;
   text: boolean;
-  /** Original closed single-property object used by an explicit custom-text branch. */
+  /** Text property of the original closed custom answer object. */
   textKey?: string;
+  /** The custom-text object also permits the same array of choice IDs. */
+  textWithChoices?: true;
   required: boolean;
   minLength?: number;
   maxLength?: number;
@@ -24,6 +27,30 @@ const metadata = ['title', 'description'];
 const simple = (v: unknown) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
 const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
 function field(schema: unknown, required: boolean, key?: string): QuestionField | undefined {
+  if (record(schema) && schema.type === 'array') {
+    if (
+      Object.keys(schema).some(
+        (name) =>
+          ![...metadata, 'type', 'items', 'minItems', 'maxItems', 'uniqueItems'].includes(name),
+      ) ||
+      !record(schema.items) ||
+      schema.items.type !== 'string' ||
+      schema.minItems !== 1 ||
+      schema.uniqueItems !== true
+    )
+      return;
+    const items = field(schema.items, true);
+    if (!items?.choices.length || items.text || schema.maxItems !== items.choices.length) return;
+    return {
+      key,
+      title: text(schema.title) ?? key,
+      description: text(schema.description),
+      required,
+      choices: items.choices,
+      multiple: true,
+      text: false,
+    };
+  }
   if (record(schema) && schema.type === 'object') {
     if (
       Object.keys(schema).some(
@@ -151,10 +178,29 @@ function field(schema: unknown, required: boolean, key?: string): QuestionField 
   if (Array.isArray(union) && union.length) {
     const choices: Choice[] = [];
     let free: QuestionField | undefined;
+    let multiple: QuestionField | undefined;
+    let customChoices: QuestionField | undefined;
     for (const branch of union) {
       if (!record(branch) || 'oneOf' in branch || 'anyOf' in branch) return;
-      const parsed = field(branch, required, key);
+      let candidate = branch;
+      if (
+        branch.type === 'object' &&
+        record(branch.properties) &&
+        Object.hasOwn(branch.properties, 'choices') &&
+        Object.keys(branch.properties).length > 1
+      ) {
+        if (customChoices) return;
+        const { choices, ...properties } = branch.properties;
+        customChoices = field(choices, true);
+        if (!customChoices?.multiple) return;
+        candidate = { ...branch, properties };
+      }
+      const parsed = field(candidate, required, key);
       if (!parsed) return;
+      if (parsed.multiple) {
+        if (multiple) return;
+        multiple = parsed;
+      }
       if (parsed.text) {
         if (
           free ||
@@ -167,6 +213,20 @@ function field(schema: unknown, required: boolean, key?: string): QuestionField 
       }
       choices.push(...parsed.choices);
     }
+    if (
+      multiple &&
+      (schema.type !== undefined ||
+        choices.length !== multiple.choices.length ||
+        (free && free.textKey === undefined))
+    )
+      return;
+    if (
+      customChoices &&
+      (!multiple ||
+        customChoices.choices.length !== choices.length ||
+        customChoices.choices.some((choice, index) => choice.value !== choices[index]?.value))
+    )
+      return;
     if (new Set(choices.map((c) => JSON.stringify(c.value))).size !== choices.length) return;
     if (
       !choices.every((c) => compatible(c.value) && lengthValid(c.value)) ||
@@ -179,7 +239,9 @@ function field(schema: unknown, required: boolean, key?: string): QuestionField 
       ...base,
       text: free !== undefined,
       choices,
+      ...(multiple ? { multiple: true as const } : {}),
       textKey: free?.textKey,
+      ...(customChoices ? { textWithChoices: true as const } : {}),
       minLength: free?.textKey === undefined ? minLength : free.minLength,
       maxLength: free?.textKey === undefined ? maxLength : free.maxLength,
     };
@@ -188,9 +250,10 @@ function field(schema: unknown, required: boolean, key?: string): QuestionField 
   return undefined;
 }
 /** Conservative presentation of the original JSON Schema. Unhandled validation stays in the JSON panel. */
-export function questionForm(request: unknown): QuestionForm | undefined {
+export function questionForm(request: unknown, askUser = false): QuestionForm | undefined {
   if (!record(request) || !record(request.schema)) return;
   const schema = request.schema;
+  const { recommendedOptions } = request;
   if (schema.type !== 'object') {
     const parsed = field(schema, true);
     if (parsed) return { object: false, fields: [parsed] };
@@ -207,7 +270,7 @@ export function questionForm(request: unknown): QuestionForm | undefined {
       (branch) => record(branch) && Object.hasOwn(branch, 'const') && branch.const === null,
     );
     if (!record(object) || object.additionalProperties !== false || !alternate) return;
-    const form = questionForm({ schema: object });
+    const form = questionForm({ schema: object, recommendedOptions }, askUser);
     const choice = field(alternate, true);
     if (!form?.object || choice?.text || choice?.choices.length !== 1) return;
     return {
@@ -241,28 +304,63 @@ export function questionForm(request: unknown): QuestionForm | undefined {
   for (const [key, value] of Object.entries(schema.properties)) {
     const parsed = field(value, required.includes(key), key);
     if (!parsed) return;
+    const recommended =
+      record(recommendedOptions) && Object.hasOwn(recommendedOptions, key)
+        ? text(recommendedOptions[key])
+        : undefined;
+    if (recommended !== undefined) {
+      const choice = parsed.choices.find(({ value }) => value === recommended);
+      if (choice) choice.recommended = true;
+    } else if (askUser && recommendedOptions === undefined) {
+      // Earlier ask_user requests appended this marker to the first option automatically.
+      const first = parsed.choices[0];
+      if (first?.value === `${key}-o1` && first.title.endsWith(' (Recommended)'))
+        first.title = first.title.slice(0, -' (Recommended)'.length);
+    }
     fields.push(parsed);
   }
   if (!fields.length) return;
   return { title: text(schema.title), description: text(schema.description), object: true, fields };
 }
 
-export type QuestionFieldDraft = { selected?: number; text: string; skipped?: boolean };
+export type QuestionFieldDraft = {
+  selected?: number;
+  selectedChoices?: readonly number[];
+  text: string;
+  skipped?: boolean;
+};
+export function toggleQuestionChoice(selected: readonly number[] = [], index: number): number[] {
+  return selected.includes(index)
+    ? selected.filter((choice) => choice !== index)
+    : [...selected, index].sort((left, right) => left - right);
+}
 export function questionFieldValue(
   field: QuestionField,
   draft: QuestionFieldDraft,
 ): { value: unknown } | undefined {
   if (draft.skipped && !field.required) return { value: undefined };
+  const custom = field.text && (!field.choices.length || draft.selected === field.choices.length);
+  const validText = custom && draft.text.trim() && !questionLengthError(field, draft.text);
+  if (field.multiple) {
+    const selected = draft.selectedChoices ?? [];
+    if (new Set(selected).size !== selected.length) return;
+    const choices = selected.map((index) => field.choices[index]);
+    if (choices.some((choice) => choice === undefined)) return;
+    const values = choices.map((choice) => choice!.value);
+    if (!custom) return values.length ? { value: values } : undefined;
+    if (!validText || field.textKey === undefined) return;
+    return {
+      value: {
+        [field.textKey]: draft.text,
+        ...(field.textWithChoices && values.length ? { choices: values } : {}),
+      },
+    };
+  }
   if (draft.selected !== undefined) {
     const choice = field.choices[draft.selected];
     if (choice) return { value: choice.value };
   }
-  if (
-    field.text &&
-    (!field.choices.length || draft.selected === field.choices.length) &&
-    draft.text.trim() &&
-    !questionLengthError(field, draft.text)
-  )
+  if (validText)
     return { value: field.textKey === undefined ? draft.text : { [field.textKey]: draft.text } };
   return undefined;
 }

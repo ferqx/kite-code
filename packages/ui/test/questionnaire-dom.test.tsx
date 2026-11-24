@@ -111,7 +111,11 @@ test('actual DOM browses unanswered original questions and submits all exact val
       ),
     );
     const button = (name: string) =>
-      [...host.querySelectorAll('button')].find((node) => node.textContent === name)!;
+      [...host.querySelectorAll('button')].find(
+        (node) => (node.getAttribute('aria-label') ?? node.textContent) === name,
+      )!;
+    const counter = () =>
+      host.querySelector('nav[aria-label="题目导航"] [role="status"]')?.textContent;
     const choose = async (name: string) =>
       act(async () => host.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!.click());
     const click = async (name: string) => act(async () => button(name).click());
@@ -122,22 +126,26 @@ test('actual DOM browses unanswered original questions and submits all exact val
     expect(
       [...host.querySelectorAll('input[type="radio"]')].at(-1)?.getAttribute('aria-label'),
     ).toBe('自定义输入');
-    expect(button('上一题')).toBeUndefined();
+    expect(button('上一题').disabled).toBe(true);
+    expect(button('查看下一题').disabled).toBe(false);
     expect(button('提交回答')).toBeUndefined();
     const firstChoice = host.querySelector('input[aria-label="Alpha 推荐"]')!;
     expect(
       host.ownerDocument.getElementById(firstChoice.getAttribute('aria-describedby')!)!.textContent,
     ).toBe('Full original description\nwith Unicode 尾部');
-    expect(host.querySelector('[aria-current="step"]')?.textContent).toBe('1');
+    expect(counter()).toBe('1/3');
     await click('下一题');
-    await act(async () =>
-      host.querySelector<HTMLButtonElement>('button[aria-label="第 3 题，待回答"]')!.click(),
-    );
-    expect(host.querySelector('[aria-current="step"]')?.textContent).toBe('3');
+    expect(counter()).toBe('2/3');
+    await click('查看下一题');
+    expect(counter()).toBe('3/3');
+    expect(button('查看下一题').disabled).toBe(true);
     expect(host.ownerDocument.activeElement?.textContent).toBe('q3 original question');
     expect(host.querySelector('.questionnaire-incomplete')?.textContent).toBe('还有 3 题待答');
     expect(button('提交回答').disabled).toBe(true);
     await choose('自定义输入');
+    const customRow = host.querySelector('.questionnaire-custom-choice[data-selected="true"]')!;
+    expect(customRow.querySelector('input[aria-label="自定义输入"]')).not.toBeNull();
+    expect(customRow.querySelector('textarea[aria-label="自定义输入"]')).not.toBeNull();
     const text = '  q3-o1🙂é\n保持 空格  ';
     await act(async () => {
       const input = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="自定义输入"]')!;
@@ -148,9 +156,8 @@ test('actual DOM browses unanswered original questions and submits all exact val
     await choose('q1-o1');
     await click('上一题');
     await choose('Alpha 推荐');
-    await act(async () =>
-      host.querySelector<HTMLButtonElement>('button[aria-label="第 3 题，已回答"]')!.click(),
-    );
+    await click('查看下一题');
+    await click('查看下一题');
     expect(host.querySelector('textarea')!.value).toBe(text);
     expect(button('提交回答').disabled).toBe(false);
     expect(host.querySelector('.questionnaire-incomplete')).toBeNull();
@@ -195,6 +202,160 @@ test('actual DOM browses unanswered original questions and submits all exact val
     expect(host.querySelector('textarea')!.value).toBe(text);
     expect(button('提交回答').disabled).toBe(true);
     expect(host.querySelector('.question-submission')?.textContent).toBe('回答提交结果尚未确认。');
+  });
+});
+
+test('multi-select keeps checked choices alongside inline custom text and preserves the radio step', async () => {
+  await domFixture(async (host, dom, root) => {
+    const values: NonNullable<Interaction['answer']>[] = [];
+    const route = {
+      type: 'array',
+      minItems: 1,
+      maxItems: 3,
+      uniqueItems: true,
+      items: {
+        type: 'string',
+        oneOf: [
+          { const: 'a', title: 'First route' },
+          { const: 'b', title: 'Second route' },
+          { const: 'c', title: 'Third route' },
+        ],
+      },
+    };
+    const interaction: Interaction = {
+      ...original,
+      request: {
+        schema: {
+          type: 'object',
+          required: ['routes', 'mode'],
+          additionalProperties: false,
+          properties: {
+            routes: {
+              title: '选择路线（可多选）：',
+              anyOf: [
+                route,
+                {
+                  type: 'object',
+                  required: ['text'],
+                  additionalProperties: false,
+                  properties: { choices: route, text: { type: 'string', pattern: '\\S' } },
+                },
+              ],
+            },
+            mode: { type: 'string', enum: ['manual', 'automatic'] },
+          },
+        },
+      },
+    };
+    await act(async () =>
+      root.render(
+        <InteractionCard
+          interaction={interaction}
+          onAnswer={(_card, answer) => {
+            values.push(answer);
+          }}
+        />,
+      ),
+    );
+    const click = async (selector: string) =>
+      act(async () => host.querySelector<HTMLElement>(selector)!.click());
+    const custom = 'input[type="checkbox"][aria-label="自定义输入"]';
+    const customLabel = () => host.querySelector('.questionnaire-custom-label');
+    const editor = () =>
+      host.querySelector<HTMLTextAreaElement>('textarea[aria-label="自定义输入"]');
+    expect(host.querySelectorAll('input[type="checkbox"]')).toHaveLength(4);
+    expect(host.querySelector('.questionnaire-header h3')?.textContent).toBe('选择路线');
+    expect(host.textContent).not.toContain('可多选');
+    expect(host.querySelectorAll('input:checked')).toHaveLength(0);
+    expect(customLabel()?.textContent).toBe('自定义输入');
+    await click('input[aria-label="Third route"]');
+    await click(custom);
+    expect(editor()?.closest('.questionnaire-choice')).toBe(
+      host.querySelector(custom)?.closest('.questionnaire-choice'),
+    );
+    expect(customLabel()?.textContent).toBe('');
+    expect(editor()?.placeholder).toBe('自定义输入');
+    expect(host.querySelectorAll('input:checked')).toHaveLength(2);
+    const text = '  原文🪁\n第二行  ';
+    await act(async () => {
+      editor()!.value = text;
+      editor()!.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    });
+    await click('input[aria-label="First route"]');
+    expect(editor()?.value).toBe(text);
+    expect(host.querySelectorAll('input:checked')).toHaveLength(3);
+    await click(custom);
+    expect(editor()).toBeNull();
+    expect(customLabel()?.textContent).toBe('自定义输入');
+    expect(host.querySelectorAll('input:checked')).toHaveLength(2);
+    await click(custom);
+    expect(editor()?.value).toBe(text);
+    await act(async () =>
+      [...host.querySelectorAll('button')]
+        .find((button) => button.textContent === '下一题')!
+        .click(),
+    );
+    expect(host.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    await click('input[type="radio"][aria-label="manual"]');
+    await act(async () =>
+      host
+        .querySelector('form')!
+        .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })),
+    );
+    expect(values).toEqual([
+      { kind: 'question', answers: { routes: { choices: ['a', 'c'], text }, mode: 'manual' } },
+    ]);
+  });
+});
+
+test('only the explicitly recommended option gets a badge and no answer is preselected', async () => {
+  await domFixture(async (host, _dom, root) => {
+    const schema = {
+      type: 'object',
+      required: ['q1'],
+      additionalProperties: false,
+      properties: {
+        q1: {
+          title: 'Choose a route',
+          anyOf: [
+            { const: 'q1-o1', title: 'First (Recommended)' },
+            { const: 'q1-o2', title: 'Second' },
+          ],
+        },
+      },
+    };
+    const render = async (request: Json) =>
+      act(async () =>
+        root.render(
+          <InteractionCard
+            interaction={{ ...original, request }}
+            onAnswer={() => {
+              throw Error('No explicit answer was submitted');
+            }}
+          />,
+        ),
+      );
+    const labels = () =>
+      [...host.querySelectorAll('input[type="radio"]')].map((input) =>
+        input.getAttribute('aria-label'),
+      );
+    const badges = () => [...host.querySelectorAll('.questionnaire-recommended')];
+
+    await render({ schema });
+    expect(labels()).toEqual(['First', 'Second']);
+    expect(badges()).toHaveLength(0);
+
+    await render({ schema, recommendedOptions: {} });
+    expect(labels()).toEqual(['First (Recommended)', 'Second']);
+    expect(badges()).toHaveLength(0);
+
+    await render({ schema, recommendedOptions: { q1: 'q1-o2' } });
+    expect(labels()).toEqual(['First (Recommended)', 'Second']);
+    expect(badges()).toHaveLength(1);
+    expect(badges()[0]?.closest('label')?.querySelector('input')?.getAttribute('aria-label')).toBe(
+      'Second',
+    );
+    expect(host.querySelector('input:checked')).toBeNull();
   });
 });
 

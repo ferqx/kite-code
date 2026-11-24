@@ -263,7 +263,7 @@ async function main() {
           content:
             scenario === 'outside'
               ? `This is a scope-denial test. Call read_file exactly once for the absolute path ${join(outside, 'private.txt')}. When it is rejected, explain the failure in one sentence and finish. Do not ask questions or use another tool.`
-              : '我想创建一个页面，开始前必须由我决定版式和风格。请调用一次 ask_user，一次询问两个问题：版式选静态页面或仪表盘；风格选简洁风格或活泼风格。每个选项带简短说明，首项推荐。收到回答或取消后，只用一句话确认，然后结束，不创建文件，不再提问。',
+              : '我想创建一个页面，开始前必须由我决定版式和风格。请调用一次 ask_user，一次询问两个问题：版式选静态页面、仪表盘或分栏页面；风格选简洁风格、活泼风格或复古风格。每个选项带简短说明，在每题首项设置 recommended: true。收到回答或取消后，只用一句话确认，然后结束，不创建文件，不再提问。',
         },
       });
       const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });

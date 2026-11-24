@@ -61,6 +61,29 @@ const tool = (
   ...extra,
 });
 
+test('ask_user history adds one title separator and preserves the saved answer punctuation', () => {
+  const view = render(
+    <ToolCardBlock
+      block={tool({
+        name: 'ask_user',
+        args: { questions: [{ question: '选择颜色：' }, { question: '选择饮品:' }] },
+        status: 'done',
+        expanded: true,
+        summary: JSON.stringify({
+          answers: { q1: '原文： :保留', q2: ['茶', '咖啡', '水', '牛奶', '苹果汁'] },
+        }),
+      })}
+      columns={100}
+    />,
+  );
+  try {
+    expect(view.lastFrame()).toContain('选择颜色: 原文： :保留');
+    expect(view.lastFrame()).toContain('选择饮品: 茶, 咖啡, 水, 牛奶, 苹果汁');
+  } finally {
+    view.unmount();
+  }
+});
+
 test('generic result previews mark character and line clipping without splitting a Unicode scalar', () => {
   for (const summary of [
     `${'x'.repeat(299)}🙂RESULT_TAIL`,

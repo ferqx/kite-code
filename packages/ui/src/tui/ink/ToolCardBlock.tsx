@@ -161,8 +161,20 @@ function parseAskUserAnswers(
   try {
     const p = JSON.parse(summary) as Record<string, unknown> | undefined;
     if (p && typeof p === 'object') {
-      const am = p.answers as Record<string, string> | undefined;
-      if (am && Object.keys(am).length > 0) answerMap = am;
+      if (p.answers && typeof p.answers === 'object' && !Array.isArray(p.answers)) {
+        const entries = Object.entries(p.answers).flatMap(([key, value]) => {
+          if (typeof value === 'string') return [[key, value]];
+          if (
+            Array.isArray(value) &&
+            value.length >= 1 &&
+            value.length <= 5 &&
+            value.every((label) => typeof label === 'string')
+          )
+            return [[key, value.join(', ')]];
+          return [];
+        });
+        if (entries.length) answerMap = Object.fromEntries(entries);
+      }
       const a = p.answer as string | undefined;
       if (typeof a === 'string') answer = a || '(no answer)';
     }
@@ -251,8 +263,8 @@ function renderAskUserSummary(
     return (
       <>
         {questions.map((q, i) => {
-          const id = q.id ?? String(i);
-          const raw = answerMap[id] ?? '';
+          const raw =
+            answerMap[q.id ?? `q${i + 1}`] ?? answerMap[String(i)] ?? answerMap[q.question] ?? '';
           const prefix = i === 0 ? ASK_DETAIL_PREFIX : ASK_DETAIL_ALIGN;
           const midfix = ': ';
           const contentWidth = maxLine - stringWidth(prefix) - stringWidth(midfix);
@@ -260,7 +272,7 @@ function renderAskUserSummary(
           const rawQMax = Math.floor(contentWidth * 0.45);
           const qMax = Math.max(10, Math.min(rawQMax, contentWidth - 10));
           const aMax = contentWidth - qMax;
-          const qShort = clip(q.question, qMax);
+          const qShort = clip(q.question.replace(/(?:[：:]\s*)+$/u, ''), qMax);
           const aShort = truncateAnswer(raw || translate('tool.noAnswer'), aMax);
           return (
             <Text key={`${q.id ?? 'q'}-${i}`} color={dt.dim}>

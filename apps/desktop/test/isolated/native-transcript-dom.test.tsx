@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
+import type { Execution, Message, ModelOutputSnapshot } from '@kite-ai/client';
 import {
   Conversation,
   type Message as DesktopMessage,
@@ -11,9 +11,14 @@ import { JSDOM } from 'jsdom';
 import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { markdownMarkup } from '../../../../packages/ui/test/markdown-dom.fixture';
+import { nativeToolMessageFact } from '../../electron/tool-message-fact';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { NativeModelOutputMessage } from '../../src/native-model-output-message';
-import { groupNativeToolMessages, liveToolMessages } from '../../src/native-tool-messages';
+import {
+  desktopToolMessage,
+  groupNativeToolMessages,
+  liveToolMessages,
+} from '../../src/native-tool-messages';
 import { renderNativeToolGroup } from '../../src/native-tool-renderer';
 import {
   desktopTranscript,
@@ -2433,6 +2438,76 @@ test('all historical Run batches stay in the selected read scope; late metadata 
           request.method === 'toolMessages.runs' || request.method === 'toolMessages.close',
       ),
     ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a single ask_user history row keeps its answer and shows the saved title when its original input is read', async () => {
+  const f = fixture();
+  const options = ['红色', '蓝色', '绿色'].map((label) => ({ label, description: label }));
+  const answer = '红色, 蓝色, 绿色';
+  const content = JSON.stringify({ answer, answers: { q1: options.map(({ label }) => label) } });
+  const receipt = {
+    ...message('answer', 'tool', '2', content),
+    toolCallId: 'ask-call',
+    sourceIds: ['original-execution'],
+  };
+  const execution: Execution = {
+    id: 'original-execution',
+    originStoreId: 'store',
+    sessionId: receipt.sessionId,
+    runId: receipt.runId,
+    toolCallId: receipt.toolCallId,
+    kind: 'tool',
+    definitionId: 'ask_user',
+    definitionVersion: '1',
+    status: 'succeeded',
+    resultRevision: '1',
+    result: { outcome: 'succeeded', content },
+    cancelRequestedAt: null,
+  };
+  function Activity({ source }: { source: Execution }) {
+    const [expanded, setExpanded] = useState(false);
+    const fact = nativeToolMessageFact({
+      execution: source,
+      message: receipt,
+      messages: [receipt],
+      sessionId: receipt.sessionId,
+    })!;
+    return (
+      <ToolActivity
+        messages={[desktopToolMessage(fact, receipt.id, receipt.content)]}
+        traceSummaryTitle="询问了用户"
+        onToggle={setExpanded}
+        expanded={expanded}
+        renderChildren={() => null}
+      />
+    );
+  }
+  const text = () =>
+    Array.from(f.host.querySelectorAll('.tool-ask-text'), (node) => node.textContent);
+  try {
+    await act(async () => f.root.render(<Activity source={execution} />));
+    const button = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    await act(async () => button.click());
+    expect(text()).toEqual([answer]);
+    const question = '请选择你喜欢的颜色';
+    await act(async () =>
+      f.root.render(
+        <Activity
+          source={{
+            ...execution,
+            toolInput: { questions: [{ question, multiple: true, options }] },
+          }}
+        />,
+      ),
+    );
+    expect(f.host.querySelector('button.tool-activity-summary')).toBe(button);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.textContent).toContain(question);
+    expect(text()).toEqual([answer]);
+    expect(f.host.querySelector('.tool-activity-content')?.textContent).not.toContain(question);
   } finally {
     await f.close();
   }

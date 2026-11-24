@@ -1,3 +1,5 @@
+import { ArrowLeft01Icon, ArrowRight01Icon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import type { Interaction, Json } from '@kite-ai/client';
 import { type FormEvent, useId, useRef, useState } from 'react';
 import { AnswerChoices, useAnswerSubmission } from './answer-form';
@@ -10,6 +12,7 @@ import {
   questionFieldValue,
   questionLengthError,
   questionValues,
+  toggleQuestionChoice,
 } from './question';
 
 export type QuestionAnswerDraft =
@@ -119,21 +122,55 @@ export function Questionnaire({
   function fieldsForAnswer(value: typeof draft) {
     return value.fields.map((field, index) => ({
       ...field,
-      skipped: !form.fields[index]!.required && field.selected === undefined && !field.text.trim(),
+      skipped:
+        !form.fields[index]!.required &&
+        field.selected === undefined &&
+        !field.selectedChoices?.length &&
+        (form.fields[index]!.textWithChoices || !field.text.trim()),
     }));
   }
-  const steps = fieldsForAnswer(draft).map((value, index) => {
-    if (value.skipped) return '可选';
-    return questionFieldValue(form.fields[index]!, value) ? '已回答' : '待回答';
-  });
-  const remaining = steps.filter((step) => step === '待回答').length;
-  const multiStep = steps.length > 1;
-  const lastStep = draft.step === steps.length - 1;
+  const remaining = fieldsForAnswer(draft).filter(
+    (value, index) => !value.skipped && !questionFieldValue(form.fields[index]!, value),
+  ).length;
+  const count = form.fields.length;
+  const multiStep = count > 1;
+  const lastStep = draft.step === count - 1;
   const showRemaining = multiStep && lastStep && remaining > 0 && !disabled && !submitting;
   const field = form.fields[draft.step]!;
   const input = draft.fields[draft.step]!;
+  const title = field.title ?? form.title ?? '回答问题';
+  const questionTitle = field.multiple
+    ? title.replace(/\s*[（(]\s*可?多选\s*[）)]\s*[：:。.]?\s*$/u, '') || title
+    : title;
   const textLabel = field.choices.length ? '自定义输入' : '自由回答';
+  const customSelected = input.selected === field.choices.length;
   const lengthError = input.text ? questionLengthError(field, input.text) : undefined;
+  const editor = field.text && (!field.choices.length || customSelected) && (
+    <Textarea
+      id={`${formId}-text`}
+      aria-label={textLabel}
+      aria-invalid={lengthError ? true : undefined}
+      aria-describedby={lengthError ? `${formId}-length-error` : undefined}
+      placeholder={field.choices.length ? textLabel : '输入你的回答…'}
+      rows={field.choices.length ? 1 : 2}
+      value={input.text}
+      ref={(element) => {
+        freeAnswer.current = element;
+        if (!element || !focusFreeAnswer.current) return;
+        focusFreeAnswer.current = false;
+        element.focus();
+      }}
+      onInput={(event) =>
+        edit({ ...current.current.fields[current.current.step]!, text: event.currentTarget.value })
+      }
+    />
+  );
+  const textError = editor && lengthError && (
+    <span className="questionnaire-error" id={`${formId}-length-error`} role="status">
+      {lengthError.kind === 'minimum' ? '至少' : '最多'} {lengthError.bound} 个字符；当前{' '}
+      {lengthError.length} 个字符
+    </span>
+  );
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (disabled || busy.current || current.current.step !== form.fields.length - 1) return;
@@ -153,48 +190,36 @@ export function Questionnaire({
             heading.focus();
           }}
         >
-          {field.title ?? form.title ?? '回答问题'}
+          {questionTitle}
         </h3>
         {multiStep && (
           <nav className="questionnaire-progress" aria-label="题目导航">
-            <p className="sr-only" role="status">
-              问题 {draft.step + 1} / {steps.length}
-            </p>
-            {steps.map((status, index) => {
-              const label = `第 ${index + 1} 题，${status}`;
-              const active = draft.step === index;
-              return (
-                <Button
-                  className="questionnaire-step"
-                  key={index}
-                  type="button"
-                  size="icon-xs"
-                  variant={active ? 'default' : 'outline'}
-                  aria-label={label}
-                  title={label}
-                  aria-current={active ? 'step' : undefined}
-                  data-answered={status === '已回答' || undefined}
-                  disabled={submitting}
-                  onClick={() => goToStep(index)}
-                >
-                  {index + 1}
-                </Button>
-              );
-            })}
-            {showRemaining && (
-              <p className="questionnaire-incomplete" id={`${formId}-incomplete`} role="status">
-                还有 {remaining} 题待答
-              </p>
-            )}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="上一题"
+              disabled={submitting || draft.step === 0}
+              onClick={() => goToStep(current.current.step - 1)}
+            >
+              <HugeiconsIcon icon={ArrowLeft01Icon} aria-hidden="true" />
+            </Button>
+            <span role="status">
+              {draft.step + 1}/{count}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="查看下一题"
+              disabled={submitting || lastStep}
+              onClick={() => goToStep(current.current.step + 1)}
+            >
+              <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
+            </Button>
           </nav>
         )}
       </header>
-      <fieldset
-        key={draft.step}
-        aria-labelledby={`${formId}-question`}
-        disabled={disabled || submitting}
-      >
-        <div className="questionnaire-content">
+      <div className="questionnaire-content" key={draft.step}>
+        <fieldset aria-labelledby={`${formId}-question`} disabled={disabled || submitting}>
           {field.title && form.title && form.title !== field.title && (
             <p className="questionnaire-description">{form.title}</p>
           )}
@@ -204,79 +229,73 @@ export function Questionnaire({
             name={`${formId}-${draft.step}`}
             choices={field.choices}
             selected={input.selected}
-            onSelect={(selected) =>
-              edit({ ...current.current.fields[current.current.step]!, selected })
+            multiple={field.multiple}
+            selectedChoices={
+              customSelected && !field.textWithChoices ? undefined : input.selectedChoices
             }
+            onSelect={(selected) => {
+              const answer = current.current.fields[current.current.step]!;
+              edit(
+                field.multiple
+                  ? {
+                      ...answer,
+                      selected: field.textWithChoices ? answer.selected : undefined,
+                      selectedChoices: toggleQuestionChoice(answer.selectedChoices, selected),
+                    }
+                  : { ...answer, selected },
+              );
+            }}
           >
-            {field.text && (
-              <div>
-                {field.choices.length > 0 && (
-                  <label
-                    className="questionnaire-choice"
-                    data-selected={input.selected === field.choices.length}
+            {field.text &&
+              (field.choices.length ? (
+                <div>
+                  <div
+                    className="questionnaire-choice questionnaire-custom-choice"
+                    data-selected={customSelected}
                   >
-                    <input
-                      type="radio"
-                      name={`${formId}-${draft.step}`}
-                      aria-label={textLabel}
-                      checked={input.selected === field.choices.length}
-                      onClick={(event) => {
-                        // Arrow keys should keep focus in the native radio group.
-                        if (event.detail === 0) return;
-                        if (freeAnswer.current) freeAnswer.current.focus();
-                        else focusFreeAnswer.current = true;
-                      }}
-                      onChange={() =>
-                        edit({
-                          ...current.current.fields[current.current.step]!,
-                          selected: field.choices.length,
-                        })
-                      }
-                    />
-                    <span>{textLabel}</span>
-                  </label>
-                )}
-                {(!field.choices.length || input.selected === field.choices.length) && (
-                  <label className="questionnaire-text-answer" htmlFor={`${formId}-text`}>
-                    {!field.choices.length && <span>{textLabel}</span>}
-                    <Textarea
-                      id={`${formId}-text`}
-                      aria-label={textLabel}
-                      aria-invalid={lengthError ? true : undefined}
-                      aria-describedby={lengthError ? `${formId}-length-error` : undefined}
-                      placeholder="输入你的回答…"
-                      rows={2}
-                      value={input.text}
-                      ref={(element) => {
-                        freeAnswer.current = element;
-                        if (!element || !focusFreeAnswer.current) return;
-                        focusFreeAnswer.current = false;
-                        element.focus();
-                      }}
-                      onInput={(event) =>
-                        edit({
-                          ...current.current.fields[current.current.step]!,
-                          text: event.currentTarget.value,
-                        })
-                      }
-                    />
-                    {lengthError && (
-                      <span
-                        className="questionnaire-error"
-                        id={`${formId}-length-error`}
-                        role="status"
-                      >
-                        {lengthError.kind === 'minimum' ? '至少' : '最多'} {lengthError.bound}{' '}
-                        个字符；当前 {lengthError.length}
-                      </span>
-                    )}
-                  </label>
-                )}
-              </div>
-            )}
+                    <label className="questionnaire-custom-label">
+                      <input
+                        type={field.textWithChoices ? 'checkbox' : 'radio'}
+                        name={`${formId}-${draft.step}`}
+                        aria-label={textLabel}
+                        checked={customSelected}
+                        onClick={(event) => {
+                          // Keep keyboard focus on the native choice control.
+                          if (event.detail === 0 || !event.currentTarget.checked) return;
+                          if (freeAnswer.current) freeAnswer.current.focus();
+                          else focusFreeAnswer.current = true;
+                        }}
+                        onChange={(event) => {
+                          const answer = current.current.fields[current.current.step]!;
+                          edit({
+                            ...answer,
+                            selected: event.currentTarget.checked
+                              ? field.choices.length
+                              : undefined,
+                            selectedChoices: field.textWithChoices
+                              ? answer.selectedChoices
+                              : undefined,
+                          });
+                        }}
+                      />
+                      {!customSelected && (
+                        <span className="questionnaire-choice-title">{textLabel}</span>
+                      )}
+                    </label>
+                    {editor}
+                  </div>
+                  {textError}
+                </div>
+              ) : (
+                <label className="questionnaire-text-answer" htmlFor={`${formId}-text`}>
+                  <span>{textLabel}</span>
+                  {editor}
+                  {textError}
+                </label>
+              ))}
           </AnswerChoices>
-        </div>
-      </fieldset>
+        </fieldset>
+      </div>
       <footer className="questionnaire-actions">
         {form.alternative && (
           <div className="questionnaire-alternative">
@@ -299,19 +318,12 @@ export function Questionnaire({
             )}
           </div>
         )}
+        {showRemaining && (
+          <p className="questionnaire-incomplete" id={`${formId}-incomplete`} role="status">
+            还有 {remaining} 题待答
+          </p>
+        )}
         <div className="questionnaire-navigation">
-          {draft.step > 0 && (
-            <Button
-              key="previous-question"
-              variant="outline"
-              size="sm"
-              type="button"
-              disabled={submitting}
-              onClick={() => goToStep(current.current.step - 1)}
-            >
-              上一题
-            </Button>
-          )}
           {!lastStep ? (
             <Button
               key="next-question"

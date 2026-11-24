@@ -107,6 +107,7 @@ import { confirmNativeFullPermission } from './native-full-permission-confirmati
 import { type HistoryState, NativeHistory } from './native-history';
 import { NativeImageGalleryProvider } from './native-image-gallery';
 import {
+  isNativeAskUserQuestion,
   nativeAskUserAwaitingAnswer,
   nativeInputErrorText,
   nativePlanReviewAwaitingAnswer,
@@ -966,6 +967,9 @@ function NativeDesktopContent({
       }
     >(),
   );
+  const [dispatchingQuestions, setDispatchingQuestions] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   function acceptDirectory(value: NativeDirectory) {
     setDirectoryObservation({ generation: generation.current, value });
     if (startupPhase.current === 'loading' && value.unavailable) {
@@ -1057,6 +1061,16 @@ function NativeDesktopContent({
       for (const submission of value.interactionSubmissions)
         if (submission.phase === 'accepted' && submission.receipt)
           interactionDrafts.current.delete(questionDraftKey(submission.interaction));
+      if (value.interactionSubmissions.length)
+        setDispatchingQuestions((previous) => {
+          const observed = value.interactionSubmissions.map((row) =>
+            questionDraftKey(row.interaction),
+          );
+          if (!observed.some((key) => previous.has(key))) return previous;
+          const next = new Set(previous);
+          for (const key of observed) next.delete(key);
+          return next;
+        });
       for (const card of value.selection?.interactions ?? []) {
         const currentKey = questionDraftKey(card);
         for (const [key, saved] of interactionDrafts.current)
@@ -2784,7 +2798,7 @@ function NativeDesktopContent({
           lookup('lookupPermission', row.intent.commandId);
       for (const row of state?.interactionSubmissions ?? [])
         if (
-          row.interaction.sessionId === sessionId &&
+          (row.interaction.sessionId === sessionId || isNativeAskUserQuestion(row.interaction)) &&
           row.intent.expectedStoreId === receiptStoreId &&
           row.phase === 'unknown'
         )
@@ -4581,9 +4595,22 @@ function NativeDesktopContent({
   }
   const approvalReadIntent = viewIntent.current,
     approvalReadEpoch = readLifecycle.current.epoch;
-  const visibleInteractions = selection?.interactions.filter(
-    (card) => !approvalPresentation.hidden(card),
-  );
+  const visibleInteractions = selection?.interactions.filter((card) => {
+    if (approvalPresentation.hidden(card)) return false;
+    if (!isNativeAskUserQuestion(card)) return true;
+    const key = questionDraftKey(card);
+    return (
+      !dispatchingQuestions.has(key) &&
+      !state?.interactionSubmissions.some((row) => questionDraftKey(row.interaction) === key) &&
+      !state?.answerSubmissions?.some(
+        (row) =>
+          row.scope.storeId === card.originStoreId &&
+          row.scope.sessionId === card.presentationSessionId &&
+          row.interaction.id === card.id &&
+          row.interaction.revision === card.revision,
+      )
+    );
+  });
   const pendingPlanReviews = new Set(
     preparing
       ? []
@@ -5521,22 +5548,65 @@ function NativeDesktopContent({
           answerUnavailable && !planReview
             ? undefined
             : async (_card, answer) => {
+                const backgroundQuestion = isNativeAskUserQuestion(interaction);
                 if (
                   answerUnavailable ||
-                  (planReview &&
+                  ((planReview || backgroundQuestion) &&
                     (generation.current !== answerGeneration ||
                       viewIntent.current !== answerView ||
                       selected.current !== selection.session.id))
-                )
+                ) {
+                  if (backgroundQuestion) return;
                   throw Error('interaction_observation_changed');
+                }
+                const request = {
+                  method: 'interaction.answer',
+                  generation: generation.current,
+                  interactionId: interaction.id,
+                  revision: interaction.revision,
+                  answer,
+                } as const;
+                if (backgroundQuestion) {
+                  const epoch = readLifecycle.current.epoch;
+                  setDispatchingQuestions((previous) => new Set(previous).add(draftKey));
+                  const showFailure = () => {
+                    if (
+                      isCurrentRead(answerGeneration, epoch, answerView) &&
+                      selected.current === selection.session.id
+                    )
+                      showOperationMessage('回答未保存，可以停止当前任务。');
+                  };
+                  void (async () => {
+                    try {
+                      const result = await bridge.request(request);
+                      if (result && 'status' in result && result.status === 'rejected')
+                        showFailure();
+                    } catch (cause) {
+                      if (
+                        cause instanceof Error &&
+                        /\b(?:interaction_observation_changed|interaction_answer_invalid|interaction_scope_mismatch|interaction_scope_denied|attachment_not_loaded|answer_scope_unavailable|workspace_identity_unavailable)$/.test(
+                          cause.message,
+                        )
+                      )
+                        showFailure();
+                    } finally {
+                      // Keep the dismissal until Main owns the submitted card or the read recovers.
+                      await refresh()
+                        .then(() => {
+                          setDispatchingQuestions((previous) => {
+                            if (!previous.has(draftKey)) return previous;
+                            const next = new Set(previous);
+                            next.delete(draftKey);
+                            return next;
+                          });
+                        })
+                        .catch(() => {});
+                    }
+                  })();
+                  return;
+                }
                 try {
-                  await bridge.request({
-                    method: 'interaction.answer',
-                    generation: generation.current,
-                    interactionId: interaction.id,
-                    revision: interaction.revision,
-                    answer,
-                  });
+                  await bridge.request(request);
                 } finally {
                   // Observation failure cannot turn a saved answer into a retryable failure.
                   if (planReview) await refresh().catch(() => {});
@@ -6124,7 +6194,11 @@ function NativeDesktopContent({
         ))}
       {state?.answerUnavailable && <p role="status">原答复私有记录不可用；不发送新的答复。</p>}
       {(state?.answerSubmissions ?? [])
-        .filter((submission) => diagnostics || submission.phase !== 'accepted')
+        .filter(
+          (submission) =>
+            diagnostics ||
+            (submission.interaction.kind !== 'question' && submission.phase !== 'accepted'),
+        )
         .map((submission) => (
           <div key={submission.request.commandId}>
             <p>
@@ -6161,7 +6235,12 @@ function NativeDesktopContent({
           </div>
         ))}
       {(state?.interactionSubmissions ?? [])
-        .filter((submission) => diagnostics || !['accepted', 'applied'].includes(submission.phase))
+        .filter(
+          (submission) =>
+            diagnostics ||
+            (!isNativeAskUserQuestion(submission.interaction) &&
+              !['accepted', 'applied'].includes(submission.phase)),
+        )
         .filter(
           (submission) =>
             !state?.answerSubmissions?.some(

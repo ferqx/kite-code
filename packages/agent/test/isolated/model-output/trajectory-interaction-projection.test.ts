@@ -13,13 +13,16 @@ test('actual ask_user request schema retains only original public questions and 
           options: [
             { label: '方案甲', description: '甲说明' },
             { label: '方案乙', description: '乙说明' },
+            { label: '方案丙', description: '丙说明' },
           ],
         },
         {
           question: '另一个决定？',
+          multiple: true,
           options: [
             { label: '保留', description: '保留说明' },
             { label: '调整', description: '调整说明' },
+            { label: '重做', description: '重做说明' },
           ],
         },
       ],
@@ -27,7 +30,7 @@ test('actual ask_user request schema retains only original public questions and 
     {
       requestInput: async (value: Json) => {
         request = value;
-        return { q1: 'q1-o2', q2: { text: ' 原文\n自由回答 ' } };
+        return { q1: 'q1-o2', q2: ['q2-o1', 'q2-o3'] };
       },
     } as unknown as ToolContext,
   );
@@ -35,7 +38,7 @@ test('actual ask_user request schema retains only original public questions and 
   const saved: Json = {
     kind: 'question',
     request: request!,
-    answer: { kind: 'question', answers: { q1: 'q1-o2', q2: { text: ' 原文\n自由回答 ' } } },
+    answer: { kind: 'question', answers: { q1: 'q1-o2', q2: ['q2-o1', 'q2-o3'] } },
     source: { privateProof: 'PRIVATE_SOURCE' },
   };
   const before = structuredClone(saved);
@@ -48,22 +51,25 @@ test('actual ask_user request schema retains only original public questions and 
       id: 'q1',
       question: '选择实现方式？',
       options: [
-        { id: 'q1-o1', label: '方案甲 (Recommended)', description: '甲说明' },
+        { id: 'q1-o1', label: '方案甲', description: '甲说明' },
         { id: 'q1-o2', label: '方案乙', description: '乙说明' },
+        { id: 'q1-o3', label: '方案丙', description: '丙说明' },
       ],
     },
     {
       id: 'q2',
       question: '另一个决定？',
+      multiSelect: true,
       options: [
-        { id: 'q2-o1', label: '保留 (Recommended)', description: '保留说明' },
+        { id: 'q2-o1', label: '保留', description: '保留说明' },
         { id: 'q2-o2', label: '调整', description: '调整说明' },
+        { id: 'q2-o3', label: '重做', description: '重做说明' },
       ],
     },
   ]);
   expect(result.answer).toEqual({
     kind: 'question',
-    answers: { q1: 'q1-o2', q2: { text: ' 原文\n自由回答 ' } },
+    answers: { q1: 'q1-o2', q2: ['q2-o1', 'q2-o3'] },
   });
   expect(JSON.stringify(result)).not.toContain('schema');
   expect(JSON.stringify(result)).not.toContain('PRIVATE_SOURCE');

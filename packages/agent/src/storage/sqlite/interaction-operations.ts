@@ -88,6 +88,7 @@ function schema(value: Json): ReturnType<Ajv['compile']> {
     'maximum',
     'minItems',
     'maxItems',
+    'uniqueItems',
     'description',
     'title',
   ]);
@@ -99,6 +100,23 @@ function schema(value: Json): ReturnType<Ajv['compile']> {
       if (!keywords.has(key)) throw new AgentError('question_schema_invalid');
       // Permit only the bounded, linear nonblank string constraint.
       if (key === 'pattern' && child !== '\\S') throw new AgentError('question_schema_invalid');
+      if (key === 'uniqueItems') {
+        const items = v.items;
+        // Keep unique checks bounded and on string items with cheap equality.
+        if (
+          child !== true ||
+          v.type !== 'array' ||
+          typeof v.maxItems !== 'number' ||
+          !Number.isSafeInteger(v.maxItems) ||
+          v.maxItems < 1 ||
+          v.maxItems > 32 ||
+          !items ||
+          typeof items !== 'object' ||
+          Array.isArray(items) ||
+          items.type !== 'string'
+        )
+          throw new AgentError('question_schema_invalid');
+      }
       if (key === 'properties') {
         if (!child || typeof child !== 'object' || Array.isArray(child))
           throw new AgentError('question_schema_invalid');

@@ -128,6 +128,7 @@ test.skipIf(process.platform !== 'darwin')(
                                     recommended: true,
                                   },
                                   { label: 'Other', description: 'Other first option' },
+                                  { label: 'Third', description: 'Third first option' },
                                 ],
                               },
                               {
@@ -140,6 +141,7 @@ test.skipIf(process.platform !== 'darwin')(
                                     recommended: true,
                                   },
                                   { label: 'Other', description: 'Other second option' },
+                                  { label: 'Third', description: 'Third second option' },
                                 ],
                               },
                               {
@@ -147,6 +149,7 @@ test.skipIf(process.platform !== 'darwin')(
                                 options: [
                                   { label: 'One', description: 'First third option' },
                                   { label: 'Two', description: 'Second third option' },
+                                  { label: 'Three', description: 'Third third option' },
                                 ],
                               },
                             ],

@@ -118,6 +118,7 @@ for (const carried of [true, false])
                   options: [
                     { label: 'Blue', description: 'Use Blue' },
                     { label: 'Green', description: 'Use Green' },
+                    { label: 'Red', description: 'Use Red' },
                   ],
                 },
               ],

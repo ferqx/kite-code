@@ -106,7 +106,7 @@ function PlainInteractionCard({
   const approvalOptions = readApprovalOptions(request);
   return (
     <article
-      className={structuredQuestion ? 'answer-interaction' : undefined}
+      className={structuredQuestion ? 'answer-interaction question-interaction' : undefined}
       data-answer-interaction={interaction.kind === 'question' && !mcpSourceReview ? '' : undefined}
       aria-label={structuredQuestion ? '补充问题' : `${interaction.kind} ${interaction.id}`}
     >
@@ -245,7 +245,7 @@ function QuestionAnswerForm({
     request && typeof request === 'object' && !Array.isArray(request) ? request.schema : undefined;
   // Lock synchronously: repeated Enter events in the same React render cannot send twice.
   const busy = useRef(false);
-  const form = questionForm(request);
+  const form = questionForm(request, interaction.definitionId === 'ask_user');
   async function submit(answers: unknown) {
     if (busy.current) return;
     busy.current = true;

@@ -49,6 +49,7 @@ describe('TUI PTY System — ask_user Escape', () => {
                         description: 'Use the Python runtime and ecosystem.',
                         recommended: false,
                       },
+                      { label: 'Go', description: 'Use the Go toolchain.' },
                     ],
                   },
                 ],

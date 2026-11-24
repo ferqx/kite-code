@@ -262,11 +262,20 @@ export function toolResultPresentation(input: {
     if (answers && Array.isArray(args.questions))
       view = {
         kind: 'question',
-        answers: args.questions.flatMap((item) => {
+        answers: args.questions.flatMap((item, index) => {
           const question = object(item),
-            answer = question && typeof question.id === 'string' ? answers[question.id] : undefined;
-          return question && typeof question.question === 'string' && typeof answer === 'string'
-            ? [{ question: question.question, answer }]
+            answer = answers[typeof question?.id === 'string' ? question.id : `q${index + 1}`];
+          const text =
+            typeof answer === 'string'
+              ? answer
+              : Array.isArray(answer) &&
+                  answer.length >= 1 &&
+                  answer.length <= 5 &&
+                  answer.every((label) => typeof label === 'string')
+                ? answer.join(', ')
+                : undefined;
+          return typeof question?.question === 'string' && text !== undefined
+            ? [{ question: question.question, answer: text }]
             : [];
         }),
       };

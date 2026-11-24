@@ -132,7 +132,7 @@ try {
   await wait('Choose original route', { material: true });
   await wait('First original route', { material: true });
   await wait('Second original route', { material: true });
-  await wait('First original route (Recommended)', { material: true });
+  await wait('First original route (recommended)', { material: true });
   assert.equal(material().includes('q1-o1') || material().includes('q1-o2'), false);
   await wait('Question 1/3', { material: true, ready: true });
   await wait('1 / 3', { ready: true });
@@ -142,7 +142,7 @@ try {
   await wait('No selection (Enter has no answer)', { ready: true });
   await check('blank');
   await key('\x1b[B');
-  await wait('❯ 1. First original route (Recommended)', { ready: true });
+  await wait('❯ 1. First original route (recommended)', { ready: true });
   await key('\r');
   await wait('Write original detail', { material: true });
   await wait('Question 2/3', { material: true, ready: true });
@@ -150,6 +150,7 @@ try {
   await check('route');
   await key('\x1b[B');
   await wait('❯ 1. Brief detail', { ready: true });
+  await key('\x1b[B');
   await key('\x1b[B');
   await key('\x1b[B');
   await wait('❯ Answer >', { ready: true });
@@ -163,7 +164,7 @@ try {
   await wait(pasted, { ready: true });
   await check('text-ctrl-a');
   await key('\x1b[A');
-  await wait('❯ 2. Full detail', { ready: true });
+  await wait('❯ 3. Summary', { ready: true });
   await check('custom-navigation');
   await key('\x1b[B');
   await wait('❯ Answer >', { ready: true });
@@ -206,6 +207,7 @@ try {
   await wait('3 / 3', { ready: true });
   await key('\x1b[B');
   await wait('❯ 1. Original delivery option', { ready: true });
+  await key('\x1b[B');
   await key('\x1b[B');
   await key('\x1b[B');
   await wait('❯ Answer >', { ready: true });

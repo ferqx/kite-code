@@ -12,14 +12,15 @@ function pendingRootInteraction(card: Interaction, selection: NativeSelection) {
   );
 }
 
+export function isNativeAskUserQuestion(card: Interaction): boolean {
+  return card.kind === 'question' && card.definitionId === 'ask_user';
+}
+
 export function nativeAskUserAwaitingAnswer(selection: NativeSelection | undefined): boolean {
   if (!selection) return false;
   return (
     selection.interactions.some(
-      (card) =>
-        card.kind === 'question' &&
-        card.definitionId === 'ask_user' &&
-        pendingRootInteraction(card, selection),
+      (card) => isNativeAskUserQuestion(card) && pendingRootInteraction(card, selection),
     ) || runningToolAwaitingAnswer(selection, 'ask_user')
   );
 }

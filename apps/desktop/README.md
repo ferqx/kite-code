@@ -1241,13 +1241,17 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 同一准确 Run 中相邻、已核实的 Files read2/3/4、glob2、search2/3、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
 
-默认 `ask_user` v1 的历史回执沿原成功 Execution／准确结果读取；唯一原 Model call 提供 q1–q3 的实际问题，回答保原人类选项标签与自由文本。`{cancelled:true}` 显示“已取消回答”，工具仍按实际 succeeded，Run 可继续；这不是停止任务。缺原请求不补问题，未来版本只保原文。原审批的当前接入见下一节；原记录另由[交互历史](#原交互记录只读历史)读取，所有封存／恢复组合及完整 PC 核对尚未关闭。
+默认 `ask_user` v1 的历史回执沿原成功 Execution／准确结果读取；从唯一原 Model call 读取 q1–q3 的实际问题，历史页缺该调用时可读取同一原 Execution 中匹配 `toolCallId` 的已保存参数，回答保原人类选项标签与自由文本。`{cancelled:true}` 显示“已取消回答”，工具仍按实际 succeeded，Run 可继续；这不是停止任务。请求来源缺失或冲突时保留已核实的答案，未来版本只保原文。原审批的当前接入见下一节；原记录另由[交互历史](#原交互记录只读历史)读取，所有封存／恢复组合及完整 PC 核对尚未关闭。
 
-恢复为新 Store 后，原源会话和封存 Fork 的已回答记录继续交原 ToolRow 展示。Main 核已观察 Message 的唯一原 Execution、原 Session／Run、明确封存的 Store 及终态／准确结果；原问题只从同一原 Store／Session／Run 中唯一较早的 Model call 取得，不把当前准入 Store 当作原出处。封存记录不读来源 Run 的后来状态，也不提供原授权或回答入口；当前活动工具与回答资格仍由原独立入口控制。恢复后的封存 Model 用量同样只核原成功 Execution，不借来源 Run 的后来状态补历史。
+恢复为新 Store 后，原源会话和封存 Fork 的已回答记录继续交原 ToolRow 展示。Main 核已观察 Message 的唯一原 Execution、原 Session／Run、明确封存的 Store 及终态／准确结果；原问题来自同一原 Store／Session／Run 中唯一较早的 Model call，或与原回执准确绑定的 Execution 参数，不把当前准入 Store 当作原出处。封存记录不读来源 Run 的后来状态，也不提供原授权或回答入口；当前活动工具与回答资格仍由原独立入口控制。恢复后的封存 Model 用量同样只核原成功 Execution，不借来源 Run 的后来状态补历史。
 
 [安装版问答回归](test/isolated/native-restored-questionnaire-bundle.test.ts)使用默认 installed Main／Service／preload 与原 Questionnaire，保存一次选项和完整 Unicode／换行自由文本，再明确 Fork、退出并通过包内 CLI 备份恢复为新 Store。三个真实 macOS 窗口核源会话／分支的原问题、答案、Message／Execution／Run／Store、首次与冷读及切换清理；原回答 POST 仅一次、Provider 两次，读取 POST 与封存来源 Run GET 均为零，三次 Service 普通退出及双层 EX 可取。当前结果为 1pass／24Bun断言及全部 Node 流程／79.14秒；[Core 冷出处](../../packages/agent/test/isolated/context/restored-origin.test.ts)、[投影](../service/test/message-response.test.ts)与上述 Main／原 DOM 提供各自范围的证据，准确输入和失败归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09恢复后已保存问答回执)。本片不扩展取消回答、审批、通用交互历史的全部恢复组合或完整 PC 资格，公共 schema、原 UI 与持久格式保持。
 
 取舍见[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)。[Main／有限 IPC](test/native-tool-messages.test.ts)、[正式 caller](test/native-caller.test.ts)和[原 Conversation DOM](test/isolated/native-transcript-dom.test.tsx)核身份、所属读取、原展开／复制及问答；原[源码外 macOS 窗口](test/isolated/native-bundle.test.ts)核首次和冷读的折叠、展开与准确最终复制，保原预算和退出断言。实际执行输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)，有限展示证据不代替完整恢复、其他平台或整片独立审查。
+
+2026-11-24，单题 `ask_user` 回执在历史页省略原 Model call 时曾只显示答案。Main 在原 Tool 结果内容核实后，可直接从匹配的已保存执行参数取题；延迟正文用已通过长度与摘要校验的原结果解码。回归覆盖缺页、冲突调用、封存和已展开行收到题目后保留原展开状态。Windows Chromium 150% 隔离验证从真实工具生成的单题结果经过 Main 回执投影，展开、收起和重开均显示原题与答案。截图位于本机 `.cache/questionnaire-history-title/`，未复验安装版 Electron。
+
+单题题目显示在工具行，展开区显示答复。多题展开区逐题显示题目和答复。Windows Chromium 150% 的 900px 与 380px 视口对照核对展开、收起和重开，单题答复相对工具行标题的缩进由 26 CSS px 降为 4 CSS px。截图位于本机 `.cache/questionnaire-history-compact/`。
 
 ## 会话消息渲染验证
 
@@ -2006,7 +2010,7 @@ Skills 详情按名称、简介、独立滚动的 Markdown 正文及来源展示
 
 ## Native 普通问题与页面草稿
 
-普通问卷使用[共享卡片](../../packages/ui/src/questionnaire.tsx)。题头包含题目、可切换的题号和末题待答数，完整选项说明随可用宽度排列。选项和自由输入区域限制高度并独立滚动，翻页和提交位于底部操作栏。会话底部区域根据可用高度收敛，给聊天正文留出阅读空间。默认作答区不显示 `question · pending`、执行 ID 或原请求 JSON，失败和未知答复仍保留中文状态及原命令查询。普通页不在输入框上方重复显示 `轮次：failed`；历史上下文来源错误显示可读原因，原代码保留在失败记录中。
+普通问卷使用[共享卡片](../../packages/ui/src/questionnaire.tsx)。题头包含题目、可切换的题号和末题待答数，完整选项说明随可用宽度排列。选项和自由输入区域限制高度并独立滚动，翻页和提交位于底部操作栏。会话底部区域根据可用高度收敛，给聊天正文留出阅读空间。默认作答区不显示 `question · pending`、执行 ID 或原请求 JSON，普通 `ask_user` 提交时收起问卷，保存和回执核对沿原命令在后台处理。已确认的工具执行异常沿原工具结果显示。普通页不在输入框上方重复显示 `轮次：failed`；历史上下文来源错误显示可读原因，原代码保留在失败记录中。
 
 根 `desktop` 选择的 [Native renderer](src/native.tsx)消费共享 Questionnaire。普通问题等待期间保留同一会话的主输入表单和草稿。问卷通过原 `interaction.answer` 提交，取消回答提交原 schema 的 null，同一 Run 收到取消信息后继续。等待 `ask_user` 答案时，[主输入准入](src/native-input.ts)阻止发送，Composer 的同一个按钮在原任务可停止时提供 `command.cancel`。待决页暂时省略该卡，且原 Run 和 `ask_user` 执行仍在等候时，继续保留门禁。确认问卷结束后，主输入恢复现有发送准入，草稿等待用户手动发送。计划答复和 MCP 来源／凭据使用原交互呈现。跨会话未发送文本按原 Store／Session 页面缓存保留，并沿私有草稿读取链自动持久化与恢复。普通界面不提供显式保存按钮。未知／失败回答保留原意图，只查询原 Command，不再次 POST。
 
@@ -2051,6 +2055,22 @@ renderer 的页面 Map 分别保存步骤与 JSON fallback 草稿，身份固定
 同日增加 `ask_user` 待答发送门禁和末项“自定义输入”后，Windows x64 的隔离 Native 渲染器在 Chrome 157 复验深浅主题各 1200×850、470×560。输入和切换会话保留原草稿，待答、答复提交中及未知回执期间，Enter 和主表单提交均为零主输入请求。原答复结束后，同一按钮恢复发送，原草稿经明确操作才进入原 Run 的队列。待答期间用该按钮停止任务，核对原活动 Command、零问卷提交和草稿保留。浏览器另核最后一项、鼠标聚焦及原多行自定义值，过程记录在本机 `.cache/questionnaire-waiting-input-20261111/`。8 项定向回归和两 workspace 类型检查通过，本轮使用隔离测试桥，未复验安装版 Electron 或真实模型。
 
 同日调整问卷高度后，Windows x64 的隔离 Native 渲染器在 Chrome 157 复验深浅主题。同一份问卷的首题在 1200×850 窗口中从 343 px 降至 196 px，在 470×560 窗口中从 309 px 降至 203 px，聊天正文分别多出 149 px 和 109 px。窄窗末题的自定义输入、待答数和底部操作同屏可见。另核对长选项滚动、长主草稿下通过滚轮到达问卷操作、翻题焦点、原阅读位置及答复失败和未知回执的恢复。过程和截图在本机 `.cache/questionnaire-compact-20261111/`。5 项定向回归及 UI、Desktop 两个 workspace 类型检查通过。此次使用隔离测试桥，未复验安装版 Electron 或真实模型。
+
+2026-11-24，Windows Chromium 隔离渲染器以生产样式验证深浅主题、1.5 倍设备像素比例及 1200×760、470×560 两种视口。问卷与主输入区同宽，窄窗保留题头左右箭头和底部主操作，选项较长时在卡片内滚动。连续核对悬停、选中、键盘焦点、翻题与首尾禁用、待答数、自定义草稿恢复、提交反馈和主输入保留。问卷、审批及计划审阅的 10 项定向 DOM 回归通过。截图位于本机 `.cache/questionnaire-surface/polished/`。本轮未复验安装版 Electron 或真实模型。
+
+同日以同一隔离渲染范围验证问卷行内输入和选项区限高。1200×760 中五项同屏，470×560 中选项独立滚动，题头和底部操作未被选项遮盖。鼠标与键盘均可进入无独立边框的行内输入，多行内容扩展选项行，翻题后保留原回答。截图位于本机 `.cache/questionnaire-surface/inline-custom/`，6 项定向 DOM 回归通过。
+
+同日以实际工具生成的 schema 和生产样式，在 1.5 倍设备像素比例的 Windows Chromium 隔离渲染器复验 1200×760、470×560 的深浅主题。混合问卷首题显示「可多选」和复选框，逐项勾选、翻到单选题及返回时保留已选值，提交一次返回原多选 ID 数组与单选 ID，确认后关闭问卷。截图位于本机 `.cache/questionnaire-surface/multiple/`。原生问答历史定向用例核对多选文案。未复验安装版 Electron 或真实模型。
+
+同一验证环境使用新的多选 schema 核对「自定义输入」复选项。选中后鼠标焦点进入同一行的输入框，勾选和取消保留其他已选项，重新勾选及翻题回来保留原输入。宽窗验证组合提交，窄窗验证仅自定义提交，确认后关闭问卷。单选题仍使用原单选控件。截图位于本机 `.cache/questionnaire-surface/combined-custom/`。
+
+同一环境对照修复前后首次键入、移动文本光标及 Tab 往返。编辑时输入区及所在行均无描边，键盘回到复选框时恢复选项焦点轮廓。展开与收起已保存问答时，题目与答案只用一个冒号分隔，自定义原文中的标点保留。窗口验证截图位于本机 `.cache/questionnaire-surface/inline-focus-fixed/`。
+
+后续补查首次键入前与清空后的光标。Windows Chromium 150% 缩放下，宽窗修复前空白光标 12 个设备像素、输入后 25 个。修复后在 1200×760、470×560 的深浅主题中，同一窗口内空白、首个拉丁字符、汉字及清空后的光标高度和位置一致，光标为 25 或 26 个设备像素。100% 缩放对照为 17 个。复选框表示多选，问卷省略独立提示和题末的重复提示。截图见本机 `.cache/questionnaire-caret/caret-fixed/`。
+
+行内输入扩展到选择控件右侧全宽后，在同一矩阵核对点击输入区末端、Tab 往返、空白占位文字和光标几何。五组均维持原光标高度和编辑区无描边。截图见本机 `.cache/questionnaire-caret/full-row/`。
+
+[Native 问卷回归](test/native-questionnaire-dom.test.tsx)暂扣提交回执，逐步核对点击即收起、切到另一会话仍只查原命令、返回原会话时无等待文案、准确接纳后保留主输入草稿且只提交一次。[工具消息回归](../../packages/ui/test/isolated/desktop-tool-aggregation.test.tsx)核单题原题和答复一起显示。此处使用隔离渲染器和受控 bridge，未复验安装版 Electron。
 
 ## Native 计划入口与完整审核
 

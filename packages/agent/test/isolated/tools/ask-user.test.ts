@@ -16,6 +16,7 @@ const question: { question: string; options: Record<string, Json>[] } = {
   options: [
     { label: '  First  ', description: '  First explanation  ' },
     { label: 'Second', description: 'Second explanation' },
+    { label: 'Third', description: 'Third explanation' },
   ],
 };
 const input = { questions: [question] };
@@ -144,12 +145,7 @@ test('canonical parser rejects removed fields, invalid cardinality, whitespace, 
       questions: [
         {
           ...question,
-          options: [
-            question.options[0]!,
-            question.options[1]!,
-            question.options[0]!,
-            question.options[1]!,
-          ],
+          options: [...question.options, question.options[0]!, question.options[1]!],
         },
       ],
     },
@@ -157,16 +153,17 @@ test('canonical parser rejects removed fields, invalid cardinality, whitespace, 
       questions: [
         {
           ...question,
-          options: [{ label: 'A', description: 'a', id: 'old' }, question.options[1]!],
+          options: [{ label: 'A', description: 'a', id: 'old' }, ...question.options.slice(1)],
         },
       ],
     },
     { questions: [{ ...question, allowFreeText: true }] },
+    { questions: [{ ...question, multiple: 'true' }] },
     { questions: [{ ...question, question: '  ' }] },
-    { questions: [{ ...question, options: [question.options[0]!] }] },
+    { questions: [{ ...question, options: question.options.slice(0, 2) }] },
     {
       questions: [
-        { ...question, options: [{ label: 'A', description: ' ' }, question.options[1]!] },
+        { ...question, options: [{ label: 'A', description: ' ' }, ...question.options.slice(1)] },
       ],
     },
     {
@@ -215,7 +212,15 @@ test('real Core/SQLite asks all questions in one original interaction and return
   const f = await fixture({
     questions: [
       question,
-      { ...question, question: 'Other decision?' },
+      {
+        ...question,
+        question: 'Other decision?',
+        options: [
+          { ...question.options[0]!, recommended: false },
+          ...question.options.slice(1),
+          { label: 'Fourth', description: 'Fourth explanation', recommended: true },
+        ],
+      },
       { ...question, question: 'Third?' },
     ],
   });
@@ -223,6 +228,7 @@ test('real Core/SQLite asks all questions in one original interaction and return
     const record = await f.pending();
     expect(record.kind).toBe('question');
     expect(record.request).toMatchObject({
+      recommendedOptions: { q2: 'q2-o4' },
       schema: {
         oneOf: [
           {
@@ -234,13 +240,18 @@ test('real Core/SQLite asks all questions in one original interaction and return
                 anyOf: [
                   {
                     const: 'q1-o1',
-                    title: 'First (Recommended)',
+                    title: 'First',
                     description: 'First explanation',
                   },
                   {
                     const: 'q1-o2',
                     title: 'Second',
                     description: 'Second explanation',
+                  },
+                  {
+                    const: 'q1-o3',
+                    title: 'Third',
+                    description: 'Third explanation',
                   },
                   {
                     type: 'object',
@@ -282,20 +293,75 @@ test('real Core/SQLite asks all questions in one original interaction and return
       expect(pending?.answer).toBeNull();
     }
     const free = '  q1-o1\n雪\r\n  ';
-    await f.answer(record, { q1: 'q1-o2', q2: { text: free }, q3: 'q3-o1' });
+    await f.answer(record, { q1: 'q1-o2', q2: 'q2-o4', q3: { text: free } });
     await f.runtime.waitForCommand('work');
     const result = (await f.store.getExecution(record.executionId))
       ?.result as unknown as ToolResult;
     expect(result).toMatchObject({
       outcome: 'succeeded',
       details: {
-        answer: `Which approach?: Second\nOther decision?: ${free}\nThird?: First`,
-        answers: { q1: 'Second', q2: free, q3: 'First' },
+        answer: `Which approach?: Second\nOther decision?: Fourth\nThird?: ${free}`,
+        answers: { q1: 'Second', q2: 'Fourth', q3: free },
       },
     });
     expect(JSON.parse(result!.content)).toEqual(result!.details);
     expect((await f.interactions()).interactions).toHaveLength(1);
     expect(f.model.requests).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+}, 10000);
+
+test('mixed selection modes save distinct IDs and deliver the selected labels to the Model', async () => {
+  const multiple = { ...question, multiple: true };
+  const f = await fixture({
+    questions: [
+      { ...question, question: 'Which approach?：' },
+      { ...multiple, question: 'Which approach?: ：' },
+      multiple,
+    ],
+  });
+  try {
+    const record = await f.pending();
+    const invalid: Json[] = [
+      [],
+      ['q2-o1', 'q2-o1'],
+      ['q2-o9'],
+      'q2-o1',
+      { choices: ['q2-o1'], text: ' \n ' },
+      { choices: ['q2-o1', 'q2-o1'], text: 'Additional' },
+      { choices: ['q2-o9'], text: 'Additional' },
+      { choices: ['q2-o1'] },
+    ];
+    for (const [index, q2] of invalid.entries()) {
+      let error: unknown;
+      try {
+        await f.answer(
+          record,
+          { q1: 'q1-o2', q2, q3: { text: 'Other' } },
+          `invalid-multi-${index}`,
+        );
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error).toMatchObject({ code: 'interaction_answer_invalid' });
+    }
+    const text = '  附加🪁： :原文\n第二行  ';
+    const answers = {
+      q1: 'q1-o2',
+      q2: { choices: ['q2-o3', 'q2-o1'], text },
+      q3: { text: 'Only custom' },
+    };
+    await f.answer(record, answers);
+    await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+    expect((await f.interactions()).interactions[0]?.answer).toEqual({ kind: 'question', answers });
+    expect((await f.store.getExecution(record.executionId))?.result).toMatchObject({
+      outcome: 'succeeded',
+      details: {
+        answer: `Which approach?: Second\nWhich approach?: Third, First, ${text}\nWhich approach?: Only custom`,
+        answers: { q1: 'Second', q2: ['Third', 'First', text], q3: 'Only custom' },
+      },
+    });
   } finally {
     await f.close();
   }
@@ -429,7 +495,7 @@ test('real canonical-invalid zero questions are rejected before any original que
   }
 }, 10000);
 
-test('no explicit recommendation marks only the first option without selecting a default or answering for the user', async () => {
+test('omitted recommendations keep all original labels without marking an option', async () => {
   let request: Json | undefined;
   const response = await tool.execute(
     {
@@ -439,6 +505,7 @@ test('no explicit recommendation marks only the first option without selecting a
           options: [
             { label: 'A', description: 'a' },
             { label: 'B', description: 'b' },
+            { label: 'C', description: 'c' },
           ],
         },
       ],
@@ -451,6 +518,7 @@ test('no explicit recommendation marks only the first option without selecting a
     } as unknown as ToolContext,
   );
   expect(request).toEqual({
+    recommendedOptions: {},
     schema: {
       oneOf: [
         {
@@ -459,8 +527,9 @@ test('no explicit recommendation marks only the first option without selecting a
             q1: {
               title: 'Choice?',
               anyOf: [
-                { const: 'q1-o1', title: 'A (Recommended)', description: 'a' },
+                { const: 'q1-o1', title: 'A', description: 'a' },
                 { const: 'q1-o2', title: 'B', description: 'b' },
+                { const: 'q1-o3', title: 'C', description: 'c' },
                 {
                   type: 'object',
                   properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
@@ -515,6 +584,20 @@ test('only the exact original cancel_requested exception becomes a cancelled res
   }
 });
 
+test('a confirmed question execution error is returned as the original tool result', async () => {
+  const tool = createAskUserExtension().tools![0]!;
+  const context = {
+    signal: new AbortController().signal,
+    requestInput: async () => {
+      throw new AgentError('interaction_answer_invalid');
+    },
+  } as unknown as ToolContext;
+  expect(await tool.execute({ questions: [question] }, context)).toEqual({
+    outcome: 'failed',
+    content: 'interaction_answer_invalid',
+  });
+});
+
 test('saved Question cancellation evidence must match this exact current Tool and Run', async () => {
   const record = {
     kind: 'question',
@@ -555,12 +638,12 @@ test('saved Question cancellation evidence must match this exact current Tool an
   }
 });
 
-test('retired option recommendation fields fail public schema with zero questions and allows the next Model response', async () => {
+test('a non-boolean recommendation fails public schema with zero questions and allows the next Model response', async () => {
   const f = await fixture({
     questions: [
       {
         ...question,
-        options: question.options.map((option) => ({ ...option, recommended: true })),
+        options: [{ ...question.options[0]!, recommended: 'yes' }, ...question.options.slice(1)],
       },
     ],
   });

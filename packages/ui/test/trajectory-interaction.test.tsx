@@ -65,6 +65,30 @@ test('answers without original questions use exact saved keys once and preserve 
   page.window.close();
 });
 
+test('saved custom text and checked options show together without interpreting free text as an ID', () => {
+  const page = render({
+    request: {
+      questions: [
+        {
+          id: 'q1',
+          question: '导出格式',
+          multiSelect: true,
+          options: [
+            { id: 'q1-o1', label: 'PDF' },
+            { id: 'q1-o2', label: 'Word' },
+          ],
+        },
+      ],
+    },
+    answer: { kind: 'question', answers: { q1: { choices: ['q1-o1'], text: 'q1-o2' } } },
+  });
+  const heading = section(page, '导出格式').querySelector('h4')!;
+  expect(heading.nextElementSibling?.textContent).toBe('PDF');
+  expect(heading.nextElementSibling?.nextElementSibling?.textContent).toBe('q1-o2');
+  expect(page.window.document.querySelectorAll('pre')).toHaveLength(0);
+  page.window.close();
+});
+
 test('an empty saved answer object without original questions remains distinct from a missing answer', () => {
   const data = { request: {}, answer: { kind: 'question', answers: {} } };
   const page = render(data);

@@ -8,6 +8,7 @@ import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation'
 import {
   type QuestionDraft,
   type QuestionForm,
+  questionEditingText,
   questionLengthError,
   questionValue,
 } from './question';
@@ -18,6 +19,7 @@ export const questionInputWidth = (columns: number | undefined, answerLabel: str
 /** Original question material is fixed for one displayed step. */
 export function QuestionMaterial({ form, step }: { form: QuestionForm; step: number }) {
   const { t } = useTuiPresentation();
+  const { t: translate } = useInkI18n();
   const field = form.fields[step]!;
   return (
     <Box flexDirection="column">
@@ -32,6 +34,7 @@ export function QuestionMaterial({ form, step }: { form: QuestionForm; step: num
         <Box key={i} flexDirection="column">
           <Text>
             {i + 1}. {terminalText(choice.title)}
+            {choice.recommended ? ` ${translate('common.recommended')}` : ''}
           </Text>
           {choice.description && <Text>{terminalText(choice.description)}</Text>}
         </Box>
@@ -57,14 +60,17 @@ export function QuestionMaterial({ form, step }: { form: QuestionForm; step: num
 export function TuiAnswerInput({
   buffer,
   label = 'Answer',
+  checkedChoice = false,
 }: {
   buffer: ComposerBuffer;
   label?: string;
+  checkedChoice?: boolean;
 }) {
   const { t } = useTuiPresentation();
   const { stdout } = useStdout();
-  const prefix = `${t(label)} > `;
-  const width = questionInputWidth(stdout.columns, t(label));
+  const inputLabel = checkedChoice ? `[x] ${t('Custom answer')}` : t(label);
+  const prefix = `${inputLabel} > `;
+  const width = questionInputWidth(stdout.columns, inputLabel);
   const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const { lines, index } = buffer.row(width, display),
     start = Math.max(0, index - 2),
@@ -116,16 +122,17 @@ export function QuestionPanel({
   const { t: translate } = useInkI18n();
   const field = form.fields[draft.step]!,
     current = draft.fields[draft.step]!;
-  const editing =
-    field.text && (!field.choices.length || current.selected === field.choices.length);
+  const editing = questionEditingText(field, current);
+  const customChecked = current.selected === field.choices.length;
   const lengthError = questionLengthError(field, current.buffer.text);
   const frozen = submission !== undefined && submission !== 'rejected';
+  const cursor = field.multiple ? current.cursor : current.selected;
   const options = [
     ...field.choices.map((choice, index) => ({
       id: String(index),
       label: providerAction
         ? terminalText(choice.title)
-        : `${index + 1}. ${terminalText(choice.title)}`,
+        : `${field.multiple ? (current.selectedChoices?.includes(index) ? '[x] ' : '[ ] ') : ''}${index + 1}. ${terminalText(choice.title)}${choice.recommended ? ` ${translate('common.recommended')}` : ''}`,
       description:
         !compactMaterial && choice.description ? terminalText(choice.description) : undefined,
     })),
@@ -133,9 +140,14 @@ export function QuestionPanel({
       ? [
           {
             id: String(field.choices.length),
-            label: translate('input.other'),
+            label: field.textWithChoices
+              ? `${customChecked ? '[x]' : '[ ]'} ${t('Custom answer')}`
+              : translate('input.other'),
             separatorBefore: true,
-            selectedContent: <TuiAnswerInput buffer={current.buffer} />,
+            selectedContent:
+              !field.multiple || editing ? (
+                <TuiAnswerInput buffer={current.buffer} checkedChoice={field.textWithChoices} />
+              ) : undefined,
           },
         ]
       : []),
@@ -157,6 +169,9 @@ export function QuestionPanel({
             shortcuts={[
               ...(field.choices.length
                 ? [{ keys: '↑↓', label: translate('common.navigate') }]
+                : []),
+              ...(field.multiple && !editing
+                ? [{ keys: 'Space', label: translate('input.toggleChoice') }]
                 : []),
               {
                 keys: 'Enter',
@@ -191,15 +206,16 @@ export function QuestionPanel({
         <Box marginTop={1}>
           <OverlayChoiceList
             options={options}
-            selectedId={current.selected === undefined ? undefined : String(current.selected)}
+            selectedId={cursor === undefined ? undefined : String(cursor)}
           />
         </Box>
       ) : (
         <TuiAnswerInput buffer={current.buffer} />
       )}
-      {!frozen && current.selected === undefined && field.choices.length > 0 && (
-        <Text dimColor>{t('No selection (Enter has no answer)')}</Text>
-      )}
+      {!frozen &&
+        current.selected === undefined &&
+        !current.selectedChoices?.length &&
+        field.choices.length > 0 && <Text dimColor>{t('No selection (Enter has no answer)')}</Text>}
       {!frozen && (form.alternative || permissionsAvailable) && (
         <Text>
           {form.alternative && <>Alt+A: {terminalText(form.alternative.title)}</>}
@@ -282,11 +298,20 @@ export function QuestionReviewPanel({
             <Text>
               {answer === undefined
                 ? t('Answer unavailable')
-                : choice
-                  ? terminalText(choice.title)
-                  : current.skipped
-                    ? t('Skipped')
-                    : terminalText(current.buffer.text)}
+                : field.multiple && current.selectedChoices?.length
+                  ? [
+                      ...current.selectedChoices.map((index) =>
+                        terminalText(field.choices[index]!.title),
+                      ),
+                      ...(field.textWithChoices && current.selected === field.choices.length
+                        ? [terminalText(current.buffer.text)]
+                        : []),
+                    ].join(', ')
+                  : choice
+                    ? terminalText(choice.title)
+                    : current.skipped
+                      ? t('Skipped')
+                      : terminalText(current.buffer.text)}
             </Text>
           </Box>
         );

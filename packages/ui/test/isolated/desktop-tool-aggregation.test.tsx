@@ -1389,11 +1389,72 @@ test('question receipts keep their answers while failed question tools retain th
     const rows = host.querySelector('.tool-activity-steps')!.children;
     expect(host.textContent).not.toContain('QUESTION_TOOL_FAILURE');
     await click(rows[0]!.querySelector('.tool-activity-summary')!);
-    expect(rows[0]!.querySelector('.tool-ask-answers')?.textContent).toContain('原答复');
+    expect(rows[0]!.querySelector('.tool-activity-summary')?.textContent).toContain('原问题');
+    expect(
+      Array.from(rows[0]!.querySelectorAll('.tool-ask-text'), (node) => node.textContent),
+    ).toEqual(['原答复']);
     await click(rows[1]!.querySelector('.tool-activity-summary')!);
     expect(rows[1]!.querySelector('.tool-detail')?.textContent).toBe('QUESTION_TOOL_FAILURE');
     expect(rows[0]!.querySelector('.tool-ask-answers')?.textContent).toContain('原答复');
   });
+});
+
+test('question summaries normalize only the title separator and preserve custom answer punctuation', () => {
+  const text = '用户说： :原样保留\n下一行';
+  const summary = `选择颜色：: ${text}\n选择饮品: 茶, 苹果汁`;
+  const answers = { q1: text, q2: '茶, 苹果汁' };
+  const base = { ...tool('answered', 'completed'), toolName: 'ask_user' };
+  const variants: [Message, string[]][] = [
+    [
+      {
+        ...base,
+        ask: {
+          questions: [
+            { id: 'q1', question: '选择颜色： :' },
+            { id: 'q2', question: '选择饮品:' },
+          ],
+          answers,
+        },
+      },
+      [`选择颜色：${text}`, '选择饮品：茶, 苹果汁'],
+    ],
+    [
+      { ...base, ask: { questions: [], summary, answers } },
+      [`选择颜色: ${text}\n选择饮品: 茶, 苹果汁`],
+    ],
+    [
+      {
+        ...base,
+        toolResult: {
+          ok: true,
+          stdout: JSON.stringify({ answer: summary, answers: { q1: text, q2: ['茶', '苹果汁'] } }),
+        },
+      },
+      [`选择颜色: ${text}\n选择饮品: 茶, 苹果汁`],
+    ],
+  ];
+  for (const [message, expected] of variants) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <ToolActivity
+          messages={[message]}
+          expanded
+          onToggle={() => {}}
+          renderChildren={() => null}
+        />,
+      ),
+    );
+    try {
+      expect(
+        Array.from(
+          dom.window.document.querySelectorAll('.tool-ask-text'),
+          (node) => node.textContent,
+        ),
+      ).toEqual(expected);
+    } finally {
+      dom.window.close();
+    }
+  }
 });
 
 for (const initial of ['queued', 'running'] as const)

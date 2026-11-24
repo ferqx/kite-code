@@ -2014,11 +2014,59 @@ test('restored source and sealed Fork ask_user receipts preserve the original qu
     expect(sealed.entries[0]!.ask).toEqual(direct.entries[0]!.ask);
     expect(sealed.entries[0]!.authorization).toBeUndefined();
     expect(message.originMessage!.storeId).toBe('original-store');
-    expect(f.reads).toEqual([execution.id, execution.id]);
+    execution.toolCallId = message.toolCallId;
+    execution.toolInput = { questions };
+    f.messages.delete(call.id);
+    expect((await f.list([message.id])).entries[0]!.ask).toEqual(direct.entries[0]!.ask);
+    expect(f.reads).toEqual([execution.id, execution.id, execution.id]);
   } finally {
     f.manager.release();
   }
 });
+test('a single ask_user receipt recovers its original title when the Model call is outside the history page', async () => {
+  const f = fixture();
+  f.add('one-question', 'succeeded', 'one-question', 'ask_user');
+  const message = f.messages.get('one-question')!;
+  const originalCall = f.messages.get('call-one-question')!;
+  const execution = f.executions.get('execution-one-question')!;
+  const question = '你希望采用哪些方案？';
+  const options = ['方案一', '方案二', '方案三'].map((label) => ({ label, description: label }));
+  const input = { questions: [{ question, options, multiple: true }] };
+  const labels = options.map(({ label }) => label);
+  const result = JSON.stringify({ answer: labels.join(', '), answers: { q1: labels } });
+  const expected = {
+    questions: [{ id: 'q1', question }],
+    summary: labels.join(', '),
+    answers: { q1: labels.join(', ') },
+  };
+  message.content = result;
+  execution.result = { outcome: 'succeeded', content: result };
+  execution.toolCallId = message.toolCallId;
+  execution.toolInput = input;
+  f.messages.delete(originalCall.id);
+
+  expect((await f.list([message.id])).entries[0]!.ask).toEqual(expected);
+  message.content = result.slice(0, 15);
+  message.deferredText = {
+    bytes: String(Buffer.byteLength(result)),
+    sha256: createHash('sha256').update(result).digest('hex'),
+  };
+  expect((await f.list([message.id])).entries[0]!.ask).toEqual(expected);
+
+  originalCall.toolCalls![0]!.arguments = JSON.stringify(input);
+  f.messages.set(originalCall.id, originalCall);
+  expect((await f.list([message.id])).entries[0]!.ask).toEqual(expected);
+  originalCall.toolCalls![0]!.arguments = JSON.stringify({
+    questions: [{ ...input.questions[0], question: '另一个问题' }],
+  });
+  expect((await f.list([message.id])).entries[0]!.ask?.questions).toEqual([]);
+  originalCall.toolCalls!.push({ ...originalCall.toolCalls![0]! });
+  expect((await f.list([message.id])).entries[0]!.ask?.questions).toEqual([]);
+  f.messages.delete(originalCall.id);
+  execution.toolCallId = 'other-call';
+  expect((await f.list([message.id])).entries[0]!.ask?.questions).toEqual([]);
+});
+
 test('known ask_user receipts keep the actual human answer and information cancellation; an ambiguous request or future version cannot invent question ownership', async () => {
   const f = fixture();
   const questions = [
@@ -2055,6 +2103,28 @@ test('known ask_user receipts keep the actual human answer and information cance
   ]);
   expect(answered.ask?.answers).toEqual({ q1: '保留原代码', q2: ' 原文 雪🙂\r\n' });
   expect(answered.status).toBe('succeeded');
+  set('answered-multiple', {
+    answer: '选择主线 雪🙂: 保留原代码, 继续阅读, 测试, 文档, 补充原文\n补充约束: macOS',
+    answers: { q1: ['保留原代码', '继续阅读', '测试', '文档', '补充原文'], q2: 'macOS' },
+  });
+  f.messages.get('call-answered-multiple')!.toolCalls![0]!.arguments = JSON.stringify({
+    questions: [
+      {
+        ...questions[0],
+        multiple: true,
+        options: [
+          ...questions[0]!.options,
+          { label: '测试', description: '验证' },
+          { label: '文档', description: '说明' },
+        ],
+      },
+      questions[1],
+    ],
+  });
+  expect((await f.list(['answered-multiple'])).entries[0]!.ask?.answers).toEqual({
+    q1: '保留原代码, 继续阅读, 测试, 文档, 补充原文',
+    q2: 'macOS',
+  });
   set('cancelled-info', { cancelled: true });
   const cancelled = (await f.list(['cancelled-info'])).entries[0]!;
   expect(cancelled.ask?.cancelled).toBe(true);

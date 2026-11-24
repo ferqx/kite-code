@@ -26,6 +26,7 @@ const questions: Json = {
       options: [
         { label: 'q1-o2', description: 'Exact label', recommended: true },
         { label: 'Second', description: 'Other' },
+        { label: 'Third', description: 'Third choice' },
       ],
     },
     {
@@ -33,13 +34,16 @@ const questions: Json = {
       options: [
         { label: 'One', description: 'One' },
         { label: 'Two', description: 'Two' },
+        { label: 'Three', description: 'Three' },
       ],
     },
     {
       question: 'Unicode?',
+      multiple: true,
       options: [
         { label: 'Yes', description: 'Y' },
         { label: 'No', description: 'N' },
+        { label: 'Unsure', description: 'Undecided' },
       ],
     },
   ],
@@ -188,7 +192,11 @@ async function fixture() {
   };
 }
 
-const answers = { q1: 'q1-o1', q2: { text: 'q2-o1' }, q3: { text: '  雪🪁\n第二行  ' } };
+const answers = {
+  q1: 'q1-o1',
+  q2: { text: 'q2-o1' },
+  q3: { choices: ['q3-o2'], text: '  雪🪁\n第二行  ' },
+};
 async function read(card: Interaction, text: string) {
   const stdio = createStdioInteractionHandler({ input: Readable.from([text]), write() {} });
   try {
@@ -305,8 +313,8 @@ test('real default Service and CLI stdio retain invalid pending then deliver exa
     expect(saved.answer).toEqual({ kind: 'question', answers });
     expect(saved.acceptedDecisionRevision).not.toBeNull();
     const semantic = {
-      answer: 'First?: q1-o2\nFree?: q2-o1\nUnicode?:   雪🪁\n第二行  ',
-      answers: { q1: 'q1-o2', q2: 'q2-o1', q3: answers.q3.text },
+      answer: `First?: q1-o2\nFree?: q2-o1\nUnicode?: No, ${answers.q3.text}`,
+      answers: { q1: 'q1-o2', q2: 'q2-o1', q3: ['No', answers.q3.text] },
     };
     const messages = f.requests[1]!.messages as { role: string; content: string }[];
     expect(JSON.parse(messages.find((message) => message.role === 'tool')!.content)).toEqual(
@@ -345,6 +353,28 @@ for (const [schema, value, accepted] of [
   [{ oneOf: [{ const: 'id' }, { type: 'string' }] }, 'id', false],
   [{ oneOf: [{ const: 'id' }, { const: 'other' }] }, 'id', true],
   [{ anyOf: [{ const: 'id' }, { type: 'string' }] }, 'id', true],
+  [
+    {
+      type: 'array',
+      items: { type: 'string', enum: ['a', 'b'] },
+      minItems: 1,
+      maxItems: 2,
+      uniqueItems: true,
+    },
+    ['b', 'a'] as string[],
+    true,
+  ],
+  [
+    {
+      type: 'array',
+      items: { type: 'string', enum: ['a', 'b'] },
+      minItems: 1,
+      maxItems: 2,
+      uniqueItems: true,
+    },
+    ['a', 'a'],
+    false,
+  ],
   [{ const: { a: 1, b: 2 } }, { b: 2, a: 1 }, true],
   [
     {

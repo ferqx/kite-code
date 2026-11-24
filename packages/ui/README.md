@@ -549,11 +549,11 @@ Conversation 在调用宿主 `renderMessage` 之前统一排除 thinking、timin
 
 设置动作图标由 [SettingsActionIcon](src/desktop/SettingsActionIcon.tsx)统一使用共享图标库；[DropdownMenu](src/desktop/components/ui/dropdown-menu.tsx)公开普通菜单项和分隔线，Content 可指定 Portal container，使设置内的菜单留在所属 Dialog 的焦点及 Escape 边界内。宿主决定菜单内容与业务资格，公共组件不建立连接或授权。
 
-普通问题共用中立的 [原 schema 解析器](src/question.ts)。DOM [Questionnaire](src/questionnaire.tsx) 为完整可表达的标量或浅 object 提供单选、闭合自由输入与多步骤；可以先浏览未回答的题目，最终明确点击提交时才发送完整答案。原字段和 choice 值、Unicode codepoint 长度与非空白约束保持；仅闭合浅 object 加明确 null alternative 的根 oneOf 可作为整份问卷的另一项决定，其他未知或重叠约束仍回退原 JSON。选项标题和完整说明在可用宽度内同行或换行，单选通过 `aria-describedby` 引用说明。题头的原问题给单选组提供无障碍名称。题号按原字段校验标记已答或待答，翻页后聚焦题目并重置卡片内部滚动。鼠标点选“自定义输入”进入文本框，原生单选的键盘方向键仍留在选项组内。题号、翻页和最终提交各有独立按钮身份，避免浏览器将导航解释为提交。
+普通问题共用中立的 [原 schema 解析器](src/question.ts)。DOM [Questionnaire](src/questionnaire.tsx) 为完整可表达的标量或浅 object 提供单选、有限多选、闭合自由输入与多步骤；可以先浏览未回答的题目，最终明确点击提交时才发送完整答案。多选由有界且唯一的字符串选项数组表达，独立保存勾选状态并提交原选项 ID 数组。原字段和 choice 值、Unicode codepoint 长度与非空白约束保持；仅闭合浅 object 加明确 null alternative 的根 oneOf 可作为整份问卷的另一项决定，其他未知或重叠约束仍回退原 JSON。选项标题和完整说明在可用宽度内同行或换行，原生单选和复选控件通过 `aria-describedby` 引用说明。题头的原问题给选项组提供无障碍名称。多题导航沿用审批样式，以左右箭头和当前题号／总题数呈现，翻页后聚焦题目并重置卡片内部滚动。鼠标点选“自定义输入”进入文本框，原生单选的键盘方向键仍留在选项组内。翻页和最终提交各有独立按钮身份，避免浏览器将导航解释为提交。
 
-问卷与主输入同时显示时，底部区域保持 [Composer](src/desktop/Composer.tsx) 可用，并按会话高度预留阅读空间。超高的选项正文与问卷区域均可滚动。宿主可保持输入框可编辑并暂停发送，当前任务可停止时使用同一个按钮提供停止操作。带选项且允许自由回答的题目在最后显示“自定义输入”，该项沿原 schema 提交自由回答。
+问卷与主输入同时显示时，底部区域保持 [Composer](src/desktop/Composer.tsx) 可用，并按会话高度预留阅读空间。单张普通问卷可收缩选项滚动区，优先为题头和底部操作留出空间。宿主可保持输入框可编辑并暂停发送，当前任务可停止时使用同一个按钮提供停止操作。带选项且允许自由回答的题目在最后显示“自定义输入”，选中后以「自定义输入」作为行内文本框的占位文字，文本框占满选择控件右侧的可用宽度。空白和已输入时使用同一行高的文字光标，选项轮廓用于聚焦复选框或单选按钮。原 schema 的自定义对象允许 `choices` 时，末项为复选项，与原 ID 数组一起提交。只填自定义答案时仍提交原 `{text}`。TUI 多选题通过方向键移动焦点，空格键变更勾选，Tab 切换行内输入和选项焦点，Enter 继续或提交。桌面与 TUI 从 `request.recommendedOptions` 读取明确的推荐标记。旧 `ask_user` 问卷仅在可作答界面移除曾自动附加到首项的后缀，持久原请求保留。
 
-结构化问题的可作答卡片使用共享选择行、推荐标记、紧凑说明按钮和同一操作栏；已知 `Cancel answering` 展示为“取消回答”，原 null 值保持。可作答卡不显示 kind/state、原请求或执行身份，原文和 choice 值仍用于提交与恢复；只读卡及 JSON fallback 保留原材料。对应样式由 [Desktop CSS](src/desktop/style.css)提供，深浅主题与窄窗共用。
+结构化问题的可作答卡片使用共享选择行、推荐标记、紧凑说明按钮和同一操作栏；已知 `Cancel answering` 展示为“取消回答”，原 null 值保持。可作答卡不显示 kind/state、原请求或执行身份，原文和 choice 值仍用于提交与恢复；只读卡及 JSON fallback 保留原材料。普通问卷沿用主输入区的边框、圆角和底色，选择行默认透明，状态底色在卡片底色上合成。对应样式由 [Desktop CSS](src/desktop/style.css)提供，深浅主题与窄窗共用。
 
 `InteractionCard.initialQuestionDraft/onQuestionDraftChange` 与 `ActionInputForm.initialDraft/onDraftChange` 将草稿生命周期交给实际宿主，既覆盖步骤也覆盖原 JSON fallback。`questionDraftKey` 固定 Store、source/presentation Session、Interaction ID、revision 与 inputDigest，不以连接 generation 另建草稿。组件自身不从 Promise resolve、卡片缺席或状态查询推导保存成功；Native 宿主按原准确回执清理。只读卡仍显示原完整请求与身份，缺回调没有作答入口。[DOM 验证](test/questionnaire-dom.test.tsx)核完整原值、空白拒绝、翻页零提交和重复抑制；实际 Native 窗口与页面生命周期由 [Desktop owner](../../apps/desktop/README.md#native-普通问题与页面草稿)维护。
 

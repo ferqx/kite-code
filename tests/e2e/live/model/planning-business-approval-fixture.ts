@@ -331,6 +331,7 @@ export async function runPlanningBusinessCase(options: {
                 options: [
                   { label: 'Approve', description: 'Perform the requested effect' },
                   { label: 'Deny', description: 'Do not perform it' },
+                  { label: 'Defer', description: 'Leave the decision for later' },
                 ],
               },
             ],

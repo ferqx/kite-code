@@ -78,8 +78,21 @@ function publicQuestions(request: Record<string, Json>): Json[] {
   return Object.entries(object(branches[0]!.properties) ?? {}).flatMap(([id, value]) => {
     const question = object(value);
     if (!question || typeof question.title !== 'string') return [];
-    const choices = question.type === 'array' ? object(question.items) : question;
-    const alternatives = choices && Array.isArray(choices.anyOf) ? choices.anyOf : [];
+    const branches = Array.isArray(question.anyOf) ? question.anyOf.map(object) : [];
+    const arrays = branches.filter((branch) => branch?.type === 'array');
+    const multiple =
+      question.type === 'array'
+        ? question
+        : arrays.length === 1 &&
+            branches.every((branch) => branch?.type === 'array' || branch?.type === 'object')
+          ? arrays[0]
+          : undefined;
+    const choices = multiple ? object(multiple.items) : question;
+    const alternatives = Array.isArray(choices?.anyOf)
+      ? choices.anyOf
+      : multiple && Array.isArray(choices?.oneOf)
+        ? choices.oneOf
+        : [];
     const options = alternatives.flatMap((item) => {
       const option = object(item);
       return option && typeof option.const === 'string' && typeof option.title === 'string'
@@ -90,7 +103,7 @@ function publicQuestions(request: Record<string, Json>): Json[] {
       {
         id,
         question: question.title,
-        ...(question.type === 'array' ? { multiSelect: true } : {}),
+        ...(multiple ? { multiSelect: true } : {}),
         ...(options.length ? { options } : {}),
       },
     ];

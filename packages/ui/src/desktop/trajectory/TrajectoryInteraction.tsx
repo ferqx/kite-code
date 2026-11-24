@@ -64,6 +64,20 @@ function SavedAnswer({ value, choices = [] }: { value: unknown; choices?: Option
     return <SavedAnswer value={item.text} />;
   if (
     item &&
+    Object.keys(item).length === 2 &&
+    typeof item.text === 'string' &&
+    Array.isArray(item.choices) &&
+    item.choices.length > 0 &&
+    item.choices.every((id) => choices.some((choice) => choice.id === id))
+  )
+    return (
+      <>
+        <SavedAnswer value={item.choices} choices={choices} />
+        <SavedAnswer value={item.text} />
+      </>
+    );
+  if (
+    item &&
     typeof item.question === 'string' &&
     Object.hasOwn(item, 'answer') &&
     Object.keys(item).every((key) => key === 'question' || key === 'answer')

@@ -2357,10 +2357,12 @@ test('completed Trace summaries preserve original single-step disclosure and det
     } else {
       expect(trace?.querySelector(':scope > button')).toBeNull();
       expect(trace?.querySelector('.tool-label')?.textContent).toBe('询问了用户');
-      expect(trace?.querySelector('.tool-activity-content')?.textContent).toContain(
+      expect(trace?.querySelector('.tool-activity-summary')?.textContent).toContain(
         'ORIGINAL QUESTION',
       );
-      expect(trace?.textContent).toContain('ORIGINAL ANSWER');
+      expect(trace?.querySelector('.tool-activity-content')?.textContent).toContain(
+        'ORIGINAL ANSWER',
+      );
     }
     dom.window.close();
   }

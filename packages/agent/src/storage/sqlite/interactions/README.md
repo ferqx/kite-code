@@ -22,7 +22,7 @@ Core 先取得当前权限决定和原 Execution，硬拒绝不调用 owner 准�
 
 确认 binding 的 `requestDigest` 同时约束实际展示的 `policy.confirmation`，不能仅保留 binding 标记而更换正文。inline 正文由 Gate 与最终 SQL 各自计算摘要；完整 Artifact 正文沿原 scope／注册／完整 hash／UTF-8／JSON 读取核验后再核确认正文，SQL 独立核该原封装的不可变登记元数据，不在事务内读文件。可信 Store 边界故障注入分别核 inline／Artifact 篡改零效果，并在 Gate 观察被遮蔽的反例中核最终 SQL 仍拒绝；这证明独立守卫的必要性，不代表普通扩展可写 Store。
 
-question 可带 `request.schema`，其有限 JSON schema 支持 type/properties/required/additionalProperties/items/enum/const、oneOf/anyOf、数值及长度/数组上下界、title/description，最多 256 schema 节点/12 层。组合须为非空数组，每个分支计入同一预算并递归核对白名单；原 Ajv 继续分别执行恰好一项或至少一项匹配，不把选项文案代替 const/enum 原值。pattern 仅接受准确 `\\S`，用于默认普通问题的非空白字符串约束，在保存前拒绝空白并保持原卡 pending/revision；单字符类别扫描不开放任意正则。$ref、其他 pattern、format、allOf 和未知关键字仍拒绝，避免外部 I/O 和无界正则；答案短事务按原 schema 检验。所有答案最多 32 KiB；plan_review 可带有界 feedback。无 schema 的问题答案保持 bounded JSON。
+question 可带 `request.schema`，其有限 JSON schema 支持 type/properties/required/additionalProperties/items/enum/const、oneOf/anyOf、数值及长度/数组上下界、title/description，最多 256 schema 节点/12 层。`uniqueItems: true` 仅允许在 `items.type` 为 `string` 且 `maxItems` 为 1–32 的有界数组上，供多选答案核对原 ID 的唯一性。组合须为非空数组，每个分支计入同一预算并递归核对白名单。Ajv 分别执行恰好一项或至少一项匹配，const/enum 始终验证原值。pattern 仅接受准确 `\\S`，用于默认普通问题的非空白字符串约束，在保存前拒绝空白并保持原卡 pending/revision。$ref、其他 pattern、format、allOf 和未知关键字仍拒绝，避免外部 I/O 和无界正则。答案短事务按原 schema 检验。所有答案最多 32 KiB。plan_review 可带有界 feedback。无 schema 的问题答案保持 bounded JSON。
 
 Ajv 使用 `ownProperties:true`，必填与属性校验只读取实际 JSON 自身字段，继承的 constructor/toString 不满足 required；明确自身同名字段仍按原值检验。当前 Ajv 编译器排除 properties 中的 `__proto__`，因此 schema 准入明确拒绝该自身属性和 required 中的同名键，包括组合分支内的声明；不能发布一张缺字段会通过、真实字段反而无法回答的卡。此有限拒绝与选项组合的取舍见[普通问题原 schema 与答案](../../../../../../.agents/notes/implemented/architecture/2026-10-06-original-question-schema-forms.md)。
 

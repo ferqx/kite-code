@@ -40,6 +40,7 @@ test.skipIf(process.platform !== 'darwin')(
           options: [
             { label: 'q1-o2', description: 'Exact label', recommended: true },
             { label: 'Second', description: 'Other' },
+            { label: 'Third', description: 'Third choice' },
           ],
         },
         {
@@ -47,6 +48,7 @@ test.skipIf(process.platform !== 'darwin')(
           options: [
             { label: 'One', description: 'One' },
             { label: 'Two', description: 'Two' },
+            { label: 'Three', description: 'Three' },
           ],
         },
         {
@@ -54,6 +56,7 @@ test.skipIf(process.platform !== 'darwin')(
           options: [
             { label: 'Yes', description: 'Y' },
             { label: 'No', description: 'N' },
+            { label: 'Unsure', description: 'Undecided' },
           ],
         },
       ],

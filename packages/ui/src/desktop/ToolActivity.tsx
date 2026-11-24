@@ -1007,6 +1007,39 @@ export interface ChildAgentActivity {
   readonly name: string;
 }
 
+function askAnswerTitle(title: string): string {
+  return title.replace(/(?:[：:]\s*)+$/u, '');
+}
+
+/** Some historical receipts have a saved summary and answers but no question metadata. */
+function displaySavedAskSummary(summary: string, answers: unknown): string {
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return summary;
+  const count = Object.keys(answers).length;
+  if (count < 2 || count > 3) return summary;
+  let start = 0;
+  let display = '';
+  for (let index = 1; index <= count; index++) {
+    const key = `q${index}`;
+    if (!Object.hasOwn(answers, key)) return summary;
+    const value: unknown = Reflect.get(answers, key);
+    const answer =
+      typeof value === 'string'
+        ? value
+        : Array.isArray(value) && value.every((item) => typeof item === 'string')
+          ? value.join(', ')
+          : undefined;
+    if (!answer) return summary;
+    const last = index === count;
+    const suffix = `: ${answer}${last ? '' : '\n'}`;
+    const boundary = last ? summary.length - suffix.length : summary.indexOf(suffix, start);
+    if (boundary <= start || !summary.startsWith(suffix, boundary)) return summary;
+    const title = summary.slice(start, boundary);
+    display += askAnswerTitle(title) + suffix;
+    start = boundary + suffix.length;
+  }
+  return display;
+}
+
 export function ToolActivity({
   messages,
   expanded,
@@ -1090,7 +1123,13 @@ export function ToolActivity({
         'answer' in result &&
         typeof result.answer === 'string'
       )
-        ask = { questions: [], summary: result.answer };
+        ask = {
+          questions: [],
+          summary: displaySavedAskSummary(
+            result.answer,
+            'answers' in result ? result.answers : undefined,
+          ),
+        };
     } catch {
       /* A tool failure is not an answered question. */
     }
@@ -1197,7 +1236,7 @@ export function ToolActivity({
       (imageOnly && !!renderImages) ||
       Boolean(getChildren()));
   const ownSummaryTitle = directTraceDetails ? undefined : traceSummaryTitle;
-  const showTarget = shell || !ownSummaryTitle || (!canExpand && message.settled);
+  const showTarget = ask || shell || !ownSummaryTitle || (!canExpand && message.settled);
   const label =
     webFetchBatch?.label ??
     ownSummaryTitle ??
@@ -1456,12 +1495,8 @@ export function ToolActivity({
               const detailText = itemIssue && !shell ? toolDetailText(message) : undefined;
               return (
                 <>
-                  {ownSummaryTitle && !edit && !shell && !webFetchBatch && (
-                    <p className="tool-detail-status">
-                      {ask && target
-                        ? `${toolTraceLabel(message)} · ${target}`
-                        : toolTraceTitle(message)}
-                    </p>
+                  {ownSummaryTitle && !ask && !edit && !shell && !webFetchBatch && (
+                    <p className="tool-detail-status">{toolTraceTitle(message)}</p>
                   )}
                   {grouped && (
                     <ScrollArea
@@ -1549,7 +1584,7 @@ export function ToolActivity({
                           <div className="tool-ask-answer" key={question.id}>
                             <span className="tool-ask-prefix">{index + 1}. </span>
                             <span className="tool-ask-text">
-                              {question.question.replace(/[：:]\s*$/, '')}：
+                              {askAnswerTitle(question.question)}：
                               {ask.answers?.[question.id] ?? '尚未回答'}
                             </span>
                           </div>
@@ -1558,7 +1593,9 @@ export function ToolActivity({
                         <div className="tool-ask-answer">
                           <span className="tool-ask-prefix">回答：</span>
                           <span className="tool-ask-text">
-                            {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
+                            {ask.answers?.[ask.questions[0]?.id ?? ''] ??
+                              (ask.summary && displaySavedAskSummary(ask.summary, ask.answers)) ??
+                              '尚未回答'}
                           </span>
                         </div>
                       )}

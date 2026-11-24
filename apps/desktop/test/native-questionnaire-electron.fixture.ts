@@ -271,18 +271,24 @@ try {
   }
   const mainDraft = '  原主草稿🙂\n保留空格  ';
   const first = await start('Complete original Native questionnaire', mainDraft, 1);
+  const questionProgress = page.getByRole('navigation', { name: '题目导航' });
   assert.equal(await page.getByRole('radio', { checked: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '提交回答', exact: true }).count(), 0);
-  const firstChoice = page.getByRole('radio', { name: 'Alpha (Recommended)', exact: true });
+  const firstChoice = page.getByRole('radio', { name: 'Alpha', exact: true });
+  await page
+    .locator('.questionnaire-choice')
+    .filter({ has: firstChoice })
+    .getByText('推荐', { exact: true })
+    .waitFor();
   const description = await firstChoice.getAttribute('aria-describedby');
   assert.ok(description);
   const descriptionText = page.locator(`[id="${description}"]`);
   assert.equal(await descriptionText.isVisible(), true);
   assert.match(await descriptionText.innerText(), /Full original description\nUnicode 尾部/);
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 2 / 3', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '第 3 题，待回答', exact: true }).click();
-  await page.getByText('问题 3 / 3', { exact: true }).waitFor();
+  await questionProgress.getByText('2/3', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '查看下一题', exact: true }).click();
+  await questionProgress.getByText('3/3', { exact: true }).waitFor();
   assert.equal(await page.getByText('还有 3 题待答', { exact: true }).isVisible(), true);
   assert.equal(
     await page.getByRole('button', { name: '提交回答', exact: true }).isDisabled(),
@@ -309,13 +315,13 @@ try {
   );
   assert.equal(await page.getByRole('button', { name: '下一题', exact: true }).count(), 0);
   await page.getByRole('button', { name: '上一题', exact: true }).click();
-  await page.getByRole('radio', { name: 'q1-o1 (Recommended)', exact: true }).check();
+  await page.getByRole('radio', { name: 'q1-o1', exact: true }).check();
   await page.getByRole('button', { name: '上一题', exact: true }).click();
-  await page.getByRole('radio', { name: 'Alpha (Recommended)', exact: true }).check();
+  await page.getByRole('radio', { name: 'Alpha', exact: true }).check();
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 2 / 3', { exact: true }).waitFor();
+  await questionProgress.getByText('2/3', { exact: true }).waitFor();
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 3 / 3', { exact: true }).waitFor();
+  await questionProgress.getByText('3/3', { exact: true }).waitFor();
   assert.equal(await posts(), 0);
   await page.getByRole('button', { name: '提交回答', exact: true }).click();
   await page.getByRole('form', { name: 'Questionnaire' }).waitFor({ state: 'detached' });

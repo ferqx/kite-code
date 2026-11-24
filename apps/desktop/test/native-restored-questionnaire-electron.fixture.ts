@@ -318,9 +318,12 @@ try {
   await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
   await page.getByRole('form', { name: 'Questionnaire' }).waitFor();
-  await page.getByRole('radio', { name: `${facts.answers.q1} (Recommended)`, exact: true }).check();
+  await page.getByRole('radio', { name: facts.answers.q1, exact: true }).check();
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 2 / 2', { exact: true }).waitFor();
+  await page
+    .getByRole('navigation', { name: '题目导航' })
+    .getByText('2/2', { exact: true })
+    .waitFor();
   await page.getByRole('radio', { name: '自定义输入', exact: true }).check();
   await page.getByRole('textbox', { name: '自定义输入', exact: true }).fill(facts.answers.q2);
   assert.equal(

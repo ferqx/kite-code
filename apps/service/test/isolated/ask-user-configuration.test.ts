@@ -20,9 +20,11 @@ const questions = {
   questions: [
     {
       question: 'First?',
+      multiple: true,
       options: [
         { label: 'q1-o2', description: 'Exact label', recommended: true },
         { label: 'Second', description: 'Other' },
+        { label: 'Third', description: 'Third choice' },
       ],
     },
     {
@@ -30,6 +32,7 @@ const questions = {
       options: [
         { label: 'One', description: 'One' },
         { label: 'Two', description: 'Two' },
+        { label: 'Three', description: 'Three' },
       ],
     },
   ],
@@ -357,7 +360,25 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         type: 'object',
         additionalProperties: false,
         required: ['questions'],
+        properties: {
+          questions: {
+            items: {
+              properties: {
+                multiple: { type: 'boolean' },
+                options: {
+                  minItems: 3,
+                  maxItems: 4,
+                  items: {
+                    properties: { recommended: { type: 'boolean' } },
+                    required: ['label', 'description'],
+                  },
+                },
+              },
+            },
+          },
+        },
       });
+      expect(card.request).toMatchObject({ recommendedOptions: { q1: 'q1-o1' } });
       expect(card.definitionId).toBe('ask_user');
       expect(card.definitionVersion).toBe('1');
       f.disableQuestions();
@@ -365,15 +386,18 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         expectedStoreId: f.expectedStoreId,
         commandId: 'answer',
         expectedRevision: card.revision,
-        answer: { kind: 'question', answers: { q1: 'q1-o1', q2: { text: 'q1-o1' } } },
+        answer: {
+          kind: 'question',
+          answers: { q1: { choices: ['q1-o1', 'q1-o3'], text: 'Extra' }, q2: { text: 'q1-o1' } },
+        },
       });
       if (mode === 'accept_edits') await f.waitForCompletionModel();
       else await f.runtime.waitForCommand('run', { timeoutMs: 5000 });
       expect(f.requests).toHaveLength(mode === 'accept_edits' ? 3 : 2);
       const messages = f.requests[1]!.messages as { role: string; content: string }[];
       expect(JSON.parse(messages.find((item) => item.role === 'tool')!.content)).toMatchObject({
-        answer: 'First?: q1-o2\nFree?: q1-o1',
-        answers: { q1: 'q1-o2', q2: 'q1-o1' },
+        answer: 'First?: q1-o2, Third, Extra\nFree?: q1-o1',
+        answers: { q1: ['q1-o2', 'Third', 'Extra'], q2: 'q1-o1' },
       });
       expect((await f.client.getExecution(card.executionId!)).status).toBe('succeeded');
       const run = (await f.client.getView('s')).runs[0]!;

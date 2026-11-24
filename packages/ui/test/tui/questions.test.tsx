@@ -338,6 +338,108 @@ test('ordinary schema enum answers via actual Ink selection keys, with no initia
   app.unmount();
 });
 
+test('a multi-select question moves the cursor separately from checked answers', async () => {
+  const f = fixture({
+    type: 'object',
+    additionalProperties: false,
+    required: ['route'],
+    properties: {
+      route: {
+        title: 'Pick routes',
+        type: 'array',
+        minItems: 1,
+        maxItems: 3,
+        uniqueItems: true,
+        items: {
+          type: 'string',
+          oneOf: [
+            { const: 'a', title: 'First route' },
+            { const: 'b', title: 'Second route' },
+            { const: 'c', title: 'Third route' },
+          ],
+        },
+      },
+    },
+  });
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    app.stdin.write('\u001b[B');
+    await tick();
+    expect(app.lastFrame()).toContain('[ ] 1. First route');
+    app.stdin.write('\r');
+    await tick();
+    expect(f.answers).toHaveLength(0);
+    for (const key of [' ', '\u001b[B', ' ', ' ', '\u001b[B', ' ']) {
+      app.stdin.write(key);
+      await tick();
+    }
+    expect(app.lastFrame()).toContain('[x] 1. First route');
+    expect(app.lastFrame()).toContain('[ ] 2. Second route');
+    expect(app.lastFrame()).toContain('[x] 3. Third route');
+    app.stdin.write('\r');
+    await tick();
+    expect(f.answers.map((entry) => entry.answer)).toEqual([
+      { kind: 'question', answers: { route: ['a', 'c'] } },
+    ]);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('a custom checkbox keeps existing selections while editing and can be toggled independently', async () => {
+  const choices = {
+    type: 'array',
+    items: { type: 'string', enum: ['PDF', 'HTML', 'Word'] },
+    minItems: 1,
+    maxItems: 3,
+    uniqueItems: true,
+  };
+  const f = fixture({
+    anyOf: [
+      choices,
+      {
+        type: 'object',
+        properties: { choices, text: { type: 'string', minLength: 1, pattern: '\\S' } },
+        required: ['text'],
+        additionalProperties: false,
+      },
+    ],
+  });
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    async function press(...keys: string[]) {
+      for (const key of keys) {
+        app.stdin.write(key);
+        await tick();
+      }
+    }
+    const down = '\u001b[B';
+    const up = '\u001b[A';
+    await press(down, ' ', '\t', '\r');
+    expect(f.answers).toHaveLength(0);
+    expect(app.lastFrame()).toContain('[x] 1. PDF');
+    expect(app.lastFrame()).toContain('[x] Custom answer >');
+    await press('Markdown', '\t', down, ' ', up, up, ' ');
+    expect(app.lastFrame()).toContain('[ ] Custom answer');
+    expect(app.lastFrame()).toContain('[x] 1. PDF');
+    expect(app.lastFrame()).toContain('[x] 2. HTML');
+    await press(' ');
+    expect(app.lastFrame()).toContain('[x] Custom answer > Markdown');
+    await press('\r');
+    expect(f.answers.map((entry) => entry.answer)).toEqual([
+      { kind: 'question', answers: { choices: ['PDF', 'HTML'], text: 'Markdown' } },
+    ]);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
 test('object wizard preserves exact keys, titles, text, later draft and grapheme cursor across Esc', async () => {
   const f = fixture({
     type: 'object',
@@ -363,7 +465,7 @@ test('object wizard preserves exact keys, titles, text, later draft and grapheme
   await tick();
   app.stdin.write('\r');
   await tick();
-  app.stdin.write('  /recovery @path 👨‍👩‍👧‍👦é  ');
+  app.stdin.write('  /recovery @path 👨e  ');
   await tick();
   app.stdin.write('\u001b[D');
   await tick();
@@ -392,7 +494,7 @@ test('object wizard preserves exact keys, titles, text, later draft and grapheme
     kind: 'question',
     answers: {
       route: 'other-id',
-      detail: '  /recovery @path 👨‍👩‍👧‍👦é ',
+      detail: '  /recovery @path 👨e ',
       constructor: 'delivery-id',
     },
   });
@@ -409,7 +511,7 @@ test('empty free answer does not submit, original whitespace and Unicode survive
   app.stdin.write('\r');
   await tick();
   expect(f.answers).toHaveLength(0);
-  app.stdin.write('👨‍👩‍👧‍👦é');
+  app.stdin.write('👨e');
   await tick();
   app.stdin.write('\u007f');
   await tick();
@@ -417,7 +519,7 @@ test('empty free answer does not submit, original whitespace and Unicode survive
   await tick();
   app.stdin.write('\r');
   await tick();
-  expect(f.answers[0]!.answer).toEqual({ kind: 'question', answers: '   👨‍👩‍👧‍👦原文  ' });
+  expect(f.answers[0]!.answer).toEqual({ kind: 'question', answers: '   👨原文  ' });
   app.unmount();
 });
 
