@@ -222,14 +222,14 @@ test('environment names hide internal IDs outside diagnostics and keep unconfirm
       try {
         await f.render();
         const identity = f.host.querySelector('.background-execution-identity')!;
-        const name = diagnostics && !entry.childTitle ? 'job-1' : entry.name;
+        const name = diagnostics && entry.childTitle === '' ? 'job-1' : entry.name;
         expect(identity.textContent).toBe(name);
         const detail = identity.closest('button');
         if (entry.childTitle !== undefined) {
           expect(detail?.getAttribute('title')).toBe(name);
           expect(detail?.getAttribute('aria-label')).toBe(`查看子 Agent 详情：${name}`);
         }
-        if (!diagnostics) expect(f.text).not.toContain('job-1');
+        if (!diagnostics || entry.childTitle === undefined) expect(f.text).not.toContain('job-1');
         expect(f.host.querySelector('.background-execution-stop')).not.toBeNull();
         f.unconfirmed(true);
         await f.render();

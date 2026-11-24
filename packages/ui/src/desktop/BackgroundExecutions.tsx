@@ -16,6 +16,8 @@ export interface BackgroundExecutionSummary {
   readonly activity?: string;
   readonly executionId: string;
   readonly displayName?: string;
+  /** The originating Tool returned while this Shell Job was still active. */
+  readonly continued?: true;
   /** Stable original Store/child Session decoration; grants no navigation or control. */
   readonly childAgentIdentity?: string;
   readonly kind: 'shell' | 'service' | 'subagent';
@@ -74,7 +76,10 @@ export function BackgroundExecutions({
   const diagnostics = useDesktopDiagnostics();
   if (currentOnly) {
     const shells = executions.filter(
-      (execution) => execution.kind === 'shell' && execution.status === 'running',
+      (execution) =>
+        execution.kind === 'shell' &&
+        (execution.status === 'running' ||
+          (execution.continued && ['queued', 'starting', 'stopping'].includes(execution.status))),
     );
     const subagents = executions.filter((execution) => execution.kind === 'subagent');
     return (
@@ -198,7 +203,9 @@ function ExecutionGroup({
           );
           const name =
             execution.displayName ??
-            (diagnostics ? execution.executionId : kindLabel(execution.kind));
+            (diagnostics && execution.kind !== 'shell'
+              ? execution.executionId
+              : kindLabel(execution.kind));
           const status = execution.activity ?? statusLabel(execution.status);
           const stopping = stoppingExecutionId === execution.executionId;
           const childIcon =
@@ -213,7 +220,10 @@ function ExecutionGroup({
             <>
               <span className="background-execution-identity">
                 {childIcon}
-                {childSessionId || execution.displayName || !diagnostics ? (
+                {execution.kind === 'shell' ||
+                childSessionId ||
+                execution.displayName ||
+                !diagnostics ? (
                   <span
                     className="background-execution-name"
                     title={childSessionId ? undefined : name}

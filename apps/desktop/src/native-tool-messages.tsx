@@ -180,7 +180,9 @@ function shellInputMissing(fact: NativeToolMessageFact | undefined) {
   const input = fact?.definitionVersion === '1' ? fact.shellInput : undefined;
   return (
     !!input &&
-    (['execute', 'launch'].includes(input.operation) ? input.command === undefined : !input.shellId)
+    (['execute', 'launch'].includes(input.operation)
+      ? input.command === undefined
+      : !input.shellId && !input.sessionId)
   );
 }
 function withoutToolInput(fact: NativeToolMessageFact): NativeToolMessageFact {
@@ -193,6 +195,7 @@ function withoutToolInput(fact: NativeToolMessageFact): NativeToolMessageFact {
       ? {
           shellInput: { operation: fact.shellInput.operation },
           shellResultVerified: undefined,
+          shellSession: undefined,
           shellJobExecutionId: undefined,
           shellJobSettlement: undefined,
           shellOutputReceipt: undefined,
@@ -242,7 +245,7 @@ function shellCallCompatible(
           (fact.definitionId !== 'shell.execute' ||
             (args.background === true) === (fact.shellInput.operation === 'launch')) &&
           nativeToolRequestTarget(args, fact.definitionId, fact.definitionVersion) === fact.target
-      : args.shellId === fact.shellInput?.shellId;
+      : args.shellId === (fact.shellInput?.shellId ?? fact.shellInput?.sessionId);
   } catch {
     return false;
   }
@@ -362,6 +365,7 @@ export function desktopToolMessage(
       | 'shellOutputLimit'
       | 'shellOutputReceipt'
       | 'shellResultVerified'
+      | 'shellSession'
       | 'shellJobExecutionId'
       | 'shellJobSettlement'
       | 'worktreeFailure'
@@ -1191,7 +1195,7 @@ export function useNativeToolMessages({
       job.definitionVersion === '1' &&
       job.originStoreId === storeId &&
       job.sessionId === sessionId &&
-      (job.status === 'succeeded' || job.status === 'failed'),
+      ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(job.status),
   );
   const jobIdentity = JSON.stringify([
     storeId,
@@ -1250,7 +1254,7 @@ export function useNativeToolMessages({
         !fact?.shellJobExecutionId ||
         fact.status !== 'succeeded' ||
         !fact.shellResultVerified ||
-        fact.shellInput?.operation !== 'launch'
+        (fact.shellInput?.operation !== 'launch' && !fact.shellSession)
       )
         return;
       const jobExecutionId = fact.shellJobExecutionId;

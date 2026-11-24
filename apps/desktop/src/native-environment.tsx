@@ -160,7 +160,7 @@ export function environmentDisplay(
           !(
             item.sourceTool?.definitionId === 'shell.launch' ||
             (item.sourceTool?.definitionId === 'shell.execute' &&
-              item.sourceTool.background === true)
+              (item.sourceTool.background === true || item.sourceTool.continued === true))
           ) ||
           item.sourceTool?.definitionVersion !== '1'))
     )
@@ -187,6 +187,7 @@ export function environmentDisplay(
       ...(item.childSession?.title ? { displayName: item.childSession.title } : {}),
       ...(childAgentIdentity ? { childAgentIdentity } : {}),
       kind: e.childSessionId ? 'subagent' : 'shell',
+      ...(item.sourceTool?.continued ? { continued: true as const } : {}),
       status,
       cleanupConfirmed: false,
       canStop:
@@ -227,6 +228,7 @@ export function useNativeEnvironment({
   onChanged,
   plan,
   references,
+  shellCommands,
   onOpenChild,
 }: {
   bridge?: NativeBridge;
@@ -245,6 +247,7 @@ export function useNativeEnvironment({
   submissions?: readonly NativeCallerMetadata[];
   plan?: ReactNode;
   references?: ReactNode;
+  shellCommands?: ReadonlyMap<string, string>;
   onChanged: () => Promise<void>;
   /** A tab host may route navigation before activating this hook's one visible child reader. */
   onOpenChild?: (
@@ -938,6 +941,9 @@ export function useNativeEnvironment({
             executions={
               display?.rows.map((row) => ({
                 ...row,
+                ...(row.kind === 'shell' && shellCommands?.has(row.executionId)
+                  ? { displayName: shellCommands.get(row.executionId) }
+                  : {}),
                 ...(executionUnconfirmed &&
                 ['queued', 'starting', 'running', 'stopping'].includes(row.status)
                   ? diagnostics

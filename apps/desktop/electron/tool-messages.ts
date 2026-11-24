@@ -582,9 +582,13 @@ export class NativeToolMessages {
                 executionId: execution.id,
                 jobExecutionId: fact.shellJobExecutionId,
               };
-              fact.shellJobSettlement = nativeShellJobSettlement(job, identity);
+              fact.shellJobSettlement = nativeShellJobSettlement(
+                job,
+                identity,
+                !!fact.shellSession,
+              );
               if (!nativeShellJobMatches(job, identity)) finishWatch?.('mismatch');
-              else if (['succeeded', 'failed', 'cancelled'].includes(job.status))
+              else if (['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(job.status))
                 finishWatch?.('terminal');
             } catch {
               // The verified launch remains readable when its optional Job result is unavailable.

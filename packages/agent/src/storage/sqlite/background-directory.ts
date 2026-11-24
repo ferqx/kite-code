@@ -89,6 +89,21 @@ export function readBackgroundExecutions(
       origin_tool.id AS source_tool_id,origin_tool.adapter_id AS source_tool_definition_id,origin_tool.definition_version AS source_tool_definition_version,
       CASE WHEN origin_tool.adapter_id='shell.execute' AND origin_tool.definition_version='1'
         AND json_type(origin_tool.intent_json,'$.background')='true' THEN 1 END AS source_tool_background,
+       CASE WHEN ?=1 AND e.adapter_id='shell.command' AND e.definition_version='1'
+         AND origin_tool.adapter_id='shell.execute' AND origin_tool.definition_version='1'
+         AND origin_tool.state='succeeded'
+         AND json_extract(origin_tool.result_json,'$.outcome')='succeeded'
+         AND json_type(origin_tool.result_json,'$.details.session_id')='integer'
+         AND json_extract(origin_tool.result_json,'$.details.session_id') BETWEEN 1 AND 9007199254740991
+         AND json_type(origin_tool.result_json,'$.details.terminal')='false'
+         AND json_extract(origin_tool.result_json,'$.details.status') IN ('planned','dispatching','running')
+         AND json_extract(origin_tool.result_json,'$.details.execution_id')=origin_tool.id
+         AND json_extract(origin_tool.result_json,'$.details.ref.extensionId')='builtin.shell'
+         AND json_extract(origin_tool.result_json,'$.details.ref.executionId')=e.id
+         AND json_extract(origin_tool.result_json,'$.details.ref.commandId')=e.origin_command_id
+         AND json_extract(origin_tool.result_json,'$.details.ref.sessionId')=e.session_id
+         AND json_extract(origin_tool.result_json,'$.details.ref.originStoreId')=e.origin_store_id
+         THEN 1 END AS source_tool_continued,
       CAST(e.rowid AS TEXT) AS directory_seq FROM execution e
       JOIN eligible s ON s.id=e.session_id JOIN command source ON source.id=e.origin_command_id AND source.session_id=e.session_id
       LEFT JOIN execution origin_tool ON origin_tool.id=e.parent_execution_id AND origin_tool.kind='tool'
@@ -106,6 +121,7 @@ export function readBackgroundExecutions(
       input.rootSessionId ?? null,
       input.subjectId,
       input.subjectId,
+      input.includeSourceTool ? 1 : 0,
       afterSeq,
       upperSeq,
       input.executionId ?? null,
@@ -297,6 +313,9 @@ export function readBackgroundExecutions(
                   definitionId: String(row.source_tool_definition_id),
                   definitionVersion: String(row.source_tool_definition_version),
                   ...(String(row.source_tool_background) === '1' ? { background: true } : {}),
+                  ...(String(row.source_tool_continued) === '1'
+                    ? { continued: true as const }
+                    : {}),
                 },
               }
             : {}),

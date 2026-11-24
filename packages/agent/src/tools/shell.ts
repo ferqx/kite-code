@@ -177,6 +177,7 @@ async function sessionOutput(input: {
       break;
     }
   }
+  const outputStart = { afterSeq, offset };
   const page = await context.operations.readOutput(ref, { afterSeq, limit: 200 });
   let remaining = Math.max(
     4,
@@ -234,6 +235,7 @@ async function sessionOutput(input: {
       ...visible,
       ref: ref as unknown as Json,
       execution: execution as unknown as Json,
+      outputStart,
       outputPosition: { afterSeq, offset },
     },
   };

@@ -33,6 +33,7 @@ export type NativeWorktreeFailure = {
 export type NativeShellInput = {
   operation: 'execute' | 'launch' | 'read' | 'wait' | 'stop';
   shellId?: string;
+  sessionId?: number;
   /** Original command fragment; offsets count UTF-16 units without splitting a code point. */
   command?: string;
   commandOffset?: number;
@@ -47,6 +48,17 @@ export type NativeToolMessageScope = {
   sessionId: string;
   workspaceId: string;
 };
+export type NativeShellOutputPosition = { afterSeq: string; offset: number };
+
+export type NativeShellSessionReceipt = {
+  sessionId: number;
+  jobExecutionId: string;
+  starterExecutionId: string;
+  terminal: boolean;
+  start?: NativeShellOutputPosition;
+  end: NativeShellOutputPosition;
+};
+
 export type NativeToolMessageFact = Pick<
   Execution,
   'definitionId' | 'definitionVersion' | 'status' | 'resultRevision'
@@ -77,9 +89,14 @@ export type NativeToolMessageFact = Pick<
   inputSource?: { storeId: string; sessionId: string; runId: string; toolCallId: string };
   /** Exact known Shell result content equals its saved structured details. */
   shellResultVerified?: boolean;
+  /** Exact numeric Shell session page, bound to the original Job and starter Tool. */
+  shellSession?: NativeShellSessionReceipt;
   /** Original Job identity and, when observed, a proved background command exit. */
   shellJobExecutionId?: string;
-  shellJobSettlement?: { jobStatus: 'succeeded' | 'failed'; exitCode?: number };
+  shellJobSettlement?: {
+    jobStatus: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
+    exitCode?: number;
+  };
   /** Host-verified status for a receipt whose message body is already the model output. */
   shellOutputReceipt?: Pick<
     NonNullable<import('@kite-ai/ui/desktop').Message['shell']>,
@@ -249,13 +266,16 @@ export function nativeShellJobMatches(
 export function nativeShellJobSettlement(
   job: NativeToolExecution | undefined,
   tool: ShellLaunchIdentity,
+  continued = false,
 ): NativeToolMessageFact['shellJobSettlement'] {
   if (!nativeShellJobMatches(job, tool)) return;
   if (job.status === 'succeeded') return { jobStatus: 'succeeded' };
   const exitCode = job.shellExitCode ?? nativeShellExitCode(job);
-  return job.status === 'failed' && exitCode !== undefined
-    ? { jobStatus: 'failed', exitCode }
-    : undefined;
+  if (job.status === 'failed' && (exitCode !== undefined || continued))
+    return { jobStatus: 'failed', ...(exitCode === undefined ? {} : { exitCode }) };
+  if (continued && (job.status === 'cancelled' || job.status === 'outcome_unknown'))
+    return { jobStatus: job.status };
+  return undefined;
 }
 
 export function nativeRunFact(run: NativeRunFact): NativeRunFact {

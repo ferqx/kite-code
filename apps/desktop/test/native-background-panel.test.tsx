@@ -18,6 +18,7 @@ import {
   nativeChildActivity,
   useNativeEnvironment,
 } from '../src/native-environment';
+import { nativeBackgroundShellCommands } from '../src/native-shell-receipt';
 import { backgroundItem, backgroundShellItem } from './background-item.fixture';
 
 async function fixture(
@@ -288,15 +289,22 @@ test('retained environment card separates Shell and named children, exact stop, 
   const shell = backgroundShellItem(1),
     child = backgroundItem(2, true),
     other = backgroundItem(3),
-    foreground = backgroundShellItem(4);
+    foreground = backgroundShellItem(4),
+    background = backgroundShellItem(5);
   foreground.sourceTool!.definitionId = 'shell.execute';
   foreground.execution.cancelWithParent = false;
   shell.execution.definitionId = 'shell.command';
+  shell.sourceTool!.definitionId = 'shell.execute';
+  shell.sourceTool!.continued = true;
+  shell.execution.status = 'dispatching';
   other.execution.definitionId = 'mcp.job';
   child.childSession!.title = '原子智能体';
   child.execution.status = 'running';
-  const items = [shell, child, other, foreground],
+  const items = [shell, child, other, foreground, background],
     calls: NativeRequest[] = [];
+  const continuedCommand = "printf '%s\\n' 'Kite 中文'\nsleep 30";
+  const backgroundCommand = `printf '%s\\n' '${'long-argument-'.repeat(12)}' && sleep 30`;
+  let shellCommands: ReadonlyMap<string, string> | undefined;
   const selection: NativeSelection = {
     viewGeneration: 1,
     viewSelection: 1,
@@ -401,6 +409,7 @@ test('retained environment card separates Shell and named children, exact stop, 
       generation: 1,
       selection,
       revision,
+      shellCommands,
       unavailable: false,
       onChanged: async () => undefined,
     });
@@ -432,14 +441,84 @@ test('retained environment card separates Shell and named children, exact stop, 
       await render(port);
       const region = host.querySelector('[aria-label="环境信息"]')!;
       expect(region.querySelector('[aria-label="Shell 列表"] h3')?.textContent).toBe('Shell 列表');
+      const startingShell = region.querySelector(`[data-execution-id="${shell.execution.id}"]`);
+      expect(!!startingShell).toBe(true);
+      expect(startingShell?.querySelector('.background-execution-stop')).toBeNull();
+      const shellName = (row: Element | null | undefined) =>
+        row?.querySelector('.background-execution-name');
+      const backgroundRow = region.querySelector(
+        `[data-execution-id="${background.execution.id}"]`,
+      );
+      expect(shellName(startingShell)?.textContent).toBe('Shell');
+      expect(shellName(backgroundRow)?.textContent).toBe('Shell');
+      shellCommands = nativeBackgroundShellCommands([
+        {
+          shellJobExecutionId: shell.execution.id,
+          shellResultVerified: true,
+          shellInput: {
+            operation: 'execute',
+            command: continuedCommand,
+            commandOffset: 0,
+            commandNextOffset: null,
+          },
+        },
+        {
+          shellJobExecutionId: background.execution.id,
+          shellResultVerified: true,
+          shellInput: {
+            operation: 'launch',
+            command: backgroundCommand,
+            commandOffset: 0,
+            commandNextOffset: null,
+          },
+        },
+        {
+          shellJobExecutionId: background.execution.id,
+          shellResultVerified: false,
+          shellInput: {
+            operation: 'launch',
+            command: 'unverified replacement',
+            commandOffset: 0,
+            commandNextOffset: null,
+          },
+        },
+        {
+          shellJobExecutionId: shell.execution.id,
+          shellResultVerified: true,
+          shellInput: {
+            operation: 'execute',
+            command: 'incomplete fragment',
+            commandOffset: 0,
+            commandNextOffset: 19,
+          },
+        },
+      ]);
+      await render(port);
+      expect(region.querySelector(`[data-execution-id="${background.execution.id}"]`)).toBe(
+        backgroundRow,
+      );
+      expect(shellName(startingShell)?.textContent).toBe(continuedCommand);
+      expect(shellName(backgroundRow)?.textContent).toBe(backgroundCommand);
+      expect(shellName(startingShell)?.getAttribute('title')).toBe(continuedCommand);
+      expect(shellName(backgroundRow)?.getAttribute('title')).toBe(backgroundCommand);
+      expect(region.textContent).not.toContain(background.execution.id);
+      shell.execution.status = 'running';
+      revision++;
+      await render(port);
+      expect(
+        region.querySelector(`[data-execution-id="${shell.execution.id}"]`) === startingShell,
+      ).toBe(true);
+      expect(region.querySelector('[aria-label="Shell 列表"] h3')?.textContent).toBe('Shell 列表');
       expect(region.querySelector('header')).toBeNull();
       const children = region.querySelector('[aria-label="子智能体"]')!;
       expect(children.textContent).toContain('运行中');
       expect(children.querySelector('.background-execution-stop')).not.toBeNull();
-      expect(region.querySelectorAll('.background-execution-stop')).toHaveLength(2);
+      expect(region.querySelectorAll('.background-execution-stop')).toHaveLength(3);
       const shellRow = region.querySelector(`[data-execution-id="${shell.execution.id}"]`)!;
       expect(shellRow).not.toBeNull();
-      expect(shellRow.querySelector('.background-execution-name')?.textContent).toBe('Shell');
+      expect(shellRow.querySelector('.background-execution-name')?.textContent).toBe(
+        continuedCommand,
+      );
       expect(region.textContent).not.toContain(shell.execution.id);
       expect(region.textContent).toContain('原子智能体');
       expect(region.querySelector('[data-execution-id="job-2"] [data-child-icon]')).not.toBeNull();
@@ -461,12 +540,19 @@ test('retained environment card separates Shell and named children, exact stop, 
       );
       const activeShellRow = () =>
         host.querySelector(`[aria-label="Shell 列表"] [data-execution-id="${shell.execution.id}"]`);
+      const beforeStop = activeShellRow()!;
       await act(async () => {
-        const stop = activeShellRow()!.querySelector<HTMLButtonElement>('[aria-label="停止"]')!;
+        const stop = beforeStop.querySelector<HTMLButtonElement>('[aria-label="停止"]')!;
         stop.click();
         stop.click();
       });
       expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(1);
+      expect(activeShellRow() === beforeStop).toBe(true);
+      expect(activeShellRow()?.querySelector('[aria-label="停止"]')).toBeNull();
+      shell.execution.status = 'cancelled';
+      background.execution.status = 'succeeded';
+      revision++;
+      await render(port);
       expect(activeShellRow()).toBeNull();
       expect(host.querySelector('[aria-label="Shell 列表"]')).toBeNull();
       expect(host.querySelector('[aria-label="子智能体"] h3')?.textContent).toBe('子智能体');
@@ -550,8 +636,12 @@ test('environment Shell rows require exact background request facts, independent
       }
     }
   }
+  const continued = backgroundShellItem(1);
+  continued.sourceTool!.definitionId = 'shell.execute';
+  continued.sourceTool!.continued = true;
+  expect(environmentDisplay([continued], 'store').rows[0]).toMatchObject({ continued: true });
   for (const variant of ['missing', 'wrong-parent', 'unknown-version']) {
-    const shell = backgroundShellItem(1);
+    const shell = structuredClone(continued);
     if (variant === 'missing') delete shell.sourceTool;
     else if (variant === 'wrong-parent') shell.sourceTool!.id = 'another-tool';
     else shell.sourceTool!.definitionVersion = 'future';

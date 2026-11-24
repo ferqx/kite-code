@@ -1,10 +1,13 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import type { JobDefinition, ToolContext } from '@kite-ai/agent/extensions';
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AgentClient, Execution, Message } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createModelToolSurface } from '../../../../packages/agent/src/model-tools';
+import { shellOperationKey } from '../../../../packages/agent/src/shell-input';
+import { nativeToolMessageFact } from '../../electron/tool-message-fact';
 import { NativeToolMessages } from '../../electron/tool-messages';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import type { NativeToolMessageFact, NativeToolMessagePage } from '../../src/tool-messages-bridge';
@@ -41,6 +44,171 @@ const { desktopTranscript } = await import('../../src/native-transcript');
 const { renderNativeToolGroup } = await import('../../src/native-tool-renderer');
 Object.assign(globalThis, originalGlobals);
 bootstrap.window.close();
+
+test('numeric Shell receipts keep one command and expanded output through polling, failure and re-open', async () => {
+  const f = fixture();
+  const command = 'printf one && printf two';
+  function receipt(
+    seq: number,
+    status: 'dispatching' | 'running' | 'failed',
+    output: string,
+    start: number | undefined,
+    end: number,
+    deferred = false,
+  ) {
+    const starter = seq === 1;
+    const terminal = status === 'failed';
+    const executionId = starter ? 'starter' : `poll-${seq}`;
+    const toolCallId = `call-${seq}`;
+    const definitionId = starter ? 'shell.execute' : 'shell.read';
+    const input: Execution['toolInput'] = starter ? { command, yield_time_ms: 0 } : { shellId: 7 };
+    const visible = {
+      session_id: 7,
+      status,
+      terminal,
+      has_more: false,
+      output,
+      ...(terminal ? { exit_code: 1 } : {}),
+      ...(starter ? { execution_id: executionId } : {}),
+    };
+    const content = JSON.stringify(visible);
+    const message: Message = {
+      id: executionId,
+      seq: String(seq),
+      sessionId: 's',
+      runId: 'run',
+      role: 'tool',
+      status: 'complete',
+      toolCallId,
+      sourceIds: [executionId],
+      content: deferred ? '' : content,
+      ...(deferred
+        ? {
+            deferredText: {
+              bytes: String(Buffer.byteLength(content)),
+              sha256: createHash('sha256').update(content).digest('hex'),
+            },
+          }
+        : {}),
+    };
+    const execution: Execution = {
+      id: executionId,
+      originStoreId: 'store',
+      sessionId: 's',
+      runId: 'run',
+      kind: 'tool',
+      definitionId,
+      definitionVersion: '1',
+      status: 'succeeded',
+      toolCallId,
+      toolInput: input,
+      resultRevision: '1',
+      cancelRequestedAt: null,
+      rootWorkCommandId: 'work',
+      rootWorkSeq: '2',
+      result: {
+        outcome: 'succeeded',
+        content,
+        details: {
+          ...visible,
+          ...(start === undefined ? {} : { outputStart: { afterSeq: String(start), offset: 0 } }),
+          outputPosition: { afterSeq: String(end), offset: 0 },
+          ref: {
+            key: 'shell-key',
+            commandId: 'job-command',
+            executionId: 'job',
+            extensionId: 'builtin.shell',
+            originStoreId: 'store',
+            sessionId: 's',
+          },
+          execution: {
+            id: 'job',
+            parentExecutionId: 'starter',
+            originCommandId: 'job-command',
+            originStoreId: 'store',
+            sessionId: 's',
+            rootWorkCommandId: 'work',
+            rootWorkSeq: '2',
+            kind: 'job',
+            definitionId: 'shell.command',
+            definitionVersion: '1',
+            status,
+            result: terminal
+              ? { outcome: 'failed', content: 'Shell failed', details: { exitCode: 1 } }
+              : null,
+          },
+        },
+      },
+    };
+    return { message, execution };
+  }
+
+  const starter = receipt(1, 'dispatching', '', undefined, 0);
+  const running = receipt(2, 'running', 'one\n', 0, 1);
+  const failed = receipt(3, 'failed', 'two\n', 1, 2, true);
+  const project = (receipts: ReturnType<typeof receipt>[]) => {
+    const messages = receipts.map(({ message }) => message);
+    return desktopTranscript({
+      storeId: 'store',
+      sessionId: 's',
+      runs: [],
+      messages,
+      tools: receipts.map(({ execution, message }) => {
+        const fact = nativeToolMessageFact({ execution, message, messages, sessionId: 's' })!;
+        expect(fact.shellResultVerified).toBe(true);
+        return fact;
+      }),
+      traceTurns: true,
+    }).messages;
+  };
+  const render = async (receipts: ReturnType<typeof receipt>[]) => {
+    const messages = project(receipts);
+    await act(async () =>
+      f.root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="Shell"
+          readingKey="shell-continuation"
+          loading={false}
+          connected
+          connectionLabel="local"
+          actions={{}}
+          messages={messages}
+        />,
+      ),
+    );
+    return messages;
+  };
+  try {
+    expect((await render([starter]))[0]?.shell?.jobStatus).toBe('dispatching');
+    const row = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    await act(async () => row.click());
+    const output = f.host.querySelector('.shell-output')!;
+    expect(output.textContent).toContain('执行中');
+    expect(
+      (await render([starter, running])).filter((entry) => entry.role === 'tool'),
+    ).toHaveLength(1);
+    expect(f.host.querySelector('.shell-output')).toBe(output);
+    expect(output.textContent).toContain('one');
+    expect(output.textContent).not.toContain('等待输出');
+    const completed = await render([starter, running, failed]);
+    expect(completed[0]).toMatchObject({
+      id: starter.message.id,
+      status: 'failed',
+      shell: { command, jobStatus: 'failed', output: 'one\ntwo\n', exitCode: 1 },
+    });
+    expect(f.host.querySelector('.shell-output')).toBe(output);
+    expect(output.textContent).toContain('退出码 1');
+    expect(output.textContent).not.toContain('读取结果未提供');
+    expect(project([failed])[0]).toMatchObject({ shell: { operation: 'read', output: 'two\n' } });
+    const legacy = receipt(2, 'failed', 'legacy\n', undefined, 1);
+    expect(project([starter, legacy])[0]?.shell?.output).toBe('legacy\n');
+    await act(async () => f.root.render(null));
+    expect((await render([starter, running, failed]))[0]?.shell?.output).toBe('one\ntwo\n');
+  } finally {
+    await f.close();
+  }
+});
 
 test('collaboration tool labels use exact new definitions and versions without inferring an Agent outcome', () => {
   expect(
@@ -524,12 +692,12 @@ test('the exact saved Shell request is readable before Model history completes a
   );
   const call = surface.decode({
     id: 'actual-call',
-    name: 'shell_execute',
-    arguments: JSON.stringify({ key: 'exact-command', command }),
+    name: 'exec_command',
+    arguments: JSON.stringify({ cmd: command }),
   });
   expect(call.name).toBe('shell.execute');
   const ref = {
-    key: 'exact-command',
+    key: shellOperationKey(undefined, 'actual-tool'),
     extensionId: 'builtin.shell',
     sessionId: 's',
     originStoreId: 'store',
@@ -549,6 +717,7 @@ test('the exact saved Shell request is readable before Model history completes a
   const result = await shell
     .tools!.find((tool) => tool.id === 'shell.execute')!
     .execute(JSON.parse(call.arguments), {
+      executionId: 'actual-tool',
       signal: new AbortController().signal,
       records: { get: async () => null, write: async () => {} },
       operations: {

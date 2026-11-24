@@ -3940,6 +3940,7 @@ export type BackgroundExecutionItem = {
     definitionId: string;
     definitionVersion: string;
     background?: boolean;
+    continued?: true;
   };
   execution: {
     id: string;
@@ -4080,6 +4081,7 @@ export type BackgroundExecutionPage = {
       definitionId: string;
       definitionVersion: string;
       background?: boolean;
+      continued?: true;
     };
     execution: {
       id: string;

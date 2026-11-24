@@ -9,6 +9,26 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 const decimal = (value: unknown): value is string =>
   typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value);
 
+export function nativeBackgroundShellCommands(
+  receipts: readonly Pick<
+    NativeToolMessageFact,
+    'shellInput' | 'shellJobExecutionId' | 'shellResultVerified'
+  >[],
+): ReadonlyMap<string, string> {
+  const commands = new Map<string, string>();
+  for (const { shellInput, shellJobExecutionId, shellResultVerified } of receipts) {
+    if (
+      shellResultVerified &&
+      shellJobExecutionId &&
+      shellInput?.command &&
+      shellInput.commandOffset === 0 &&
+      shellInput.commandNextOffset === null
+    )
+      commands.set(shellJobExecutionId, shellInput.command);
+  }
+  return commands;
+}
+
 /** Use the public result of the already verified original Shell Job. */
 export function desktopShellFailure(status: unknown, result: unknown): string | undefined {
   if (status !== 'failed' && status !== 'outcome_unknown') return;
@@ -32,6 +52,7 @@ export function desktopShell(
       | 'shellOutputLimit'
       | 'shellOutputReceipt'
       | 'shellResultVerified'
+      | 'shellSession'
       | 'shellJobExecutionId'
       | 'shellJobSettlement'
       | 'target'
@@ -63,7 +84,8 @@ export function desktopShell(
   };
   if (fact.shellDisplay) return { ...shell, ...fact.shellDisplay, ...fact.shellJobSettlement };
   if (!fact.shellResultVerified) return shell;
-  if (fact.shellOutputReceipt) return { ...shell, ...fact.shellOutputReceipt, output: text };
+  if (fact.shellOutputReceipt && !fact.shellSession)
+    return { ...shell, ...fact.shellOutputReceipt, output: text };
   let result: Record<string, unknown> | undefined;
   try {
     result = record(JSON.parse(text));
@@ -71,6 +93,17 @@ export function desktopShell(
     return shell;
   }
   if (!result) return shell;
+  if (fact.shellSession) {
+    if (typeof result.output !== 'string') return shell;
+    return {
+      ...shell,
+      ...fact.shellOutputReceipt,
+      ...fact.shellJobSettlement,
+      ...(result.output || (!fact.shellSession.terminal && !fact.shellJobSettlement)
+        ? { output: result.output }
+        : {}),
+    };
+  }
   const ref = record(result.ref);
   if (ref?.extensionId !== 'builtin.shell' || ref.key !== shell.shellId) return shell;
   if (operation === 'launch')

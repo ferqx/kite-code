@@ -1902,6 +1902,7 @@ export const BackgroundExecutionItemSchema = z.strictObject({
       definitionId: z.string(),
       definitionVersion: z.string(),
       background: z.boolean().optional(),
+      continued: z.literal(true).optional(),
     })
     .optional(),
   execution: backgroundExecution,

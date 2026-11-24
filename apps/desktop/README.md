@@ -263,7 +263,7 @@ Trace 设置的最终生产 Native 经真实 Main／Client／候选 Service 完�
 
 [Native 新对话／导航 DOM](test/isolated/native-new-conversation-dom.test.tsx)整文件94项／1924断言通过，最后的等待中编辑分支另有12项／142断言定向通过；[导航与原输入](test/native-worktree-navigation.test.ts)、[输入](test/native-input.test.ts)及模型合同合计12项／118断言通过。原[会话外壳浏览器 runner](test/session-shell-browser-runner.fixture.ts)的 `--worktree-navigation` 显式测试制品在 Chrome156 深浅主题各12阶段、309连续帧通过：核目录／选择／历史等待、无模型／缺目录、原来源不动、来源不可见及迟到响应不覆盖后选；等待时普通控件颜色／透明度／编辑资格与矩形保持，期间新草稿往返后完整保留。未见欢迎闪现、重复或跨会话正文，页面错误与业务／删除／权限提交均为0。报告在 `.cache/worktree-navigation-browser-20261106.json`，最终阶段图在 `.cache/session-shell-browser-JbARMT/`；旧候选证据保留，不以最终图代替过程观察。本机验证不授任意真实模型、完整安装版或其他平台资格。
 
-统一 Shell 启动沿[Shell owner](../../packages/agent/src/tools/shell.README.md)使用 shell_execute。background:true 显示原后台受理及 Job 状态。Native 从已核实的原调用投影命令预览，并按现有分段读取提供完整命令。无 key 的新调用从已核原结果取得 shell_id，不在客户端推导或生成。后台目录仅据准确父 Tool 来源的 background:true 接纳新后台项，历史 shell.launch 兼容，默认前台不误入后台列表。
+统一 Shell 启动沿[Shell owner](../../packages/agent/src/tools/shell.README.md)使用 shell_execute。background:true 显示原后台受理及 Job 状态。Native 从已核实的原调用投影命令预览，并按现有分段读取提供完整命令。无 key 的新调用从已核原结果取得 shell_id，不在客户端推导或生成。后台目录依据准确父 Tool 的显式后台请求或 `continued:true` 接纳 Shell。历史 shell.launch 保持原语义。普通调用须先有已保存的会话交回事实。
 
 Git 工作树错误沿[Main 工具事实](electron/tool-message-fact.ts)核原内容、原 Execution 和 Run 的准确 `builtin.shell/git.worktree@1` 注册，再向[Native 工具消息](src/native-tool-messages.tsx)投影有限 `worktreeFailure`。详情用中文区分进程启动、权限拒绝、Git 命令及核验失败，保留原消息正文和部分／未知效果、清理未确认说明。旧 generic 不从 stderr 或 EPERM 猜审批；可选 Run 读取失败回退原文，不阻塞消息。私有 IPC 不传完整 Run 配置，不增加重试入口、公开调试开关或工具版本。
 
@@ -1046,6 +1046,12 @@ Windows 的[集成终端 Shell](src/native-shell-settings.tsx)复用设置下拉
 
 ## 原工具过程与结果阅读
 
+数字 Shell 会话的 [Main 回执校验](electron/tool-message-fact.ts)核对原 Tool、Job、Session、Store、请求和已保存正文。[会话投影](src/native-transcript.ts)按原 Job 与启动 Tool 绑定同轮连续的读取页，按游标追加原输出并在同一命令行更新终态。缺少启动记录、跨轮或无法确认相接的页继续按原记录展示。未被轮询的终态可沿原 Job 复核，输出以已读取的内容为准。旧回执没有起始游标时只接入首个可用的后续页。元数据读取不重跑命令。[过程回归](test/isolated/native-tool-messages-dom.test.tsx)覆盖首张回执、分段追加、非零退出、展开节点保留和重新打开。[后台目录回归](../../packages/agent/test/isolated/tools/shell/reference-runtime.test.ts)验证同一原 Job 在会话交回和终态之间保留来源事实。
+
+2026-11-24，Windows x64／Bun 1.4.4。本机只读回放 24 条已保存的数字会话回执，生成 12 条原命令，输出和退出状态逐条与原结果一致。Chromium 隔离夹具用实际组件检查启动、可停止、停止中和退出移除，验证同一命令输出节点、非零退出与历史重开。定向 DOM 和真实 SQLite／HTTP 目录回归通过。此证据适用于 Windows 开发交付及夹具范围。
+
+2026-11-24，Windows 开发版 Electron 使用本机 Codex 提供商、gpt-6-luna 和中等思考程度。4 次真实模型请求创建并读取两个实际 Shell Job。环境卡显示原命令，停止第二个 Job 后第一个继续执行并正常退出。原命令行分别显示实际输出和终态，重开历史后无额外轮询行或模型请求。
+
 [工具分段渲染](src/native.tsx)从首个普通工具就建立稳定的分段容器，后续“创建／继续子 Agent”只插入所属行；首段沿原工具组身份，后续段沿前一个子 Agent 操作身份保存展开状态。[NativeToolPresentation](src/native-tool-messages.tsx)按同scope、同执行展示身份记录首次观察的位置，回执在同一可读工具块内原位接管，避免完成顺序将仍在运行的工具移到另一段并重建DOM。说明正文、引导和其他Run继续分隔工具块；冷读从实际历史顺序开始，窗口内切换沿原有界展示缓存保留位置。位置身份与完整展示共同计入原缓存预算，不参与元数据、结果、读取或操作资格。共享扫光CSS与循环参数保持。
 
 [实际Native聚合回归](test/isolated/native-live-tool-aggregation-dom.test.tsx)补充收起／展开两例，先复现子Agent加入时的节点替换，再覆盖其回执先到时两侧活动工具的节点、展开选择和运行标记；[位置与来源回归](test/isolated/native-tool-targets-dom.test.tsx)核乱序接管、正文／引导／Run边界、会话缓存和冷读。2026-11-05，`e96af0dd4`加本次diff、Windows x64／Bun1.4.4／Chrome156，六个完整定向文件91项／2014断言、Desktop类型、定向Biome、Core边界与测试归属检查通过。隔离生产Native页面检查深浅主题下普通混合工具、Shell、子Agent加入及收起状态共8组；6025个活动逐帧采样中原工具组零缺帧，CSS动画对象与起始时间各保持一个，展开工具行的动画身份在加入与回执接管后同样保持。过程图及原始采样在本机`.cache/tool-animation-native-trace/before/`与`after/`，临时入口为`.cache/tool-animation-native-trace.ts`；原始重建与首轮仅保首段、未保另一侧工具的失败证据保留于测试输出。该夹具使用受控业务事实，普通工具的合成metadata目标不作为真实路径验收；此范围不代完整Electron窗口、真实模型或安装资格。
@@ -1690,7 +1696,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 [环境信息卡](src/native-environment.tsx)按原 Store／子 Session 汇总子 Agent，依已核实目录的顺序用最新执行更新原行，状态、详情与停止操作绑定该执行。目录和消息详情仍使用准确的执行标识。[环境卡回归](test/native-background-panel.test.tsx)覆盖同一子 Agent 的后续执行更新、同名不同子 Agent 及准确详情打开。
 
-共享 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx) 将有内容的列表同级展示。Shell 列表、子智能体和输出的标题都使用图标和名称。Shell 区以执行目录投影的 `running` 为成员条件，提交期间用原停止控件表达忙碌。目录出现 `stopping` 或终态后移除该行，执行记录继续提供实际停止和清理结果。环境卡子智能体行通过现有入口打开右侧会话标签。
+共享 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx) 将有内容的列表同级展示。Shell 列表、子智能体和输出的标题都使用图标和名称。Shell 区显示正在运行的后台命令，也显示已交回会话 ID、仍在排队、启动或停止的同一执行。已核实运行且原停止资格有效时提供停止按钮。环境卡依据已核实的启动回执把完整原命令交给同一 Job 行，适用于显式后台启动和数字会话交回。命令暂未核实时显示「Shell」。继续执行的条目在目录核实终态后移除，退出与清理结果仍可在原记录查看。环境卡子智能体行通过现有入口打开右侧会话标签。
 
 环境行将原 Store／子 Session 组合交给共享 `ChildAgentIcon`，与工具消息及审批使用相同稳定身份，不按标题、状态或本次 carrier 重新分配。恢复历史沿原 Store 保持外观；无法导航的已知子会话仍显示图标，缺身份时使用通用子 Agent 图标。显示、点击与停止资格仍分别由原 metadata 和回调决定。
 

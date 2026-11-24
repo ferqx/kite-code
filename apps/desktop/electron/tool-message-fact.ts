@@ -5,6 +5,7 @@ import { ClientError, type Execution, type Message, type Run } from '@kite-ai/cl
 import { desktopShell, desktopShellFailure } from '../src/native-shell-receipt';
 import {
   type NativeShellInput,
+  type NativeShellOutputPosition,
   type NativeToolMessageFact,
   nativeAgentWaitErrors,
   nativeShellCommandChunkBytes,
@@ -176,6 +177,13 @@ function shellInput(
     ...(typeof shellId === 'string' &&
     (!original || original[commandOperation ? 'key' : 'shellId'] === shellId)
       ? { shellId }
+      : {}),
+    ...(operation === 'read' &&
+    typeof shellId === 'number' &&
+    Number.isSafeInteger(shellId) &&
+    shellId > 0 &&
+    original?.shellId === shellId
+      ? { sessionId: shellId }
       : {}),
   };
   const command = commandOperation ? input?.command : undefined;
@@ -468,6 +476,118 @@ function webFetchBatch(
     : undefined;
 }
 
+function shellOutputPosition(value: unknown): NativeShellOutputPosition | undefined {
+  const position = object(value);
+  if (
+    typeof position?.afterSeq === 'string' &&
+    /^(0|[1-9][0-9]{0,18})$/.test(position.afterSeq) &&
+    typeof position.offset === 'number' &&
+    Number.isSafeInteger(position.offset) &&
+    position.offset >= 0
+  )
+    return { afterSeq: position.afterSeq, offset: position.offset };
+  return undefined;
+}
+
+function numericShellReceipt(
+  execution: Execution,
+  shell: NativeShellInput,
+  call: Record<string, unknown> | undefined,
+  details: Record<string, unknown>,
+  content: string,
+): Pick<NativeToolMessageFact, 'shellSession' | 'shellOutputReceipt'> | undefined {
+  const starter = shell.operation === 'execute' || shell.operation === 'launch';
+  if (!starter && shell.operation !== 'read') return;
+  const ref = object(details.ref);
+  const job = object(details.execution);
+  const jobResult = object(job?.result);
+  const jobDetails = object(jobResult?.details);
+  const start = shellOutputPosition(details.outputStart);
+  const end = shellOutputPosition(details.outputPosition);
+  const status = job?.status as NonNullable<
+    NativeToolMessageFact['shellOutputReceipt']
+  >['jobStatus'];
+  const terminal = ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(String(status));
+  const sessionId = details.session_id;
+  if (
+    typeof sessionId !== 'number' ||
+    !Number.isSafeInteger(sessionId) ||
+    sessionId < 1 ||
+    !end ||
+    (details.outputStart !== undefined && !start) ||
+    (start &&
+      (BigInt(start.afterSeq) > BigInt(end.afterSeq) ||
+        (start.afterSeq === end.afterSeq && start.offset > end.offset))) ||
+    (!terminal && !['planned', 'dispatching', 'running'].includes(String(status))) ||
+    details.terminal !== terminal ||
+    details.status !== status ||
+    typeof details.has_more !== 'boolean' ||
+    typeof details.output !== 'string' ||
+    ref?.extensionId !== 'builtin.shell' ||
+    typeof ref.key !== 'string' ||
+    !ref.key ||
+    ref.sessionId !== execution.sessionId ||
+    ref.originStoreId !== execution.originStoreId ||
+    typeof ref.commandId !== 'string' ||
+    !ref.commandId ||
+    !job ||
+    typeof job.id !== 'string' ||
+    !job.id ||
+    job.id !== ref.executionId ||
+    job.originCommandId !== ref.commandId ||
+    job.sessionId !== ref.sessionId ||
+    job.originStoreId !== ref.originStoreId ||
+    (starter &&
+      (job.rootWorkCommandId !== execution.rootWorkCommandId ||
+        job.rootWorkSeq !== execution.rootWorkSeq)) ||
+    job.kind !== 'job' ||
+    job.definitionId !== 'shell.command' ||
+    job.definitionVersion !== '1' ||
+    typeof job.parentExecutionId !== 'string' ||
+    !job.parentExecutionId ||
+    job.id === job.parentExecutionId ||
+    (terminal && (jobResult?.outcome !== status || typeof jobResult?.content !== 'string')) ||
+    (details.exit_code !== undefined &&
+      (!terminal ||
+        !Number.isSafeInteger(details.exit_code) ||
+        details.exit_code !== jobDetails?.exitCode)) ||
+    (starter
+      ? details.execution_id !== execution.id ||
+        job.parentExecutionId !== execution.id ||
+        !shell.command ||
+        execution.status !== (terminal ? status : 'succeeded')
+      : execution.status !== 'succeeded' ||
+        details.execution_id !== undefined ||
+        shell.sessionId !== sessionId ||
+        call?.shellId !== sessionId)
+  )
+    return;
+  const {
+    ref: _ref,
+    execution: _job,
+    outputStart: _start,
+    outputPosition: _end,
+    ...visible
+  } = details;
+  if (!isDeepStrictEqual(JSON.parse(content), visible)) return;
+  return {
+    shellSession: {
+      sessionId,
+      jobExecutionId: job.id,
+      starterExecutionId: job.parentExecutionId,
+      terminal,
+      ...(start ? { start } : {}),
+      end,
+    },
+    shellOutputReceipt: {
+      jobStatus: status,
+      failureReason: desktopShellFailure(status, jobResult),
+      ...(typeof details.exit_code === 'number' ? { exitCode: details.exit_code } : {}),
+      outputComplete: terminal && !details.has_more,
+    },
+  };
+}
+
 export function nativeLegacyShellOutput(execution: Execution) {
   const details = object(object(execution.result)?.details);
   return (
@@ -475,6 +595,7 @@ export function nativeLegacyShellOutput(execution: Execution) {
     ['shell.execute', 'shell.read'].includes(execution.definitionId) &&
     !!details &&
     details.outputFormat !== 'model-preview' &&
+    typeof details.session_id !== 'number' &&
     (typeof details.stdout === 'string' || typeof details.stderr === 'string' || !!details.output)
   );
 }
@@ -634,8 +755,27 @@ export function nativeToolMessageFact({
   let shell = shellInput(execution, call, commandOffset);
   let shellResultVerified = false;
   let shellJobExecutionId: string | undefined;
+  let shellSession: NativeToolMessageFact['shellSession'];
   let shellOutputReceipt: NativeToolMessageFact['shellOutputReceipt'];
-  if (shell && details) {
+  if (shell && details && typeof details.session_id === 'number') {
+    try {
+      const numeric = numericShellReceipt(execution, shell, call, details, result.content);
+      if (numeric) {
+        shellSession = numeric.shellSession;
+        shellOutputReceipt = numeric.shellOutputReceipt;
+        shellResultVerified = true;
+        if (
+          shellSession &&
+          shellSession.starterExecutionId === execution.id &&
+          !shellSession.terminal
+        )
+          shellJobExecutionId = shellSession.jobExecutionId;
+      }
+    } catch {
+      // Preserve the original result if the numeric receipt cannot be verified.
+    }
+  }
+  if (shell && details && typeof details.session_id !== 'number') {
     try {
       const ref = object(details.ref);
       // New calls do not supply a key. Only the exact saved builtin receipt can
@@ -795,7 +935,7 @@ export function nativeToolMessageFact({
     target: planReadTarget ?? requestTarget,
     ...(expectedTarget !== undefined && requestTarget === undefined ? { inputPending: true } : {}),
     ...(shell ? { shellInput: shell } : {}),
-    ...(shell?.shellId &&
+    ...((shell?.shellId || shell?.sessionId) &&
     call &&
     execution.toolCallId === message.toolCallId &&
     execution.toolCallId
@@ -810,6 +950,7 @@ export function nativeToolMessageFact({
       : {}),
     ...(shellResultVerified ? { shellResultVerified: true } : {}),
     ...(shellJobExecutionId ? { shellJobExecutionId } : {}),
+    ...(shellSession ? { shellSession } : {}),
     ...(shellOutputReceipt ? { shellOutputReceipt } : {}),
     ...(legacyShellOutput
       ? {

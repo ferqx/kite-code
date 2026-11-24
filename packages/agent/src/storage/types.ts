@@ -982,6 +982,8 @@ export interface BackgroundExecutionItem {
     definitionId: string;
     definitionVersion: string;
     background?: boolean;
+    /** The original Shell Tool returned its session while the exact Job was still active. */
+    continued?: true;
   };
   execution: BackgroundExecution;
   session: SessionRecord;

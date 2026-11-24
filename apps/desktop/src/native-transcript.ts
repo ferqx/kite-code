@@ -365,6 +365,105 @@ function nativeRunFailure(reason: string | null, interrupted: boolean) {
   }
 }
 
+type ShellPage = NonNullable<NativeToolMessageFact['shellSession']>;
+
+function positionOrder(left: ShellPage['end'], right: ShellPage['end']) {
+  if (left.afterSeq === right.afterSeq) return Math.sign(left.offset - right.offset);
+  return BigInt(left.afterSeq) < BigInt(right.afterSeq) ? -1 : 1;
+}
+
+function foldShellPages(
+  modeled: DesktopMessage[],
+  messages: readonly Message[],
+  pages: ReadonlyMap<string, ShellPage>,
+) {
+  const groups = new Map<
+    string,
+    {
+      index: number;
+      last: ShellPage;
+      shell: NonNullable<DesktopMessage['shell']>;
+      parts: string[];
+      foldedRead: boolean;
+      retainedSettlement: boolean;
+    }
+  >();
+  const hidden = new Set<number>();
+  for (const [index, message] of messages.entries()) {
+    if (message.originMessage || !message.runId) continue;
+    const page = pages.get(message.id);
+    const shell = modeled[index]?.shell;
+    if (!page || !shell?.jobStatus) continue;
+    const key = JSON.stringify([
+      message.sessionId,
+      message.runId,
+      page.sessionId,
+      page.jobExecutionId,
+      page.starterExecutionId,
+    ]);
+    if (shell.operation === 'execute' || shell.operation === 'launch') {
+      if (message.sourceIds?.[0] === page.starterExecutionId)
+        groups.set(key, {
+          index,
+          last: page,
+          shell,
+          parts: shell.output ? [shell.output] : [],
+          foldedRead: false,
+          retainedSettlement:
+            !page.terminal &&
+            ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(shell.jobStatus),
+        });
+      continue;
+    }
+    const group = groups.get(key);
+    if (
+      shell.operation !== 'read' ||
+      !group ||
+      BigInt(message.seq) <= BigInt(messages[group.index]!.seq) ||
+      (group.last.terminal && !page.terminal)
+    )
+      continue;
+    const order = positionOrder(page.end, group.last.end);
+    const contiguous = page.start
+      ? positionOrder(page.start, group.last.end) === 0
+      : !group.foldedRead;
+    // Old receipts only recorded their ending position. Fold the first legacy
+    // continuation; keep later ambiguous or noncontiguous pages readable in place.
+    if (order < 0 || (order > 0 && !contiguous) || (order === 0 && shell.output)) continue;
+    if (shell.output) group.parts.push(shell.output);
+    group.foldedRead = true;
+    group.last = page;
+    if (page.terminal || !group.retainedSettlement)
+      group.shell = {
+        ...group.shell,
+        jobStatus: shell.jobStatus,
+        exitCode: shell.exitCode,
+        timedOut: shell.timedOut,
+        failureReason: shell.failureReason,
+        outputComplete: shell.outputComplete,
+      };
+    hidden.add(index);
+  }
+  for (const group of groups.values()) {
+    if (!group.foldedRead && !group.retainedSettlement) continue;
+    const message = modeled[group.index]!;
+    const { jobStatus } = group.shell;
+    const status = jobStatus === 'outcome_unknown' ? 'unknown' : jobStatus;
+    modeled[group.index] = {
+      ...message,
+      status:
+        status === 'failed' || status === 'cancelled' || status === 'unknown'
+          ? status
+          : message.status,
+      shell: {
+        ...group.shell,
+        output: group.parts.length ? group.parts.join('') : undefined,
+      },
+    };
+  }
+  return hidden;
+}
+
 export function desktopTranscript({
   messages: history,
   runs,
@@ -468,6 +567,7 @@ export function desktopTranscript({
       indexEntry(callsById, key, { call, message });
     }
   }
+  const shellPages = new Map<string, ShellPage>();
   const modeled = desktopMessages(messages, true).map((model, index) => {
     const message = messages[index]!,
       run =
@@ -561,7 +661,7 @@ export function desktopTranscript({
         inputCompatible =
           input?.command !== undefined
             ? args.command === input.command && args.key === input.shellId
-            : args.shellId === input?.shellId;
+            : args.shellId === (input?.shellId ?? input?.sessionId);
       } catch {
         /* Preserve the original unverified record on a conflicting call. */
       }
@@ -574,18 +674,23 @@ export function desktopTranscript({
         )
       : undefined;
     const shell = factMessage?.shell;
+    if (fact?.shellSession && shell?.jobStatus) shellPages.set(message.id, fact.shellSession);
     const jobSettlement =
       shell?.jobExecutionId && fact && run && !message.originMessage
         ? executionsById
             .get(shell.jobExecutionId)
             ?.map((job) =>
-              nativeShellJobSettlement(job, {
-                executionId: fact.executionId,
-                originStoreId: run.originStoreId,
-                sessionId,
-                runId: run.id,
-                jobExecutionId: shell.jobExecutionId!,
-              }),
+              nativeShellJobSettlement(
+                job,
+                {
+                  executionId: fact.executionId,
+                  originStoreId: run.originStoreId,
+                  sessionId,
+                  runId: run.id,
+                  jobExecutionId: shell.jobExecutionId!,
+                },
+                !!fact.shellSession,
+              ),
             )
             .find(Boolean)
         : undefined;
@@ -653,6 +758,7 @@ export function desktopTranscript({
       };
     return result;
   });
+  const foldedShellReads = foldShellPages(modeled, messages, shellPages);
   const compressing = compressionProgress && observed.get(compressionProgress.runId);
   const progressMessage =
     compressionProgress?.executionId &&
@@ -727,6 +833,7 @@ export function desktopTranscript({
         )
         .at(-1);
     const projected = modeled.flatMap((model, index): DesktopMessage[] => {
+      if (foldedShellReads.has(index)) return [];
       const message = messages[index];
       if (!message || model.systemKind || message.role !== 'assistant' || !model.turnId)
         return [model];
@@ -799,6 +906,8 @@ export function desktopTranscript({
       });
     }
     modeled.splice(0, modeled.length, ...projected);
+  } else {
+    for (const index of [...foldedShellReads].reverse()) modeled.splice(index, 1);
   }
   for (const run of observed.values()) {
     const turnId = identity(run.id);

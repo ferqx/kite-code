@@ -25277,6 +25277,10 @@
               },
               "background": {
                 "type": "boolean"
+              },
+              "continued": {
+                "type": "boolean",
+                "const": true
               }
             },
             "required": ["id", "definitionId", "definitionVersion"],
@@ -26121,6 +26125,10 @@
                     },
                     "background": {
                       "type": "boolean"
+                    },
+                    "continued": {
+                      "type": "boolean",
+                      "const": true
                     }
                   },
                   "required": ["id", "definitionId", "definitionVersion"],

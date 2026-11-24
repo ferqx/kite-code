@@ -35,7 +35,11 @@ function shellHandle(request: ModelRequest): number {
   }
   throw Error('shell_session_missing_from_actual_model_feedback');
 }
-async function fixture(responses: ModelEvent[][], startFailure = false) {
+async function fixture(
+  responses: ModelEvent[][],
+  startFailure = false,
+  gates?: { job: Promise<void>; beforeModel: (index: number) => Promise<void> },
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-shell-reference-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   const model = createFixedModel(responses);
@@ -53,6 +57,7 @@ async function fixture(responses: ModelEvent[][], startFailure = false) {
       return { reference: { original: true } };
     },
     async *observe(): AsyncIterable<JobEvent> {
+      if (gates) await gates.job;
       yield {
         type: 'terminal',
         result: startFailure
@@ -75,6 +80,7 @@ async function fixture(responses: ModelEvent[][], startFailure = false) {
     model: {
       async *stream(request, options) {
         const index = model.requests.length;
+        if (gates) await gates.beforeModel(index);
         responses[index] = (responses[index] ?? []).map((event) => {
           if (event.type !== 'tool_call') return event;
           const input = JSON.parse(event.arguments);
@@ -222,6 +228,66 @@ test('wrong reference does not alter or restart an existing original Job', async
       terminal: true,
     });
   } finally {
+    await f.close();
+  }
+});
+
+test('the directory proves a numeric Shell handoff from the exact saved starter and keeps its Job identity through exit', async () => {
+  const reachedHandoff = Promise.withResolvers<void>();
+  const releaseModel = Promise.withResolvers<void>();
+  const releaseJob = Promise.withResolvers<void>();
+  const f = await fixture(
+    [
+      calls(['exec_command', { cmd: 'controlled command', yield_time_ms: 0 }]),
+      calls(['poll_command', { session_id: 'original-shell' }]),
+      [finish],
+    ],
+    false,
+    {
+      job: releaseJob.promise,
+      async beforeModel(index) {
+        if (index === 1) {
+          reachedHandoff.resolve();
+          await releaseModel.promise;
+        }
+      },
+    },
+  );
+  const run = f.run();
+  try {
+    await Promise.race([
+      reachedHandoff.promise,
+      run.then(() => {
+        throw Error('handoff_missing');
+      }),
+    ]);
+    const expectedStoreId = (await f.store.getMetadata()).storeId;
+    const scope = { expectedStoreId, rootSessionId: 's', subjectId: 'owner' };
+    const first = (await f.store.listBackgroundExecutions({ ...scope, includeSourceTool: true }))
+      .items[0]!;
+    expect(first.sourceTool).toEqual({
+      id: first.execution.parentExecutionId!,
+      definitionId: 'shell.execute',
+      definitionVersion: '1',
+      continued: true,
+    });
+    expect(['planned', 'dispatching', 'running']).toContain(first.execution.status);
+    expect((await f.store.listBackgroundExecutions(scope)).items[0]?.sourceTool).toBeUndefined();
+    releaseJob.resolve();
+    releaseModel.resolve();
+    const view = await run;
+    const final = (await f.store.listBackgroundExecutions({ ...scope, includeSourceTool: true }))
+      .items[0]!;
+    expect(final.execution.id).toBe(first.execution.id);
+    expect(final.execution.status).toBe('succeeded');
+    expect(final.sourceTool).toEqual(first.sourceTool!);
+    expect(
+      view.executions.find((entry) => entry.definitionId === 'shell.read')?.result,
+    ).toMatchObject({ details: { outputStart: { afterSeq: '0', offset: 0 } } });
+    expect(f.counts()).toEqual({ starts: 1, cancels: 0, probes: 0 });
+  } finally {
+    releaseJob.resolve();
+    releaseModel.resolve();
     await f.close();
   }
 });

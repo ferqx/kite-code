@@ -154,6 +154,7 @@ import { NativeSessionPanel } from './native-sessions';
 import type { NativeSettingsState } from './native-settings-bridge';
 import { NativeSettingsRoot } from './native-settings-root';
 import { NativeSettingsWorkspace } from './native-settings-workspace';
+import { nativeBackgroundShellCommands } from './native-shell-receipt';
 import { NativeStartup } from './native-startup';
 import { useNativeTheme } from './native-theme';
 import {
@@ -2480,7 +2481,22 @@ function NativeDesktopContent({
       },
     });
   };
+  const toolMessages = useNativeToolMessages({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    selection: !preparing && !scheduledTasksView ? selection : undefined,
+    historyEpoch: state?.historyEpoch ?? 0,
+    messages,
+    observationRevision: selection?.viewGeneration ?? 0,
+    executions: executionRecords,
+    finishedShellJobs: executionObservation?.finishedShellJobs,
+  });
+  const shellCommands = useMemo(
+    () => nativeBackgroundShellCommands(toolMessages.entries),
+    [toolMessages.entries],
+  );
   const environment = useNativeEnvironment({
+    shellCommands,
     plan: planProgress.active && (
       <PlanExecutionProgress
         plan={planProgress.active.plan}
@@ -2624,16 +2640,6 @@ function NativeDesktopContent({
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     includeRead: true,
-  });
-  const toolMessages = useNativeToolMessages({
-    bridge,
-    generation: state?.generation ?? generation.current,
-    selection: !preparing && !scheduledTasksView ? selection : undefined,
-    historyEpoch: state?.historyEpoch ?? 0,
-    messages,
-    observationRevision: selection?.viewGeneration ?? 0,
-    executions: executionRecords,
-    finishedShellJobs: executionObservation?.finishedShellJobs,
   });
   const submittedInteractionIds = JSON.stringify(
     (state?.selection?.interactions ?? [])

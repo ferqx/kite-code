@@ -8,6 +8,7 @@ Status: implemented
 
 ## Decision
 
+[数字 Shell 会话的后续决定](2026-11-24-desktop-shell-continuation.md)扩展了环境卡的成员条件。原目录请求边界、直接父 Tool 来源要求和取消关系的解释继续适用。以下保留当时仅识别明确后台启动的取舍。
 后台目录在原读取事务内核对 Job 的直接父 Tool 与同 Session、origin Store、root work，只在显式 `includeSourceTool:true` 时投影 `sourceTool` 的 ID、定义和版本。默认与 false 的响应保持原结构，不加入工具正文、结果、引用或授权材料。无 SQL 迁移，也不修改原操作意图。
 
 Native 环境读取和准确停止复核显式请求该元数据，卡片只把父 ID 匹配、来源为 `shell.launch@1` 的 `shell.command` 作为后台 Shell，再沿既有运行／停止中筛选。前台 `shell.execute`、缺失来源或未知版本不补后台身份。子 Agent 展示与只读详情保持，Shell 原停止准入和自动更新保持。

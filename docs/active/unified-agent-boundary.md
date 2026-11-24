@@ -60,7 +60,7 @@ Service 的最终 listener 关闭位于 Runtime、已接纳 HTTP 资源、正文
 
 实际创建父续 Run 的 child 结果才投影为独立公共 Message，须沿原 Source／carrier／revision、consume 和 idle report 回执核对真实目标 Run 的创建来源；原 active 接纳后来结束也不补气泡，不能用 Run 当前活动状态猜历史时机。投影不另写普通消息造成模型双重接收，展示名称和正文不取得人类输入或执行授权；大型结果预览必须明确完整性。具体证明与分页由 [Store owner](../../packages/agent/src/storage/README.md#人类工作与完成报告事务)维护。
 
-后台 Job 目录的来源观察沿 [Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录) → [Service](../../apps/service/README.md#后台目录的来源投影) → [Client](../../packages/client/README.md) → [Native](../../apps/desktop/README.md#native-当前会话环境信息与子详情) 交接。`includeSourceTool:true` 只读取同原 Session／Store／root work 的直接父 Tool ID／定义／版本；默认响应保持原闭合结构，工具正文和授权材料不进入来源投影。来源缺失不推断后台身份，取消边不作为前后台标记。该观察不扩大读取或停止 authority，不改原 Job、取消和冷恢复边界。
+后台 Job 目录的来源观察沿 [Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录) → [Service](../../apps/service/README.md#后台目录的来源投影) → [Client](../../packages/client/README.md) → [Native](../../apps/desktop/README.md#native-当前会话环境信息与子详情) 交接。`includeSourceTool:true` 只公开同原 Session／Store／root work 的直接父 Tool ID／定义／版本及有限的 Shell 启动事实。持久回执证明父 Tool 交回数字会话且原 Job 尚活动时，目录可投影继续执行的事实。默认响应保持原闭合结构，来源缺失和取消边均不授予后台身份。工具正文和授权材料不进入来源投影。该观察不扩大读取或停止 authority，不改原 Job、取消和冷恢复边界。
 
 自动权限检查沿[权限 owner](../../packages/agent/src/permissions/README.md)与 Core 的 `authorization.check`／`authorizationCheck` 执行，只记录原 Session 内无 Run Model，不创建子 Agent。工具包导出实际执行定义和可信行为，宿主静态登记并封存准确 kind／id／version、contractRef／configurationDigest；Tool.execute/resume 与 Job 生命周期不变。默认 policy 明确选择 check.behavior，独立 checker／人工上限保留，Loop 不按工具名选择审核算法。
 

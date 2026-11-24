@@ -223,7 +223,9 @@ function shellTitle(message: Message): string {
     message.approval?.state === 'rejected' ||
     message.toolResult?.terminationReason === 'timed_out' ||
     message.shell?.timedOut ||
-    message.shell?.jobStatus === 'outcome_unknown'
+    message.shell?.jobStatus === 'outcome_unknown' ||
+    (operation === 'execute' &&
+      ['planned', 'dispatching', 'running'].includes(message.shell?.jobStatus ?? ''))
   )
     return action;
   if (operation === 'execute' && message.status === 'failed') return '已运行';
@@ -849,7 +851,7 @@ function ShellOutput({
   else if (showFailure || stoppedBeforeExecution) output = '';
   else if (shell) {
     if (shell.jobStatus === 'succeeded' && shell.outputComplete === true)
-      output = '命令执行成功，无输出。';
+      output = shell.operation === 'read' ? '本次没有新增输出。' : '命令执行成功，无输出。';
     else if (!shell.jobStatus && message.text && !(shell.operation === 'launch' && shell.accepted))
       output = message.text;
     else output = shell.outputComplete === false ? '本次记录未包含完整输出。' : '';
@@ -931,6 +933,8 @@ function ShellOutput({
                 !failure &&
                 !command &&
                 !preview &&
+                !message.settled &&
+                (message.status === 'running' || message.status === 'queued') &&
                 !executionUnconfirmed(message)
                   ? '等待输出…'
                   : '')}
