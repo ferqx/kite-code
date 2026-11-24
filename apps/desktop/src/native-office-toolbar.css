@@ -12,8 +12,20 @@
   font-size: 13px;
 }
 .native-file-preview-viewport {
+  position: relative;
   flex: 1;
   min-height: 0;
+}
+.native-file-preview-iframe {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.native-file-preview-iframe[data-loading] {
+  opacity: 0;
 }
 .native-file-preview-output {
   min-height: 80px;
@@ -38,7 +50,8 @@
   margin: 0;
 }
 .native-preview-toolbar,
-.native-preview-toolbar fieldset {
+.native-preview-capsule,
+.native-preview-file-actions {
   min-inline-size: 0;
   margin: 0;
   padding: 0;
@@ -50,170 +63,23 @@
   display: flex;
   align-items: center;
   flex: none;
+  gap: 8px;
 }
 .native-preview-toolbar {
   align-self: center;
   width: max-content;
   max-width: calc(100% - 8px);
   margin: 6px auto;
-  gap: 12px;
   white-space: nowrap;
 }
 .native-preview-toolbar[data-align="end"] {
   align-self: flex-end;
   margin-inline: 4px 6px;
 }
-.native-preview-file-actions {
-  gap: 8px;
-}
-.native-preview-toolbar .native-preview-capsule,
-.native-preview-toolbar button.native-preview-save {
-  border: 1px solid var(--composer-border-color);
-  background-color: var(--control-hover);
-}
-.native-preview-toolbar .native-preview-capsule {
-  box-sizing: border-box;
-  gap: 4px;
-  padding: 1px 4px;
-  border-radius: 999px;
-}
-.native-preview-toolbar button,
-.native-preview-toolbar select {
-  box-sizing: border-box;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  appearance: none;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.native-preview-toolbar button.native-preview-save {
-  width: 34px;
-  height: 34px;
-}
-.native-preview-toolbar :is(button, select):hover:not(:disabled),
-.native-preview-toolbar button[aria-pressed="true"] {
-  background-color: var(--control-selected);
-}
-.native-preview-toolbar :is(button, select):active:not(:disabled) {
-  background-color: var(--control-pressed);
-}
-.native-preview-toolbar :is(button, select):focus-visible {
-  outline: 1px solid var(--foreground);
-  outline-offset: -2px;
-  background-color: var(--control-selected);
-}
-.native-preview-toolbar :is(button, select):disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.native-preview-toolbar svg {
-  width: 16px;
-  height: 16px;
-  pointer-events: none;
-}
-.native-preview-zoom,
-.native-preview-more {
-  position: relative;
-  display: grid;
-  place-items: center;
-}
-.native-preview-zoom select {
-  display: block;
-  text-align: center;
-  width: 54px;
-  padding: 0 15px 0 3px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-.native-preview-zoom svg {
-  position: absolute;
-  right: 4px;
-  width: 10px;
-  height: 10px;
-}
-/* Keep the system menu and its option colors native. Only its closed trigger
-   is visually replaced; pointer input, keyboard focus and the accessible value stay on select. */
-.native-preview-more {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-}
-.native-preview-more select {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-}
-.native-preview-more:has(select:hover:not(:disabled)),
-.native-preview-more:has(select:focus-visible) {
-  background-color: var(--control-selected);
-}
-.native-preview-more:has(select:active:not(:disabled)) {
-  background-color: var(--control-pressed);
-}
-.native-preview-more:has(select:focus-visible) {
-  outline: 1px solid var(--foreground);
-  outline-offset: -2px;
-}
-.native-preview-toolbar .native-preview-more select:disabled {
-  opacity: 0;
-}
-.native-preview-more svg {
-  position: absolute;
-}
-.native-preview-toolbar option,
-.native-preview-toolbar optgroup {
-  background: var(--card);
-  color: var(--foreground);
-}
-.native-preview-toolbar select:disabled + svg {
-  opacity: 0.5;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .native-preview-toolbar :is(button, select) {
-    transition:
-      background-color 100ms,
-      color 100ms;
-  }
-}
-.native-office-notes summary:hover {
-  background: var(--control-hover);
-}
-.native-office-notes summary:active {
-  background: var(--control-pressed);
-}
 .native-office-status {
   padding: 4px 12px;
   font-size: 12px;
   flex-shrink: 0;
-}
-.native-office-notes {
-  flex-shrink: 0;
-  padding: 0 8px 4px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  max-width: 100%;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.native-office-notes summary {
-  padding: 4px 8px;
-  border-radius: var(--button-radius, 8px);
-  cursor: pointer;
-}
-.native-office-notes p {
-  margin: 4px 8px 8px;
-  color: var(--foreground);
-  white-space: pre-wrap;
-  max-height: 140px;
-  overflow: auto;
 }
 .native-excel-readonly {
   display: flex;
@@ -228,32 +94,12 @@
   border-block: 1px solid var(--border);
   background: var(--page-background);
 }
-.native-excel-readonly button {
-  flex: none;
-  box-sizing: border-box;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-.native-excel-readonly button:hover:not(:disabled),
-.native-excel-readonly button:focus-visible {
-  background-color: var(--control-selected);
-}
-.native-excel-readonly button:active:not(:disabled) {
-  background-color: var(--control-pressed);
-}
-.native-excel-readonly button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.native-excel-range {
+.native-excel-readonly > button.native-excel-range {
   min-width: 54px;
+  min-height: 0;
   height: 26px;
-  padding: 0 8px;
-  border-radius: 4px;
+  padding: 0 5px;
   font: 500 12px / 1 var(--font-mono);
-  text-align: start;
 }
 .native-excel-value {
   display: flex;
@@ -291,19 +137,6 @@
   padding: 3px 0;
   overflow: hidden;
 }
-.native-excel-readonly .native-excel-expand {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border-radius: 50%;
-  color: var(--muted-foreground);
-}
-.native-excel-expand svg {
-  width: 12px;
-  height: 12px;
-}
 .native-excel-expand[aria-expanded="true"] svg {
   transform: rotate(180deg);
 }
@@ -326,19 +159,4 @@
   width: 100%;
   height: 100px;
   padding: 4px 0;
-}
-.native-excel-readonly button:focus-visible,
-.native-excel-value textarea:focus-visible,
-.native-excel-details textarea:focus-visible,
-.native-office-notes summary:focus-visible {
-  outline: 1px solid var(--foreground);
-  outline-offset: -2px;
-}
-@container office-preview (max-width: 260px) {
-  .native-preview-toolbar {
-    gap: 6px;
-  }
-  .native-preview-file-actions {
-    gap: 4px;
-  }
 }

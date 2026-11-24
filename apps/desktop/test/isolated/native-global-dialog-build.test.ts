@@ -45,6 +45,7 @@ test('native builds retain fixed renderer entries while development uses only Vi
         'preload.cjs',
         'global-dialog-preload.cjs',
         'image-gallery-preload.cjs',
+        'preview-menu-preload.cjs',
         'session-search-preload.cjs',
         'settings-preload.cjs',
       ])
@@ -61,6 +62,8 @@ test('native builds retain fixed renderer entries while development uses only Vi
           'global-dialog-renderer.js',
           'image-gallery.html',
           'image-gallery-renderer.js',
+          'preview-menu.html',
+          'preview-menu-renderer.js',
           'session-search.html',
           'session-search-renderer.js',
           'settings.html',
@@ -79,6 +82,12 @@ test('native builds retain fixed renderer entries while development uses only Vi
       expect(Buffer.byteLength(gallery)).toBeLessThan(500_000);
       expect(gallery).not.toContain('katex');
       expect(gallery).not.toContain('mermaid');
+      expect(readFileSync(join(output, 'preview-menu.html'), 'utf8')).toContain(
+        './preview-menu-renderer.js',
+      );
+      const menuPreload = readFileSync(join(output, 'preview-menu-preload.cjs'), 'utf8');
+      expect(menuPreload).toContain('kitePreviewMenuOverlay');
+      expect(menuPreload).not.toContain('kiteNative');
       const settingsHtml = readFileSync(join(output, 'settings.html'), 'utf8');
       expect(settingsHtml).toContain('./settings-renderer.js');
       const settingsPreload = readFileSync(join(output, 'settings-preload.cjs'), 'utf8');

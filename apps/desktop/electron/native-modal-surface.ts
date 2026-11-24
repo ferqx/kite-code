@@ -6,7 +6,7 @@ import {
 } from './native-overlay-layer';
 import type { NativeRootWindow } from './native-root-window';
 
-/** Shared transparent native modal mechanics. Authority remains in each typed host. */
+/** Shared transparent native modal mechanics. Each typed host owns authority and disposal. */
 export function createNativeModalSurface(options: {
   window: NativeRootWindow;
   url: string;
@@ -216,7 +216,6 @@ export function createNativeModalSurface(options: {
     parent.off('hide', cancel);
     parent.off('minimize', cancel);
     parent.off('focus', focus);
-    parent.off('closed', dispose);
     root.off('did-start-navigation', rootNavigation);
     root.off('render-process-gone', cancel);
     root.off('destroyed', cancel);
@@ -224,7 +223,6 @@ export function createNativeModalSurface(options: {
     protectedContents.clear();
     destroy();
   };
-  parent.once('closed', dispose);
   return {
     prepare,
     sync,

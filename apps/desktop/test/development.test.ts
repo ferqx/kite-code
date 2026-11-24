@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
 import {
   desktopContentSecurityPolicy,
+  guardDevelopmentLogPipes,
   parseDesktopDevelopment,
   parseDevelopmentServiceReload,
   serveDevelopmentReload,
@@ -12,6 +13,19 @@ const configuration = {
   cspNonce: 'a'.repeat(32),
   control: { port: 43220, token: 'b'.repeat(64) },
 };
+
+test('a closed development log pipe leaves other log errors observable', () => {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  guardDevelopmentLogPipes(stdout, stderr);
+  const broken = Object.assign(Error('write EPIPE'), { code: 'EPIPE' });
+  expect(() => stdout.emit('error', broken)).not.toThrow();
+  expect(() => stderr.emit('error', broken)).not.toThrow();
+  const unexpected = Object.assign(Error('write EIO'), { code: 'EIO' });
+  expect(() => stderr.emit('error', unexpected)).toThrow(unexpected);
+  stdout.destroy();
+  stderr.destroy();
+});
 
 test('only explicit development accepts a canonical loopback renderer and limits CSP to its nonce and websocket', () => {
   expect(parseDesktopDevelopment(null, false)).toBeNull();

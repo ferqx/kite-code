@@ -15,11 +15,18 @@ test.each([
   const isImage = mediaType.startsWith('image/');
   const paged = /\.(pdf|docx|xlsx|pptx)$/.test(name);
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {};
   const keys = [
     'window',
     'document',
     'navigator',
     'HTMLElement',
+    'HTMLFormElement',
+    'DocumentFragment',
+    'NodeFilter',
+    'HTMLInputElement',
+    'Element',
+    'CustomEvent',
     'Node',
     'MutationObserver',
     'getComputedStyle',
@@ -115,9 +122,8 @@ test.each([
     },
   } as NativeBridge;
   const loader = () => document.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]');
-  const zoom = () => document.querySelector<HTMLSelectElement>('select[aria-label="预览缩放"]')!;
-  const imageZoom = () =>
-    document.querySelector<HTMLSelectElement>('select[aria-label="图片缩放"]')!;
+  const zoom = () => document.querySelector<HTMLButtonElement>('[aria-label="预览缩放"]')!;
+  const imageZoom = () => document.querySelector<HTMLButtonElement>('[aria-label="图片缩放"]')!;
   const button = (name: string) =>
     [...document.querySelectorAll('button')].find(
       (item) => (item.getAttribute('aria-label') ?? item.textContent) === name,
@@ -149,10 +155,7 @@ test.each([
     );
     if (paged) {
       expect(zoom().disabled).toBe(true);
-      expect(button('请求修改')!.disabled).toBe(true);
-      const count = requests.length;
-      await act(() => button('请求修改')!.click());
-      expect(requests).toHaveLength(count);
+      expect(button('请求修改')).toBeUndefined();
       expect(document.body.textContent).not.toContain('请先选择');
       expect(button('继续修改整个文件')).toBeUndefined();
     } else {
@@ -160,7 +163,7 @@ test.each([
       if (isImage) expect(imageZoom().disabled).toBe(true);
       else expect(imageZoom()).toBeNull();
       expect(
-        [...document.querySelectorAll('fieldset button')].map((item) =>
+        [...document.querySelectorAll('.native-preview-file-actions button')].map((item) =>
           item.getAttribute('aria-label'),
         ),
       ).toEqual(['继续修改', '另存为']);
@@ -208,15 +211,14 @@ test.each([
     expect(document.querySelector('.native-file-preview-error')).toBeNull();
     if (paged) {
       expect(zoom().disabled).toBe(false);
-      expect(button('请求修改')!.disabled).toBe(false);
+      expect(button('请求修改')).toBeUndefined();
       expect(button('继续修改整个文件')).toBeUndefined();
       expect(document.body.textContent).not.toContain('请先选择');
-      await act(() => button('请求修改')!.click());
       expect(
         requests.filter(
           (r) => r.method === 'outputs.preview.control' && r.control.kind === 'request-edit',
         ),
-      ).toHaveLength(1);
+      ).toHaveLength(0);
       if (name.endsWith('.xlsx')) {
         const field = document.querySelector<HTMLTextAreaElement>(
           '[aria-label="单元格公式（只读）"]',
@@ -231,12 +233,21 @@ test.each([
         expect(select.disabled).toBe(false);
         const toolbar = select.closest('.native-preview-toolbar');
         expect(toolbar?.contains(button('另存为')!)).toBe(true);
-        expect(select.value).toBe('fit');
+        expect(select.textContent).toBe('适应');
         await act(async () => {
-          select.value = '1';
-          select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+          select.dispatchEvent(
+            new dom.window.KeyboardEvent('keydown', {
+              key: 'ArrowDown',
+              bubbles: true,
+            }),
+          );
         });
-        expect(select.value).toBe('1');
+        await act(async () => {
+          [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+            .find((option) => option.textContent === '100% 原始大小')!
+            .click();
+        });
+        expect(select.textContent).toBe('100% 原始大小');
         expect(select.title).toContain('100%');
         expect(
           requests.flatMap((r) =>

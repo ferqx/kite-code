@@ -10,6 +10,10 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     'document',
     'navigator',
     'HTMLElement',
+    'HTMLFormElement',
+    'DocumentFragment',
+    'NodeFilter',
+    'HTMLInputElement',
     'getComputedStyle',
     'DOMRect',
     'MutationObserver',
@@ -51,6 +55,18 @@ test('local preview owns no write action; hide closes view, late reads cannot re
         if (failure) throw Object.assign(Error(failure), { code: failure });
         return { kind: 'outputs.preview', status: 'ready' };
       }
+      if (request.method === 'localPreview.interaction')
+        return {
+          kind: 'localPreview.interaction',
+          interaction: {
+            previewId: request.previewId,
+            generation: request.generation,
+            handleId: request.handleId,
+            sourceHash: 'source',
+            selection: null,
+            zoom: 1.12,
+          },
+        };
       return null;
     },
   } as NativeBridge;
@@ -127,9 +143,7 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     failure = undefined;
     hold = true;
     await show(true);
-    expect(document.querySelector<HTMLButtonElement>('[aria-label="请求修改"]')!.disabled).toBe(
-      true,
-    );
+    expect(document.querySelector('[aria-label="请求修改"]')).toBeNull();
     expect(
       document.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]'),
     ).toHaveLength(1);
@@ -156,7 +170,15 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     expect(
       document.querySelector('.native-excel-readonly,.native-preview-file-actions,textarea'),
     ).toBeNull();
-    expect(requests.some((request) => request.method === 'localPreview.interaction')).toBe(false);
+    await act(async () => new Promise((done) => setTimeout(done, 300)));
+    expect(document.querySelector('[aria-label="预览缩放"]')?.textContent).toBe('112%');
+    expect(requests).toContainEqual(
+      expect.objectContaining({
+        method: 'localPreview.interaction',
+        handleId: 'local-xlsx',
+        consumeRequest: false,
+      }),
+    );
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
@@ -173,6 +195,10 @@ test('local PDF Enter dispatches each frozen request once while only receipts re
     'document',
     'navigator',
     'HTMLElement',
+    'HTMLFormElement',
+    'DocumentFragment',
+    'NodeFilter',
+    'HTMLInputElement',
     'getComputedStyle',
     'DOMRect',
     'MutationObserver',
@@ -257,16 +283,13 @@ test('local PDF Enter dispatches each frozen request once while only receipts re
         />,
       ),
     );
-    expect(document.querySelector('[aria-label="请求修改"]')).not.toBeNull();
     await act(async () => {
       await new Promise((done) => setTimeout(done, 1150));
     });
     expect(edits).toBe(1);
     expect(receipts).toBe(3);
-    expect(document.querySelector<HTMLButtonElement>('[aria-label="请求修改"]')!.disabled).toBe(
-      true,
-    );
-    expect(document.querySelector<HTMLSelectElement>('[aria-label="预览缩放"]')!.disabled).toBe(
+    expect(document.querySelector('[aria-label="请求修改"]')).toBeNull();
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="预览缩放"]')!.disabled).toBe(
       true,
     );
     expect(document.body.textContent).toContain('不会重复发送');

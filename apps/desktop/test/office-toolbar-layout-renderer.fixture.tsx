@@ -3,12 +3,12 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NativeOfficeToolbar } from '../src/native-office-toolbar';
 import '../../../packages/ui/src/desktop/style.css';
+import '../src/native-tailwind.css';
 
 const kind = new URLSearchParams(location.search).get('kind') ?? 'docx';
 function Fixture() {
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const [presentation, setPresentation] = useState(false);
-  const [skillId, setSkillId] = useState('');
   const [events, setEvents] = useState<string[]>([]);
   const record = (event: string) => setEvents((old) => [...old, event]);
   return (
@@ -50,20 +50,8 @@ function Fixture() {
             setPresentation(!presentation);
             record('presentation');
           }}
-          onEdit={() => record('edit')}
           onSave={() => record('save')}
-          skill={{
-            id: skillId,
-            options: [{ id: 'office.review', name: '非常长的修改 Skill 名称不应挤占工具栏' }],
-            select: setSkillId,
-          }}
         />
-        {kind === 'pptx' && (
-          <details className="native-office-notes">
-            <summary>演讲者备注</summary>
-            <p>只读备注内容</p>
-          </details>
-        )}
         <div
           data-fixture-document
           style={{ padding: 16, minHeight: 240, color: 'var(--muted-foreground)' }}

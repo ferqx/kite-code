@@ -33,6 +33,7 @@ import { NativeBrowserPageHost } from './browser-page-host';
 import {
   type DevelopmentServiceReload,
   desktopContentSecurityPolicy,
+  guardDevelopmentLogPipes,
   parseDesktopDevelopment,
   serveDevelopmentReload,
 } from './development';
@@ -56,6 +57,7 @@ import {
   registerNativeThemeIpc,
   registerNativeWindowIpc,
 } from './native-ipc';
+import { createNativePreviewMenuHost } from './native-preview-menu-host';
 import {
   createNativeRootWindow,
   type NativeRootWindow,
@@ -70,6 +72,7 @@ import {
   registerNativeWindowMenuIpc,
 } from './native-window-menu';
 import { spawnNodePairedChild } from './node-process';
+import { ignoreOfficePreviewMenuShortcut } from './office-preview-zoom';
 import { registerOutputPreviewScheme } from './output-preview';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
@@ -122,6 +125,7 @@ const development = parseDesktopDevelopment(
   typeof __KITE_DESKTOP_DEVELOPMENT__ === 'undefined' ? null : __KITE_DESKTOP_DEVELOPMENT__,
   !candidate && assets.kind === 'development',
 );
+if (development) guardDevelopmentLogPipes(process.stdout, process.stderr);
 let activeAssets = assets;
 const nextCallerGeneration = createNativeCallerGenerationOwner();
 let callerSelectionHint: Readonly<{ storeId: string; sessionId: string }> | undefined;
@@ -680,7 +684,7 @@ void app
     };
     window = createNativeRootWindow(windowOptions);
     const createModalView = (
-      kind: 'global-dialog' | 'image-gallery' | 'session-search' | 'settings',
+      kind: 'global-dialog' | 'image-gallery' | 'preview-menu' | 'session-search' | 'settings',
     ) => {
       const view = new WebContentsView({
         webPreferences: {
@@ -767,7 +771,27 @@ void app
         globalDialog.active() || imageGallery.active() || sessionSearch.active(),
     });
     settingsOwner = settings;
+    createNativePreviewMenuHost({
+      window,
+      ipcMain,
+      rootUrl: rendererUrl,
+      url: new URL('preview-menu.html', rendererUrl).href,
+      theme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+      createView: () => createModalView('preview-menu'),
+      higherModalActive: () =>
+        globalDialog.active() ||
+        imageGallery.active() ||
+        sessionSearch.active() ||
+        settings.active(),
+    });
 
+    const rootContents = window.webContents;
+    rootContents.on('before-input-event', (_event, input) => {
+      // Keep the native View shortcuts when focus is outside the document.
+      const previewZoom = ignoreOfficePreviewMenuShortcut(rootContents, input);
+      const immersiveMenuKey = process.platform === 'win32' && (input.alt || input.key === 'F10');
+      rootContents.setIgnoreMenuShortcuts(previewZoom || immersiveMenuKey);
+    });
     if (process.platform === 'darwin')
       Menu.setApplicationMenu(Menu.buildFromTemplate(nativeRootWindowMenu(window)));
     if (process.platform === 'win32') {
@@ -802,8 +826,6 @@ void app
       window.setMenu(Menu.buildFromTemplate(nativeWindowMenuTemplate(menuOptions)));
       window.setMenuBarVisibility(false);
       window.webContents.on('before-input-event', (event, input) => {
-        // Let F10 and Alt navigation reach the immersive menu instead of the hidden system row.
-        window!.webContents.setIgnoreMenuShortcuts(input.alt || input.key === 'F10');
         const action = nativeWindowMenuShortcut(input);
         if (action) {
           event.preventDefault();
@@ -873,14 +895,18 @@ void app
       complete(false),
     );
     window.webContents.session.setPermissionCheckHandler(() => false);
-    window.webContents.session.webRequest.onHeadersReceived((details, complete) =>
+    window.webContents.session.webRequest.onHeadersReceived((details, complete) => {
+      if (details.url.startsWith('kite-office-preview:')) {
+        complete({});
+        return;
+      }
       complete({
         responseHeaders: {
           ...details.responseHeaders,
-          'Content-Security-Policy': [desktopContentSecurityPolicy(development)],
+          'Content-Security-Policy': [desktopContentSecurityPolicy(development, true)],
         },
-      }),
-    );
+      });
+    });
     registerNativeBrowserIpc({
       ipcMain,
       window,

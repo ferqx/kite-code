@@ -1,7 +1,6 @@
 /** Isolated hostile-render fixture: production Chromium/session/IPC boundaries, no converter or user files. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { once } from 'node:events';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,6 +9,7 @@ import {
   BaseWindow,
   type IpcMain,
   type IpcMainInvokeEvent,
+  type WebContents,
   WebContentsView,
   webContents,
 } from 'electron';
@@ -19,8 +19,11 @@ import { registerNativeIpc } from '../electron/native-ipc';
 import type { NativeRootWindow } from '../electron/native-root-window';
 import { NativeOutputPreview, registerOutputPreviewScheme } from '../electron/output-preview';
 import { type NativeReply, type NativeRequest, nativeChannel } from '../src/native-bridge';
+import { verifyOfficePreviewTheme } from './office-preview-theme.fixture';
 
 const root = resolve(process.argv[2]!);
+// The fixture can run on a shared Windows desktop while another window has focus.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 registerOutputPreviewScheme();
 // Keep Main alive until the owned teardown receipt has been flushed.
 app.on('window-all-closed', () => {});
@@ -55,6 +58,21 @@ function latch() {
     release = resolve;
   });
   return { opened, release };
+}
+async function mountFrame(root: WebContents, url: string) {
+  await root.executeJavaScript(`new Promise(resolve => {
+    document.querySelector('iframe')?.remove();
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.onload = () => resolve();
+    frame.src = ${JSON.stringify(url)};
+    frame.style.cssText = 'width:880px;height:560px;border:0';
+    document.body.append(frame);
+  })`);
+  const frame = root.mainFrame.frames.find((child) => child.url === url);
+  assert.ok(frame);
+  assert.equal(frame.origin, 'null');
+  return frame;
 }
 async function checkPreviewReopen(
   window: NativeRootWindow,
@@ -95,8 +113,12 @@ async function checkPreviewReopen(
     caller: async () =>
       ({
         assertGeneration,
+        checkOutputGeneration: assertGeneration,
+        startsSelectionActivation: (request: Extract<NativeRequest, { method: 'select' }>) =>
+          request.activationId !== 1,
         async invoke(request: NativeRequest) {
           if ('generation' in request) assertGeneration(request.generation);
+          if (request.method === 'select') return null;
           assert.fail('Unexpected caller operation');
         },
         async admitOutputTarget(value: number) {
@@ -182,23 +204,55 @@ async function checkPreviewReopen(
     oldAdmission.release();
     const earlierReply = await earlier;
     newMaterialization.release();
-    assert.deepEqual(await later, {
-      ok: true,
-      value: { kind: 'outputs.preview', status: 'ready' },
-    });
+    const laterReply = await later;
+    assert.ok(
+      laterReply.ok &&
+        laterReply.value &&
+        'kind' in laterReply.value &&
+        laterReply.value.kind === 'outputs.preview' &&
+        laterReply.value.status === 'frame',
+    );
     assert.deepEqual(earlierReply, { ok: false, code: 'preview_replaced' });
     assert.equal(copies, 1);
-    const page = window.contentView.children.at(-1) as WebContentsView;
-    const contents = page.webContents;
-    assert.notEqual(contents, origin);
-    assert.match(await contents.executeJavaScript('document.body.textContent'), /示例（中文标点）/);
+    const frame = await mountFrame(origin, laterReply.value.url);
+    assert.deepEqual(
+      await dispatch({
+        method: 'outputs.preview.frame.ready',
+        generation,
+        previewId: 'later',
+      }),
+      { ok: true, value: { kind: 'outputs.preview', status: 'ready' } },
+    );
+    assert.match(
+      (await frame.executeJavaScript('document.body.textContent')) as string,
+      /示例（中文标点）/,
+    );
+    assert.deepEqual(
+      await dispatch({
+        method: 'select',
+        generation,
+        sessionId: target.sessionId,
+        activationId: 1,
+      }),
+      {
+        ok: true,
+        value: null,
+      },
+    );
+    assert.equal(
+      await frame.executeJavaScript("fetch('presentation.pptx').then(r=>r.ok,()=>false)"),
+      true,
+    );
     await close('earlier');
-    assert.equal(contents.isDestroyed(), false);
-    const destroyed = once(contents, 'destroyed');
+    assert.equal(frame.isDestroyed(), false);
     assert.deepEqual(await close('later'), { ok: true, value: null });
-    assert.equal(window.contentView.children.includes(page), false);
-    await destroyed;
-    assert.equal(contents.isDestroyed(), true);
+    assert.equal(
+      await frame.executeJavaScript("fetch('presentation.pptx').then(()=>false,()=>true)"),
+      true,
+    );
+    await origin.executeJavaScript("document.querySelector('iframe').remove()");
+    await pause();
+    assert.equal(frame.isDestroyed(), true);
 
     const closing = open('closed-before-admission');
     await Promise.race([
@@ -209,6 +263,32 @@ async function checkPreviewReopen(
     closingAdmission.release();
     assert.deepEqual(await closing, { ok: false, code: 'preview_replaced' });
     assert.equal(copies, 1);
+    const next = await open('retired-by-selection');
+    assert.ok(
+      next.ok &&
+        next.value &&
+        'kind' in next.value &&
+        next.value.kind === 'outputs.preview' &&
+        next.value.status === 'frame',
+    );
+    const retired = await mountFrame(origin, next.value.url);
+    assert.deepEqual(
+      await dispatch({
+        method: 'select',
+        generation,
+        sessionId: 'another-session',
+        activationId: 2,
+      }),
+      {
+        ok: true,
+        value: null,
+      },
+    );
+    assert.equal(
+      await retired.executeJavaScript("fetch('presentation.pptx').then(()=>false,()=>true)"),
+      true,
+    );
+    await origin.executeJavaScript("document.querySelector('iframe').remove()");
     assert.deepEqual(
       window.contentView.children.map((child) => (child as WebContentsView).webContents),
       [origin],
@@ -256,13 +336,22 @@ void app
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
+        backgroundThrottling: false,
       },
     });
     window.contentView.addChildView(primary);
-    await primary.webContents.loadURL('data:text/html,<p>fixture owner</p>');
+    primary.setBounds({ x: 0, y: 0, width: 900, height: 600 });
+    const fixtureHtml = join(root, 'host.html');
+    await writeFile(
+      fixtureHtml,
+      `<!doctype html><meta http-equiv="Content-Security-Policy" content="frame-src kite-office-preview:"><p>fixture owner</p>`,
+      { flag: 'wx' },
+    );
+    await primary.webContents.loadFile(fixtureHtml);
     Object.defineProperty(window, 'webContents', { value: primary.webContents });
     const preview = new NativeOutputPreview();
     let passed = false;
+    let resumedFromHidden = false;
     try {
       assert.equal(app.commandLine.hasSwitch('no-sandbox'), false);
       assert.equal(window.isVisible(), false);
@@ -296,25 +385,62 @@ void app
             };
           },
         });
-      await open('A');
-      const document = window.contentView.children.at(-1) as WebContentsView;
-      const contents = document.webContents,
-        origin = `kite-preview://${new URL(contents.getURL()).host}`;
-      assert.equal(document.getVisible(), false);
-      assert.equal(contents.getBackgroundThrottling(), true);
+      const openedFrame = await open('A');
+      assert.equal(openedFrame.status, 'frame');
+      if (openedFrame.status !== 'frame') throw Error('expected preview frame');
+      const contents = await mountFrame(primary.webContents, openedFrame.url);
+      let attached = false;
+      const attaching = preview.attachFrame('A', 1).then(() => {
+        attached = true;
+      });
+      await pause();
+      assert.equal(attached, false);
+      assert.equal(window.isVisible(), false);
+      window.showInactive();
+      await attaching;
+      resumedFromHidden = window.isVisible();
+      await preview.control('A', 1, { kind: 'zoom', value: 2 });
+      await verifyOfficePreviewTheme(
+        contents,
+        [{ selector: 'html', axis: 'vertical' }, { selector: '.kite-thumbnail-rail' }],
+        'html',
+        '.slide',
+      );
+      await preview.control('A', 1, { kind: 'zoom', value: 'fit' });
+      checks.push('pptx-scrollbar-theme');
+      await preview.control('A', 1, { kind: 'zoom', value: 1 });
+      await primary.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x: 430,
+        y: 280,
+        deltaX: 0,
+        deltaY: -80,
+        modifiers: 2,
+      });
+      await contents.executeJavaScript(
+        'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
+      );
+      const { zoom } = await preview.readInteraction('A', 1, false);
+      assert.ok(typeof zoom === 'number' && zoom > 1 && zoom < 1.25, String(zoom));
+      assert.equal(primary.webContents.getZoomFactor(), 1);
+      await preview.control('A', 1, { kind: 'zoom', value: 'fit' });
+      checks.push('pptx-scoped-wheel-zoom');
+      const origin = openedFrame.url.slice(0, -'/index.html'.length);
+      assert.equal(window.contentView.children.length, 1);
       assert.match(
-        await contents.executeJavaScript('document.body.textContent'),
+        (await contents.executeJavaScript('document.body.textContent')) as string,
         /示例（中文标点）/,
       );
-      const preferences = webPreferences(contents);
+      const preferences = webPreferences(primary.webContents);
       assert.equal(preferences.sandbox, true);
       assert.equal(preferences.contextIsolation, true);
       assert.equal(preferences.nodeIntegration, false);
       assert.ok(!preferences.preload);
+      assert.equal(await contents.executeJavaScript('typeof kiteOfficeInteraction'), 'undefined');
       assert.match(
-        await contents.executeJavaScript(
+        (await contents.executeJavaScript(
           'document.querySelector(".slide [data-path]").textContent',
-        ),
+        )) as string,
         /<script>window\.attackStarted=true<\/script>/,
       );
       assert.equal(
@@ -332,13 +458,18 @@ void app
       document.querySelectorAll('button').forEach(b=>b.click());
       document.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
       document.dispatchEvent(new KeyboardEvent('keydown',{ctrlKey:true,shiftKey:true,code:'KeyX',bubbles:true}));
+      document.dispatchEvent(new KeyboardEvent('keydown',{ctrlKey:true,key:'+',bubbles:true}));
+      document.dispatchEvent(new WheelEvent('wheel',{ctrlKey:true,deltaY:-120,bubbles:true,cancelable:true}));
+      window.postMessage({kind:'kite-office-preview-wheel',delta:-120},'*');
+      window.parent.postMessage({kind:'kite-office-preview-wheel',delta:-120},'*');
     })()`);
       assert.equal(await contents.executeJavaScript('typeof window.attackStarted'), 'undefined');
-      checks.push('normal-sandbox-native-preview-and-script-free-source');
+      checks.push('opaque-sandbox-iframe-with-isolated-controller-and-script-free-source');
       const attack = await preview.readInteraction('A', 1);
       assert.equal(attack.selection, null);
       assert.equal(attack.inlineRequest, undefined);
       assert.equal(attack.requestOpen, false);
+      assert.equal(attack.zoom, 'fit');
       assert.equal(attack.target.fileId, 'A');
       assert.equal(attack.sourceHash, sourceHash);
       checks.push('main-world-forged-controller-and-synthetic-input-cannot-request');
@@ -360,10 +491,26 @@ void app
         );
         assert.equal(blocked, true, url);
       }
-      // Main's session fetch tests the production closed manifest independent of CSP.
-      const allowed = await contents.session.fetch(`${origin}/presentation.pptx`);
-      assert.equal(allowed.status, 200);
-      assert.equal(hash(Buffer.from(await allowed.arrayBuffer())), sourceHash);
+      assert.equal(
+        await contents.executeJavaScript(`fetch('${origin}/presentation.pptx')
+        .then(r=>r.arrayBuffer()).then(b=>crypto.subtle.digest('SHA-256',b))
+        .then(d=>Array.from(new Uint8Array(d), n=>n.toString(16).padStart(2,'0')).join(''))`),
+        sourceHash,
+      );
+      assert.equal(
+        (
+          await primary.webContents.session
+            .fetch(`${origin}/presentation.pptx`)
+            .catch(() => undefined)
+        )?.ok ?? false,
+        false,
+      );
+      assert.equal(
+        await primary.webContents.executeJavaScript(
+          `fetch('${origin}/presentation.pptx').then(()=>false,()=>true)`,
+        ),
+        true,
+      );
       for (const [url, method] of [
         [`${origin}/missing`, 'GET'],
         [`${origin}/presentation.pptx`, 'POST'],
@@ -371,7 +518,9 @@ void app
         ['kite-preview://other-origin/index.html', 'GET'],
         [`${origin}/%2e%2e/not-in-manifest.txt`, 'GET'],
       ]) {
-        const response = await contents.session.fetch(url!, { method }).catch(() => undefined);
+        const response = await primary.webContents.session
+          .fetch(url!, { method })
+          .catch(() => undefined);
         assert.equal(response?.ok ?? false, false);
       }
       assert.equal(
@@ -379,7 +528,7 @@ void app
         true,
       );
       const frameFailures: number[] = [];
-      contents.on('did-fail-load', (_event, code, _message, url, mainFrame) => {
+      primary.webContents.on('did-fail-load', (_event, code, _message, url, mainFrame) => {
         if (!mainFrame && url === `${origin}/index.html`) frameFailures.push(code);
       });
       await contents.executeJavaScript(`(() => {
@@ -387,7 +536,7 @@ void app
       const link=document.createElement('a');link.href='${origin}/presentation.pptx';link.download='forbidden.pptx';link.click();
     })()`);
       await pause();
-      assert.equal(contents.getURL(), `${origin}/index.html`);
+      assert.equal(contents.url, `${origin}/index.html`);
       assert.ok(frameFailures.includes(-30), 'iframe rejected with ERR_BLOCKED_BY_CSP');
       checks.push('network-local-file-unc-cross-origin-path-method-popup-frame-denied');
 
@@ -398,8 +547,8 @@ void app
       assert.equal(opened.inlineRequest, undefined);
       const trusted = window.contentView.children.at(-1) as WebContentsView;
       const trustedContents = trusted.webContents;
-      assert.notEqual(trusted, document);
-      assert.notEqual(trustedContents.session, contents.session);
+      assert.notEqual(trusted, primary);
+      assert.notEqual(trustedContents.session, primary.webContents.session);
       assert.equal(webPreferences(trustedContents).sandbox, true);
       assert.ok(!webPreferences(trustedContents).preload);
       assert.equal(
@@ -437,10 +586,18 @@ void app
       );
       checks.push('separate-script-free-input-not-readable-or-submittable-by-document');
 
-      const oldSession = contents.session;
-      await open('B');
-      assert.equal(contents.isDestroyed(), true);
+      const oldSession = primary.webContents.session;
+      const second = await open('B');
+      assert.equal(second.status, 'frame');
+      if (second.status !== 'frame') throw Error('expected preview frame');
       assert.equal(trustedContents.isDestroyed(), true);
+      assert.equal(
+        await contents.executeJavaScript("fetch('presentation.pptx').then(()=>false,()=>true)"),
+        true,
+      );
+      await mountFrame(primary.webContents, second.url);
+      await preview.attachFrame('B', 1);
+      assert.equal(contents.isDestroyed(), true);
       await assert.rejects(preview.readInteraction('A', 1), /preview_replaced/);
       await assert.rejects(
         preview.settleRequest('A', 1, 'attack', { status: 'accepted' }),
@@ -458,6 +615,7 @@ void app
       assert.equal(await readFile(privateFile, 'utf8'), 'fixture-private-marker');
       assert.deepEqual(await readdir(join(root, 'downloads')), []);
       preview.close();
+      await primary.webContents.executeJavaScript("document.querySelector('iframe').remove()");
       await checkPreviewReopen(window as NativeRootWindow, body, target);
       checks.push('late-file-admission-cannot-replace-a-reopened-preview');
       passed = true;
@@ -476,7 +634,7 @@ void app
           checks,
           viewsDestroyed,
           normalSandbox: !app.commandLine.hasSwitch('no-sandbox'),
-          windowWasHidden: true,
+          resumedFromHidden,
         }),
       );
       app.exit(passed && viewsDestroyed ? 0 : 1);

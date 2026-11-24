@@ -2,18 +2,32 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
 import { _electron } from 'playwright';
+import { build } from 'vite';
 
 const root = await mkdtemp(join(tmpdir(), 'kite-toolbar-layout-'));
-const build = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, 'office-toolbar-layout-renderer.fixture.tsx')],
-  outdir: root,
-  naming: 'renderer.[ext]',
-  target: 'browser',
+await build({
+  root: dirname(import.meta.dir),
+  configFile: false,
+  envFile: false,
+  logLevel: 'error',
   define: { 'process.env.NODE_ENV': '"production"' },
+  esbuild: { jsxDev: false },
+  plugins: [react(), tailwindcss()],
+  build: {
+    outDir: root,
+    emptyOutDir: false,
+    lib: {
+      entry: resolve(import.meta.dir, 'office-toolbar-layout-renderer.fixture.tsx'),
+      formats: ['es'],
+      fileName: () => 'renderer.js',
+      cssFileName: 'renderer',
+    },
+  },
 });
-if (!build.success) throw new AggregateError(build.logs, 'build_failed');
 await writeFile(
   join(root, 'index.html'),
   '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="renderer.css"><div id="root"></div><script type="module" src="renderer.js"></script>',
@@ -38,8 +52,10 @@ async function checkNarrowDisclosure() {
   const style = () =>
     button.evaluate((el) => ({
       background: getComputedStyle(el).backgroundColor,
-      radius: getComputedStyle(el).borderRadius,
-      outline: getComputedStyle(el).outlineStyle,
+      circular:
+        Number.parseFloat(getComputedStyle(el).borderRadius) >=
+        el.getBoundingClientRect().width / 2,
+      shadow: getComputedStyle(el).boxShadow,
       focus: el.matches(':focus-visible'),
       rotation: getComputedStyle(el.querySelector('svg')!).transform,
     }));
@@ -49,14 +65,26 @@ async function checkNarrowDisclosure() {
     }, theme);
     await page.mouse.move(10, 160);
     const collapsed = await style();
-    assert.equal(collapsed.radius, '50%');
+    assert.equal(collapsed.circular, true);
     assert.equal(collapsed.background, 'rgba(0, 0, 0, 0)');
     assert.equal(collapsed.rotation, 'none');
     await button.hover();
+    await page.waitForFunction(
+      (background) =>
+        getComputedStyle(document.querySelector('.native-excel-expand')!).backgroundColor !==
+        background,
+      collapsed.background,
+    );
     const hover = await style();
     assert.notEqual(hover.background, collapsed.background);
     await button.click();
     await page.mouse.move(10, 160);
+    await page.waitForFunction(
+      (background) =>
+        getComputedStyle(document.querySelector('.native-excel-expand')!).backgroundColor ===
+        background,
+      collapsed.background,
+    );
     const opened = await style();
     assert.equal(
       opened.background,
@@ -69,9 +97,8 @@ async function checkNarrowDisclosure() {
     await page.keyboard.press('Tab');
     const focused = await style();
     assert.equal(focused.focus, true);
-    assert.equal(focused.radius, '50%');
-    assert.notEqual(focused.outline, 'none');
-    assert.notEqual(focused.background, opened.background);
+    assert.equal(focused.circular, true);
+    assert.notEqual(focused.shadow, opened.shadow);
     await page.screenshot({ path: join(root, `xlsx-320-${theme}-keyboard.png`) });
     await page.keyboard.press('Enter');
     assert.equal(await button.getAttribute('aria-expanded'), 'false');
@@ -88,7 +115,9 @@ try {
   for (const kind of ['docx', 'xlsx', 'pptx', 'pdf']) {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(`file://${join(root, 'index.html')}?kind=${kind}`);
-    await page.getByRole('button', { name: '请求修改', exact: true }).waitFor();
+    await page.getByRole('button', { name: '另存为', exact: true }).waitFor();
+    assert.equal(await page.getByLabel('修改 Skill', { exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: '请求修改', exact: true }).count(), 0);
     for (const width of kind === 'xlsx' ? [320, 420, 550, 640] : [240, 280, 320, 480, 640]) {
       await app.evaluate(
         ({ BrowserWindow }, value) => BrowserWindow.getAllWindows()[0]!.setContentSize(value, 560),
@@ -106,7 +135,7 @@ try {
         const rect = toolbar.getBoundingClientRect();
         const controls = [
           ...document.querySelectorAll<HTMLElement>(
-            '.native-office-toolbar button, .native-office-toolbar select, .native-excel-readonly textarea, .native-excel-readonly button, .native-office-notes summary',
+            '.native-office-toolbar button, .native-office-toolbar select, .native-excel-readonly textarea, .native-excel-readonly button',
           ),
         ]
           .filter((el) => el.getBoundingClientRect().width > 0)
@@ -115,7 +144,7 @@ try {
             const style = getComputedStyle(el);
             return {
               border: style.borderTopWidth,
-              opacity: style.opacity,
+              slot: el.dataset.slot,
               label: el.getAttribute('aria-label') || el.textContent,
               left: r.left,
               right: r.right,
@@ -151,7 +180,7 @@ try {
       );
       if (width >= 320 && kind !== 'xlsx')
         assert.ok(geometry.toolbarWidth < width - 40, 'floating controls do not span the pane');
-      assert.equal(geometry.toolbarHeight, 34, 'one row; the document keeps all remaining height');
+      assert.equal(geometry.toolbarHeight, 32, 'one row; the document keeps all remaining height');
       if (kind === 'xlsx') {
         const strip = geometry.strip!;
         assert.ok(
@@ -163,7 +192,7 @@ try {
         assert.equal(strip.height, 32);
         assert.equal(strip.bottom, geometry.contentTop, 'the formula strip meets the grid');
         const toggle = geometry.controls.find(({ label }) => label === '展开单元格内容')!;
-        assert.deepEqual([toggle.width, toggle.bottom - toggle.top], [30, 30]);
+        assert.deepEqual([toggle.width, toggle.bottom - toggle.top], [28, 28]);
         if (width === 320) {
           const formula = geometry.controls.find(({ label }) => label === '单元格公式（只读）')!;
           assert.ok(
@@ -182,19 +211,11 @@ try {
         }
       }
       const save = geometry.controls.find(({ label }) => label === '另存为')!;
-      const edit = geometry.controls.find(({ label }) => label === '请求修改')!;
       const zoom = geometry.controls.find(({ label }) => label === '预览缩放')!;
-      assert.equal(save.width, 34);
-      assert.equal(save.bottom - save.top, 34);
-      assert.equal(edit.width, 30);
-      assert.equal(zoom.width, 54);
-      assert.equal(zoom.border, '0px', 'a closed native select is not an additional pill');
-      const skill = geometry.controls.find(({ label }) => label === '修改 Skill')!;
-      assert.equal(skill.opacity, '0', 'the More icon replaces the closed native value');
-      assert.ok(
-        zoom.right < edit.left && edit.right < save.left,
-        'reading, editing, then separate save',
-      );
+      assert.deepEqual([save.width, save.bottom - save.top], [32, 32]);
+      assert.equal(save.slot, 'button');
+      assert.equal(zoom.slot, 'select-trigger');
+      assert.ok(zoom.right < save.left, 'reading controls precede file actions');
       assert.ok(geometry.scrollWidth <= width, JSON.stringify({ kind, geometry }));
       for (const control of geometry.controls) {
         assert.ok(
@@ -213,27 +234,28 @@ try {
           );
         }
       if (width === 240 && kind === 'pptx') {
-        const more = page.getByLabel('修改 Skill', { exact: true });
-        await more.selectOption({ label: '非常长的修改 Skill 名称不应挤占工具栏' });
         await page.getByRole('button', { name: '放映', exact: true }).click();
         const stop = page.getByRole('button', { name: '退出放映', exact: true });
         await stop.waitFor();
-        // Starting a presentation is not a Skill change. The active stop remains directly reachable.
-        assert.equal(
-          await page.getByLabel('修改 Skill', { exact: true }).inputValue(),
-          'office.review',
-        );
+        assert.equal(await stop.getAttribute('aria-pressed'), 'true');
         await stop.click();
-        assert.equal(await more.inputValue(), 'office.review');
       }
       checks.push({ kind, ...geometry });
       if (width === 240 || width === 320 || width === 640)
         await page.screenshot({ path: join(root, `${kind}-${width}.png`) });
     }
     const beforeZoom = await page.locator('.native-office-toolbar').boundingBox();
-    await page.getByRole('button', { name: '请求修改', exact: true }).hover();
-    await page.getByRole('button', { name: '请求修改', exact: true }).click();
-    await page.getByLabel('预览缩放').selectOption('2');
+    const zoom = page.getByRole('combobox', { name: '预览缩放' });
+    const documentFrame = page.locator('[data-fixture-document]');
+    const beforeOpen = await documentFrame.boundingBox();
+    await zoom.click();
+    const double = page.getByRole('option', { name: '200%', exact: true });
+    await double.waitFor();
+    assert.deepEqual(await documentFrame.boundingBox(), beforeOpen);
+    await double.click();
+    assert.deepEqual(await documentFrame.boundingBox(), beforeOpen);
+    assert.equal(await zoom.getAttribute('aria-expanded'), 'false');
+    assert.equal(await zoom.textContent(), '200%');
     assert.deepEqual(
       await page.locator('.native-office-toolbar').boundingBox(),
       beforeZoom,
@@ -254,7 +276,6 @@ try {
     const events = JSON.parse((await page.locator('#events').textContent()) ?? '[]') as string[];
     assert.deepEqual(events, [
       ...(kind === 'pptx' ? ['presentation', 'presentation'] : []),
-      'edit',
       'zoom:2',
       'save',
       ...(kind === 'pptx' ? ['presentation', 'presentation'] : []),

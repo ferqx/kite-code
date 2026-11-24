@@ -16,7 +16,7 @@ MCP Server 可提供工具、资源和提示。Skills 提供可发现的知识�
 
 Native 的 `computer-use` 是内置全局技能，目录发现不依赖项目安装；它描述内置浏览器的操作规范。使用时仍须具备并选中受控执行能力，技能正文和资源不授予页面或敏感业务操作权限。当前候选与验收边界见[桌面浏览器](../clients/desktop/README.md#agent-浏览器)。
 
-内置的 `docx`、`xlsx` 和 `pptx` 使用 OfficeCLI 的技能。`pdf` 使用 Kite 的 PDF 技能。可在支持 Skill 的客户端选用，也可在 Desktop 交付文件的预览中为本次修改选择技能。用户安装的技能可与内置同名技能共存。 [办公文件基础操作](../clients/desktop/README.md#办公文件基础操作)
+内置的 `docx`、`xlsx` 和 `pptx` 使用 OfficeCLI 的技能。`pdf` 使用 Kite 的 PDF 技能。可在支持 Skill 的客户端选用。Desktop 交付文件的预览修改沿用会话的 Skill 选择。用户安装的技能可与内置同名技能共存。 [办公文件基础操作](../clients/desktop/README.md#办公文件基础操作)
 
 Kite 的各平台制品随包提供对应版本的 OfficeCLI。内置办公技能在受管 Shell 中直接使用 `officecli`，可以从文档操作开始。文件与联网范围沿当前任务的授权。 [OfficeCLI 发行页](https://github.com/iOfficeAI/OfficeCLI/releases/tag/v1.0.161)
 

@@ -3,8 +3,11 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
+import { build } from 'vite';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
@@ -58,7 +61,9 @@ test.skipIf(process.platform !== 'win32')(
         mkdirSync(join(root, name));
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('S');
-      for (let row = 1; row <= 30; row++)
+      for (let index = 1; index <= 12; index++)
+        workbook.addWorksheet(`Supplemental sheet ${index}`);
+      for (let row = 1; row <= 48; row++)
         for (let col = 1; col <= 8; col++) {
           const cell = sheet.getCell(row, col);
           cell.value = cell.address;
@@ -88,20 +93,37 @@ test.skipIf(process.platform !== 'win32')(
         naming: 'fixture.cjs',
       });
       if (!built.success) throw new AggregateError(built.logs, 'readonly_host_build_failed');
-      for (const [entry, name, target] of [
-        ['office-readonly-host-renderer.fixture.tsx', 'renderer.[ext]', 'browser'],
-        ['office-readonly-host-preload.fixture.ts', 'preload.cjs', 'node'],
-      ] as const) {
-        const result = await Bun.build({
-          entrypoints: [resolve(import.meta.dir, `../${entry}`)],
-          target,
-          format: target === 'browser' ? 'esm' : 'cjs',
-          external: target === 'node' ? ['electron'] : [],
-          outdir: root,
-          naming: name,
-        });
-        if (!result.success) throw new AggregateError(result.logs, 'readonly_host_build_failed');
-      }
+      const desktop = resolve(import.meta.dir, '../..');
+      const preload = await Bun.build({
+        entrypoints: [resolve(desktop, 'test/office-readonly-host-preload.fixture.ts')],
+        target: 'node',
+        format: 'cjs',
+        external: ['electron'],
+        outdir: root,
+        naming: 'preload.cjs',
+      });
+      if (!preload.success) throw new AggregateError(preload.logs, 'readonly_host_build_failed');
+      await build({
+        root: desktop,
+        configFile: false,
+        envFile: false,
+        logLevel: 'error',
+        base: './',
+        plugins: [react(), tailwindcss()],
+        esbuild: { jsxDev: false },
+        define: { 'process.env.NODE_ENV': '"production"' },
+        build: {
+          target: 'es2022',
+          outDir: root,
+          emptyOutDir: false,
+          lib: {
+            entry: resolve(desktop, 'test/office-readonly-host-renderer.fixture.tsx'),
+            formats: ['es'],
+            fileName: () => 'renderer.js',
+            cssFileName: 'renderer',
+          },
+        },
+      });
       await Bun.write(
         join(root, 'host.html'),
         '<!doctype html><html data-platform="windows" data-theme="light"><meta charset="utf-8"><link rel="stylesheet" href="renderer.css"><style>body{margin:0}#root{height:100vh}</style><div id="root"></div><script type="module" src="renderer.js"></script>',
@@ -184,7 +206,19 @@ test.skipIf(process.platform !== 'win32')(
       expect(receipt.viewsDestroyed).toBe(true);
       expect(receipt.normalSandbox).toBe(true);
       expect(receipt.previewWasVisible).toBe(true);
-      expect(receipt.checks).toHaveLength(8);
+      expect(receipt.checks).toHaveLength(20);
+      expect(receipt.checks).toContain('excel-scoped-zoom-input-and-ordinary-scroll');
+      expect(receipt.checks).toContain('pdf-scoped-zoom-input-and-ordinary-scroll');
+      expect(receipt.checks).toContain('pdf-chromium-touchpad-pinch');
+      expect(receipt.checks).toContain('word-scoped-zoom-input-and-ordinary-scroll');
+      expect(receipt.checks).toContain('excel-scrollbar-theme');
+      expect(receipt.checks).toContain('word-scrollbar-theme');
+      expect(receipt.checks).toContain('pdf-scrollbar-theme');
+      expect(receipt.checks).toContain('zoom-menu-over-iframe-without-moving-preview');
+      expect(receipt.checks).toContain('pdf-wide-rail-and-compact-breakpoint');
+      expect(receipt.checks).toContain('pdf-rail-fits-and-scrolls-vertically');
+      expect(receipt.checks).toContain('pdf-iframe-page-resource-and-exact-request');
+      expect(receipt.checks).toContain('interrupted-iframe-releases-input-and-retries');
       passed = true;
     } finally {
       // Only an owned, canonical tree after actual child close and successful view teardown.

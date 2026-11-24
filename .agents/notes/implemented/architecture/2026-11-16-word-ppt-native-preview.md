@@ -8,7 +8,7 @@ Word 和 PPT 的 Desktop 预览曾先转换成 HTML。用户选择其他 Skill �
 
 ## Decision
 
-沿用 [Excel 原件预览](2026-11-16-xlsx-native-preview.md)的独立 View 和只读清单。Word 用 `docx-preview` 渲染，按源 XML 结构将段落绑定到渲染节点。稳定的预览页支持正文范围提交。PPT 用 `@aiden0z/pptx-renderer` 渲染，采用演示关系顺序与原部件的对象 ID 描述选区。两者沿用 [可信请求输入](2026-11-11-office-inline-request-isolation.md)和现有 `selectedSkills` 字段。
+沿用 [Excel 原件预览](2026-11-16-xlsx-native-preview.md)的独立 View 和只读清单。Word 用 `docx-preview` 渲染，按源 XML 结构将段落绑定到渲染节点。稳定的预览页支持正文范围提交。PPT 用 `@aiden0z/pptx-renderer` 渲染，采用演示关系顺序与原部件的对象 ID 描述选区。两者沿用 [可信请求输入](2026-11-11-office-inline-request-isolation.md)。原工具栏 Skill 入口已由 [文件预览工具栏决定](../simplification/2026-11-24-native-file-preview-toolbar.md)收敛到会话的 Skill 选择。
 
 ## Alternatives considered
 
@@ -17,4 +17,6 @@ Word 和 PPT 的 Desktop 预览曾先转换成 HTML。用户选择其他 Skill �
 
 ## Consequences
 
-Desktop 直接打开原件，并允许选择本次修改使用的 Skill。Word 使用原件中的分节和分页信息，PPT 保持静态预览与只读备注。渲染器及其源节点适配需在升级时一起验证。Windows 真实文件的过程与现有打包边界见 [Desktop owner](../../../../apps/desktop/README.md#办公输出文件)。
+后续 [办公预览 iframe 决定](2026-11-24-office-preview-iframe.md)替代了独立文档视图与 session 的呈现方式。原件读取、选区证据和可信请求输入的边界继续适用。
+
+Desktop 直接打开原件。Word 使用原件中的分节和分页信息，PPT 展示原幻灯片，演讲者备注保留在原文件中。渲染器及其源节点适配需在升级时一起验证。Windows 真实文件的过程与现有打包边界见 [Desktop owner](../../../../apps/desktop/README.md#办公输出文件)。

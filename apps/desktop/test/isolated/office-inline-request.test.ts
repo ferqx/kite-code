@@ -239,31 +239,6 @@ test('isolated Office chrome follows the client palette and platform font withou
   expect(officeRequestHtml).not.toContain('#4b8df8');
 });
 
-test('Office toolbar keeps shared neutral states and compact client control metrics', () => {
-  const css = readFileSync(new URL('../../src/native-office-toolbar.css', import.meta.url), 'utf8');
-  for (const token of [
-    '--font-ui',
-    '--button-radius',
-    '--control-hover',
-    '--control-selected',
-    '--control-pressed',
-    '--foreground',
-    '--border',
-  ])
-    expect(css).toContain(`var(${token}`);
-  for (const state of [
-    ':hover:not(:disabled)',
-    ':active:not(:disabled)',
-    ':focus-visible',
-    ':disabled',
-    '[aria-pressed="true"]',
-  ])
-    expect(css).toContain(state);
-  expect(css).toContain('height: 30px');
-  expect(css).toContain('height: 24px');
-  expect(css).not.toMatch(/#[0-9a-f]{3,8}|border-radius: (22|24)px/i);
-});
-
 test('request form keeps the idle surface concise and keyboard help discoverable', () => {
   const f = fixture();
   expect(f.win.document.querySelector('[role="status"]')?.textContent).toBe('');

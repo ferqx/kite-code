@@ -7,6 +7,7 @@ import {
   filePreviewFailure,
   NativeFilePreviewStatus,
 } from './native-file-preview-status';
+import { createOfficePreviewFrame } from './native-office-frame';
 import { NativeOfficeToolbar } from './native-office-toolbar';
 import { presentNativePreview } from './native-preview-presentation';
 import type { LocalOfficeRequest, OfficeRequestOutcome } from './output-files-bridge';
@@ -50,6 +51,23 @@ export function NativeLocalFilePreview({
     >();
     const previewId = crypto.randomUUID();
     preview.current = previewId;
+    const frame = createOfficePreviewFrame(
+      viewport.current,
+      bridge,
+      generation,
+      previewId,
+      target.name,
+      (reason) => {
+        if (cancelled) return;
+        revoked = true;
+        ready = false;
+        setStatus(
+          reason === 'access'
+            ? { message: '文件或访问权限已变化，请关闭后重新打开' }
+            : { message: '预览已中断', retry: true },
+        );
+      },
+    );
     const bounds = () => {
       const rect = viewport.current!.getBoundingClientRect();
       return {
@@ -68,6 +86,7 @@ export function NativeLocalFilePreview({
     );
     setStatus('loading');
     setRequestOpen(false);
+    setZoom('fit');
     setIssue('');
     void bridge
       .request({
@@ -77,13 +96,21 @@ export function NativeLocalFilePreview({
         previewId,
         bounds: bounds(),
       })
-      .then((result) => {
+      .then(async (result) => {
         if (cancelled || revoked) return;
         if (
           result &&
           'kind' in result &&
           result.kind === 'outputs.preview' &&
-          result.status === 'ready'
+          result.status === 'frame'
+        )
+          await frame.load(result.url);
+        if (cancelled || revoked) return;
+        if (
+          result &&
+          'kind' in result &&
+          result.kind === 'outputs.preview' &&
+          (result.status === 'ready' || result.status === 'frame')
         ) {
           setStatus('ready');
           ready = true;
@@ -116,8 +143,8 @@ export function NativeLocalFilePreview({
         value.settling = false;
       }
     };
-    const readRequest = async () => {
-      if (!pdf || !requestEdit.current || !ready || reading || cancelled || revoked) return;
+    const readInteraction = async () => {
+      if (!paged || !ready || reading || cancelled || revoked) return;
       reading = true;
       try {
         const result = await bridge.request({
@@ -125,6 +152,7 @@ export function NativeLocalFilePreview({
           generation,
           handleId: target.handleId,
           previewId,
+          consumeRequest: pdf && !!requestEdit.current,
         });
         if (
           cancelled ||
@@ -142,6 +170,9 @@ export function NativeLocalFilePreview({
           value.handleId !== target.handleId
         )
           return;
+        if (value.zoom !== undefined) setZoom(value.zoom);
+        const edit = requestEdit.current;
+        if (!pdf || !edit) return;
         setRequestOpen(!!value.requestOpen);
         const request = value.inlineRequest;
         if (!request || request.context.sourceHash !== value.sourceHash) return;
@@ -153,7 +184,7 @@ export function NativeLocalFilePreview({
         void (async () => {
           let outcome: OfficeRequestOutcome;
           try {
-            outcome = await requestEdit.current!({
+            outcome = await edit({
               handleId: target.handleId,
               previewId,
               requestId: request.requestId,
@@ -176,7 +207,7 @@ export function NativeLocalFilePreview({
       }
     };
     const requestTimer = setInterval(() => {
-      void readRequest();
+      void readInteraction();
     }, 250);
     const timer = setInterval(() => {
       if (cancelled || revoked || checking) return;
@@ -186,6 +217,7 @@ export function NativeLocalFilePreview({
         .catch(() => {
           if (cancelled || revoked) return;
           revoked = true;
+          frame.dispose();
           setStatus({ message: '文件或访问权限已变化，请关闭后重新打开' });
           void bridge
             .request({ method: 'outputs.preview.close', generation, previewId })
@@ -197,6 +229,7 @@ export function NativeLocalFilePreview({
     }, 1000);
     return () => {
       cancelled = true;
+      frame.dispose();
       clearInterval(timer);
       clearInterval(requestTimer);
       if (preview.current === previewId) preview.current = undefined;
@@ -206,7 +239,7 @@ export function NativeLocalFilePreview({
         .request({ method: 'outputs.preview.close', generation, previewId })
         .catch(() => {});
     };
-  }, [bridge, generation, target.handleId, retry, pdf]);
+  }, [bridge, generation, target.handleId, retry, pdf, paged]);
   return (
     <section className="native-file-preview" aria-label={`预览 ${target.name}`}>
       {paged && (
@@ -218,24 +251,6 @@ export function NativeLocalFilePreview({
           zoom={zoom}
           presentation={false}
           onPresentation={() => {}}
-          onEdit={
-            pdf && onRequestEdit && typeof status !== 'object'
-              ? () => {
-                  const id = preview.current;
-                  if (!id || !bridge) return;
-                  void bridge
-                    .request({
-                      method: 'outputs.preview.control',
-                      generation,
-                      previewId: id,
-                      control: { kind: 'request-edit' },
-                    })
-                    .catch(() => {
-                      if (preview.current === id) setIssue('无法读取当前选区，请重新选择。');
-                    });
-                }
-              : undefined
-          }
           onZoom={(value) => {
             const id = preview.current;
             if (!id || !bridge) return;

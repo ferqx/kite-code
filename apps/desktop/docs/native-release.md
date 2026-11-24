@@ -12,6 +12,8 @@ Windows 构建预检和运行清单均要求 Chromium 的 `chrome_100_percent.pa
 
 图片原图浮层另有固定 `image-gallery.html`／renderer／专用 preload；它与权限确认复用原生模态底座，但只有当前图片展示和组内切换通道，没有通用应用、文件或网络读取桥。普通构建包含该入口及共享 CSS／字体，显式开发入口由同一受限 Vite 地址加载；旧 preload 需完整重启后取得新展示端口。构建闭包回归见 [全局浮层构建检查](../test/isolated/native-global-dialog-build.test.ts)，窗口行为与实际资格归 [Desktop owner](../README.md#markdown-与附件输入)。
 
+交付图片的缩放浮层使用固定的 `preview-menu.html`、renderer 和专用 preload。它复用原生浮层底座，专用桥仅交换菜单展示状态和选项结果。普通构建打包入口与共享样式，开发构建通过受限 Vite 地址加载同一入口。 [浮层构建检查](../test/isolated/native-global-dialog-build.test.ts) · [预览工具栏](../README.md#预览工具栏与修改请求)
+
 当前 renderer 沿原桌面的 Vite/React/Tailwind 管线编译复用页面，CSS 与 Geist 字体是候选内的实际文件；Vite 输出保留 Main/preload/helper 的共同目录。新增 UI exports 在 workspace build 中产生实际 desktop/index.js 与 style.css，候选继续逐项核完整递归 manifest。macOS 源码外窗口范围与剩余迁移见[Desktop owner](../README.md#复用原桌面展示层)和[本片进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不替代完整 installed 或三平台资格。
 
 [Native builder](../scripts/build-native.ts)的非development renderer固定使用生产React与JSX转换：`esbuild.jsxDev=false` 和 `process.env.NODE_ENV=production`，不随构建调用进程的 `NODE_ENV=test` 等环境切换。该规则同时适用于普通与显式测试诊断候选，诊断常量仍按独立构建输入封存，开发服务器不改。实际renderer字节的开发栈守卫及本机窗口范围归[Desktop owner](../README.md)和[构建模式决定](../../../.agents/notes/implemented/bug-fix/2026-10-21-native-renderer-production-build.md)；不以定向窗口通过替代完整manifest、安装或三平台门禁。
@@ -26,7 +28,7 @@ Windows Main 保初始完整内容／语义验证，再由 [Node-API owner](../n
 
 macOS arm64 和 Windows x64 执行 `bun run release:build --product native` 可独立构建桌面候选。Windows 使用已准备的 x64 MSVC 和满足现有 ACL 准入的 Bun、Electron 与输出目录，离线安装包构建见下文。macOS 用 `bun run desktop` 启动默认候选，Windows 使用已安装的桌面前门。Linux 先执行 `bun run release:build` 准备 `dist/unified-terminal`，再构建 Native 并启动。启动核对两层完整性和使用权。日常开发使用 `bun run build` 后 `bun run desktop:dev`，并使用独立 development profile。
 
-Native 构建将 Word、Excel、PPT 原件预览脚本放入桌面应用目录，并随制品记录 Word、PPT 渲染器的许可与上游声明。默认运行时提供四个 Office Skill、PDF helper 与独立字体。运行时以已准入的 Service 入口定位同级 Agent 包，支持桌面专用 `terminal/code` 和完整 Terminal 的 `terminal/node_modules` 布局。 [已准入的 Service 入口](../electron/native-assets.ts) · [文档资产的构建与校验](../../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
+Native 构建将 Word、Excel、PPT 原件预览脚本放入桌面应用目录，并随制品记录 Word、PPT 渲染器的许可与上游声明。Main 为沙箱 iframe 的已准入子帧装配这些脚本。默认运行时提供四个 Office Skill、PDF helper 与独立字体。运行时以已准入的 Service 入口定位同级 Agent 包，支持桌面专用 `terminal/code` 和完整 Terminal 的 `terminal/node_modules` 布局。 [已准入的 Service 入口](../electron/native-assets.ts) · [文档资产的构建与校验](../../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
 
 图片显示由[固定构建](../scripts/build-image-display.ts)加入独立codec JS、当前平台sharp原生绑定及libvips、完整第三方许可声明。JS与版本元数据打入固定入口，原生绑定只从入口同目录的私有assets加载，不依赖仓库或环境中的包，不新增`node_modules`目录。macOS本机的[默认路径与搬迁回归](../test/isolated/native-image-display-bundle.test.ts)核实际Electron整图／区域解码，并在禁止外部依赖查找时核包内闭包；绑定缺失时明确失败，不回退环境。此项构建验证不代表本轮完整DMG、Windows安装包或跨平台发行资格。
 

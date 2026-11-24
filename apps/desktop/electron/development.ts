@@ -8,6 +8,18 @@ export interface DevelopmentServiceReload {
   readonly sha256: string;
 }
 
+/** A closed terminal must not interrupt the independent parent control connection. */
+export function guardDevelopmentLogPipes(
+  stdout: NodeJS.WritableStream,
+  stderr: NodeJS.WritableStream,
+) {
+  const onError = (error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EPIPE') throw error;
+  };
+  stdout.on('error', onError);
+  stderr.on('error', onError);
+}
+
 /** Only an explicit development build can select a local renderer server. */
 export function parseDesktopDevelopment(
   value: unknown,
@@ -57,12 +69,16 @@ export function parseDesktopDevelopment(
   };
 }
 
-export function desktopContentSecurityPolicy(development: DesktopDevelopment | null): string {
+export function desktopContentSecurityPolicy(
+  development: DesktopDevelopment | null,
+  officeFrames = false,
+): string {
   const script = development ? `'self' 'nonce-${development.cspNonce}'` : "'self'";
   const connect = development
     ? `'self' ${development.rendererUrl.replace('http:', 'ws:').replace(/\/$/, '')}`
     : "'none'";
-  return `default-src 'self'; script-src ${script}; connect-src ${connect}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
+  const frames = officeFrames ? 'kite-office-preview:' : "'none'";
+  return `default-src 'self'; script-src ${script}; connect-src ${connect}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src ${frames}; object-src 'none'; base-uri 'none'; form-action 'none'`;
 }
 
 export function parseDevelopmentServiceReload(value: unknown): DevelopmentServiceReload {

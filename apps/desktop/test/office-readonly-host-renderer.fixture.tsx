@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import type { NativeBridge } from '../src/native-bridge';
 
 import '../../../packages/ui/src/desktop/style.css';
-import '../src/native-content-theme.css';
+import '../src/native-tailwind.css';
 
 const { NativeFilePreview } = await import('../src/native-file-preview');
 const api = (window as unknown as { readonlyFixture: NativeBridge }).readonlyFixture;
@@ -19,6 +19,9 @@ function Fixture() {
       </button>
       <button type="button" id="word" onClick={() => setId('notes')}>
         Fixture Word notes
+      </button>
+      <button type="button" id="pdf" onClick={() => setId('pdf')}>
+        Fixture PDF
       </button>
       <div
         className="client-content-frame client-main-panel"

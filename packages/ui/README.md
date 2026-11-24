@@ -73,7 +73,7 @@ Shell 工具行与当前工具的思维链摘要使用原命令或已核实的�
 
 [RightSidebar](src/desktop/RightSidebar.tsx)导出的`RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH`统一定义420px固定表单宽度，SessionPage通过`--right-sidebar-form-width`交给定时任务右栏布局消费。定时任务表单使用静态分隔线，关闭拖拽与键盘调宽；会话阅读详情仍沿原约束调宽。内容外框不足800px时改为覆盖，窄于默认值时按外框收缩。窄窗中暂存的展开尺寸在恢复宽窗时取得真实分配，不重挂载草稿；关闭会清除该待恢复意图。重复新建不递增编辑器 generation，草稿、原创建身份和输入节点保持；关闭后新建才建立新编辑器。
 
-Desktop入口导出公共shadcn Input、Textarea、Select和Switch供Native设置复用。Select使用Radix触发器、选项和可指定容器的Portal，Switch保留受控的`checked`／`onCheckedChange`及无障碍语义；共享样式的旧设置按钮兜底避开带`data-slot`的公共组件，防止覆盖开关几何和状态底色。`SessionPage`导出的`NAVIGATION_MIN_WIDTH`同时提供设置导航宽度，数值只在共享布局中维护。`RightSidebar`内的定时任务和Native配置表单共用`.right-sidebar-editor`、`-body`、`-footer`结构：标题和底栏固定，中段收缩并独立滚动，内容与底栏留白分别为12px和8px／12px；正文也是绝对定位辅助控件的包含块，隐藏表单控件不撑开外层栏体。设置页的布局与实际验证归[Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)。
+Desktop 入口导出公共 shadcn Input、Textarea、Select 和 Switch 供 Native 设置复用。办公文件预览在宿主 DOM 使用公共 shadcn Select。交付图片的独立透明浮层通过 `@kite-ai/ui/desktop/select` 加载同一组件。Select使用Radix触发器、选项和可指定容器的Portal，Switch保留受控的`checked`／`onCheckedChange`及无障碍语义；共享样式的旧设置按钮兜底避开带`data-slot`的公共组件，防止覆盖开关几何和状态底色。`SessionPage`导出的`NAVIGATION_MIN_WIDTH`同时提供设置导航宽度，数值只在共享布局中维护。`RightSidebar`内的定时任务和Native配置表单共用`.right-sidebar-editor`、`-body`、`-footer`结构：标题和底栏固定，中段收缩并独立滚动，内容与底栏留白分别为12px和8px／12px；正文也是绝对定位辅助控件的包含块，隐藏表单控件不撑开外层栏体。设置页的布局与实际验证归[Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)。
 
 新增Select沿现有Dialog的Radix依赖族锁定版本，共用DismissableLayer与FocusScope，避免嵌套菜单的Escape同时关闭父层；更新依赖时须保留该嵌套交互回归。Native的选择器组合仅提交当前选项中的值，条件选项重建时隐藏表单控件的空值通知不会清空已选的凭据处理方式。
 

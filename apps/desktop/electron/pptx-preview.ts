@@ -7,38 +7,10 @@ import {
   type SlideData,
   type SlideHandle,
 } from '@aiden0z/pptx-renderer/browser';
-import JSZip from 'jszip';
 import { installRenderedOfficeInteraction } from './office-preview-interaction';
 import { fitOfficePages, startOfficePreview } from './office-preview-source';
 
 const presentationNs = 'http://schemas.openxmlformats.org/presentationml/2006/main';
-const drawingNs = 'http://schemas.openxmlformats.org/drawingml/2006/main';
-
-async function speakerNotes(zip: JSZip, slide: SlideData) {
-  const relation = [...slide.rels.values()].find((rel) => rel.type.endsWith('/notesSlide'));
-  if (!relation || relation.targetMode?.toLowerCase() === 'external') return '';
-  const base = new URL(slide.slidePath, 'https://package.invalid/');
-  const url = new URL(relation.target, base);
-  if (url.origin !== base.origin || url.search || url.hash) return '';
-  const source = await zip.file(url.pathname.slice(1))?.async('string');
-  if (!source) return '';
-  const xml = new DOMParser().parseFromString(source, 'application/xml');
-  return Array.from(xml.getElementsByTagNameNS(presentationNs, 'sp'))
-    .filter((shape) =>
-      Array.from(shape.getElementsByTagNameNS(presentationNs, 'ph')).some(
-        (ph) => ph.getAttribute('type') === 'body',
-      ),
-    )
-    .flatMap((shape) => Array.from(shape.getElementsByTagNameNS(drawingNs, 'p')))
-    .map((paragraph) =>
-      Array.from(paragraph.getElementsByTagNameNS(drawingNs, 't'), (node) => node.textContent).join(
-        '',
-      ),
-    )
-    .join('\n')
-    .trim()
-    .slice(0, 8192);
-}
 
 function anchorSlideObjects(surface: HTMLElement, slide: SlideData, failures: ReadonlySet<string>) {
   // The pinned renderer draws background, master and layout before the visible slide
@@ -73,17 +45,14 @@ function anchorSlideObjects(surface: HTMLElement, slide: SlideData, failures: Re
 }
 
 startOfficePreview('presentation.pptx', async (root, bytes) => {
-  const [parts, zip] = await Promise.all([
-    parseZipLazyMedia(bytes, RECOMMENDED_ZIP_LIMITS),
-    JSZip.loadAsync(bytes),
-  ]);
+  const parts = await parseZipLazyMedia(bytes, RECOMMENDED_ZIP_LIMITS);
   const presentation = buildPresentation(parts, { lazySlides: true });
   if (!presentation.slides.length || presentation.slides.length > 1000)
     throw Error('preview_pptx_slide_budget');
   const css = document.createElement('style');
   css.textContent = `body{margin:0}#office-preview{box-sizing:border-box;padding:10px;min-width:0}
     .main > .slide-container{display:flex;width:max-content;margin:0 auto 14px;box-shadow:0 0 2px #0005}
-    .slide{color-scheme:light}.main > .slide-container > .slide-notes{display:none}
+    .slide{color-scheme:light}
     body.kite-present #office-preview{padding:8px}`;
   document.head.append(css);
   root.classList.add('main');
@@ -110,19 +79,6 @@ startOfficePreview('presentation.pptx', async (root, bytes) => {
     await handle.ready;
     for (const link of page.querySelectorAll('a[href]')) link.removeAttribute('href');
     anchorSlideObjects(handle.element, slide, errors);
-    const text = await speakerNotes(zip, slide);
-    if (text) {
-      const notes = document.createElement('div');
-      notes.className = 'slide-notes';
-      const label = document.createElement('div');
-      label.className = 'slide-notes-label';
-      label.textContent = 'Notes';
-      const body = document.createElement('div');
-      body.className = 'slide-notes-body';
-      body.textContent = text;
-      notes.append(label, body);
-      page.append(notes);
-    }
   }
   fitOfficePages(root, pages);
   installRenderedOfficeInteraction('powerpoint', root.dataset.editable === 'true');

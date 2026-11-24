@@ -138,17 +138,16 @@ test('Word reports exact block offsets and clears a collapsed selection', () => 
   assert.equal(f.read().selection, null);
   f.close();
 });
-test('PPT controls choose current slide, expose notes and clear old object selection', () => {
+test('PPT controls choose current slide and clear old object selection', () => {
   const f = fixture(
     'powerpoint',
-    '<div class="main"><div class="slide-container"><div data-path="/slide[1]/shape[@id=2]">one</div></div><div class="slide-container"><div class="slide-notes"><div class="slide-notes-label">Notes</div><div class="slide-notes-body">notes</div></div></div></div>',
+    '<div class="main"><div class="slide-container"><div data-path="/slide[1]/shape[@id=2]">one</div></div><div class="slide-container"><div class="slide">Two</div></div></div>',
   );
   f.click(f.win.document.querySelector('[data-path]')!);
   assert.equal(f.read().selection.slide, 1);
   f.control({ kind: 'presentation', value: true });
   f.control({ kind: 'slide', value: 2 });
   assert.equal(f.read().currentSlide, 2);
-  assert.equal(f.read().notes, 'notes');
   assert.equal(f.read().selection, null);
   f.control({ kind: 'zoom', value: 1.5 });
   assert.equal(f.win.document.documentElement.style.zoom, '1.5');
@@ -334,10 +333,10 @@ test('explicit PPT page and object remain stable when two pages are wholly visib
   f.close();
 });
 
-test('PPT page visibility and navigation target actual slides instead of long speaker notes', () => {
+test('PPT page visibility and navigation use slide surfaces inside page wrappers', () => {
   const f = fixture(
     'powerpoint',
-    '<div class="main"><div class="slide-container"><div class="slide">First slide</div><div class="slide-notes-body">Long notes</div></div><div class="slide-container"><div class="slide">Second slide</div></div></div>',
+    '<div class="main"><div class="slide-container"><div class="slide">First slide</div></div><div class="slide-container"><div class="slide">Second slide</div></div></div>',
   );
   const containers = [...f.win.document.querySelectorAll<HTMLElement>('.main > .slide-container')];
   const pages = containers.map((el) => el.querySelector<HTMLElement>('.slide')!);
@@ -759,40 +758,6 @@ test('Word native text request capsule remains visible under zoom while its quot
     assert.deepEqual(result.requestAnchor, { x: 350, y: 250, width: 40, height: 40 });
     f.close();
   }
-});
-
-test('PPT keeps exact page-four notes available to the host while preserving author content', () => {
-  const note = '店长每天闭店前核对新品销量、试饮份数和复购券核销。';
-  const slides = Array.from(
-    { length: 5 },
-    (_, index) =>
-      `<div class="slide-container"><div class="slide"><div data-path="/slide[${index + 1}]/shape[@id=1]">Page ${index + 1}<div class="slide-notes"><div class="slide-notes-body">Authored slide content</div></div></div></div>${index === 3 ? `<div class="slide-notes"><div class="slide-notes-label">Notes</div><div class="slide-notes-body"><div>${note}</div></div></div>` : ''}</div>`,
-  ).join('');
-  const f = fixture('powerpoint', `<div class="main">${slides}</div>`);
-  const containers = f.win.document.querySelectorAll('.main > .slide-container');
-  const notes = containers[3]!.querySelector<HTMLElement>(':scope > .slide-notes')!;
-  const authored = containers[3]!.querySelector<HTMLElement>('.slide .slide-notes')!;
-  const authoredText = authored.outerHTML;
-  assert.equal(notes.style.getPropertyValue('display'), 'none');
-  assert.equal(notes.style.getPropertyPriority('display'), 'important');
-  assert.equal(notes.querySelector('.slide-notes-body')!.textContent, note);
-  assert.equal(authored.style.display, '');
-  assert.equal(authored.hasAttribute('aria-hidden'), false);
-  f.control({ kind: 'slide', value: 4 });
-  assert.equal(f.read().currentSlide, 4);
-  assert.equal(f.read().notes, note);
-  for (const value of [true, false]) {
-    f.control({ kind: 'presentation', value });
-    assert.equal(f.read().notes, note);
-    assert.equal(f.read().currentSlide, 4);
-    assert.equal(notes.style.display, 'none');
-    assert.equal(authored.outerHTML, authoredText);
-    assert.notEqual(f.win.getComputedStyle(authored).display, 'none');
-  }
-  f.control({ kind: 'slide', value: 5 });
-  assert.equal(f.read().notes, '');
-  assert.equal(f.win.document.querySelectorAll('.kite-thumbnail-button').length, 5);
-  f.win.close();
 });
 
 test('PPT navigation counter-scales at interface size and compact gutter never follows hover', () => {

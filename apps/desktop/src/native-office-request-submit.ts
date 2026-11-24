@@ -13,7 +13,6 @@ export async function submitOfficeRequest(options: {
   file: OutputFileSummary;
   context: OfficeEditContext;
   prompt: string;
-  skillId?: string;
   isCurrent: () => boolean;
   modelReady: boolean;
   modelChoice?: NativeModelChoice;
@@ -45,17 +44,13 @@ export async function submitOfficeRequest(options: {
   let dispatched = false;
   let preparationAttempted = false;
   try {
-    const base = nativeTextIntent(
+    const intent = nativeTextIntent(
       selection,
       commandId,
       composeBrowserDraft(officeDocument),
       options.plan,
       options.modelChoice,
     );
-    const intent =
-      options.skillId && (base.kind === 'run.start' || base.kind === 'input.follow_up')
-        ? { ...base, selectedSkills: [options.skillId] }
-        : base;
     if (intent.kind !== 'input.steer' && !options.modelReady)
       throw Error('model_selection_unavailable');
     // Main verifies the original output belongs to the selected parent's authorized

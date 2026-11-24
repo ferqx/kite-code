@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { app, ipcMain, type WebContentsView, webContents } from 'electron';
-import { createNativeRootWindow, getNativeRootView } from '../electron/native-root-window';
+import { app, ipcMain, Menu, nativeImage, webContents } from 'electron';
+import { createNativeRootWindow } from '../electron/native-root-window';
+import { nativeWindowMenuTemplate } from '../electron/native-window-menu';
+import { ignoreOfficePreviewMenuShortcut } from '../electron/office-preview-zoom';
 import { NativeOutputPreview, registerOutputPreviewScheme } from '../electron/output-preview';
 import { parseNativePreviewLayout } from '../src/native-preview-layout-bridge';
 import type { NativeOutputRequest } from '../src/output-files-bridge';
+import { verifyOfficePreviewTheme } from './office-preview-theme.fixture';
 
 const root = resolve(process.argv[2]!);
 // This fixture can run behind another window on a shared Windows desktop.
@@ -48,6 +51,20 @@ void app
       },
     });
     const primary = { webContents: window.webContents };
+    window.setMenu(
+      Menu.buildFromTemplate(
+        nativeWindowMenuTemplate({
+          applicationEnabled: true,
+          dispatch() {},
+        }),
+      ),
+    );
+    window.setMenuBarVisibility(false);
+    primary.webContents.on('before-input-event', (_event, input) => {
+      primary.webContents.setIgnoreMenuShortcuts(
+        ignoreOfficePreviewMenuShortcut(primary.webContents, input),
+      );
+    });
     primary.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) =>
       callback(false),
     );
@@ -70,7 +87,17 @@ void app
     let releaseOpen: (success: boolean) => void;
     const bytes = await readFile(join(root, 'fixture.xlsx'));
     const notes = await readFile(join(root, 'fixture.docx'));
-    const original = (id: string) => (id === 'notes' ? notes : bytes);
+    const pdfSource = Buffer.from('%PDF-1.4\n% view fixture');
+    const pdfWidth = 384;
+    const pdfHeight = 768;
+    const pdfPage = nativeImage
+      .createFromBitmap(Buffer.alloc(pdfWidth * pdfHeight * 4, 255), {
+        width: pdfWidth,
+        height: pdfHeight,
+      })
+      .toPNG()
+      .toString('base64');
+    const original = (id: string) => (id === 'notes' ? notes : id === 'pdf' ? pdfSource : bytes);
     const sourceHash = hash(bytes);
     const target = {
       storeId: 'store',
@@ -82,7 +109,7 @@ void app
       ...target,
       fileId: id,
       locator: { kind: 'delivery' as const, key: `delivery/${id}` },
-      name: id === 'notes' ? 'notes.docx' : `${id}.xlsx`,
+      name: id === 'notes' ? 'notes.docx' : id === 'pdf' ? 'fixture.pdf' : `${id}.xlsx`,
       ownerRunId: 'fixture',
       mediaType: 'application/octet-stream',
       size: String(original(id).length),
@@ -137,23 +164,28 @@ void app
               }
               currentId = request.previewId;
               currentGeneration = request.generation;
-              await preview.open({
+              return preview.open({
                 id: request.previewId,
                 generation: request.generation,
                 target: request.target,
                 window,
                 bounds: request.bounds,
                 check() {},
+                async renderPdfPage() {
+                  return {
+                    data: pdfPage,
+                    totalPages: 12,
+                    textLayer: { status: 'empty', width: pdfWidth, height: pdfHeight, items: [] },
+                  };
+                },
                 async materialize(path) {
                   await writeFile(path, original(request.target.fileId), { flag: 'wx' });
                   return info(request.target.fileId);
                 },
               });
-              const view = doc();
-              assert.equal(view.getVisible(), false);
-              assert.equal(view.webContents.getBackgroundThrottling(), true);
-              return { kind: 'outputs.preview', status: 'ready' };
             }
+            case 'outputs.preview.frame.ready':
+              return preview.attachFrame(request.previewId, request.generation);
             case 'outputs.preview.interaction':
               return {
                 kind: 'outputs.preview.interaction',
@@ -178,31 +210,30 @@ void app
         },
       );
       await window.loadFile(join(root, 'host.html'));
+      window.setContentSize(1100, 780);
       const doc = () =>
-        window.contentView.children.find((v) =>
-          (v as WebContentsView).webContents?.getURL().startsWith('kite-preview:'),
-        ) as WebContentsView;
+        primary.webContents.mainFrame.frames.find((frame) =>
+          frame.url.startsWith('kite-office-preview:'),
+        );
+      const frameBounds = () =>
+        primary.webContents.executeJavaScript(
+          'document.querySelector(".native-file-preview-iframe")?.getBoundingClientRect().toJSON()',
+        );
+      const paintedFrame = () =>
+        primary.webContents.executeJavaScript(
+          'document.querySelector(".native-file-preview-iframe:not([data-loading])")?.src',
+        );
       const capture = async (name: string) => {
         await new Promise((resolve) => setTimeout(resolve, 350));
         await primary.webContents.executeJavaScript(
           'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))',
         );
-        await pause();
-        for (const [label, wc] of [
-          ['host', primary.webContents],
-          ['preview', doc()?.webContents],
-        ] as const) {
-          if (!wc) continue;
-          const filename = `${name}-${label}.png`;
-          try {
-            await writeFile(
-              join(root, filename),
-              (await wc.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG(),
-            );
-            captures.push(filename);
-          } catch (error) {
-            captureUnavailable.push({ filename, error: String(error) });
-          }
+        const filename = `${name}-host.png`;
+        try {
+          await writeFile(join(root, filename), (await primary.webContents.capturePage()).toPNG());
+          captures.push(filename);
+        } catch (error) {
+          captureUnavailable.push({ filename, error: String(error) });
         }
       };
       const click = async (selector: string) => {
@@ -271,9 +302,9 @@ void app
       releaseOpen!(true);
       await until(
         async () =>
-          doc()?.getVisible() &&
+          !!doc() &&
           (await primary.webContents.executeJavaScript(
-            '!!document.querySelector(".native-office-toolbar") && !document.querySelector(".native-excel-readonly,textarea")',
+            '!!document.querySelector(".native-office-toolbar") && !document.querySelector(".native-file-preview-state,.native-excel-readonly,textarea")',
           )),
         Boolean,
       ).catch(async (error: unknown) => {
@@ -281,13 +312,11 @@ void app
           host: await primary.webContents.executeJavaScript(
             `({text:document.body.innerText.slice(0,400),hidden:document.hidden,viewport:document.querySelector('.native-file-preview > .native-file-preview-viewport')?.getBoundingClientRect().toJSON()})`,
           ),
-          child: doc()?.webContents.getURL(),
+          child: doc()?.url,
           layoutReports,
-          bounds: doc()?.getBounds(),
-          visible: doc()?.getVisible(),
+          bounds: await frameBounds(),
           contentSize: window.getContentSize(),
-          rootBounds: getNativeRootView(window)?.getBounds(),
-          childState: await doc()?.webContents.executeJavaScript(
+          childState: await doc()?.executeJavaScript(
             `({text:document.body?.innerText.slice(0,160),element:!!document.querySelector('.xlsx-viewport'),viewport:[innerWidth,innerHeight],hidden:document.hidden})`,
           ),
         };
@@ -305,56 +334,194 @@ void app
         const state = await primary.webContents.executeJavaScript(
           `(()=>{const toolbar=document.querySelector('.native-office-toolbar').getBoundingClientRect(); const bottom=(document.querySelector('.native-excel-details') ?? document.querySelector('.native-excel-readonly') ?? document.querySelector('.native-office-toolbar')).getBoundingClientRect().bottom; const viewport=document.querySelector('.native-file-preview > .native-file-preview-viewport')?.getBoundingClientRect();return {bar:{bottom,left:toolbar.left,top:toolbar.top,right:toolbar.right},viewport:viewport?{x:viewport.x,y:viewport.y,width:viewport.width,height:viewport.height}:null,hit:!!document.elementFromPoint(toolbar.left+20,toolbar.top+12)?.closest('.native-office-toolbar')}})()`,
         );
-        const bounds = doc().getBounds();
+        const bounds = await frameBounds();
         geometries.push({ label, state, bounds });
         assert.ok(state.bar.bottom <= bounds.y + 1);
         assert.equal(state.hit, true);
         assert.ok(state.viewport);
-        const viewport = state.viewport;
-        const [width = 0, height = 0] = window.getContentSize();
-        assert.equal(bounds.x, Math.ceil(viewport.x));
-        assert.equal(bounds.y, Math.ceil(viewport.y));
-        assert.equal(
-          bounds.x + bounds.width,
-          Math.min(width, Math.floor(viewport.x + viewport.width)),
-        );
-        assert.equal(
-          bounds.y + bounds.height,
-          Math.min(height, Math.floor(viewport.y + viewport.height)),
-        );
+        for (const key of ['x', 'y', 'width', 'height'])
+          assert.ok(Math.abs(bounds[key] - state.viewport[key]) < 1, key);
         return bounds;
       };
       const drag = async (start: Point, end: Point, whileHeld?: () => Promise<void>) => {
         window.focus();
-        const view = doc().webContents;
+        const view = primary.webContents;
         view.focus();
-        view.sendInputEvent({ type: 'mouseMove', ...start });
-        view.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...start });
-        await pause();
-        view.sendInputEvent({
-          type: 'mouseMove',
-          button: 'left',
-          modifiers: ['leftbuttondown'],
-          ...end,
+        const frame = await frameBounds();
+        const absolute = (point: Point) => ({
+          x: Math.round(point.x + frame.x),
+          y: Math.round(point.y + frame.y),
         });
+        const dispatch = (type: string, point: Point, buttons: number) =>
+          view.debugger.sendCommand('Input.dispatchMouseEvent', {
+            type,
+            button: 'left',
+            buttons,
+            clickCount: 1,
+            ...absolute(point),
+          });
+        await dispatch('mouseMoved', start, 0);
+        await dispatch('mousePressed', start, 1);
+        await pause();
+        await dispatch('mouseMoved', end, 1);
         await pause();
         if (whileHeld) {
           // Cross the host's selection poll with a real captured pointer still held.
           await new Promise((resolve) => setTimeout(resolve, 450));
           await whileHeld();
         }
-        view.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...end });
+        await dispatch('mouseReleased', end, 0);
       };
       const initial = await geometry('initial');
-      const contents = doc().webContents;
-      previewWasVisible = window.isVisible() && doc().getVisible();
+      const contents = doc()!;
+      previewWasVisible = window.isVisible() && !!contents;
       assert.equal(previewWasVisible, true);
+      assert.equal(contents.origin, 'null');
+      assert.equal(window.contentView.children.length, 1, 'Office has no native document view');
+      const zoomTrigger = '[role="combobox"][aria-label="预览缩放"]';
+      const previewZoom = () =>
+        preview.readInteraction(currentId, currentGeneration, false).then((value) => value.zoom);
+      const toolbarZoom = () =>
+        primary.webContents.executeJavaScript(
+          `document.querySelector(${JSON.stringify(zoomTrigger)})?.textContent.trim()`,
+        );
+      const wheel = async (deltaY: number, modifiers: number) => {
+        const bounds = await frameBounds();
+        return primary.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: Math.round(bounds.x + bounds.width / 2),
+          y: Math.round(bounds.y + bounds.height / 2),
+          deltaX: 0,
+          deltaY,
+          modifiers,
+        });
+      };
+      const keyZoom = async (key: '=' | '-' | '0', modifier: 'control' | 'meta') => {
+        const code = { '=': 'Equal', '-': 'Minus', '0': 'Digit0' }[key];
+        const windowsVirtualKeyCode = { '=': 187, '-': 189, '0': 48 }[key];
+        for (const type of ['rawKeyDown', 'keyUp'])
+          await primary.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+            type,
+            key,
+            code,
+            windowsVirtualKeyCode,
+            modifiers: modifier === 'control' ? 2 : 4,
+          });
+      };
+      const verifyZoom = async (format: string, modifier: 'control' | 'meta', scroller: string) => {
+        const documentFrame = doc()!;
+        const state = await documentFrame.executeJavaScript(`(() => {
+          document.body.tabIndex = -1;
+          document.body.focus({preventScroll:true});
+          return visualViewport.scale;
+        })()`);
+        await until(async () => primary.webContents.focusedFrame === documentFrame, Boolean);
+        const shellZoom = primary.webContents.getZoomFactor();
+        const bounds = await frameBounds();
+        await preview.control(currentId, currentGeneration, { kind: 'zoom', value: 1 });
+        await until(toolbarZoom, (label) => label === '100%');
+        await keyZoom('=', modifier);
+        await until(previewZoom, (value) => value === 1.25);
+        await until(toolbarZoom, (label) => label === '125%');
+        await keyZoom('-', modifier);
+        await until(previewZoom, (value) => value === 1);
+        const scroll = async () =>
+          Number(
+            await documentFrame.executeJavaScript(
+              `document.querySelector(${JSON.stringify(scroller)}).scrollTop`,
+            ),
+          );
+        const initialScroll = await scroll();
+        await wheel(180, 0);
+        await until(scroll, (top) => top > initialScroll);
+        assert.equal(await previewZoom(), 1);
+        await wheel(-60, 2);
+        const enlarged = await until(
+          previewZoom,
+          (value) => typeof value === 'number' && value > 1,
+        );
+        assert.ok(typeof enlarged === 'number' && enlarged < 1.25);
+        await until(toolbarZoom, (label) => label === `${Math.round(enlarged * 100)}%`);
+        await wheel(90, 2);
+        await until(previewZoom, (value) => typeof value === 'number' && value < 1);
+        await keyZoom('0', modifier);
+        await until(previewZoom, (value) => value === 1);
+        await until(toolbarZoom, (label) => label === '100%');
+        assert.equal(await documentFrame.executeJavaScript('visualViewport.scale'), state);
+        assert.equal(primary.webContents.getZoomFactor(), shellZoom);
+        assert.deepEqual(await frameBounds(), bounds);
+        await preview.control(currentId, currentGeneration, { kind: 'zoom', value: 'fit' });
+        await documentFrame.executeJavaScript(
+          `document.querySelector(${JSON.stringify(scroller)}).scrollTop = 0`,
+        );
+        await until(toolbarZoom, (label) => label === '适应');
+        checks.push(`${format}-scoped-zoom-input-and-ordinary-scroll`);
+      };
+      const openMenu = async () => {
+        await click(zoomTrigger);
+        await until(
+          () =>
+            primary.webContents.executeJavaScript(
+              '!!document.querySelector("[role=listbox]") && !!document.activeElement?.closest("[role=listbox]")',
+            ),
+          Boolean,
+        );
+        assert.equal(doc(), contents);
+        assert.deepEqual(await frameBounds(), initial);
+        const hits = await primary.webContents.executeJavaScript(
+          `(() => {const opt=document.querySelector('[role=option]:last-child'); const r=opt.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;return y>${initial.y} && document.elementFromPoint(x,y)?.closest('[role=listbox]')!==null})()`,
+        );
+        assert.equal(hits, true, 'the option is above the file iframe at the shared point');
+      };
+      const closeMenu = async () => {
+        await until(
+          () =>
+            primary.webContents.executeJavaScript(
+              `!document.querySelector('[role=listbox]') && document.activeElement?.matches(${JSON.stringify(zoomTrigger)})`,
+            ),
+          Boolean,
+        );
+        assert.deepEqual(await frameBounds(), initial);
+      };
+      const chooseZoom = async (label: string, value: number | 'fit') => {
+        await openMenu();
+        const p = await primary.webContents.executeJavaScript(
+          `(() => {const el=[...document.querySelectorAll('[role=option]')].find(e=>e.textContent.trim()===${JSON.stringify(label)}); const r=el.getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`,
+        );
+        for (const type of ['mouseDown', 'mouseUp'] as const)
+          primary.webContents.sendInputEvent({ type, button: 'left', clickCount: 1, ...p });
+        await closeMenu();
+        await until(
+          () => preview.readInteraction(currentId, currentGeneration, false),
+          (state) => state.zoom === value,
+        );
+      };
+      await openMenu();
+      await capture('zoom-menu');
+      primary.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+      primary.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+      await closeMenu();
+      await chooseZoom('125%', 1.25);
+      await chooseZoom('适应', 'fit');
+      checks.push('zoom-menu-over-iframe-without-moving-preview');
+      await verifyOfficePreviewTheme(
+        contents,
+        [
+          { selector: '.xlsx-viewport', axis: 'vertical' },
+          { selector: '.xlsx-tabs', axis: 'horizontal' },
+        ],
+        '.xlsx-tabs',
+        '.xlsx-cell',
+        () => capture('xlsx-dark-scrollbars'),
+      );
+      checks.push('excel-scrollbar-theme');
+      await verifyZoom('excel', 'control', '.xlsx-viewport');
       const point = (address: string) =>
         until<Point | null>(
           () =>
             contents.executeJavaScript(
               `(()=>{const cell=document.querySelector('.xlsx-cell[data-row="${Number(address.slice(1)) - 1}"][data-col="${address.charCodeAt(0) - 65}"]');if(!cell)return null;const r=cell.getBoundingClientRect();const x=Math.round(r.x+r.width/2),y=Math.round(r.y+r.height/2);return document.elementFromPoint(x,y)?.closest('.xlsx-cell')===cell?{x,y}:null})()`,
-            ),
+            ) as Promise<Point | null>,
           Boolean,
         )
           .then((position) => {
@@ -376,8 +543,22 @@ void app
         const current = await preview.readInteraction(currentId, currentGeneration, false);
         assert.equal(current.selection, null);
         assert.equal(current.excelSelection, undefined);
-        assert.deepEqual(doc().getBounds(), initial);
-        assert.ok(await contents.executeJavaScript("!!document.querySelector('.xlsx-highlight')"));
+        assert.deepEqual(await frameBounds(), initial);
+        const shown = await contents.executeJavaScript(
+          "!!document.querySelector('.xlsx-highlight')",
+        );
+        if (!shown) {
+          previewDiagnostic = {
+            pointer: await contents.executeJavaScript('window.fixturePointer'),
+            bounds: await frameBounds(),
+            start,
+            end,
+            root: await primary.webContents.executeJavaScript(
+              '({active:document.activeElement?.outerHTML.slice(0,320),zoom:devicePixelRatio})',
+            ),
+          };
+        }
+        assert.ok(shown);
         assert.ok(
           await primary.webContents.executeJavaScript(
             "!document.querySelector('.native-excel-readonly')",
@@ -458,8 +639,13 @@ void app
         const pending = await preview.readInteraction(currentId, currentGeneration, false);
         assert.deepEqual(pending.selection, selected.selection);
         assert.deepEqual(pending.excelSelection, selected.excelSelection);
-        contents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
-        contents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+        for (const type of ['rawKeyDown', 'keyUp'])
+          await primary.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+            type,
+            key: 'Escape',
+            code: 'Escape',
+            windowsVirtualKeyCode: 27,
+          });
         await until(
           () => preview.readInteraction(currentId, currentGeneration, false),
           (value) => value.selection === null,
@@ -479,7 +665,7 @@ void app
       await until(
         () =>
           primary.webContents.executeJavaScript(
-            "document.querySelector('.native-excel-readonly button').disabled",
+            "document.querySelector('.native-excel-readonly button')?.disabled",
           ),
         Boolean,
       );
@@ -511,10 +697,10 @@ void app
       await click('#word');
       const positions = await until<[Point, Point] | null>(async () => {
         const view = doc();
-        if (!view?.getVisible() || view.webContents === contents) return null;
-        return await view.webContents.executeJavaScript(
+        if (!view || view === contents || view.url !== (await paintedFrame())) return null;
+        return (await view.executeJavaScript(
           `(()=>{const paragraph=document.querySelector('[data-path="/body/p[1]"]');if(paragraph?.textContent!=='AB1CD')return null;const walker=document.createTreeWalker(paragraph,NodeFilter.SHOW_TEXT);for(let n=walker.nextNode();n;n=walker.nextNode()){if(n.textContent!=='CD')continue;const range=document.createRange();range.selectNodeContents(n);const r=range.getBoundingClientRect();const y=Math.round(r.y+r.height/2);return [{x:Math.ceil(r.left),y},{x:Math.floor(r.right),y}]};return null})()`,
-        );
+        )) as [Point, Point] | null;
       }, Boolean);
       assert.ok(positions);
       await drag(positions[0], positions[1]);
@@ -531,6 +717,224 @@ void app
       });
       checks.push('word-footnote-source-offsets');
       await capture('footnote-selection');
+      const wordFrame = doc()!;
+      await verifyOfficePreviewTheme(
+        wordFrame,
+        [{ selector: 'html', axis: 'vertical' }, { selector: '.kite-word-rail' }],
+        'html',
+        'section.kite-docx.page',
+        () => capture('word-dark-scrollbars'),
+      );
+      checks.push('word-scrollbar-theme');
+      await verifyZoom('word', 'control', 'html');
+      window.setContentSize(640, 620);
+      await click('#pdf');
+      const pdf = await until(async () => {
+        const frame = doc();
+        if (!frame || frame === wordFrame || frame.url !== (await paintedFrame())) return null;
+        return (await frame.executeJavaScript(
+          `document.querySelector("main img")?.complete && document.querySelector("main img")?.naturalWidth === ${pdfWidth}`,
+        ))
+          ? frame
+          : null;
+      }, Boolean);
+      assert.ok(pdf);
+      await preview.control(currentId, currentGeneration, { kind: 'zoom', value: 2 });
+      await verifyOfficePreviewTheme(
+        pdf,
+        [
+          { selector: 'html', axis: 'vertical' },
+          { selector: 'main', axis: 'horizontal' },
+          { selector: 'nav', axis: 'vertical' },
+        ],
+        'nav',
+        'main img',
+        () => capture('pdf-dark-scrollbars'),
+      );
+      await preview.control(currentId, currentGeneration, { kind: 'zoom', value: 'fit' });
+      checks.push('pdf-scrollbar-theme');
+      await verifyZoom('pdf', 'meta', 'html');
+      await preview.control(currentId, currentGeneration, { kind: 'zoom', value: 1 });
+      const recordPinch = `window.fixturePinch=[];window.addEventListener('wheel',e=>window.fixturePinch.push({x:e.clientX,y:e.clientY,ctrl:e.ctrlKey,delta:e.deltaY,trusted:e.isTrusted}),{passive:true,capture:true})`;
+      await primary.webContents.executeJavaScript(recordPinch);
+      await pdf.executeJavaScript(recordPinch);
+      const pinch = async (scaleFactor: number) => {
+        const bounds = await frameBounds();
+        return primary.webContents.debugger.sendCommand('Input.synthesizePinchGesture', {
+          x: Math.round(bounds.x + bounds.width / 2),
+          y: Math.round(bounds.y + bounds.height / 2),
+          gestureSourceType: 'mouse',
+          scaleFactor,
+        });
+      };
+      await pinch(1.3);
+      await pause();
+      previewDiagnostic = {
+        zoom: await previewZoom(),
+        root: await primary.webContents.executeJavaScript('window.fixturePinch'),
+        frame: await pdf.executeJavaScript('window.fixturePinch'),
+        bounds: await frameBounds(),
+      };
+      const pinched = await until(previewZoom, (scale) => typeof scale === 'number' && scale > 1);
+      assert.ok(typeof pinched === 'number' && pinched >= 1.15 && pinched <= 1.35, String(pinched));
+      await pinch(0.7);
+      await until(previewZoom, (scale) => typeof scale === 'number' && scale < 1);
+      assert.equal(await pdf.executeJavaScript('visualViewport.scale'), 1);
+      assert.equal(primary.webContents.getZoomFactor(), 1);
+      await preview.control(currentId, currentGeneration, { kind: 'zoom', value: 'fit' });
+      checks.push('pdf-chromium-touchpad-pinch');
+      const pdfRail = () =>
+        pdf.executeJavaScript(`(() => {
+          const rail = document.querySelector('nav');
+          const { width, y, height } = rail.getBoundingClientRect();
+          return { width, y, height, clientWidth: rail.clientWidth, scrollWidth: rail.scrollWidth,
+            verticalOverflow: rail.scrollHeight > rail.clientHeight, top: rail.scrollTop,
+            viewportWidth: innerWidth, compact: rail.classList.contains('kite-rail-compact'),
+            thumbnailVisible: getComputedStyle(rail.querySelector('img')).visibility === 'visible',
+            selectedPage: Number(rail.querySelector('[aria-current="true"]').dataset.page),
+            image: document.querySelector('main img').getBoundingClientRect().toJSON() };
+        })()`) as Promise<{
+          width: number;
+          y: number;
+          height: number;
+          clientWidth: number;
+          scrollWidth: number;
+          verticalOverflow: boolean;
+          top: number;
+          viewportWidth: number;
+          compact: boolean;
+          thumbnailVisible: boolean;
+          selectedPage: number;
+          image: unknown;
+        }>;
+      const previewMouse = async (type: string, x: number, y: number, deltaY?: number) => {
+        const bounds = await frameBounds();
+        return primary.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+          type,
+          x: bounds.x + x,
+          y: bounds.y + y,
+          ...(deltaY === undefined ? {} : { deltaX: 0, deltaY }),
+        });
+      };
+      const moveOutsideRail = async () =>
+        previewMouse('mouseMoved', (await frameBounds()).width - 8, 8);
+      const goToPdfPage = async (page: number) => {
+        const point = (await pdf.executeJavaScript(
+          `(() => {const r=document.querySelector('button[data-page="${page}"]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+        )) as Point;
+        await drag(point, point);
+        await until(
+          () =>
+            pdf.executeJavaScript(
+              `(() => {const img=document.querySelector('main img[alt="第 ${page} 页"]');return img?.complete && img.naturalWidth === ${pdfWidth}})()`,
+            ),
+          Boolean,
+        );
+      };
+      await moveOutsideRail();
+      const wideRail = await until(pdfRail, (rail) => rail.viewportWidth >= 600 && !rail.compact);
+      assert.equal(wideRail.width, 104);
+      assert.equal(wideRail.thumbnailVisible, true);
+      assert.ok(wideRail.scrollWidth <= wideRail.clientWidth, 'wide PDF rail fits');
+      assert.equal(wideRail.verticalOverflow, true);
+      await previewMouse('mouseWheel', 14, 100, 300);
+      const wideScrolled = await until(pdfRail, (rail) => rail.top > 0);
+      assert.deepEqual(wideScrolled.image, wideRail.image);
+      await previewMouse('mouseWheel', 14, 100, -300);
+      await until(pdfRail, (rail) => rail.top === 0);
+      await goToPdfPage(3);
+      await pdf.executeJavaScript('document.activeElement.blur()');
+      await moveOutsideRail();
+      // Control the iframe width in CSS pixels so OS scale and native size rounding cannot skip 599.
+      const setFrameWidth = (width: string) =>
+        primary.webContents.executeJavaScript(
+          `document.querySelector('.native-file-preview-iframe').style.width = ${JSON.stringify(width)}`,
+        );
+      await setFrameWidth('600px');
+      const wideBoundary = await until(pdfRail, (rail) => rail.viewportWidth === 600);
+      assert.equal(wideBoundary.compact, false);
+      assert.equal(wideBoundary.thumbnailVisible, true);
+      assert.ok(wideBoundary.scrollWidth <= wideBoundary.clientWidth);
+      assert.equal(wideBoundary.selectedPage, 3);
+      await setFrameWidth('599px');
+      const narrowBoundary = await until(
+        pdfRail,
+        (rail) => rail.viewportWidth === 599 && rail.compact,
+      );
+      assert.equal(narrowBoundary.width, 32);
+      assert.equal(narrowBoundary.thumbnailVisible, false);
+      assert.ok(narrowBoundary.scrollWidth <= narrowBoundary.clientWidth);
+      assert.equal(narrowBoundary.selectedPage, 3);
+      checks.push('pdf-wide-rail-and-compact-breakpoint');
+      await setFrameWidth('');
+      window.setContentSize(520, 620);
+      const compactRail = await until(
+        pdfRail,
+        (rail) => rail.viewportWidth < 600 && rail.width === 32,
+      );
+      assert.ok(compactRail.scrollWidth <= compactRail.clientWidth, 'compact PDF rail fits');
+      const railMiddle = compactRail.y + compactRail.height / 2;
+      await previewMouse('mouseMoved', 14, railMiddle);
+      const expandedRail = await until(pdfRail, (rail) => rail.width === 104);
+      assert.ok(expandedRail.scrollWidth <= expandedRail.clientWidth, 'expanded PDF rail fits');
+      assert.equal(expandedRail.verticalOverflow, true);
+      assert.deepEqual(expandedRail.image, compactRail.image);
+      await previewMouse('mouseWheel', 14, railMiddle, 300);
+      const scrolledRail = await until(pdfRail, (rail) => rail.top > 0);
+      assert.deepEqual(scrolledRail.image, compactRail.image);
+      await previewMouse('mouseWheel', 14, railMiddle, -300);
+      await until(pdfRail, (rail) => rail.top === 0);
+      await moveOutsideRail();
+      await until(pdfRail, (rail) => rail.width === 32);
+      await pdf.executeJavaScript("document.querySelector('nav').focus()");
+      const focusedRail = await until(pdfRail, (rail) => rail.width === 104);
+      assert.ok(
+        focusedRail.scrollWidth <= focusedRail.clientWidth,
+        'keyboard-focused PDF rail fits',
+      );
+      assert.deepEqual(focusedRail.image, compactRail.image);
+      checks.push('pdf-rail-fits-and-scrolls-vertically');
+      await goToPdfPage(2);
+      await preview.control(currentId, currentGeneration, { kind: 'request-edit' });
+      const pdfRequest = await preview.readInteraction(currentId, currentGeneration);
+      assert.equal(pdfRequest.floatingSelection?.kind, 'pdf');
+      assert.equal(
+        pdfRequest.floatingSelection?.kind === 'pdf' && pdfRequest.floatingSelection.page,
+        2,
+      );
+      assert.equal(pdfRequest.requestOpen, true);
+      await wheel(-120, 2);
+      await pinch(1.2);
+      await pause();
+      assert.equal(await previewZoom(), 'fit');
+      assert.equal(
+        (await preview.readInteraction(currentId, currentGeneration, false)).requestOpen,
+        true,
+      );
+      checks.push('pdf-iframe-page-resource-and-exact-request');
+      await capture('pdf-page-request');
+      await primary.webContents.executeJavaScript(
+        "document.querySelector('.native-file-preview-iframe').remove()",
+      );
+      await until(
+        () =>
+          primary.webContents.executeJavaScript(
+            `document.querySelector('.native-file-preview-error [role=status]')?.textContent`,
+          ),
+        (status) => status === '预览已中断',
+      );
+      assert.equal(pdf.isDestroyed(), true);
+      assert.equal(window.contentView.children.length, 1);
+      await click('.native-file-preview-error button');
+      await until(
+        () =>
+          primary.webContents.executeJavaScript(
+            `!!document.querySelector('.native-file-preview-iframe:not([data-loading])')`,
+          ),
+        Boolean,
+      );
+      assert.ok(doc());
+      checks.push('interrupted-iframe-releases-input-and-retries');
       passed = true;
     } catch (error) {
       failure = String(error);
@@ -557,7 +961,7 @@ void app
             viewsDestroyed,
             normalSandbox: !app.commandLine.hasSwitch('no-sandbox'),
             previewWasVisible,
-            captureKind: 'separate WebContents capturePage; not OS composition',
+            captureKind: 'Root capturePage with the Office iframe',
             businessRequests: 0,
           },
           null,

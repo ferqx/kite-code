@@ -131,6 +131,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
   const theme = useMemo(() => workbookTheme(workbook), [workbook]);
   const date1904 = workbook.properties.date1904 === true;
   const viewport = useRef<HTMLDivElement>(null);
+  const grid = useRef<HTMLTableElement>(null);
   const [box, setBox] = useState({ width: 800, height: 600 });
   const [scroll, setScroll] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
@@ -259,6 +260,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
 
   useLayoutEffect(() => {
     const controller = {
+      zoomScale: () => (request.current || drag.current ? undefined : scale),
       read(consume = true): OfficeInteraction {
         const gesture = drag.current;
         const selection = gesture ? gesture.previous : rangeRef.current;
@@ -373,6 +375,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
             return;
           }
           event.preventDefault();
+          grid.current?.focus({ preventScroll: true });
           drag.current = {
             pointerId: event.pointerId,
             previous: rangeRef.current,
@@ -403,6 +406,7 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
         <table
           // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: The virtual table exposes a selectable grid.
           role="grid"
+          ref={grid}
           aria-label={sheet.name}
           tabIndex={0}
           aria-rowcount={rows.length - 1}
@@ -618,10 +622,10 @@ function Preview({ workbook, editable }: { workbook: Workbook; editable: boolean
 
 const css = [
   'html,body,#office-preview{margin:0;height:100%;overflow:hidden}',
-  'body{background:#fff;color:#111;font-family:Arial,sans-serif}',
+  'body{background:var(--office-background);color:#111;font-family:Arial,sans-serif}',
   '#office-preview{display:flex;flex-direction:column}',
   '.xlsx-viewport{flex:1;min-height:0;overflow:auto;position:relative;outline:none;overscroll-behavior:contain;user-select:none}',
-  '.xlsx-plane{display:block;position:relative;overflow:hidden;background:#fff;border-spacing:0}',
+  '.xlsx-plane{display:block;position:relative;overflow:hidden;background:#fff;color-scheme:light;border-spacing:0}',
   '.xlsx-plane thead,.xlsx-plane tbody,.xlsx-plane tr{display:contents}',
   '.xlsx-cell,.xlsx-header{position:absolute;box-sizing:border-box;display:flex;align-items:center;overflow:hidden}',
   '.xlsx-cell{background:#fff;border:solid #d6d9dc;border-width:0 1px 1px 0;white-space:nowrap;cursor:cell;overflow:visible}',
@@ -630,9 +634,9 @@ const css = [
   '.xlsx-value{overflow:hidden;text-overflow:clip;max-width:100%;max-height:100%}',
   '.xlsx-header{background:#f3f4f6;border:solid #d6d9dc;border-width:0 1px 1px 0;justify-content:center;font-size:11px;font-weight:normal;color:#374151}',
   '.xlsx-highlight{position:absolute;inset:0;background:#64748b1c;border:solid #667085;pointer-events:none}',
-  '.xlsx-tabs{display:flex;flex:none;overflow:auto;align-items:stretch;gap:2px;background:#f3f4f6;border-top:1px solid #d6d9dc;min-height:28px}',
-  '.xlsx-tabs button{font:12px system-ui;background:transparent;border:0;border-bottom:2px solid transparent;color:#334155;padding:3px 12px;white-space:nowrap}',
-  '.xlsx-tabs button[aria-selected="true"]{background:#fff;color:#126348;border-bottom-color:#168363;font-weight:600}',
+  '.xlsx-tabs{display:flex;flex:none;overflow:auto;align-items:stretch;gap:2px;background:var(--office-background);border-top:1px solid var(--office-border);min-height:28px}',
+  '.xlsx-tabs button{font:12px var(--office-font);background:transparent;border:0;border-bottom:2px solid transparent;color:var(--office-foreground);padding:3px 12px;white-space:nowrap}',
+  '.xlsx-tabs button[aria-selected="true"]{background:var(--office-card);color:light-dark(#126348,#8bdbc4);border-bottom-color:light-dark(#168363,#57cbb0);font-weight:600}',
   '.xlsx-status{position:fixed;z-index:9;left:48px;bottom:40px}',
 ].join('');
 

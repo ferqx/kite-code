@@ -6,7 +6,7 @@ import {
   imageZoomChoices,
 } from './image-zoom';
 import type { NativeBridge } from './native-bridge';
-import { PreviewIcon } from './native-office-toolbar';
+import { NativePreviewZoomSelect } from './native-office-toolbar';
 
 /** The image viewport owns actual scale, scrolling, pixel mapping and ROI. The Root only presents its controls. */
 export function NativeImageZoom({
@@ -79,34 +79,26 @@ export function NativeImageZoom({
   const selected = !state || state.fit ? 'fit' : String(state.scale);
   const custom = !imageZoomChoices.includes(selected as ImageZoomChoice);
   return (
-    <span ref={node} className="native-preview-zoom">
-      <select
-        className="ui-form-control"
-        aria-label="图片缩放"
+    <span ref={node}>
+      <NativePreviewZoomSelect
+        label="图片缩放"
+        aboveNativeView
+        className="w-32"
         title={state?.fit ? `适合宽度（${percent}）` : `图片缩放：${percent}`}
         disabled={!previewId}
         value={selected}
-        onChange={(e) => dispatch.current?.(e.currentTarget.value as ImageZoomChoice)}
-      >
-        <option value="fit">适应</option>
-        <option value="out" disabled={!!state && state.scale <= state.minimum}>
-          缩小
-        </option>
-        <option value="in" disabled={state?.scale === 8}>
-          放大
-        </option>
-        {imageZoomChoices.slice(3).map((v) => (
-          <option key={v} value={v}>
-            {v === '1' ? '100% 原始大小' : `${Number(v) * 100}%`}
-          </option>
-        ))}
-        {custom && (
-          <option value={selected} hidden>
-            {percent}
-          </option>
-        )}
-      </select>
-      <PreviewIcon name="down" />
+        customLabel={custom ? percent : undefined}
+        onChange={(value) => dispatch.current?.(value as ImageZoomChoice)}
+        options={[
+          { value: 'fit', label: '适应' },
+          { value: 'out', label: '缩小', disabled: !!state && state.scale <= state.minimum },
+          { value: 'in', label: '放大', disabled: state?.scale === 8 },
+          ...imageZoomChoices.slice(3).map((value) => ({
+            value,
+            label: value === '1' ? '100% 原始大小' : `${Number(value) * 100}%`,
+          })),
+        ]}
+      />
     </span>
   );
 }

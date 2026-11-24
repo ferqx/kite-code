@@ -40,6 +40,7 @@ test('descriptive projection drops forged submission, ownership and privileged c
       previewId: 'other',
       editor: { editorId: 'forged' },
       prompt: 'forged',
+      notes: 'Speaker notes',
     },
     'powerpoint',
     hash,
@@ -82,13 +83,12 @@ test('anchor is an exact finite rectangle, never an arbitrary bounds or target o
     ).requestAnchor,
   ).toEqual({ x: -1, y: -2, width: 0, height: 0 });
 });
-test('descriptive counters and text remain bounded even with a valid selection', () => {
+test('descriptive counters and controls remain bounded even with a valid selection', () => {
   for (const extra of [
     { floatingRequest: 1 },
     { floatingRequest: NaN, floatingSelection: selection },
     { slideCount: 10001 },
     { currentSlide: 0 },
-    { notes: 'x'.repeat(8193) },
     { presentation: 'true' },
     { zoom: 100 },
   ])

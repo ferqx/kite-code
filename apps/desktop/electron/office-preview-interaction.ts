@@ -13,7 +13,6 @@ export type OfficeInteraction = {
   excelSelection?: OfficeExcelSelectionView;
   currentSlide?: number;
   slideCount?: number;
-  notes?: string;
   presentation?: boolean;
   zoom?: number | 'fit';
   floatingRequest?: number;
@@ -75,27 +74,6 @@ function installInteraction(
   const slides = Array.from(
     document.querySelectorAll<HTMLElement>('.main > .slide-container'),
   ).slice(0, 1000);
-  const speakerNotes = new Map<HTMLElement, Element>();
-  if (kind === 'powerpoint') {
-    for (const slide of slides) {
-      const notes = slide.querySelector<HTMLElement>(':scope > .slide-notes');
-      const label = notes?.children[0];
-      const body = notes?.children[1];
-      // The trusted host presents the notes from the current slide.
-      if (
-        notes?.children.length === 2 &&
-        label?.className === 'slide-notes-label' &&
-        label.textContent?.trim() === 'Notes' &&
-        body?.className === 'slide-notes-body' &&
-        !notes.matches('[data-path]') &&
-        !notes.querySelector('[data-path]')
-      ) {
-        speakerNotes.set(slide, body);
-        notes.style.setProperty('display', 'none', 'important');
-        notes.setAttribute('aria-hidden', 'true');
-      }
-    }
-  }
   let selected: OfficeSelection | null = null;
   let zoom: number | 'fit' = 'fit';
   let wordRange: Range | null = null;
@@ -557,6 +535,15 @@ body.kite-present .main>.slide-container{display:none!important}body.kite-presen
   function controller() {
     return {
       control,
+      zoomScale() {
+        if (requestScopeSerial) return;
+        if (zoom !== 'fit') return zoom;
+        const page =
+          kind === 'powerpoint'
+            ? slides[currentSlide() - 1]
+            : document.querySelector<HTMLElement>('.page-wrapper');
+        return Number(page?.style.zoom) || 1;
+      },
       releaseScope(value: number) {
         if (value !== requestScopeSerial) return;
         requestScopeSerial = 0;
@@ -608,13 +595,7 @@ body.kite-present .main>.slide-container{display:none!important}body.kite-presen
           ...(invalidatedSerial ? { requestInvalidated: invalidatedSerial } : {}),
           zoom,
           ...(kind === 'powerpoint' ? { presentation } : {}),
-          ...(slide
-            ? {
-                currentSlide: slide,
-                slideCount: slides.length,
-                notes: (speakerNotes.get(slides[slide - 1]!)?.textContent ?? '').slice(0, 8192),
-              }
-            : {}),
+          ...(slide ? { currentSlide: slide, slideCount: slides.length } : {}),
           ...(request ? { floatingRequest: request, floatingSelection } : {}),
           ...(requestAnchor ? { requestAnchor: locateRequest() } : {}),
         };

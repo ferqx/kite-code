@@ -18,9 +18,12 @@ void app.whenReady().then(async () => {
   });
   root.contentView.addChildView(primary);
   primary.setBounds({ x: 0, y: 0, width: 1000, height: 700 });
-  await primary.webContents.loadURL(
-    'data:text/html,<body><textarea id="draft">keep draft</textarea><p>conversation retained</p>',
+  const html = join(directory, 'host.html');
+  await writeFile(
+    html,
+    '<!doctype html><meta http-equiv="Content-Security-Policy" content="frame-src kite-office-preview:"><textarea id="draft">keep draft</textarea><p>conversation retained</p>',
   );
+  await primary.webContents.loadFile(html);
   const window = root as NativeRootWindow;
   Object.defineProperty(window, 'webContents', { value: primary.webContents });
   const preview = new NativeOutputPreview();
@@ -154,37 +157,56 @@ void app.whenReady().then(async () => {
           };
         },
       };
+      const openOffice = async (input: typeof request) => {
+        const prepared = await preview.open(input);
+        if (prepared.status !== 'frame') throw Error('expected preview frame');
+        await primary.webContents.executeJavaScript(`new Promise(resolve => {
+          const frame = document.createElement('iframe');
+          frame.setAttribute('sandbox', 'allow-scripts');
+          frame.style.cssText = 'position:absolute;inset:80px 10px 10px 400px;width:580px;height:600px;border:0';
+          frame.onload = () => resolve();
+          frame.src = ${JSON.stringify(prepared.url)};
+          document.body.append(frame);
+        })`);
+        await preview.attachFrame(input.id, input.generation);
+        const frame = primary.webContents.mainFrame.frames.find(
+          (item) => item.url === prepared.url,
+        );
+        assert.ok(frame);
+        return frame;
+      };
+      const closeOffice = async (id: string) => {
+        preview.close(id);
+        await primary.webContents.executeJavaScript("document.querySelector('iframe').remove()");
+      };
       const started = performance.now();
-      await preview.open(request);
+      const office = await openOffice(request);
       const firstMs = performance.now() - started;
-      const office = root.contentView.children.at(-1) as WebContentsView;
       assert.match(
-        await office.webContents.executeJavaScript('document.documentElement.outerHTML'),
+        (await office.executeJavaScript('document.documentElement.outerHTML')) as string,
         /<html/i,
       );
       assert.deepEqual(
-        await office.webContents.executeJavaScript(
-          '[typeof require,typeof process,typeof window.kiteNative]',
-        ),
+        await office.executeJavaScript('[typeof require,typeof process,typeof window.kiteNative]'),
         ['undefined', 'undefined', 'undefined'],
       );
       const stage = `office-${index}-${source.split('.').at(-1)}`;
       await writeFile(
         join(directory, `${stage}.html`),
-        await office.webContents.executeJavaScript('document.documentElement.outerHTML'),
+        (await office.executeJavaScript('document.documentElement.outerHTML')) as string,
       );
-      await observe(stage, office);
-      const katexNodes = await office.webContents.executeJavaScript(
+      await observe(stage, primary);
+      const katexNodes = (await office.executeJavaScript(
         'document.querySelectorAll(".katex").length',
-      );
+      )) as number;
       if (source.includes('math.')) assert.ok(katexNodes > 0, 'offline_math_must_render');
       snapshots.push(`${stage}.png`);
-      preview.close(`office-${index}`);
+      await closeOffice(`office-${index}`);
       assert.equal(root.contentView.children.length, 1);
       const repeated = performance.now();
-      await preview.open({ ...request, id: `repeat-${index}` });
+      await openOffice({ ...request, id: `repeat-${index}` });
       const repeatedMs = performance.now() - repeated;
-      preview.close(`repeat-${index}`);
+      await closeOffice(`repeat-${index}`);
       timings.push({ source, firstMs, repeatedMs, katexNodes });
     }
     assert.equal(

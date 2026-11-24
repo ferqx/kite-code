@@ -114,8 +114,10 @@ test.skipIf(process.platform !== 'win32')(
       expect(receipt.passed).toBe(true);
       expect(receipt.viewsDestroyed).toBe(true);
       expect(receipt.normalSandbox).toBe(true);
-      expect(receipt.windowWasHidden).toBe(true);
-      expect(receipt.checks).toHaveLength(6);
+      expect(receipt.resumedFromHidden).toBe(true);
+      expect(receipt.checks).toHaveLength(8);
+      expect(receipt.checks).toContain('pptx-scrollbar-theme');
+      expect(receipt.checks).toContain('pptx-scoped-wheel-zoom');
       expect(receipt.checks).toContain('late-file-admission-cannot-replace-a-reopened-preview');
       passed = true;
     } finally {

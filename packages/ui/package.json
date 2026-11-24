@@ -9,6 +9,7 @@
     "./desktop": "./src/desktop/index.ts",
     "./desktop/confirmation": "./src/desktop/confirmation.ts",
     "./desktop/session-search": "./src/desktop/SessionSearch.tsx",
+    "./desktop/select": "./src/desktop/components/ui/select.tsx",
     "./desktop/image-gallery": "./src/desktop/ImageGallery.tsx",
     "./desktop/markdown": "./src/desktop/markdown-parser.ts",
     "./desktop/style.css": "./src/desktop/style.css",

@@ -100,6 +100,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'outputs.reveal': ['target'],
   'outputs.info': ['target'],
   'outputs.preview.open': ['target', 'bounds', 'previewId'],
+  'outputs.preview.frame.ready': ['previewId'],
   'outputs.preview.close': ['previewId'],
   'outputs.preview.bounds': ['previewId', 'bounds'],
   'input.files.fromOutput': ['id', 'target', 'context'],
@@ -1836,6 +1837,7 @@ export function registerNativeIpc(options: {
     { method: 'localPreview.open' | 'outputs.preview.open' | 'outputs.office.preview' }
   >;
   let preview: NativeOutputPreview | undefined;
+  let unwatchPreviewRoot: (() => void) | undefined;
   const openingPreviews = new Map<number, PreviewOpen>();
   const localFiles = new Map<string, LocalFilePreview>();
   const localSubmissions = new LocalPreviewSubmissions<NativeResult>();
@@ -1845,6 +1847,8 @@ export function registerNativeIpc(options: {
     localSubmissions.clear();
   };
   const closePreview = () => {
+    unwatchPreviewRoot?.();
+    unwatchPreviewRoot = undefined;
     openingPreviews.clear();
     releaseLocalFiles();
     preview?.dispose();
@@ -1861,9 +1865,20 @@ export function registerNativeIpc(options: {
       const { NativeOutputPreview } = await import('./output-preview');
       checkPreviewOpening(request);
       preview = new NativeOutputPreview();
-      input.window.once('closed', closePreview);
-      input.window.webContents.once('render-process-gone', closePreview);
-      input.window.webContents.once('did-start-navigation', closePreview);
+      const window = input.window;
+      const root = window.webContents;
+      const navigation = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
+        if (mainFrame && !inPlace) closePreview();
+      };
+      window.once('closed', closePreview);
+      root.once('render-process-gone', closePreview);
+      root.on('did-start-navigation', navigation);
+      unwatchPreviewRoot = () => {
+        window.off('closed', closePreview);
+        if (root.isDestroyed()) return;
+        root.off('render-process-gone', closePreview);
+        root.off('did-start-navigation', navigation);
+      };
     }
     checkPreviewOpening(request);
     input.check();
@@ -1927,9 +1942,12 @@ export function registerNativeIpc(options: {
         request.method === 'detach'
       ) {
         if (request.method !== 'attach') caller.assertGeneration(request.generation);
-        openingPreviews.clear();
-        preview?.close();
-        releaseLocalFiles();
+        // Recovery rereads an existing activation while a Run is taking over the conversation.
+        if (request.method !== 'select' || caller.startsSelectionActivation(request)) {
+          openingPreviews.clear();
+          preview?.close();
+          releaseLocalFiles();
+        }
       }
       let value: NativeResult;
       if (request.method === 'localPreview.check') {
@@ -2136,6 +2154,10 @@ export function registerNativeIpc(options: {
             },
           );
         }
+      } else if (request.method === 'outputs.preview.frame.ready') {
+        caller.checkOutputGeneration(request.generation);
+        if (!preview) throw Error('preview_replaced');
+        value = await preview.attachFrame(request.previewId, request.generation);
       } else if (request.method === 'outputs.preview.interaction') {
         caller.checkOutputGeneration(request.generation);
         if (!preview) throw Error('preview_replaced');

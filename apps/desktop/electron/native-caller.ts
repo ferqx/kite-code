@@ -2224,6 +2224,7 @@ export class NativeCaller {
       case 'localPreview.request.result':
       case 'localPreview.submit':
       case 'outputs.preview.open':
+      case 'outputs.preview.frame.ready':
       case 'outputs.preview.close':
       case 'outputs.preview.request.result':
       case 'outputs.preview.bounds':
@@ -4118,6 +4119,13 @@ export class NativeCaller {
   }
   checkOutputGeneration(generation: number) {
     this.assertGeneration(generation);
+  }
+  startsSelectionActivation(request: Extract<NativeRequest, { method: 'select' }>) {
+    return (
+      request.activationId === undefined ||
+      this.activation === undefined ||
+      request.activationId > this.activation.id
+    );
   }
   checkOutputScope(generation: number, target: OutputFileTarget) {
     this.assertGeneration(generation);

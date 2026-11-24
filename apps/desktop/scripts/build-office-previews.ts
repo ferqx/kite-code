@@ -48,7 +48,6 @@ export async function buildOfficePreviews(outdir: string) {
     [
       ['docx', zip],
       ['xlsx', excel],
-      ['pptx', zip],
     ].map(async ([format, runtime]) => {
       const entry = join(outdir, `${format}-preview.js`);
       const [library, view] = await Promise.all([

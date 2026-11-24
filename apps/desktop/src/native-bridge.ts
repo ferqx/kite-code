@@ -1251,6 +1251,9 @@ export interface NativeBridge {
     input: NativePreviewLayoutRequest,
   ): Promise<NativePreviewLayoutIdentity>;
   subscribePreviewPresentation?(listener: () => void): () => void;
+  subscribeOfficePreviewFrameClosed?(
+    listener: (event: import('./native-preview-layout-bridge').OfficePreviewFrameClosed) => void,
+  ): () => void;
   readonly trajectoryFiles?: NativeTrajectoryFileBridge;
   fileReferences?(files: readonly File[]): readonly { name: string; uri: string }[];
   request(input: NativeRequest): Promise<NativeResult>;

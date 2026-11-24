@@ -32,15 +32,17 @@ PDF 分页预览收到 `pdf_font_invalid` 时在内容区提示换用嵌入可�
 
 2026-11-19 在 Windows x64／Electron 44.3.0 的隔离窗口验证了两处入口、复制期间的进行中状态和失败反馈。聊天文件卡从两份同名样本中选择第二份，检查了副本的实际字节与资源管理器的选中项。输出列表使用损坏流复验失败提示和本次副本清理。当前开发窗口重启后载入新的 Main。 [客户端回归](test/isolated/native-output-files-dom.test.tsx)
 
-三个 OOXML 格式在[隔离预览 View](electron/output-preview.ts)直接读取当前清单中的已校验原文件快照。Word 用 [docx-preview](electron/docx-preview.ts)渲染，将可定位段落和表格文字对到源 XML。PPT 用 [PPTX Renderer](electron/pptx-preview.ts)保留渲染页与原部件关系，按演示顺序绑定页码，并用原幻灯片的 `cNvPr` ID 定位对象。Excel 的[虚拟网格](electron/xlsx-preview.tsx)用 ExcelJS、SSF 和 TanStack Virtual 解析数据与公式缓存，按工作表和源单元格生成选区。预览不执行公式；仅无缓存结果的公式单元格显示提示，该提示不写入文件或选区。随包 ExcelJS 保留显式的空字符串缓存。PDF 使用现有 PDF.js worker。
+三个 OOXML 格式在[沙箱 iframe](electron/output-preview.ts)直接读取当前清单中的已校验原文件快照。Word 用 [docx-preview](electron/docx-preview.ts)渲染，将可定位段落和表格文字对到源 XML。PPT 用 [PPTX Renderer](electron/pptx-preview.ts)保留渲染页与原部件关系，按演示顺序绑定页码，并用原幻灯片的 `cNvPr` ID 定位对象。Excel 的[虚拟网格](electron/xlsx-preview.tsx)用 ExcelJS、SSF 和 TanStack Virtual 解析数据与公式缓存，按工作表和源单元格生成选区。预览不执行公式；仅无缓存结果的公式单元格显示提示，该提示不写入文件或选区。随包 ExcelJS 保留显式的空字符串缓存。PDF 使用现有 PDF.js worker。
 
-文件预览先在未附加到窗口的视图中完成首次导航，再以隐藏状态附加；打开相邻文件不因此改变键盘焦点。Word、Excel 和 PPT 的渲染初始化可能在隐藏视图中等待动画帧或定时任务。[Main](electron/output-preview.ts)在等待 Office 渲染就绪期间暂停该视图的后台节流，结束时恢复。预览仍由当前窗口几何和有效原生首帧准入显示。Windows x64／Electron 44.3.0 的[真实 Office 窗口回归](test/isolated/office-readonly-host.test.ts)覆盖 Word 与 Excel 等待动画帧、隐藏初始化、恢复节流、失败重试与原件切换。[PPT 回归](test/isolated/office-preview-security.test.ts)使用悬挂标点触发同一路径。原故障附件在隔离窗口从文件卡打开后呈现五页，实测切到第 4 页、关闭重开、读取失败后重试，以及加载中关闭时晚到的结果未重新显示。同机在 125% 和 150% 缩放核实交付文件或原路径的 Word、Excel、PPT、PDF、PNG、Markdown 和文本样本取得有效首帧。
+四种预览在各自子帧隔离世界处理可信的键盘缩放和带修饰键的滚轮。Chromium 有时把 iframe 上的触控板捏合作为滚轮事件送给 Root，宿主命中当前可用子帧后只向该帧转发有界的滚动增量，隔离控制器仅接受直属父窗口发送的消息。Main 依据聚焦的子帧让出相应的原生菜单快捷键。交付和原路径工具栏用当前预览的交互回读显示比例，原路径 OOXML 回读只提供缩放状态。 [输入控制](electron/office-preview-zoom.ts) · [宿主命中](src/native-office-frame.ts) · [窗口回归](test/isolated/office-readonly-host.test.ts)
+
+办公预览在宿主视口中等待已准入子帧渲染就绪，期间保留宿主焦点和加载指示。隐藏或最小化的窗口在显示后继续等待渲染，避免消耗等待首个动画帧的超时预算。图片和普通文件的原生预览仍先在未附加到窗口的视图中完成首次导航。此前在独立视图实现中，原故障附件从文件卡打开呈现五页，并实测了翻到第 4 页、关闭重开、失败重试和忽略已关闭预览的晚到结果。
 
 [Main](electron/native-ipc.ts)按连接代次跟踪待核验的打开请求。关闭操作按原预览 ID 和连接代次撤销对应请求。切换或断开会话前先核实请求所属的连接，当前打开请求完成原文件的来源与权限核验后才取得视图。交付文件、原路径和已有 Office 副本共用这个顺序。[Windows Electron 回归](test/isolated/office-preview-security.test.ts)控制同一文件重开的回执顺序，并在核验期间投递其他连接代次的请求，检查当前预览内容和视图释放。
 
 2026-11-19 在 Windows x64／Electron 44.3.0 的普通窗口用已归档的五页 PPT 做修前修后对照。预览读取被控制为旧请求晚于新请求。基线 `6b59a1bd9` 关闭新预览并显示「预览失败」。修后新请求从加载直接进入可见的五页预览，关闭后再次打开也显示五页。原会话保持 10 次模型调用。窗口过程保存在本机 `.cache/preview-reopen-fix-51d97050/`。
 
-Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)从当前用户 Skills 目录读取“修改 Skill”选项。同名可用项带各自的 ID。显式选择通过现有 `selectedSkills` 随原修改申请提交，Main 继续复核原版本和选区。OOXML 预览在独立 sandbox 中执行构建期脚本，页面自身禁止执行脚本，`kite-preview` 清单仅提供当前原件和固定空页面。Word 禁止加载嵌入 HTML，PPT 禁止外部媒体。用户安装的 Skill 可通过受管 Shell 使用所需编辑工具。原文件的读取、选区定位和请求表单均由 Desktop 负责。内置 Skill 的资源边界见 [Office owner](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
+Word、Excel、PPT 和 PDF 的[交付文件预览](src/native-file-preview.tsx)从内容选区提交修改请求，沿用会话的 Skill 选择。Main 继续复核原版本和选区。Word、Excel、PPT 和 PDF 在沙箱 iframe 中渲染。Main 按当前 Root、子帧和文件范围准入 `kite-office-preview` 资源，并在该帧的隔离世界运行构建期渲染器。页面自身脚本由 CSP 禁止。Word 禁止加载嵌入 HTML，PPT 禁止外部媒体。用户安装的 Skill 可通过受管 Shell 使用所需编辑工具。原文件的读取、选区定位和请求表单均由 Desktop 负责。内置 Skill 的资源边界见 [Office owner](../../packages/agent/src/tools/documents/README.md#内置-office-skills)。
 
 内置 `docx`、`xlsx` 和 `pptx` 使用 OfficeCLI 技能，同一目录提供 OfficeCLI 通用项和专项项。编辑时 `officecli` 由当前受管 Shell 解析。`pdf` 沿用原内置来源。下方记录保留切换前针对原技能的 Windows 实测。 [当前 Skill 资产](../../packages/agent/src/tools/documents/README.md#内置-office-skills)
 
@@ -68,7 +70,7 @@ XLSX 预览使用固定 ExcelJS 浏览器包，将 SpreadsheetML 和扩展属性
 
 这些缓存只保留展示数据。主体、Store、连接、权限或来源失效时撤销旧展示。选择 ABA 丢弃旧在途读取，预览与保存也捕获原选择。打开、另存和继续修改仍走当前 Main 准入。`outputs.retry` IPC 调用单独核对准确 child collection、revision 与当前准入，沿用 Store 原期限、权限及 unknown 规则。相关静态及受控回归入口为[共享缓存测试](test/native-output-read-cache.test.ts)、[来源权限测试](test/native-output-sources.test.ts)和[热返回与撤销 DOM 测试](test/isolated/native-output-cache-dom.test.tsx)。
 
-从文件预览发起的「继续修改」保留 child 来源引用，加入当前父输入草稿；发送前后重新核来源，明确提交后才通过原 InputFile import／工作副本链交给父轮，不覆盖子快照或自动续作 child。输出列表允许滚动查看所有已合并文件，各来源通过原游标读取后续页。重复名称分别展示，来源标签使用子名称和原轮次，打开操作沿准确 target。
+从普通文件预览发起的「继续修改」保留 child 来源引用，加入当前父输入草稿；发送前后重新核来源，明确提交后才通过原 InputFile import／工作副本链交给父轮，不覆盖子快照或自动续作 child。输出列表允许滚动查看所有已合并文件，各来源通过原游标读取后续页。重复名称分别展示，来源标签使用子名称和原轮次，打开操作沿准确 target。
 
 2026-11-16，Windows x64／Chrome 157 通过受控宿主核对「参考」栏。首次等待时隐藏空栏，读取失败时保留原文件链接，后台恢复后加入新文件。点击链接提交准确的文件目标，切换会话后显示新会话的文件，切回已读会话从缓存恢复。各阶段均无参考栏状态提示或整理重试请求。阶段截图及记录位于本机 `.cache/desktop-reference-verification-xB2kTG/`。
 
@@ -536,6 +538,8 @@ macOS 上 Apple SQLite 只读打开缺少 WAL／SHM 的冷库时可能报 `SQLIT
 2026-11-07 本轮版本统一 apply 复核未改生产启动代码，再以当前入口和隔离HOME／Profile实启：Store编号1、5.42秒Service就绪，12个Renderer样本从加载前空页到6.36秒唯一新对话／输入区，草稿输入与清空正常、零pageerror；原SIGTERM控制退出143，准确Electron退出、所属资产路径零残留、Profile EX已释放。材料归本机 `/private/tmp/kite-desktop-dev-actual-R4U10W/` 和 `/private/tmp/kite-desktop-dev-version1-review-20261107.log`。退出观察区间出现一次sandbox_extension_issue_file stderr，原记录保留；日志无独立发出者／时戳，不认定具体诱因，不将其计为启动失败或删目录竞态证明，也未据此修改未变的原生清理。此为启动、草稿和退出的有限验证，不扩为完整Native呈现或业务验收。
 
 开发 Main 给配套 Service 的 bootstrap／连接阶段各30秒有限期限，正式 paired 默认仍各10秒，外层开发父控制保持45秒。Main 只将 Service 的闭合阶段／状态／毫秒计时打印为 `[desktop:dev] Service ...`，不透传私有 stderr；Shell 运行时、配置、Store、Runtime 和 HTTP 的开始／完成／失败可在超时时定位最后阶段。父宿主在真实准入后另报告 Electron／Service 握手耗时，原失败清理和就绪条件保持。
+
+开发 Main 的终端日志接收端关闭导致 `EPIPE` 时，原父控制连接继续负责服务重载和收尾。其他日志错误继续进入原异常处理。原生浮层的窗口关闭回调由各宿主注册，一并释放视图和 IPC 监听。 [开发 Main 日志](electron/development.ts) · [原生浮层](electron/native-modal-surface.ts)
 
 2026-11-05，Windows x64／Bun1.4.4，隔离目录内交替正反顺序对照本机 Git 的1,139个文件／约303MiB：原同步 Git Bash 冷准备10.36／10.79秒，优化后3.56／4.01秒，清单摘要相同；热准备原2.91／3.33秒、优化后2.23／2.39秒。真实开发 builder 生成的 Service 由 Node 私有管道启动，全新隔离 HOME 下 bootstrap 为5.85秒，Shell 阶段4.03秒，原10秒探针期限内完成，父 EOF 后退出0。这是本机文件准备和 Service 启动证据，不承诺所有机器的耗时，也不代证实际窗口、模型或完整发行资格。
 
@@ -3543,12 +3547,20 @@ Main现在将已解析但页面／展示owner已失效的菜单请求按原`null
 
 ### 预览工具栏与修改请求
 
-预览根据文件能力提供现有请求修改、缩放、另存为及 PPT 放映，文件名不在标签页下重复。Excel 的共用操作栏不随选区变化移动；宿主仅在已有可定位单元格时，在表格上方显示贯穿面板的紧凑名称／只读值与公式栏。拖选的实时范围只绘制在网格内，宿主保持上一已完成选区，直到指针释放或取消，避免公式栏出现时移动拖选目标。长文本按需展开；公式栏及展开区保持在原生内容视口外，沿用准确选区、定位、复制及只读权限。不增加编辑或分享能力。`office-toolbar-layout.fixture.ts` 用实际 Electron 验证三格式五种宽度及键盘入口，但不等同真实模型/完整客户端测试。
+文件预览工具栏使用公共 shadcn Button、Select，Excel 的只读公式栏复用公共 Textarea。办公文件从预览内容、缩略图或工作表等现有入口发起选区修改，工具栏提供当前格式可用的缩放、另存为及 PPT 放映。Excel 的共用操作栏不随选区变化移动；宿主仅在已有可定位单元格时，在表格上方显示贯穿面板的紧凑名称／只读值与公式栏。拖选的实时范围只绘制在网格内，宿主保持上一已完成选区，直到指针释放或取消，避免公式栏出现时移动拖选目标。长文本按需展开；公式栏及展开区保持在原生内容视口外，沿用准确选区、定位、复制及只读权限。不增加编辑或分享能力。`office-toolbar-layout.fixture.ts` 用实际 Electron 验证三格式五种宽度及键盘入口，但不等同真实模型/完整客户端测试。
 
 办公预览请求的本地 accepted 回执与轮询可能并发结束同一输入窗；仅当原预览仍有效、准确原请求已成功退役且没有后继请求时，Main 将该回执视为幂等完成。关闭或释放失败、替换预览/请求及 failed/unknown 均不转为成功；回执恢复不再次发送用户请求或调用模型。该边界由确定性并发回归验证，不作为历史真实运行回执错误已归因的证据。
 
 
-PPT 预览读取原幻灯片关系中关联的演讲者备注。可信宿主在工具栏下按当前页展示备注折叠区，原幻灯片内容保持可读。
+PPT 预览使用原幻灯片内容，工具栏下方直接显示预览视口。演讲者备注保留在原文件中。
+
+2026-11-24，Windows x64／Electron 44.3.0 的实际窗口核对了加载、失败重试、缩放浮层重叠点命中、按 Esc 收起后的焦点、选择 125% 与恢复适应，开合期间正文视口尺寸保持稳定。Excel 跨帧拖选在释放前保留已有提交范围，拖选期间按 Esc 清除选区。Word 脚注样本仍按原文偏移选择，PDF 翻页后按第 2 页打开修改输入。模拟子帧消失后，旧输入被关闭，右侧面板可重试并重新显示文件。PPT 安全回归从隐藏状态恢复渲染，验证页面脚本受限、替换后旧帧资源撤销，以及晚到的旧文件准入无法覆盖新预览。 [实窗交互](test/isolated/office-readonly-host.test.ts) · [实窗隔离](test/isolated/office-preview-security.test.ts)
+
+同日用 Windows x64 源码制品、真实 paired Service 和现有 OpenAI Responses 连接执行 `gpt-6-luna`／`medium`。通过真实模型交付四份合成原件，按摘要核对每份交付。Word 新版仅替换所选日期，Excel 新版仅改 `预算!B2`，PPT 新版仅改所选形状文字，PDF 新版仅在第 2 页加标记。持久请求均保留准确原件及选区。首轮复制和首次 PPT 修改遇到模型生成的 PowerShell 语法错误，改用短命令后交付。PDF 首轮生成新版后验收端超时关闭，下一轮交付同一已校验副本，成品与该副本的摘要一致。夹具曾因历史尚未挂载而误发一次复制和一次 Word 请求，重复轮次与前述失败均保存在隔离记录中。
+
+实窗暴露一次已接纳修改请求后原预览正文空白。IPC 观察定位到同一会话用原 activation ID 重读时触发了预览清理。修正后，PPT 和 PDF 从可信输入接纳到新版交付期间，同一 iframe 持续可见，普通聊天草稿仍在。修复版冷启动重开四份新版并切到 PDF 第 2 页，模型执行记录没有增加。独立窗口回归核对同一会话重读保留原帧，真正切换会话后旧帧资源撤销。实窗、持久模型输入与产物摘要保存在本机 `.cache/office-iframe-live-588c3c4d/`。 [Main IPC](electron/native-ipc.ts) · [窗口回归](test/isolated/office-preview-security.test.ts)
+
+Windows 隔离 Electron 窗口使用一份带备注的五页 PPT，观察加载、失败后重试、缩略图翻页、进入与退出放映、关闭及重开。宿主逐帧记录和预览画面均未出现备注区，切页与放映时视口顶部位置一致，原文件 SHA-256 一致。记录与分阶段画面位于本机 `.cache/ppt-notes-removal-1795493562502/`。
 
 Word/PPT 左侧预览导航保持界面尺寸，不随文档 100%/150%/200% 缩放。预览窗口窄于 600px 时收成居中短横线导航；悬停或键盘聚焦展开缩略图浮层，离开且失焦后收起，展开不重新挤压正文。宽窗口保留完整列表，放映隐藏导航。独立零模型几何夹具 `test/office-page-rail-layout.fixture.ts` 验证倍率、正文缩放、固定留白及 hover/focus；不计入真实模型成功率。
 
@@ -3560,7 +3572,11 @@ Word 页导航与修改范围校验分离：原页身份、分页代际、顺序
 
 浏览器与文件预览共用 `native-content-observer` 的宿主布局观察/清理和 `native-content-layout` 的 CSS→原生坐标投影、向内裁剪与窗口/root resize、zoom、隐藏/恢复监听。零尺寸只隐藏预览及请求输入窗，不结束 pending 请求；会话分栏暂时不足时，宿主保留原选中文件实例与未发送的请求。撤回原生视图后，仅当仍为同一活动预览且当前键窗口没有 WebContents 响应者时才把键盘还给宿主，不在恢复尺寸时抢焦点。关闭后迟到事件不能复活视图。侧栏约束测量和 resize 预测现复用同一纯几何模块，文件两入口通过独立带 revision 的呈现通道提交；具体同步移动、恢复与帧准入见下文“原生内容布局复用”。浏览器导航与控制租约、预览独立 session、manifest 资源和权限拒绝策略不变。
 
-PDF 文件预览沿受校验的逐页接口按需读取，在独立 `kite-preview` WebContentsView 中显示；不用浏览器 PDF 插件。Word、PPT、PDF 共用受信页栏布局：宽屏常显、窄屏细线 hover/focus 浮层，正文缩放不改变页栏尺寸。PDF 使用独立选区描述与可信备注输入，不伪装 Office 原生文字路径或直接编辑 PDF；具体提交与验证边界见下文“PDF 标注候选”。页请求串行、可取消，最多500页，PNG与文字层共同受单页8MiB、当前预览累计256MiB预算约束，失败保留页内错误而不伪造空白成功。
+PDF 文件预览沿受校验的逐页接口按需读取，在沙箱 `kite-office-preview` iframe 中绘制原页图和文字层。Word、PPT、PDF 共用受信页栏布局：宽屏常显、窄屏细线 hover/focus 浮层，正文缩放不改变页栏尺寸。PDF 使用独立选区描述与可信备注输入，不伪装 Office 原生文字路径或直接编辑 PDF；具体提交与验证边界见下文“PDF 标注候选”。页请求串行、可取消，最多500页，PNG与文字层共同受单页8MiB、当前预览累计256MiB预算约束，失败保留页内错误而不伪造空白成功。
+
+PDF 缩略图按钮按页栏可用宽度排版，页栏只在纵向溢出时滚动。Windows 实窗的 12 页样本核对宽栏常显、窄栏收起、悬停展开及聚焦，覆盖两种栏宽下的纵向滚动和翻页。实测在 600 和 599 CSS 像素之间切换时保留当前页，窄栏开合时正文位置保持稳定。 [窗口回归](test/isolated/office-readonly-host.test.ts)
+
+Word、Excel、PPT 和 PDF 的 iframe 在初始 HTML 中装入共享滚动条样式。正文、缩略图栏与工作表标签使用与桌面一致的透明轨道、细滑块和主题前景色，系统强制配色沿用 Chromium 原生绘制。PDF 的导航和请求控件以及 Excel 的工作表标签使用预览界面主题色。Windows 实窗以同一已打开子帧检查浅→深→浅切换，覆盖 Word 和 PPT 的正文与缩略图栏、Excel 的工作表纵向和标签横向滚动，以及放大后的 PDF 两个滚动方向和缩略图栏。原页、幻灯片和单元格配色及滚动位置通过对照。 [共享样式](electron/isolated-preview-chrome.ts) · [窗口回归](test/isolated/office-readonly-host.test.ts) · [PPT 窗口回归](test/isolated/office-preview-security.test.ts)
 
 消息中的本地文件链接沿原 message/run、工作区或受管理目录与保护根授权检查。非代码文件通过有界只读 handle 在右侧预览，不注册为输出产物，不附加另存或原文件写入权限；代码仍走原编辑器。本地 PDF 可以提交标注要求，Main 从原 handle 构造原路径及准确选区上下文，而不是伪造产物 target。handle 绑定当前会话与代际及文件身份，每次读取、PDF 分页前后重新校验授权与源文件，关闭标签或切会话释放；当前显示另有周期权限复核。原文件替换、内容变更或权限撤销时失效，不静默转读新文件。PDF 使用安全快照和现有 PNG 渲染器，不启用浏览器 PDF 插件。
 
@@ -3570,7 +3586,7 @@ PDF 请求输入打开时保留原页和归一化选区坐标。窗口尺寸改�
 
 选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照。每轮产物查询失败不插入提示，空列表不挂载占位；主动整理操作的实际失败仍在原位置反馈。「输出」列表读取失败时保留仍可核实的文件，并在后台重读。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。
 
-右侧文件预览不重复展示标签内的文件名。普通交付文件与 Office／PDF 使用同一宿主工具栏：沿现有主题 token 分组显示缩放和文件操作，另存为独立显示圆形按钮。原路径遵守现有权限，文件操作没有新增回调或授权。宿主控件在正文视口外，不跨 WebContentsView 覆盖文档；正文仍由原观察器测量，不加整宽分隔栏。交付图片的宿主工具栏合并显示缩放与文件操作。图片隔离视图仍依据同一套适宽、原始比例、缩放范围及高清区域请求渲染；宿主只通过现有预览控制通道传入已验证的图片缩放动作，不把另存和继续修改权限下放给图片文档。独立冷构建Electron组件布局回归覆盖DOCX/XLSX/PPTX/PDF各240、280、320、480、640像素，核边界、内容无覆盖、缩放不改变按钮几何、键盘保存及PPT放映；此合成组件证据不代替全客户端正文预览。 macOS arm64／Electron 44.3 的独立桌面窗口另以浅深色、实际 240／300／550px 和交付／只读夹具检查控件、文档视口和原生下拉触发；此轮不验证生产服务权限变更、真实模型或 Windows 发布资格。
+右侧文件预览不重复展示标签内的文件名。普通交付文件与 Office／PDF 使用同一宿主工具栏：沿现有主题 token 分组显示缩放和文件操作，另存为独立显示圆形按钮。原路径遵守现有权限。工具栏位于正文视口外。办公文件的 shadcn 缩放选项在宿主 DOM 中浮于 iframe 上方，开合保持正文尺寸与阅读位置。原生图片视图的缩放菜单继续经可信透明浮层显示。宿主按当前预览身份提交缩放，办公修改输入使用独立可信视图，几何由原观察器测量。交付图片的宿主工具栏合并显示缩放与文件操作。图片隔离视图仍依据同一套适宽、原始比例、缩放范围及高清区域请求渲染；宿主只通过现有预览控制通道传入已验证的图片缩放动作，不把另存和继续修改权限下放给图片文档。独立冷构建Electron组件布局回归覆盖DOCX/XLSX/PPTX/PDF各240、280、320、480、640像素，核边界、内容无覆盖、缩放不改变按钮几何、键盘保存及PPT放映；此合成组件证据不代替全客户端正文预览。 macOS arm64／Electron 44.3 的独立桌面窗口另以浅深色、实际 240／300／550px 和交付／只读夹具检查当时的控件、文档视口和平台下拉触发；此轮不验证生产服务权限变更、真实模型或 Windows 发布资格。
 
 ### PDF 标注候选
 

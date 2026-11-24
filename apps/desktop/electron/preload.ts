@@ -76,8 +76,16 @@ import {
 import {
   nativePreviewLayoutChannel,
   nativePreviewPresentationChannel,
+  type OfficePreviewFrameClosed,
+  officePreviewFrameClosedChannel,
   readNativePreviewLayoutReply,
 } from '../src/native-preview-layout-bridge';
+import {
+  type PreviewMenuBridge,
+  previewMenuActiveChannel,
+  previewMenuCloseChannel,
+  previewMenuOpenChannel,
+} from '../src/native-preview-menu-bridge';
 import {
   isNativeSessionSearchAction,
   isNativeSessionSearchPresentation,
@@ -135,6 +143,9 @@ ipcRenderer.on(nativeGlobalDialogActiveChannel, (_event, active: unknown) =>
 );
 ipcRenderer.on(nativeImageGalleryActiveChannel, (_event, active: unknown) =>
   setModalActive('image-gallery', active),
+);
+ipcRenderer.on(previewMenuActiveChannel, (_event, active: unknown) =>
+  setModalActive('preview-menu', active),
 );
 ipcRenderer.on(nativeSessionSearchActiveChannel, (_event, active: unknown) =>
   setModalActive('session-search', active),
@@ -212,6 +223,11 @@ const imageGallery: NativeImageGalleryBridge = {
   },
 };
 contextBridge.exposeInMainWorld('kiteNativeImageGallery', imageGallery);
+const previewMenu: PreviewMenuBridge = {
+  open: (menu) => ipcRenderer.invoke(previewMenuOpenChannel, menu),
+  close: (id) => ipcRenderer.send(previewMenuCloseChannel, id),
+};
+contextBridge.exposeInMainWorld('kitePreviewMenu', previewMenu);
 const imageDisplay: NativeImageDisplayBridge = {
   async render(request) {
     if (!isNativeImageDisplayRequest(request)) throw Error('native_image_display_invalid');
@@ -327,6 +343,12 @@ const bridge: NativeBridge &
     };
     ipcRenderer.on(nativePreviewPresentationChannel, receive);
     return () => ipcRenderer.removeListener(nativePreviewPresentationChannel, receive);
+  },
+  subscribeOfficePreviewFrameClosed(listener) {
+    const receive = (_event: Electron.IpcRendererEvent, state: OfficePreviewFrameClosed) =>
+      listener(state);
+    ipcRenderer.on(officePreviewFrameClosedChannel, receive);
+    return () => ipcRenderer.off(officePreviewFrameClosedChannel, receive);
   },
   presentBrowserLayout(input) {
     return readBrowserLayoutReply(

@@ -75,7 +75,6 @@ export function useNativeOutputFiles(input: {
     file: OutputFileSummary,
     context: OfficeEditContext,
     prompt: string,
-    skillId?: string,
   ) => Promise<OfficeRequestOutcome>;
   onRequestLocalEdit?: (
     target: Extract<SessionFileTarget, { kind: 'local-preview' }>,

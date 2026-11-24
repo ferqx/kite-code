@@ -1,4 +1,21 @@
-import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'react';
+import {
+  Button,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
+} from '@kite-ai/ui/desktop';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import type { PreviewMenuOption } from './native-preview-menu-bridge';
 import type { OfficeExcelSelectionView, OfficeSelection } from './output-files-bridge';
 import './native-office-toolbar.css';
 
@@ -8,22 +25,112 @@ const iconPaths = {
   play: 'm8 4 12 8-12 8Z',
   stop: 'M6 6h12v12H6z',
   down: 'm6 9 6 6 6-6',
-  more: 'M5 12h.1m6.9 0h.1m6.9 0h.1',
 };
+const officeZoomOptions = [
+  { value: 'fit', label: '适应' },
+  ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((zoom) => ({ value: String(zoom), label: `${zoom * 100}%` })),
+];
 
-export function PreviewIcon({ name }: { name: keyof typeof iconPaths }) {
+function PreviewIcon({ name }: { name: keyof typeof iconPaths }) {
   return (
     <svg
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={name === 'more' ? 3.5 : 1.65}
+      strokeWidth="1.65"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
       <path d={iconPaths[name]} />
     </svg>
+  );
+}
+
+export function NativePreviewZoomSelect({
+  label,
+  title = label,
+  className = 'w-[5.75rem]',
+  aboveNativeView = false,
+  value,
+  customLabel,
+  disabled,
+  options,
+  onChange,
+}: {
+  label: string;
+  title?: string;
+  className?: string;
+  aboveNativeView?: boolean;
+  value: string;
+  customLabel?: string;
+  disabled: boolean;
+  options: readonly PreviewMenuOption[];
+  onChange(value: string): void;
+}) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const request = useRef<string | undefined>(undefined);
+  const [pending, setPending] = useState(false);
+  const overlay =
+    aboveNativeView && typeof window !== 'undefined' ? window.kitePreviewMenu : undefined;
+  useLayoutEffect(() => {
+    if (disabled) setPending(false);
+    return () => {
+      if (request.current) overlay?.close(request.current);
+      request.current = undefined;
+    };
+  }, [overlay, disabled]);
+  const openOverlay = (open: boolean) => {
+    const button = trigger.current;
+    if (!overlay || !button || !open || disabled || request.current) return;
+    const id = crypto.randomUUID();
+    const { x, y, width, height } = button.getBoundingClientRect();
+    request.current = id;
+    setPending(true);
+    void overlay
+      .open({ id, anchor: { x, y, width, height }, label, value, options })
+      .catch(() => null)
+      .then((selected) => {
+        if (request.current !== id) return;
+        request.current = undefined;
+        setPending(false);
+        button.focus({ preventScroll: true });
+        if (
+          typeof selected === 'string' &&
+          options.some((option) => option.value === selected && !option.disabled)
+        )
+          onChange(selected);
+      });
+  };
+  return (
+    <Select
+      value={value}
+      disabled={disabled}
+      onValueChange={onChange}
+      open={overlay ? false : undefined}
+      onOpenChange={overlay ? openOverlay : undefined}
+    >
+      <SelectTrigger
+        ref={trigger}
+        className={`${className} rounded-full text-xs tabular-nums disabled:opacity-50`}
+        aria-label={label}
+        title={title}
+        {...(overlay ? { 'aria-expanded': pending, 'aria-controls': undefined } : {})}
+      >
+        <SelectValue>
+          {customLabel ?? options.find((option) => option.value === value)?.label}
+        </SelectValue>
+      </SelectTrigger>
+      {!overlay && (
+        <SelectContent align="start">
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      )}
+    </Select>
   );
 }
 
@@ -35,9 +142,7 @@ export function NativePreviewToolbar(props: {
   reading?: ReactNode;
   align?: 'end';
   editLabel?: string;
-  editDisabled?: boolean;
   onEdit?: () => void;
-  more?: ReactNode;
   onSave?: () => void;
 }) {
   return (
@@ -55,34 +160,31 @@ export function NativePreviewToolbar(props: {
           {props.reading}
         </fieldset>
       )}
-      {(props.onEdit || props.onSave || props.more) && (
+      {(props.onEdit || props.onSave) && (
         <fieldset className="native-preview-file-actions" aria-label="文件操作">
-          {(props.onEdit || props.more) && (
-            <div className="native-preview-capsule">
-              {props.onEdit && (
-                <button
-                  type="button"
-                  aria-label={props.editLabel}
-                  title={props.editLabel}
-                  disabled={props.editDisabled}
-                  onClick={props.onEdit}
-                >
-                  <PreviewIcon name="edit" />
-                </button>
-              )}
-              {props.more}
-            </div>
+          {props.onEdit && (
+            <Button
+              size="icon"
+              variant="outline"
+              className="rounded-full"
+              aria-label={props.editLabel}
+              title={props.editLabel}
+              onClick={props.onEdit}
+            >
+              <PreviewIcon name="edit" />
+            </Button>
           )}
           {props.onSave && (
-            <button
-              className="native-preview-save"
-              type="button"
+            <Button
+              size="icon"
+              variant="outline"
+              className="rounded-full"
               aria-label="另存为"
               title="另存为"
               onClick={props.onSave}
             >
               <PreviewIcon name="save" />
-            </button>
+            </Button>
           )}
         </fieldset>
       )}
@@ -137,13 +239,7 @@ export function NativeOfficeToolbar(props: {
   presentation: boolean;
   onZoom: (zoom: number | 'fit') => void;
   onPresentation: () => void;
-  onEdit?: () => void;
   onSave?: () => void;
-  skill?: {
-    id: string;
-    options: { id: string; name: string }[];
-    select: (id: string) => void;
-  };
 }) {
   const cell = selectedCell(props.excel);
   const [expandedSerial, setExpandedSerial] = useState<number | null>(null);
@@ -151,6 +247,7 @@ export function NativeOfficeToolbar(props: {
   // A reopened preview can reuse a serial; a retired selection must not reopen its details.
   if (expandedSerial !== null && !expanded) setExpandedSerial(null);
   const detailsId = useId();
+  const valueId = useId();
   const expandButton = useRef<HTMLButtonElement>(null);
   const dismissExpanded = (event: KeyboardEvent) => {
     if (
@@ -167,44 +264,29 @@ export function NativeOfficeToolbar(props: {
   };
   const playLabel = props.presentation ? '退出放映' : '放映';
   const description = '只读预览，排版可能与 Office 不同；复杂 3D 与动画不受支持。';
-  const skill = props.onEdit ? props.skill : undefined;
-  const selectedSkill = skill?.options.find((option) => option.id === skill.id);
   return (
     <>
       <NativePreviewToolbar
         name={props.name}
         description={description}
         title={`${props.source}。${description}`}
-        editLabel="请求修改"
-        editDisabled={!props.ready}
-        onEdit={props.onEdit}
         onSave={props.onSave}
         align={props.excel ? 'end' : undefined}
         reading={
           <>
-            <span className="native-preview-zoom">
-              <select
-                className="ui-form-control"
-                aria-label="预览缩放"
-                title="预览缩放"
-                disabled={!props.ready}
-                value={props.zoom}
-                onChange={(event) =>
-                  props.onZoom(event.target.value === 'fit' ? 'fit' : Number(event.target.value))
-                }
-              >
-                <option value="fit">适应</option>
-                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((zoom) => (
-                  <option key={zoom} value={zoom}>
-                    {zoom * 100}%
-                  </option>
-                ))}
-              </select>
-              <PreviewIcon name="down" />
-            </span>
+            <NativePreviewZoomSelect
+              label="预览缩放"
+              disabled={!props.ready}
+              value={String(props.zoom)}
+              customLabel={props.zoom === 'fit' ? undefined : `${Math.round(props.zoom * 100)}%`}
+              onChange={(value) => props.onZoom(value === 'fit' ? 'fit' : Number(value))}
+              options={officeZoomOptions}
+            />
             {props.powerpoint && (
-              <button
-                type="button"
+              <Button
+                size="icon"
+                variant={props.presentation ? 'secondary' : 'outline'}
+                className="rounded-full"
                 disabled={!props.ready}
                 aria-label={playLabel}
                 title={playLabel}
@@ -212,39 +294,16 @@ export function NativeOfficeToolbar(props: {
                 onClick={props.onPresentation}
               >
                 <PreviewIcon name={props.presentation ? 'stop' : 'play'} />
-              </button>
+              </Button>
             )}
           </>
-        }
-        more={
-          skill && (
-            <span className="native-preview-more">
-              <select
-                className="ui-form-control"
-                aria-label="修改 Skill"
-                title={selectedSkill ? `修改 Skill：${selectedSkill.name}` : '修改 Skill'}
-                disabled={!props.ready}
-                value={skill.id}
-                onChange={(event) => skill.select(event.target.value)}
-              >
-                <optgroup label="修改 Skill">
-                  <option value="">自动选择</option>
-                  {skill.options.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-              <PreviewIcon name="more" />
-            </span>
-          )
         }
       />
       {cell && (
         <fieldset className="native-excel-readonly" aria-label="单元格信息">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="xs"
             className="native-excel-range"
             aria-label="定位当前选区"
             aria-description={cell.identity}
@@ -253,13 +312,17 @@ export function NativeOfficeToolbar(props: {
             onClick={() => props.excel?.onLocate(cell.serial)}
           >
             {cell.address}
-          </button>
+          </Button>
           {cell.text !== '' && (
             <>
-              <label className="native-excel-value" title={`${cell.address} · ${cell.label}`}>
+              <label
+                className="native-excel-value"
+                htmlFor={valueId}
+                title={`${cell.address} · ${cell.label}`}
+              >
                 {cell.formula && <i aria-hidden="true">ƒx</i>}
-                <textarea
-                  className="ui-form-control"
+                <Textarea
+                  id={valueId}
                   aria-label={cell.label}
                   onKeyDown={dismissExpanded}
                   aria-description={cell.identity}
@@ -269,11 +332,12 @@ export function NativeOfficeToolbar(props: {
                   value={cell.text}
                 />
               </label>
-              <button
-                className="native-excel-expand"
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="native-excel-expand rounded-full"
                 ref={expandButton}
                 onKeyDown={dismissExpanded}
-                type="button"
                 title={expanded ? '收起单元格内容' : '展开单元格内容'}
                 aria-label={expanded ? '收起单元格内容' : '展开单元格内容'}
                 aria-expanded={expanded}
@@ -281,16 +345,16 @@ export function NativeOfficeToolbar(props: {
                 onClick={() => setExpandedSerial(expanded ? null : cell.serial)}
               >
                 <PreviewIcon name="down" />
-              </button>
+              </Button>
             </>
           )}
         </fieldset>
       )}
       {expanded && cell && (
-        <label className="native-excel-details" id={detailsId}>
+        <label className="native-excel-details" id={detailsId} htmlFor={`${detailsId}-value`}>
           <span>{cell.identity}</span>
-          <textarea
-            className="ui-form-control"
+          <Textarea
+            id={`${detailsId}-value`}
             aria-label="完整单元格内容（只读）"
             onKeyDown={dismissExpanded}
             readOnly

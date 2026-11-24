@@ -11,6 +11,7 @@ import {
   screen,
   session,
   WebContentsView,
+  type WebFrameMain,
   webContents,
 } from 'electron';
 import { filePreviewFormat } from '../src/file-preview-format';
@@ -25,8 +26,11 @@ import type { NativeImageDisplayMediaType } from '../src/native-image-display-br
 import {
   type NativePreviewLayoutRequest,
   nativePreviewPresentationChannel,
+  type OfficePreviewFrameClosed,
+  officePreviewFrameClosedChannel,
 } from '../src/native-preview-layout-bridge';
 import type {
+  LocalOfficePreviewInteraction,
   OfficeEditContext,
   OfficeInlineRequest,
   OfficeRequestOutcome,
@@ -40,11 +44,18 @@ import {
 import { createImageDisplayRegionResource } from './image-display-region-resource';
 import { renderImageDisplay } from './image-display-service';
 import { imageDisplayViewportScript } from './image-display-viewport';
+import { isolatedOfficeDocumentCss } from './isolated-preview-chrome';
 import { localPdfRegionPixels } from './local-preview-submit';
 import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
 import { waitForNativeFrame } from './native-frame-readiness';
 import { addNativeWindowView, focusNativeWindowContent } from './native-overlay-layer';
 import { getNativeRootView, type NativeRootWindow } from './native-root-window';
+import {
+  createOfficeFrameWorld,
+  leaseOfficePreviewFrame,
+  newOfficePreviewOrigin,
+  officePreviewScheme,
+} from './office-preview-frame';
 import {
   type OfficePreviewControl,
   officeInteractionControlScript,
@@ -54,6 +65,7 @@ import {
   officeInteractionWorld,
 } from './office-preview-interaction';
 import { type OfficePreviewKind, readOfficeDescription } from './office-preview-trust';
+import { officePreviewZoomInstallScript } from './office-preview-zoom';
 import { NativeOfficeRequestView } from './office-request-view';
 import { createPdfPageCache } from './pdf-page-cache';
 import { type PdfTextLayer, pdfPreviewHtml, pdfPreviewInstallScript } from './pdf-preview';
@@ -68,6 +80,10 @@ import {
 export function registerOutputPreviewScheme() {
   protocol.registerSchemesAsPrivileged([
     { scheme: 'kite-preview', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+    {
+      scheme: officePreviewScheme,
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+    },
   ]);
 }
 type Resource = {
@@ -91,7 +107,7 @@ const officePreviews = {
   powerpoint: { source: 'presentation.pptx', script: 'pptx-preview.js' },
 };
 
-/** One isolated view per root. Preview resources come only from its closed manifest. */
+/** One admitted preview per Root. Resources come only from the active manifest. */
 export class NativeOutputPreview {
   private active?: {
     id: string;
@@ -114,6 +130,12 @@ export class NativeOutputPreview {
     officeKind?: OfficePreviewKind;
     abort: AbortController;
     view?: WebContentsView;
+    frame?: ReturnType<typeof leaseOfficePreviewFrame>;
+    frameDocument?: WebFrameMain;
+    frameWorld?: ReturnType<typeof createOfficeFrameWorld>;
+    frameReady?: Promise<void>;
+    frameVisibilityChanged?: () => void;
+    frameBoot?: (world: ReturnType<typeof createOfficeFrameWorld>) => Promise<void>;
     layout?: { sync: () => void; dispose: () => void };
     directory?: string;
     pending?: boolean;
@@ -202,7 +224,7 @@ export class NativeOutputPreview {
       if (office) {
         if (BigInt(file.size) > 128n * 1024n * 1024n) throw Error('preview_office_source_budget');
         const html = Buffer.from(
-          `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><div id="office-preview" data-editable="${Boolean(active.target)}"></div></body></html>`,
+          `<!doctype html><html lang="zh-CN" class="kite-office-preview-document"><meta charset="utf-8"><style>${isolatedOfficeDocumentCss}</style><body><div id="office-preview" data-editable="${Boolean(active.target)}"></div></body></html>`,
         );
         const path = join(active.directory, 'index.html');
         await writeFile(path, html, { flag: 'wx' });
@@ -356,7 +378,8 @@ export class NativeOutputPreview {
         entry = 'index.html';
       } else throw Error('preview_format_unavailable');
       current();
-      const origin = `kite-preview://${randomUUID()}`;
+      const framed = !!office || active.pdf === true;
+      const origin = framed ? newOfficePreviewOrigin() : `kite-preview://${randomUUID()}`;
       const regions = imageSource
         ? createImageDisplayRegionResource({
             origin,
@@ -373,18 +396,13 @@ export class NativeOutputPreview {
           file,
         ]),
       );
-      const previewSession = session.fromPartition(`kite-output-${randomUUID()}`, { cache: false });
-      previewSession.setPermissionRequestHandler((_contents, _permission, callback) =>
-        callback(false),
-      );
-      previewSession.setPermissionCheckHandler(() => false);
-      previewSession.on('will-download', (event) => event.preventDefault());
-      previewSession.webRequest.onBeforeRequest((details, callback) =>
-        callback({
-          cancel: !manifest.has(details.url.split('#')[0]!) && !regions?.accepts(details.url),
-        }),
-      );
-      await previewSession.protocol.handle('kite-preview', async (request) => {
+      const accepts = (url: string) => manifest.has(url.split('#')[0]!) || !!regions?.accepts(url);
+      const rootUrl = framed ? new URL(input.window.webContents.getURL()) : undefined;
+      const frameAncestor = rootUrl?.protocol === 'file:' ? 'file:' : rootUrl?.origin;
+      const resourcePolicy = framed
+        ? `${officeCsp.replaceAll("'self'", origin)}; sandbox allow-scripts; frame-ancestors ${frameAncestor}`
+        : csp;
+      const respond = async (request: Request) => {
         const resource = manifest.get(request.url.split('#')[0]!);
         if (
           (!resource && !regions?.accepts(request.url)) ||
@@ -419,7 +437,8 @@ export class NativeOutputPreview {
           return new Response(new Uint8Array(bytes).buffer, {
             headers: {
               'Content-Type': resource.mimeType,
-              'Content-Security-Policy': office ? officeCsp : csp,
+              'Content-Security-Policy': resourcePolicy,
+              ...(framed ? { 'Access-Control-Allow-Origin': 'null' } : {}),
               'X-Content-Type-Options': 'nosniff',
               'Cache-Control': 'no-store',
             },
@@ -427,7 +446,117 @@ export class NativeOutputPreview {
         } catch {
           return new Response(null, { status: 410 });
         }
-      });
+      };
+      let verifying = false;
+      let lastVerified = 0;
+      active.checkTimer = setInterval(() => {
+        if (active.frameDocument) {
+          try {
+            if (active.frame?.resolve() !== active.frameDocument) throw Error('preview_replaced');
+          } catch {
+            if (this.active === active) this.close(active.id, 'interrupted');
+            return;
+          }
+        }
+        try {
+          current();
+          if (input.verifyAccess && !verifying && Date.now() - lastVerified > 2000) {
+            verifying = true;
+            lastVerified = Date.now();
+            void input
+              .verifyAccess()
+              .catch(() => {
+                if (this.active === active) this.close(active.id, 'access');
+              })
+              .finally(() => {
+                verifying = false;
+              });
+          }
+        } catch {
+          if (this.active === active) this.close(active.id, 'access');
+        }
+      }, 250);
+      if (framed) {
+        const frame = leaseOfficePreviewFrame(
+          input.window.webContents,
+          origin,
+          entry,
+          accepts,
+          respond,
+        );
+        active.frame = frame;
+        const syncFrame = () => {
+          if (this.active !== active || active.window.isDestroyed()) return;
+          active.frameVisibilityChanged?.();
+          const next = this.measureNativeBounds(active);
+          active.nativeBounds = next;
+          if (next) active.request?.view.bounds(next);
+          active.request?.view.visible(
+            !!next && active.window.isVisible() && !active.window.isMinimized(),
+          );
+        };
+        active.layout = {
+          sync: syncFrame,
+          dispose: watchNativeContentWindow(input.window, getNativeRootView(input.window), {
+            resize: syncFrame,
+            hide: syncFrame,
+            minimize: syncFrame,
+            show: syncFrame,
+            restore: syncFrame,
+          }),
+        };
+        active.frameBoot = async (world) => {
+          current();
+          if (office) {
+            const script = await readFile(join(app.getAppPath(), office.script), 'utf8');
+            current();
+            await world.evaluate(script);
+            const result =
+              await world.evaluate(`Promise.resolve(globalThis.kiteOfficePreviewReady).catch(error =>
+              ['preview_office_archive_invalid', 'preview_office_archive_budget'].includes(error?.message)
+                ? error.message : false)`);
+            if (
+              result === 'preview_office_archive_invalid' ||
+              result === 'preview_office_archive_budget'
+            )
+              throw Error(result);
+            if (result !== true) throw Error('preview_office_not_ready');
+            const initialControls = input.initialControls ?? [];
+            if (initialControls.length > 4) throw Error('preview_control_invalid');
+            for (const command of initialControls) {
+              current();
+              await world.evaluate(officeInteractionControlScript(command));
+            }
+          } else {
+            await world.evaluate(pdfPreviewInstallScript());
+          }
+          current();
+          await world.evaluate(`(() => {
+            for (const type of ['keydown', 'pointerdown', 'pointerup', 'click', 'dblclick',
+              'contextmenu', 'wheel', 'touchmove']) {
+              window.addEventListener(type, event => {
+                if (!globalThis.kiteOfficeInputBlocked) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+              }, { capture: true, passive: false });
+            }
+          })()`);
+          current();
+          await world.evaluate(officePreviewZoomInstallScript());
+          current();
+        };
+        return { kind: 'outputs.preview' as const, status: 'frame' as const, url: frame.url };
+      }
+      const previewSession = session.fromPartition(`kite-output-${randomUUID()}`, { cache: false });
+      previewSession.setPermissionRequestHandler((_contents, _permission, callback) =>
+        callback(false),
+      );
+      previewSession.setPermissionCheckHandler(() => false);
+      previewSession.on('will-download', (event) => event.preventDefault());
+      previewSession.webRequest.onBeforeRequest((details, callback) =>
+        callback({ cancel: !accepts(details.url) }),
+      );
+      await previewSession.protocol.handle('kite-preview', respond);
       current();
       const view = new WebContentsView({
         webPreferences: {
@@ -442,27 +571,6 @@ export class NativeOutputPreview {
       });
       view.setVisible(false);
       active.view = view;
-      let verifying = false;
-      let lastVerified = 0;
-      active.checkTimer = setInterval(() => {
-        try {
-          current();
-          if (input.verifyAccess && !verifying && Date.now() - lastVerified > 2000) {
-            verifying = true;
-            lastVerified = Date.now();
-            void input
-              .verifyAccess()
-              .catch(() => {
-                if (this.active === active) this.close(active.id);
-              })
-              .finally(() => {
-                verifying = false;
-              });
-          }
-        } catch {
-          if (this.active === active) this.close(active.id);
-        }
-      }, 250);
       // While the small request view is open, keep its original selection and page still.
       view.webContents.on('before-input-event', (event) => {
         if (active.request) event.preventDefault();
@@ -707,65 +815,6 @@ export class NativeOutputPreview {
         ]);
         current();
       }
-      if (active.pdf)
-        await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
-          { code: pdfPreviewInstallScript() },
-        ]);
-      if (office) {
-        const script = await readFile(join(app.getAppPath(), office.script), 'utf8');
-        current();
-        const contents = view.webContents;
-        // Office renderers can need animation frames and timers while this view is still hidden.
-        const resumeThrottling = contents.getBackgroundThrottling();
-        let timeout: ReturnType<typeof setTimeout> | undefined;
-        try {
-          if (resumeThrottling) contents.setBackgroundThrottling(false);
-          await Promise.race([
-            (async () => {
-              await contents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
-                { code: script },
-              ]);
-              const result = await contents.executeJavaScriptInIsolatedWorld(
-                officeInteractionWorld,
-                [
-                  {
-                    code: `Promise.resolve(globalThis.kiteOfficePreviewReady).catch(error =>
-                    ['preview_office_archive_invalid', 'preview_office_archive_budget'].includes(error?.message)
-                      ? error.message : false)`,
-                  },
-                ],
-              );
-              if (
-                result === 'preview_office_archive_invalid' ||
-                result === 'preview_office_archive_budget'
-              )
-                throw Error(result);
-              if (result !== true) throw Error('preview_office_not_ready');
-            })(),
-            new Promise<never>((_, reject) => {
-              timeout = setTimeout(() => reject(Error('preview_office_timeout')), 60000);
-            }),
-          ]);
-        } finally {
-          clearTimeout(timeout);
-          if (resumeThrottling && !contents.isDestroyed()) contents.setBackgroundThrottling(true);
-        }
-        current();
-        if (!active.target) {
-          await view.webContents.insertCSS(
-            '.kite-office-request-trigger { display:none !important }',
-          );
-          current();
-        }
-        const initialControls = input.initialControls ?? [];
-        if (initialControls.length > 4) throw Error('preview_control_invalid');
-        for (const command of initialControls) {
-          await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
-            { code: officeInteractionControlScript(command) },
-          ]);
-          current();
-        }
-      }
       current();
       contentReady = true;
       sync();
@@ -779,15 +828,93 @@ export class NativeOutputPreview {
         await rm(active.directory, { recursive: true, force: true }).catch(() => {});
     }
   }
+  private measureNativeBounds(active: NonNullable<NativeOutputPreview['active']>) {
+    const [width = 0, height = 0] = active.window.getContentSize();
+    const zoom = active.window.webContents.getZoomFactor();
+    const anchor = active.projection ?? active.presentation;
+    const projected =
+      anchor?.layout &&
+      projectNativeBrowserLayout(anchor.bounds, anchor.layout, width / zoom, height / zoom);
+    if (projected) active.projection = projected;
+    const bounds = anchor?.layout ? projected?.bounds : anchor?.bounds;
+    return bounds && nativeContentBounds(bounds, zoom, width, height);
+  }
+  async attachFrame(id: string, generation: number) {
+    const active = this.active;
+    if (!active?.frame || active.id !== id || active.generation !== generation)
+      throw Error('preview_replaced');
+    active.check?.();
+    if (!active.frameReady) {
+      const boot = active.frameBoot!;
+      const frame = active.frame.resolve();
+      active.frameReady = (async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const visibility = Promise.withResolvers<void>();
+        const deadline = Promise.withResolvers<never>();
+        const signal = active.abort.signal;
+        const abort = () => deadline.reject(signal.reason);
+        try {
+          signal.addEventListener('abort', abort, { once: true });
+          active.frameVisibilityChanged = () => {
+            if (!active.window.isVisible() || active.window.isMinimized()) {
+              clearTimeout(timer);
+              timer = undefined;
+              return;
+            }
+            visibility.resolve();
+            timer ??= setTimeout(() => deadline.reject(Error('preview_office_timeout')), 60000);
+          };
+          active.frameVisibilityChanged();
+          await Promise.race([visibility.promise, deadline.promise]);
+          signal.throwIfAborted();
+          const world = createOfficeFrameWorld(active.window.webContents, active.frame!.url, () => {
+            if (this.active === active) this.close(id, 'interrupted');
+          });
+          active.frameWorld = world;
+          await Promise.race([world.initialize().then(() => boot(world)), deadline.promise]);
+          if (this.active !== active || frame !== active.frame!.resolve())
+            throw Error('preview_replaced');
+          active.frameDocument = frame;
+          active.frameBoot = undefined;
+        } catch (error) {
+          if (this.active === active) this.close(id);
+          throw error;
+        } finally {
+          signal.removeEventListener('abort', abort);
+          active.frameVisibilityChanged = undefined;
+          clearTimeout(timer);
+        }
+      })();
+    }
+    await active.frameReady;
+    if (this.active !== active) throw Error('preview_replaced');
+    active.check?.();
+    return { kind: 'outputs.preview' as const, status: 'ready' as const };
+  }
+  private runPreview<T = unknown>(
+    active: NonNullable<NativeOutputPreview['active']>,
+    code: string,
+  ): Promise<T> {
+    if (this.active !== active) throw Error('preview_replaced');
+    if (active.frame) {
+      active.check?.();
+      const frame = active.frame.resolve();
+      if (frame !== active.frameDocument) throw Error('preview_replaced');
+      return active.frameWorld!.evaluate<T>(code);
+    }
+    if (!active.view) throw Error('preview_replaced');
+    return active.view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
+      { code },
+    ]);
+  }
   private async releaseDocumentRequest(
     active: NonNullable<NativeOutputPreview['active']>,
     serial: number,
   ) {
-    if (this.active !== active || active.abort.signal.aborted || !active.view) return;
+    if (this.active !== active || active.abort.signal.aborted) return;
     try {
-      await active.view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
-        { code: officeInteractionReleaseScript(serial) },
-      ]);
+      await this.runPreview(active, officeInteractionReleaseScript(serial));
+      if (active.frame) await this.runPreview(active, 'globalThis.kiteOfficeInputBlocked = false');
     } catch (error) {
       // Retiring the entire preview destroys its controller; no acknowledgement is needed.
       if (this.active === active && !active.abort.signal.aborted) throw error;
@@ -811,9 +938,14 @@ export class NativeOutputPreview {
           !active.abort.signal.aborted &&
           active.window.isFocused() &&
           active.nativeBounds &&
-          active.view?.getVisible()
-        )
-          focusNativeWindowContent(active.window, active.view.webContents);
+          (active.frameDocument || active.view?.getVisible())
+        ) {
+          focusNativeWindowContent(
+            active.window,
+            active.view?.webContents ?? active.window.webContents,
+          );
+          if (active.frameDocument) void this.runPreview(active, 'window.focus()').catch(() => {});
+        }
       },
     );
     return request.retiring;
@@ -827,10 +959,31 @@ export class NativeOutputPreview {
     generation: number,
     handleId: string,
     consumeRequest = true,
-  ) {
+  ): Promise<LocalOfficePreviewInteraction> {
     const active = this.active;
-    if (!active?.pdf || active.target || active.localHandleId !== handleId)
+    if (
+      !active ||
+      !(active.pdf || active.officeKind) ||
+      active.target ||
+      active.localHandleId !== handleId ||
+      active.id !== id ||
+      active.generation !== generation ||
+      active.pending
+    )
       throw Error('local_preview_readonly');
+    if (!active.pdf) {
+      const evidence = await this.runPreview(active, officeInteractionPeekScript);
+      if (this.active !== active || active.abort.signal.aborted) throw Error('preview_replaced');
+      const { zoom } = readOfficeDescription(evidence, active.officeKind, active.sourceHash);
+      return {
+        selection: null,
+        zoom,
+        handleId,
+        previewId: id,
+        generation,
+        sourceHash: active.sourceHash!,
+      };
+    }
     const { target: _target, ...result } = await this.readInteractionState(
       id,
       generation,
@@ -872,30 +1025,26 @@ export class NativeOutputPreview {
       !active ||
       active.id !== id ||
       active.generation !== generation ||
-      !active.view ||
+      (!active.frameDocument && !active.view) ||
       active.pending
     )
       throw Error('preview_replaced');
     let pdfPage: number | undefined;
     if (active.pdf) {
-      const page = await active.view.webContents.executeJavaScriptInIsolatedWorld(
-        officeInteractionWorld,
-        [{ code: 'globalThis.kitePdfPreview?.page()' }],
-      );
+      const page = await this.runPreview<number>(active, 'globalThis.kitePdfPreview?.page()');
       if (!Number.isSafeInteger(page) || page < 1 || page > (active.pdfPageCount ?? 500))
         throw Error('preview_selection_replaced');
       pdfPage = page;
       const layer = active.pdfLayers?.get(page);
       if (layer)
-        await active.view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
-          {
-            code: `globalThis.kitePdfPreview?.setLayer(${JSON.stringify(page)},${JSON.stringify(layer)})`,
-          },
-        ]);
+        await this.runPreview(
+          active,
+          `globalThis.kitePdfPreview?.setLayer(${JSON.stringify(page)},${JSON.stringify(layer)})`,
+        );
     }
-    const evidence = await active.view.webContents.executeJavaScriptInIsolatedWorld(
-      officeInteractionWorld,
-      [{ code: consumeRequest ? officeInteractionReadScript : officeInteractionPeekScript }],
+    const evidence = await this.runPreview(
+      active,
+      consumeRequest ? officeInteractionReadScript : officeInteractionPeekScript,
     );
     if (this.active !== active || active.abort.signal.aborted) throw Error('preview_replaced');
     const result = readOfficeDescription(evidence, active.officeKind, active.sourceHash);
@@ -961,6 +1110,8 @@ export class NativeOutputPreview {
         const selection = request.context.selection!;
         const label = `请求修改 · ${officeSelectionLabel(selection)}`;
         try {
+          if (active.frame)
+            await this.runPreview(active, 'globalThis.kiteOfficeInputBlocked = true');
           await view.open(active.nativeBounds ?? active.bounds, label);
           if (
             this.active !== active ||
@@ -1004,10 +1155,7 @@ export class NativeOutputPreview {
           throw Error('preview_request_invalid');
         // The page may have reflowed or lost its frozen sheet/page while input was awaited.
         // Re-read only descriptive invalidation; never replace the captured context or target.
-        const latest = await active.view.webContents.executeJavaScriptInIsolatedWorld(
-          officeInteractionWorld,
-          [{ code: officeInteractionPeekScript }],
-        );
+        const latest = await this.runPreview(active, officeInteractionPeekScript);
         if (
           this.active !== active ||
           active.abort.signal.aborted ||
@@ -1096,13 +1244,14 @@ export class NativeOutputPreview {
       !active ||
       active.id !== id ||
       active.generation !== generation ||
-      !active.view ||
+      (!active.frameDocument && !active.view) ||
       active.pending
     )
       throw Error('preview_replaced');
     active.check?.();
     if (command.kind === 'image-zoom') {
-      if (!active.target || !active.hostedImage) throw Error('preview_control_invalid');
+      if (!active.target || !active.hostedImage || !active.view)
+        throw Error('preview_control_invalid');
       validateImageZoom(command);
       const state = await active.view.webContents.executeJavaScriptInIsolatedWorld(
         officeInteractionWorld,
@@ -1140,10 +1289,7 @@ export class NativeOutputPreview {
       throw Error('preview_request_active');
     }
     if (command.kind === 'locate-selection') {
-      const evidence = await active.view.webContents.executeJavaScriptInIsolatedWorld(
-        officeInteractionWorld,
-        [{ code: officeInteractionPeekScript }],
-      );
+      const evidence = await this.runPreview(active, officeInteractionPeekScript);
       if (this.active !== active || active.abort.signal.aborted || active.pending)
         throw Error('preview_replaced');
       if (active.request) throw Error('preview_request_active');
@@ -1152,15 +1298,14 @@ export class NativeOutputPreview {
       if (current.excelSelection?.selectionSerial !== command.selectionSerial)
         throw Error('preview_selection_replaced');
     }
-    await active.view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
-      {
-        code: active.pdf
-          ? `globalThis.kitePdfPreview?.control(${JSON.stringify(command)})`
-          : !active.officeKind && command.kind === 'zoom'
-            ? `document.documentElement.style.zoom = ${JSON.stringify(command.value === 'fit' ? '1' : String(command.value))}`
-            : code,
-      },
-    ]);
+    await this.runPreview(
+      active,
+      active.pdf
+        ? `globalThis.kitePdfPreview?.control(${JSON.stringify(command)})`
+        : !active.officeKind && command.kind === 'zoom'
+          ? `document.documentElement.style.zoom = ${JSON.stringify(command.value === 'fit' ? '1' : String(command.value))}`
+          : code,
+    );
     if (this.active !== active || active.abort.signal.aborted) throw Error('preview_replaced');
     return undefined;
   }
@@ -1208,11 +1353,27 @@ export class NativeOutputPreview {
   closeOwned(id: string, generation: number) {
     if (this.active?.generation === generation) this.close(id);
   }
-  close(id?: string) {
+  close(id?: string, reason?: OfficePreviewFrameClosed['reason']) {
     const active = this.active;
     if (!active || (id && active.id !== id)) return;
     this.active = undefined;
     active.abort.abort(Error('preview_closed'));
+    active.frameWorld?.close();
+    if (active.frame) {
+      active.frame.close();
+      const root = active.window.webContents;
+      if (!root.isDestroyed()) {
+        try {
+          root.send(officePreviewFrameClosedChannel, {
+            previewId: active.id,
+            generation: active.generation,
+            reason,
+          } satisfies OfficePreviewFrameClosed);
+        } catch {
+          // Root can lose its renderer before sending the retirement notice.
+        }
+      }
+    }
     active.layout?.dispose();
     active.request?.view.close();
     if (active.checkTimer) clearInterval(active.checkTimer);

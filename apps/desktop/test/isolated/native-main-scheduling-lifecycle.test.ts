@@ -378,6 +378,7 @@ async function mainFixture(
     },
     parseDesktopDevelopment: (value: unknown) => value,
     desktopContentSecurityPolicy: () => "default-src 'none'",
+    guardDevelopmentLogPipes: () => {},
     serveDevelopmentReload: (options: { reload: typeof reload }) => {
       reload = options.reload;
       return () => {};
@@ -556,6 +557,7 @@ async function mainFixture(
     './development': exports([
       'parseDesktopDevelopment',
       'desktopContentSecurityPolicy',
+      'guardDevelopmentLogPipes',
       'serveDevelopmentReload',
     ]),
     './native-caller': exports(['NativeCaller', 'createNativeCallerGenerationOwner']),
@@ -569,6 +571,7 @@ async function mainFixture(
       'export const createNativeSessionSearchHost = () => ({ syncTheme() {}, dismiss() {}, active: () => false });',
     './native-settings-host':
       'export const createNativeSettingsHost = () => ({ syncTheme() {}, dismiss() {}, active: () => false });',
+    './native-preview-menu-host': `${prefix}export const createNativePreviewMenuHost = f.register;`,
     './native-root-window':
       prefix +
       'export const createNativeRootWindow = (...args) => new f.electron.BrowserWindow(...args); export const onNativeRootReady = (window, receive) => { window.once("ready-to-show", receive); return () => window.off("ready-to-show", receive); }; export const nativeRootWindowMenu = () => [];',

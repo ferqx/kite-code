@@ -6,6 +6,12 @@ import {
 
 export const nativePreviewLayoutChannel = 'kite:native:preview-layout';
 export const nativePreviewPresentationChannel = 'kite:native:preview-presentation';
+export const officePreviewFrameClosedChannel = 'kite:native:office-preview-frame-closed';
+export type OfficePreviewFrameClosed = {
+  previewId: string;
+  generation: number;
+  reason?: 'access' | 'interrupted';
+};
 /** Geometry only: never a file, session, network or interaction capability. */
 export type NativePreviewLayoutRequest = {
   previewId: string;

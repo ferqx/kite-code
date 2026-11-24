@@ -201,6 +201,7 @@ export async function startDesktopRenderer(root: string) {
           clientFiles: [
             './index.html',
             './global-dialog.html',
+            './preview-menu.html',
             './session-search.html',
             './settings.html',
             './src/native.tsx',

@@ -9,9 +9,9 @@ import {
   NativeFilePreviewStatus,
 } from './native-file-preview-status';
 import { NativeImageZoom } from './native-image-zoom';
+import { createOfficePreviewFrame } from './native-office-frame';
 import { NativeOfficeToolbar, NativePreviewToolbar } from './native-office-toolbar';
 import { presentNativePreview } from './native-preview-presentation';
-import { readNativeSkillCatalogue } from './native-skills';
 import type {
   OfficeEditContext,
   OfficePreviewControl,
@@ -29,7 +29,6 @@ type Props = {
     file: OutputFileSummary,
     context: OfficeEditContext,
     prompt: string,
-    skillId?: string,
   ) => Promise<OfficeRequestOutcome>;
 };
 export function NativeFilePreview(props: Props) {
@@ -40,7 +39,6 @@ function FilePreview(props: Props) {
   const viewport = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
   const preview = useRef<string | undefined>(undefined);
-  const editPending = useRef(false);
   const [fileRead, setFileRead] = useState<{ file: OutputFileSummary; retry: number }>();
   const file = fileRead?.file;
   const [status, setStatus] = useState<FilePreviewState>('loading');
@@ -50,9 +48,6 @@ function FilePreview(props: Props) {
   const [interaction, setInteraction] = useState<OfficePreviewInteraction>();
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const [presentation, setPresentation] = useState(false);
-  const [skills, setSkills] = useState<{ id: string; name: string }[]>([]);
-  const [skillId, setSkillId] = useState('');
-  const selectedSkill = useRef('');
   const onRequestEdit = useRef(props.onRequestEdit);
   onRequestEdit.current = props.onRequestEdit;
   const isPdf = !!file && (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name));
@@ -68,35 +63,6 @@ function FilePreview(props: Props) {
     !interaction?.requestOpen
       ? file
       : undefined;
-  useEffect(() => {
-    const bridge = props.bridge;
-    if (!isOffice || !bridge) return;
-    const abort = new AbortController();
-    void readNativeSkillCatalogue({
-      bridge,
-      scope: { generation: props.generation, storeId: props.target.storeId },
-      signal: abort.signal,
-      isCurrent: () => !abort.signal.aborted,
-    })
-      .then((catalogue) => {
-        if (abort.signal.aborted) return;
-        const options = catalogue.entries.flatMap(({ id, name, state }) =>
-          state === 'available' && name && id.length <= 128 ? [{ id, name }] : [],
-        );
-        const counts = new Map<string, number>();
-        for (const { name } of options) counts.set(name, (counts.get(name) ?? 0) + 1);
-        setSkills(
-          options.map(({ id, name }) => ({
-            id,
-            name: counts.get(name)! > 1 ? `${name} (${id})` : name,
-          })),
-        );
-      })
-      .catch(() => {
-        if (!abort.signal.aborted) setSkills([]);
-      });
-    return () => abort.abort();
-  }, [isOffice, props.bridge, props.generation, props.target.storeId]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -143,8 +109,25 @@ function FilePreview(props: Props) {
       };
     };
     let ready = false;
+    let frameUnavailable = false;
+    const frame = createOfficePreviewFrame(
+      viewport.current!,
+      bridge,
+      props.generation,
+      previewId,
+      file.name,
+      (reason) => {
+        if (cancelled) return;
+        frameUnavailable = true;
+        ready = false;
+        setStatus(
+          reason === 'access'
+            ? { message: '文件或访问权限已变化，请关闭后重新打开', sourceUnavailable: true }
+            : { message: '预览已中断', retry: true },
+        );
+      },
+    );
     let reading = false;
-    let requestSkill: string | undefined;
     const submitted = new Set<string>();
     const outcomes = new Map<
       string,
@@ -200,8 +183,6 @@ function FilePreview(props: Props) {
           if (result.interaction.presentation !== undefined)
             setPresentation(result.interaction.presentation);
           if (result.interaction.zoom !== undefined) setZoom(result.interaction.zoom);
-          if (result.interaction.requestOpen) requestSkill ??= selectedSkill.current;
-          else requestSkill = undefined;
           const request = result.interaction.inlineRequest;
           if (request && !submitted.has(request.requestId)) {
             submitted.add(request.requestId);
@@ -217,12 +198,11 @@ function FilePreview(props: Props) {
             )
               return;
             // Sending can outlive the local form. Keep polling so Escape closes it promptly.
-            const skill = requestSkill || undefined;
             void (async () => {
               let outcome: OfficeRequestOutcome;
               try {
                 outcome = onRequestEdit.current
-                  ? await onRequestEdit.current(file, request.context, request.prompt, skill)
+                  ? await onRequestEdit.current(file, request.context, request.prompt)
                   : { status: 'failed', message: '当前会话尚未就绪，请稍后重试。' };
               } catch {
                 outcome = {
@@ -268,12 +248,11 @@ function FilePreview(props: Props) {
         bounds: bounds(),
       })
       .then(async (result) => {
-        if (cancelled) return;
-        ready =
-          !!result &&
-          'kind' in result &&
-          result.kind === 'outputs.preview' &&
-          result.status === 'ready';
+        if (cancelled || frameUnavailable) return;
+        const prepared = !!result && 'kind' in result && result.kind === 'outputs.preview';
+        if (prepared && result.status === 'frame') await frame.load(result.url);
+        if (cancelled || frameUnavailable) return;
+        ready = prepared && (result.status === 'ready' || result.status === 'frame');
         setStatus(ready ? 'ready' : filePreviewFailure());
         if (ready) presentation.ready();
         if (ready && isOffice) {
@@ -289,11 +268,12 @@ function FilePreview(props: Props) {
         }
       })
       .catch((error) => {
-        if (!cancelled) setStatus(filePreviewFailure(error));
+        if (!cancelled && !frameUnavailable) setStatus(filePreviewFailure(error));
       });
     const timer = setInterval(() => void read(), 200);
     return () => {
       cancelled = true;
+      frame.dispose();
       clearInterval(timer);
       presentation.dispose();
       if (preview.current === previewId) preview.current = undefined;
@@ -328,47 +308,6 @@ function FilePreview(props: Props) {
         );
     }
   }
-  async function requestEdit() {
-    if (!file || !selectionReady || editPending.current) return;
-    editPending.current = true;
-    try {
-      let current: OfficePreviewInteraction | undefined;
-      const id = preview.current;
-      if (id && status === 'ready') {
-        try {
-          const result = await props.bridge?.request({
-            method: 'outputs.preview.interaction',
-            consumeRequest: false,
-            generation: props.generation,
-            previewId: id,
-          });
-          if (!alive.current || preview.current !== id) return;
-          if (
-            result &&
-            'kind' in result &&
-            result.kind === 'outputs.preview.interaction' &&
-            'interaction' in result
-          )
-            current = result.interaction;
-          else throw Error('selection_unavailable');
-        } catch {
-          if (alive.current && preview.current === id)
-            setIssue('无法读取当前选区，请重试；尚未发送修改请求。');
-          return;
-        }
-      }
-      if (!alive.current || preview.current !== id || current?.requestOpen) return;
-      if (isOffice) {
-        if (!id || !current || (!current.selection && !isPpt)) {
-          setIssue('请先选择需要修改的文字或单元格。');
-          return;
-        }
-        await control({ kind: 'request-edit' });
-      } else props.onEdit(file, current ? contextFor(current) : undefined);
-    } finally {
-      editPending.current = false;
-    }
-  }
   return (
     <section className="native-file-preview" aria-label={file ? `预览 ${file.name}` : '文件预览'}>
       {isOffice && file ? (
@@ -391,20 +330,7 @@ function FilePreview(props: Props) {
           presentation={presentation}
           onZoom={(value) => void control({ kind: 'zoom', value })}
           onPresentation={() => void control({ kind: 'presentation', value: !presentation })}
-          onEdit={typeof status === 'object' ? undefined : () => void requestEdit()}
           onSave={() => props.onSave(file)}
-          skill={
-            skills.length
-              ? {
-                  id: skillId,
-                  options: skills,
-                  select: (id) => {
-                    selectedSkill.current = id;
-                    setSkillId(id);
-                  },
-                }
-              : undefined
-          }
         />
       ) : file ? (
         <NativePreviewToolbar
@@ -424,12 +350,6 @@ function FilePreview(props: Props) {
           onSave={() => props.onSave(file)}
         />
       ) : null}
-      {isPpt && interaction?.notes?.trim() && status === 'ready' && (
-        <details className="native-office-notes" key={interaction.currentSlide}>
-          <summary>演讲者备注</summary>
-          <p>{interaction.notes}</p>
-        </details>
-      )}
       {status === 'ready' && issue && (
         <div className="native-office-status" role="status">
           {issue}
@@ -447,10 +367,4 @@ function FilePreview(props: Props) {
       </div>
     </section>
   );
-}
-function contextFor(interaction: OfficePreviewInteraction): OfficeEditContext {
-  return {
-    sourceHash: interaction.sourceHash,
-    ...(interaction.selection ? { selection: interaction.selection } : {}),
-  };
 }

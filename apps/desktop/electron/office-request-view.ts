@@ -3,6 +3,7 @@ import { session, WebContentsView } from 'electron';
 import type { OfficeRequestOutcome } from '../src/output-files-bridge';
 import { addNativeWindowView, focusNativeWindowContent } from './native-overlay-layer';
 import type { NativeRootWindow } from './native-root-window';
+import { isNativeOfficeZoomShortcut } from './office-preview-zoom';
 import {
   officeRequestHtml,
   officeRequestInstallScript,
@@ -48,6 +49,9 @@ export class NativeOfficeRequestView {
     view.setVisible(false);
     view.setBackgroundColor('#00000000');
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    view.webContents.on('before-input-event', (event, input) => {
+      if (isNativeOfficeZoomShortcut(input)) event.preventDefault();
+    });
     view.webContents.on('will-navigate', (event) => event.preventDefault());
     view.webContents.on('will-frame-navigate', (event) => event.preventDefault());
     view.webContents.on('will-redirect', (event) => event.preventDefault());

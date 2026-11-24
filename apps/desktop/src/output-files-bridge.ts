@@ -65,7 +65,6 @@ export type OfficePreviewInteraction = {
   floatingSelection?: OfficeSelection;
   inlineRequest?: OfficeInlineRequest;
   requestOpen?: boolean;
-  notes?: string;
   presentation?: boolean;
   zoom?: number | 'fit';
 };
@@ -115,6 +114,11 @@ export type NativeOutputRequest =
       bounds: { x: number; y: number; width: number; height: number };
     }
   | { method: 'localPreview.release' | 'localPreview.check'; generation: number; handleId: string }
+  | {
+      method: 'outputs.preview.frame.ready';
+      generation: number;
+      previewId: string;
+    }
   | {
       method: 'outputs.preview.request.result';
       generation: number;
@@ -219,7 +223,8 @@ export type NativeOutputResult =
   | { kind: 'outputs.info'; file: OutputFileSummary }
   | { kind: 'outputs.page'; page: OutputFilesPage }
   | { kind: 'outputs.saved'; cancelled: boolean }
-  | { kind: 'outputs.preview'; status: 'ready' | 'unavailable' };
+  | { kind: 'outputs.preview'; status: 'ready' | 'unavailable' }
+  | { kind: 'outputs.preview'; status: 'frame'; url: string };
 export function isOutputFileTarget(value: unknown): value is OutputFileTarget {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;

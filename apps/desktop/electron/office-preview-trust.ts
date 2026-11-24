@@ -85,11 +85,6 @@ export function readOfficeDescription(
       return fail();
     result[field] = Number(item[field]);
   }
-  if (item.notes !== undefined) {
-    if (kind !== 'powerpoint' || typeof item.notes !== 'string' || item.notes.length > 8192)
-      return fail();
-    result.notes = item.notes;
-  }
   if (item.presentation !== undefined) {
     if (kind !== 'powerpoint' || typeof item.presentation !== 'boolean') return fail();
     result.presentation = item.presentation;

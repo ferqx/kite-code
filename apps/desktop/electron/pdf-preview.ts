@@ -1,5 +1,6 @@
 import type { PdfSelection } from '../src/output-files-bridge';
 import { installPageRail } from './document-page-rail';
+import { isolatedOfficeDocumentCss } from './isolated-preview-chrome';
 import type { OfficeInteraction } from './office-preview-interaction';
 export type PdfTextLayer = {
   status: 'available' | 'empty' | 'unavailable';
@@ -28,7 +29,18 @@ export function pdfPreviewHtml(pages: number) {
     @media(max-width:599px){.pdf-preview-loading{left:calc(50% + 10px)}}
     @media(prefers-reduced-motion:reduce){.pdf-preview-loading{animation:none}}
     </style><svg class="pdf-preview-loading" role="status" aria-label="页面加载中" viewBox="0 0 24 24" hidden><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="44 13"/></svg>`;
-  return `<!doctype html><meta charset="utf-8"><style>:root{--office-background:#fff;--office-border:#ddd;--office-muted:#888;--office-foreground:#222}body{margin:0;background:#eee;font:13px system-ui}nav{overflow:auto;box-sizing:border-box;padding:8px 4px;background:white}nav button{position:relative;display:block;width:96px;padding:4px;margin:0 0 8px;border:1px solid transparent;border-radius:6px;background:white}nav button[aria-current=true]{border-color:#555}nav img{display:block;width:86px;height:110px;object-fit:contain}main{padding:16px;overflow:auto}.page{position:relative;width:fit-content;margin:auto}main img{display:block;max-width:none;background:white}.text{position:absolute;inset:0;overflow:hidden;line-height:1}.text span{position:absolute;white-space:pre;transform-origin:0 0;color:transparent;cursor:text}.text ::selection{background:#4094ff66}.region{position:absolute;pointer-events:none;border:1px solid #4285f4;background:#4285f422;box-sizing:border-box}.request{position:fixed;z-index:5;border:1px solid #ddd;border-radius:8px;background:white;padding:6px 10px;box-shadow:0 2px 8px #0002;font:12px system-ui}p{padding:12px}</style><nav aria-label="PDF 预览页">${Array.from({ length: pages }, (_, i) => `<button type="button" data-page="${i + 1}" aria-label="预览第 ${i + 1} 页"><img loading="lazy" src="page-${i + 1}.png" alt=""><span>${i + 1}</span></button>`).join('')}</nav><main><p role="status"></p>${loader}<div class="page"><img alt="第 1 页"><div class="text" title="选择文字；按住 Alt 拖动可选择区域" aria-label="PDF 文字与区域选择"></div><div class="region" hidden></div></div></main><button class="request" hidden type="button">请求修改</button>`;
+  return `<!doctype html><html lang="zh-CN" class="kite-office-preview-document"><meta charset="utf-8"><style>
+    ${isolatedOfficeDocumentCss}
+    body{margin:0;background:var(--office-background);color:var(--office-foreground);font:13px var(--office-font)}
+    nav{overflow-x:hidden;overflow-y:auto;box-sizing:border-box;padding:8px 4px;background:var(--office-background)}
+    nav button{position:relative;display:block;box-sizing:border-box;width:100%;max-width:96px;padding:4px;margin:0 0 8px;border:1px solid transparent;border-radius:6px;background:var(--office-card);color:inherit}
+    nav button:hover{background:var(--office-hover)}
+    nav button[aria-current=true]{border-color:var(--office-muted);background:var(--office-selected)}
+    nav img{display:block;width:100%;height:110px;object-fit:contain}
+    main{padding:16px;overflow:auto}.page{position:relative;width:fit-content;margin:auto}main img{display:block;max-width:none;background:white}.text{position:absolute;inset:0;overflow:hidden;line-height:1}.text span{position:absolute;white-space:pre;transform-origin:0 0;color:transparent;cursor:text}.text ::selection{background:#4094ff66}.region{position:absolute;pointer-events:none;border:1px solid #4285f4;background:#4285f422;box-sizing:border-box}
+    .request{position:fixed;z-index:5;border:1px solid var(--office-border);border-radius:8px;background:var(--office-card);color:var(--office-foreground);padding:6px 10px;box-shadow:0 2px 8px #0002;font:12px var(--office-font)}
+    p{padding:12px}
+    </style><nav aria-label="PDF 预览页">${Array.from({ length: pages }, (_, i) => `<button type="button" data-page="${i + 1}" aria-label="预览第 ${i + 1} 页"><img loading="lazy" src="page-${i + 1}.png" alt=""><span>${i + 1}</span></button>`).join('')}</nav><main><p role="status"></p>${loader}<div class="page"><img alt="第 1 页"><div class="text" title="选择文字；按住 Alt 拖动可选择区域" aria-label="PDF 文字与区域选择"></div><div class="region" hidden></div></div></main><button class="request" hidden type="button">请求修改</button>`;
 }
 function installPdf(railInstaller: typeof installPageRail) {
   const rail = document.querySelector('nav')!;
@@ -289,6 +301,8 @@ function installPdf(railInstaller: typeof installPageRail) {
   });
   const controller = {
     page: () => page,
+    zoomScale: () =>
+      ready && !request ? Number.parseFloat(image.style.width) / image.naturalWidth : undefined,
     setLayer(n: number, value: PdfTextLayer) {
       if (n !== page || layer) return;
       layer = value;
