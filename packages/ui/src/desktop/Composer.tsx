@@ -843,7 +843,7 @@ export function Composer(props: ComposerProps) {
                   className="composer-attachment-preview composer-image-preview-trigger"
                   aria-label={`预览图片 ${image.name}${image.previewFrame === 'first' ? '（动画首帧）' : ''}`}
                   aria-busy={(!image.url && !image.previewError && !image.error) || undefined}
-                  disabled={props.disabled || props.readOnly}
+                  disabled={props.disabled || props.readOnly || !!image.error}
                   onClick={() => setPreviewImageId(image.id)}
                 >
                   {image.url ? (
@@ -853,22 +853,18 @@ export function Composer(props: ComposerProps) {
                         <span className="image-preview-frame-label">动画首帧</span>
                       )}
                     </>
-                  ) : image.previewError || image.error ? (
-                    !onError && <span>{image.previewError ?? '预览不可用'}</span>
+                  ) : image.previewError && !image.error && !onError ? (
+                    <span>{image.previewError}</span>
                   ) : null}
                 </button>
-                <span
-                  className="composer-attachment-name"
-                  title={
-                    image.errorKind === 'system' && onError
-                      ? image.name
-                      : (image.error ?? image.name)
-                  }
-                >
-                  {image.errorKind === 'system' && onError
-                    ? image.name
-                    : (image.error ?? image.name)}
+                <span className="composer-attachment-name" title={image.name}>
+                  {image.name}
                 </span>
+                {image.error && (image.errorKind !== 'system' || !onError) && (
+                  <span className="composer-input-error" role="alert">
+                    {image.error}
+                  </span>
+                )}
                 {props.onRemoveImage && (
                   <Button
                     className="composer-attachment-remove"

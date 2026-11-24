@@ -1,5 +1,6 @@
 export const inputImageCount = 10;
 export const inputImageWindowCount = 128;
+export const pendingAttachmentBytesMissing = 'attachment_bytes_missing';
 
 /** Pending UI attachments are private drafts, never authority to submit or read a path. */
 export type NativePendingAttachment = {

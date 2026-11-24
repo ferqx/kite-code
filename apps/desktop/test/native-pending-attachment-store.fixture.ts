@@ -213,12 +213,17 @@ try {
       .run(Buffer.alloc(bytes.length, 1), draftId, 'image');
     const corrupt = data.attachments!.read(scope('corrupt'));
     assert.equal(corrupt.attachments[0]!.state, 'error');
+    assert.equal(corrupt.attachments[0]!.error, 'attachment_bytes_unavailable');
     assert.equal(corrupt.attachments[1]!.state, 'ready');
     assert.deepEqual(Buffer.concat(data.attachments!.readBytes(scope('corrupt'), 'file')), bytes);
     database
       .prepare('DELETE FROM pending_attachment_chunks WHERE draft_id=? AND attachment_id=?')
       .run(draftId, 'file');
-    assert.equal(data.attachments!.read(scope('corrupt')).attachments[1]!.state, 'error');
+    const missing = data.attachments!.read(scope('corrupt')).attachments[1]!;
+    assert.equal(missing.state, 'error');
+    assert.equal(missing.error, 'attachment_bytes_missing');
+    assert.equal(missing.name, file.name);
+    assert.equal(data.attachments!.read(scope('corrupt'), false).attachments[1]!.state, 'ready');
   } finally {
     database.close();
   }

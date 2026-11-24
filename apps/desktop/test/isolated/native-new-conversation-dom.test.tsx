@@ -7869,6 +7869,141 @@ test('default preparation waits for its current Main observation without startin
   }
 });
 
+for (const outcome of ['recovers', 'scope stays unavailable', 'other read failure'] as const)
+  test(`startup attachment read stays quiet (${outcome}) without moving or clearing the draft`, async () => {
+    const f = fixture(true, true, 'accept_edits', { withoutSelection: true });
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    const reads: {
+      resolve: (result: NativeResult) => void;
+      reject: (cause: Error) => void;
+    }[] = [];
+    let directoryUnavailable = true;
+    f.drafts.set('new-conversation', 'saved draft');
+    f.dom.window.localStorage.setItem(
+      'kite.desktop.recommended-model.store',
+      '{"modelId":"model"}',
+    );
+    bridge.request = async (input) => {
+      if (input.method === 'input.attachments.read') {
+        expect(input.sessionId).toBe('new-conversation');
+        if (input.workspaceId === 'empty')
+          return { kind: 'input.attachments', revision: 0, attachments: [] };
+        expect(input.workspaceId).toBe('w');
+        return new Promise<NativeResult>((resolve, reject) => reads.push({ resolve, reject }));
+      }
+      const result = await request(input);
+      return result && 'generation' in result
+        ? {
+            ...result,
+            pendingAttachmentDrafts: true,
+            backgroundUnavailable: directoryUnavailable,
+            callerSubmissions: [],
+          }
+        : result;
+    };
+    const flashes: string[] = [];
+    const observer = new f.dom.window.MutationObserver(() => {
+      const feedback = f.host.querySelector(
+        '.composer-input-error,.native-toast-card',
+      )?.textContent;
+      if (feedback) flashes.push(feedback);
+    });
+    observer.observe(f.host.body, { childList: true, subtree: true, characterData: true });
+    const toast = () => f.host.querySelector('.native-toast-card');
+    const send = () => f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')!;
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.until(() => !!f.host.querySelector('[aria-label="项目空间"]'));
+      expect(reads).toHaveLength(0);
+      expect(send().disabled).toBe(true);
+      expect(toast()).toBeNull();
+      directoryUnavailable = false;
+      await f.refreshFacts();
+      await f.until(
+        () =>
+          reads.length === 1 &&
+          promptValue(f.input()) === 'saved draft' &&
+          !!f.host.querySelector('[data-model-trigger][aria-label^="模型：Model"]'),
+      );
+      const editor = f.input()!;
+      await act(async () => editor.focus());
+      expect(send().disabled).toBe(true);
+      expect(toast()).toBeNull();
+
+      const retryable = outcome !== 'other read failure';
+      await act(async () =>
+        reads[0]!.reject(
+          Error(retryable ? 'attachment_scope_unavailable' : 'attachment_storage_unavailable'),
+        ),
+      );
+      expect(send().disabled).toBe(true);
+      expect(toast()).toBeNull();
+      if (retryable) await f.until(() => reads.length === 2);
+      expect(f.host.activeElement === editor).toBe(true);
+      expect(send().disabled).toBe(true);
+      expect(toast()).toBeNull();
+
+      if (outcome !== 'recovers') {
+        if (retryable)
+          await act(async () => reads[1]!.reject(Error('attachment_scope_unavailable')));
+        expect(toast()).toBeNull();
+        expect(send().disabled).toBe(true);
+        const failedReads = retryable ? 2 : 1;
+        for (const unavailable of [false, true, false]) {
+          directoryUnavailable = unavailable;
+          await f.refreshFacts();
+          expect(reads).toHaveLength(failedReads);
+          expect(toast()).toBeNull();
+          expect(send().disabled).toBe(true);
+        }
+        if (outcome === 'scope stays unavailable') {
+          await f.click('在 Ordinary directory 中新建对话');
+          expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe(
+            'Ordinary directory',
+          );
+          expect(reads).toHaveLength(failedReads);
+          await f.click('在 Workspace 中新建对话');
+        } else await f.click('新对话');
+        await f.until(() => reads.length === failedReads + 1);
+        expect(toast()).toBeNull();
+        expect(send().disabled).toBe(true);
+      }
+
+      await act(async () =>
+        reads.at(-1)!.resolve({
+          kind: 'input.attachments',
+          revision: 1,
+          attachments: [
+            {
+              kind: 'reference',
+              id: 'saved-file',
+              name: 'saved.txt',
+              uri: 'file:///saved.txt',
+              state: 'ready',
+            },
+          ],
+        }),
+      );
+      await f.until(() => !send().disabled);
+      expect(f.input() === editor).toBe(true);
+      expect(promptValue(f.input())).toBe('saved draft');
+      expect(f.host.querySelector('.composer-attachments')?.textContent).toContain('saved.txt');
+      expect(toast()).toBeNull();
+      expect(flashes).toEqual([]);
+      expect(
+        f.calls.filter((call) =>
+          ['conversation.send', 'submit', 'draft.write', 'input.attachments.write'].includes(
+            call.method,
+          ),
+        ),
+      ).toHaveLength(0);
+    } finally {
+      observer.disconnect();
+      await f.close();
+    }
+  });
+
 test('a temporary preparation association miss waits and keeps the cold draft even with no project', async () => {
   const f = fixture(true, true, 'accept_edits', { withoutSelection: true, workspaceIds: [] });
   const bridge = f.dom.window.kiteNative! as NativeBridge;

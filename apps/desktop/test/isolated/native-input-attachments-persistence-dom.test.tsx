@@ -6,6 +6,7 @@ import type {
   NativePendingAttachment,
   NativePendingAttachments,
 } from '../../src/input-images-bridge';
+import { pendingAttachmentBytesMissing } from '../../src/input-images-bridge';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
 import { useNativeInputImages } from '../../src/native-input-images';
 import { installImagePreviewWorker } from '../image-preview-worker.fixture';
@@ -489,10 +490,12 @@ test('a restored animated attachment keeps first-frame metadata and original gal
 });
 
 test.each([
-  'image',
-  'file',
-  'reference',
-] as const)('a restored invalid %s stays visible and blocks send until removed', async (kind) => {
+  ['image', 'attachment_bytes_unavailable', '附件已失效'],
+  ['file', 'attachment_bytes_unavailable', '附件已失效'],
+  ['reference', 'attachment_bytes_unavailable', '附件已失效'],
+  ['image', pendingAttachmentBytesMissing, '文件 404'],
+  ['file', pendingAttachmentBytesMissing, '文件 404'],
+] as const)('a restored %s with %s stays visible and blocks send until removed', async (kind, error, label) => {
   const main = durableHost();
   main.seed('session-a', [
     {
@@ -500,8 +503,8 @@ test.each([
       kind,
       name: 'missing.dat',
       state: 'error',
-      error: 'missing',
-      uri: 'file:///missing.dat',
+      error,
+      ...(kind === 'reference' ? { uri: 'file:///missing.dat' } : {}),
     },
   ]);
   const f = await fixture(main);
@@ -514,8 +517,11 @@ test.each([
           : '[aria-label="移除附件 missing.dat"]',
       ),
     ).not.toBeNull();
-    expect(document.querySelector('[aria-label="待发送附件"]')?.textContent).toContain(
-      '附件已失效',
+    const attachments = () => document.querySelector('[aria-label="待发送附件"]');
+    expect(attachments()?.textContent).toContain('missing.dat');
+    expect(attachments()?.textContent).toContain(label);
+    expect(attachments()?.textContent?.includes('文件 404')).toBe(
+      error === pendingAttachmentBytesMissing,
     );
     expect(sendButton().disabled).toBe(true);
     await f.send();
@@ -523,12 +529,26 @@ test.each([
     await act(async () => {
       await expect(f.attachments.flush('a')).rejects.toThrow('attachment_draft_unavailable');
     });
+    if (error === pendingAttachmentBytesMissing) {
+      await act(async () => {
+        f.attachments.addFiles('a', [reference('keep.txt')]);
+        await f.attachments.flushForQuit();
+      });
+      expect(main.read('session-a').attachments[0]?.error).toBe(pendingAttachmentBytesMissing);
+      await f.remount();
+      await act(async () => f.attachments.restore('a', 'session-a'));
+      expect(attachments()?.textContent).toContain(label);
+      expect(attachments()?.textContent).toContain('keep.txt');
+      expect(sendButton().disabled).toBe(true);
+    }
     await act(async () => {
       f.attachments.removeIds(['invalid']);
       await f.attachments.flush('a');
     });
     expect(sendButton().disabled).toBe(false);
-    expect(main.read('session-a').attachments).toEqual([]);
+    expect(main.read('session-a').attachments.map((item) => item.name)).toEqual(
+      error === pendingAttachmentBytesMissing ? ['keep.txt'] : [],
+    );
   } finally {
     await f.close();
   }

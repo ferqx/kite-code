@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type {
-  NativeAttachmentRecovery,
-  NativePendingAttachment,
-  NativePendingAttachments,
+import {
+  type NativeAttachmentRecovery,
+  type NativePendingAttachment,
+  type NativePendingAttachments,
+  pendingAttachmentBytesMissing,
 } from '../src/input-images-bridge';
 import type { NativeCallerRecord } from '../src/native-bridge';
 import type { DraftScope } from './private-data';
@@ -213,6 +214,8 @@ export function createPendingAttachments(
         'SELECT count(*) AS count,coalesce(sum(length(bytes)),0) AS size,coalesce(max(length(bytes)),0) AS maximum FROM pending_attachment_chunks WHERE draft_id=? AND attachment_id=?',
       )
       .get(saved.id, id)!;
+    if (item.size! > 0 && Number(storedSizes.count) === 0)
+      throw Error(pendingAttachmentBytesMissing);
     if (
       Number(storedSizes.size) !== item.size ||
       Number(storedSizes.maximum) > 65536 ||
@@ -252,8 +255,15 @@ export function createPendingAttachments(
         if (verifyBytes && item.state === 'ready' && item.kind !== 'reference') {
           try {
             bytes(scope, item.id);
-          } catch {
-            return { ...item, state: 'error', error: 'attachment_bytes_unavailable' };
+          } catch (cause) {
+            return {
+              ...item,
+              state: 'error',
+              error:
+                cause instanceof Error && cause.message === pendingAttachmentBytesMissing
+                  ? pendingAttachmentBytesMissing
+                  : 'attachment_bytes_unavailable',
+            };
           }
         }
         return item;

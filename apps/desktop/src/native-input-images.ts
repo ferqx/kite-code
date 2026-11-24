@@ -14,6 +14,7 @@ import {
   type NativeAttachmentRecovery,
   type NativePendingAttachment,
   type NativePendingAttachmentWrite,
+  pendingAttachmentBytesMissing,
 } from './input-images-bridge';
 import type { NativeBridge } from './native-bridge';
 import { NativeImagePreviews } from './native-image-previews';
@@ -63,6 +64,15 @@ type SavedScope = {
   queue: Promise<void>;
 };
 const attachmentSaveError = '附件草稿尚未确认保存，请重新打开会话核对后再发送。';
+const missingAttachmentLabel = '文件 404';
+const invalidAttachmentLabel = '附件已失效，请移除后重新添加。';
+
+function restoredAttachmentError(item: NativePendingAttachment) {
+  if (item.state !== 'error') return;
+  return item.error === pendingAttachmentBytesMissing
+    ? missingAttachmentLabel
+    : invalidAttachmentLabel;
+}
 
 function attachmentHostOutdated(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
@@ -147,21 +157,31 @@ export function useNativeInputImages(
     return all(key)
       .filter((item) => !('output' in item && item.output))
       .map((item) => {
+        const error =
+          item.error === missingAttachmentLabel ? pendingAttachmentBytesMissing : item.error;
         if ('url' in item)
           return {
             id: item.id,
             kind: 'image' as const,
             name: item.name,
-            ...(item.error ? { state: 'error' as const, error: item.error, size: 0 } : {}),
+            ...(error ? { state: 'error' as const, error, size: 0 } : {}),
           };
         return item.prepared
           ? {
               id: item.id,
               kind: 'file' as const,
               name: item.name,
-              ...(item.error ? { state: 'error' as const, error: item.error, size: 0 } : {}),
+              ...(error ? { state: 'error' as const, error, size: 0 } : {}),
             }
-          : { id: item.id, kind: 'reference' as const, name: item.name, uri: item.uri };
+          : {
+              id: item.id,
+              kind: 'reference' as const,
+              name: item.name,
+              uri: item.uri,
+              ...(error === pendingAttachmentBytesMissing
+                ? { state: 'error' as const, error }
+                : {}),
+            };
       });
   }
   function normalized(entries: readonly NativePendingAttachmentWrite[]) {
@@ -174,7 +194,7 @@ export function useNativeInputImages(
               kind: item.kind,
               name: item.name,
               ...(item.state === 'error'
-                ? { state: 'error', error: '附件已失效，请移除后重新添加。', size: 0 }
+                ? { state: 'error', error: invalidAttachmentLabel, size: 0 }
                 : {}),
             },
       ),
@@ -373,15 +393,30 @@ export function useNativeInputImages(
       queue: Promise.resolve(),
     };
     savedScopes.current.set(key, scope);
+    const ownsRead = () => active() && savedScopes.current.get(key) === scope;
+    const read = () =>
+      bridge!.request({
+        method: 'input.attachments.read',
+        generation: generation!,
+        sessionId,
+        workspaceId,
+      });
     scope.queue = (async () => {
       try {
-        const value = await bridge!.request({
-          method: 'input.attachments.read',
-          generation: generation!,
-          sessionId,
-          workspaceId,
-        });
-        if (!active() || savedScopes.current.get(key) !== scope) return;
+        let value: Awaited<ReturnType<typeof read>>;
+        try {
+          value = await read();
+        } catch (cause) {
+          const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+          if (!ownsRead()) return;
+          if (sessionId !== 'new-conversation' || code !== 'attachment_scope_unavailable')
+            throw cause;
+          // Main can briefly replace its directory observation while preparation stays visible.
+          await new Promise<void>((resolve) => setTimeout(resolve, 250));
+          if (!ownsRead()) return;
+          value = await read();
+        }
+        if (!ownsRead()) return;
         if (
           !value ||
           !('kind' in value) ||
@@ -395,7 +430,7 @@ export function useNativeInputImages(
         const restored: (ImageDraft | FileDraft)[] = [];
         for (const saved of value.attachments) {
           if (currentIds.has(saved.id)) continue;
-          const error = saved.state === 'error' ? '附件已失效，请移除后重新添加。' : undefined;
+          const error = restoredAttachmentError(saved);
           if (saved.kind === 'image') {
             const item: ImageDraft = {
               id: saved.id,
@@ -437,7 +472,7 @@ export function useNativeInputImages(
           persist(key);
         }
       } catch (cause) {
-        if (active() && savedScopes.current.get(key) === scope) {
+        if (ownsRead()) {
           const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
           scope.error = [
             'native_image_budget_unavailable',
@@ -573,16 +608,20 @@ export function useNativeInputImages(
       signal.removeEventListener('abort', cancel);
     }
   }
-  function blocked(key: string) {
+  function blocked(key: string, requiresRestore = false) {
     const scope = savedScopes.current.get(key);
+    if (!scope) return requiresRestore;
     return (
-      !!scope &&
-      (!scope.ready ||
-        !!scope.error ||
-        !!scope.moving ||
-        !!scope.recoveryErrors?.size ||
-        !!scope.recoveryPending?.size)
+      !scope.ready ||
+      !!scope.error ||
+      !!scope.moving ||
+      !!scope.recoveryErrors?.size ||
+      !!scope.recoveryPending?.size
     );
+  }
+  function restoreError(key: string) {
+    const scope = savedScopes.current.get(key);
+    return scope?.ready === false ? scope.error : undefined;
   }
   function error(key: string) {
     const scope = savedScopes.current.get(key);
@@ -661,7 +700,7 @@ export function useNativeInputImages(
         const additions: (ImageDraft | FileDraft)[] = [];
         for (const saved of value.attachments) {
           if (!ids.has(saved.id) || currentIds.has(saved.id) || removed.has(saved.id)) continue;
-          const itemError = saved.state === 'error' ? '附件已失效，请移除后重新添加。' : undefined;
+          const itemError = restoredAttachmentError(saved);
           if (saved.kind === 'image')
             additions.push({
               id: saved.id,
@@ -1269,6 +1308,7 @@ export function useNativeInputImages(
     flush,
     flushForQuit,
     blocked,
+    restoreError,
     error,
     accepted,
     recovery,

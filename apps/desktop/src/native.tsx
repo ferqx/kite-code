@@ -592,38 +592,11 @@ function NativeDesktopContent({
   noteStateOwner.current = nextNoteOwner;
   const newImageScope = JSON.stringify([directory?.storeId, 'new-conversation', newWorkspace]);
   const newTextScope = JSON.stringify([directory?.storeId, 'new-conversation']);
-  // Restoring a draft is read-only; no restart path invokes submit.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Keys, not changing hook closures, own hydration.
-  useEffect(() => {
-    if (!state?.pendingAttachmentDrafts) return;
-    if (preparing && directory?.storeId && newWorkspace)
-      void imageDrafts.restore(newImageScope, 'new-conversation', newWorkspace);
-    else if (state.selection && !state.selection.session.parentSessionId)
-      void imageDrafts.restore(
-        imageScope(state.selection.storeId, state.selection.session.id),
-        state.selection.session.id,
-      );
-    for (const caller of state.callerSubmissions ?? []) {
-      if (caller.phase === 'rejected' && caller.attachmentRecovery)
-        imageDrafts.recovery(
-          imageScope(caller.scope.storeId, caller.attachmentRecovery.sessionId),
-          caller.request.commandId,
-          caller.attachmentRecovery,
-        );
-    }
-    // The hook owns same-scope deduplication and connection-generation cancellation.
-  }, [
-    state?.pendingAttachmentDrafts,
-    state?.callerSubmissions,
-    state?.generation,
-    state?.selection?.storeId,
-    state?.selection?.session.id,
-    state?.selection?.session.parentSessionId,
-    preparing,
-    directory?.storeId,
-    newWorkspace,
+  const preparationAttachmentReadError = imageDrafts.restoreError(newImageScope);
+  const preparationAttachmentsBlocked = imageDrafts.blocked(
     newImageScope,
-  ]);
+    !!state?.pendingAttachmentDrafts && !!newWorkspace,
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const childTabSequence = useRef(0);
   const [childTabRequest, setChildTabRequest] = useState<
@@ -899,6 +872,42 @@ function NativeDesktopContent({
     directoryObservation?.generation === state.generation &&
     (!state.directory || state.directory.storeId === directory.storeId) &&
     !state.backgroundUnavailable;
+  // Restoring a draft is read-only; no restart path invokes submit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Keys, not changing hook closures, own hydration.
+  useEffect(() => {
+    if (!state?.pendingAttachmentDrafts) return;
+    if (preparing && directory?.storeId && newWorkspace) {
+      // A failed restore stays parked until the user opens this preparation again.
+      if (preparationReadsReady && !imageDrafts.restoreError(newImageScope))
+        void imageDrafts.restore(newImageScope, 'new-conversation', newWorkspace);
+    } else if (state.selection && !state.selection.session.parentSessionId) {
+      void imageDrafts.restore(
+        imageScope(state.selection.storeId, state.selection.session.id),
+        state.selection.session.id,
+      );
+    }
+    for (const caller of state.callerSubmissions ?? []) {
+      if (caller.phase === 'rejected' && caller.attachmentRecovery)
+        imageDrafts.recovery(
+          imageScope(caller.scope.storeId, caller.attachmentRecovery.sessionId),
+          caller.request.commandId,
+          caller.attachmentRecovery,
+        );
+    }
+    // The hook owns same-scope deduplication and connection-generation cancellation.
+  }, [
+    state?.pendingAttachmentDrafts,
+    state?.callerSubmissions,
+    state?.generation,
+    state?.selection?.storeId,
+    state?.selection?.session.id,
+    state?.selection?.session.parentSessionId,
+    preparing,
+    preparationReadsReady,
+    directory?.storeId,
+    newWorkspace,
+    newImageScope,
+  ]);
   const searchGeneration = state?.generation;
   const searchBridge = window.kiteNativeSessionSearch;
   const sessionSearch = useMemo(
@@ -3215,6 +3224,11 @@ function NativeDesktopContent({
       setNewPermission(selection.permissions.mode.mode);
     if (firstRef.current?.result?.phase !== 'unknown' && !pending) setFirstSubmission(undefined);
     const target = workspaceId ?? directory?.workspaces[0]?.id;
+    if (target && preparationReadsReady && state?.pendingAttachmentDrafts) {
+      const targetScope = JSON.stringify([directory?.storeId, 'new-conversation', target]);
+      if (imageDrafts.restoreError(targetScope))
+        void imageDrafts.restore(targetScope, 'new-conversation', target);
+    }
     // The directory already identifies the target. Branch reads qualify sending,
     // rather than temporarily clearing the project shown by the page and sidebar.
     setNewWorkspace(target ?? '');
@@ -3672,7 +3686,7 @@ function NativeDesktopContent({
         !imageDrafts.files(newImageScope).length) ||
       imageDrafts.get(newImageScope).some((image) => image.loading || image.error) ||
       imageDrafts.files(newImageScope).some((file) => file.error) ||
-      imageDrafts.blocked(newImageScope) ||
+      preparationAttachmentsBlocked ||
       firstSubmission?.result?.phase === 'unknown'
     )
       return;
@@ -7667,7 +7681,7 @@ function NativeDesktopContent({
                 files: imageDrafts.files(newImageScope),
                 imageError:
                   (noteSaveError.key === newTextScope ? noteSaveError.message : '') ||
-                  imageDrafts.error(newImageScope),
+                  (preparationAttachmentReadError ? undefined : imageDrafts.error(newImageScope)),
                 onValidateAttachments: (images, files) =>
                   imageDrafts.validateAttachments(newImageScope, images, files),
                 onFilesSelected: (files) => imageDrafts.addFiles(newImageScope, files),
@@ -7693,7 +7707,7 @@ function NativeDesktopContent({
                     !!state.callerUnavailable ||
                     !newModelReady.ready ||
                     newDraftReady !== newTextScope ||
-                    imageDrafts.blocked(newImageScope),
+                    preparationAttachmentsBlocked,
                 },
                 sessionLoading: !preparing,
                 sending,
