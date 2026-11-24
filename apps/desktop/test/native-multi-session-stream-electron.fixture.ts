@@ -1539,11 +1539,39 @@ try {
       await page.getByRole('button', { name: '显示环境信息', exact: true }).click();
     await environment.waitFor({ state: 'visible' });
     const stoppedChild = jobs.get(1)![0]!;
+    const childRow = environment.locator(`[data-execution-id="${stoppedChild.id}"]`);
+    await childRow.waitFor({ state: 'visible' });
+    assert.equal(await childRow.getByRole('button', { name: '停止', exact: true }).count(), 0);
     const childCancelStartedAt = Date.now();
-    await environment
-      .locator(`[data-execution-id="${stoppedChild.id}"]`)
-      .getByRole('button', { name: '停止', exact: true })
-      .click();
+    // Exercise the existing cancellation boundary independently of the read-only child row.
+    await page.evaluate(async (executionId) => {
+      const bridge = window.kiteNative!;
+      const readId = crypto.randomUUID();
+      try {
+        let result = await bridge.request({ method: 'background.open', generation: 1, readId });
+        let found = false;
+        for (;;) {
+          if (!result || !('kind' in result) || result.kind !== 'background.page')
+            throw Error('background_child_stop_directory_invalid');
+          const page = result as NativeBackgroundPage;
+          found ||= page.entries.some((entry) => entry.execution.id === executionId);
+          if (page.complete) {
+            if (!found) throw Error('background_child_stop_target_missing');
+            await bridge.request({
+              method: 'background.stop',
+              generation: 1,
+              observationId: page.observationId,
+              executionId,
+              commandId: crypto.randomUUID(),
+            });
+            return;
+          }
+          result = await bridge.request({ method: 'background.next', generation: 1, readId });
+        }
+      } finally {
+        await bridge.request({ method: 'background.close', generation: 1, readId });
+      }
+    }, stoppedChild.id);
     const afterChildStop = await until(
       provider,
       (value) =>

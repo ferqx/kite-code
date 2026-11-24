@@ -58,8 +58,9 @@ const report = { browser: browser.version(), cases: [] as unknown[] };
 const observation = process.argv.includes('--observe')
   ? createInterface({ input: process.stdin, output: process.stdout })
   : undefined;
+const officeOnly = process.argv.includes('--office-attachments');
 try {
-  if (process.argv.includes('--attachments')) {
+  if (officeOnly || process.argv.includes('--attachments')) {
     console.log(JSON.stringify({ artifact }));
     for (const theme of ['dark', 'light'])
       for (const width of [1280, 390]) {
@@ -73,7 +74,6 @@ try {
           document.querySelector('.kite-client')!.setAttribute('data-theme', theme);
         }, theme);
         await page.waitForFunction(() => !!window.imagePreviewFixture);
-        await page.evaluate(() => window.imagePreviewFixture.generate());
         const stages: unknown[] = [];
         const checkpoint = async (name: string) => {
           const measurements = await page.evaluate(() => {
@@ -94,6 +94,13 @@ try {
               bodyDisplay: getComputedStyle(body).display,
               rail: { ...rect(rail), scroll: rail.scrollLeft, scrollWidth: rail.scrollWidth },
               cards: [...rail.querySelectorAll<HTMLElement>('.composer-attachment')].map(rect),
+              documentIcons: [...rail.querySelectorAll<SVGElement>('[data-document-icon]')].map(
+                (icon) => ({
+                  kind: icon.dataset.documentIcon,
+                  width: icon.getBoundingClientRect().width,
+                  height: icon.getBoundingClientRect().height,
+                }),
+              ),
               pageOverflow: document.documentElement.scrollWidth > innerWidth,
               readingTop: document.querySelector('.conversation-viewport')!.scrollTop,
               timeCount: user.querySelectorAll('.message-meta').length,
@@ -118,6 +125,93 @@ try {
           if (observation) await observation.question('观察此阶段后按 Enter 继续：');
           return measurements;
         };
+        if (officeOnly) {
+          const expectedIcons = [
+            'pdf',
+            'excel',
+            'word',
+            'powerpoint',
+            'access',
+            'outlook',
+            'onenote',
+            'visio',
+            'project',
+            'publisher',
+            'loop',
+            'whiteboard',
+            'infopath',
+            'clipchamp',
+            'sharepoint',
+          ];
+          await page.evaluate(() => window.imagePreviewFixture.addOfficeDraft());
+          const draftIcons = page.locator('[aria-label="待发送附件"] [data-document-icon]');
+          await draftIcons.last().waitFor({ state: 'attached' });
+          assert.deepEqual(
+            await draftIcons.evaluateAll((icons) =>
+              icons.map((icon) => icon.getAttribute('data-document-icon')),
+            ),
+            expectedIcons,
+          );
+          await page.screenshot({
+            path: path.join(artifact, `${theme}-${width}-office-draft.png`),
+          });
+          await page.getByRole('button', { name: '移除附件 尺寸规范.xlsx' }).click();
+          assert.equal(await draftIcons.count(), expectedIcons.length - 1);
+          const showDelivery = async (phase: 'sending' | 'saved') => {
+            await page.evaluate(
+              (phase) =>
+                window.imagePreviewFixture.layout({
+                  files: 15,
+                  images: 0,
+                  text: '办公附件',
+                  phase,
+                }),
+              phase,
+            );
+            await page.waitForSelector('.message.user .message-attachments');
+            return checkpoint(`office-${phase}`);
+          };
+          const officePending = await showDelivery('sending');
+          const officeSaved = await showDelivery('saved');
+          assert.deepEqual(officeSaved.documentIcons, officePending.documentIcons);
+          assert.equal(officeSaved.body.y, officePending.body.y);
+          assert.deepEqual(
+            officeSaved.documentIcons.map((icon) => icon.kind),
+            expectedIcons,
+          );
+          assert.ok(
+            officeSaved.documentIcons.every(({ width, height }) => width === 42 && height === 42),
+          );
+          for (const file of ['库存.accdb', '项目排期.mpp', '申请表.xsn', '团队站点.sppkg']) {
+            await page.getByText(file, { exact: true }).scrollIntoViewIfNeeded();
+            await checkpoint(`office-${file.split('.').at(-1)}`);
+          }
+          await page.evaluate(() => window.imagePreviewFixture.select('b'));
+          await page.getByText('另一个会话', { exact: true }).waitFor();
+          await page.evaluate(() => window.imagePreviewFixture.select('a'));
+          const returned = await checkpoint('office-returned');
+          assert.deepEqual(returned.documentIcons, officeSaved.documentIcons);
+          await page.evaluate(() => window.imagePreviewFixture.reopen());
+          const reopened = await checkpoint('office-reopened');
+          assert.deepEqual(reopened.documentIcons, officeSaved.documentIcons);
+          await page.evaluate(() =>
+            window.imagePreviewFixture.layout({
+              files: 15,
+              images: 0,
+              text: '办公附件',
+              phase: 'failed',
+            }),
+          );
+          await page.waitForSelector('.delivery-status');
+          const failed = await checkpoint('office-failed');
+          assert.deepEqual(failed.documentIcons, officeSaved.documentIcons);
+          assert.deepEqual(errors, []);
+          report.cases.push({ theme, width, stages, errors });
+          await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+          await page.close();
+          continue;
+        }
+        await page.evaluate(() => window.imagePreviewFixture.generate());
         await page.evaluate(() =>
           window.imagePreviewFixture.layout({
             files: 1,

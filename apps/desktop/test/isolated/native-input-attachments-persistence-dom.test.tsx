@@ -403,6 +403,9 @@ test('durable mixed attachments survive unmount and restore exact session, works
     expect(document.querySelector('[aria-label="待发送附件"]')?.textContent).toContain(
       'report.pdf',
     );
+    expect(
+      document.querySelector('[aria-label="待发送附件"] [data-document-icon="pdf"]'),
+    ).not.toBeNull();
     expect(document.querySelector('[aria-label="待发送附件"]')?.textContent).not.toContain(
       'other.txt',
     );

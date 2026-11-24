@@ -240,11 +240,16 @@ test('file references show only files across reads, pagination, and scope change
     expect(document.querySelector('.native-toast-card')).toBeNull();
 
     let lateBatch = false;
+    let failedContinuation = false;
     queryPage = (request) => {
       const all = Array.from({ length: lateBatch ? 200 : 100 }, (_, i) =>
         file((lateBatch ? 199 : 99) - i, request.scope.sessionId),
       );
       const offset = Number(request.beforeKey ?? 0);
+      if (!request.runId && offset === 50 && !failedContinuation) {
+        failedContinuation = true;
+        throw Error('output_continuation_failed');
+      }
       return {
         ...page,
         scope: request.scope,
@@ -255,8 +260,36 @@ test('file references show only files across reads, pagination, and scope change
     };
     await act(async () => root.render(<Harness sessionId="pages" revision={2} />));
     await settle();
-    await click('加载更多');
+    expect(references()?.querySelectorAll('li')).toHaveLength(50);
+    expect(references()?.textContent).not.toContain('加载更多');
+    const viewport = references()!.querySelector<HTMLDivElement>(
+      '[data-slot="scroll-area-viewport"]',
+    )!;
+    Object.defineProperties(viewport, {
+      clientHeight: { value: 128 },
+      scrollHeight: { get: () => references()!.querySelectorAll('li').length * 32 },
+    });
+    await act(async () => {
+      viewport.scrollTop = 1472;
+      viewport.dispatchEvent(new dom.window.Event('scroll'));
+      viewport.dispatchEvent(new dom.window.Event('scroll'));
+    });
+    expect(failedContinuation).toBe(true);
+    expect(references()?.querySelectorAll('li')).toHaveLength(50);
+    const deadline = Date.now() + 2000;
+    while (references()?.querySelectorAll('li').length === 50 && Date.now() < deadline)
+      await settle();
     expect(references()?.querySelectorAll('li')).toHaveLength(100);
+    expect(viewport.scrollTop).toBe(1472);
+    expect(
+      calls.filter(
+        (request) =>
+          request.method === 'outputs.query' &&
+          request.scope.sessionId === 'pages' &&
+          !request.runId &&
+          request.beforeKey === '50',
+      ),
+    ).toHaveLength(2);
     await click('加载更多文件');
     expect(document.querySelector('[aria-label="本次产出"]')?.querySelectorAll('li')).toHaveLength(
       100,

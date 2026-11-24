@@ -191,7 +191,11 @@ export function environmentDisplay(
       status,
       cleanupConfirmed: false,
       canStop:
-        !restored && e.status === 'running' && !e.cancelRequested && e.cancelRequestedAt === null,
+        !e.childSessionId &&
+        !restored &&
+        e.status === 'running' &&
+        !e.cancelRequested &&
+        e.cancelRequestedAt === null,
     };
     // The verified directory is in ascending sequence order. A follow-up replaces the row in place.
     entries.set(childAgentIdentity ?? `shell:${e.id}`, {
@@ -767,6 +771,7 @@ export function useNativeEnvironment({
       busy ||
       !facts ||
       !item ||
+      item.execution.childSessionId ||
       !execution.canStop ||
       blocked.has(execution.executionId) ||
       stopBusy.current?.scope === scope

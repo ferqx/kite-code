@@ -230,13 +230,15 @@ test('environment names hide internal IDs outside diagnostics and keep unconfirm
           expect(detail?.getAttribute('aria-label')).toBe(`查看子 Agent 详情：${name}`);
         }
         if (!diagnostics || entry.childTitle === undefined) expect(f.text).not.toContain('job-1');
-        expect(f.host.querySelector('.background-execution-stop')).not.toBeNull();
+        const stop = () => f.host.querySelector<HTMLButtonElement>('.background-execution-stop');
+        expect(!!stop()).toBe(entry.childTitle === undefined);
         f.unconfirmed(true);
         await f.render();
-        expect(f.text?.includes('执行状态待核实')).toBe(diagnostics);
-        expect(
-          f.host.querySelector<HTMLButtonElement>('.background-execution-stop')?.disabled,
-        ).toBe(true);
+        expect(f.text?.includes('执行状态待核实')).toBe(
+          diagnostics && entry.childTitle !== undefined,
+        );
+        if (entry.childTitle === undefined) expect(stop()?.disabled).toBe(true);
+        else expect(stop()).toBeNull();
         expect(f.stops).toBe(0);
       } finally {
         await f.close();
@@ -255,6 +257,7 @@ test('routine environment refresh retains card text and controls while blocking 
     const stop = card.querySelector<HTMLButtonElement>('.background-execution-stop')!;
     expect(stop).not.toBeNull();
     expect(stop.disabled).toBe(false);
+    expect(card.querySelector('.background-execution-status')).toBeNull();
     held = f.holdDirectory();
     await f.render();
     expect(f.host.querySelector('[aria-label="环境信息"]')).toBe(card);
@@ -291,37 +294,35 @@ test('routine environment refresh retains card text and controls while blocking 
   }
 });
 
-test('a running child keeps its row and controls through repeated observation gaps and then shows completion', async () => {
+test('a running child keeps its read-only row through repeated observation gaps and then shows completion', async () => {
   const f = fixture({ childTitle: '项目只读检查' });
   const stopSelector = '.background-execution-stop';
   try {
     await f.render();
     const card = f.host.querySelector('[aria-label="环境信息"]')!;
     const row = card.querySelector('[data-execution-id="job-1"]')!;
-    const stop = row.querySelector<HTMLButtonElement>(stopSelector)!;
     const detail = row.querySelector('.background-execution-detail')!;
     const text = card.textContent;
+    expect(row.querySelector(stopSelector)).toBeNull();
+    await act(async () => f.click());
+    expect(f.stops).toBe(0);
     for (let index = 0; index < 3; index++) {
       f.unconfirmed(true);
       await f.render();
-      expect(row.querySelector(stopSelector)).toBe(stop);
-      expect(stop.disabled).toBe(true);
+      expect(row.querySelector(stopSelector)).toBeNull();
       expect(card.textContent).toBe(text);
 
       f.unavailable(true);
       await f.render();
-      expect(row.querySelector(stopSelector)).toBe(stop);
-      expect(stop.disabled).toBe(true);
+      expect(row.querySelector(stopSelector)).toBeNull();
       expect(card.textContent).toBe(text);
-      await act(async () => stop.click());
 
       f.unavailable(false);
       f.unconfirmed(false);
       await f.render();
       expect(card.querySelector('[data-execution-id="job-1"]')).toBe(row);
       expect(row.querySelector('.background-execution-detail')).toBe(detail);
-      expect(row.querySelector(stopSelector)).toBe(stop);
-      expect(stop.disabled).toBe(false);
+      expect(row.querySelector(stopSelector)).toBeNull();
       expect(card.textContent).toBe(text);
     }
     f.complete();

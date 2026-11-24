@@ -184,8 +184,8 @@ test('a cold environment distinguishes loading and failed reads from a confirmed
     expect(headings()).toEqual([]);
     expect(stops(f.host)).toHaveLength(0);
     await f.resolve();
-    expect(stops(f.host)).toHaveLength(2);
-    expect(headings()).toEqual(['Shell 列表', '子智能体']);
+    expect(stops(f.host)).toHaveLength(1);
+    expect(headings()).toEqual(['后台 Shell', '子智能体']);
     await f.render({ generation: 2, nextRead: 'error' });
     expect(card().getAttribute('data-stale')).toBe('true');
     expect(headings()).toEqual([]);
@@ -203,7 +203,7 @@ test('pause retains its display with one parent commit and resume cannot use the
   const f = await fixture();
   try {
     await f.render();
-    expect(stops(f.host)).toHaveLength(2);
+    expect(stops(f.host)).toHaveLength(1);
     expect(stops(f.host).every((button) => !button.disabled)).toBe(true);
     const previous = f.commits.length;
     const oldText = f.host.textContent;
@@ -309,7 +309,7 @@ test('errors and unavailable observations remain non-authoritative through pause
   try {
     await f.render();
     const buttons = stops(f.host);
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(1);
     await f.render({ revision: 1, nextRead: 'error' });
     expect(stops(f.host).every((button, index) => button === buttons[index])).toBe(true);
     expect(buttons.every((button) => button.isConnected && button.disabled)).toBe(true);

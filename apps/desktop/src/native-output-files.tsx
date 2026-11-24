@@ -623,8 +623,9 @@ function OutputFileReader(input: OutputReaderInput) {
   const [read, setRead] = useState<{ cursor: string }>();
   const nextCursor = page?.nextCursor;
   const more = useCallback(() => {
-    if (nextCursor) setRead({ cursor: nextCursor });
-  }, [nextCursor]);
+    if (page?.nextCursor) setRead({ cursor: page.nextCursor });
+  }, [page]);
+  const scrollPaging = input.onState !== undefined;
   const [retryRevision, setRetryRevision] = useState(0);
   const readFailures = useRef(0);
   const lastRevision = useRef<string | undefined>(undefined);
@@ -651,11 +652,15 @@ function OutputFileReader(input: OutputReaderInput) {
       return;
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let retryContinuation = false;
     const current = () =>
       !cancelled && currentRead.current === readKey && input.cache.valid(input.rootKey);
     const revision = `${windowKey}/${input.fileRevision}/${retryRevision}`;
     const continuation = lastRevision.current === revision;
-    const readCursor = continuation ? read?.cursor : undefined;
+    const readCursor =
+      continuation && (!scrollPaging || read?.cursor === pageRef.current?.nextCursor)
+        ? read?.cursor
+        : undefined;
     lastRevision.current = revision;
     if (!readCursor && retryRevision === 0) {
       const cached = input.cache.get<Versioned<FilePage>>(cacheKey);
@@ -691,6 +696,7 @@ function OutputFileReader(input: OutputReaderInput) {
         )
           throw Error('output_scope_changed');
         const { items, nextCursor, revision } = result.page;
+        if (beforeKey && beforeKey === nextCursor) throw Error('output_cursor_repeated');
         return { items, nextCursor, revision } satisfies FilePage;
       });
     void query(readCursor)
@@ -749,18 +755,24 @@ function OutputFileReader(input: OutputReaderInput) {
       })
       .catch((error: unknown) => {
         if (!current()) return;
-        if (outputReadRevoked(error)) {
+        const revoked = outputReadRevoked(error);
+        if (revoked) {
           input.cache.delete(cacheKey);
           setPage(undefined);
         }
         reportChecked.current?.(windowKey);
+        const retryCursor = scrollPaging && !revoked ? readCursor : undefined;
+        retryContinuation = retryCursor !== undefined;
         retry = setTimeout(
-          () => setRetryRevision((value) => value + 1),
+          () => {
+            if (retryCursor) setRead({ cursor: retryCursor });
+            else setRetryRevision((value) => value + 1);
+          },
           500 * 2 ** Math.min(readFailures.current++, 4),
         );
       })
       .finally(() => {
-        if (current()) setLoading(false);
+        if (current() && !retryContinuation) setLoading(false);
       });
     return () => {
       clearTimeout(retry);
@@ -784,6 +796,7 @@ function OutputFileReader(input: OutputReaderInput) {
     read,
     setPage,
     scopeValid,
+    scrollPaging,
   ]);
   const onState = useRef(input.onState);
   onState.current = input.onState;
@@ -900,7 +913,7 @@ function OutputReferenceReaders(
         onOpen={input.actions.onOpen}
         onReveal={input.actions.onReveal}
         items={scopeValid ? items : []}
-        onMore={next?.state.more}
+        onMore={scopeValid && input.available !== false ? next?.state.more : undefined}
         moreDisabled={active.length < unique.length || active.some(({ state }) => state.loading)}
       />
     </>

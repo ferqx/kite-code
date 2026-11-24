@@ -152,9 +152,26 @@ test('file descriptions and icons use the same format, with MIME fallback', asyn
   mount();
   const cases = [
     ['a.xlsx', 'application/msword', 'spreadsheet', 'Excel 工作簿'],
+    ['workbook.XLSM', 'application/octet-stream', 'spreadsheet', 'Excel 工作簿'],
+    ['data.csv', 'application/vnd.ms-excel', 'spreadsheet', 'CSV 表格'],
     ['b.PPTX', 'application/octet-stream', 'presentation', 'PPT 演示文稿'],
     ['c.ppt', 'application/octet-stream', 'presentation', 'PPT 演示文稿'],
     ['d.pdf', 'application/octet-stream', 'pdf', 'PDF 文档'],
+    ['no-word-extension', 'application/msword', 'document', 'Word 文档'],
+    ['inventory.accdb', 'application/octet-stream', 'document', 'Access 数据库'],
+    ['no-outlook-extension', ' APPLICATION/VND.MS-OUTLOOK ', 'document', 'Outlook 文件'],
+    ['notes.ONEPKG', 'application/octet-stream', 'document', 'OneNote 笔记'],
+    ['diagram.vsdx', 'application/octet-stream', 'document', 'Visio 文件'],
+    ['plan.mpp', 'application/octet-stream', 'document', 'Project 计划'],
+    ['brochure.pub', 'application/octet-stream', 'document', 'Publisher 出版物'],
+    ['workspace.fluid', 'application/octet-stream', 'document', 'Loop 组件'],
+    ['board.whiteboard', 'application/octet-stream', 'document', 'Microsoft Whiteboard 白板'],
+    ['form.xsn', 'application/octet-stream', 'document', 'InfoPath 表单'],
+    ['demo.clipchamp', 'application/octet-stream', 'document', 'Clipchamp 项目'],
+    ['app.sppkg', 'application/zip', 'archive', 'SharePoint 解决方案包'],
+    ['id_ed25519.pub', 'application/octet-stream', 'unknown', '文件'],
+    ['graph.dot', 'application/octet-stream', 'unknown', '文件'],
+    ['messages.pot', 'text/plain', 'text', '文本文件'],
     ['e.txt', 'application/octet-stream', 'text', '文本文件'],
     ['logo.PNG', 'application/octet-stream', 'image', 'PNG 图片'],
     ['diagram.svg', 'application/octet-stream', 'image', 'SVG 矢量图'],
@@ -169,16 +186,48 @@ test('file descriptions and icons use the same format, with MIME fallback', asyn
     ['unrecognized', 'application/octet-stream', 'unknown', '文件'],
   ] as const;
   const files = cases.map(([name, mediaType]) => ({ ...file(name), mediaType }));
-  await act(() => root!.render(<OutputFiles items={files} onOpen={() => {}} onSave={() => {}} />));
+  await act(() =>
+    root!.render(
+      <>
+        <OutputFiles items={files} onOpen={() => {}} onSave={() => {}} />
+        <OutputReferences items={files} onOpen={() => {}} />
+      </>,
+    ),
+  );
   expect(
     [...document.querySelectorAll('.output-file-card')].map((row) => [
       row.querySelector('.output-file-icon')?.getAttribute('data-file-kind'),
       row.querySelector('.output-file-type')?.textContent,
     ]),
   ).toEqual(cases.map(([, , kind, label]) => [kind, label]));
+  for (const selector of ['.output-file-icon', '.output-reference-link > svg:first-child']) {
+    expect(
+      [...document.querySelectorAll(`${selector}[data-document-icon]`)].map((icon) =>
+        icon.getAttribute('data-document-icon'),
+      ),
+    ).toEqual([
+      'excel',
+      'excel',
+      'powerpoint',
+      'powerpoint',
+      'pdf',
+      'word',
+      'access',
+      'outlook',
+      'onenote',
+      'visio',
+      'project',
+      'publisher',
+      'loop',
+      'whiteboard',
+      'infopath',
+      'clipchamp',
+      'sharepoint',
+    ]);
+  }
   expect(document.querySelectorAll('.output-file-open')).toHaveLength(files.length);
 });
-test('empty file lists stay hidden and references expose the loaded files and their next page', async () => {
+test('empty file lists stay hidden and scrolling toward the end requests one next page', async () => {
   mount();
   const callbacks = { onOpen() {}, onSave() {} };
   let pages = 0;
@@ -202,11 +251,21 @@ test('empty file lists stay hidden and references expose the loaded files and th
   );
   expect(document.querySelectorAll('.output-reference-link')).toHaveLength(6);
   expect(document.querySelector('.output-references > h3')?.textContent).toBe('输出');
-  await act(() =>
-    [...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === '加载更多')!
-      .click(),
-  );
+  expect(document.querySelector('.output-references')?.textContent).not.toContain('加载更多');
+  const viewport = document.querySelector<HTMLDivElement>(
+    '.output-references [data-slot="scroll-area-viewport"]',
+  )!;
+  Object.defineProperties(viewport, {
+    clientHeight: { value: 128 },
+    scrollHeight: { value: 320 },
+  });
+  await act(() => viewport.dispatchEvent(new dom.window.Event('scroll')));
+  expect(pages).toBe(0);
+  await act(() => {
+    viewport.scrollTop = 160;
+    viewport.dispatchEvent(new dom.window.Event('scroll'));
+    viewport.dispatchEvent(new dom.window.Event('scroll'));
+  });
   expect(pages).toBe(1);
   expect(document.querySelector('[role="status"], [role="alert"]')).toBeNull();
 });
@@ -270,9 +329,10 @@ test('environment shows count-free headings and file links for populated groups'
   expect(references).not.toBeNull();
   expect(headings()).toEqual(['输出']);
   await render(['shell']);
-  expect(headings()).toEqual(['Shell 列表', '输出']);
+  expect(headings()).toEqual(['后台 Shell', '输出']);
   await render(['shell', 'shell', 'subagent', 'subagent']);
-  expect(headings()).toEqual(['Shell 列表', '子智能体', '输出']);
+  expect(headings()).toEqual(['后台 Shell', '子智能体', '输出']);
+  expect(environment.querySelector('h3 svg')).toBeNull();
   await render(['subagent']);
   expect(headings()).toEqual(['子智能体', '输出']);
   expect(environment.querySelector('[aria-label="输出"]')).toBe(references);
@@ -323,7 +383,6 @@ test('reference links distinguish document formats and unknown fallback from hea
     const link = document.querySelector('.output-reference-link')!;
     const icon = link.querySelector('svg')!;
     expect(icon.getAttribute('aria-hidden')).toBe('true');
-    expect(icon.innerHTML).not.toBe(document.querySelector('.output-references h3 svg')!.innerHTML);
     expect(link.textContent).toBe(name);
     icons.push(icon.innerHTML);
   }

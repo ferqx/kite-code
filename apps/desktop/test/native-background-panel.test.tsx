@@ -440,7 +440,7 @@ test('retained environment card separates Shell and named children, exact stop, 
       // The shared fixture mounts the real hook and retained card; no effect is created by navigation.
       await render(port);
       const region = host.querySelector('[aria-label="环境信息"]')!;
-      expect(region.querySelector('[aria-label="Shell 列表"] h3')?.textContent).toBe('Shell 列表');
+      expect(region.querySelector('[aria-label="后台 Shell"] h3')?.textContent).toBe('后台 Shell');
       const startingShell = region.querySelector(`[data-execution-id="${shell.execution.id}"]`);
       expect(!!startingShell).toBe(true);
       expect(startingShell?.querySelector('.background-execution-stop')).toBeNull();
@@ -508,17 +508,18 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect(
         region.querySelector(`[data-execution-id="${shell.execution.id}"]`) === startingShell,
       ).toBe(true);
-      expect(region.querySelector('[aria-label="Shell 列表"] h3')?.textContent).toBe('Shell 列表');
+      expect(region.querySelector('[aria-label="后台 Shell"] h3')?.textContent).toBe('后台 Shell');
       expect(region.querySelector('header')).toBeNull();
       const children = region.querySelector('[aria-label="子智能体"]')!;
       expect(children.textContent).toContain('运行中');
-      expect(children.querySelector('.background-execution-stop')).not.toBeNull();
-      expect(region.querySelectorAll('.background-execution-stop')).toHaveLength(3);
+      expect(children.querySelector('.background-execution-stop')).toBeNull();
+      expect(region.querySelectorAll('.background-execution-stop')).toHaveLength(2);
       const shellRow = region.querySelector(`[data-execution-id="${shell.execution.id}"]`)!;
       expect(shellRow).not.toBeNull();
       expect(shellRow.querySelector('.background-execution-name')?.textContent).toBe(
         continuedCommand,
       );
+      expect(shellRow.querySelector('.background-execution-status')).toBeNull();
       expect(region.textContent).not.toContain(shell.execution.id);
       expect(region.textContent).toContain('原子智能体');
       expect(region.querySelector('[data-execution-id="job-2"] [data-child-icon]')).not.toBeNull();
@@ -539,7 +540,7 @@ test('retained environment card separates Shell and named children, exact stop, 
         '原父会话草稿',
       );
       const activeShellRow = () =>
-        host.querySelector(`[aria-label="Shell 列表"] [data-execution-id="${shell.execution.id}"]`);
+        host.querySelector(`[aria-label="后台 Shell"] [data-execution-id="${shell.execution.id}"]`);
       const beforeStop = activeShellRow()!;
       await act(async () => {
         const stop = beforeStop.querySelector<HTMLButtonElement>('[aria-label="停止"]')!;
@@ -554,7 +555,7 @@ test('retained environment card separates Shell and named children, exact stop, 
       revision++;
       await render(port);
       expect(activeShellRow()).toBeNull();
-      expect(host.querySelector('[aria-label="Shell 列表"]')).toBeNull();
+      expect(host.querySelector('[aria-label="后台 Shell"]')).toBeNull();
       expect(host.querySelector('[aria-label="子智能体"] h3')?.textContent).toBe('子智能体');
       failed = true;
       revision++;
@@ -563,12 +564,7 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect(host.textContent).toContain('上次状态 · 待核实');
       expect(host.textContent).toContain('原子智能体');
       expect(host.textContent).toContain('directory_changed');
-      const stop = host.querySelector<HTMLButtonElement>(
-        '[aria-label="子智能体"] .background-execution-stop',
-      )!;
-      expect(stop.getAttribute('aria-label')).toBe('停止');
-      expect(stop.disabled).toBe(true);
-      await act(async () => stop.click());
+      expect(host.querySelector('[aria-label="子智能体"] .background-execution-stop')).toBeNull();
       expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(1);
       failed = false;
       await click(host, '重试');
@@ -931,6 +927,8 @@ test('Native background DOM publishes only complete pages, shows original parent
     expect(host.textContent).toContain('原父轮次 parent-run · waiting_execution');
     expect(host.textContent).not.toContain('本轮必需任务');
     expect(host.textContent).toContain('原子轮次 original-child-run · running');
+    const child = host.querySelector<HTMLElement>('[data-execution-id="job-1"]')!;
+    expect(child.textContent).not.toContain('停止后台执行');
     const second = host.querySelector<HTMLElement>('[data-execution-id="job-2"]')!;
     await click(second, '读取完整已保存输出');
     expect(second.textContent).toContain('完整非选中原输出🙂');

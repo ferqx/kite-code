@@ -16,6 +16,23 @@ export type AttachmentLayout = {
   phase: 'sending' | 'saved' | 'failed';
   reply?: string;
 };
+const documentAttachmentNames = [
+  '设计说明.pdf',
+  '尺寸规范.xlsx',
+  '项目介绍.docx',
+  '设计评审.PPTX',
+  '库存.accdb',
+  '确认邮件.msg',
+  '会议笔记.one',
+  '处理流程.vsdx',
+  '项目排期.mpp',
+  '宣传册.pub',
+  '协作清单.loop',
+  '研讨白板.whiteboard',
+  '申请表.xsn',
+  '演示视频.clipchamp',
+  '团队站点.sppkg',
+];
 const metrics = {
   conversions: 0,
   peakConversions: 0,
@@ -134,9 +151,7 @@ function App() {
   const [mount, setMount] = useState(0);
   const messageFiles = layout
     ? Array.from({ length: layout.files }, (_, index) => ({
-        name: ['设计说明.pdf', '尺寸规范.xlsx', 'message.css', '消息附件展示与交互说明.md'][
-          index % 4
-        ]!,
+        name: documentAttachmentNames[index % documentAttachmentNames.length]!,
         uri: `file:///synthetic/${index}`,
       }))
     : [];
@@ -154,6 +169,12 @@ function App() {
     },
   }));
   const api = {
+    addOfficeDraft() {
+      attachments.addFiles(
+        'draft',
+        documentAttachmentNames.map((name) => ({ name, uri: `file:///synthetic/${name}` })),
+      );
+    },
     layout(next: AttachmentLayout) {
       setLayout(next);
       setView('a');
@@ -291,7 +312,9 @@ function App() {
           disabled={false}
           active={false}
           stopping={false}
+          files={attachments.files('draft')}
           images={attachments.get('draft')}
+          onRemoveFile={(id) => attachments.removeIds([id])}
           onRemoveImage={(id) => attachments.removeIds([id])}
         />
       ) : (
@@ -372,6 +395,7 @@ function App() {
 declare global {
   interface Window {
     imagePreviewFixture: {
+      addOfficeDraft: () => void;
       layout: (next: AttachmentLayout) => void;
       reopen: () => void;
       generate: () => Promise<number>;

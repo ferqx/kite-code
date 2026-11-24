@@ -5778,7 +5778,7 @@ body {
 }
 .background-executions.environment-information {
   --environment-row-height: 32px;
-  --environment-list-indent: 24px;
+  --environment-row-padding: 4px;
   position: absolute;
   z-index: 2;
   top: 0;
@@ -5896,7 +5896,6 @@ body {
 .kite-client .environment-information .background-execution-group > h3 {
   display: flex;
   align-items: center;
-  gap: 8px;
   margin: 0;
   min-height: 20px;
   color: var(--muted-foreground);
@@ -5904,20 +5903,23 @@ body {
   line-height: inherit;
   font-weight: 500;
 }
-.kite-client .environment-information .background-execution-group > h3 svg {
-  width: 16px;
-  height: 16px;
-  flex: none;
+.kite-client .environment-list-scroll {
+  --scroll-fade-reveal: var(--environment-row-height, 32px);
+  --scrollbar-thumb: transparent;
+  --scrollbar-thumb-hover: transparent;
+  margin-block-start: 4px;
 }
-.kite-client .environment-information .background-execution-group > ul {
+.kite-client .environment-list-scroll:hover {
   --scrollbar-thumb: color-mix(in srgb, var(--foreground) 30%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 42%, transparent);
-  margin: 4px 0 0 var(--environment-list-indent);
-  max-height: calc(4 * var(--environment-row-height));
-  overflow: hidden auto;
-  scrollbar-gutter: stable;
 }
-.kite-client .environment-information .background-execution-group > ul > li {
+.kite-client .environment-list-scroll > [data-slot="scroll-area-viewport"] {
+  max-height: calc(4 * var(--environment-row-height));
+}
+.kite-client .environment-information .environment-list-scroll ul {
+  margin: 0;
+}
+.kite-client .environment-information .environment-list-scroll ul > li {
   gap: 4px;
   min-width: 0;
   min-height: var(--environment-row-height);
@@ -5931,7 +5933,9 @@ body {
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
-  padding: 0 4px;
+  padding-block: 0;
+  padding-inline: var(--environment-row-padding);
+  border-inline-width: 0;
   font: inherit;
   text-align: left;
 }
@@ -5962,7 +5966,6 @@ body {
 }
 
 .kite-client .environment-information .background-execution-error {
-  padding-left: 26px;
   color: var(--destructive);
 }
 .kite-client .environment-information .background-execution-name,
@@ -6042,6 +6045,10 @@ body {
   color: var(--muted-foreground);
   font-size: 12px;
 }
+.kite-client .environment-information .native-plan-row > button {
+  padding-inline: var(--environment-row-padding);
+  border-inline-width: 0;
+}
 .kite-client .native-plan-progress-count {
   flex: none;
   color: var(--muted-foreground);
@@ -6065,9 +6072,12 @@ body {
   padding: 0 4px;
   list-style: none;
 }
-.kite-client .native-plan-environment .native-plan-steps {
+.kite-client .native-plan-steps-scroll > [data-slot="scroll-area-viewport"] {
   max-height: 200px;
-  overflow: auto;
+}
+.kite-client .native-plan-steps-scroll .native-plan-steps {
+  margin: 0;
+  padding-inline: 0;
 }
 .kite-client .native-plan-steps > li {
   display: grid;
@@ -6077,6 +6087,9 @@ body {
   padding-block: 2px;
   font-size: 12px;
   line-height: 18px;
+}
+.kite-client .environment-information .native-plan-steps-scroll .native-plan-steps > li {
+  padding-inline: var(--environment-row-padding);
 }
 .kite-client .native-plan-step-title {
   overflow-wrap: anywhere;
@@ -6626,6 +6639,10 @@ body {
 .kite-client .composer-attachment-preview > svg {
   width: 24px;
   height: 24px;
+}
+.kite-client .composer-attachment-preview > svg[data-document-icon] {
+  width: 42px;
+  height: 42px;
 }
 .kite-client .composer-attachment-preview > img {
   width: 100%;
@@ -8749,9 +8766,6 @@ body {
 .output-file-icon[data-file-kind="presentation"] {
   color: light-dark(#b43f26, #ff9b75);
 }
-.output-file-icon[data-file-kind="pdf"] {
-  color: light-dark(#b7252c, #ff838a);
-}
 .output-file-icon[data-file-kind="image"] {
   color: light-dark(#146b72, #78cdd3);
 }
@@ -8786,9 +8800,6 @@ body {
   color: var(--muted-foreground);
 }
 
-.kite-client .environment-information .output-reference-more {
-  margin: 4px 0 0 var(--environment-list-indent);
-}
 .output-reference-link {
   display: flex;
   align-items: center;

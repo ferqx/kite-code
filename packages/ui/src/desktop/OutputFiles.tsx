@@ -1,6 +1,6 @@
-import { ArrowRight01Icon, Attachment01Icon, MoreHorizontalIcon } from '@hugeicons/core-free-icons';
+import { ArrowRight01Icon, MoreHorizontalIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ButtonGroup } from './components/ui/button-group';
 import {
   DropdownMenu,
@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+import { ScrollArea } from './components/ui/scroll-area';
 import { Spinner } from './components/ui/spinner';
 import { FileTypeIcon } from './FileTypeIcon';
 import { outputFileFormat } from './output-file-format';
@@ -152,7 +153,7 @@ function FileRow({
         aria-label={`预览 ${file.name}`}
         aria-describedby={description}
       >
-        <FileTypeIcon kind={format.kind} className="output-file-icon size-6" />
+        <FileTypeIcon format={format} className="output-file-icon size-6" />
         <span className="output-file-description">
           <span id={titleId} className="output-file-name" title={file.name}>
             <FileNameParts name={file.name} />
@@ -209,47 +210,68 @@ export function OutputReferences(
     moreDisabled?: boolean;
   },
 ) {
-  if (!props.items.length && !props.onMore) return null;
+  const { onMore, moreDisabled } = props;
+  const viewport = useRef<HTMLDivElement>(null);
+  const requested = useRef<typeof onMore>(undefined);
+  const loadNearEnd = useCallback(
+    ({ clientHeight, scrollHeight, scrollTop }: HTMLDivElement) => {
+      if (
+        onMore &&
+        !moreDisabled &&
+        requested.current !== onMore &&
+        clientHeight > 0 &&
+        scrollHeight - scrollTop - clientHeight <= 64
+      ) {
+        requested.current = onMore;
+        onMore();
+      }
+    },
+    [onMore, moreDisabled],
+  );
+  useEffect(() => {
+    const node = viewport.current;
+    // Keep loading across a page handoff if the reader already reached the end, or the list cannot scroll yet.
+    if (node && (node.scrollTop > 0 || node.scrollHeight <= node.clientHeight)) loadNearEnd(node);
+  }, [loadNearEnd]);
+  if (!props.items.length && !onMore) return null;
   const repeated = duplicateNames(props.items);
   return (
     <section className="output-references background-execution-group" aria-label="输出">
-      <h3>
-        <HugeiconsIcon icon={Attachment01Icon} aria-hidden="true" />
-        <span>输出</span>
-      </h3>
-      <ul>
-        {props.items.map((file) => (
-          <li key={fileIdentity(file)}>
-            <button
-              type="button"
-              className="output-reference-link"
-              title={[file.name, file.sourceLabel].filter(Boolean).join(' · ')}
-              aria-label={`打开 ${file.name}${file.sourceLabel ? `，${file.sourceLabel}` : ''}${repeated.has(file.name) ? `，${collectionTime(file.publishedAt)}，${file.size} 字节` : ''}`}
-              onClick={() => props.onOpen(file)}
-            >
-              <FileTypeIcon kind={outputFileFormat(file.name, file.mediaType).kind} />
-              <span className="output-reference-name">
-                <FileNameParts name={file.name} />
-                {file.sourceLabel && (
-                  <span className="output-reference-source">{` · ${file.sourceLabel}`}</span>
-                )}
-              </span>
-              {!props.onReveal && <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />}
-            </button>
-            {props.onReveal && <OutputFileMenu file={file} onReveal={props.onReveal} />}
-          </li>
-        ))}
-      </ul>
-      {props.onMore && (
-        <Button
-          className="output-reference-more"
-          variant="ghost"
-          disabled={props.moreDisabled}
-          onClick={props.onMore}
-        >
-          加载更多
-        </Button>
-      )}
+      <h3>输出</h3>
+      <ScrollArea
+        className="environment-list-scroll"
+        fade="y"
+        nativeScrollbars
+        viewportRef={viewport}
+        viewportProps={{
+          'aria-busy': (onMore && moreDisabled) || undefined,
+          onScroll: (event) => loadNearEnd(event.currentTarget),
+        }}
+      >
+        <ul>
+          {props.items.map((file) => (
+            <li key={fileIdentity(file)}>
+              <button
+                type="button"
+                className="output-reference-link"
+                title={[file.name, file.sourceLabel].filter(Boolean).join(' · ')}
+                aria-label={`打开 ${file.name}${file.sourceLabel ? `，${file.sourceLabel}` : ''}${repeated.has(file.name) ? `，${collectionTime(file.publishedAt)}，${file.size} 字节` : ''}`}
+                onClick={() => props.onOpen(file)}
+              >
+                <FileTypeIcon format={outputFileFormat(file.name, file.mediaType)} />
+                <span className="output-reference-name">
+                  <FileNameParts name={file.name} />
+                  {file.sourceLabel && (
+                    <span className="output-reference-source">{` · ${file.sourceLabel}`}</span>
+                  )}
+                </span>
+                {!props.onReveal && <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />}
+              </button>
+              {props.onReveal && <OutputFileMenu file={file} onReveal={props.onReveal} />}
+            </li>
+          ))}
+        </ul>
+      </ScrollArea>
     </section>
   );
 }

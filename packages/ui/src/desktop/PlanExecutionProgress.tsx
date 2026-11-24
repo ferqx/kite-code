@@ -6,6 +6,7 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useId, useState } from 'react';
+import { ScrollArea } from './components/ui/scroll-area';
 import { Button } from './ui';
 
 export type PlanExecutionSnapshot = {
@@ -115,7 +116,15 @@ export function PlanExecutionProgress({
         </Button>
       </div>
       <div id={stepsId} hidden={!open}>
-        {open && <Steps steps={plan.steps} />}
+        {open && (
+          <ScrollArea
+            className="environment-list-scroll native-plan-steps-scroll"
+            fade="y"
+            nativeScrollbars
+          >
+            <Steps steps={plan.steps} />
+          </ScrollArea>
+        )}
       </div>
     </section>
   );

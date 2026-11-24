@@ -12,7 +12,26 @@ export type OutputFileKind =
   | 'video'
   | 'unknown';
 
-type OutputFileFormat = { kind: OutputFileKind; label: string };
+export type OutputFileFormat = {
+  kind: OutputFileKind;
+  label: string;
+  documentIcon?:
+    | 'word'
+    | 'excel'
+    | 'powerpoint'
+    | 'access'
+    | 'outlook'
+    | 'onenote'
+    | 'visio'
+    | 'project'
+    | 'publisher'
+    | 'loop'
+    | 'whiteboard'
+    | 'infopath'
+    | 'clipchamp'
+    | 'sharepoint'
+    | 'pdf';
+};
 type KnownFormat = OutputFileFormat & {
   extensions: readonly string[];
   mediaTypes?: readonly string[];
@@ -22,7 +41,8 @@ const formats: readonly KnownFormat[] = [
   {
     kind: 'document',
     label: 'Word 文档',
-    extensions: ['doc', 'docx'],
+    documentIcon: 'word',
+    extensions: ['doc', 'docx', 'docm', 'dotx', 'dotm'],
     mediaTypes: [
       'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -31,7 +51,8 @@ const formats: readonly KnownFormat[] = [
   {
     kind: 'spreadsheet',
     label: 'Excel 工作簿',
-    extensions: ['xls', 'xlsx'],
+    documentIcon: 'excel',
+    extensions: ['xls', 'xlsx', 'xlsm', 'xlsb', 'xlt', 'xltx', 'xltm'],
     mediaTypes: [
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -40,11 +61,85 @@ const formats: readonly KnownFormat[] = [
   {
     kind: 'presentation',
     label: 'PPT 演示文稿',
-    extensions: ['ppt', 'pptx'],
+    documentIcon: 'powerpoint',
+    extensions: ['ppt', 'pptx', 'pptm', 'pps', 'ppsx', 'ppsm', 'potx', 'potm'],
     mediaTypes: [
       'application/vnd.ms-powerpoint',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     ],
+  },
+  {
+    kind: 'document',
+    label: 'Access 数据库',
+    documentIcon: 'access',
+    extensions: ['accdb', 'accde', 'accdt', 'accdr', 'mdb', 'mde'],
+    mediaTypes: ['application/msaccess', 'application/x-msaccess'],
+  },
+  {
+    kind: 'document',
+    label: 'Outlook 文件',
+    documentIcon: 'outlook',
+    extensions: ['msg', 'oft', 'pst', 'ost', 'olm'],
+    mediaTypes: ['application/vnd.ms-outlook'],
+  },
+  {
+    kind: 'document',
+    label: 'OneNote 笔记',
+    documentIcon: 'onenote',
+    extensions: ['one', 'onepkg', 'onetoc', 'onetoc2'],
+    mediaTypes: ['application/onenote'],
+  },
+  {
+    kind: 'document',
+    label: 'Visio 文件',
+    documentIcon: 'visio',
+    extensions: ['vsd', 'vsdx', 'vsdm', 'vdx', 'vdw', 'vss', 'vssx', 'vssm', 'vst', 'vstx', 'vstm'],
+    mediaTypes: ['application/vnd.visio', 'application/vnd.ms-visio.drawing'],
+  },
+  {
+    kind: 'document',
+    label: 'Project 计划',
+    documentIcon: 'project',
+    extensions: ['mpp', 'mpt'],
+    mediaTypes: ['application/vnd.ms-project'],
+  },
+  {
+    kind: 'document',
+    label: 'Publisher 出版物',
+    documentIcon: 'publisher',
+    extensions: ['pub'],
+    mediaTypes: ['application/vnd.ms-publisher', 'application/x-mspublisher'],
+  },
+  {
+    kind: 'document',
+    label: 'Loop 组件',
+    documentIcon: 'loop',
+    extensions: ['loop', 'fluid'],
+  },
+  {
+    kind: 'document',
+    label: 'Microsoft Whiteboard 白板',
+    documentIcon: 'whiteboard',
+    extensions: ['whiteboard'],
+  },
+  {
+    kind: 'document',
+    label: 'InfoPath 表单',
+    documentIcon: 'infopath',
+    extensions: ['xsn', 'xsf'],
+    mediaTypes: ['application/vnd.ms-infopath'],
+  },
+  {
+    kind: 'document',
+    label: 'Clipchamp 项目',
+    documentIcon: 'clipchamp',
+    extensions: ['clipchamp'],
+  },
+  {
+    kind: 'archive',
+    label: 'SharePoint 解决方案包',
+    documentIcon: 'sharepoint',
+    extensions: ['sppkg', 'wsp'],
   },
   {
     kind: 'document',
@@ -70,7 +165,13 @@ const formats: readonly KnownFormat[] = [
     extensions: ['rtf'],
     mediaTypes: ['application/rtf', 'text/rtf'],
   },
-  { kind: 'pdf', label: 'PDF 文档', extensions: ['pdf'], mediaTypes: ['application/pdf'] },
+  {
+    kind: 'pdf',
+    label: 'PDF 文档',
+    documentIcon: 'pdf',
+    extensions: ['pdf'],
+    mediaTypes: ['application/pdf'],
+  },
   { kind: 'image', label: 'PNG 图片', extensions: ['png'], mediaTypes: ['image/png'] },
   { kind: 'image', label: 'JPEG 图片', extensions: ['jpg', 'jpeg'], mediaTypes: ['image/jpeg'] },
   { kind: 'image', label: 'GIF 图片', extensions: ['gif'], mediaTypes: ['image/gif'] },
@@ -185,8 +286,9 @@ export function outputFileFormat(path: string, mediaType = ''): OutputFileFormat
   const dot = name.lastIndexOf('.');
   const extension = dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
   const mime = (mediaType.split(';', 1)[0] ?? '').trim().toLowerCase();
+  const sshKey = extension === 'pub' && /(?:^|[/\\])(?:\.ssh[/\\]|id_|ssh_host_)/i.test(path);
   return (
-    byExtension.get(extension) ??
+    (sshKey ? undefined : byExtension.get(extension)) ??
     byMediaType.get(mime) ??
     byMediaFamily.get(mime.split('/', 1)[0] ?? '') ?? { kind: 'unknown', label: '文件' }
   );

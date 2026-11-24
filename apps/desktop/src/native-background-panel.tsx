@@ -222,6 +222,7 @@ function BackgroundPanel({
           {view.items?.map((item) => {
             const e = item.execution,
               stoppable =
+                !e.childSessionId &&
                 !view.busy &&
                 !view.error &&
                 e.originStoreId === storeId &&

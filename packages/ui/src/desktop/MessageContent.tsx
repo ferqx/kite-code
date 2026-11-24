@@ -250,7 +250,7 @@ function MarkdownFileLink({
       aria-disabled={!readActive || !openFile || undefined}
       onClick={activate}
     >
-      <FileTypeIcon kind={outputFileFormat(path).kind} className="file-reference-icon" />
+      <FileTypeIcon format={outputFileFormat(path)} className="file-reference-icon" />
       {children}
     </button>
   );
@@ -291,7 +291,7 @@ function MarkdownReference({
             }
           }}
         >
-          <FileTypeIcon kind={outputFileFormat(path).kind} className="file-reference-icon" />
+          <FileTypeIcon format={outputFileFormat(path)} className="file-reference-icon" />
           {children}
           {`（第 ${line} 行）`}
         </a>

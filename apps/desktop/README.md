@@ -309,6 +309,8 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 ## Markdown 与附件输入
 
+Office、Microsoft 365 和 PDF 的文件图标由 UI 的[文件格式映射](../../packages/ui/src/desktop/output-file-format.ts)统一选择。待发送、发送占位和历史消息共用同一文件卡。2026-11-24 在 Windows x64／Chrome 158 使用[附件浏览器夹具](test/image-previews-browser-runner.fixture.ts)的 `--office-attachments` 验证 15 种图标，覆盖 1280／390px 深浅主题下的添加、移除、投递占位、保存接管、横向浏览、切回、重开和失败。另通过正文文件引用与轮次产物浏览器回归。验证使用隔离的桌面渲染组件和受控回执。该夹具旧的 `--attachments` 图片场景缺少当前原生预览桥接，等待读取图片超时。
+
 正文可以引用 Shell 交付回执提供的本机绝对路径。共享 Markdown 识别盘符路径和以斜杠开头的本机路径，保留模型给出的标签。Windows 的准确盘符路径由 `messageFile.open` 识别，再校验原会话、工作区、实际文件与当前读取权限。链接使用实际保存位置，能在输出归档前打开。文件卡读取固定快照，提供预览和另存。普通网页与明确的绝对文件链接有下划线，历史虚拟路径保留为文字。 [交付回执](../../packages/agent/src/tools/documents/README.md#成品路径与交付) · [浏览器回归](test/markdown-content-browser-runner.fixture.ts) · [桌面入口回归](test/native-file-changes.test.ts)
 
 同会话收尾刷新期间，正文链接和预览复核沿用已验证的消息读取身份。预览仍绑定原选择和历史代际，按原消息和实际磁盘文件校验每次读取。连接重置、切换会话、工作区失效和实际文件变更继续使旧句柄失效。 [收尾刷新回归](test/native-caller.test.ts)
@@ -1293,7 +1295,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 桌面会话在一个滚动区呈现完整时间线。Native 沿固定水位在后台读取，长正文使用原消息的有界预览和分块读取。思维链首次展开时才构造工具与思考明细，已读正文在后台读取恢复期间保留。旧窗口和轮次占位的性能数据保留为历史记录。
 
-长会话首次构建允许新的侧栏选择打断。消息节点保留在同一正文区，浏览器按阅读位置布局离屏条目，支持原生全选、跳转到任意已读消息和恢复锚点。工具匹配先按消息、执行和原调用身份建立索引，再核对来源与版本。历史保留已排序的消息位置索引，同序号改写只替换对应位置，尾部新消息沿核实的分页顺序追加，旧位置增删或重新基线仍按完整位置校验。只改当前已可见、未完成助手回复的正文或正文预览字节数时，Native 复用已投影的历史行。执行状态、工具、压缩、完整正文凭据、选择或旧消息变化时沿原投影处理。轮次接近阅读区时立即查询产物。[轮次文件卡](src/native-output-files.tsx)在历史首次呈现时，等待阅读范围内已完成轮次的来源和产物页核实结束，再一起显示正文与文件卡。已有有效缓存时直接显示。回复节点预先保留原布局。普通重读失败时保留同一权限与来源内已经核实的文件。轮次离开阅读范围时暂停新查询，读取资格失效时撤下原呈现。后到的有效产物补在原轮次。首次呈现后新增的回复直接显示，附件核实后再补齐。 [浏览器逐帧回归](test/native-history-presentation-browser-runner.fixture.ts)的 `--turn-outputs` 覆盖静态慢读同帧、实时正文先显示、失败恢复与回切。轮次文件卡和「输出」栏的翻页由用户操作触发，查询失败后沿原退避重试。[读取回归](test/isolated/native-output-files-dom.test.tsx)核对轮次进入可读范围即查询，以及菜单、分页和切换来源。已读卡片随原页面保留。Main 按原 Run 标记执行生命周期和已核实来源的产物变化。若原事件缺少可核实 Run 身份，则按已核来源会话重新读取。普通校准保留原来源与同权限的已核文件页，核实新结果后更新原位置。连接或权限变化、来源或会话被撤销时立即失效。重新挂载时，当前来源仍有效的父轮和子来源卡片可在历史校验期间从缓存显示，不发起轮次查询。离开阅读区后暂停新的轮次查询。「输出」栏独立读取会话及获准子来源。相关实现见[会话展示](../../packages/ui/src/desktop/Conversation.tsx)、[工具与轮次投影](src/native-transcript.ts)和[产物读取](src/native-output-files.tsx)。
+长会话首次构建允许新的侧栏选择打断。消息节点保留在同一正文区，浏览器按阅读位置布局离屏条目，支持原生全选、跳转到任意已读消息和恢复锚点。工具匹配先按消息、执行和原调用身份建立索引，再核对来源与版本。历史保留已排序的消息位置索引，同序号改写只替换对应位置，尾部新消息沿核实的分页顺序追加，旧位置增删或重新基线仍按完整位置校验。只改当前已可见、未完成助手回复的正文或正文预览字节数时，Native 复用已投影的历史行。执行状态、工具、压缩、完整正文凭据、选择或旧消息变化时沿原投影处理。轮次接近阅读区时立即查询产物。[轮次文件卡](src/native-output-files.tsx)在历史首次呈现时，等待阅读范围内已完成轮次的来源和产物页核实结束，再一起显示正文与文件卡。已有有效缓存时直接显示。回复节点预先保留原布局。普通重读失败时保留同一权限与来源内已经核实的文件。轮次离开阅读范围时暂停新查询，读取资格失效时撤下原呈现。后到的有效产物补在原轮次。首次呈现后新增的回复直接显示，附件核实后再补齐。 [浏览器逐帧回归](test/native-history-presentation-browser-runner.fixture.ts)的 `--turn-outputs` 覆盖静态慢读同帧、实时正文先显示、失败恢复与回切。轮次文件卡由按钮翻页，「输出」栏在滚动接近底部时自动续页。各来源使用原游标。临时续页失败后保留已核实结果并重试该页，快照变化时重建已加载的窗口。[读取回归](test/isolated/native-output-files-dom.test.tsx)核对轮次进入可读范围即查询，以及菜单、分页和切换来源。已读卡片随原页面保留。Main 按原 Run 标记执行生命周期和已核实来源的产物变化。若原事件缺少可核实 Run 身份，则按已核来源会话重新读取。普通校准保留原来源与同权限的已核文件页，核实新结果后更新原位置。连接或权限变化、来源或会话被撤销时立即失效。重新挂载时，当前来源仍有效的父轮和子来源卡片可在历史校验期间从缓存显示，不发起轮次查询。离开阅读区后暂停新的轮次查询。「输出」栏独立读取会话及获准子来源。相关实现见[会话展示](../../packages/ui/src/desktop/Conversation.tsx)、[工具与轮次投影](src/native-transcript.ts)和[产物读取](src/native-output-files.tsx)。
 
 2026-11-24，Windows x64／Chrome 158 的隔离渲染器通过 [轮次文件浏览器夹具](test/native-history-presentation-browser-runner.fixture.ts) 的深浅主题回归。模拟新轮开始、完成和同源文件变更，旧文件卡在重读挂起到新页到达的 150 帧保留原节点、尺寸和阅读位置。新轮开始与完成未发旧轮查询，缺 Run 身份的文件事件各主题按同来源重读一次。报告为本机 `.cache/native-history-presentation-ds1D8a/report.json`。
 
@@ -1704,11 +1706,11 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 当前会话环境信息与子详情
 
-[环境信息卡](src/native-environment.tsx)按原 Store／子 Session 汇总子 Agent，依已核实目录的顺序用最新执行更新原行，状态、详情与停止操作绑定该执行。目录和消息详情仍使用准确的执行标识。[环境卡回归](test/native-background-panel.test.tsx)覆盖同一子 Agent 的后续执行更新、同名不同子 Agent 及准确详情打开。
+[环境信息卡](src/native-environment.tsx)按原 Store／子 Session 汇总子 Agent，依已核实目录的顺序用最新执行更新原行，状态与详情绑定该执行。目录和消息详情仍使用准确的执行标识。[环境卡回归](test/native-background-panel.test.tsx)覆盖同一子 Agent 的后续执行更新、同名不同子 Agent 及准确详情打开。
 
-共享 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx) 将有内容的列表同级展示。Shell 列表、子智能体和输出的标题都使用图标和名称。Shell 区显示正在运行的后台命令，也显示已交回会话 ID、仍在排队、启动或停止的同一执行。已核实运行且原停止资格有效时提供停止按钮。环境卡依据已核实的启动回执把完整原命令交给同一 Job 行，适用于显式后台启动和数字会话交回。命令暂未核实时显示「Shell」。继续执行的条目在目录核实终态后移除，退出与清理结果仍可在原记录查看。环境卡子智能体行通过现有入口打开右侧会话标签。
+共享 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx) 将有内容的列表同级展示。「后台 Shell」「子智能体」和「输出」使用纯文字标题。Shell 区显示正在运行的后台命令，也显示已交回会话 ID、仍在排队、启动或停止的同一执行。已核实运行且原停止资格有效时提供停止按钮。环境卡依据已核实的启动回执把完整原命令交给同一 Job 行，适用于显式后台启动和数字会话交回。命令暂未核实时显示「Shell」。继续执行的条目在目录核实终态后移除，退出与清理结果仍可在原记录查看。环境卡子智能体行通过现有入口打开右侧会话标签。
 
-环境行将原 Store／子 Session 组合交给共享 `ChildAgentIcon`，与工具消息及审批使用相同稳定身份，不按标题、状态或本次 carrier 重新分配。恢复历史沿原 Store 保持外观；无法导航的已知子会话仍显示图标，缺身份时使用通用子 Agent 图标。显示、点击与停止资格仍分别由原 metadata 和回调决定。
+环境行将原 Store／子 Session 组合交给共享 `ChildAgentIcon`，与工具消息及审批使用相同稳定身份，不按标题、状态或本次 carrier 重新分配。恢复历史沿原 Store 保持外观；无法导航的已知子会话仍显示图标，缺身份时使用通用子 Agent 图标。显示与只读详情仍由原 metadata 和回调决定。
 
 环境行、工具消息和子结果入口打开详情时，同步把该原身份交给共享SessionTabs的`childAgentIdentity`，标签图标使用同一分配；结果历史沿原消息Store，环境恢复历史沿原Execution Store。该装饰字段不参与Session／Execution去重或读取准入，标签改名仍保留同一图标节点，SVG沿共享14px尺寸。
 
@@ -1788,17 +1790,17 @@ macOS 上的 Chrome 隔离夹具使用正式会话组件、生产样式和受控
 
 2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 加本轮工作区改动：[目录](test/native-directory.test.tsx)新增同会话校准保运行标记及真实失败／foreign Store 反例，[停止竞态](test/isolated/native-environment-stop-dom.test.tsx)新增普通刷新保节点、空列表不插加载段、禁用零写及真实失败。原实现分别复现运行标记被撤下、环境卡加“上次状态”并移除停止按钮，以及空列表插加载段；修复后相关整文件通过。Chrome 155 隔离夹具使用实际目录适配、共享 SessionPage／Composer 与环境 hook，亮暗主题、1240／800／500px、空／非空目录下原环境卡高度变化为4／48px，修复后文字、按钮数、可见侧栏运行标记和所有受测几何／滚动保持；每次选择一次、后台读取继续、零停止写入。500px 原侧栏未挂载，不将该场景计作侧栏视觉证据。完整安装窗口、其他平台及全量默认测试未运行；原嵌套 `@keyframes` 编译提示保留。
 
-[环境适配](src/native-environment.tsx)保留上次完整目录中的停止按钮和空分组文案。执行权待核实、目录正在更新或暂时失效时，原按钮保持禁用；停止仍要求原范围的新鲜完整观察与 Main 的准入复核。重新取得资格后复用原按钮，目录确认终态后撤除。[停止竞态回归](test/isolated/native-environment-stop-dom.test.tsx)核同一运行中子 Agent 多次失联恢复间的原行、详情和停止节点、禁用零写及随后完成。
+[环境适配](src/native-environment.tsx)保留上次完整目录中仍显示的 Shell 停止按钮。执行权待核实、目录正在更新或暂时失效时，原按钮保持禁用；停止仍要求原范围的新鲜完整观察与 Main 的准入复核。重新取得资格后复用原按钮，目录确认终态后撤除。[停止竞态回归](test/isolated/native-environment-stop-dom.test.tsx)核运行中的子 Agent 多次失联恢复期间保留原行和详情，确认终态后更新状态。Shell 回归覆盖停止按钮的禁用、恢复和零重复写入。
 
 2026-11-24，Windows x64 使用独立 Electron 源码制品、配套 Service、SQLite 和本机合成 Provider 验证三个 Job 并发、自然退出、后台总览准确取消、Main 故障后原树退出和冷开零重放，以及 Service 故障后原树退出。自然退出、取消和配套 Service 能收尾的 Main 故障保存清理确认。直接强杀 Service 时只核实实际进程已退出，原记录未取得清理确认。阶段记录在本机 `.cache/windows-shell-window-wfmCMC/windows-shell-stages.jsonl`。
 
 2026-11-15 Windows x64，基于 `65ce50cec` 对照本次修复。Chrome 隔离夹具使用正式 SessionPage、样式与环境 hook，在打开子详情后模拟三轮执行权待核实、目录失联、挂起重读和恢复，最后发布任务完成。修复前停止按钮消失、运行状态右移 58 CSS px，失联时 Shell「空闲」改为「状态未知」。修复后 126 个渲染帧采样中，终态发布前卡片、行、按钮、参考区及草稿几何稳定，父阅读滚动位置保持，子详情保留原节点。阶段截图核对了文案和最终「已完成」。该范围使用受控观察数据和 Chrome 渲染，未覆盖真实模型或 Electron 窗口合成。
 
-正式 [页面](src/native.tsx)将现有后台目录接到原 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx)环境卡和 SessionPage 的 `environmentInformation` slot，保留原 300px 卡、宽窄窗口停靠／浮层与开关行为。[适配器](src/native-environment.tsx)仅将来源为 `shell.launch@1` 且父工具身份匹配的 `shell.command` 展示为后台 Shell，子 Agent 仍按准确 child Session 展示，名称取公开 child title；自动命名扩展的 `agent/session-title` 按公开 `definitionId` 从环境卡的行与 child 入口映射中排除，不按可变名称判断，同名普通委派任务仍显示。原后台目录、执行历史、取消和 unknown 事实保留；回归见[环境展示测试](test/native-background-panel.test.tsx)。Shell 列表只展示当前投影为运行中的执行，对经准入核实的执行提供准确停止。环境卡的子列表保留全部记录及 queued／starting／unknown／restored 状态和只读详情入口；共享展示层接收原 `stoppingExecutionId/onStop`，仅对当前新鲜完整目录中已核实的准确可停止 carrier 提供操作。旧状态、unknown、恢复历史或缺少资格时禁用停止，不凭稳定 child Session 转向后来一轮；原 task／Run 范围及 Main 的准入前后复核保持。不把终态或受理回执当作进程清理证明。
+正式 [页面](src/native.tsx)将现有后台目录接到原 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx)环境卡和 SessionPage 的 `environmentInformation` slot，保留原 300px 卡、宽窄窗口停靠／浮层与开关行为。[适配器](src/native-environment.tsx)仅将来源为 `shell.launch@1` 且父工具身份匹配的 `shell.command` 展示为后台 Shell，子 Agent 仍按准确 child Session 展示，名称取公开 child title；自动命名扩展的 `agent/session-title` 按公开 `definitionId` 从环境卡的行与 child 入口映射中排除，不按可变名称判断，同名普通委派任务仍显示。原后台目录、执行历史、取消和 unknown 事实保留；回归见[环境展示测试](test/native-background-panel.test.tsx)。后台 Shell只展示当前投影为运行中的执行，对经准入核实的执行提供准确停止。环境卡的子列表保留全部记录及 queued／starting／unknown／restored 状态和只读详情入口；环境卡的手动停止回调限定在已核实的后台 Shell 执行。后台总览仅为已核实的独立后台 Job 提供停止入口。旧状态、unknown 或恢复历史只能阅读。不把终态或受理回执当作进程清理证明。
 
 环境卡的 Main 目录读取和准确停止复核显式请求 `includeSourceTool:true`，消费原父工具的只读 ID／定义／版本；`shell.execute` 的前台命令、来源缺失或身份不匹配的记录均不进入 Shell 分组，不按 `cancelWithParent` 推断前后台。来源在原后台目录事务内核同 Session／origin Store／root work，普通总览默认响应保持。相关元数据与兼容边界见[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)，取舍见[来源过滤决定](../../.agents/notes/implemented/architecture/2026-10-20-background-shell-origin-filter.md)。
 
-同一稳定 child Session 的多份 carrier 分别保留原执行卡。环境卡打开详情时同时传原 `executionId` 与 Session；[renderer reader](src/native-background.ts)核 carrier／原 child Run／rootWork，导航、刷新和展示缓存均 pin 原 execution，不按 Session 找第一条或最新任务。缺少 execution 且有多个候选时明确范围不可核实，不猜目标。原停止仍按所选准确执行走原 durable caller。[实际 DOM 回归](test/native-background-panel.test.tsx)核同 Session 两个 carrier 的点击、刷新和返回，原完整正文与停止回归继续保持；这组受控 IPC／DOM 测试不替代源码外窗口或新六工具完整审批交互。环境目录当前不携带准确 child Tool 的审批事实，不能仅凭 child Run 的 waiting_interaction 推断“等待你的批准”；原准确主交互卡保持可达。
+同一稳定 child Session 的多份 carrier 分别保留原执行卡。环境卡打开详情时同时传原 `executionId` 与 Session；[renderer reader](src/native-background.ts)核 carrier／原 child Run／rootWork，导航、刷新和展示缓存均 pin 原 execution，不按 Session 找第一条或最新任务。缺少 execution 且有多个候选时明确范围不可核实，不猜目标。[实际 DOM 回归](test/native-background-panel.test.tsx)核同 Session 两个 carrier 的点击、刷新和返回，原完整正文与停止回归继续保持；这组受控 IPC／DOM 测试不替代源码外窗口或新六工具完整审批交互。环境目录当前不携带准确 child Tool 的审批事实，不能仅凭 child Run 的 waiting_interaction 推断“等待你的批准”；原准确主交互卡保持可达。
 
 只有 Session 的导航可先等待当前共享目录，等待属于本次导航并可独立取消。首次完整目录返回后，唯一同 Session carrier 才形成准确 pin；缺失或多个候选明确失败，后来的目录不能替这次失败选择目标。已绑定的导航、刷新和缓存继续使用该 execution，新 follow-up 不改投；只有用户再次明确打开才重新选取。连续切换及时退役旧等待，不关闭共享目录 owner。[导航回归](test/isolated/native-session-navigation-dom.test.tsx)同时核目录未返回时的100次切换、歧义拒绝及后续 carrier 不替换原目标。
 
