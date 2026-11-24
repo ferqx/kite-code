@@ -11,6 +11,68 @@ const sourceEvents = `(type='extension.record_updated' AND
   (object_id LIKE 'builtin.files/delivery/%' OR object_id LIKE 'builtin.files/collection/%'))
   OR type IN ('run.started','run.finished','run.interrupted','session.forked')`;
 type Changes = { prefixes: Set<string> | null; cursor: string; previousCursor: string };
+const producerFields =
+  'id,kind,run_id,parent_execution_id,session_id,root_work_command_id,root_work_seq,origin_store_id';
+
+export function outputProducerRun(
+  db: SqliteOperations,
+  producer: NonNullable<ReturnType<SqliteOperations['row']>>,
+) {
+  let ancestor = producer;
+  let toolId = '';
+  const visited = new Set<string>();
+  while (ancestor.run_id === null) {
+    if (!ancestor.parent_execution_id || visited.size >= 32 || visited.has(String(ancestor.id)))
+      return;
+    visited.add(String(ancestor.id));
+    const parent = db.row(
+      `SELECT ${producerFields} FROM execution WHERE id=?`,
+      ancestor.parent_execution_id,
+    );
+    if (
+      !parent ||
+      parent.session_id !== producer.session_id ||
+      parent.root_work_command_id !== producer.root_work_command_id ||
+      parent.root_work_seq !== producer.root_work_seq ||
+      parent.origin_store_id !== producer.origin_store_id
+    )
+      return;
+    ancestor = parent;
+    if (parent.kind === 'tool') toolId = String(parent.id);
+  }
+  const run = db.row(
+    'SELECT r.id,r.session_id,r.origin_store_id,c.seq AS origin_seq FROM run r JOIN command c ON c.id=r.origin_command_id WHERE r.id=?',
+    ancestor.run_id!,
+  );
+  if (
+    !run ||
+    run.session_id !== producer.session_id ||
+    run.origin_store_id !== producer.origin_store_id
+  )
+    return;
+  return { run, toolId: toolId || String(ancestor.id) };
+}
+
+/** Recover the immutable producer's Run for old and new collection/delivery events. */
+export function outputChangeRunId(db: SqliteOperations, sessionId: string, objectId: string) {
+  const key =
+    /^builtin\.files\/(?:collection\/([0-9]{20})\/([A-Za-z0-9_.:-]+)|delivery\/([0-9]{20})\/([A-Za-z0-9_.:-]+)\/[A-Za-z0-9_.:-]+)$/.exec(
+      objectId,
+    );
+  if (!key) return;
+  const sequence = BigInt(key[1] ?? key[3]!);
+  if (sequence > 9223372036854775807n) return;
+  const producer = db.row(
+    `SELECT ${producerFields} FROM execution WHERE id=? AND session_id=? AND kind IN ('tool','job')`,
+    (key[2] ?? key[4])!,
+    sessionId,
+  );
+  if (!producer) return;
+  const binding = outputProducerRun(db, producer);
+  return binding && String(binding.run.origin_seq) === sequence.toString()
+    ? String(binding.run.id)
+    : undefined;
+}
 
 function head(db: SqliteOperations, sessionId: string) {
   const row = db.row(

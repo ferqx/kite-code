@@ -28,10 +28,12 @@ for (const delivered of [true, false])
       compactions = 0,
       resetChecks = 0;
     const requests: ModelRequest[] = [];
+    const streaming = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
     const finish: ModelEvent = {
       type: 'finish',
       reason: 'stop',
-      usage: { inputTokens: 100, outputTokens: 10 },
+      usage: { inputTokens: 100, outputTokens: 10, cachedInputTokens: 91 },
     };
     const model: ModelAdapter = {
       describeRequest() {
@@ -61,6 +63,10 @@ for (const delivered of [true, false])
             type: 'text_delta',
             text: compactions ? 'Source-labeled summary.' : 'Original visual answer.',
           };
+          if (delivered && requests.length === 2) {
+            streaming.resolve();
+            await release.promise;
+          }
           yield finish;
         }
       },
@@ -158,7 +164,43 @@ for (const delivered of [true, false])
         commandId: 'work',
         request: { kind: 'run.start', content: 'Inspect the image' },
       });
-      await runtime.waitForCommand('work');
+      const completion = runtime.waitForCommand('work');
+      if (delivered) {
+        try {
+          const reachedStream = await Promise.race([
+            streaming.promise.then(() => true),
+            completion.then(() => false),
+          ]);
+          expect(reachedStream).toBe(true);
+          const view = await runtime.getView('s');
+          const latest = [...view.messages]
+            .reverse()
+            .find((message) => message.role === 'assistant' && message.status === 'complete');
+          expect(view.runs[0]?.status).toBe('running');
+          expect(view.messages.some((message) => message.role === 'tool')).toBe(true);
+          expect(latest?.sourceIds).toEqual([requests[0]!.requestId]);
+          expect(requests[1]?.messages.some((message) => message.images?.length)).toBe(true);
+          const reads = pngReads;
+          expect(
+            await store.getSessionTokenUsage({
+              expectedStoreId: base.expectedStoreId,
+              sessionId: base.sessionId,
+            }),
+          ).toMatchObject({ inputTokens: 100, cachedInputTokens: 91 });
+          const error = await runtime
+            .readContextEstimate({ ...base, executionId: requests[0]!.requestId })
+            .then(
+              () => null,
+              (error) => error,
+            );
+          expect(error?.code).toBe('context_estimate_unavailable');
+          expect(pngReads).toBe(reads);
+          expect(requests).toHaveLength(2);
+        } finally {
+          release.resolve();
+        }
+      }
+      await completion;
       const requestsBefore = requests.length,
         readsBefore = pngReads;
       if (delivered) {
@@ -224,6 +266,7 @@ for (const delivered of [true, false])
         expect(pngReads).toBe(readsBefore);
       }
     } finally {
+      release.resolve();
       await runtime.close();
       removeTemporaryDirectory(root);
     }

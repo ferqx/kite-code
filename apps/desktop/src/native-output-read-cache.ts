@@ -61,9 +61,7 @@ export class NativeOutputReadCache {
   }
 
   set<T>(key: string, value: T) {
-    const previous = this.values.get(key);
-    if (previous) this.bytes -= previous.bytes;
-    this.values.delete(key);
+    this.delete(key);
     const bytes = key.length * 2 + estimateNativeSnapshotBytes(value);
     if (bytes > 4 * 1024 * 1024) return;
     this.values.set(key, { value, bytes });
@@ -73,6 +71,13 @@ export class NativeOutputReadCache {
       this.bytes -= this.values.get(oldest)!.bytes;
       this.values.delete(oldest);
     }
+  }
+
+  delete(key: string) {
+    const entry = this.values.get(key);
+    if (!entry) return;
+    this.bytes -= entry.bytes;
+    this.values.delete(key);
   }
 
   async read<T>(key: string, load: () => Promise<T>): Promise<T> {

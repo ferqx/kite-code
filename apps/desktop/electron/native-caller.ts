@@ -159,6 +159,14 @@ export class NativeCaller {
   private directoryRefreshing?: Promise<void>;
   private directoryRefreshRequested = false;
   private directoryRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private directorySnapshotCursor?: bigint;
+  private directorySessionIndexes = new Map<string, number>();
+  private readonly directoryNewSessions = new Map<string, bigint>();
+  private readonly directoryMessageActivity = new Map<
+    string,
+    { cursor: bigint; updatedAt: number }
+  >();
+  private messageActivityTimer?: ReturnType<typeof setTimeout>;
   private directoryEpoch = 0;
   private directoryRead?: {
     generation: number;
@@ -939,9 +947,42 @@ export class NativeCaller {
     this.directoryRefreshRequested = false;
     clearTimeout(this.directoryRefreshTimer);
     this.directoryRefreshTimer = undefined;
+    clearTimeout(this.messageActivityTimer);
+    this.messageActivityTimer = undefined;
+    this.directorySnapshotCursor = undefined;
+    this.directorySessionIndexes.clear();
+    this.directoryNewSessions.clear();
+    this.directoryMessageActivity.clear();
     this.directoryUnavailable = true;
     this.workspaceObservation = undefined;
     if (clear) this.directory = undefined;
+  }
+  private applyDirectoryMessageActivity(sessions: NativeDirectory['sessions']) {
+    let patched: NativeDirectory['sessions'] | undefined;
+    for (const [id, next] of this.directoryMessageActivity) {
+      const index = this.directorySessionIndexes.get(id);
+      if (index === undefined) continue;
+      const session = sessions[index]!;
+      if (session.activity && session.activity.updatedAt !== next.updatedAt) {
+        patched ??= sessions.slice();
+        patched[index] = {
+          ...session,
+          activity: { ...session.activity, updatedAt: next.updatedAt },
+        };
+      }
+    }
+    return patched ?? sessions;
+  }
+  private scheduleMessageActivity() {
+    if (this.closed || this.messageActivityTimer) return;
+    this.messageActivityTimer = setTimeout(() => {
+      this.messageActivityTimer = undefined;
+      if (this.directory && !this.directoryUnavailable) {
+        const sessions = this.applyDirectoryMessageActivity(this.directory.sessions);
+        if (sessions !== this.directory.sessions) this.directory = { ...this.directory, sessions };
+      }
+      this.changed();
+    }, 250);
   }
   private directoryState(): NativeDirectory | undefined {
     let readTurns: NativeDirectory['readTurns'];
@@ -971,8 +1012,16 @@ export class NativeCaller {
       const workspaces = await this.client.listAllWorkspaces({
         signal: abort.signal,
       });
+      let snapshotCursor: string | undefined;
       const sessions = this.client.serverInfo!.capabilities.includes('session_directory_activity')
-        ? (await this.client.listAllSessionDirectory({ signal: abort.signal })).map((item) => ({
+        ? (
+            await this.client.listAllSessionDirectory({
+              signal: abort.signal,
+              onSnapshot: (cursor) => {
+                snapshotCursor = cursor;
+              },
+            })
+          ).map((item) => ({
             ...item.session,
             activity: item.activity,
             ...(item.worktreeSource ? { worktreeSource: item.worktreeSource } : {}),
@@ -982,10 +1031,22 @@ export class NativeCaller {
       abort.signal.throwIfAborted();
       if (epoch !== this.directoryEpoch || this.client.serverInfo?.storeId !== storeId)
         throw new ClientError('directory_identity_conflict');
+      const observed = snapshotCursor === undefined ? undefined : BigInt(snapshotCursor);
+      this.directorySnapshotCursor = observed;
+      this.directorySessionIndexes = new Map(sessions.map((session, index) => [session.id, index]));
+      for (const [id, cursor] of this.directoryNewSessions)
+        if (observed === undefined || cursor <= observed) this.directoryNewSessions.delete(id);
+      for (const [id, activity] of this.directoryMessageActivity)
+        if (
+          observed === undefined ||
+          activity.cursor <= observed ||
+          (!this.directorySessionIndexes.has(id) && !this.directoryNewSessions.has(id))
+        )
+          this.directoryMessageActivity.delete(id);
       this.directory = {
         storeId,
         workspaces,
-        sessions,
+        sessions: this.applyDirectoryMessageActivity(sessions),
         canReadWebSearchSettings:
           this.client.serverInfo!.capabilities.includes('web_search_settings'),
         canManageSessions: this.client.serverInfo!.capabilities.includes('sessions'),
@@ -1400,6 +1461,71 @@ export class NativeCaller {
               }
             },
             onChange: (change) => {
+              if (
+                change.type === 'session.created' &&
+                change.sessionId &&
+                this.directorySnapshotCursor !== undefined &&
+                BigInt(change.cursor) > this.directorySnapshotCursor
+              )
+                this.directoryNewSessions.set(change.sessionId, BigInt(change.cursor));
+              const messageUpdate = change.type === 'message.updated' && !!change.sessionId;
+              const messageHistory =
+                messageUpdate &&
+                change.sessionId === this.selected &&
+                this.client.serverInfo?.capabilities.includes('message_changes');
+              if (messageHistory) {
+                const sessionId = change.sessionId!;
+                this.historyHead = {
+                  sessionId,
+                  selection: this.selection,
+                  cursor: change.cursor,
+                };
+                if (!this.observationUnavailable)
+                  this.emit({
+                    kind: 'messages.changed',
+                    generation: this.generation,
+                    storeId: originalStore,
+                    sessionId,
+                    viewSelection: this.selection,
+                    historyEpoch: this.historyEpoch,
+                    cursor: change.cursor,
+                  });
+              }
+              const activity = change.payload;
+              if (
+                messageUpdate &&
+                this.directorySnapshotCursor !== undefined &&
+                !this.directoryUnavailable &&
+                this.client.serverInfo?.capabilities.includes('message_changes') &&
+                activity &&
+                typeof activity === 'object' &&
+                !Array.isArray(activity) &&
+                Object.keys(activity).length === 1 &&
+                typeof activity.updatedAt === 'number' &&
+                Number.isSafeInteger(activity.updatedAt) &&
+                !Number.isNaN(new Date(activity.updatedAt).getTime())
+              ) {
+                const sessionId = change.sessionId!,
+                  cursor = BigInt(change.cursor);
+                const previous = this.directoryMessageActivity.get(sessionId);
+                const knownSession = this.directorySessionIndexes.has(sessionId);
+                if (
+                  (knownSession || this.directoryNewSessions.has(sessionId)) &&
+                  cursor > (previous?.cursor ?? this.directorySnapshotCursor)
+                ) {
+                  this.directoryMessageActivity.set(sessionId, {
+                    cursor,
+                    updatedAt: activity.updatedAt,
+                  });
+                  if (knownSession) this.scheduleMessageActivity();
+                }
+                if (sessionId !== this.selected && this.environment.includesSession(sessionId)) {
+                  this.environmentRevision++;
+                  this.selectedEnvironmentRevision++;
+                  this.scheduleMessageActivity();
+                }
+                return;
+              }
               this.environmentRevision++;
               if (
                 change.sessionId === this.selected &&
@@ -1441,11 +1567,11 @@ export class NativeCaller {
               const historyOnly =
                 !!this.selected &&
                 this.client.serverInfo?.capabilities.includes('message_changes') &&
-                ((change.type === 'message.updated' && change.sessionId === this.selected) ||
+                (messageHistory ||
                   (change.type === 'session.renamed' && change.sessionId !== this.selected) ||
                   (change.type.endsWith('.history_collected') &&
                     change.sessionId !== this.selected));
-              if (historyOnly) {
+              if (historyOnly && !messageHistory) {
                 this.historyHead = {
                   sessionId: this.selected!,
                   selection: this.selection,
@@ -2173,7 +2299,8 @@ export class NativeCaller {
         break;
       case 'outputs.sources':
         result = await this.outputSources.read(generation, request.scope);
-        this.outputDisplayVersions.sources(request.scope.sessionId, result.sources);
+        if (this.outputDisplayVersions.sources(request.scope.sessionId, result.sources))
+          this.changed();
         break;
       case 'outputs.retry': {
         await this.outputSources.retry(generation, {
@@ -4589,6 +4716,13 @@ export class NativeCaller {
                     : item,
                 ),
         };
+        if (result.kind === 'delete') {
+          this.directorySessionIndexes = new Map(
+            this.directory.sessions.map((session, index) => [session.id, index]),
+          );
+          this.directoryMessageActivity.delete(receipt.id);
+          this.directoryNewSessions.delete(receipt.id);
+        }
       }
     }
     const selectionRemoved = result.kind === 'delete' && result.sessionId === this.selected;

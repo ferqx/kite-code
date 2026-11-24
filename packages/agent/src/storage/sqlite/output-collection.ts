@@ -14,7 +14,7 @@ import { artifactReferenceInTransaction, assertArtifactSessionScope } from './ar
 import { actualRoot } from './execution-group-safety';
 import { forkSourceProjection } from './fork-readonly-sources';
 import type { SqliteOperations } from './operations';
-import { readOutputFileIndex } from './output-file-index';
+import { outputProducerRun, readOutputFileIndex } from './output-file-index';
 
 const namespace = 'builtin.files';
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -198,31 +198,9 @@ export function outputCollectionOperation(
         !['dispatching', 'running'].includes(String(e.state))
       )
         throw new AgentError('output_producer_invalid');
-      let ancestor = e;
-      let toolId = '';
-      const visited = new Set<string>();
-      while (ancestor.run_id === null) {
-        if (!ancestor.parent_execution_id || visited.size >= 32 || visited.has(String(ancestor.id)))
-          throw new AgentError('output_source_invalid');
-        visited.add(String(ancestor.id));
-        const parent = db.row('SELECT * FROM execution WHERE id=?', ancestor.parent_execution_id);
-        if (
-          !parent ||
-          parent.session_id !== e.session_id ||
-          parent.root_work_command_id !== e.root_work_command_id ||
-          parent.root_work_seq !== e.root_work_seq ||
-          parent.origin_store_id !== e.origin_store_id
-        )
-          throw new AgentError('output_source_invalid');
-        ancestor = parent;
-        if (parent.kind === 'tool') toolId = String(parent.id);
-      }
-      const run = db.row(
-        'SELECT r.*,c.seq AS origin_seq FROM run r JOIN command c ON c.id=r.origin_command_id WHERE r.id=?',
-        ancestor.run_id!,
-      );
-      if (!run || run.session_id !== e.session_id || run.origin_store_id !== e.origin_store_id)
-        throw new AgentError('output_source_invalid');
+      const source = outputProducerRun(db, e);
+      if (!source) throw new AgentError('output_source_invalid');
+      const { run, toolId } = source;
       const key = `collection/${seq(String(run.origin_seq))}/${e.id}`;
       const prior = readCollection(db, input.sessionId, key);
       if (prior) {
@@ -244,7 +222,7 @@ export function outputCollectionOperation(
           runId: String(run.id),
           runOriginSeq: String(run.origin_seq),
           producerExecutionId: String(e.id),
-          producerToolExecutionId: toolId || String(ancestor.id),
+          producerToolExecutionId: toolId,
           producerResultRevision: null,
         },
         allocation: {

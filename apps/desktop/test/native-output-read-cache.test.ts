@@ -3,21 +3,21 @@ import { NativeOutputDisplayVersions } from '../electron/output-display-versions
 import { NativeOutputReadCache } from '../src/native-output-read-cache';
 import { sessionChange } from './native-change.fixture';
 
-test('output display versions follow inactive roots and exact descendants without invalidating unrelated deliveries', () => {
+test('output display versions refresh Run and source data independently of display authority', () => {
   const versions = new NativeOutputDisplayVersions();
-  const revision = (id: string) =>
-    versions.snapshot('store', 'user', id).roots.find((root) => root.sessionId === id)!.revision;
-  const a = revision('a'),
-    b = revision('b');
-  versions.sources('a', [
-    {
-      sessionId: 'child',
-      runId: 'child-run',
-      parentRunId: 'a-run',
-      carrierExecutionId: 'carrier',
-      name: 'same name',
-    },
-  ]);
+  const root = (id: string) =>
+    versions.snapshot('store', 'user', id).roots.find((root) => root.sessionId === id)!;
+  const originalA = root('a');
+  const originalB = root('b');
+  const child = {
+    sessionId: 'child',
+    runId: 'child-run',
+    parentRunId: 'a-run',
+    carrierExecutionId: 'carrier',
+    name: 'same name',
+  };
+  expect(versions.sources('a', [child])).toBe(false);
+  expect(versions.sources('a', [{ ...child, name: 'renamed' }])).toBe(false);
   expect(
     versions.changed({
       ...sessionChange('foreign'),
@@ -25,8 +25,8 @@ test('output display versions follow inactive roots and exact descendants withou
       objectId: 'builtin.files/delivery/foreign',
     }),
   ).toBe(false);
-  expect(revision('a')).toBe(a);
-  expect(revision('b')).toBe(b);
+  expect(root('a')).toEqual(originalA);
+  expect(root('b')).toEqual(originalB);
   expect(
     versions.changed({
       ...sessionChange('child'),
@@ -34,33 +34,76 @@ test('output display versions follow inactive roots and exact descendants withou
       objectId: 'builtin.files/delivery/file',
     }),
   ).toBe(true);
-  expect(revision('a')).toBeGreaterThan(a);
-  expect(revision('b')).toBe(b);
-  const delivered = revision('a');
-  versions.changed({ ...sessionChange('child'), type: 'run.finished' });
-  expect(revision('a')).toBeGreaterThan(delivered);
-  const finished = revision('a');
-  versions.changed({ ...sessionChange('child'), type: 'session.delete_requested' });
-  expect(revision('a')).toBeGreaterThan(finished);
-  expect(revision('b')).toBe(b);
-  const beforePermission = revision('a');
-  versions.changed({ ...sessionChange(null), type: 'host_control.changed' });
-  expect(revision('a')).toBeGreaterThan(beforePermission);
-  expect(revision('b')).toBeGreaterThan(b);
-  const beforeUnknown = revision('a');
-  versions.changed({ ...sessionChange('new-child'), type: 'run.started' });
-  expect(revision('a')).toBeGreaterThan(beforeUnknown);
-  const beforeInterrupted = revision('a');
-  versions.changed({ ...sessionChange('child'), type: 'run.interrupted' });
-  expect(revision('a')).toBeGreaterThan(beforeInterrupted);
-  const beforeFork = revision('b');
+  const delivered = root('a');
+  expect(delivered).toMatchObject({
+    revision: originalA.revision,
+    sourcesRevision: originalA.sourcesRevision,
+    files: [{ sessionId: 'child', revision: expect.any(Number) }],
+  });
+  expect(root('b')).toEqual(originalB);
+  versions.changed({ ...sessionChange('child'), type: 'run.finished', objectId: 'child-run' });
+  const finished = root('a');
+  expect(finished.files).toEqual([
+    ...delivered.files,
+    { sessionId: 'child', runId: 'child-run', revision: expect.any(Number) },
+  ]);
+  expect(finished.revision).toBe(delivered.revision);
+  expect(finished.sourcesRevision).toBe(delivered.sourcesRevision);
+  versions.changed({ ...sessionChange('a'), type: 'run.started', objectId: 'new-run' });
+  const started = root('a');
+  expect(started.files).toEqual([
+    ...finished.files,
+    { sessionId: 'a', runId: 'new-run', revision: expect.any(Number) },
+  ]);
+  expect(started.revision).toBe(finished.revision);
+  expect(started.sourcesRevision).toBe(finished.sourcesRevision);
+  versions.changed({
+    ...sessionChange('a'),
+    type: 'extension.record_updated',
+    objectId: 'builtin.files/delivery/00000000000000000001/producer/file',
+    payload: { outputRunId: 'old-run' },
+  });
+  const lateDelivery = root('a');
+  expect(lateDelivery.files).toEqual([
+    ...started.files,
+    { sessionId: 'a', runId: 'old-run', revision: expect.any(Number) },
+  ]);
+  versions.changed({
+    ...sessionChange('new-child'),
+    type: 'run.started',
+    objectId: 'child-started',
+  });
+  expect(root('a')).toEqual({ ...lateDelivery, sourcesRevision: expect.any(Number) });
+  expect(root('a').sourcesRevision).toBeGreaterThan(started.sourcesRevision);
+  expect(root('b').sourcesRevision).toBeGreaterThan(originalB.sourcesRevision);
+  const beforeFork = root('b');
   versions.changed({ ...sessionChange('fork'), type: 'session.forked' });
-  expect(revision('b')).toBeGreaterThan(beforeFork);
+  expect(root('b').sourcesRevision).toBeGreaterThan(beforeFork.sourcesRevision);
+  expect(root('b').revision).toBe(beforeFork.revision);
+  const beforeExactLoss = root('a').revision;
+  expect(versions.sources('a', [{ ...child, carrierExecutionId: 'different-carrier' }])).toBe(true);
+  expect(root('a').revision).toBeGreaterThan(beforeExactLoss);
+  expect(root('a').files).toEqual([]);
+  const beforeDelete = root('a');
+  versions.changed({ ...sessionChange('child'), type: 'session.delete_requested' });
+  expect(root('a').revision).toBeGreaterThan(beforeDelete.revision);
+  expect(root('a').files).toEqual([]);
+  expect(root('b').revision).toBe(beforeFork.revision);
+  const beforePermission = root('a').revision;
+  versions.changed({ ...sessionChange(null), type: 'host_control.changed' });
+  expect(root('a').revision).toBeGreaterThan(beforePermission);
+  expect(root('b').revision).toBeGreaterThan(beforeFork.revision);
+  for (let index = 0; index < 70; index++)
+    versions.changed({ ...sessionChange('a'), type: 'run.interrupted', objectId: String(index) });
+  const capped = root('a');
+  expect(capped.filesRevision).toBeGreaterThan(0);
+  expect(capped.files).toHaveLength(5);
+  expect(capped.files.every((file) => file.revision > capped.filesRevision)).toBe(true);
   const beforeReset = versions.snapshot('store', 'user');
   versions.reset();
   expect(versions.snapshot('store', 'user').epoch).toBeGreaterThan(beforeReset.epoch);
   expect(versions.snapshot('store', 'user').roots).toEqual([]);
-  for (let i = 0; i < 30; i++) revision(String(i));
+  for (let i = 0; i < 30; i++) root(String(i));
   expect(versions.snapshot('store', 'user').roots).toHaveLength(12);
 });
 

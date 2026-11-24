@@ -245,6 +245,70 @@ test('real append transaction metadata and original payload roll back atomically
   }
 });
 
+test('Files replay scopes collection and delivery invalidation to the original Run', async () => {
+  const f = await fixture();
+  try {
+    await f.append(0);
+    const owner = (await f.store.acquireSessionOwner('s', 'owner'))!;
+    const run = await f.store.startRun({
+      expectedStoreId: f.input.expectedStoreId,
+      owner,
+      commandId: 'work-0',
+      configuration: {},
+    });
+    for (const kind of ['model', 'tool', 'job'] as const)
+      await f.store.planExecution({
+        expectedStoreId: f.input.expectedStoreId,
+        owner,
+        executionId: kind,
+        sessionId: 's',
+        runId: run.id,
+        originCommandId: 'work-0',
+        stepId: kind,
+        callId: kind,
+        kind: kind === 'job' ? 'tool' : kind,
+        definitionId: 'fixed',
+        definitionVersion: '1',
+        input: { modelId: 'fixed', requestId: kind, messages: [], tools: [] },
+        decisionSource: { kind: 'model_decision', executionId: 'model', callId: kind },
+      });
+    f.db
+      .query(
+        "UPDATE execution SET kind='job',run_id=NULL,parent_execution_id='tool' WHERE id='job'",
+      )
+      .run();
+    const seq = (await f.store.getCommand('work-0'))!.seq;
+    const prefix = String(seq).padStart(20, '0');
+    const after = (await f.store.getMetadata()).lastChangeCursor;
+    // Inject immutable, legacy-format event rows without running a filesystem producer.
+    const cases = [
+      { session: 's', key: `collection/${prefix}/tool`, hint: { outputRunId: run.id } },
+      { session: 's', key: `delivery/${prefix}/tool/file`, hint: { outputRunId: run.id } },
+      { session: 's', key: `collection/${prefix}/job`, hint: { outputRunId: run.id } },
+      { session: 's', key: `delivery/${prefix}/job/file`, hint: { outputRunId: run.id } },
+      { session: 's', key: `collection/${prefix}/model`, hint: null },
+      { session: 's', key: `collection/${'9'.repeat(20)}/tool`, hint: null },
+      { session: 'other', key: `collection/${prefix}/tool`, hint: null },
+    ];
+    for (const [index, entry] of cases.entries()) {
+      await f.append(index + 1, entry.session);
+      f.db
+        .query(
+          "UPDATE change_event SET type='extension.record_updated',object_id=?,payload_json='null' WHERE object_id=? AND type='command.accepted'",
+        )
+        .run(`builtin.files/${entry.key}`, `work-${index + 1}`);
+    }
+    const { events } = await f.store.getChanges({ after, limit: 50 });
+    expect(
+      events
+        .filter((event) => event.type === 'extension.record_updated')
+        .map((event) => event.payload),
+    ).toEqual(cases.map((entry) => entry.hint));
+  } finally {
+    await f.close();
+  }
+});
+
 test('model navigation captures real input metadata, not event name; old metadata cannot acquire navigation or current status', async () => {
   const f = await fixture();
   try {

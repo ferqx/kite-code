@@ -167,7 +167,7 @@ import {
 import { type NativeToolRenderer, renderNativeToolGroup } from './native-tool-renderer';
 import { NativeTrajectory } from './native-trajectory';
 import {
-  desktopTranscript,
+  NativeTranscriptProjection,
   nativePendingInputMessage,
   nativeReplyKey,
   useNativeRuns,
@@ -966,6 +966,7 @@ function NativeDesktopContent({
   const operationDiffs = useRef(new NativeDisplayCache<NativeFileChangeDetail>());
   const [verifiedReplyRevision, renderVerifiedReply] = useState(0);
   const transcriptDisplay = useRef(new NativeTranscriptDisplay());
+  const transcriptProjection = useRef(new NativeTranscriptProjection());
   const interactionDrafts = useRef(
     new Map<
       string,
@@ -1826,6 +1827,11 @@ function NativeDesktopContent({
         generation.current > 0 &&
         event.generation === generation.current
       ) {
+        if (event.kind === 'messages.changed') {
+          if (parentHistoryVisible.current && selected.current === event.sessionId)
+            history.current?.advance(event);
+          return;
+        }
         const nonce = viewIntent.current,
           epoch = readLifecycle.current.epoch;
         void refresh().catch((cause) => {
@@ -4895,11 +4901,17 @@ function NativeDesktopContent({
     // replaced by verified history. Keep its receipt/retry owner intact.
     if (firstSaved) savedFirstInput.current = firstInputIdentity;
   }, [firstSaved, firstInputIdentity]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: The revision invalidates the current-view body map after verified reads and reader disposal.
   const freshTranscript = useMemo(() => {
-    if (!readingParent) return { messages: [] };
-    if (!selection) return { messages: desktopMessages(displayMessages) };
-    return desktopTranscript({
+    if (!readingParent || !selection) {
+      transcriptProjection.current.clear();
+      return { messages: readingParent ? desktopMessages(displayMessages) : [] };
+    }
+    const boundary = JSON.stringify([
+      replyDisplayScope,
+      selection.viewSelection ?? selection.viewGeneration,
+      state?.historyEpoch,
+    ]);
+    return transcriptProjection.current.project(bridge, boundary, verifiedReplyRevision, {
       messages: displayMessages,
       runs: runMessages.runs,
       tools: toolMessages.entries,
@@ -4921,6 +4933,7 @@ function NativeDesktopContent({
       },
     });
   }, [
+    bridge,
     readingParent,
     displayMessages,
     runMessages.runs,
@@ -4929,6 +4942,7 @@ function NativeDesktopContent({
     executionRecords,
     executionObservation,
     replyDisplayScope,
+    state?.historyEpoch,
     verifiedReplyRevision,
   ]);
   const transcriptBoundary = JSON.stringify([
@@ -4965,9 +4979,11 @@ function NativeDesktopContent({
         boundary: transcriptBoundary,
         key: transcriptKey,
         messages: displayMessages,
-        replies: displayMessages.map((message) =>
-          verifiedReplyBodies.current.get(JSON.stringify([replyDisplayScope, message.id])),
-        ),
+        replies: verifiedReplyBodies.current.size
+          ? displayMessages.map((message) =>
+              verifiedReplyBodies.current.get(JSON.stringify([replyDisplayScope, message.id])),
+            )
+          : [],
         transcript: freshTranscript,
         loading: transcriptLoading,
         unavailable: transcriptUnavailable,

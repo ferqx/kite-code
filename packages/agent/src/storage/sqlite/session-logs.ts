@@ -120,6 +120,23 @@ export function unwrapChangePayload(value: Json): Json {
   // A reserved wrapper is never public payload, even when a future or malformed metadata version is unreadable.
   return Object.hasOwn(value, 'payload') ? value.payload! : null;
 }
+
+/** The directory and the durable message notification share one stored timestamp. */
+export function messageChangePayload(value: Json): Json {
+  const original = unwrapChangePayload(value);
+  if (
+    original !== null ||
+    !obj(value) ||
+    value.format !== 'kite.session-log' ||
+    value.version !== 1 ||
+    value.payload !== null ||
+    typeof value.occurredAt !== 'number' ||
+    !Number.isSafeInteger(value.occurredAt) ||
+    Number.isNaN(new Date(value.occurredAt).getTime())
+  )
+    return original;
+  return { updatedAt: value.occurredAt };
+}
 function modelNavigation(db: SqliteOperations, sessionId: string, execution: Row): string | null {
   if (
     execution.kind !== 'model' ||

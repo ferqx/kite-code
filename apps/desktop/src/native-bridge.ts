@@ -595,13 +595,45 @@ export type NativeState = {
   readonly answerSubmissions?: readonly NativeAnswerMetadata[];
   readonly answerUnavailable?: boolean;
 };
+export type NativeHistoryChange = {
+  readonly kind: 'messages.changed';
+  readonly generation: number;
+  readonly storeId: string;
+  readonly sessionId: string;
+  readonly viewSelection: number;
+  readonly historyEpoch: number;
+  readonly cursor: string;
+};
+
 export type NativeEvent =
   | NativeWorkspaceChangeEvent
+  | NativeHistoryChange
   | { readonly generation: number; readonly kind: 'changed' }
   | { readonly kind: 'lifecycle'; readonly phase: 'quitting' | 'active' };
 
 export function decodeNativeEvent(value: unknown): NativeEvent | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  if ('kind' in value && value.kind === 'messages.changed') {
+    const event = value as Partial<NativeHistoryChange>;
+    if (
+      Object.keys(event).length !== 7 ||
+      !Number.isSafeInteger(event.generation) ||
+      event.generation! < 1 ||
+      !Number.isSafeInteger(event.viewSelection) ||
+      event.viewSelection! < 1 ||
+      !Number.isSafeInteger(event.historyEpoch) ||
+      event.historyEpoch! < 0 ||
+      typeof event.storeId !== 'string' ||
+      !event.storeId ||
+      typeof event.sessionId !== 'string' ||
+      !event.sessionId ||
+      typeof event.cursor !== 'string' ||
+      !/^[1-9][0-9]{0,18}$/.test(event.cursor) ||
+      BigInt(event.cursor) > 9223372036854775807n
+    )
+      return;
+    return event as NativeHistoryChange;
+  }
   if ('kind' in value && value.kind === 'workspaceChanges.changed') {
     const event = value as Partial<NativeWorkspaceChangeEvent>;
     const scope = event.scope;

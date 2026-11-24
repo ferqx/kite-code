@@ -222,6 +222,8 @@ export class NativeDirectoryProjection {
 
 /** Keep one complete business message at the original input's position in this reading. */
 export function desktopConversationMessages(messages: readonly Message[]): Message[] {
+  if (!messages.some((message) => message.humanInput?.duplicateOfMessageId))
+    return messages.slice();
   const byId = new Map(messages.map((message) => [message.id, message]));
   const replacements = new Map<string, Message>();
   const relocated = new Set<string>();

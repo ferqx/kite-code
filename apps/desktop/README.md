@@ -1293,7 +1293,13 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 桌面会话在一个滚动区呈现完整时间线。Native 沿固定水位在后台读取，长正文使用原消息的有界预览和分块读取。思维链首次展开时才构造工具与思考明细，已读正文在后台读取恢复期间保留。旧窗口和轮次占位的性能数据保留为历史记录。
 
-长会话首次构建允许新的侧栏选择打断。消息节点保留在同一正文区，浏览器按阅读位置布局离屏条目，支持原生全选、跳转到任意已读消息和恢复锚点。工具匹配先按消息、执行和原调用身份建立索引，再核对来源与版本。轮次接近阅读区时立即查询产物。[轮次文件卡](src/native-output-files.tsx)在历史首次呈现时，等待阅读范围内已完成轮次的来源和产物页核实结束，再一起显示正文与文件卡。已有有效缓存时直接显示。回复节点预先保留原布局。读取失败、当前读取资格失效或轮次离开阅读范围时释放呈现，后到的有效产物补在原轮次。首次呈现后新增的回复直接显示，附件核实后再补齐。 [浏览器逐帧回归](test/native-history-presentation-browser-runner.fixture.ts)的 `--turn-outputs` 覆盖静态慢读同帧、实时正文先显示、失败恢复与回切。轮次文件卡和「输出」栏的翻页由用户操作触发，查询失败后沿原退避重试。[读取回归](test/isolated/native-output-files-dom.test.tsx)核对轮次进入可读范围即查询，以及菜单、分页和切换来源。已读卡片随原页面保留。重新挂载时，当前来源仍有效的父轮和子来源卡片可在历史校验期间从缓存显示，不发起轮次查询。离开阅读区后暂停新的轮次查询。「输出」栏独立读取会话及获准子来源。相关实现见[会话展示](../../packages/ui/src/desktop/Conversation.tsx)、[工具与轮次投影](src/native-transcript.ts)和[产物读取](src/native-output-files.tsx)。
+长会话首次构建允许新的侧栏选择打断。消息节点保留在同一正文区，浏览器按阅读位置布局离屏条目，支持原生全选、跳转到任意已读消息和恢复锚点。工具匹配先按消息、执行和原调用身份建立索引，再核对来源与版本。历史保留已排序的消息位置索引，同序号改写只替换对应位置，尾部新消息沿核实的分页顺序追加，旧位置增删或重新基线仍按完整位置校验。只改当前已可见、未完成助手回复的正文或正文预览字节数时，Native 复用已投影的历史行。执行状态、工具、压缩、完整正文凭据、选择或旧消息变化时沿原投影处理。轮次接近阅读区时立即查询产物。[轮次文件卡](src/native-output-files.tsx)在历史首次呈现时，等待阅读范围内已完成轮次的来源和产物页核实结束，再一起显示正文与文件卡。已有有效缓存时直接显示。回复节点预先保留原布局。普通重读失败时保留同一权限与来源内已经核实的文件。轮次离开阅读范围时暂停新查询，读取资格失效时撤下原呈现。后到的有效产物补在原轮次。首次呈现后新增的回复直接显示，附件核实后再补齐。 [浏览器逐帧回归](test/native-history-presentation-browser-runner.fixture.ts)的 `--turn-outputs` 覆盖静态慢读同帧、实时正文先显示、失败恢复与回切。轮次文件卡和「输出」栏的翻页由用户操作触发，查询失败后沿原退避重试。[读取回归](test/isolated/native-output-files-dom.test.tsx)核对轮次进入可读范围即查询，以及菜单、分页和切换来源。已读卡片随原页面保留。Main 按原 Run 标记执行生命周期和已核实来源的产物变化。若原事件缺少可核实 Run 身份，则按已核来源会话重新读取。普通校准保留原来源与同权限的已核文件页，核实新结果后更新原位置。连接或权限变化、来源或会话被撤销时立即失效。重新挂载时，当前来源仍有效的父轮和子来源卡片可在历史校验期间从缓存显示，不发起轮次查询。离开阅读区后暂停新的轮次查询。「输出」栏独立读取会话及获准子来源。相关实现见[会话展示](../../packages/ui/src/desktop/Conversation.tsx)、[工具与轮次投影](src/native-transcript.ts)和[产物读取](src/native-output-files.tsx)。
+
+2026-11-24，Windows x64／Chrome 158 的隔离渲染器通过 [轮次文件浏览器夹具](test/native-history-presentation-browser-runner.fixture.ts) 的深浅主题回归。模拟新轮开始、完成和同源文件变更，旧文件卡在重读挂起到新页到达的 150 帧保留原节点、尺寸和阅读位置。新轮开始与完成未发旧轮查询，缺 Run 身份的文件事件各主题按同来源重读一次。报告为本机 `.cache/native-history-presentation-ds1D8a/report.json`。
+
+同日另采 Windows Electron 的 40 轮与 800 条折叠工具消息、图片预览和办公预览三个隔离样本。工具历史核完整读取与切回，图片核四种格式、数种大图和来源撤销，办公窗口核交互与预览销毁。进程与可用的堆或 DOM 采样分别归 `.cache/initial-render-prod-oDcXQ3/report.json`、`.cache/image-display-electron-75VLWe/report.json` 与 `.cache/desktop-office-memory.json`。样本属于独立窗口，不能还原原会话运行轨迹。
+
+截图时段的本机日志经只读脱敏提取，用 Windows 隔离 Electron 回放同一轮，覆盖 160 条消息更新与 17 条已核对来源的收集和交付事件。启用定向通知后，旧轮次产物查询由 24 次降至 0 次。同一旧卡在手动上翻的 3273 帧均保持原节点与位置。自动跟随单独核对，容器滚动位移与卡片的视口位移逐帧相抵。回放使用替代正文和文件名，采样报告在本机 `.cache/session-log-replay-9U9xL9/report.json`。
 
 2026-11-18，M4 Pro 上的生产 Electron 44.3 隔离夹具从点击测到合成器首个可读帧，180 轮由 599 ms 降至 225 ms，600 轮由 1,848 ms 降至 576 ms。构建 600 轮时再次选择小会话，点击排队由 1,749 ms 降至 8 ms，新目标在这次点击后 27 ms 可读。小会话缓存命中的 100 次切换 P95 为 31.22 ms。冷切换报告在本机 `.cache/initial-render-prod-ywaSlR`，缓存切换报告在 `.cache/session-cache-performance-production-85r4pH`。[真实 Service 与 SQLite 回归](test/isolated/native-history-electron.test.ts)另核对 5,051 条历史、超长回复分段阅读、迟到分页和两次物理断线后的恢复。
 
@@ -1302,6 +1308,8 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 思考展开期间，内联思考和长思考都按原消息的思考字节数补读。只有回复正文增长时沿用已显示的思考，同一模型后来追加思考时原位更新。旧 Service 省略内联字节数时按该消息的变更补读。读取期间积累的更新合并为一次最新补读，切走、收起或失去读取资格即撤销原读取。双活动会话回归核对实际 Model 输出请求次数，并将两条最终回复中的片段逐一与对应输出端比对。
 
 [历史读取](src/native-history.ts)在固定水位完整读到后单独标记正文可展示。后续持久变更继续补入原时间线，发送、停止和审批仍等待原有完整校验。[延迟正文](src/native-message-text.tsx)在消息处于可视范围且原读取资格有效时后台重试临时读取失败，离开视区或失去资格时停止重试。替换预览前仍核对消息身份与正文摘要，并沿用原阅读锚点。回归覆盖[持续生成中的冷打开](test/isolated/native-history-presentation-dom.test.tsx)和[可见正文的后台恢复](test/isolated/native-message-text-dom.test.tsx)。
+
+2026-11-24，Windows x64／Electron 44.3 隔离窗口验证 180 和 600 轮的流式正文、终态接管、注入读取失败后恢复、全选和返回历史位置。手动阅读采样的锚点位移为 0 CSS 像素。600 轮内存对照在清除夹具的节点引用后采样，返回小会话的已收集 DOM 计数均为 368。隔离渲染器的私有提交随阶段和样本变化，原会话的高内存来源仍待核实。资料位于本机 `.cache/initial-render-prod-stqhgc/` 与 `.cache/initial-render-prod-blBdO1/`。纯投影微基准仅计稳定执行与工具元数据下的正文变化。150 个样本的 600 和 2500 轮 P95 分别从 2.443 和 19.909ms 降至 0.020 和 0.189ms。IPC、React 与绘制耗时需另行测量。
 
 2026-11-14，Windows x64 的隔离 Electron 夹具以 `--electron --turns=180 --churn` 核对 360 条消息。首个可读画面约 1.16 秒，随后看到流式正文原位更新，停止流式更新前完成三次增量读取。报告和过程帧在本机 `.cache/initial-render-prod-YzulKY/`。该样本使用合成传输，正文断点和旧读取迟到由上述 DOM 回归注入。
 
@@ -1495,15 +1503,17 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 
 2026-11-09，Windows／Bun1.4.4：同会话Loop刷新不再主动关闭权限、模型和附件弹层，操作资格暂缓与Full原确认失效仍独立核验；模型弹层按稳定会话scope关闭，不按临时读取状态关闭。上下文读取失败／空结果后台退避恢复，离开范围取消重试。UI25项、Native数值IPC34项及上下文DOM6项共65项覆盖未变化的弹层与读取恢复。最终Core冷读与Service子Loop两个完整文件13项／123断言通过，核同一数据冷读前后计数一致及无新增metadata字段。Desktop／UI／Agent／Service类型和八workspace静态边界通过。Chrome156隔离生产组件与模拟桥接在深浅主题、500／1440px四组合中，让三种弹层各经历三次刷新开／关，共432帧均保留原节点和可见性；同轮权限等待72帧、公共表单／开关检查保持通过，共10组。截图与报告归本机 `.cache/session-shell-browser-4FNgcM`、`.cache/loop-popover-context-review-20261109.json`。Core复用原模型请求中已经封存的工具正文，并核对既有Store／Session／Run、调用、消息来源及不可变终态结果；不新增metadata字段，不改变统计数据结构，不重新执行工具或调用现在的格式器。主／子Agent及Run／step工具共用该通用路径，新增工具无需登记。相同事实在运行中、结束后和重启后保持同一统计口径；确实缺少原请求或来源冲突时才不可估算。本机原会话使用现有数据库只读回验得到42944／262144 tokens（约16%），业务游标不变；这验证原数据可用，运行中的客户端界面是否采用当前后端另行核对。
 
-[NativeDesktop](src/native.tsx)通过 [useNativeContextUsage](src/native-context-usage.ts)向共享 [Composer](../../packages/ui/src/desktop/Composer.tsx)传只读上下文估算。圆环的比例固定为 totalInputTokens / contextWindowTokens，分母是最近已保存原请求所属冻结模型的完整窗口，不能使用累计缓存率、累计输入或API中扣除输出预留后的 utilization。浮层标明约数，显示上下文已用与总容量；窗口容量未知时显示未知，尚无可用原请求、数据失效或读取失败时清除旧数值，原圆环保留空轨道并标明未知；新对话缺少上下文数据时隐藏圆环与浮层，已有会话仍保留未知状态。累计缓存命中率与命中／总量放在同一圆环的提示中，不单独显示工具栏文字。模型入口与圆环相隔8px，宿主已提供模型时不再渲染空名称节点；模型弹层默认top-center并保留视口避让。圆环由共享 Composer 直接渲染为无点击操作的状态图标，保留悬停与键盘聚焦的详情提示。首次打开目标会话时，两路 hook 分别返回读取待定状态，Native 在历史及所需指标读取结束前通过`metricsLoading`保留同一组节点，显示空圆环，随后一次接管目标数据；已有对应已核实样本时继续直接恢复。真实失败、无样本或无可用估算会结束占位，无缓存样本时提示明确显示暂无数据，圆环仍保留，原错误事实保持，输入、权限与停止资格不等待指标。上下文无可用结果也沿原有界缓存记住对应消息／模型的只读展示状态，避免返回时重新插入占位；读取失败或终态尚未取得估算时，从500ms退避只读重试，最长间隔30秒；切换会话、读取资格撤销或离开时取消计时及原读取。新选择仍重新读取，模型、正文、来源或观察边界变化继续失效。
+[NativeDesktop](src/native.tsx)通过 [useNativeContextUsage](src/native-context-usage.ts)向共享 [Composer](../../packages/ui/src/desktop/Composer.tsx)传只读上下文估算。圆环的比例固定为 totalInputTokens / contextWindowTokens，分母是最近已保存原请求所属冻结模型的完整窗口，不能使用累计缓存率、累计输入或API中扣除输出预留后的 utilization。浮层标明约数，显示上下文已用与总容量；窗口容量未知时显示未知。尚无可用估算时，原圆环保留空轨道，已核实的同模型窗口继续显示，当前估算显示未知；新对话缺少上下文数据时隐藏圆环与浮层，已有会话仍保留未知状态。累计缓存命中率与命中／总量放在同一圆环的提示中，不单独显示工具栏文字。模型入口与圆环相隔8px，宿主已提供模型时不再渲染空名称节点；模型弹层默认top-center并保留视口避让。圆环由共享 Composer 直接渲染为无点击操作的状态图标，保留悬停与键盘聚焦的详情提示。首次打开目标会话时，两路 hook 分别返回读取待定状态，Native 在历史及所需指标读取结束前通过`metricsLoading`保留同一组节点，显示空圆环，随后一次接管目标数据；已有对应已核实样本时继续直接恢复。真实失败、无样本或无可用估算会结束占位，无缓存样本时提示明确显示暂无数据，圆环仍保留，原错误事实保持，输入、权限与停止资格不等待指标。上下文无可用结果也沿原有界缓存记住对应消息／模型的只读展示状态，避免返回时重新插入占位；读取失败或终态尚未取得估算时，从500ms退避只读重试，最长间隔30秒；切换会话、读取资格撤销或离开时取消计时及原读取。新选择仍重新读取，模型、正文、来源或观察边界变化继续失效。
 
 2026-11-05，Windows x64／Bun1.4.4：首次打开的隔离 Native 页面修前记录为70%／2%→两项消失→30%／4%；修后深浅主题在选择、模型准备、历史读取、两路指标分别返回及缓存往返的400帧中始终只有一组原指标节点，依次为原会话数值、静态读取状态、目标会话数值。18张阶段截图已目视核对；历史就绪而指标仍待定时，输入可编辑、原停止按钮可用。原会话页、缓存、上下文和输入编辑四个完整文件31项／425断言通过，包含失败结束占位及后续重新打开恢复；Desktop／UI类型和定向Biome通过。原始修前记录、修后逐帧数据与截图在本机`.cache/metrics-switch/`。该结果覆盖生产编译样式与实际Native组件的隔离浏览器过程，不扩大完整Electron窗口、安装或其他平台资格。
 
-[Main reader](electron/tool-messages.ts)的 toolMessages.contextUsage沿原有限IPC只接受一个已观察的完整助手Message ID，复用原read lease、关闭与退出释放；核准确当前Store、Session、Run、成功Model Execution、消息正文与来源后，调用现有 getContextEstimate，只回传模型、上下文选择及输入／窗口数字。响应前再核当前View、选择、工作区和原消息；不向Renderer回传上下文正文，不写入、不初始化Provider、不启动模型。这个用户可见的数值展示不开放测试Context面板。API的完整历史预测、实测基线和来源限制归 [Core owner](../../packages/agent/src/context-estimate.README.md)，未发送草稿、重新捕获的项目来源与随后模型／工具配置变化不在该预测内。
+[Main reader](electron/tool-messages.ts)的 toolMessages.contextUsage沿原有限IPC只接受一个已观察的完整助手Message ID，复用原read lease、关闭与退出释放；核准确当前Store、Session、Run、成功Model Execution、消息正文与来源后，调用现有 getContextEstimate，只回传模型、上下文选择及输入／窗口数字。原请求证据不足时，Main 核对准确原 Run 配置中唯一匹配的冻结模型窗口并单独回传，分子保持未知。响应前再核当前View、选择、工作区和原消息；不向Renderer回传上下文正文，不写入、不初始化Provider、不启动模型。这个用户可见的数值展示不开放测试Context面板。API的完整历史预测、实测基线和来源限制归 [Core owner](../../packages/agent/src/context-estimate.README.md)，未发送草稿、重新捕获的项目来源与随后模型／工具配置变化不在该预测内。
 
-Renderer按generation、Store和history epoch清空有界显示缓存，按会话、工作区、context selection保存最多12项，并逐次核对原消息和已选模型；普通读取期间可保留同目标已核实比例，已知模型改变或上下文切换后不沿用原比例。完整消息高水位、原助手消息及阅读身份变化驱动重新估算，普通无关重绘和缓存率变化不触发新读取；迟到响应与失败不发布旧范围，切换、重载和退出取消所属读取。[数值IPC与来源回归](test/native-tool-messages.test.ts)和[占用DOM回归](test/isolated/native-context-usage-dom.test.tsx)分别核只读范围、分母独立、异常计数、迟到取消及显示隔离。
+Renderer按generation、Store和history epoch清空有界显示缓存，按会话、工作区、context selection保存最多12项，并逐次核对原消息和已选模型；普通读取期间可保留同目标已核实比例，已知模型改变或上下文切换后不沿用原比例。完整消息高水位、原助手消息及阅读身份变化驱动重新估算。Main 确认缺少原请求证据后，同一原助手回执的额外工具或流式消息不会重复触发估算。临时失败的重试间隔从 500ms 到 30s，最多重试七次。普通无关重绘和缓存率变化不触发新读取。迟到响应与失败不发布旧范围，切换、重载和退出取消所属读取。[数值IPC与来源回归](test/native-tool-messages.test.ts)和[占用DOM回归](test/isolated/native-context-usage-dom.test.tsx)分别核只读范围、分母独立、异常计数、迟到取消及显示隔离。
 
 2026-10-20，Windows x64／Bun1.4.3，`5dba8a6b`工作树加本次接线：`bun test --parallel=1 --max-concurrency=1`运行上述数值IPC、占用DOM、原累计缓存DOM与共享页面四个整文件，34项／317断言通过；UI／Desktop类型、15个相关源码／测试的Biome、文档、边界与测试归属检查通过。Chrome155沿实际Composer与Native编译样式核深浅主题各1240／360px四组，覆盖悬停、键盘、Escape、真实零、未知容量及显示独立；另以实际NativeDesktop和明确隔离Main替身核会话切换，缓存70%／30%时圆环分别为68%／20%。未运行本轮安装版IPC窗口或其他平台；前轮已确认的环境停止控件壳层测试既有失败仍不作为本次通过证据。Main数值端口新增后，开发热更新页面不足以加载它，须完全退出并重新启动客户端。
+
+2026-11-24，Windows Chrome 158 使用实际上下文 hook、Composer 和生产样式的隔离桥，206 帧覆盖 68%、看图后的估算未知、持续回复和新回执恢复到 84%。总容量 500、累计缓存 91%、圆环和草稿保持。读请求只发生在已有估算、发现缺证据和下一有效回执三个节点。真实 Runtime 与 SQLite 合成图片用例另核原模型和图片工具时序、零额外图片读取和零模型派发。
 
 ## 原输入区累计缓存命中率
 
@@ -1576,7 +1586,7 @@ Workspace/Session 完整目录分别读取；其间新登记的项目可能还�
 
 [目录 DOM](test/native-directory.test.tsx)与[草稿 DOM](test/isolated/native-drafts-dom.test.tsx)已直接核已有 Sidebar/实际 NativeDesktop：同名会话准确项目/原 ID、空项目、独立折叠零写、项目列表焦点零选择、创建期间阅读、晚项目保留与迟到创建保后来选择/草稿。新目录 DOM 另核真实时间排序、5/+10 展示、全局待输入／普通运行状态和旧事实保留；Main 有限 port 核第201项之后的非选中变化、失败保目录、慢读取不挡选择及 detach 迟到拒绝。源码外默认 macOS [窗口](test/isolated/native-bundle.test.ts)实际核审批期间切到另一会话、原目录 Badge／准确 Run／时间／排序、原卡返回、Provider 不增加与冷时间保留。具体输入和结果归[本片进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-全局会话状态与时间排序)，不以有限 DOM 宣称完整 installed/跨平台资格。
 
-Main 对目录与所选会话分别保留一个在途读取和一个后继通知位，读取结束后合并100ms内的连续变化；所选会话的后继读取不再额外刷新目录。显式选择与原命令操作不等待该合并窗口，慢目录仍不阻塞所选会话。reset 后先读原事实与历史，ready 高水位等于该 baseline 时不重复读取，也不将 snapshot 当作已应用事件游标。同一阅读范围的历史刷新保留原消息组件和已展开全文，真实 attach／选择／history epoch 变化才释放原全文状态；加载中写资格仍按原门禁撤除。取舍见[刷新修复](../../.agents/notes/implemented/bug-fix/2026-10-08-native-observation-output-refresh.md)，原17MiB管理窗口与直接回归结果见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08native-大输出刷新与全文保留)。
+Main 对目录与所选会话分别保留一个在途读取和一个后继通知位，读取结束后合并100ms内的连续变化。普通正文保存通过选择范围内的游标通知唤醒历史增量，历史 reader 合并在途的后续游标。较新正文的已核保存时间可直接更新目录顺序，目录呈现最多每250ms通知一次。目录完整读取按快照游标接管，保留后续已核时间。旧 Service 缺少同一时间事实时继续读取目录。显式选择与原命令操作不等待该合并窗口，慢目录仍不阻塞所选会话。reset 后先读原事实与历史，ready 高水位等于该 baseline 时不重复读取，也不将 snapshot 当作已应用事件游标。同一阅读范围的历史刷新保留原消息组件和已展开全文，真实 attach／选择／history epoch 变化才释放原全文状态；加载中写资格仍按原门禁撤除。取舍见[刷新修复](../../.agents/notes/implemented/bug-fix/2026-10-08-native-observation-output-refresh.md)，原17MiB管理窗口与直接回归结果见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08native-大输出刷新与全文保留)。
 
 ## Native 空间批量移除
 
@@ -1779,6 +1789,8 @@ macOS 上的 Chrome 隔离夹具使用正式会话组件、生产样式和受控
 2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 加本轮工作区改动：[目录](test/native-directory.test.tsx)新增同会话校准保运行标记及真实失败／foreign Store 反例，[停止竞态](test/isolated/native-environment-stop-dom.test.tsx)新增普通刷新保节点、空列表不插加载段、禁用零写及真实失败。原实现分别复现运行标记被撤下、环境卡加“上次状态”并移除停止按钮，以及空列表插加载段；修复后相关整文件通过。Chrome 155 隔离夹具使用实际目录适配、共享 SessionPage／Composer 与环境 hook，亮暗主题、1240／800／500px、空／非空目录下原环境卡高度变化为4／48px，修复后文字、按钮数、可见侧栏运行标记和所有受测几何／滚动保持；每次选择一次、后台读取继续、零停止写入。500px 原侧栏未挂载，不将该场景计作侧栏视觉证据。完整安装窗口、其他平台及全量默认测试未运行；原嵌套 `@keyframes` 编译提示保留。
 
 [环境适配](src/native-environment.tsx)保留上次完整目录中的停止按钮和空分组文案。执行权待核实、目录正在更新或暂时失效时，原按钮保持禁用；停止仍要求原范围的新鲜完整观察与 Main 的准入复核。重新取得资格后复用原按钮，目录确认终态后撤除。[停止竞态回归](test/isolated/native-environment-stop-dom.test.tsx)核同一运行中子 Agent 多次失联恢复间的原行、详情和停止节点、禁用零写及随后完成。
+
+2026-11-24，Windows x64 使用独立 Electron 源码制品、配套 Service、SQLite 和本机合成 Provider 验证三个 Job 并发、自然退出、后台总览准确取消、Main 故障后原树退出和冷开零重放，以及 Service 故障后原树退出。自然退出、取消和配套 Service 能收尾的 Main 故障保存清理确认。直接强杀 Service 时只核实实际进程已退出，原记录未取得清理确认。阶段记录在本机 `.cache/windows-shell-window-wfmCMC/windows-shell-stages.jsonl`。
 
 2026-11-15 Windows x64，基于 `65ce50cec` 对照本次修复。Chrome 隔离夹具使用正式 SessionPage、样式与环境 hook，在打开子详情后模拟三轮执行权待核实、目录失联、挂起重读和恢复，最后发布任务完成。修复前停止按钮消失、运行状态右移 58 CSS px，失联时 Shell「空闲」改为「状态未知」。修复后 126 个渲染帧采样中，终态发布前卡片、行、按钮、参考区及草稿几何稳定，父阅读滚动位置保持，子详情保留原节点。阶段截图核对了文案和最终「已完成」。该范围使用受控观察数据和 Chrome 渲染，未覆盖真实模型或 Electron 窗口合成。
 

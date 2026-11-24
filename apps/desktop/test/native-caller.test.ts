@@ -3699,6 +3699,116 @@ test('main shutdown and directory exhaust admitted SDK pages: activity beyond 20
   }
 });
 
+test('streamed message events split selected history from the directory and preserve the newest saved time across a concurrent refresh', async () => {
+  const port = client();
+  port.serverInfo!.capabilities.push('sessions', 'session_directory_activity', 'message_changes');
+  let observe!: Parameters<AgentClient['observe']>[0];
+  let directoryReads = 0,
+    snapshot = '1',
+    savedTime: number | null = null,
+    hold = false;
+  let entered!: () => void;
+  const enteredRead = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: () => void;
+  const heldRead = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const getView = port.getView.bind(port);
+  Object.assign(port, {
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      observe = options;
+      await options.onReady?.({ storeId: 'store', replayFloor: '0', highWaterCursor: '1' });
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+    async getView(id: string) {
+      return { ...(await getView(id)), snapshotCursor: '1' };
+    },
+    async listAllSessionDirectory(options: { onSnapshot(cursor: string): void }) {
+      directoryReads++;
+      const cursor = snapshot,
+        updatedAt = savedTime;
+      if (hold) {
+        entered();
+        await heldRead;
+      }
+      options.onSnapshot(cursor);
+      return await Promise.all(
+        ['s', 'other'].map(async (id, index) => ({
+          seq: String(index + 1),
+          session: (await getView(id)).session,
+          activity: {
+            updatedAt: id === 's' ? updatedAt : 150,
+            pendingInteractions: 0,
+            queued: false,
+            run: null,
+          },
+        })),
+      );
+    },
+  });
+  const events: NativeEvent[] = [];
+  const caller = new NativeCaller(port, (event) => events.push(event));
+  const notify = (sessionId: string, cursor: number, updatedAt?: number) =>
+    observe.onChange({
+      ...sessionChange(sessionId, String(cursor)),
+      type: 'message.updated',
+      payload: updatedAt === undefined ? null : { updatedAt },
+    });
+  const time = () => caller.state().directory?.sessions[0]?.activity?.updatedAt;
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    await caller.invoke({ method: 'directory', generation: 1 });
+    await Bun.sleep(150);
+    const initialReads = directoryReads;
+    const epoch = caller.state().historyEpoch!;
+    const selection = caller.state().selection!.viewSelection!;
+    events.length = 0;
+    await notify('s', 2, 200);
+    await notify('child', 3, 300);
+    for (let cursor = 4; cursor < 54; cursor++) await notify('s', cursor, cursor * 100);
+    const history = events.filter((event) => event.kind === 'messages.changed');
+    expect(history).toHaveLength(51);
+    expect(history.at(-1)).toEqual({
+      kind: 'messages.changed',
+      generation: 1,
+      storeId: 'store',
+      sessionId: 's',
+      viewSelection: selection,
+      historyEpoch: epoch,
+      cursor: '53',
+    });
+    expect(events.filter((event) => event.kind === 'changed')).toHaveLength(0);
+    await waitForCallerState(caller, () => time() === 5300);
+    expect(events.filter((event) => event.kind === 'changed')).toHaveLength(1);
+    expect(directoryReads).toBe(initialReads);
+
+    snapshot = '53';
+    savedTime = 5300;
+    hold = true;
+    const reading = caller.invoke({ method: 'directory', generation: 1 });
+    await enteredRead;
+    // The system clock may have moved backwards since the snapshot. Cursor wins.
+    await notify('s', 54, 125);
+    release();
+    await reading;
+    expect(time()).toBe(125);
+    hold = false;
+    snapshot = '55';
+    savedTime = 180;
+    await notify('s', 55); // older Service sends a null payload
+    await waitForCallerState(caller, () => time() === 180);
+    expect(directoryReads).toBe(initialReads + 2);
+  } finally {
+    release();
+    await caller.close();
+  }
+});
+
 test('global activity refresh follows non-selected changes, retains failed observations, and never blocks selected reading or revives a detached read', async () => {
   const port = client();
   port.serverInfo!.capabilities.push('session_directory_activity');
@@ -5199,7 +5309,8 @@ test('parent output IPC preserves child identity, refreshes late files and rejec
     );
   };
   const child = backgroundItem(1, true);
-  port.listAllBackgroundExecutions = async () => [structuredClone(child)];
+  let childAdmitted = true;
+  port.listAllBackgroundExecutions = async () => (childAdmitted ? [structuredClone(child)] : []);
   port.listBackgroundExecutions = async () => ({ items: [structuredClone(child)] }) as never;
   const file = {
     storeId: 'store',
@@ -5225,7 +5336,8 @@ test('parent output IPC preserves child identity, refreshes late files and rejec
   };
   port.resolveOutputFile = async () =>
     ({ summary: file, reference: { hash: 'a'.repeat(64), size: '4' } }) as never;
-  const caller = new NativeCaller(port, () => {}, memoryPrivateData());
+  const events: NativeEvent[] = [];
+  const caller = new NativeCaller(port, (event) => events.push(event), memoryPrivateData());
   try {
     const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
     await caller.invoke({ method: 'select', generation, sessionId: 'root' });
@@ -5324,25 +5436,47 @@ test('parent output IPC preserves child identity, refreshes late files and rejec
     await caller.invoke({ method: 'outputs.info', generation, target });
     finish(undefined);
     await expect(saving).rejects.toThrow('output_scope_unavailable');
-    const displayRevision = (sessionId: string) =>
-      caller.state().outputFilesDisplay!.roots.find((root) => root.sessionId === sessionId)!
-        .revision;
-    const beforeBackground = displayRevision('root');
+    const displayRoot = (sessionId: string) =>
+      caller.state().outputFilesDisplay!.roots.find((root) => root.sessionId === sessionId)!;
+    const beforeBackground = displayRoot('root');
     await caller.invoke({ method: 'select', generation, sessionId: 'other-root' });
-    const otherRevision = displayRevision('other-root');
+    const otherRoot = displayRoot('other-root');
     await observe.onChange?.({
       ...sessionChange('child', '3'),
       type: 'extension.record_updated',
       objectId: 'builtin.files/delivery/late',
     });
-    expect(displayRevision('root')).toBeGreaterThan(beforeBackground);
-    expect(displayRevision('other-root')).toBe(otherRevision);
-    const beforeDeleted = displayRevision('root');
+    expect(displayRoot('root')).toMatchObject({
+      revision: beforeBackground.revision,
+      sourcesRevision: beforeBackground.sourcesRevision,
+      files: [{ sessionId: 'child', revision: expect.any(Number) }],
+    });
+    expect(displayRoot('other-root')).toEqual(otherRoot);
+    await caller.invoke({ method: 'select', generation, sessionId: 'root' });
+    const readSources = () =>
+      caller.invoke({
+        method: 'outputs.sources',
+        generation,
+        scope: { storeId: 'store', sessionId: 'root' },
+      });
+    const beforeDiscovery = displayRoot('root').revision;
+    await readSources();
+    const beforeSourceLoss = events.length;
+    expect(displayRoot('root').revision).toBe(beforeDiscovery);
+    childAdmitted = false;
+    await expect(readSources()).resolves.toMatchObject({ kind: 'outputs.sources', sources: [] });
+    expect(displayRoot('root').revision).toBeGreaterThan(beforeDiscovery);
+    expect(events.slice(beforeSourceLoss)).toContainEqual({ kind: 'changed', generation });
+    const afterSourceLoss = displayRoot('root').revision;
+    childAdmitted = true;
+    await readSources();
+    expect(displayRoot('root').revision).toBe(afterSourceLoss);
+    const beforeDeleted = displayRoot('root').revision;
     await observe.onChange?.({ ...sessionChange('child', '4'), type: 'session.delete_requested' });
-    expect(displayRevision('root')).toBeGreaterThan(beforeDeleted);
-    const beforeRevoked = displayRevision('root');
+    expect(displayRoot('root').revision).toBeGreaterThan(beforeDeleted);
+    const beforeRevoked = displayRoot('root').revision;
     await observe.onChange?.({ ...sessionChange('root', '5'), type: 'permission.grants.cleared' });
-    expect(displayRevision('root')).toBeGreaterThan(beforeRevoked);
+    expect(displayRoot('root').revision).toBeGreaterThan(beforeRevoked);
     expect(caller.state().outputFilesDisplay).toMatchObject({
       storeId: 'store',
       subjectId: 'local-user',

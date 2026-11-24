@@ -5,7 +5,7 @@ import { NativeOutputDisplayVersions } from '../../electron/output-display-versi
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
 import { sessionChange } from '../native-change.fixture';
 
-test('shared output views restore unchanged turns immediately while invalidating changed, revoked and replacement scopes', async () => {
+test('shared output views refresh only affected windows and retire revoked or replacement scopes', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -88,6 +88,7 @@ test('shared output views restore unchanged turns immediately while invalidating
         return { kind: 'outputs.sources', scope: request.scope, sources };
       }
       if (request.method === 'outputs.query') {
+        const name = `${owner}-${request.scope.sessionId}-${content}.txt`;
         if (pendingReplacement) await pendingReplacement;
         return {
           kind: 'outputs.page',
@@ -102,7 +103,7 @@ test('shared output views restore unchanged turns immediately while invalidating
                 ownerRunId: request.runId ?? 'run',
                 fileId: 'file',
                 locator: { kind: 'delivery', key: 'delivery/1/producer/file' },
-                name: `${owner}-${request.scope.sessionId}-${content}.txt`,
+                name,
                 size: '1',
                 mediaType: 'text/plain',
                 publishedAt: '2026-11-16T00:00:00Z',
@@ -189,6 +190,19 @@ test('shared output views restore unchanged turns immediately while invalidating
     await render('a', 99);
     await settle();
     expect(calls).toHaveLength(count);
+    const previousCards = [...cards()];
+    versions.changed({ ...sessionChange('a'), type: 'run.started', objectId: 'unrelated-run' });
+    await render('a');
+    versions.changed({ ...sessionChange('a'), type: 'run.finished', objectId: 'unrelated-run' });
+    await render('a');
+    expect([...cards()]).toEqual(previousCards);
+    expect(calls.slice(count).map((request) => request.method)).toEqual([
+      'outputs.query',
+      'outputs.query',
+    ]);
+    expect(
+      calls.slice(count).every((request) => request.method === 'outputs.query' && !request.runId),
+    ).toBe(true);
     await render('b');
     await settle();
     expect(document.body.textContent).not.toContain('user-a-old.txt');
@@ -227,19 +241,19 @@ test('shared output views restore unchanged turns immediately while invalidating
     showCold = false;
     await render('a');
     // SessionPage may retain the original React elements while a new selection is pending.
-    // Their old props must observe invalidation, not revive a prior revision on activation.
+    // A background Run lifecycle change keeps the authorized old page through the handoff.
     freeze = true;
     await render('b');
     expect(document.body.textContent).toContain('user-a-child-old.txt');
-    versions.changed({ ...sessionChange('a-child'), type: 'run.finished' });
+    versions.changed({ ...sessionChange('a-child'), type: 'run.finished', objectId: 'child-run' });
     await render('b');
-    expect(cards()).toHaveLength(0);
-    expect(document.body.textContent).not.toContain('user-a-child-old.txt');
+    expect(cards()).toHaveLength(3);
+    expect(document.body.textContent).toContain('user-a-child-old.txt');
     freeze = false;
     await render('a');
     await settle();
     expect(cards()).toHaveLength(3);
-    // A background child updates A while B is selected; A must not revive its old window.
+    // A late child file refreshes the original window without dropping the primary card.
     await render('b');
     content = 'new';
     versions.changed({
@@ -247,14 +261,52 @@ test('shared output views restore unchanged turns immediately while invalidating
       type: 'extension.record_updated',
       objectId: 'builtin.files/delivery/file',
     });
-    await render('a');
-    expect(document.body.textContent).not.toContain('old.txt');
+    const lateDelivery = Promise.withResolvers<void>();
+    pendingReplacement = lateDelivery.promise;
+    const beforeChildRefresh = calls.length;
+    try {
+      await render('a');
+      expect(document.body.textContent).toContain('user-a-child-old.txt');
+      expect(document.body.textContent).toContain('user-a-old.txt');
+      expect(calls.slice(beforeChildRefresh)).toEqual([
+        expect.objectContaining({ method: 'outputs.query', runId: 'child-run' }),
+      ]);
+    } finally {
+      pendingReplacement = undefined;
+      await act(async () => lateDelivery.resolve());
+    }
     await settle();
     expect(document.body.textContent).toContain('user-a-child-new.txt');
-    expect(document.body.textContent).not.toContain('old.txt');
+    expect(document.body.textContent).not.toContain('user-a-child-old.txt');
+    expect(document.body.textContent).toContain('user-a-old.txt');
+    const obsoleteDelivery = Promise.withResolvers<void>();
+    pendingReplacement = obsoleteDelivery.promise;
+    const childRun = { ...sessionChange('a-child'), type: 'run.finished', objectId: 'child-run' };
+    try {
+      content = 'obsolete';
+      versions.changed(childRun);
+      await render('a');
+      expect(document.body.textContent).toContain('user-a-child-new.txt');
+      pendingReplacement = undefined;
+      content = 'newest';
+      versions.changed(childRun);
+      await render('a');
+      expect(document.body.textContent).toContain('user-a-child-newest.txt');
+    } finally {
+      pendingReplacement = undefined;
+      await act(async () => obsoleteDelivery.resolve());
+    }
+    expect(document.body.textContent).toContain('user-a-child-newest.txt');
+    expect(document.body.textContent).not.toContain('user-a-child-obsolete.txt');
+    content = 'new';
+    freeze = true;
     await render('b');
     childPresent = false;
-    versions.changed({ ...sessionChange('a-child'), type: 'session.delete_requested' });
+    // Main learned the exact source disappeared before the frozen A view was replaced.
+    expect(versions.sources('a', [])).toBe(true);
+    await render('b');
+    expect(cards()).toHaveLength(0);
+    freeze = false;
     await render('a');
     expect(document.body.textContent).not.toContain('a-child');
     await settle();

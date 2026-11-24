@@ -1,11 +1,25 @@
 import type { Change } from '@kite-ai/client';
-import type { NativeOutputDisplayState, NativeOutputSource } from '../src/output-files-bridge';
+import {
+  type NativeOutputDisplayState,
+  type NativeOutputFileVersion,
+  type NativeOutputSource,
+  nativeOutputSourceKey,
+} from '../src/output-files-bridge';
+
+type Root = {
+  revision: number;
+  sourcesRevision: number;
+  filesRevision: number;
+  files: Map<string, NativeOutputFileVersion>;
+  sessions: Set<string>;
+  sources: Set<string>;
+};
 
 /** Observation invalidation only. These counters never grant access to a source or target. */
 export class NativeOutputDisplayVersions {
   private epoch = 0;
   private nextRevision = 0;
-  private roots = new Map<string, { revision: number; sessions: Set<string> }>();
+  private roots = new Map<string, Root>();
 
   reset() {
     this.epoch++;
@@ -15,7 +29,14 @@ export class NativeOutputDisplayVersions {
   private root(sessionId: string) {
     let root = this.roots.get(sessionId);
     if (!root) {
-      root = { revision: ++this.nextRevision, sessions: new Set([sessionId]) };
+      root = {
+        revision: ++this.nextRevision,
+        sourcesRevision: 0,
+        filesRevision: 0,
+        files: new Map(),
+        sessions: new Set([sessionId]),
+        sources: new Set(),
+      };
       this.roots.set(sessionId, root);
     } else {
       this.roots.delete(sessionId);
@@ -25,35 +46,73 @@ export class NativeOutputDisplayVersions {
     return root;
   }
 
+  private revoke(root: Root) {
+    root.revision = ++this.nextRevision;
+    root.files.clear();
+    root.filesRevision = 0;
+    root.sources.clear();
+  }
+
   sources(sessionId: string, sources: readonly NativeOutputSource[]) {
-    this.root(sessionId).sessions = new Set([
-      sessionId,
-      ...sources.map((source) => source.sessionId),
-    ]);
+    const root = this.root(sessionId);
+    const proved = new Set(sources.map(nativeOutputSourceKey));
+    const revoked = [...root.sources].some((source) => !proved.has(source));
+    if (revoked) this.revoke(root);
+    root.sources = proved;
+    root.sessions = new Set([sessionId, ...sources.map((source) => source.sessionId)]);
+    return revoked;
   }
 
   changed(change: Change): boolean {
-    const all =
-      change.type === 'host_control.changed' ||
-      change.type.startsWith('permission.') ||
-      // Creation/start events do not expose ancestry. Until the exact source directory
-      // proves membership, conservatively invalidate retained roots rather than guess.
-      change.type === 'session.created' ||
-      change.type === 'session.forked' ||
-      (change.type === 'run.started' &&
-        ![...this.roots.values()].some((root) => root.sessions.has(change.sessionId ?? '')));
+    const { type, sessionId, objectId } = change;
+    const run = type === 'run.started' || type === 'run.finished' || type === 'run.interrupted';
     const output =
-      (change.type === 'extension.record_updated' &&
-        /^builtin\.files\/(delivery|collection|output|output-index)\//.test(change.objectId)) ||
-      change.type === 'run.started' ||
-      change.type === 'run.finished' ||
-      change.type === 'run.interrupted' ||
-      change.type === 'session.renamed' ||
-      change.type === 'session.delete_requested';
+      type === 'extension.record_updated' &&
+      /^builtin\.files\/(delivery|collection|output|output-index)\//.test(objectId);
+    const hint =
+      output &&
+      /^builtin\.files\/(delivery|collection)\//.test(objectId) &&
+      change.payload &&
+      typeof change.payload === 'object' &&
+      !Array.isArray(change.payload)
+        ? change.payload.outputRunId
+        : undefined;
+    const runId = run ? objectId : typeof hint === 'string' && hint.length ? hint : undefined;
+    const revoke = type === 'host_control.changed' || type.startsWith('permission.');
+    // Creation exposes no ancestry. Refresh the directory without discarding admitted cards.
+    const discover =
+      type === 'session.created' ||
+      type === 'session.forked' ||
+      (type === 'run.started' &&
+        !!sessionId &&
+        ![...this.roots.values()].some((root) => root.sessions.has(sessionId)));
     let changed = false;
-    for (const root of this.roots.values()) {
-      if (all || (output && !!change.sessionId && root.sessions.has(change.sessionId))) {
-        root.revision = ++this.nextRevision;
+    for (const [rootId, root] of this.roots) {
+      const knownSource = !!sessionId && root.sessions.has(sessionId);
+      if (revoke || (knownSource && type === 'session.delete_requested')) {
+        this.revoke(root);
+        changed = true;
+        continue;
+      }
+      if (
+        discover ||
+        (knownSource &&
+          sessionId !== rootId &&
+          (type === 'run.started' || type === 'session.renamed'))
+      ) {
+        root.sourcesRevision = ++this.nextRevision;
+        changed = true;
+      }
+      if (sessionId && knownSource && (run || output)) {
+        const key = JSON.stringify([sessionId, runId]);
+        const revision = ++this.nextRevision;
+        if (!root.files.has(key) && root.files.size === 64) {
+          // Compact in batches so long sessions can still isolate subsequent Run changes.
+          root.filesRevision = revision;
+          root.files.clear();
+        } else {
+          root.files.set(key, { sessionId, runId, revision });
+        }
         changed = true;
       }
     }
@@ -66,7 +125,13 @@ export class NativeOutputDisplayVersions {
       storeId,
       subjectId,
       epoch: this.epoch,
-      roots: [...this.roots].map(([sessionId, root]) => ({ sessionId, revision: root.revision })),
+      roots: [...this.roots].map(([sessionId, root]) => ({
+        sessionId,
+        revision: root.revision,
+        sourcesRevision: root.sourcesRevision,
+        filesRevision: root.filesRevision,
+        files: [...root.files.values()],
+      })),
     };
   }
 }

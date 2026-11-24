@@ -126,15 +126,27 @@ test('Native normal streaming merges same-seq changes without rescanning, loadin
     },
   } as NativeBridge;
   const reader = new NativeHistory(bridge, (state) => states.push(state));
+  const notify = (cursor: string, historyEpoch = 0) =>
+    reader.advance({
+      kind: 'messages.changed',
+      generation: 1,
+      storeId: 'store',
+      sessionId: 's',
+      viewSelection: 1,
+      historyEpoch,
+      cursor,
+    });
   try {
     reader.select(1, incrementalSelection(1));
     await until(() => reader.state.phase === 'complete');
     const original = reader.state.messages[0];
     const start = states.length;
-    reader.select(1, incrementalSelection(2));
+    notify('2');
     await until(() => !!release);
     expect(reader.state.phase).toBe('complete');
-    reader.select(1, incrementalSelection(3));
+    notify('3');
+    notify('9', 1); // A future epoch may buffer, but cannot advance this reader.
+    reader.select(1, { ...incrementalSelection(1), viewGeneration: 2 });
     release();
     await until(() => reader.state.messages.at(-1)?.content === 'revision 3');
     expect(reader.state.messages.map((message) => message.id)).toEqual(['saved', 'active']);

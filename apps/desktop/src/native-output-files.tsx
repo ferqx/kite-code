@@ -17,6 +17,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -25,12 +26,13 @@ import type { NativeBridge } from './native-bridge';
 import { NativeFilePreview } from './native-file-preview';
 import { NativeLocalFilePreview } from './native-local-file-preview';
 import { NativeOutputReadCache } from './native-output-read-cache';
-import type {
-  LocalOfficeRequest,
-  NativeOutputDisplayState,
-  NativeOutputSource,
-  OfficeEditContext,
-  OfficeRequestOutcome,
+import {
+  type LocalOfficeRequest,
+  type NativeOutputDisplayState,
+  type NativeOutputSource,
+  nativeOutputSourceKey,
+  type OfficeEditContext,
+  type OfficeRequestOutcome,
 } from './output-files-bridge';
 
 function target(file: OutputFileTarget): OutputFileTarget {
@@ -92,16 +94,14 @@ export function useNativeOutputFiles(input: {
   const displayStoreId = input.storeId ?? input.pendingReading?.storeId;
   const displaySessionId = input.sessionId ?? input.pendingReading?.sessionId;
   const display = input.display?.storeId === displayStoreId ? input.display : undefined;
-  const displayRevision = display?.roots.find(
-    (root) => root.sessionId === displaySessionId,
-  )?.revision;
+  const displayRoot = display?.roots.find((root) => root.sessionId === displaySessionId);
   const authority = JSON.stringify([
     input.generation,
     displayStoreId,
     display?.subjectId,
     display?.epoch,
     // Without Main's live invalidation coverage, sharing is limited to this selection.
-    displayRevision === undefined ? scopeKey : undefined,
+    displayRoot ? undefined : scopeKey,
     input.available === false,
   ]);
   const key = JSON.stringify([scopeKey, authority]);
@@ -123,12 +123,12 @@ export function useNativeOutputFiles(input: {
   }
   const cache = retained.current.cache;
   const activation = cache.select(key);
-  const sourceRevision = displayRevision ?? input.revision;
-  const rootKey = JSON.stringify([key, sourceRevision]);
+  // Authority changes retire the display. Data changes only revalidate its read windows.
+  const rootKey = JSON.stringify([key, displayRoot?.revision]);
   cache.cover(
     input.available === false
       ? []
-      : displayRevision === undefined
+      : !displayRoot
         ? [rootKey]
         : display!.roots.map((root) =>
             JSON.stringify([
@@ -148,51 +148,85 @@ export function useNativeOutputFiles(input: {
     cache,
     rootKey,
     available: input.available,
-    strict: displayRevision !== undefined,
+  };
+  const sourcesKey = `sources/${rootKey}`;
+  const sourceRevision = displayRoot?.sourcesRevision ?? input.revision;
+  const revisions = new Map<string, number>();
+  const aggregateRevisions = new Map<string, number>();
+  for (const file of displayRoot?.files ?? []) {
+    revisions.set(JSON.stringify([file.sessionId, file.runId]), file.revision);
+    aggregateRevisions.set(
+      file.sessionId,
+      Math.max(file.revision, aggregateRevisions.get(file.sessionId) ?? 0),
+    );
+  }
+  const fileRevision = (sessionId?: string, runId?: string) => {
+    if (!displayRoot) return input.revision;
+    if (!sessionId) return displayRoot.filesRevision;
+    return Math.max(
+      displayRoot.filesRevision,
+      runId === undefined
+        ? (aggregateRevisions.get(sessionId) ?? 0)
+        : (revisions.get(JSON.stringify([sessionId, undefined])) ?? 0),
+      runId === undefined ? 0 : (revisions.get(JSON.stringify([sessionId, runId])) ?? 0),
+    );
   };
   const currentKey = useRef(key);
   currentKey.current = key;
   const [sourceState, setSourceState] = useState<{
     key: string;
+    cache: NativeOutputReadCache;
     sources: NativeOutputSource[];
-    revision: number;
-    activation: number;
   }>();
-  const [failedSourceRead, setFailedSourceRead] = useState<string>();
-  const sourceReadKey = JSON.stringify([rootKey, activation]);
+  const [failedSourceRead, setFailedSourceRead] = useState<{
+    key: string;
+    cache: NativeOutputReadCache;
+  }>();
+  const sourceReadKey = JSON.stringify([rootKey, sourceRevision, activation]);
+  const currentSourceRead = useRef(sourceReadKey);
+  useLayoutEffect(() => {
+    currentSourceRead.current = sourceReadKey;
+  }, [sourceReadKey]);
   const observedSources =
     input.available === false
       ? undefined
-      : sourceState?.key === key &&
-          sourceState.activation === activation &&
-          (displayRevision === undefined || sourceState.revision === displayRevision)
+      : sourceState?.key === rootKey && sourceState.cache === cache
         ? sourceState.sources
-        : cache.get<NativeOutputSource[]>(`sources/${rootKey}`);
+        : cache.peek<Versioned<NativeOutputSource[]>>(sourcesKey)?.value;
   const sources = observedSources ?? [];
-  const sourcesChecked = observedSources !== undefined || failedSourceRead === sourceReadKey;
+  const sourcesByParent = useMemo(() => {
+    const grouped = new Map<string, { source: NativeOutputSource; key: string }[]>();
+    for (const source of observedSources ?? []) {
+      const parent = grouped.get(source.parentRunId) ?? [];
+      parent.push({ source, key: nativeOutputSourceKey(source) });
+      grouped.set(source.parentRunId, parent);
+    }
+    return grouped;
+  }, [observedSources]);
+  const sourcesChecked =
+    observedSources !== undefined ||
+    (failedSourceRead?.key === sourceReadKey && failedSourceRead.cache === cache);
   useEffect(() => {
     if (input.available === false || !input.bridge || !input.storeId || !input.sessionId) return;
-    const cached = cache.get<NativeOutputSource[]>(`sources/${rootKey}`);
-    if (cached) {
-      setSourceState({
-        key,
-        sources: cached,
-        revision: sourceRevision,
-        activation,
-      });
+    const cached = cache.get<Versioned<NativeOutputSource[]>>(sourcesKey);
+    if (cached?.revision === sourceRevision) {
+      setSourceState({ key: rootKey, cache, sources: cached.value });
       return;
     }
     let cancelled = false;
     let failures = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    const current = () =>
+      !cancelled && currentSourceRead.current === sourceReadKey && cache.valid(rootKey);
     const read = async () => {
+      if (!current()) return;
       try {
         const result = await input.bridge!.request({
           method: 'outputs.sources',
           generation: input.generation,
           scope: { storeId: input.storeId!, sessionId: input.sessionId! },
         });
-        if (cancelled) return;
+        if (!current()) return;
         if (
           !result ||
           !('kind' in result) ||
@@ -203,16 +237,15 @@ export function useNativeOutputFiles(input: {
           result.scope.sessionId !== input.sessionId
         )
           throw Error('output_sources_scope_changed');
-        cache.set(`sources/${rootKey}`, result.sources);
-        setSourceState({
-          key,
-          sources: result.sources,
-          revision: sourceRevision,
-          activation,
-        });
-      } catch {
-        if (cancelled) return;
-        setFailedSourceRead(sourceReadKey);
+        cache.set(sourcesKey, { revision: sourceRevision, value: result.sources });
+        setSourceState({ key: rootKey, cache, sources: result.sources });
+      } catch (error) {
+        if (!current()) return;
+        if (outputReadRevoked(error)) {
+          cache.delete(sourcesKey);
+          setSourceState({ key: rootKey, cache, sources: [] });
+        }
+        setFailedSourceRead({ key: sourceReadKey, cache });
         retry = setTimeout(
           () => {
             void read();
@@ -232,12 +265,11 @@ export function useNativeOutputFiles(input: {
     input.storeId,
     input.sessionId,
     rootKey,
-    key,
     cache,
     input.available,
-    activation,
     sourceRevision,
     sourceReadKey,
+    sourcesKey,
   ]);
   useEffect(() => {
     setRequest((previous) => (previous?.scope === key ? previous : undefined));
@@ -303,7 +335,7 @@ export function useNativeOutputFiles(input: {
     input.available !== false
   );
   const cachedWindow = (window: string) =>
-    cache.valid(rootKey) ? cache.peek<FilePage>(`window/${window}`) : undefined;
+    cache.valid(rootKey) ? cache.peek<Versioned<FilePage>>(`window/${window}`)?.value : undefined;
   const hasCards = (window: string) => !!cachedWindow(window)?.items.length;
   return {
     closeFile: (file: SessionFileTarget) => {
@@ -338,20 +370,23 @@ export function useNativeOutputFiles(input: {
         : undefined,
     references: (
       <OutputReferenceReaders
-        key={key}
+        key={rootKey}
         {...input}
         {...reader}
         sources={sources}
+        fileRevision={fileRevision}
         actions={actions}
       />
     ),
     renderTurnOutputs: ({ turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, input.sessionId);
       if (!runId) return null;
-      const childSources = sources.filter((source) => source.parentRunId === runId);
+      const childSources = sourcesByParent.get(runId) ?? [];
       const windows = [
         outputWindowKey(rootKey, input.sessionId, runId),
-        ...childSources.map((source) => outputWindowKey(rootKey, source.sessionId, source.runId)),
+        ...childSources.map(({ source, key }) =>
+          outputWindowKey(rootKey, source.sessionId, source.runId, key),
+        ),
       ];
       return (
         <TurnOutputSlot
@@ -362,14 +397,22 @@ export function useNativeOutputFiles(input: {
             sourcesChecked && windows.every((window) => checked.has(window) || cachedWindow(window))
           }
         >
-          <OutputFileReader {...input} {...reader} runId={runId} actions={actions} />
-          {childSources.map((source) => (
+          <OutputFileReader
+            {...input}
+            {...reader}
+            runId={runId}
+            fileRevision={fileRevision(input.sessionId, runId)}
+            actions={actions}
+          />
+          {childSources.map(({ source, key }) => (
             <OutputFileReader
-              key={`${key}/${source.sessionId}/${source.runId}`}
+              key={key}
               {...input}
               {...reader}
               sessionId={source.sessionId}
               runId={source.runId}
+              sourceKey={key}
+              fileRevision={fileRevision(source.sessionId, source.runId)}
               sourceLabel={`来自子 Agent · ${source.name} · ${input.turnLabel(source.runId)}`}
               actions={actions}
             />
@@ -380,24 +423,27 @@ export function useNativeOutputFiles(input: {
     renderChildTurnOutputs: (sessionId: string, { turnId }: { turnId: string }) => {
       const runId = nativeOutputRunId(turnId, input.storeId, sessionId);
       if (!runId) return null;
-      const admitted = sources.some(
+      const source = sources.find(
         (source) => source.sessionId === sessionId && source.runId === runId,
       );
-      if (!admitted && sourcesChecked) return null;
-      const window = outputWindowKey(rootKey, sessionId, runId);
+      if (!source && sourcesChecked) return null;
+      const sourceKey = source && nativeOutputSourceKey(source);
+      const window = outputWindowKey(rootKey, sessionId, runId, sourceKey);
       return (
         <TurnOutputSlot
           key={`${key}/${sessionId}/${runId}`}
           readable={readable}
-          hasCards={() => admitted && hasCards(window)}
+          hasCards={() => !!source && hasCards(window)}
           ready={(checked) => sourcesChecked && (checked.has(window) || !!cachedWindow(window))}
         >
-          {admitted && (
+          {source && (
             <OutputFileReader
               {...input}
               {...reader}
               sessionId={sessionId}
               runId={runId}
+              sourceKey={sourceKey}
+              fileRevision={fileRevision(sessionId, runId)}
               actions={actions}
             />
           )}
@@ -504,10 +550,23 @@ function TurnOutputSlot({
     </>
   );
 }
-function outputWindowKey(rootKey: string, sessionId?: string, runId?: string) {
-  return JSON.stringify([rootKey, sessionId, runId]);
+function outputWindowKey(rootKey: string, sessionId?: string, runId?: string, sourceKey?: string) {
+  return JSON.stringify([rootKey, sessionId, runId, sourceKey]);
 }
 type FilePage = Pick<OutputFilesPage, 'items' | 'nextCursor' | 'revision'>;
+type Versioned<T> = { revision: number; value: T };
+
+function outputReadRevoked(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  switch (error.message) {
+    case 'output_scope_denied':
+    case 'output_scope_unavailable':
+    case 'output_source_unavailable':
+      return true;
+    default:
+      return false;
+  }
+}
 
 type OutputReadState = {
   page?: FilePage;
@@ -518,12 +577,13 @@ type OutputReaderInput = {
   cache: NativeOutputReadCache;
   rootKey: string;
   available?: boolean;
-  strict?: boolean;
+  fileRevision: number;
   bridge?: NativeBridge;
   generation: number;
   storeId?: string;
   sessionId?: string;
   runId?: string;
+  sourceKey?: string;
   sourceLabel?: string;
   onState?: (state: OutputReadState) => void;
   actions: Omit<OutputFilesProps, 'items'>;
@@ -537,24 +597,21 @@ function OutputFileReader(input: OutputReaderInput) {
   reportChecked.current = markChecked;
   useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
   const scopeValid = input.cache.valid(input.rootKey);
-  const windowKey = outputWindowKey(input.rootKey, input.sessionId, input.runId);
+  const windowKey = outputWindowKey(input.rootKey, input.sessionId, input.runId, input.sourceKey);
+  const cacheKey = `window/${windowKey}`;
   const [saved, savePage] = useState(() => ({
     key: windowKey,
     cache: input.cache,
-    page: input.available === false ? undefined : input.cache.get<FilePage>(`window/${windowKey}`),
+    page: input.cache.peek<Versioned<FilePage>>(cacheKey)?.value,
   }));
   const page =
-    !scopeValid ||
-    input.available === false ||
-    saved.cache !== input.cache ||
-    (input.strict && saved.key !== windowKey)
+    !scopeValid || input.available === false
       ? undefined
-      : saved.page;
-  // Revalidation replaces bytes atomically, but does not forget the reader's loaded window.
-  const loadedCount = useRef(saved.page?.items.length ?? 50);
-  if (saved.page) loadedCount.current = Math.max(50, saved.page.items.length);
+      : saved.cache === input.cache && saved.key === windowKey
+        ? saved.page
+        : input.cache.peek<Versioned<FilePage>>(cacheKey)?.value;
   const setPage = useCallback(
-    (page: FilePage) => savePage({ key: windowKey, cache: input.cache, page }),
+    (page: FilePage | undefined) => savePage({ key: windowKey, cache: input.cache, page }),
     [windowKey, input.cache],
   );
   useLayoutEffect(() => {
@@ -571,6 +628,17 @@ function OutputFileReader(input: OutputReaderInput) {
   const [retryRevision, setRetryRevision] = useState(0);
   const readFailures = useRef(0);
   const lastRevision = useRef<string | undefined>(undefined);
+  const readKey = JSON.stringify([
+    windowKey,
+    input.fileRevision,
+    retryRevision,
+    read?.cursor,
+    readActive,
+  ]);
+  const currentRead = useRef(readKey);
+  useLayoutEffect(() => {
+    currentRead.current = readKey;
+  }, [readKey]);
   useEffect(() => {
     if (
       input.available === false ||
@@ -583,21 +651,23 @@ function OutputFileReader(input: OutputReaderInput) {
       return;
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
-    const revision = `${windowKey}/${retryRevision}`;
+    const current = () =>
+      !cancelled && currentRead.current === readKey && input.cache.valid(input.rootKey);
+    const revision = `${windowKey}/${input.fileRevision}/${retryRevision}`;
     const continuation = lastRevision.current === revision;
     const readCursor = continuation ? read?.cursor : undefined;
     lastRevision.current = revision;
     if (!readCursor && retryRevision === 0) {
-      const cached = input.cache.get<FilePage>(`window/${windowKey}`);
-      if (cached) {
-        setPage(cached);
+      const cached = input.cache.get<Versioned<FilePage>>(cacheKey);
+      if (cached?.revision === input.fileRevision) {
+        setPage(cached.value);
         setLoading(false);
         return;
       }
     }
     setLoading(true);
     const query = (beforeKey?: string) =>
-      input.cache.read(JSON.stringify(['page', windowKey, retryRevision, beforeKey]), async () => {
+      input.cache.read(JSON.stringify(['page', revision, beforeKey]), async () => {
         const result = await input.bridge!.request({
           method: 'outputs.query',
           generation: input.generation,
@@ -625,7 +695,7 @@ function OutputFileReader(input: OutputReaderInput) {
       });
     void query(readCursor)
       .then(async (head) => {
-        if (cancelled) return;
+        if (!current()) return;
         const previous = pageRef.current;
         if (readCursor && previous && previous.revision !== head.revision) {
           // Never merge a continuation from a different storage snapshot.
@@ -636,15 +706,15 @@ function OutputFileReader(input: OutputReaderInput) {
         if (!readCursor) {
           // Rebuild the loaded window atomically. Retaining an old tail can resurrect
           // a superseded delivery that the authoritative head no longer contains.
-          const wanted = Math.max(50, previous?.items.length ?? 0, loadedCount.current);
+          const wanted = Math.max(50, previous?.items.length ?? 0);
           const seen = new Set<string>();
           while (incoming.nextCursor && incoming.items.length < wanted) {
-            if (cancelled) return;
+            if (!current()) return;
             const cursor = incoming.nextCursor;
             if (seen.has(cursor)) throw Error('output_cursor_repeated');
             seen.add(cursor);
             const next = await query(cursor);
-            if (cancelled) return;
+            if (!current()) return;
             if (next.revision !== incoming.revision) throw Error('output_snapshot_changed');
             incoming = {
               ...incoming,
@@ -659,7 +729,7 @@ function OutputFileReader(input: OutputReaderInput) {
             };
           }
         }
-        if (cancelled) return;
+        if (!current()) return;
         const updated =
           previous && readCursor
             ? {
@@ -673,12 +743,16 @@ function OutputFileReader(input: OutputReaderInput) {
                 ],
               }
             : incoming;
-        input.cache.set(`window/${windowKey}`, updated);
+        input.cache.set(cacheKey, { revision: input.fileRevision, value: updated });
         setPage(updated);
         readFailures.current = 0;
       })
-      .catch(() => {
-        if (cancelled) return;
+      .catch((error: unknown) => {
+        if (!current()) return;
+        if (outputReadRevoked(error)) {
+          input.cache.delete(cacheKey);
+          setPage(undefined);
+        }
         reportChecked.current?.(windowKey);
         retry = setTimeout(
           () => setRetryRevision((value) => value + 1),
@@ -686,7 +760,7 @@ function OutputFileReader(input: OutputReaderInput) {
         );
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (current()) setLoading(false);
       });
     return () => {
       clearTimeout(retry);
@@ -698,7 +772,11 @@ function OutputFileReader(input: OutputReaderInput) {
     input.storeId,
     input.sessionId,
     input.runId,
+    input.fileRevision,
     windowKey,
+    readKey,
+    input.rootKey,
+    cacheKey,
     input.cache,
     input.available,
     readActive,
@@ -759,22 +837,24 @@ function outputPageMatches(
 }
 /** Each source retains its own cursor/revision; combining references never changes ownership. */
 function OutputReferenceReaders(
-  input: OutputReaderInput & {
+  input: Omit<OutputReaderInput, 'fileRevision'> & {
     sources: readonly NativeOutputSource[];
     turnLabel: (runId: string) => string;
+    fileRevision: (sessionId?: string, runId?: string) => number;
   },
 ) {
   useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
   const scopeValid = input.cache.valid(input.rootKey);
   const [states, setStates] = useState(new Map<string, OutputReadState>());
   const readers = [
-    { sessionId: input.sessionId, runId: undefined, sourceLabel: undefined },
+    { sessionId: input.sessionId, runId: undefined, sourceLabel: undefined, sourceKey: undefined },
     ...input.sources.map((source) => ({
       sessionId: source.sessionId,
       runId: source.runId,
       sourceLabel: `来自子 Agent · ${source.name} · ${input.turnLabel(source.runId)}`,
+      sourceKey: nativeOutputSourceKey(source),
     })),
-  ].map((source) => ({ ...source, key: JSON.stringify([source.sessionId, source.runId]) }));
+  ].map((source) => ({ ...source, key: source.sourceKey ?? JSON.stringify([source.sessionId]) }));
   const unique = [...new Map(readers.map((source) => [source.key, source])).values()];
   const membership = JSON.stringify(unique.map((source) => source.key));
   useEffect(() => {
@@ -811,6 +891,8 @@ function OutputReferenceReaders(
           {...input}
           sessionId={source.sessionId}
           runId={source.runId}
+          sourceKey={source.sourceKey}
+          fileRevision={input.fileRevision(source.sessionId, source.runId)}
           onState={(state) => setStates((previous) => new Map(previous).set(source.key, state))}
         />
       ))}

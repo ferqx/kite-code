@@ -174,7 +174,7 @@ test('context reads and retained ratios remain bound to their Session, model, ep
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-      return page(request, id, id === 's' ? 340 : 100);
+      return id === 's' ? page(request, id) : page(request, id, 50, 250);
     },
   } as NativeBridge;
   const render = (
@@ -203,9 +203,9 @@ test('context reads and retained ratios remain bound to their Session, model, ep
       '上下文占用约 68%',
     );
     await render('b', 3);
-    expect(f.host.querySelector('.composer-context-usage')?.getAttribute('aria-label')).toBe(
-      '上下文占用约 20%',
-    );
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('上下文估算 50 / 250 tokens');
     await render('s', 4, false);
     expect(f.host.querySelector('.composer-context-usage')?.getAttribute('aria-label')).toBe(
       '上下文占用约 68%',
@@ -221,6 +221,7 @@ test('context reads and retained ratios remain bound to their Session, model, ep
     await render('b', 5, false, 'different-route');
     const ring = f.host.querySelector('.composer-context-usage')!;
     expect(ring.getAttribute('aria-label')).toBe('上下文占用未知');
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 未知 tokens');
     expect(ring.querySelector('[stroke-dasharray]')).toBeNull();
     await render('b', 5, false, undefined, 1);
     expect(f.host.querySelector('.composer-context-usage')).toBe(ring);
@@ -274,6 +275,61 @@ test('unknown capacity stays unknown, real zero stays zero and over-capacity lab
     expect(f.host.querySelector('[stroke-dasharray]')?.getAttribute('stroke-dasharray')).toBe(
       '100 100',
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('image evidence waits for a new completed model receipt while keeping the original window', async () => {
+  const f = fixture();
+  const reads: string[] = [];
+  const first = message();
+  const image: Message = { ...first, id: 'image', seq: '2', role: 'tool' };
+  const nextTool: Message = { ...image, id: 'another-tool', seq: '3' };
+  const next: Message = { ...first, id: 'next-assistant', seq: '4', sourceIds: ['next-model'] };
+  let imageAvailable = false;
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      if (request.method !== 'toolMessages.contextUsage') return null;
+      const id = request.messageIds[0]!;
+      reads.push(id);
+      if (!imageAvailable) return page(request, 's');
+      if (id === next.id) return page(request, 's', 420);
+      return {
+        ...page(request, 's'),
+        context: { modelId: 'route', contextSelectionId: 'context-s', contextWindowTokens: 500 },
+      };
+    },
+  } as NativeBridge;
+  const render = (messages: readonly Message[], viewLoading = false) =>
+    act(async () =>
+      f.root.render(
+        <Harness bridge={bridge} selection={{ ...selected(), viewLoading }} messages={messages} />,
+      ),
+    );
+  try {
+    await render([first]);
+    const ring = f.host.querySelector('.composer-context-usage')!;
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用约 68%');
+    imageAvailable = true;
+    await render([first, image]);
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用未知');
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 500 tokens');
+    expect(ring.getAttribute('aria-description')).toContain('缓存命中率 99%');
+
+    const running: Message = { ...next, content: 'more', status: 'incomplete' };
+    await render([first, image, nextTool], true);
+    await render([first, image, nextTool, running]);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 650)));
+    expect(reads).toEqual([first.id, first.id]);
+    expect(f.host.querySelector('.composer-context-usage')).toBe(ring);
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 500 tokens');
+
+    await render([first, image, nextTool, next]);
+    expect(reads).toEqual([first.id, first.id, next.id]);
+    expect(f.host.querySelector('.composer-context-usage')).toBe(ring);
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用约 84%');
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 420 / 500 tokens');
   } finally {
     await f.close();
   }

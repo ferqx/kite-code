@@ -258,7 +258,7 @@ Native在已验证Model正文发布前，可由静态Worker运行UI公开固定M
 
 Task carrier成功继续要求原child的attached效果域结算，child Model／Run已结束不代表排队或运行中的Shell已结束。Runtime在该边界用可信Store的准确owner／carrier快照与同事务cursor等待原变更，detached保持独立，最终成功／unknown仍由原SQLite事务复核。准确持久取消与本地读取／计算中断分别处理，不以信号本身伪造已停止，不重新执行Model或Shell；负责合同及修复验证归[Task](../../packages/agent/src/extensions/task/README.md)与[child Store](../../packages/agent/src/storage/sqlite/child/README.md)。
 
-全局 PC 目录复用原 Sidebar 展示，公共 `session_directory_activity` 从同 Store／主体的只读事务提供准确 Run／pending 和最后已保存对话消息的更新时间。SDK 只有穷尽同 upper／snapshotCursor 后才发布，变化丢弃前缀、持续变化明确失败；没有新增 Store schema 或第二个运行索引。Native 全局读取与选中会话正文／草稿分别管理，SSE 只触发 GET，迟到读取按原 attach／Store／epoch 拒绝，失败保上次目录并标明。没有目录事实时不从当前选择推造其他会话状态，目录成功不 ACK 或授予执行／审批权；owner 见[Store](../../packages/agent/src/storage/README.md#目录分页)、[Client](../../packages/client/README.md#完整目录读取)与[Native](../../apps/desktop/README.md#native-项目会话目录)。
+全局 PC 目录复用原 Sidebar 展示，公共 `session_directory_activity` 从同 Store／主体的只读事务提供准确 Run／pending 和最后已保存对话消息的更新时间。SDK 只有穷尽同 upper／snapshotCursor 后才发布，变化丢弃前缀、持续变化明确失败；没有新增 Store schema 或第二个运行索引。Native 全局读取与选中会话正文／草稿分别管理。正文 SSE 唤醒原范围的只读增量。带有同一持久记录的有效时间时，可以更新已核实目录项的排序。目录结果按快照游标接管，缺少时间或范围证明时沿原 GET 核对。Files 收集和交付变更可以带 Store 核实的原 Run ID。Native 只据此缩小列表校准范围，文件及来源仍沿原主体和权限读取。迟到读取按原 attach／Store／epoch 拒绝，失败保上次目录并标明。没有目录事实时不从当前选择推造其他会话状态，目录成功不 ACK 或授予执行／审批权；owner 见[Store](../../packages/agent/src/storage/README.md#目录分页)、[Client](../../packages/client/README.md#完整目录读取)与[Native](../../apps/desktop/README.md#native-项目会话目录)。
 
 同一目录的可选 `activity.hasCreatedWorktree` 只读投影原 Session 原生 worktree 创建稳定成功记录，用于 Native 右侧历史图标。它不证明实时路径存在、不迁移 cwd，不从 child／Fork 或消息文本推造；后续移除不擦除已发生的创建。生成 schema／Client 保持字段可选，省略不补造标记，原目录快照和执行准入边界不变；具体来源归上述 Store owner 与[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。
 

@@ -1,12 +1,20 @@
 import type { OutputFileSummary, OutputFilesPage, OutputFileTarget } from '@kite-ai/client';
 import type { ImageZoomControl, ImageZoomState } from './image-zoom';
 import type { InputRequest } from './input';
+
+export type NativeOutputFileVersion = { sessionId: string; runId?: string; revision: number };
 /** Live observation versions for display reuse only, never a read or operation grant. */
 export type NativeOutputDisplayState = {
   storeId: string;
   subjectId: string;
   epoch: number;
-  roots: readonly { sessionId: string; revision: number }[];
+  roots: readonly {
+    sessionId: string;
+    revision: number;
+    sourcesRevision: number;
+    filesRevision: number;
+    files: readonly NativeOutputFileVersion[];
+  }[];
 };
 export type PdfSelection = {
   kind: 'pdf';
@@ -86,6 +94,14 @@ export type NativeOutputSource = {
   carrierExecutionId: string;
   name: string;
 };
+export function nativeOutputSourceKey(source: NativeOutputSource) {
+  return JSON.stringify([
+    source.sessionId,
+    source.runId,
+    source.parentRunId,
+    source.carrierExecutionId,
+  ]);
+}
 export type NativeOutputRequest =
   | { method: 'outputs.sources'; generation: number; scope: { storeId: string; sessionId: string } }
   | ({

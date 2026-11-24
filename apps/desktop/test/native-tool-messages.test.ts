@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { AgentClient, Execution, Message, Run } from '@kite-ai/client';
+import {
+  type AgentClient,
+  ClientError,
+  type Execution,
+  type Message,
+  type Run,
+} from '@kite-ai/client';
 import { nativeMcpServerName, nativeMcpToolName } from '../electron/mcp-tool-label';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { nativeLiveShellInputFact, nativeToolMessageFact } from '../electron/tool-message-fact';
@@ -2287,9 +2293,19 @@ test('current context uses the original request forecast and full window, indepe
     result: { content: 'answer', usage: { inputTokens: 100000, cachedInputTokens: 99000 } },
   } as Execution);
   const reads: unknown[] = [];
+  let failure: ClientError | undefined;
+  const matchingModel = { id: 'route', modelCapabilities: { contextWindowTokens: 500 } };
+  let fallbackRun = {
+    id: 'run',
+    sessionId: 's',
+    originStoreId: 'store',
+    configuration: { snapshot: { configuration: { models: [matchingModel] } } },
+  };
+  const runReads: string[] = [];
   Object.assign(f.client, {
     getContextEstimate: async (sessionId: string, query: unknown) => {
       reads.push([sessionId, query]);
+      if (failure) throw failure;
       return {
         storeId: 'store',
         sessionId: 's',
@@ -2303,6 +2319,10 @@ test('current context uses the original request forecast and full window, indepe
         utilization: 3.4,
         cumulativeUsage: { inputTokens: 1000000, cachedInputTokens: 990000 },
       };
+    },
+    getRun: async (id: string) => {
+      runReads.push(id);
+      return fallbackRun;
     },
     getView: async () => ({
       storeId: 'store',
@@ -2327,6 +2347,7 @@ test('current context uses the original request forecast and full window, indepe
   });
   expect(JSON.stringify(result)).not.toContain('cachedInputTokens');
   expect(JSON.stringify(result)).not.toContain('answer');
+  expect(runReads).toEqual([]);
   expect(decodeNativeRequest(request)).toEqual(request);
   for (const invalid of [
     { ...request, messageIds: [] },
@@ -2336,6 +2357,26 @@ test('current context uses the original request forecast and full window, indepe
     { ...request, path: 'arbitrary' },
   ])
     expect(() => decodeNativeRequest(invalid)).toThrow();
+
+  const read = () => f.manager.contextUsage(request);
+  failure = new ClientError('context_estimate_unavailable');
+  expect((await read()).context).toEqual({
+    modelId: 'route',
+    contextSelectionId: 'selected',
+    contextWindowTokens: 500,
+  });
+  expect(runReads).toEqual(['run']);
+  const originalRun = fallbackRun;
+  fallbackRun = {
+    ...originalRun,
+    configuration: { snapshot: { configuration: { models: [matchingModel, matchingModel] } } },
+  };
+  expect((await read()).context).toEqual({ modelId: 'route', contextSelectionId: 'selected' });
+  fallbackRun = { ...originalRun, originStoreId: 'other' };
+  await expect(read()).rejects.toMatchObject({ code: 'model_usage_identity_mismatch' });
+  failure = new ClientError('network_outcome_unknown');
+  await expect(read()).rejects.toMatchObject({ code: 'network_outcome_unknown' });
+  expect(runReads).toEqual(['run', 'run', 'run']);
 });
 
 test('context forecasts reject changed selections, departed reads, foreign receipts and invented counts', async () => {
@@ -2398,6 +2439,7 @@ test('context forecasts reject changed selections, departed reads, foreign recei
   for (const invalid of [
     { contextSelectionId: 'different' },
     { storeId: 'other' },
+    { modelId: 'other-route' },
     { modelInputExecutionId: 'other' },
     { totalInputTokens: -1 },
     { totalInputTokens: Number.NaN },

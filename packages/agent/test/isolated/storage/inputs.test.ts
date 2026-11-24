@@ -232,6 +232,11 @@ test('message first-publication time survives streamed updates, finalization and
         "SELECT payload_json FROM change_event WHERE object_id=? AND type='message.updated' ORDER BY cursor LIMIT 1",
       )
       .get(user.id) as { payload_json: string };
+    const messageChange = async () =>
+      (await f.store.getChanges({ after: '0', sessionIds: ['s'] })).events.find(
+        (entry) => entry.objectId === user.id && entry.type === 'message.updated',
+      )?.payload;
+    expect(await messageChange()).toEqual({ updatedAt: JSON.parse(event.payload_json).occurredAt });
     expect(
       (await f.store.listMessages('s')).find((message) => message.id === user.id)?.createdAt,
     ).toBe(JSON.parse(event.payload_json).occurredAt);
@@ -240,6 +245,7 @@ test('message first-publication time survives streamed updates, finalization and
         "UPDATE change_event SET payload_json='null' WHERE cursor=(SELECT MIN(cursor) FROM change_event WHERE object_id=? AND type='message.updated')",
       )
       .run(user.id);
+    expect(await messageChange()).toBeNull();
     expect(
       (await f.store.listMessages('s')).find((message) => message.id === user.id)?.createdAt,
     ).toBeUndefined();

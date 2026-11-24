@@ -1,10 +1,12 @@
 // Explicit production-renderer fixture. No Service, user Store or diagnostic entrypoint.
 import type { Message, OutputFileTarget, Run } from '@kite-ai/client';
 import { createRoot } from 'react-dom/client';
+import { NativeOutputDisplayVersions } from '../electron/output-display-versions';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeRequest } from '../src/native-bridge';
 import { type NativeToolMessageFact, nativeRunFact } from '../src/tool-messages-bridge';
 import { backgroundItem } from './background-item.fixture';
+import { sessionChange } from './native-change.fixture';
 import { sessionSwitchBridge } from './session-switch-bridge.fixture';
 import '../src/native-tailwind.css';
 import '../src/native-startup.css';
@@ -16,6 +18,7 @@ export type PresentationPhase =
   | 'runs'
   | 'tools'
   | 'outputs'
+  | 'historicalOutputs'
   | 'liveOutputs';
 export interface PresentationEvent {
   kind: 'request' | 'release';
@@ -31,6 +34,9 @@ export interface HistoryPresentationFixture {
   events: PresentationEvent[];
   openInAppTargets: OutputFileTarget[];
   finishOpenInApp(error?: string): void;
+  startLiveTurn(): void;
+  appendLiveReply(text: string): void;
+  publishLiveOutput(): void;
   finishLiveTurn(): void;
   release(phase: PresentationPhase): void;
   pending(): Partial<Record<PresentationPhase, number>>;
@@ -130,11 +136,17 @@ const events: PresentationEvent[] = [];
 const openInAppTargets: OutputFileTarget[] = [];
 let finishOpening: ((error?: string) => void) | undefined;
 const liveRunId = 'run-a-live';
+const outputVersions = new NativeOutputDisplayVersions();
+let liveDelivery = false;
 let failedOutputRead = false;
 const pending = new Map<PresentationPhase, (() => void)[]>();
 const released = new Set<PresentationPhase>();
 const gate = async (sessionId: string, phase: PresentationPhase) => {
-  if ((sessionId !== target && phase !== 'liveOutputs') || released.has(phase)) return;
+  if (
+    (sessionId !== target && phase !== 'liveOutputs' && phase !== 'historicalOutputs') ||
+    released.has(phase)
+  )
+    return;
   await new Promise<void>((resolve) => {
     const queue = pending.get(phase) ?? [];
     queue.push(resolve);
@@ -155,8 +167,10 @@ const bridge: NativeBridge = {
         };
       });
     }
-    if (turnOutputs && request.method === 'outputs.sources')
+    if (turnOutputs && request.method === 'outputs.sources') {
+      outputVersions.sources(request.scope.sessionId, []);
       return { kind: 'outputs.sources', scope: request.scope, sources: [] };
+    }
     if (turnOutputs && request.method === 'outputs.query') {
       const { scope, runId } = request;
       const sessionId = scope.sessionId;
@@ -164,9 +178,10 @@ const bridge: NativeBridge = {
       const ownerRunId = live ? liveRunId : `run-${sessionId}-1`;
       const hasFile = runId === ownerRunId;
       if (hasFile) {
+        const phase = live ? 'liveOutputs' : liveDelivery ? 'historicalOutputs' : 'outputs';
         events.push({
           kind: 'request',
-          phase: live ? 'liveOutputs' : 'outputs',
+          phase,
           sessionId,
           time: performance.now(),
         });
@@ -174,7 +189,7 @@ const bridge: NativeBridge = {
           failedOutputRead = true;
           throw Error('fixture_outputs_unavailable');
         }
-        if (live) await gate(sessionId, 'liveOutputs');
+        if (live || liveDelivery) await gate(sessionId, phase);
         else if (sessionId === target) await gate(sessionId, 'outputs');
         else await new Promise((resolve) => setTimeout(resolve, 30));
       }
@@ -247,12 +262,7 @@ const bridge: NativeBridge = {
         ...result,
         ...(turnOutputs
           ? {
-              outputFilesDisplay: {
-                epoch: 1,
-                storeId: 'store',
-                subjectId: 'fixture-subject',
-                roots: ['a', 'b'].map((id) => ({ sessionId: id, revision: 1 })),
-              },
+              outputFilesDisplay: outputVersions.snapshot('store', 'fixture-subject', sessionId),
             }
           : {}),
         selection: {
@@ -350,7 +360,7 @@ window.historyPresentationFixture = {
     if (!finishOpening) throw Error('fixture_output_open_not_pending');
     finishOpening(error);
   },
-  finishLiveTurn() {
+  startLiveTurn() {
     const messages = histories.get('a')!;
     const runs = runLists.get('a')!;
     const prior = runs.at(-1)!;
@@ -361,11 +371,13 @@ window.historyPresentationFixture = {
       rootWorkCommandId: 'command-a-live',
       rootWorkSeq: String(count + 1),
       createdAt: prior.finishedAt! + 1,
-      finishedAt: prior.finishedAt! + 2,
+      isActive: true,
+      status: 'running',
+      finishedAt: null,
     });
     for (const [role, content] of [
       ['user', 'Create an output in the current conversation'],
-      ['assistant', 'LIVE-REPLY-a'],
+      ['assistant', 'LIVE-STREAM-a'],
     ] as const) {
       messages.push({
         id: `a-live-${role}`,
@@ -373,10 +385,36 @@ window.historyPresentationFixture = {
         runId: liveRunId,
         seq: String(messages.length + 1),
         role,
-        status: 'complete',
+        status: role === 'assistant' ? 'incomplete' : 'complete',
         content,
       });
     }
+    outputVersions.changed({ ...sessionChange('a'), objectId: liveRunId, type: 'run.started' });
+    control.publish();
+  },
+  appendLiveReply(text) {
+    const message = histories.get('a')!.at(-1)!;
+    message.content += text;
+    control.publish();
+  },
+  publishLiveOutput() {
+    liveDelivery = true;
+    outputVersions.changed({
+      ...sessionChange('a'),
+      objectId: 'builtin.files/delivery/00000000000000000003/producer/live-presentation',
+      type: 'extension.record_updated',
+    });
+    control.publish();
+  },
+  finishLiveTurn() {
+    const run = runLists.get('a')!.at(-1)!;
+    run.finishedAt = run.createdAt + 1;
+    run.status = 'completed';
+    run.isActive = false;
+    const message = histories.get('a')!.at(-1)!;
+    message.status = 'complete';
+    message.content = 'LIVE-REPLY-a';
+    outputVersions.changed({ ...sessionChange('a'), objectId: liveRunId, type: 'run.finished' });
     control.publish();
   },
   release(phase) {

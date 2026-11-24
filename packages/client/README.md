@@ -22,7 +22,7 @@ V1 bundle 保留新 `tool_input` 引用、有限压缩字段及缺少新字段�
 
 ## 消息历史增量
 
-[AgentClient.listMessageChanges](src/index.ts)要求`message_changes`能力，GET `/v1/sessions/:id/message-changes`，查询`storeId/afterCursor/upperCursor/upperSeq?/afterSeq?/limit?`。首个候选页省略`upperSeq`时由Store只读事务取得当前序号上界，后页传回该`highWaterSeq`；`nextAfterSeq`按候选行推进，可能含已移除的ID，不能假定总等于最后一条可见消息。穷尽候选页面后才沿`nextCursor`读取下一批事件，达到`upperCursor`表示覆盖该持久事件范围，不表示SSE ACK或执行准入。
+[AgentClient.listMessageChanges](src/index.ts)要求`message_changes`能力，GET `/v1/sessions/:id/message-changes`，查询`storeId/afterCursor/upperCursor/upperSeq?/afterSeq?/limit?`。首个候选页省略`upperSeq`时由Store只读事务取得当前序号上界，后页传回该`highWaterSeq`；`nextAfterSeq`按候选行推进，可能含已移除的ID，不能假定总等于最后一条可见消息。穷尽候选页面后才沿`nextCursor`读取下一批事件，达到`upperCursor`表示覆盖该持久事件范围，不表示SSE ACK或执行准入。普通消息变更的既有 JSON payload 可带已保存的 `updatedAt`。收集和交付变更可带 Store 核实的 `outputRunId`，旧事件和缺少原来源证明时可能省略。目录完整分页可在原快照通过核验后通知调用方其 `snapshotCursor`，用于判断随后到达的已核时间是否更晚。
 
 Cookie 调用者使用同一组游标和分页核验。BrowserClient 在读取服务信息时声明支持 `message_changes`，收到能力后可通过 `listMessageChanges(sessionId, input, { signal })` 读取固定游标区间。网关绑定当前 Store，浏览器传入 `afterCursor`、`upperCursor` 及可选的消息分页边界。
 

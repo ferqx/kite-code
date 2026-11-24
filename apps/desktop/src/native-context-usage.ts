@@ -10,6 +10,7 @@ type Receipt = {
   context?: NativeContextUsage;
   modelId?: string;
 };
+const contextRetryDelays = [500, 1000, 2000, 4000, 8000, 16000, 30000] as const;
 
 /** Current-context forecast only; cache-hit and cumulative token counts never enter this ratio. */
 export function useNativeContextUsage({
@@ -42,8 +43,7 @@ export function useNativeContextUsage({
     snapshots.current.boundary !== boundary ||
     (storeId && snapshots.current.storeId !== storeId)
   ) {
-    snapshots.current.cache.clear();
-    snapshots.current.boundary = boundary;
+    snapshots.current = { boundary, storeId, cache: new NativeDisplayCache<Receipt>() };
   }
   if (storeId) snapshots.current.storeId = storeId;
   const displayKey = JSON.stringify([sessionId, workspaceId, contextSelectionId]);
@@ -78,34 +78,37 @@ export function useNativeContextUsage({
       ),
     [messages, sessionId],
   );
-  const scope = JSON.stringify([boundary, storeId, displayKey, viewSelection, highWaterSeq]);
   const messageId = candidate?.id,
     messageKey = candidate && modelUsageMessageKey(candidate),
     content = candidate?.content;
-  const [state, setState] = useState<{ scope: string; receipt?: Receipt; failed?: boolean }>();
-  const [retryRevision, setRetryRevision] = useState(0);
-  const retry = useRef({ key: '', attempts: 0 });
-  const available =
+  const basis = JSON.stringify([boundary, storeId, displayKey, viewSelection, modelId]);
+  const [state, setState] = useState<{
+    basis: string;
+    scope: string;
+    highWaterSeq: string;
+    receipt: Receipt;
+    waitingForEvidence?: boolean;
+  }>();
+  // Later tool messages cannot add evidence to an already sealed original request.
+  const waitingForEvidence =
+    !!state?.waitingForEvidence &&
+    state.basis === basis &&
+    state.receipt.messageKey === messageKey &&
+    state.receipt.content === content;
+  const readHighWaterSeq = waitingForEvidence ? state.highWaterSeq : highWaterSeq;
+  const scope = JSON.stringify([basis, readHighWaterSeq]);
+  const readable =
     !suspended &&
-    historyComplete &&
     !!selection &&
-    !selection.viewLoading &&
-    !selection.permissionUnavailable &&
     selection.canReadContext !== false &&
     selection.canReadModelInput !== false;
-  useEffect(() => {
-    const key = JSON.stringify([scope, modelId]);
-    if (retry.current.key !== key) retry.current = { key, attempts: 0 };
-    if (!available || state?.scope !== scope || !state.failed) return;
-    const delay = Math.min(500 * 2 ** Math.min(retry.current.attempts++, 6), 30000);
-    const timer = setTimeout(() => setRetryRevision((value) => value + 1), delay);
-    return () => clearTimeout(timer);
-  }, [available, state, scope, modelId]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retryRevision deliberately repeats the same scoped read after backoff.
+  const available =
+    readable && historyComplete && !selection?.viewLoading && !selection?.permissionUnavailable;
   useEffect(() => {
     if (
       !bridge ||
       !available ||
+      waitingForEvidence ||
       !storeId ||
       !sessionId ||
       !workspaceId ||
@@ -116,19 +119,23 @@ export function useNativeContextUsage({
       content === undefined
     )
       return;
+    const cache = snapshots.current.cache;
     let active = true;
-    const readId = crypto.randomUUID();
-    void bridge
-      .request({
-        method: 'toolMessages.contextUsage',
-        generation,
-        viewSelection,
-        historyEpoch,
-        readId,
-        messageIds: [messageId],
-      })
-      .then((page) => {
-        if (!active) return;
+    let pendingReadId: string | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = async (attempt: number) => {
+      const readId = crypto.randomUUID();
+      pendingReadId = readId;
+      try {
+        const page = await bridge.request({
+          method: 'toolMessages.contextUsage',
+          generation,
+          viewSelection,
+          historyEpoch,
+          readId,
+          messageIds: [messageId],
+        });
+        if (!active || snapshots.current.cache !== cache) return;
         if (
           !page ||
           !('kind' in page) ||
@@ -145,42 +152,70 @@ export function useNativeContextUsage({
         )
           throw Error('context_usage_identity_mismatch');
         const context = page.context;
+        if (!context) throw Error('context_usage_missing');
         if (
-          context &&
-          (context.contextSelectionId !== contextSelectionId ||
-            !Number.isSafeInteger(context.totalInputTokens) ||
-            context.totalInputTokens < 0 ||
-            !context.modelId ||
-            (context.contextWindowTokens !== undefined &&
-              (!Number.isSafeInteger(context.contextWindowTokens) ||
-                context.contextWindowTokens <= 0)))
+          context.contextSelectionId !== contextSelectionId ||
+          (context.totalInputTokens !== undefined &&
+            (!Number.isSafeInteger(context.totalInputTokens) || context.totalInputTokens < 0)) ||
+          !context.modelId ||
+          (context.contextWindowTokens !== undefined &&
+            (!Number.isSafeInteger(context.contextWindowTokens) ||
+              context.contextWindowTokens <= 0))
         )
           throw Error('context_usage_identity_mismatch');
         const receipt: Receipt = {
           messageKey,
           content,
           modelId,
-          context: context && (!modelId || context.modelId === modelId) ? context : undefined,
+          context: !modelId || context.modelId === modelId ? context : undefined,
         };
-        snapshots.current.cache.set(displayKey, receipt);
-        if (context) retry.current.attempts = 0;
-        setState({ scope, receipt, failed: !context });
-      })
-      .catch(() => {
-        if (active) {
-          const receipt = { messageKey, content, modelId };
-          snapshots.current.cache.set(displayKey, receipt);
-          setState({ scope, receipt, failed: true });
+        cache.set(displayKey, receipt);
+        setState({
+          basis,
+          scope,
+          highWaterSeq: readHighWaterSeq,
+          receipt,
+          waitingForEvidence: context.totalInputTokens === undefined,
+        });
+      } catch {
+        if (!active || snapshots.current.cache !== cache) return;
+        const previous = cache.get(displayKey);
+        const verified =
+          previous?.messageKey === messageKey && previous.content === content
+            ? previous.context
+            : undefined;
+        const receipt: Receipt = { messageKey, content, modelId };
+        if (
+          verified?.contextWindowTokens !== undefined &&
+          (!modelId || modelId === verified.modelId)
+        ) {
+          const { totalInputTokens: _total, ...window } = verified;
+          receipt.context = window;
         }
-      });
+        cache.set(displayKey, receipt);
+        setState({ basis, scope, highWaterSeq: readHighWaterSeq, receipt });
+        const delay = contextRetryDelays[attempt];
+        if (delay !== undefined) timer = setTimeout(() => void read(attempt + 1), delay);
+      } finally {
+        pendingReadId = undefined;
+      }
+    };
+    void read(0);
     return () => {
       active = false;
-      void bridge.request({ method: 'toolMessages.close', generation, readId }).catch(() => {});
+      clearTimeout(timer);
+      if (pendingReadId)
+        void bridge
+          .request({ method: 'toolMessages.close', generation, readId: pendingReadId })
+          .catch(() => {});
     };
   }, [
     bridge,
     available,
+    waitingForEvidence,
+    basis,
     scope,
+    readHighWaterSeq,
     generation,
     storeId,
     sessionId,
@@ -193,7 +228,6 @@ export function useNativeContextUsage({
     content,
     displayKey,
     modelId,
-    retryRevision,
   ]);
   const displayed =
     state?.scope === scope ? state.receipt : snapshots.current.cache.get(displayKey);
@@ -205,15 +239,12 @@ export function useNativeContextUsage({
     (displayed.context
       ? !modelId || displayed.context.modelId === modelId
       : !modelId || displayed.modelId === modelId);
-  const metrics = !suspended && observed ? displayed.context : undefined;
+  const metrics = readable && observed ? displayed.context : undefined;
   return {
     metrics,
     pending:
       !!bridge &&
-      !suspended &&
-      !!selection &&
-      selection.canReadContext !== false &&
-      selection.canReadModelInput !== false &&
+      readable &&
       !observed &&
       (!historyComplete || (available && !!candidate && state?.scope !== scope)),
   };

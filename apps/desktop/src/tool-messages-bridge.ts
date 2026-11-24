@@ -148,7 +148,8 @@ export type NativeToolRunPage = {
 export type NativeContextUsage = {
   modelId: string;
   contextSelectionId: string;
-  totalInputTokens: number;
+  /** Absent when the sealed request cannot account for the current selected history. */
+  totalInputTokens?: number;
   contextWindowTokens?: number;
 };
 export type NativeContextUsagePage = {

@@ -44,6 +44,17 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+function frozenContextWindow(run: Run, modelId: string): number | undefined {
+  const binding = object(run.configuration);
+  const models = object(object(binding?.snapshot)?.configuration ?? binding?.configuration)?.models;
+  if (!Array.isArray(models)) return;
+  const matching = models.map(object).filter((model) => model?.id === modelId);
+  if (matching.length !== 1) return;
+  const capacity = object(matching[0]?.modelCapabilities)?.contextWindowTokens;
+  return typeof capacity === 'number' && Number.isSafeInteger(capacity) && capacity > 0
+    ? capacity
+    : undefined;
+}
 const source = (message: Message) =>
   message.originMessage
     ? { sessionId: message.originMessage.sessionId, runId: message.originMessage.runId }
@@ -238,12 +249,32 @@ export class NativeToolMessages {
         object(execution.result)?.content !== content
       )
         return page;
-      const estimate = await this.client.getContextEstimate(
-        scope.sessionId,
-        { storeId: scope.storeId, executionId: execution.id },
-        { signal: lease.abort.signal },
-      );
+      const estimate = await this.client
+        .getContextEstimate(
+          scope.sessionId,
+          { storeId: scope.storeId, executionId: execution.id },
+          { signal: lease.abort.signal },
+        )
+        .catch((error: unknown) => {
+          // An older sealed request may not contain newly completed image evidence.
+          // Its frozen model window still belongs to the exact observed request.
+          if (!(error instanceof ClientError) || error.code !== 'context_estimate_unavailable')
+            throw error;
+          return undefined;
+        });
       this.check(lease);
+      let contextWindowTokens = estimate?.contextWindowTokens;
+      if (!estimate) {
+        const run = await this.client.getRun(message.runId, { signal: lease.abort.signal });
+        this.check(lease);
+        if (
+          run.id !== message.runId ||
+          run.sessionId !== scope.sessionId ||
+          run.originStoreId !== scope.storeId
+        )
+          throw new ClientError('model_usage_identity_mismatch');
+        contextWindowTokens = frozenContextWindow(run, execution.definitionId);
+      }
       const view = await this.client.getView(scope.sessionId, { signal: lease.abort.signal });
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
@@ -255,29 +286,28 @@ export class NativeToolMessages {
         view.session.id !== scope.sessionId ||
         view.session.workspaceId !== scope.workspaceId ||
         view.session.deletedAt !== null ||
-        estimate.storeId !== scope.storeId ||
-        estimate.sessionId !== scope.sessionId ||
-        estimate.runId !== execution.runId ||
-        estimate.modelInputExecutionId !== execution.id ||
-        estimate.contextSelectionId !== view.session.contextSelectionId
+        (estimate &&
+          (estimate.storeId !== scope.storeId ||
+            estimate.sessionId !== scope.sessionId ||
+            estimate.runId !== execution.runId ||
+            estimate.modelInputExecutionId !== execution.id ||
+            estimate.modelId !== execution.definitionId ||
+            estimate.contextSelectionId !== view.session.contextSelectionId))
       )
         throw new ClientError('context_selection_changed');
       if (
-        !Number.isSafeInteger(estimate.totalInputTokens) ||
-        estimate.totalInputTokens < 0 ||
-        !estimate.modelId ||
-        (estimate.contextWindowTokens !== undefined &&
-          (!Number.isSafeInteger(estimate.contextWindowTokens) ||
-            estimate.contextWindowTokens <= 0))
+        !execution.definitionId ||
+        (estimate &&
+          (!Number.isSafeInteger(estimate.totalInputTokens) || estimate.totalInputTokens < 0)) ||
+        (contextWindowTokens !== undefined &&
+          (!Number.isSafeInteger(contextWindowTokens) || contextWindowTokens <= 0))
       )
         throw new ClientError('context_estimate_unavailable');
       page.context = {
-        modelId: estimate.modelId,
-        contextSelectionId: estimate.contextSelectionId,
-        totalInputTokens: estimate.totalInputTokens,
-        ...(estimate.contextWindowTokens === undefined
-          ? {}
-          : { contextWindowTokens: estimate.contextWindowTokens }),
+        modelId: execution.definitionId,
+        contextSelectionId: view.session.contextSelectionId,
+        ...(estimate ? { totalInputTokens: estimate.totalInputTokens } : {}),
+        ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
       };
       return page;
     } finally {

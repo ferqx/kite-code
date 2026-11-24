@@ -207,7 +207,7 @@ export interface ComposerProps {
   permissionPending?: boolean;
   sessionLoading?: boolean;
   contextUsage?: {
-    readonly totalInputTokens: number;
+    readonly totalInputTokens?: number;
     readonly contextWindowTokens?: number;
   };
   cacheMetrics?: {

@@ -175,7 +175,7 @@ import {
   registerOutputCollectionAtTerminal,
   registerTextOutputAtTerminal,
 } from './output-collection';
-import { OutputFileIndex } from './output-file-index';
+import { OutputFileIndex, outputChangeRunId } from './output-file-index';
 import { getPendingInputQueue, mutatePendingInputQueue } from './pending-input-queue';
 import { callPermissionGrant, verifyPermissionGrantDispatch } from './permission-grants';
 import { closeReconciledHistory } from './reconciliation-admission';
@@ -197,7 +197,12 @@ import {
 } from './session-execution-root';
 import { callSessionExport } from './session-export';
 import { readFirstSessionRun } from './session-first-run';
-import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
+import {
+  getSessionLogs,
+  messageChangePayload,
+  sessionLogEnvelope,
+  unwrapChangePayload,
+} from './session-logs';
 import { manageSession } from './session-management-operations';
 import { readLatestBusinessModelPreference } from './session-model-preference';
 import { reconcileSession } from './session-reconciliation';
@@ -3100,14 +3105,28 @@ export class SqliteOperations {
             after,
             ...(scopes ?? []),
             limit(input.limit),
-          ).map((row) => ({
-            cursor: String(row.cursor),
-            sessionId: row.scope_session_id === null ? null : String(row.scope_session_id),
-            objectId: String(row.object_id),
-            revision: String(row.revision),
-            type: String(row.type),
-            payload: unwrapChangePayload(parse(row.payload_json)),
-          }));
+          ).map((row) => {
+            const sessionId = row.scope_session_id === null ? null : String(row.scope_session_id);
+            const objectId = String(row.object_id);
+            const type = String(row.type);
+            const saved = parse(row.payload_json);
+            let payload =
+              sessionId && type === 'message.updated'
+                ? messageChangePayload(saved)
+                : unwrapChangePayload(saved);
+            if (payload === null && sessionId && type === 'extension.record_updated') {
+              const outputRunId = outputChangeRunId(this, sessionId, objectId);
+              if (outputRunId) payload = { outputRunId };
+            }
+            return {
+              cursor: String(row.cursor),
+              sessionId,
+              objectId,
+              revision: String(row.revision),
+              type,
+              payload,
+            };
+          });
           this.db.run('COMMIT');
           return { metadata: meta, events };
         } catch (error) {

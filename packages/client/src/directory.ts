@@ -83,11 +83,12 @@ export async function collectSnapshotDirectory<T extends { seq: string }>(
   signal?: AbortSignal,
   identity?: (item: T) => string,
   retryDelayMs = 0,
+  onSnapshot?: (cursor: string) => void,
 ): Promise<T[]> {
   for (let attempt = 0; ; attempt++) {
     let snapshotCursor: string | undefined;
     try {
-      return await collectDirectory(
+      const items = await collectDirectory(
         async (input) => {
           const page = await read({ ...input, snapshotCursor });
           if (snapshotCursor !== undefined && page.snapshotCursor !== snapshotCursor)
@@ -98,6 +99,8 @@ export async function collectSnapshotDirectory<T extends { seq: string }>(
         signal,
         identity,
       );
+      if (snapshotCursor !== undefined) onSnapshot?.(snapshotCursor);
+      return items;
     } catch (error) {
       signal?.throwIfAborted();
       if (!(error instanceof ClientError) || error.code !== 'directory_changed' || attempt >= 2)

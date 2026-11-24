@@ -72,6 +72,12 @@ type OutputFrame = {
   files: string[];
   bottom: number;
 };
+type HistoricalOutputFrame = {
+  sameCard: boolean;
+  top: number;
+  height: number;
+  scrollTop: number;
+};
 
 async function assertOutputSpacing(reply: Locator, lastBlockSelector: string) {
   const spacing = await reply.evaluate((article, selector) => {
@@ -109,6 +115,7 @@ declare global {
     historyPresentationPhase: string;
     outputFrames: OutputFrame[];
     outputPhase: OutputFrame['phase'];
+    stopHistoricalOutputFrames: () => HistoricalOutputFrame[];
   }
 }
 
@@ -164,6 +171,7 @@ const report = {
     theme: string;
     frames: OutputFrame[];
     events: PresentationEvent[];
+    historicalFrames: HistoricalOutputFrame[];
     failedReadFrames: OutputFrame[];
   }[],
 };
@@ -472,6 +480,42 @@ try {
       await page.getByRole('button', { name: 'Session A', exact: true }).click();
       await first.locator('.output-file-card').waitFor();
       await page.screenshot({ path: path.join(artifact, `outputs-${theme}-warm.png`) });
+      await firstFile.evaluate(async (card) => {
+        const reply = card.closest('.message.assistant')!;
+        const viewport = card.closest('.conversation-viewport')!;
+        viewport.scrollTop -= 64;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const frames: HistoricalOutputFrame[] = [];
+        function sample() {
+          const rect = card.getBoundingClientRect();
+          frames.push({
+            sameCard: reply.querySelector('.output-file-card') === card,
+            top: rect.top,
+            height: rect.height,
+            scrollTop: viewport.scrollTop,
+          });
+          animation = requestAnimationFrame(sample);
+        }
+        let animation = 0;
+        sample();
+        window.stopHistoricalOutputFrames = () => {
+          cancelAnimationFrame(animation);
+          return frames;
+        };
+      });
+      await page.evaluate(() => window.historyPresentationFixture.startLiveTurn());
+      await page.getByText('LIVE-STREAM-a', { exact: true }).waitFor();
+      await page.evaluate(() => {
+        window.historyPresentationFixture.appendLiveReply(' 正在继续输出。');
+        window.historyPresentationFixture.publishLiveOutput();
+      });
+      await page.getByText('LIVE-STREAM-a 正在继续输出。', { exact: true }).waitFor();
+      await page.waitForFunction(
+        () => window.historyPresentationFixture.pending().historicalOutputs === 1,
+      );
+      await page.screenshot({
+        path: path.join(artifact, `outputs-${theme}-historical-refresh.png`),
+      });
       await page.evaluate(() => {
         window.outputPhase = 'live';
         window.historyPresentationFixture.finishLiveTurn();
@@ -505,10 +549,28 @@ try {
       });
       assert.ok(Math.abs(textToFooter.distance - textToFooter.expected) < 0.1);
       await page.screenshot({ path: path.join(artifact, `outputs-${theme}-live.png`) });
-      await page.evaluate(() => window.historyPresentationFixture.release('liveOutputs'));
+      await page.evaluate(() => {
+        window.historyPresentationFixture.release('historicalOutputs');
+        window.historyPresentationFixture.release('liveOutputs');
+      });
       await latest.locator('.output-file-card').waitFor();
+      const historicalFrames = await page.evaluate(() => window.stopHistoricalOutputFrames());
+      const initialHistoricalFrame = historicalFrames[0]!;
+      assert.ok(historicalFrames.length >= 8);
+      assert.ok(initialHistoricalFrame.height > 0);
+      assert.ok(
+        historicalFrames.every(
+          (frame) =>
+            frame.sameCard &&
+            Math.abs(frame.height - initialHistoricalFrame.height) < 1 &&
+            Math.abs(frame.top - initialHistoricalFrame.top) < 1 &&
+            Math.abs(frame.scrollTop - initialHistoricalFrame.scrollTop) < 1,
+        ),
+        JSON.stringify(historicalFrames),
+      );
       assert.equal(await messageFooterOpacity(latest), '1');
       const afterParagraph = await assertOutputSpacing(latest, 'p');
+      await latest.locator('.output-file-card').scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(artifact, `outputs-${theme}-live-resolved.png`) });
       const { frames, events } = await page.evaluate(() => ({
         frames: window.outputFrames,
@@ -538,6 +600,11 @@ try {
         events.filter((event) => event.phase === 'outputs' && event.sessionId === 'a').length,
         1,
       );
+      assert.equal(
+        events.filter((event) => event.kind === 'request' && event.phase === 'historicalOutputs')
+          .length,
+        1,
+      );
       assert.equal(await page.locator('.native-toast-card').count(), 0);
       assert.deepEqual(errors, []);
       await page.goto(
@@ -553,7 +620,7 @@ try {
       assert.ok(failedReadFrames.slice(firstRecoveredReply).every((frame) => frame.visible));
       assert.deepEqual(failedReadFrames.at(-1)?.files, ['Output-a.pptx']);
       assert.deepEqual(errors, []);
-      report.outputPresentation.push({ theme, frames, events, failedReadFrames });
+      report.outputPresentation.push({ theme, frames, events, historicalFrames, failedReadFrames });
       await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
       console.log(
         JSON.stringify({

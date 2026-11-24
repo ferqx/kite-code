@@ -54,7 +54,7 @@ Shell交付的原子终态、私有索引、collector恢复与Fork只读来源�
 
 模型以思考开始、消息仍在流式输出时，公开消息可携带 `inlineReasoningBytes`。SQLite 在读取该内联记录时从已保存的思考前缀计算 UTF-8 字节数，无需迁移旧记录。思考正文仍通过原模型执行的输出读取。带产物引用的消息使用既有的 `outputBody.reasoningBytes` 公开投影。[内联思考回归](../../test/isolated/model-output/live-reasoning.test.ts)
 
-[listMessageChanges](port.ts)由Worker在单个只读事务调用[持久变更读取](sqlite/message-changes.ts)。它固定原Store、Session和`(afterCursor,upperCursor]`，每批最多扫描200个全局`change_event`；`Message.seq`只负责候选分页和历史位置，不能作为内容版本。普通`message.updated`按原ID定位消息，同一序号的partial会返回新正文；全局非正文事件保守重投影具有展示依赖的原用户消息、解释/压缩Model消息及result_ref来源，覆盖原输入接管、外来名称、压缩结果与虚拟子结果的变化。候选按seq分页，公开可见消息复用原[结果展示证明](sqlite/agent-result-display.ts)，不可见候选返回`removedIds`；批次空页仍沿准确`nextCursor`前进。
+[listMessageChanges](port.ts)由Worker在单个只读事务调用[持久变更读取](sqlite/message-changes.ts)。它固定原Store、Session和`(afterCursor,upperCursor]`，每批最多扫描200个全局`change_event`；`Message.seq`只负责候选分页和历史位置，不能作为内容版本。普通`message.updated`按原ID定位消息，同一序号的partial会返回新正文。公开变更可附带持久日志中的同一条消息更新时间，客户端可用它更新已知会话的目录顺序；全局非正文事件保守重投影具有展示依赖的原用户消息、解释/压缩Model消息及result_ref来源，覆盖原输入接管、外来名称、压缩结果与虚拟子结果的变化。候选按seq分页，公开可见消息复用原[结果展示证明](sqlite/agent-result-display.ts)，不可见候选返回`removedIds`；批次空页仍沿准确`nextCursor`前进。
 
 首个候选页可取得同事务Session.nextSeq，后续固定`upperSeq`；它约束读取位置而非承诺可变正文快照，当前正文可领先事件上界，后续事件按原ID重放仍幂等。Runtime继续执行原公开普通输入/Agent邮件投影，Service继续生成原回应元数据。游标ahead、Store错配拒绝；低于replayFloor或范围含历史回收事件返回`cursor_expired`，由客户端建立完整基线，不能用缓存冒充覆盖。没有新增数据表、业务事件或写authority。元数据路径会重读可能受影响的依赖候选，可能仍较大；普通流式快路径不重传稳定历史。
 
@@ -298,7 +298,7 @@ Windows x64／Bun 1.4.2 的真实强杀、原审批、并行结果与完整历�
 
 ## Session 日志元数据只读观察
 
-[Session logs owner](sqlite/session-logs.README.md) 在原 change_event payload 中保存私有版本化 append 元数据，原公共 getChanges payload/SSE 不变。Store 只提供准确原 Session/subject 的固定 upper、有界只读页；旧元数据不可用，不从当前状态补历史。Model 导航只指向原持久输入绑定，不读取正文或授予执行权。无 schema／format 变化，原备份恢复字节契约保持。
+[Session logs owner](sqlite/session-logs.README.md) 在原 change_event payload 中保存私有版本化 append 元数据，公开 getChanges 保留原 payload。若会话级 `message.updated` 原 payload 为空且日志含可核实 v1 时间，仅提供 `updatedAt`，与会话目录使用同一持久时间。Store 只提供准确原 Session/subject 的固定 upper、有界只读页；旧元数据不可用，不从当前状态补历史。Model 导航只指向原持久输入绑定，不读取正文或授予执行权。无 schema／format 变化，原备份恢复字节契约保持。
 
 ## 普通 Action 的完整执行组边界
 

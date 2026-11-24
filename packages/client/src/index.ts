@@ -3705,11 +3705,18 @@ export class AgentClient {
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
     return result.map((item) => item.workspace);
   }
-  async listAllSessionDirectory(options: { workspaceId?: string; signal?: AbortSignal } = {}) {
+  async listAllSessionDirectory(
+    options: {
+      workspaceId?: string;
+      signal?: AbortSignal;
+      onSnapshot?: (cursor: string) => void;
+    } = {},
+  ) {
     this.requireCapability('session_directory_activity');
     const storeId = this.serverInfo!.storeId!,
       workspaceId = options.workspaceId,
       generation = this.connectionGeneration;
+    let snapshotCursor: string | undefined;
     const result = await collectSnapshotDirectory(
       (page) => {
         if (generation !== this.connectionGeneration)
@@ -3718,9 +3725,14 @@ export class AgentClient {
       },
       options.signal,
       (item) => item.session.id,
+      0,
+      (cursor) => {
+        snapshotCursor = cursor;
+      },
     );
     this.requireConnection();
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (snapshotCursor !== undefined) options.onSnapshot?.(snapshotCursor);
     return result;
   }
   async listAllSessions(options: { workspaceId?: string; signal?: AbortSignal } = {}) {

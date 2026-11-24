@@ -1,5 +1,5 @@
 import type { Message } from '@kite-ai/client';
-import type { NativeBridge, NativeSelection } from './native-bridge';
+import type { NativeBridge, NativeHistoryChange, NativeSelection } from './native-bridge';
 import { NativeHistoryCache } from './native-history-cache';
 import { nativeReadDeadline } from './native-read-deadline';
 
@@ -13,22 +13,37 @@ export type HistoryState = {
   error?: string;
 };
 type HistoryTarget = { upperSeq: string; cursor?: string; baselineCursor?: string };
+type HistoryScope = {
+  generation: number;
+  storeId: string;
+  sessionId: string;
+  selection: number;
+  epoch: number;
+  previews?: boolean;
+};
+
+function isHistoryChange(scope: HistoryScope | undefined, notice: NativeHistoryChange) {
+  return (
+    scope?.generation === notice.generation &&
+    scope.storeId === notice.storeId &&
+    scope.sessionId === notice.sessionId &&
+    scope.selection === notice.viewSelection &&
+    scope.epoch === notice.historyEpoch
+  );
+}
 /** Full baselines seal placement; subsequent reads cover durable changes, including same-seq edits. */
 export class NativeHistory {
-  private scope?: {
-    generation: number;
-    storeId: string;
-    sessionId: string;
-    selection: number;
-    epoch: number;
-    previews?: boolean;
-  };
+  private scope?: HistoryScope;
   private run?: { readId: string; canceled: boolean; target: HistoryTarget };
   private wanted?: HistoryTarget;
+  private baseline?: HistoryTarget;
+  private notice?: NativeHistoryChange;
+  private pendingNotice?: NativeHistoryChange;
   private cursor?: string;
   private revision?: number;
   private baselineReady = false;
-  private entries = new Map<string, Message>();
+  private messages: Message[] = [];
+  private positions = new Map<string, number>();
   private readonly inlineReasoningVersions = new WeakMap<Message, string>();
   private cached = new NativeHistoryCache();
   private disposed = false;
@@ -41,7 +56,7 @@ export class NativeHistory {
   }
   private publish(phase: HistoryState['phase'], highWaterSeq?: string, error?: string) {
     this.state = {
-      messages: [...this.entries.values()].sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1)),
+      messages: this.messages,
       phase,
       baselineReady: this.baselineReady,
       highWaterSeq,
@@ -67,6 +82,9 @@ export class NativeHistory {
     }
     this.run = undefined;
     this.wanted = undefined;
+    this.baseline = undefined;
+    this.notice = undefined;
+    this.pendingNotice = undefined;
   }
   /** Confirmed scope removal: release its cached data as well as its current read. */
   evictStore(storeId: string) {
@@ -77,7 +95,7 @@ export class NativeHistory {
     this.close();
     this.scope = undefined;
     this.revision = undefined;
-    this.entries.clear();
+    this.install([]);
     this.publish('loading');
   }
   clear() {
@@ -94,17 +112,14 @@ export class NativeHistory {
     if (this.disposed) return;
     this.revision = undefined;
     const previous = this.scope;
+    const pending = this.pendingNotice?.sessionId === sessionId ? this.pendingNotice : undefined;
     this.close();
+    this.pendingNotice = pending;
     if (previous) {
       this.cached.save(previous.storeId, previous.sessionId, this.state.messages);
-      this.entries = new Map(
-        (this.cached.take(previous.storeId, sessionId) ?? []).map((message) => [
-          message.id,
-          message,
-        ]),
-      );
+      this.install(this.cached.take(previous.storeId, sessionId) ?? []);
       this.scope = { ...previous, sessionId, selection: -1 };
-    } else this.entries.clear();
+    } else this.install([]);
     this.publish('loading');
   }
   select(generation: number, selection: NativeSelection, epoch = 0) {
@@ -118,11 +133,23 @@ export class NativeHistory {
       ...(selection.canReadHistoryPreviews === true ? { previews: true } : {}),
     };
     const sameScope = JSON.stringify(scope) === JSON.stringify(this.scope);
-    const target = {
+    const notice =
+      this.pendingNotice && isHistoryChange(scope, this.pendingNotice)
+        ? this.pendingNotice
+        : this.notice && isHistoryChange(scope, this.notice)
+          ? this.notice
+          : undefined;
+    const baseline = {
       upperSeq: selection.session.nextSeq,
       cursor: selection.historyTargetCursor ?? selection.historyCursor,
       baselineCursor: selection.historyCursor,
     };
+    const target =
+      notice && baseline.cursor !== undefined && BigInt(notice.cursor) > BigInt(baseline.cursor)
+        ? { ...baseline, cursor: notice.cursor }
+        : baseline;
+    // A View read started before the last notification can carry an older cursor.
+    if (sameScope) this.baseline = baseline;
     if (
       sameScope &&
       this.revision === selection.viewGeneration &&
@@ -148,17 +175,43 @@ export class NativeHistory {
       if (!sameObservation) this.cached.clear();
       else if (!sameReading)
         this.cached.save(previous.storeId, previous.sessionId, this.state.messages);
-      this.entries = new Map(
-        (sameReading
-          ? this.state.messages
-          : (this.cached.take(scope.storeId, scope.sessionId) ?? [])
-        ).map((message) => [message.id, message]),
-      );
+      if (!sameReading) this.install(this.cached.take(scope.storeId, scope.sessionId) ?? []);
       this.scope = scope;
       this.publish('loading');
     }
+    this.notice = notice;
     this.revision = selection.viewGeneration;
+    this.baseline = baseline;
     this.wanted = target;
+    void this.drain();
+  }
+  advance(notice: NativeHistoryChange) {
+    if (this.disposed) return;
+    const baseline = this.baseline;
+    if (
+      baseline &&
+      this.scope &&
+      (this.scope.generation !== notice.generation ||
+        this.scope.storeId !== notice.storeId ||
+        this.scope.sessionId !== notice.sessionId ||
+        this.scope.selection > notice.viewSelection ||
+        (this.scope.selection === notice.viewSelection && this.scope.epoch > notice.historyEpoch))
+    )
+      return;
+    // A notice may arrive while the selecting IPC is still resolving. That read
+    // establishes the original Store, selection and baseline before we advance it.
+    if (!isHistoryChange(this.scope, notice) || !baseline) {
+      this.pendingNotice = notice;
+      return;
+    }
+    if (
+      !baseline.cursor ||
+      BigInt(notice.cursor) <= BigInt(this.notice?.cursor ?? baseline.cursor) ||
+      BigInt(notice.cursor) <= BigInt(baseline.cursor)
+    )
+      return;
+    this.notice = notice;
+    this.wanted = { ...baseline, cursor: notice.cursor };
     void this.drain();
   }
   private closeRead(generation: number, readId: string) {
@@ -235,7 +288,7 @@ export class NativeHistory {
         afterSeq = page.nextAfterSeq;
       }
       // EOF proves the complete reading, including removal or replacement of older records.
-      this.replace(scanned, run.readId);
+      this.install([...scanned.values()].map((message) => this.retain(message, run.readId)));
       this.baselineReady = true;
       this.cursor = target.baselineCursor;
       if (target.cursor !== target.baselineCursor) this.wanted ??= target;
@@ -256,8 +309,10 @@ export class NativeHistory {
         }
         // A failed scan proves only its legal prefix; retain the last reading beyond it.
         // Failed recalibration must not replace a newer, already visible version.
-        for (const [id, message] of scanned)
-          if (!this.entries.has(id)) this.entries.set(id, message);
+        this.applyChanges(
+          [...scanned.values()].filter((message) => !this.positions.has(message.id)),
+          new Set(),
+        );
         const code = (error as { code?: string })?.code ?? (error as Error)?.message;
         this.publish('unavailable', this.state.highWaterSeq, code);
       }
@@ -272,24 +327,57 @@ export class NativeHistory {
       ? this.inlineReasoningVersions.get(message)
       : `bytes:${message.inlineReasoningBytes}`;
   }
-  private replace(messages: Map<string, Message>, revision: string) {
-    for (const [id, message] of messages) {
-      const previous = this.entries.get(id);
-      if (previous === message) continue;
-      const retained =
-        previous && JSON.stringify(previous) === JSON.stringify(message) ? previous : message;
-      if (retained !== message) messages.set(id, retained);
-      // Older Services omit the byte count. A returned row may then have new reasoning
-      // even when all its public fields stayed the same.
-      if (
-        retained.status === 'incomplete' &&
-        retained.firstOutput === 'reasoning' &&
-        !retained.outputBody &&
-        retained.inlineReasoningBytes === undefined
-      )
-        this.inlineReasoningVersions.set(retained, revision);
+  private install(messages: Message[]) {
+    this.messages = messages;
+    this.positions = new Map(messages.map((message, index) => [message.id, index]));
+  }
+  private retain(message: Message, revision: string, previous?: Message): Message {
+    previous ??= this.messages[this.positions.get(message.id) ?? -1];
+    if (previous === message) return message;
+    const retained =
+      previous && JSON.stringify(previous) === JSON.stringify(message) ? previous : message;
+    // Older Services omit the byte count. A returned row may then have new reasoning
+    // even when all its public fields stayed the same.
+    if (
+      retained.status === 'incomplete' &&
+      retained.firstOutput === 'reasoning' &&
+      !retained.outputBody &&
+      retained.inlineReasoningBytes === undefined
+    )
+      this.inlineReasoningVersions.set(retained, revision);
+    return retained;
+  }
+  private applyChanges(updates: Iterable<Message>, removed: Set<string>, revision?: string) {
+    let next = this.messages;
+    const inserted: Message[] = [];
+    for (const update of updates) {
+      const position = this.positions.get(update.id) ?? -1;
+      const previous = this.messages[position];
+      const message = revision ? this.retain(update, revision, previous) : update;
+      if (!previous) inserted.push(message);
+      else if (previous.seq !== message.seq) {
+        removed.add(message.id);
+        inserted.push(message);
+      } else if (message !== previous) {
+        if (next === this.messages) next = next.slice();
+        next[position] = message;
+      }
     }
-    this.entries = messages;
+    const tail = next.at(-1);
+    if (removed.size || (tail && inserted.length && BigInt(inserted[0]!.seq) <= BigInt(tail.seq))) {
+      this.install(
+        next
+          .filter((message) => !removed.has(message.id))
+          .concat(inserted)
+          .sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1)),
+      );
+      return;
+    }
+    // The delta pages already prove the order of new tail rows. A same-sequence
+    // revision leaves the index intact and an empty delta can reuse the array.
+    for (const [offset, message] of inserted.entries())
+      this.positions.set(message.id, next.length + offset);
+    this.messages = inserted.length ? next.concat(inserted) : next;
   }
   private async readChanges(
     scope: NonNullable<NativeHistory['scope']>,
@@ -363,10 +451,7 @@ export class NativeHistory {
         afterSeq = page.nextAfterSeq;
       }
       // Commit one covered cursor batch atomically. Failed/late pages never delete old rows.
-      const merged = new Map(this.entries);
-      for (const id of removed) merged.delete(id);
-      for (const [id, message] of updates) merged.set(id, message);
-      this.replace(merged, nextCursor!);
+      this.applyChanges(updates.values(), removed, nextCursor!);
       this.cursor = nextCursor;
       this.publish(
         this.state.phase !== 'complete' && (this.cursor !== target.cursor || this.wanted)

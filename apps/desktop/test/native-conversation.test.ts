@@ -17,7 +17,7 @@ import { callerTextDigest } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import type { NativeConversationResult, NativeDraft, NativeRequest } from '../src/native-bridge';
-import { desktopTranscript } from '../src/native-transcript';
+import { desktopTranscript, NativeTranscriptProjection } from '../src/native-transcript';
 import { memoryPrivateData } from './private-data.fixture';
 
 const text = 'first input\n雪🙂\u0000end';
@@ -67,6 +67,55 @@ test('formal Native transcript preserves the explicit final-only copy contract f
   expect(projection.messages.find((entry) => entry.id === 'first')?.finalReply).not.toBe(true);
   expect(projection.messages.find((entry) => entry.id === 'final')?.finalReply).toBe(true);
   expect(projection.messages.find((entry) => entry.id === 'final')?.copyText).toBe(final);
+});
+
+test('Native reuses historical transcript rows only for text changes to the same visible incomplete reply', () => {
+  const input = {
+    sessionId: 'session',
+    storeId: 'store',
+    traceTurns: true,
+    tools: [],
+    runs: [],
+  };
+  const history: Message = {
+    id: 'history',
+    sessionId: 'session',
+    runId: null,
+    seq: '1',
+    role: 'user',
+    status: 'complete',
+    content: 'Original input',
+  };
+  const reply: Message = {
+    ...history,
+    id: 'reply',
+    seq: '2',
+    role: 'assistant',
+    status: 'incomplete',
+    content: 'stream',
+  };
+  const owner = {};
+  const projection = new NativeTranscriptProjection();
+  const project = (messages: Message[], boundary = 'view', bodyRevision = 0) => {
+    const result = projection.project(owner, boundary, bodyRevision, { ...input, messages });
+    expect(result).toEqual(desktopTranscript({ ...input, messages }));
+    return result;
+  };
+  const start = project([history, reply]);
+  const appended = { ...reply, content: 'stream continues' };
+  const live = project([history, appended]);
+  expect(live.messages[0]).toBe(start.messages[0]);
+  expect(live.messages[1]).not.toBe(start.messages[1]);
+  expect(live.messages[1]?.text).toBe(appended.content);
+  const revised = { ...history, content: 'Restored input' };
+  const corrected = project([revised, appended]);
+  expect(corrected.messages[0]).not.toBe(live.messages[0]);
+  const switched = project([revised, appended], 'reconnected');
+  expect(switched.messages[0]).not.toBe(corrected.messages[0]);
+  const verified = project([revised, appended], 'reconnected', 1);
+  expect(verified.messages[0]).not.toBe(switched.messages[0]);
+  const complete = project([revised, { ...appended, status: 'complete' }], 'reconnected', 1);
+  expect(complete.messages[1]?.settled).toBe(true);
 });
 function fixture(protectMissingUserDirectory = false, savedText = text) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'native-conversation-')));

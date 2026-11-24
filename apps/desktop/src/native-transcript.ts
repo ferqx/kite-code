@@ -101,14 +101,14 @@ export function useNativeRuns({
   ]);
   const available =
     !suspended && !!selection && !selection.viewLoading && !selection.permissionUnavailable;
-  const representatives = useMemo(() => {
+  const ids = useMemo(() => {
     const entries = new Map<string, string>();
     for (const message of messages)
       if (!message.originMessage && message.sessionId === sessionId && message.runId)
         entries.set(message.runId, message.id);
-    return entries;
+    return JSON.stringify([...entries]);
   }, [messages, sessionId]);
-  const ids = useMemo(() => JSON.stringify([...representatives]), [representatives]);
+  const representatives = useMemo(() => new Map<string, string>(JSON.parse(ids)), [ids]);
   const view = useMemo(
     () =>
       JSON.stringify(
@@ -287,13 +287,14 @@ export function useNativeRuns({
     state.bridge === bridge
       ? state.error
       : undefined;
+  const resolved = useMemo(() => new Set(runs.map((run) => run.id)), [runs]);
   return {
     runs,
     loading:
       !error &&
       [...representatives.keys()].some(
         (id) =>
-          !runs.some((run) => run.id === id) &&
+          !resolved.has(id) &&
           (cache.current.scope !== scope ||
             cache.current.retryRevision !== retryRevision ||
             !cache.current.read.has(id)),
@@ -1004,4 +1005,118 @@ export function desktopTranscript({
         }
       : {}),
   };
+}
+
+type TranscriptInput = Parameters<typeof desktopTranscript>[0];
+type Transcript = ReturnType<typeof desktopTranscript>;
+
+function sameRows<T>(before?: readonly T[], after?: readonly T[]) {
+  return (
+    before === after ||
+    (!!before && before.length === after?.length && before.every((row, i) => row === after[i]))
+  );
+}
+
+function onlyReplyTextChanged(before: Message, after: Message) {
+  if (
+    before.role !== 'assistant' ||
+    before.status !== 'incomplete' ||
+    before.originMessage ||
+    before.compression ||
+    before.agentMessage ||
+    before.agentResult ||
+    before.contentFormat ||
+    before.firstOutput === 'tool_calls' ||
+    before.toolCalls?.length ||
+    before.outputBody?.toolCallCount ||
+    !(before.content || (before.outputBody && before.outputBody.contentBytes !== '0')) ||
+    !(after.content || (after.outputBody && after.outputBody.contentBytes !== '0'))
+  )
+    return false;
+  const { content: _oldText, outputBody: oldBody, ...oldFields } = before;
+  const { content: _newText, outputBody: newBody, ...newFields } = after;
+  const { contentBytes: _oldBytes, ...oldBodyFields } = oldBody ?? {};
+  const { contentBytes: _newBytes, ...newBodyFields } = newBody ?? {};
+  return (
+    !!oldBody === !!newBody &&
+    JSON.stringify(oldFields) === JSON.stringify(newFields) &&
+    JSON.stringify(oldBodyFields) === JSON.stringify(newBodyFields)
+  );
+}
+
+/** Reuse the same verified projection while a visible incomplete reply's text changes. */
+export class NativeTranscriptProjection {
+  private previous?: {
+    owner: unknown;
+    boundary: string;
+    replyRevision: number;
+    facts: Omit<TranscriptInput, 'fullReply'>;
+    transcript: Transcript;
+    tailIndex: number;
+  };
+
+  project(
+    owner: unknown,
+    boundary: string,
+    replyRevision: number,
+    input: TranscriptInput,
+  ): Transcript {
+    const { fullReply, ...facts } = input;
+    const previous = this.previous;
+    const tail = input.messages.at(-1);
+    const before = previous?.facts;
+    if (
+      previous &&
+      before &&
+      previous.owner === owner &&
+      previous.boundary === boundary &&
+      previous.replyRevision === replyRevision &&
+      previous.tailIndex !== -1 &&
+      before.traceTurns === input.traceTurns &&
+      before.storeId === input.storeId &&
+      before.sessionId === input.sessionId &&
+      sameRows(before.runs, input.runs) &&
+      sameRows(before.tools, input.tools) &&
+      sameRows(before.executions, input.executions) &&
+      sameRows(before.compressionMessages, input.compressionMessages) &&
+      before.compressionProgress === input.compressionProgress &&
+      tail &&
+      before.messages.length === input.messages.length &&
+      before.messages.every((message, index) =>
+        index === before.messages.length - 1
+          ? onlyReplyTextChanged(message, tail)
+          : message === input.messages[index],
+      )
+    ) {
+      const row = previous.transcript.messages[previous.tailIndex]!;
+      let transcript = previous.transcript;
+      if (row.text !== tail.content) {
+        const messages = transcript.messages.slice();
+        messages[previous.tailIndex] = { ...row, text: tail.content };
+        transcript = { ...transcript, messages };
+      }
+      this.previous = {
+        owner,
+        boundary,
+        replyRevision,
+        facts,
+        transcript,
+        tailIndex: previous.tailIndex,
+      };
+      return transcript;
+    }
+    const transcript = desktopTranscript({ ...facts, fullReply });
+    const tailIndex =
+      tail?.role === 'assistant' && tail.status === 'incomplete'
+        ? transcript.messages.findIndex(
+            (row) => row.id === tail.id && row.role === 'assistant' && !row.finalReply,
+          )
+        : -1;
+    this.previous = { owner, boundary, replyRevision, facts, transcript, tailIndex };
+    return transcript;
+  }
+
+  clear() {
+    this.previous = undefined;
+  }
 }

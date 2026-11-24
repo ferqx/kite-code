@@ -102,7 +102,10 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
         const state = caller?.state();
         if (state?.selection) reader?.select(state.generation, state.selection, state.historyEpoch);
       });
-    caller = new NativeCaller(client, refresh);
+    caller = new NativeCaller(client, (event) => {
+      if (event.kind === 'messages.changed') reader?.advance(event);
+      else if (event.kind === 'changed') refresh();
+    });
     reader = new NativeHistory(
       { request: (request) => caller!.invoke(request) } as NativeBridge,
       () => {},
@@ -203,11 +206,12 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
         !caller!.state().backgroundUnavailable && !caller!.state().selection?.permissionUnavailable,
     );
     finish.release();
-    await until(
-      () =>
-        caller!.state().executionObservation?.runs.some((run) => run.status === 'completed') ===
-        true,
-    );
+    await until(() => {
+      const observation = caller!.state().executionObservation;
+      return (
+        observation?.phase === 'fresh' && observation.runs.some((run) => run.status === 'completed')
+      );
+    });
     expect(requests.filter((request) => request.path.endsWith('/messages'))).toHaveLength(
       hiddenReads,
     );

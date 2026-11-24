@@ -28,7 +28,7 @@ Native 只读 `GET /v1/sessions/:id/execution-root` 复用同一解析器，核�
 
 ## 消息历史变更协议
 
-可选能力`message_changes`公开只读`GET /v1/sessions/:id/message-changes`，闭合查询和回应来自[HTTP schema](src/http/schema/index.ts)并生成Client及OpenAPI。原Store与持久变更范围由[Runtime/Store](../../packages/agent/src/storage/README.md#消息历史变更读取)核实，Service沿`messageResponses`保原公开消息、Fork来源及正文引用投影，不从SSE载荷拼装消息，不发起补写或重放执行。首个候选页可取得Store当前序号上界，后续固定该值，回收/过期要求新基线。桌面和已协商该能力的 Web 网关读取同一投影。进行中的内联思考可带 UTF-8 字节数，思考详情仍由原模型输出接口提供。[真实HTTP回归](test/isolated/http.test.ts)覆盖分页、保存消息、闭合查询和Store拒绝，客户端接收边界归[Client owner](../../packages/client/README.md#消息历史增量)。
+可选能力`message_changes`公开只读`GET /v1/sessions/:id/message-changes`，闭合查询和回应来自[HTTP schema](src/http/schema/index.ts)并生成Client及OpenAPI。原Store与持久变更范围由[Runtime/Store](../../packages/agent/src/storage/README.md#消息历史变更读取)核实，Service沿`messageResponses`保原公开消息、Fork来源及正文引用投影，不从SSE载荷拼装消息，不发起补写或重放执行。首个候选页可取得Store当前序号上界，后续固定该值，回收/过期要求新基线。桌面和已协商该能力的 Web 网关读取同一投影。普通消息 SSE 可转发 Store 投影的可选 `updatedAt`，作为已保存的会话目录排序事实。Files 通知也可包含 Store 核实的原 `outputRunId`，供客户端定向更新该轮列表。消息增量仍由原只读接口读取。进行中的内联思考可带 UTF-8 字节数，思考详情仍由原模型输出接口提供。[真实HTTP回归](test/isolated/http.test.ts)覆盖分页、保存消息、闭合查询和Store拒绝，客户端接收边界归[Client owner](../../packages/client/README.md#消息历史增量)。
 
 `session_state` 能力提供只读会话状态、倒序历史、固定水位的轮次位置索引和原消息文本分块。大正文的预览带 UTF-8 字节数和 SHA-256，正文块核原 Store、Session、Message、序号、摘要与偏移。默认历史和完整 View 沿原读取合同，Desktop 的具体采用和验证归[Desktop owner](../desktop/README.md#执行观察与操作准入)。
 

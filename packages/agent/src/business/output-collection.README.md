@@ -38,7 +38,7 @@ Shell 向模型说明 `KITE_OUTPUT_DIR` 归本次 Job。跨调用复用的中间
 
 [SQLite owner](../storage/sqlite/output-collection.ts)只使用原 extension_record，按 `collection/<seq20>/<producer>` 与 `delivery/<seq20>/<producer>/<fileId>` 键范围查询。`OutputFileTarget` 持久保留 locator；resolve 为准确点查，不靠文件名、后缀扫描或内存映射授权。公开 summary 不含路径、hash或ArtifactReference，读取事务 revision 为原 lastChangeCursor。
 
-可见集合的 output-index 只保存原 delivery locator，不复制文件正文、不改变 OutputFileTarget、公开分页／revision 或工具版本。delivery、collection 和 Run 状态事实的事务提交前按受影响原 Run 更新索引；collection 晚于 Run 结束、部分交付及明确重试仍更新原轮，不把“轮次结束”当成永久冻结。原文件名、媒体类型、大小及 scope 继续从准确 delivery 读取，权限门禁在索引读取之前执行。派生索引不产生新的业务事件，原事件与索引同时可见。
+可见集合的 output-index 只保存原 delivery locator，不复制文件正文、不改变 OutputFileTarget、公开分页／revision 或工具版本。delivery、collection 和 Run 状态事实的事务提交前按受影响原 Run 更新索引；collection 晚于 Run 结束、部分交付及明确重试仍更新原轮，不把“轮次结束”当成永久冻结。原文件名、媒体类型、大小及 scope 继续从准确 delivery 读取，权限门禁在索引读取之前执行。派生索引不产生新的业务事件，原事件与索引同时可见。读取原交付和收集变更时，Store 核对原 Session、触发产物的 Execution 和 Run 的本地起始命令序号。三者相符时，公开通知可带原 Run ID 供列表定向校准，文件读取资格仍以原范围核验为准。
 
 读写 Store 启动仅从已保存元数据补建缺失或过时索引，不取得 Session 执行 owner，也不运行 collector、模型或 Shell。每个 Session 的索引与完成标记在同一事务提交；补建中断不留下半成品有效标记，后继写实例可继续。旧二进制写入的原 source event 会使水位不匹配，读取退回原只读投影而不使用陈旧结果；下一读写启动按当前事实修复。当前 writer 只有在原索引水位等于本事务前 source 水位时才增量更新，否则重建整个 Session，避免旧 writer 改 Run A 后新 writer 只改 Run B 而认证陈旧 A。未补建的 readonly 历史同样可读，但不在 GET 内写入或恢复。正常已建索引读取只核事实水位并分页读取持久集合；环境参考区的最近列表与单轮附件共用同一集合，child 仍在自己的原 Session scope 读取；早期未登记 delivery 的 Files legacy 路径仍沿原只读查询。索引记录在 Fork 中 omit，由目标已重建的 delivery 重新建立；Profile 恢复按新 Store 身份重建，删除／GC 沿原 Session 记录生命周期。
 
