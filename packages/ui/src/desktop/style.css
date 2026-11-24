@@ -61,6 +61,7 @@ body {
   --resize-handle-width: 1px;
   --sidebar-motion-duration: 180ms;
   --sidebar-motion-easing: ease-out;
+  --sidebar-inline-padding: 12px;
   --background: #fafafa;
   --page-background: var(--background);
   --card: #fff;
@@ -72,7 +73,6 @@ body {
   --sidebar: #f5f5f5;
   --foreground: #222;
   --muted-foreground: #666;
-  --directory-tertiary-foreground: #999;
   --accent: #ececec;
   /* Neutral state layers blend with each control's actual surface. */
   --control-hover: rgb(0 0 0 / 5%);
@@ -116,6 +116,13 @@ body {
   --scrollbar-thumb: color-mix(in srgb, var(--foreground) 10%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 18%, transparent);
   --navigation-foreground: #484848;
+  --navigation-hover-background: linear-gradient(var(--control-hover), var(--control-hover))
+    var(--sidebar);
+  --navigation-selected-background: linear-gradient(
+      var(--control-selected),
+      var(--control-selected)
+    )
+    var(--sidebar);
   --success-background: color-mix(in srgb, var(--success) 12%, var(--card));
   --success-foreground: var(--success);
   --diff-added-background: var(--success-background);
@@ -417,7 +424,6 @@ body {
     left: calc(var(--resize-handle-width) / 2);
   }
   .sidebar {
-    --sidebar-inline-padding: 12px;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -478,41 +484,38 @@ body {
   .client-panels[data-animate-width="true"] .desktop-sidebar-toggle > .sidebar-toggle {
     transition: left var(--sidebar-motion-duration) var(--sidebar-motion-easing);
   }
-  .primary-navigation {
+  .sidebar-navigation-list {
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+  .primary-navigation {
     margin-block: 8px 4px;
   }
-  :is(
-      .primary-navigation .button,
-      .sidebar-navigation-action,
-      .space-row,
-      .session-row,
-      .space-new-session,
-      .space-more,
-      .connection .button
-    ) {
+  :is(.sidebar-navigation-row, .space-new-session, .space-more, .connection .button) {
     height: 32px;
     min-height: 32px;
     font-size: 14px;
     font-weight: 400;
   }
-  :is(.primary-navigation .button, .sidebar-navigation-action) {
+  .sidebar-navigation-row {
+    --control-pressed: var(--navigation-hover-background);
     width: 100%;
     padding: 6px 10px;
     justify-content: flex-start;
     gap: 10px;
     border: 0;
-  }
-  .primary-navigation .button {
     background: transparent;
+    border-radius: var(--button-radius);
+    text-align: start;
+  }
+  .sidebar-navigation-row,
+  .sidebar-navigation-heading,
+  .sidebar-sessions .empty-list {
     color: var(--navigation-foreground);
   }
-  .primary-navigation .button:not(.sidebar-navigation-action).selected,
-  .primary-navigation
-    .button:not(.sidebar-navigation-action):hover:is(:not(:disabled), [data-read-gated="true"]) {
-    background: var(--control-hover);
+  .sidebar-navigation-row:hover:where(:not(:disabled), [data-read-gated="true"]) {
+    background: var(--navigation-hover-background);
   }
   .primary-navigation .new-session:disabled:not([data-read-gated="true"]) {
     opacity: 1;
@@ -524,18 +527,21 @@ body {
     text-align: left;
   }
   .sidebar-navigation-action {
-    color: var(--navigation-foreground, var(--foreground));
-    background: transparent;
     transition: none;
   }
-  .nav-label {
+  .primary-navigation .sidebar-navigation-row.selected,
+  .sidebar-navigation-action.scheduled-tasks-navigation[aria-current="page"],
+  .sidebar-navigation-action[aria-pressed="true"] {
+    --control-pressed: var(--navigation-selected-background);
+    background: var(--navigation-selected-background);
+  }
+  .sidebar-navigation-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
     min-height: 24px;
     padding-inline: 10px 0;
-    color: var(--muted-foreground);
-    font-size: inherit;
+    font-size: 14px;
   }
   .nav-label button:where(:not([data-size^="icon"])) {
     font-size: inherit;
@@ -543,14 +549,6 @@ body {
   }
   .nav-label :is(.space-removal-results, .session-mutation-results):first-of-type {
     margin-inline-start: auto;
-  }
-  .space-row {
-    justify-content: flex-start;
-    text-align: left;
-    gap: 10px;
-    padding: 8px 10px;
-    background: transparent;
-    border: 0;
   }
   .nav-copy {
     display: flex;
@@ -590,18 +588,8 @@ body {
   }
   .session-row {
     display: flex;
-    width: 100%;
-    text-align: left;
-    margin-bottom: 2px;
     /* Match the workspace label: 10px inset, icon width, then a 10px gap. */
     padding: 4px 10px 4px calc(20px + var(--ui-icon-size));
-    border: 0;
-    background: transparent;
-    border-radius: var(--button-radius);
-  }
-  .session-row.selected,
-  .session-row:hover:is(:not(:disabled), [data-read-gated="true"]) {
-    background: var(--control-hover);
   }
   .session-unread-dot {
     width: 8px;
@@ -621,15 +609,10 @@ body {
   }
   .session-load-more {
     justify-content: flex-start;
-    color: var(--directory-tertiary-foreground);
-  }
-  .empty-list {
-    font-size: inherit;
-    color: var(--muted-foreground);
-    line-height: 1.7;
   }
   .sidebar-sessions .empty-list {
-    color: var(--directory-tertiary-foreground);
+    font-size: inherit;
+    line-height: 1.7;
     margin: 0 0 0 24px;
     padding: 4px 10px;
   }
@@ -2118,23 +2101,22 @@ body {
   min-width: 0;
   margin-bottom: 2px;
 }
-.kite-client .space-row {
-  width: 100%;
-}
 .kite-client :is(.space-heading, .session-heading) {
   display: flex;
   align-items: center;
   gap: 0;
   border-radius: var(--button-radius);
 }
-.kite-client :is(.space-heading, .session-heading):is(.selected, [data-menu-active], :hover) {
-  background: var(--control-hover);
-}
 .kite-client
-  :is(.space-heading, .session-heading):has(
-    .button:active:is(:not(:disabled), [data-read-gated="true"])
+  :is(.space-heading, .session-heading):is(
+    [data-menu-active],
+    :hover,
+    :has(:where(.button:active:is(:not(:disabled), [data-read-gated="true"])))
   ) {
-  background: var(--control-pressed);
+  background: var(--navigation-hover-background);
+}
+.kite-client :is(.space-heading, .session-heading).selected {
+  background: var(--navigation-selected-background);
 }
 .kite-client
   :is(.space-heading, .session-heading)
@@ -2147,10 +2129,8 @@ body {
 }
 .kite-client .session-heading {
   position: relative;
-  margin-bottom: 2px;
 }
 .kite-client .session-heading .session-row {
-  margin-bottom: 0;
   padding-inline-end: 4px;
   background: transparent;
 }
@@ -2281,7 +2261,6 @@ body {
   --sidebar: #242424;
   --foreground: #ededed;
   --muted-foreground: #b5b5b5;
-  --directory-tertiary-foreground: #8c8c8c;
   --accent: #333333;
   --control-hover: rgb(255 255 255 / 7%);
   --control-selected: rgb(255 255 255 / 11%);
@@ -8930,7 +8909,7 @@ body {
   display: flex;
   width: min(640px, calc(100vw - 32px));
   max-width: none;
-  max-height: min(520px, calc(100dvh - var(--session-search-top) - 16px));
+  height: min(520px, calc(100dvh - var(--session-search-top) - 16px));
   flex-direction: column;
   gap: 0;
   overflow: hidden;
@@ -8996,7 +8975,7 @@ body {
   line-height: 18px;
 }
 .kite-client .session-search-results {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -9006,7 +8985,12 @@ body {
 .kite-client .session-search-results[data-has-results] {
   padding-block: 6px;
 }
+.kite-client .session-search-results > [role="listbox"] {
+  display: grid;
+  gap: 4px;
+}
 .kite-client .session-search-result {
+  --control-pressed: var(--navigation-hover-background);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -9017,9 +9001,14 @@ body {
   padding: 7px 12px;
   border-radius: var(--button-radius);
   text-align: left;
+  transition: none;
 }
-.kite-client .session-search-result[aria-selected="true"] {
-  background: var(--control-selected);
+.kite-client .button.session-search-result:hover:where(:not(:disabled), [data-read-gated="true"]) {
+  background: var(--navigation-hover-background);
+}
+.kite-client .button.session-search-result[aria-selected="true"] {
+  --control-pressed: var(--navigation-selected-background);
+  background: var(--navigation-selected-background);
 }
 .kite-client .session-search-result-label {
   display: flex;
@@ -9046,16 +9035,4 @@ body {
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-}
-.kite-client .session-search-more {
-  width: 100%;
-  font-size: 12px;
-}
-.kite-client .session-search-pages {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 4px 0 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
 }

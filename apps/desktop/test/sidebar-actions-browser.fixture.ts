@@ -589,7 +589,269 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await hidden();
       assert.deepEqual(errors, []);
       assert.ok((await read()).every((item) => item.same));
-      cases.push({ theme, sessionLoading, initial, overridden, picking, frames, errors });
+
+      const tasks = page.getByRole('button', { name: '定时任务', exact: true });
+      const newSession = page.getByRole('button', { name: '新对话', exact: true });
+      const session = page.getByRole('button', { name: 'Session A', exact: true });
+      const current = page.locator('#navigation [aria-current="page"]');
+      const transparent = 'rgba(0, 0, 0, 0)';
+      const selectedBackground =
+        theme === 'light' ? 'rgba(0, 0, 0, 0.09)' : 'rgba(255, 255, 255, 0.11)';
+      const hoverBackground =
+        theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.07)';
+      const sidebarBackground = theme === 'light' ? 'rgb(245, 245, 245)' : 'rgb(36, 36, 36)';
+      const tintLayer = (color: string) => `linear-gradient(${color}, ${color})`;
+      const expectNavigationBackground = async (target: Locator, color: string) => {
+        await expect(target).toHaveCSS(
+          'background-color',
+          color === transparent ? transparent : sidebarBackground,
+        );
+        await expect(target).toHaveCSS(
+          'background-image',
+          color === transparent ? 'none' : tintLayer(color),
+        );
+      };
+      const expectPressBackground = async (
+        action: Locator,
+        background: string,
+        idle: string,
+        target = action,
+      ) => {
+        await action.hover();
+        await expectNavigationBackground(target, background);
+        await page.mouse.down();
+        try {
+          assert.equal(await action.evaluate((node) => node.matches(':active')), true);
+          await expectNavigationBackground(target, background);
+        } finally {
+          await page.mouse.move(1100, 650);
+          await page.mouse.up();
+        }
+        await expectNavigationBackground(target, idle);
+      };
+      const spaceHeadingRow = page.locator('.space-heading').first();
+      const space = spaceHeadingRow.locator('.space-row');
+      await expectPressBackground(space, hoverBackground, transparent, spaceHeadingRow);
+      const sessionHeading = page.locator('.session-heading').filter({ has: session });
+      await expectPressBackground(session, selectedBackground, selectedBackground, sessionHeading);
+      for (const action of [newSession, tasks]) {
+        await expectNavigationBackground(action, transparent);
+        await expectPressBackground(action, hoverBackground, transparent);
+      }
+      const navigationFrames = await tasks.evaluateHandle((button) => {
+        const navigation = button.closest('#navigation')!;
+        const samples: {
+          current: boolean;
+          background: string;
+          tint: string;
+          currentCount: number;
+        }[] = [];
+        const state = { recording: true, samples };
+        const sample = () => {
+          if (!state.recording) return;
+          const style = getComputedStyle(button);
+          samples.push({
+            current: button.getAttribute('aria-current') === 'page',
+            background: style.backgroundColor,
+            tint: style.backgroundImage,
+            currentCount: navigation.querySelectorAll('[aria-current="page"]').length,
+          });
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+        return state;
+      });
+      await tasks.click();
+      await expect(page.locator('.scheduled-page')).toBeVisible();
+      await page.mouse.move(1100, 650);
+      await expect(current).toHaveText('定时任务');
+      await expectNavigationBackground(tasks, selectedBackground);
+      await expectPressBackground(tasks, selectedBackground, selectedBackground);
+
+      await page.getByRole('button', { name: '新建', exact: true }).click();
+      const name = page.getByRole('textbox', { name: '名称', exact: true });
+      await name.click();
+      await name.fill('定时任务草稿');
+      await expect(name).toBeFocused();
+      await expect(current).toHaveText('定时任务');
+      await expectNavigationBackground(tasks, selectedBackground);
+      await page.screenshot({ path: path.join(artifact, `sidebar-${theme}-scheduled-editor.png`) });
+      await page.getByRole('button', { name: '取消', exact: true }).click();
+      await expect(name).toBeHidden();
+      await expectNavigationBackground(tasks, selectedBackground);
+
+      await session.click();
+      await expect(current).toHaveText('Session A');
+      await expectNavigationBackground(tasks, transparent);
+      await expect(draft).toHaveValue('Draft A');
+      await expect(page.getByText('Reply a', { exact: true })).toHaveCount(1);
+      const scheduledNavigation = await navigationFrames.evaluate((state) => {
+        state.recording = false;
+        return state.samples;
+      });
+      await navigationFrames.dispose();
+      assert.ok(scheduledNavigation.some((frame) => frame.current));
+      for (const frame of scheduledNavigation) {
+        assert.ok(frame.currentCount <= 1);
+        if (frame.current) {
+          assert.equal(frame.background, sidebarBackground);
+          assert.equal(frame.tint, tintLayer(selectedBackground));
+        }
+      }
+
+      await page.evaluate(() => {
+        const fixture = window.sessionShellFixture;
+        for (const id of ['c', 'd', 'e', 'f', 'g']) fixture.registerSession(id);
+        const request = fixture.bridge.request.bind(fixture.bridge);
+        fixture.bridge.request = async (input) => {
+          const result = await request(input);
+          if (!result || !('directory' in result) || !result.directory) return result;
+          return {
+            ...result,
+            directory: {
+              ...result.directory,
+              workspaces: [
+                ...result.directory.workspaces,
+                { id: 'empty', name: 'Empty workspace', rootUri: 'file:///empty' },
+              ],
+            },
+          };
+        };
+        fixture.publish();
+      });
+      const navigationColor = await tasks.evaluate((node) => getComputedStyle(node).color);
+      const moreSessions = page.getByRole('button', { name: '展开更多', exact: true });
+      const emptySpace = page.getByText('暂无聊天', { exact: true });
+      const expectNavigationColor = async (labels: Locator) => {
+        const colors = await labels.evaluateAll((nodes) =>
+          nodes.map((node) => getComputedStyle(node).color),
+        );
+        assert.ok(colors.length > 0);
+        assert.deepEqual([...new Set(colors)], [navigationColor]);
+      };
+      await expect(moreSessions).toBeVisible();
+      await expect(emptySpace).toBeVisible();
+      const directoryLabels = page.locator(
+        '.nav-label > span, .workspace-directory .nav-copy strong',
+      );
+      await expectNavigationColor(directoryLabels);
+      await expect(moreSessions).toHaveCSS('color', navigationColor);
+      await expect(emptySpace).toHaveCSS('color', navigationColor);
+      await page.locator('#navigation').screenshot({
+        path: path.join(artifact, `sidebar-${theme}-navigation-color.png`),
+      });
+      await moreSessions.click();
+      await expect(moreSessions).toBeHidden();
+      await expectNavigationColor(directoryLabels);
+
+      const rowStyle = (row: Locator) =>
+        row.evaluate((node) => {
+          const { height, paddingInlineStart, columnGap, borderRadius, fontSize, fontWeight } =
+            getComputedStyle(node);
+          return { height, paddingInlineStart, columnGap, borderRadius, fontSize, fontWeight };
+        });
+      const headingStyle = (heading: Locator) =>
+        heading.evaluate((node) => {
+          const { minHeight, paddingInlineStart, fontSize, fontWeight } = getComputedStyle(node);
+          return { minHeight, paddingInlineStart, fontSize, fontWeight };
+        });
+      const expectCenteredNavigation = async (actions: Locator) => {
+        const rows = await actions.evaluateAll((buttons) => {
+          const center = (node: Element) => {
+            const { top, height } = node.getBoundingClientRect();
+            return top + height / 2;
+          };
+          return buttons.map((button) => {
+            const icon = button.querySelector('svg')!;
+            const label = button.querySelector('span')!;
+            return {
+              label: label.textContent,
+              iconWidth: icon.getBoundingClientRect().width,
+              iconOffset: center(icon) - center(button),
+              labelOffset: center(label) - center(button),
+            };
+          });
+        });
+        assert.ok(rows.length > 0);
+        for (const { label, iconWidth, iconOffset, labelOffset } of rows) {
+          assert.equal(iconWidth, 14, `${label} icon size`);
+          assert.ok(Math.abs(iconOffset) < 0.1, `${label} icon offset: ${iconOffset}px`);
+          assert.ok(Math.abs(labelOffset) < 0.1, `${label} label offset: ${labelOffset}px`);
+        }
+      };
+      const primaryRow = await rowStyle(tasks);
+      const spaceHeading = await headingStyle(page.locator('.nav-label'));
+      assert.deepEqual(await rowStyle(page.locator('.space-row').first()), primaryRow);
+      await expectCenteredNavigation(
+        page.locator('.primary-navigation .sidebar-navigation-action'),
+      );
+      await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+      await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+      const settingsLabels = page.locator(
+        '.native-settings-rail-heading, .native-settings-rail nav :is(.sidebar-navigation-heading > span, button > span)',
+      );
+      const appearanceCategory = page.getByRole('button', { name: '外观', exact: true });
+      const generalCategory = page.getByRole('button', { name: '常规', exact: true });
+      await expect(appearanceCategory).toBeVisible();
+      await expectNavigationColor(settingsLabels);
+      const settingsActions = page.locator('.native-settings-rail .sidebar-navigation-action');
+      await expectCenteredNavigation(settingsActions);
+      await page.locator('html').evaluate((node) => {
+        node.dataset.platform = 'windows';
+      });
+      await page.setViewportSize({ width: 1280, height: 851 });
+      const dialogPixelTop = await page
+        .getByRole('dialog', { name: '设置', exact: true })
+        .evaluate((node) => node.getBoundingClientRect().top * window.devicePixelRatio);
+      assert.ok(Math.abs(dialogPixelTop - Math.round(dialogPixelTop)) < 0.01);
+      await expectCenteredNavigation(settingsActions);
+      assert.deepEqual(await rowStyle(appearanceCategory), primaryRow);
+      assert.deepEqual(
+        await headingStyle(
+          page.locator('.native-settings-rail .sidebar-navigation-heading').first(),
+        ),
+        spaceHeading,
+      );
+      const settingsGroup = page
+        .locator('.native-settings-rail section.sidebar-navigation-list')
+        .first();
+      await expect(settingsGroup).toHaveCSS('row-gap', '2px');
+      await expectNavigationBackground(generalCategory, selectedBackground);
+      await expectPressBackground(generalCategory, selectedBackground, selectedBackground);
+      await expectPressBackground(appearanceCategory, hoverBackground, transparent);
+      await expectNavigationBackground(generalCategory, selectedBackground);
+      await appearanceCategory.click();
+      await expect(appearanceCategory).toHaveAttribute('aria-pressed', 'true');
+      await expectNavigationBackground(appearanceCategory, selectedBackground);
+      await expectNavigationBackground(generalCategory, transparent);
+      await page.mouse.move(1100, 650);
+      await expectNavigationBackground(appearanceCategory, selectedBackground);
+      await expectNavigationColor(settingsLabels);
+      await page.locator('.native-settings-rail').screenshot({
+        path: path.join(artifact, `sidebar-${theme}-settings-color.png`),
+      });
+      await page.setViewportSize({ width: 800, height: 850 });
+      const settingsBack = page.locator('.native-settings-back');
+      await expect(settingsBack).toBeVisible();
+      await expect(settingsBack).toHaveCSS('color', navigationColor);
+      await settingsBack.click();
+      await expect(appearanceCategory).toBeFocused();
+      await expectNavigationBackground(appearanceCategory, selectedBackground);
+      await expectNavigationColor(settingsLabels);
+      await expectCenteredNavigation(settingsActions);
+      await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+      await expect(draft).toHaveValue('Draft A');
+      assert.deepEqual(errors, []);
+      cases.push({
+        theme,
+        sessionLoading,
+        initial,
+        overridden,
+        picking,
+        frames,
+        scheduledNavigation,
+        errors,
+      });
     } finally {
       await page.close();
     }

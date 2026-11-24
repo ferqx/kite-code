@@ -1,9 +1,9 @@
 import {
-  BrowserIcon,
-  InformationCircleIcon,
   KiteIcon,
+  ListIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  PanelRightIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ComponentProps, CSSProperties, ReactNode, SyntheticEvent } from 'react';
@@ -1625,7 +1625,7 @@ function SessionPageContent({
                           setEnvironmentPreference(environmentVisible ? 'closed' : 'open');
                         }}
                       >
-                        <HugeiconsIcon icon={InformationCircleIcon} />
+                        <HugeiconsIcon icon={ListIcon} />
                       </Button>
                     )}
                     {hasTabs && (
@@ -1646,7 +1646,7 @@ function SessionPageContent({
                           changeTabsOpen(open);
                         }}
                       >
-                        <HugeiconsIcon icon={BrowserIcon} />
+                        <HugeiconsIcon icon={PanelRightIcon} />
                       </Button>
                     )}
                   </header>

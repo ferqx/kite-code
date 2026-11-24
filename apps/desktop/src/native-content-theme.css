@@ -11,7 +11,6 @@
     var(--composer-background)
   );
   --composer-focus-ring-color: color-mix(in srgb, var(--foreground) 14%, transparent);
-  --directory-tertiary-foreground: var(--muted-foreground);
   --markdown-link-color: var(--foreground);
   --diagram-accent: var(--foreground);
   --diagram-secondary: var(--muted-foreground);

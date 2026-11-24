@@ -7,12 +7,16 @@
 .kite-client.native-settings-floating {
   --settings-inset-top: 20px;
   --settings-inset-bottom: 20px;
+  --settings-height: min(
+    732px,
+    calc(100dvh - var(--settings-inset-top) - var(--settings-inset-bottom))
+  );
   box-sizing: border-box;
   position: fixed;
   inset: calc(50% + (var(--settings-inset-top) - var(--settings-inset-bottom)) / 2) auto auto 50%;
   z-index: 51;
   width: min(1016px, calc(100vw - 32px));
-  height: min(732px, calc(100dvh - var(--settings-inset-top) - var(--settings-inset-bottom)));
+  height: var(--settings-height);
   max-width: none;
   max-height: none;
   padding: 0;
@@ -25,6 +29,20 @@
   box-shadow:
     0 34px 110px rgb(0 0 0 / 50%),
     0 5px 22px rgb(0 0 0 / 32%);
+}
+/* Lay out the dialog on a device pixel before painting its navigation. */
+@supports (top: round(nearest, 1px, 1px)) {
+  html[data-platform="windows"] .kite-client.native-settings-floating {
+    --settings-centered-top: calc(
+      (100dvh - var(--settings-height) + var(--settings-inset-top) - var(--settings-inset-bottom)) /
+      2
+    );
+    top: max(
+      var(--settings-inset-top),
+      round(nearest, var(--settings-centered-top), var(--settings-device-pixel, 1px))
+    );
+    translate: -50% 0;
+  }
 }
 /* The native traffic lights sit above the renderer's content, including at minimum height. */
 html[data-settings-macos] .kite-client.native-settings-floating {

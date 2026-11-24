@@ -24,6 +24,7 @@ const row = (id: string) => ({
 });
 const state: NativeSessionSearchPresentation = {
   requestId: 'first',
+  resultId: 'results-1',
   query: '',
   page: 0,
   resultPage: 0,
@@ -193,13 +194,14 @@ test('native search claims top-level hit testing without modifying Browser or Of
   }
 });
 
-test('only exact frames may update or select; a request selects a row only from its newest admitted page', () => {
+test('only exact frames may update or select from a published batch', () => {
   const f = fixture();
   const selection = {
     type: 'select',
     query: '',
     page: 0,
     requestId: 'first',
+    resultId: state.resultId,
     sessionId: 'current',
   };
   try {
@@ -217,12 +219,51 @@ test('only exact frames may update or select; a request selects a row only from 
     f.present({ ...state, query: 'project' }, false);
     expect(f.overlay.webContents.sent(nativeSessionSearchStateChannel)).toHaveLength(1);
     f.present({ ...state, query: 'project', page: 3, total: 1, rows: [row('new')] }, false);
-    const selected = { ...selection, query: 'project', page: 3, sessionId: 'new' };
+    const selected = { ...selection, query: 'project', sessionId: 'new' };
     f.overlayEvent(selected);
     expect(f.host.active()).toBe(false);
     expect(f.actions()).toEqual([query, selected]);
   } finally {
     f.host.dispose();
+  }
+});
+
+test('continuous search can select an earlier loaded batch, but a changed snapshot retires it', () => {
+  for (const changed of [false, true]) {
+    const f = fixture();
+    try {
+      const firstBatch = Array.from({ length: 50 }, (_, index) => row(`row-${index}`));
+      const first = { ...state, total: 51, rows: firstBatch };
+      f.present(first);
+      f.overlayEvent({ type: 'ready' });
+      const next = { type: 'query', requestId: state.requestId, query: state.query, page: 1 };
+      f.overlayEvent(next);
+      f.present(
+        {
+          ...first,
+          resultId: changed ? 'results-2' : first.resultId,
+          page: 1,
+          resultPage: 1,
+          rows: [row('row-50')],
+        },
+        false,
+      );
+      const selection = {
+        type: 'select',
+        requestId: first.requestId,
+        resultId: first.resultId,
+        query: first.query,
+        page: 0,
+        sessionId: 'row-0',
+      };
+      f.overlayEvent(selection);
+      expect(f.actions()).toEqual([
+        next,
+        changed ? { type: 'close', requestId: first.requestId } : selection,
+      ]);
+    } finally {
+      f.host.dispose();
+    }
   }
 });
 
@@ -233,6 +274,7 @@ test('a racing approval, a removed row, an old Root close and a hidden window ne
     query: '',
     page: 0,
     requestId: 'first',
+    resultId: state.resultId,
     sessionId: 'current',
   };
   try {

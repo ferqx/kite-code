@@ -1,4 +1,10 @@
-import { Button, SettingsNavigationIcon, SidebarNavigationAction } from '@kite-ai/ui/desktop';
+import {
+  Button,
+  SettingsNavigationIcon,
+  SidebarNavigationAction,
+  SidebarNavigationHeading,
+  SidebarNavigationList,
+} from '@kite-ai/ui/desktop';
 import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { NativeSettingsDetailNavigation } from './native-settings-heading';
@@ -104,10 +110,10 @@ export function NativeSettingsLayout({
         <div className="native-settings-rail-heading">
           <span>设置</span>
         </div>
-        <nav aria-label="设置分类" ref={categoriesNav}>
+        <SidebarNavigationList aria-label="设置分类" ref={categoriesNav}>
           {groups.map((group) => (
-            <section key={group.label} aria-label={group.label}>
-              <p>{group.label}</p>
+            <SidebarNavigationList as="section" key={group.label} aria-label={group.label}>
+              <SidebarNavigationHeading label={group.label} />
               {group.pages.map((key) => {
                 const { label, icon } = categories[key];
                 if (key === 'webSearch' && !canReadWebSearch) return null;
@@ -132,9 +138,9 @@ export function NativeSettingsLayout({
                   </SidebarNavigationAction>
                 );
               })}
-            </section>
+            </SidebarNavigationList>
           ))}
-        </nav>
+        </SidebarNavigationList>
       </aside>
       <Button
         type="button"

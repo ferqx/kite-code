@@ -2,7 +2,35 @@ import type { ComponentProps, ReactNode } from 'react';
 import { cn } from './lib/utils';
 import { Button } from './ui';
 
-/** A primary navigation action whose current page is semantic, not a selection style. */
+export function SidebarNavigationList({
+  as: Element = 'nav',
+  className,
+  ...props
+}: ComponentProps<'nav'> & { readonly as?: 'nav' | 'section' }) {
+  return <Element {...props} className={cn('sidebar-navigation-list', className)} />;
+}
+
+export function SidebarNavigationHeading({
+  label,
+  className,
+  children,
+}: {
+  readonly label: string;
+  readonly className?: string;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <div className={cn('sidebar-navigation-heading', className)}>
+      <span>{label}</span>
+      {children}
+    </div>
+  );
+}
+
+export function SidebarNavigationButton({ className, ...props }: ComponentProps<typeof Button>) {
+  return <Button {...props} className={cn('sidebar-navigation-row', className)} />;
+}
+
 export function SidebarNavigationAction({
   icon,
   children,
@@ -13,14 +41,13 @@ export function SidebarNavigationAction({
   readonly children: ReactNode;
 }) {
   return (
-    <Button
+    <SidebarNavigationButton
       {...props}
       className={cn('sidebar-navigation-action', className)}
-      size="sm"
       variant="plain"
     >
       {icon}
       <span>{children}</span>
-    </Button>
+    </SidebarNavigationButton>
   );
 }

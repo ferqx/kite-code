@@ -133,9 +133,10 @@ function fixture(
         searchListener!({
           requestId: state.requestId,
           type: 'select',
+          resultId: state.resultId,
           sessionId: id,
           query: state.query,
-          page: state.page,
+          page: state.resultPage,
         }),
       );
       await act(async () => nextDesktopPresentation(dom));

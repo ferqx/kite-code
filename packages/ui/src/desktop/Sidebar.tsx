@@ -39,7 +39,12 @@ import { ScrollArea } from './components/ui/scroll-area';
 import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
 import { SessionSearch, type SessionSearchProps } from './SessionSearch';
-import { SidebarNavigationAction } from './SidebarNavigationAction';
+import {
+  SidebarNavigationAction,
+  SidebarNavigationButton,
+  SidebarNavigationHeading,
+  SidebarNavigationList,
+} from './SidebarNavigationAction';
 import { sessionStatusLabel } from './status';
 import type { WorkspaceSummary } from './types';
 import { Button } from './ui';
@@ -114,7 +119,7 @@ const WorkspaceHeader = memo(function WorkspaceHeader(props: {
             if (!moreOpen) setTooltipNeedsHover(false);
           }}
         >
-          <Button
+          <SidebarNavigationButton
             className="space-row"
             aria-current={props.selected ? 'page' : undefined}
             aria-expanded={props.expanded}
@@ -130,7 +135,7 @@ const WorkspaceHeader = memo(function WorkspaceHeader(props: {
                 {props.label}
               </strong>
             </span>
-          </Button>
+          </SidebarNavigationButton>
           <span className="sidebar-actions">
             {props.onNewSession && props.state !== 'unavailable' && (
               <Button
@@ -228,7 +233,7 @@ const SessionRow = memo(function SessionRow({
           className={`session-heading${selected ? ' selected' : ''}`}
           data-menu-active={menuOpen || undefined}
         >
-          <Button
+          <SidebarNavigationButton
             className={`session-row ${selected ? 'selected' : ''}`}
             aria-label={session.displayName}
             aria-description={
@@ -269,7 +274,7 @@ const SessionRow = memo(function SessionRow({
             {session.hasUnreadTurn && (
               <span className="session-unread-dot" role="img" aria-label="有新结束的回复" />
             )}
-          </Button>
+          </SidebarNavigationButton>
           {onManage && (
             <span className="sidebar-actions">
               <DropdownMenu
@@ -392,9 +397,11 @@ const Workspace = memo(function Workspace({
       />
       <div className="sidebar-sessions" hidden={!expanded}>
         {workspace.state === 'unavailable' && (
-          <Button onClick={() => props.onExpand?.(workspace.id)}>会话暂不可用 · 重试</Button>
+          <SidebarNavigationButton onClick={() => props.onExpand?.(workspace.id)}>
+            会话暂不可用 · 重试
+          </SidebarNavigationButton>
         )}
-        <nav
+        <SidebarNavigationList
           id={id}
           ref={list}
           aria-label="当前项目会话"
@@ -434,18 +441,18 @@ const Workspace = memo(function Workspace({
             />
           ))}
           {workspace.sessions.length > visibleCount && (
-            <Button
+            <SidebarNavigationButton
               variant="ghost"
               className="session-row session-load-more"
               onClick={() => setVisibleCount((count) => count + 10)}
             >
               展开更多
-            </Button>
+            </SidebarNavigationButton>
           )}
           {!sessions.length && workspace.state === 'loaded' && (
             <p className="empty-list">暂无聊天</p>
           )}
-        </nav>
+        </SidebarNavigationList>
       </div>
     </section>
   );
@@ -519,7 +526,7 @@ export function Sidebar({
   return (
     <>
       {(actions.newSession || actions.workbench || actions.scheduledTasks) && (
-        <nav className="primary-navigation" aria-label="主要导航">
+        <SidebarNavigationList className="primary-navigation" aria-label="主要导航">
           {actions.newSession && (
             <SidebarNavigationAction
               className="new-session"
@@ -532,7 +539,7 @@ export function Sidebar({
             </SidebarNavigationAction>
           )}
           {actions.workbench && (
-            <Button
+            <SidebarNavigationButton
               variant="ghost"
               className={activePage === 'workbench' ? 'selected' : undefined}
               aria-current={activePage === 'workbench' ? 'page' : undefined}
@@ -540,10 +547,11 @@ export function Sidebar({
             >
               <HugeiconsIcon data-icon="inline-start" icon={Home03Icon} />
               <span>工作台</span>
-            </Button>
+            </SidebarNavigationButton>
           )}
           {actions.scheduledTasks && (
             <SidebarNavigationAction
+              className="scheduled-tasks-navigation"
               aria-current={activePage === 'scheduledTasks' ? 'page' : undefined}
               onClick={actions.scheduledTasks}
               icon={<HugeiconsIcon data-icon="inline-start" icon={AlarmClockIcon} />}
@@ -551,10 +559,9 @@ export function Sidebar({
               定时任务
             </SidebarNavigationAction>
           )}
-        </nav>
+        </SidebarNavigationList>
       )}
-      <div className="nav-label">
-        <span>空间</span>
+      <SidebarNavigationHeading className="nav-label" label="空间">
         {props.sessionSearch && (
           <Button
             ref={searchTrigger}
@@ -644,7 +651,7 @@ export function Sidebar({
             <HugeiconsIcon icon={Add01Icon} />
           </Button>
         )}
-      </div>
+      </SidebarNavigationHeading>
       {searchOpen &&
         props.sessionSearch &&
         (props.sessionSearch.render ? (

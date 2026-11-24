@@ -1,6 +1,6 @@
 import { Cancel01Icon, Search01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -59,6 +59,7 @@ export type SearchRow = {
 export function searchSessions(
   workspaces: readonly SessionSearchWorkspace[],
   query: string,
+  now = Date.now(),
 ): SearchRow[] {
   const words = query.trim().toLocaleLowerCase('en-US').split(/\s+/).filter(Boolean);
   const names = new Map<string, number>();
@@ -71,17 +72,20 @@ export function searchSessions(
           const text = `${session.displayName} ${workspace.label}`.toLocaleLowerCase('en-US');
           return words.every((word) => text.includes(word));
         })
-        .map(({ updatedAt, ...session }) => {
+        .flatMap(({ updatedAt, ...session }) => {
           const time = Date.parse(updatedAt ?? '');
-          return {
-            key: JSON.stringify([workspace.id, session.sessionId]),
-            session,
-            ...(Number.isFinite(time) ? { updatedAtMs: time } : {}),
-            workspaceLabel: workspace.label,
-            ...((names.get(workspace.label) ?? 0) > 1
-              ? { location: workspace.rootUri || workspace.id }
-              : {}),
-          };
+          if (!words.length && !(time >= now - 7 * DAY_MS && time <= now)) return [];
+          return [
+            {
+              key: JSON.stringify([workspace.id, session.sessionId]),
+              session,
+              ...(Number.isFinite(time) ? { updatedAtMs: time } : {}),
+              workspaceLabel: workspace.label,
+              ...((names.get(workspace.label) ?? 0) > 1
+                ? { location: workspace.rootUri || workspace.id }
+                : {}),
+            },
+          ];
         }),
     )
     .sort(
@@ -127,6 +131,7 @@ export function sessionSearchActivityTime(updatedAtMs: number | undefined, now: 
 export function SessionSearch(props: SessionSearchProps) {
   const [query, setQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState(SESSION_SEARCH_PAGE_SIZE);
+  const opening = useRef(false);
   const complete = sessionSearchDirectoryComplete(props.available, props.workspaces);
   const results = useMemo(
     () => (complete ? searchSessions(props.workspaces, query) : []),
@@ -141,10 +146,21 @@ export function SessionSearch(props: SessionSearchProps) {
         setVisibleCount(SESSION_SEARCH_PAGE_SIZE);
       }}
       complete={complete}
-      total={results.length}
-      results={results}
-      visibleCount={visibleCount}
-      onMore={() => setVisibleCount(visibleCount + SESSION_SEARCH_PAGE_SIZE)}
+      results={results.slice(0, visibleCount)}
+      onMore={
+        visibleCount < results.length
+          ? () => setVisibleCount((count) => count + SESSION_SEARCH_PAGE_SIZE)
+          : undefined
+      }
+      onOpen={
+        props.onOpen &&
+        ((id) => {
+          if (opening.current) return;
+          opening.current = true;
+          props.onOpen?.(id);
+          props.onClose();
+        })
+      }
     />
   );
 }
@@ -152,29 +168,23 @@ export function SessionSearch(props: SessionSearchProps) {
 export function SessionSearchPalette({
   id,
   query,
+  resultsQuery = query,
   setQuery,
   complete,
   results,
-  total,
-  visibleCount,
-  page,
   pending,
-  landAtLast,
   onMore,
   onOpen,
   onClose,
   restoreFocus,
 }: Omit<SessionSearchProps, 'available' | 'workspaces'> & {
   query: string;
+  resultsQuery?: string;
   setQuery(value: string): void;
   complete: boolean;
   results: readonly SearchRow[];
-  total: number;
-  visibleCount: number;
-  page?: number;
   pending?: boolean;
-  landAtLast?: boolean;
-  onMore?(page: number, landAtLast?: boolean): void;
+  onMore?(): void;
 }) {
   const [activeKey, setActiveKey] = useState<string>();
   const [now, setNow] = useState(Date.now);
@@ -183,25 +193,37 @@ export function SessionSearchPalette({
     return () => clearInterval(timer);
   }, []);
   const input = useRef<HTMLInputElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
   const activeRow = useRef<HTMLButtonElement>(null);
-  const opening = useRef(false);
+  const lastResultsQuery = useRef(resultsQuery);
+  const advanceFrom = useRef<string | undefined>(undefined);
   const composing = useRef(false);
   const restoreOnClose = useRef(false);
   const listId = useId();
-  const searching = Boolean(query.trim());
-  const matched = results.findIndex((row) => row.key === activeKey);
-  const activeIndex = matched >= 0 ? matched : landAtLast ? Math.max(0, results.length - 1) : 0;
+  const queryChanged = resultsQuery !== lastResultsQuery.current;
+  const matched = queryChanged ? -1 : results.findIndex((row) => row.key === activeKey);
+  const activeIndex = Math.max(matched, 0);
   const active = results[activeIndex];
   const activeId = active ? `${listId}-${activeIndex}` : undefined;
-  const visible = results.slice(0, Math.max(visibleCount, activeIndex + 1));
+  useLayoutEffect(() => {
+    if (!queryChanged) return;
+    lastResultsQuery.current = resultsQuery;
+    setActiveKey(undefined);
+    if (viewport.current) viewport.current.scrollTop = 0;
+  }, [queryChanged, resultsQuery]);
+  useLayoutEffect(() => {
+    if (advanceFrom.current === undefined || pending) return;
+    const index = results.findIndex((row) => row.key === advanceFrom.current);
+    if (index >= 0 && results[index + 1]) {
+      advanceFrom.current = undefined;
+      setActiveKey(results[index + 1]?.key);
+    } else if (index < 0 || !onMore) advanceFrom.current = undefined;
+  }, [onMore, pending, results]);
   useEffect(() => {
     if (activeId && active?.key) activeRow.current?.scrollIntoView?.({ block: 'nearest' });
   }, [activeId, active?.key]);
   function open(row: SearchRow) {
-    if (!complete || !onOpen || opening.current || pending) return;
-    opening.current = true;
-    onOpen(row.session.sessionId);
-    onClose();
+    if (complete && !pending) onOpen?.(row.session.sessionId);
   }
   function dismiss() {
     restoreOnClose.current = true;
@@ -259,8 +281,8 @@ export function SessionSearchPalette({
                 composing.current = false;
               }}
               onChange={(event) => {
+                advanceFrom.current = undefined;
                 setQuery(event.target.value);
-                setActiveKey(undefined);
               }}
               onKeyDown={(event) => {
                 if (isComposing(event.nativeEvent) || event.repeat || pending) return;
@@ -274,24 +296,17 @@ export function SessionSearchPalette({
                     ),
                   );
                   if (
-                    page !== undefined &&
                     onMore &&
+                    active &&
                     event.key === 'ArrowDown' &&
-                    activeIndex === results.length - 1 &&
-                    (page + 1) * SESSION_SEARCH_PAGE_SIZE < total
+                    activeIndex === results.length - 1
                   ) {
-                    setActiveKey(undefined);
-                    onMore(page + 1);
-                  } else if (
-                    page !== undefined &&
-                    onMore &&
-                    event.key === 'ArrowUp' &&
-                    activeIndex === 0 &&
-                    page > 0
-                  ) {
-                    setActiveKey(undefined);
-                    onMore(page - 1, true);
-                  } else setActiveKey(results[next]?.key);
+                    advanceFrom.current = active.key;
+                    onMore();
+                  } else {
+                    advanceFrom.current = undefined;
+                    setActiveKey(results[next]?.key);
+                  }
                 } else if (event.key === 'Enter' && active) {
                   event.preventDefault();
                   open(active);
@@ -308,22 +323,27 @@ export function SessionSearchPalette({
               <HugeiconsIcon icon={Cancel01Icon} aria-hidden="true" />
             </Button>
           </div>
-          {!pending && (!complete || total === 0) && (
+          {(!complete || results.length === 0) && (
             <p className="session-search-feedback" role="status">
               {!complete
                 ? '会话目录暂不可用，恢复后会自动更新。'
-                : searching
+                : resultsQuery.trim()
                   ? '未找到匹配的会话'
-                  : '暂无会话'}
+                  : '最近 7 天暂无会话'}
             </p>
           )}
           <div
+            ref={viewport}
             className="session-search-results"
             aria-busy={pending || undefined}
-            data-has-results={visible.length > 0 || undefined}
+            data-has-results={results.length > 0 || undefined}
+            onScroll={(event) => {
+              const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
+              if (!pending && scrollHeight - scrollTop - clientHeight <= 64) onMore?.();
+            }}
           >
             <div id={listId} role="listbox" aria-label="会话搜索结果">
-              {visible.map((row, index) => {
+              {results.map((row, index) => {
                 const time = sessionSearchActivityTime(row.updatedAtMs, now);
                 return (
                   <Button
@@ -332,13 +352,17 @@ export function SessionSearchPalette({
                     id={`${listId}-${index}`}
                     role="option"
                     aria-selected={index === activeIndex}
+                    aria-disabled={pending || undefined}
                     tabIndex={-1}
                     variant="ghost"
                     className="session-search-result"
-                    disabled={!onOpen || pending}
+                    disabled={!onOpen}
                     title={[row.session.displayName, row.workspaceLabel, row.location]
                       .filter(Boolean)
                       .join('\n')}
+                    onMouseDown={(event) => {
+                      if (pending) event.preventDefault();
+                    }}
                     onClick={() => open(row)}
                   >
                     <span className="session-search-result-label">
@@ -366,40 +390,6 @@ export function SessionSearchPalette({
                 );
               })}
             </div>
-            {!pending && onMore && page === undefined && visible.length < results.length && (
-              <Button className="session-search-more" variant="ghost" onClick={() => onMore(0)}>
-                显示更多（已显示 {visible.length} / {total}）
-              </Button>
-            )}
-            {onMore && page !== undefined && total > SESSION_SEARCH_PAGE_SIZE && (
-              <div className="session-search-pages">
-                <Button
-                  variant="ghost"
-                  disabled={pending || !page}
-                  onClick={() => {
-                    setActiveKey(undefined);
-                    onMore(page - 1);
-                    input.current?.focus();
-                  }}
-                >
-                  上一页
-                </Button>
-                <span>
-                  {page + 1} / {Math.ceil(total / SESSION_SEARCH_PAGE_SIZE)}
-                </span>
-                <Button
-                  variant="ghost"
-                  disabled={pending || (page + 1) * SESSION_SEARCH_PAGE_SIZE >= total}
-                  onClick={() => {
-                    setActiveKey(undefined);
-                    onMore(page + 1);
-                    input.current?.focus();
-                  }}
-                >
-                  下一页
-                </Button>
-              </div>
-            )}
           </div>
         </DialogContent>
       </DialogPortal>

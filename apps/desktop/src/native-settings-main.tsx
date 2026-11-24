@@ -52,5 +52,17 @@ function NativeSettings({ port }: { port: NativeSettingsOverlayBridge }) {
 const port = window.kiteSettingsOverlay;
 if (/Macintosh|Mac OS X/i.test(navigator.userAgent))
   document.documentElement.dataset.settingsMacos = '';
+else if (/Windows/i.test(navigator.userAgent)) {
+  document.documentElement.dataset.platform = 'windows';
+  let resolution: MediaQueryList | undefined;
+  const updateDevicePixel = () => {
+    const ratio = window.devicePixelRatio;
+    document.documentElement.style.setProperty('--settings-device-pixel', `${1 / ratio}px`);
+    resolution?.removeEventListener('change', updateDevicePixel);
+    resolution = window.matchMedia(`(resolution: ${ratio}dppx)`);
+    resolution.addEventListener('change', updateDevicePixel);
+  };
+  updateDevicePixel();
+}
 installNativeInputModality(document);
 if (port) createRoot(document.getElementById('root')!).render(<NativeSettings port={port} />);

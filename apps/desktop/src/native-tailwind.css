@@ -730,7 +730,7 @@ html[data-native-window][data-platform="windows"] .kite-client #navigation .clie
   padding-inline: 0;
 }
 
-html[data-native-window][data-platform="windows"] .kite-client .sidebar {
+html[data-platform="windows"] .kite-client :is(.sidebar, .native-settings-rail) {
   --sidebar-inline-padding: 6px;
 }
 

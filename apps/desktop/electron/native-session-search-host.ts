@@ -3,6 +3,7 @@ import {
   isNativeSessionSearchAction,
   isNativeSessionSearchPresentation,
   type NativeSessionSearchAction,
+  type NativeSessionSearchPresentation,
   type NativeSessionSearchState,
   nativeSessionSearchActionChannel,
   nativeSessionSearchActiveChannel,
@@ -29,6 +30,7 @@ export function createNativeSessionSearchHost(options: {
   let state: NativeSessionSearchState | null = null;
   let disposed = false;
   let awaiting: { query: string; page: number } | undefined;
+  const admittedSessions = new Map<number, Set<string>>();
   const send = () => {
     if (surface.isReady()) surface.send(nativeSessionSearchStateChannel, state);
   };
@@ -40,6 +42,7 @@ export function createNativeSessionSearchHost(options: {
     const { requestId } = state;
     state = null;
     awaiting = undefined;
+    admittedSessions.clear();
     surface.setActive(false);
     send();
     action(result ?? { requestId, type: 'close' });
@@ -62,6 +65,16 @@ export function createNativeSessionSearchHost(options: {
     event.sender === root &&
     event.senderFrame === root.mainFrame &&
     event.senderFrame?.url.split('#')[0] === options.rootUrl;
+  const publish = (input: NativeSessionSearchPresentation) => {
+    if (state?.resultId !== input.resultId || state.query !== input.query || !input.available)
+      admittedSessions.clear();
+    if (input.available)
+      admittedSessions.set(
+        input.resultPage,
+        new Set(input.rows.map((row) => row.session.sessionId)),
+      );
+    state = { ...input, theme: options.theme() };
+  };
   const present = (event: IpcMainEvent, input: unknown, opening: unknown) => {
     if (
       !rootSender(event) ||
@@ -72,7 +85,7 @@ export function createNativeSessionSearchHost(options: {
     if (state?.requestId === input.requestId) {
       if (awaiting && (input.query !== awaiting.query || input.page !== awaiting.page)) return;
       awaiting = undefined;
-      state = { ...input, theme: options.theme() };
+      publish(input);
       send();
       return;
     }
@@ -82,7 +95,7 @@ export function createNativeSessionSearchHost(options: {
       return;
     }
     finish();
-    state = { ...input, theme: options.theme() };
+    publish(input);
     const { requestId } = input;
     // Reserve the transparent native input fence before waiting for its renderer.
     surface.setActive(true);
@@ -125,8 +138,8 @@ export function createNativeSessionSearchHost(options: {
           !awaiting &&
           state.available &&
           state.query === input.query &&
-          state.page === input.page &&
-          state.rows.some((row) => row.session.sessionId === input.sessionId);
+          state.resultId === input.resultId &&
+          admittedSessions.get(input.page)?.has(input.sessionId);
         finish(current ? input : undefined);
       }
     }

@@ -26,12 +26,15 @@ export function NativeSessionSearch({
   const [requestId] = useState(() => crypto.randomUUID());
   const opening = useRef(true);
   const [target, setTarget] = useState({ query: '', page: 0 });
-  const current = useRef({ ...props, onUnavailable });
   const complete = sessionSearchDirectoryComplete(props.available, props.workspaces);
-  const matches = useMemo(
-    () => (complete ? searchSessions(props.workspaces, target.query) : []),
+  const { matches, resultId } = useMemo(
+    () => ({
+      matches: complete ? searchSessions(props.workspaces, target.query) : [],
+      resultId: crypto.randomUUID(),
+    }),
     [complete, props.workspaces, target.query],
   );
+  const current = useRef({ ...props, onUnavailable, resultId });
   const resultPage = Math.min(
     target.page,
     Math.max(0, Math.ceil(matches.length / SESSION_SEARCH_PAGE_SIZE) - 1),
@@ -51,7 +54,7 @@ export function NativeSessionSearch({
     [matches, start],
   );
   useLayoutEffect(() => {
-    current.current = { ...props, onUnavailable };
+    current.current = { ...props, onUnavailable, resultId };
   });
   useLayoutEffect(() => {
     const unwatch = bridge.watchActions((action) => {
@@ -62,9 +65,10 @@ export function NativeSessionSearch({
       }
       current.current.onClose();
       if (action.type === 'select') {
-        const { available, workspaces, onOpen } = current.current;
+        const { available, workspaces, onOpen, resultId } = current.current;
         if (
           onOpen &&
+          action.resultId === resultId &&
           sessionSearchDirectoryComplete(available, workspaces) &&
           workspaces.some((ws) => ws.sessions.some((row) => row.sessionId === action.sessionId))
         ) {
@@ -86,6 +90,7 @@ export function NativeSessionSearch({
       bridge.present(
         {
           requestId,
+          resultId,
           available: complete,
           ...target,
           total: matches.length,
@@ -100,6 +105,6 @@ export function NativeSessionSearch({
       current.current.restoreFocus();
       current.current.onUnavailable();
     }
-  }, [bridge, requestId, complete, target, matches.length, resultPage, rows]);
+  }, [bridge, requestId, resultId, complete, target, matches.length, resultPage, rows]);
   return null;
 }

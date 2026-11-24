@@ -10,6 +10,7 @@ export const nativeSessionSearchActiveChannel = 'kite:native:session-search-acti
 type Request = { query: string; page: number };
 export type NativeSessionSearchPresentation = Request & {
   requestId: string;
+  resultId: string;
   available: boolean;
   total: number;
   resultPage: number;
@@ -21,7 +22,7 @@ export type NativeSessionSearchState = NativeSessionSearchPresentation & {
 export type NativeSessionSearchAction = { requestId: string } & (
   | { type: 'close' }
   | { type: 'unavailable' }
-  | ({ type: 'select'; sessionId: string } & Request)
+  | ({ type: 'select'; sessionId: string; resultId: string } & Request)
   | ({ type: 'query' } & Request)
 );
 export interface NativeSessionSearchBridge {
@@ -81,8 +82,18 @@ export function isNativeSessionSearchPresentation(
 ): input is NativeSessionSearchPresentation {
   return (
     record(input) &&
-    keys(input, ['requestId', 'available', 'query', 'page', 'total', 'resultPage', 'rows']) &&
+    keys(input, [
+      'requestId',
+      'resultId',
+      'available',
+      'query',
+      'page',
+      'total',
+      'resultPage',
+      'rows',
+    ]) &&
     nativeSessionSearchRequestId(input.requestId) &&
+    nativeSessionSearchRequestId(input.resultId) &&
     request(input) &&
     typeof input.available === 'boolean' &&
     count(input.total) &&
@@ -101,6 +112,7 @@ export function isNativeSessionSearchState(input: unknown): input is NativeSessi
     !record(input) ||
     !keys(input, [
       'requestId',
+      'resultId',
       'available',
       'query',
       'page',
@@ -119,7 +131,8 @@ export function isNativeSessionSearchAction(input: unknown): input is NativeSess
   if (!record(input) || !nativeSessionSearchRequestId(input.requestId)) return false;
   if (input.type === 'select')
     return (
-      keys(input, ['type', 'requestId', 'sessionId', 'query', 'page']) &&
+      keys(input, ['type', 'requestId', 'resultId', 'sessionId', 'query', 'page']) &&
+      nativeSessionSearchRequestId(input.resultId) &&
       rowId(input.sessionId) &&
       request(input)
     );

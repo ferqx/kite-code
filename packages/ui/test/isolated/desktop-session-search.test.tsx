@@ -39,7 +39,7 @@ for (const [key, value] of Object.entries(globals)) {
 }
 const { createRoot } = await import('react-dom/client');
 const { Sidebar } = await import('../../src/desktop/Sidebar');
-const { searchSessions, sessionSearchActivityTime } = await import(
+const { searchSessions, sessionSearchActivityTime, SessionSearchPalette } = await import(
   '../../src/desktop/SessionSearch'
 );
 const host = document.getElementById('root')!;
@@ -56,6 +56,7 @@ afterAll(() => {
   }
 });
 function workspaces(): WorkspaceSummary[] {
+  const now = Date.now() - 1000;
   return ['one', 'two'].map((id, workspace) => ({
     id,
     label: 'Kite',
@@ -66,7 +67,9 @@ function workspaces(): WorkspaceSummary[] {
       sessionId: `${id}-${index}`,
       displayName: index === 204 ? '旧部署记录' : `会话 ${index}`,
       status: index === 204 && workspace === 1 ? 'running' : 'idle',
-      updatedAt: new Date(Date.UTC(2026, 0, 1) - index * 1000 - workspace).toISOString(),
+      updatedAt: new Date(
+        now - index * 1000 - workspace - (index === 204 ? 8 * 86400000 : 0),
+      ).toISOString(),
     })),
   }));
 }
@@ -119,6 +122,135 @@ async function key(value: string, extra: KeyboardEventInit = {}) {
   );
 }
 
+test('an async search keeps the displayed rows and focus until new results arrive', async () => {
+  root = createRoot(host);
+  const directory = workspaces();
+  const recent = searchSessions(directory, '').slice(0, 3);
+  const matches = searchSessions(directory, '旧部署');
+  const opened: string[] = [];
+  const render = async (query: string, resultsQuery: string, pending: boolean) => {
+    await act(async () =>
+      root!.render(
+        <SessionSearchPalette
+          id="async-search"
+          query={query}
+          resultsQuery={resultsQuery}
+          setQuery={() => {}}
+          results={resultsQuery ? matches : recent}
+          complete
+          pending={pending}
+          onOpen={(id) => opened.push(id)}
+          onClose={() => {}}
+          restoreFocus={() => {}}
+        />,
+      ),
+    );
+  };
+
+  await render('', '', false);
+  const originalInput = input();
+  await key('ArrowDown');
+  const selected = results()[1]!;
+  const viewport = palette()!.querySelector<HTMLElement>('.session-search-results')!;
+  viewport.scrollTop = 42;
+
+  await render('旧部署', '', true);
+  expect(input() === originalInput && document.activeElement === originalInput).toBe(true);
+  expect(viewport.scrollTop).toBe(42);
+  expect(results()[1] === selected).toBe(true);
+  expect(selected.getAttribute('aria-selected')).toBe('true');
+  expect(selected.getAttribute('aria-disabled')).toBe('true');
+  expect(selected.disabled).toBe(false);
+  await key('Enter');
+  await click(selected);
+  expect(opened).toEqual([]);
+
+  await render('旧部署', '旧部署', false);
+  expect(input() === originalInput && document.activeElement === originalInput).toBe(true);
+  expect(viewport.scrollTop).toBe(0);
+  expect(results()[0]?.getAttribute('aria-selected')).toBe('true');
+  await key('Enter');
+  expect(opened).toEqual([matches[0]!.session.sessionId]);
+});
+
+test('an async search keeps the confirmed empty message until the results change', async () => {
+  root = createRoot(host);
+  const matches = searchSessions(workspaces(), '旧部署');
+  const render = async (query: string, resultsQuery: string, pending = false) => {
+    await act(async () =>
+      root!.render(
+        <SessionSearchPalette
+          id="async-search"
+          query={query}
+          resultsQuery={resultsQuery}
+          setQuery={() => {}}
+          results={resultsQuery === '旧部署' ? matches : []}
+          complete
+          pending={pending}
+          onClose={() => {}}
+          restoreFocus={() => {}}
+        />,
+      ),
+    );
+  };
+  const status = () => palette()?.querySelector('[role="status"]');
+
+  await render('', '');
+  const message = status();
+  expect(message?.textContent).toBe('最近 7 天暂无会话');
+  await render('未', '', true);
+  expect(status() === message).toBe(true);
+  expect(status()?.textContent).toBe('最近 7 天暂无会话');
+
+  await render('未', '未');
+  expect(status()?.textContent).toBe('未找到匹配的会话');
+  await render('未知', '未', true);
+  expect(status() === message).toBe(true);
+  expect(status()?.textContent).toBe('未找到匹配的会话');
+  await render('未知', '未知');
+  expect(status() === message).toBe(true);
+
+  await render('旧部署', '未知', true);
+  expect(status() === message).toBe(true);
+  await render('旧部署', '旧部署');
+  expect(status()).toBeNull();
+  expect(results()).toHaveLength(matches.length);
+});
+
+test('blank search includes only the past seven days while keywords still reach older history', () => {
+  const now = Date.UTC(2026, 10, 24);
+  const cutoff = now - 7 * 86_400_000;
+  const samples = [
+    { id: 'now', time: new Date(now).toISOString() },
+    { id: 'boundary', time: new Date(cutoff).toISOString() },
+    { id: 'older', time: new Date(cutoff - 1).toISOString() },
+    { id: 'future', time: new Date(now + 1).toISOString() },
+    { id: 'invalid', time: 'unavailable' },
+    { id: 'missing' },
+  ];
+  const directory: WorkspaceSummary[] = [
+    {
+      id: 'scope',
+      label: '项目',
+      state: 'loaded',
+      sessionCount: samples.length,
+      sessions: samples.map(({ id, time }) => ({
+        sessionId: id,
+        displayName: `会话 ${id}`,
+        status: 'idle',
+        updatedAt: time,
+      })),
+    },
+  ];
+  expect(searchSessions(directory, '  ', now).map((row) => row.session.sessionId)).toEqual([
+    'now',
+    'boundary',
+  ]);
+  expect(searchSessions(directory, '项目 older', now).map((row) => row.session.sessionId)).toEqual([
+    'older',
+  ]);
+});
+
 test('search reaches old sessions beyond both directory and visible pages and disambiguates same-name projects', async () => {
   const f = await fixture();
   expect(host.textContent).not.toContain('旧部署记录');
@@ -132,6 +264,7 @@ test('search reaches old sessions beyond both directory and visible pages and di
   );
   expect(host.querySelector<HTMLElement>('.workspace-directory')?.style.display).not.toBe('none');
   expect(results()).toHaveLength(50);
+  expect(results().some((row) => row.textContent?.includes('旧部署记录'))).toBe(false);
   expect(palette()?.textContent).not.toContain('最近会话');
   expect(palette()?.querySelector('[role="status"]')).toBeNull();
   expect(palette()?.querySelector('kbd')).toBeNull();
@@ -201,11 +334,12 @@ test('Escape restores the original sidebar nodes and focus; Store changes discar
   expect(palette()?.textContent).toContain('暂无会话');
 });
 
-test('keyboard traverses beyond the first rendered page and preserves the selected identity across updates', async () => {
+test('keyboard advances in a continuous list and preserves the selected identity across updates', async () => {
   const f = await fixture();
   await click(trigger());
   for (let i = 0; i < 55; i++) await key('ArrowDown');
-  expect(results()).toHaveLength(56);
+  expect(results()).toHaveLength(100);
+  expect(palette()?.querySelector('.session-search-pages, .session-search-more')).toBeNull();
   const selected = results().find((row) => row.getAttribute('aria-selected') === 'true')!;
   const title = selected.title;
   await f.render({
@@ -276,7 +410,7 @@ test('a selected result that moves during directory refresh is scrolled back int
         ...w,
         sessions: w.sessions.map((session) =>
           session.sessionId === 'two-27'
-            ? { ...session, updatedAt: '2027-01-01T00:00:00.000Z' }
+            ? { ...session, updatedAt: new Date().toISOString() }
             : session,
         ),
       })),
@@ -324,6 +458,8 @@ test('activity display uses the ranked timestamp and omits invalid time without 
   ];
   await f.render({ workspaces: [{ ...one, sessions, sessionCount: sessions.length }] });
   await click(trigger());
+  expect(results()).toHaveLength(3);
+  await query('row');
   const rows = results();
   expect(rows.map((row) => row.querySelector('strong')?.textContent)).toEqual([
     'Recent row',

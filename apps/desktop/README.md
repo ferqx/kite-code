@@ -8,7 +8,9 @@
 
 ## 侧栏会话搜索
 
-[NativeCaller](electron/native-caller.ts)原目录读取穷尽工作区与会话分页，完整成功后发布，失败不发布前缀目录。[NativeDesktop](src/native.tsx)据连接代次／Store、目录状态与当前代次的直接读取失败接入共享侧栏搜索，没有新增 Workbench 路由、后端搜索或消息正文读取。[目录投影](src/native-presentation.ts)保留登记 `rootUri` 以辨识同名项目；打开结果复用原 `onOpen/select`。桌面搜索复用[原生模态底座](electron/native-modal-surface.ts)，使用[独立搜索视图](src/native-session-search-main.tsx)与[受限 IPC](electron/native-session-search-host.ts)；[Root 适配](src/native-session-search.tsx)持有目录、搜索排序与导航，每次只传最多 50 条当前页展示信息。结果时间沿目录的最近活动时间，IPC 传可选有限时间戳；缺失或无效时不显示，不以创建时间代替。搜索视图不具备 Service 或浏览器控制能力。搜索位于右侧网页和文件原生视图之上、权限确认与图片预览之下，不改变底层视图的可见性、几何或浏览器操作凭据。共享 Web 继续使用[本地搜索对话框](../../packages/ui/src/desktop/SessionSearch.tsx)。
+[NativeCaller](electron/native-caller.ts)原目录读取穷尽工作区与会话分页，完整成功后发布，失败不发布前缀目录。[NativeDesktop](src/native.tsx)据连接代次／Store、目录状态与当前代次的直接读取失败接入共享侧栏搜索，没有新增 Workbench 路由、后端搜索或消息正文读取。[目录投影](src/native-presentation.ts)保留登记 `rootUri` 以辨识同名项目；打开结果复用原 `onOpen/select`。桌面搜索复用[原生模态底座](electron/native-modal-surface.ts)，使用[独立搜索视图](src/native-session-search-main.tsx)与[受限 IPC](electron/native-session-search-host.ts)；[Root 适配](src/native-session-search.tsx)持有目录、搜索排序与导航，每次最多传 50 条展示信息，搜索面板按滚动或键盘操作将后续结果追加到同一个列表。空查询只列出最近 7 天更新的会话。选择经 Main 核对当前结果快照和已发布批次，目录变化后淘汰旧批次。结果时间沿目录的最近活动时间，IPC 传可选有限时间戳；缺失或无效时不显示，不以创建时间代替。搜索视图不具备 Service 或浏览器控制能力。搜索位于右侧网页和文件原生视图之上、权限确认与图片预览之下，不改变底层视图的可见性、几何或浏览器操作凭据。共享 Web 继续使用[本地搜索对话框](../../packages/ui/src/desktop/SessionSearch.tsx)。
+
+2026-11-24，Windows Chromium 的深浅主题生产搜索渲染器以 103 条近一周会话和一条更早会话核对空查询、关键词和清空。滚动追加时保留已有节点和滚动位置，方向键可越过原批次边界，滚回较早加载的行仍能选择原会话。目录刷新后重新加载当前结果，输入焦点保持。受控延迟复现旧面板从 522px 收缩到 68px，新渲染器在连续输入、等待、命中、无匹配与清空的 42 帧中保持面板尺寸、输入节点和焦点，等待时保留结果且禁止打开。两种主题的悬停与选中像素和侧栏配色一致。截图归本机 `.cache/session-search-continuous-browser/`。空结果提示补验以 1.5 倍设备像素比例采样 56 帧，连续空结果保留同一提示节点，命中后才收起，目录故障与恢复分别显示对应状态。本轮使用隔离搜索桥接，未复验安装版实窗。
 
 2026-11-17，`15bf767c0` 的隔离 Linux／Bun 1.4.4 补丁：[搜索 DOM](../../packages/ui/test/isolated/desktop-session-search.test.tsx)与[完整分页](../../packages/client/test/directory.test.ts)共12项／152断言通过，含排序刷新后保留选中身份并跟随滚动。[Native 导航](test/isolated/native-session-shell-dom.test.tsx)新增2项／23断言通过，核运行会话往返、两份草稿、零发送／停止，以及无通知的直接目录失败撤销旧结果与恢复；[目录投影](test/native-directory.test.tsx)12项／190断言、侧栏渲染3项／39断言和UI／Desktop类型检查通过。完整 Native shell 另5项失败、Sidebar另1项失败，均在未修改的准确基线同名复现。生产 Sidebar 夹具编译成功，云 Chromium 被 socket 权限阻断，工具浏览器也无法连接该环境的 loopback；完整 Native 浏览器编译受云内存限制。该云端阶段曾因Mac离线而未取得实窗资格；后续本机验证见下段，完整安装版资格仍未取得。
 
@@ -831,7 +833,20 @@ Native消费[UI共享语义色](../../packages/ui/README.md#原桌面展示层)�
 
 2026-11-01，设置分类恢复持续选中高亮：Windows x64／Electron44.3.0、独立Profile及普通生产renderer实际核常规、MCP、Skills、提供商与模型四项，鼠标移开后仍只有当前项保留底色；Tab把焦点移到Skills时仍保留MCP选中，Enter后选中转到Skills，键盘焦点环保持，返回原页面正常。过程截图和无障碍树在本机`.cache/settings-selection-20261101/`；零模型请求，窗口正常退出0，5个所属进程全部结束。本轮仅改CSS及当前文档，未改页面状态或TypeScript；原窗口动作DOM结果沿用前轮，CSS Biome与文档检查通过，不扩展安装或其他平台资格。
 
-Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Skills 列表](src/native-provider-settings.css)消费 [UI owner 的中性交互变量](../../packages/ui/README.md#原桌面展示层)，顶栏菜单与设置内容沿用默认的悬停／选中／按下分级；设置返回与 `.settings-sidebar` 将按下变量局部映射到悬停值，与共享侧栏保持一致。设置分类与“新对话”“定时任务”复用 [SidebarNavigationAction](../../packages/ui/src/desktop/SidebarNavigationAction.tsx)，不绘制悬停或常驻选中底色，也不使用过渡；保留原生按钮、当前分类语义和可见键盘焦点；Tailwind 的 `--color-accent` 映射到 `--control-hover`，使移出页面树的菜单也遵循同一规则。原 `--accent` 继续服务静态内容，不随交互高亮调整。实色主操作保留原角色配色，禁用状态和键盘焦点沿原控件语义。
+Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Skills 列表](src/native-provider-settings.css)消费 [UI owner 的中性交互变量](../../packages/ui/README.md#原桌面展示层)，顶栏菜单与设置内容沿用默认的悬停／选中／按下分级；设置返回与 `.settings-sidebar` 将按下变量局部映射到悬停值，与共享侧栏保持一致。设置左栏与主页面复用 [导航组件](../../packages/ui/src/desktop/SidebarNavigationAction.tsx) 的列表、分组标题和行控件。设置标题、分组、类别及返回控件共用 `--navigation-foreground`。主侧栏的空间、会话、定时任务与设置分类共用悬停、按下和选中底色，以及原生按钮焦点反馈。行高亮以主题侧栏色为底合成，玻璃与实色上的颜色一致。窄窗从内容返回分类时，焦点回到当前分类。Tailwind 的 `--color-accent` 映射到 `--control-hover`，使移出页面树的菜单也遵循同一规则。原 `--accent` 继续服务静态内容，不随交互高亮调整。实色主操作保留原角色配色，禁用状态和键盘焦点沿原控件语义。
+
+2026-11-24，Windows x64／Chromium 157 的[生产渲染器侧栏回归](test/isolated/sidebar-actions-browser.test.ts)在深浅主题下核对两处列表的分组、行高、字号、圆角、间距和文字色。操作覆盖展开更多、切换设置分类、窄窗返回分类与关闭设置，当前分类底色、键盘焦点和原会话草稿符合预期，两个主题均无页面异常。带 Windows Mica 标记的浏览器夹具中，两处侧栏的内边距均为 6px，导航文字起点距栏边均为 40px。截图和运行报告位于本机 `.cache/session-shell-browser-4DCwJk/`。
+同日沿同一回归验证悬停。深浅主题下，新对话、定时任务和设置分类的悬停底色与空间行一致，移开鼠标后当前项保持选中，其他项恢复普通底色。续测报告位于本机 `.cache/session-shell-browser-2IbHxm/`。
+
+主视图的侧栏容器原先把按下底色映射为悬停色，独立设置视图使用普通按钮的默认按下色。把该规则归到共享导航行后，实际鼠标按住、移开再松开的浏览器回归通过。Windows Electron 的两个生产渲染器在深浅主题下核对未选中与已选中的默认、悬停、按下和键盘焦点样式，结果一致。前后对照位于本机 `.cache/settings-style-production-shared/navigation-press.jsonl` 和 `.cache/settings-style-production-press/navigation-press.jsonl`。
+
+设置导航与空间及会话整行共用悬停和选中颜色。选中使用独立叠层，悬停、按下和选中都以同一主题侧栏色合成。Windows Electron 的独立视图截图采样确认，浅色两处的悬停／选中分别为 RGB 232／223，深色分别为 RGB 51／60。浏览器回归另核鼠标移入、按住、移开及设置分类切换和会话返回后的底色。前后数据位于本机 `.cache/settings-style-production-press/navigation-color.jsonl` 和 `.cache/settings-style-production-nav-palette/navigation-color.jsonl`。
+
+浏览器回归比较每行图标框、文字行框与按钮的垂直中心，也覆盖窄窗返回分类。旧的 Chromium 样本用于核对布局中心，实际设置 WebContentsView 中的可见对齐另按 Electron 截图核对。
+
+同日用 Windows Electron 44.3.0 在独立主视图和设置 WebContentsView 加载两份实际生产入口。两处加载同一共享 UI 样式，深浅主题下的导航字体、行高和图文垂直中心一致。原独立设置入口缺少 Windows 平台标记，侧栏采用 12px 默认内边距，标签从栏边 46px 开始。补齐入口标记后，两处均采用 6px 内边距，标签从栏边 40px 开始。隔离桥下的修复前后样式数据位于本机 `.cache/settings-style-production-baseline/` 与 `.cache/settings-style-production-fixed/`。
+
+独立 Windows 设置 WebContentsView 的截图复现了图文偏差。对调两视图的图标和标签后，半像素纵坐标额外引入约 1 个物理像素的偏差，同一内容放在同一坐标时绘制一致。两处导航统一使用共享行样式和平台留白，Windows 将浮窗顶部贴合设备像素，移除设置分类单独的图文偏移。独立 Electron 改变缩放后仍核对浮窗顶边与共享行样式，窄窗返回分类后两处行样式一致。对照数据位于本机 `.cache/settings-style-production-shared/icon-shared.jsonl`。
 
 2026-10-19 Windows x64／Bun 1.4.3／Chrome 155.0.8059.82，在 `f734245a` 加当前未提交源码上，用隔离夹具加载实际 SessionPage、Sidebar 与 Native 编译样式，Windows／macOS CSS 标记下亮暗、Mica／Vibrancy／实色、窄侧栏、选中导航与设置分类选择器共14组对照：悬停／按下底色不一致的采样由64处降为0。键盘按下空间标题只绘制一层背景，焦点提示、透明承载层、草稿和主区普通按钮的原按下反馈保持；页面无异常，定向 CSS Biome 与文档检查通过。设置页仅核选择器夹具，未复验真实 Service、Electron 实窗或系统材质最终合成。
 
@@ -1594,6 +1609,8 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 ## Native 定时任务
 
 模块统一称为“定时任务”，侧栏、页面、新建／编辑面板、搜索、筛选、空状态与删除确认使用同一名称；侧栏入口、空状态和任务卡片统一使用公共图标库的闹钟图标。对应公共UI、无障碍名称与测试定位保持一致。此次命名和图标调整不改变持久字段、IPC、调度、运行及恢复语义。
+
+2026-11-24，Windows x64 上的[生产渲染器侧栏回归](test/isolated/sidebar-actions-browser.test.ts)先复现入口已有当前页标记但底色仍透明。修复后在隔离 Chromium 157 的深浅主题下采样 131 帧，覆盖进入任务页、移开指针、新建、输入、取消和返回原会话。选中帧的入口底色稳定，每帧最多一个当前项，返回后原回复只出现一次且会话草稿保留。两份截图和逐帧结果位于本机 `.cache/session-shell-browser-R48pnL/`。同轮定时任务 Native DOM 有两项创建按钮／模型选择断言失败，换回 HEAD 的相关组件源码后在同一断言复现。
 
 列表工具栏左侧为筛选，右侧搜索框与新建按钮同高同行；窄区只允许筛选换行，搜索与新建保持成组。空列表仍保留新建入口。2026-11-04，相关UI、SessionPage和Native页面三个完整文件35项通过，UI typecheck及定向Biome通过；隔离Chrome在明暗主题×1280／800px四组28阶段观察搜索、新建等待与完成、编辑、删除确认取消和空状态，另核共享组件390px两组6阶段，搜索框与按钮均为32px同高、8px间距且无横向溢出。截图与几何数据在`.cache/scheduled-toolbar-row-preview/`，模拟保存回调与上轮相同，未调用模型或操作用户窗口。
 
