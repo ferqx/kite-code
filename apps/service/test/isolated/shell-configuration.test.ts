@@ -83,6 +83,7 @@ function endpoint(
   let permissions: RequestedScope | undefined;
   let description: string | undefined;
   let workdir: string | undefined;
+  let currentExecCommand = false;
   const reviews: Record<string, unknown>[] = [];
   let beforeStop: ((shellId: string) => Promise<void>) | undefined;
   const requests: Record<string, unknown>[] = [];
@@ -145,10 +146,20 @@ function endpoint(
               { name: 'shell_wait', input: { shell_id: shellId, wait_ms: 4000 } },
               { name: 'shell_read', input: { shell_id: shellId, limit: 200 } },
             ];
-      const call =
-        reviewPayload ||
-        (background && results.length > 0) ||
-        (!(child && !isChild) && results.length > 0 && !shellId)
+      const call = currentExecCommand
+        ? !reviewPayload && results.length === 0
+          ? {
+              name: 'exec_command',
+              input: {
+                cmd: actualCommand,
+                ...(workdir === undefined ? {} : { workdir }),
+                yield_time_ms: 5000,
+              },
+            }
+          : undefined
+        : reviewPayload ||
+            (background && results.length > 0) ||
+            (!(child && !isChild) && results.length > 0 && !shellId)
           ? undefined
           : calls[results.length];
       if (call?.name === 'shell_stop') await beforeStop?.(shellId!);
@@ -200,6 +211,9 @@ function endpoint(
     },
     workdir(value?: string) {
       workdir = value;
+    },
+    useCurrentExecCommand() {
+      currentExecCommand = true;
     },
     description(value?: string) {
       description = value;
@@ -1727,6 +1741,59 @@ nativeTest(
       expect(JSON.stringify(snapshot)).not.toContain('trusted-fixed');
       expect(JSON.stringify(snapshot)).not.toContain('HTTP_PROXY');
       expect(f.a.requests[0]!.tools).toBeDefined();
+    } finally {
+      await f.close();
+    }
+  },
+  15000,
+);
+nativeTest(
+  'macOS workspace writes keep the selected root when Shell starts in a nested directory',
+  async () => {
+    const f = await fixture({
+      mode: 'accept_edits',
+      persistentPermissions: true,
+      hostBoundary: true,
+      command: 'pwd && printf root-owned > ../workspace-effect.txt',
+    });
+    try {
+      const cwd = join(f.workspace, 'nested');
+      mkdirSync(cwd);
+      f.a.useCurrentExecCommand();
+      f.a.workdir('nested');
+      await f.submit();
+      expect((await f.done()).status).toBe('applied');
+      const jobs = (await f.store.listExecutions('s')).filter(
+        (row) => row.definitionId === 'shell.command',
+      );
+      expect(jobs).toHaveLength(1);
+      const job = jobs[0]!;
+      const output = await f.store.listExecutionOutput({
+        executionId: job.id,
+        afterSeq: '0',
+        limit: 200,
+      });
+      expect(
+        output.items
+          .filter((row) => row.stream === 'stdout')
+          .map((row) => row.content)
+          .join('')
+          .trim(),
+      ).toBe(cwd);
+      const effect = join(f.workspace, 'workspace-effect.txt');
+      expect({
+        status: job.status,
+        dispatched: job.authorization?.dispatched,
+        result: job.result,
+        effect: existsSync(effect) ? readFileSync(effect, 'utf8') : null,
+      }).toMatchObject({
+        status: 'succeeded',
+        dispatched: true,
+        result: { details: { exitCode: 0, processTreeStopped: true } },
+        effect: 'root-owned',
+      });
+      expect(f.a.reviews).toEqual([]);
+      expect((await f.store.getView('s')).runs[0]).toMatchObject({ status: 'completed' });
     } finally {
       await f.close();
     }

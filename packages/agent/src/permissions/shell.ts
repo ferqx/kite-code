@@ -906,6 +906,7 @@ export async function createShellConfiguration(input: {
                 ...jobOptions,
                 cwd: directory,
                 ...host,
+                workspaceRoot: cwd,
                 filesystemScope: hostFilesystemScope,
                 executionScope,
               })
