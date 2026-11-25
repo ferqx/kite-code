@@ -213,7 +213,7 @@ export function ConversationTrace({
                     <HugeiconsIcon icon={BulbIcon} />
                   </TraceIcon>
                   <TraceTitle aria-live={grouped ? undefined : 'polite'}>
-                    {grouped ? (thinking ? '思考中' : step.settled ? '已思考' : '思考') : label}
+                    {thinking ? '思考中' : '已思考'}
                   </TraceTitle>
                   {canRead && (
                     <TraceIcon className="conversation-trace-chevron">

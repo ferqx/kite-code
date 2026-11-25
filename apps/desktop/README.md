@@ -1231,6 +1231,8 @@ Native 主会话由 [desktopTranscript](src/native-transcript.ts)投影准确 Ru
 
 上述普通 Electron 窗口回归在思维链运行时同时展开已完成的文件读取结果和已经读到的思考。后续工具启动、结算、元数据延迟和接管期间，44 帧渲染采样和 11 次 DOM 变动检查中，原结果节点、思考正文、开合状态、选中文字和焦点均保持。之后继续手动开合，并核对轮次完成及重载。思考的显示身份取原消息、来源及正文版本。同源补读失败或返回空正文时保留已核实内容，读取到相同正文时沿用原渲染节点。首次读取失败继续提供原重试反馈。[思考 DOM 回归](test/isolated/native-reasoning-dom.test.tsx)覆盖读回失败及恢复路径。
 
+2026-11-25，Windows x64 隔离开发窗口使用本地受控模型核对单条思考。公开正文展开时，标题从「思考中」原位切到「已思考」，思考与回复各显示一次，原展开、草稿、输入焦点和滚动位置保持。核对手动收起、切回及冷重开后展开至正文完整可见。两次窗口正常退出，全程一次模型请求。阶段截图与 27 条状态变化保存在本机 `.cache/reasoning-status-window-b0370ec9/`。多步链及执行状态待核实的标题由[共享 UI 回归](../../packages/ui/test/desktop-reasoning-turns.test.tsx)覆盖。
+
 Native 的侧栏打开入口对当前父会话及同一在途选择去重，重复鼠标点击和 Enter 不重新发起 `select`、撤销历史读取或重建消息。子详情通过右侧栏标签打开，点击当前父会话不会关闭详情或重新选择父会话；准备页及定时任务页仍恢复原会话；选择其他目标和显式恢复读取保持原流程。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)核重复点击的请求数量、消息节点、滚动和展开保持，以及在途目标复用。
 
 初始没有已选会话时，`selectionHandoff` 同样参与聊天加载判断，覆盖目标 `select` 确认和模型准备，再由 `NativeHistory` 的加载阶段接续；不能因 `selection` 尚未到达而提前发布 Conversation 空状态。[新对话 DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)分别核已有正文与真实空历史，延迟选择、模型及历史读取并穿插状态刷新；完整历史到达后才呈现正文或实际空状态，原首次发送的待定消息交接仍保持。

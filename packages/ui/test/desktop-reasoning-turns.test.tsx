@@ -422,7 +422,7 @@ test('conversation trace keeps the first tool icon as the active title changes a
 
   expectIcon(traceHeadings(renderTrace([thought]))[0]!, BulbIcon);
   const completedThought = traceHeadings(renderTrace([complete(thought)]))[0]!;
-  expect(completedThought.textContent).toBe('处理过程');
+  expect(completedThought.textContent).toBe('已思考');
   expectIcon(completedThought, BulbIcon);
   expectIcon(traceHeadings(renderTrace([complete(read)]))[0]!, BookOpen01Icon);
   const running = renderTrace([complete(thought), read, shell]).querySelector(summary)!;
@@ -1102,7 +1102,7 @@ test('separate traces retain their own result or thinking while the Turn shows i
       const thinking = status === 'running' && !executionUnconfirmed;
       expect(headings.map((heading) => heading.textContent)).toEqual([
         '读取了文件',
-        thinking ? '思考中' : '处理过程',
+        thinking ? '思考中' : '已思考',
       ]);
       expect(headings[0]!.getAttribute('data-status')).not.toBe('running');
       expect(headings[1]!.getAttribute('data-status') === 'running').toBe(thinking);
@@ -1787,7 +1787,7 @@ test('a connection notice separates a tool result from later reasoning', () => {
       ),
     );
     const titles = traceHeadings(dom.window.document).map((node) => node.textContent);
-    expect(titles).toEqual(['运行了命令', executionUnconfirmed ? '处理过程' : '思考中']);
+    expect(titles).toEqual(['运行了命令', executionUnconfirmed ? '已思考' : '思考中']);
     expect(dom.window.document.querySelectorAll('.model-connection')).toHaveLength(1);
     dom.window.close();
   }
@@ -1817,8 +1817,8 @@ test('Model and Tool handoff markers have no activity row of their own', () => {
 test('streaming native reasoning uses its source even when the body is loaded separately', () => {
   for (const [settled, executionUnconfirmed, expected] of [
     [false, false, '思考中'],
-    [true, false, '处理过程'],
-    [false, true, '处理过程'],
+    [true, false, '已思考'],
+    [false, true, '已思考'],
   ] as const) {
     const dom = new JSDOM(
       renderToStaticMarkup(
@@ -1859,7 +1859,7 @@ test('streaming native reasoning uses its source even when the body is loaded se
   );
   const trace = missing.window.document.querySelector('.conversation-trace')!;
   expect(traceHeadings(missing.window.document).map((line) => line.textContent)).toEqual([
-    '处理过程',
+    '已思考',
   ]);
   expect(trace.querySelectorAll('button, [aria-expanded]')).toHaveLength(0);
   expect(trace.textContent).not.toContain('PRIVATE REASONING');
@@ -1931,7 +1931,7 @@ test('exact pending answers and approvals outrank parallel activity and withdraw
       '.conversation-reasoning [data-slot="trace-title"]',
     );
     if (steps.some((step) => step.id === thought.id))
-      expect(row?.textContent).toBe(unconfirmed ? '思考' : '思考中');
+      expect(row?.textContent).toBe(unconfirmed ? '已思考' : '思考中');
     dom.window.close();
   }
 });

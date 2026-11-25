@@ -595,7 +595,7 @@ try {
   );
   const reasoningBody = page.locator('.conversation-reasoning-body .typeset-chat');
   assert.equal(await page.locator('.conversation .conversation-trace-trigger').count(), 1);
-  assert.equal(await thought.innerText(), '正在思考…');
+  assert.equal(await thought.innerText(), '思考中');
   assert.equal(await thought.getAttribute('aria-expanded'), 'true');
   assert.equal(
     await thought.getAttribute('aria-controls'),
@@ -711,7 +711,7 @@ try {
   const originalToolHeading = await toolHeading.elementHandle();
   assert.equal(await toolHeading.getAttribute('aria-expanded'), 'false');
   assert.equal(await toolHeading.locator('[data-status="running"]').count(), 0);
-  assert.deepEqual(await traceHeadings.allTextContents(), ['处理过程', latestReadTitle]);
+  assert.deepEqual(await traceHeadings.allTextContents(), ['已思考', latestReadTitle]);
   await setPhase('tools-complete');
   const toolTiming = await readTimer();
   await until(readTimer, (value) => value !== toolTiming, 'Run keeps ticking over the latest read');
@@ -837,7 +837,7 @@ try {
   await checkBeforeReply('second-reasoning', 1);
   assert.deepEqual(
     await traceHeadings.allTextContents(),
-    ['处理过程', '思考中'],
+    ['已思考', '思考中'],
     'only the current trace shows the current Model phase',
   );
   assert.equal(
@@ -864,7 +864,7 @@ try {
   );
   assert.deepEqual(
     await traceHeadings.allTextContents(),
-    ['处理过程', '检查了文件读取了文件'],
+    ['已思考', '检查了文件读取了文件'],
     'actual prose ends the Trace and summary distinguishes missing files from reads',
   );
   assert.equal(
@@ -986,6 +986,7 @@ try {
   );
   await setPhase('settled-reasoning-open');
   const readThought = readTrace.locator('.conversation-reasoning > button').last();
+  assert.equal(await readThought.innerText(), '已思考');
   assert.equal(await readThought.getAttribute('aria-expanded'), 'false');
   await readThought.click();
   await until(

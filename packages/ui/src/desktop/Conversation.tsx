@@ -1541,7 +1541,7 @@ export function Conversation({
                   ? toolTraceTitle(latestTool)
                   : tools.length
                     ? completedToolActions(tools) || '工具执行'
-                    : '处理过程');
+                    : '已思考');
           const boundary = blocks[index - 1]?.[0];
           const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
           if (open && expanded[id] === true) trackOpen(id);
