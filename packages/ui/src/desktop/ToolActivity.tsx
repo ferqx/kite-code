@@ -1282,6 +1282,10 @@ export function ToolActivity({
           ? '状态待核对'
           : undefined
         : executionLabel(message, diagnostics);
+  const showDetailStatus =
+    status &&
+    status !== '成功' &&
+    !(message.toolName === 'web_search' && (status === '等待执行' || status === '执行中'));
   const commandSummary = shell && target ? target.replace(/\s+/g, ' ').trim() : undefined;
   const shortCommand =
     commandSummary && commandSummary.length > 512
@@ -1554,7 +1558,7 @@ export function ToolActivity({
                       originalContent={children || undefined}
                     />
                   )}
-                  {!grouped && !shell && !ask && status && status !== '成功' && (
+                  {!shell && !ask && showDetailStatus && (
                     <p className="tool-detail-status" role="status">
                       {waitFailure ? message.text : status}
                     </p>

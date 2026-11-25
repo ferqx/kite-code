@@ -42,7 +42,7 @@ type Mode =
   | 'web-search-legacy'
   | 'web-search-wrong-owner'
   | 'web-search-missing'
-  | 'web-search-retry'
+  | 'web-search-read-failure'
   | 'web-search-trace'
   | 'web-search-many'
   | 'write-diff'
@@ -158,6 +158,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
   const pending: (() => void)[] = [];
   const pendingTargets: (() => void)[] = [];
   const pendingBodies: (() => void)[] = [];
+  const firstSearchRead = Promise.withResolvers<void>();
   const state = (): NativeState => ({
     generation: 1,
     creationSubmissions: [],
@@ -317,8 +318,13 @@ function fixture(mode: Mode, testDiagnostics = false) {
             highWaterSeq: request.upperSeq,
           };
         case 'webSearch.evidence':
+          if (
+            mode === 'web-search' &&
+            requests.filter((r) => r.method === 'webSearch.evidence').length === 1
+          )
+            await firstSearchRead.promise;
           if (mode === 'web-search-missing') return { kind: 'webSearch.evidence', evidence: null };
-          if (mode === 'web-search-retry') {
+          if (mode === 'web-search-read-failure') {
             if (requests.filter((r) => r.method === 'webSearch.evidence').length === 1)
               throw Error('PRIVATE_TRANSPORT_ERROR');
             return {
@@ -342,6 +348,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
               route: 'provider',
               status: 'completed',
               query: 'fixture',
+              truncated: true,
               sources:
                 mode === 'web-search-many'
                   ? Array.from({ length: 9 }, (_, i) => ({
@@ -675,6 +682,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
     until,
     requests,
     expectedShellOutput,
+    releaseFirstSearchRead: () => act(async () => firstSearchRead.resolve()),
     setFileOpenable: (openable: boolean) => {
       fileOpenable = openable;
     },
@@ -923,6 +931,9 @@ for (const mode of ['web-search', 'web-search-legacy', 'web-search-wrong-owner']
       await f.toggle();
       await f.settlePresentation();
       if (mode === 'web-search') {
+        await f.until(() => reads().length === 1);
+        expect(f.host.querySelector('.tool-activity-content')?.textContent?.trim()).toBe('');
+        await f.releaseFirstSearchRead();
         await f.until(() => !!f.host.querySelector('.web-search-sources a'));
         expect(reads()).toEqual([
           {
@@ -939,6 +950,7 @@ for (const mode of ['web-search', 'web-search-legacy', 'web-search-wrong-owner']
         expect(a.href).toBe('https://example.test/source');
         expect(a.rel).toContain('noopener');
         expect(f.host.querySelectorAll('.web-search-sources a')).toHaveLength(1);
+        expect(f.host.textContent).not.toContain('仅显示部分搜索材料');
         expect(f.host.querySelector('.web-search-sources img, .tool-activity pre')).toBeNull();
         expect(f.host.querySelector('.web-search-snippet')).toBeNull();
         const toggle = [...f.host.querySelectorAll('button')].find(
@@ -975,7 +987,7 @@ for (const mode of ['web-search', 'web-search-legacy', 'web-search-wrong-owner']
     }
   });
 
-for (const mode of ['web-search-missing', 'web-search-retry', 'web-search-trace'] as const)
+for (const mode of ['web-search-missing', 'web-search-read-failure', 'web-search-trace'] as const)
   test(`actual NativeDesktop ${mode}: absent vs failed vs verified sources; collapsed prior trace never reads by model ID`, async () => {
     const f = fixture(mode),
       reads = () => f.requests.filter((r) => r.method === 'webSearch.evidence');
@@ -996,16 +1008,19 @@ for (const mode of ['web-search-missing', 'web-search-retry', 'web-search-trace'
         await act(async () => trigger.click());
       } else await f.toggle();
       await f.until(() => reads().length === 1);
-      if (mode === 'web-search-missing') expect(f.host.textContent).toContain('此执行未记录');
-      if (mode === 'web-search-retry') {
+      if (mode === 'web-search-missing')
+        expect(f.host.querySelector('.tool-activity-content')?.textContent?.trim()).toBe('');
+      if (mode === 'web-search-read-failure') {
         expect(f.host.textContent).not.toContain('PRIVATE_TRANSPORT_ERROR');
-        expect(f.host.textContent).toContain('暂时无法读取');
-        const retry = Array.from(f.host.querySelectorAll('button')).find(
-          (x) => x.textContent === '重新读取来源',
-        )!;
-        await act(async () => retry.click());
+        const body = () => f.host.querySelector('.tool-activity-content');
+        expect(body()?.textContent?.trim()).toBe('暂时无法读取搜索来源。');
+        expect(body()?.querySelector('button')).toBeNull();
+        await f.toggle();
+        await f.settlePresentation();
+        expect(reads()).toHaveLength(1);
+        await f.toggle();
         await f.until(() => reads().length === 2);
-        expect(f.host.textContent).toContain('未返回可展示的来源');
+        expect(body()?.textContent?.trim()).toBe('');
       }
       if (mode === 'web-search-trace') {
         expect(f.host.querySelector('.conversation-trace .web-search-sources a')).not.toBeNull();

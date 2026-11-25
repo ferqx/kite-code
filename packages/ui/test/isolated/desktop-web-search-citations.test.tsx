@@ -88,16 +88,37 @@ test('deduplicates within separate bounded cited/retrieved lists, escapes titles
     <WebSearchSources
       evidence={{
         ...evidence,
+        truncated: true,
         citations: [],
         sources: [{ url, title: '<img onerror=fetch()>' }, { url }],
       }}
     />,
   );
   expect(html).toContain('检索来源（1）');
+  expect(html).not.toContain('仅显示部分搜索材料');
   expect(html).not.toContain('正文引用');
   expect(html).toContain('&lt;img');
   expect(html).not.toContain('<img');
   expect(
     renderToStaticMarkup(<WebSearchSources evidence={{ ...evidence, status: 'failed' }} />),
   ).toContain('搜索失败');
+});
+
+test('tool receipts show no placeholder for unavailable sources in running or completed evidence', () => {
+  const receipt = {
+    ...evidence,
+    query: 'fixture',
+    citations: [],
+    sources: [{ url: 'file:///tmp/source' }],
+    truncated: true,
+  };
+  for (const status of ['running', 'completed'] as const)
+    expect(
+      renderToStaticMarkup(<WebSearchSources evidence={{ ...receipt, status }} toolReceipt />),
+    ).toBe('');
+  expect(
+    renderToStaticMarkup(
+      <WebSearchSources evidence={{ ...receipt, status: 'unknown' }} toolReceipt />,
+    ),
+  ).toContain('搜索结果未知');
 });

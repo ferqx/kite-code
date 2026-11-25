@@ -1,5 +1,4 @@
 import {
-  Button,
   useConversationReadActive,
   verifyWebSearchAnchors,
   type WebSearchAnchor,
@@ -14,7 +13,7 @@ export type NativeSearchReader = {
   read(): Promise<WebSearchDisplay | undefined>;
 };
 /** Observation only: reads at most one request at a time, never a probe, and drops out-of-scope completions. */
-function useNativeSearchReading(reader?: NativeSearchReader, retry = 0) {
+function useNativeSearchReading(reader?: NativeSearchReader) {
   const active = useConversationReadActive(),
     current = useRef(reader);
   current.current = reader;
@@ -22,41 +21,29 @@ function useNativeSearchReading(reader?: NativeSearchReader, retry = 0) {
     executionId = reader?.executionId,
     live = reader?.live;
   const [saved, setSaved] = useState<{ scope: string; data: WebSearchDisplay }>();
-  const [state, setState] = useState<{
-    scope: string;
-    retry: number;
-    phase: 'available' | 'absent' | 'unavailable';
-  }>();
+  const [failedScope, setFailedScope] = useState<string>();
   useEffect(() => {
     if (!active || !scope || !executionId) return;
     let done = false,
       timer: ReturnType<typeof setTimeout> | undefined,
       delay = 1000;
-    const report = (phase: 'available' | 'absent' | 'unavailable') =>
-      setState((prev) =>
-        prev?.scope === scope && prev.retry === retry && prev.phase === phase
-          ? prev
-          : { scope, retry, phase },
-      );
     const read = async () => {
       if (done || current.current?.scope !== scope) return;
       const again = live;
       try {
         const data = await current.current.read();
         if (done || current.current?.scope !== scope) return;
+        setFailedScope(undefined);
         if (data && data.executionId === executionId) {
-          report('available');
           setSaved((old) =>
             old?.scope === scope && old.data.revision >= data.revision ? old : { scope, data },
           );
           // One model execution may contain several native search calls; stop polling when the owning execution settles, not at the first result.
-        } else {
-          report('absent');
         }
         delay = 1250;
       } catch {
         if (done || current.current?.scope !== scope) return;
-        report('unavailable');
+        setFailedScope(scope);
         delay = Math.min(8000, delay * 2);
       }
       if (!done && again) timer = setTimeout(() => void read(), delay);
@@ -66,16 +53,17 @@ function useNativeSearchReading(reader?: NativeSearchReader, retry = 0) {
       done = true;
       clearTimeout(timer);
     };
-  }, [scope, executionId, live, active, retry]);
+  }, [scope, executionId, live, active]);
+  // Ordinary search has its own tool status. Only model search needs a fallback here.
   const evidence =
     saved && saved.scope === scope && saved.data.executionId === executionId
-      ? !live && saved.data.status === 'running'
+      ? !live && saved.data.route !== 'provider' && saved.data.status === 'running'
         ? { ...saved.data, status: 'unknown' as const }
         : saved.data
       : undefined;
   return {
     evidence,
-    phase: state?.scope === scope && state?.retry === retry ? state?.phase : 'loading',
+    unavailable: failedScope !== undefined && failedScope === scope,
   };
 }
 export function useNativeSearchEvidence(reader?: NativeSearchReader) {
@@ -91,27 +79,12 @@ export function NativeWebSearchToolDetails({
   unsupported?: boolean;
   headingQuery?: string;
 }) {
-  const [retry, setRetry] = useState(0),
-    { evidence, phase } = useNativeSearchReading(reader, retry);
+  const { evidence, unavailable } = useNativeSearchReading(reader);
   if (evidence?.route === 'provider')
     return <WebSearchSources evidence={evidence} toolReceipt headingQuery={headingQuery} />;
   if (unsupported) return <small>此连接不支持查看搜索来源。</small>;
-  if (reader && phase === 'unavailable')
-    return (
-      <div>
-        <small>暂时无法读取搜索来源。</small>{' '}
-        <Button variant="ghost" onClick={() => setRetry((v) => v + 1)}>
-          重新读取来源
-        </Button>
-      </div>
-    );
-  if (reader && !reader.live && (phase === 'absent' || evidence))
-    return <small>此执行未记录可展示的来源。</small>;
-  return reader && phase === 'loading' ? (
-    <small role="status" aria-busy="true">
-      正在读取来源…
-    </small>
-  ) : null;
+  if (unavailable) return <small>暂时无法读取搜索来源。</small>;
+  return null;
 }
 export function NativeWebSearchActivity({ reader }: { reader: NativeSearchReader }) {
   const evidence = useNativeSearchEvidence(reader);

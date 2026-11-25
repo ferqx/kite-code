@@ -6,7 +6,6 @@ import { WebLinkContext } from './MessageContent';
 import {
   isSearchSiteIcon,
   type WebSearchDisplay,
-  type WebSearchSource,
   webSearchLabel,
   webSearchLinks,
 } from './web-search-citations';
@@ -28,9 +27,8 @@ function useSourceClick() {
   };
 }
 /** Secondary sources in model output stay separate from the ordinary tool receipt. */
-function SourceList({ sources, label }: { sources: readonly WebSearchSource[]; label: string }) {
-  const visit = useSourceClick(),
-    links = webSearchLinks(sources);
+function SourceList({ links, label }: { links: ReturnType<typeof webSearchLinks>; label: string }) {
+  const visit = useSourceClick();
   if (!links.length) return null;
   return (
     <details>
@@ -81,10 +79,15 @@ function SearchReceipt({
     listId = useId(),
     visit = useSourceClick();
   const links = webSearchLinks(evidence.sources),
+    citations = webSearchLinks(evidence.citations),
     query = webSearchLabel(evidence.query),
     provider = webSearchLabel(evidence.provider),
     visible = all ? links : links.slice(0, initialCount);
-  const state = evidence.status === 'completed' ? undefined : statusText[evidence.status];
+  const state =
+    evidence.status === 'running' || evidence.status === 'completed'
+      ? undefined
+      : statusText[evidence.status];
+  if (!state && !links.length && !citations.length) return null;
   return (
     <section className="web-search-sources web-search-receipt" aria-label="网页搜索来源">
       {query && query !== webSearchLabel(headingQuery) && (
@@ -153,9 +156,7 @@ function SearchReceipt({
           </div>
         </>
       )}
-      {evidence.status === 'completed' && !links.length && <p>未返回可展示的来源。</p>}
-      <SourceList sources={evidence.citations} label="搜索服务引用" />
-      {evidence.truncated && <small>仅显示部分搜索材料。</small>}
+      <SourceList links={citations} label="搜索服务引用" />
     </section>
   );
 }
@@ -180,11 +181,10 @@ export function WebSearchSources({
         {query ? `：${query}` : ''}
       </small>
       <SourceList
-        sources={evidence.citations}
+        links={webSearchLinks(evidence.citations)}
         label={evidence.route === 'provider' ? '搜索服务引用' : '正文引用'}
       />
-      <SourceList sources={evidence.sources} label="检索来源" />
-      {evidence.truncated && <small>仅显示部分搜索材料。</small>}
+      <SourceList links={webSearchLinks(evidence.sources)} label="检索来源" />
     </section>
   );
 }
