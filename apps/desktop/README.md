@@ -303,7 +303,7 @@ Desktop renderer的普通图标沿共享`--ui-icon-size:14px`，原16px的设置
 
 [Main](electron/main.ts)在 Windows 启动时设置固定应用身份 `dev.kite-code.native`，使用 [Kite 原生图标](app-icon.ico)创建窗口和唯一托盘。双击托盘或选择“打开 Kite”恢复最小化的原窗口并显示、聚焦；普通关窗仍只隐藏。托盘“退出”调用原 `app.quit()`，先沿[草稿保存屏障](electron/native-draft-flush.ts)最多等待5秒。保存确认后才移除托盘、隐藏窗口并进入原最多4秒的清理；清理未完成就终止自有Service并退出。保存失败或超时则取消这次退出，保留窗口并显示错误，不误报草稿已保存。SIGINT／SIGTERM与launcher控制连接终止仍沿原有限清理，不提供正常退出的最新草稿保证。
 
-ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px 图像。[构建入口](scripts/build-native.ts)在开发热更新与固定 renderer 两条路径共用的阶段复制图标，正式 Native 的现有完整文件清单自动包含该资源。托盘生命周期与安全退出回归沿用 [Main 夹具](test/isolated/native-main-scheduling-lifecycle.test.ts)；它验证主进程接线，不代替真实 Windows 通知区域操作。
+白底 [ICO](app-icon.ico)包含 16、20、24、32、40、48、64、256px 图像，由 Windows 窗口、托盘、安装构建与 Web 标签页复用。[构建入口](scripts/build-native.ts)在开发热更新与固定 renderer 两条路径共用的阶段复制图标，正式 Native 的现有完整文件清单自动包含该资源。托盘生命周期与安全退出回归沿用 [Main 夹具](test/isolated/native-main-scheduling-lifecycle.test.ts)；它验证主进程接线，不代替真实 Windows 通知区域操作。
 
 2026-10-24，Windows x64（10.0.26300）／Electron44.3.0／Bun1.4.3：Main 回归30项352断言、Desktop typecheck、定向Biome与文档检查通过。普通 Main／生产 renderer 构建在独立 Profile、真实配套 Service 下正常启动并退出；随后仅在隔离测试制品加入私有观察端口，逐步观察关窗隐藏且托盘保留、投递 Tray 双击事件恢复并聚焦同一窗口、最小化后恢复，以及点击托盘原生菜单“退出”。最终 Main 退出0，准确所属 Service PID 已消失；观察记录在本机 `.cache/native-tray-live-20261024`。双击事件与菜单展开由该测试端口触发，原生菜单退出由实际 Windows UI 点击；没有取得通知区域物理双击／右键或完整安装包资格，不将该端口加入普通开发或正式客户端。
 
@@ -665,7 +665,9 @@ Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)�
 
 2026-10-14 Windows x64／Bun 1.4.2，启动页 DOM 完整文件3项／58断言通过；实际 Chrome headless 按 renderer 的 CSS 顺序载入当前 Tailwind 编译结果、启动样式与共享 CSS，核亮／暗、Native Mica／无材质／非 Native、准备中／失败共12种组合：Mica 启动容器及其承载层透明，其他组合保原实色，文字与重试按钮保主题颜色。定向 Biome、文档结构与影响检查通过；此 CSS 验证不代证 Windows 桌面的最终材质合成，Main 的材质选择未改。
 
-[NativeStartup](src/native-startup.tsx)迁入原 kite-desktop 的启动页布局、[图标](app-icon.svg)和[启动样式](src/native-startup.css)，按钮仍用原共享 Button。[正式入口](src/native.tsx)先完成现有 Main 的 attach 与首屏完整 Workspace／Session 目录观察，再显示原 SessionPage；尚未核实的目录不能进入，空目录与未配置模型可以进入处理。没有人为最短停留时间，不另建服务或执行路径。
+[NativeStartup](src/native-startup.tsx)在加载和启动失败时显示[白底 Kite 图标](app-icon.ico)，布局沿用[启动样式](src/native-startup.css)，按钮仍用原共享 Button。[正式入口](src/native.tsx)先完成现有 Main 的 attach 与首屏完整 Workspace／Session 目录观察，再显示原 SessionPage；尚未核实的目录不能进入，空目录与未配置模型可以进入处理。没有人为最短停留时间，不另建服务或执行路径。
+
+2026-11-25 在 Windows x64 的隔离 Electron 窗口中加载正式构建的渲染器，控制启动桥接结果，依次确认首次加载、失败、重试和进入主界面。每次显示启动页时只有一个 56px 白底图标，渲染资源与桌面 ICO 字节一致。
 
 [窗口容器](src/native-window-frame.tsx)在准备中、启动失败和重试时使用 `showHeader=false`，不渲染自绘顶栏与 Windows 菜单，也不监听 F10／Alt 菜单导航；内容区使用整个窗口高度。缺 bridge 的失败页使用同一显示规则。完整首屏目录观察通过后恢复32px顶栏与菜单；进入主界面后的连接失败沿原逻辑保留页面和顶栏。Main 继续负责原生窗口按钮，服务准入、诊断、重试和退出沿原端口。
 

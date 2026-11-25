@@ -14,6 +14,8 @@ bun run server
 
 该命令构建 Web 资源、显式启动本机 App Server daemon，并打印根地址。在浏览器打开该地址。
 
+Web 标签页使用与桌面客户端一致的白底 Kite 图标。
+
 已有匹配服务时，`bun run agent web` 只打印已运行服务的地址，不隐式启动或升级进程。安装版使用对应的 `kite server start`、`kite web`。详细操作见[服务生命周期](../../server/lifecycle.md)。
 
 ## 第一次查看

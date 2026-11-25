@@ -38,6 +38,8 @@ DOM 测试共用私有 [global descriptor 夹具](test/globals.fixture.ts)安装
 
 [build.ts](build.ts)是显式构建宿主，不进入 browser source。build 将 React/Client/UI 离线打包为固定 `/app.js`，同时产出 `/index.html` 和 `/app.css`、`dist/manifest.json`、source-independent `dist/assets.js` 与 `assets.d.ts`。`@kite-ai/web/assets` 的 `getTrustedAssets()` 返回新 ReadonlyMap，`assetManifest` 保存每个固定 path/MIME/UTF-8 size/SHA256；类型入口是源码声明，不要求 clean checkout 已有 dist。宿主先调用公共 `validateTrustedAssets(assets,assetManifest)`，再将这个固定 Map 注入 Gateway，不提供任意目录、URL 或文件代理。
 
+Web 开发构建与 Terminal 制品共用的[资产生成器](src/assets.ts)将[桌面白底 ICO](../desktop/app-icon.ico)嵌入 `/index.html` 的标签页图标声明，随页面一起校验。现有[资产构建测试](test/isolated/assets.test.ts)核对图标字节与桌面源文件一致。
+
 [制品测试](test/isolated/assets.test.ts)实际执行完整 build，将 assets module 复制到没有源码的临时目录后动态 import，按 manifest 核对固定路径、hash、metadata，并拒绝额外路径、内容损坏及重复项。构建不连接 Provider，不携带 cookie、Native token 或配置路径。Service library 不必依赖 Web runtime；Root 的显式开发入口决定何时 build/load 和装配。
 
 验证入口：`bun run --cwd apps/web typecheck`、`bun run --cwd apps/web build`、`bun test apps/web/test`。新源文件加入[依赖边界检查](../../scripts/check-unified-agent-boundary.ts)、统一测试与 workspace build/typecheck。正式入口装配本包；仓库中的 `apps/kite-web` 旧源码仍待完整迁移审查与最终退役，不能把保留目录当作现行正式启动路由。

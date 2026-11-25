@@ -1,5 +1,5 @@
 import { Button } from '@kite-ai/ui/desktop';
-import appIcon from '../app-icon.svg';
+import appIcon from '../app-icon.ico';
 
 function startupMessage(error: string | undefined): string | undefined {
   switch (error) {

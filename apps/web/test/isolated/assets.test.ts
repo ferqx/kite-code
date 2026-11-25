@@ -28,7 +28,15 @@ test('actual browser build produces only fixed verified assets and source-indepe
     const assets = module.getTrustedAssets();
     expect([...assets.keys()]).toEqual(['/index.html', '/app.js', '/app.css']);
     await validateTrustedAssets(assets, module.assetManifest);
-    expect(assets.get('/index.html')?.content).toContain('src="/app.js"');
+    const html = assets.get('/index.html')!.content;
+    expect(html).toContain('src="/app.js"');
+    const favicon = html.match(
+      /<link rel="icon" type="image\/x-icon" href="data:image\/x-icon;base64,([^"]+)">/u,
+    );
+    expect(favicon).not.toBeNull();
+    expect(Buffer.from(favicon![1]!, 'base64')).toEqual(
+      readFileSync(join(import.meta.dir, '../../../desktop/app-icon.ico')),
+    );
     expect(assets.get('/app.js')?.content).not.toContain('from"react"');
     expect(JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'))).toEqual(
       module.assetManifest,

@@ -30,6 +30,7 @@ struct DialogStyle {
   HBRUSH divider = nullptr;
   HFONT heading = nullptr;
   HFONT status = nullptr;
+  HICON icon = nullptr;
 
   DialogStyle() {
     HIGHCONTRASTW settings{sizeof(settings)};
@@ -43,6 +44,7 @@ struct DialogStyle {
   ~DialogStyle() {
     for (const auto brush : {hero, body, footer, divider}) if (brush) DeleteObject(brush);
     for (const auto font : {heading, status}) if (font) DeleteObject(font);
+    if (icon) DestroyIcon(icon);
   }
 
   void scale(HWND window) {
@@ -62,70 +64,30 @@ struct DialogStyle {
     };
     setFont(IDC_SETUP_HEADING, cover ? 15 : 10, heading);
     setFont(IDC_SETUP_STATUS, 10, status);
-    const auto size = MulDiv(32, dpi, 96);
-    const auto icon = LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_KITE), IMAGE_ICON,
-                                 size, size, LR_SHARED);
-    SendDlgItemMessageW(window, IDC_SETUP_ICON, STM_SETICON, reinterpret_cast<WPARAM>(icon), 0);
+    const auto size = MulDiv(cover ? 96 : 32, dpi, 96);
+    const auto replacement = static_cast<HICON>(LoadImageW(
+      GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_KITE), IMAGE_ICON, size, size, 0));
+    if (replacement) {
+      SendDlgItemMessageW(window, IDC_SETUP_ICON, STM_SETICON, reinterpret_cast<WPARAM>(replacement), 0);
+      if (icon) DestroyIcon(icon);
+      icon = replacement;
+    }
     SendMessageW(window, WM_SETICON, ICON_SMALL,
                  reinterpret_cast<LPARAM>(LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_KITE))));
   }
 };
-
-void paintKiteArtwork(HDC dc, const RECT& bounds) {
-  const int saved = SaveDC(dc);
-  if (!saved) return;
-  IntersectClipRect(dc, bounds.left, bounds.top, bounds.right, bounds.bottom);
-  const auto point = [&](int x, int y) -> POINT {
-    return {bounds.left + MulDiv(x, bounds.right - bounds.left, 110),
-            bounds.top + MulDiv(y, bounds.bottom - bounds.top, 182)};
-  };
-  const auto facet = [&](COLORREF color, POINT first, POINT second, POINT third, POINT fourth) {
-    const auto brush = CreateSolidBrush(color);
-    if (!brush) return;
-    const POINT points[]{first, second, third, fourth};
-    const auto previous = SelectObject(dc, brush);
-    Polygon(dc, points, ARRAYSIZE(points));
-    SelectObject(dc, previous);
-    DeleteObject(brush);
-  };
-  SelectObject(dc, GetStockObject(NULL_PEN));
-  const auto backdrop = CreateSolidBrush(RGB(16, 48, 38));
-  if (backdrop) {
-    FillRect(dc, &bounds, backdrop);
-    DeleteObject(backdrop);
-  }
-  facet(RGB(22, 63, 48), point(0, 119), point(110, 67), point(110, 182), point(0, 182));
-  const auto thread = CreatePen(PS_SOLID, 2, RGB(194, 226, 205));
-  if (thread) {
-    const POINT line[]{point(49, 89), point(53, 110), point(65, 122), point(84, 135),
-                       point(77, 154), point(49, 165), point(41, 186)};
-    const auto previous = SelectObject(dc, thread);
-    PolyBezier(dc, line, ARRAYSIZE(line));
-    SelectObject(dc, previous);
-    DeleteObject(thread);
-  }
-  const auto top = point(77, 23), left = point(17, 53), middle = point(64, 57);
-  const auto right = point(102, 65), bottom = point(49, 100);
-  facet(RGB(194, 234, 173), top, left, middle, middle);
-  facet(RGB(123, 203, 152), top, middle, right, right);
-  facet(RGB(81, 168, 129), left, bottom, middle, middle);
-  facet(RGB(44, 135, 108), middle, bottom, right, right);
-  RestoreDC(dc, saved);
-}
 
 LRESULT CALLBACK paintDialog(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
                             UINT_PTR id, DWORD_PTR data) {
   const auto style = reinterpret_cast<DialogStyle*>(data);
   if (message == WM_ERASEBKGND) {
     const HDC dc = reinterpret_cast<HDC>(wparam);
-    RECT client{}, bands{0, 35, 110, 182};
+    RECT client{}, bands{0, 35, 0, 182};
     GetClientRect(window, &client);
     MapDialogRect(window, &bands);
     if (style->cover) {
       const RECT page{0, 0, client.right, bands.bottom};
       FillRect(dc, &page, style->hero);
-      const RECT art{0, 0, bands.right, bands.bottom};
-      if (!style->highContrast) paintKiteArtwork(dc, art);
     } else {
       const RECT hero{0, 0, client.right, bands.top};
       const RECT headerLine{0, bands.top, client.right, bands.top + 1};
@@ -179,6 +141,7 @@ void positionControl(HWND window, int control, RECT bounds) {
 }
 
 void coverPage(HWND window, bool cover) {
+  positionControl(window, IDC_SETUP_ICON, cover ? RECT{0, 0, 110, 182} : RECT{306, 8, 334, 33});
   DWORD_PTR data = 0;
   if (GetWindowSubclass(window, paintDialog, 1, &data)) {
     auto* style = reinterpret_cast<DialogStyle*>(data);
@@ -187,8 +150,7 @@ void coverPage(HWND window, bool cover) {
       style->scale(window);
     }
   }
-  positionControl(window, IDC_SETUP_HEADING, cover ? RECT{125, 11, 334, 47} : RECT{11, 6, 295, 20});
-  ShowWindow(GetDlgItem(window, IDC_SETUP_ICON), cover ? SW_HIDE : SW_SHOW);
+  positionControl(window, IDC_SETUP_HEADING, cover ? RECT{125, 11, 334, 47} : RECT{16, 6, 295, 20});
   ShowWindow(GetDlgItem(window, IDC_SETUP_DETAIL), cover ? SW_HIDE : SW_SHOW);
   RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
