@@ -1186,7 +1186,25 @@ export class AgentClient {
     }
   }
 
-  private async readPermission<
+  private async verifyPermissionRead<T>(
+    storeId: string,
+    signal: AbortSignal | undefined,
+    read: (generation: number) => Promise<T>,
+    capability: 'permission_controls' | 'sessions' = 'permission_controls',
+  ): Promise<T> {
+    this.permissionStore(storeId, capability);
+    const generation = this.connectionGeneration;
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    const result = await read(generation);
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    await this.verifyConnection({ signal });
+    signal?.throwIfAborted();
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return result;
+  }
+
+  private async readPermissionFact<
     K extends
       | 'PermissionModeState'
       | 'WorkspaceTrustState'
@@ -1197,51 +1215,118 @@ export class AgentClient {
     shape: K,
     storeId: string,
     verify: (result: Responses[K]) => void | Promise<void>,
-    signal?: AbortSignal,
-    capability: 'permission_controls' | 'sessions' = 'permission_controls',
+    generation: number,
+    signal: AbortSignal | undefined,
   ): Promise<Responses[K]> {
-    this.permissionStore(storeId, capability);
-    const generation = this.connectionGeneration;
-    await this.verifyConnection({ signal });
     const result = await this.fetchJSON(`${path}?${new URLSearchParams({ storeId })}`, shape, {
       signal,
     });
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
     await verify(result);
-    await this.verifyConnection({ signal });
-    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
     return result;
   }
 
-  getPermissionMode(sessionId: string, options: { storeId: string; signal?: AbortSignal }) {
-    return this.readPermission(
+  private readPermission<K extends 'PermissionMutation' | 'WorkspaceRemoval'>(
+    path: string,
+    shape: K,
+    storeId: string,
+    verify: (result: Responses[K]) => void | Promise<void>,
+    signal?: AbortSignal,
+    capability: 'permission_controls' | 'sessions' = 'permission_controls',
+  ): Promise<Responses[K]> {
+    return this.verifyPermissionRead(
+      storeId,
+      signal,
+      (generation) => this.readPermissionFact(path, shape, storeId, verify, generation, signal),
+      capability,
+    );
+  }
+
+  private readPermissionMode(
+    sessionId: string,
+    { storeId, signal }: { storeId: string; signal?: AbortSignal },
+    generation: number,
+  ) {
+    return this.readPermissionFact(
       `/v1/sessions/${encodeURIComponent(sessionId)}/permission-mode`,
       'PermissionModeState',
-      options.storeId,
+      storeId,
       (result) => {
-        if (result.storeId !== options.storeId || result.sessionId !== sessionId)
+        if (result.storeId !== storeId || result.sessionId !== sessionId)
           throw new ClientError('permission_scope_mismatch');
         this.permissionRevision(result.revision, 'invalid_response');
         this.permissionRevision(result.defaultRevision, 'invalid_response');
       },
-      options.signal,
+      generation,
+      signal,
     );
   }
 
-  getWorkspaceTrust(workspaceId: string, options: { storeId: string; signal?: AbortSignal }) {
-    return this.readPermission(
+  private readWorkspaceTrust(
+    workspaceId: string,
+    { storeId, signal }: { storeId: string; signal?: AbortSignal },
+    generation: number,
+  ) {
+    return this.readPermissionFact(
       `/v1/workspaces/${encodeURIComponent(workspaceId)}/trust`,
       'WorkspaceTrustState',
-      options.storeId,
+      storeId,
       (result) => {
-        if (result.storeId !== options.storeId || result.workspaceId !== workspaceId)
+        if (result.storeId !== storeId || result.workspaceId !== workspaceId)
           throw new ClientError('permission_scope_mismatch');
         if (result.trusted !== (result.status === 'trusted'))
           throw new ClientError('invalid_response');
         this.permissionRevision(result.revision, 'invalid_response');
       },
-      options.signal,
+      generation,
+      signal,
     );
+  }
+
+  getPermissionMode(
+    sessionId: string,
+    { storeId, signal }: { storeId: string; signal?: AbortSignal },
+  ) {
+    return this.verifyPermissionRead(storeId, signal, (generation) =>
+      this.readPermissionMode(sessionId, { storeId, signal }, generation),
+    );
+  }
+
+  getWorkspaceTrust(
+    workspaceId: string,
+    { storeId, signal }: { storeId: string; signal?: AbortSignal },
+  ) {
+    return this.verifyPermissionRead(storeId, signal, (generation) =>
+      this.readWorkspaceTrust(workspaceId, { storeId, signal }, generation),
+    );
+  }
+
+  /** Check both facts under one fresh connection fence, independently of their resource scopes. */
+  getSelectionPermissions(
+    sessionId: string,
+    workspaceId: string,
+    { storeId, signal }: { storeId: string; signal?: AbortSignal },
+  ) {
+    return this.verifyPermissionRead(storeId, signal, async (generation) => {
+      const reading = new AbortController();
+      const options = {
+        storeId,
+        signal: signal ? AbortSignal.any([signal, reading.signal]) : reading.signal,
+      };
+      try {
+        const [mode, trust] = await Promise.all([
+          this.readPermissionMode(sessionId, options, generation),
+          this.readWorkspaceTrust(workspaceId, options, generation).catch((error: unknown) => {
+            if (error instanceof ClientError && error.code === 'workspace_identity_unavailable')
+              return undefined;
+            throw error;
+          }),
+        ]);
+        return { mode, trust };
+      } finally {
+        reading.abort();
+      }
+    });
   }
 
   private verifyPermissionMutation(

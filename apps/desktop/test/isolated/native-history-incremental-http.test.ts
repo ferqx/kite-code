@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
@@ -33,6 +34,7 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
   const profile = { dataRoot: join(root, 'data'), profile: 'isolated' };
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
+  const artifacts = createArtifactStore({ profile, store });
   const second = barrier(),
     finish = barrier();
   let modelCalls = 0;
@@ -67,6 +69,7 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
     subjectId: 'owner',
   });
   const requests: { method: string; path: string }[] = [];
+  let artifactObserved = false;
   let offline = false,
     stream: AbortController | undefined;
   const originalFetch = globalThis.fetch;
@@ -93,6 +96,16 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
       },
     });
     await client.connect();
+    const observe = client.observe.bind(client);
+    client.observe = (options) =>
+      observe({
+        ...options,
+        async onChange(change) {
+          await options.onChange(change);
+          if (change.type === 'artifact.published' && change.objectId === 'isolated-observed-ref')
+            artifactObserved = true;
+        },
+      });
     return client;
   };
   let caller: NativeCaller | undefined, reader: NativeHistory | undefined;
@@ -145,6 +158,23 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
     const original = reader!.state.messages.find(
       (message) => message.content === 'first saved chunk',
     )!;
+    await until(() => caller!.state().selection?.viewLoading !== true);
+    await Bun.sleep(120);
+    const passiveStart = requests.length;
+    await artifacts.publish({
+      expectedStoreId: storeId,
+      refId: 'isolated-observed-ref',
+      sessionId: 's',
+      subjectId: 'owner',
+      scope: { kind: 'session', id: 's' },
+      mediaType: 'application/octet-stream',
+      content: new Uint8Array([1, 2, 3]),
+    });
+    await until(() => artifactObserved);
+    await Bun.sleep(120);
+    expect(requests.slice(passiveStart).map(({ path }) => path)).toEqual([]);
+    expect(reader!.state.messages.find((message) => message.id === original.id)).toBe(original);
+    expect(caller!.state().selection?.viewLoading).not.toBe(true);
     const epoch = caller!.state().historyEpoch!;
     const fullReads = requests.filter((request) => request.path.endsWith('/messages')).length;
     const streamsBeforeLoss = requests.filter((request) => request.path === '/v1/events').length;
@@ -244,6 +274,7 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
     reader?.dispose();
     await caller?.close();
     globalThis.fetch = originalFetch;
+    await artifacts.close();
     await service.close();
   }
 }, 20000);

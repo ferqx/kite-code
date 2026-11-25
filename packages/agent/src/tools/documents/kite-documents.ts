@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import { SaxesParser } from 'saxes';
 import { stageDocument } from './document-export';
 import { createPdfDocument, inspectPdfFields } from './pdf-command';
+import { readPdfForShell } from './pdf-shell';
 
 function checkPlainXlsxFormula(input: unknown) {
   const fail = () => {
@@ -69,18 +70,30 @@ function checkPlainXlsxFormula(input: unknown) {
 const options = new Map<string, string>();
 try {
   const command = process.argv[2];
-  if (!['pdf', 'pdf-fields', 'stage', 'xlsx-formula-guard'].includes(command ?? ''))
+  const pdfRead = command === 'pdf-text' || command === 'pdf-render';
+  if (
+    !['pdf', 'pdf-fields', 'pdf-text', 'pdf-render', 'stage', 'xlsx-formula-guard'].includes(
+      command ?? '',
+    )
+  )
     throw Error('documents_command_invalid');
   for (let i = 3; i < process.argv.length; i += 2) {
     const key = process.argv[i]!,
       value = process.argv[i + 1];
-    if (!['--input', '--out'].includes(key) || value === undefined || options.has(key))
+    if (
+      !['--input', '--out', ...(pdfRead ? ['--pages'] : [])].includes(key) ||
+      value === undefined ||
+      options.has(key)
+    )
       throw Error('documents_arguments_invalid');
     options.set(key, value);
   }
   const input = options.get('--input'),
     out = options.get('--out');
-  if (!input || (command === 'pdf' ? !out : out !== undefined))
+  if (
+    !input ||
+    (command === 'pdf' || command === 'pdf-render' ? !out : !pdfRead && out !== undefined)
+  )
     throw Error('documents_arguments_invalid');
   let spec: unknown;
   if (command === 'pdf' || command === 'xlsx-formula-guard') {
@@ -103,11 +116,19 @@ try {
     const result =
       command === 'stage'
         ? await stageDocument(input, controller.signal)
-        : command === 'pdf'
-          ? await createPdfDocument({ spec, out: out!, signal: controller.signal })
-          : command === 'pdf-fields'
-            ? await inspectPdfFields(input, controller.signal)
-            : checkPlainXlsxFormula(spec);
+        : pdfRead
+          ? await readPdfForShell({
+              input,
+              mode: command === 'pdf-render' ? 'image' : 'text',
+              pages: options.get('--pages'),
+              out,
+              signal: controller.signal,
+            })
+          : command === 'pdf'
+            ? await createPdfDocument({ spec, out: out!, signal: controller.signal })
+            : command === 'pdf-fields'
+              ? await inspectPdfFields(input, controller.signal)
+              : checkPlainXlsxFormula(spec);
     console.log(JSON.stringify(result));
   } finally {
     process.removeListener('SIGTERM', stop);

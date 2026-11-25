@@ -32,6 +32,10 @@ Auto 下准确 `builtin.shell/git.worktree@1` Tool 不调用 generic check 或�
 
 父通过现有消息转发给相关直接 child，idle child 需明确 follow-up 才开启新轮。[Task owner](../../extensions/task/README.md)维护投递、接收和完成通知的区别；本工具不广播、不建立目录使用租约，也不新增编辑独占或并行限制。两个可写 child 可共享或分别使用目录；创建与通知均不迁移 cwd，不把路径消息变成编辑授权。
 
+list、create 准备和 use 共用经过验证的 Git 来源。工作区本身必须是实际检出，或当前目录能在已授权边界内找到真实检出根。来源没有可核实的 Git 元数据时返回 `not_git_repository`。Git 查找使用已验证检出根的父目录作为边界，并继续执行 Git 自身的仓库安全校验。独立选中的 bare 仓库可读取登记，不能创建或切换。
+
+use 对缺失或未登记目标返回 `not_linked_worktree`，对其他仓库返回 `worktree_repository_mismatch`。实际重解析、Git 指针不一致及核验期间路径替换保留各自的失败原因。有效 linked checkout 仍可通过双向登记引用主树共享的 Git 元数据。使用前复核原 Session 选区、源和目标的物理身份及同仓库证明，只有原权限和执行根校验通过才提交下一 epoch。
+
 只查询 Git 登记快照，保留 locked/prunable、原因和缺失路径；不推断 dirty、占用或 removable。创建先冻结完整 OID，原子预留不存在的目标，再 `add --no-checkout`；在目的实际配置和双向定位核对后，仅由当前未中断 worker 填充它刚分配的空目标。目的 `includeIf` 不能跳过检查。不会复制来源的本地修改、初始化依赖、fetch、迁移会话或自动清理失败现场。
 
 变更拒绝 bare、unborn、partial clone、shallow、alternates、grafts、sparse checkout、显式 `core.worktree` 等不能证明的仓库配置。每次 Git 调用禁用替换对象、lazy fetch、hooks、fsmonitor、untracked cache、交互和可执行 filters；命令级覆盖不改源配置。filters 按来源和目的分别完整枚举；LFS 等可能只得到提交内的指针文件。

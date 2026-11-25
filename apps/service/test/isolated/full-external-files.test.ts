@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -26,6 +27,7 @@ import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { authorizationCheckInstructions } from '../../../../packages/agent/src/execution/authorization-check-feedback';
 import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
+import { simplePdf } from '../../../../tests/fixtures/pdf';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
@@ -1375,7 +1377,7 @@ for (const mode of ['auto', 'full'] as const)
       string,
       Json
     >[])
-      test(`${mode} external ${exists ? 'present' : 'missing'} read preserves PDF-option errors: ${JSON.stringify(params)}`, async () => {
+      test(`${mode} external ${exists ? 'present' : 'missing'} read rejects retired PDF options: ${JSON.stringify(params)}`, async () => {
         const canary = 'INVALID_PDF_OPTIONS_EXTERNAL_TEXT_947';
         const f = await fixture({
           mode,
@@ -1393,18 +1395,76 @@ for (const mode of ['auto', 'full'] as const)
             (row) => row.definitionId === 'files.read',
           )!;
           expect(read.status).toBe('failed');
-          const invalidParameter = Object.hasOwn(params, 'mode');
-          const code = invalidParameter ? 'invalid_tool_arguments' : 'pdf_options_require_pdf';
+          const code = 'invalid_tool_arguments';
           expect(read.result).toMatchObject({
             outcome: 'failed',
             content: code,
             details: { code },
           });
-          if (invalidParameter) expect(read.authorization?.dispatched).toBe(false);
-          expect(f.reviewRequests()).toBe(!invalidParameter && mode === 'auto' ? 1 : 0);
+          expect(read.authorization?.dispatched).toBe(false);
+          expect(f.reviewRequests()).toBe(0);
           assertQuarantined(f, canary);
           expect(existsSync(f.target)).toBe(exists);
         } finally {
           await f.close();
         }
       }, 30000);
+
+for (const mode of ['auto', 'full'] as const)
+  test(mode +
+    ' gives Shell guidance for external document types without opening them for review', async () => {
+    const canary = 'PRIVATE_DOCUMENT_BODY_SHOULD_REMAIN_UNREAD';
+    const documentPath = (target: string) => join(target, '..', 'scope.pdf');
+    const f = await fixture({
+      mode,
+      decision: 'approve',
+      program: (_body, step, _actor, paths) =>
+        step === 0 ? { name: 'read_file', input: { path: documentPath(paths.target) } } : null,
+    });
+    const path = documentPath(f.target);
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, canary);
+    try {
+      await f.run();
+      const read = (await f.store.listExecutions('s')).find(
+        (row) => row.definitionId === 'files.read',
+      )!;
+      expect(read.status).toBe('failed');
+      const result = read.result as { content: string; artifactRefs?: unknown[] };
+      expect(result).toMatchObject({ details: { code: 'unsupported_file_type' } });
+      expect(result.content).toContain('pdf-text');
+      expect(result.artifactRefs).toBeUndefined();
+      expect(f.reviewRequests()).toBe(0);
+      assertQuarantined(f, canary);
+    } finally {
+      await f.close();
+    }
+  }, 30000);
+
+test('Full read-only external fallback rejects a PDF header after leading bytes', async () => {
+  const targetPath = (target: string) => join(target, '..', 'prefixed.ts');
+  const f = await fixture({
+    mode: 'full',
+    program: (_body, step, _actor, paths) =>
+      step === 0 ? { name: 'read_file', input: { path: targetPath(paths.target) } } : null,
+  });
+  const path = targetPath(f.target);
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, Buffer.concat([Buffer.from('\r\n'), simplePdf()]));
+  // A second link forces the read-only adapter to handle the refusal.
+  linkSync(path, join(path, '..', 'prefixed-link.ts'));
+  try {
+    await f.run();
+    const read = (await f.store.listExecutions('s')).find(
+      (row) => row.definitionId === 'files.read',
+    )!;
+    expect(read.status).toBe('failed');
+    expect(read.result).toMatchObject({
+      content: expect.stringContaining('pdf-text'),
+      details: { code: 'unsupported_file_type' },
+    });
+    assertQuarantined(f, 'Hello PDF');
+  } finally {
+    await f.close();
+  }
+}, 30000);

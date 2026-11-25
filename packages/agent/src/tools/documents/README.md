@@ -14,15 +14,19 @@ Kite 从 OfficeCLI 上游提交 `5fbf766` 改编三个办公技能。随包的 `
 
 Excel 编辑后，先在工作副本上复核重要汇总格。内置 XLSX 技能的 `verify-sum.ts` 仅支持用户任务中明确指定的独立同表整数 SUM，检查直接数值输入和预期值，通过已校验的文档 helper 识别目标单元格的 OOXML 公式结构，拒绝共享、数组、数据表或无法验证的结构。对于独立公式，使用宿主已校验的 OfficeCLI 重写未缓存的同一公式，再重新打开核对缓存；成功后排他发布新文件。原稿和通用 `stage` 不会重算或改写。OfficeCLI 保存时可能刷新或清除同一副本中的其他公式缓存，不保证其他缓存不变；交付前仍需核对其他重要结果。未通过或超出范围的公式保留原样，并在交付中明确哪些数字需要在 Excel 中重算。[XLSX 技能](../../../assets/office/xlsx/SKILL.md#verify-a-summary-before-delivery)
 
-## PDF 制作与交付
+## PDF 读取、渲染与交付
 
 受管 Shell 可用已有 Bun 调用 PDF helper。`--input -` 可从标准输入读入 JSON。
 
 ~~~sh
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf-text --input report.pdf --pages 1-2
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf-render --input report.pdf --pages 2 --out .
 "$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf --input spec.json --out report.pdf
 "$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf-fields --input report.pdf
 "$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" stage --input report.pdf
 ~~~
+
+`pdf-text` 从物理第 1 页起算，默认一页，单次最多 20 页。结果保留页标签、总页数、`nextPage` 和 `no_extractable_text` 状态。stdout 的 JSON 上限为 48 KiB，大结果可用 `--out` 排他保存到新的工作区 JSON 文件。`pdf-render` 单次最多四页，在 `--out` 指定的现有目录下创建专用子目录，stdout 返回所选 PNG 的绝对路径。模型通过后续显式调用 `view_images` 接收所需图像。 [PDF Skill](../../../assets/office/pdf/SKILL.md#read-selected-pages)
 
 成功结束的 Shell 将当前输出目录交给现有收集器。非零退出按原 Shell 结果处理，结果未知时先核原执行。需要重新导出时，从已核实的可用源文件出发，使用当前 Shell 的输出目录。 [交付 owner](../../business/output-collection.README.md)
 

@@ -52,11 +52,12 @@ import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
 import { NativeApproval } from './native-approval';
 import { NativeApprovalFeedback } from './native-approval-feedback';
-import { isOrdinaryNativeApproval, NativeApprovalGroup } from './native-approval-group';
+import { NativeApprovalGroup } from './native-approval-group';
 import {
   nativeApprovalSubmission,
   useNativeApprovalPresentation,
 } from './native-approval-presentation';
+import { isOrdinaryNativeApproval, nativeApprovalPriority } from './native-approval-priority';
 import { NativeBackgroundPanel } from './native-background-panel';
 import type {
   NativeBranchFacts,
@@ -5664,6 +5665,11 @@ function NativeDesktopContent({
           (!selection.session.parentSessionId ? selection.session.id : '')
         }
         owners={environment.approvalOwners}
+        priority={
+          footerInteractions?.some(isOrdinaryNativeApproval)
+            ? nativeApprovalPriority(selection)
+            : undefined
+        }
         renderInteraction={renderInteraction}
       />
     ) : undefined;

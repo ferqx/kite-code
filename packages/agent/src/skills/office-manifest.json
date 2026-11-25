@@ -53,8 +53,8 @@
         },
         {
           "path": "SKILL.md",
-          "bytes": 9709,
-          "sha256": "2ca703fa10f685793be9a0a5ea81537746892193cdfd218570a8c232a084947e"
+          "bytes": 10890,
+          "sha256": "81538749329dee1a6869333c8a688898b99f616bc075ed66d551ca1b9281e62d"
         },
         {
           "path": "scripts/check_bounding_boxes.py",

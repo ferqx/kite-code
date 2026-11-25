@@ -646,7 +646,7 @@ bun tests/e2e/live/model/image-reading.benchmark.ts --output=C:/absolute/new-own
 
 ## PDF 扫描页与图表
 
-[PDF 视觉 runner](pdf-vision.live.ts)读取当前配置的默认模型，或由 `--model-id=<已配置ID>` 明确选择单一模型。它只上传自造的随机代码／柱图栅格 PDF，在删除源文件后核真实 `read_file` 页图和最终回答；沿默认 Service Files 装配、实际 SQLite／Artifact 和 SDK，权限由隔离夹具明确允许。需要显式设置 `KITE_RUN_LIVE_PDF_VISION=1`，最多5次实际 HTTP、120秒总预算和45秒单请求，不外围重试、不换模型或协议。
+[PDF 视觉 runner](pdf-vision.live.ts)读取当前配置的默认模型，或由 `--model-id=<已配置ID>` 明确选择单一模型。它上传合成的随机代码／柱图栅格 PDF，从已准备的工作区副本调用随包助手渲染指定页，再以真实 `view_images`、SQLite／Artifact 和 SDK 核模型的视觉回答。需要显式设置 `KITE_RUN_LIVE_PDF_VISION=1`，最多5次实际 HTTP、120秒总预算和45秒单请求，不外围重试、不换模型或协议。
 
 ```powershell
 $env:KITE_RUN_LIVE_PDF_VISION = '1'

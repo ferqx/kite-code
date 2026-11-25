@@ -62,7 +62,7 @@ Shell 当前模型入口以整数 `session_id` 续读或停止，对应原受管
 
 | 负责模块／内部工具 | 模型工具名称 | 主要字段选择 |
 | --- | --- | --- |
-| `files.read` | `read_file` | `path,offset?,limit?,pages?`。文本起始行从 1 开始。PDF 用 `pages` 选页，返回可用文本和页面图像 |
+| `files.read` | `read_file` | `path,offset?,limit?`。UTF-8 源码和工程文本按行读取，起始行从 1 开始。文档和表格走受管 Shell |
 | `files.write/edit` | `write_file`、`edit_file` | `path,content` 或 `path,old_string,new_string,replace_all?`。宿主从本次封存请求选用准确同路径基线 |
 | `shell.execute/read/stop` | `exec_command`、`poll_command`、`terminate_session` | 启动使用 `cmd,workdir?,yield_time_ms?,max_output_tokens?,description?,filesystem?,network?`。续读和停止用整数 `session_id`，续读可指定等待和输出上限 |
 | 普通问题、网页 | `ask_user`、`web_fetch` | 问题保留闭合 `{questions}`；网页使用 `max_chars/timeout_ms` |

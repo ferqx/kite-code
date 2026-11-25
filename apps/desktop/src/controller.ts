@@ -9,6 +9,7 @@ import {
   type IncludeResultRequest,
   type Interaction,
   type InteractionAttachment,
+  type InteractionPage,
   interactionAttachment,
   type Json,
   type PermissionModeState,
@@ -23,6 +24,7 @@ import {
   type WorkspaceTrustState,
 } from '@kite-ai/client';
 import { serializePlanReviewAnswer } from '@kite-ai/ui';
+import { nativeApprovalPriority } from './native-approval-priority';
 
 /** Permission facts belong to the observed root and Workspace, even in a child view. */
 export function permissionChangeAffectsView(
@@ -462,22 +464,10 @@ export class DesktopController {
             )
           : undefined,
         this.client.serverInfo?.capabilities?.includes('permission_controls')
-          ? Promise.all([
-              this.client.getPermissionMode(selection.sessionId, { storeId: view.storeId, signal }),
-              this.client
-                .getWorkspaceTrust(view.session.workspaceId, {
-                  storeId: view.storeId,
-                  signal,
-                })
-                .catch((error: unknown) => {
-                  if (
-                    error instanceof ClientError &&
-                    error.code === 'workspace_identity_unavailable'
-                  )
-                    return undefined;
-                  throw error;
-                }),
-            ])
+          ? this.client.getSelectionPermissions(selection.sessionId, view.session.workspaceId, {
+              storeId: view.storeId,
+              signal,
+            })
           : undefined,
         this.options.readActiveCommandOnSelect && activeRun
           ? this.client.getCommand(activeRun.originCommandId, { signal })
@@ -488,11 +478,11 @@ export class DesktopController {
       this.validateInteractionPage(page, view, afterId);
       if (afterId && 'snapshotCursor' in page && page.snapshotCursor !== view.snapshotCursor)
         throw new ClientError('interaction_page_observation_changed');
-      const permissions = permissionFacts?.[1]
+      const permissions = permissionFacts?.trust
         ? {
             observationId: ++this.permissionObservation,
-            mode: permissionFacts[0],
-            trust: permissionFacts[1],
+            mode: permissionFacts.mode,
+            trust: permissionFacts.trust,
           }
         : undefined;
       check();
@@ -520,7 +510,7 @@ export class DesktopController {
         context,
         activeCommand,
         permissions,
-        ...(permissionFacts && !permissionFacts[1] ? { workspaceUnavailable: true } : {}),
+        ...(permissionFacts && !permissionFacts.trust ? { workspaceUnavailable: true } : {}),
       };
       // Only the current read may contribute display data or a cached snapshot.
       check();
@@ -553,6 +543,7 @@ export class DesktopController {
           }
         : undefined;
       this.options.onSnapshot(snapshot);
+      if (!afterId && 'snapshotCursor' in page) void this.findCurrentApproval(snapshot, page);
       return snapshot;
     } catch (error) {
       reading.abort();
@@ -569,6 +560,62 @@ export class DesktopController {
     this.interactionRead?.abort();
     this.interactionRead = undefined;
     this.interactionReadGeneration = undefined;
+  }
+
+  private async findCurrentApproval(
+    snapshot: DesktopSnapshot,
+    first: InteractionPage,
+  ): Promise<void> {
+    if (
+      !this.options.lightweightSessionState ||
+      first.nextAfterId === null ||
+      this.current !== snapshot ||
+      this.interactionRead
+    )
+      return;
+    const { generation, view } = snapshot;
+    const priority = nativeApprovalPriority(view);
+    if (!priority?.awaitingApproval || first.interactions.some(priority.current)) return;
+    // This read can add an exact card without delaying admission or taking over
+    // an explicit page request. The original page and cursor stay reachable.
+    const reading = new AbortController();
+    const signal = this.readSignal(reading.signal);
+    this.interactionRead = reading;
+    this.interactionReadGeneration = generation;
+    try {
+      let afterId: string | null = first.nextAfterId;
+      while (afterId !== null) {
+        const page: InteractionPage = await this.client.listInteractions(
+          view.session.id,
+          { storeId: view.storeId, state: 'pending', limit: 20, afterId },
+          { signal },
+        );
+        signal.throwIfAborted();
+        if (
+          this.disposed ||
+          this.current !== snapshot ||
+          this.generation !== generation ||
+          page.snapshotCursor !== first.snapshotCursor
+        )
+          return;
+        this.validateInteractionPage(page, view, afterId);
+        const current = page.interactions.find(priority.current);
+        if (!current) {
+          afterId = page.nextAfterId;
+          continue;
+        }
+        const next = { ...snapshot, interactions: [...snapshot.interactions, current] };
+        if (new TextEncoder().encode(JSON.stringify(next)).byteLength > this.byteLimit) return;
+        this.current = next;
+        this.remember(next);
+        this.options.onSnapshot(next);
+        return;
+      }
+    } catch {
+      // The admitted first page remains usable if enrichment cannot be verified.
+    } finally {
+      if (this.interactionRead === reading) this.interactionRead = undefined;
+    }
   }
 
   private validateInteractionPage(

@@ -12,13 +12,14 @@ import {
   simplePdf,
 } from '../../../../../tests/fixtures/pdf';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
-import type { ArtifactWriter, AuthorizationRequest, ToolContext } from '../../../src/extensions';
+import type { AuthorizationRequest, ToolContext } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, withInputFileReads } from '../../../src/files';
 import type { InputFileImport } from '../../../src/storage/input-file-imports';
 import type { Json } from '../../../src/storage/types';
 import { readCachedPdf, readPdf } from '../../../src/tools/documents/pdf';
+import { readPdfForShell } from '../../../src/tools/documents/pdf-shell';
 
-test('text reads omit PDF-only options and invalid combinations explain recovery without bypassing attachment scope', async () => {
+test('engineering text keeps its baseline and document types are routed without reading their bytes', async () => {
   const root = temporaryDirectory('kite-pdf-text-contract-'),
     workspace = join(root, 'workspace'),
     profilePath = join(root, 'profile');
@@ -68,13 +69,35 @@ test('text reads omit PDF-only options and invalid combinations explain recovery
     expect(ordinary.outcome).toBe('succeeded');
     expect(ordinary.content).toContain('WORKSPACE_TOKEN');
     expect(ordinary.content).not.toContain('first');
-    const invalid = await read.execute({ path: 'note.txt', pages: '1', mode: 'text' }, context);
-    expect(invalid).toMatchObject({
-      outcome: 'failed',
-      details: { code: 'pdf_options_require_saved_attachment' },
+    const props = read.inputSchema.properties as Record<string, Json>;
+    expect(props.pages).toBeUndefined();
+    expect(props.mode).toBeUndefined();
+    writeFileSync(join(workspace, 'table.csv'), 'private,CANARY');
+    writeFileSync(join(workspace, 'renamed.ts'), simplePdf());
+    const prefixed = Buffer.concat([Buffer.from('\r\n'), simplePdf()]);
+    writeFileSync(join(workspace, 'prefixed.ts'), prefixed);
+    expect((await readPdf(prefixed, { mode: 'text' }, context.signal)).pages[0]!.text).toBe(
+      'Hello PDF',
+    );
+    writeFileSync(join(workspace, 'pdf-example.ts'), 'export const header = "%PDF-1.7";\n');
+    expect(await read.execute({ path: 'pdf-example.ts' }, context)).toMatchObject({
+      outcome: 'succeeded',
+      content: expect.stringContaining('%PDF-1.7'),
     });
-    expect(invalid.content).toContain('omit pages and mode');
-    expect(invalid.content).not.toContain('WORKSPACE_TOKEN');
+    for (const [name, hint] of [
+      ['table.csv', 'exec_command'],
+      ['renamed.ts', 'pdf-text'],
+      ['prefixed.ts', 'pdf-text'],
+    ]) {
+      const refused = await read.execute({ path: name! }, context);
+      expect(refused).toMatchObject({
+        outcome: 'failed',
+        details: { code: 'unsupported_file_type' },
+      });
+      expect(refused.content).toContain(hint!);
+      expect(refused.content).not.toContain('private,CANARY');
+      expect(refused.modelImages).toBeUndefined();
+    }
     const request: AuthorizationRequest = {
       kind: 'tool',
       definitionId: 'files.read',
@@ -99,24 +122,6 @@ test('text reads omit PDF-only options and invalid combinations explain recovery
     });
     expect(saved.outcome).toBe('succeeded');
     expect(saved.content).toContain('WORKSPACE_TOKEN');
-    const invalidRequest = { ...request, input: { path, mode: 'text' } };
-    const invalidCapability = await adapter.describeRequest(invalidRequest);
-    const invalidSaved = await read.execute(invalidRequest.input, {
-      ...context,
-      dispatchAuthorization: {
-        revision: 'saved-text-invalid-options',
-        snapshot: {
-          namespace: 'builtin.permissions',
-          version: '1',
-          data: { capability: invalidCapability as unknown as Json },
-        },
-      },
-    });
-    expect(invalidSaved).toMatchObject({
-      outcome: 'failed',
-      details: { code: 'pdf_options_require_pdf' },
-    });
-    expect(invalidSaved.content).toContain('omit pages and mode');
     const foreign = await read.execute({ path }, { ...context, sessionId: 'other' });
     expect(foreign).toMatchObject({ outcome: 'failed', content: 'input_file_scope_denied' });
     writeFileSync(path, 'changed saved attachment');
@@ -141,7 +146,7 @@ test('text reads omit PDF-only options and invalid combinations explain recovery
   }
 });
 
-test('public Files preserves the fixed column-major and table-row text while publishing the actual page image', async () => {
+test('a saved PDF read refuses cleanly while the Shell helper delivers text and the selected PNG', async () => {
   const profilePath = temporaryDirectory('kite-pdf-layout-');
   const files = createWorkspaceFiles({ root: profilePath });
   const bytes = columnsAndTablePdf();
@@ -168,8 +173,6 @@ test('public Files preserves the fixed column-major and table-row text while pub
       mediaType: 'application/pdf',
     },
   };
-  // This format fixture supplies only exact scope/publication ports. Actual
-  // Store binding, Artifact verification and Model delivery have their own tests.
   const adapter = withInputFileReads({
     profilePath,
     tools: createFileTools(files),
@@ -177,55 +180,44 @@ test('public Files preserves the fixed column-major and table-row text while pub
       return request.sessionId === imported.sessionId && uri === imported.uri ? imported : null;
     },
   });
-  const published = new Map<string, Uint8Array>();
-  const artifacts: ArtifactWriter = {
-    async publish(input) {
-      const id = `${published.size}:${input.key}`;
-      published.set(id, Uint8Array.from(input.content));
-      return {
-        id,
-        mediaType: input.mediaType,
-        size: String(input.content.byteLength),
-        scope: { kind: 'execution', id: 'read-layout' },
-      };
-    },
-    async read(reference) {
-      return published.get(reference.id)!;
-    },
+  const signal = new AbortController().signal;
+  const request: AuthorizationRequest = {
+    kind: 'tool',
+    definitionId: 'files.read',
+    definitionVersion: '5',
+    sessionId: 'session',
+    runId: 'original-run',
+    executionId: 'read-layout',
+    signal,
+    input: { path },
   };
-  const read = async (mode: 'text' | 'image') => {
-    const input = { path, pages: '1', mode };
-    const request: AuthorizationRequest = {
-      kind: 'tool',
-      definitionId: 'files.read',
-      definitionVersion: '5',
-      sessionId: 'session',
-      runId: 'original-run',
-      executionId: 'read-layout',
-      signal: new AbortController().signal,
-      input,
-    };
-    const capability = await adapter.describeRequest(request);
-    expect(capability?.hardAllowed).toBe(true);
-    return adapter.tools
-      .find((tool) => tool.id === 'files.read')!
-      .execute(input, {
-        ...request,
-        artifacts,
-        dispatchAuthorization: {
-          revision: 'accepted-layout-read',
-          snapshot: {
-            namespace: 'builtin.permissions',
-            version: '1',
-            data: { capability },
-          },
-        },
-      } as unknown as ToolContext);
-  };
+  const capability = await adapter.describeRequest(request);
+  expect(capability?.hardAllowed).toBe(true);
+  const tool = adapter.tools.find(({ id }) => id === 'files.read')!;
+  const context = {
+    ...request,
+    dispatchAuthorization: {
+      revision: 'accepted-layout-read',
+      snapshot: {
+        namespace: 'builtin.permissions',
+        version: '1',
+        data: { capability },
+      },
+    },
+  } as unknown as ToolContext;
   try {
-    const text = await read('text');
-    expect(text.outcome).toBe('succeeded');
-    const body = JSON.parse(text.content);
+    const refused = await tool.execute({ path }, context);
+    expect(refused).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'unsupported_file_type' },
+    });
+    expect(refused.content).toContain('pdf-text');
+    expect(refused.content).toContain('workspace copy');
+    expect(refused.artifactRefs).toBeUndefined();
+    expect(refused.modelImages).toBeUndefined();
+    const body = JSON.parse(
+      JSON.stringify(await readPdfForShell({ input: path, mode: 'text', pages: '1', signal })),
+    );
     expect(body.pages[0].text.replace(/[ \t]+/g, ' ').trim()).toBe(
       [
         'Two columns and a table',
@@ -245,25 +237,33 @@ test('public Files preserves the fixed column-major and table-row text while pub
       nextPage: null,
       pages: [{ number: 1, extraction: 'text_extracted_reading_order_not_guaranteed' }],
     });
-    expect(Buffer.from(await artifacts.read(text.modelContent!.reference)).toString()).toBe(
-      text.content,
-    );
-    const image = await read('image');
-    expect(image.outcome).toBe('succeeded');
-    expect(JSON.parse(image.content).pages).toEqual([
-      { number: 1, label: null, text: '', extraction: 'page_image' },
-    ]);
-    expect(image.modelImages).toHaveLength(1);
-    const png = await artifacts.read(image.modelImages![0]!);
+    const textFile = join(profilePath, 'selected.json');
+    const saved = await readPdfForShell({ input: path, mode: 'text', out: textFile, signal });
+    expect(saved).toMatchObject({ outputPath: textFile });
+    expect(JSON.parse(readFileSync(textFile, 'utf8'))).toEqual(body);
+    await expect(
+      readPdfForShell({ input: path, mode: 'text', out: textFile, signal }),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    const image = await readPdfForShell({
+      input: path,
+      mode: 'image',
+      pages: '1',
+      out: profilePath,
+      signal,
+    });
+    const page = image.pages[0]!;
+    if (!('path' in page)) throw Error('rendered page missing');
+    expect({ number: page.number, label: page.label }).toEqual({ number: 1, label: null });
+    const png = readFileSync(page.path);
     const decoded = await loadImage(Buffer.from(png));
     expect([decoded.width, decoded.height]).toEqual([918, 1188]);
     const canvas = createCanvas(decoded.width, decoded.height);
-    const context = canvas.getContext('2d');
-    context.drawImage(decoded, 0, 0);
-    expect([...context.getImageData(80, 360, 1, 1).data]).toEqual([204, 230, 255, 255]);
+    const canvasContext = canvas.getContext('2d');
+    canvasContext.drawImage(decoded, 0, 0);
+    expect([...canvasContext.getImageData(80, 360, 1, 1).data]).toEqual([204, 230, 255, 255]);
     // Visible table rules remain in the image although text extraction returns no grid.
-    expect(context.getImageData(100, 408, 1, 1).data[0]).toBeLessThan(100);
-    expect(context.getImageData(450, 440, 1, 1).data[0]).toBeLessThan(100);
+    expect(canvasContext.getImageData(100, 408, 1, 1).data[0]).toBeLessThan(100);
+    expect(canvasContext.getImageData(450, 440, 1, 1).data[0]).toBeLessThan(100);
     expect(readFileSync(path)).toEqual(bytes);
   } finally {
     await files.close();

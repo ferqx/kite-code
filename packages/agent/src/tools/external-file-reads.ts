@@ -8,6 +8,12 @@ import type { CapabilityDescription } from '../permissions';
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import { AgentError, type Json } from '../storage/types';
 import type { FileSnapshot } from './files';
+import {
+  hasPdfHeader,
+  isEngineeringTextPath,
+  pdfHeaderSearchBytes,
+  unsupportedFileRead,
+} from './files/read-scope';
 import { createFileReadResult, createMissingFileReadResult } from './files-tools';
 
 const normalized = (path: string) => (process.platform === 'win32' ? path.toLowerCase() : path);
@@ -20,6 +26,9 @@ function codeOf(error: unknown) {
     ? error.code
     : 'file_read_failed';
 }
+
+const readableText = (selected: { path: string; actual: string }) =>
+  isEngineeringTextPath(selected.path) && isEngineeringTextPath(selected.actual);
 
 /** Resolve missing suffixes through existing ancestors before checking protected scopes.
  * A dangling link is not proof that the requested ordinary target is absent.
@@ -98,6 +107,8 @@ export function withExternalFileReads(options: {
   ): Promise<{ path: string; value: Omit<FileSnapshot, 'baseline'> | null } | null> {
     const selected = await target(request, input);
     if (!selected) return null;
+    if (selected.exists && !readableText(selected))
+      throw unsupportedFileRead(selected.path, { name: selected.actual });
     const parameters = input as Record<string, Json>;
     const offset = parameters.offset ?? 1,
       limit = parameters.limit ?? 200;
@@ -140,6 +151,10 @@ export function withExternalFileReads(options: {
         before.ino !== actual.ino
       )
         throw new AgentError('file_changed');
+      const signature = Buffer.alloc(pdfHeaderSearchBytes);
+      const probe = await file.read(signature, 0, signature.length, 0);
+      if (hasPdfHeader(signature.subarray(0, probe.bytesRead)))
+        throw unsupportedFileRead(selected.path, { name: 'document.pdf' });
       bytes = await file.readFile({ signal: request.signal });
       const after = await file.stat({ bigint: true });
       if (
@@ -247,7 +262,10 @@ export function withExternalFileReads(options: {
                   const code = codeOf(error);
                   return {
                     outcome: context.signal.aborted ? 'cancelled' : 'failed',
-                    content: code,
+                    content:
+                      code === 'unsupported_file_type' && error instanceof Error
+                        ? error.message
+                        : code,
                     details: { code },
                   };
                 }
@@ -264,11 +282,12 @@ export function withExternalFileReads(options: {
       try {
         const selected = await target(request, request.input);
         if (!selected) return null;
+        const refusal = selected.exists && !readableText(selected);
         return {
           ...identity,
           revision: revision(selected, request.input),
-          effects: ['read', 'external'],
-          safeRead: false,
+          effects: refusal ? ['read'] : ['read', 'external'],
+          safeRead: refusal,
           hardAllowed: true,
         };
       } catch (error) {

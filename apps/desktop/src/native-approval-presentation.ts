@@ -1,7 +1,7 @@
 import type { Interaction } from '@kite-ai/client';
 import type { InteractionSubmission } from '@kite-ai/ui';
 import { useRef, useState } from 'react';
-import { isOrdinaryNativeApproval } from './native-approval-group';
+import { isOrdinaryNativeApproval } from './native-approval-priority';
 import type { NativeAnswerMetadata, NativeState } from './native-bridge';
 
 export const nativeApprovalKey = (card: Interaction) =>

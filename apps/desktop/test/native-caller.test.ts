@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import type {
   AgentClient,
   CallerCommandRequest,
+  Change,
   Command,
   Execution,
   Message,
@@ -38,6 +39,7 @@ import { nativePreviewLayoutChannel } from '../src/native-preview-layout-bridge'
 import { backgroundItem } from './background-item.fixture';
 import { sessionChange } from './native-change.fixture';
 import { memoryPrivateData } from './private-data.fixture';
+import { getSelectionPermissions } from './selection-permissions.fixture';
 
 function client() {
   let writes = 0;
@@ -46,6 +48,7 @@ function client() {
       return writes;
     },
     serverInfo: { storeId: 'store', subjectId: 'local-user', capabilities: [] },
+    getSelectionPermissions,
     connect: async () => ({}),
     verifyConnection: async () => ({ dataAvailability: 'available' }),
     async observe({ signal }: { signal: AbortSignal }) {
@@ -3805,6 +3808,82 @@ test('streamed message events split selected history from the directory and pres
     expect(directoryReads).toBe(initialReads + 2);
   } finally {
     release();
+    await caller.close();
+  }
+});
+
+test('durable artifact, Job output, and published file events do not reload the directory or admission', async () => {
+  const port = client();
+  let observe!: Parameters<AgentClient['observe']>[0];
+  const originalView = port.getView.bind(port);
+  let viewReads = 0,
+    directoryReads = 0,
+    cursor = 1;
+  Object.assign(port, {
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      observe = options;
+      await options.onReady?.({ storeId: 'store', replayFloor: '0', highWaterCursor: '1' });
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+    async listAllWorkspaces() {
+      directoryReads++;
+      return [];
+    },
+    async getView(id: string) {
+      viewReads++;
+      return { ...(await originalView(id)), snapshotCursor: String(cursor) };
+    },
+  });
+  const events: NativeEvent[] = [];
+  const caller = new NativeCaller(port, (event) => events.push(event));
+  const emit = (type: string, objectId: string, payload: Change['payload'] = null) =>
+    observe.onChange({ ...sessionChange('s', String(++cursor)), type, objectId, payload });
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    await caller.invoke({ method: 'directory', generation: 1 });
+    await Bun.sleep(120);
+    const original = { viewReads, directoryReads };
+    const initial = caller.state();
+    events.length = 0;
+    for (let index = 0; index < 50; index++) {
+      await emit('artifact.published', `ref-${index}`);
+      await emit('execution.output', 'job');
+    }
+    expect(events).toEqual([]);
+    expect(caller.state().selectedEnvironmentRevision).toBe(initial.selectedEnvironmentRevision);
+    await emit('extension.record_updated', 'builtin.files/delivery/receipt', {
+      outputRunId: 'run',
+    });
+    await waitForCallerState(
+      caller,
+      (state) => state.outputFilesRevision! > initial.outputFilesRevision!,
+    );
+    expect(caller.state().selectedEnvironmentRevision).toBe(initial.selectedEnvironmentRevision);
+    expect(caller.state().selection?.session.id).toBe('s');
+    await Bun.sleep(120);
+    expect({ viewReads, directoryReads }).toEqual(original);
+    expect(events.some((event) => event.kind === 'changed')).toBe(true);
+
+    await emit('execution.dispatching', 'job');
+    await waitForCallerState(
+      caller,
+      (state) => state.executionObservation?.observedCursor === String(cursor),
+    );
+    expect(viewReads).toBeGreaterThan(original.viewReads);
+    expect(directoryReads).toBe(original.directoryReads);
+
+    await emit('run.finished', 'run');
+    await waitForCallerState(caller, () => directoryReads > original.directoryReads);
+    const afterRun = directoryReads;
+    await emit('future.unclassified', 'change');
+    await waitForCallerState(caller, () => directoryReads > afterRun);
+    const afterUnknown = directoryReads;
+    await emit('artifact.published', 'new-format', { unknown: true });
+    await waitForCallerState(caller, () => directoryReads > afterUnknown);
+  } finally {
     await caller.close();
   }
 });

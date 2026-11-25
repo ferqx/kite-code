@@ -1,11 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createCredentialVault, createOsCredentialBackend } from '@kite-ai/agent/config';
+import { verifyDocumentHelper } from '@kite-ai/agent/documents';
+import { createWorkingInputFiles } from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -191,19 +193,14 @@ try {
       }
     },
   };
-  // Real default file/permission/planning assembly; only the SDK transport is bounded.
+  // The fixture runs the shipped helper first. Model access to the resulting page uses the default scope.
   host = createDefaultProcessConfiguration({
     profile,
     planning: { requirePlan: false },
     hostConfiguration: {
       configuration: {
         modelId: selected.id,
-        tools: [{ id: 'files.read', definitionVersion: '5' }],
-      },
-    },
-    permissions: {
-      async authorize() {
-        return { allowed: true, revision: 'synthetic-live-owner' };
+        tools: [{ id: 'files.view_images' }],
       },
     },
   });
@@ -212,6 +209,7 @@ try {
   runtime = createRuntime({
     store,
     artifacts: createArtifactStore({ profile, store }),
+    workingInputFiles: createWorkingInputFiles(),
     workspaceSerialLocks: locks,
     permissions: host.permissions!,
     extensions: host.extensions,
@@ -255,25 +253,63 @@ try {
       yield readFileSync(source);
     })(),
   });
+  await runtime.prepareWorkingInputs({
+    ...scope,
+    targetSessionId: scope.sessionId,
+    commandId: 'read',
+    files: [file],
+    signal: deadline,
+  });
+  const working = await store.getWorkingInput({ ...scope, commandId: 'read', importId: 'scan' });
+  if (!working) throw Error('pdf_live_working_copy_missing');
+  const workingPath = join(workspace, working.workingRelativePath);
   rmSync(source);
+  const helper = await verifyDocumentHelper();
+  const render = Bun.spawn(
+    [
+      process.execPath,
+      '--no-install',
+      helper,
+      'pdf-render',
+      '--input',
+      workingPath,
+      '--pages',
+      '1',
+      '--out',
+      workspace,
+    ],
+    { cwd: workspace, stdout: 'pipe', stderr: 'ignore', signal: deadline },
+  );
+  const [renderOutput, renderExit] = await Promise.all([
+    new Response(render.stdout).text(),
+    render.exited,
+  ]);
+  if (renderExit !== 0) throw Error('pdf_live_render_failed');
+  const imagePath = (JSON.parse(renderOutput) as { pages?: { path: string }[] }).pages?.[0]?.path;
+  if (!imagePath || !isAbsolute(imagePath)) throw Error('pdf_live_render_path_invalid');
+  const inside = relative(workspace, imagePath);
+  if (!inside || isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`))
+    throw Error('pdf_live_render_path_invalid');
+  const renderedBytes = readFileSync(imagePath).byteLength;
   await runtime.submitCommand({
     ...scope,
     commandId: 'read',
     request: {
       kind: 'run.start',
-      content: `Read page 1 of the attached raster PDF using read_file with mode=image. Inspect the actual page and return JSON with code (the six-character code printed on the page), red (red bar count), blue (blue bar count). Do not guess or use text extraction for this scanned page. File: ${fileURLToPath(file.uri)}`,
+      content: `Use view_images to inspect this rendered scan of page 1: ${imagePath}. Return JSON with code (the six-character code printed on the page), red (red bar count), and blue (blue bar count).`,
       files: [file],
     },
   });
   const command = await runtime.waitForCommand('read', { timeoutMs: 110000, signal: deadline });
   const run = await store.getRun((command.receipt as { runId: string }).runId);
   const reads = (await store.listExecutions(scope.sessionId)).filter(
-    (row) => row.definitionId === 'files.read',
+    (row) => row.definitionId === 'files.view_images',
   );
   Object.assign(report, {
     statuses,
     modelRequests,
     toolImages,
+    renderedBytes,
     calls,
     runStatus: run?.status,
     reads: reads.map((row) => ({

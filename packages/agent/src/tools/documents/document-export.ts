@@ -29,21 +29,31 @@ export async function stageDocument(source: string, signal?: AbortSignal) {
 
 const maximum = 256 * 1024 * 1024;
 /** Bounded stable read of an opened regular file. No source path is re-opened after validation. */
-export async function readBoundedDocument(path: string, limit = maximum): Promise<Buffer> {
+export async function readBoundedDocument(
+  path: string,
+  limit = maximum,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  signal?.throwIfAborted();
   const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const before = await file.stat({ bigint: true });
     if (!before.isFile() || before.size > BigInt(limit)) throw Error('document_source_invalid');
-    const chunks: Buffer[] = [];
+    const bytes = Buffer.allocUnsafe(Number(before.size));
     let count = 0;
-    for (;;) {
-      const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, limit - count + 1));
-      const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+    while (count < bytes.length) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await file.read(
+        bytes,
+        count,
+        Math.min(1024 * 1024, bytes.length - count),
+        null,
+      );
       if (!bytesRead) break;
       count += bytesRead;
-      if (count > limit) throw Error('document_size_limit');
-      chunks.push(buffer.subarray(0, bytesRead));
     }
+    signal?.throwIfAborted();
+    const extra = await file.read(Buffer.allocUnsafe(1), 0, 1, null);
     const after = await file.stat({ bigint: true });
     if (
       before.dev !== after.dev ||
@@ -51,10 +61,12 @@ export async function readBoundedDocument(path: string, limit = maximum): Promis
       before.size !== after.size ||
       before.mtimeNs !== after.mtimeNs ||
       before.ctimeNs !== after.ctimeNs ||
-      BigInt(count) !== before.size
+      BigInt(count) !== before.size ||
+      extra.bytesRead !== 0
     )
       throw Error('document_source_changed');
-    return Buffer.concat(chunks, count);
+    signal?.throwIfAborted();
+    return bytes;
   } finally {
     await file.close();
   }

@@ -2,9 +2,9 @@ import type { ArtifactRef, ToolContext, ToolDefinition, ToolResult } from '../ex
 import { modelReference, readModelReference } from '../model-reference';
 import type { Json } from '../storage/types';
 import { AgentError } from '../storage/types';
-import { pdfPages, readPdfToolResult } from './documents/read-tool';
 import type { FileBaseline, FileSnapshot, WorkspaceFiles } from './files';
 import { formatFileReadResult } from './files/model-result';
+import { isEngineeringTextPath, unsupportedFileRead } from './files/read-scope';
 
 /** Optional trusted host capture. Tokens and evidence never come from Model input. */
 export interface FileMutationCapture {
@@ -264,7 +264,6 @@ export function createFileTools(
       required: ['path'],
       properties: {
         path,
-        pages: pdfPages,
         offset: {
           type: 'integer',
           minimum: 1,
@@ -360,7 +359,7 @@ export function createFileTools(
     edit: 'edit_file',
   };
   const descriptions: Record<string, string> = {
-    read: 'Read UTF-8 file lines with one-based offset and limit (default 200). Pass next_line as offset to continue. For an authorized PDF, use pages and omit offset and limit. The default is page 1, and a request returns up to four page images with any available text. A missing ordinary file returns exists:false. The runtime retains the exact editable file baseline for later writes.',
+    read: 'Read UTF-8 source, scripts, project configuration and engineering documentation. Use one-based offset and limit (default 200); pass next_line as offset to continue. Read document and data formats with their skills or exec_command, and use view_images for images. A missing ordinary file returns exists:false. The runtime retains the exact editable file baseline for later writes.',
     write:
       'Create a UTF-8 file or replace its complete content. To replace an existing file, read the same path first. Missing parent directories within the allowed file scope can be created. The runtime checks for concurrent changes before writing. Verify the original result before proceeding after a write with unknown outcome.',
     edit: 'Replace literal old_string with new_string after reading the same path. Use replace_all only when every exact match should change. Otherwise old_string must match exactly once. The runtime checks for concurrent changes before publishing. After a confirmed conflict, read the current file before deciding on a new edit.',
@@ -441,22 +440,18 @@ export function createFileTools(
             ? parameters
             : { ...parameters, path: files.relativePath(string(parameters.path)) };
         let value: unknown;
-        let pdfSource: Awaited<ReturnType<WorkspaceFiles['readBytes']>> | undefined;
         try {
           if (
             d.name === 'read' &&
             typeof selected.path === 'string' &&
-            selected.path.toLowerCase().endsWith('.pdf')
+            !isEngineeringTextPath(selected.path)
           ) {
-            pdfSource = await files.readBytes(selected.path, {
-              maxBytes: 256 * 1024 * 1024,
-              signal: context.signal,
-            });
-          } else {
-            if (d.name === 'read' && selected.pages !== undefined)
-              throw new AgentError('pdf_options_require_pdf');
-            value = await d.call(selected, context);
+            const identity = await files.inspectIdentity(selected.path);
+            context.signal.throwIfAborted();
+            if (!identity.file) throw new AgentError('ENOENT');
+            throw unsupportedFileRead(string(parameters.path));
           }
+          value = await d.call(selected, context);
         } catch (error) {
           if (
             d.name === 'read' &&
@@ -470,13 +465,6 @@ export function createFileTools(
           throw error;
         }
         if (d.name === 'read') context.signal.throwIfAborted();
-        if (pdfSource)
-          return await readPdfToolResult({
-            path: string(parameters.path),
-            request: selected,
-            context,
-            source: pdfSource,
-          });
         if (d.name === 'read') return await createFileReadResult(value as FileSnapshot, context);
         const mutationResult =
           d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot) : undefined;

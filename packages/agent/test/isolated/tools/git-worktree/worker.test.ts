@@ -1034,6 +1034,44 @@ describe('trusted worktree worker: real Git', () => {
     success(await f.create());
     success(await f.remove());
   });
+  test('worker never returns an enclosing repository or prepares creation from an unbound source', async () => {
+    const f = fixture();
+    const unbound = join(f.source, 'unbound');
+    mkdirSync(unbound);
+    const source = f.request('list', { action: 'list' });
+    const inventory = await executeWorktreeRequest(source);
+    expect(inventory.businessOutcome).toBe('succeeded');
+    expect(inventory.details.sourceWorktree).toBe(f.source);
+
+    const outside = join(f.root, 'must-stay-unallocated');
+    const list = { ...source, sourceCwd: unbound };
+    const create = {
+      ...f.request('prepare_create', f.createInput({ path: outside })),
+      sourceCwd: unbound,
+    };
+    for (const request of [list, create]) {
+      const rejected = await executeWorktreeRequest(request);
+      expect(rejected.businessOutcome).toBe('failed');
+      expect(rejected.details).toMatchObject({
+        code: 'not_git_repository',
+        mutation: 'not_started',
+      });
+      expect(rejected.details.repository).toBeUndefined();
+      expect(rejected.details.worktrees).toBeUndefined();
+      expect(rejected.plan).toBeUndefined();
+    }
+    expect(filesystem.existsSync(outside)).toBe(false);
+    writeFileSync(join(unbound, '.git'), 'invalid Git pointer\n');
+    const malformed = await executeWorktreeRequest(list);
+    expect(malformed.businessOutcome).toBe('failed');
+    expect(malformed.details).toMatchObject({
+      code: 'worktree_root_unverifiable',
+      failure: { category: 'verification' },
+      mutation: 'not_started',
+    });
+    expect(malformed.details.repository).toBeUndefined();
+    expect(malformed.details.worktrees).toBeUndefined();
+  });
   test('missing Git, non-repository, unborn and bare sources fail explicitly without mutation', async () => {
     const f = fixture(),
       missing = f.request('list', { action: 'list' });

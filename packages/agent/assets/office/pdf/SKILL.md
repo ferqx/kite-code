@@ -8,7 +8,23 @@ license: Complete terms in LICENSE.txt
 
 ## Overview
 
-In Kite's managed Shell, use the bundled PDF helper for A4 generation, page operations and edits to existing text, checkbox and choice fields. It uses the bundled Bun and font assets. The Python examples below apply when their dependencies are already available.
+In Kite's managed Shell, use the bundled PDF helper for page text, page rendering, A4 generation, page operations and edits to existing text, checkbox and choice fields. Use the workspace copy path supplied with an attachment. The Python examples below apply when their dependencies are already available.
+
+## Read selected pages
+
+Use `pdf-text` to extract a small page selection. The result reports physical page numbers, labels and `nextPage`. An extraction status of `no_extractable_text` usually calls for visual inspection. Complex tables and multi-column reading order may also need a visual check. For a large text result, use `--out` with a new workspace JSON path and inspect only the relevant excerpts.
+
+Use `pdf-render` for the specific pages you need to see. Give it an existing output directory. It creates a fresh subdirectory and returns absolute PNG paths. Call `view_images` with those paths to send the selected pages, including scanned pages, to the model.
+
+```sh
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf-text --input "source.pdf" --pages 1-2
+"$KITE_DOCUMENTS_BUN" --no-install "$KITE_DOCUMENTS_HELPER" pdf-render --input "source.pdf" --pages 2 --out .
+```
+
+```powershell
+& $env:KITE_DOCUMENTS_BUN --no-install $env:KITE_DOCUMENTS_HELPER pdf-text --input 'source.pdf' --pages '1-2'
+& $env:KITE_DOCUMENTS_BUN --no-install $env:KITE_DOCUMENTS_HELPER pdf-render --input 'source.pdf' --pages 2 --out .
+```
 
 ## Kite managed PDF workflow
 

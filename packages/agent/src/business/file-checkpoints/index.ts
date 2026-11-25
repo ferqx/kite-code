@@ -384,10 +384,11 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
   const readBoundary = options.readBoundary;
   const files = createWorkspaceFiles({
     root: selected.root,
+    expectedRootIdentity: selected.expectedIdentity,
     protectedPaths: [...options.protectedPaths],
     ...(options.protectReads !== undefined ? { protectReads: options.protectReads } : {}),
   });
-  const initial = lstatSync(selected.root, { bigint: true });
+  const initial = selected.expectedIdentity ?? lstatSync(selected.root, { bigint: true });
   const workspace = { device: String(initial.dev), inode: String(initial.ino) };
   interface Pending {
     context: ToolContext;

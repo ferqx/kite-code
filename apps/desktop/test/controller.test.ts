@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { type AgentClient, ClientError, type SessionView } from '@kite-ai/client';
 import { createDesktopController } from '../src/controller';
+import { getSelectionPermissions } from './selection-permissions.fixture';
 
 function view(id: string): SessionView {
   return {
@@ -32,6 +33,7 @@ test('execution publishes before held admission and an invalidated late admissio
   const client = {
     serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
     getView: async (id: string) => view(id),
+    getSelectionPermissions,
     getPermissionMode: async () => {
       await gate;
       return { storeId: 'store', sessionId: 's' };
@@ -100,6 +102,7 @@ test('a missing workspace preserves a fresh readable selection without permissio
     async getView(id: string) {
       return view(id);
     },
+    getSelectionPermissions,
     async getPermissionMode() {
       return { storeId: 'store', sessionId: 'root', revision: 'mode' };
     },
@@ -140,6 +143,7 @@ test('only an unavailable workspace identity permits readonly selection; other p
   const client = {
     serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
     getView: async (id: string) => view(id),
+    getSelectionPermissions,
     getPermissionMode: async () => ({}),
     getWorkspaceTrust: async () => {
       throw new ClientError(failure);
@@ -161,6 +165,7 @@ test('a retired missing-workspace trust read cannot publish into a later selecti
   const client = {
     serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
     getView: async (id: string) => view(id),
+    getSelectionPermissions,
     getPermissionMode: async () => ({}),
     getWorkspaceTrust: async () => {
       if (++reads === 1)
@@ -406,6 +411,7 @@ test('100 rapid selections cancel retired pure GET chains and disposal aborts th
       check(id, signal);
       return { messages: [], resultSources: [] };
     },
+    getSelectionPermissions,
     async getPermissionMode(id: string, { signal }: { signal: AbortSignal }) {
       check(id, signal);
       return { mode: 'auto' };
@@ -466,6 +472,7 @@ test('retired parallel permission reads share cancellation and cannot replace th
     async getView(id: string) {
       return { ...view(id), session: { ...view(id).session, workspaceId: `w-${id}` } };
     },
+    getSelectionPermissions,
     getPermissionMode(id: string, { signal }: { signal: AbortSignal }) {
       signals.push(signal);
       return id === 'old'
@@ -524,6 +531,7 @@ test('selection starts independent metadata reads together and waits for all bef
     queryExtension: () => read('extension', []),
     listInteractions: () => read('interactions', { interactions: [], nextAfterId: null }),
     getContext: () => read('context', { messages: [], resultSources: [] }),
+    getSelectionPermissions,
     getPermissionMode: () => read('mode', { mode: 'auto' }),
     getWorkspaceTrust: () => read('trust', { readScopes: [] }),
     disposeNetwork() {},

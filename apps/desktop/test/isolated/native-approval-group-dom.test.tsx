@@ -237,6 +237,72 @@ test('child labels require the original Store, Session and Run and never display
   expect(nativeApprovalOwnerLabel(child, 'store', 'root', [owner, owner])).toBe('子 Agent');
 });
 
+test('a current approval takes the default position while an explicit older selection stays', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+    IS_REACT_ACT_ENVIRONMENT: Reflect.get(globalThis, 'IS_REACT_ACT_ENVIRONMENT'),
+  };
+  const restore = prepareDesktopDom(dom);
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const host = dom.window.document.getElementById('root')!;
+  const root = createRoot(host);
+  const older = approval('earlier', 'root');
+  const current = { ...approval('current-job', 'root'), runId: null };
+  const render = (interactions: Interaction[]) =>
+    root.render(
+      <NativeApprovalGroup
+        interactions={interactions}
+        storeId="store"
+        rootSessionId="root"
+        priority={{ current: (card) => card.runId === null, earlier: (card) => card === older }}
+        renderInteraction={(card) => <button type="button">{card.id}</button>}
+      />,
+    );
+  try {
+    await act(async () => render([older]));
+    expect(host.textContent).toContain('earlier');
+    await act(async () => render([older, current]));
+    expect(host.textContent).toContain('current-job');
+    const another = { ...current, id: 'another-current' };
+    await act(async () => render([older, another, current]));
+    expect(host.textContent).toContain('current-job');
+    await act(async () => render([older, current]));
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('[aria-label="上一项审批"]')!.click(),
+    );
+    expect(host.textContent).toContain('较早轮次');
+    const selected = [...host.querySelectorAll('button')].find(
+      (entry) => entry.textContent === 'earlier',
+    );
+    await act(async () => render([current, older]));
+    expect(host.contains(selected!)).toBeTrue();
+    await act(async () => render([current]));
+    expect(host.textContent).toContain('current-job');
+
+    await act(async () => render([older]));
+    const earlierButton = [...host.querySelectorAll('button')].find(
+      (entry) => entry.textContent === 'earlier',
+    )!;
+    await act(async () => earlierButton.focus());
+    await act(async () => render([older, current]));
+    expect(dom.window.document.activeElement).toBe(earlierButton);
+    expect(host.textContent).not.toContain('current-job');
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    restore();
+    Object.assign(globalThis, previous);
+  }
+});
+
 test('session approval submits only the selected original child while sibling and root approvals remain pending', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',

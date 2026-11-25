@@ -66,7 +66,7 @@ import { NativeModelOutputReads } from './model-output-reads';
 import { NativeInputQueue } from './native-input-queue';
 import { NativeProcessOwner } from './native-processes';
 import { NativeOfficeEditor } from './office-editor';
-import { NativeOutputDisplayVersions } from './output-display-versions';
+import { NativeOutputDisplayVersions, nativeOutputRecord } from './output-display-versions';
 import { canOpenOutputInApp, createOutputCopyPath, saveOutputFile } from './output-files';
 import { NativeOutputSources } from './output-sources';
 import type { StoredPendingAttachment } from './pending-attachments';
@@ -92,6 +92,14 @@ export function createNativeCallerGenerationOwner(): () => number {
   let generation = 0;
   return () => ++generation;
 }
+
+// These Store events update only the Execution record. Run and interaction
+// transitions have their own events and still refresh the directory.
+const executionOnlyChanges = new Set([
+  'execution.planned',
+  'execution.dispatching',
+  'execution.running',
+]);
 
 export class NativeCaller {
   private readonly localFileReferences: boolean;
@@ -1526,24 +1534,48 @@ export class NativeCaller {
                 }
                 return;
               }
-              this.environmentRevision++;
+              const changedSession = change.sessionId;
+              // References surface through their owning message or file receipt.
+              // A Job's saved output is read at its own requested high water.
+              if (
+                changedSession &&
+                activity === null &&
+                (change.type === 'artifact.published' || change.type === 'execution.output')
+              )
+                return;
+              const affectsEnvironment =
+                !changedSession ||
+                changedSession === this.selected ||
+                change.type === 'session.created' ||
+                this.environment.includesSession(changedSession);
+              const outputRecord = nativeOutputRecord(change);
+              const outputOnly =
+                !!changedSession &&
+                outputRecord?.hasRecordId === true &&
+                (activity === null ||
+                  (typeof activity === 'object' &&
+                    !Array.isArray(activity) &&
+                    Object.keys(activity).length === 1 &&
+                    typeof activity.outputRunId === 'string' &&
+                    !!activity.outputRunId));
+              if (!outputOnly) this.environmentRevision++;
               if (
                 change.sessionId === this.selected &&
                 change.type === 'session.execution_root.changed'
               )
                 this.workspaceChanges.invalidateExecutionRoot();
-              if (this.outputDisplayVersions.changed(change)) this.changed();
-              if (
+              const outputDisplayChanged = this.outputDisplayVersions.changed(change, outputRecord);
+              const outputSourceChanged =
                 (change.sessionId === this.selected ||
                   (!!change.sessionId &&
                     (this.outputSources.includesSession(change.sessionId) ||
                       this.environment.includesSession(change.sessionId)))) &&
-                ((change.type === 'extension.record_updated' &&
-                  /^builtin\.files\/(delivery|collection|output)\//.test(change.objectId)) ||
+                ((outputRecord && outputRecord.kind !== 'output-index') ||
                   change.type === 'run.finished' ||
-                  change.type === 'run.started')
-              )
-                this.outputFilesRevision++;
+                  change.type === 'run.started');
+              if (outputSourceChanged) this.outputFilesRevision++;
+              if (outputDisplayChanged || (outputOnly && outputSourceChanged)) this.changed();
+              if (outputOnly) return;
               if (
                 change.type === 'session.created' ||
                 (change.type === 'run.started' &&
@@ -1579,7 +1611,12 @@ export class NativeCaller {
                 };
                 this.changed();
               }
-              this.scheduleDirectoryRefresh();
+              if (
+                !changedSession ||
+                change.payload !== null ||
+                !executionOnlyChanges.has(change.type)
+              )
+                this.scheduleDirectoryRefresh();
               const executionChange =
                 change.sessionId === this.selected &&
                 (change.type.startsWith('run.') || change.type.startsWith('execution.'));
@@ -1628,13 +1665,7 @@ export class NativeCaller {
               }
               // Creation is conservative: the next exact root directory establishes
               // a new descendant's membership. Known descendants need no foreign View GET.
-              if (
-                !change.sessionId ||
-                change.sessionId === this.selected ||
-                change.type === 'session.created' ||
-                this.environment.includesSession(change.sessionId)
-              )
-                this.selectedEnvironmentRevision++;
+              if (affectsEnvironment) this.selectedEnvironmentRevision++;
             },
             onReset: () => {
               reset = true;

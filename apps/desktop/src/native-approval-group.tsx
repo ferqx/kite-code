@@ -1,21 +1,13 @@
 import type { Interaction } from '@kite-ai/client';
 import { ApprovalHeader } from '@kite-ai/ui/desktop';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, type SyntheticEvent, useEffect, useState } from 'react';
+import { isOrdinaryNativeApproval } from './native-approval-priority';
 
 export interface NativeApprovalOwner {
   storeId: string;
   sessionId: string;
   runId: string;
   title: string;
-}
-
-/** MCP source decisions keep their own form and scope, outside ordinary tool approvals. */
-export function isOrdinaryNativeApproval(interaction: Interaction) {
-  if (interaction.kind !== 'approval') return false;
-  const request = interaction.request;
-  const kind =
-    request && typeof request === 'object' && !Array.isArray(request) ? request.kind : undefined;
-  return kind !== 'mcp_source_approval' && kind !== 'mcp_credential_binding';
 }
 
 export function nativeApprovalOwnerLabel(
@@ -47,12 +39,17 @@ export function NativeApprovalGroup({
   storeId,
   rootSessionId,
   owners = [],
+  priority,
   renderInteraction,
 }: {
   interactions: readonly Interaction[];
   storeId: string;
   rootSessionId: string;
   owners?: readonly NativeApprovalOwner[];
+  priority?: {
+    current: (interaction: Interaction) => boolean;
+    earlier: (interaction: Interaction) => boolean;
+  };
   renderInteraction: (interaction: Interaction, embedded: boolean) => ReactNode;
 }) {
   const approvals = interactions.filter(
@@ -61,13 +58,25 @@ export function NativeApprovalGroup({
   const key = (interaction: Interaction) =>
     JSON.stringify([interaction.originStoreId, interaction.id]);
   const scope = JSON.stringify([storeId, rootSessionId]);
-  const [selected, setSelected] = useState<{ scope: string; key: string; index: number }>();
+  const [selected, setSelected] = useState<{
+    scope: string;
+    key: string;
+    index: number;
+    explicit: boolean;
+  }>();
   const found =
     selected?.scope === scope ? approvals.findIndex((item) => key(item) === selected.key) : -1;
+  const preferred = priority ? approvals.findIndex(priority.current) : -1;
+  const keep = found >= 0 && (selected?.explicit || priority?.current(approvals[found]!));
   const index =
-    found >= 0
-      ? found
-      : Math.min(selected?.scope === scope ? selected.index : 0, Math.max(0, approvals.length - 1));
+    preferred >= 0 && !keep
+      ? preferred
+      : found >= 0
+        ? found
+        : Math.min(
+            selected?.scope === scope ? selected.index : 0,
+            Math.max(0, approvals.length - 1),
+          );
   const current = approvals[index];
   const currentKey = current && key(current);
   useEffect(() => {
@@ -75,13 +84,29 @@ export function NativeApprovalGroup({
       setSelected((previous) =>
         previous?.scope === scope && previous.key === currentKey && previous.index === index
           ? previous
-          : { scope, key: currentKey, index },
+          : {
+              scope,
+              key: currentKey,
+              index,
+              explicit:
+                previous?.scope === scope && previous.key === currentKey && previous.explicit,
+            },
       );
   }, [scope, currentKey, index]);
   const move = (direction: number) => {
     if (!approvals.length) return;
     const nextIndex = (index + direction + approvals.length) % approvals.length;
-    setSelected({ scope, key: key(approvals[nextIndex]!), index: nextIndex });
+    setSelected({ scope, key: key(approvals[nextIndex]!), index: nextIndex, explicit: true });
+  };
+  const retain = (event: SyntheticEvent<HTMLDivElement>) => {
+    // Focus moving into a portalled menu does not change which card owns it.
+    if (
+      !currentKey ||
+      !event.currentTarget.contains(event.target as Node) ||
+      (selected?.scope === scope && selected.key === currentKey && selected.explicit)
+    )
+      return;
+    setSelected({ scope, key: currentKey, index, explicit: true });
   };
   return (
     <>
@@ -104,6 +129,7 @@ export function NativeApprovalGroup({
           }}
         >
           <ApprovalHeader
+            scopeLabel={priority?.earlier(current) ? '较早轮次' : undefined}
             child={
               current.originStoreId === storeId && current.sessionId === rootSessionId
                 ? undefined
@@ -117,7 +143,11 @@ export function NativeApprovalGroup({
             onPrevious={() => move(-1)}
             onNext={() => move(1)}
           />
-          <div key={JSON.stringify([key(current), current.revision])}>
+          <div
+            key={JSON.stringify([key(current), current.revision])}
+            onClickCapture={retain}
+            onFocusCapture={retain}
+          >
             {renderInteraction(current, true)}
           </div>
         </section>

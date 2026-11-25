@@ -1,11 +1,15 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +17,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
-import { filesNativeAssets } from '@kite-ai/agent/files';
+import { createWorkspaceFiles, filesNativeAssets } from '@kite-ai/agent/files';
 import { mcpSchemaWorkerAssets } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
@@ -22,7 +26,7 @@ import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
-test('actual default Service keeps native and compiler assets protected in Full while unified read_file reads external user text', async () => {
+test('actual default Service reads ordinary files and rejects protected assets and a replaced execution root', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-files-native-service-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -40,6 +44,10 @@ test('actual default Service keeps native and compiler assets protected in Full 
   expect(existsSync(deniedNew)).toBe(false);
   const ordinary = join(root, 'ordinary.txt');
   writeFileSync(ordinary, 'complete external ordinary text');
+  const sourcePath = join(workspace, 'workspace.ts');
+  writeFileSync(sourcePath, 'export const original = 42;\r\n');
+  const replacementText = 'export const replacement = 99;\r\n';
+  const workspaceReadProofs = new Map<string, string>();
   let modelCalls = 0;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -51,6 +59,8 @@ test('actual default Service keeps native and compiler assets protected in Full 
       const find = (operation: string) =>
         input.tools.find((tool) => tool.function.name === `${operation}_file`)!.function.name;
       const calls = [
+        [find('read'), { path: 'workspace.ts' }],
+        [find('read'), { path: sourcePath }],
         [find('read'), { path: ordinary }],
         [find('read'), { path: metadata }],
         [find('read'), { path: assets[0] }],
@@ -60,12 +70,21 @@ test('actual default Service keeps native and compiler assets protected in Full 
           [find('write'), { path, content: 'must not overwrite' }],
         ]),
       ];
+      modelCalls++;
+      let toolCalls: typeof calls = modelCalls === 1 ? calls : [];
+      if (modelCalls === 3) {
+        // The next Run's opening Model request already carries the original workspace binding.
+        renameSync(workspace, join(root, 'original-workspace'));
+        mkdirSync(workspace);
+        writeFileSync(sourcePath, replacementText);
+        toolCalls = [calls[0]!];
+      }
       const delta =
-        modelCalls++ === 0
+        toolCalls.length > 0
           ? {
-              tool_calls: calls.map(([name, args], index) => ({
+              tool_calls: toolCalls.map(([name, args], index) => ({
                 index,
-                id: `call-${index}`,
+                id: `call-${modelCalls}-${index}`,
                 type: 'function',
                 function: { name, arguments: JSON.stringify(args) },
               })),
@@ -80,7 +99,7 @@ test('actual default Service keeps native and compiler assets protected in Full 
           choices: [{ index: 0, delta, finish_reason: finish }],
         })}\n\n`;
       return new Response(
-        `${chunk(delta, null)}${chunk({}, modelCalls === 1 ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
+        `${chunk(delta, null)}${chunk({}, toolCalls.length ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
         {
           headers: { 'content-type': 'text/event-stream' },
         },
@@ -133,6 +152,30 @@ test('actual default Service keeps native and compiler assets protected in Full 
     store,
     artifacts,
     workspaceSerialLocks,
+    async resolveRunConfiguration(input) {
+      const resolved = await host.resolveRunConfiguration!(input);
+      return {
+        ...resolved,
+        async readStepCapabilities(input) {
+          const step = await resolved.readStepCapabilities!(input);
+          return {
+            ...step,
+            toolBehaviors: step.toolBehaviors?.map((behavior) => {
+              const { workspaceRead } = behavior;
+              if (!workspaceRead) return behavior;
+              return {
+                ...behavior,
+                async workspaceRead(request) {
+                  const proof = await workspaceRead(request);
+                  if (proof) workspaceReadProofs.set(request.executionId, proof.path);
+                  return proof;
+                },
+              };
+            }),
+          };
+        },
+      };
+    },
   });
   host.permissionManagement?.(runtime);
   try {
@@ -173,12 +216,22 @@ test('actual default Service keeps native and compiler assets protected in Full 
     });
     await runtime.waitForCommand('work', { timeoutMs: 10000 });
     const tools = (await store.listExecutions('s')).filter((row) => row.kind === 'tool');
-    expect(tools).toHaveLength(4 + compilerAssets.length * 2);
-    expect(tools[0]!.status, JSON.stringify(tools[0]!.result)).toBe('succeeded');
-    expect((tools[0]!.result as { content: string }).content).toContain(
+    expect(tools).toHaveLength(6 + compilerAssets.length * 2);
+    for (const tool of tools.slice(0, 2)) {
+      expect(tool.status, JSON.stringify(tool.result)).toBe('succeeded');
+      expect(JSON.parse((tool.result as { content: string }).content)).toMatchObject({
+        content: 'export const original = 42;\r\n',
+        baseline: { hash: createHash('sha256').update(readFileSync(sourcePath)).digest('hex') },
+      });
+    }
+    expect(workspaceReadProofs).toEqual(
+      new Map(tools.slice(0, 2).map(({ id }) => [id, sourcePath])),
+    );
+    expect(tools[2]!.status, JSON.stringify(tools[2]!.result)).toBe('succeeded');
+    expect((tools[2]!.result as { content: string }).content).toContain(
       'complete external ordinary text',
     );
-    for (const tool of tools.slice(1)) {
+    for (const tool of tools.slice(3)) {
       expect(tool.status).toBe('failed');
       expect(tool.result).toMatchObject({
         details: {
@@ -199,6 +252,32 @@ test('actual default Service keeps native and compiler assets protected in Full 
       expect(readFileSync(path)).toEqual(originalCompilerBytes[index]!);
     expect(readFileSync(ordinary, 'utf8')).toBe('complete external ordinary text');
     expect(modelCalls).toBe(2);
+
+    await runtime.submitCommand({
+      expectedStoreId,
+      sessionId: 's',
+      commandId: 'replaced-root',
+      subjectId: 'owner',
+      request: { kind: 'run.start', content: 'Verify access after replacing the workspace.' },
+    });
+    await runtime.waitForCommand('replaced-root', { timeoutMs: 10000 });
+    expect(readFileSync(sourcePath, 'utf8')).toBe(replacementText);
+    expect(workspaceReadProofs).toEqual(
+      new Map(tools.slice(0, 2).map(({ id }) => [id, sourcePath])),
+    );
+    const afterReplacement = (await store.listExecutions('s')).filter(
+      (row) => row.kind === 'tool' && row.originCommandId === 'replaced-root',
+    );
+    expect(afterReplacement).toHaveLength(1);
+    expect(afterReplacement[0]!.status).toBe('failed');
+    expect(afterReplacement[0]!.result).toMatchObject({
+      content: 'execution_root_changed',
+      details: {
+        code: 'execution_root_changed',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
+    });
   } finally {
     await runtime.close();
     await workspaceSerialLocks.close();
@@ -208,4 +287,31 @@ test('actual default Service keeps native and compiler assets protected in Full 
     rmSync(deniedNew, { force: true });
     rmSync(root, { recursive: true, force: true });
   }
-}, 20000);
+}, 30000);
+
+test('a held native Files owner rejects a stale Session root and closes before returning', async () => {
+  const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'kite-files-root-replace-')));
+  const root = join(fixture, 'workspace');
+  const original = join(fixture, 'original');
+  const replacement = join(fixture, 'replacement');
+  let files: ReturnType<typeof createWorkspaceFiles> | undefined;
+  try {
+    mkdirSync(root);
+    const before = lstatSync(root, { bigint: true });
+    const expectedRootIdentity = { dev: String(before.dev), ino: String(before.ino) };
+    renameSync(root, original);
+    mkdirSync(root);
+    expect(() => {
+      files = createWorkspaceFiles({ root, expectedRootIdentity });
+    }).toThrow('execution_root_changed');
+    // Windows won't rename the replacement if the failed Files owner still pins it.
+    renameSync(root, replacement);
+    symlinkSync(original, root, process.platform === 'win32' ? 'junction' : 'dir');
+    expect(() => {
+      files = createWorkspaceFiles({ root, expectedRootIdentity });
+    }).toThrow();
+  } finally {
+    await files?.close();
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});

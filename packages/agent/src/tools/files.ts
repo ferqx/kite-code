@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { lstatSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import ignore, { type Ignore } from 'ignore';
-import { AgentError } from '../storage/types';
+import { AgentError, type SessionExecutionRoot } from '../storage/types';
+import { hasPdfHeader, unsupportedFileRead } from './files/read-scope';
 import { fileChangePreview } from './files-diff';
 import { createWorkspaceFileIo } from './files-io';
 
@@ -219,6 +221,8 @@ function pageLimit(value = 100): number {
 /** Explicit host selection. Operations retain the selected physical directory objects. */
 export function createWorkspaceFiles(options: {
   root: string;
+  /** Trusted persisted Session root identity, verified only while the native owner holds the root. */
+  expectedRootIdentity?: NonNullable<SessionExecutionRoot['identity']>;
   maxFileBytes?: number;
   /** Trusted absolute user-file assembly: reject foreign-owner and hardlink read aliases. */
   strictReads?: boolean;
@@ -248,6 +252,24 @@ export function createWorkspaceFiles(options: {
   const root = resolve(options.root);
   const io = createWorkspaceFileIo(root, protectedPaths, protectReads);
   const rootFd = io.root;
+  const expected = options.expectedRootIdentity;
+  if (expected) {
+    try {
+      // Windows pins the native FILE_ID_INFO in directory handles opened without delete sharing.
+      // Compare the Session's lstat identity while those same directory handles are held.
+      const physical =
+        process.platform === 'win32' ? lstatSync(root, { bigint: true }) : io.stat(rootFd);
+      if (
+        !physical.isDirectory() ||
+        String(physical.dev) !== expected.dev ||
+        String(physical.ino) !== expected.ino
+      )
+        fail('execution_root_changed');
+    } catch (error) {
+      io.close();
+      throw error;
+    }
+  }
   let closed = false;
   const activeReads = new Set<Promise<unknown>>();
   let closing: Promise<void> | undefined;
@@ -491,6 +513,8 @@ export function createWorkspaceFiles(options: {
         if (!Number.isSafeInteger(count) || (max !== undefined && count > max))
           fail('file_too_large');
         const bytes = buffer.subarray(0, read);
+        if (count === read && hasPdfHeader(bytes))
+          throw unsupportedFileRead(logical, { name: 'document.pdf' });
         digest.update(bytes);
         try {
           accept(decoder.decode(bytes, { stream: true }));

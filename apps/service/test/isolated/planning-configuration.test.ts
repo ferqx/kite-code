@@ -526,21 +526,19 @@ test('external Plan drift during review rejects late approval and blocks workspa
   }
 }, 15000);
 
-test('uploaded PDF pages flow through the exact file tool result to the next model input', async () => {
+test('a saved PDF read directs the model to its workspace copy without publishing content', async () => {
   let path = '';
   const f = await fixture(
     {},
     ['files.read'],
     async (step, f): Promise<Call> => {
-      if (step === 0) return { name: 'read_file', input: { path, pages: '1' } };
+      if (step === 0) return { name: 'read_file', input: { path } };
       if (step === 1) {
-        const read = (await f.store.listExecutions('s')).find(
-          (x) => x.definitionId === 'files.read',
-        )!;
-        expect({ status: read.status, result: read.result }).toMatchObject({ status: 'succeeded' });
-        expect(JSON.stringify(f.requests.at(-1))).toContain('Hello PDF');
-        expect(JSON.stringify(f.requests.at(-1))).toContain('data:image/png;base64,');
-        expect(JSON.stringify(f.requests.at(-1))).toContain('not a human request or approval');
+        const next = JSON.stringify(f.requests.at(-1));
+        expect(next).toContain('pdf-text');
+        expect(next).toContain('workspace copy');
+        expect(next).not.toContain('Hello PDF');
+        expect(next).not.toContain('data:image/png;base64,');
       }
       return null;
     },
@@ -560,17 +558,17 @@ test('uploaded PDF pages flow through the exact file tool result to the next mod
     await f.runtime.submitCommand({
       ...f.base,
       commandId: 'work',
-      request: { kind: 'run.start', content: 'Read the text and page image.', files: [file] },
+      request: { kind: 'run.start', content: 'Read the attached document.', files: [file] },
     });
     expect((await f.done()).run?.status).toBe('completed');
     const reads = (await f.store.listExecutions('s')).filter(
       (x) => x.definitionId === 'files.read',
     );
-    expect(reads.map((read) => read.status)).toEqual(['succeeded']);
+    expect(reads.map((read) => read.status)).toEqual(['failed']);
     const result = reads[0]!.result as Record<string, Json>;
-    expect(result.modelImages).toMatchObject([
-      { mediaType: 'image/png', scope: { kind: 'execution', id: reads[0]!.id } },
-    ]);
+    expect(result.details).toMatchObject({ code: 'unsupported_file_type' });
+    expect(result.modelImages).toBeUndefined();
+    expect(result.artifactRefs).toBeUndefined();
   } finally {
     await f.close();
   }
@@ -586,7 +584,7 @@ test('working attachments project only paths and use the authorized explicit Fil
     ['files.read', 'files.edit'],
     async (step, current): Promise<Call> => {
       if (['foreign-attachment-read', 'missing-working-read'].includes(current.commandId))
-        return step === 0 ? { name: 'read_file', input: { path: paths[0]!, pages: '1' } } : null;
+        return step === 0 ? { name: 'read_file', input: { path: paths[0]! } } : null;
       if (current.commandId === 'working-copy-edit') {
         if (step === 0)
           return { name: 'read_file', input: { path: paths[1]!, offset: 1, limit: 1 } };
@@ -616,17 +614,18 @@ test('working attachments project only paths and use the authorized explicit Fil
         );
         const refs = JSON.parse(attached!.content.split(prefix)[1]!);
         paths = refs.map((ref: { uri: string }) => fileURLToPath(ref.uri));
-        return { name: 'read_file', input: { path: paths[0]!, pages: '1' } };
+        return { name: 'read_file', input: { path: paths[0]! } };
       }
-      if (step === 1) return { name: 'read_file', input: { path: paths[0]! } };
+      if (step === 1)
+        return { name: 'read_file', input: { path: relative(current.workspace, paths[0]!) } };
       if (step === 2) return { name: 'read_file', input: { path: paths[1]!, offset: 1, limit: 1 } };
       if (step === 3) return { name: 'read_file', input: { path: paths[1]!, pages: '1' } };
       if (step === 4)
         return {
           name: 'read_file',
-          input: { path: 'unregistered.pdf', pages: '1' },
+          input: { path: 'unregistered.pdf' },
         };
-      if (step === 5) return { name: 'read_file', input: { path: unboundPath, pages: '1' } };
+      if (step === 5) return { name: 'read_file', input: { path: unboundPath } };
       if (step === 6)
         return { name: 'read_file', input: { path: relative(current.workspace, unboundPath) } };
       return null;
@@ -711,33 +710,25 @@ test('working attachments project only paths and use the authorized explicit Fil
     expect(first).not.toContain(Buffer.from(pdf).toString('base64'));
     const rows = (await f.store.listExecutions('s')).filter((entry) => entry.kind === 'tool');
     expect(rows.map((entry) => [entry.definitionId, entry.status])).toEqual([
-      ['files.read', 'succeeded'],
-      ['files.read', 'succeeded'],
-      ['files.read', 'succeeded'],
+      ['files.read', 'failed'],
       ['files.read', 'failed'],
       ['files.read', 'succeeded'],
+      ['files.read', 'failed'],
+      ['files.read', 'failed'],
       ['files.read', 'failed'],
       ['files.read', 'failed'],
     ]);
-    expect(rows[0]!.result).toMatchObject({
-      modelImages: [{ mediaType: 'image/png', scope: { kind: 'execution', id: rows[0]!.id } }],
-    });
-    const firstPage = (rows[0]!.result as { modelImages: { id: string }[] }).modelImages[0]!;
-    const page = await f.runtime.readArtifact({
-      ...f.base,
-      refId: firstPage.id,
-      scope: { kind: 'execution', id: rows[0]!.id },
-    });
-    expect(page.content.subarray(0, 8)).toEqual(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
-    expect(JSON.stringify(f.requests[1])).toContain(
-      `data:image/png;base64,${Buffer.from(page.content).toString('base64')}`,
-    );
-    expect(JSON.stringify(f.requests[2])).toContain('Hello PDF');
+    for (const index of [0, 1, 4]) {
+      const result = rows[index]!.result as Record<string, Json>;
+      expect(result.details).toMatchObject({ code: 'unsupported_file_type' });
+      expect(result.content).toContain('pdf-text');
+      expect(result.artifactRefs).toBeUndefined();
+      expect(result.modelImages).toBeUndefined();
+    }
+    expect(JSON.stringify(f.requests)).not.toContain('Hello PDF');
+    expect(JSON.stringify(f.requests)).not.toContain('data:image/png;base64,');
     expect(JSON.stringify(rows[2]!.result)).toContain('WORKING_VERSION');
-    expect(rows[3]!.result).toMatchObject({ details: { code: 'pdf_options_require_pdf' } });
-    expect(rows[4]!.result).toMatchObject({
-      modelImages: [{ mediaType: 'image/png', scope: { kind: 'execution', id: rows[4]!.id } }],
-    });
+    expect(rows[3]!.result).toMatchObject({ details: { code: 'invalid_tool_arguments' } });
     expect(
       rows.slice(5).map((row) => ({
         path: (row.input as Record<string, Json>).path,
@@ -971,7 +962,7 @@ test('mixed PDF, TXT and Office files are path-only while a direct PNG is inline
         authorization: { dispatched: true },
       });
       expect(row.result).toMatchObject({
-        details: { code: expect.stringMatching(/^file_(binary|encoding_invalid)$/) },
+        details: { code: 'unsupported_file_type' },
       });
     }
   } finally {

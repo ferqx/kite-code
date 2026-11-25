@@ -1,6 +1,6 @@
 # Workspace 文件 leaf
 
-模型使用 `read_file(path,offset?,limit?,pages?)`、`write_file(path,content)` 或 `edit_file(path,old_string,new_string,replace_all?)`。编辑默认要求唯一匹配，显式 `replace_all:true` 可替换全部匹配。工作区、获准的外部文件和 Plan 私有路径由各自负责适配器执行。
+模型使用 `read_file(path,offset?,limit?)`、`write_file(path,content)` 或 `edit_file(path,old_string,new_string,replace_all?)`。编辑默认要求唯一匹配，显式 `replace_all:true` 可替换全部匹配。工作区、获准的外部文件和 Plan 私有路径由各自负责适配器执行。
 
 对覆盖和编辑，宿主从本次封存 Model 请求按同路径选择最近的准确读取或修改回执，并验证原结果修订、读取身份及完整基线。即使只读取数行，写入也核整个文件的原身份和字节摘要。已存在路径缺少可用基线时先读取；文件变化时返回冲突，以新读核实后再决定是否修改。显式 `write_plan` 仍从读取结果取得原 `file_base_ref`。
 
@@ -120,17 +120,17 @@ Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存
 
 2026-10-24，Windows x64／Bun1.4.3、主仓库 `60a2d984c` 加当前改动，`bun test packages/agent/test/isolated/files/pdf.test.ts packages/agent/test/isolated/files/pdf-packaged.test.ts` 整两叶9项61断言通过，覆盖中文本地 CMap、物理页／页标签、分页、旋转大页、无文本页、坏文件、缓存损坏／删除重建，以及真实 AES 加密文件的 `pdf_password_required`。取消例使用真实 Worker：两个在途请求占满并发，第三个排队取消不创建 Worker；取消一个在途请求不影响另一个，原 Worker 各调用一次 terminate，后续读取仍成功。这证明取消调度与调用范围，不代证操作系统线程已经物理退出。[源码外闭包](../../../test/isolated/files/pdf-packaged.test.ts)实际复制 parser、Canvas 和 native 依赖，在空 PATH／NODE_PATH、禁止自动安装的独立目录提取文本及渲染 PNG；完整候选的资源验收归 [Terminal owner](../../../../../apps/cli/docs/terminal-release.md)。其他平台与完整安装资格仍独立验证。
 
-其中[固定两栏与表格样本](../../../../../tests/fixtures/pdf.ts)经公开 Files 适配器、真实原生读取及 PDF Worker，核列优先正文与表格逐行文字、完整模型正文和实际 PNG 的尺寸、表头与格线；另渲染并目视确认两栏及表格完整清晰。此例以准确范围／Artifact 发布测试端口隔离格式行为，既有真实 Store 绑定及后继 Model 交接仍由上文 Service 联验覆盖。结果继续明确 `text_extracted_reading_order_not_guaranteed`；固定样本通过不保证任意复杂多栏或表格的阅读顺序，页面图像保留文字提取不含的布局。
+其中[固定两栏与表格样本](../../../../../tests/fixtures/pdf.ts)经公开 Files 适配器、真实原生读取及 PDF Worker，核列优先正文与表格逐行文字、完整模型正文和实际 PNG 的尺寸、表头与格线；另渲染并目视确认两栏及表格完整清晰。当前格式回归以 Shell 助手取得文字和 PNG，并保留这些版面断言。结果继续明确 `text_extracted_reading_order_not_guaranteed`；固定样本通过不保证任意复杂多栏或表格的阅读顺序，页面图像保留文字提取不含的布局。
 
 固定 2048×2048 噪声图像的一页 PNG 成功，两页实际输出超过 16 MiB 时明确 `pdf_result_too_large`，后续普通读取仍成功；这验证单批结果预算，不是机器 OOM 资格。源码外私有物理副本分别移除准确 Worker／校验文件、写入错误校验摘要，真实子进程核 `ENOENT`／`pdf_assets_invalid`，每次恢复原字节后同进程重新读取成功；未修改源依赖或增加网络回退。损坏的嵌入 TrueType 字体在 text／image 均返回 `pdf_font_invalid`，后续正常读取成功；修复前真实 parser 曾仅警告并生成替代字体页图，不能将该旧成功计为准确结果。
 
-同日 [真实视觉 runner](../../../../../tests/e2e/live/model/pdf-vision.live.ts)经默认 Service Files 装配、Runtime／SQLite／Artifact 和实际 SDK，上传只有栅格图片的合成 PDF，删除原路径后由模型调用 `read_file` 获取页图。已配置 `deepseek-v4-flash`／Chat Completions 在两次 HTTP 200、一次成功页图读取后，准确返回随机六字母及红7／蓝3柱图。此前含易混淆字符的样本把 B 识别成 8，柱图仍正确；该失败保留，成功样本不能证明任意扫描件的识别准确率。测试没有本地 OCR、模型回答替换或协议回退，预算与复现命令见 [live 测试说明](../../../../../tests/e2e/live/model/README.md#pdf-扫描页与图表)。
+早期实现的 [真实视觉 runner](../../../../../tests/e2e/live/model/pdf-vision.live.ts)经默认 Service Files 装配、Runtime／SQLite／Artifact 和实际 SDK，上传只有栅格图片的合成 PDF，删除原路径后由模型调用 `read_file` 获取页图。已配置 `deepseek-v4-flash`／Chat Completions 在两次 HTTP 200、一次成功页图读取后，准确返回随机六字母及红7／蓝3柱图。此前含易混淆字符的样本把 B 识别成 8，柱图仍正确；该失败保留，成功样本不能证明任意扫描件的识别准确率。测试没有本地 OCR、模型回答替换或协议回退，预算与复现命令见 [live 测试说明](../../../../../tests/e2e/live/model/README.md#pdf-扫描页与图表)。
 
 不支持视觉的端点明确失败、不改为纯文本或切换协议；两协议受控 HTTP 400 的准确请求与错误证据归 [AI 图片消息](../../../../ai/README.md#图片消息)。
 
-Native 工作副本入口下，非图片附件随已应用的输入只提交名称和工作路径给模型，不借此解析或发布正文。[输入文件](../input-files.ts)验证所选消息中的准确原件路径，或在原 Run 上下文核对工作路径对应的已绑定准备记录；工作路径不授予目录权限，不暴露私有原件地址。PDF 读取通过显式工具操作打开不可变原件，核完整 hash／size、引用和派发快照。附件工作路径必须在当前上下文有绑定，绝对路径和相对于原工作区的路径都遵守该边界。普通工作区 PDF 按当前文件权限读取；私有目录的其他路径仍拒绝。普通工作副本文本读取、编辑沿现有权限、严格 UTF-8、完整 baseline 和范围读取。`read_file` 的 `pages` 与 `mode=text|image` 只适用于保存的 PDF 附件，默认第 1 页；每次最多 20 页文字或 4 张页图，返回物理页码、标签、总页数和 nextPage。工作区文件和非 PDF 附件按 `start_line/max_lines` 读取，省略上述两个 PDF 参数；PDF 附件省略行范围。不匹配的参数组合仍失败，结果保留 `details.code` 并给出明确的省略／重选参数方法，取消不提供重试指示。公开说明与各字段描述保持一致，实际 schema 的可选语义由 [AI Responses adapter](../../../../ai/README.md)保留。页图每边最多 2048 像素，单批结果最多 16 MiB，源文件最多 256 MiB，不进行 OCR。
+Native 发送非图片附件时把名称和工作区副本路径交给模型。工作副本准备和绑定核对原 Session、选区、工作目录以及物理身份。普通文件工具保留工程文本的 UTF-8、分页和基线。执行 `read_file` 时，PDF、Office、CSV 和其他范围外格式在读取正文之前返回 `unsupported_file_type`。已保留的原件及历史执行结果继续按各自的范围复核。 [输入文件](../input-files.ts) · [文件类型范围](read-scope.ts)
 
-[PDF Worker](../documents/pdf-worker.ts)使用固定 PDF.js 6.4.299、本地字体／CMap／WASM 与 Canvas；禁用文档网络、XFA 和系统字体回退。解析在独立可取消 Worker 执行，同时最多两次，单次 60 秒；Worker 不是 OS 沙箱，仍需安装制品及平台资源资格。原提取顺序不保证复杂多栏／表格语义。缓存键含完整源 hash、Store、配方、页范围、模式和 Worker 摘要，命中前仍核原件权限和全字节。缓存不进入历史：实际交给模型的正文及页图分别保存为准确 Tool Execution 的 Artifact。中立 `tool` 消息保存视觉结果来源；Responses 使用原工具结果的图像部分，Chat Completions 保留原工具配对并追加明确标记为工具数据的视觉载体，不产生人类输入或批准。
+受管 Shell 用按页 `pdf-text` 或 `pdf-render` 处理工作区副本。后者只返回落盘路径，页图通过后续 `view_images` 的准确权限查看。原生 [PDF Worker](../documents/pdf-worker.ts) 由 Shell 助手和 Desktop 分页预览复用，使用固定 PDF.js、Canvas 与本地资产，禁用网络、XFA 和系统字体回退。缓存继续用于 Desktop 预览。页图每边最多 2048 像素，每批结果最多 16 MiB，源文件最多 256 MiB。所提取的文字保留物理页号和页标签。 [文档助手](../documents/README.md#pdf-读取渲染与交付)
 
 该固定 parser 会把部分字体错误降为警告；Worker 只识别已核对的字体诊断前缀并返回 `pdf_font_invalid`，其他格式错误警告返回 `pdf_processing_failed`，不发布降级的文本或页图，也不传播命中的原始诊断。记录只存在于单次解析 Worker，结束恢复原警告处理；版本变化必须重新核对。未嵌入字体的 `missingFile` 也可能合法，不能据此拒绝无故障的 CMap 文本读取。此处理拒绝已识别的解析失败，不修复字体，也不承诺任意字体或排版都可读取。
 
@@ -144,7 +144,7 @@ Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF W
 
 此前 Windows 本机联验曾覆盖附件→PDF→Artifact→后继模型 wire、旧 Files 输出编辑、历史快照、Fork 独立副本及备份恢复；旧输出生成／编辑特性已移除，该记录不是新入口验收。两协议 wire 不等于真实视觉模型识别资格。测试入口为 [Service 文件／Plan 联验](../../../../../apps/service/test/isolated/planning-configuration.test.ts)、[真实 PDF Worker](../../../test/isolated/files/pdf.test.ts)与 [AI 图片协议](../../../../ai/test/input-images.test.ts)。
 
-模型接口由可信 `ToolDefinition.model` 投影。`read_file` 使用 `path/offset/limit/pages`；`write_file` 使用 `path/content`；`edit_file` 使用 `path/old_string/new_string/replace_all`。覆盖或编辑从请求中已见过的同路径结果选择完整基线，冲突后重新读取。Files 定义负责操作说明，Service 装配追加实际授权和附件范围。外部普通文件经同一只读工具读取。Auto、请求批准和 Full 继续按各自权限核验外部路径。内部 `files.*` 的 ID、定义版本、完整 baseline 与工作区检查点沿原合同执行。目录、文件查找和正文搜索使用 Shell 与内置 rg。
+模型接口由可信 `ToolDefinition.model` 投影，参数见本页开头。覆盖或编辑从请求中已见过的同路径结果选择完整基线，冲突后重新读取。Files 定义负责操作说明，Service 装配追加实际授权和附件范围。外部普通文件经同一只读工具读取。Auto、请求批准和 Full 继续按各自权限核验外部路径。内部 `files.*` 的 ID、定义版本、完整 baseline 与工作区检查点沿原合同执行。目录、文件查找和正文搜索使用 Shell 与内置 rg。
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将三个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。按当前模式获准的外部范围由下文适配器接入，不改变这个固定根。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
@@ -230,6 +230,8 @@ Agent／Service／Desktop typecheck、原包边界与 API／测试归属、文�
 
 Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他架构或路径范围不从源码接入推定可用。工厂固定当前 token SID 和 System DLL，只在实际创建能力时加载。它持有原根及祖先目录 HANDLE，以 `NtCreateFile` 的原父 HANDLE 逐段打开，不跟随 reparse；普通 Workspace 使用已有 DACL，不修 ACL。新 temporary 与 POSIX 的 0600 对应，使用当前 SID 私有权限。完整 baseline 使用实际 volume、128-bit FileID、完整 EOF／hash／size，并比较原 HANDLE 的 LastWriteTime 与 ChangeTime。字节恢复的严格身份检查要求父目录和文件的当前 SID owner、文件单链接；普通 Workspace 默认读取保宿主已有权限。
 
+可信 Service 传入会话执行根身份时，文件工厂在同一原生 owner 持有禁止删除共享的根及祖先句柄期间复核 Bun `lstat` 的 `dev/ino`。跨平台的会话身份继续用于目录绑定，Windows `FILE_ID_INFO` 继续用于原生文件基线。复核失败会释放本次打开的 owner，正常文件读取与检查点沿原 owner 执行。 [Service 回归](../../../../../apps/service/test/isolated/files-native-boundary.test.ts) [取舍记录](../../../../../.agents/notes/implemented/bug-fix/2026-11-25-worktree-execution-root-proof.md)
+
 组件拒绝 ADS、DOS 设备名、尾点／空格及非规范路径。实际原 HANDLE 的 canonical 长名对照拒绝 8.3 别名；保护范围按实际组件与 Windows 大小写等价核对，普通合法大小写变体仍可读取同一对象。目录枚举使用原 HANDLE，保护范围与原分页、search、glob 语义共用。未知类型、对象漂移、关闭或内存释放未确认均保明确失败，不从数字 HANDLE 重建资源。
 
 发布先完整写入和 flush 原 temporary，再核准确基线，从原 temporary HANDLE 向原父 HANDLE 相对 rename；create-only 不覆盖，replace 明确替换。删除由原对象 HANDLE 的 disposition、真实 close 及缺失确认组成。发布／删除后的确认或关闭失败保 `file_publish_outcome_unknown`；未知原资源强持整个 owner 及父链，`close` 不宣称释放成功。Windows 的 file flush 与目录身份复核不等于 POSIX directory fsync，也未证明断电持久性；该限制和平台验收保留，不能由异常注入或本机 POSIX 测试替代。API依据见 [NtCreateFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile)、[FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)和 [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)。
@@ -240,7 +242,7 @@ Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他�
 
 [Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行三个 Files 模型工具与内部目录／检索 API、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip。2026-10-16 在 Windows x64／Bun1.4.2，基于 `84b17867` 的本轮未提交 diff，本次路径、变更预览、检查点与 Native 工具展示六文件43项535断言通过（正常用户权限，51.69秒，包含实际会话的重复反斜杠输入），包含原生六工具、字节恢复、绝对路径 Core／完整 Artifact 和真实组件 DOM。原用例的 CRLF 搜索断言改为保留实际 `\r`，大正文夹具明确超过1MiB后才断言 Artifact，未降低验证要求。该结果不证明正式安装、完整 Service／客户端或其他平台。共享默认装配及恢复后新 Store 的原验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
 
-模型 `read_file` 默认从第 1 行读 200 行，把返回的 `next_line` 作为下次 `offset`。PDF 在同一只读入口以 `pages` 选择页面，复用文件来源、权限和 [Documents 解析](../documents/README.md)，交付可用文本和正式页面图像。
+模型 `read_file` 对工程文本默认从第 1 行读取 200 行，把返回的 `next_line` 作为下次 `offset`。文档通过 [受管 Shell 助手](../documents/README.md) 处理。
 
 默认没有整文件、原文、搜索匹配数或长行总额度。读取使用固定 64 KiB 字节块，严格增量 UTF-8 解码、完整 hash 与前后 FD 事实校验；默认 read 返回全部剩余行。宿主显式 `maxFileBytes` 可声明该宿主的单文件能力约束，未设置时不回退为旧 8 MiB。真实内存、磁盘、IO 与字符串表示能力仍可能局部失败，不把它们假装 Provider 窗口。二进制控制字节采样检查和严格 UTF-8 保留，BOM/CRLF 不规范化；search 不将已识别二进制当文本。
 

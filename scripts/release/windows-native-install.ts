@@ -41,7 +41,7 @@ import {
   unregisterNativeCLIWhileLocked,
   verifyCLIRegistrationTargetWhileLocked,
 } from './cli-registration';
-import { createWindowsNativeArchiveScratch, unpackNativeBundle } from './native-archive';
+import { createWindowsNativeArchiveScratch } from './native-archive';
 import type { InstalledNativeBundle } from './native-install';
 import { rejectBundleOutput } from './terminal-paths';
 import { copyWindowsCandidate } from './windows-candidate-copy';
@@ -359,13 +359,12 @@ export function installWindowsNativeBundle(
         stage = createWindowsNativeArchiveScratch(coordination.prefix);
         owner.retain(stage);
         try {
-          bundle = unpackNativeBundle({ ...input, destination: stage.destination });
+          bundle = stage.unpack(input);
         } catch (error) {
           if (error instanceof AggregateError && error.message === 'native_archive_close_unknown')
             owner.keep();
           throw error;
         }
-        stage.accept(bundle);
         if (id && bundle.digest !== id) denied('candidate_changed');
       }
       input.onPublish?.();

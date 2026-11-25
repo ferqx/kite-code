@@ -3,8 +3,10 @@ import { lstat, realpath } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import type { Json, ToolContext } from '@kite-ai/agent/extensions';
+import { dispatchScopeLeaves } from '@kite-ai/agent/permissions';
 import { inspectWorktreeExecutionRoot } from '@kite-ai/agent/shell';
 import type { SessionExecutionRoot } from '@kite-ai/agent/storage';
+import { planningSnapshotDigest } from './planning-configuration';
 
 const object = (value: unknown): Record<string, Json> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -116,25 +118,34 @@ export async function inspectWorktreeRootSelection(
   scope: { sessionId: string; executionId: string },
   sourceCwd: string,
 ) {
-  const selected = await resolveSessionExecutionRoot(runtime, scope);
-  if ((await realpath(sourceCwd)) !== selected.root) throw new AgentError('execution_root_changed');
-  const workspace = await runtime.getWorkspace(selected.binding.workspaceId);
-  if (!workspace) throw new AgentError('workspace_not_found');
-  let target: Awaited<ReturnType<typeof inspectExecutionRoot>>;
-  if (request.action === 'exit') target = await inspectExecutionRoot(workspace.rootUri);
-  else {
-    const verified = inspectWorktreeExecutionRoot(selected.root, request.path);
-    target = await inspectExecutionRoot(pathToFileURL(verified.path).href);
+  try {
+    const selected = await resolveSessionExecutionRoot(runtime, scope);
+    const workspace = await runtime.getWorkspace(selected.binding.workspaceId);
+    if (!workspace) throw new AgentError('workspace_not_found');
+    if (request.action === 'exit') {
+      if ((await realpath(sourceCwd)) !== selected.root)
+        throw new AgentError('execution_root_changed');
+      const original = await inspectExecutionRoot(workspace.rootUri);
+      return { source: selected.binding, target: { ...original, rootUri: workspace.rootUri } };
+    }
+    const verified = inspectWorktreeExecutionRoot(sourceCwd, request.path, selected.root);
+    const target = await inspectExecutionRoot(pathToFileURL(verified.path).href);
     if (
       target.identity.dev !== verified.identity.dev ||
       target.identity.ino !== verified.identity.ino
     )
       throw new AgentError('execution_root_changed');
+    return {
+      source: selected.binding,
+      target,
+      repositoryRevision: verified.repositoryRevision,
+    };
+  } catch (error) {
+    const errno = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errno === 'ENOENT' || errno === 'ENOTDIR') throw new AgentError('execution_root_changed');
+    if (errno === 'EACCES' || errno === 'EPERM') throw new AgentError('git_permission_denied');
+    throw error;
   }
-  return {
-    source: selected.binding,
-    target: { ...target, rootUri: request.action === 'exit' ? workspace.rootUri : target.rootUri },
-  };
 }
 
 export async function prepareWorktreeExecutionRoot(
@@ -142,7 +153,6 @@ export async function prepareWorktreeExecutionRoot(
   request: { action: 'use'; path: string } | { action: 'exit' },
   context: ToolContext,
   sourceCwd: string,
-  approvedSelection: Awaited<ReturnType<typeof inspectWorktreeRootSelection>>,
 ): Promise<Json> {
   const [session, actual, metadata] = await Promise.all([
     runtime.getSession(context.sessionId),
@@ -161,9 +171,30 @@ export async function prepareWorktreeExecutionRoot(
     throw new AgentError('execution_root_scope_mismatch');
   const ownerSession = await runtime.getSession(session.rootSessionId);
   if (!ownerSession?.ownerInstanceId) throw new AgentError('owner_changed');
+  const authorization = context.dispatchAuthorization;
+  if (!authorization?.revision) throw new AgentError('execution_root_authorization_unavailable');
+  // Match the fresh physical proof against the exact owned dispatch decision.
   const selection = await inspectWorktreeRootSelection(runtime, request, context, sourceCwd);
-  if (JSON.stringify(selection) !== JSON.stringify(approvedSelection))
-    throw new AgentError('execution_root_changed');
+  const expectedDigest = planningSnapshotDigest({
+    sourceCwd,
+    request,
+    selection,
+  } as unknown as Json);
+  for (const { namespace, data } of dispatchScopeLeaves(
+    authorization.snapshot,
+    'execution_root_authorization_unavailable',
+  )) {
+    const capability = object(data.capability);
+    if (
+      namespace !== 'builtin.permissions' ||
+      capability?.kind !== 'tool' ||
+      capability.definitionId !== 'git.worktree' ||
+      capability.definitionVersion !== '1' ||
+      capability.hardAllowed !== true ||
+      capability.commandDigest !== expectedDigest
+    )
+      throw new AgentError('execution_root_changed');
+  }
   const { source, target } = selection;
   context.signal.throwIfAborted();
   const result = await runtime.prepareSessionExecutionRoot({

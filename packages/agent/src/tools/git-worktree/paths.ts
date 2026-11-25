@@ -106,10 +106,16 @@ export function inspectPath(path: string, directory?: boolean): void {
           fail('unsafe_reparse_point', 'A Windows entry redirects to a different physical path.');
       } else fail('unsafe_reparse_point', 'The Windows entry has an unsupported or reparse type.');
     } catch (error) {
+      // Existing paths must still pass the native reparse check. A missing
+      // entry reported by lstat is not itself evidence of a reparse point.
+      const errno = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (errno === 'ENOENT' || errno === 'ENOTDIR') throw error;
+      const checked = normalizeWorktreeError(error);
+      if (checked.facts.failure && checked.code === 'git_permission_denied') throw checked;
       fail(
         'unsafe_reparse_point',
         'A Windows path or ancestor is a reparse point or could not be verified.',
-        { failure: normalizeWorktreeError(error).facts.failure },
+        { failure: checked.facts.failure },
       );
     }
   }

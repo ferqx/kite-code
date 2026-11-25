@@ -19,6 +19,7 @@ import { decodeNativeRequest } from '../electron/native-ipc';
 import type { NativeConversationResult, NativeDraft, NativeRequest } from '../src/native-bridge';
 import { desktopTranscript, NativeTranscriptProjection } from '../src/native-transcript';
 import { memoryPrivateData } from './private-data.fixture';
+import { getSelectionPermissions } from './selection-permissions.fixture';
 
 const text = 'first input\n雪🙂\u0000end';
 test('formal Native transcript preserves the explicit final-only copy contract for the exact completed Run', () => {
@@ -169,6 +170,7 @@ function fixture(protectMissingUserDirectory = false, savedText = text) {
       subjectId: 'user',
       capabilities: ['configuration_management', 'permission_controls'],
     },
+    getSelectionPermissions,
     connect: async () => ({}),
     async observe({ signal }: { signal: AbortSignal }) {
       await new Promise<void>((resolve) =>

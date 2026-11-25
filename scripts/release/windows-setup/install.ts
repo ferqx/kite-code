@@ -1,6 +1,6 @@
 import { dirname } from 'node:path';
 import { privateDirectory } from '../../../packages/agent/src/platform/windows-path-security';
-import { createWindowsNativeArchiveScratch, unpackNativeBundle } from '../native-archive';
+import { createWindowsNativeArchiveScratch } from '../native-archive';
 import {
   installWindowsNativeBundle,
   replaceWindowsNativeBundle,
@@ -75,13 +75,11 @@ function replaceDirectInstallation() {
   const stage = createWindowsNativeArchiveScratch(location!);
   try {
     progress.phase('decode');
-    const bundle = unpackNativeBundle({
+    const bundle = stage.unpack({
       archivePath: archivePath!,
       sha256: sha256!,
-      destination: stage.destination,
       ...archiveProgress,
     });
-    stage.accept(bundle);
     if (bundle.digest !== __KITE_SETUP_CANDIDATE__) throw Error('native_windows_candidate_changed');
     uninstallWindowsNativeBundle(location!, removing, removalProgress);
     privateDirectory(location!);

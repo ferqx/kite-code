@@ -15,6 +15,14 @@ type Root = {
   sources: Set<string>;
 };
 
+export function nativeOutputRecord(change: Change) {
+  if (change.type !== 'extension.record_updated') return null;
+  const prefix = /^builtin\.files\/(delivery|collection|output|output-index)\//.exec(
+    change.objectId,
+  );
+  return prefix && { kind: prefix[1]!, hasRecordId: change.objectId.length > prefix[0].length };
+}
+
 /** Observation invalidation only. These counters never grant access to a source or target. */
 export class NativeOutputDisplayVersions {
   private epoch = 0;
@@ -63,15 +71,11 @@ export class NativeOutputDisplayVersions {
     return revoked;
   }
 
-  changed(change: Change): boolean {
+  changed(change: Change, output = nativeOutputRecord(change)): boolean {
     const { type, sessionId, objectId } = change;
     const run = type === 'run.started' || type === 'run.finished' || type === 'run.interrupted';
-    const output =
-      type === 'extension.record_updated' &&
-      /^builtin\.files\/(delivery|collection|output|output-index)\//.test(objectId);
     const hint =
-      output &&
-      /^builtin\.files\/(delivery|collection)\//.test(objectId) &&
+      (output?.kind === 'delivery' || output?.kind === 'collection') &&
       change.payload &&
       typeof change.payload === 'object' &&
       !Array.isArray(change.payload)

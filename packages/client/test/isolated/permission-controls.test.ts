@@ -3,9 +3,11 @@ import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import {
   createClient,
+  type PermissionModeState,
   type PermissionMutation,
   type ServerInfo,
   type SetPermissionModeRequest,
+  type WorkspaceTrustState,
 } from '../../src';
 
 const profile = { dataRoot: '/chosen/permission-test', name: 'new', accessKey: 'fixture-key' };
@@ -40,7 +42,7 @@ const applied: PermissionMutation = {
     defaultRevision: '9007199254740994',
   },
 };
-const initial = {
+const initial: PermissionModeState = {
   storeId: 'store',
   sessionId: 's',
   scopeSessionId: 's',
@@ -127,6 +129,119 @@ test('permission operations need admission/capability/original Store and validat
     expect(supported.requests).toHaveLength(1);
   } finally {
     supported.close();
+  }
+});
+
+const observedTrust: WorkspaceTrustState = {
+  storeId: 'store',
+  workspaceId: 'w',
+  status: 'trusted',
+  trusted: true,
+  revision: large,
+  canonicalIdentity: 'a'.repeat(64),
+  externalReadScopeDigest: 'b'.repeat(64),
+  readScopes: [{ kind: 'workspace', description: 'Observed scope' }],
+};
+
+test('selected mode and trust share one fresh connection check on each side of parallel fact reads', async () => {
+  const both = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const facts = new Set<string>();
+  let activeIdentity = identity;
+  const f = fixture(async (request) => {
+    const { pathname, searchParams } = new URL(request.url);
+    if (pathname === '/v1/server') return Response.json(activeIdentity);
+    expect(searchParams.get('storeId')).toBe('store');
+    facts.add(pathname);
+    if (facts.size === 2) both.resolve();
+    await release.promise;
+    return Response.json(pathname.endsWith('/trust') ? observedTrust : initial);
+  });
+  try {
+    await f.client.connect();
+    f.requests.length = 0;
+    const waiting = f.client.getSelectionPermissions('s', 'w', { storeId: 'store' });
+    await both.promise;
+    expect(f.requests[0]?.path).toBe('/v1/server');
+    expect(
+      f.requests
+        .slice(1)
+        .map(({ path }) => path)
+        .sort(),
+    ).toEqual(['/v1/sessions/s/permission-mode', '/v1/workspaces/w/trust']);
+    release.resolve();
+    expect(await waiting).toEqual({ mode: initial, trust: observedTrust });
+    expect(f.requests).toHaveLength(4);
+    expect(f.requests[3]?.path).toBe('/v1/server');
+
+    // A later pair must establish its own connection identity before any fact read.
+    activeIdentity = { ...identity, storeId: 'different' };
+    await rejected(
+      f.client.getSelectionPermissions('s', 'w', { storeId: 'store' }),
+      'store_identity_mismatch',
+    );
+    expect(f.requests).toHaveLength(5);
+    expect(f.requests[4]?.path).toBe('/v1/server');
+  } finally {
+    release.resolve();
+    f.close();
+  }
+});
+
+test('a paired read rejects wrong resource identity, changed connection after the facts, and late cancellation', async () => {
+  const both = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const paths = new Set<string>();
+  let checks = 0;
+  let scenario: 'wrong-scope' | 'wrong-fence' | 'cancelled' = 'wrong-scope';
+  const f = fixture(async (request) => {
+    const path = new URL(request.url).pathname;
+    if (path === '/v1/server') {
+      const instanceId =
+        scenario === 'wrong-fence' && ++checks === 2 ? 'replaced' : identity.instanceId;
+      return Response.json({ ...identity, instanceId });
+    }
+    if (scenario === 'cancelled') {
+      paths.add(path);
+      if (paths.size === 2) both.resolve();
+      await release.promise;
+    }
+    if (path.endsWith('/trust'))
+      return Response.json({
+        ...observedTrust,
+        workspaceId: scenario === 'wrong-scope' ? 'other' : 'w',
+      });
+    return Response.json(initial);
+  });
+  try {
+    await f.client.connect();
+    await rejected(
+      f.client.getSelectionPermissions('s', 'w', { storeId: 'store' }),
+      'permission_scope_mismatch',
+    );
+    scenario = 'wrong-fence';
+    await rejected(
+      f.client.getSelectionPermissions('s', 'w', { storeId: 'store' }),
+      'connection_identity_mismatch',
+    );
+    scenario = 'cancelled';
+    f.requests.length = 0;
+    const controller = new AbortController();
+    const reason = Error('retired selection');
+    const waiting = f.client
+      .getSelectionPermissions('s', 'w', {
+        storeId: 'store',
+        signal: controller.signal,
+      })
+      .catch((error: unknown) => error);
+    await both.promise;
+    controller.abort(reason);
+    release.resolve();
+    expect(await waiting).toBe(reason);
+    expect(f.requests.filter(({ path }) => path === '/v1/server')).toHaveLength(1);
+  } finally {
+    release.resolve();
+    f.close();
   }
 });
 

@@ -100,6 +100,200 @@ test('explicit pending page replaces window; closed IPC grants no answer/cancel 
   expect(() => decodeNativeRequest({ method: 'interactions.close', generation: 1 })).toThrow();
 });
 
+test('Native finds the current attached Shell approval beyond the first page using the original work', async () => {
+  const finishFirstLookup = Promise.withResolvers<void>();
+  const preferredPublished = Promise.withResolvers<void>();
+  const finishRetiredLookup = Promise.withResolvers<void>();
+  let lookupGate = finishFirstLookup.promise;
+  let nextSnapshot = '10';
+  let attached = true;
+  let laterReads = 0;
+  const current = {
+    ...card('b'),
+    runId: null,
+    executionId: 'job',
+    definitionId: 'shell.command',
+  };
+  const f = fixture(async () => {
+    laterReads++;
+    await lookupGate;
+    return { interactions: [current], nextAfterId: null };
+  });
+  const list = f.client.listInteractions.bind(f.client);
+  f.client.listInteractions = async (...args) => {
+    const page = await list(...args);
+    return args[1].afterId ? { ...page, snapshotCursor: nextSnapshot } : page;
+  };
+  f.client.getView = async (id) =>
+    id !== 's'
+      ? view(id)
+      : {
+          ...view(),
+          runs: [
+            {
+              id: 'run-current',
+              sessionId: 's',
+              originCommandId: 'start',
+              originStoreId: 'store',
+              rootWorkCommandId: 'start',
+              rootWorkSeq: '1',
+              isActive: true,
+              status: 'running',
+              createdAt: 1,
+              finishedAt: null,
+              reason: null,
+            },
+          ],
+          executions: [
+            {
+              id: 'tool',
+              kind: 'tool',
+              definitionId: 'shell.execute',
+              definitionVersion: '1',
+              status: 'running',
+              runId: 'run-current',
+              originStoreId: 'store',
+              sessionId: 's',
+              rootWorkCommandId: 'start',
+              rootWorkSeq: '1',
+              result: null,
+              resultRevision: '0',
+              cancelRequestedAt: null,
+            },
+            {
+              id: 'job',
+              kind: 'job',
+              definitionId: 'shell.command',
+              definitionVersion: '1',
+              status: 'planned',
+              runId: null,
+              originStoreId: 'store',
+              sessionId: 's',
+              rootWorkCommandId: 'start',
+              rootWorkSeq: '1',
+              parentExecutionId: 'tool',
+              cancelWithParent: attached,
+              result: null,
+              resultRevision: '0',
+              cancelRequestedAt: null,
+            },
+          ],
+        };
+  const controller = createDesktopController({
+    admittedClient: f.client,
+    lightweightSessionState: true,
+    onSnapshot(snapshot) {
+      if (
+        snapshot.interactionsAfterId === 'a' &&
+        snapshot.interactions.some(({ id }) => id === 'b')
+      )
+        preferredPublished.resolve();
+    },
+  });
+  try {
+    await controller.selectSession('s');
+    expect(controller.snapshot?.interactions.map((c) => c.id)).toEqual(['a']);
+    expect(laterReads).toBe(1);
+    finishFirstLookup.resolve();
+    await preferredPublished.promise;
+    expect(controller.snapshot?.interactions.map((c) => c.id)).toEqual(['a', 'b']);
+    expect(controller.snapshot?.interactionsAfterId).toBe('a');
+    expect(laterReads).toBe(1);
+    await controller.nextInteractionPage(controller.snapshot!.generation, 'a');
+    expect(controller.snapshot?.interactions.map((c) => c.id)).toEqual(['b']);
+
+    nextSnapshot = '11';
+    await controller.selectSession('s');
+    expect(controller.snapshot?.interactions.map((c) => c.id)).toEqual(['a']);
+    expect(laterReads).toBe(3);
+    attached = false;
+    nextSnapshot = '10';
+    await controller.selectSession('s');
+    expect(controller.snapshot?.interactions.map((c) => c.id)).toEqual(['a']);
+    expect(laterReads).toBe(3);
+    expect(f.posts()).toBe(0);
+
+    attached = true;
+    lookupGate = finishRetiredLookup.promise;
+    await controller.selectSession('s');
+    expect(laterReads).toBe(4);
+    await controller.selectSession('other');
+    finishRetiredLookup.resolve();
+    await Bun.sleep(0);
+    expect(controller.snapshot?.sessionId).toBe('other');
+    expect(controller.snapshot?.interactions).toEqual([]);
+  } finally {
+    finishFirstLookup.resolve();
+    finishRetiredLookup.resolve();
+    controller.disposeNetwork();
+    f.controller.disposeNetwork();
+  }
+});
+
+test('a current question is admitted without looking through older approval pages', async () => {
+  let laterReads = 0;
+  const question = {
+    ...card('a'),
+    kind: 'question',
+    definitionId: 'tools.ask_user',
+    executionId: 'question',
+    runId: 'current',
+  } satisfies Interaction;
+  const f = fixture(async () => {
+    laterReads++;
+    return { interactions: [], nextAfterId: null };
+  });
+  const list = f.client.listInteractions.bind(f.client);
+  f.client.listInteractions = async (...args) =>
+    args[1].afterId
+      ? list(...args)
+      : { interactions: [question], nextAfterId: question.id, snapshotCursor: '10' };
+  f.client.getView = async () => ({
+    ...view(),
+    runs: [
+      {
+        id: 'current',
+        sessionId: 's',
+        originCommandId: 'start',
+        originStoreId: 'store',
+        isActive: true,
+        status: 'waiting_interaction',
+        createdAt: 1,
+        finishedAt: null,
+        reason: null,
+      },
+    ],
+    executions: [
+      {
+        id: question.executionId,
+        sessionId: 's',
+        originStoreId: 'store',
+        runId: 'current',
+        kind: 'tool',
+        definitionId: question.definitionId,
+        definitionVersion: question.definitionVersion,
+        status: 'running',
+        cancelRequestedAt: null,
+        result: null,
+        resultRevision: '0',
+        authorization: { dispatched: true },
+      },
+    ],
+  });
+  const controller = createDesktopController({
+    admittedClient: f.client,
+    lightweightSessionState: true,
+    onSnapshot() {},
+  });
+  try {
+    expect((await controller.selectSession('s'))?.interactions).toEqual([question]);
+    expect(laterReads).toBe(0);
+  } finally {
+    controller.disposeNetwork();
+    f.controller.disposeNetwork();
+  }
+});
+
 test('event refresh re-reads the current later window with fresh revision; explicit select and scope drift reset it', async () => {
   let revision = '0';
   const f = fixture(async () => ({

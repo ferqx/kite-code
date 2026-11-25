@@ -1,4 +1,5 @@
 import type { ArtifactRef, PublicExecution, ReadContext, ToolContext } from '../../extensions';
+import type { SessionExecutionRoot } from '../../storage/types';
 import type { FileBaseline } from '../../tools/files';
 
 export interface FileCheckpointBoundary {
@@ -39,7 +40,11 @@ export interface FileCheckpointRecoveryBoundary {
   trigger: { messageId: string; seq: string };
 }
 export interface FileCheckpointOptions {
-  workspace: { id: string; root: string };
+  workspace: {
+    id: string;
+    root: string;
+    expectedIdentity?: NonNullable<SessionExecutionRoot['identity']>;
+  };
   maxBytes: number;
   protectedPaths: readonly string[];
   /** Trusted host opt-in: ordinary read/list/search/glob and mutations share the protected scope. */

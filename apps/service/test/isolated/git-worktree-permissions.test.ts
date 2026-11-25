@@ -199,7 +199,10 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
     }
     if (scenario === 'parent-worker-auto' || scenario === 'parent-worker-manual')
       return [
-        { name: 'spawn_agent', arguments: { prompt: `WORKTREE_WRITABLE:${scenario.slice(14)}` } },
+        {
+          name: 'spawn_agent',
+          arguments: { task_name: scenario, message: `WORKTREE_WRITABLE:${scenario.slice(14)}` },
+        },
       ];
     if (scenario === 'auto-list') return [{ name: 'git_worktree', arguments: { action: 'list' } }];
     if (scenario === 'auto-create')
@@ -252,7 +255,11 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
       return [
         {
           name: 'spawn_agent',
-          arguments: { preset: scenario.slice(7), prompt: `WORKTREE_CHILD:${scenario.slice(7)}` },
+          arguments: {
+            task_name: scenario,
+            agent_type: scenario.slice(7),
+            message: `WORKTREE_CHILD:${scenario.slice(7)}`,
+          },
         },
       ];
     if (scenario.startsWith('child-'))

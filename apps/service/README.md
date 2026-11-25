@@ -12,9 +12,13 @@
 
 [执行根解析](src/session-execution-root.ts)以 Store 的 Session／epoch 与实际目录 dev/ino 为可信根，不改共享 Workspace。使用工作树只切执行目录，会话仍属于原空间并保留在原空间会话列表中，Session ID 与父子身份不变；exit 返回原空间的原始目录，不迁移会话。明确 `git_worktree use/exit` 由[Host](src/worktree-host.ts)绑定原 Tool；目标审批前核同仓库 linked 指针，执行前重验。Tool 成功与根变更在同一持久事务提交，下一 step 重装 Files、Shell、项目指令、权限及检查点。创建通知、Shell workdir、客户端阅读导航没有这种 authority。
 
+工作树选择沿用列表及创建的已授权仓库核验。`use` 在批准前绑定源与目标的实际仓库和目录身份，派发时用相同证据复核。源仓库、目标登记和路径变化的核验错误沿原工具回执返回。 [工作树 owner](../../packages/agent/src/tools/git-worktree/README.md)
+
 [默认装配](src/configuration.ts)按根 epoch 缓存整套 binding；每个历史 assembly 活到原 Run 和已派发 Job lease 都释放，不在切根时销毁。权限用实际请求的 Session／Execution 根分类，包括父策略约束子请求；原模型恢复只读其封存根。配置与工具上限仍取原 Run，新的工作区指令不授新工具。删除占用读取还核当前执行根、待提交使用目标及未终态 Job 历史根；任何读取不完整／身份变化拒绝删除。检查点按物理根隔离，具体恢复合同归 [Files owner](../../packages/agent/src/business/file-checkpoints/README.md)。集成断言见[同轮显式切换测试](test/isolated/session-execution-root.test.ts)，不从受控模型推定真实客户端全过程或其他平台资格。
 
 Native 只读 `GET /v1/sessions/:id/execution-root` 复用同一解析器，核调用者固定的 Store／Session／原 Workspace 后返回当前物理目录和含 epoch／目录身份的 revision。它不采用历史工具消息或 renderer 路径，不改变会话归属；拒绝 Origin，不进入 Cookie Browser facade。目录被替换或根发生漂移时明确失败，不回退原项目。读取不写 Store，响应禁止缓存；[HTTP／SQLite 回归](test/isolated/session-execution-root-http.test.ts)覆盖已提交 use／exit、同路径新 epoch、归属不变及失效目录拒绝。
+
+2026-11-25，Windows x64／Bun 1.4.4 的[同轮回归](test/isolated/session-execution-root.test.ts)通过 2 项 47 个断言。模型端使用本地固定 SSE。流程通过原生 Git 创建、列出和切换合成工作树，通过 Files 读取源码，经受管 Shell 处理 CSV 与 PDF，再退出并读回原目录。提取文字与渲染阶段的请求仅包含文本和路径，显式查看 PNG 后才接收页图。另核未登记目标的派发拒绝、派发摘要不符及同路径目录替换均无法提交新执行根。 [子 Agent 权限回归](test/isolated/git-worktree-permissions.test.ts)
 
 ## Trajectory 与独立 Trace 消费
 
@@ -36,7 +40,7 @@ Native 只读 `GET /v1/sessions/:id/execution-root` 复用同一解析器，核�
 
 `input_files` 能力通过现有受认证 Session 路由提供流式二进制上传、稳定导入查询与释放；参数与响应进入同源 schema／生成 SDK。上传上限 256 MiB，完整 SHA／size 核验后才返回准确原件引用，正式输入绑定仍由原 Command 事务负责。缺失能力不伪装为上传成功，旧 URI 输入继续保持原含义。
 
-默认 Files 装配依次组合工作区检查点、只读输入、Plan owner 协调与会话输出；请求分类和 execute 使用同一准确目标 revision，不放开整个 Profile。PDF 解析在独立 Worker，工具页图经 Artifact 和 Runtime 进入后继模型。具体文件、权限、Plan 与维护合同归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)与[维护](../../packages/agent/src/maintenance/README.md)；[真实默认宿主联验](test/isolated/planning-configuration.test.ts)覆盖这些交接，完整客户端和安装验收不从该测试推定。
+默认 Files 装配依次组合工作区检查点、只读输入、Plan owner 协调与会话输出；请求分类和 execute 使用同一准确目标 revision，不放开整个 Profile。`read_file` 限于源码与工程文本。PDF 和其他文档通过受管 Shell 处理，上传文档使用已准备的工作区副本。PDF 页图在 `view_images` 显式读取时通过原 Artifact 和 Runtime 交接。 [Files](../../packages/agent/src/tools/files/README.md) · [文档助手](../../packages/agent/src/tools/documents/README.md) · [默认宿主联验](test/isolated/planning-configuration.test.ts)
 
 [最终 Files 目录装配](src/file-checkpoint-configuration.ts)统一英文工具与 path 说明：三种模式均支持普通外部读取、写入和编辑，请求批准先人批，有效 Full 直接授权；Auto 普通工作区读取免模型审核，普通外部文本隔离读取后仅对存在正文审核释放，缺失直接反馈；写入／编辑仍经自动审核；获准且可安全编辑的外部读取才有完整基线。准确附件和当前计划仍保专用范围，参数语义和版本不变；Files 批准不授予其他工具权限，Shell 的独立请求仍经过自身策略和原任务限制。普通文件确定缺失以成功观察及 `exists:false` 进入下一模型，不造正文或基线；私有文件缺失、保护失败与损坏不因此降成正常观察。[三模式目录及结果回归](test/isolated/full-external-files.test.ts)核实际默认装配和下一模型交接；UI 与真实模型资格另由实际观察及原测试记录说明。
 
@@ -445,7 +449,7 @@ resolver 返回每 Run 的 `extensions`、`sources` 与 `dispose`。项目来源
 
 同一装配支持三种权限模式下的普通外部 `write_file`／`edit_file`，不增工具版本；请求批准先人批，Auto 先自动审核，Full 按有效权限直接执行。权限 refinement 接收 Agent 本次已读取并校验的 policy 隔离副本，普通与 Planning 链均透传，Service 不另读根偏好决定外写。执行与描述优先匹配会话输出、当前 Plan 和准确输入文件，再走通用外部文件与原外部只读适配；私有例外不被通用外部能力接管。外部适配独立核最终证明的所有权限叶及目标 revision，保留 trust、父子／计划／工具集合和受保护资源限制；可安全编辑的外部读提供 baseline，外部变化不进入 Workspace checkpoint。当前源码与确定性边界见[适配器](../../packages/agent/src/tools/full-access-files.ts)、[权限 owner](../../packages/agent/src/permissions/README.md)及[默认 Service 回归](test/isolated/full-external-files.test.ts)，真实模型结果单独记录。
 
-默认装配把 Agent `filesNativeAssets()` 的加载器及整个 Node-API companion 纳入原 runtime assets，普通读取、外部路径和 checkpoint／restore 共用该保护。它只来自可信 public entry，JSONC／HTTP／Model 不能重标；Full 仍在 adapter 前拒绝。原[真实 Service 验证](test/isolated/files-native-boundary.test.ts)经 compatible SDK 与实际 Runtime 核普通外部文件可读、加载器／manifest／目录内新建拒绝和零写入，不冒称安装版或任意未运行平台资格。
+默认装配把 Agent `filesNativeAssets()` 的加载器及整个 Node-API companion 纳入原 runtime assets，普通读取、外部路径和 checkpoint／restore 共用该保护。它只来自可信 public entry，JSONC／HTTP／Model 不能重标；Full 仍在 adapter 前拒绝。Windows 普通工作区读取的快速核验和实际文件操作都在持有根与祖先原生句柄期间，用 Bun `lstat` 复核会话执行根身份。原生卷标识与 File ID 继续用于原生文件身份和编辑基线。 [真实 Service 验证](test/isolated/files-native-boundary.test.ts)
 
 当前selected history按实际selection/upper完整分页；8192 Messages、64MiB累计来源证明、8MiB单页超限明确拒绝。历史capture verification改由私有`readOriginalRunSelection`从actual Run/Command pin读取当时选择，再按原trigger上界读取完整历史；当前point资格另核current selection。同Session保全Messages但换ID不会误拒旧点，排除trigger仍unavailable。已发布compression逐层核完整input/output/origin，前缀仅定位候选，真实User碰撞不被排除。生成摘要指令只按唯一准确 `sourceIds=[compressionId]` 及 user 身份从完整原输入定位；项目／Runtime 尾部来源不冒充该指令，不假设它位于最后，也不移除其他真实 User 或碰撞正文。restore逐项核原Source、Artifact EOF/hash/size及真实postbaseline；v2 journal/effect ledger保实际新inode或确认missing，v1只读不回填。默认full仍独立人类Ask，不继承原Tool/旧Store授权；原ID/cold只读原journal/carrier。
 

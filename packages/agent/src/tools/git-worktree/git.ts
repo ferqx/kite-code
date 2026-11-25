@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import {
   gitCommandFailure,
   processEventFailure,
   processStartFailure,
   type WorktreeFailure,
 } from './errors';
+import { inspectWorktreeSource, sameWorktreeRepositoryAnchor } from './execution-root';
 import {
   canonicalDirectory,
   exists,
@@ -148,6 +149,7 @@ export function parseWorktrees(bytes: Buffer, sourceRoot: string): ListedWorktre
 export class Git {
   private readonly env: NodeJS.ProcessEnv;
   private readonly signal?: AbortSignal;
+  private readonly repositoryAnchors = new Map<string, ReturnType<typeof inspectWorktreeSource>>();
   readonly path: string;
   readonly hooksPath: string;
   constructor(path: string, expectedSha: string, hooksPath: string, signal?: AbortSignal) {
@@ -227,6 +229,26 @@ export class Git {
       env[`GIT_CONFIG_KEY_${index}`] = key;
       env[`GIT_CONFIG_VALUE_${index}`] = value;
     });
+    const bound = this.repositoryAnchors.get(this.anchorKey(cwd));
+    if (bound && !options.location) {
+      const ceiling = dirname(bound.root);
+      if (ceiling.includes(delimiter))
+        fail('worktree_root_unverifiable', 'Git cannot represent this checkout boundary safely.');
+      // Preserve Git's own repository and safe.directory checks. The parent
+      // is an exclusive ceiling, including if the original .git disappears.
+      env.GIT_CEILING_DIRECTORIES = ceiling;
+      if (
+        !sameIdentity(bound.rootIdentity, identity(bound.root), false) ||
+        !sameIdentity(bound.gitIdentity, identity(bound.gitDir), false) ||
+        !sameIdentity(bound.commonIdentity, identity(bound.commonDir), false) ||
+        (bound.kind === 'linked' &&
+          !sameIdentity(bound.markerIdentity, identity(join(bound.root, '.git'))))
+      )
+        fail(
+          'worktree_root_changed',
+          'The verified source checkout or its Git registration changed.',
+        );
+    }
     const argv = [
       '--no-replace-objects',
       '--no-lazy-fetch',
@@ -329,14 +351,25 @@ export class Git {
       text = utf8(result.stdout);
     return text.endsWith('\n') ? text.slice(0, -1) : text;
   }
-  async repository(cwd: string): Promise<Repository> {
-    const capability = await this.run(cwd, ['--version'], { allowFailure: true });
+  private anchorKey(path: string) {
+    const canonical = resolve(path);
+    return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
+  }
+  async repository(source: string, authorizedRoot = source): Promise<Repository> {
+    const capability = await this.run(source, ['--version'], { allowFailure: true });
     if (capability.exitCode !== 0)
       fail(
         'unsupported_git_version',
         'The trusted Git must support --no-lazy-fetch; install a supported Git without removing the safety flags.',
         { failure: capability.failure },
       );
+    const anchor = inspectWorktreeSource(source, authorizedRoot);
+    const cwd = anchor.root;
+    const key = this.anchorKey(cwd);
+    const previous = this.repositoryAnchors.get(key);
+    if (previous && !sameWorktreeRepositoryAnchor(previous, anchor))
+      fail('worktree_root_changed', 'The original checkout registration changed.');
+    this.repositoryAnchors.set(key, anchor);
     const probe = await this.run(cwd, ['rev-parse', '--is-bare-repository'], {
       allowFailure: true,
     });
@@ -350,6 +383,8 @@ export class Git {
     if (!['true\n', 'false\n'].includes(bareText))
       fail('worktree_protocol_error', 'Git returned an invalid repository classification.');
     const bare = bareText === 'true\n';
+    if (bare !== (anchor.kind === 'bare'))
+      fail('worktree_repository_mismatch', 'Git did not recognize the verified checkout type.');
     const gitDir = canonicalDirectory(
       await this.text(cwd, ['rev-parse', '--path-format=absolute', '--git-dir']),
     );
@@ -361,6 +396,14 @@ export class Git {
       : canonicalDirectory(
           await this.text(cwd, ['rev-parse', '--path-format=absolute', '--show-toplevel']),
         );
+    if (
+      !samePath(root, anchor.root) ||
+      !samePath(gitDir, anchor.gitDir) ||
+      !samePath(commonDir, anchor.commonDir)
+    )
+      fail('worktree_repository_mismatch', 'Git did not resolve to the authorized checkout.');
+    if (!sameWorktreeRepositoryAnchor(anchor, inspectWorktreeSource(source, authorizedRoot)))
+      fail('worktree_root_changed', 'The source registration changed during repository discovery.');
     return {
       root,
       gitDir,
@@ -377,6 +420,9 @@ export class Git {
         'worktree_protocol_error',
         'Git reported an incomplete or anomalous worktree registration read.',
       );
+    const bound = this.repositoryAnchors.get(this.anchorKey(repository.root));
+    if (!bound || !sameWorktreeRepositoryAnchor(bound, inspectWorktreeSource(repository.root)))
+      fail('worktree_root_changed', 'The source registration changed during the inventory read.');
     return parseWorktrees(result.stdout, repository.root);
   }
   async configuration(

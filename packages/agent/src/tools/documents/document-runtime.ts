@@ -9,7 +9,7 @@ export const documentFontAsset = {
   sha256: 'd68bafcb48a2707749396aa12bbbd833cb70401f3a9a689fd2902c7e0d295964',
 };
 
-function documentAsset(name: string) {
+export function documentAsset(name: string) {
   const here = dirname(fileURLToPath(import.meta.url));
   return [
     join(here, name),

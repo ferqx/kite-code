@@ -80,10 +80,10 @@ export function createWindowsNativeArchiveScratch(prefix: string) {
   let released = false;
   const owner = {
     root,
-    destination,
-    accept(bundle: ReturnType<typeof verifyNativeRuntimeBundle>) {
-      if (released || bundle.root !== destination || inventory)
-        throw Error('native_archive_scratch_unknown');
+    unpack(input: Omit<Parameters<typeof unpackNativeBundle>[0], 'destination'>) {
+      if (released || inventory) throw Error('native_archive_scratch_unknown');
+      const bundle = unpackNativeBundle({ ...input, destination });
+      if (bundle.root !== destination) throw Error('native_archive_scratch_unknown');
       inventory = closedWindowsTree(
         [
           'candidate/native-manifest.json',
@@ -98,6 +98,7 @@ export function createWindowsNativeArchiveScratch(prefix: string) {
           ),
         ],
       );
+      return bundle;
     },
     publishTo(target: string) {
       if (released || !inventory || removal) throw Error('native_archive_scratch_unknown');

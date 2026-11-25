@@ -474,7 +474,11 @@ export function createDefaultFileCheckpointConfiguration(options: {
     async (context) => {
       const bound = await scope(context);
       return createFileCheckpointing({
-        workspace: { id: bound.workspace.id, root: bound.root },
+        workspace: {
+          id: bound.workspace.id,
+          root: bound.root,
+          expectedIdentity: bound.executionRoot.identity!,
+        },
         maxBytes,
         protectedPaths: await protectedPaths(bound.root, options.profile, options.runtimeAssets()),
         protectReads: true,
@@ -955,9 +959,6 @@ export function createDefaultFileCheckpointConfiguration(options: {
           const input = object(request.input);
           if (
             typeof input?.path !== 'string' ||
-            input.path.toLowerCase().endsWith('.pdf') ||
-            input.pages !== undefined ||
-            input.mode !== undefined ||
             (await images.describeRequest(request)) ||
             (await planFiles.describeRequest(request)) ||
             (await inputFiles.describeRequest(request)) ||
@@ -965,26 +966,28 @@ export function createDefaultFileCheckpointConfiguration(options: {
           )
             return null;
           const { binding, root } = await resolveSessionExecutionRoot(options.runtime(), request);
+          const protectedRoots = await protectedPaths(
+            root,
+            options.profile,
+            options.runtimeAssets(),
+          );
+          request.signal.throwIfAborted();
           const native = createWorkspaceFiles({
             root,
+            expectedRootIdentity: binding.identity!,
             protectReads: true,
-            protectedPaths: await protectedPaths(root, options.profile, options.runtimeAssets()),
+            protectedPaths: protectedRoots,
           });
           try {
             const path = native.relativePath(input.path);
             if (!path || path.toLowerCase().split('/').includes('.kite-inputs')) return null;
-            const physical = await native.inspectRootIdentity?.();
-            if (
-              physical?.device !== binding.identity?.dev ||
-              physical?.inode !== binding.identity?.ino
-            )
-              throw new AgentError('execution_root_changed');
             await native.inspectIdentity(path);
             request.signal.throwIfAborted();
             return { root: binding, path: resolve(root, path) };
           } catch (error) {
             request.signal.throwIfAborted();
-            if (error instanceof AgentError && error.code === 'execution_root_changed') throw error;
+            if (error instanceof AgentError && error.code === 'file_root_changed')
+              throw new AgentError('execution_root_changed');
             // Preserve the normal route and its own failure for unproven paths.
             return null;
           } finally {
@@ -999,10 +1002,6 @@ export function createDefaultFileCheckpointConfiguration(options: {
             (await inputFiles.describeRequest(request))
           )
             return null;
-          // Keep PDF-option validation and its recovery result in the input adapter.
-          // A private ordinary-file snapshot must not bypass that wrapper.
-          const input = object(request.input);
-          if (input?.pages !== undefined || input?.mode !== undefined) return null;
           return fullAccessFiles.prepareRead(request, decision);
         },
       } satisfies TrustedToolBehavior,

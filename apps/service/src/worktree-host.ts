@@ -149,7 +149,6 @@ export async function readOnlyWorktreeBoundary(
 
 /** Reads existing authority only. No worktree inventory or occupation lease is created. */
 export function createWorktreeHost(readRuntime: () => AgentRuntime | undefined) {
-  const selections = new Map<string, Awaited<ReturnType<typeof inspectWorktreeRootSelection>>>();
   return {
     async describeExecutionRoot(
       request: { action: 'use'; path: string } | { action: 'exit' },
@@ -158,9 +157,12 @@ export function createWorktreeHost(readRuntime: () => AgentRuntime | undefined) 
     ) {
       const runtime = readRuntime();
       if (!runtime) throw new AgentError('execution_root_unavailable');
-      const value = await inspectWorktreeRootSelection(runtime, request, scope, sourceCwd);
-      selections.set(scope.executionId, value);
-      return value as unknown as Json;
+      return (await inspectWorktreeRootSelection(
+        runtime,
+        request,
+        scope,
+        sourceCwd,
+      )) as unknown as Json;
     },
     async prepareExecutionRoot(
       request: { action: 'use'; path: string } | { action: 'exit' },
@@ -169,13 +171,7 @@ export function createWorktreeHost(readRuntime: () => AgentRuntime | undefined) 
     ) {
       const runtime = readRuntime();
       if (!runtime) throw new AgentError('execution_root_unavailable');
-      const approved = selections.get(context.executionId);
-      if (!approved) throw new AgentError('execution_root_authorization_unavailable');
-      try {
-        return await prepareWorktreeExecutionRoot(runtime, request, context, sourceCwd, approved);
-      } finally {
-        selections.delete(context.executionId);
-      }
+      return await prepareWorktreeExecutionRoot(runtime, request, context, sourceCwd);
     },
     async readRegisteredWorkspaceRoots() {
       const runtime = readRuntime();

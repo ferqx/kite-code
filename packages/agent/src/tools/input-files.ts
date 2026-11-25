@@ -8,18 +8,26 @@ import type { CapabilityDescription } from '../permissions';
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import type { InputFileImport } from '../storage/input-file-imports';
 import { AgentError, type Json } from '../storage/types';
-import { pdfPages, readPdfToolResult } from './documents/read-tool';
 import { createWorkspaceFiles, type WorkspaceFiles } from './files';
-import { createFileTools } from './files-tools';
+import { isEngineeringTextPath, unsupportedFileRead } from './files/read-scope';
+import { createFileReadResult } from './files-tools';
 
 type InputReadRequest = Pick<AuthorizationRequest, 'sessionId' | 'executionId' | 'signal'>;
-const isPdf = (input: InputFileImport) =>
-  input.reference.mediaType === 'application/pdf' || input.name.toLowerCase().endsWith('.pdf');
-
-const pdfReadRecovery: Readonly<Record<string, string>> = {
-  pdf_options_require_pdf: 'This file is not a PDF. Use optional offset and limit to read text.',
-  pdf_requires_page_range: 'Use pages for this PDF. Omit offset and limit.',
+const documentExtensions: Readonly<Record<string, string>> = {
+  'application/pdf': '.pdf',
+  'text/csv': '.csv',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
 };
+function inputName(input: InputFileImport) {
+  const extension = documentExtensions[input.reference.mediaType];
+  return extension ? `attachment${extension}` : input.name;
+}
 
 /** Trusted exact-target adapter. It grants no directory capability to ordinary file tools. */
 export function withInputFileReads(options: {
@@ -74,29 +82,25 @@ export function withInputFileReads(options: {
     } else {
       const candidate = workingPath(input);
       if (!candidate || !options.resolveWorking) return null;
-      const params = input as Record<string, Json>;
-      const requestsPdf =
-        candidate.toLowerCase().endsWith('.pdf') ||
-        params.pages !== undefined ||
-        params.mode !== undefined;
+      const engineeringPath = isEngineeringTextPath(candidate);
       path = isAbsolute(candidate)
         ? candidate
         : options.workspaceRoot
           ? resolve(await options.workspaceRoot(request), candidate)
           : '';
       if (!path) {
-        if (requestsPdf) throw new AgentError('input_file_scope_denied');
+        if (!engineeringPath) throw new AgentError('input_file_scope_denied');
         return null;
       }
       const binding = await options.resolveWorking(request, pathToFileURL(path).href);
       request.signal.throwIfAborted();
       if (!binding) {
-        if (requestsPdf) throw new AgentError('input_file_scope_denied');
+        if (!engineeringPath) throw new AgentError('input_file_scope_denied');
         return null;
       }
       imported = binding.imported;
       // A normal editable text read must still observe the current working copy.
-      if (!isPdf(imported) && params.pages === undefined && params.mode === undefined) return null;
+      if (engineeringPath && isEngineeringTextPath(inputName(imported))) return null;
       const working = binding.working;
       const files = createWorkspaceFiles({
         root: fileURLToPath(working.workspaceRootUri),
@@ -120,10 +124,7 @@ export function withInputFileReads(options: {
       } finally {
         await files.close();
       }
-      // The working path locates the binding; parsing a saved attachment still
-      // reads and verifies its private immutable original, not the mutable copy.
-      anchor = pathOf({ path: fileURLToPath(imported.uri) }) ?? '';
-      if (!anchor) throw new AgentError('input_file_scope_denied');
+      anchor = path;
     }
     const revision = `input-file:1:${createHash('sha256')
       .update(
@@ -137,7 +138,7 @@ export function withInputFileReads(options: {
         } as unknown as Json),
       )
       .digest('hex')}`;
-    return { path, anchor, imported, revision };
+    return { path, anchor, imported, revision, savedAttachment: direct !== null };
   }
   function verify(context: ToolContext, revision: string) {
     if (!context.dispatchAuthorization?.revision)
@@ -206,14 +207,12 @@ export function withInputFileReads(options: {
           : {
               ...tool,
               version: '5',
-              model: { name: 'read_file', ...tool.model, omitParameters: ['mode'] },
-              description: `${tool.description} Use pages for an authorized PDF, including workspace files and saved attachments. Default is the first page; up to four pages per request. PDF results include page images and available text. Use offset and limit for ordinary text files.`,
+              model: { name: 'read_file', ...tool.model },
+              description: `${tool.description} For an attached document, pass its prepared workspace copy to the relevant Shell helper.`,
               inputSchema: {
                 ...tool.inputSchema,
                 properties: {
                   ...(tool.inputSchema.properties as Record<string, Json>),
-                  pages: pdfPages,
-                  mode: { enum: ['text', 'image'] },
                   path: {
                     type: 'string',
                     maxLength: 4096,
@@ -228,89 +227,40 @@ export function withInputFileReads(options: {
                   const selected = await target(context, input);
                   if (!selected) return await tool.execute(input, context);
                   verify(context, selected.revision);
+                  const name = inputName(selected.imported);
+                  if (!selected.savedAttachment || !isEngineeringTextPath(name))
+                    throw unsupportedFileRead(selected.path, {
+                      name,
+                      savedAttachment: selected.savedAttachment,
+                    });
                   files = createWorkspaceFiles({
                     root: dirname(selected.anchor),
                     strictReads: true,
                   });
-                  const anchored = files;
-                  if (isPdf(selected.imported)) {
-                    const params = input as Record<string, Json>;
-                    if (params.offset !== undefined || params.limit !== undefined)
-                      throw new AgentError('pdf_requires_page_range');
-                    const original = await anchored.readBytes(basename(selected.anchor), {
-                      maxBytes: 256 * 1024 * 1024,
-                      signal: context.signal,
-                    });
-                    if (
-                      original.baseline.hash !== selected.imported.reference.hash ||
-                      String(original.baseline.size) !== selected.imported.reference.size
-                    )
-                      throw new AgentError('artifact_content_mismatch');
-                    return await readPdfToolResult({
-                      path: selected.path,
-                      request: {
-                        ...params,
-                        ...(params.mode === undefined && !context.readDecisionToolResults
-                          ? { mode: 'text' }
-                          : {}),
-                      },
-                      context,
-                      source: original,
-                      cache: {
-                        profilePath: options.profilePath,
-                        storeId: selected.imported.originStoreId,
-                      },
-                      async verify() {
-                        if ((await target(context, input))?.revision !== selected.revision)
-                          throw new AgentError('file_dispatch_scope_changed');
-                      },
-                    });
-                  }
-                  if (
-                    (input as Record<string, Json>).pages !== undefined ||
-                    (input as Record<string, Json>).mode !== undefined
-                  )
-                    throw new AgentError('pdf_options_require_pdf');
-                  const adapter = new Proxy(anchored, {
-                    get(_source, key) {
-                      if (key === 'relativePath')
-                        return (path: string) => {
-                          if (path !== selected.path)
-                            throw new AgentError('file_dispatch_scope_changed');
-                          return basename(selected.anchor);
-                        };
-                      if (key === 'read')
-                        return async (
-                          _path: string,
-                          readOptions: Parameters<WorkspaceFiles['read']>[1],
-                        ) => {
-                          const value = await anchored.read(basename(selected.anchor), {
-                            ...readOptions,
-                            signal: context.signal,
-                          });
-                          if (
-                            value.baseline.hash !== selected.imported.reference.hash ||
-                            String(value.baseline.size) !== selected.imported.reference.size
-                          )
-                            throw new AgentError('artifact_content_mismatch');
-                          const current = await target(context, input);
-                          if (current?.revision !== selected.revision)
-                            throw new AgentError('file_dispatch_scope_changed');
-                          return { ...value, path: selected.path };
-                        };
-                      throw new AgentError('input_file_read_only');
-                    },
+                  const params = input as Record<string, Json>;
+                  const value = await files.read(basename(selected.anchor), {
+                    offset: params.offset === undefined ? 1 : Number(params.offset),
+                    limit: params.limit === undefined ? 200 : Number(params.limit),
+                    signal: context.signal,
                   });
-                  return await createFileTools(adapter, { missingRead: 'error' })
-                    .find((definition) => definition.id === 'files.read')!
-                    .execute(input, context);
+                  if (
+                    value.baseline.hash !== selected.imported.reference.hash ||
+                    String(value.baseline.size) !== selected.imported.reference.size
+                  )
+                    throw new AgentError('artifact_content_mismatch');
+                  if ((await target(context, input))?.revision !== selected.revision)
+                    throw new AgentError('file_dispatch_scope_changed');
+                  context.signal.throwIfAborted();
+                  return await createFileReadResult({ ...value, path: selected.path }, context);
                 } catch (error) {
                   const code = error instanceof AgentError ? error.code : 'file_target_unavailable';
-                  const recovery = context.signal.aborted ? undefined : pdfReadRecovery[code];
                   return {
                     outcome: context.signal.aborted ? 'cancelled' : 'failed',
-                    content: recovery ? `${code}: ${recovery}` : code,
-                    ...(recovery ? { details: { code } } : {}),
+                    content:
+                      code === 'unsupported_file_type' && error instanceof Error
+                        ? error.message
+                        : code,
+                    details: { code },
                   };
                 } finally {
                   await files?.close();

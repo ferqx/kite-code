@@ -70,7 +70,7 @@ mock.module('@kite-ai/service/native-runtime-assets',()=>({
 mock.module('@kite-ai/service/runtime-assets',()=>({parseTerminalBundleManifest:value=>value,terminalEmptyAssetDirectories:()=>[],retainWindowsTerminalRuntimeFiles:p=>retain('files:'+p),readWindowsTerminalRuntimeFile(owner,path){assert.ok(retained.has(owner.name));assert.ok(owner.name.startsWith('files:'));const bytes=files.get(owner.name.slice('files:'.length)+'/'+path);assert.ok(bytes);return Buffer.from(bytes);}}));
 mock.module(${JSON.stringify(modulePath('scripts/release/terminal-archive.ts'))},()=>({readCandidateArchiveFiles:()=>archiveFiles}));
 mock.module(${JSON.stringify(modulePath('scripts/release/terminal-paths.ts'))},()=>({rejectBundleOutput(){}}));
-mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))},()=>({retainWindowsInstallationRemoval({root,inventory}){return{
+mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))},()=>({WindowsInstallationFilesInUseError:class extends Error{},retainWindowsInstallationRemoval({root,inventory}){return{
   verify(){},remove(){assert.deepEqual(inventory.map(item=>root+'/'+item.path).sort(),[...files.keys(),...directories].filter(p=>p.startsWith(root+'/')).sort());for(const item of inventory){files.delete(root+'/'+item.path);directories.delete(root+'/'+item.path);}directories.delete(root);events.push('original-tree-delete');},release(){events.push('original-tree-close');}
 };}}));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-private-file-removal.ts'))},()=>({retainWindowsPrivateFileRemoval(){throw Error('unexpected failed pack cleanup');}}));

@@ -13,9 +13,9 @@ import type { CapabilityDescription, PermissionPolicySnapshot } from '../permiss
 import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import { AgentError, type Json } from '../storage/types';
 import type { PreparedToolExecution } from '../tool-behavior';
-import { readPdfToolResult } from './documents/read-tool';
 import { withExternalFileReads } from './external-file-reads';
 import { createWorkspaceFiles, type FileSnapshot, type WorkspaceFiles } from './files';
+import { isEngineeringTextPath, unsupportedFileRead } from './files/read-scope';
 import {
   createFileReadResult,
   createFileTools,
@@ -203,6 +203,12 @@ export function withFullAccessFiles(options: {
     try {
       const selected = await prepare(request, input);
       if (!selected) return null;
+      if (
+        selected.path === selected.binding.probe &&
+        selected.binding.file &&
+        (!isEngineeringTextPath(selected.path) || !isEngineeringTextPath(selected.binding.actual))
+      )
+        throw unsupportedFileRead(selected.path, { name: selected.binding.actual });
       files = createWorkspaceFiles({ root: selected.anchor, strictReads: true });
       if (
         canonicalJson({
@@ -319,7 +325,7 @@ export function withFullAccessFiles(options: {
     )
       return null;
     const initial = await readScope.describeRequest(request);
-    if (!initial) return null;
+    if (!initial || initial.safeRead) return null;
     if (!initial.hardAllowed)
       throw new AgentError(initial.denialReason ?? 'file_read_scope_unavailable');
     if (preparations.has(request.executionId)) throw new AgentError('file_preparation_conflict');
@@ -462,6 +468,7 @@ export function withFullAccessFiles(options: {
                     });
                     if (!capability?.hardAllowed || !authorized(context, tool, capability.revision))
                       throw new AgentError('file_dispatch_scope_changed');
+                    if (capability.safeRead) return await tool.execute(input, context);
                   }
                   context.signal.throwIfAborted();
                   const selected = await prepare(context, input);
@@ -489,41 +496,31 @@ export function withFullAccessFiles(options: {
                       : {}),
                   });
                   if (read) {
+                    if (
+                      selected.path === selected.binding.probe &&
+                      selected.binding.file &&
+                      (!isEngineeringTextPath(selected.path) ||
+                        !isEngineeringTextPath(selected.binding.actual))
+                    )
+                      throw unsupportedFileRead(selected.path, { name: selected.binding.actual });
                     const parameters = input as Record<string, Json>;
                     let snapshot: FileSnapshot | undefined;
-                    let pdfSource: Awaited<ReturnType<WorkspaceFiles['readBytes']>> | undefined;
                     try {
-                      if (selected.path.toLowerCase().endsWith('.pdf')) {
-                        pdfSource = await native.readBytes(selected.relativePath, {
-                          maxBytes: 256 * 1024 * 1024,
-                          signal: context.signal,
-                        });
-                      } else {
-                        if (parameters.pages !== undefined)
-                          throw new AgentError('pdf_options_require_pdf');
-                        snapshot = await native.read(selected.relativePath, {
-                          offset: parameters.offset === undefined ? 1 : Number(parameters.offset),
-                          limit: parameters.limit === undefined ? 200 : Number(parameters.limit),
-                          signal: context.signal,
-                        });
-                      }
+                      snapshot = await native.read(selected.relativePath, {
+                        offset: parameters.offset === undefined ? 1 : Number(parameters.offset),
+                        limit: parameters.limit === undefined ? 200 : Number(parameters.limit),
+                        signal: context.signal,
+                      });
                     } catch (error) {
                       if (codeOf(error) !== 'ENOENT') throw error;
                       context.signal.throwIfAborted();
                     }
-                    result = pdfSource
-                      ? await readPdfToolResult({
-                          path: selected.path,
-                          request: parameters,
-                          context,
-                          source: pdfSource,
+                    result = snapshot
+                      ? await createFileReadResult(absolute(snapshot), context, {
+                          fileScope: 'external_path',
+                          workspaceCheckpoint: false,
                         })
-                      : snapshot
-                        ? await createFileReadResult(absolute(snapshot), context, {
-                            fileScope: 'external_path',
-                            workspaceCheckpoint: false,
-                          })
-                        : createMissingFileReadResult(selected.path);
+                      : createMissingFileReadResult(selected.path);
                   } else {
                     const adapter = new Proxy(native, {
                       get(_source, property) {

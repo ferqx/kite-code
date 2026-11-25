@@ -260,9 +260,15 @@ Task carrier成功继续要求原child的attached效果域结算，child Model�
 
 全局 PC 目录复用原 Sidebar 展示，公共 `session_directory_activity` 从同 Store／主体的只读事务提供准确 Run／pending 和最后已保存对话消息的更新时间。SDK 只有穷尽同 upper／snapshotCursor 后才发布，变化丢弃前缀、持续变化明确失败；没有新增 Store schema 或第二个运行索引。Native 全局读取与选中会话正文／草稿分别管理。正文 SSE 唤醒原范围的只读增量。带有同一持久记录的有效时间时，可以更新已核实目录项的排序。目录结果按快照游标接管，缺少时间或范围证明时沿原 GET 核对。Files 收集和交付变更可以带 Store 核实的原 Run ID。Native 只据此缩小列表校准范围，文件及来源仍沿原主体和权限读取。迟到读取按原 attach／Store／epoch 拒绝，失败保上次目录并标明。没有目录事实时不从当前选择推造其他会话状态，目录成功不 ACK 或授予执行／审批权；owner 见[Store](../../packages/agent/src/storage/README.md#目录分页)、[Client](../../packages/client/README.md#完整目录读取)与[Native](../../apps/desktop/README.md#native-项目会话目录)。
 
+Native 只将涉及目录投影的已知变化交给目录核对。已知 Artifact 注册和 Job 输出事件继续计入 SSE 游标。真实文件交付刷新所属视图，待批、生命周期终态、无法识别的事件和断线续读仍沿原准入与目录核对。 [目录 owner](../../apps/desktop/README.md#native-项目会话目录)
+
 同一目录的可选 `activity.hasCreatedWorktree` 只读投影原 Session 原生 worktree 创建稳定成功记录，用于 Native 右侧历史图标。它不证明实时路径存在、不迁移 cwd，不从 child／Fork 或消息文本推造；后续移除不擦除已发生的创建。生成 schema／Client 保持字段可选，省略不补造标记，原目录快照和执行准入边界不变；具体来源归上述 Store owner 与[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。
 
 显式 `git_worktree use/exit` 仅提交当前 Session 的可信执行根，保原 Workspace 归属及工具版本。Host 核真实 linked worktree／来源根、目标目录身份和授权摘要；Store 在原成功 Tool 终态事务内 CAS epoch 与不可变历史，同一 Model 响应只能含该 Tool。下一 step 的 Files、Shell、权限、指令源、检查点一起切换；原 Model 恢复读原封存 epoch，已派发 Job 保旧绑定及 lease。父子权限交集不变，新 child／Fork 继承准确派发根，既有子会话不迁移。创建通知、任意 workdir 与阅读导航都不授切根权；退出不删除文件。私有 host binding 不进入通用扩展写入；`session.execution_root` 控制读在最终派发和提交事务复验。实现、验证和平台限制分别归[Service owner](../../apps/service/README.md#会话执行工作树)、[Store](../../packages/agent/src/storage/README.md)与[Worktree](../../packages/agent/src/tools/git-worktree/README.md)。
+
+工作树仓库发现受已授权执行根约束。切换复核同时使用源与目标的 Git 登记和真实目录身份。普通文件快速读取及实际操作使用同一会话根身份核验，Windows 在原生句柄固定目录期间读取会话所用的 Bun 身份。 [仓库边界](../../packages/agent/src/tools/git-worktree/README.md) [文件身份](../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)
+
+`read_file` 提供工程文本的分页与基线，范围外格式在读取正文前反馈处理入口。文档的工作副本供原受管 Shell 按权限处理，PDF 页图经显式 `view_images` 进入后续模型。私有原件解析、附件绑定和原生路径校验分别在原 owner 核实。 [文件范围](../../packages/agent/src/tools/files/README.md) [文档读取](../../packages/agent/src/tools/documents/README.md#pdf-读取渲染与交付)
 
 Worktree 新失败的可选分类由实际失败阶段产生，仍属于原版本1回执，不改变输入、权限或 Job 身份。spawn 失败与明确访问拒绝、Git 非零退出分开，旧 generic 不追溯猜测；清理未确认保主因与原 mutation。Native 仅从准确原消息／Execution／Run 注册投影有限可读说明，完整配置不进入展示 IPC。默认模型指导不得因错误码猜用户拒绝、自动扩权或换 key／参数／工具重放；原稳定记录、未知效果只查原 Job 的恢复合同保持，当前范围与验证归[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。
 

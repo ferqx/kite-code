@@ -50,12 +50,14 @@ export function ChildAgentIcon({
 
 export function ApprovalHeader({
   child,
+  scopeLabel,
   index,
   count,
   onPrevious,
   onNext,
 }: {
   child?: { identity: string; name: string };
+  scopeLabel?: string;
   index: number;
   count: number;
   onPrevious: () => void;
@@ -72,6 +74,7 @@ export function ApprovalHeader({
             <span className="approval-child-name">{child.name}</span>
           </span>
         )}
+        {scopeLabel && <span className="approval-child-name">{scopeLabel}</span>}
       </div>
       {count > 1 && (
         <nav className="approval-pager" aria-label="切换审批">

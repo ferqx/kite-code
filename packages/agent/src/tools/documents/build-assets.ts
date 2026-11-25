@@ -31,6 +31,7 @@ const helper = await Bun.build({
   outdir: destination,
   target: 'bun',
   packages: 'bundle',
+  define: desktop ? { __KITE_DESKTOP_ASSETS__: 'true' } : {},
   naming: 'kite-documents.js',
 });
 if (!helper.success) throw new Error('documents_helper_build_failed');

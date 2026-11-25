@@ -8,6 +8,8 @@ import { desktopAsset } from '../../platform/desktop-assets';
 import { createOwnedWorker } from '../../platform/process/owned-worker';
 import { AgentError } from '../../storage/types';
 import { createWorkspaceFiles } from '../files';
+import { pdfHeaderSearchBytes } from '../files/read-scope';
+import { documentAsset } from './document-runtime';
 import { type PdfTextLayer, validPdfTextLayer } from './pdf-text-layer';
 
 export interface PdfPage {
@@ -164,14 +166,16 @@ function decodeCachedResult(
   return { totalPages: data.totalPages, nextPage: data.nextPage, pages };
 }
 export function pdfAssets() {
-  const worker = fileURLToPath(
-    new URL(
-      import.meta.url.endsWith('.js')
-        ? './tools/documents/pdf-worker.js'
-        : '../../../dist/tools/documents/pdf-worker.js',
-      import.meta.url,
-    ),
-  );
+  const worker =
+    documentAsset('pdf-worker.js') ??
+    fileURLToPath(
+      new URL(
+        import.meta.url.endsWith('.js')
+          ? './tools/documents/pdf-worker.js'
+          : '../../../dist/tools/documents/pdf-worker.js',
+        import.meta.url,
+      ),
+    );
   const checksum = worker.replace(/\.js$/, '.sha256');
   const desktop = desktopAsset('assets/pdf');
   if (desktop) return { worker, checksum, dependencies: [desktop, desktopAsset('code/vendor')!] };
@@ -238,7 +242,7 @@ export async function readPdf(
     throw new AgentError('pdf_range_invalid');
   if (
     bytes.byteLength > 256 * 1024 * 1024 ||
-    Buffer.from(bytes.subarray(0, 1024)).indexOf('%PDF-') < 0
+    Buffer.from(bytes.subarray(0, pdfHeaderSearchBytes)).indexOf('%PDF-') < 0
   )
     throw new AgentError('pdf_invalid');
   await acquire(signal);

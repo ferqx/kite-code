@@ -12,6 +12,7 @@ import { NativeCaller } from '../electron/native-caller';
 import { createDesktopController } from '../src/controller';
 import type { NativeState } from '../src/native-bridge';
 import { memoryPrivateData } from './private-data.fixture';
+import { getSelectionPermissions } from './selection-permissions.fixture';
 
 function port() {
   let unavailable = false,
@@ -19,6 +20,7 @@ function port() {
   const inputs: { sessionId: string; input: SetPermissionModeRequest }[] = [];
   const client = {
     serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
+    getSelectionPermissions,
     connect: async () => ({}),
     disposeNetwork() {},
     async observe({ signal }: { signal: AbortSignal }) {
