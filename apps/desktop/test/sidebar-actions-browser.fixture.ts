@@ -359,6 +359,74 @@ async function verifySessionRowLoading(page: Page) {
   return phases;
 }
 
+async function verifyWindowsBackdropLayout(page: Page, url: string) {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto(`${url}?settings-geometry=1`);
+  await expect(page.locator('.native-window-titlebar')).toBeVisible();
+  const results = [];
+  const measure = () =>
+    page.evaluate(() => {
+      const html = document.documentElement;
+      const previousMaterial = html.dataset.windowMaterial;
+      const selectors = [
+        '.native-window-titlebar',
+        '.client-panels',
+        '#navigation .client-sidebar-panel',
+        '.client-content-frame',
+        '.session-header',
+        '.composer',
+        '#details',
+      ];
+      const panels = selectors.map((selector) => {
+        const panel = document.querySelector(selector);
+        if (!panel) throw Error(`Missing Windows layout element: ${selector}`);
+        return panel;
+      });
+      const modes = (['mica', 'acrylic', 'none'] as const).map((material) => {
+        html.dataset.windowMaterial = material;
+        return {
+          material,
+          layout: panels.map((panel) => {
+            const { x, y, width, height } = panel.getBoundingClientRect();
+            return [x, y, width, height];
+          }),
+          navigationBlur: getComputedStyle(panels[2]!).backdropFilter,
+          outline: getComputedStyle(panels[1]!, '::after').borderTopWidth,
+        };
+      });
+      html.dataset.windowMaterial = previousMaterial;
+      return modes;
+    });
+  const verifyLayout = async (width: number) => {
+    const modes = await measure();
+    const mica = modes[0]!;
+    assert.deepEqual(mica.layout[0], [0, 0, width, 32]);
+    assert.deepEqual(mica.layout[1], [6, 38, width - 12, 806]);
+    for (const mode of modes) {
+      assert.deepEqual(mode.layout, mica.layout, `${width}px ${mode.material}`);
+      assert.equal(mode.outline, '1px');
+      assert.equal(mode.navigationBlur === 'none', mode.material === 'none');
+    }
+    return modes;
+  };
+  for (const width of [1280, 800]) {
+    await page.setViewportSize({ width, height: 850 });
+    results.push({ width, detailsOpen: false, modes: await verifyLayout(width) });
+    if (width === 1280) {
+      const tabs = page.getByRole('button', { name: '标签页', exact: true });
+      await tabs.click();
+      await expect(tabs).toHaveAttribute('aria-expanded', 'true');
+      await expect
+        .poll(async () => (await page.locator('#details').boundingBox())?.width)
+        .toBeGreaterThan(0);
+      results.push({ width, detailsOpen: true, modes: await verifyLayout(width) });
+      await tabs.click();
+      await expect(tabs).toHaveAttribute('aria-expanded', 'false');
+    }
+  }
+  return results;
+}
+
 /** Exercise Native pending transitions with actual Sidebar controls and production CSS. */
 export async function verifySidebarActions(browser: Browser, url: string, artifact: string) {
   const cases = [];
@@ -841,6 +909,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await expectCenteredNavigation(settingsActions);
       await page.getByRole('button', { name: '关闭设置', exact: true }).click();
       await expect(draft).toHaveValue('Draft A');
+      const windowsBackdrops = await verifyWindowsBackdropLayout(page, url);
       assert.deepEqual(errors, []);
       cases.push({
         theme,
@@ -850,6 +919,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         picking,
         frames,
         scheduledNavigation,
+        windowsBackdrops,
         errors,
       });
     } finally {

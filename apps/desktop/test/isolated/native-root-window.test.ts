@@ -109,6 +109,8 @@ class Window extends EventEmitter {
   full = false;
   minimizes = 0;
   title = '';
+  readonly nativeHandle = Buffer.alloc(8);
+  readonly messages = new Map<number, () => void>();
   readonly options: unknown;
   constructor(options: unknown) {
     super();
@@ -121,6 +123,12 @@ class Window extends EventEmitter {
     return this.destroyed;
   }
   setBackgroundColor() {}
+  getNativeWindowHandle() {
+    return this.nativeHandle;
+  }
+  hookWindowMessage(message: number, update: () => void) {
+    this.messages.set(message, update);
+  }
   show(...args: unknown[]) {
     this.shows++;
     this.emit('native-show', ...args);
@@ -165,6 +173,9 @@ const {
   nativeRootWindowMenu,
   nativeRootWillShowEvent,
 } = await import('../../electron/native-root-window');
+const { attachWindowsAcrylic, selectWindowMaterial } = await import(
+  '../../electron/native-window-appearance'
+);
 const tick = async () => {
   await Bun.sleep(0);
 };
@@ -469,4 +480,51 @@ test('the same explicit Root factory forwards platform window options while conf
     window.destroy();
     expect(root.webContents.closes).toBe(1);
   }
+});
+
+test('Windows uses acrylic only on supported older builds with the native backend available', () => {
+  expect(selectWindowMaterial('win32', '10.0.17762', true)).toBe('none');
+  expect(selectWindowMaterial('win32', '10.0.17763', true)).toBe('acrylic');
+  expect(selectWindowMaterial('win32', '10.0.19045', true)).toBe('acrylic');
+  expect(selectWindowMaterial('win32', '10.0.19045', false)).toBe('none');
+  expect(selectWindowMaterial('win32', '10.0.22000', true)).toBe('acrylic');
+  expect(selectWindowMaterial('win32', '10.0.22621', false)).toBe('mica');
+  expect(selectWindowMaterial('darwin', '24.6.0', false)).toBe('vibrancy');
+  expect(selectWindowMaterial('linux', '6.8.0', true)).toBe('none');
+});
+
+test('acrylic fallback replaces the backdrop without rebuilding Root and recovers before showing', async () => {
+  const value = createNativeRootWindow({ show: false, backgroundColor: '#fafafa' });
+  const window = value as unknown as Window;
+  const root = getNativeRootView(value)! as unknown as ContentsView;
+  let applied = false,
+    dark = false;
+  const calls: boolean[] = [];
+  const update = attachWindowsAcrylic(
+    value,
+    (handle, darkMode) => {
+      expect(handle).toBe(window.nativeHandle);
+      calls.push(darkMode);
+      return applied;
+    },
+    () => dark,
+  );
+  expect(root.colors.at(-1)).toBe('#fafafa');
+  dark = true;
+  window.messages.get(0x001a)!();
+  expect(root.colors.at(-1)).toBe('#191919');
+  applied = true;
+  window.once('native-show', () => expect(root.colors.at(-1)).toBe('#00000000'));
+  value.show();
+  expect(getNativeRootView(value)).toBe(root as unknown as ReturnType<typeof getNativeRootView>);
+  expect(calls).toEqual([false, true, true]);
+  window.emit('show');
+  window.emit('focus');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(calls).toEqual([false, true, true, true]);
+  window.emit('focus');
+  window.destroy();
+  update();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(calls).toHaveLength(4);
 });

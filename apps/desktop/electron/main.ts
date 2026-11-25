@@ -25,7 +25,7 @@ import {
   Tray,
   WebContentsView,
 } from 'electron';
-import { type NativeWindowAppearance, nativeEventChannel } from '../src/native-bridge';
+import { nativeEventChannel } from '../src/native-bridge';
 import { nativeWindowMenuActionChannel } from '../src/native-menu-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
 import { listenBrowserPageHost } from './browser-page-channel';
@@ -67,6 +67,11 @@ import {
 import { createNativeSessionSearchHost } from './native-session-search-host';
 import { createNativeSettingsHost } from './native-settings-host';
 import {
+  attachWindowsAcrylic,
+  selectWindowMaterial,
+  solidWindowColor,
+} from './native-window-appearance';
+import {
   nativeWindowMenuShortcut,
   nativeWindowMenuTemplate,
   registerNativeWindowMenuIpc,
@@ -86,6 +91,7 @@ import { registerNativeTrajectoryFileIpc } from './trajectory-file-ipc';
 import { NativeTrajectoryFiles } from './trajectory-files';
 import { createTrajectoryOfflineWindow } from './trajectory-offline-window';
 import { loadWindowsAccess } from './windows-access';
+import { registerWindowsDesktopInstance } from './windows-desktop-instance';
 import {
   acquireWindowsNativeCandidate,
   parseWindowsNativeHandoff,
@@ -93,7 +99,6 @@ import {
   type WindowsNativeCandidateAccess,
 } from './windows-native-candidate';
 
-registerOutputPreviewScheme();
 declare const __KITE_DESKTOP_NATIVE_ASSETS__: unknown;
 declare const __KITE_DESKTOP_PROFILE_ACCESS__: {
   relativePath: 'profile-access.js';
@@ -118,6 +123,7 @@ const candidate =
 if (candidate && Object.keys(inputAssets).length !== 1) throw Error('invalid_native_assets');
 const windowsHandoff =
   candidate && process.platform === 'win32' ? parseWindowsNativeHandoff(process.argv) : undefined;
+registerOutputPreviewScheme();
 const formalAssets = candidate ? resolveNativeCandidate(app.getAppPath()) : undefined;
 const assets = formalAssets ?? parseNativeAssets(inputAssets);
 declare const __KITE_DESKTOP_DEVELOPMENT__: unknown;
@@ -139,12 +145,6 @@ const windowsAsset =
     : undefined);
 app.setName('kite-native');
 if (process.platform === 'win32') app.setAppUserModelId('dev.kite-code.native');
-const mica = process.platform === 'win32' && Number(release().split('.')[2]) >= 22621;
-const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
-  ? 'mica'
-  : process.platform === 'darwin'
-    ? 'vibrancy'
-    : 'none';
 let window: NativeRootWindow | undefined, caller: NativeCaller | undefined;
 let globalDialogOwner: ReturnType<typeof createNativeGlobalDialogHost> | undefined;
 let sessionSearchOwner: ReturnType<typeof createNativeSessionSearchHost> | undefined;
@@ -228,10 +228,14 @@ let artifactAccess: { close(): void }[] = windowsHandoff ? [acquireFormalWindows
 let startupDiagnostic: ServiceStartupDiagnostic | undefined;
 let quitting = false,
   exitAllowed = false;
+let mainWindowReady = false,
+  windowsActivationPending = false;
 let developmentReload: Promise<void> | undefined;
 let switchingService = false;
 let draftFlush: ReturnType<typeof createNativeDraftFlush> | undefined;
 let preparingQuit: Promise<void> | undefined;
+if (process.platform === 'win32')
+  registerWindowsDesktopInstance(app, activateExistingWindowsInstance);
 function setQuitting() {
   quitting = true;
   void scheduledTasks?.stop().catch(() => {});
@@ -622,19 +626,21 @@ void app
     if (stoppingNativeProcess || exitAllowed) return;
     if (initialTrajectoryPath) {
       await openOfflineTrajectory(initialTrajectoryPath);
+      if (windowsActivationPending) activateExistingWindowsInstance();
       return;
     }
-    if (process.platform === 'win32' && windowsAsset) {
+    const windowsBackend =
+      process.platform === 'win32' && windowsAsset ? loadWindowsAccess(windowsAsset) : undefined;
+    if (windowsBackend) {
       const profile = selectProfile(
         assets.profile ?? {
           dataRoot: join(homedir(), '.kite-code', 'unified-agent'),
           profile: 'default',
         },
       );
-      const backend = loadWindowsAccess(windowsAsset);
       const admitted = await ensureDesktopProfilePermissions({
         dataRoot: profile.dataRoot,
-        inspect: () => backend.profilePermissions(profile.dataRoot, profile.profile),
+        inspect: () => windowsBackend.profilePermissions(profile.dataRoot, profile.profile),
         show: (options) => dialog.showMessageBox(options),
         active: () => !stoppingNativeProcess && !exitAllowed,
       });
@@ -647,6 +653,7 @@ void app
     }
     const rendererPath = join(app.getAppPath(), 'index.html'),
       rendererUrl = development?.rendererUrl ?? pathToFileURL(rendererPath).href;
+    const windowMaterial = selectWindowMaterial(process.platform, release(), !!windowsBackend);
     const windowOptions: BrowserWindowConstructorOptions = {
       title: 'Kite',
       ...(process.platform === 'win32' ? { icon: join(app.getAppPath(), 'app-icon.ico') } : {}),
@@ -664,16 +671,14 @@ void app
             },
           }),
       show: false,
-      ...(mica ? { backgroundMaterial: 'mica' as const } : {}),
+      ...(windowMaterial === 'mica' ? { backgroundMaterial: 'mica' as const } : {}),
       ...(windowMaterial === 'vibrancy'
         ? { vibrancy: 'sidebar' as const, visualEffectState: 'active' as const }
         : {}),
       backgroundColor:
-        windowMaterial !== 'none'
+        windowMaterial === 'mica' || windowMaterial === 'vibrancy'
           ? '#00000000'
-          : nativeTheme.shouldUseDarkColors
-            ? '#191919'
-            : '#fafafa',
+          : solidWindowColor(nativeTheme.shouldUseDarkColors),
       webPreferences: {
         preload: join(app.getAppPath(), 'preload.cjs'),
         contextIsolation: true,
@@ -683,6 +688,14 @@ void app
       },
     };
     window = createNativeRootWindow(windowOptions);
+    const syncAcrylic =
+      windowMaterial === 'acrylic' && windowsBackend
+        ? attachWindowsAcrylic(
+            window,
+            windowsBackend.applyWindowAcrylic,
+            () => nativeTheme.shouldUseDarkColors,
+          )
+        : undefined;
     const createModalView = (
       kind: 'global-dialog' | 'image-gallery' | 'preview-menu' | 'session-search' | 'settings',
     ) => {
@@ -867,13 +880,13 @@ void app
       sessionSearch.syncTheme();
       settings.syncTheme();
       if (window && !window.isDestroyed()) {
-        window.setBackgroundColor(
-          windowMaterial !== 'none'
-            ? '#00000000'
-            : nativeTheme.shouldUseDarkColors
-              ? '#191919'
-              : '#fafafa',
-        );
+        if (syncAcrylic) syncAcrylic();
+        else
+          window.setBackgroundColor(
+            windowMaterial === 'none'
+              ? solidWindowColor(nativeTheme.shouldUseDarkColors)
+              : '#00000000',
+          );
         if (process.platform !== 'darwin')
           window.setTitleBarOverlay({
             symbolColor: nativeTheme.shouldUseDarkColors ? '#eeeeee' : '#222222',
@@ -1084,7 +1097,10 @@ void app
       }
     });
     const showReadyWindow = () => {
-      if (!stoppingNativeProcess && !exitAllowed && window && !window.isDestroyed()) window.show();
+      mainWindowReady = true;
+      if (windowsActivationPending) activateExistingWindowsInstance();
+      else if (!stoppingNativeProcess && !exitAllowed && window && !window.isDestroyed())
+        window.show();
     };
     onNativeRootReady(window, showReadyWindow);
     if (development) {
@@ -1114,6 +1130,30 @@ function showMainWindow() {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+}
+function activateExistingWindowsInstance() {
+  if (quitting || preparingQuit || stoppingNativeProcess || exitAllowed) return;
+  if (mainWindowReady) {
+    windowsActivationPending = false;
+    showMainWindow();
+    return;
+  }
+  if (offlineTrajectory && !offlineTrajectory.window.isDestroyed()) {
+    windowsActivationPending = false;
+    const owner = offlineTrajectory;
+    void owner.ready
+      .then(() => {
+        if (quitting || preparingQuit || stoppingNativeProcess || exitAllowed) return;
+        const viewer = owner.window;
+        if (viewer.isDestroyed()) return;
+        if (viewer.isMinimized()) viewer.restore();
+        viewer.show();
+        viewer.focus();
+      })
+      .catch(() => {});
+    return;
+  }
+  windowsActivationPending = true;
 }
 app.on('activate', showMainWindow);
 app.on('window-all-closed', () => {

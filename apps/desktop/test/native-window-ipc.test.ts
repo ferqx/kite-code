@@ -122,6 +122,7 @@ test('original text and both zoom states use only the current window host, even 
 test.each([
   'none',
   'vibrancy',
+  'acrylic',
 ] as const)('development HTTP renderer retains exact main-frame, origin and document scope for window operations (%s)', async (backgroundMaterial) => {
   const f = fixture('http://127.0.0.1:43219/', backgroundMaterial);
   expect(await f.send(nativeWindowAppearanceChannel)).toEqual({

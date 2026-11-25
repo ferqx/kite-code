@@ -447,7 +447,7 @@ const bridge: NativeBridge &
       nativeWindowAppearanceChannel,
     )) as NativeWindowAppearanceReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
-    if (!['mica', 'vibrancy', 'none'].includes(reply.value?.backgroundMaterial))
+    if (!['mica', 'acrylic', 'vibrancy', 'none'].includes(reply.value?.backgroundMaterial))
       throw Error('invalid_native_window_appearance');
     return reply.value;
   },

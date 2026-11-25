@@ -4,7 +4,11 @@
   place-items: center;
   padding: 32px;
 }
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="acrylic"],
+    [data-window-material="vibrancy"]
+  )
   .kite-client.desktop-startup {
   background: transparent;
 }

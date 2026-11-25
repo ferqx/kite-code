@@ -48,6 +48,8 @@ export async function buildWindowsAccess(outdir: string, compiler = process.env.
       '/link',
       'advapi32.lib',
       'bcrypt.lib',
+      'dwmapi.lib',
+      'user32.lib',
       `/OUT:${output}`,
       `/IMPLIB:${join(outdir, 'windows-access.lib')}`,
     ],

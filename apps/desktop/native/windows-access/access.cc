@@ -7,6 +7,7 @@
 #include <sddl.h>
 #include <bcrypt.h>
 #include <tlhelp32.h>
+#include <dwmapi.h>
 #include "node_api.h"
 #include <algorithm>
 #include <memory>
@@ -17,9 +18,10 @@
 #include <set>
 #include <cmath>
 #include <exception>
+#include <cstring>
 
 // All signatures and registration types come from the pinned official Node-API headers.
-#define API_LIST(X) X(napi_get_cb_info) X(napi_get_value_string_utf16) X(napi_create_object) X(napi_create_function) X(napi_set_named_property) X(napi_wrap) X(napi_unwrap) X(napi_get_undefined) X(napi_throw_error) X(napi_get_global) X(napi_get_named_property) X(napi_call_function) X(napi_create_string_utf8) X(napi_create_string_utf16) X(napi_get_property_names) X(napi_get_array_length) X(napi_get_element) X(napi_is_array) X(napi_get_value_double) X(napi_get_boolean) X(napi_type_tag_object) X(napi_check_object_type_tag)
+#define API_LIST(X) X(napi_get_cb_info) X(napi_get_value_string_utf16) X(napi_create_object) X(napi_create_function) X(napi_set_named_property) X(napi_wrap) X(napi_unwrap) X(napi_get_undefined) X(napi_throw_error) X(napi_get_global) X(napi_get_named_property) X(napi_call_function) X(napi_create_string_utf8) X(napi_create_string_utf16) X(napi_get_property_names) X(napi_get_array_length) X(napi_get_element) X(napi_is_array) X(napi_get_value_double) X(napi_get_boolean) X(napi_type_tag_object) X(napi_check_object_type_tag) X(napi_is_buffer) X(napi_get_buffer_info) X(napi_get_value_bool)
 #define DECLARE(name) static decltype(&name) p_##name;
 API_LIST(DECLARE)
 static void need(bool ok) { if (!ok) throw std::runtime_error("windows_access_denied"); }
@@ -816,6 +818,7 @@ static napi_value factory(napi_env env, napi_callback_info info) {
     p_napi_throw_error(env, "windows_access_unavailable", "windows_access_unavailable"); return nullptr;
   }
 }
+#include "window-acrylic.h"
 NAPI_MODULE_INIT() {
   HMODULE exe = GetModuleHandleW(nullptr);
 #define RESOLVE(name) p_##name = reinterpret_cast<decltype(&name)>(GetProcAddress(exe, #name)); if (!p_##name) return nullptr;
@@ -824,7 +827,9 @@ NAPI_MODULE_INIT() {
     napi_value function;
     if (p_napi_create_function(env, item.first, NAPI_AUTO_LENGTH, factory, item.second, &function) != napi_ok || p_napi_set_named_property(env, exports, item.first, function) != napi_ok) return nullptr;
   }
-  napi_value inspection;
-  if (p_napi_create_function(env, "profilePermissions", NAPI_AUTO_LENGTH, inspectProfilePermissions, nullptr, &inspection) != napi_ok || p_napi_set_named_property(env, exports, "profilePermissions", inspection) != napi_ok) return nullptr;
+  for (const auto& method : {std::pair<const char*, napi_callback>("profilePermissions", inspectProfilePermissions), {"applyWindowAcrylic", window_acrylic::apply}}) {
+    napi_value function;
+    if (p_napi_create_function(env, method.first, NAPI_AUTO_LENGTH, method.second, nullptr, &function) != napi_ok || p_napi_set_named_property(env, exports, method.first, function) != napi_ok) return nullptr;
+  }
   return exports;
 }

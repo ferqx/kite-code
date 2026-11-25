@@ -354,6 +354,14 @@ export async function runDevelopmentDesktop(
   } catch (error) {
     if (requested) return requested === 'SIGINT' ? 130 : 143;
     if (watchError) throw watchError;
+    if (
+      process.platform === 'win32' &&
+      child &&
+      error instanceof Error &&
+      error.message === 'development_desktop_exited' &&
+      (await child.exited) === 0
+    )
+      return 0;
     throw error;
   } finally {
     try {

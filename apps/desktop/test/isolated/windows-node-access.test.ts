@@ -75,6 +75,8 @@ int wmain(int argc,wchar_t** argv) {
           '/link',
           'advapi32.lib',
           'bcrypt.lib',
+          'dwmapi.lib',
+          'user32.lib',
         ],
         { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 15000 },
       );
@@ -868,7 +870,36 @@ test('formal Windows candidate Main stops before native loading, factories or ch
     const driver = join(root, 'driver.cjs');
     writeFileSync(
       driver,
-      `const assert=require('node:assert/strict'),Module=require('node:module'),child=require('node:child_process');let nativeLoads=0,factories=0,children=0,appReads=0;const original=Module._load;Module._load=function(request,...args){if(request==='electron')return{app:{getAppPath(){appReads++;return ${JSON.stringify(join(root, 'untrusted-app'))};}}};if(request.endsWith('.node')){nativeLoads++;return{artifactShared(){factories++;throw Error('unqualified_factory');},profileShared(){factories++;throw Error('unqualified_factory');}};}if(request==='node:sqlite'){nativeLoads++;throw Error('unqualified_sqlite');}return original.call(this,request,...args);};for(const name of ['spawn','exec','execFile','fork'])child[name]=()=>{children++;throw Error('unqualified_child');};const actualPlatform=process.platform;if(actualPlatform!=='win32')Object.defineProperty(process,'platform',{value:'win32'});let failure;try{require(${JSON.stringify(main)});}catch(error){failure=error;}assert.equal(failure?.code,'native_windows_bootstrap_unqualified');assert.deepEqual({nativeLoads,factories,children,appReads},{nativeLoads:0,factories:0,children:0,appReads:0});console.log(JSON.stringify({actualPlatform,negative:'native_windows_bootstrap_unqualified',nativeLoads,factories,children,appReads}));`,
+      `const assert = require('node:assert/strict');
+const Module = require('node:module');
+const child = require('node:child_process');
+const effects = { schemes: 0, nativeLoads: 0, factories: 0, children: 0, appReads: 0 };
+const original = Module._load;
+Module._load = function (request, ...args) {
+  if (request === 'electron') return {
+    app: { getAppPath() { effects.appReads++; return ${JSON.stringify(join(root, 'untrusted-app'))}; } },
+    protocol: { registerSchemesAsPrivileged() { effects.schemes++; } },
+  };
+  if (request.endsWith('.node')) {
+    effects.nativeLoads++;
+    const factory = () => { effects.factories++; throw Error('unqualified_factory'); };
+    return { artifactShared: factory, profileShared: factory, candidateShared: factory };
+  }
+  if (request === 'node:sqlite') {
+    effects.nativeLoads++;
+    throw Error('unqualified_sqlite');
+  }
+  return original.call(this, request, ...args);
+};
+for (const name of ['spawn', 'exec', 'execFile', 'fork']) child[name] = () => {
+  effects.children++;
+  throw Error('unqualified_child');
+};
+const actualPlatform = process.platform;
+if (actualPlatform !== 'win32') Object.defineProperty(process, 'platform', { value: 'win32' });
+assert.throws(() => require(${JSON.stringify(main)}), { code: 'native_windows_bootstrap_unqualified' });
+assert.deepEqual(effects, { schemes: 0, nativeLoads: 0, factories: 0, children: 0, appReads: 0 });
+console.log(JSON.stringify({ actualPlatform, negative: 'native_windows_bootstrap_unqualified', ...effects }));`,
     );
     const node = Bun.which('node');
     if (!node) throw Error('owned_node_unavailable');
@@ -878,12 +909,13 @@ test('formal Windows candidate Main stops before native loading, factories or ch
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ]);
-    expect(exit).toBe(0);
+    expect(exit, stderr).toBe(0);
     expect(stderr).toBe('');
     const proof = JSON.parse(stdout);
     expect(proof).toEqual({
       actualPlatform: process.platform,
       negative: 'native_windows_bootstrap_unqualified',
+      schemes: 0,
       nativeLoads: 0,
       factories: 0,
       children: 0,

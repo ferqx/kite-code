@@ -575,7 +575,6 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
 html[data-native-window] {
   --native-titlebar-height: 32px;
   --native-panel-inset: 0px;
-  --native-shell-inset: 0px;
 }
 
 .native-window-frame {
@@ -614,7 +613,6 @@ html[data-native-window][data-platform="macos"] {
   --native-macos-header-height: 48px;
   --native-window-controls-width: 80px;
   --native-panel-inset: 0px;
-  --native-shell-inset: 0px;
 }
 
 html[data-native-window][data-platform="macos"] .native-window-titlebar {
@@ -689,37 +687,43 @@ html[data-native-window][data-platform="macos"] .kite-client .session-sidebar-to
   -webkit-app-region: no-drag;
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"]) {
-  --native-shell-inset: 6px;
-  background: transparent;
+/* Windows layout follows the platform even when its backdrop falls back to a solid fill. */
+html[data-native-window][data-platform="windows"] .native-window-content {
+  padding: 6px;
 }
 
-html[data-native-window][data-platform="macos"][data-window-material="vibrancy"] {
-  --native-shell-inset: 0px;
-}
-
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
-  .native-window-content {
-  padding: var(--native-shell-inset);
-}
-
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"]) #root,
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+html[data-native-window]:is(
+  [data-window-material="mica"],
+  [data-window-material="acrylic"],
+  [data-window-material="vibrancy"]
+),
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="acrylic"],
+    [data-window-material="vibrancy"]
+  )
+  #root,
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="acrylic"],
+    [data-window-material="vibrancy"]
+  )
   :where(body, .native-window-titlebar, .kite-client.shell, .client-sidebar-panel) {
   background: transparent;
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="acrylic"],
+    [data-window-material="vibrancy"]
+  )
   .client-sidebar-panel
   :where(.sidebar-header, .sidebar) {
   background: transparent;
 }
 
-/* Balance the separator and content inset at the outer edge of the glass navigation. */
-html[data-native-window]:is(
-    [data-window-material="mica"],
-    [data-window-material="vibrancy"]
-  ) .kite-client
+/* Balance the outer edge of the macOS navigation against its resize handle. */
+html[data-native-window][data-platform="macos"][data-window-material="vibrancy"] .kite-client
   #navigation
   .client-sidebar-panel {
   padding-left: calc(var(--native-panel-inset) + var(--resize-handle-width));
@@ -744,7 +748,7 @@ html[data-native-window][data-platform="windows"] .kite-client .sidebar-header {
   padding-inline: 16px var(--sidebar-header-end-padding);
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+html[data-native-window]:is([data-platform="windows"], [data-window-material="vibrancy"])
   .kite-client.shell {
   --sidebar-toggle-closed-offset: calc(
     var(--session-header-start-padding) +
@@ -759,7 +763,7 @@ html[data-native-window][data-platform="macos"] .kite-client.shell {
 
 /* Keep navigation controls level with the inset conversation header. */
 html[data-native-window]:is(
-    [data-window-material="mica"],
+    [data-platform="windows"],
     [data-window-material="vibrancy"]
   ) .kite-client
   .sidebar-header {
@@ -790,7 +794,7 @@ html[data-native-window] .kite-client #details-resize::before {
   background: transparent;
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+html[data-native-window]:is([data-platform="windows"], [data-window-material="vibrancy"])
   .kite-client
   .client-content-frame {
   width: 100%;
@@ -801,7 +805,7 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
 
 /* One exterior outline encloses navigation, conversation and tools together. */
 html[data-native-window]:is(
-    [data-window-material="mica"],
+    [data-platform="windows"],
     [data-window-material="vibrancy"]
   ) .kite-client
   .client-panels {
@@ -811,9 +815,7 @@ html[data-native-window]:is(
   box-shadow: var(--native-content-shadow);
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
-  .kite-client
-  .client-panels::after {
+html[data-native-window][data-platform="windows"] .kite-client .client-panels::after {
   position: absolute;
   z-index: 1;
   inset: 0;
@@ -833,21 +835,21 @@ html[data-native-window] .kite-client .client-content-frame .right-sidebar {
 }
 
 /* Direct resizing reaches zero before release; button changes keep the shared transition. */
-html[data-native-window][data-platform="windows"][data-window-material="mica"] .kite-client
+html[data-native-window][data-platform="windows"] .kite-client
   .client-panels:not([data-animate-width="true"])
   #navigation-resize[aria-valuenow="0"] {
   width: 0;
   transition: none;
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+html[data-native-window]:is([data-platform="windows"], [data-window-material="vibrancy"])
   .kite-client
   #navigation-resize {
   outline: none;
   box-shadow: none;
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+html[data-native-window]:is([data-platform="windows"], [data-window-material="vibrancy"])
   .kite-client
   #navigation-resize:focus-visible:where(:root:not([data-input-modality="pointer"]) *)
   .resizable-grip {
@@ -855,7 +857,11 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
   box-shadow: 0 0 0 2px var(--input);
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="acrylic"],
+    [data-window-material="vibrancy"]
+  )
   .kite-client
   .desktop-settings
   .settings-content {

@@ -20,6 +20,8 @@ Node hash 读取完成到 `require(path)` 之间不能自行绑定原 Windows �
 
 Main 在 BrowserWindow、Profile/UI SQLite 和 child 前取得 candidate 使用权，并在 child bootstrap 期间保持自己的 SH；成功 child 必须有实际 Store 身份，诊断失败不作 Profile 持锁证明。数据库和所属 child 确认关闭后才关闭 Main lease，所有 fresh probes／pipe event／OVERLAPPED／原文件先确认关闭再释放双 SH。cancel/timeout不作原 I/O 终止证明；explicit close失败保留尚未关闭的原资源。原child EOF/退出只释放child自己使用权，SIGKILL由OS释放该 process 的HANDLE；没有常驻broker，原POSIX Node→Bun fd协议保持。受控后端fixture仍不构成 installed/fullNative 资格。
 
+[Main 入口](../../electron/main.ts)先解析正式 Windows 候选的交接，再注册预览 scheme。缺少交接时，[启动负例](../../test/isolated/windows-node-access.test.ts)在实际 Windows Node 子进程中断言返回 `native_windows_bootstrap_unqualified`，并核对 scheme 注册、读取应用路径、原生模块加载、factory 和子进程启动各为零。有效交接仍走原候选身份与证书核验。
+
 祖先HANDLE请求FILE_TRAVERSE以真实阻止rename；属性读取不作为使用期pin。锁文件仅以GENERIC_READ运行LockFileEx SH，与完整只读candidate pin兼容，UI数据库保持原READ/WRITE。JS [原Main facade](../../electron/windows-native-candidate.ts)只允许WeakMap内原live owner向配套启动器借用，绑定同root/id/entry/Bun/build，原Service退出未兑现时close拒绝。Node适配器保私有管道并让Windows Service脱离libuv默认强杀Job，Main异常死亡后仍实际EOF清理。取舍与反例归[原对象决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)。
 
 Node-API ABI使用原样的 Node v22.21.1官方四header，默认明确NAPI_VERSION=8；[builder](../../scripts/build-windows-access.ts)核固定SHA，`decltype`引用官方签名，注册使用官方NAPI_MODULE_INIT宏。有限NAPI symbols仅从当前原exe解析；没有PATH/native库fallback或手写Windows/Node结构。builder只接受明确canonical absolute `KITE_WINDOWS_MSVC` 编译器与其已配置SDK环境，/MT静态CRT，输出固定 `windows-access.node`，已装Main不编译代码。缺编译器、资产、symbol或unsupported平台明确拒绝。
@@ -42,3 +44,7 @@ Windows transport/release CI在真实消费之前调用[有限准备脚本](../.
 [固定Office扩展](office-access.h)只接受genuine、live且已preparePrivateUi的原Profile lease，宿主只传固定root、64位摘要稿ID及0–100版本的有限文件名。它不创建目录或文件，不接任意路径、SID、ACL或HANDLE，不提供Office写锁、flush与修权限接口。owner-only DACL定义账户边界，不承诺隔离同SID恶意进程或管理员。每个guard独立取得同原协调锁SH并固定完整祖先；原Profile关闭后，已取得的guard保自己的使用权，新请求拒绝。
 
 历史文件以read/no-write/no-delete HANDLE覆盖元数据、query、hash及流读取，拒绝reparse、hardlink、宽权限、异主和身份漂移。reader没有batch/publish或原件恢复；close等待实际子进程及流关闭。测试和资格归[Desktop owner](../../README.md#办公输出文件)，取舍见[Office历史决定](../../../../.agents/notes/implemented/architecture/2026-11-11-windows-office-private-leases.md)。
+
+## 窗口外观
+
+桌面 Main 通过 `applyWindowAcrylic` 为较早 Windows 的自有顶层窗口设置 DWM 毛玻璃。后端检查句柄长度和进程归属，结合系统偏好应用模糊和客户区玻璃，两项成功时才返回透明可用。renderer 通过当前窗口外观查询读取材质配置，窗口句柄和材质操作留在 Main。该入口与上述租约、ACL、清单及发布准入分别运作。[窗口外观 owner](../../README.md#windows-原生-mica)

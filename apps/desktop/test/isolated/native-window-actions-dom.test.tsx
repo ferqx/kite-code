@@ -4,6 +4,7 @@ import { act } from 'react';
 import type {
   NativeBridge,
   NativeDirectory,
+  NativeDraft,
   NativeRequest,
   NativeState,
   NativeWindowBridge,
@@ -15,7 +16,7 @@ import type {
 } from '../../src/native-menu-bridge';
 import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
-const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
+const bootstrap = new JSDOM('<!doctype html><div></div>', { pretendToBeVisual: true });
 const originals = {
   window: globalThis.window,
   document: globalThis.document,
@@ -32,7 +33,7 @@ Object.assign(globalThis, originals);
 bootstrap.window.close();
 
 test('actual Native page retains window actions and connects Windows menus to the existing controller without sending work', async () => {
-  const dom = new JSDOM('<div id="root"></div>', {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
       url: 'http://localhost',
       pretendToBeVisual: true,
     }),
@@ -63,6 +64,15 @@ test('actual Native page retains window actions and connects Windows menus to th
     fail = false,
     menuUnsubscribed = false;
   let failure: unknown = Error('native_window_failed');
+  let pendingZoom: Promise<void> | undefined;
+  let savedDraft: NativeDraft = {
+    id: 'preparation-draft',
+    storeId: directory.storeId,
+    workspaceId: 'new-conversation',
+    rootSessionId: 'new-conversation',
+    revision: 1,
+    content: '原草稿\n雪🙂',
+  };
   let menuAction: ((action: NativeWindowMenuAction) => void) | undefined;
   const menuRequests: NativeWindowMenuRequest[] = [];
   const bridge: NativeBridge & NativeWindowBridge & NativeWindowMenuBridge = {
@@ -82,6 +92,13 @@ test('actual Native page retains window actions and connects Windows menus to th
     request: async (request) => {
       calls.push(request);
       if (request.method === 'directory') return directory;
+      if (request.method === 'draft.read' && request.sessionId === 'new-conversation')
+        return savedDraft;
+      if (request.method === 'draft.write' && request.sessionId === 'new-conversation') {
+        expect(request.revision).toBe(savedDraft.revision);
+        savedDraft = { ...savedDraft, content: request.content, revision: savedDraft.revision + 1 };
+        return savedDraft;
+      }
       if (request.method === 'conversation.models.read')
         return {
           kind: 'settings.models',
@@ -93,6 +110,18 @@ test('actual Native page retains window actions and connects Windows menus to th
           errors: ['model_not_configured'],
           models: [],
         };
+      if (request.method === 'settings.general.shell.read')
+        return {
+          kind: 'settings.general.shell',
+          storeId: directory.storeId,
+          preference: 'powershell',
+          automatic: 'powershell',
+          gitBashAvailable: false,
+          powerShellAvailable: true,
+          powerShellVersion: null,
+          powerShell7Version: null,
+        };
+      if (request.method === 'workspace.pick') return null;
       return state;
     },
     watch: () => () => {},
@@ -101,6 +130,7 @@ test('actual Native page retains window actions and connects Windows menus to th
     },
     toggleWindowMaximize: async () => {
       zooms++;
+      if (pendingZoom) return pendingZoom;
       if (fail) throw failure;
     },
   };
@@ -120,9 +150,8 @@ test('actual Native page retains window actions and connects Windows menus to th
       draft = host.querySelector<HTMLElement>('[role="textbox"][aria-label="新对话草稿"]')!;
     expect(header).not.toBeNull();
     expect(sidebar).not.toBeNull();
-    await act(async () => {
-      await setPromptText(draft, '原草稿\n雪🙂');
-    });
+    expect(dom.window.document.querySelector('.native-toast')).toBeNull();
+    expect(promptValue(draft)).toBe('原草稿\n雪🙂');
     const before = calls.length;
     await down(header, 1);
     await down(header, 2, 2);
@@ -156,7 +185,9 @@ test('actual Native page retains window actions and connects Windows menus to th
     expect(calls.length).toBe(before);
     expect(
       calls.every((request) =>
-        ['attach', 'directory', 'conversation.models.read', 'state'].includes(request.method),
+        ['attach', 'directory', 'conversation.models.read', 'draft.read', 'state'].includes(
+          request.method,
+        ),
       ),
     ).toBe(true);
     const menus = Array.from(
@@ -166,32 +197,32 @@ test('actual Native page retains window actions and connects Windows menus to th
     await act(async () => menus[1]!.click());
     expect(menuRequests).toEqual([{ menu: 'edit', x: 0, y: 0, applicationEnabled: true }]);
     expect(calls.length).toBe(before);
+    const editedDraft = '已编辑草稿\n雪🙂';
+    await act(async () => {
+      await setPromptText(draft, editedDraft);
+    });
     await act(async () => menuAction!('new-conversation'));
-    expect(promptValue(draft)).toBe('原草稿\n雪🙂');
+    expect(promptValue(draft)).toBe(editedDraft);
+    expect(savedDraft.content).toBe(editedDraft);
     expect(calls.slice(before).map((request) => request.method)).toEqual([
+      'draft.write',
       'conversation.models.read',
     ]);
-    await act(async () => menuAction!('settings'));
-    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
-    // A failure from the previous presentation cannot follow navigation into settings.
-    expect(dom.window.document.querySelector('.native-toast')).toBeNull();
+    let rejectZoom!: (reason: Error) => void;
+    pendingZoom = new Promise<void>((_resolve, reject) => {
+      rejectZoom = reject;
+    });
     await down(header, 2);
-    const settingsToast = dom.window.document.querySelector<HTMLElement>('.native-toast')!;
-    expect(settingsToast.closest('.desktop-settings-dialog') !== null).toBe(true);
-    expect(settingsToast.hidden).toBe(false);
-    expect(settingsToast.hasAttribute('inert')).toBe(false);
-    expect(settingsToast.textContent).toContain('调整窗口大小遇到问题');
-    expect(dom.window.document.querySelector('.settings-content .notice.error') === null).toBe(
-      true,
-    );
-    expect(menus[0]!.closest('[aria-hidden="true"]')).toBeNull();
-    // Windows settings is non-modal so native menus and nested Select focus guards
-    // can receive focus outside the full-page content without leaving settings.
-    await act(async () => menus[1]!.focus());
-    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
-    await act(async () => menus[1]!.click());
-    expect(menuRequests.at(-1)).toEqual({ menu: 'edit', x: 0, y: 0, applicationEnabled: true });
-    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    expect(zooms).toBe(6);
+    await act(async () => menuAction!('settings'));
+    const settings = dom.window.document.querySelector<HTMLElement>('.desktop-settings-dialog')!;
+    expect(settings).not.toBeNull();
+    await act(async () => rejectZoom(Error('native_window_failed')));
+    pendingZoom = undefined;
+    expect(dom.window.document.querySelector('.native-toast')).toBeNull();
+    await act(async () => menuAction!('add-workspace'));
+    expect(settings.isConnected).toBe(true);
+    expect(calls.some((request) => request.method === 'workspace.pick')).toBe(false);
     const focusGuard = dom.window.document.querySelector<HTMLElement>('[data-radix-focus-guard]')!;
     expect(focusGuard).not.toBeNull();
     await act(async () => focusGuard.focus());
@@ -205,7 +236,7 @@ test('actual Native page retains window actions and connects Windows menus to th
     await act(async () => dom.window.document.documentElement.dispatchEvent(outsidePointer));
     expect(outsidePointer.defaultPrevented).toBe(true);
     expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
-    const editor = host.querySelector<HTMLButtonElement>('[aria-label="默认编辑器"]')!;
+    const editor = settings.querySelector<HTMLButtonElement>('[aria-label="默认编辑器"]')!;
     await act(async () =>
       editor.dispatchEvent(
         new dom.window.KeyboardEvent('keydown', {
@@ -239,8 +270,7 @@ test('actual Native page retains window actions and connects Windows menus to th
       ),
     );
     expect(dom.window.document.querySelector('.desktop-settings-dialog')).toBeNull();
-    await act(async () => menuAction!('settings'));
-    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    expect(dom.window.document.querySelector('.native-toast')).toBeNull();
     await act(async () => menuAction!('add-workspace'));
     expect(dom.window.document.querySelector('.desktop-settings-dialog')).toBeNull();
     expect(
@@ -255,7 +285,7 @@ test('actual Native page retains window actions and connects Windows menus to th
     ).toBe(false);
     expect(
       promptValue(host.querySelector<HTMLElement>('[role="textbox"][aria-label="新对话草稿"]')),
-    ).toBe('原草稿\n雪🙂');
+    ).toBe(editedDraft);
   } finally {
     await act(async () => root.unmount());
     expect(menuUnsubscribed).toBe(true);

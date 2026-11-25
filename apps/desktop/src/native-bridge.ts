@@ -180,7 +180,7 @@ export type NativeFullPermissionConfirmationReply =
   | { ok: true; value: boolean }
   | { ok: false; code: string };
 export type NativeWindowAppearance = {
-  readonly backgroundMaterial: 'mica' | 'vibrancy' | 'none';
+  readonly backgroundMaterial: 'mica' | 'acrylic' | 'vibrancy' | 'none';
 };
 export type NativeWindowAppearanceReply =
   | { ok: true; value: NativeWindowAppearance }

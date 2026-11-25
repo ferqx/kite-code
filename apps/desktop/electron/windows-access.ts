@@ -22,6 +22,7 @@ export interface WindowsProfilePermissionIssue {
   repair(): void;
 }
 type Backend = {
+  applyWindowAcrylic(window: Buffer, dark: boolean): boolean;
   profilePermissions(dataRoot: string, profile: string): WindowsProfilePermissionIssue | undefined;
   artifactShared(root: string): WindowsAccessLease;
   profileShared(dataRoot: string, profile: string): WindowsAccessLease;
@@ -41,7 +42,8 @@ export function loadWindowsAccess(asset: { path: string; sha256: string }): Back
   const backend = createRequire(import.meta.url)(asset.path) as Backend;
   if (
     Object.keys(backend).sort().join(',') !==
-      'artifactShared,candidateShared,profilePermissions,profileShared' ||
+      'applyWindowAcrylic,artifactShared,candidateShared,profilePermissions,profileShared' ||
+    typeof backend.applyWindowAcrylic !== 'function' ||
     typeof backend.profilePermissions !== 'function' ||
     typeof backend.artifactShared !== 'function' ||
     typeof backend.profileShared !== 'function' ||

@@ -125,6 +125,7 @@ async function mainFixture(
   const windows: BrowserWindow[] = [];
   const trays: FixtureTray[] = [];
   const appUserModelIds: string[] = [];
+  let instanceLocks = 0;
   let dockHides = 0;
   let appHides = 0;
   const clocks = new Map<
@@ -150,6 +151,10 @@ async function mainFixture(
   const app = Object.assign(new EventEmitter(), {
     setName: () => {},
     setAppUserModelId: (id: string) => appUserModelIds.push(id),
+    requestSingleInstanceLock: () => {
+      instanceLocks++;
+      return true;
+    },
     getAppPath: () => root,
     getVersion: () => 'fixture',
     setAboutPanelOptions: () => {},
@@ -824,6 +829,8 @@ async function mainFixture(
     },
     trays,
     appUserModelIds,
+    instanceLocks: () => instanceLocks,
+    secondInstance: () => app.emit('second-instance', {}, [], root, {}),
     trayQuit: () => trays.at(-1)!.menu.find((item) => item.label === '退出')!.click!(),
     dockHides: () => dockHides,
     appHides: () => appHides,
@@ -1524,27 +1531,38 @@ for (const failure of [
   }, 15000);
 
 test.skipIf(process.platform !== 'win32')(
-  'Windows tray restores the original window and idle exit drains its Service',
+  'Windows tray and repeated launch restore the original window and idle exit drains its Service',
   async () => {
     const f = await mainFixture('none', true);
     try {
       await f.open();
       expect(f.appUserModelIds).toEqual(['dev.kite-code.native']);
+      expect(f.instanceLocks()).toBe(1);
       expect(f.trays).toHaveLength(1);
       const tray = f.trays[0]!;
       expect(tray.icon.endsWith('app-icon.ico')).toBe(true);
       expect(tray.tooltip).toBe('Kite');
+      f.secondInstance();
+      f.secondInstance();
+      expect(f.windowVisible()).toBe(false);
       f.readyToShow();
+      expect(f.windowVisible()).toBe(true);
+      expect(f.trace.filter((event) => event === 'window:focus')).toHaveLength(1);
       f.closeWindow();
       expect(f.windowVisible()).toBe(false);
       expect(tray.destroyed).toBe(false);
       tray.emit('double-click');
       expect(f.windowVisible()).toBe(true);
       expect(f.trace.at(-1)).toBe('window:focus');
+      f.closeWindow();
+      f.secondInstance();
+      expect(f.windowVisible()).toBe(true);
+      expect(f.trace.at(-1)).toBe('window:focus');
       f.minimizeWindow();
-      tray.emit('double-click');
+      f.secondInstance();
       expect(f.windowMinimized()).toBe(false);
       expect(f.windowCount()).toBe(1);
+      expect(f.services).toHaveLength(1);
       f.trayQuit();
       await f.serviceClosing;
       expect(f.dialogs).toEqual([]);
@@ -1553,6 +1571,7 @@ test.skipIf(process.platform !== 'win32')(
       expect(f.windowVisible()).toBe(false);
       const presentation = [...f.trace];
       tray.emit('double-click');
+      f.secondInstance();
       expect(f.trace).toEqual(presentation);
       f.releaseServiceClose();
       expect(await f.exited).toBe(0);

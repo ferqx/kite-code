@@ -23,3 +23,5 @@ Status: implemented
 阅读区与右栏沿同一180ms缓出过渡调宽，外沿描边持续覆盖整框。导航与工作区使用外层约束，工具区使用内层约束，关闭与调宽回调保持原用途语义。Windows Mica四周6px留白固定，macOS内容仍铺满且无外沿描边。主区与右栏共用Dark Modern配色，左栏保留灰色玻璃；布局测量沿原协议表达外层padding，权限端口与协议版本保持。
 
 用户行为归[桌面手册](../../../../docs/handbook/clients/desktop/README.md#配置编辑交互)，布局与验证归[UI owner](../../../../packages/ui/README.md#原桌面展示层)和[Native owner](../../../../apps/desktop/README.md#windows-原生-mica)。本机原生夹具验证与其他平台 CSS 标记核对不能提升为正式安装包或其他系统原生合成资格。
+
+2026-11-25 的 [Windows 版本共用外框决定](../feature/2026-11-25-windows-acrylic-layout.md)将 Windows 外沿扩大到 Acrylic 和实色模式。共同外框的三栏归属与阅读／工具联动取舍仍适用。
