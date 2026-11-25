@@ -1711,6 +1711,9 @@ body {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+  .questionnaire:has(.questionnaire-text-answer) .questionnaire-header h3 {
+    max-height: calc(5lh + 4px);
+  }
   .questionnaire-progress button:disabled {
     opacity: 0.45;
   }
@@ -3723,6 +3726,9 @@ body {
   display: flex;
   flex-direction: column;
   max-height: min(100%, max(360px, 72%));
+  &:has(.questionnaire-text-answer) {
+    max-height: min(100%, max(400px, 72%));
+  }
   > .bottom-controls {
     display: flex;
     flex-direction: column;
@@ -3739,6 +3745,9 @@ body {
   }
   .questionnaire-content {
     max-height: var(--questionnaire-content-max-height, min(18vh, 156px));
+  }
+  .questionnaire-content:has(.questionnaire-text-answer) {
+    flex-shrink: 0;
   }
 }
 .kite-client

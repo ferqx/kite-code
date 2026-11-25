@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { createAskUserExtension } from '@kite-ai/agent/ask-user';
+import type { Json, ToolContext } from '@kite-ai/agent/extensions';
 import type { Command, Interaction, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
@@ -13,7 +15,14 @@ import {
   setPromptText,
 } from './native-page-dom.fixture';
 
-test('Native keeps question drafts and hides a submitted card while the original receipt resolves in the background', async () => {
+test('Native opens a single text editor and retains drafts while the original answer receipt resolves', async () => {
+  let request: Json = null;
+  await createAskUserExtension().tools![0]!.execute({ questions: [{ question: '发生了什么？' }] }, {
+    async requestInput(value) {
+      request = value;
+      return null;
+    },
+  } as ToolContext);
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -63,7 +72,7 @@ test('Native keeps question drafts and hides a submitted card while the original
         revision: '1',
         acceptedDecisionRevision: null,
         state: 'pending',
-        request: { schema: { type: 'string', minLength: 1, pattern: '\\S' } },
+        request,
       } satisfies Interaction,
     ]),
   );
@@ -223,6 +232,13 @@ test('Native keeps question drafts and hides a submitted card while the original
     await refresh();
     expect(mainInput() === editor).toBe(true);
     expect([editor.selectionStart, editor.selectionEnd]).toEqual([3, 6]);
+    const form = text().form!;
+    expect(form.querySelector('h3')?.textContent).toBe('发生了什么？');
+    expect(form.querySelectorAll('textarea')).toHaveLength(1);
+    expect(form.querySelector('input[type=radio], input[type=checkbox]')).toBeNull();
+    await edit('  \n  ');
+    await click('提交回答');
+    expect(posts).toBe(0);
     await edit('  original A\n雪🙂  ');
     const updatedMainDraft = `${mainDraft}后续草稿`;
     await act(async () => setPromptText(editor, updatedMainDraft));
@@ -267,7 +283,7 @@ test('Native keeps question drafts and hides a submitted card while the original
     await refresh();
     expect(submissions[0]!.intent.answer).toEqual({
       kind: 'question',
-      answers: '  original A\n雪🙂  ',
+      answers: { q1: { text: '  original A\n雪🙂  ' } },
     });
     await act(async () => Promise.race([lookedUp, Bun.sleep(2000)]));
     expect(lookupIds).toContain('original-answer');

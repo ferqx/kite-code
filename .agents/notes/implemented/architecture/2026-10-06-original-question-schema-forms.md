@@ -30,9 +30,13 @@ TUI 普通主区沿原 Ctrl+C 取消合同识别全真实 C 的批次，仍由�
 
 Native 页面进程 Map 按 Store/source/presentation/id/revision/inputDigest 保留步骤和 JSON 草稿。切会话、读取失败、bounded pending 页缺席和 Promise resolve 不能清理；Main 已严格核原 answer_saved 的 accepted 回执只清准确原键，观察到替代／终态再清相应旧键。关闭页面进程不承诺草稿恢复，原持久 Answer journal 不变。
 
+纯文本 `ask_user` 题目在省略 `options` 或传空数组时直接声明闭合 `{text}` 字段。通用表单按原 schema 显示输入框，允许同一问卷混合题型。
+
 多选的闭合自定义对象可声明受同一数组约束的可选 `choices`，在原答案中分别保存 ID 和用户原文。客户端据此提供末项复选框，已保存的问题继续使用各自的 schema。
 
 ## Alternatives considered
+
+- 为纯文本提问新增第二个工具或显式模式字段会增加模型调用分支和客户端约定。原有 `{text}` 可以表达同一信息答案，空选项已足以区分提问方式。
 
 - 将多选的自定义输入作为互斥答案：这会阻止用户同时选用预设方案和描述额外选项，组合答案沿用同一表单和回执路径。
 

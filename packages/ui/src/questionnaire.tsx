@@ -287,11 +287,10 @@ export function Questionnaire({
                   {textError}
                 </div>
               ) : (
-                <label className="questionnaire-text-answer" htmlFor={`${formId}-text`}>
-                  <span>{textLabel}</span>
+                <div className="questionnaire-text-answer">
                   {editor}
                   {textError}
-                </label>
+                </div>
               ))}
           </AnswerChoices>
         </fieldset>

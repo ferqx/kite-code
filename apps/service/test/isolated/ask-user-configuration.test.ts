@@ -27,14 +27,7 @@ const questions = {
         { label: 'Third', description: 'Third choice' },
       ],
     },
-    {
-      question: 'Free?',
-      options: [
-        { label: 'One', description: 'One' },
-        { label: 'Two', description: 'Two' },
-        { label: 'Three', description: 'Three' },
-      ],
-    },
+    { question: 'Free?' },
   ],
 };
 async function fixture(
@@ -363,11 +356,12 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         properties: {
           questions: {
             items: {
+              required: ['question'],
               properties: {
                 multiple: { type: 'boolean' },
                 options: {
-                  minItems: 3,
                   maxItems: 4,
+                  anyOf: [{ maxItems: 0 }, { minItems: 3 }],
                   items: {
                     properties: { recommended: { type: 'boolean' } },
                     required: ['label', 'description'],

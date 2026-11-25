@@ -70,7 +70,7 @@ remove 只接受同仓库的 linked worktree，保护主树、当前来源、已
 | 文件修改 | `write_file`、`edit_file` | `path,content` 写完整文本。`path,old_string,new_string,replace_all?` 做精确替换。覆盖或编辑前读取同一路径，宿主从模型已见的记录选用完整基线 |
 | Git 工作树 | `git_worktree` | `action:list/create/remove/observe/use/exit`；create 不切换，use 明确路径，exit 回原工作区且不删除 |
 | Shell | `exec_command`、`poll_command`、`terminate_session` | 以 `cmd` 启动，按 `yield_time_ms` 返回当前输出或原会话状态。使用返回的整数 `session_id` 续读或停止 |
-| 问题与网页 | `ask_user`、`web_fetch` | 普通问题只收集信息；网页时限用 `timeout_ms` |
+| 问题与网页 | `ask_user`、`web_fetch` | 普通问题可直接收集自由文本或提供选项。网页时限用 `timeout_ms` |
 | 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent` | 创建时提供 `task_name/message`，可选 `agent_type`。继续、留言或中断使用返回的 `target`。用 `dispatch_id` 核对每次派发的结果 |
 | 子 Agent 等待与目录 | `wait_agent`、`list_agents` | `wait_agent(timeout_ms?)` 观察该父会话的邮箱。`list_agents()` 查看协作者、当前派发和最近结果 |
 | 计划 | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 计划保存、批准和基于真实回执的进度分别核实 |

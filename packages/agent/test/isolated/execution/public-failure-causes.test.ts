@@ -31,7 +31,7 @@ for (const entry of [
   {
     name: 'Ask answer',
     code: 'invalid_ask_user_answer',
-    hint: 'does not match the offered options',
+    hint: 'does not match the original question',
   },
   { name: 'Skills text limit', code: 'skill_text_limit', hint: 'supported reading limit' },
   {

@@ -56,7 +56,7 @@ Ctrl+A 只为当前原卡确实要求的附件发起重读；Controller 也在�
 
 [首次配置](onboarding-panel.tsx)沿原 Trust／Provider／Connection／Manual Model 流程接新的 [onboarding port](onboarding.ts)。没有可用默认时可配置 Provider，也可用原 enabled/default CAS 选已有模型。秘密仅在遮罩输入和一次热 POST 内，unknown 只 GET 原 mutation；输入、配置和身份校验仍由新 Service／Agent 完成。
 
-模型、权限、会话、Files、MCP、Skills、语言、主题、帮助与交互面板使用原纯 frame／行布局，完整目录及描述保留。模型与 effort 使用原单 Enter 选择；权限、MCP 变更及恢复继续保留各自必要确认，CAS、来源绑定与原 ID 查询不变。Question Tab 在选项与自定义编辑间切换；可选的纯输入题仍用 Tab 跳过，混合题用 Alt+S；多步骤 Esc 返回，第一步 Esc 精确取消原 Question Execution。计划意图和权限仍独立，Shift+Tab 只切换下一草稿 planning，不改活动 Run。
+模型、权限、会话、Files、MCP、Skills、语言、主题、帮助与交互面板使用原纯 frame／行布局，完整目录及描述保留。模型与 effort 使用原单 Enter 选择；权限、MCP 变更及恢复继续保留各自必要确认，CAS、来源绑定与原 ID 查询不变。Question Tab 在选项与自定义编辑间切换。必答纯文本题直接进入编辑，Enter 沿原步骤继续或提交，可选的纯输入题仍用 Tab 跳过，混合题用 Alt+S；多步骤 Esc 返回，第一步 Esc 精确取消原 Question Execution。计划意图和权限仍独立，Shift+Tab 只切换下一草稿 planning，不改活动 Run。
 
 Ctrl+P 在运行、审批及 Question 草稿中直接打开权限面板，不解释或清空原答案的 slash 文本；Esc 返回原卡、步骤与缓冲。默认问卷的权限提示并入原 Alt+A 行，保留 80×24 的题号和选项高度。[权限回归](../../test/tui/permissions.test.tsx)核实际控制事件、主／子 scope、default／trust、选择中收到根变更、旧读晚回与原保存结果；[问卷回归](../../test/tui/questions.test.tsx)核实际按键切模式、原步骤／字面正文与准确答案身份。
 

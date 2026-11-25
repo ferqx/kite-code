@@ -1,9 +1,9 @@
 // Fixed public explanations only. These descriptions neither establish effects nor grant retries.
 export const additionalFailureExplanations: Readonly<Record<string, string>> = {
   invalid_ask_user_arguments:
-    'The question arguments are invalid. Supply one to three questions, each with three to four labeled and described options. If present, multiple must be a boolean. Set recommended: true on at most one option per question.',
+    'The question arguments are invalid. Supply one to three questions. Omit options or pass an empty array for a free-text question, or provide three to four labeled and described options for a choice question. If present, multiple must be a boolean. Set recommended: true on at most one option per question.',
   invalid_ask_user_answer:
-    'The received answer does not match the offered options. Check the original question and answer; do not invent a selection.',
+    'The received answer does not match the original question. Check the original answer format and preserve the user’s input.',
   cancel_requested:
     'The request was cancelled. Check its original response before deciding how to continue; do not automatically repeat it.',
   execution_cancel_requested:

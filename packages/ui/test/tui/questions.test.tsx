@@ -501,11 +501,31 @@ test('object wizard preserves exact keys, titles, text, later draft and grapheme
   app.unmount();
 });
 
-test('empty free answer does not submit, original whitespace and Unicode survive intact', async () => {
-  const f = fixture({ type: 'string' });
+test('text-only ask_user opens directly for input and submits the exact nonblank text', async () => {
+  const f = fixture({
+    oneOf: [
+      {
+        type: 'object',
+        properties: {
+          q1: {
+            title: 'What happened?',
+            type: 'object',
+            properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
+            required: ['text'],
+            additionalProperties: false,
+          },
+        },
+        required: ['q1'],
+        additionalProperties: false,
+      },
+      { const: null, title: 'Cancel answering' },
+    ],
+  });
   await f.controller.select('a');
   const app = render(<TuiSession controller={f.controller} />);
   await tick();
+  expect(app.lastFrame()).toContain('What happened?');
+  expect(app.lastFrame()).not.toContain('No selection');
   app.stdin.write('   ');
   await tick();
   app.stdin.write('\r');
@@ -517,9 +537,17 @@ test('empty free answer does not submit, original whitespace and Unicode survive
   await tick();
   app.stdin.write('原文  ');
   await tick();
+  app.stdin.write('\u001b\r');
+  await tick();
+  app.stdin.write('第二行  ');
+  await tick();
+  expect(app.lastFrame()).toContain('第二行');
+  expect(f.answers).toHaveLength(0);
   app.stdin.write('\r');
   await tick();
-  expect(f.answers[0]!.answer).toEqual({ kind: 'question', answers: '   👨原文  ' });
+  expect(f.answers.map(({ answer }) => answer)).toEqual([
+    { kind: 'question', answers: { q1: { text: '   👨原文  \n第二行  ' } } },
+  ]);
   app.unmount();
 });
 

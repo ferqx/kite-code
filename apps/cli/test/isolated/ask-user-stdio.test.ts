@@ -29,14 +29,7 @@ const questions: Json = {
         { label: 'Third', description: 'Third choice' },
       ],
     },
-    {
-      question: 'Free?',
-      options: [
-        { label: 'One', description: 'One' },
-        { label: 'Two', description: 'Two' },
-        { label: 'Three', description: 'Three' },
-      ],
-    },
+    { question: 'Free?', options: [] },
     {
       question: 'Unicode?',
       multiple: true,

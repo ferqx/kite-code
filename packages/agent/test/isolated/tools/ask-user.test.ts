@@ -160,6 +160,8 @@ test('canonical parser rejects removed fields, invalid cardinality, whitespace, 
     { questions: [{ ...question, allowFreeText: true }] },
     { questions: [{ ...question, multiple: 'true' }] },
     { questions: [{ ...question, question: '  ' }] },
+    { questions: [{ ...question, options: null }] },
+    { questions: [{ ...question, options: question.options.slice(0, 1) }] },
     { questions: [{ ...question, options: question.options.slice(0, 2) }] },
     {
       questions: [
@@ -367,8 +369,68 @@ test('mixed selection modes save distinct IDs and deliver the selected labels to
   }
 }, 10000);
 
+test('omitted and empty options create text-only fields that save complete original answers', async () => {
+  const f = await fixture({
+    questions: [
+      { question: 'What happened?' },
+      { question: 'Where?', options: [], multiple: true },
+    ],
+  });
+  try {
+    const record = await f.pending();
+    const field = {
+      type: 'object',
+      properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
+      required: ['text'],
+      additionalProperties: false,
+    };
+    expect(record.request).toMatchObject({
+      recommendedOptions: {},
+      schema: {
+        oneOf: [
+          {
+            properties: {
+              q1: { title: 'What happened?', ...field },
+              q2: { title: 'Where?', ...field },
+            },
+          },
+          { const: null },
+        ],
+      },
+    });
+    const invalid: Json[] = ['q1-o1', { text: ' \n ' }, { text: 'x', choices: [] }];
+    for (const [index, q1] of invalid.entries()) {
+      let error: unknown;
+      try {
+        await f.answer(record, { q1, q2: { text: 'Somewhere' } }, `invalid-text-${index}`);
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error).toMatchObject({ code: 'interaction_answer_invalid' });
+    }
+    expect(await f.pending()).toMatchObject({ id: record.id, revision: record.revision });
+    const original = '  原文🧭\n第二行  ';
+    const answers = { q1: { text: original }, q2: { text: 'q2-o1' } };
+    await f.answer(record, answers);
+    await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+    expect((await f.interactions()).interactions[0]?.answer).toEqual({ kind: 'question', answers });
+    expect((await f.store.getExecution(record.executionId))?.result).toMatchObject({
+      outcome: 'succeeded',
+      details: {
+        answer: `What happened?: ${original}\nWhere?: q2-o1`,
+        answers: { q1: original, q2: 'q2-o1' },
+      },
+    });
+    expect((await f.store.getRun(record.runId!))?.status).toBe('completed');
+  } finally {
+    const pending = (await f.interactions()).interactions.find((item) => item.state === 'pending');
+    if (pending) await f.answer(pending, null, 'cleanup-answer');
+    await f.close();
+  }
+}, 10000);
+
 test('cancelling only the original questionnaire saves null and lets the same Run continue to the next Model response', async () => {
-  const f = await fixture();
+  const f = await fixture({ questions: [{ question: 'What happened?' }] });
   try {
     const card = await f.pending();
     const receipt = await f.answer(card, null);

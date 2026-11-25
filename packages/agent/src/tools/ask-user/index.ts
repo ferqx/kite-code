@@ -6,7 +6,7 @@ import { AgentError } from '../../storage/types';
 const nonempty = { type: 'string', minLength: 1, pattern: '\\S' };
 const minOptions = 3;
 const maxOptions = 4;
-const inputSchema = {
+const inputSchema: ToolDefinition['inputSchema'] = {
   type: 'object',
   properties: {
     questions: {
@@ -20,8 +20,8 @@ const inputSchema = {
           multiple: { type: 'boolean' },
           options: {
             type: 'array',
-            minItems: minOptions,
             maxItems: maxOptions,
+            anyOf: [{ maxItems: 0 }, { minItems: minOptions }],
             items: {
               type: 'object',
               properties: {
@@ -34,7 +34,7 @@ const inputSchema = {
             },
           },
         },
-        required: ['question', 'options'],
+        required: ['question'],
         additionalProperties: false,
       },
     },
@@ -66,11 +66,15 @@ function questions(input: Json) {
   if (!Array.isArray(values) || values.length < 1 || values.length > 3)
     throw new AgentError('invalid_ask_user_arguments');
   return values.map((value, index) => {
-    const question = object(value, ['question', 'options'], ['multiple']);
+    const question = object(value, ['question'], ['options', 'multiple']);
     const multiple = Object.hasOwn(question, 'multiple') ? question.multiple : false;
     if (typeof multiple !== 'boolean') throw new AgentError('invalid_ask_user_arguments');
-    const options = question.options;
-    if (!Array.isArray(options) || options.length < minOptions || options.length > maxOptions)
+    const options = Object.hasOwn(question, 'options') ? question.options : [];
+    if (
+      !Array.isArray(options) ||
+      (options.length > 0 && options.length < minOptions) ||
+      options.length > maxOptions
+    )
       throw new AgentError('invalid_ask_user_arguments');
     const choices = options.map((value, choiceIndex) => {
       const option = object(value, ['label', 'description'], ['recommended']);
@@ -86,7 +90,12 @@ function questions(input: Json) {
     });
     if (choices.filter((choice) => choice.recommended).length > 1)
       throw new AgentError('invalid_ask_user_arguments');
-    return { id: `q${index + 1}`, question: text(question.question!).trim(), choices, multiple };
+    return {
+      id: `q${index + 1}`,
+      question: text(question.question!).trim(),
+      choices,
+      multiple: choices.length > 0 && multiple,
+    };
   });
 }
 
@@ -97,7 +106,7 @@ export function createAskUserExtension(): Extension {
     model: { name: 'ask_user', snakeCase: true },
     version: '1',
     description:
-      'Ask only when a material choice blocks progress. Submit all one to three focused questions in one call, each with three to four label/description options. Questions are single-choice by default; set multiple: true on a question to allow more than one option. To recommend an option, set recommended: true on at most one option per question. Every question permits a free-text answer. When multiple is true, users can combine free text with selected options. Cancelling the answers returns cancelled information and leaves the task running; do not automatically repeat these questions.',
+      'Ask only when a material answer blocks progress. Submit all one to three focused questions in one call. Omit options or pass an empty array for a free-text question. For a choice question, provide three to four label/description options. Choice questions are single-choice by default; set multiple: true to let users combine selected options with each other and with free text. Set recommended: true on at most one option per question. Every question permits a free-text answer. Cancelling the answers returns cancelled information and leaves the task running; do not automatically repeat these questions.',
     inputSchema,
     async execute(input, context) {
       let parsed: ReturnType<typeof questions>;
@@ -127,18 +136,15 @@ export function createAskUserExtension(): Extension {
               uniqueItems: true,
             }
           : undefined;
-        properties[question.id] = {
-          title: question.question,
-          anyOf: [
-            ...(multiple ? [multiple] : choices),
-            {
-              type: 'object',
-              properties: { text: nonempty, ...(multiple ? { choices: multiple } : {}) },
-              required: ['text'],
-              additionalProperties: false,
-            },
-          ],
+        const freeText = {
+          type: 'object',
+          properties: { text: nonempty, ...(multiple ? { choices: multiple } : {}) },
+          required: ['text'],
+          additionalProperties: false,
         };
+        properties[question.id] = choices.length
+          ? { title: question.question, anyOf: [...(multiple ? [multiple] : choices), freeText] }
+          : { title: question.question, ...freeText };
       }
       let accepted: Json;
       try {
