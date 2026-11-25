@@ -425,7 +425,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.events',
         'wait_agent',
-        'Wait for any new event in the parent mailbox. Defaults to 30000ms; zero returns immediately. The runtime resumes the observation automatically. Complete child reports are delivered separately. An empty timeout does not establish failure or completion. A timeout does not stop child work.',
+        'Wait for any new event in the parent mailbox. Defaults to 30000ms; zero returns immediately. The runtime remembers the mailbox position for the next call. Complete child reports are delivered separately. An empty timeout does not establish failure or completion. A timeout does not stop child work. If a child result is still needed, continue independent authorized work or call wait_agent again. An empty timeout by itself does not call for a user update.',
         object(
           {
             workRefs: {

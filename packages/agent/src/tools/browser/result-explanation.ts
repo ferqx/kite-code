@@ -178,13 +178,13 @@ const known = (value: Json | undefined): string | undefined =>
   typeof value === 'string' && Object.hasOwn(explanations, value) ? value : undefined;
 const structuredExplanations: Readonly<Record<string, string>> = {
   browser_page_binding_required:
-    'Use browser_tabs to select this exact retained tab and obtain its current snapshot before sending input.',
+    'If browser_tabs is available, select this exact retained tab and obtain its current snapshot before sending input. Otherwise report that the tab cannot be selected.',
   browser_page_recovery_required:
-    'The original page is retained after its first navigation lost confirmation. Use browser_tabs to list and select the exact tab marked observation_required before any new opening or input. Do not replay the earlier navigation.',
+    'The original page is retained after its first navigation lost confirmation. If browser_tabs is available, list and select the exact tab marked observation_required before any new opening or input. Otherwise report that the original result remains unknown. Do not replay the earlier navigation.',
   browser_page_observation_required:
-    'Take a fresh browser_snapshot on the exact original tab before input or a screenshot. The earlier navigation result remains unknown.',
+    'Take a fresh observation on the exact original tab before input or a screenshot. Use browser_snapshot if available, or use browser_tabs to list and select that same tab by tab_id for a fresh snapshot. If neither is available, report that the current page cannot be verified. The earlier navigation result remains unknown.',
   browser_stale_element:
-    'The element reference is stale. Take a fresh browser_snapshot and use the current target. Earlier confirmed actions keep their effects.',
+    'The element reference is stale. Use browser_snapshot if available, or use browser_tabs to list and select the exact same tab by tab_id for a fresh snapshot. Use the current target from that observation. If neither is available, report the missing observation and stop actions that depend on this target. Earlier confirmed actions keep their effects.',
 };
 
 /** Pure display only. Never changes outcome, dispatch facts, original results or recovery authority. */
@@ -257,7 +257,7 @@ export function explainBrowserExecutionResult(
   else if (result.outcome === 'failed' && code === 'browser_page_existing_missing')
     content +=
       surface === 'structured'
-        ? ' List the remaining pages with browser_tabs. Select a tab only if its identity matches the requested page. An independently authorized fresh opening can use browser_navigate if it does not depend on the missing page state. Preserve any unknown outcome or unconfirmed cleanup.'
+        ? ' If browser_tabs is available, list the remaining pages and select a tab only if its identity matches the requested page. Otherwise report that the retained tabs cannot be checked. An independently authorized fresh opening can use browser_navigate when available if it does not depend on the missing page state. Preserve any unknown outcome or unconfirmed cleanup.'
         : ' The old candidate is invalid. List browser.pages() once more to inspect the remaining candidates. If another candidate uniquely matches the page intended by the current user task, construct a fresh browser.page(candidate.id) handle and take a new snapshot. If no unique candidate matches, explain that limitation. Do not choose by list order, recency or visibility, guess between same-URL pages, navigate another page or replay earlier actions. If the current user task clearly requests opening a known URL and does not depend on the original page state, use a separate browser.open(theActualUrl) call and take a fresh snapshot of the new page. Do not replay earlier input or unknown actions. A connection failure or identity mismatch does not permit this recovery, and this result does not clear an unknown result or unconfirmed cleanup.';
   else if (result.outcome === 'cancelled')
     content += ' This step was cancelled; that does not undo any earlier completed actions.';

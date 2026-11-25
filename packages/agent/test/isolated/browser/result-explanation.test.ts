@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test';
 import type { Json, ToolResult } from '../../../src/extensions';
 import { explainBrowserExecutionResult } from '../../../src/tools/browser/result-explanation';
+import {
+  runStructuredBrowser,
+  type StructuredBrowserState,
+} from '../../../src/tools/browser/structured';
 
 test('structured recovery names only the current browser tools and preserves the original failure', () => {
   for (const code of ['browser_page_existing_missing', 'browser_page_recovery_required']) {
@@ -8,7 +12,8 @@ test('structured recovery names only the current browser tools and preserves the
       { outcome: 'failed', content: code },
       'structured',
     );
-    expect(result.content).toContain('browser_tabs');
+    expect(result.content).toContain('If browser_tabs is available');
+    expect(result.content).toContain('Otherwise report');
     expect(result.content).not.toContain('browser.pages()');
     expect(result.content).not.toContain('browser.open(');
     expect(result.details).toMatchObject({ code, diagnostic: { originalContent: code } });
@@ -89,6 +94,65 @@ for (const code of ['browser_page_recovery_required', 'browser_page_observation_
     expect(result.details).toMatchObject({ operations: [] });
     expect(input.content).toBe(code);
   });
+
+for (const code of ['browser_stale_element', 'browser_page_observation_required'])
+  test(`structured ${code} can recover a snapshot by selecting the exact original tab`, () => {
+    const result = explainBrowserExecutionResult(
+      { outcome: 'failed', content: code },
+      'structured',
+    );
+    expect(result.content).toContain('browser_snapshot if available');
+    expect(result.content).toContain('browser_tabs to list and select');
+    expect(result.content).toContain('by tab_id for a fresh snapshot');
+    expect(result.details).toMatchObject({ code });
+  });
+
+test('reselecting the original tab returns new targets without navigating or switching pages', async () => {
+  const state: StructuredBrowserState = {
+    prefix: 'test',
+    next: 0,
+    active: 'original',
+    elements: new Map(),
+    tabIds: new Map(),
+  };
+  const calls: { method: string; args: Json }[] = [];
+  const call = async (method: string, args: Json): Promise<Json> => {
+    calls.push({ method, args });
+    const url = 'https://example.test/';
+    if (method === 'pages')
+      return [
+        { id: 'other', url, title: 'Another tab' },
+        { id: 'original', url, title: 'Original tab' },
+      ];
+    if (method !== 'snapshot') throw Error('unexpected_browser_method');
+    return {
+      url,
+      snapshot: 'textbox Name [ref=e1]',
+      elements: [{ ref: 'internal', backendRef: 'e1', role: 'textbox', name: 'Name' }],
+    };
+  };
+  const stale = await runStructuredBrowser({
+    id: 'browser.structured.click',
+    input: { target: 'e-old' },
+    state,
+    call,
+  });
+  expect(stale.failure?.message).toBe('browser_stale_element');
+  expect(calls).toHaveLength(0);
+  const id = 'browser.structured.tabs';
+  const listed = await runStructuredBrowser({ id, input: { action: 'list' }, state, call });
+  const { tabs } = listed.value as { tabs: { tab_id: string; title: string }[] };
+  const tab_id = tabs.find(({ title }) => title === 'Original tab')!.tab_id;
+  const selected = await runStructuredBrowser({
+    id,
+    input: { action: 'select', tab_id },
+    state,
+    call,
+  });
+  expect(selected.value).toMatchObject({ elements: [{ ref: 'etest-3', name: 'Name' }] });
+  expect(calls.map(({ method }) => method)).toEqual(['pages', 'pages', 'snapshot']);
+  expect(calls[2]!.args).toMatchObject({ page: 'original' });
+});
 
 for (const outcome of ['failed', 'outcome_unknown'] as const)
   test(`confirmed original page closure explains ${outcome} while preserving earlier effects and uncertainty`, () => {

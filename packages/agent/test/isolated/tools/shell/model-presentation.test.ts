@@ -148,17 +148,10 @@ test.each([
   expect(render(f)).not.toContain('Candidate from');
 });
 
-for (const name of [
-  'shell.execute',
-  'shell.launch',
-  'shell.read',
-  'shell.wait',
-  'shell.stop',
-] as const)
+for (const name of ['shell.execute', 'shell.read', 'shell.wait', 'shell.stop'] as const)
   test(`${name} presents the original starter UUID without borrowing its Job or observer identity`, () => {
     const f = fixture();
-    if (name === 'shell.launch') f.starter.definitionId = name;
-    else if (name !== 'shell.execute') lifecycle(f, name);
+    if (name !== 'shell.execute') lifecycle(f, name);
     const before = structuredClone(f);
     const body = formatShellResult(f)!;
     expect(body).toContain(`execution_id: ${JSON.stringify(modelExecutionId(f.starter.id))}`);
@@ -283,17 +276,6 @@ test('reused approval is described as reuse rather than a fresh review', () => {
   const body = render(f)!;
   expect(body).toContain('existing approval was reused');
   expect(body).not.toContain('risk review allowed');
-});
-
-test('a saved legacy launch handle remains readable without inventing a new identity', () => {
-  const f = fixture();
-  f.starter.definitionId = 'shell.launch';
-  f.starter.input = { key: 'saved-legacy-shell', command: 'printf original' };
-  f.ref.key = 'saved-legacy-shell';
-  lifecycle(f, 'shell.read');
-  const body = render(f)!;
-  expect(body).toContain('shell_id: "saved-legacy-shell"');
-  expect(body).toContain('原始输出🪁\n');
 });
 
 test('an unaccepted approval answer is not reported as user approval', () => {

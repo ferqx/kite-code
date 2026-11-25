@@ -410,6 +410,47 @@ test('default Service exposes one global Browser extension and selected native t
   }
 }, 20000);
 
+test.skipIf(process.platform !== 'darwin' || !!nativeBrowserUnavailableReason())(
+  'structured navigation and its Skill condition retained-tab guidance on the selected Browser catalogue',
+  async () => {
+    const f = await fixture();
+    try {
+      f.configuration.tools = [
+        { id: 'browser.execute', enabled: true },
+        { id: 'browser.structured.tabs', enabled: false },
+        { id: 'skills.load', enabled: true },
+        { id: 'skills.resource', enabled: true },
+      ];
+      f.save();
+      f.emit({ name: 'load_skill', input: { skill_id: 'computer-use' } });
+      expect((await f.run()).run?.status).toBe('completed');
+      const request = f.requests.at(-1)!;
+      const definitions = (
+        request.tools as { function: { name: string; description: string } }[]
+      ).map((tool) => tool.function);
+      expect(definitions.some(({ name }) => name === 'browser_tabs')).toBe(false);
+      expect(definitions.find(({ name }) => name === 'browser_navigate')?.description).toContain(
+        'use browser_tabs if it is available in the current tool catalog. Otherwise report',
+      );
+      const knowledge = (request.messages as { role: string; content: unknown }[]).filter(
+        ({ content }) => typeof content === 'string' && content.includes('# Computer use'),
+      );
+      expect(knowledge.map(({ role }) => role)).toEqual(['user']);
+      const body = knowledge[0]?.content;
+      expect(body).toContain(
+        'If browser_tabs is unavailable, report that the retained tab cannot be selected',
+      );
+      expect(body).toContain(
+        'If you need to release a tab and the tool is unavailable, report that limitation',
+      );
+      expect(existsSync(f.browser.runtimeDirectory!)).toBe(false);
+    } finally {
+      await f.close();
+    }
+  },
+  20000,
+);
+
 test('raw user/workspace browser controls and Tool options never enter trusted host construction', async () => {
   const f = await fixture();
   try {
@@ -508,13 +549,15 @@ test('private Browser roots are protected from ordinary external file reads even
 test('actual Full-mode dispatch cannot lift a disabled host Browser capability through user tool selection', async () => {
   const f = await fixture(false);
   try {
-    f.configuration.tools = [{ id: 'browser.open', enabled: true }];
+    f.configuration.tools = [{ id: 'browser.structured.navigate', enabled: true }];
     f.save();
-    f.emit({ name: 'browser_open', input: { key: 'open-denied', url: 'https://example.test/' } });
+    f.emit({ name: 'browser_navigate', input: { url: 'https://example.test/' } });
     const result = await f.run();
     expect(result.run?.status).toBe('completed');
     const executions = await f.store.listExecutions('s', 100);
-    const tool = executions.find((execution) => execution.definitionId === 'browser.open');
+    const tool = executions.find(
+      (execution) => execution.definitionId === 'browser.structured.navigate',
+    );
     expect(tool?.status).toBe('failed');
     expect(JSON.stringify(tool?.result)).toContain('browser_disabled_by_host');
     expect(executions.some((execution) => execution.definitionId === 'browser.session')).toBe(
@@ -539,12 +582,14 @@ test('missing Browser assets are absent from defaults while explicit selection f
         tool.function.name.startsWith('browser_'),
       ),
     ).toBe(false);
-    f.configuration.tools = [{ id: 'browser.open', enabled: true }];
+    f.configuration.tools = [{ id: 'browser.structured.navigate', enabled: true }];
     f.save();
-    f.emit({ name: 'browser_open', input: { key: 'missing-open', url: 'https://example.test/' } });
+    f.emit({ name: 'browser_navigate', input: { url: 'https://example.test/' } });
     expect((await f.run()).run?.status).toBe('completed');
     const executions = await f.store.listExecutions('s', 100);
-    const tool = executions.find((execution) => execution.definitionId === 'browser.open');
+    const tool = executions.find(
+      (execution) => execution.definitionId === 'browser.structured.navigate',
+    );
     expect(tool?.status).toBe('failed');
     expect(JSON.stringify(tool?.result)).toContain('browser_runtime_unavailable');
     expect(executions.some((execution) => execution.definitionId === 'browser.session')).toBe(

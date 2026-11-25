@@ -70,6 +70,8 @@ export interface ProcessHostConfiguration {
   sessionInputMetadata?: RuntimeOptions['sessionInputMetadata'];
   extensions?: RuntimeOptions['extensions'];
   sources?: RuntimeOptions['sources'];
+  /** Trusted preparation for the host's own Shell output staging. */
+  outputCollections?: RuntimeOptions['outputCollections'];
   workspaceSerialLocks?: RuntimeOptions['workspaceSerialLocks'];
   /** Share the actual host coordinator with private network/credential operations. No new owner. */
   bindWorkspaceSerialLocks?(locks: NonNullable<RuntimeOptions['workspaceSerialLocks']>): void;

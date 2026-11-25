@@ -52,7 +52,7 @@ Plan 原记录和历史审阅正文不随当前文件变化；恢复保留实际
 
 完整 plan 仍保存在既有 record；当前没有单 record 业务正文限额，但 SQLite Worker 保留既有 queuedBytes/pending 资源准入（普通队列 14 MiB/224、关键队列 16 MiB/256），不因本叶子扩大。真实资格覆盖超过 300 KiB 的 UTF-8 与 JSON escaped 大正文写入、原 Artifact 完整审阅、批准状态和真实 step receipt 完成；不宣称超过既有队列/平台容量的无界传输。贡献中的批准摘要仍只保留 decision identity/answer，不再次复制审阅附件正文。
 
-当前步骤进度由 `read_plan` 从原 `progress/<plan>/<version>` 记录读取；压缩后若进度已不在模型窗口，静态合同指导模型先核当前进度，再选择剩余步骤。进度不混入稳定的计划来源或批准摘要，避免同批步骤更新使普通后继工具刷新失败，也不使先前成功 receipt 随进度变化失效。[进度观察与批准事实](../../../test/isolated/business/planning-progress-view.test.ts)核准确要求、无阶段投影与进度变化后的稳定来源；[计划执行回归](../../../test/isolated/business/planning.test.ts)核同批普通工具及后续进度仍可引用原成功 receipt。该指导不等同于自动注入全部进度或保证模型永不遗忘。
+当前步骤进度由 `read_plan` 从原 `progress/<plan>/<version>` 记录读取，稳定计划来源及批准摘要独立保存。同一获批 Run 的新工具决策采用该 Run 已发布的压缩摘要时，派发条件核封存模型请求中的原 Tool 回执。当前修订的准确进度回执或全部已保存的相关原执行结果可满足条件。两类事实均缺失或不完整时，新副作用调用在派发前保存 `plan_progress_read_required`，由下一模型调用 `read_plan` 确认剩余步骤。进度记录的读取加入同一派发事务的条件读集。原计划管理、可信只读及已在途工作的轮询和停止继续沿各自入口处理。[进度观察与批准事实](../../../test/isolated/business/planning-progress-view.test.ts)核准确要求、无阶段投影与进度变化后的稳定来源；[计划执行回归](../../../test/isolated/business/planning.test.ts)核同批普通工具及后续进度仍可引用原成功 receipt。
 
 `planning.progress.display` 沿现有 Extension Query 提供客户端只读投影。当前视图核原 Run 的执行批准和当前计划文件。结束后的历史沿原 Run 的不可变批准记录核对每个获批版本及原审阅执行，读取该轮持久进度。同一版本被后续 Run 重用时，从原 Run 成功更新的确切结果和已提交的进度修订恢复原步骤。后续 Run 的首次更新从该轮自己的步骤状态开始。投影仅含计划标题、版本身份、审阅入口、步骤标题及状态。
 

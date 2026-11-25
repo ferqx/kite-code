@@ -1,84 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { gunzipSync } from 'node:zlib';
-import {
-  fixturePermissions,
-  privateDirectory,
-  temporaryDirectory,
-} from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
-import { openSqliteStore, preflightSqliteStore } from '../../../src/sqlite';
-
-// Genuine format-1 profiles retain their original private review bodies. The
-// current same-major implementation still rejects their old schema/checksums.
-function unpack(shape: string) {
-  const root = temporaryDirectory('kite-old-format-authorization-');
-  const files = JSON.parse(
-    gunzipSync(
-      readFileSync(
-        new URL(`./fixtures/legacy-authorization-review-${shape}.json.gz`, import.meta.url),
-      ),
-    ).toString(),
-  ) as Record<string, string>;
-  for (const [name, bytes] of Object.entries(files)) {
-    const path = join(root, name);
-    privateDirectory(dirname(path));
-    writeFileSync(path, Buffer.from(bytes, 'base64'), { mode: 0o600 });
-    fixturePermissions(path, name.includes('/blobs/') ? 0o400 : 0o600);
-  }
-  return { root, files, profile: { dataRoot: join(root, 'data'), profile: 'owned' } };
-}
-for (const shape of ['inline', 'artifact-private', 'artifact-semantic', 'guarded'])
-  test(`same-major legacy ${shape} review history is rejected without conversion or rewriting saved results`, async () => {
-    const f = unpack(shape);
-    try {
-      const originals = new Map(
-        Object.keys(f.files).map((name) => [name, readFileSync(join(f.root, name))]),
-      );
-      await expect(preflightSqliteStore(f.profile)).rejects.toMatchObject({
-        code: 'store_incompatible',
-      });
-      const legacy = new Database(join(f.profile.dataRoot, f.profile.profile, 'core.db'), {
-        readonly: true,
-      });
-      try {
-        expect(
-          JSON.parse(
-            readFileSync(join(f.profile.dataRoot, f.profile.profile, 'profile.json'), 'utf8'),
-          ).formatMajor,
-        ).toBe(1);
-        expect(legacy.query('SELECT format_major FROM storage_meta').get()).toEqual({
-          format_major: 1,
-        });
-        const baseline = readFileSync(
-          new URL('../../../src/storage/migrations/0001-baseline.sql', import.meta.url),
-        );
-        expect(
-          legacy
-            .query<{ checksum: string }, []>(
-              "SELECT checksum FROM schema_migration WHERE id='0001-baseline'",
-            )
-            .get()!.checksum,
-        ).not.toBe(createHash('sha256').update(baseline).digest('hex'));
-      } finally {
-        legacy.close(true);
-      }
-
-      for (const mode of ['readonly', 'readwrite'] as const)
-        await expect(openSqliteStore({ ...f.profile, mode })).rejects.toMatchObject({
-          code: 'store_incompatible',
-        });
-      for (const [name, bytes] of originals)
-        expect(readFileSync(join(f.root, name))).toEqual(bytes);
-    } finally {
-      rmSync(f.root, { recursive: true, force: true });
-    }
-  });
+import { openSqliteStore } from '../../../src/sqlite';
 
 async function modelPurposeFixture(title: boolean) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-internal-purpose-boundary-')));

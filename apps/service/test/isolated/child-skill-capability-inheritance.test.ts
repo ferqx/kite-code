@@ -1,12 +1,12 @@
-import { expect, spyOn, test } from 'bun:test';
-import { writeFileSync } from 'node:fs';
+import { expect, test } from 'bun:test';
+import { existsSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { browserStructuredToolIds } from '@kite-ai/agent/browser';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
-import * as mcp from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
@@ -94,8 +94,6 @@ test('explicit inherited requirements and unknown inherited IDs still fail befor
   }
 });
 
-// Real default Browser registrations and packaged dependencies are available on macOS.
-// The endpoint is owned and inert: this scenario must not launch or control a browser.
 async function defaultScenario(selectedSkills?: string[], childBrowserAvailable = true) {
   const f = fixture();
   writeFileSync(join(f.workspace, 'source.txt'), 'unchanged fixture source\n');
@@ -123,13 +121,9 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
       return new Response('No browser operation belongs to this test.', { status: 500 });
     },
   });
-  // The source-only resolver deliberately rejects .ts callers. Resolve the actual
-  // packaged guardian, without replacing a capability, controller or permission.
-  const packagedMcpPath = join(import.meta.dir, '../../../../packages/agent/dist/mcp/index.js');
-  const packagedMcp = (await import(packagedMcpPath)) as typeof mcp;
-  const guardianAsset = spyOn(mcp, 'mcpStdioGuardianAsset').mockImplementation(
-    packagedMcp.mcpStdioGuardianAsset,
-  );
+  // Use the actual Service catalogue and policy with inert files at the native
+  // boundary. This test checks inheritance without launching a browser.
+  const executable = realpathSync(process.execPath);
   const hostOptions = {
     profile: f.profile,
     userConfigurationPath: configPath,
@@ -137,6 +131,12 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
     localCodex: false as const,
     credentialBackend: createTemporaryCredentialBackend(),
     desktopBrowser: { endpoint: new URL('/kite-page', endpoint.url).href, token: 'a'.repeat(72) },
+    browser: {
+      executable,
+      browserPath: executable,
+      darwin: { guardianPath: executable, bunExecutable: executable },
+      runtimeDirectory: join(f.root, 'browser-private'),
+    },
   };
   const host = createDefaultProcessConfiguration(hostOptions);
   const childHost = childBrowserAvailable
@@ -152,8 +152,9 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
       role,
       createFixedModel([
         call('spawn_agent', {
-          prompt: 'Read source.txt and report it without modifying anything.',
-          ...(role === 'general' ? {} : { preset: role }),
+          message: 'Read source.txt and report it without modifying anything.',
+          task_name: 'Read fixture source',
+          ...(role === 'general' ? {} : { agent_type: role }),
         }),
         [finish],
         [finish],
@@ -166,6 +167,16 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
       createFixedModel([call('read_file', { path: 'source.txt' }), [finish]]),
     ]),
   );
+  const parentSkillIds = selectedSkills ?? [
+    'computer-use',
+    'office.docx',
+    'office.pdf',
+    'office.pptx',
+    'office.xlsx',
+  ];
+  const browserModelToolIds = browserStructuredToolIds
+    .map((id) => id.replace('browser.structured.', 'browser_'))
+    .sort();
   const preparationFailures: unknown[] = [];
   const store = await openSqliteStore(f.profile);
   let runtime: ReturnType<typeof createRuntime> | undefined;
@@ -254,11 +265,14 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
       });
       await runtime.waitForCommand(`work-${role}`, { timeoutMs: 5000 });
       const command = (await store.getCommand(`work-${role}`))!;
-      const parentRun = (await store.getRun((command.receipt as { runId: string }).runId))!;
+      expect(command.status).toBe('applied');
+      const runId = (command.receipt as { runId?: string } | null)?.runId;
+      expect(typeof runId).toBe('string');
+      const parentRun = (await store.getRun(runId!))!;
       const parentSnapshot = object(object(parentRun.configuration).snapshot);
       expect(parentSnapshot.skillSelection).toEqual({
         requested: selectedSkills ?? null,
-        resolvedIds: selectedSkills?.length === 0 ? [] : ['computer-use'],
+        resolvedIds: parentSkillIds,
       });
       const parentFacts = object(parentSnapshot.actualCapabilities);
       expect(
@@ -325,11 +339,14 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
       const childSnapshot = object(object(childRun.configuration).snapshot);
       const binding = object(childSnapshot.configuration);
       const readonly = role === 'explore';
+      const childSkillIds = readonly
+        ? parentSkillIds.filter((skillId) => skillId !== 'computer-use')
+        : parentSkillIds;
       for (const tool of object(binding.actualCapabilities).tools as Json[])
         expect(parentFacts.tools as Json[]).toContainEqual(tool);
       expect(childSnapshot.skillSelection).toEqual({
         requested: selectedSkills ?? null,
-        resolvedIds: readonly || selectedSkills?.length === 0 ? [] : ['computer-use'],
+        resolvedIds: childSkillIds,
       });
       expect(
         (object(binding.actualCapabilities).tools as { id: string }[]).some(
@@ -337,14 +354,20 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
         ),
       ).toBe(!readonly);
       expect(object(binding.actualCapabilities).skills).toEqual(
-        readonly || selectedSkills?.length === 0 ? [] : parentFacts.skills,
+        (parentFacts.skills as { id: string }[]).filter((skill) =>
+          childSkillIds.includes(skill.id),
+        ),
       );
       for (const request of children.get(role)!.requests)
         expect(
-          request.tools.filter((tool) => tool.id.startsWith('browser_')).map((tool) => tool.id),
-        ).toEqual(readonly ? [] : ['browser_execute']);
+          request.tools
+            .filter((tool) => tool.id.startsWith('browser_'))
+            .map((tool) => tool.id)
+            .sort(),
+        ).toEqual(readonly ? [] : browserModelToolIds);
     }
     expect(browserRequests).toBe(0);
+    expect(existsSync(hostOptions.browser.runtimeDirectory)).toBe(false);
     expect(await Bun.file(join(f.workspace, 'source.txt')).text()).toBe(
       'unchanged fixture source\n',
     );
@@ -354,7 +377,6 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
     else if (runtime) await runtime.close();
     else await store.close();
     await endpoint.stop(true);
-    guardianAsset.mockRestore();
     removeTemporaryDirectory(f.root);
   }
 }

@@ -1,13 +1,8 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gunzipSync } from 'node:zlib';
-import {
-  privateDirectory,
-  temporaryDirectory,
-} from '../../../../../tests/fixtures/test-filesystem';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
@@ -20,59 +15,6 @@ beforeAll(async () => {
   qualified = await prepareQualifiedSqliteFixture();
 }, 60000);
 afterAll(() => qualified?.close());
-
-// These actual historical SIGKILL profiles are rejection inputs, never upgraded or replayed.
-function unpack(shape: 'approved' | 'none') {
-  const root = temporaryDirectory('kite-rejected-run-format-');
-  const files = JSON.parse(
-    gunzipSync(
-      readFileSync(
-        new URL(`../execution/fixtures/legacy-resume-${shape}.json.gz`, import.meta.url),
-      ),
-    ).toString(),
-  ) as Record<string, string>;
-  for (const [name, bytes] of Object.entries(files)) {
-    const path = join(root, name);
-    privateDirectory(dirname(path));
-    writeFileSync(path, Buffer.from(bytes, 'base64'), { mode: 0o600 });
-  }
-  return { root, profile: { dataRoot: join(root, 'data'), profile: 'test' } };
-}
-function treeBytes(root: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  function visit(relative: string) {
-    for (const entry of readdirSync(join(root, relative), { withFileTypes: true })) {
-      const name = join(relative, entry.name);
-      if (entry.isDirectory()) visit(name);
-      else
-        result[name] = createHash('sha256')
-          .update(readFileSync(join(root, name)))
-          .digest('hex');
-    }
-  }
-  visit('');
-  return result;
-}
-for (const shape of ['approved', 'none'] as const)
-  for (const mode of ['readwrite', 'readonly'] as const)
-    test(`same-major legacy ${shape} Store is rejected before ${mode} opening without changing any original bytes`, async () => {
-      const { root, profile } = unpack(shape);
-      try {
-        const profileDirectory = join(profile.dataRoot, profile.profile);
-        expect(
-          JSON.parse(readFileSync(join(profileDirectory, 'profile.json'), 'utf8')).formatMajor,
-        ).toBe(1);
-        const before = treeBytes(profileDirectory);
-        const error = await openSqliteStore({
-          ...profile,
-          ...(mode === 'readonly' ? { mode: 'readonly' as const } : {}),
-        }).catch((error) => error);
-        expect(error).toMatchObject({ code: 'store_incompatible' });
-        expect(treeBytes(profileDirectory)).toEqual(before);
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    });
 
 type Ready = {
   expectedStoreId: string;
@@ -153,12 +95,13 @@ for (const shape of ['current', 'context'] as const)
         timeoutMs: 3000,
       });
       expect(configuration.toolBehaviors).toHaveLength(1);
+      // The saved check deadline covers all three attempts, each with a 3000 ms limit.
       expect(
         (ready.checkPayload as { timeout: { startedAt: number; deadlineAt: number } }).timeout
           .deadlineAt -
           (ready.checkPayload as { timeout: { startedAt: number; deadlineAt: number } }).timeout
             .startedAt,
-      ).toBe(3000);
+      ).toBe(9000);
       runtime = createRuntime({
         store,
         artifacts: createArtifactStore({ profile, store }),

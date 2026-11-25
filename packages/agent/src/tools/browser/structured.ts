@@ -27,7 +27,7 @@ const schemas: Record<
 > = {
   'browser.structured.navigate': {
     description:
-      'Navigate the current task page or open the initial URL, then observe it. Reuse a retained tab through browser_tabs when continuing work. Unknown effects require observing the original page before further input.',
+      'Navigate the current task page or open the initial URL, then observe it. To continue on a retained tab, use browser_tabs if it is available in the current tool catalog. Otherwise report that the tab cannot be selected. Unknown effects require observing the original page before further input; do not open a replacement.',
     schema: object({ url }),
   },
   'browser.structured.snapshot': {
@@ -59,7 +59,7 @@ const schemas: Record<
   },
   'browser.structured.tabs': {
     description:
-      'List this task’s known tabs. Select using the listed tab_id. New acquires a tab for the supplied HTTP(S) address. Close releases control of the selected tab and preserves the user’s page.',
+      'List this task’s known tabs. Select using the listed tab_id to return a fresh snapshot, including when reselecting the current tab. New acquires a tab for the supplied HTTP(S) address. Close releases control of the selected tab and preserves the user’s page.',
     schema: {
       oneOf: [
         object({ action: { const: 'list' } }),

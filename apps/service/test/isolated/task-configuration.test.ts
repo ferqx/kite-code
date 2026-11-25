@@ -731,6 +731,13 @@ test('default explore runs through the real Task carrier and exposes only frozen
       expect(waitTool.function.description).toContain(
         'Wait for any new event in the parent mailbox',
       );
+      expect(waitTool.function.description).toContain(
+        'The runtime remembers the mailbox position for the next call',
+      );
+      expect(waitTool.function.description).toContain(
+        'If a child result is still needed, continue independent authorized work or call wait_agent again',
+      );
+      expect(waitTool.function.description).toContain('does not call for a user update');
       expect(contract(parentRequests[0]!)).not.toContain('An empty timeout');
       expect(contract(parentRequests[0]!)).not.toContain('next_cursor');
       expect(contract(parentRequests[0]!)).not.toMatch(/\b(?:agent_id|work_ref|work_refs)\b/);

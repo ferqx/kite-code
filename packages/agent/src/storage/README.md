@@ -267,7 +267,7 @@ begin 取得真实 root OS 锁并登记受限 RunResumeLease。Runtime 按实际
 
 零派发 Tool 已有结算的 Auto 检查时，同一恢复 commit 核实准确 `authorization.check` 来源、target、封存输入和终态结果，原检查 Model 与目标一并交接 fencing generation；active、unknown、取消或身份不实不取得接管资格，任一代次失真令整项事务回滚。新版内部检查只消费原统一回执，不接管旧 child 审核格式。原请求、输出凭据、ID/attempt 与人工决定保持，零新 Model/子会话/授权。[交接回归](../../test/isolated/recovery/run-resume-check-ownership.test.ts)验证真实冷接续。
 
-新版 Run 显式恢复核原封存的审核 preset／预算、checker 与全部工具行为绑定；缺失或配置漂移明确失败，不再把 `authorizationReview` 映射成 `authorizationCheck`，也不推断缺省设置。SQL commit 只消费原保存配置，不改写历史快照；已结算检查只消费原 v1 回执，不运行当前解释器或 Provider。原期限、结果、准确 target 与独立真人要求保持。[新版自身强杀恢复与旧库拒绝回归](../../test/isolated/recovery/run-resume-configuration-compatibility.test.ts)的环境、完整结果及未覆盖范围归[恢复证据](#会话状态核实与私有恢复边界)。
+新版 Run 显式恢复核原封存的审核 preset／预算、checker 与全部工具行为绑定；缺失或配置漂移明确失败，不再把 `authorizationReview` 映射成 `authorizationCheck`，也不推断缺省设置。SQL commit 只消费原保存配置，不改写历史快照；已结算检查只消费原 v1 回执，不运行当前解释器或 Provider。原期限、结果、准确 target 与独立真人要求保持。[当前格式强杀恢复回归](../../test/isolated/recovery/run-resume-configuration-compatibility.test.ts)验证原检查期限、原审批和一次执行。[格式与校验错误回归](../../test/isolated/recovery/run-resume-audit-migration.test.ts)验证拒绝无效存储时保持原文件字节。
 
 所有四处具名 Run 创建事务捕获 `context_selection_id`；当前 selection 漂移拒绝恢复。`initialization_state` 持久区分 unstarted／started／completed：任何初始化回调前先登记 started，注册 requirement 结果与 completed 同事务提交，空 refs 也必须完成封存。恢复 completed 复用原 refs，不重跑回调；started 拒绝重放半执行的闭包；unstarted 只有零 Execution 时可进入原初始化入口。
 

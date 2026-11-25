@@ -195,7 +195,7 @@ export function verifyPlanningBusinessEvidence(evidence: PlanningBusinessEvidenc
     assert.equal(output.version, 1);
     assert.equal(object(output.answer).decision, 'approve_once');
     assert.equal(object(output.target).executionId, shells[0]!.id, 'review_target_mismatch');
-    assert.equal(object(object(check.result).timing).budgetMs, 8000);
+    assert.equal(object(object(check.result).timing).budgetMs, 24000);
   }
   const targetDecisions = interactions.filter((row) => row.kind === 'approval');
   assert.equal(
@@ -297,22 +297,23 @@ export async function runPlanningBusinessCase(options: {
     const actor = child ? 'child' : 'root',
       step = steps.get(actor) ?? 0;
     steps.set(actor, step + 1);
+    const shellCall = {
+      name: 'exec_command',
+      input: {
+        cmd: command,
+        filesystem: entry.external ? 'full_access' : 'workspace_write',
+        network: 'none',
+      },
+    };
     if (child && options.attemptUnavailableGrandchild && step === 0)
       return {
         name: 'spawn_agent',
-        input: { prompt: 'Forbidden grandchild must not be created.' },
+        input: {
+          task_name: 'Forbidden grandchild',
+          message: 'Forbidden grandchild must not be created.',
+        },
       };
-    if (child)
-      return step === (options.attemptUnavailableGrandchild ? 1 : 0)
-        ? {
-            name: 'shell_execute',
-            input: {
-              command,
-              filesystem: entry.external ? 'full_access' : 'workspace_write',
-              network: 'none',
-            },
-          }
-        : null;
+    if (child) return step === (options.attemptUnavailableGrandchild ? 1 : 0) ? shellCall : null;
     const sessions = await ownedSessions();
     const sessionId = 's';
     const planWrite = (await store.listExecutions('s'))
@@ -337,15 +338,7 @@ export async function runPlanningBusinessCase(options: {
             ],
           },
         };
-      if (step === 1)
-        return {
-          name: 'shell_execute',
-          input: {
-            command,
-            filesystem: entry.external ? 'full_access' : 'workspace_write',
-            network: 'none',
-          },
-        };
+      if (step === 1) return shellCall;
       return null;
     }
     if (step === 0)
@@ -366,19 +359,13 @@ export async function runPlanningBusinessCase(options: {
       };
     if (step === 2)
       return entry.actor === 'main'
-        ? {
-            name: 'shell_execute',
-            input: {
-              command,
-              filesystem: entry.external ? 'full_access' : 'workspace_write',
-              network: 'none',
-            },
-          }
+        ? shellCall
         : {
             name: 'spawn_agent',
             input: {
-              preset: entry.actor,
-              prompt: `Perform only this owned command: ${command}. ${entry.actor === 'explore' ? 'Read only; do not write.' : 'Append exactly once.'} Do not spawn another agent.`,
+              task_name: 'Perform the exact owned operation',
+              agent_type: entry.actor,
+              message: `Perform only this owned command: ${command}. ${entry.actor === 'explore' ? 'Read only; do not write.' : 'Append exactly once.'} Do not spawn another agent.`,
             },
           };
     if (step >= 3) {
@@ -401,7 +388,7 @@ export async function runPlanningBusinessCase(options: {
           )
         ).flatMap((view) => view.runs);
         if (!childRuns.length || childRuns.some((run) => run.isActive))
-          return { name: 'wait_agent_events', input: { wait_ms: 1000 } };
+          return { name: 'wait_agent', input: { timeout_ms: 1000 } };
       }
       const rows = await store.listExecutions('s');
       const operation = rows.find(
@@ -716,7 +703,7 @@ export async function runPlanningBusinessCase(options: {
     await setMode(entry.mode);
     const task = entry.question
       ? `Before any effect ask me one Approve/Deny question with ask_user. Wait for my original answer. If approved execute exactly ${command} with ${entry.external ? 'full_access' : 'workspace_write'}/no-network. No other command or effect.`
-      : `This is one bounded tool/permission verification. Save a plan with one step effect; request_plan_review for the exact plan version/digest and wait for my answer. Do not choose or change permission mode. After approval ${entry.actor === 'main' ? `execute exactly ${command} with ${entry.external ? 'full_access' : 'workspace_write'}/no-network` : `spawn exactly one ${entry.actor} agent to execute only ${command}; it must ${entry.actor === 'explore' ? 'read only' : 'append exactly once'}, and cannot spawn. Wait for its actual terminal result`}. Complete the plan step using the actual successful original ${entry.actor === 'main' ? 'shell_execute' : 'spawn_agent'} execution receipt. The completion execution_id must be the real Execution UUID, never shell_id or an operation key. Use the original receipt visible in context. If its identity is unavailable, report the missing evidence rather than inventing an ID or re-executing the effect. Do not repeat the effect. No other paths, network or effects. Tool/permission results matter; no special final response format is required.`;
+      : `This is one bounded tool/permission verification. Save a plan with one step effect; request_plan_review for the exact plan version/digest and wait for my answer. Do not choose or change permission mode. After approval ${entry.actor === 'main' ? `execute exactly ${command} with ${entry.external ? 'full_access' : 'workspace_write'}/no-network` : `spawn exactly one ${entry.actor} agent to execute only ${command}; it must ${entry.actor === 'explore' ? 'read only' : 'append exactly once'}, and cannot spawn. Wait for its actual terminal result`}. Complete the plan step using the actual successful original ${entry.actor === 'main' ? 'exec_command' : 'spawn_agent'} execution receipt. The completion execution_id must be the real Execution UUID, never a numeric session_id or an operation key. Use the original receipt visible in context. If its identity is unavailable, report the missing evidence rather than inventing an ID or re-executing the effect. Do not repeat the effect. No other paths, network or effects. Tool/permission results matter; no special final response format is required.`;
     await client.startRun('s', {
       expectedStoreId,
       commandId: 'work',
@@ -799,7 +786,7 @@ export async function runPlanningBusinessCase(options: {
       const runs = (
         await Promise.all(sessions.map((session) => store!.getView(session.id)))
       ).flatMap((view) => view.runs);
-      if (runs.length && runs.every((run) => !run.isActive)) {
+      if (runs.length && runs.every((run) => !run.isActive) && !runtime.getLifecycleState().busy) {
         const rows = (
           await Promise.all(
             sessions.map((session) =>

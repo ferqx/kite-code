@@ -248,7 +248,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
           'send_agent_message',
           'spawn_agent',
           'view_images',
-          'wait_agent_events',
+          'wait_agent',
           'web_fetch',
           'write_file',
         ]);

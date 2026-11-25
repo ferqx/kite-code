@@ -251,7 +251,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
         'send_agent_message',
         'spawn_agent',
         'view_images',
-        'wait_agent_events',
+        'wait_agent',
         'web_fetch',
         'write_file',
       ]);

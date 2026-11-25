@@ -623,6 +623,8 @@ export type ConditionReadContext = Pick<
   'sessionId' | 'getRun' | 'getExecution' | 'getInteraction' | 'readRunExecutionSafety'
 > & {
   readonly records: Pick<ReadContext['records'], 'get'>;
+  /** Planning-only evidence for the exact same-Run Model decision using an adopted checkpoint. */
+  readonly readCompactedDecisionToolResults?: () => Promise<readonly PublicExecution[] | null>;
   readonly readMutationFacts?: (options?: {
     afterSeq?: string;
     limit?: number;

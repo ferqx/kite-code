@@ -13,6 +13,8 @@
 
 六个定义均保持 v1。工厂为 `createTaskExtension({roles, defaultRole?, presets?})`；模型不能传内部 key、Run、selection、配置 ID、权限或 detached。`task_name` 只作显示，不参与身份、去重或授权。旧工具及 `role/resultDisposition/after_turn` 参数不再可用。
 
+`wait_agent` 每次调用建立一次观察，结束时宿主保存邮箱位置供下一次调用使用。空超时后仍需子任务结果时，父 Agent 可继续有授权的独立工作或再次调用 `wait_agent`，并按 `dispatch_id` 核对返回结果。
+
 ## 身份、权限和预设
 
 `target` 由所属父会话的准确目录锚点派生。同一协作者多轮复用 target，每次新轮使用独立 `dispatch_id`。宿主按直接父子关系、Store 与主体解析，实际停止与续派由原事务选择工作。底层 Session、WorkRef 和原调用回执仍持久保存。

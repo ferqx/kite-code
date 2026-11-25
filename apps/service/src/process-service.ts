@@ -312,7 +312,7 @@ export async function assembleProcessService(
           workingInputFiles: createWorkingInputFiles({
             protectedPaths: [selected.profilePath, selected.coordinationPath, ...runtimeAssets],
           }),
-          outputCollections: {
+          outputCollections: runtimeConfiguration.outputCollections ?? {
             prepare: (context, identity) => prepareOutputDirectory(runtime!, context, identity),
           },
           store,

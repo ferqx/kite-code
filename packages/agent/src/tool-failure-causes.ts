@@ -84,6 +84,8 @@ export const additionalFailureExplanations: Readonly<Record<string, string>> = {
     'The requested step does not exist in the current plan. Check the current step identifiers.',
   plan_progress_conflict:
     'The saved plan progress changed since the supplied revision. Read the current progress before deciding on another authorized update.',
+  plan_progress_read_required:
+    'The approved plan has recorded progress outside this context. If read_plan is available, call it and use the returned step status before choosing the next operation. Otherwise report that the current step status could not be verified.',
   plan_terminal_rollback:
     'A completed plan step cannot be moved back to an unfinished status. Preserve its confirmed completion evidence.',
   plan_compensation_evidence_required:

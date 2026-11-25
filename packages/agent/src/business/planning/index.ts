@@ -418,6 +418,13 @@ export function createPlanningValidation(
     'planning.review',
     'planning.update',
   ]);
+  const existingWorkTools = new Set([
+    'shell.read',
+    'shell.stop',
+    'task.events',
+    'task.list',
+    'task.interrupt',
+  ]);
   const planInput = schema(
     {
       planId: text,
@@ -1364,6 +1371,7 @@ export function createPlanningValidation(
                   }
               }
               const boundary = context.boundary;
+              let exemptFromProgressCheck = false;
               if (
                 phase === 'dispatch' &&
                 !inheritedPlanContinuation &&
@@ -1371,6 +1379,7 @@ export function createPlanningValidation(
               ) {
                 outcome = 'satisfied';
                 reason = 'planning_read_only_shell_search';
+                exemptFromProgressCheck = true;
               }
               if (
                 phase === 'dispatch' &&
@@ -1379,6 +1388,7 @@ export function createPlanningValidation(
               ) {
                 outcome = 'satisfied';
                 reason = 'planning_read_only_git_worktree';
+                exemptFromProgressCheck = true;
               }
               if (
                 phase === 'dispatch' &&
@@ -1387,6 +1397,7 @@ export function createPlanningValidation(
               ) {
                 outcome = 'satisfied';
                 reason = 'planning_exact_file_boundary';
+                exemptFromProgressCheck = true;
               }
               if (
                 phase === 'dispatch' &&
@@ -1403,6 +1414,7 @@ export function createPlanningValidation(
               ) {
                 outcome = 'satisfied';
                 reason = 'planning_host_read_only_boundary';
+                exemptFromProgressCheck = true;
               }
               if (
                 phase === 'dispatch' &&
@@ -1418,6 +1430,24 @@ export function createPlanningValidation(
               ) {
                 outcome = 'satisfied';
                 reason = 'planning_management_boundary';
+                exemptFromProgressCheck = true;
+              }
+              if (
+                phase === 'dispatch' &&
+                state.status === 'approved' &&
+                boundary.kind === 'tool' &&
+                boundary.sessionId === ref.sessionId &&
+                boundary.runId === ref.runId &&
+                !exemptFromProgressCheck &&
+                !(
+                  boundary.definitionVersion === '1' &&
+                  existingWorkTools.has(boundary.definitionId ?? '')
+                )
+              ) {
+                await requireCompactedPlanProgress(read, state, {
+                  runId: ref.runId,
+                  originStoreId: ref.originStoreId,
+                });
               }
             }
             return {
@@ -1804,6 +1834,80 @@ export function createPlanningValidation(
       progress.version === plan.version &&
       progress.digest === plan.digest
     );
+  }
+  async function requireCompactedPlanProgress(
+    read: ConditionReadContext,
+    plan: Extract<PlanningState, { status: 'approved' }>,
+    scope: ProgressScope,
+  ) {
+    const visible = await read.readCompactedDecisionToolResults?.();
+    if (!visible) return;
+    const record = await read.records.get(
+      `progress/${encodeURIComponent(plan.planId)}/${plan.version}`,
+    );
+    const progress = decode(record);
+    if (
+      record?.originStoreId !== scope.originStoreId ||
+      !matchesProgress(progress, plan, scope.runId)
+    )
+      return;
+
+    const receipts = Object.values(object(progress.steps)).flatMap((value) => {
+      const step = object(value);
+      if (step.status !== 'completed' && step.status !== 'compensated') return [];
+      const receipt = object(step.receipt);
+      return step.originalReceipt ? [receipt, object(step.originalReceipt)] : [receipt];
+    });
+    if (!receipts.length) return;
+
+    const own = visible.filter(
+      (item) =>
+        item.runId === scope.runId &&
+        item.sessionId === read.sessionId &&
+        item.originStoreId === scope.originStoreId,
+    );
+    if (
+      own.some((item) => {
+        if (
+          item.extensionId !== planningExtensionId ||
+          item.definitionVersion !== '1' ||
+          !['planning.read', 'planning.update'].includes(item.definitionId ?? '')
+        )
+          return false;
+        const details = object(object(item.result).details);
+        if (item.definitionId === 'planning.update')
+          return (
+            details.revision === record.revision && matchesProgress(details, plan, scope.runId)
+          );
+        if (details.runId !== scope.runId || !details.progress) return false;
+        const shown = object(details.progress);
+        return (
+          shown.revision === record.revision &&
+          shown.value !== undefined &&
+          canonical(shown.value) === canonical(progress)
+        );
+      })
+    )
+      return;
+
+    // The original completed Tool outcomes still prove the effects even when a
+    // progress update from their batch has not yet reached the Model window.
+    const byId = new Map(own.map((item) => [item.id, item]));
+    if (
+      receipts.every((receipt) => {
+        const item = typeof receipt.executionId === 'string' && byId.get(receipt.executionId);
+        return (
+          item &&
+          item.attempt === receipt.attempt &&
+          item.definitionId === receipt.definitionId &&
+          item.definitionVersion === receipt.definitionVersion &&
+          item.inputDigest === receipt.inputDigest &&
+          item.resultRevision === receipt.resultRevision
+        );
+      })
+    )
+      return;
+    throw new AgentError('plan_progress_read_required');
   }
   async function currentProgress(context: ReadContext, scope: ProgressScope) {
     const state = await readPlanningState(context, scope);

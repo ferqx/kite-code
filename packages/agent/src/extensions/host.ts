@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { ArtifactContentStore } from '../artifact-port';
+import { isBrowserObservationOrReleaseTool } from '../browser-tool-identity';
 import {
   assertContextSource,
   type ContextSource,
@@ -12,6 +13,7 @@ import type { StandaloneScope, ToolScope, UnifiedExecution } from '../execution'
 import { readExecutionToolOwner } from '../execution/definition-owner';
 import { browserContinuationSource } from '../execution/host-control';
 import { canonicalJson, semanticDigest } from '../json';
+import { imageArchiveSummaryText } from '../model-body/image-delivery';
 import { InputSchemaCompiler } from '../schema-cache';
 import type { Store } from '../storage/port';
 import {
@@ -21,6 +23,7 @@ import {
   type DispatchRecordListRead,
   type DispatchRecordRead,
   type ExecutionGroupGuard,
+  type ExecutionRecord,
   type ExtensionRecordWrite,
   type ForkRecordSourceBinding,
   type Json,
@@ -710,6 +713,13 @@ export class ExtensionHost {
     );
     return {
       sessionId: context.sessionId,
+      ...(reference.extensionId === 'builtin.planning' &&
+      reference.requirementId === 'plan.required'
+        ? {
+            readCompactedDecisionToolResults: () =>
+              this.readCompactedDecisionToolResults(scope, reference, command, boundaryExecutionId),
+          }
+        : {}),
       readRunExecutionSafety: async (runId) => {
         if (runId !== reference.runId) throw new AgentError('execution_safety_scope_denied');
         const boundary = boundaryExecutionId
@@ -742,6 +752,156 @@ export class ExtensionHost {
         },
       },
     };
+  }
+  private async readCompactedDecisionToolResults(
+    scope: ToolScope,
+    reference: RequirementRef,
+    command: CommandRecord,
+    executionId: string | undefined,
+  ): Promise<readonly PublicExecution[] | null> {
+    const { store, forkSourceReaders: readers } = this.options;
+    if (!readers || !executionId || !('run' in scope)) return null;
+    const { run, signal } = scope;
+    if (
+      reference.sessionId !== run.sessionId ||
+      reference.runId !== run.id ||
+      reference.originStoreId !== run.originStoreId ||
+      command.originStoreId !== run.originStoreId
+    )
+      return null;
+    const readScope = {
+      expectedStoreId: run.originStoreId,
+      sessionId: run.sessionId,
+      subjectId: command.subjectId,
+    };
+    const inRun = (execution: ExecutionRecord | null): execution is ExecutionRecord =>
+      execution?.runId === run.id &&
+      execution.sessionId === run.sessionId &&
+      execution.originStoreId === run.originStoreId &&
+      execution.rootWorkCommandId === run.rootWorkCommandId &&
+      execution.rootWorkSeq === run.rootWorkSeq;
+    signal.throwIfAborted();
+    const tool = await store.getExecution(executionId);
+    if (!inRun(tool) || tool.kind !== 'tool') return null;
+    const source = tool.decisionSource;
+    if (
+      !source ||
+      typeof source !== 'object' ||
+      Array.isArray(source) ||
+      source.kind !== 'model_decision' ||
+      typeof source.modelExecutionId !== 'string'
+    )
+      return null;
+    const model = await store.getExecution(source.modelExecutionId);
+    if (
+      !inRun(model) ||
+      model.kind !== 'model' ||
+      model.status !== 'succeeded' ||
+      model.modelDispatched !== true ||
+      tool.stepId !== model.stepId
+    )
+      return null;
+    const modelSource = model.decisionSource;
+    if (
+      !modelSource ||
+      typeof modelSource !== 'object' ||
+      Array.isArray(modelSource) ||
+      modelSource.kind !== 'model_request' ||
+      !Array.isArray(modelSource.sourceIds)
+    )
+      return null;
+    const candidates = new Set(
+      modelSource.sourceIds.filter(
+        (id): id is string => typeof id === 'string' && id.startsWith('compression-'),
+      ),
+    );
+    if (!candidates.size) return null;
+    if (
+      isBrowserObservationOrReleaseTool(tool.definitionId, tool.definitionVersion, tool.input) &&
+      (await readExecutionToolOwner(store, tool)) === 'builtin.browser'
+    )
+      return null;
+    const snapshot = await readers.readModelInput({ ...readScope, executionId: model.id });
+    if (
+      snapshot.storeId !== run.originStoreId ||
+      snapshot.sessionId !== run.sessionId ||
+      snapshot.runId !== run.id ||
+      snapshot.executionId !== model.id ||
+      snapshot.attempt !== model.attempt ||
+      snapshot.confirmation !== 'succeeded'
+    )
+      return null;
+    const summaries = snapshot.request.messages.filter(
+      (message) =>
+        message.role === 'user' &&
+        message.sourceIds?.length === 1 &&
+        candidates.has(message.sourceIds[0]!),
+    );
+    let compacted = false;
+    for (const compressionId of new Set(summaries.map((message) => message.sourceIds![0]!))) {
+      signal.throwIfAborted();
+      const checkpoint = await store
+        .getCompressionOrigin({ ...readScope, compressionId })
+        .catch((error: unknown) => {
+          // Ordinary user input can have a colliding source ID without selecting a checkpoint.
+          if (error instanceof AgentError && error.code === 'compression_scope_denied') return null;
+          throw error;
+        });
+      if (
+        !checkpoint ||
+        checkpoint.id !== compressionId ||
+        checkpoint.originSessionId !== run.sessionId ||
+        checkpoint.originStoreId !== run.originStoreId ||
+        checkpoint.runId !== run.id ||
+        checkpoint.contextSelectionId !== run.contextSelectionId ||
+        checkpoint.compression?.adopted !== true
+      )
+        continue;
+      const summary = await store.getExecution(checkpoint.modelExecutionId);
+      if (!inRun(summary) || summary.kind !== 'model' || summary.modelDispatched !== true) continue;
+      const output = await readers.readModelOutput({ ...readScope, executionId: summary.id });
+      if (!output.output.complete || output.output.toolCalls.length) continue;
+      const expected = imageArchiveSummaryText(
+        output.output.content,
+        (summary.decisionSource as Record<string, Json> | null)?.imageArchiveDirectory === true,
+      );
+      if (
+        summaries.some(
+          (message) => message.sourceIds![0] === compressionId && message.content === expected,
+        )
+      ) {
+        compacted = true;
+        break;
+      }
+    }
+    if (!compacted) return null;
+    const receipts = new Map<string, PublicExecution>();
+    for (const message of snapshot.request.messages) {
+      signal.throwIfAborted();
+      if (message.role !== 'tool' || message.sourceIds?.length !== 1 || !message.toolCallId)
+        continue;
+      const id = message.sourceIds[0]!;
+      if (receipts.has(id)) continue;
+      const receipt = await store.getExecution(id);
+      if (
+        !inRun(receipt) ||
+        receipt.kind !== 'tool' ||
+        receipt.status !== 'succeeded' ||
+        receipt.authorization?.dispatched !== true ||
+        receipt.callId !== message.toolCallId
+      )
+        continue;
+      const owner = await readExecutionToolOwner(store, receipt);
+      if (
+        owner === 'builtin.planning' &&
+        ['planning.read', 'planning.update'].includes(receipt.definitionId) &&
+        (receipt.result as Record<string, Json> | null)?.content !== message.content
+      )
+        continue;
+      const view = await publicExecution(receipt, owner);
+      if (view) receipts.set(receipt.id, view);
+    }
+    return [...receipts.values()];
   }
   async contextSources(input: {
     command: CommandRecord;

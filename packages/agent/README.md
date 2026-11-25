@@ -34,7 +34,7 @@ Git 工作树错误指导以[原工具分类](src/tools/git-worktree/README.md)�
 
 审批可在模型视窗外处理，调用成功或未见提示不能证明“无审批”；内部步骤复用也不是整项操作免审批。合同要求仅按原证据报告来源／次数，缺少证据时不作该结论，不新增审批或权限规则。该指导来自 Worktree 真实父子报告与原两张卡矛盾的实际失败；[模型验证](../../tests/e2e/live/model/README.md#git-工作树与直接子-agent)保留原样本及修后资格。
 
-Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。模型观察中的 `plan_requirement` 表达准确原 Run 的计划批准事实；真实 `plan.required`、准确版本／原批准与独立工具权限仍在派发和完成边界核验。步骤 progress 不混入稳定计划来源，避免本批进度更新使普通兄弟工具失效或使旧成功 receipt 失效；压缩后进度不可见时通过 `read_plan` 找回，原操作引用或结果不可见时按需读当前任务执行证据，不为找结果重跑效果。
+Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。模型观察中的 `plan_requirement` 表达准确原 Run 的计划批准事实；真实 `plan.required`、准确版本／原批准与独立工具权限仍在派发和完成边界核验。步骤 progress 与稳定计划来源独立保存。[压缩后的派发检查](src/business/planning/README.md#计划与真实来源)核封存模型请求内的计划进度或相关原执行结果。缺失时通过 `read_plan` 找回，原操作引用或结果不可见时按需读当前任务执行证据，不为找结果重跑效果。
 
 工具异常与审批回执的模型可读说明归[结果呈现](src/model-tools.README.md#结果呈现)：原调用、回执和机器状态保留，明确未派发、失败、取消与效果未知分别解释。实际业务原因及部分效果由各工具 owner 提供，通用呈现不公开私有 details 或签发授权。
 

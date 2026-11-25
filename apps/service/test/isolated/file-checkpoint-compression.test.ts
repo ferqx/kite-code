@@ -73,7 +73,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
         else if (phase === 'writer') {
           const step = writerStep++;
           if (step === 0)
-            call = { name: 'read_file', input: { path: 'original.txt', max_lines: 10000 } };
+            call = { name: 'read_file', input: { path: 'original.txt', limit: 10000 } };
           else if (step === 1) {
             const raw = body.messages.filter((message) => message.role === 'tool').at(-1);
             if (!raw) throw Error('actual_baseline_missing');
@@ -84,7 +84,6 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
               name: 'write_file',
               input: {
                 path: 'original.txt',
-                base_ref: read.baseRef,
                 content: 'actual compressed write\r\n',
               },
             };

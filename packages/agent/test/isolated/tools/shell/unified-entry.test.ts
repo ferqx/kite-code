@@ -242,34 +242,6 @@ async function fixture(
               return { outcome: 'succeeded', content: 'unreachable' };
             },
           },
-          {
-            id: 'fixture.legacy',
-            version: '1',
-            description: 'Isolated trusted caller of the preserved internal legacy Shell entry',
-            inputSchema: { type: 'object' },
-            async execute(_input, context) {
-              const original = await context.operations.ensure({
-                key: 'legacy-carrier',
-                request: {
-                  kind: 'tool',
-                  definitionId: 'shell.launch',
-                  definitionVersion: '1',
-                  input: {
-                    key: 'legacy-shell',
-                    command: 'historical command',
-                    permissions: { filesystem: 'workspace_write', network: 'none' },
-                    cancellation: 'attached',
-                  },
-                },
-              });
-              const execution = await context.operations.wait(original, { signal: context.signal });
-              return {
-                outcome: 'succeeded',
-                content: JSON.stringify(execution.result),
-                details: { ref: original as unknown as Json },
-              };
-            },
-          },
         ],
       },
     ],
@@ -1035,33 +1007,35 @@ test('background work remains attached when its active parent Run is cancelled',
   }
 }, 15000);
 
-test('a legacy launch reference survives closing and reopening the same Store without replaying its Job', async () => {
-  const f = await fixture([calls(['fixture.legacy', {}]), [finish]]);
+test('the current Shell session resumes output after reopening the Store without replaying its Job', async () => {
+  const f = await fixture([
+    calls(['exec_command', { cmd: 'current persisted command', max_output_tokens: 1 }]),
+    [finish],
+  ]);
   let reopened: ReturnType<typeof createRuntime> | undefined;
   let coldStore: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {
-    await f.run();
-    const jobs = await until(
-      () => f.store.listExecutions('s'),
-      (executions) =>
-        executions.some(
-          (execution) => execution.kind === 'job' && execution.status === 'succeeded',
-        ),
-    );
-    const original = jobs.find((execution) => execution.kind === 'job')!;
+    const view = await f.run();
+    const original = view.executions.find((execution) => execution.kind === 'job')!;
     expect(f.started).toEqual([original.id]);
-    expect(jobs.find((execution) => execution.definitionId === 'shell.launch')!.status).toBe(
-      'succeeded',
-    );
+    expect(original.status).toBe('succeeded');
+    const starter = view.executions.find(
+      (execution) => execution.definitionId === 'shell.execute',
+    )!;
+    expect(starter.status).toBe('succeeded');
+    const { session_id: sessionId } = (starter.result as { details: { session_id: number } })
+      .details;
+    expect(starter.result).toMatchObject({
+      details: {
+        session_id: expect.any(Number),
+        output: 'orig',
+        has_more: true,
+        ref: { executionId: original.id },
+      },
+    });
     await f.runtime.close();
     coldStore = await openSqliteStore({ dataRoot: join(f.root, 'data'), profile: 'test' });
-    const model = createFixedModel([
-      calls(
-        ['shell_read', { shell_id: 'legacy-shell' }],
-        ['shell_wait', { shell_id: 'legacy-shell' }],
-      ),
-      [finish],
-    ]);
+    const model = createFixedModel([calls(['poll_command', { session_id: sessionId }]), [finish]]);
     reopened = createRuntime({
       store: coldStore,
       model,
@@ -1080,7 +1054,7 @@ test('a legacy launch reference survives closing and reopening the same Store wi
       commandId: 'cold-read',
       request: {
         kind: 'run.start',
-        content: 'Read and wait on the original historical Shell without executing it again.',
+        content: 'Continue reading the original Shell output.',
       },
     });
     await reopened.waitForCommand('cold-read');
@@ -1090,21 +1064,23 @@ test('a legacy launch reference survives closing and reopening the same Store wi
     ).toEqual([original.id]);
     expect(f.started).toEqual([original.id]);
     expect(readFileSync(join(f.root, 'effects'), 'utf8')).toBe(`${original.id}\n`);
-    const readers = rows.filter((execution) =>
-      ['shell.read', 'shell.wait'].includes(execution.definitionId),
-    );
-    expect(readers).toHaveLength(2);
-    expect(readers.every((execution) => execution.status === 'succeeded')).toBe(true);
+    const readers = rows.filter((execution) => execution.definitionId === 'shell.read');
+    expect(readers).toHaveLength(1);
+    expect(readers[0]).toMatchObject({
+      status: 'succeeded',
+      result: {
+        details: {
+          session_id: sessionId,
+          output: 'inal durable output\n',
+          terminal: true,
+          has_more: false,
+          ref: { executionId: original.id },
+        },
+      },
+    });
     expect(
-      model.requests[1]!.messages.some(
-        (message) => message.role === 'tool' && message.content.includes('original durable output'),
-      ),
-    ).toBe(true);
-    expect(
-      model.requests[1]!.messages.filter(
-        (message) => message.role === 'tool' && message.content.includes(original.id),
-      ).length,
-    ).toBeGreaterThanOrEqual(2);
+      model.requests[1]!.messages.find((message) => message.sourceIds?.includes(readers[0]!.id)),
+    ).toMatchObject({ role: 'tool', content: expect.stringContaining('inal durable output') });
   } finally {
     if (reopened) await reopened.close();
     else if (coldStore) await coldStore.close();

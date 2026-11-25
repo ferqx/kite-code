@@ -10,6 +10,7 @@ import {
   ConfigurationPreparationCleanupError,
   type ContextCompressor,
   type ContextSource,
+  prepareOutputDirectory,
   prepareOutputStaging,
   type RunConfiguration,
   type RuntimeOptions,
@@ -2202,6 +2203,12 @@ export function createDefaultProcessConfiguration(options: {
   });
   return {
     ...child,
+    outputCollections: {
+      prepare(context, identity) {
+        if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+        return prepareOutputDirectory(policyRuntime, context, identity);
+      },
+    },
     sessionInputMetadata: { preserve: (command) => titles.preserveInputFallback(command) },
     childConfigurations: child.childConfigurations ?? [],
     resolveChildRunConfiguration: child.resolveChildRunConfiguration,
