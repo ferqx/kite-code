@@ -1555,6 +1555,28 @@ export async function verifyColdSessionToolbarWidth(
             await page.evaluate(() => window.sessionShellFixture.release('usage'));
             await phase('usage-ready');
             assert.equal(await page.locator('.composer-cache-rate').count(), 0);
+            if (mode === 'both') {
+              await page.waitForFunction(() =>
+                document
+                  .querySelector('.composer-context-usage')
+                  ?.getAttribute('aria-description')
+                  ?.includes('缓存命中率 30%'),
+              );
+              await page.locator('.composer-context-usage').focus();
+              const loadingTooltip = page.getByRole('tooltip');
+              await loadingTooltip.waitFor();
+              const detail = await loadingTooltip.textContent();
+              assert(detail?.includes('读取中'));
+              assert(detail?.includes('30%'));
+              await page.screenshot({
+                path: path.join(
+                  artifact,
+                  `toolbar-${theme}-${width}-${mode}-usage-ready-tooltip.png`,
+                ),
+              });
+              await page.keyboard.press('Escape');
+              await loadingTooltip.waitFor({ state: 'hidden' });
+            }
           }
           await page.evaluate(() => window.sessionShellFixture.resume());
           await page.waitForFunction(

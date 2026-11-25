@@ -215,6 +215,8 @@ export interface ComposerProps {
     readonly cacheMissTokens: number;
   };
   metricsLoading?: boolean;
+  contextUsageLoading?: boolean;
+  cacheMetricsLoading?: boolean;
   /** New-conversation preparation has no request usage to display yet. */
   hideContextWhenUnavailable?: boolean;
   submitStatus?: string;
@@ -544,7 +546,7 @@ export function Composer(props: ComposerProps) {
   const cacheTokenTotal =
     (props.cacheMetrics?.cacheHitTokens ?? 0) + (props.cacheMetrics?.cacheMissTokens ?? 0);
   const cacheHitPercentage =
-    !props.metricsLoading && cacheTokenTotal > 0
+    cacheTokenTotal > 0
       ? Math.round(((props.cacheMetrics?.cacheHitTokens ?? 0) / cacheTokenTotal) * 100)
       : undefined;
   const contextTokens = props.contextUsage?.totalInputTokens;
@@ -558,6 +560,10 @@ export function Composer(props: ComposerProps) {
     contextWindowTokens > 0
       ? Math.round((contextTokens / contextWindowTokens) * 100)
       : undefined;
+  const contextUsageLoading = props.contextUsageLoading ?? props.metricsLoading;
+  const cacheMetricsLoading = props.cacheMetricsLoading ?? props.metricsLoading;
+  const canInspectUsage =
+    !contextUsageLoading || contextWindowTokens !== undefined || cacheHitPercentage !== undefined;
   const canSend =
     !!props.onSend &&
     !props.promptHidden &&
@@ -585,7 +591,7 @@ export function Composer(props: ComposerProps) {
       props.stopping);
   const cacheDescription =
     cacheHitPercentage === undefined
-      ? props.metricsLoading
+      ? cacheMetricsLoading
         ? '正在读取缓存用量'
         : '暂无缓存用量数据'
       : `缓存命中率 ${cacheHitPercentage}%，缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`;
@@ -978,7 +984,10 @@ export function Composer(props: ComposerProps) {
           </div>
           <div className="composer-trailing">
             {(!props.hideContextWhenUnavailable || props.contextUsage !== undefined) && (
-              <div className="composer-metrics" aria-busy={props.metricsLoading || undefined}>
+              <div
+                className="composer-metrics"
+                aria-busy={contextUsageLoading || cacheMetricsLoading || undefined}
+              >
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -987,36 +996,34 @@ export function Composer(props: ComposerProps) {
                         viewBox="0 0 16 16"
                         fill="none"
                         role="img"
-                        tabIndex={props.metricsLoading ? undefined : 0}
+                        tabIndex={canInspectUsage ? 0 : undefined}
                         aria-label={
-                          props.metricsLoading
-                            ? '正在读取上下文占用'
-                            : contextPercentage === undefined
-                              ? '上下文占用未知'
-                              : `上下文占用约 ${contextPercentage}%`
+                          contextPercentage !== undefined
+                            ? `上下文占用约 ${contextPercentage}%`
+                            : contextUsageLoading
+                              ? '正在读取上下文占用'
+                              : '上下文占用未知'
                         }
                         aria-description={
-                          props.metricsLoading
+                          !canInspectUsage
                             ? undefined
                             : `上下文估算 ${contextTokens ?? '未知'} / ${contextWindowTokens ?? '未知'} tokens；${cacheDescription}`
                         }
                       >
                         <circle className="composer-context-track" cx="8" cy="8" r="6" />
-                        {!props.metricsLoading &&
-                          contextPercentage !== undefined &&
-                          contextPercentage > 0 && (
-                            <circle
-                              cx="8"
-                              cy="8"
-                              r="6"
-                              pathLength="100"
-                              strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
-                              transform="rotate(-90 8 8)"
-                            />
-                          )}
+                        {contextPercentage !== undefined && contextPercentage > 0 && (
+                          <circle
+                            cx="8"
+                            cy="8"
+                            r="6"
+                            pathLength="100"
+                            strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
+                            transform="rotate(-90 8 8)"
+                          />
+                        )}
                       </svg>
                     </TooltipTrigger>
-                    {!props.metricsLoading && (
+                    {canInspectUsage && (
                       <TooltipContent
                         className="kite-client composer-context-tooltip"
                         side="top"
@@ -1028,7 +1035,9 @@ export function Composer(props: ComposerProps) {
                             <span>上下文占用</span>
                             <strong>
                               {contextPercentage === undefined
-                                ? '未知'
+                                ? contextUsageLoading
+                                  ? '读取中'
+                                  : '未知'
                                 : `约 ${contextPercentage}%`}
                             </strong>
                           </div>
@@ -1054,13 +1063,15 @@ export function Composer(props: ComposerProps) {
                             <span>缓存命中率</span>
                             <strong>
                               {cacheHitPercentage === undefined
-                                ? '暂无数据'
+                                ? cacheMetricsLoading
+                                  ? '读取中'
+                                  : '暂无数据'
                                 : `${cacheHitPercentage}%`}
                             </strong>
                           </div>
                           <div className="composer-context-detail">
                             {cacheHitPercentage === undefined
-                              ? '暂无缓存用量数据'
+                              ? cacheDescription
                               : `累计命中 ${formatTokenQuantity(props.cacheMetrics!.cacheHitTokens)} / 输入 ${formatTokenQuantity(cacheTokenTotal)} tokens`}
                           </div>
                         </div>

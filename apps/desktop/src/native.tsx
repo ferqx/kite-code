@@ -2875,10 +2875,14 @@ function NativeDesktopContent({
       sessionRecovery.current.close();
     };
   }, []);
+  const usageSelection =
+    !preparing && !scheduledTasksView && selection?.session.id === selected.current
+      ? selection
+      : undefined;
   const cacheMetrics = useNativeCacheMetrics({
     bridge,
     generation: state?.generation ?? generation.current,
-    selection: !preparing && !scheduledTasksView ? selection : undefined,
+    selection: usageSelection,
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     historyComplete: historyState.phase === 'complete',
@@ -2887,14 +2891,22 @@ function NativeDesktopContent({
   const contextUsage = useNativeContextUsage({
     bridge,
     generation: state?.generation ?? generation.current,
-    selection: !preparing && !scheduledTasksView ? selection : undefined,
+    // History loading also gates actions in the projected selection. Use Main's flags for read access.
+    selection: usageSelection ? state?.selection : undefined,
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     historyComplete: historyState.phase === 'complete',
+    suspended: !!state?.callerUnavailable || !!state?.backgroundUnavailable,
+    modelRevision: settingsRevision,
     modelId:
       modelChoices.current.get(choiceKey)?.modelId ??
       (resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice?.modelId : undefined),
   });
+  const usageLoadingAvailable =
+    !state?.callerUnavailable &&
+    !state?.backgroundUnavailable &&
+    !(state?.selection?.permissionUnavailable && !state.selection.viewLoading) &&
+    historyState.phase !== 'unavailable';
   // File targets gate reads only. Run/Tool facts also determine the first history layout.
   const historyMetadataLoading = runMessages.loading || toolMessages.loading || fileTargets.loading;
   const conversationDomScope = JSON.stringify([
@@ -7882,13 +7894,12 @@ function NativeDesktopContent({
                   active: !!activeExecutionRun && !executionUnconfirmed,
                   cacheMetrics: cacheMetrics.metrics,
                   contextUsage: contextUsage.metrics,
-                  metricsLoading:
-                    !state.callerUnavailable &&
-                    !state.backgroundUnavailable &&
-                    !(state.selection?.permissionUnavailable && !state.selection.viewLoading) &&
-                    historyState.phase !== 'unavailable' &&
-                    ((cacheMetrics.pending && !cacheMetrics.metrics) ||
-                      (contextUsage.pending && !contextUsage.metrics)),
+                  contextUsageLoading:
+                    usageLoadingAvailable &&
+                    (contextUsage.pending ||
+                      (!contextUsage.metrics && historyState.phase === 'loading')),
+                  cacheMetricsLoading:
+                    usageLoadingAvailable && cacheMetrics.pending && !cacheMetrics.metrics,
                   stopping: activeExecutionRun?.status === 'cancelling',
                   preferStop: selection.workspaceUnavailable || waitingForAskUser,
                   cancelDisabled: cancelCurrentRunBusinessDisabled,

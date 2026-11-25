@@ -58,7 +58,9 @@ function Harness({
   generation = 1,
   historyEpoch = 0,
   modelId,
+  modelRevision,
   cached = 99,
+  observeLoading = false,
 }: {
   bridge: NativeBridge;
   selection?: NativeSelection;
@@ -67,7 +69,9 @@ function Harness({
   generation?: number;
   historyEpoch?: number;
   modelId?: string;
+  modelRevision?: number;
   cached?: number;
+  observeLoading?: boolean;
 }) {
   const facts = useNativeContextUsage({
     bridge,
@@ -77,6 +81,7 @@ function Harness({
     messages,
     historyComplete: complete,
     modelId,
+    modelRevision,
   });
   return (
     <div className="kite-client">
@@ -88,6 +93,7 @@ function Harness({
         disabled={false}
         cacheMetrics={{ cacheHitTokens: cached, cacheMissTokens: 100 - cached }}
         contextUsage={facts.metrics}
+        contextUsageLoading={observeLoading && facts.pending}
       />
     </div>
   );
@@ -335,15 +341,106 @@ test('image evidence waits for a new completed model receipt while keeping the o
   }
 });
 
-for (const failure of ['error', 'empty'] as const)
+test('same-scope advances share the original pending read, keep the verified window and follow only the newest watermark', async () => {
+  const f = fixture();
+  const reads: Request[] = [];
+  const closed: string[] = [];
+  const inflight = new Map<string, (result: NativeContextUsagePage) => void>();
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      if (request.method === 'toolMessages.close') closed.push(request.readId);
+      if (request.method !== 'toolMessages.contextUsage') return null;
+      reads.push(request);
+      if (reads.length === 1) return page(request, 's');
+      return new Promise<NativeContextUsagePage>((resolve) =>
+        inflight.set(request.readId, resolve),
+      );
+    },
+  } as NativeBridge;
+  const first = message();
+  const next: Message = { ...message('s', '7'), id: 'new-answer', sourceIds: ['next-model'] };
+  const tool = (seq: number): Message => ({
+    ...first,
+    id: `tool-${seq}`,
+    seq: String(seq),
+    role: 'tool',
+  });
+  const render = (
+    messages: readonly Message[],
+    selection: NativeSelection = selected(),
+    modelRevision = 0,
+  ) =>
+    act(async () =>
+      f.root.render(
+        <Harness
+          bridge={bridge}
+          messages={messages}
+          selection={selection}
+          modelRevision={modelRevision}
+          observeLoading
+        />,
+      ),
+    );
+  const complete = (request: Request, count: number, window = 500) =>
+    act(async () => inflight.get(request.readId)!(page(request, 's', count, window)));
+  try {
+    await render([first]);
+    const ring = f.host.querySelector('.composer-context-usage')!;
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用约 68%');
+    await render([first, tool(2)]);
+    const originalRead = reads[1]!;
+    const refreshing = { ...selected(), permissionUnavailable: true, viewLoading: true };
+    for (let seq = 3; seq <= 6; seq++) await render([first, tool(seq)], refreshing);
+    await render([first, next], refreshing);
+    await render([first, next, tool(8)], refreshing);
+    expect(reads).toHaveLength(2);
+    expect(closed).toEqual([]);
+    expect(f.host.querySelector('.composer-context-usage')).toBe(ring);
+    expect(ring.getAttribute('aria-label')).toBe('正在读取上下文占用');
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 500 tokens');
+    expect(ring.getAttribute('aria-description')).toContain('缓存命中率 99%');
+    expect(ring.getAttribute('tabindex')).toBe('0');
+
+    await complete(originalRead, 1, 10);
+    expect(reads).toHaveLength(2);
+    expect(closed).toEqual([]);
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 500 tokens');
+    await render([first, next, tool(8)]);
+    expect(reads).toHaveLength(3);
+    expect(reads[2]?.messageIds).toEqual([next.id]);
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 500 tokens');
+    await complete(reads[2]!, 420);
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用约 84%');
+
+    await render([first, next, tool(9)]);
+    const revokedRead = reads[3]!;
+    await render([first, next, tool(9)], { ...selected(), permissionUnavailable: true });
+    expect(closed).toEqual([revokedRead.readId]);
+    await complete(revokedRead, 200);
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 未知 tokens');
+
+    await render([first, next, tool(9)]);
+    await complete(reads[4]!, 420);
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用约 84%');
+    await render([first, next, tool(9)], selected(), 1);
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 未知 tokens');
+  } finally {
+    await f.close();
+  }
+});
+
+for (const failure of ['error', 'empty', 'timeout'] as const)
   test(`a transient context estimate ${failure} recovers without a new message or selection`, async () => {
     const f = fixture();
     let attempts = 0;
+    const closed: string[] = [];
     const bridge = {
       request: async (request: NativeRequest) => {
+        if (request.method === 'toolMessages.close') closed.push(request.readId);
         if (request.method !== 'toolMessages.contextUsage') return null;
         if (++attempts === 1) {
           if (failure === 'error') throw Error('context_estimate_changed');
+          if (failure === 'timeout') throw Error('native_read_timeout');
           const initial = page(request, 's');
           delete initial.context;
           return initial;
@@ -358,6 +455,7 @@ for (const failure of ['error', 'empty'] as const)
       );
       await act(async () => new Promise((resolve) => setTimeout(resolve, 650)));
       expect(attempts).toBe(2);
+      expect(closed).toHaveLength(failure === 'timeout' ? 1 : 0);
       expect(f.host.querySelector('.composer-context-usage')?.getAttribute('aria-label')).toBe(
         '上下文占用约 68%',
       );

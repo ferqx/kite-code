@@ -677,7 +677,7 @@ test('cold confirmed controls keep their normal presentation while history recon
   }
 });
 
-test('a cold Session keeps metric nodes mounted through a single loading state and adopts both readings together without gating input', async () => {
+test('a cold Session keeps metric nodes mounted and adopts each reading without gating input', async () => {
   const f = fixture({ active: false, contextUsage: true });
   const changes: string[] = [];
   const record = () =>
@@ -725,7 +725,9 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
     expect((editor as HTMLTextAreaElement).readOnly).toBe(false);
     await f.release('usage');
     expect(metrics.getAttribute('aria-busy')).toBe('true');
-    expect(ring.getAttribute('aria-description')).toBeNull();
+    expect(ring.getAttribute('aria-description')).toBe(
+      '上下文估算 未知 / 未知 tokens；缓存命中率 30%，缓存命中 30 / 100 tokens',
+    );
     expect(ring.getAttribute('aria-label')).toBe('正在读取上下文占用');
     await f.release('context');
     await f.resume();
@@ -746,6 +748,10 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
           '上下文占用约 2%',
         ]),
         JSON.stringify([null, '正在读取上下文占用']),
+        JSON.stringify([
+          '上下文估算 未知 / 未知 tokens；缓存命中率 30%，缓存命中 30 / 100 tokens',
+          '正在读取上下文占用',
+        ]),
         JSON.stringify([
           '上下文估算 12000 / 272000 tokens；缓存命中率 30%，缓存命中 30 / 100 tokens',
           '上下文占用约 4%',

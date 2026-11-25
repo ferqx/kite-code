@@ -275,7 +275,11 @@ export class NativeToolMessages {
           throw new ClientError('model_usage_identity_mismatch');
         contextWindowTokens = frozenContextWindow(run, execution.definitionId);
       }
-      const view = await this.client.getView(scope.sessionId, { signal: lease.abort.signal });
+      // The final fence needs Session metadata, not the full View's message and
+      // execution bodies. Older Services fall back through the SDK.
+      const view = await this.client.getSessionState(scope.sessionId, {
+        signal: lease.abort.signal,
+      });
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
       const current = this.messages().get(message.id);

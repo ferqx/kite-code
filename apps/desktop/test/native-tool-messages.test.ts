@@ -2302,6 +2302,7 @@ test('current context uses the original request forecast and full window, indepe
     configuration: { snapshot: { configuration: { models: [matchingModel] } } },
   };
   const runReads: string[] = [];
+  const stateReads: string[] = [];
   Object.assign(f.client, {
     getContextEstimate: async (sessionId: string, query: unknown) => {
       reads.push([sessionId, query]);
@@ -2324,10 +2325,16 @@ test('current context uses the original request forecast and full window, indepe
       runReads.push(id);
       return fallbackRun;
     },
-    getView: async () => ({
-      storeId: 'store',
-      session: { id: 's', workspaceId: 'w', contextSelectionId: 'selected', deletedAt: null },
-    }),
+    getView: async () => {
+      throw Error('forecast loaded full history to check metadata');
+    },
+    getSessionState: async (sessionId: string) => {
+      stateReads.push(sessionId);
+      return {
+        storeId: 'store',
+        session: { id: 's', workspaceId: 'w', contextSelectionId: 'selected', deletedAt: null },
+      };
+    },
   });
   const request = {
     method: 'toolMessages.contextUsage' as const,
@@ -2339,6 +2346,7 @@ test('current context uses the original request forecast and full window, indepe
   };
   const result = await f.manager.contextUsage({ ...request, messageIds: [...request.messageIds] });
   expect(reads).toEqual([['s', { storeId: 'store', executionId: 'model' }]]);
+  expect(stateReads).toEqual(['s']);
   expect(result.context).toEqual({
     modelId: 'route',
     contextSelectionId: 'selected',
@@ -2419,7 +2427,7 @@ test('context forecasts reject changed selections, departed reads, foreign recei
   let next: Record<string, unknown> = estimate;
   Object.assign(f.client, {
     getContextEstimate: async () => next,
-    getView: async () => ({
+    getSessionState: async () => ({
       storeId: 'store',
       session: { id: 's', workspaceId: 'w', contextSelectionId: 'selected', deletedAt: null },
     }),
