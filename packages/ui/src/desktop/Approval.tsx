@@ -16,7 +16,7 @@ export function Approval({
   command,
   summary,
   toolLabel,
-  fullText,
+  tooltipText,
   attachment,
   status,
   options,
@@ -28,7 +28,7 @@ export function Approval({
   command?: string;
   summary?: string;
   toolLabel?: string;
-  fullText?: string;
+  tooltipText?: string;
   attachment?: { phase: 'idle' | 'loading' | 'failed' | 'loaded'; retry?: () => void };
   status?: string;
   options: readonly ApprovalOptionView[];
@@ -48,24 +48,28 @@ export function Approval({
           <HugeiconsIcon icon={command ? TerminalIcon : Wrench01Icon} aria-hidden="true" />
           {toolLabel ?? (command ? 'Shell' : '工具')}
         </span>
-        <TooltipProvider delayDuration={350}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* Read-only full text must also be reachable with the keyboard. */}
-              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard focus exposes the full truncated tool text. */}
-              <code className="approval-command" tabIndex={0}>
-                {command ?? summary}
-              </code>
-            </TooltipTrigger>
-            <TooltipContent
-              className="kite-client approval-command-tooltip"
-              side="top"
-              align="start"
-            >
-              <code>{fullText ?? command ?? summary}</code>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        {tooltipText === undefined ? (
+          <code className="approval-command">{command ?? summary}</code>
+        ) : (
+          <TooltipProvider delayDuration={350}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard focus exposes the full truncated tool text. */}
+                <code className="approval-command" tabIndex={0}>
+                  {command ?? summary}
+                </code>
+              </TooltipTrigger>
+              <TooltipContent
+                className="kite-client approval-command-tooltip"
+                data-shell-command={command !== undefined ? '' : undefined}
+                side="top"
+                align="start"
+              >
+                <code>{tooltipText}</code>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
         {attachment?.phase === 'failed' && attachment.retry && (
           <Button variant="ghost" size="xs" onClick={attachment.retry}>
             重试核对

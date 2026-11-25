@@ -131,6 +131,7 @@ test('the original Approval form consumes the verified complete request and subm
       )!;
     expect(approve().disabled).toBe(true);
     expect(f.host.querySelector('[aria-label="更多批准方式"]')).toBeNull();
+    expect(f.host.querySelector('.approval-command')?.hasAttribute('tabindex')).toBe(false);
     await act(async () => approve().click());
     expect(answers).toEqual([]);
     await act(async () =>
@@ -147,7 +148,7 @@ test('the original Approval form consumes the verified complete request and subm
     expect(command.textContent).toBe(request.input.command);
     await act(async () => command.focus());
     expect(f.dom.window.document.querySelector('.approval-command-tooltip code')?.textContent).toBe(
-      JSON.stringify(request, null, 2),
+      request.input.command,
     );
     await act(async () => command.blur());
     expect(approve().disabled).toBe(false);
@@ -307,29 +308,27 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
   }
 });
 
-test('compact Shell approval exposes the exact permission scope on keyboard focus', async () => {
+test('compact Shell approvals expose only the exact command on keyboard focus', async () => {
   const f = fixture();
-  const command = './deploy.sh';
+  const command = 'printf "line one"\nprintf "line two"';
   try {
-    for (const permissions of [
-      { filesystem: 'workspace_write', network: 'none' },
-      { filesystem: 'full_access', network: 'internet' },
-    ]) {
+    for (const definitionId of ['shell.execute', 'shell.launch', 'shell.command']) {
       const request = {
-        definitionId: 'shell.execute',
+        definitionId,
         definitionVersion: '1',
         options: [
           { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
         ],
-        input: { key: 'deploy', command, permissions, cancellation: 'detached' },
-        policy: { reason: 'approval_required', executionScope: permissions },
+        input: { command, filesystem: 'full_access', network: 'internet' },
+        policy: { reason: 'approval_required' },
+        approvalControlReads: [{ kind: 'permission.mode', revision: '0', scope: 'user' }],
       };
       await act(async () =>
         f.root.render(
           <InteractionCard
-            key={permissions.filesystem}
+            key={definitionId}
             compactApproval
-            interaction={{ ...card, request }}
+            interaction={{ ...card, definitionId, request }}
             onAnswer={() => {}}
             renderApproval={(props) => <NativeApproval {...props} embedded />}
           />,
@@ -340,10 +339,7 @@ test('compact Shell approval exposes the exact permission scope on keyboard focu
       expect(f.host.querySelector('details')).toBeNull();
       await act(async () => trigger.focus());
       const full = f.dom.window.document.querySelector('.approval-command-tooltip code');
-      expect(full?.textContent).toBe(JSON.stringify(request, null, 2));
-      expect(full?.textContent).toContain(permissions.filesystem);
-      expect(full?.textContent).toContain(permissions.network);
-      expect(full?.textContent).toContain('detached');
+      expect(full?.textContent).toBe(command);
       await act(async () => trigger.blur());
     }
   } finally {

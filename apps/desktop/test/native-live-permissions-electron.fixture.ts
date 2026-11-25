@@ -366,14 +366,19 @@ async function verifyQueueWindow() {
   );
   assert.ok(originalApproval);
   assert.equal(originalApproval.definitionId, 'shell.execute');
-  const completeRequest = JSON.parse(await tooltip.innerText());
-  assert.deepEqual(completeRequest, originalApproval.request);
+  const completeRequest = originalApproval.request;
   assert.ok(
     completeRequest && typeof completeRequest === 'object' && !Array.isArray(completeRequest),
   );
   const input = completeRequest.input;
   assert.ok(input && typeof input === 'object' && !Array.isArray(input));
   assert.equal(input.command, shellText);
+  assert.equal(await tooltip.locator('code').textContent(), input.command);
+  assert.ok(
+    await tooltip.evaluate(
+      (element) => element.getBoundingClientRect().height <= Math.min(160, innerHeight * 0.3) + 1,
+    ),
+  );
   assert.equal(input.filesystem, 'full_access');
   assert.equal(input.network, 'none');
   assert.equal(Object.hasOwn(input, 'permissions'), false);
@@ -639,13 +644,18 @@ async function assertApprovalGroup(cards: Record<(typeof roles)[number], string>
     assert.equal(styles.overflow, 'hidden');
     assert.equal(styles.ellipsis, 'ellipsis');
     assert.equal(styles.whiteSpace, 'pre');
+    const shellText = await until(
+      async () => command.textContent(),
+      (value) => !!value?.includes('EFFECT'),
+      'original shell command ready',
+    );
     await command.hover();
     const tooltip = page!.locator('.approval-command-tooltip');
     await tooltip.waitFor();
     await until(
-      async () => tooltip.innerText(),
-      (value) => value.includes('EFFECT'),
-      'complete original approval content',
+      async () => tooltip.locator('code').textContent(),
+      (value) => value === shellText,
+      'complete original shell command',
     );
     await draft.hover();
   }

@@ -5405,6 +5405,10 @@ body {
   color: var(--foreground);
   border: 1px solid var(--border);
 }
+.kite-client.approval-command-tooltip[data-shell-command] {
+  box-sizing: border-box;
+  max-height: min(160px, 30vh, var(--radix-tooltip-content-available-height));
+}
 .kite-client.approval-command-tooltip code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

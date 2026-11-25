@@ -1433,7 +1433,7 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 
 ## 原审批面板与授权观察
 
-[NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只消费原冻结请求的 `options`。主按钮取 `kind:once` 的原展示，分体菜单列出全部 `kind:scope` 选项及其完整 label/details；每次只提交原 optionId，deny 不带选项。Shell、文件和 worktree 不各设答案格式，Main IPC 与持久 answer journal 同步拒绝旧 grant 字段及客户端自报 scope。已知 `shell.execute`、`shell.launch` 和 `shell.command` 的版本1显示准确原命令，其他定义显示原身份、目标和原因；工具标签与等宽目标分层，单行超出省略，沿原 Tooltip 悬停／聚焦查看核实后的完整原审批请求（包含 Shell 每次调用的 filesystem／network 权限、其他输入与策略原因），不再额外展示详情；单行命令不代替授权范围披露。`InteractionCard.renderApproval` 的紧凑模式自动沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格核实完整正文，失败可重试；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
+[NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只消费原冻结请求的 `options`。主按钮取 `kind:once` 的原展示，分体菜单列出全部 `kind:scope` 选项及其完整 label/details；每次只提交原 optionId，deny 不带选项。Shell、文件和 worktree 不各设答案格式，Main IPC 与持久 answer journal 同步拒绝旧 grant 字段及客户端自报 scope。已知 `shell.execute`、`shell.launch` 和 `shell.command` 的版本1显示准确原命令。工具标签与等宽目标分层，超宽单行省略。Shell 的 Tooltip 仅接收核实后的命令正文，正文未就绪时没有命令浮层。其他工具显示原身份和摘要，Tooltip 可查看核实后的原审批请求。`InteractionCard.renderApproval` 的紧凑模式自动沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格核实完整正文，失败可重试；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
 
 [NativeApprovalGroup](src/native-approval-group.tsx)将当前普通工具审批归入输入组件上方的一张独立浮卡，高度不超过默认 Composer；右上角“‹ 1/3 ›”一次只挂载一项原 `InteractionCard` 与准确 `approval ID` article，翻页不回答其他项，当前项消失后按原位置选择后继。主 Agent 不显示名称；子 Agent 名称按实际 Store／Session／Run 核实，未匹配时显示“子 Agent”，不将内部 UUID 当名称。[ApprovalHeader](../../packages/ui/src/desktop/ApprovalHeader.tsx)按准确 Store／Session 的随机身份确定固定池中的图标及语义色槽，翻页、重开或新 Run 不重新随机。附件读取、独立 grant、在途／未知禁用、原答案身份与迟到隔离均沿原链；MCP 来源／凭据授权、问题及计划不进入普通审批组。
 
@@ -1454,6 +1454,8 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 自动批准通过理由不进入工具展开正文，真实执行失败和结果未知只展示各自异常；原授权事实和盾牌提示仍保留，拒绝及转人工原因不受影响。显示规则、逐状态回归与实际浏览器过程证据归 [共享 UI](../../packages/ui/README.md#原桌面展示层)。Native 的已知写入展示同时支持保存的 `files.write@2` 和当前 `@3`，两者均显示“写入”；未来未识别版本仍使用原定义／版本文字，不推断能力或执行结果。
 
 普通 root／child 工具审批都与父 Composer、权限选择器并存，待批时可切 Auto／Full 使原未派发工具重新判断。`nativeRootInteractionBlocksComposer` 为当前会话的 MCP 特殊审批核对原 Store、Session、Execution 与活动 Run，无 Run 的交互核对原执行。共享 SessionPage 的 `interactionHidesPrompt` 缺省保持。普通工具审批和补充问题与主编辑器并存。计划待审时，专用面板占用底部输入位置。实际输入、单轮准入及模式复核继续由原 Runtime 决定。
+
+2026-11-25，Windows x64／Chrome，在 `6e9e81200` 加本次差量的隔离页面中使用实际审批组件与生产样式。960×620 和 440×420 视口分别测得 Shell 浮层高 160px 和 126px。核对附件失败后重试、悬停滚至命令末尾、移开收起、键盘聚焦与 Esc，以及翻页后原卡拒绝和批准。浮层开合保持审批按钮位置、草稿和会话阅读位置。审批与输入交互的四个 DOM 文件共 16 项通过。本次窗口证据来自隔离浏览器，未运行 macOS 完整 Electron 场景。
 
 ## 原运行中消息队列
 

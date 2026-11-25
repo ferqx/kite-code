@@ -74,7 +74,7 @@ export function NativeApproval({
         command={command}
         summary={summary}
         toolLabel={shell ? 'Shell' : interaction.definitionId}
-        fullText={request ? JSON.stringify(request, null, 2) : undefined}
+        tooltipText={shell ? command : request ? JSON.stringify(request, null, 2) : summary}
         attachment={attachment}
         status={
           submission
