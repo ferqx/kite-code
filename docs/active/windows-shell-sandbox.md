@@ -20,6 +20,8 @@ Probe，或 Windows Full/fallback UI 状态时。
 
 随后修正 PowerShell 静态未知分类在 Full 下仍强制人工审批的行为，仅调整 Shell 能力细化的模式条件。通用独立人审、硬拒绝、父子上限与原生执行边界保持；5.1／7／Git Bash 的受控模型 Native 窗口核对零工具审批与 3 个原 Job 清理。修复前对照可复现的补充测试失败及完整资格归 [权限 owner](../../packages/agent/src/permissions/README.md)，取舍见 [Full 审批修复](../../.agents/notes/implemented/bug-fix/2026-11-18-powershell-full-uncertain-approval.md)。
 
+请求批准模式的受限 PowerShell 附着调用由原 `shell.command` Job 承担默认人工决策。可信注册的父 Tool 仅获排队许可，实际 Job 独立核命令、目录、工作区信任、范围及当前控制修订。一次性批准绑定派发 Job。独立策略、硬拒绝和后台关系仍分别适用。 [权限 owner](../../packages/agent/src/permissions/README.md) · [单次审批决定](../../.agents/notes/implemented/bug-fix/2026-11-25-windows-powershell-job-approval.md)
+
 Windows x64 桌面设置只提供 Git Shell 与 PowerShell，默认优先完整 Git Shell；缺少 Git 时使用已核验的 PowerShell。PowerShell 从受信任的本机安装中实际核验全部候选并选择最高版本，不固定主版本、不内置解释器。新会话创建时封存类型，子任务沿所属根会话；PowerShell 新装配重新核版本，已派发 Job 与冻结 Run 保留原解释器和资产摘要。旧 `auto`／`powershell-7` 记录兼容读取，新设置与绑定归一为两类。通用审批、范围、Job 监督与清理不按版本分叉，不新增 CLI 特例。Git 分支和工作树独立依据 Git 的可用性。Service 与 Runner 使用原 V7。业务模型从共享系统提示取得实际工作环境及本次解释器版本。实现入口见 [桌面 Shell 设置](../../apps/service/README.md#默认-shell-装配)、[PowerShell Job](../../packages/agent/src/jobs/README.md#windows-桌面-powershell-回退)和 [Shell 审批](../../packages/agent/src/permissions/README.md)。
 
 2026-11-18，Windows x64 隔离 Native 开发制品与本地受控 Provider 验证两类设置、Git 默认、PowerShell 7.6.9 最高选择、原 Git 会话保持和冷启动仅发现 5.1.26100.10066 时的同类型执行。四个 Run／Job 完成，模型、设置与实际进程版本一致，四个 Job 均确认原清理与进程树停止，工具审批为零。完整过程与验证边界归 [Desktop owner](../../apps/desktop/README.md#windows-集成终端-shell)，不扩大为远程真实模型或安装发行资格。下方 2026-11-17 段为旧版本独立选项的历史验证。

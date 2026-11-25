@@ -193,7 +193,7 @@ for (const backend of ['powershell', 'git-bash'] as const) {
               expect(system?.content).toMatch(/Shell: Git Bash(?: .+)? on Windows/);
               expect(system?.content).not.toContain('PowerShell on Windows passes wildcard paths');
             }
-            const shellTool = request.tools?.find(({ id }) => id === 'shell_execute');
+            const shellTool = request.tools?.find(({ id }) => id === 'exec_command');
             expect(shellTool?.description).not.toMatch(
               /Shell:|user locale|rg --files|ripgrep.*version/i,
             );
@@ -203,15 +203,15 @@ for (const backend of ['powershell', 'git-bash'] as const) {
             expect(shellTool?.description).toContain('-WindowStyle Hidden');
             if (powerShell) expect(shellTool?.description).not.toContain(powerShell.version);
             expect(shellTool?.inputSchema.properties).toMatchObject({
-              command: { type: 'string', minLength: 1, maxLength: 262144 },
+              cmd: { type: 'string', minLength: 1, maxLength: 262144 },
             });
             const command = commands[index++];
             if (command !== undefined) {
               yield {
                 type: 'tool_call',
                 id: crypto.randomUUID(),
-                name: 'shell_execute',
-                arguments: JSON.stringify({ command }),
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: command }),
               };
               yield { ...finish, reason: 'tool_calls' };
             } else yield finish;
@@ -453,3 +453,296 @@ for (const backend of ['powershell', 'git-bash'] as const) {
     65000,
   );
 }
+
+test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
+  'confined PowerShell Request Approval owns one Job card for approval, denial and cancellation',
+  async () => {
+    const root = temporaryDirectory('kite-windows-shell-request-approval-');
+    const workspace = join(root, 'workspace');
+    const control = join(root, 'control');
+    const stateRoot = join(root, 'sandbox');
+    const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'request-approval' });
+    try {
+      for (const path of [workspace, control, stateRoot]) mkdirSync(path);
+      privateDirectory(profile.profilePath);
+      const script = 'approval fixture.ps1';
+      const command = `& './${script}'`;
+      const effect = join(workspace, 'approval-effects.txt');
+      writeFileSync(
+        join(workspace, script),
+        "Add-Content -LiteralPath 'approval-effects.txt' -Value 'approved execution'\n",
+      );
+      const readEffects = () =>
+        existsSync(effect) ? readFileSync(effect, 'utf8').trimEnd().split(/\r?\n/u) : [];
+      const userConfigurationPath = join(profile.profilePath, 'config.jsonc');
+      writeFileSync(
+        userConfigurationPath,
+        JSON.stringify({
+          modelId: 'fixed',
+          models: [
+            {
+              id: 'fixed',
+              provider: 'compatible',
+              model: 'unused',
+              baseURL: 'http://127.0.0.1:9/v1',
+            },
+          ],
+        }),
+      );
+      const { runner } = await windowsShellFixture();
+      const powerShell = await discoverWindowsPowerShell();
+      const host = createDefaultProcessConfiguration({
+        profile,
+        userConfigurationPath,
+        ordinaryHostTools: true,
+        localCodex: false,
+        credentialBackend: createTemporaryCredentialBackend(),
+        shell: {
+          platform: 'win32',
+          configurationId: 'windows-shell-request-approval-fixture',
+          env: withBundledRipgrep({}).env,
+          supervisorPath: runner,
+          bunExecutable: process.execPath,
+          shellExecutable: powerShell.executable.canonical,
+          windows: { kind: 'powershell', powerShell, stateRoot },
+          host: {
+            controlBase: control,
+            protectedRoots: [],
+            readonlyAssets: [],
+            runtimeReadOnlyRoots: [],
+          },
+        },
+      });
+      const store = await openSqliteStore(profile);
+      const workspaceSerialLocks = createWorkspaceSerialLocks(profile);
+      const artifacts = createArtifactStore({ profile, store });
+      host.bindWorkspaceSerialLocks?.(workspaceSerialLocks);
+      const runtime: ReturnType<typeof createRuntime> = createRuntime({
+        ...host,
+        store,
+        permissions: host.permissions!,
+        workspaceSerialLocks,
+        artifacts,
+        outputCollections: {
+          prepare: (context, identity) => prepareOutputDirectory(runtime, context, identity),
+        },
+        resolveRunConfiguration: async (input) => {
+          const selected = await host.resolveRunConfiguration!(input);
+          let issued = false;
+          const model: ModelAdapter = {
+            async *stream(request) {
+              if (issued) {
+                yield finish;
+                return;
+              }
+              issued = true;
+              expect(request.tools?.some(({ id }) => id === 'exec_command')).toBeTrue();
+              yield {
+                type: 'tool_call',
+                id: crypto.randomUUID(),
+                name: 'exec_command',
+                arguments: JSON.stringify({
+                  cmd: command,
+                  filesystem: 'workspace_write',
+                  network: 'none',
+                  yield_time_ms: 10000,
+                }),
+              };
+              yield { ...finish, reason: 'tool_calls' };
+            },
+          };
+          return { ...selected, model };
+        },
+      });
+      host.permissionManagement?.(runtime);
+      const expectedStoreId = (await store.getMetadata()).storeId;
+      const sessionId = 'request-approval';
+      const identity = { expectedStoreId, sessionId, subjectId: 'owner' };
+      try {
+        await runtime.createWorkspace({
+          expectedStoreId,
+          id: 'w',
+          name: 'Windows Shell Request Approval',
+          rootUri: pathToFileURL(workspace).href,
+        });
+        await runtime.createSession({
+          ...identity,
+          commandId: 'create',
+          workspaceId: 'w',
+          title: 'Windows Shell Request Approval',
+        });
+        await initializeLivePermissionFixture({
+          runtime,
+          profile,
+          ...identity,
+          workspaceId: 'w',
+          mode: 'accept_edits',
+          trusted: true,
+        });
+
+        const seenCards = new Map<string, 'answered' | 'cancelled'>();
+        for (const decision of ['approve', 'deny', 'cancel'] as const) {
+          const commandId = `shell-${decision}`;
+          const approving = decision === 'approve';
+          await runtime.submitCommand({
+            ...identity,
+            commandId,
+            request: { kind: 'run.start', content: 'Run the exact local fixture script.' },
+          });
+          const pending = { expectedStoreId, sessionId, state: 'pending' as const };
+          const deadline = Date.now() + 10000;
+          let cards = (await store.listInteractions(pending)).interactions;
+          while (!cards.length && Date.now() < deadline) {
+            await Bun.sleep(20);
+            cards = (await store.listInteractions(pending)).interactions;
+          }
+          if (!cards.length) {
+            const status = (await store.getCommand(commandId))?.status;
+            const executions = (await store.listExecutions(sessionId))
+              .filter((entry) => entry.originCommandId === commandId)
+              .map(({ definitionId, status, result }) => ({ definitionId, status, result }));
+            throw new Error(JSON.stringify({ commandId, status, executions }));
+          }
+          expect(cards).toHaveLength(1);
+          const card = cards[0]!;
+          expect(seenCards.has(card.id)).toBeFalse();
+          expect(card.definitionId).toBe('shell.command');
+          expect(card).toMatchObject({
+            kind: 'approval',
+            definitionVersion: '1',
+            sessionId,
+            presentationSessionId: sessionId,
+            originStoreId: expectedStoreId,
+            subjectId: identity.subjectId,
+            request: {
+              policy: {
+                mode: 'accept_edits',
+                effects: ['process', 'unknown'],
+                executionScope: { filesystem: 'workspace_write', network: 'none' },
+              },
+              input: { command },
+              options: [{ optionId: 'once', kind: 'once' }],
+            },
+          });
+          const job = (await store.getExecution(card.executionId))!;
+          const {
+            kind,
+            definitionId,
+            definitionVersion,
+            originStoreId,
+            rootWorkCommandId,
+            runId,
+            cancelWithParent,
+            input,
+            interactionBinding,
+            authorization,
+          } = job;
+          expect({
+            kind,
+            definitionId,
+            definitionVersion,
+            originStoreId,
+            rootWorkCommandId,
+            runId,
+            cancelWithParent,
+            input,
+            interactionBinding,
+            authorization,
+            sessionId: job.sessionId,
+          }).toMatchObject({
+            kind: 'job',
+            definitionId: 'shell.command',
+            definitionVersion: '1',
+            originStoreId: expectedStoreId,
+            rootWorkCommandId: commandId,
+            sessionId,
+            runId: null,
+            cancelWithParent: true,
+            input: {
+              command,
+              permissions: { filesystem: 'workspace_write', network: 'none' },
+            },
+            interactionBinding: { interactionId: card.id },
+            authorization: { dispatched: false },
+          });
+          expect(await store.getCommand(job.originCommandId)).toMatchObject({
+            rootWorkCommandId: commandId,
+            sessionId,
+            originStoreId: expectedStoreId,
+          });
+          const tool = await store.getExecution(job.parentExecutionId!);
+          expect(tool).toMatchObject({
+            kind: 'tool',
+            definitionId: 'shell.execute',
+            originCommandId: commandId,
+            input: { command },
+          });
+          expect(readEffects()).toEqual(approving ? [] : ['approved execution']);
+
+          if (decision === 'cancel') {
+            expect(tool?.runId).toBeTruthy();
+            await runtime.cancelRun({
+              ...identity,
+              commandId: 'cancel-before-shell-dispatch',
+              runId: tool!.runId!,
+            });
+          } else {
+            await runtime.answerInteraction({
+              ...identity,
+              commandId: `answer-${decision}`,
+              presentationSessionId: sessionId,
+              interactionId: card.id,
+              expectedRevision: card.revision,
+              answer: approving
+                ? { kind: 'approval', decision: 'approve', optionId: 'once' }
+                : { kind: 'approval', decision: 'deny' },
+            });
+          }
+          seenCards.set(card.id, decision === 'cancel' ? 'cancelled' : 'answered');
+          await runtime.waitForCommand(commandId, { timeoutMs: 10000 });
+          const terminal = (await store.getExecution(job.id))!;
+          expect(terminal).toMatchObject({
+            status: decision === 'cancel' ? 'cancelled' : approving ? 'succeeded' : 'failed',
+            authorization: { dispatched: approving },
+          });
+          if (decision === 'cancel') {
+            expect(terminal.authorization?.human).toMatchObject({
+              interactionId: card.id,
+              state: 'cancelled',
+              accepted: false,
+              acceptedDecisionRevision: null,
+              decision: null,
+            });
+            expect(await store.getRun(tool!.runId!)).toMatchObject({
+              status: 'cancelled',
+              isActive: false,
+            });
+          } else {
+            expect(terminal.authorization?.human).toMatchObject({
+              interactionId: card.id,
+              decision,
+            });
+          }
+          if (approving)
+            expect(terminal.result).toMatchObject({
+              details: { exitCode: 0, cleanupConfirmed: true, processTreeStopped: true },
+            });
+          expect(terminal.authorization?.policy).toBeUndefined();
+          expect(terminal.authorization?.check).toBeUndefined();
+          expect(readEffects()).toEqual(['approved execution']);
+          const allCards = (await store.listInteractions({ expectedStoreId, sessionId }))
+            .interactions;
+          expect(new Map(allCards.map(({ id, state }) => [id, state]))).toEqual(seenCards);
+        }
+      } finally {
+        await runtime.close();
+        await artifacts.close();
+        await store.close();
+        await workspaceSerialLocks.close();
+      }
+    } finally {
+      removeTemporaryDirectory(root);
+    }
+  },
+  45000,
+);

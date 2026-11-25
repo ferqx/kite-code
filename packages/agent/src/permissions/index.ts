@@ -55,6 +55,8 @@ export interface CapabilityDescription extends CapabilityIdentity {
   readonly autoReview?: 'check' | 'none';
   /** Trusted classification requires an exact human decision for this call. */
   readonly requiresApproval?: true;
+  /** Trusted confined PowerShell Tool whose attached Job owns the process approval. */
+  readonly schedulesPowerShellJob?: true;
   /** Only the registered Windows native Git Bash contract; parents schedule, Jobs execute. */
   readonly windowsNativeUserProcess?: true;
   readonly reviewBehavior?: ToolBehaviorBinding;
@@ -177,6 +179,15 @@ function validDescription(description: CapabilityDescription) {
     (description.autoReview === undefined ||
       description.autoReview === 'check' ||
       description.autoReview === 'none') &&
+    (description.schedulesPowerShellJob === undefined ||
+      (description.schedulesPowerShellJob === true &&
+        description.kind === 'tool' &&
+        description.definitionVersion === '1' &&
+        ['shell.execute', 'shell.launch'].includes(description.definitionId) &&
+        !!description.executionScope &&
+        !description.windowsNativeUserProcess &&
+        !description.worktreeAuthorization &&
+        !description.approvalExempt)) &&
     (description.windowsNativeUserProcess === undefined ||
       (description.windowsNativeUserProcess === true &&
         description.definitionVersion === '1' &&
@@ -265,6 +276,7 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
             ? ['stop_on_timeout']
             : []),
           ...(description.requiresApproval ? ['requires_approval'] : []),
+          ...(description.schedulesPowerShellJob ? ['schedules-powershell-job'] : []),
           ...(description.windowsNativeUserProcess ? ['windows-native-user-process'] : []),
           ...(description.worktreeAuthorization ? [description.worktreeAuthorization] : []),
         ],
@@ -452,6 +464,15 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       // This Tool can only submit the typed shell.command Job. Do not ask twice; only
       // the dispatching Job owns a user-process confirmation. Independent policies still apply.
       if (description.windowsNativeUserProcess && request.kind === 'tool')
+        return { ...controlProof, allowed: true, revision: boundRevision };
+      if (
+        policy.mode === 'accept_edits' &&
+        description.schedulesPowerShellJob &&
+        policy.allowed.some(
+          ({ kind, definitionId, definitionVersion }) =>
+            kind === 'job' && definitionId === 'shell.command' && definitionVersion === '1',
+        )
+      )
         return { ...controlProof, allowed: true, revision: boundRevision };
       const nativeUserConsent =
         description.windowsNativeUserProcess === true && request.kind === 'job';

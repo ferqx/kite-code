@@ -206,7 +206,8 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
               signal: AbortSignal.timeout(15000),
             };
             const decision = await policy.authorize(request);
-            if (mode === 'full') {
+            const schedulesAttachedJob = mode === 'accept_edits' && capability.kind === 'tool';
+            if (mode === 'full' || schedulesAttachedJob) {
               expect(decision, powerShell.version).toMatchObject({ allowed: true });
               expect(decision.approval).toBeUndefined();
               expect(decision.check).toBeUndefined();
@@ -216,6 +217,13 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
                 reason: mode === 'auto' ? 'auto_check_required' : 'approval_required',
               });
               expect(!!decision.check).toBe(mode === 'auto');
+            }
+            if (schedulesAttachedJob) {
+              const detached = await policy.authorize({
+                ...request,
+                input: { ...request.input, cancellation: 'detached' },
+              });
+              expect(detached).toMatchObject({ allowed: false, reason: 'approval_required' });
             }
             for (const [command, reason] of [
               ["Write-Output 'unterminated", 'shell_command_syntax_invalid'],

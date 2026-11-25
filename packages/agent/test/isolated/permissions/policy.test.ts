@@ -53,6 +53,79 @@ test('an explicit per-call human requirement remains binding in every mode', asy
   }
 });
 
+test('only the admitted PowerShell parent may schedule the independently approved Job', async () => {
+  const parent = { kind: 'tool', definitionId: 'shell.execute', definitionVersion: '1' } as const;
+  const job = { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' } as const;
+  const parentRequest = {
+    ...parent,
+    sessionId: 's',
+    runId: 'r',
+    executionId: 'parent',
+    input: { command: '& ./script.ps1' },
+    signal: new AbortController().signal,
+  };
+  const jobRequest = { ...parentRequest, ...job, runId: null, executionId: 'job' };
+  const selection: PermissionPolicySnapshot = {
+    mode: 'accept_edits',
+    workspaceTrust: true,
+    revision: 'workspace',
+    allowed: [parent, job],
+  };
+  const exactScope = { filesystem: 'workspace_write', network: 'none' } as const;
+  const describe = (request: AuthorizationRequest): CapabilityDescription => ({
+    kind: request.kind,
+    definitionId: request.definitionId,
+    definitionVersion: request.definitionVersion,
+    revision: 'powershell',
+    hardAllowed: true,
+    safeRead: false,
+    effects: ['process', 'unknown'],
+    executionScope: exactScope,
+    requiresApproval: true,
+    ...(request.kind === 'tool' ? { schedulesPowerShellJob: true } : {}),
+  });
+  const permissions = createPermissionPolicy({
+    readPolicy: () => selection,
+    describeCapability: describe,
+  });
+  const scheduled = await permissions.authorize(parentRequest);
+  expect(scheduled).toMatchObject({ allowed: true });
+  expect(scheduled.approval).toBeUndefined();
+  expect(await permissions.authorize(jobRequest)).toMatchObject({
+    allowed: false,
+    reason: 'approval_required',
+    approval: {
+      options: [{ kind: 'once' }],
+      request: { executionScope: exactScope },
+    },
+  });
+
+  const noJob = createPermissionPolicy({
+    readPolicy: () => ({ ...selection, allowed: [parent, { ...job, definitionVersion: '2' }] }),
+    describeCapability: describe,
+  });
+  expect(await noJob.authorize(parentRequest)).toMatchObject({
+    allowed: false,
+    reason: 'approval_required',
+  });
+  expect(await noJob.authorize(jobRequest)).toMatchObject({
+    allowed: false,
+    reason: 'capability_not_allowed',
+  });
+
+  const hardRefusal = createPermissionPolicy({
+    readPolicy: () => selection,
+    describeCapability: (request) => ({
+      ...describe(request),
+      hardAllowed: false,
+      denialReason: 'fixture_hard_refusal',
+    }),
+  });
+  const denied = await hardRefusal.authorize(parentRequest);
+  expect(denied).toMatchObject({ allowed: false, reason: 'fixture_hard_refusal' });
+  expect(denied.approval).toBeUndefined();
+});
+
 test('capability refinement receives this authorization policy without a second control read', async () => {
   const request: AuthorizationRequest = {
     kind: 'tool',

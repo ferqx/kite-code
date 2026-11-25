@@ -1385,6 +1385,13 @@ export async function createShellConfiguration(input: {
         const denial = ps ? powerShellScopeDenial(ps, scope) : classified.hardDenied;
         return {
           commandDigest: digestShellCommand(request, value, directory, classified),
+          ...(host &&
+          options.windows?.kind === 'powershell' &&
+          policy?.mode === 'accept_edits' &&
+          request.kind === 'tool' &&
+          value.cancellation !== 'detached'
+            ? { schedulesPowerShellJob: true as const }
+            : {}),
           ...((options.windows
             ? windowsRead(value.command, classified)
             : readOnlySearchCommand(classified, shell.path)) &&

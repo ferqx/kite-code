@@ -164,6 +164,8 @@ Windows 桌面 PowerShell 使用[所选安装的 AST 解析器](powershell-comma
 
 [真实 pending approval SIGKILL 回归](../../test/isolated/recovery/live-approval-crash.test.ts)在审批卡和原 planned Tool 已耐久后杀死自有进程（核 SIGKILL/137），只读重开保持原卡/Run/执行和 cursor、模型 ledger 不增长。随后持久根模式由请求批准改为 Full，冷 Runtime 观察仍不准备 Provider；错误主体显式恢复被拒，准确原 Run 显式恢复才读取当前 applied control revision、同事务失效旧卡并派发原 Tool。外置 ledger 核原效果一次、已成功原 Model 不重放、重复同一恢复不增效果；原 request/source 不变、answer 仍 null，唯一失效回执保准确原revision/当前controls。该 fixture只验证这一实际进程丢失与模式变化边界，不替代其他平台或所有自动审核崩溃场景。
 
+`accept_edits` 的受限 PowerShell 在可信父 Tool 只调度同一附着 `shell.command`、且当前策略包含该 Job 时，将默认审批交给 Job。父 Tool 先通过自身能力与硬限制核验，Job 原批准及派发分别核当前策略和原回执。与其他权限合成时，各方继续核各自要求。Windows x64／Bun 1.4.4 源码 Service 回归使用本机真实受限进程及受控模型，覆盖同命令两轮各一张 Job 卡、首轮一次效果、次轮拒绝零派发，以及两个 Windows 后端的 Auto。 [默认策略](index.ts) · [可信分类](shell.ts) · [原生回归](../../../../apps/service/test/isolated/windows-shell-auto.test.ts)
+
 ## Git Worktree 的准确权限
 
 `git.worktree@1` 仍是混合读写工具，不加入整个 hostReadOnlyTool 白名单；只有真实 `builtin.shell` 绑定的合法 list 和准确匹配固定 worker list 命令可返回 safeRead。prepare 按原变更 action 的保守效果执行；create/remove 不因内层准备只读而取得分析角色或 Planning 权限。[Service](../../../../apps/service/src/permission-configuration.ts)按真实装配对只读子任务拒绝 Worktree 变更，原普通 Shell 的任务指引和三模式保持。
