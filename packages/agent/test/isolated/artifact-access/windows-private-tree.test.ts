@@ -82,6 +82,18 @@ test.skipIf(!windows)(
       expect(() => security.copyPrivateArtifactFiles(source, target, ['asset'])).toThrow();
       expect(readdirSync(target)).toEqual([]);
       unlinkSync(join(outside, 'hardlink'));
+      linkSync(join(source, 'asset'), join(target, 'hardlink'));
+      expect(() =>
+        security.writePrivateArtifactFiles(
+          target,
+          new Map([['hardlink', Buffer.from('replacement')]]),
+          undefined,
+          { directories: [], record() {} },
+        ),
+      ).toThrow();
+      expect(readFileSync(join(source, 'asset'))).toEqual(bytes);
+      expect(readFileSync(join(target, 'hardlink'))).toEqual(bytes);
+      unlinkSync(join(target, 'hardlink'));
       symlinkSync(outside, join(target, 'alias'), 'junction');
       expect(() =>
         security.writePrivateArtifactFiles(target, new Map([['alias/escape', bytes]])),

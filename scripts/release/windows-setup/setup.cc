@@ -22,7 +22,7 @@
 
 namespace {
 
-const wchar_t title[] = L"Kite 桌面版安装";
+const wchar_t title[] = L"安装 Kite";
 
 struct Handle {
   HANDLE value;
@@ -140,7 +140,7 @@ struct Stage {
   bool clean() {
     if (!owned) return true;
     for (const wchar_t* file : {L"bundle.tar.zst", L"bun.exe", L"install.js", L"bunfig.toml",
-                              L"install.log", L"Kite Desktop.exe"}) {
+                              L"install.log", desktopExecutableName}) {
       if (!DeleteFileW((path + L"\\" + file).c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND) return false;
     }
     if (!RemoveDirectoryW(path.c_str())) return false;
@@ -208,6 +208,49 @@ Handle pinDirectory(const std::wstring& path) {
       nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
 }
 
+std::wstring saveInstallLog(const std::wstring& location, const SetupProgress& progress,
+                            const std::wstring& message, bool upgrade) {
+  SYSTEMTIME time{};
+  GetLocalTime(&time);
+  wchar_t timestamp[32]{};
+  swprintf_s(timestamp, L"%04u-%02u-%02u %02u:%02u:%02u", unsigned(time.wYear),
+      unsigned(time.wMonth), unsigned(time.wDay), unsigned(time.wHour),
+      unsigned(time.wMinute), unsigned(time.wSecond));
+  const auto summary = std::wstring(L"Kite Windows Setup\r\n时间 ") + timestamp +
+      L"\r\n操作 " + (upgrade ? L"更新" : L"安装") +
+      L"\r\n安装目录 " + location + L"\r\n制品 " + expectedCandidate +
+      L"\r\n\r\n" + progress.history() + L"\r\n" + message + L"\r\n";
+  const int size = WideCharToMultiByte(CP_UTF8, 0, summary.data(), static_cast<int>(summary.size()),
+                                      nullptr, 0, nullptr, nullptr);
+  if (size <= 0) return L"";
+  std::vector<unsigned char> contents(static_cast<size_t>(size) + 3);
+  contents[0] = 0xef;
+  contents[1] = 0xbb;
+  contents[2] = 0xbf;
+  if (!WideCharToMultiByte(CP_UTF8, 0, summary.data(), static_cast<int>(summary.size()),
+          reinterpret_cast<char*>(contents.data() + 3), size, nullptr, nullptr)) return L"";
+  for (const bool fallback : {false, true}) {
+    try {
+      const auto parent = fallback ? temporaryDirectory() : knownFolder(FOLDERID_LocalAppData);
+      const auto parentPin = pinDirectory(parent);
+      require(static_cast<bool>(parentPin), L"无法访问安装日志目录。");
+      verifyPhysicalPath(parent, parentPin.value, true);
+      Stage log;
+      createStage(log, parent, L"KiteSetupLog-");
+      const auto folderPin = pinDirectory(log.path);
+      require(static_cast<bool>(folderPin), L"无法锁定安装日志目录。");
+      verifyPhysicalPath(log.path, folderPin.value, true);
+      const auto path = log.path + L"\\install.log";
+      writeFile(path, {contents.data(), static_cast<DWORD>(contents.size())});
+      log.owned = false;
+      return path;
+    } catch (const std::wstring&) {
+      // A full or redirected volume must not hide the original failure.
+    }
+  }
+  return L"";
+}
+
 std::wstring quote(const std::wstring& text) {
   require(!text.empty() && text.back() != L'\\' && text.find(L'"') == text.npos, L"安装路径无效。");
   return L"\"" + text + L"\"";
@@ -247,12 +290,15 @@ constexpr ScriptStep scriptSteps[] = {
   {"decode", L"正在解压安装包", SetupCount::checkedFiles, {30, 30}},
   {"archive", L"正在校验包内文件", SetupCount::checkedFiles, {35, 55}},
   {"write", L"正在写入并验证应用文件", SetupCount::writtenFiles, {55, 83}},
+  {"rollback", L"正在回收本次安装的暂存文件"},
   {"publish", L"正在启用已安装的版本", SetupCount::checkedFiles, {83, 83}},
   {"verify", L"正在检查已安装的文件"},
   {"wait", L"正在等待应用文件解除占用"},
   {"replace", L"正在移除旧版应用文件", SetupCount::removedEntries, {83, 90}},
   {"remove", L"正在移除应用文件", SetupCount::removedEntries, {20, 90}},
 };
+
+bool validScriptCode(const std::wstring& code);
 
 struct ScriptOutput {
   std::string pending;
@@ -265,9 +311,10 @@ struct ScriptOutput {
   bool changed = false;
   bool overflow = false;
 
-  void accept(std::string_view line) {
+  void accept(std::string_view line, SetupProgress& progress) {
     constexpr std::string_view stage = "KITE_SETUP_PHASE ";
     constexpr std::string_view count = "KITE_SETUP_PROGRESS ";
+    constexpr std::string_view diagnostic = "KITE_SETUP_DIAGNOSTIC ";
     if (line.substr(0, stage.size()) == stage) {
       const auto name = line.substr(stage.size());
       for (const auto& step : scriptSteps) if (name == step.id && phase != &step) {
@@ -275,6 +322,7 @@ struct ScriptOutput {
         displayed = nullptr;
         measured = false;
         changed = true;
+        progress.record(std::wstring(line.begin(), line.end()));
         break;
       }
     } else if (phase && line.substr(0, count.size()) == count) {
@@ -295,6 +343,10 @@ struct ScriptOutput {
       completed = next;
       total = size;
       measured = changed = true;
+      progress.record(std::wstring(line.begin(), line.end()));
+    } else if (line.substr(0, diagnostic.size()) == diagnostic) {
+      const std::wstring code(line.begin() + diagnostic.size(), line.end());
+      if (validScriptCode(code)) progress.record(std::wstring(line.begin(), line.end()));
     }
   }
 
@@ -314,7 +366,7 @@ struct ScriptOutput {
           else if (!pending.empty()) {
             if (pending.back() == '\r') pending.pop_back();
             if (!pending.empty()) {
-              accept(pending);
+              accept(pending, progress);
               // All protocol tokens and receipts are ASCII. Raw diagnostics are never displayed.
               last.assign(pending.begin(), pending.end());
             }
@@ -345,6 +397,11 @@ struct LocationUnavailable {
 };
 
 struct SetupScratchInUse {};
+struct SetupInstallFailed {
+  std::wstring detail;
+};
+
+void reportFailure(const std::wstring& message);
 
 struct ScriptResult {
   DWORD code;
@@ -425,6 +482,7 @@ ScriptResult runScript(const std::wstring& stage, const std::wstring& parameters
           L"安装进程结果未知，请检查安装目录。");
   output.read(observer.value, progress, true);
   if (output.overflow || !output.pending.empty()) output.last.clear();
+  progress.record(L"安装进程退出码 " + std::to_wstring(exit));
   return {exit, output.last};
 }
 
@@ -441,15 +499,25 @@ std::wstring lastScriptLine(const std::wstring& output) {
   return output.substr(first, last - first + 1);
 }
 
-std::wstring scriptFailureCode(const std::wstring& output) {
+bool validScriptCode(const std::wstring& code) {
+  return !code.empty() && code.size() <= 81 && code[0] >= L'a' && code[0] <= L'z' &&
+    std::all_of(code.begin(), code.end(), [](wchar_t value) {
+      return (value >= L'a' && value <= L'z') || (value >= L'0' && value <= L'9') || value == L'_';
+    });
+}
+
+std::wstring scriptFailureCode(const std::wstring& output, std::wstring* original = nullptr) {
   const auto line = lastScriptLine(output);
   const std::wstring prefix = L"KITE_SETUP_FAILURE ";
   if (line.compare(0, prefix.size(), prefix) != 0) return L"operation_failed";
-  const auto code = line.substr(prefix.size());
-  if (code.empty() || code.size() > 81 || code[0] < L'a' || code[0] > L'z' ||
-      !std::all_of(code.begin(), code.end(), [](wchar_t value) {
-        return (value >= L'a' && value <= L'z') || (value >= L'0' && value <= L'9') || value == L'_';
-      })) return L"operation_failed";
+  const auto separator = line.find(L' ', prefix.size());
+  const auto code = line.substr(prefix.size(), separator - prefix.size());
+  if (!validScriptCode(code)) return L"operation_failed";
+  if (separator != line.npos) {
+    const auto cause = line.substr(separator + 1);
+    if (!validScriptCode(cause)) return L"operation_failed";
+    if (original) *original = cause;
+  }
   return code;
 }
 
@@ -509,11 +577,31 @@ Installed install(const std::wstring& location, SetupProgress& progress,
   if (line == receipt + L" desktop") prefix = location + L"\\resources\\app";
   else if (line == receipt + L" desktop-update") prefix = location + L"\\resources\\app-update";
   if (result.code != 0 || prefix.empty()) {
-    const auto code = scriptFailureCode(result.output);
+    std::wstring original;
+    const auto code = scriptFailureCode(result.output, &original);
+    progress.record(L"安装进程结果 " + code +
+                    (original.empty() ? L"" : L" " + original));
     if (code == L"native_windows_scratch_in_use") throw SetupScratchInUse{};
+    stagePin.close();
+    const bool scratchCleaned = stage.clean();
+    std::wstring detail;
+    if (code == L"native_archive_rolled_back")
+      detail = L"已回收本次写入的应用暂存文件。";
+    if (code == L"native_archive_close_unknown")
+      detail = L"应用暂存文件未能全部回收。请关闭正在访问安装目录的程序后重新运行安装程序。";
+    if (code == L"native_windows_close_unknown")
+      detail = L"安装文件的回收结果未确认。请关闭正在访问安装目录的程序后重新运行安装程序。";
     if (setupFilesInUse(code))
-      throw std::wstring(L"安装未完成。应用文件仍在使用。\n\n") + filesInUseHint(code);
-    throw std::wstring(L"安装未完成。\n\n错误代码：") + code;
+      detail = L"应用文件仍在使用。" + filesInUseHint(code);
+    if (!scratchCleaned) {
+      if (!detail.empty()) detail += L"\n";
+      detail += L"部分安装临时文件未能清理。";
+    }
+    if (!detail.empty()) detail += L"\n\n";
+    detail += L"错误代码：" + (original.empty() ? code : original);
+    if (!original.empty() && code != L"native_archive_rolled_back")
+      detail += L"\n回收错误代码：" + code;
+    throw SetupInstallFailed{std::move(detail)};
   }
   progress.stage(L"正在清理临时安装文件", {90, 90});
   progress.pump();
@@ -615,7 +703,7 @@ bool retireRunningHost(const std::wstring& path, const std::wstring& prefix) {
     const auto directory = pinDirectory(stage.path);
     if (!directory || !SetFileAttributesW(stage.path.c_str(), FILE_ATTRIBUTE_HIDDEN)) return false;
     verifyPhysicalPath(stage.path, directory.value, true);
-    const auto moved = stage.path + L"\\Kite Desktop.exe";
+    const auto moved = desktopHostPath(stage.path);
     // Detach this exact host while the integration lock is held. A subsequent
     // installer can reuse the original name without racing delayed cleanup.
     if (!MoveFileExW(path.c_str(), moved.c_str(), MOVEFILE_WRITE_THROUGH)) return false;
@@ -668,12 +756,12 @@ DesktopRegistration publishDesktop(const SetupSelection& selection, const Instal
   const auto directory = pinDirectory(support.path);
   require(static_cast<bool>(directory), L"无法锁定 Windows 安装记录目录。");
   verifyPhysicalPath(support.path, directory.value, true);
-  const auto stagedHost = support.path + L"\\Kite Desktop.exe";
+  const auto stagedHost = desktopHostPath(support.path);
   const auto payload = resource(104);
   require(payload.size > 2 && payload.data[0] == 'M' && payload.data[1] == 'Z',
           L"安装包中的桌面入口无效。");
   writeFile(stagedHost, payload);
-  const auto host = selection.location + L"\\Kite Desktop.exe";
+  const auto host = desktopHostPath(selection.location);
   const bool present = GetFileAttributesW(host.c_str()) != INVALID_FILE_ATTRIBUTES;
   require(rootDesktopHostAvailable(host, previous, payload),
           L"安装目录已有同名文件，请保留原文件并选择 Kite 的安装目录。");
@@ -762,14 +850,14 @@ int runMaintenance(bool uninstall, bool quiet, bool fixtureRun) {
     return *record;
   };
   if (!uninstall) {
-    require(openDesktop(current().prefix), L"无法打开 Kite 桌面版。");
+    require(openDesktop(current().prefix), L"无法打开 Kite。");
     return 0;
   }
   const IntegrationLock lock;
   const auto record = current();
-  SetupProgress progress(!quiet, L"卸载 Kite 桌面版", L"卸载范围：当前 Windows 用户");
-  if (!quiet && !fixtureRun && !progress.choose(L"卸载 Kite 桌面版",
-                                                 L"卸载程序将移除 Kite 桌面版及其快捷方式。会话、设置和工作区文件将保留。\n\n单击「卸载」继续。",
+  SetupProgress progress(!quiet, L"卸载 Kite", L"卸载范围：当前 Windows 用户");
+  if (!quiet && !fixtureRun && !progress.choose(L"卸载 Kite",
+                                                 L"卸载程序将移除 Kite 及其快捷方式。会话、设置和工作区文件将保留。\n\n单击「卸载」继续。",
                                                  L"卸载", L"取消"))
     return ERROR_CANCELLED;
   for (;;) {
@@ -793,10 +881,10 @@ int runMaintenance(bool uninstall, bool quiet, bool fixtureRun) {
   progress.pump();
   require(retireRunningHost(self, record.prefix), L"应用已卸载。启动文件清理未完成。");
   if (!quiet) {
-    std::wstring message = L"Kite 桌面版已卸载。会话、设置和工作区文件已保留。";
+    std::wstring message = L"Kite 已卸载。会话、设置和工作区文件已保留。";
     if (!shortcuts) message += L"\n部分快捷方式未能移除。";
     message += L"\n\n单击「完成」关闭向导。";
-    progress.choose(L"完成 Kite 桌面版\n卸载向导", message.c_str(), L"完成", nullptr);
+    progress.choose(L"完成 Kite\n卸载向导", message.c_str(), L"完成", nullptr);
   }
   return shortcuts ? 0 : 2;
 }
@@ -819,16 +907,25 @@ int runSetup(std::wstring location, bool quiet, bool requestedShortcut, bool fix
   for (bool chooseLocationAgain = false;; chooseLocationAgain = true) {
     if (!quiet && !fixtureRun && !upgrade && !showInstallWizard(selection, chooseLocationAgain))
       return ERROR_CANCELLED;
-    SetupProgress progress(!quiet, upgrade ? L"更新 Kite 桌面版" : L"安装 Kite 桌面版",
+    SetupProgress progress(!quiet, upgrade ? L"更新 Kite" : L"安装 Kite",
                            upgrade ? L"更新范围：当前 Windows 用户" : L"安装范围：当前 Windows 用户");
-    if (!quiet && !fixtureRun && upgrade && !progress.choose(L"更新 Kite 桌面版",
-        L"安装程序将在下方的目录中更新 Kite 桌面版。会话和设置将保留。\n\n单击「更新」继续。",
+    if (!quiet && !fixtureRun && upgrade && !progress.choose(L"更新 Kite",
+        L"安装程序将在下方的目录中更新 Kite。会话和设置将保留。\n\n单击「更新」继续。",
         L"更新", L"取消", selection.location.c_str()))
       return ERROR_CANCELLED;
     progress.step(1, upgrade ? L"准备更新" : L"准备安装");
+    const auto failInstall = [&](std::wstring message) {
+      const auto log = saveInstallLog(selection.location, progress, message, upgrade);
+      if (log.empty()) message += L"\n\n无法保存安装日志。";
+      reportFailure(log.empty() ? message : message + L"\n安装日志：" + log);
+      if (!quiet)
+        progress.choose(upgrade ? L"更新 Kite 失败" : L"安装 Kite 失败", message.c_str(),
+                        L"完成", nullptr, nullptr, false, log.empty() ? nullptr : log.c_str());
+      return 1;
+    };
     Installed installed;
     try {
-      if (!rootDesktopHostAvailable(selection.location + L"\\Kite Desktop.exe",
+      if (!rootDesktopHostAvailable(desktopHostPath(selection.location),
             previous, resource(104)))
         throw LocationUnavailable{L"目录中已有同名文件或无法访问此位置。"};
       for (;;) {
@@ -847,32 +944,43 @@ int runSetup(std::wstring location, bool quiet, bool requestedShortcut, bool fix
             return ERROR_CANCELLED;
         }
       }
+    } catch (const SetupInstallFailed& error) {
+      return failInstall(error.detail);
     } catch (const LocationUnavailable& error) {
       const std::wstring message = L"无法使用所选安装目录。\n\n" + error.detail + L"\n\n" +
         (upgrade ? L"请检查原安装目录的访问权限和文件占用，然后重新运行安装程序。"
                  : L"请选择当前 Windows 用户可写的本地目录。");
-      if (quiet || upgrade || fixtureRun) throw message;
-      MessageBoxW(progress.owner(), message.c_str(), title, MB_OK | MB_ICONWARNING);
+      if (quiet || upgrade || fixtureRun) return failInstall(message);
+      const auto log = saveInstallLog(selection.location, progress, message, upgrade);
+      const auto detail = log.empty() ? message : message + L"\n\n安装日志：" + log;
+      MessageBoxW(progress.owner(), detail.c_str(), title, MB_OK | MB_ICONWARNING);
       continue;
+    } catch (const std::wstring& message) {
+      return failInstall(message);
     }
     progress.step(3, upgrade ? L"完成更新" : L"完成安装");
     progress.stage(L"正在注册应用并配置快捷方式", {95, 95});
     progress.pump();
-    const auto record = publishDesktop(selection, installed, previous);
+    DesktopRegistration record;
+    try {
+      record = publishDesktop(selection, installed, previous);
+    } catch (const std::wstring& message) {
+      return failInstall(message);
+    }
     const bool shortcuts = applyDesktopShortcuts(record, upgrade);
     const bool previousHostCleaned = !shortcuts || !previous || previous->host == record.host ||
       deleteSupportHost(previous->host, previous->prefix);
     const bool finished = installed.cleaned && shortcuts && previousHostCleaned;
     if (!quiet) {
-      std::wstring message = upgrade ? L"Kite 桌面版已更新。" : L"Kite 桌面版已安装到此计算机。";
-      if (!shortcuts) message += L"\n快捷方式设置未完成。可从安装目录运行 Kite Desktop.exe。";
+      std::wstring message = upgrade ? L"Kite 已更新。" : L"Kite 已安装到此计算机。";
+      if (!shortcuts) message += L"\n快捷方式设置未完成。可从安装目录运行 Kite.exe。";
       if (!installed.cleaned) message += L"\n部分临时安装文件未能清理。";
       if (!previousHostCleaned) message += L"\n旧版启动程序未能清理。";
       message += L"\n\n单击「完成」关闭向导。";
-      if (progress.choose(upgrade ? L"完成 Kite 桌面版\n更新向导" : L"完成 Kite 桌面版\n安装向导",
+      if (progress.choose(upgrade ? L"完成 Kite\n更新向导" : L"完成 Kite\n安装向导",
                           message.c_str(), L"完成", nullptr, nullptr, true) &&
           !openDesktop(installed.prefix)) {
-        MessageBoxW(progress.owner(), L"安装已完成。无法启动 Kite，请稍后从安装目录运行 Kite Desktop.exe。",
+        MessageBoxW(progress.owner(), L"安装已完成。无法启动 Kite，请稍后从安装目录运行 Kite.exe。",
                     title, MB_OK | MB_ICONWARNING);
       }
     }
@@ -929,11 +1037,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       status = runSetup(location, quiet, desktopShortcut, fixtureRun);
     }
   } catch (const std::wstring& message) {
-    if (!quiet) MessageBoxW(nullptr, message.c_str(), uninstall ? L"Kite 桌面版卸载" : title,
+    if (!quiet) MessageBoxW(nullptr, message.c_str(), uninstall ? L"卸载 Kite" : title,
                           MB_OK | MB_ICONERROR);
     reportFailure(message);
   } catch (...) {
-    if (!quiet) MessageBoxW(nullptr, L"操作遇到意外错误。", uninstall ? L"Kite 桌面版卸载" : title,
+    if (!quiet) MessageBoxW(nullptr, L"操作遇到意外错误。", uninstall ? L"卸载 Kite" : title,
                           MB_OK | MB_ICONERROR);
   }
   if (com) CoUninitialize();

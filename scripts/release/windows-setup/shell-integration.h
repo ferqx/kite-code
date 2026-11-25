@@ -5,6 +5,13 @@
 #include <optional>
 #include <string>
 
+#ifdef KITE_SETUP_FIXTURE
+inline constexpr wchar_t desktopFolderName[] = L"KiteVerification";
+#else
+inline constexpr wchar_t desktopFolderName[] = L"Kite";
+#endif
+inline constexpr wchar_t desktopExecutableName[] = L"Kite.exe";
+
 struct DesktopRegistration {
   std::wstring location;
   std::wstring prefix;
@@ -12,8 +19,9 @@ struct DesktopRegistration {
   bool desktopShortcut = false;
 };
 
-std::wstring knownFolder(const KNOWNFOLDERID& folder);
+std::wstring knownFolder(const KNOWNFOLDERID& folder, DWORD flags = 0);
 std::wstring defaultDesktopLocation();
+std::wstring desktopHostPath(const std::wstring& location);
 const wchar_t* integrationMutex();
 std::wstring supportParent(const std::wstring& prefix);
 bool isSupportHost(const std::wstring& path, const std::wstring& prefix);

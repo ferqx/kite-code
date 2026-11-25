@@ -1,6 +1,7 @@
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { retainWindowsArtifactScope } from './windows-artifact-scope';
+import { windowsLocalFilePath } from './windows-local-file-path';
 import { defaultWindowsPathSecurity } from './windows-path-security';
 
 const pending = new Set<object>();
@@ -43,7 +44,7 @@ export function retainWindowsPrivateFileRemoval(path: string): WindowsPrivateFil
   const denied = (): never => {
     throw Error('windows_private_file_removal_unknown');
   };
-  const wide = Buffer.from(`${path}\0`, 'utf16le');
+  const wide = Buffer.from(`${windowsLocalFilePath(path)}\0`, 'utf16le');
   const stamp = () => {
     if (!handle) return denied();
     const bytes = new Uint8Array(52);

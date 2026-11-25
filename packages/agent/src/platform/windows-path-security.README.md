@@ -36,6 +36,8 @@ Neither handle verification nor the final byte check and rename forms an atomic 
 
 ## 维护原文件与发布端口
 
+Windows 本地绝对路径接近传统 Win32 长度上限时，安装写入、原对象校验、发布和回收在文件 API 边界使用扩展长度形式。路径权限、对象标识与重解析点检查沿用同一规范化路径。系统长路径策略和宿主的 `longPathAware` 声明无需修改。 [Windows 长路径规则](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation)
+
 `retainPrivateFile` 返回不暴露 HANDLE 的 verify/close 能力：原文件持有 GENERIC_READ，允许 read sharing、拒绝 write/delete sharing；整条祖先链保留原 identity 并拒绝 delete sharing。普通文件仍核 current SID/FA；`retainReadOnlyFile` 单独要求 protected、无继承 flag 的精确 FR，供不可变 blob 使用，不放宽配置或协调锁政策。关闭失败仅移除成功关闭的 HANDLE，剩余对象可重试；verify 拒绝已关闭的原文件或身份/ACL/时间变化。[维护 FD 与 SQL owner](../maintenance/README.md#windows-维护文件端口与验收边界)负责将 pin 保留至实际读者关闭。
 
 `syncPrivateFile` 使用实际 GENERIC_WRITE、write-through 文件 HANDLE 与 FlushFileBuffers，既有对象只验证、不改 ACL。`movePrivateEntry` 保留 source/target 父祖先，原 source HANDLE 允许本次 rename；MoveFileExW 使用 WRITE_THROUGH，拒绝跨卷复制和延迟重启，成功路径重核 published FileID 是原 source。它不构成对同 owner 不合作编辑器的原子 CAS，也不授予目录 fsync 或断电持久性证明。平台依据为 [CreateFileW sharing](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)、[FlushFileBuffers access](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)与 [MoveFileExW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw)。

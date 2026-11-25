@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { windowsLocalFilePath } from './windows-local-file-path';
 import { defaultWindowsPathSecurity } from './windows-path-security';
 
 // Failed native closes remain strongly owned even if acquisition could not return a port.
@@ -28,6 +29,7 @@ export class WindowsInstallationFilesInUseError extends Error {
 export interface WindowsInstallationInventoryEntry {
   readonly path: string;
   readonly kind: 'file' | 'directory';
+  readonly identity?: string;
 }
 export interface WindowsInstallationRemoval {
   verify(): void;
@@ -71,6 +73,7 @@ export function assertWindowsInstallationRemoval(
 export function retainWindowsInstallationRemoval(input: {
   root: string;
   inventory: readonly WindowsInstallationInventoryEntry[];
+  rootIdentity?: string;
   onFileHashed?: () => void;
 }): WindowsInstallationRemoval {
   const fail = (): never => {
@@ -87,6 +90,8 @@ export function retainWindowsInstallationRemoval(input: {
   )
     fail();
   const expected = new Map<string, 'file' | 'directory'>([['', 'directory']]);
+  const identities = new Map<string, string>();
+  if (input.rootIdentity) identities.set('', input.rootIdentity);
   for (const entry of input.inventory) {
     if (
       !entry ||
@@ -100,6 +105,7 @@ export function retainWindowsInstallationRemoval(input: {
     )
       fail();
     expected.set(entry.path, entry.kind);
+    if (entry.identity) identities.set(entry.path, entry.identity);
   }
   for (const path of expected.keys()) {
     const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
@@ -170,7 +176,7 @@ export function retainWindowsInstallationRemoval(input: {
     // DELETE-purpose handles deny other WRITE/DELETE opens from the outset. Ancestors
     // outside the removal root retain ordinary no-delete pins and are never deleted.
     const handle = kernel.symbols.CreateFileW(
-      ptr(wide(path)),
+      ptr(wide(windowsLocalFilePath(path))),
       relative === null ? 0x200a0 : kind === 'file' ? 0x80030080 : 0x30080,
       relative === null ? 3 : 1,
       null,
@@ -196,6 +202,12 @@ export function retainWindowsInstallationRemoval(input: {
     };
     held.push(entry);
     const original = metadata(entry);
+    if (
+      relative !== null &&
+      identities.has(relative) &&
+      identities.get(relative) !== original.identity
+    )
+      fail();
     entry.identity = original.identity;
     entry.content = original.content;
     entry.size = original.size;
@@ -325,7 +337,8 @@ export function retainWindowsInstallationRemoval(input: {
         close(entry);
         onProgress?.(++completed, entries.length);
       }
-      if (kernel.symbols.GetFileAttributesW(ptr(wide(root))) !== 0xffffffff) fail();
+      if (kernel.symbols.GetFileAttributesW(ptr(wide(windowsLocalFilePath(root)))) !== 0xffffffff)
+        fail();
       if (![2, 3].includes(kernel.symbols.GetLastError())) fail();
       removed = true;
     },

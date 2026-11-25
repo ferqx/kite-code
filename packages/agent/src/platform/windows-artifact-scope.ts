@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import { windowsLocalFilePath } from './windows-local-file-path';
 import {
   windowsSecurityDescriptorReader,
   windowsSecurityDescriptorSymbols,
@@ -142,7 +143,7 @@ function createBackend(): (
       // Include FILE_READ_DATA / FILE_LIST_DIRECTORY, not just attributes:
       // attribute-only opens do not establish the intended sharing protection.
       const handle = kernel.symbols.CreateFileW(
-        ptr(wide(path)),
+        ptr(wide(windowsLocalFilePath(path))),
         probe ? 0x20080 : strict ? 0x80020080 | (directory ? 0x20 : 0) : 0x200a0,
         strict ? 1 : 3,
         null,

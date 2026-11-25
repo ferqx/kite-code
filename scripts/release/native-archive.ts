@@ -13,7 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, posix, resolve } from 'node:path';
+import { basename, dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
   parseNativeBundleManifest,
@@ -63,8 +63,12 @@ function closedWindowsTree(
       (a, b) => a.path.split('/').length - b.path.split('/').length || a.path.localeCompare(b.path),
     );
 }
-function removeWindowsTree(root: string, inventory: readonly WindowsInstallationInventoryEntry[]) {
-  const owner = retainWindowsInstallationRemoval({ root, inventory });
+function removeWindowsTree(
+  root: string,
+  inventory: readonly WindowsInstallationInventoryEntry[],
+  rootIdentity?: string,
+) {
+  const owner = retainWindowsInstallationRemoval({ root, inventory, rootIdentity });
   pendingWindowsArchiveOwners.add(owner);
   owner.remove();
   owner.release();
@@ -80,9 +84,9 @@ export function createWindowsNativeArchiveScratch(prefix: string) {
   let released = false;
   const owner = {
     root,
-    unpack(input: Omit<Parameters<typeof unpackNativeBundle>[0], 'destination'>) {
+    unpack(input: Omit<NativeArchiveInput, 'destination'>) {
       if (released || inventory) throw Error('native_archive_scratch_unknown');
-      const bundle = unpackNativeBundle({ ...input, destination });
+      const bundle = unpackArchive({ ...input, destination }, true);
       if (bundle.root !== destination) throw Error('native_archive_scratch_unknown');
       inventory = closedWindowsTree(
         [
@@ -273,8 +277,7 @@ export async function packNativeBundle(input: { bundleRoot: string; archivePath:
   return result!;
 }
 
-/** Archive bytes are bounded input, not a task/runtime quota. Never extract archive-controlled links. */
-export function unpackNativeBundle(input: {
+interface NativeArchiveInput {
   archivePath: string;
   sha256: string;
   destination: string;
@@ -282,7 +285,15 @@ export function unpackNativeBundle(input: {
   onArchiveFileChecked?: (completed: number, total: number) => void;
   onArchiveWrite?: () => void;
   onArchiveFileWritten?: (completed: number, total: number) => void;
-}) {
+  onArchiveRollback?: () => void;
+}
+
+/** Archive bytes are bounded input. Never extract archive-controlled links. */
+export function unpackNativeBundle(input: NativeArchiveInput) {
+  return unpackArchive(input);
+}
+
+function unpackArchive(input: NativeArchiveInput, managedWindowsInstall = false) {
   const destination = resolve(input.destination);
   if (lstatSync(destination, { throwIfNoEntry: false })) throw Error('native_destination_exists');
   const files = readCandidateArchiveFiles(input),
@@ -309,15 +320,16 @@ export function unpackNativeBundle(input: {
     ...terminal.links.map((link) => ({ path: `terminal/${link.path}`, target: link.target })),
   ];
   if (process.platform === 'win32' && links.length) fail();
-  const declarations = [
-    ...files.keys(),
-    ...links.map((link) => link.path),
+  const emptyDirectories = [
     ...manifest.directories,
     ...terminalEmptyAssetDirectories(terminal).map((path) => `terminal/${path}`),
   ];
-  const paths = new Set(declarations);
+  const declarations = [...files.keys(), ...links.map((link) => link.path), ...emptyDirectories];
+  const paths = new Set(
+    process.platform === 'win32' ? declarations.map((path) => path.toLowerCase()) : declarations,
+  );
   if (paths.size !== declarations.length) fail();
-  for (const path of declarations) {
+  for (const path of paths) {
     let parent = posix.dirname(path);
     while (parent !== '.') {
       if (paths.has(parent)) fail();
@@ -337,14 +349,35 @@ export function unpackNativeBundle(input: {
     mkdirSync(destination, { mode: 0o700 });
   }
   const windowsCreated: WindowsInstallationInventoryEntry[] = [];
+  const installEntries = new Map<string, WindowsInstallationInventoryEntry>();
+  let rootIdentity: string | undefined;
   let windowsUnknown = false;
   if (process.platform === 'win32') pendingWindowsArchiveOwners.add(windowsCreated);
   try {
     const modes = new Map(expected.map((file) => [file.path, file.mode]));
     if (process.platform === 'win32') {
       try {
-        defaultWindowsPathSecurity()!.writePrivateArtifactFiles(destination, files, countWritten);
-        windowsCreated.push(...closedWindowsTree([...files.keys()], []));
+        defaultWindowsPathSecurity()!.writePrivateArtifactFiles(
+          destination,
+          files,
+          countWritten,
+          managedWindowsInstall
+            ? {
+                directories: emptyDirectories,
+                record(path, kind, identity, movedFrom) {
+                  const name = relative(destination, path).split(sep).join('/');
+                  if (!name) rootIdentity = identity;
+                  else {
+                    if (movedFrom)
+                      installEntries.delete(relative(destination, movedFrom).split(sep).join('/'));
+                    installEntries.set(name, { path: name, kind, identity });
+                  }
+                },
+              }
+            : undefined,
+        );
+        if (!managedWindowsInstall)
+          windowsCreated.push(...closedWindowsTree([...files.keys()], []));
       } catch (error) {
         windowsUnknown = true;
         throw error;
@@ -367,10 +400,7 @@ export function unpackNativeBundle(input: {
         }
         countWritten?.();
       }
-    for (const directory of [
-      ...manifest.directories,
-      ...terminalEmptyAssetDirectories(terminal).map((path) => `terminal/${path}`),
-    ]) {
+    for (const directory of managedWindowsInstall ? [] : emptyDirectories) {
       if (process.platform === 'win32') {
         for (const entry of closedWindowsTree([], [directory]))
           if (!lstatSync(join(destination, entry.path), { throwIfNoEntry: false })) {
@@ -389,6 +419,22 @@ export function unpackNativeBundle(input: {
     return result;
   } catch (error) {
     if (process.platform === 'win32') {
+      if (managedWindowsInstall && rootIdentity) {
+        if (error instanceof Error && error.message === 'windows_path_security_close_failed')
+          throw new AggregateError([error], 'native_archive_close_unknown');
+        try {
+          input.onArchiveRollback?.();
+        } catch {
+          // Progress feedback must not prevent recovery.
+        }
+        try {
+          removeWindowsTree(destination, [...installEntries.values()], rootIdentity);
+          pendingWindowsArchiveOwners.delete(windowsCreated);
+        } catch (cleanup) {
+          throw new AggregateError([error, cleanup], 'native_archive_close_unknown');
+        }
+        throw Error('native_archive_rolled_back', { cause: error });
+      }
       if (!windowsUnknown) {
         try {
           removeWindowsTree(destination, windowsCreated);

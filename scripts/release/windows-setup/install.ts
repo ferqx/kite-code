@@ -38,6 +38,7 @@ const archiveProgress = {
   onArchiveWrite: () => progress.phase('write'),
   onArchiveFileWritten: (completed: number, total: number) =>
     progress.count('write', completed, total),
+  onArchiveRollback: () => progress.phase('rollback'),
 };
 const install = () =>
   installWindowsNativeBundle({
@@ -67,12 +68,14 @@ try {
   if (destination.replacing) hideSetupCoordination(destination.replacing);
   console.log(`KITE_DESKTOP_SETUP_OK ${result.candidateId} ${destination.layout}`);
 } catch (error) {
+  progress.flush();
   reportSetupFailure(error);
   process.exitCode = 1;
 }
 
 function replaceDirectInstallation() {
   const stage = createWindowsNativeArchiveScratch(location!);
+  let retainScratch = false;
   try {
     progress.phase('decode');
     const bundle = stage.unpack({
@@ -86,7 +89,11 @@ function replaceDirectInstallation() {
     privateDirectory(dirname(destination.prefix));
     progress.phase('publish');
     return installWindowsNativeBundle({ bundleRoot: bundle.root, prefix: destination.prefix });
+  } catch (error) {
+    retainScratch =
+      error instanceof AggregateError && error.message === 'native_archive_close_unknown';
+    throw error;
   } finally {
-    stage.release();
+    if (!retainScratch) stage.release();
   }
 }

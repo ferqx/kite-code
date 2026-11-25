@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { WindowsPathSecurity } from './locks';
@@ -6,6 +7,7 @@ import {
   retainWindowsCandidateFiles,
   windowsArtifactRelativeFiles,
 } from './windows-candidate-files';
+import { windowsLocalFilePath } from './windows-local-file-path';
 import {
   windowsSecurityDescriptorReader,
   windowsSecurityDescriptorSymbols,
@@ -21,6 +23,10 @@ export interface WindowsPrivateRead {
 export interface WindowsPrivateRecordRead extends WindowsPrivateRead {
   read(): Uint8Array;
 }
+interface WindowsInstallOutput {
+  directories: readonly string[];
+  record(path: string, kind: 'file' | 'directory', identity: string, movedFrom?: string): void;
+}
 export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
   verifyScopeDirectory(path: string): void;
   readScopeFile(path: string, maxBytes: number, privateFile?: boolean): Uint8Array | null;
@@ -33,6 +39,7 @@ export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
     root: string,
     files: ReadonlyMap<string, Uint8Array>,
     onFileWritten?: () => void,
+    installOutput?: WindowsInstallOutput,
   ): void;
   copyPrivateArtifactFiles(sourceRoot: string, targetRoot: string, files: readonly string[]): void;
   copyPrivateFile(source: string, target: string): void;
@@ -112,9 +119,11 @@ function createNativeWindowsPathSecurity(): Implementation {
     EqualSid: { args: ['ptr', 'ptr'], returns: 'bool' },
     GetAce: { args: ['ptr', 'u32', 'ptr'], returns: 'bool' },
   });
-  const fail = (): never => {
-    throw Error('windows_path_security_denied');
+  const fail = (detail?: string): never => {
+    throw Error('windows_path_security_denied', detail ? { cause: Error(detail) } : undefined);
   };
+  const failIO = (operation: string, code: number): never =>
+    fail(`windows_${operation}_win32_${code}`);
   const failedVerificationClose = (handle: bigint | number): never => {
     unclosedNativeOwners.add({ kernel, adv, handle });
     throw Error('windows_path_security_close_failed');
@@ -197,6 +206,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     reuse = true,
     share = 7,
     flags = 0x02200000,
+    onCreateConflict?: () => bigint | number,
   ): bigint | number => {
     const sa = new Uint8Array(24);
     if (sd) {
@@ -205,7 +215,7 @@ function createNativeWindowsPathSecurity(): Implementation {
       view.setBigUint64(8, BigInt(sd), true);
     }
     const handle = kernel.symbols.CreateFileW(
-      ptr(wide(path)),
+      ptr(wide(windowsLocalFilePath(path))),
       access,
       share,
       sd ? ptr(sa) : null,
@@ -215,8 +225,11 @@ function createNativeWindowsPathSecurity(): Implementation {
     );
     if (!handle || BigInt(handle) === invalid) {
       const error = kernel.symbols.GetLastError();
-      if (create && reuse && (error === 80 || error === 183)) return open(path, false);
-      fail();
+      if (create && (error === 80 || error === 183)) {
+        if (onCreateConflict) return onCreateConflict();
+        if (reuse) return open(path, false);
+      }
+      failIO('open_file', error);
     }
     return handle;
   };
@@ -232,14 +245,16 @@ function createNativeWindowsPathSecurity(): Implementation {
     const security = readSecurity(handle);
     const owner = security.owner,
       dacl = security.dacl;
-    if (!owner || !dacl || !adv.symbols.EqualSid(pointer(owner), sid)) fail();
+    if (!owner || !adv.symbols.EqualSid(pointer(owner), sid)) fail('windows_acl_owner_mismatch');
+    if (!dacl) fail('windows_acl_missing');
     const control = new Uint16Array(1),
       revision = new Uint32Array(1);
     if (!adv.symbols.GetSecurityDescriptorControl(security.descriptor, ptr(control), ptr(revision)))
       fail();
-    if (!(control[0]! & 4) || ((directory || readOnly) && !(control[0]! & 0x1000))) fail();
+    if (!(control[0]! & 4) || ((directory || readOnly) && !(control[0]! & 0x1000)))
+      fail('windows_acl_unprotected');
     const acl = new DataView(toArrayBuffer(pointer(dacl), 0, 8));
-    if (acl.getUint16(4, true) !== 1) fail();
+    if (acl.getUint16(4, true) !== 1) fail('windows_acl_entry_count');
     const ace = out();
     if (!adv.symbols.GetAce(pointer(dacl), 0, ptr(ace))) fail();
     const address = pointer(ace[0]!);
@@ -253,7 +268,7 @@ function createNativeWindowsPathSecurity(): Implementation {
       (directory && (flags & 3) !== 3) ||
       !adv.symbols.EqualSid(pointer(BigInt(address) + 8n), sid)
     )
-      fail();
+      fail('windows_acl_entry_mismatch');
   };
   const verifyHandle = (
     handle: bigint | number,
@@ -268,11 +283,11 @@ function createNativeWindowsPathSecurity(): Implementation {
       !!(original.getUint32(0, true) & 0x10) !== directory ||
       (!directory && original.getUint32(40, true) !== 1)
     )
-      fail();
+      fail('windows_file_type_or_link_count');
     if (privateObject) verifyAcl(handle, directory, readOnly);
     const current = open(path, false);
     withVerification(current, () => {
-      if (identity(info(current)) !== identity(original)) fail();
+      if (identity(info(current)) !== identity(original)) fail('windows_file_identity_mismatch');
       if (privateObject) verifyAcl(current, directory, readOnly);
     });
   };
@@ -400,12 +415,9 @@ function createNativeWindowsPathSecurity(): Implementation {
     let total = 0;
     while (total < bytes.length) {
       const chunk = bytes.subarray(total, Math.min(bytes.length, total + 65536));
-      if (
-        !kernel.symbols.WriteFile(handle, ptr(chunk), chunk.length, ptr(count), null) ||
-        !count[0] ||
-        count[0] > chunk.length
-      )
-        fail();
+      if (!kernel.symbols.WriteFile(handle, ptr(chunk), chunk.length, ptr(count), null))
+        failIO('write_file', kernel.symbols.GetLastError());
+      if (!count[0] || count[0] > chunk.length) fail();
       total += count[0]!;
     }
   };
@@ -460,9 +472,11 @@ function createNativeWindowsPathSecurity(): Implementation {
     paths: readonly string[],
     provide: (path: string, output: bigint | number, held: Held[]) => void,
     onFileWritten?: () => void,
+    installOutput?: WindowsInstallOutput,
   ) => {
     root = resolve(root);
     windowsArtifactRelativeFiles(paths);
+    if (installOutput) windowsArtifactRelativeFiles(installOutput.directories);
     api.verifyPath(root);
     api.verifyDirectory(root);
     const held: Held[] = [],
@@ -474,14 +488,16 @@ function createNativeWindowsPathSecurity(): Implementation {
     const directory = (path: string) => {
       if (parents.has(path)) return;
       directory(dirname(path));
-      if (!existsSync(path)) {
+      const created = !existsSync(path);
+      if (created) {
         const sd = descriptor(true);
         const sa = new Uint8Array(24),
           view = new DataView(sa.buffer);
         view.setUint32(0, 24, true);
         view.setBigUint64(8, BigInt(sd), true);
         try {
-          if (!kernel.symbols.CreateDirectoryW(ptr(wide(path)), ptr(sa))) fail();
+          if (!kernel.symbols.CreateDirectoryW(ptr(wide(windowsLocalFilePath(path))), ptr(sa)))
+            failIO('create_directory', kernel.symbols.GetLastError());
         } finally {
           kernel.symbols.LocalFree(sd);
         }
@@ -490,33 +506,62 @@ function createNativeWindowsPathSecurity(): Implementation {
       held.push({ path, handle, directory: true });
       verifyHandle(handle, path, true);
       parents.add(path);
+      if (created) installOutput?.record(path, 'directory', identity(info(handle)));
     };
     try {
       retainParents([join(root, 'entry')], held, parents);
+      if (installOutput) {
+        const rootEntry = held.find((entry) => entry.path === root)!;
+        installOutput.record(root, 'directory', identity(info(rootEntry.handle)));
+      }
       for (const path of paths) {
         const target = join(root, ...path.split('/'));
         directory(dirname(target));
         const sd = descriptor(false);
+        let output = target;
         let handle: bigint | number;
         try {
-          handle = open(target, true, sd, 0x40020080, false, 1);
+          handle = open(
+            target,
+            true,
+            sd,
+            0x40020080,
+            false,
+            1,
+            undefined,
+            installOutput &&
+              (() => {
+                api.verifyFile(target);
+                output = join(dirname(target), `.kite-replacement-${randomUUID()}`);
+                return open(output, true, sd, 0x40020080, false, 1);
+              }),
+          );
         } finally {
           kernel.symbols.LocalFree(sd);
         }
-        const entry = { path: target, handle, directory: false };
+        const entry = { path: output, handle, directory: false };
         held.push(entry);
-        verifyHandle(handle, target, false);
+        verifyHandle(handle, output, false);
         const original = identity(info(handle));
+        installOutput?.record(output, 'file', original);
         provide(path, handle, held);
-        if (!kernel.symbols.FlushFileBuffers(handle) || identity(info(handle)) !== original) fail();
-        verifyHandle(handle, target, false);
+        if (!kernel.symbols.FlushFileBuffers(handle))
+          failIO('flush_file', kernel.symbols.GetLastError());
+        if (identity(info(handle)) !== original) fail();
+        verifyHandle(handle, output, false);
         if (!kernel.symbols.CloseHandle(handle)) {
           closeUnknown = true;
           throw Error('windows_path_security_close_failed');
         }
         held.splice(held.indexOf(entry), 1);
+        if (output !== target) {
+          api.movePrivateEntry(output, target, true);
+          installOutput!.record(target, 'file', original, output);
+        }
         onFileWritten?.();
       }
+      for (const path of installOutput?.directories ?? [])
+        directory(join(root, ...path.split('/')));
       for (const entry of held)
         verifyHandle(
           entry.handle,
@@ -632,7 +677,7 @@ function createNativeWindowsPathSecurity(): Implementation {
         if (actual.getUint32(32, true) || actual.getUint32(36, true) !== bytes.length) fail();
       });
     },
-    writePrivateArtifactFiles(root, files, onFileWritten) {
+    writePrivateArtifactFiles(root, files, onFileWritten, installOutput) {
       const paths = windowsArtifactRelativeFiles([...files.keys()]);
       for (const path of paths) {
         const bytes = files.get(path);
@@ -648,6 +693,7 @@ function createNativeWindowsPathSecurity(): Implementation {
           if (written.getUint32(32, true) || written.getUint32(36, true) !== bytes.length) fail();
         },
         onFileWritten,
+        installOutput,
       );
     },
     copyPrivateArtifactFiles(sourceRoot, targetRoot, files) {
@@ -893,10 +939,11 @@ function createNativeWindowsPathSecurity(): Implementation {
           if (!replace || directory) fail();
           api.verifyFile(target);
         }
-        const from = wide(source),
-          to = wide(target);
+        const from = wide(windowsLocalFilePath(source)),
+          to = wide(windowsLocalFilePath(target));
         // No COPY_ALLOWED or delayed reboot: only a synchronous same-volume publication.
-        if (!kernel.symbols.MoveFileExW(ptr(from), ptr(to), 8 | (replace ? 1 : 0))) fail();
+        if (!kernel.symbols.MoveFileExW(ptr(from), ptr(to), 8 | (replace ? 1 : 0)))
+          failIO('move_file', kernel.symbols.GetLastError());
         verifyHandle(handle, target, directory);
         for (const parent of held.slice(0, -1))
           verifyHandle(parent.handle, parent.path, true, false);
@@ -911,11 +958,10 @@ function createNativeWindowsPathSecurity(): Implementation {
       view.setUint32(0, 24, true);
       view.setBigUint64(8, BigInt(sd), true);
       try {
-        if (
-          !kernel.symbols.CreateDirectoryW(ptr(wide(path)), ptr(sa)) &&
-          kernel.symbols.GetLastError() !== 183
-        )
-          fail();
+        if (!kernel.symbols.CreateDirectoryW(ptr(wide(windowsLocalFilePath(path))), ptr(sa))) {
+          const code = kernel.symbols.GetLastError();
+          if (code !== 183) failIO('create_directory', code);
+        }
       } finally {
         kernel.symbols.LocalFree(sd);
       }

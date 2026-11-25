@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shlobj.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <memory>
@@ -9,16 +10,12 @@
 #include "location-dialog.h"
 #include "payload.h"
 #include "resource.h"
+#include "shell-integration.h"
 
 namespace {
 
-#ifdef KITE_SETUP_FIXTURE
-constexpr wchar_t appFolder[] = L"KiteDesktopVerification";
-#else
-constexpr wchar_t appFolder[] = L"KiteDesktop";
-#endif
-constexpr wchar_t title[] = L"Kite 桌面版安装向导";
-constexpr wchar_t invalidLocation[] = L"请输入本机磁盘上的完整安装路径，例如 D:\\KiteDesktop。";
+constexpr wchar_t title[] = L"Kite 安装向导";
+constexpr wchar_t invalidLocation[] = L"请输入本机磁盘上的完整安装路径，例如 D:\\Kite。";
 constexpr unsigned meterRange = 100;
 
 struct DialogStyle {
@@ -199,7 +196,7 @@ void updateDiskSpace(HWND dialog) {
 
 bool isKiteFolder(const std::wstring& path) {
   const size_t separator = path.find_last_of(L'\\');
-  return (separator != path.npos && _wcsicmp(path.c_str() + separator + 1, appFolder) == 0) ||
+  return (separator != path.npos && _wcsicmp(path.c_str() + separator + 1, desktopFolderName) == 0) ||
     GetFileAttributesW((path + L"\\.kite-native-install.json").c_str()) != INVALID_FILE_ATTRIBUTES ||
     GetFileAttributesW((path + L"\\client\\.kite-native-install.json").c_str()) != INVALID_FILE_ATTRIBUTES;
 }
@@ -215,8 +212,7 @@ void browse(HWND owner) {
           FOS_PATHMUSTEXIST | FOS_DONTADDTORECENT))) {
     throw std::wstring(L"无法打开文件夹选择器。请直接输入安装路径。");
   }
-  const auto pickerTitle = L"选择存放 " + std::wstring(appFolder) + L" 的位置";
-  picker->SetTitle(pickerTitle.c_str());
+  picker->SetTitle(L"选择 Kite 的安装位置");
   picker->SetOkButtonLabel(L"选择文件夹");
   const auto startingFolder = existingDirectory(locationText(owner));
   IShellItem* starting = nullptr;
@@ -238,14 +234,14 @@ void browse(HWND owner) {
   if (value.empty()) throw std::wstring(invalidLocation);
   if (!isKiteFolder(value)) {
     if (value.back() != L'\\') value += L'\\';
-    value += appFolder;
+    value += desktopFolderName;
   }
   value = installationLocation(value);
   SetDlgItemTextW(owner, IDC_LOCATION, value.c_str());
   SendDlgItemMessageW(owner, IDC_LOCATION, EM_SETSEL, value.size(), value.size());
 }
 
-enum class InstallPage { welcome, directory, shortcuts };
+enum class InstallPage { welcome, directory, shortcuts, review };
 
 struct InstallWizard {
   SetupSelection& selection;
@@ -256,21 +252,27 @@ void showInstallPage(HWND dialog, InstallWizard& wizard) {
   const bool welcome = wizard.page == InstallPage::welcome;
   const bool directory = wizard.page == InstallPage::directory;
   const bool shortcuts = wizard.page == InstallPage::shortcuts;
+  const bool review = wizard.page == InstallPage::review;
   coverPage(dialog, welcome);
-  SetDlgItemTextW(dialog, IDC_SETUP_HEADING, welcome ? L"欢迎使用 Kite 桌面版\n安装向导" :
-                    directory ? L"选择安装位置" : L"设置快捷方式");
-  SetDlgItemTextW(dialog, IDC_SETUP_DETAIL, directory ? L"选择要安装 Kite 桌面版的文件夹。" :
-                    L"选择在何处创建 Kite 快捷方式。");
-  positionControl(dialog, IDC_SETUP_PROGRESS_DETAIL, welcome ? RECT{125, 54, 334, 151} : RECT{16, 47, 330, 76});
+  SetDlgItemTextW(dialog, IDC_SETUP_HEADING, welcome ? L"欢迎使用 Kite\n安装向导" :
+                    directory ? L"选择安装位置" : shortcuts ? L"设置快捷方式" : L"确认安装");
+  SetDlgItemTextW(dialog, IDC_SETUP_DETAIL, directory ? L"选择要安装 Kite 的文件夹。" :
+                    shortcuts ? L"选择在何处创建 Kite 快捷方式。" : L"安装范围：当前 Windows 用户");
+  positionControl(dialog, IDC_SETUP_PROGRESS_DETAIL, welcome ? RECT{125, 54, 334, 151} :
+                    review ? RECT{16, 97, 330, 142} : RECT{16, 47, 330, 76});
   SetDlgItemTextW(dialog, IDC_SETUP_PROGRESS_DETAIL,
-    welcome ? L"此向导将为当前 Windows 用户安装 Kite 桌面版。\n\n单击「下一步」继续。" :
-    directory ? L"Kite 桌面版将安装到下方的文件夹。要更改位置，请单击「浏览」或输入路径。\n单击「下一步」继续。" :
-    L"安装程序会在 Windows 开始菜单中添加 Kite Desktop。\n如果也希望从桌面打开 Kite，请勾选下方选项。");
+    welcome ? L"此向导将为当前 Windows 用户安装 Kite。\n\n单击「下一步」继续。" :
+    directory ? L"Kite 将安装到下方的文件夹。要更改位置，请单击「浏览」或输入路径。\n单击「下一步」继续。" :
+    shortcuts ? L"安装程序会在 Windows 开始菜单中添加 Kite。\n如果也希望从桌面打开 Kite，请勾选下方选项。" :
+    wizard.selection.desktopShortcut ? L"快捷方式\n开始菜单和桌面" : L"快捷方式\n仅开始菜单");
+  if (review) SetDlgItemTextW(dialog, IDC_SETUP_PATH, wizard.selection.location.c_str());
   for (const int control : {IDC_SETUP_LOCATION_GROUP, IDC_LOCATION, IDC_BROWSE, IDC_SETUP_DISK_SPACE})
     ShowWindow(GetDlgItem(dialog, control), directory ? SW_SHOW : SW_HIDE);
+  for (const int control : {IDC_SETUP_REVIEW_LOCATION, IDC_SETUP_PATH})
+    ShowWindow(GetDlgItem(dialog, control), review ? SW_SHOW : SW_HIDE);
   ShowWindow(GetDlgItem(dialog, IDC_DESKTOP_SHORTCUT), shortcuts ? SW_SHOW : SW_HIDE);
   ShowWindow(GetDlgItem(dialog, IDC_SETUP_BACK), welcome ? SW_HIDE : SW_SHOW);
-  SetDlgItemTextW(dialog, IDOK, shortcuts ? L"安装(&I)" : L"下一步(&N) >");
+  SetDlgItemTextW(dialog, IDOK, review ? L"安装(&I)" : L"下一步(&N) >");
   SendMessageW(dialog, DM_SETDEFID, IDOK, 0);
   const int focused = directory ? IDC_LOCATION : IDOK;
   SetFocus(GetDlgItem(dialog, focused));
@@ -308,16 +310,19 @@ INT_PTR CALLBACK locationDialog(HWND dialog, UINT message, WPARAM wparam, LPARAM
         return TRUE;
       case IDC_SETUP_BACK:
         if (wizard.page == InstallPage::welcome) return TRUE;
-        wizard.page = wizard.page == InstallPage::shortcuts ? InstallPage::directory : InstallPage::welcome;
+        wizard.page = wizard.page == InstallPage::review ? InstallPage::shortcuts :
+                      wizard.page == InstallPage::shortcuts ? InstallPage::directory : InstallPage::welcome;
         showInstallPage(dialog, wizard);
         return TRUE;
       case IDOK:
-        if (wizard.page == InstallPage::shortcuts) {
-          wizard.selection.desktopShortcut = IsDlgButtonChecked(dialog, IDC_DESKTOP_SHORTCUT) == BST_CHECKED;
+        if (wizard.page == InstallPage::review) {
           EndDialog(dialog, IDOK);
           return TRUE;
         }
-        if (wizard.page == InstallPage::directory) {
+        if (wizard.page == InstallPage::shortcuts) {
+          wizard.selection.desktopShortcut = IsDlgButtonChecked(dialog, IDC_DESKTOP_SHORTCUT) == BST_CHECKED;
+          wizard.page = InstallPage::review;
+        } else if (wizard.page == InstallPage::directory) {
           wizard.selection.location = installationLocation(locationText(dialog));
           SetDlgItemTextW(dialog, IDC_LOCATION, wizard.selection.location.c_str());
           wizard.page = InstallPage::shortcuts;
@@ -354,7 +359,7 @@ std::wstring installationLocation(std::wstring location) {
   }
   const UINT drive = GetDriveTypeW(location.substr(0, 3).c_str());
   if (drive != DRIVE_FIXED && drive != DRIVE_REMOVABLE) throw std::wstring(invalidLocation);
-  if (location.size() == 3) location += appFolder;
+  if (location.size() == 3) location += desktopFolderName;
   return location;
 }
 
@@ -390,6 +395,7 @@ INT_PTR CALLBACK SetupProgress::dispatch(HWND dialog, UINT message, WPARAM wpara
     styleDialog(dialog);
     ShowWindow(GetDlgItem(dialog, IDC_SETUP_PATH), SW_HIDE);
     ShowWindow(GetDlgItem(dialog, IDC_SETUP_LAUNCH), SW_HIDE);
+    ShowWindow(GetDlgItem(dialog, IDC_SETUP_LOG), SW_HIDE);
     ShowWindow(GetDlgItem(dialog, IDC_SETUP_BACK), SW_HIDE);
     return TRUE;
   }
@@ -397,6 +403,18 @@ INT_PTR CALLBACK SetupProgress::dispatch(HWND dialog, UINT message, WPARAM wpara
   if (!self) return FALSE;
   if (message == WM_CLOSE) {
     if (self->choosing) self->choice = IDCANCEL;
+    return TRUE;
+  }
+  if (message == WM_COMMAND && LOWORD(wparam) == IDC_SETUP_LOG && self->failureLog) {
+    wchar_t system[MAX_PATH]{};
+    const auto size = GetSystemDirectoryW(system, MAX_PATH);
+    const auto arguments = L"\"" + std::wstring(self->failureLog) + L"\"";
+    if (!size || size >= MAX_PATH || reinterpret_cast<INT_PTR>(ShellExecuteW(dialog, L"open",
+          (std::wstring(system) + L"\\notepad.exe").c_str(), arguments.c_str(),
+          nullptr, SW_SHOWNORMAL)) <= 32) {
+      const auto detail = L"请在文件资源管理器中打开：\n\n" + std::wstring(self->failureLog);
+      MessageBoxW(dialog, detail.c_str(), title, MB_OK | MB_ICONINFORMATION);
+    }
     return TRUE;
   }
   if (message == WM_COMMAND && (LOWORD(wparam) == IDOK || LOWORD(wparam) == IDCANCEL)) {
@@ -427,6 +445,7 @@ void SetupProgress::step(unsigned number, const wchar_t* label) {
 }
 
 void SetupProgress::stage(const wchar_t* heading, SetupProgressRange nextRange) {
+  record(heading);
   if (!window) return;
   range = nextRange;
   advance(range.start);
@@ -457,6 +476,17 @@ void SetupProgress::stage(const wchar_t* heading, SetupProgressRange nextRange) 
   } else if (hadActions) {
     InvalidateRect(window, nullptr, TRUE);
   }
+}
+
+void SetupProgress::record(std::wstring_view line) {
+  constexpr size_t maximum = 16384;
+  if (line.size() + 2 > maximum) return;
+  if (journal.size() + line.size() + 2 > maximum) {
+    const auto first = journal.find(L'\n', journal.size() + line.size() + 2 - maximum);
+    journal.erase(0, first == journal.npos ? journal.size() : first + 1);
+  }
+  journal.append(line);
+  journal.append(L"\r\n");
 }
 
 void SetupProgress::count(uint64_t completed, uint64_t total, SetupCount unit) {
@@ -492,10 +522,14 @@ void SetupProgress::advance(unsigned next) {
 }
 
 bool SetupProgress::choose(const wchar_t* heading, const wchar_t* detail, const wchar_t* primary,
-                           const wchar_t* secondary, const wchar_t* location, bool offerLaunch) {
+                           const wchar_t* secondary, const wchar_t* location, bool offerLaunch,
+                           const wchar_t* logPath) {
   if (!window) return false;
   choice = 0;
   choosing = true;
+  failureLog = logPath;
+  const bool wasVisible = IsWindowVisible(window);
+  if (wasVisible) SendMessageW(window, WM_SETREDRAW, FALSE, 0);
   EnableMenuItem(GetSystemMenu(window, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
   ShowWindow(GetDlgItem(window, IDC_SETUP_OVERALL), SW_HIDE);
   ShowWindow(GetDlgItem(window, IDC_SETUP_METER), SW_HIDE);
@@ -509,6 +543,7 @@ bool SetupProgress::choose(const wchar_t* heading, const wchar_t* detail, const 
   if (location) SetDlgItemTextW(window, IDC_SETUP_PATH, (L"安装目录  " + std::wstring(location)).c_str());
   ShowWindow(GetDlgItem(window, IDC_SETUP_PATH), location ? SW_SHOW : SW_HIDE);
   ShowWindow(GetDlgItem(window, IDC_SETUP_LAUNCH), offerLaunch ? SW_SHOW : SW_HIDE);
+  ShowWindow(GetDlgItem(window, IDC_SETUP_LOG), failureLog ? SW_SHOW : SW_HIDE);
   if (offerLaunch) CheckDlgButton(window, IDC_SETUP_LAUNCH, BST_UNCHECKED);
   SetDlgItemTextW(window, IDOK, primary);
   SetDlgItemTextW(window, IDCANCEL, secondary ? secondary : L"取消");
@@ -517,8 +552,10 @@ bool SetupProgress::choose(const wchar_t* heading, const wchar_t* detail, const 
   ShowWindow(GetDlgItem(window, IDCANCEL), SW_SHOW);
   EnableWindow(GetDlgItem(window, IDOK), TRUE);
   EnableWindow(GetDlgItem(window, IDCANCEL), !complete);
-  InvalidateRect(window, nullptr, TRUE);
-  if (!IsWindowVisible(window)) ShowWindow(window, SW_SHOW);
+  if (wasVisible) {
+    SendMessageW(window, WM_SETREDRAW, TRUE, 0);
+    RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+  } else ShowWindow(window, SW_SHOW);
   const auto focused = secondary ? IDCANCEL : IDOK;
   SendMessageW(window, DM_SETDEFID, focused, 0);
   SetFocus(GetDlgItem(window, focused));
@@ -531,5 +568,6 @@ bool SetupProgress::choose(const wchar_t* heading, const wchar_t* detail, const 
     DispatchMessageW(&message);
   }
   choosing = false;
+  failureLog = nullptr;
   return choice == IDOK && (!offerLaunch || IsDlgButtonChecked(window, IDC_SETUP_LAUNCH) == BST_CHECKED);
 }

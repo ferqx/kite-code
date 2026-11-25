@@ -89,6 +89,34 @@ const versionFields = [...version.split('.').map(Number), 0];
 assert(versionFields.every((part) => part <= 65535));
 const versionResource = versionFields.join(',');
 const icon = resolve(import.meta.dir, '../../../apps/desktop/app-icon.ico');
+function versionInfo(description: string, filename: string) {
+  return [
+    '1 VERSIONINFO',
+    ` FILEVERSION ${versionResource}`,
+    ` PRODUCTVERSION ${versionResource}`,
+    ' FILEFLAGSMASK VS_FFI_FILEFLAGSMASK',
+    ' FILEOS VOS_NT_WINDOWS32',
+    ' FILETYPE VFT_APP',
+    'BEGIN',
+    ' BLOCK "StringFileInfo"',
+    ' BEGIN',
+    '  BLOCK "080404b0"',
+    '  BEGIN',
+    `   VALUE "FileDescription", "${description}"`,
+    '   VALUE "ProductName", "Kite"',
+    `   VALUE "FileVersion", "${version}"`,
+    `   VALUE "ProductVersion", "${version}"`,
+    `   VALUE "OriginalFilename", "${filename}"`,
+    '  END',
+    ' END',
+    ' BLOCK "VarFileInfo"',
+    ' BEGIN',
+    '  VALUE "Translation", 0x0804, 1200',
+    ' END',
+    'END',
+  ];
+}
+
 writeFileSync(
   join(work, 'maintenance.rc'),
   [
@@ -97,6 +125,7 @@ writeFileSync(
     `1 RT_MANIFEST ${JSON.stringify(join(import.meta.dir, 'setup.manifest'))}`,
     `10 ICON ${JSON.stringify(icon)}`,
     `105 RCDATA ${JSON.stringify(uninstall)}`,
+    ...versionInfo('Kite', 'Kite.exe'),
     '',
   ].join('\n'),
 );
@@ -111,29 +140,7 @@ writeFileSync(
     `101 RCDATA ${JSON.stringify(archive)}`,
     `102 RCDATA ${JSON.stringify(script)}`,
     `103 RCDATA ${JSON.stringify(license)}`,
-    '1 VERSIONINFO',
-    ` FILEVERSION ${versionResource}`,
-    ` PRODUCTVERSION ${versionResource}`,
-    ' FILEFLAGSMASK VS_FFI_FILEFLAGSMASK',
-    ' FILEOS VOS_NT_WINDOWS32',
-    ' FILETYPE VFT_APP',
-    'BEGIN',
-    ' BLOCK "StringFileInfo"',
-    ' BEGIN',
-    '  BLOCK "080404b0"',
-    '  BEGIN',
-    '   VALUE "FileDescription", "Kite Desktop Setup"',
-    '   VALUE "ProductName", "Kite Desktop"',
-    `   VALUE "FileVersion", "${version}"`,
-    `   VALUE "ProductVersion", "${version}"`,
-    '   VALUE "OriginalFilename", "KiteDesktopSetup.exe"',
-    '  END',
-    ' END',
-    ' BLOCK "VarFileInfo"',
-    ' BEGIN',
-    '  VALUE "Translation", 0x0804, 1200',
-    ' END',
-    'END',
+    ...versionInfo('Kite Setup', 'KiteDesktopSetup.exe'),
     '',
   ].join('\n'),
 );

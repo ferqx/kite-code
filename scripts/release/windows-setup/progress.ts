@@ -3,6 +3,7 @@ type SetupPhase =
   | 'decode'
   | 'archive'
   | 'write'
+  | 'rollback'
   | 'publish'
   | 'verify'
   | 'wait'
@@ -21,16 +22,24 @@ function emit(line: string) {
 
 export function setupProgress() {
   let lastUpdate = -Infinity;
+  let pending: string | undefined;
+  const flush = () => {
+    if (pending) emit(pending);
+    pending = undefined;
+  };
   return {
+    flush,
     phase(phase: SetupPhase) {
+      flush();
       lastUpdate = -Infinity;
       emit(`KITE_SETUP_PHASE ${phase}`);
     },
     count(phase: SetupPhase, completed: number, total = 0) {
+      pending = `KITE_SETUP_PROGRESS ${phase} ${completed} ${total}`;
       const now = performance.now();
       if (completed !== 0 && completed !== total && now - lastUpdate < 150) return;
       lastUpdate = now;
-      emit(`KITE_SETUP_PROGRESS ${phase} ${completed} ${total}`);
+      flush();
     },
   };
 }

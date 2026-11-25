@@ -8,21 +8,20 @@
 namespace {
 
 #ifdef KITE_SETUP_FIXTURE
-constexpr wchar_t registryPath[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\KiteDesktopVerification";
-constexpr wchar_t linkName[] = L"\\Kite Desktop Verification.lnk";
-constexpr wchar_t displayName[] = L"Kite Desktop Verification";
-constexpr wchar_t mutexName[] = L"Local\\KiteDesktopSetupVerification";
-constexpr wchar_t directoryStem[] = L"KiteDesktopVerificationSupport-";
+constexpr wchar_t registryPath[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\dev.kite-code.native.verification";
+constexpr wchar_t linkName[] = L"\\Kite Verification.lnk";
+constexpr wchar_t displayName[] = L"Kite Verification";
+constexpr wchar_t mutexName[] = L"Local\\KiteSetupVerification";
+constexpr wchar_t directoryStem[] = L"KiteVerificationSupport-";
 #else
-constexpr wchar_t registryPath[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\KiteDesktop";
-constexpr wchar_t linkName[] = L"\\Kite Desktop.lnk";
-constexpr wchar_t displayName[] = L"Kite Desktop";
-constexpr wchar_t mutexName[] = L"Local\\KiteDesktopSetup";
-constexpr wchar_t directoryStem[] = L"KiteDesktopSupport-";
+constexpr wchar_t registryPath[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\dev.kite-code.native";
+constexpr wchar_t linkName[] = L"\\Kite.lnk";
+constexpr wchar_t displayName[] = L"Kite";
+constexpr wchar_t mutexName[] = L"Local\\KiteSetup";
+constexpr wchar_t directoryStem[] = L"KiteSupport-";
 #endif
-constexpr wchar_t description[] = L"Kite 桌面版";
+constexpr wchar_t description[] = L"Kite";
 constexpr wchar_t bootstrapSuffix[] = L"\\bin\\kite-desktop.exe";
-constexpr wchar_t hostSuffix[] = L"\\Kite Desktop.exe";
 
 const auto release = [](auto* object) { object->Release(); };
 
@@ -71,9 +70,11 @@ std::wstring prefixFromBootstrap(const std::wstring& path) {
 bool supportHostInDirectory(const std::wstring& path, const std::wstring& parent) {
   if (path.empty() || parent.empty()) return false;
   const std::wstring base = parent + (parent.back() == L'\\' ? L"" : L"\\") + directoryStem;
-  if (path.size() != base.size() + 38 + std::size(hostSuffix) - 1 ||
+  const auto nameSeparator = base.size() + 38;
+  if (path.size() != nameSeparator + std::size(desktopExecutableName) ||
       _wcsnicmp(path.c_str(), base.c_str(), base.size()) != 0 ||
-      _wcsicmp(path.c_str() + base.size() + 38, hostSuffix) != 0) return false;
+      path[nameSeparator] != L'\\' ||
+      _wcsicmp(path.c_str() + nameSeparator + 1, desktopExecutableName) != 0) return false;
   GUID id{};
   return SUCCEEDED(CLSIDFromString(path.substr(base.size(), 38).c_str(), &id));
 }
@@ -148,9 +149,9 @@ bool setFlag(HKEY key, const wchar_t* name, DWORD value) {
 
 } // namespace
 
-std::wstring knownFolder(const KNOWNFOLDERID& folder) {
+std::wstring knownFolder(const KNOWNFOLDERID& folder, DWORD flags) {
   wchar_t* raw = nullptr;
-  if (FAILED(SHGetKnownFolderPath(folder, 0, nullptr, &raw)))
+  if (FAILED(SHGetKnownFolderPath(folder, flags, nullptr, &raw)))
     throw std::wstring(L"无法定位当前用户的 Windows 文件夹。");
   const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> path(raw, CoTaskMemFree);
   std::wstring result(path.get());
@@ -161,11 +162,11 @@ std::wstring knownFolder(const KNOWNFOLDERID& folder) {
 const wchar_t* integrationMutex() { return mutexName; }
 
 std::wstring defaultDesktopLocation() {
-#ifdef KITE_SETUP_FIXTURE
-  return knownFolder(FOLDERID_LocalAppData) + L"\\KiteDesktopVerification";
-#else
-  return knownFolder(FOLDERID_LocalAppData) + L"\\KiteDesktop";
-#endif
+  return knownFolder(FOLDERID_UserProgramFiles, KF_FLAG_DONT_VERIFY) + L'\\' + desktopFolderName;
+}
+
+std::wstring desktopHostPath(const std::wstring& location) {
+  return location + L'\\' + desktopExecutableName;
 }
 
 std::wstring supportParent(const std::wstring& prefix) {
@@ -181,7 +182,7 @@ bool isSupportHost(const std::wstring& path, const std::wstring& prefix) {
 bool isRootDesktopHost(const std::wstring& path, const std::wstring& prefix) {
   const auto location = supportParent(supportParent(prefix));
   return !location.empty() && desktopResourcesPrefix(prefix, location) &&
-    equals(path, location + hostSuffix);
+    equals(path, desktopHostPath(location));
 }
 
 std::optional<DesktopRegistration> readDesktopRegistration() {
@@ -215,13 +216,12 @@ std::wstring discoverDesktopLocation() {
       return prefix;
     }
     const auto location = supportParent(menu.target);
-    if (equals(menu.target, location + hostSuffix) &&
+    if (equals(menu.target, desktopHostPath(location)) &&
         (managed(location + L"\\resources\\app") || managed(location + L"\\resources\\app-update")))
       return location;
   }
   const auto fallback = defaultDesktopLocation();
-  if (managed(fallback) || managed(fallback + L"\\client") ||
-      managed(fallback + L"\\resources\\app") || managed(fallback + L"\\resources\\app-update"))
+  if (managed(fallback + L"\\resources\\app") || managed(fallback + L"\\resources\\app-update"))
     return fallback;
   return L"";
 }

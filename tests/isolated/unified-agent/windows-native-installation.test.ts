@@ -35,6 +35,9 @@ import { reportSetupFailure } from ${JSON.stringify(modulePath('scripts/release/
 reportSetupFailure(Object.assign(Error('private file path'),{code:'native_windows_candidate_in_use'}));
 reportSetupFailure(Error('var bundled = private data'));
 reportSetupFailure(Error('windows_installation_removal_unknown'));
+reportSetupFailure(Error('native_archive_rolled_back',{cause:Error('windows_path_security_denied',{cause:Error('windows_create_directory_win32_206')})}));
+reportSetupFailure(new AggregateError([Error('private source pathname'), Error('close failed')], 'native_archive_close_unknown'));
+reportSetupFailure(new AggregateError([Error('native_archive_invalid'), Error('close failed')], 'native_windows_close_unknown'));
 `;
   const child = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 4000 });
   expect(child.status).toBe(0);
@@ -42,6 +45,10 @@ reportSetupFailure(Error('windows_installation_removal_unknown'));
     'KITE_SETUP_FAILURE native_windows_candidate_in_use',
     'KITE_SETUP_FAILURE operation_failed',
     'KITE_SETUP_FAILURE windows_installation_removal_unknown',
+    'KITE_SETUP_DIAGNOSTIC windows_create_directory_win32_206',
+    'KITE_SETUP_FAILURE native_archive_rolled_back windows_path_security_denied',
+    'KITE_SETUP_FAILURE native_archive_close_unknown operation_failed',
+    'KITE_SETUP_FAILURE native_windows_close_unknown native_archive_invalid',
   ]);
 });
 

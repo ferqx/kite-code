@@ -4,6 +4,8 @@
 
 ## 正在实施
 
+[Windows 桌面发行制品与 VS Code 对齐](windows-desktop-packaging.md) 描述 User Setup、ZIP、版本化目录和新格式更新的实施顺序。当前已对照微软正式制品的 ZIP 目录及对应安装脚本。
+
 [浏览器统一执行入口与 computer-use 技能](2026-10-28-browser-computer-use.md)：本次自动化修复已按2026-10-31用户确认范围收尾，连续缩放缺口明确保留，不继续容器结构调整。统一执行入口、全局内置技能及页面API的实现与真实资格见负责文档；整个浏览器呈现和完整发布资格未取得，旧配置、失败和unknown保留。
 
 [子 Agent 协作 V1.1 真实模型验证收束](subagent-collaboration-live-validation.md)：依据当前测试入口补齐仍适用的关键缺口；69 主用例与 80 合同保留为原证据，退役用例不重跑，受控全量、真实模型与平台资格分别验收。

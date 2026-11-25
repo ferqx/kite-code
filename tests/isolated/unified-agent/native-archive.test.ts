@@ -10,11 +10,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { packNativeBundle, unpackNativeBundle } from '../../../scripts/release/native-archive';
 import { readCandidateArchiveFiles } from '../../../scripts/release/terminal-archive';
+import { installWindowsNativeBundle } from '../../../scripts/release/windows-native-install';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 import { finiteNativeFixture, hash } from '../../fixtures/unified-agent/native-artifact-fixture';
 import {
@@ -103,6 +104,65 @@ test('finite Native archive preserves full two manifest bytes, relative link and
     rmSync(parent, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform !== 'win32')(
+  'Windows managed archive rolls back interrupted writes and replaces a regular conflict on retry',
+  async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-archive-retry-')));
+    try {
+      const archivePath = join(root, 'native.tar.gz');
+      const packed = await packNativeBundle({ bundleRoot: finiteNativeFixture(root), archivePath });
+      const prefix = join(root, 'install');
+      const original = Error('interrupted archive write');
+      let rollbackEvents = 0;
+      expect(() =>
+        installWindowsNativeBundle({
+          ...packed,
+          prefix,
+          onArchiveFileWritten(completed) {
+            if (completed === 3) throw original;
+          },
+          onArchiveRollback() {
+            rollbackEvents++;
+          },
+        }),
+      ).toThrow('native_archive_rolled_back');
+      expect(rollbackEvents).toBe(1);
+      const coordination = join(
+        root,
+        readdirSync(root).find((entry) => entry.startsWith('.kite-install-coordination-'))!,
+      );
+      expect(
+        readdirSync(coordination).some((entry) => entry.startsWith('native-unpack-')),
+      ).toBeFalse();
+      expect(existsSync(prefix)).toBeFalse();
+
+      const [path, bytes] = [...readCandidateArchiveFiles(packed).entries()][3]!;
+      let replaced = false;
+      const installed = installWindowsNativeBundle({
+        ...packed,
+        prefix,
+        onArchiveFileWritten(completed) {
+          if (completed !== 3) return;
+          const stage = readdirSync(coordination).find((entry) =>
+            entry.startsWith('native-unpack-'),
+          )!;
+          const conflict = join(coordination, stage, 'candidate', path);
+          privateDirectory(dirname(conflict));
+          writeFileSync(conflict, Buffer.alloc(bytes.length + 7, 0x78), { flag: 'wx' });
+          replaced = true;
+        },
+      });
+      expect(replaced).toBeTrue();
+      expect(readFileSync(join(installed.releaseRoot, path))).toEqual(Buffer.from(bytes));
+      expect(
+        readdirSync(coordination).some((entry) => entry.startsWith('native-unpack-')),
+      ).toBeFalse();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test('Native archive reconstructs the authenticated Terminal worker empty hooks without a manifest upgrade', async () => {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-worktree-assets-')));

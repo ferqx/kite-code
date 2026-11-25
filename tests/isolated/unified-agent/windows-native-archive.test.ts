@@ -95,6 +95,12 @@ if(scenario==='unpack'){
   assert.deepEqual(progress.splice(0),[[0,2],[1,2]]);
   assert.equal(directories.has('/corrupt'),false);
   archiveFiles.set('terminal/main.js',Buffer.from('end'));
+  const caseCollision={...manifest,directories:['App/payload/empty']};
+  archiveFiles.set('native-manifest.json',Buffer.from(JSON.stringify(caseCollision)));
+  assert.throws(()=>unpackNativeBundle({archivePath:'/archive',sha256:'a'.repeat(64),destination:'/case-collision',...observe}),/native_archive_invalid/);
+  assert.deepEqual(progress.splice(0),[[0,2],[1,2],[2,2]]);
+  assert.equal(directories.has('/case-collision'),false);
+  archiveFiles.set('native-manifest.json',nativeBytes);
   const result=unpackNativeBundle({archivePath:'/archive',sha256:'a'.repeat(64),destination:dest,...observe});
   assert.equal(result.root,dest);assert.equal(files.get(dest+'/app/payload').length,9*1024*1024+17);
   assert.deepEqual(progress,[[0,2],[1,2],[2,2],'write',[0,4],[1,4],[2,4],[3,4],[4,4]]);

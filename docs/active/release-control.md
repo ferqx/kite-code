@@ -64,6 +64,8 @@ Windows 桌面专用安装包的配套服务通过同一制品内的模块启动
 
 `bun run release:windows-setup` 串联同一 Windows 桌面专用构建、归档校验和离线安装器生成。参数和产物见 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。
 
+Windows 安装包在私有解包树中替换同名普通文件。写入或验包失败时，以本次写入的对象身份和有限库存回收。失败结果页报告回收结果和错误代码，并提供与暂存文件分开保存的本地安装日志。长文件路径在 Win32 文件调用边界处理，详见 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。
+
 Native 的 Word、Excel、PPT 浏览器渲染脚本进入完整制品库存。标准 Terminal 与 Native 均包含四个固定 Office Skill、PDF helper 和独立字体。 [文档资产边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
 
 `bun run release:macos-dmg` 将 arm64 桌面专用 Native 候选放入可拖拽的 `Kite Desktop.app`，并在只读映像中提供指向 `/Applications` 的快捷方式。制品保留桌面服务和本平台运行资源，构建核验排除 `node_modules`、CLI/TUI 和独立 Terminal Web 入口。Finder 管理复制、替换和移到废纸篓，应用启动继续验证包内候选。指定 Developer ID 身份和公证 profile 时，从源码构建并在计算清单摘要前签署内部程序。外层 DMG 完成公证、附票和校验后生成最终摘要。Developer ID 实机证据及正式发布仍走原门禁。构建参数和实机证据归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#macos-dmg)。
@@ -142,7 +144,7 @@ Windows managed Native 安装／切换／撤销源码现已接入同一正式 re
 
 Windows x64 Native 与内含 Terminal 共享一次编译的校验器制品。Windows 安装 marker 和已安装映像名继续沿原契约，资产来源与旧候选兼容见 [Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
-Windows x64 离线 EXE 消费桌面专用 Native 归档，装配一个 Bun、本地服务和桌面窗口。安装器支持选择目录及原目录更新，登记当前用户的 Windows 应用和卸载入口。新版准备和旧版移除沿 managed Native 的排他使用权及候选核验。受管安装暂存目录仅在原删除句柄获取因共享冲突而已确认回收时，持安装选择锁限时重试获取。登记仍在安装进程交付成功回执后进行。卸载保留独立 Profile。构建与验证范围归 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装)。
+Windows x64 离线 EXE 消费桌面专用 Native 归档，装配一个 Bun、本地服务和桌面窗口。安装器按当前用户登记 Kite 应用和卸载入口，默认安装到 `%LOCALAPPDATA%\Programs\Kite`，支持选择目录及原目录更新。新版准备和旧版移除沿 managed Native 的排他使用权及候选核验。受管安装暂存目录仅在原删除句柄获取因共享冲突而已确认回收时，持安装选择锁限时重试获取。登记仍在安装进程交付成功回执后进行。卸载保留独立 Profile。构建与验证范围归 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装)。
 
 正常卸载独立 Terminal 不阻止 Native 自带入口及后续升级。隐式历史登记目标已不存在时，升级仅锁 Native，并保留历史反向登记；不重建前门或自动重新登记。显式目标与仍存在的隐式目标保持原完整验证、双 prefix 锁和 nonce CAS。
 

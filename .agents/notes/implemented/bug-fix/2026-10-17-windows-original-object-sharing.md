@@ -18,6 +18,8 @@ Native 的 Node 适配器只接受 executable/entry 两参数，拒绝正式 Win
 
 Node 配套适配器只额外接受从同一候选 runtime 目录导出的四个准确固定参数，拒绝额外、分离或改投配置路径。Windows Service 使用 detached 创建以避开 libuv 的强杀 Job，但保留原私有 stdin/双输出管道和唯一 paired 生命周期；不 unref，不把断连当清理完成。[libuv 原实现](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)解释默认 Job 的所有权，实际原父 HANDLE 结束后的 EOF、清理 barrier 和自然退出由测试核对。
 
+2026-11-25 把同一长路径处理扩展到 Bun 的安装写入、候选校验、移动和回收。仅在 Win32 文件 API 边界转换已规范化的长本地路径，安装登记和 FileID 校验沿用原路径。关闭测试 Bun 的长路径 manifest 声明后，旧写入器在实际 696 文件归档上回收，新实现完整写入和校验。 [Native 安装验证](../../../../apps/desktop/docs/native-release.md#构建与安装)
+
 正式 Main 经原两跳证书、双 SH、全文件 pin 和完整内容复核后，才可向可信 `retainWindowsArtifact` 装配端口提供同进程借用。该端口不来自 JSON、HTTP、Model 或配置。WeakMap 只接受工厂产生的原 live owner，并绑定原候选 root/digest、Service entry、Bun 和 build；复制/伪造/closed 对象及改投均拒绝。借用未归还时 Main close 拒绝；paired 只在原 child exited 兑现后归还，退出未知保原借用。Service 自己仍使用独立 Bun 准入，不借父证书、父使用锁或内容缓存代替。默认 Bun 宿主继续走原准入。
 
 完整 Main 计时显示三次 Node 内容扫描各约 1.3 秒，另有实际 Node-API 独立文件准入。现在初始 Node 完整语义／内容验证保留，native factory 仍独立核每份原文件 SHA 并把原 native manifest 摘要绑定实际候选 ID；新增闭合文件／目录库存，在每次原 owner verify 中重新枚举，拒绝新增未知项、缺项、改类型和 reparse，声明空目录也必须准确。持续的原 read/no-write/no-delete pin 保护已核字节，原 identity、有效 ACL、双 SH、证书与关闭合同保持。Main 完成这次独立准入后复用其 genuine owner，不再无 owner 地重复扫描同一闭包两次；子 Service 仍独立完整准入。Node-API 采用静态 CRT 和 `/O2` 正式编译，不添加测试 export 或运行期编译入口。

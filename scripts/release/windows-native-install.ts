@@ -291,6 +291,7 @@ export function installWindowsNativeBundle(
         onArchiveFileChecked?: (completed: number, total: number) => void;
         onArchiveWrite?: () => void;
         onArchiveFileWritten?: (completed: number, total: number) => void;
+        onArchiveRollback?: () => void;
       }
   ) & {
     prefix: string;
