@@ -1652,7 +1652,7 @@ export function Conversation({
                 <small
                   className={cn(
                     'conversation-turn-notice',
-                    cancelled && 'conversation-turn-stopped',
+                    (failed || aborted || cancelled) && 'conversation-turn-terminal',
                   )}
                   role="status"
                 >

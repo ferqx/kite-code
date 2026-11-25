@@ -4279,7 +4279,7 @@ body {
   .message.assistant[data-final-reply="false"] {
   margin-block-end: 0;
 }
-.kite-client .conversation-trace-turn > * + .conversation-turn-stopped {
+.kite-client .conversation-trace-turn > * + .conversation-turn-terminal {
   margin-block-start: var(--conversation-block-gap);
 }
 .kite-client
