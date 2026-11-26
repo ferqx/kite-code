@@ -16,47 +16,51 @@ import type { NativeRecommendedModel } from '../src/native-bridge';
 import { isNativeRecommendedModel } from '../src/native-model-preference-bridge';
 
 /** Client display preferences survive renderer origins and never select a Session route. */
-export function nativeModelPreferences(directory: string) {
-  function path(storeId: string) {
-    if (typeof storeId !== 'string' || !/^[A-Za-z0-9_.:/-]{1,128}$/.test(storeId))
-      throw Error('model_preference_invalid');
-    return join(directory, `${createHash('sha256').update(storeId).digest('hex')}.json`);
-  }
+export function nativeDisplayPreferences<T>(
+  directory: string,
+  validate: (value: unknown) => value is T,
+  maxBytes: number,
+  errorPrefix: string,
+) {
+  const path = (key: string) =>
+    join(directory, `${createHash('sha256').update(key).digest('hex')}.json`);
   function checkDirectory() {
     const stat = lstatSync(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('model_preference_unavailable');
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error(`${errorPrefix}_unavailable`);
   }
   return {
-    read(storeId: string): NativeRecommendedModel | null {
-      const file = path(storeId);
+    read(key: string): T | null {
+      const file = path(key);
       let fd: number | undefined;
       try {
         checkDirectory();
-        if (lstatSync(file).isSymbolicLink()) throw Error('model_preference_unavailable');
+        if (lstatSync(file).isSymbolicLink()) throw Error(`${errorPrefix}_unavailable`);
         fd = openSync(file, 'r');
         const stat = fstatSync(fd);
-        if (!stat.isFile() || stat.nlink !== 1 || stat.size > 1024)
-          throw Error('model_preference_unavailable');
+        if (!stat.isFile() || stat.nlink !== 1 || stat.size > maxBytes)
+          throw Error(`${errorPrefix}_unavailable`);
         const value: unknown = JSON.parse(readFileSync(fd, 'utf8'));
-        if (!isNativeRecommendedModel(value)) throw Error('model_preference_invalid');
+        if (!validate(value)) throw Error(`${errorPrefix}_invalid`);
         return value;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-        throw Error('model_preference_unavailable');
+        throw Error(`${errorPrefix}_unavailable`);
       } finally {
         if (fd !== undefined) closeSync(fd);
       }
     },
-    remember(storeId: string, choice: NativeRecommendedModel) {
-      const file = path(storeId);
-      if (!isNativeRecommendedModel(choice)) throw Error('model_preference_invalid');
+    remember(key: string, choice: T) {
+      const file = path(key);
+      if (!validate(choice)) throw Error(`${errorPrefix}_invalid`);
+      const encoded = JSON.stringify(choice);
+      if (Buffer.byteLength(encoded) > maxBytes) throw Error(`${errorPrefix}_invalid`);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
       checkDirectory();
       const temporary = join(directory, `.${randomUUID()}.tmp`);
       const fd = openSync(temporary, 'wx', 0o600);
       try {
         try {
-          writeFileSync(fd, JSON.stringify(choice));
+          writeFileSync(fd, encoded);
           fsyncSync(fd);
         } finally {
           closeSync(fd);
@@ -71,5 +75,24 @@ export function nativeModelPreferences(directory: string) {
         throw error;
       }
     },
+  };
+}
+
+export function nativeModelPreferences(directory: string) {
+  const storage = nativeDisplayPreferences(
+    directory,
+    isNativeRecommendedModel,
+    1024,
+    'model_preference',
+  );
+  function key(storeId: string) {
+    if (typeof storeId !== 'string' || !/^[A-Za-z0-9_.:/-]{1,128}$/.test(storeId))
+      throw Error('model_preference_invalid');
+    return storeId;
+  }
+  return {
+    read: (storeId: string) => storage.read(key(storeId)),
+    remember: (storeId: string, choice: NativeRecommendedModel) =>
+      storage.remember(key(storeId), choice),
   };
 }

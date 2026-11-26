@@ -187,6 +187,7 @@ import {
 } from './native-web-search-evidence';
 import { NativeWindowFrame } from './native-window-frame';
 import { NativeWorkspaceChanges, type WorkspaceChangeSelection } from './native-workspace-changes';
+import { NativeWorkspaceNameDialog } from './native-workspace-name';
 import {
   isNativeWorktreeExitCommand,
   resolveNativeWorktreeExit,
@@ -512,6 +513,20 @@ function NativeDesktopContent({
     value: NativeDirectory;
   }>();
   const directory = directoryObservation?.value;
+  const [workspaceNameTarget, setWorkspaceNameTarget] = useState<{
+    generation: number;
+    storeId: string;
+    workspaceId: string;
+    name: string;
+    trigger: HTMLButtonElement;
+  }>();
+  const workspaceNameEditor =
+    workspaceNameTarget &&
+    workspaceNameTarget.generation === directoryObservation?.generation &&
+    workspaceNameTarget.storeId === directory?.storeId &&
+    directory.workspaces.some((workspace) => workspace.id === workspaceNameTarget.workspaceId)
+      ? workspaceNameTarget
+      : undefined;
   const [directoryProjection] = useState(() => new NativeDirectoryProjection());
   const [sessionDialog, setSessionDialog] = useState<DirectorySessionDialog>();
   const sessionDialogTarget = useRef<DirectorySessionTarget | undefined>(undefined);
@@ -7628,6 +7643,20 @@ function NativeDesktopContent({
           scheduledTasksView && preparing ? () => prepareConversation() : undefined,
         newWorkspaceSession: prepareConversation,
         addWorkspace: () => void addWorkspace(),
+        renameWorkspace:
+          directory?.canRenameWorkspaces && directoryObservation?.generation === generation.current
+            ? (workspaceId, trigger) => {
+                const workspace = directory.workspaces.find(({ id }) => id === workspaceId);
+                if (workspace)
+                  setWorkspaceNameTarget({
+                    generation: directoryObservation.generation,
+                    storeId: directory.storeId,
+                    workspaceId,
+                    name: workspace.name,
+                    trigger,
+                  });
+              }
+            : undefined,
         removeWorkspace: directory?.unavailable
           ? undefined
           : (id) => void report(() => removeWorkspace(id), true, '移除项目'),
@@ -8481,6 +8510,34 @@ function NativeDesktopContent({
             state={{ ...settingsSnapshot, instanceId: 'local-settings' }}
           />
         ))}
+      {workspaceNameEditor && (
+        <NativeWorkspaceNameDialog
+          name={workspaceNameEditor.name}
+          trigger={workspaceNameEditor.trigger}
+          onClose={() =>
+            setWorkspaceNameTarget((target) =>
+              target === workspaceNameEditor ? undefined : target,
+            )
+          }
+          onSave={async (name) => {
+            const { generation: observedGeneration, storeId, workspaceId } = workspaceNameEditor;
+            const epoch = readLifecycle.current.epoch;
+            if (!bridge || !isCurrentRead(observedGeneration, epoch))
+              throw Error('workspace_name_scope_changed');
+            const value = await bridge.request({
+              method: 'workspace.rename',
+              generation: observedGeneration,
+              expectedStoreId: storeId,
+              workspaceId,
+              name,
+            });
+            if (!isCurrentRead(observedGeneration, epoch)) return;
+            if (!value || !('workspaces' in value) || value.storeId !== storeId)
+              throw Error('workspace_name_unavailable');
+            acceptDirectory(value);
+          }}
+        />
+      )}
       {sessionDialog && (
         <NativeDirectorySessionDialog
           dialog={sessionDialog}

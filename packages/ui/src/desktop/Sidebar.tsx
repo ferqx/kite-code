@@ -1,10 +1,11 @@
 import {
-  Add01Icon,
   AlarmClockIcon,
   Clock01Icon,
+  CommentAdd01Icon,
   Delete02Icon,
   Folder01Icon,
   Folder02Icon,
+  FolderPlusIcon,
   GitBranchIcon,
   Home03Icon,
   MoreHorizontalIcon,
@@ -99,12 +100,17 @@ const WorkspaceHeader = memo(function WorkspaceHeader(props: {
   mutationBusy?: boolean;
   onToggle: () => void;
   onNewSession?: (workspaceId: string) => void;
+  onRename?: PageActions['renameWorkspace'];
   onRemove?: (workspaceId: string) => void;
 }) {
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [tooltipNeedsHover, setTooltipNeedsHover] = useState(false);
   const heading = useRef<HTMLDivElement>(null);
+  const moreTrigger = useRef<HTMLButtonElement>(null);
+  const openingRename = useRef(false);
+  const canStartConversation = props.onNewSession && props.state !== 'unavailable';
+  const canRename = props.onRename && props.state !== 'unavailable';
   return (
     <Tooltip
       open={tooltipOpen && !moreOpen && !tooltipNeedsHover}
@@ -137,20 +143,7 @@ const WorkspaceHeader = memo(function WorkspaceHeader(props: {
             </span>
           </SidebarNavigationButton>
           <span className="sidebar-actions">
-            {props.onNewSession && props.state !== 'unavailable' && (
-              <Button
-                className="ghost space-new-session"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`在 ${props.label} 中新建对话`}
-                title="新对话"
-                disabled={props.mutationBusy}
-                onClick={() => props.onNewSession?.(props.id)}
-              >
-                <HugeiconsIcon icon={PencilEdit02Icon} />
-              </Button>
-            )}
-            {props.onRemove && (
+            {(props.onRemove || canRename) && (
               <DropdownMenu
                 open={moreOpen}
                 onOpenChange={(open) => {
@@ -161,6 +154,7 @@ const WorkspaceHeader = memo(function WorkspaceHeader(props: {
               >
                 <DropdownMenuTrigger asChild>
                   <Button
+                    ref={moreTrigger}
                     className="ghost space-more"
                     variant="ghost"
                     size="icon-xs"
@@ -176,20 +170,51 @@ const WorkspaceHeader = memo(function WorkspaceHeader(props: {
                   className="sidebar-menu"
                   aria-label={`${props.label} 更多操作`}
                   onCloseAutoFocus={(event) => {
-                    if (!heading.current?.matches(':hover')) event.preventDefault();
+                    if (openingRename.current || !heading.current?.matches(':hover'))
+                      event.preventDefault();
+                    openingRename.current = false;
                   }}
                 >
-                  <DropdownMenuItem
-                    className="space-remove"
-                    aria-label={`移除 ${props.label}`}
-                    disabled={props.busy || props.mutationBusy}
-                    onSelect={() => props.onRemove?.(props.id)}
-                  >
-                    <HugeiconsIcon icon={Delete02Icon} />
-                    移除项目
-                  </DropdownMenuItem>
+                  {canRename && (
+                    <DropdownMenuItem
+                      disabled={props.mutationBusy}
+                      onSelect={() => {
+                        const trigger = moreTrigger.current;
+                        if (!trigger) return;
+                        openingRename.current = true;
+                        props.onRename?.(props.id, trigger);
+                      }}
+                    >
+                      <HugeiconsIcon icon={PencilEdit02Icon} />
+                      编辑名称
+                    </DropdownMenuItem>
+                  )}
+                  {props.onRemove && (
+                    <DropdownMenuItem
+                      className="space-remove"
+                      aria-label={`移除 ${props.label}`}
+                      disabled={props.busy || props.mutationBusy}
+                      onSelect={() => props.onRemove?.(props.id)}
+                    >
+                      <HugeiconsIcon icon={Delete02Icon} />
+                      移除项目
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
+            )}
+            {canStartConversation && (
+              <Button
+                className="ghost space-new-session"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`在 ${props.label} 中新建对话`}
+                title="新对话"
+                disabled={props.mutationBusy}
+                onClick={() => props.onNewSession?.(props.id)}
+              >
+                <HugeiconsIcon icon={CommentAdd01Icon} aria-hidden="true" />
+              </Button>
             )}
           </span>
         </div>
@@ -348,6 +373,7 @@ const Workspace = memo(function Workspace({
 }: Omit<DirectoryProps, 'workspaces'> & {
   workspace: WorkspaceSummary;
   onNewSession?: (workspaceId: string) => void;
+  onRename?: PageActions['renameWorkspace'];
   onRemove?: (workspaceId: string) => void;
   onManage?: PageActions['manageSession'];
   sessionMutationBusy?: boolean;
@@ -393,6 +419,7 @@ const Workspace = memo(function Workspace({
         mutationBusy={props.mutationBusy}
         onToggle={toggleExpanded}
         onNewSession={props.onNewSession}
+        onRename={props.onRename}
         onRemove={props.onRemove}
       />
       <div className="sidebar-sessions" hidden={!expanded}>
@@ -464,6 +491,7 @@ export interface PageActions {
   resumeNewConversation?: () => void;
   newWorkspaceSession?: (workspaceId: string) => void;
   addWorkspace?: () => void;
+  renameWorkspace?: (workspaceId: string, trigger: HTMLButtonElement) => void;
   removeWorkspace?: (workspaceId: string) => void;
   workspaceRemovalResults?: readonly { id: string; label: string }[];
   lookupWorkspaceRemoval?: (id: string) => void;
@@ -648,7 +676,7 @@ export function Sidebar({
             disabled={props.mutationBusy}
             onClick={actions.addWorkspace}
           >
-            <HugeiconsIcon icon={Add01Icon} />
+            <HugeiconsIcon icon={FolderPlusIcon} aria-hidden="true" />
           </Button>
         )}
       </SidebarNavigationHeading>
@@ -678,6 +706,7 @@ export function Sidebar({
                 sessionMutationBusy={props.mutationBusy || actions.sessionMutationBusy}
                 onExpand={props.onExpand}
                 onNewSession={actions.newWorkspaceSession}
+                onRename={actions.renameWorkspace}
                 onRemove={actions.removeWorkspace}
               />
             ))}

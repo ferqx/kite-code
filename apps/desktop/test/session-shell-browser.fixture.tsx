@@ -50,6 +50,39 @@ declare global {
 }
 Object.defineProperty(window, 'kiteNative', { value: control.bridge });
 window.sessionShellFixture = control;
+if (new URL(location.href).searchParams.has('rename-workspaces')) {
+  const request = control.bridge.request.bind(control.bridge);
+  const key = (storeId: string, id: string) =>
+    `fixture.workspace-name.${JSON.stringify([storeId, id])}`;
+  const withNames = (directory: import('../src/native-bridge').NativeDirectory) => ({
+    ...directory,
+    canRenameWorkspaces: true,
+    workspaces: directory.workspaces.map((workspace) => ({
+      ...workspace,
+      name: localStorage.getItem(key(directory.storeId, workspace.id)) ?? workspace.name,
+    })),
+  });
+  control.bridge.request = async (input) => {
+    if (input.method === 'draft.read' && input.sessionId === 'new-conversation')
+      return {
+        id: 'preparation',
+        storeId: 'store',
+        workspaceId: input.sessionId,
+        rootSessionId: input.sessionId,
+        revision: 0,
+        content: '',
+      };
+    if (input.method === 'workspace.rename') {
+      localStorage.setItem(key(input.expectedStoreId, input.workspaceId), input.name);
+      return control.bridge.request({ method: 'directory', generation: input.generation });
+    }
+    const value = await request(input);
+    if (value && 'workspaces' in value) return withNames(value);
+    if (value && 'directory' in value && value.directory)
+      return { ...value, directory: withNames(value.directory) };
+    return value;
+  };
+}
 const settingsGeometry = new URL(location.href).searchParams.has('settings-geometry');
 if (settingsGeometry) {
   const mcpRequest = mcpSettingsBridgeFixture(

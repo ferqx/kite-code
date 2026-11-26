@@ -536,6 +536,7 @@ export type NativeFileRecoveryObservation = {
 export type NativeDirectory = {
   storeId: string;
   canManageSessions?: boolean;
+  canRenameWorkspaces?: boolean;
   canReadWebSearchSettings?: boolean;
   /** Main's persisted local read receipts, independent of the renderer origin. */
   readTurns?: readonly (readonly [string, string])[];
@@ -1059,6 +1060,13 @@ export type NativeRequest =
       generation: number;
     }
   | { method: 'workspace.remove'; generation: number; workspaceId: string }
+  | {
+      method: 'workspace.rename';
+      generation: number;
+      expectedStoreId: string;
+      workspaceId: string;
+      name: string;
+    }
   | {
       method: 'workspace.removal.lookup';
       generation: number;

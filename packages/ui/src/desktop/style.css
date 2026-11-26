@@ -2245,15 +2245,11 @@ body {
   order: 1;
   margin-inline: calc((var(--icon-button-size-xs) - var(--ui-icon-size)) / 2);
 }
-.kite-client :where(.space-new-session, .space-more, .session-more) {
+.kite-client .sidebar-actions > .button {
   color: var(--muted-foreground);
+  transition-property: box-shadow;
 }
-.kite-client
-  :is(.space-heading, .session-heading)
-  :where(.space-new-session, .space-more, .session-more):is(:hover, :focus-visible):is(
-    :not(:disabled),
-    [data-read-gated="true"]
-  ) {
+.kite-client .sidebar-actions > .button:hover:is(:not(:disabled), [data-read-gated="true"]) {
   color: var(--foreground);
 }
 /* The container keeps hidden row actions independent of button styles. */

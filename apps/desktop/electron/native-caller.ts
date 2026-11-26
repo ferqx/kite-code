@@ -36,6 +36,7 @@ import type {
 } from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
 import { nativePlanProgress } from '../src/native-plan-progress-bridge';
+import { isWorkspaceDisplayName } from '../src/native-workspace-name-policy';
 import type { OutputDraftFile } from '../src/output-files-bridge';
 import { nativeShellExitCode } from '../src/tool-messages-bridge';
 import { NativeAnswerJournal } from './answer-journal';
@@ -63,6 +64,7 @@ import { NativeJobOutputReads } from './job-output-reads';
 import { NativeMcpSettings } from './mcp-settings';
 import { verifyNativeMcpSourceAnswer } from './mcp-source-answer';
 import { NativeModelOutputReads } from './model-output-reads';
+import type { nativeDisplayPreferences } from './model-preference';
 import { NativeInputQueue } from './native-input-queue';
 import { NativeProcessOwner } from './native-processes';
 import { NativeOfficeEditor } from './office-editor';
@@ -162,6 +164,8 @@ export class NativeCaller {
     workspaces: Workspace[];
   };
   private directory?: NativeDirectory;
+  private workspaceDisplayNames = new Map<string, string>();
+  private readonly workspaceNamePreferences?: ReturnType<typeof nativeDisplayPreferences<string>>;
   private directoryUnavailable = false;
   private directoryEnabled = false;
   private directoryRefreshing?: Promise<void>;
@@ -276,7 +280,9 @@ export class NativeCaller {
     initialSelectionHint?: Readonly<{ storeId: string; sessionId: string }>,
     skillMarketplace?: ReturnType<typeof createSkillMarketplace>,
     localFileReferences = false,
+    workspaceNamePreferences?: ReturnType<typeof nativeDisplayPreferences<string>>,
   ) {
+    this.workspaceNamePreferences = workspaceNamePreferences;
     this.localFileReferences = localFileReferences;
     this.nextGeneration = nextGeneration;
     this.initialSelectionHint = initialSelectionHint;
@@ -1004,6 +1010,15 @@ export class NativeCaller {
     return this.directory
       ? {
           ...this.directory,
+          ...(this.workspaceNamePreferences
+            ? {
+                canRenameWorkspaces: true,
+                workspaces: this.directory.workspaces.map((workspace) => {
+                  const name = this.workspaceDisplayNames.get(workspace.id);
+                  return name ? { ...workspace, name } : workspace;
+                }),
+              }
+            : {}),
           ...(readTurns !== undefined ? { readTurns } : {}),
           unavailable: this.directoryUnavailable || this.observationUnavailable,
         }
@@ -1059,6 +1074,19 @@ export class NativeCaller {
           this.client.serverInfo!.capabilities.includes('web_search_settings'),
         canManageSessions: this.client.serverInfo!.capabilities.includes('sessions'),
       };
+      this.workspaceDisplayNames.clear();
+      if (this.workspaceNamePreferences) {
+        for (const workspace of workspaces) {
+          try {
+            const name = this.workspaceNamePreferences.read(
+              JSON.stringify([storeId, workspace.id]),
+            );
+            if (name) this.workspaceDisplayNames.set(workspace.id, name);
+          } catch {
+            // A failed preference read leaves the registered name available.
+          }
+        }
+      }
       this.directoryUnavailable = false;
       this.workspaceObservation = { generation, storeId, workspaces };
       return this.directory;
@@ -2140,6 +2168,7 @@ export class NativeCaller {
         'messages',
         'select',
         'detach',
+        'workspace.rename',
         'workspace.removal.lookup',
         'session.directory.observe',
         'session.directory.submit',
@@ -3194,6 +3223,25 @@ export class NativeCaller {
         this.configuration.release();
         result = null;
         break;
+      case 'workspace.rename': {
+        const { expectedStoreId, workspaceId, name } = request;
+        if (
+          !this.workspaceNamePreferences ||
+          this.client.serverInfo?.storeId !== expectedStoreId ||
+          this.directory?.storeId !== expectedStoreId ||
+          !this.directory?.workspaces.some((workspace) => workspace.id === workspaceId) ||
+          !isWorkspaceDisplayName(name)
+        )
+          throw new ClientError('workspace_name_unavailable');
+        this.workspaceNamePreferences.remember(
+          JSON.stringify([expectedStoreId, workspaceId]),
+          name,
+        );
+        this.workspaceDisplayNames.set(workspaceId, name);
+        result = this.directoryState()!;
+        this.changed();
+        break;
+      }
       case 'workspace.removal.lookup':
         result = await this.workspaceRemoval.lookup(request.commandId);
         this.acceptWorkspaceRemoval(result);
@@ -4796,7 +4844,10 @@ export class NativeCaller {
     confirm: (label: string) => Promise<boolean>,
   ) {
     this.assertGeneration(generation);
-    const result = await this.workspaceRemoval.remove(workspaceId, confirm);
+    const name = this.workspaceDisplayNames.get(workspaceId);
+    const result = await this.workspaceRemoval.remove(workspaceId, (label) =>
+      confirm(name ?? label),
+    );
     this.assertGeneration(generation);
     this.acceptWorkspaceRemoval(result);
     return result;

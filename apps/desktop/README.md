@@ -1638,7 +1638,11 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 项目移除不在对话区插入常驻提示。显式操作的未知结果、拒绝及后台移除记录变为无法读取时，通过原非模态 Toast 临时呈现；同一次读取异常不会因刷新重复弹出。原申请未知时，「项目」旁显示查询图标；即使原项目不在目录中，也可从菜单选原项目查询结果，不重新提交。[Native DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)核等待与刷新、Toast 关闭与去重、草稿保持、原 ID 查询、成功目录更新和拒绝。
 
-原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的项目行将移除入口收进更多菜单，新对话与更多图标均为14px并沿原悬浮／键盘焦点显示；选择“移除项目”才调用原回调。[Main](electron/main.ts)通过主窗口所属的共享确认Overlay显示完整移除风险，默认和取消均为「保留项目」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他项目的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
+[Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的项目行在悬浮或键盘聚焦时显示「更多」及其右侧的「新对话」按钮。更多菜单包含「编辑名称」和「移除项目」。选择“移除项目”才调用原回调。[Main](electron/main.ts)通过主窗口所属的共享确认Overlay显示完整移除风险，默认和取消均为「保留项目」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他项目的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
+
+[项目显示名称](src/native-workspace-name.tsx)按 Store ID 和 Workspace ID 由 Main 持久保存到 Electron `userData/workspace-names`，在侧栏、会话搜索和项目选择器共用展示投影。改名经当前窗口的原生 IPC 校验当前 generation、Store 和已登记的 Workspace。Service 的工作区记录及路径保持原样。已有项目首次读取使用登记名，保存成功才更新展示，存储写入失败保留窗口和输入。重开和开发页面端口变化后仍从同一桌面配置读取。
+
+[侧栏浏览器回归](test/isolated/sidebar-actions-browser.test.ts)在 Windows 隔离 Chromium 中核对深浅主题、鼠标与键盘菜单操作、保存中状态、失败后重试、焦点回归、页面重载和原草稿。真实 Main 保存路径由 [NativeCaller 回归](test/native-caller.test.ts)核对持久读取、Store 隔离和注册身份。
 
 [Store 批量事务](../../packages/agent/src/storage/sqlite/workspace-removal.ts) 一次保存全部根及子 Session tombstone、停止边界和原 Workspace receipt，目录同时隐藏；它不逐条等待，不冒充资源停止。回复丢失／不可信则保存 unknown，重开只展示原申请，明确从侧栏菜单选择原项目才用原 Store／Workspace／Command GET；其他 Store／主体在 HTTP 前拒绝，不改绑、不自动再提交。可信 4xx 显示未移除。目录状态未核实或私有申请不能保存时拒绝新移除。
 

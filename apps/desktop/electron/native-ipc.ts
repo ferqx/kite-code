@@ -318,6 +318,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   detach: [],
   'workspace.pick': [],
   'workspace.remove': ['workspaceId'],
+  'workspace.rename': ['expectedStoreId', 'workspaceId', 'name'],
   'workspace.removal.lookup': ['commandId'],
   select: ['sessionId', 'activationId'],
   createSession: ['workspaceId', 'commandId', 'sessionId', 'title', 'expectedStoreId'],

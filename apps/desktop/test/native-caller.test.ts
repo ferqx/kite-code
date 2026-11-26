@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -19,6 +19,7 @@ import type {
 import { ClientError, canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerDigest, callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
+import { nativeDisplayPreferences } from '../electron/model-preference';
 import { createNativeCallerGenerationOwner, NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import type {
@@ -36,6 +37,7 @@ import {
 } from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
 import { nativePreviewLayoutChannel } from '../src/native-preview-layout-bridge';
+import { isWorkspaceDisplayName, maxWorkspaceNameBytes } from '../src/native-workspace-name-policy';
 import { backgroundItem } from './background-item.fixture';
 import { sessionChange } from './native-change.fixture';
 import { memoryPrivateData } from './private-data.fixture';
@@ -86,6 +88,87 @@ function client() {
     },
   } as unknown as AgentClient & { writes: number };
 }
+
+test('workspace rename survives reopening Main and is scoped to a registered Workspace and Store', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'kite-workspace-name-'));
+  const directory = join(root, 'preferences');
+  await mkdir(directory);
+  const workspace = { id: 'w', name: 'Registered name', rootUri: 'file:///workspace' };
+  const request = decodeNativeRequest({
+    method: 'workspace.rename',
+    generation: 1,
+    expectedStoreId: 'store',
+    workspaceId: workspace.id,
+    name: '项目显示名',
+  });
+  if (request.method !== 'workspace.rename') throw Error('wrong request decoded');
+  try {
+    for (const storeId of ['store', 'other', 'store']) {
+      const port = client();
+      port.serverInfo!.storeId = storeId;
+      port.listAllWorkspaces = async () => [workspace];
+      const preferences = nativeDisplayPreferences(
+        directory,
+        isWorkspaceDisplayName,
+        maxWorkspaceNameBytes * 6 + 2,
+        'workspace_name',
+      );
+      const caller = new NativeCaller(
+        port,
+        () => {},
+        undefined,
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        preferences,
+      );
+      try {
+        await caller.invoke({ method: 'attach' });
+        await caller.invoke({ method: 'directory', generation: 1 });
+        const saved = preferences.read(JSON.stringify([storeId, workspace.id]));
+        expect(caller.state().directory).toMatchObject({
+          canRenameWorkspaces: true,
+          workspaces: [{ ...workspace, name: saved ?? workspace.name }],
+        });
+        if (storeId === 'other') {
+          expect(saved).toBeNull();
+          await expect(caller.invoke(request)).rejects.toMatchObject({
+            code: 'workspace_name_unavailable',
+          });
+        } else if (!saved) {
+          for (const change of [
+            { workspaceId: 'missing' },
+            { name: ' ' },
+            { name: 'x'.repeat(4097) },
+          ])
+            await expect(caller.invoke({ ...request, ...change })).rejects.toMatchObject({
+              code: 'workspace_name_unavailable',
+            });
+          await caller.invoke(request);
+          await caller.invoke({ method: 'directory', generation: 1 });
+          expect(caller.state().directory?.workspaces).toEqual([
+            { ...workspace, name: request.name },
+          ]);
+        } else {
+          expect(saved).toBe(request.name);
+        }
+        expect(workspace.name).toBe('Registered name');
+        expect(port.writes).toBe(0);
+      } finally {
+        await caller.close();
+      }
+    }
+  } finally {
+    // The test owns only this exact, randomly created directory and file.
+    for (const file of await readdir(directory)) await rm(join(directory, file));
+    await rmdir(directory);
+    await rmdir(root);
+  }
+});
 
 test('execution observation progresses while an admission permission read is held', async () => {
   const connection = client();

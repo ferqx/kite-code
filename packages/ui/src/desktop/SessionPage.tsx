@@ -106,6 +106,8 @@ function useNavigationCallbacks(
         committed.current.focusComposer();
       },
       addWorkspace: () => committed.current.props.actions.addWorkspace?.(),
+      renameWorkspace: (...args: Parameters<NonNullable<PageActions['renameWorkspace']>>) =>
+        committed.current.props.actions.renameWorkspace?.(...args),
       removeWorkspace: (id: string) => committed.current.props.actions.removeWorkspace?.(id),
       lookupWorkspaceRemoval: (id: string) =>
         committed.current.props.actions.lookupWorkspaceRemoval?.(id),
@@ -127,6 +129,7 @@ function useNavigationCallbacks(
   const resumeNewConversation = !!props.actions.resumeNewConversation;
   const newWorkspaceSession = !!props.actions.newWorkspaceSession;
   const addWorkspace = !!props.actions.addWorkspace;
+  const renameWorkspace = !!props.actions.renameWorkspace;
   const removeWorkspace = !!props.actions.removeWorkspace;
   const workspaceRemovalResults = props.actions.workspaceRemovalResults;
   const lookupWorkspaceRemoval = !!props.actions.lookupWorkspaceRemoval;
@@ -145,6 +148,7 @@ function useNavigationCallbacks(
       resumeNewConversation: resumeNewConversation ? callbacks.newSession : undefined,
       newWorkspaceSession: newWorkspaceSession ? callbacks.newWorkspaceSession : undefined,
       addWorkspace: addWorkspace ? callbacks.addWorkspace : undefined,
+      renameWorkspace: renameWorkspace ? callbacks.renameWorkspace : undefined,
       removeWorkspace: removeWorkspace ? callbacks.removeWorkspace : undefined,
       workspaceRemovalResults,
       lookupWorkspaceRemoval: lookupWorkspaceRemoval ? callbacks.lookupWorkspaceRemoval : undefined,
@@ -166,6 +170,7 @@ function useNavigationCallbacks(
       resumeNewConversation,
       newWorkspaceSession,
       addWorkspace,
+      renameWorkspace,
       removeWorkspace,
       workspaceRemovalResults,
       lookupWorkspaceRemoval,

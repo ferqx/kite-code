@@ -27,6 +27,7 @@ import {
 } from 'electron';
 import { nativeEventChannel } from '../src/native-bridge';
 import { nativeWindowMenuActionChannel } from '../src/native-menu-bridge';
+import { isWorkspaceDisplayName, maxWorkspaceNameBytes } from '../src/native-workspace-name-policy';
 import { acquireNodeArtifactAccess } from './artifact-access';
 import { listenBrowserPageHost } from './browser-page-channel';
 import { NativeBrowserPageHost } from './browser-page-host';
@@ -41,7 +42,7 @@ import { registerNativeExternalLinks } from './external-links';
 import { createNativeImageDisplayHost } from './image-display-host';
 import { disposeImageDisplay } from './image-display-service';
 import { configureMacosElectronResize, type MacosElectronResize } from './macos-electron-resize';
-import { nativeModelPreferences } from './model-preference';
+import { nativeDisplayPreferences, nativeModelPreferences } from './model-preference';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { registerNativeBrowserIpc } from './native-browser';
 import { createNativeCallerGenerationOwner, NativeCaller } from './native-caller';
@@ -385,6 +386,12 @@ async function openCaller(): Promise<NativeCaller> {
         trashItem: (path) => shell.trashItem(path),
       }),
       true, // This Main owns the paired Service on the same computer.
+      nativeDisplayPreferences(
+        join(app.getPath('userData'), 'workspace-names'),
+        isWorkspaceDisplayName,
+        maxWorkspaceNameBytes * 6 + 2, // A one-byte character can take six bytes in JSON.
+        'workspace_name',
+      ),
     );
     scheduledTasks = new ScheduledTaskRunner(paired.client, privateData);
     caller.setScheduledTasks(scheduledTasks);

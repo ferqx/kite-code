@@ -307,10 +307,26 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
   return { sessionRowActions: ['light', 'dark'] };
 }
 
+async function rowActionColors(action: Locator) {
+  return action.evaluate((button) => {
+    const sample = document.createElement('span');
+    button.append(sample);
+    try {
+      sample.style.color = 'var(--muted-foreground)';
+      const muted = getComputedStyle(sample).color;
+      sample.style.color = 'var(--foreground)';
+      return { muted, highlighted: getComputedStyle(sample).color };
+    } finally {
+      sample.remove();
+    }
+  });
+}
+
 async function verifySessionRowLoading(page: Page) {
   const row = page.locator('.session-row[aria-label="Session B"]');
   const spinner = row.locator('svg[aria-label="会话运行中"]');
   const more = page.locator('.session-more[aria-label="Session B 更多操作"]');
+  const moreIcon = more.locator('svg');
   const title = row.locator('.nav-copy');
   await spinner.waitFor();
   assert.ok(
@@ -339,8 +355,12 @@ async function verifySessionRowLoading(page: Page) {
     return { phase, ...state };
   };
   const phases = [await sample('idle', true, false)];
+  const colors = await rowActionColors(more);
   await row.hover();
   phases.push(await sample('hovered', false, true));
+  await expect(moreIcon).toHaveCSS('color', colors.muted);
+  await more.hover();
+  await expect(moreIcon).toHaveCSS('color', colors.highlighted);
   assert.equal(
     await page.locator('.session-row[aria-label="Session A"] svg[role="status"]').isVisible(),
     true,
@@ -353,6 +373,7 @@ async function verifySessionRowLoading(page: Page) {
   await menu.waitFor();
   await page.mouse.move(1100, 650);
   phases.push(await sample('menu open', false, true));
+  await expect(moreIcon).toHaveCSS('color', colors.muted);
   await page.keyboard.press('Escape');
   await menu.waitFor({ state: 'hidden' });
   phases.push(await sample('menu closed', true, false));
@@ -425,6 +446,92 @@ async function verifyWindowsBackdropLayout(page: Page, url: string) {
     }
   }
   return results;
+}
+
+async function verifyWorkspaceName(page: Page, url: string, artifact: string, theme: string) {
+  await page.goto(`${url}?worktree-navigation=1&rename-workspaces=1`);
+  const project = page.locator('.workspace-group').first();
+  const row = project.locator('.space-row');
+  const more = project.locator('.space-more');
+  const edit = page.getByRole('menuitem', { name: '编辑名称', exact: true });
+  const dialog = page.getByRole('dialog', { name: '编辑项目名称' });
+  const input = dialog.getByRole('textbox', { name: '项目名称' });
+  const draft = page.locator('.composer textarea');
+  await expect(draft).toHaveValue('Draft A');
+  await expect(row).toHaveText('Workspace');
+  const expanded = await row.getAttribute('aria-expanded');
+
+  await row.hover();
+  const actions = project.locator('.sidebar-actions button');
+  await expect(actions).toHaveCount(2);
+  await expect(actions.nth(0)).toHaveAccessibleName('Workspace 更多操作');
+  await expect(actions.nth(1)).toHaveAccessibleName('在 Workspace 中新建对话');
+  await more.click();
+  const menu = page.getByRole('menu', { name: 'Workspace 更多操作', exact: true });
+  await expect(menu.getByRole('menuitem')).toHaveText(['编辑名称', '移除项目']);
+  await menu.screenshot({ path: path.join(artifact, `sidebar-${theme}-rename-menu.png`) });
+  await edit.click();
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue('Workspace');
+  assert.deepEqual(
+    await input.evaluate((node: HTMLInputElement) => [node.selectionStart, node.selectionEnd]),
+    [0, 9],
+  );
+  await input.fill('取消的名称');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(more).toBeFocused();
+  await expect(row).toHaveText('Workspace');
+
+  await page.keyboard.press('Enter');
+  await expect(edit).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(input).toBeFocused();
+  await input.fill('   ');
+  await input.press('Enter');
+  await expect(dialog.getByRole('alert')).toHaveText('请输入项目名称。');
+  await expect(input).toBeFocused();
+  await page.evaluate(() => {
+    const bridge = window.sessionShellFixture.bridge;
+    const original = bridge.request.bind(bridge);
+    bridge.request = async (request) => {
+      if (request.method !== 'workspace.rename') return original(request);
+      bridge.request = original;
+      await new Promise<void>((resolve) => Reflect.set(window, 'settleRename', resolve));
+      throw Error('workspace_name_unavailable');
+    };
+  });
+  const name = '项目显示名';
+  await input.fill(name);
+  await dialog.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: '保存中…', exact: true })).toBeDisabled();
+  await expect(row).toHaveText('Workspace');
+  await page.evaluate(() => Reflect.get(window, 'settleRename')());
+  await expect(dialog.getByRole('alert')).toHaveText('项目名称保存失败，请重试。');
+  await expect(input).toHaveValue(name);
+  await expect(row).toHaveText('Workspace');
+  await page.screenshot({ path: path.join(artifact, `sidebar-${theme}-rename-retry.png`) });
+
+  await dialog.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(more).toBeFocused();
+  await expect(row).toHaveText(name);
+  await expect(row).toHaveAttribute('aria-expanded', expanded!);
+  await expect(project.getByRole('button', { name: 'Session A', exact: true })).toBeVisible();
+  await expect(draft).toHaveValue('Draft A');
+  await expect(page.locator('.workspace-group').nth(1).locator('.space-row')).toHaveText(
+    'Worktree project',
+  );
+  await page.screenshot({ path: path.join(artifact, `sidebar-${theme}-rename-saved.png`) });
+
+  await page.reload();
+  await expect(row).toHaveText(name);
+  await expect(draft).toHaveValue('Draft A');
+  await row.hover();
+  await project.getByRole('button', { name: `在 ${name} 中新建对话`, exact: true }).click();
+  await expect(page.getByRole('button', { name: '项目', exact: true })).toHaveText(name);
+  await expect(draft).toBeEditable();
+  await expect(draft).toBeFocused();
 }
 
 /** Exercise Native pending transitions with actual Sidebar controls and production CSS. */
@@ -632,9 +739,35 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
             ),
         ),
       );
+      const projectMore = page.locator('.space-more').first();
+      const projectNew = page.locator('.space-new-session').first();
+      const moreIcon = projectMore.locator('svg');
+      const newIcon = projectNew.locator('svg');
+      const colors = await rowActionColors(projectMore);
+      await page.locator('.space-row').first().hover();
+      await expect(moreIcon).toHaveCSS('color', colors.muted);
+      await expect(newIcon).toHaveCSS('color', colors.muted);
+      await projectMore.hover();
+      await expect(moreIcon).toHaveCSS('color', colors.highlighted);
+      await expect(newIcon).toHaveCSS('color', colors.muted);
+      await projectNew.hover();
+      await expect(moreIcon).toHaveCSS('color', colors.muted);
+      await expect(newIcon).toHaveCSS('color', colors.highlighted);
+      await page
+        .locator('.space-heading')
+        .first()
+        .screenshot({
+          path: path.join(artifact, `sidebar-${theme}-project-action-hover.png`),
+        });
+      await page.mouse.move(1100, 650);
+
       // Keyboard access still reveals an otherwise hidden row.
       await page.locator('.space-row').first().focus();
       await page.keyboard.press('Tab');
+      await expect(projectMore).toBeFocused();
+      await expect(moreIcon).toHaveCSS('color', colors.muted);
+      await page.keyboard.press('Tab');
+      await expect(newIcon).toHaveCSS('color', colors.muted);
       assert.equal(
         await page
           .locator('.space-new-session')
@@ -920,6 +1053,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await page.getByRole('button', { name: '关闭设置', exact: true }).click();
       await expect(draft).toHaveValue('Draft A');
       const windowsBackdrops = await verifyWindowsBackdropLayout(page, url);
+      await verifyWorkspaceName(page, url, artifact, theme);
       assert.deepEqual(errors, []);
       cases.push({
         theme,
@@ -938,8 +1072,8 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
   }
   const touch = await browser.newPage({ hasTouch: true, isMobile: true });
   try {
-    await touch.goto(`${url}?worktree-navigation=1`);
-    await touch.waitForFunction(() => document.querySelector('.space-new-session'));
+    await touch.goto(`${url}?worktree-navigation=1&rename-workspaces=1`);
+    await touch.waitForFunction(() => document.querySelector('.space-more'));
     assert.equal(await touch.evaluate(() => matchMedia('(hover: none)').matches), true);
     assert.ok(
       await touch
