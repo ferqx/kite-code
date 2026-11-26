@@ -101,7 +101,6 @@ const methodNames = [
   'webSearch.settings.read',
   'webSearch.settings.save',
   'webSearch.settings.test',
-  'trace.manage',
 ] as const;
 export type NativeSettingsRequest = NativeRequest & { readonly generation: number };
 const methods: ReadonlySet<string> = new Set(methodNames);
@@ -131,16 +130,6 @@ const resultKinds: ReadonlySet<string> = new Set([
   'settings.skills.uninstall',
   'webSearch.settings',
   'webSearch.test',
-  'trace.delivery',
-  'trace.installations',
-  'trace.installation',
-  'trace.installed',
-  'trace.validated',
-  'trace.history',
-  'trace.partition',
-  'trace.deadLetters',
-  'trace.credential',
-  'trace.action',
 ]);
 const record = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype;

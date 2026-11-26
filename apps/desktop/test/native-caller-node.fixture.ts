@@ -139,6 +139,7 @@ try {
     } finally {
       for (const id of created) db.prepare('DELETE FROM caller_intents WHERE command_id=?').run(id);
       db.prepare('DELETE FROM caller_intents WHERE command_id=?').run('native-corrupt-row');
+      db.prepare('DELETE FROM caller_intents WHERE command_id=?').run('native-refused');
       db.close();
     }
   } else {

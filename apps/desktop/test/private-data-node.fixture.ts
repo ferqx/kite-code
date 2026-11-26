@@ -317,8 +317,10 @@ if (mode === 'denied') {
     assert.throws(() => data.clearCaller('caller-original'), /caller_clear_unconfirmed/);
     for (let i = 1; i < 128; i++) data.beginCaller(callerRow(`caller-${i}`));
     assert.equal(data.callers().length, 128);
-    assert.throws(() => data.beginCaller(callerRow('caller-overflow')), /caller_capacity_exceeded/);
-    assert.equal(data.callers().length, 128);
+    assert.equal(data.beginCaller(callerRow('caller-overflow')).created, true);
+    assert.equal(data.callers().length, 129);
+    data.finishCaller('caller-overflow', 'rejected');
+    data.clearCaller('caller-overflow');
     assert.throws(
       () => data.beginCaller({ ...caller, intent: { ...caller.intent, subjectId: 'other' } }),
       /caller_intent_conflict/,
@@ -330,19 +332,22 @@ if (mode === 'denied') {
       data.finishCaller(`caller-${i}`, 'rejected');
       data.clearCaller(`caller-${i}`);
     }
-    const large = '中'.repeat(400000);
-    let largeRows = 0;
-    for (let i = 0; i < 20; i++) {
-      try {
-        data.beginCaller(callerRow(`large-${i}`, large));
-        largeRows++;
-      } catch (error) {
-        assert.match((error as Error).message, /caller_capacity_exceeded/);
-        break;
-      }
+    for (let i = 0; i < 128; i++) {
+      data.beginCaller(callerRow(`applied-${i}`));
+      data.finishCaller(`applied-${i}`, 'applied');
     }
-    assert.equal(largeRows, 13);
-    assert.equal(data.callers().length, 13);
+    data.close();
+    data = await open();
+    assert.equal(data.beginCaller(callerRow('after-applied-capacity')).created, true);
+    assert.equal(data.callers().length, 128);
+    assert.equal(data.caller('applied-0')?.phase, 'applied');
+    assert.equal(data.beginCaller(callerRow('applied-0')).created, false);
+    for (let i = 0; i < 128; i++) data.clearCaller(`applied-${i}`);
+    data.finishCaller('after-applied-capacity', 'rejected');
+    data.clearCaller('after-applied-capacity');
+    const large = '中'.repeat(400000);
+    for (let i = 0; i < 14; i++) data.beginCaller(callerRow(`large-${i}`, large));
+    assert.equal(data.callers().length, 14);
     const largeRequest = data.callers()[0]!.intent.request;
     if (largeRequest.kind !== 'run.start') throw Error('actual_large_kind');
     const fullInput = largeRequest.extensionInputs?.[0]?.input;
@@ -354,10 +359,6 @@ if (mode === 'denied') {
     )
       throw Error('actual_large_input');
     assert.equal(fullInput.full, large);
-    assert.throws(
-      () => data.beginCaller(callerRow('large-overflow', large)),
-      /caller_capacity_exceeded/,
-    );
     for (const row of data.callers()) {
       data.finishCaller(row.intent.request.commandId, 'rejected');
       data.clearCaller(row.intent.request.commandId);

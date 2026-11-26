@@ -201,6 +201,9 @@ export function memoryPrivateData(): PrivateData {
     creations() {
       return [...creations.values()];
     },
+    creation(commandId) {
+      return creations.get(commandId);
+    },
     begin(input) {
       const old = creations.get(input.commandId);
       if (old) {
@@ -238,6 +241,10 @@ export function memoryPrivateData(): PrivateData {
     callers() {
       return [...callers.values()].map((r) => structuredClone(r));
     },
+    caller(commandId) {
+      const row = callers.get(commandId);
+      return row ? structuredClone(row) : undefined;
+    },
     beginCaller(row) {
       const value = validateCallerRecord(row),
         old = callers.get(value.intent.request.commandId);
@@ -246,7 +253,6 @@ export function memoryPrivateData(): PrivateData {
           throw Error('caller_intent_conflict');
         return { created: false, value: old };
       }
-      if (callers.size >= 128) throw Error('caller_capacity_exceeded');
       callers.set(value.intent.request.commandId, value);
       return { created: true, value };
     },

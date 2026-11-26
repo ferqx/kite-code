@@ -16,7 +16,6 @@ export type NativeSettingsPage =
   | 'providers'
   | 'mcp'
   | 'skills'
-  | 'trace'
   | 'webSearch';
 
 const categories = {
@@ -25,13 +24,12 @@ const categories = {
   providers: { label: '提供商与模型', icon: 'providers' },
   mcp: { label: 'MCP', icon: 'mcp' },
   skills: { label: '技能', icon: 'skills' },
-  trace: { label: '轨迹与集成', icon: 'mcp' },
   webSearch: { label: '网页搜索', icon: 'webSearch' },
 } as const;
 
 const groups = [
   { label: '应用', pages: ['general', 'appearance'] },
-  { label: '模型与扩展', pages: ['providers', 'mcp', 'skills', 'webSearch', 'trace'] },
+  { label: '模型与扩展', pages: ['providers', 'mcp', 'skills', 'webSearch'] },
 ] as const;
 
 const listNames: Partial<Record<NativeSettingsPage, string>> = {

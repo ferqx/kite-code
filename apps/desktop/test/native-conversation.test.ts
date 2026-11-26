@@ -13,7 +13,7 @@ import {
   type Message,
   type PermissionMutation,
 } from '@kite-ai/client';
-import { callerTextDigest } from '../electron/caller-journal';
+import { callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import type { NativeConversationResult, NativeDraft, NativeRequest } from '../src/native-bridge';
@@ -999,7 +999,7 @@ test('single preparation draft follows workspace choices and allows no workspace
   }
 });
 
-test('first send binds the saved preparation and clears it only after confirmed creation', async () => {
+test('first send reserves the exact input but keeps preparation through creation and input acceptance', async () => {
   const f = fixture();
   const source = {
     storeId: 'store',
@@ -1025,9 +1025,30 @@ test('first send binds the saved preparation and clears it only after confirmed 
       intent: { ...f.request.intent, commandId: 'valid-preparation-send' },
       preparationRevision: 1,
     });
-    expect(result).toMatchObject({ phase: 'accepted' });
-    expect(consumed).toEqual(['valid-preparation-send']);
-    expect(f.data.read(source).content).toBe('');
+    expect(result).toMatchObject({
+      phase: 'accepted',
+      creation: { input: { firstInputCommandId: 'valid-preparation-send' }, phase: 'created' },
+    });
+    const getCommand = f.port.getCommand.bind(f.port);
+    f.port.getCommand = async (id, options) => {
+      const command = await getCommand(id, options);
+      return id === 'valid-preparation-send'
+        ? {
+            ...command,
+            status: 'rejected',
+            receipt: { reason: 'fixture_rejected' },
+          }
+        : command;
+    };
+    expect(
+      await f.caller.invoke({
+        method: 'conversation.lookup',
+        generation: 1,
+        commandId: 'valid-preparation-send',
+      }),
+    ).toMatchObject({ phase: 'failed', code: 'fixture_rejected' });
+    expect(consumed).toEqual([]);
+    expect(f.data.read(source).content).toBe(text);
     expect(f.counts()).toMatchObject({ creates: 1, starts: 1 });
   } finally {
     await f.close();
@@ -1062,6 +1083,155 @@ test('unknown first creation retains the preparation and lookup never clears or 
     expect(f.data.read(source).content).toBe(text);
     expect(consumed).toBe(0);
   } finally {
+    await f.close();
+  }
+});
+
+test('concurrent first sends share the original receipt and reserve its preparation revision until application', async () => {
+  const f = fixture();
+  const source = {
+    storeId: 'store',
+    workspaceId: 'new-conversation',
+    rootSessionId: 'new-conversation',
+  };
+  f.data.consumePreparation = () => {};
+  try {
+    await f.ready();
+    f.data.save(source, 0, text);
+    f.holdCreate();
+    const request = { ...f.request, preparationRevision: 1 };
+    const first = f.caller.invoke(request);
+    const duplicate = f.caller.invoke(request);
+    const concurrent = {
+      ...request,
+      creation: { ...request.creation, commandId: 'other-create', sessionId: 'other-session' },
+      intent: { ...request.intent, commandId: 'other-input' },
+    };
+    expect(await f.caller.invoke(concurrent)).toMatchObject({
+      phase: 'failed',
+      code: 'conversation_submission_pending',
+    });
+    for (let attempt = 0; attempt < 50 && !f.counts().creates; attempt++)
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(f.counts().creates).toBe(1);
+    f.releaseCreate();
+    expect(await first).toMatchObject({ phase: 'accepted' });
+    expect(await duplicate).toEqual(await first);
+    expect(await f.caller.invoke(concurrent)).toMatchObject({
+      phase: 'failed',
+      code: 'conversation_submission_pending',
+    });
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 1 });
+    expect(f.data.creation('other-create')).toBeUndefined();
+    expect(f.data.read(source).content).toBe(text);
+  } finally {
+    f.releaseCreate();
+    await f.close();
+  }
+});
+
+test('switching existing conversations during preparation retires the undispatched input of the old scope', async () => {
+  const f = fixture();
+  const held = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  try {
+    await f.ready();
+    await f.caller.invoke({ method: 'select', generation: 1, sessionId: 'a' });
+    const getView = f.port.getView.bind(f.port);
+    f.port.getView = async (sessionId, options) => {
+      if (sessionId === 'a') {
+        started.resolve();
+        await held.promise;
+      }
+      return getView(sessionId, options);
+    };
+    const sending = f.caller.invoke({
+      method: 'submit',
+      generation: 1,
+      sessionId: 'a',
+      intent: { ...f.request.intent, commandId: 'old-scope' },
+    });
+    await started.promise;
+    await f.caller.invoke({ method: 'select', generation: 1, sessionId: 'b' });
+    held.resolve();
+    expect(await sending).toMatchObject({
+      sessionId: 'a',
+      phase: 'failed',
+      error: 'native_selection_changed',
+    });
+    expect(f.data.caller('old-scope')?.phase).toBe('rejected');
+    expect(
+      await f.caller.invoke({
+        method: 'submit',
+        generation: 1,
+        sessionId: 'b',
+        intent: { ...f.request.intent, commandId: 'new-scope' },
+      }),
+    ).toMatchObject({ sessionId: 'b', phase: 'accepted' });
+    expect(f.counts().starts).toBe(1);
+  } finally {
+    held.resolve();
+    await f.close();
+  }
+});
+
+test('a concurrent read of a prepared input cannot revoke its sole dispatch authority', async () => {
+  const f = fixture();
+  try {
+    const journal = new NativeCallerJournal(f.port, f.data);
+    const { intent } = f.request;
+    await journal.prepare('a', intent);
+    await expect(journal.lookup(intent.commandId)).rejects.toThrow('caller_submission_pending');
+    expect(f.data.caller(intent.commandId)?.phase).toBe('submitting');
+    const sending = journal.submit(intent.commandId);
+    expect(await journal.lookup(intent.commandId)).toEqual(await sending);
+    expect(f.counts()).toMatchObject({ creates: 0, starts: 1 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('existing conversations accept independent in-flight inputs without moving a later selection or changing either receipt', async () => {
+  const f = fixture();
+  const posted = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  try {
+    await f.ready();
+    await f.caller.invoke({ method: 'select', generation: 1, sessionId: 'a' });
+    const startRun = f.port.startRun.bind(f.port);
+    f.port.startRun = async (sessionId, input, options) => {
+      const receipt = await startRun(sessionId, input, options);
+      if (sessionId === 'a') {
+        posted.resolve();
+        await release.promise;
+      }
+      return receipt;
+    };
+    const send = (sessionId: string) =>
+      f.caller.invoke({
+        method: 'submit',
+        generation: 1,
+        sessionId,
+        intent: { ...f.request.intent, commandId: `input-${sessionId}` },
+      });
+    const first = send('a');
+    await posted.promise;
+    await f.caller.invoke({ method: 'select', generation: 1, sessionId: 'b' });
+    expect(await send('b')).toMatchObject({
+      phase: 'accepted',
+      command: { id: 'input-b', sessionId: 'b' },
+    });
+    release.resolve();
+    expect(await first).toMatchObject({
+      phase: 'accepted',
+      command: { id: 'input-a', sessionId: 'a' },
+    });
+    expect(f.caller.state().selection?.session.id).toBe('b');
+    expect(f.data.caller('input-a')?.phase).toBe('accepted');
+    expect(f.data.caller('input-b')?.phase).toBe('accepted');
+    expect(f.counts().starts).toBe(2);
+  } finally {
+    release.resolve();
     await f.close();
   }
 });

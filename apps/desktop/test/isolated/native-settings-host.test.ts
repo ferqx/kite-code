@@ -290,6 +290,16 @@ test('settings projection drops other stores, raw MCP add secrets and arbitrary 
   } satisfies NativeUserMcpSubmission;
   const input = { ...state, userMcpSubmissions: [raw, { ...raw, storeId: 'other' }] };
   expect(isNativeSettingsRequest({ method: 'store.backup', generation: 12 })).toBeFalse();
+  expect(
+    isNativeSettingsRequest({
+      method: 'trace.manage',
+      generation: 12,
+      operation: { kind: 'list' },
+    }),
+  ).toBeFalse();
+  expect(
+    isNativeSettingsReply({ ok: true, value: { kind: 'trace.installations', installations: [] } }),
+  ).toBeFalse();
   expect(isNativeSettingsState(input)).toBeFalse();
   const projected = projectNativeSettingsState(input);
   expect(isNativeSettingsState(projected)).toBeTrue();

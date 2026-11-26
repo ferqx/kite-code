@@ -20,7 +20,6 @@ import { NativeSettingsLayout, type NativeSettingsPage } from './native-settings
 import { NativeSettingsSelect } from './native-settings-select';
 import { NativeSkillsSettings } from './native-skills-settings';
 import type { ThemePreference } from './native-theme';
-import { NativeTraceSettings } from './native-trace-settings';
 import { NativeBoundWebSearchSettings } from './native-web-search-settings';
 import './native-settings-workspace.css';
 
@@ -176,20 +175,6 @@ export function NativeSettingsWorkspace({
                     description="跟随模型与提供商，无需单独配置。"
                   />
                   <p role="status">当前连接不支持网页搜索设置。</p>
-                </section>
-              )
-            ) : page === 'trace' ? (
-              storeId ? (
-                <NativeTraceSettings
-                  bridge={bridge}
-                  generation={generation}
-                  storeId={storeId}
-                  selection={selection}
-                />
-              ) : (
-                <section className="general-settings" aria-label="Trace 设置">
-                  <NativeSettingsHeading title="轨迹与集成" description="管理执行轨迹的导出。" />
-                  <p role="status">连接可用的本机数据后管理轨迹集成。</p>
                 </section>
               )
             ) : page === 'skills' ? (

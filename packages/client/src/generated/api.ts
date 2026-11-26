@@ -3795,6 +3795,7 @@ export type CreateSessionRequest = {
   sessionId: string;
   workspaceId: string;
   title: string;
+  firstInputCommandId?: string;
 };
 export type ResumeRunRequest = {
   kind: 'run.resume';

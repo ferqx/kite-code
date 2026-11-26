@@ -713,6 +713,7 @@ export interface Store {
       sessionId: string;
       workspaceId: string;
       title: string;
+      firstInputCommandId?: string;
       subjectId: string;
     },
     desktopShell?: import('./types').DesktopShellBackend,

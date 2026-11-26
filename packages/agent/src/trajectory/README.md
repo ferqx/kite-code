@@ -4,7 +4,7 @@
 
 2026-11-10节点内容补齐：[公开交互投影](evidence-projection.ts)从原已封存request.schema的唯一object表单分支提取问题标识、题干与const选项；显式questions按同一有限白名单保留。审批options只保原label／description或原presentation.label／details以及准确optionId，不公开scope／grant／permission／proof。原answer.answers可以为对象、数组或标量，不因不是数组而丢弃；null不是取消证明。公开字段沿既有interaction准入，无新类别、协议或工具版本，不能用当前工具schema补旧问题。原schema歧义或缺字段保持缺失，准确答案原值继续保留。
 
-同日完整 Native 对话复核补充：writer 仅由准确原 `Command.kind=authorization.check` 且无 Run 的 Model 封存既有 `display.operation=review`，不要求该 Command 另有规范事件，也不按模型名猜审批。公开压缩 Context 只从原 compression／compression_pending 投影覆盖上界与摘要发布消息序号，发布 0 保留为未发布；不将其混为全局事件游标。待答审批仅对准确原 `shell.execute@1` 提取 command／workdir 及有限文件、网络请求范围，不公开 env、grant、策略或凭据；未知工具和版本不猜动作。Context／Interaction 的 partial 表示有限公开预览，不代表生成仍在进行。真实 SQLite 审批分类 3 项97断言、Context／Interaction 投影 10项56断言通过；完整 Native 过程与客户端范围见[Desktop owner](../../../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)。
+同日完整 Native 对话复核补充：writer 仅由准确原 `Command.kind=authorization.check` 且无 Run 的 Model 封存既有 `display.operation=review`，不要求该 Command 另有规范事件，也不按模型名猜审批。公开压缩 Context 只从原 compression／compression_pending 投影覆盖上界与摘要发布消息序号，发布 0 保留为未发布；不将其混为全局事件游标。待答审批仅对准确原 `shell.execute@1` 提取 command／workdir 及有限文件、网络请求范围，不公开 env、grant、策略或凭据；未知工具和版本不猜动作。Context／Interaction 的 partial 表示有限公开预览，不代表生成仍在进行。真实 SQLite 审批分类 3 项97断言、Context／Interaction 投影 10项56断言通过；完整 Native 过程与客户端范围见[Desktop owner](../../../../apps/desktop/README.md#执行轨迹与离线窗口)。
 
 [原事务 writer](../storage/sqlite/trajectory-facts.ts)在原 `change_event.trajectory_fact_json` 封存规范事件及私有材料检查点；[Reader](../storage/sqlite/trajectory-reader.ts)只解释这些封存值，不从当前业务行补旧状态。当前 Store 是读取准入，事件的 `origin` 是原提交出处；恢复后两者可不同，eventId 保持原摘要。旧格式以当前 Store 的兼容命名空间生成 `legacy_local` 身份，不跨恢复副本去重。
 

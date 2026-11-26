@@ -1927,6 +1927,13 @@ export class NativeCaller {
     const saved = this.requirePrivateData().begin(structuredClone(input));
     const pending = this.creating.get(input.commandId);
     if (pending) return pending;
+    for (const [id, creation] of this.creations)
+      if (
+        id !== input.commandId &&
+        !this.creating.has(id) &&
+        (creation.phase === 'created' || creation.phase === 'rejected')
+      )
+        this.creations.delete(id);
     if (!saved.created) {
       this.creations.set(input.commandId, saved.value);
       return Promise.resolve(saved.value);
@@ -1970,7 +1977,7 @@ export class NativeCaller {
     return work;
   }
   private async lookupCreation(commandId: string): Promise<NativeCreation> {
-    const original = this.creations.get(commandId);
+    const original = this.creations.get(commandId) ?? this.requirePrivateData().creation(commandId);
     if (!original) throw new ClientError('creation_intent_missing');
     if (original.input.expectedStoreId !== this.client.serverInfo!.storeId)
       throw new ClientError('store_identity_mismatch');
@@ -2311,9 +2318,7 @@ export class NativeCaller {
         } finally {
           this.changed();
         }
-        const row = journal
-          .records()
-          .find((item) => item.intent.request.commandId === intent.commandId)!;
+        const row = journal.record(intent.commandId)!;
         result = this.callerMetadata(row);
         break;
       }
@@ -3671,9 +3676,7 @@ export class NativeCaller {
       }
       case 'caller.submit':
       case 'caller.lookup': {
-        const stored = this.requireCaller()
-          .records()
-          .find((row) => row.intent.request.commandId === request.commandId);
+        const stored = this.requireCaller().record(request.commandId);
         if (
           request.method === 'caller.submit' &&
           stored &&
@@ -3685,9 +3688,7 @@ export class NativeCaller {
           throw new ClientError('workspace_identity_unavailable');
         let verified = true;
         try {
-          const original = this.requireCaller()
-            .records()
-            .find((row) => row.intent.request.commandId === request.commandId);
+          const original = this.requireCaller().record(request.commandId);
           if (
             request.method === 'caller.submit' &&
             original?.intent.request.kind !== 'extension.invoke'
@@ -3697,9 +3698,7 @@ export class NativeCaller {
         } catch {
           verified = false;
         }
-        const row = this.requireCaller()
-          .records()
-          .find((r) => r.intent.request.commandId === request.commandId);
+        const row = this.requireCaller().record(request.commandId);
         if (!row) throw new ClientError('caller_intent_missing');
         result = {
           ...this.callerMetadata(row),
@@ -3712,9 +3711,7 @@ export class NativeCaller {
         result = null;
         break;
       case 'caller.body': {
-        const row = this.requireCaller()
-          .records()
-          .find((r) => r.intent.request.commandId === request.commandId);
+        const row = this.requireCaller().record(request.commandId);
         if (!row) throw new ClientError('caller_intent_missing');
         let read = this.callerReads.get(request.readId);
         if (!read) {
@@ -3891,9 +3888,7 @@ export class NativeCaller {
             this.input.submissions.some(
               (row) => row.intent.commandId === request.intent.commandId,
             ) ||
-            this.requireCaller()
-              .records()
-              .some((row) => row.intent.request.commandId === request.intent.commandId)
+            this.requireCaller().record(request.intent.commandId)
           )
             throw error;
           const code = (error as { code?: string })?.code ?? (error as Error)?.message;
@@ -3929,22 +3924,35 @@ export class NativeCaller {
               draftProof = nativeDraftProof(saved);
           }
         }
-        const prepared = await this.requireCaller().prepare(
+        const journal = this.requireCaller();
+        const prepared = await journal.prepare(
           request.sessionId,
           intent,
           draftProof,
           localSourceCheck,
         );
-        bindAttachments?.(intent.commandId);
-        if (intent.kind !== 'input.steer' && intent.modelId)
-          this.requirePrivateData().rememberModelRoute(
-            intent.expectedStoreId,
-            request.sessionId,
-            intent.modelId,
-          );
-        this.assertGeneration(generation);
-        if (originalSelection !== this.selection || this.selected !== request.sessionId)
-          throw new ClientError('native_selection_changed');
+        try {
+          this.assertGeneration(generation);
+          if (originalSelection !== this.selection || this.selected !== request.sessionId)
+            throw new ClientError('native_selection_changed');
+          bindAttachments?.(intent.commandId);
+          if (intent.kind !== 'input.steer' && intent.modelId)
+            this.requirePrivateData().rememberModelRoute(
+              intent.expectedStoreId,
+              request.sessionId,
+              intent.modelId,
+            );
+        } catch (cause) {
+          if (!journal.rejectUndispatched(intent.commandId)) throw cause;
+          const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+          result = inputMetadata({
+            sessionId: request.sessionId,
+            intent,
+            phase: 'failed',
+            error: /^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code : 'input_preparation_failed',
+          });
+          break;
+        }
         result = inputMetadata(
           intent.kind === 'run.start'
             ? await this.input.start(request.sessionId, intent)
@@ -3988,9 +3996,7 @@ export class NativeCaller {
       }
       case 'cancelInput': {
         const journal = this.requireCaller(),
-          original = journal
-            .records()
-            .find((r) => r.intent.request.commandId === request.commandId);
+          original = journal.record(request.commandId);
         if (
           !original ||
           ['command.cancel', 'execution.cancel'].includes(original.intent.request.kind)
@@ -4020,7 +4026,7 @@ export class NativeCaller {
         try {
           await journal.submit(id);
         } catch {}
-        const row = journal.records().find((r) => r.intent.request.commandId === id);
+        const row = journal.record(id);
         if (!row) throw new ClientError('caller_intent_missing');
         result = this.callerMetadata(row);
         break;

@@ -19155,6 +19155,12 @@
       "title": {
         "type": "string",
         "maxLength": 512
+      },
+      "firstInputCommandId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
       }
     },
     "required": ["expectedStoreId", "commandId", "sessionId", "workspaceId", "title"],

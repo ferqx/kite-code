@@ -116,6 +116,7 @@ export type PrivateData = NativeScheduledTaskData &
     list(after?: string): { drafts: Omit<NativeDraft, 'content'>[]; nextId: string | null };
     readId(id: string): NativeDraft;
     creations(): NativeCreation[];
+    creation(commandId: string): NativeCreation | undefined;
     begin(input: NativeCreation['input']): { created: boolean; value: NativeCreation };
     finish(commandId: string, phase: NativeCreation['phase'], code?: string): NativeCreation;
     recoveries(): NativeRecoveryIntent[];
@@ -126,6 +127,7 @@ export type PrivateData = NativeScheduledTaskData &
       error?: string,
     ): NativeRecoveryIntent;
     callers(): NativeCallerRecord[];
+    caller(commandId: string): NativeCallerRecord | undefined;
     beginCaller(input: NativeCallerRecord): { created: boolean; value: NativeCallerRecord };
     finishCaller(commandId: string, phase: NativeCallerRecord['phase']): NativeCallerRecord;
     clearCaller(commandId: string): void;
@@ -133,6 +135,11 @@ export type PrivateData = NativeScheduledTaskData &
   } & NativeConfigurationData &
   NativeUserMcpData;
 const require = createRequire(import.meta.url);
+// Applied ordinary inputs remain queryable by identity without occupying an admission slot.
+const appliedOrdinary = `CASE WHEN json_valid(state) THEN COALESCE(
+  json_extract(state,'$.phase')='applied'
+    AND json_extract(state,'$.intent.request.kind') IN ('run.start','input.follow_up','input.steer'),
+  0) ELSE 0 END`;
 const identity = (scope: DraftScope) =>
   createHash('sha256').update(JSON.stringify(scope)).digest('hex');
 function failure(): never {
@@ -384,6 +391,10 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       'SELECT id,store_id,workspace_id,root_session_id,revision,content FROM drafts LIMIT 0',
     ).all();
     db.prepare('SELECT command_id,input,phase,code FROM creations LIMIT 0').all();
+    db.exec(`CREATE INDEX IF NOT EXISTS caller_intents_pending ON caller_intents(command_id)
+      WHERE NOT (${appliedOrdinary})`);
+    db.exec(`CREATE INDEX IF NOT EXISTS caller_intents_invalid ON caller_intents(command_id)
+      WHERE NOT json_valid(state)`);
     db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;');
     if (process.platform === 'win32') verifyWindowsPrivateUi(access);
   } catch {
@@ -558,35 +569,49 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     }
     return rows;
   }
+  function callerRecord(row: Record<string, unknown>): NativeCallerRecord {
+    if (typeof row.state !== 'string') throw Error('caller_storage_unavailable');
+    const value = validateCallerRecord(JSON.parse(row.state));
+    if (
+      (value.intent.request.kind === 'extension.invoke' ||
+        (value.intent.request.kind === 'input.steer' &&
+          value.intent.request.queuedInputCommandId !== undefined)) &&
+      Number(database().prepare('PRAGMA user_version').get()!.user_version) < 9
+    )
+      throw Error('caller_storage_unavailable');
+    if (value.intent.request.commandId !== row.command_id)
+      throw Error('caller_storage_unavailable');
+    return value;
+  }
+  function caller(commandId: string) {
+    const row = database()
+      .prepare('SELECT command_id,state FROM caller_intents WHERE command_id=?')
+      .get(commandId);
+    return row ? callerRecord(row) : undefined;
+  }
   function callerRows() {
     const rows: NativeCallerRecord[] = [];
     let bytes = 0;
     for (const row of database()
-      .prepare('SELECT command_id,state FROM caller_intents ORDER BY command_id')
+      .prepare(
+        `SELECT command_id,state FROM caller_intents WHERE NOT (${appliedOrdinary}) ORDER BY command_id`,
+      )
       .iterate()) {
       if (typeof row.state !== 'string') throw Error('caller_storage_unavailable');
       bytes += Buffer.byteLength(row.state);
-      if (bytes > 16777216 || rows.length >= 128) throw Error('caller_capacity_exceeded');
-      const value = validateCallerRecord(JSON.parse(row.state));
-      if (
-        (value.intent.request.kind === 'extension.invoke' ||
-          (value.intent.request.kind === 'input.steer' &&
-            value.intent.request.queuedInputCommandId !== undefined)) &&
-        Number(database().prepare('PRAGMA user_version').get()!.user_version) < 9
-      )
-        throw Error('caller_storage_unavailable');
-      if (value.intent.request.commandId !== row.command_id)
-        throw Error('caller_storage_unavailable');
-      rows.push(value);
+      rows.push(callerRecord(row));
+    }
+    for (const row of database()
+      .prepare(`SELECT command_id,state FROM caller_intents WHERE (${appliedOrdinary})
+          ORDER BY rowid DESC LIMIT ?`)
+      .iterate(Math.max(0, 128 - rows.length))) {
+      if (typeof row.state !== 'string') throw Error('caller_storage_unavailable');
+      bytes += Buffer.byteLength(row.state);
+      if (bytes > 16777216) break;
+      rows.push(callerRecord(row));
     }
     return rows;
   }
-  const callerBytes = () =>
-    Number(
-      database()
-        .prepare('SELECT COALESCE(SUM(length(CAST(state AS BLOB))),0) AS n FROM caller_intents')
-        .get()!.n,
-    );
   function answerRows(): NativeAnswerRecord[] {
     const rows: NativeAnswerRecord[] = [];
     let bytes = 0;
@@ -714,7 +739,13 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     if (
       !input ||
       Object.keys(input).sort().join(',') !==
-        'commandId,expectedStoreId,sessionId,title,workspaceId' ||
+        (input.firstInputCommandId === undefined
+          ? 'commandId,expectedStoreId,sessionId,title,workspaceId'
+          : 'commandId,expectedStoreId,firstInputCommandId,sessionId,title,workspaceId') ||
+      (input.firstInputCommandId !== undefined &&
+        (typeof input.firstInputCommandId !== 'string' ||
+          !/^[A-Za-z0-9_-]{1,128}$/.test(input.firstInputCommandId) ||
+          input.firstInputCommandId === input.commandId)) ||
       [input.commandId, input.expectedStoreId, input.workspaceId, input.sessionId].some(
         (value) => typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value),
       ) ||
@@ -839,7 +870,16 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     if (!saved.content && !saved.browserAnnotations?.length) return withConsumption(saved);
     // Older clients kept accepted input as a saved draft. Reconcile only its exact proof;
     // opening history performs no command lookup, retry or new submission.
-    const accepted = callerRows().find((record) => submittedDraft(record, saved));
+    const accepted = [
+      ...database()
+        .prepare(`SELECT command_id,state FROM caller_intents
+        WHERE CASE WHEN json_valid(state) THEN json_extract(state,'$.intent.draft.id')=?
+          AND json_extract(state,'$.intent.draft.revision')=?
+          AND json_extract(state,'$.phase') IN ('accepted','applied') ELSE 0 END`)
+        .iterate(saved.id, String(saved.revision)),
+    ]
+      .map(callerRecord)
+      .find((record) => submittedDraft(record, saved));
     if (!accepted) return withConsumption(saved);
     let consumed: DraftConsumption | undefined;
     const result = transaction(() => {
@@ -1131,8 +1171,12 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           retained.content !== target.content ||
           retained.browserAnnotations?.length ||
           retained.outputFiles?.length
-        )
-          throw Error('draft_revision_conflict');
+        ) {
+          // The applied receipt may already have consumed the target copy.
+          const receipt = caller(commandId);
+          if (!receipt || receipt.phase !== 'applied' || !submittedDraft(receipt, target))
+            throw Error('draft_revision_conflict');
+        }
         const source = readDraft(scope);
         // Creation owns only the exact preparation. Later edits remain in their own revision.
         if (source.revision !== revision) return;
@@ -1217,11 +1261,13 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     },
     creations() {
       return database()
-        .prepare(
-          "SELECT * FROM creations WHERE phase IN ('pending','unknown') ORDER BY command_id LIMIT 128",
-        )
+        .prepare("SELECT * FROM creations WHERE phase IN ('pending','unknown') ORDER BY command_id")
         .all()
         .map(creation);
+    },
+    creation(commandId) {
+      const row = database().prepare('SELECT * FROM creations WHERE command_id=?').get(commandId);
+      return row ? creation(row) : undefined;
     },
     begin(input) {
       return transaction(() => {
@@ -1234,14 +1280,6 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
             throw Error('creation_intent_conflict');
           return { created: false, value };
         }
-        if (
-          Number(
-            database()
-              .prepare("SELECT count(*) AS n FROM creations WHERE phase IN ('pending','unknown')")
-              .get()!.n,
-          ) >= 128
-        )
-          throw Error('creation_capacity_exceeded');
         database()
           .prepare('INSERT INTO creations VALUES(?,?,?,NULL)')
           .run(input.commandId, JSON.stringify(input), 'pending');
@@ -1388,6 +1426,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     callers() {
       return callerRows();
     },
+    caller,
     mcps() {
       return mcpRows().filter((row): row is NativeMcpRecord => row.version === 1);
     },
@@ -1418,18 +1457,18 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       const value = validateCallerRecord(input);
       if (value.phase !== 'submitting') throw Error('caller_intent_conflict');
       return transaction(() => {
-        const rows = callerRows(),
-          old = rows.find((r) => r.intent.request.commandId === value.intent.request.commandId);
+        const old = caller(value.intent.request.commandId);
         if (old) {
           if (callerCanonical(old.intent) !== callerCanonical(value.intent))
             throw Error('caller_intent_conflict');
           return { created: false, value: old };
         }
         if (
-          rows.length >= 128 ||
-          callerBytes() + Buffer.byteLength(JSON.stringify(value)) > 16777216
+          database()
+            .prepare('SELECT 1 FROM caller_intents WHERE NOT json_valid(state) LIMIT 1')
+            .get()
         )
-          throw Error('caller_capacity_exceeded');
+          throw Error('draft_storage_unavailable');
         if (
           (value.intent.request.kind === 'extension.invoke' ||
             (value.intent.request.kind === 'input.steer' &&
@@ -1451,8 +1490,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     finishCaller(commandId, phase) {
       let consumed: DraftConsumption | undefined;
       const result = transaction(() => {
-        const rows = callerRows(),
-          old = rows.find((r) => r.intent.request.commandId === commandId);
+        const old = caller(commandId);
         if (!old) throw Error('caller_intent_missing');
         if (['applied', 'rejected'].includes(old.phase)) {
           consumed = consumeDraft(old);
@@ -1460,19 +1498,6 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           return old;
         }
         const value = validateCallerRecord({ ...old, phase });
-        if (
-          callerBytes() -
-            Buffer.byteLength(
-              String(
-                database()
-                  .prepare('SELECT state FROM caller_intents WHERE command_id=?')
-                  .get(commandId)!.state,
-              ),
-            ) +
-            Buffer.byteLength(JSON.stringify(value)) >
-          16777216
-        )
-          throw Error('caller_capacity_exceeded');
         database()
           .prepare('UPDATE caller_intents SET state=? WHERE command_id=?')
           .run(JSON.stringify(value), commandId);
@@ -1485,7 +1510,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     },
     clearCaller(commandId) {
       transaction(() => {
-        const old = callerRows().find((r) => r.intent.request.commandId === commandId);
+        const old = caller(commandId);
         if (!old || !['applied', 'rejected'].includes(old.phase))
           throw Error('caller_clear_unconfirmed');
         database().prepare('DELETE FROM caller_intents WHERE command_id=?').run(commandId);

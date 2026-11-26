@@ -9,6 +9,7 @@ import type {
   NativeBranchFacts,
   NativeConversationResult,
   NativeCreation,
+  NativeDraft,
   NativeRequest,
 } from '../src/native-bridge';
 import { promptTextForSend } from '../src/prompt-text';
@@ -23,7 +24,9 @@ type Scope = { generation: number; storeId: string };
 type Entry = {
   request: Send;
   result: NativeConversationResult;
+  preparationDraft?: NativeDraft;
   promise?: Promise<NativeConversationResult>;
+  lookup?: Promise<NativeConversationResult>;
 };
 const failureCode = (error: unknown) => {
   const value = (error as { code?: string })?.code ?? (error as Error)?.message;
@@ -192,7 +195,6 @@ export class NativeConversation {
         throw new ClientError('caller_intent_conflict');
       return previous.promise ?? Promise.resolve(structuredClone(previous.result));
     }
-    if (this.sending) throw new ClientError('conversation_submission_pending');
     const prior = [...this.entries.values()].find(
       (entry) => entry.request.creation.commandId === request.creation.commandId,
     );
@@ -206,7 +208,6 @@ export class NativeConversation {
         ))
     )
       throw new ClientError('conversation_original_unresolved');
-    if (this.entries.size >= 128) throw new ClientError('caller_intent_limit');
     const scope = this.current();
     if (!scope || request.generation !== scope.generation)
       throw new ClientError('native_generation_changed');
@@ -216,6 +217,35 @@ export class NativeConversation {
       request.intent.commandId === request.creation.commandId
     )
       throw new ClientError('store_identity_mismatch');
+    if (
+      this.sending ||
+      (request.preparationRevision !== undefined &&
+        [...this.entries.values()].some(
+          (entry) =>
+            entry.request.creation.expectedStoreId === scope.storeId &&
+            entry.request.preparationRevision === request.preparationRevision &&
+            entry.result.phase !== 'failed',
+        ))
+    ) {
+      if (this.data().caller(request.intent.commandId))
+        throw new ClientError('conversation_original_unresolved');
+      return Promise.resolve({
+        kind: 'conversation',
+        commandId: request.intent.commandId,
+        phase: 'failed',
+        stage: 'create',
+        code: 'conversation_submission_pending',
+      });
+    }
+    for (const [commandId, previous] of this.entries)
+      if (
+        !previous.promise &&
+        !previous.lookup &&
+        !previous.preparationDraft &&
+        previous.request.creation.commandId !== request.creation.commandId &&
+        (previous.result.phase === 'failed' || previous.result.input?.command?.status === 'applied')
+      )
+        this.entries.delete(commandId);
     const entry: Entry = {
       request: structuredClone(request),
       result: {
@@ -237,6 +267,7 @@ export class NativeConversation {
   }
   private async perform(entry: Entry, scope: Scope, prior?: Entry) {
     const request = entry.request;
+    let preparedCommand: string | undefined;
     try {
       const path = this.path(request.creation.workspaceId);
       const attachmentData = this.data().attachments;
@@ -272,11 +303,13 @@ export class NativeConversation {
         )
           throw new ClientError('draft_revision_conflict');
       }
-      const savedCreation = this.data()
-        .creations()
-        .find((item) => item.input.commandId === request.creation.commandId);
+      const creationInput =
+        request.preparationRevision === undefined
+          ? request.creation
+          : { ...request.creation, firstInputCommandId: request.intent.commandId };
+      const savedCreation = this.data().creation(request.creation.commandId);
       if (savedCreation && !prior) {
-        if (callerDigest(savedCreation.input) !== callerDigest(request.creation))
+        if (callerDigest(savedCreation.input) !== callerDigest(creationInput))
           throw new ClientError('creation_intent_conflict');
         // Cold/existing creation is evidence to inspect, never permission to continue its writes.
         entry.result = {
@@ -356,7 +389,7 @@ export class NativeConversation {
       let first = false;
       const creation =
         savedCreation ??
-        (await this.create(request.creation, () => {
+        (await this.create(creationInput, () => {
           first = true;
         }));
       entry.result = { ...entry.result, creation };
@@ -369,12 +402,7 @@ export class NativeConversation {
         return structuredClone(entry.result);
       }
       this.check(scope);
-      if (request.preparationRevision !== undefined)
-        this.data().consumePreparation!(
-          request.preparationRevision,
-          draft,
-          request.intent.commandId,
-        );
+      if (creation.input.firstInputCommandId) entry.preparationDraft = draft;
       entry.result = { ...entry.result, stage: 'permission' };
       this.notify();
       await this.controller.selectSession(creation.input.sessionId);
@@ -446,6 +474,7 @@ export class NativeConversation {
         intent,
         nativeDraftProof(draft),
       );
+      preparedCommand = request.intent.commandId;
       bindAttachments?.(request.intent.commandId);
       this.check(scope);
       if (request.intent.modelId)
@@ -465,7 +494,16 @@ export class NativeConversation {
             : 'accepted',
         code: result.error,
       };
+      if (entry.result.phase === 'failed') entry.preparationDraft = undefined;
+      this.consumeAppliedPreparation(entry);
     } catch (error) {
+      if (preparedCommand) {
+        try {
+          this.journal().rejectUndispatched(preparedCommand);
+        } catch {
+          // Storage failure must retain the original journal for later inspection.
+        }
+      }
       const submission =
         entry.result.permissionCommandId &&
         this.controller.permissionSubmissions.find(
@@ -479,15 +517,45 @@ export class NativeConversation {
             : 'failed',
         code: failureCode(error),
       };
+      if (entry.result.phase === 'failed') entry.preparationDraft = undefined;
     }
     return structuredClone(entry.result);
+  }
+  private consumeAppliedPreparation(entry: Entry) {
+    const { preparationDraft, request, result } = entry;
+    if (
+      !preparationDraft ||
+      request.preparationRevision === undefined ||
+      result.input?.command?.status !== 'applied'
+    )
+      return;
+    try {
+      this.data().consumePreparation?.(
+        request.preparationRevision,
+        preparationDraft,
+        result.commandId,
+      );
+      entry.preparationDraft = undefined;
+    } catch {
+      // An optional draft clear cannot change an applied first-input outcome.
+    }
   }
   async lookup(commandId: string) {
     const entry = this.entries.get(commandId);
     if (!entry) throw new ClientError('caller_intent_missing');
     if (entry.promise) return entry.promise;
+    if (entry.lookup) return entry.lookup;
+    if (entry.result.phase === 'failed' || entry.result.input?.command?.status === 'applied')
+      return structuredClone(entry.result);
+    const pending = this.lookupOnce(entry).finally(() => {
+      entry.lookup = undefined;
+    });
+    entry.lookup = pending;
+    return pending;
+  }
+  private async lookupOnce(entry: Entry) {
     if (entry.result.stage === 'input' && entry.result.input) {
-      const input = inputMetadata(await this.input.lookup(commandId));
+      const input = inputMetadata(await this.input.lookup(entry.result.commandId));
       entry.result = {
         ...entry.result,
         input,
@@ -498,6 +566,7 @@ export class NativeConversation {
             : 'accepted',
         code: input.error,
       };
+      this.consumeAppliedPreparation(entry);
     } else if (entry.result.permissionCommandId) {
       const mutation = await this.controller.lookupPermissionMutation(
         entry.result.permissionCommandId,
@@ -517,6 +586,7 @@ export class NativeConversation {
         code: creation.phase === 'created' ? 'conversation_continue_explicit' : creation.code,
       };
     }
+    if (entry.result.phase === 'failed') entry.preparationDraft = undefined;
     this.notify();
     return structuredClone(entry.result);
   }
@@ -527,6 +597,7 @@ export class NativeConversation {
       this.controller.disposeNetwork();
     } finally {
       await Promise.allSettled(this.branchReads);
+      this.entries.clear();
     }
   }
 }

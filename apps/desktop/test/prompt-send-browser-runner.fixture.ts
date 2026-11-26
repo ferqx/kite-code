@@ -505,25 +505,22 @@ async function verifySendFeedback(theme: 'light' | 'dark', width: number) {
     await input.press('Enter');
     await loading.waitFor();
     assert.equal(await alert.count(), 0);
+    const sessionRows = page.locator('.session-row');
+    const before = await sessionRows.count();
+    await page.evaluate(() => window.promptSendFixture.publishFirstPreparation());
+    await page.locator('.message.user.sending').waitFor();
+    assert.equal(await sessionRows.count(), before);
+    assert.equal(await input.getAttribute('aria-label'), '新对话草稿');
     await page.evaluate(() => window.promptSendFixture.rejectFirst());
     await alert.waitFor();
-    assert.match(await alert.innerText(), /本地执行环境尚未就绪/);
+    assert.match(await alert.innerText(), /消息未发送/);
     assert.equal(await loading.count(), 0);
     assert.equal(await input.getAttribute('aria-label'), '新对话草稿');
     assert.equal(await page.locator('.message.user').count(), 0);
     assert.equal(await transcriptNotices.count(), 0);
-    const failureToast = await alert.elementHandle();
-    await page.screenshot({ path: path.join(artifact, `${theme}-${width}-first-failure.png`) });
-    await page.evaluate(() => window.promptSendFixture.releaseFirstSelection());
-    await page.locator('[aria-label="当前会话私有草稿"]').waitFor();
     assert.equal(await promptText(input), '首条消息失败后保留的草稿');
-    assert.equal(
-      await page.evaluate(
-        (node) => node === document.querySelector('.native-toast-card'),
-        failureToast,
-      ),
-      true,
-    );
+    assert.equal(await sessionRows.count(), before);
+    await page.screenshot({ path: path.join(artifact, `${theme}-${width}-first-failure.png`) });
     await page.getByRole('button', { name: 'Session B', exact: true }).click();
     await alert.waitFor({ state: 'detached' });
     assert.equal(await transcriptNotices.count(), 0);
@@ -532,7 +529,7 @@ async function verifySendFeedback(theme: 'light' | 'dark', width: number) {
   } finally {
     await page.close();
   }
-  return { receiptUnconfirmed: true, existingRejection: true, firstRejectionDuringSelection: true };
+  return { receiptUnconfirmed: true, existingRejection: true, firstRejectionWithoutSession: true };
 }
 async function verifySendingInput(theme: 'light' | 'dark', width: number) {
   const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme });

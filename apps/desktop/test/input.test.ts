@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { type AgentClient, ClientError, type Command, type Run } from '@kite-ai/client';
 import { DesktopInput, type InputSubmission } from '../src/input';
 
-test('intent-only transport response loss and a full work cache preserve precise cancellation slots', async () => {
+test('intent-only transport response loss preserves precise cancellation scopes across inputs', async () => {
   let sends = 0,
     cancelSends = 0;
   const commands = new Map<string, Command>();
@@ -41,7 +41,7 @@ test('intent-only transport response loss and a full work cache preserve precise
       return commands.get(id)!;
     },
   } as unknown as AgentClient;
-  const input = new DesktopInput({ admittedClient: client, maxIntents: 1 });
+  const input = new DesktopInput({ admittedClient: client });
   const work = {
     kind: 'run.start' as const,
     expectedStoreId: 'original',
@@ -51,7 +51,7 @@ test('intent-only transport response loss and a full work cache preserve precise
   expect((await input.start('a', work)).phase).toBe('unknown');
   expect((await input.start('a', work)).phase).toBe('unknown');
   expect(sends).toBe(1);
-  expect(() => input.start('b', { ...work, commandId: 'more' })).toThrow('input_intent_limit');
+  expect((await input.start('b', { ...work, commandId: 'more' })).phase).toBe('unknown');
   const cancel = input.cancel('work', 'cancel');
   expect(input.cancel('work', 'different-click')).toBe(cancel);
   expect((await cancel).intent).toMatchObject({
@@ -61,6 +61,72 @@ test('intent-only transport response loss and a full work cache preserve precise
   expect(cancelSends).toBe(1);
   expect((await input.lookup('work')).command?.originStoreId).toBe('original');
   expect((await input.lookup('cancel')).phase).toBe('accepted');
+  input.disposeObserver();
+});
+
+test('ordinary sends retire resolved hot state without a cumulative limit or dropping unknown receipts', async () => {
+  const client = { serverInfo: {} } as AgentClient;
+  const input = new DesktopInput({
+    admittedClient: client,
+    caller: {
+      async submit(sessionId, request) {
+        if (request.commandId === 'unconfirmed') throw Error('receipt_lost');
+        return {
+          id: request.commandId,
+          sessionId,
+          kind: request.kind,
+          originStoreId: request.expectedStoreId,
+          status: 'applied',
+          receipt: null,
+          cancelRequestedAt: null,
+        };
+      },
+      async lookup() {
+        throw Error('unexpected_lookup');
+      },
+    },
+  });
+  const request = { kind: 'run.start', expectedStoreId: 'store', content: 'prompt' } as const;
+  await input.start('session', { ...request, commandId: 'unconfirmed' });
+  for (let ordinal = 0; ordinal < 132; ordinal++)
+    await input.start('session', { ...request, commandId: `input-${ordinal}` });
+  expect(input.submissions.map((record) => [record.intent.commandId, record.phase])).toEqual([
+    ['unconfirmed', 'unknown'],
+    ['input-131', 'applied'],
+  ]);
+  input.disposeObserver();
+  expect(input.submissions).toEqual([]);
+});
+
+test('an independent send preserves an unknown cancellation of an applied input', async () => {
+  const posts: string[] = [];
+  const input = new DesktopInput({
+    admittedClient: { serverInfo: {} } as AgentClient,
+    caller: {
+      async submit(sessionId, intent) {
+        posts.push(intent.commandId);
+        if (intent.kind === 'command.cancel') throw Error('cancel_receipt_lost');
+        return {
+          id: intent.commandId,
+          sessionId,
+          kind: intent.kind,
+          originStoreId: intent.expectedStoreId,
+          status: 'applied',
+          receipt: null,
+          cancelRequestedAt: null,
+        };
+      },
+      async lookup() {
+        throw Error('unexpected_lookup');
+      },
+    },
+  });
+  const request = { kind: 'run.start', expectedStoreId: 'store', content: 'prompt' } as const;
+  await input.start('a', { ...request, commandId: 'work-a' });
+  expect((await input.cancel('work-a', 'cancel-a')).phase).toBe('unknown');
+  await input.start('b', { ...request, commandId: 'work-b' });
+  expect((await input.cancel('work-a', 'second-click')).intent.commandId).toBe('cancel-a');
+  expect(posts).toEqual(['work-a', 'cancel-a', 'work-b']);
   input.disposeObserver();
 });
 

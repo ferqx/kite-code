@@ -35,11 +35,9 @@ if (!reusedUrl)
       lib: {
         entry: path.join(
           directory,
-          process.argv.includes('--settings')
-            ? 'trace-settings-browser.fixture.tsx'
-            : process.argv.includes('--offline')
-              ? 'trajectory-offline-browser.fixture.tsx'
-              : 'trajectory-browser.fixture.tsx',
+          process.argv.includes('--offline')
+            ? 'trajectory-offline-browser.fixture.tsx'
+            : 'trajectory-browser.fixture.tsx',
         ),
         formats: ['es'],
         fileName: 'fixture',
@@ -745,7 +743,7 @@ if (process.argv.includes('--verify')) {
         settledGeometry,
         transparentRowButton,
       });
-    } else if (!process.argv.includes('--settings') && !process.argv.includes('--offline')) {
+    } else if (!process.argv.includes('--offline')) {
       await verifyWorkbench(page);
     } else {
       await page.goto(server.url.href);

@@ -1447,7 +1447,7 @@ try {
       assert.ok(normal.box[0]! < 80, 'return retained the traffic-light horizontal indent');
       assert.equal(normal.overflow, false);
       const settingsNavigation = page.getByRole('navigation', { name: '设置分类', exact: true });
-      const navigationLabels = ['返回应用', '常规', '提供商与模型', 'MCP', '轨迹与集成', 'Skills'];
+      const navigationLabels = ['返回应用', '常规', '提供商与模型', 'MCP', 'Skills'];
       assert.equal(await settingsNavigation.getByRole('button').count(), navigationLabels.length);
       for (const label of navigationLabels) {
         const button = settingsNavigation.getByRole('button', { name: label, exact: true });

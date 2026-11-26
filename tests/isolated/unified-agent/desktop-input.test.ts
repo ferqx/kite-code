@@ -244,12 +244,11 @@ test('wrong Store and stale targets are known failures; late reply retains froze
   }
 }, 15000);
 
-test('disposing the observer during live child work preserves Service execution, and invalid input or capacity does not hide an intent', async () => {
+test('disposing the observer during live child work preserves Service execution and invalid input retains its failure receipt', async () => {
   const f = await fixture();
   const callbacks: InputSubmission[] = [];
   const input = new DesktopInput({
     admittedClient: f.client,
-    maxIntents: 2,
     onSubmission: (state) => callbacks.push(state),
   });
   try {
@@ -281,9 +280,6 @@ test('disposing the observer during live child work preserves Service execution,
         })
       ).command?.id,
     ).toBe('live');
-    expect(() => input.start('b', { ...request, commandId: 'over-capacity' })).toThrow(
-      'input_intent_limit',
-    );
     expect(input.submissions).toHaveLength(2);
     await until(async () => existsSync(join(f.profile.profilePath, 'child-started')));
     const before = callbacks.length;

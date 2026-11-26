@@ -76,6 +76,7 @@ function fixture(
     holdDirectory?: boolean;
     firstHumanInput?: boolean;
     deferFirstRun?: boolean;
+    provisionalFirst?: boolean;
     runs?: Run[];
     storeId?: string;
     contextSelectionId?: string;
@@ -629,9 +630,18 @@ function fixture(
         NativeRequest,
         { method: 'conversation.send' }
       >;
-      if (!sessions.some((item) => item.id === send.creation.sessionId))
+      if (
+        !options.provisionalFirst &&
+        !sessions.some((item) => item.id === send.creation.sessionId)
+      )
         sessions.push(session(send.creation.sessionId));
-      if (confirmed) creationSubmissions.push({ input: send.creation, phase: 'created' });
+      if (confirmed)
+        creationSubmissions.push({
+          input: options.provisionalFirst
+            ? { ...send.creation, firstInputCommandId: send.intent.commandId }
+            : send.creation,
+          phase: 'created',
+        });
       publishDirectory = true;
       await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
       return send;
@@ -682,16 +692,25 @@ function fixture(
     loseNextResponse: () => {
       rejectNext = true;
     },
-    async resolve(phase: 'failed' | 'unknown' | 'accepted', created = true, code?: string) {
+    async resolve(
+      phase: 'failed' | 'unknown' | 'accepted',
+      created = true,
+      code?: string,
+      applied = true,
+    ) {
       const send = [...calls]
         .reverse()
         .find((call) => call.method === 'conversation.send') as Extract<
         NativeRequest,
         { method: 'conversation.send' }
       >;
-      if (created && !sessions.some((item) => item.id === send.creation.sessionId))
+      if (
+        created &&
+        (!options.provisionalFirst || (phase === 'accepted' && applied)) &&
+        !sessions.some((item) => item.id === send.creation.sessionId)
+      )
         sessions.push(session(send.creation.sessionId));
-      if (phase === 'accepted' && !options.deferFirstRun) {
+      if (phase === 'accepted' && applied && !options.deferFirstRun) {
         const runId = `${options.firstHumanInput ? 'processing-run' : 'first-run'}-${send.intent.commandId}`;
         runs.push({
           id: runId,
@@ -746,7 +765,30 @@ function fixture(
           commandId: send.intent.commandId,
           phase,
           stage: created ? 'input' : 'create',
-          creation: { input: send.creation, phase: created ? 'created' : 'unknown' },
+          creation: {
+            input: options.provisionalFirst
+              ? { ...send.creation, firstInputCommandId: send.intent.commandId }
+              : send.creation,
+            phase: created ? 'created' : 'unknown',
+          },
+          ...(options.provisionalFirst && phase === 'accepted'
+            ? {
+                input: {
+                  intent: send.intent,
+                  sessionId: send.creation.sessionId,
+                  phase: applied ? 'applied' : 'accepted',
+                  command: {
+                    id: send.intent.commandId,
+                    kind: send.intent.kind,
+                    originStoreId: send.intent.expectedStoreId,
+                    sessionId: send.creation.sessionId,
+                    status: applied ? 'applied' : 'accepted',
+                    cancelRequestedAt: null,
+                    receipt: null,
+                  },
+                },
+              }
+            : {}),
           code: code ?? (phase === 'failed' ? 'input_rejected' : undefined),
         }),
       );
@@ -3230,7 +3272,6 @@ test('settings overlay the still-painted page without remounting its draft or re
       '提供商与模型',
       'MCP',
       '技能',
-      '轨迹与集成',
     ]);
     for (const button of navigationButtons) {
       expect(button.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(1);
@@ -4274,6 +4315,68 @@ test('a failed first send ends loading and reports through one Toast while the c
   }
 });
 
+test('a rejected provisional first send keeps its preparation and only a successful retry enters the sidebar', async () => {
+  const f = fixture(false, true, 'accept_edits', { provisionalFirst: true });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('retryable provisional input');
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    const original = await f.publishFirstCreation(true);
+    expect(f.host.querySelector('.session-row[aria-label="新对话"]')).toBeNull();
+    expect(f.input('新对话草稿')).toBeDefined();
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    await f.resolve('failed', true, 'caller_capacity_exceeded');
+    await f.until(() => !!f.host.querySelector('.native-toast-card'));
+    expect(f.host.querySelector('.native-toast-card')?.textContent).toContain('消息未发送');
+    expect(f.host.querySelector('.session-row[aria-label="新对话"]')).toBeNull();
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(0);
+    expect(promptValue(f.input('新对话草稿'))).toBe('retryable provisional input');
+    expect(
+      f.calls.some(
+        (call) => call.method === 'select' && call.sessionId === original.creation.sessionId,
+      ),
+    ).toBe(false);
+    await f.click('发送首条消息');
+    const retry = await f.resolve('accepted');
+    await f.until(() => f.selected() === retry.creation.sessionId);
+    expect(retry.creation.sessionId).not.toBe(original.creation.sessionId);
+    expect(f.host.querySelectorAll('.session-row[aria-label="新对话"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('returning from scheduled tasks keeps an accepted first input in preparation until it applies', async () => {
+  const f = fixture(false, true, 'accept_edits', { provisionalFirst: true });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('first input awaiting application');
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    const first = await f.resolve('accepted', true, undefined, false);
+    await f.click('定时任务');
+    await f.click('新对话');
+    expect(f.input('新对话草稿')).toBeDefined();
+    expect(f.host.querySelector('.session-row[aria-label="新对话"]')).toBeNull();
+    expect(
+      f.calls.some(
+        (call) => call.method === 'select' && call.sessionId === first.creation.sessionId,
+      ),
+    ).toBe(false);
+    await f.edit('later draft');
+    expect(
+      f.host.querySelector<HTMLButtonElement>('button[aria-label="发送首条消息"]')?.disabled,
+    ).toBe(true);
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a completed first send preserves the scheduled page and returning enters its original Session directly', async () => {
   const f = fixture();
   try {
@@ -4470,7 +4573,7 @@ test('the first reply starts timing with its Run and keeps its place through dis
     expect(footer.querySelector('time')?.dateTime).toBe(new Date(createdAt).toISOString());
     expect(footer.hasAttribute('data-default-visible')).toBe(false);
     const progress = f.host.querySelector('.agent-turn-running');
-    const turn = progress?.closest('.agent-turn');
+    const turn = progress?.closest('.agent-turn') ?? null;
     expect(progress?.textContent).toMatch(/^进行中 \d+ 秒$/);
     expect(Number(progress?.textContent?.match(/\d+/)?.[0])).toBeGreaterThanOrEqual(4);
     expect(f.host.querySelector('.conversation-turn-notice')).toBeNull();
@@ -4515,11 +4618,9 @@ test('the first reply starts timing with its Run and keeps its place through dis
       },
     };
     await f.publishMessages([input, reasoning], [run]);
-    const summary = f.host.querySelector('button.agent-turn-summary');
-    expect(summary?.closest('.agent-turn') === turn).toBe(true);
-    expect(summary?.getAttribute('aria-expanded')).toBe('false');
-    expect(f.host.querySelector('.conversation-trace-line')).toBeNull();
-    await act(async () => (summary as HTMLButtonElement).click());
+    const summary = f.host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
+    expect(summary.closest('.agent-turn')).toBe(turn);
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
     const thinking = f.host.querySelector('.conversation-trace-line');
     const expandedProgress = f.host.querySelector('.agent-turn-running');
     expect(thinking?.textContent).toBe('思考中');
@@ -4540,6 +4641,10 @@ test('the first reply starts timing with its Run and keeps its place through dis
     expect(f.host.querySelector('.conversation-trace-line')).toBe(thinking);
     const visibleReply = f.host.querySelector('.message.assistant .typeset-chat');
     expect(visibleReply?.textContent).toBe('首段正文');
+    await act(async () => summary.click());
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    expect(f.host.querySelector('.conversation-trace-line')).toBeNull();
+    expect(f.host.querySelector('.message.assistant .typeset-chat')).toBe(visibleReply);
     const terminal: Run = {
       ...run,
       status: 'completed',
@@ -4553,7 +4658,7 @@ test('the first reply starts timing with its Run and keeps its place through dis
     expect(f.host.querySelector('.agent-turn-summary')?.textContent).toBe('用时 9 秒');
     expect(f.host.querySelector('.message.assistant .typeset-chat')).toBe(visibleReply);
     expect(f.host.querySelector('button.agent-turn-summary') === summary).toBe(true);
-    expect(summary?.getAttribute('aria-expanded')).toBe('true');
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
     await f.publishMessages(
       [
         input,
@@ -4564,6 +4669,13 @@ test('the first reply starts timing with its Run and keeps its place through dis
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.agent-turn-final .message-meta .message-time')).not.toBeNull();
     expect(f.host.querySelectorAll('.agent-turn-final .message.assistant')).toHaveLength(1);
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => summary.click());
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('.conversation-trace-line')?.textContent).toBe('已思考');
+    expect(f.host.querySelector('.agent-turn-final .message.assistant .typeset-chat')).toBe(
+      visibleReply,
+    );
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
   } finally {
     await f.close();

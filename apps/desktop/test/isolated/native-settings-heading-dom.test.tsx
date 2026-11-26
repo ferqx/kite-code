@@ -63,16 +63,17 @@ test('all Settings categories render a consistent heading and detail retains its
         />,
       ),
     );
-    for (const [category, title] of [
+    const categories = [
       ['常规', '常规'],
       ['外观', '外观'],
       ['提供商与模型', '提供商与模型'],
       ['MCP', 'MCP'],
       ['技能', 'Skills'],
       ['网页搜索', '网页搜索'],
-      ['轨迹与集成', '轨迹与集成'],
-    ]) {
-      const nav = [...doc.querySelectorAll<HTMLButtonElement>('.native-settings-rail nav button')];
+    ] as const;
+    const nav = [...doc.querySelectorAll<HTMLButtonElement>('.native-settings-rail nav button')];
+    expect(nav.map((button) => button.textContent)).toEqual(categories.map(([label]) => label));
+    for (const [category, title] of categories) {
       const item = nav.find((button) => button.textContent === category);
       expect(item).toBeDefined();
       await act(async () => item?.click());

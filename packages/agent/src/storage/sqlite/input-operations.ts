@@ -7,6 +7,7 @@ import { validateAgentSource } from './agent-input-operations';
 import { hasPendingAgentMail, sealParentAgentMailAdoption } from './agent-mail-operations';
 import { assertInputImages } from './artifact-operations';
 import { filter, selected } from './context-selection-operations';
+import { publishedSessionCreation } from './directory';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import {
   assertHumanBusinessInput,
@@ -49,6 +50,19 @@ export function validateInputAdmission(
   trustedChild = false,
 ) {
   const value = input.request;
+  const unpublished = db.row(
+    `SELECT c.subject_id,json_extract(c.request_json,'$.firstInputCommandId') AS first_id
+      FROM session s JOIN command c ON c.session_id=s.id AND c.kind='session.create'
+      WHERE s.id=? AND NOT ${publishedSessionCreation}`,
+    input.sessionId,
+  );
+  if (
+    unpublished &&
+    (input.subjectId !== unpublished.subject_id ||
+      input.commandId !== unpublished.first_id ||
+      value.kind !== 'run.start')
+  )
+    throw new AgentError('session_not_found');
   if (
     ['run.start', 'input.steer', 'input.follow_up'].includes(value.kind) &&
     'files' in value &&

@@ -146,9 +146,6 @@
   align-items: center;
   gap: 8px;
 }
-.kite-client .native-settings-layout .native-settings-trace > :not(.native-settings-heading) + * {
-  margin-block-start: 20px;
-}
 .kite-client .native-settings-layout .right-sidebar-editor-body {
   padding: 20px var(--settings-page-gutter);
 }

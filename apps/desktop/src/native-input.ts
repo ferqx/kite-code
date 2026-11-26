@@ -74,6 +74,10 @@ export function nativeInputErrorText(phase: 'failed' | 'unknown', reason?: strin
     return '当前项目还有任务在运行，消息未发送。请等待任务结束后再切换分支。';
   if (reason === 'draft_changed_before_send')
     return '草稿在发送前已更新，消息没有发送。请确认当前内容后重新发送。';
+  if (reason === 'caller_capacity_exceeded')
+    return '本机暂时无法保存新的发送记录，消息未发送。请保留草稿，稍后重试。';
+  if (reason === 'conversation_submission_pending')
+    return '另一条新对话的首条消息尚未确认。这条消息未发送，草稿已保留。';
   if (
     reason &&
     [

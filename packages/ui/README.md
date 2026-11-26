@@ -775,17 +775,17 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 
 节点详情不再提供原始内容、规范事件JSON或公开字节查看入口；底层原记录与现有导出保持完整。阶段详情不开放私有reasoning、transport、授权或内部continuation。材料目标绑定原event/ref/contentVersion；实际open/read/close、主体与权限epoch、Blob/hash校验由Native owner处理。组件不读取文件、网络、Store或取得执行权限。
 
-[TrajectoryViewState](src/desktop/trajectory/view-state.ts)只保存descriptor、cursor、筛选、坐标、展示行与独立请求选择、各自合法Tab、原观察、折叠、详情宽度／阅读锚点等纯值。行政行用稳定rowId区分同对象的多个原观察，nodeId仍指向原树owner。隐藏、换来源、seek、切观察／Tab或关闭详情释放材料；清除条件不重置原选择和阅读。精确来源与A→B→A迟到结果的门禁归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)。
+[TrajectoryViewState](src/desktop/trajectory/view-state.ts)只保存descriptor、cursor、筛选、坐标、展示行与独立请求选择、各自合法Tab、原观察、折叠、详情宽度／阅读锚点等纯值。行政行用稳定rowId区分同对象的多个原观察，nodeId仍指向原树owner。隐藏、换来源、seek、切观察／Tab或关闭详情释放材料；清除条件不重置原选择和阅读。精确来源与A→B→A迟到结果的门禁归[Desktop owner](../../apps/desktop/README.md#执行轨迹与离线窗口)。
 
 旧格式`unknown/legacy_local`显示“旧记录 · 原sourceEventType”，现行未知来源独立标识；无时间、父关系、入参或正文时保留缺失，不重分类或追补。固定历史上界、新事实提示、显式返回最新以及仅事件／含获准Evidence导出保持原合同。
 
 当前回归入口为[投影](../trajectory/test/projection.test.ts)、[树](test/trajectory-tree.test.ts)、[工作台](test/trajectory-workbench.test.ts)、[详情目标](test/trajectory-workbench-details.test.ts)、[状态](test/trajectory-view-state.test.ts)、[工作台DOM](test/isolated/desktop-trajectory-tree.test.tsx)和[Session标签](test/isolated/desktop-session-tabs.test.tsx)。本轮连续UI过程和实际验收范围统一归Desktop owner；下列2026-11-08记录是此前消息／树页面迭代证据，不授予本轮新布局、参数或typed结果资格。
 
-同日消息上下文迭代，`e8a483d65`加本轮工作树、macOS arm64／Bun1.4.4：七个完整协议／投影／树／状态／reader／材料纯文件71项516断言，树DOM9项266断言，离线DOM9项74断言，Trace设置DOM4项33断言；真实Store／消息Evidence及相关输入、Fork、恢复材料回归93项1086断言，Trace consumer／host32项304断言，共218项2279断言通过。UI／Desktop／Trajectory／Agent／Client／Service类型、UI／Desktop／Trajectory构建、API生成、文档、边界和测试归属检查通过；定向Biome无错误，Runtime未变路径的optional-chain提示保持。真实Store反例另验证未知／损坏wrapper不能向后续消息传播未核实namespace。浏览器连续过程和边界归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)。
+同日消息上下文迭代，`e8a483d65`加本轮工作树、macOS arm64／Bun1.4.4：七个完整协议／投影／树／状态／reader／材料纯文件71项516断言，树DOM9项266断言，离线DOM9项74断言，Trace设置DOM4项33断言；真实Store／消息Evidence及相关输入、Fork、恢复材料回归93项1086断言，Trace consumer／host32项304断言，共218项2279断言通过。UI／Desktop／Trajectory／Agent／Client／Service类型、UI／Desktop／Trajectory构建、API生成、文档、边界和测试归属检查通过；定向Biome无错误，Runtime未变路径的optional-chain提示保持。真实Store反例另验证未知／损坏wrapper不能向后续消息传播未核实namespace。浏览器连续过程和边界归[Desktop owner](../../apps/desktop/README.md#执行轨迹与离线窗口)。
 
-同日默认四类过滤迭代，macOS arm64／Bun1.4.4：六个完整协议／投影／树／状态／reader纯文件60项449断言、树DOM8项204断言、标签DOM30项401断言、离线DOM9项74断言、四个真实Store隔离文件26项268断言，共133项1396断言通过。覆盖精确标题子树排除、旧分类不猜测、10,000层父链、默认根匹配分页和未决读取期间切换全量保留所选工具／Tab。UI／Desktop／Trajectory及相关Agent／Client／Service类型通过，定向Biome、UI／Desktop／Trajectory构建、API生成核对、文档、边界和测试归属检查通过。受控浏览器全过程及资格边界归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)。
+同日默认四类过滤迭代，macOS arm64／Bun1.4.4：六个完整协议／投影／树／状态／reader纯文件60项449断言、树DOM8项204断言、标签DOM30项401断言、离线DOM9项74断言、四个真实Store隔离文件26项268断言，共133项1396断言通过。覆盖精确标题子树排除、旧分类不猜测、10,000层父链、默认根匹配分页和未决读取期间切换全量保留所选工具／Tab。UI／Desktop／Trajectory及相关Agent／Client／Service类型通过，定向Biome、UI／Desktop／Trajectory构建、API生成核对、文档、边界和测试归属检查通过。受控浏览器全过程及资格边界归[Desktop owner](../../apps/desktop/README.md#执行轨迹与离线窗口)。
 
-同日按用户确认的树与三个 Tab 改造后，`e8a483d65` 加本轮工作树、macOS arm64／Bun1.4.4：共享树、状态与协议／reader回归53项／302断言，完整标签 DOM 30项／401断言，树 DOM 6项／105断言，离线 DOM 9项／74断言，共98项／882断言通过。树 DOM 包含真实组件10,000层执行链的完整节点、原事件、真实父身份和层级；首次／重开读取未决时保持原 Tab，用加载占位替代根节点和零记录闪现，索引到达后恢复原选择与滚动。UI类型636文件、Desktop类型1,392文件通过；UI／Desktop构建、定向Biome、文档、API、边界和测试归属检查通过。实际编译Chrome156隔离页面的连续操作与范围归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)，不将旧列表布局的Native窗口画面作为本次树界面的像素验收。
+同日按用户确认的树与三个 Tab 改造后，`e8a483d65` 加本轮工作树、macOS arm64／Bun1.4.4：共享树、状态与协议／reader回归53项／302断言，完整标签 DOM 30项／401断言，树 DOM 6项／105断言，离线 DOM 9项／74断言，共98项／882断言通过。树 DOM 包含真实组件10,000层执行链的完整节点、原事件、真实父身份和层级；首次／重开读取未决时保持原 Tab，用加载占位替代根节点和零记录闪现，索引到达后恢复原选择与滚动。UI类型636文件、Desktop类型1,392文件通过；UI／Desktop构建、定向Biome、文档、API、边界和测试归属检查通过。实际编译Chrome156隔离页面的连续操作与范围归[Desktop owner](../../apps/desktop/README.md#执行轨迹与离线窗口)，不将旧列表布局的Native窗口画面作为本次树界面的像素验收。
 
 2026-11-08，本机 macOS／Bun1.4.4，完整[标签页 DOM 回归](test/isolated/desktop-session-tabs.test.tsx)和[纯值状态回归](test/trajectory-view-state.test.ts)共31 pass／0 fail、406断言，UI类型633文件通过；UI build在本轮轨迹组件边界建立时通过，后续布局与游标修复复验上述DOM及类型。新增断言覆盖8项共享容量、唯一轨迹页、显隐／切scope释放、正式入口、旧游标不展示未来正文、Evidence原版本、超安全整数位置和卸载暂停。此为共享组件与JSDOM验证，完整Native窗口过程及安装／其他平台资格归[Desktop owner](../../apps/desktop/README.md)，不以DOM或最终画面代替。
 

@@ -209,10 +209,8 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
           const refusal = await launch(mode);
           expect(refusal.code).toBe(0);
           const facts = JSON.parse(refusal.out);
-          expect(facts.failure).toBe(
-            mode === 'capacity' ? 'caller_capacity_exceeded' : 'draft_storage_unavailable',
-          );
-          expect(facts.refused).toBe(0);
+          expect(facts.failure).toBe(mode === 'capacity' ? undefined : 'draft_storage_unavailable');
+          expect(facts.refused).toBe(mode === 'capacity' ? 1 : 0);
           if (mode === 'bad-row') expect(facts.retained).toBe('{broken');
           expect(
             readFileSync(wire, 'utf8')

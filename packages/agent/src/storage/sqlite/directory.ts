@@ -15,6 +15,17 @@ import type { Store } from '../port';
 import { AgentError, type Json, type SessionDirectoryActivity } from '../types';
 import type { SqliteOperations } from './operations';
 
+// These aliases refer to the root session and its creation command.
+export const publishedSessionCreation = `(
+  json_type(c.request_json,'$.firstInputCommandId') IS NULL OR EXISTS (
+    SELECT 1 FROM command first_input
+    WHERE first_input.id=json_extract(c.request_json,'$.firstInputCommandId')
+      AND first_input.session_id=s.id AND first_input.origin_store_id=c.origin_store_id
+      AND first_input.subject_id=c.subject_id AND first_input.kind='run.start'
+      AND first_input.status='applied'
+  )
+)`;
+
 function sequence(value: unknown, fallback: string): string {
   if (value === undefined) return fallback;
   if (
@@ -335,7 +346,8 @@ export function readDirectory(
               SELECT s.*,CAST(s.rowid AS TEXT) AS directory_seq FROM session s
               WHERE s.rowid>? AND s.rowid<=? AND s.parent_id IS NULL AND s.delete_requested=0
               AND (? IS NULL OR s.workspace_id=?)
-              AND EXISTS(SELECT 1 FROM command c WHERE c.session_id=s.id AND c.kind='session.create' AND c.subject_id=?)
+              AND EXISTS(SELECT 1 FROM command c WHERE c.session_id=s.id AND c.kind='session.create' AND c.subject_id=?
+                AND ${publishedSessionCreation})
               ORDER BY s.rowid LIMIT ?
             ), latest_message_change AS (
               SELECT e.scope_session_id,MAX(e.cursor) AS cursor FROM change_event e

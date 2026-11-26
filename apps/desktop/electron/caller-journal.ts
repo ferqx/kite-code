@@ -227,6 +227,9 @@ export class NativeCallerJournal {
   records() {
     return this.data.callers();
   }
+  record(commandId: string) {
+    return this.data.caller(commandId);
+  }
   prepare(
     sessionId: string,
     raw: NativeCallerCommandRequest,
@@ -297,7 +300,7 @@ export class NativeCallerJournal {
       !subjectId
     )
       throw Error('caller_scope_unavailable');
-    const existing = this.records().find((r) => r.intent.request.commandId === request.commandId);
+    const existing = this.record(request.commandId);
     if (existing) {
       if (
         callerDigest(existing.intent.scope) !== callerDigest(scope) ||
@@ -375,7 +378,7 @@ export class NativeCallerJournal {
     return saved.value;
   }
   private original(commandId: string) {
-    const row = this.records().find((r) => r.intent.request.commandId === commandId);
+    const row = this.record(commandId);
     if (!row) throw Error('caller_intent_missing');
     return row;
   }
@@ -464,7 +467,9 @@ export class NativeCallerJournal {
     return command;
   }
   async lookup(commandId: string) {
-    this.first.delete(commandId);
+    const pending = this.inflight.get(commandId);
+    if (pending) return pending;
+    if (this.first.has(commandId)) throw new ClientError('caller_submission_pending');
     const row = this.original(commandId);
     if (
       row.intent.request.kind === 'extension.invoke' &&
@@ -546,12 +551,14 @@ export class NativeCallerJournal {
   releaseFirst(commandId: string) {
     this.first.delete(commandId);
   }
+  rejectUndispatched(commandId: string) {
+    if (!this.first.delete(commandId)) return false;
+    this.data.finishCaller(commandId, 'rejected');
+    return true;
+  }
   clear(commandId: string) {
     this.first.delete(commandId);
-    if (
-      this.records().find((row) => row.intent.request.commandId === commandId)?.intent.request
-        .kind === 'extension.invoke'
-    )
+    if (this.record(commandId)?.intent.request.kind === 'extension.invoke')
       return this.clearExtension(commandId);
     return this.data.clearCaller(commandId);
   }

@@ -52,12 +52,19 @@ export interface InputOptions {
   readonly caller?: InputCallerPort;
   readonly admittedClient: AgentClient;
   readonly onSubmission?: (submission: InputSubmission) => void;
-  readonly maxIntents?: number;
 }
 interface Entry {
   state: InputSubmission;
   promise?: Promise<InputSubmission>;
   readGeneration?: number;
+  activeReads: number;
+}
+function settledEntry(entry: Entry) {
+  return (
+    !entry.promise &&
+    !entry.activeReads &&
+    ['applied', 'terminal', 'failed', 'rejected'].includes(entry.state.phase)
+  );
 }
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') {
@@ -81,15 +88,11 @@ export class DesktopInput {
   private readonly entries = new Map<string, Entry>();
   private readonly cancellations = new Map<string, string>();
   private readonly reads = new Set<AbortController>();
-  private readonly limit: number;
   private disposed = false;
 
   constructor(options: InputOptions) {
     this.options = options;
     this.client = options.admittedClient;
-    this.limit = options.maxIntents ?? 128;
-    if (!Number.isSafeInteger(this.limit) || this.limit < 1)
-      throw new Error('invalid_intent_limit');
     if (!this.client.serverInfo) throw new Error('client_not_admitted');
   }
   get submissions(): readonly InputSubmission[] {
@@ -117,15 +120,24 @@ export class DesktopInput {
         throw new Error('input_identity_conflict');
       return prior.promise ?? Promise.resolve(prior.state);
     }
-    // Reserve bounded cancellation identities even when all work-intent slots are occupied.
-    if (
-      input.kind !== 'command.cancel' &&
-      [...this.entries.values()].filter((entry) => entry.state.intent.kind !== 'command.cancel')
-        .length >= this.limit
-    )
-      throw new Error('input_intent_limit');
+    // Keep receipt recovery for outstanding inputs. Definitive deliveries leave the hot view
+    // when the next independent input starts; Main still has the original durable IDs.
+    if (this.options.caller && input.kind !== 'command.cancel') {
+      for (const [id, previous] of this.entries) {
+        if (previous.state.intent.kind === 'command.cancel' || !settledEntry(previous)) continue;
+        const cancellation = this.cancellations.get(id);
+        const pendingCancel = cancellation ? this.entries.get(cancellation) : undefined;
+        if (pendingCancel && !settledEntry(pendingCancel)) continue;
+        this.entries.delete(id);
+        if (cancellation) this.entries.delete(cancellation);
+        this.cancellations.delete(id);
+      }
+    }
     const intent = freeze(structuredClone(input));
-    const entry: Entry = { state: freeze({ sessionId, intent, phase: 'submitting' }) };
+    const entry: Entry = {
+      state: freeze({ sessionId, intent, phase: 'submitting' }),
+      activeReads: 0,
+    };
     this.entries.set(intent.commandId, entry);
     entry.promise = Promise.resolve()
       .then(async () => {
@@ -174,6 +186,13 @@ export class DesktopInput {
       command.kind !== intent.kind
     )
       throw new Error('input_receipt_identity_mismatch');
+    const originalStatus = entry.state.command?.status;
+    if (
+      entry.state.phase === 'terminal' ||
+      ((originalStatus === 'applied' || originalStatus === 'rejected') &&
+        command.status !== originalStatus)
+    )
+      return entry.state;
     return this.publish(entry, {
       ...entry.state,
       command,
@@ -227,6 +246,14 @@ export class DesktopInput {
     if (this.disposed) throw new Error('input_disposed');
     const entry = this.entries.get(commandId);
     if (!entry) throw new Error('input_intent_missing');
+    entry.activeReads++;
+    try {
+      return await this.lookupEntry(commandId, entry);
+    } finally {
+      entry.activeReads--;
+    }
+  }
+  private async lookupEntry(commandId: string, entry: Entry): Promise<InputSubmission> {
     if (entry.promise) await entry.promise;
     if (this.disposed) throw new Error('input_disposed');
     const generation = (entry.readGeneration ?? 0) + 1;
@@ -238,7 +265,9 @@ export class DesktopInput {
         ? this.options.caller.lookup(commandId)
         : this.client.getCommand(commandId, { signal: controller.signal }));
       if (generation !== entry.readGeneration) return entry.state;
-      this.acceptCommand(entry, command);
+      const observed = this.acceptCommand(entry, command);
+      if (observed.phase === 'terminal' || observed.command?.status !== command.status)
+        return observed;
       if (entry.state.intent.kind !== 'command.cancel') {
         const application = await readOrdinaryCommandApplication(this.client, command, {
           signal: controller.signal,
@@ -268,5 +297,7 @@ export class DesktopInput {
     this.disposed = true;
     for (const read of this.reads) read.abort();
     this.reads.clear();
+    this.entries.clear();
+    this.cancellations.clear();
   }
 }

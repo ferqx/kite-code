@@ -2,6 +2,8 @@
 
 2026-11-06，本机 macOS arm64／Bun1.4.4 使用当前配置 DeepSeek `deepseek-v4-flash`、同连接及现有凭据完成[授权性能对照](../../tests/e2e/live/model/README.md#授权复用与审核性能)。准确 scope 的两轮 high 后续调用由每轮2次审核／2张卡降为1次／1张卡，critical 均准确拒绝；14个检查完整完成、零 timeout。已完成检查 total P50/P95：受控旧 medium／10秒为1481/2144ms（n8），新 low／3秒为1502/2127ms（n6）；本批未证明单次模型判定 P50 更快，主要收益来自减少调用。早先 default offline 合成样本的256-token输出不足原失败，以及 sandbox／夹具失败均保留在该测试 owner；危险命令只进入隔离记录适配器，未实际执行，不代表客户端全过程或长期模型／平台资格。
 
+桌面首发可在创建请求中绑定 `firstInputCommandId`。原创建记录允许 Main 按原身份准备权限和附件。Store 只在同会话、同 Store、同主体的首条运行请求已应用后把会话纳入目录。普通会话创建沿原合同。
+
 公开 Session 目录的 `activity.hasCreatedWorktree` 是可选只读历史标记，沿[同源 schema](src/http/schema/index.ts)进入生成 Client／OpenAPI；Service 不检查 Git 或目录，不补写 Session。来源与快照语义由[Store owner](../../packages/agent/src/storage/README.md#目录分页)负责，普通 Native 图标由[Desktop owner](../desktop/README.md#native-项目会话目录)消费；工具／协议版本及目录能力声明保持。
 
 同一目录条目的可选 `worktreeSource:{sessionId,workspaceId}` 只传递 Store 核实的唯一创建来源，供 Native 返回来源会话，不授予执行或删除权限。缺项保持缺项，不从项目名称、路径前缀或消息补造。准确工作树工具的 Auto 免审批和内部 Job 派发证据归[权限 owner](../../packages/agent/src/permissions/README.md#git-worktree-的准确权限)，手动、父子范围及删除保护继续沿原链核验。

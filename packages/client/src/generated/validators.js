@@ -317171,7 +317171,8 @@ function validate325(
               key0 === 'commandId' ||
               key0 === 'sessionId' ||
               key0 === 'workspaceId' ||
-              key0 === 'title'
+              key0 === 'title' ||
+              key0 === 'firstInputCommandId'
             )
           ) {
             validate325.errors = [
@@ -317465,6 +317466,68 @@ function validate325(
                     var valid0 = _errs10 === errors;
                   } else {
                     var valid0 = true;
+                  }
+                  if (valid0) {
+                    if (data.firstInputCommandId !== undefined) {
+                      let data5 = data.firstInputCommandId;
+                      const _errs12 = errors;
+                      if (errors === _errs12) {
+                        if (typeof data5 === 'string') {
+                          if (func1(data5) > 128) {
+                            validate325.errors = [
+                              {
+                                instancePath: instancePath + '/firstInputCommandId',
+                                schemaPath: '#/properties/firstInputCommandId/maxLength',
+                                keyword: 'maxLength',
+                                params: { limit: 128 },
+                                message: 'must NOT have more than 128 characters',
+                              },
+                            ];
+                            return false;
+                          } else {
+                            if (func1(data5) < 1) {
+                              validate325.errors = [
+                                {
+                                  instancePath: instancePath + '/firstInputCommandId',
+                                  schemaPath: '#/properties/firstInputCommandId/minLength',
+                                  keyword: 'minLength',
+                                  params: { limit: 1 },
+                                  message: 'must NOT have fewer than 1 characters',
+                                },
+                              ];
+                              return false;
+                            } else {
+                              if (!pattern33.test(data5)) {
+                                validate325.errors = [
+                                  {
+                                    instancePath: instancePath + '/firstInputCommandId',
+                                    schemaPath: '#/properties/firstInputCommandId/pattern',
+                                    keyword: 'pattern',
+                                    params: { pattern: '^[A-Za-z0-9_-]+$' },
+                                    message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                                  },
+                                ];
+                                return false;
+                              }
+                            }
+                          }
+                        } else {
+                          validate325.errors = [
+                            {
+                              instancePath: instancePath + '/firstInputCommandId',
+                              schemaPath: '#/properties/firstInputCommandId/type',
+                              keyword: 'type',
+                              params: { type: 'string' },
+                              message: 'must be string',
+                            },
+                          ];
+                          return false;
+                        }
+                      }
+                      var valid0 = _errs12 === errors;
+                    } else {
+                      var valid0 = true;
+                    }
                   }
                 }
               }
@@ -324803,7 +324866,7 @@ var schema686 = {
   ],
   additionalProperties: false,
 };
-var pattern1737 = new RegExp('^[Hh][Tt][Tt][Pp][Ss]?:\\/\\/[^/?#@\\s]+(?:[/?#][^\\s]*)?$', 'u');
+var pattern1738 = new RegExp('^[Hh][Tt][Tt][Pp][Ss]?:\\/\\/[^/?#@\\s]+(?:[/?#][^\\s]*)?$', 'u');
 function validate346(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -325561,7 +325624,7 @@ function validate346(
                                                                           return false;
                                                                         } else {
                                                                           if (
-                                                                            !pattern1737.test(
+                                                                            !pattern1738.test(
                                                                               data15,
                                                                             )
                                                                           ) {
@@ -325922,7 +325985,7 @@ function validate346(
                                                                             return false;
                                                                           } else {
                                                                             if (
-                                                                              !pattern1737.test(
+                                                                              !pattern1738.test(
                                                                                 data20,
                                                                               )
                                                                             ) {
@@ -327989,12 +328052,12 @@ var schema687 = {
   required: ['storeId', 'readSet', 'webSearch', 'searchProviders', 'errors'],
   additionalProperties: false,
 };
-var pattern1746 = new RegExp('^[A-Za-z0-9][A-Za-z0-9_.-]*$', 'u');
-var pattern1750 = new RegExp(
+var pattern1747 = new RegExp('^[A-Za-z0-9][A-Za-z0-9_.-]*$', 'u');
+var pattern1751 = new RegExp(
   '^credential:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
   'u',
 );
-var pattern1754 = new RegExp('^[A-Za-z0-9][A-Za-z0-9._:/-]*$', 'u');
+var pattern1755 = new RegExp('^[A-Za-z0-9][A-Za-z0-9._:/-]*$', 'u');
 function validate347(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -328680,7 +328743,7 @@ function validate347(
                                     }
                                     errors++;
                                   } else {
-                                    if (!pattern1746.test(data9)) {
+                                    if (!pattern1747.test(data9)) {
                                       const err26 = {
                                         instancePath: instancePath + '/webSearch/providerId',
                                         schemaPath:
@@ -328870,7 +328933,7 @@ function validate347(
                                       }
                                       errors++;
                                     } else {
-                                      if (!pattern1746.test(data11)) {
+                                      if (!pattern1747.test(data11)) {
                                         const err35 = {
                                           instancePath: instancePath + '/webSearch/providerId',
                                           schemaPath:
@@ -329092,7 +329155,7 @@ function validate347(
                                             }
                                             errors++;
                                           } else {
-                                            if (!pattern1746.test(data14)) {
+                                            if (!pattern1747.test(data14)) {
                                               const err43 = {
                                                 instancePath:
                                                   instancePath + '/searchProviders/' + i0 + '/id',
@@ -329360,7 +329423,7 @@ function validate347(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern1746.test(data18)) {
+                                                            if (!pattern1747.test(data18)) {
                                                               const err54 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -329635,7 +329698,7 @@ function validate347(
                                                       const _errs71 = errors;
                                                       if (errors === _errs71) {
                                                         if (typeof data21 === 'string') {
-                                                          if (!pattern1750.test(data21)) {
+                                                          if (!pattern1751.test(data21)) {
                                                             const err64 = {
                                                               instancePath:
                                                                 instancePath +
@@ -330008,7 +330071,7 @@ function validate347(
                                             }
                                             errors++;
                                           } else {
-                                            if (!pattern1746.test(data24)) {
+                                            if (!pattern1747.test(data24)) {
                                               const err78 = {
                                                 instancePath:
                                                   instancePath + '/searchProviders/' + i0 + '/id',
@@ -330276,7 +330339,7 @@ function validate347(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern1746.test(data28)) {
+                                                            if (!pattern1747.test(data28)) {
                                                               const err89 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -330551,7 +330614,7 @@ function validate347(
                                                       const _errs100 = errors;
                                                       if (errors === _errs100) {
                                                         if (typeof data31 === 'string') {
-                                                          if (!pattern1750.test(data31)) {
+                                                          if (!pattern1751.test(data31)) {
                                                             const err99 = {
                                                               instancePath:
                                                                 instancePath +
@@ -330763,7 +330826,7 @@ function validate347(
                                                     }
                                                     errors++;
                                                   } else {
-                                                    if (!pattern1754.test(data33)) {
+                                                    if (!pattern1755.test(data33)) {
                                                       const err107 = {
                                                         instancePath:
                                                           instancePath +
@@ -331151,7 +331214,7 @@ function validate347(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (!pattern1746.test(data39)) {
+                                                if (!pattern1747.test(data39)) {
                                                   validate347.errors = [
                                                     {
                                                       instancePath:
@@ -331642,7 +331705,7 @@ var schema688 = {
   required: ['expectedStoreId', 'commandId', 'expectedReadSet', 'webSearch', 'searchProviders'],
   additionalProperties: false,
 };
-var pattern1773 = new RegExp('^[!-~]+$', 'u');
+var pattern1774 = new RegExp('^[!-~]+$', 'u');
 function validate348(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -332319,7 +332382,7 @@ function validate348(
                                       }
                                       errors++;
                                     } else {
-                                      if (!pattern1746.test(data10)) {
+                                      if (!pattern1747.test(data10)) {
                                         const err15 = {
                                           instancePath: instancePath + '/webSearch/providerId',
                                           schemaPath:
@@ -332510,7 +332573,7 @@ function validate348(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern1746.test(data12)) {
+                                        if (!pattern1747.test(data12)) {
                                           const err24 = {
                                             instancePath: instancePath + '/webSearch/providerId',
                                             schemaPath:
@@ -332733,7 +332796,7 @@ function validate348(
                                               }
                                               errors++;
                                             } else {
-                                              if (!pattern1746.test(data15)) {
+                                              if (!pattern1747.test(data15)) {
                                                 const err32 = {
                                                   instancePath:
                                                     instancePath + '/searchProviders/' + i0 + '/id',
@@ -333010,7 +333073,7 @@ function validate348(
                                                               }
                                                               errors++;
                                                             } else {
-                                                              if (!pattern1746.test(data19)) {
+                                                              if (!pattern1747.test(data19)) {
                                                                 const err43 = {
                                                                   instancePath:
                                                                     instancePath +
@@ -333289,7 +333352,7 @@ function validate348(
                                                         const _errs69 = errors;
                                                         if (errors === _errs69) {
                                                           if (typeof data22 === 'string') {
-                                                            if (!pattern1750.test(data22)) {
+                                                            if (!pattern1751.test(data22)) {
                                                               const err53 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -333878,7 +333941,7 @@ function validate348(
                                               }
                                               errors++;
                                             } else {
-                                              if (!pattern1746.test(data27)) {
+                                              if (!pattern1747.test(data27)) {
                                                 const err75 = {
                                                   instancePath:
                                                     instancePath + '/searchProviders/' + i0 + '/id',
@@ -334155,7 +334218,7 @@ function validate348(
                                                               }
                                                               errors++;
                                                             } else {
-                                                              if (!pattern1746.test(data31)) {
+                                                              if (!pattern1747.test(data31)) {
                                                                 const err86 = {
                                                                   instancePath:
                                                                     instancePath +
@@ -334434,7 +334497,7 @@ function validate348(
                                                         const _errs105 = errors;
                                                         if (errors === _errs105) {
                                                           if (typeof data34 === 'string') {
-                                                            if (!pattern1750.test(data34)) {
+                                                            if (!pattern1751.test(data34)) {
                                                               const err96 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -334860,7 +334923,7 @@ function validate348(
                                                       }
                                                       errors++;
                                                     } else {
-                                                      if (!pattern1754.test(data38)) {
+                                                      if (!pattern1755.test(data38)) {
                                                         const err112 = {
                                                           instancePath:
                                                             instancePath +
@@ -335061,7 +335124,7 @@ function validate348(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern1746.test(data40)) {
+                                        if (!pattern1747.test(data40)) {
                                           validate348.errors = [
                                             {
                                               instancePath: instancePath + '/credential/providerId',
@@ -335129,7 +335192,7 @@ function validate348(
                                           ];
                                           return false;
                                         } else {
-                                          if (!pattern1773.test(data41)) {
+                                          if (!pattern1774.test(data41)) {
                                             validate348.errors = [
                                               {
                                                 instancePath: instancePath + '/credential/secret',

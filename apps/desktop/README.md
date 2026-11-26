@@ -136,7 +136,7 @@ CDP重载后曾出现原生窗口／View均报告可见而文档为hidden，原�
 2026-11-09，Windows／Bun1.4.4：目录与两份隔离 Sidebar 回归分别运行，共24项537断言通过；Desktop／UI 类型、四文件 Biome、文档结构与影响检查通过。Chrome156 的实际投影／Sidebar 生产样式隔离夹具按空项发布、刷新、消息时间接管逐步观察，145个连续动画帧中新增行始终第一、单份且保留原节点；阶段截图已核对，页面错误为0。不以该受控目录过程代替真实 Service／Electron 端到端或其他平台验收。本机原始证据已缺失。
 
 2026-11-09轨迹类型筛选简化：移除顶栏轮次／调用／子调用三个按钮，筛选菜单只保留消息、思考、工具、子 Agent、自动压缩、审批六类。旧时长、轮次、层级条件在Panel归一化为全部，避免隐藏筛选；childAgents缺省开启，普通工具和子Agent独立控制，局部折叠与准确材料继续保留。DOM26项897断言、Workbench与统计17项140断言、UI663／Desktop1426文件类型和定向Biome通过。生产组件通过实际浏览器菜单与子Agent／工具切换观察，重新勾选恢复原12行，证据`type-filter-manual-review.json`；此为隔离桥组件验证，未取得安装态Electron或真实Provider资格。预览服务已停止。本机原始证据已缺失。
-## 执行轨迹、离线窗口与 Trace 设置
+## 执行轨迹与离线窗口
 
 2026-11-10提交审查修复：在线材料读取权与原清理身份分离，release／显式close立即撤销，关闭未确认仍保准确身份供重试，旧lease不随同scope重开恢复。离线成功pick由Main先退休旧包，Renderer不再重复close旧id；材料按准确readId独立offset与关闭，最多16份（含pending）、128MiB，并在I/O前按已验证section大小预留，换包全撤销且迟到open不占新包预算。Native原材料17项118断言、离线换包12项262断言、离线Main材料11项38断言、Desktop1433文件类型通过。冻结后重建完整Electron候选，真实离线窗口连续三包打开／换包及详情读取通过，无旧包／offset错误、重复行或renderer错误；本机记录原记录。同候选在线隐藏／重开三轮，每轮准确子工具结果均可读、29行不重复；本机记录原记录，没有操作日常Profile。本机原始证据已缺失。
 
@@ -214,7 +214,7 @@ Agent loop与原Run／执行轮次为同一个分组，不再在Run内增第二�
 
 压缩概述使用原同口径before／after计数及采用状态，调用usage另列；没有准确发布事实不称已采用，缺值不填0，摘要来自原Model公开输出。Model与发布Context保独立来源和父子，默认当前前缀可沿确证关联说明采用结果；显式旧观察不带入之后发布。消息正文与模型材料同样独立，未完成前缀与之后完成版本分别绑定。
 
-[Trace设置](src/native-trace-settings.tsx)对工具参数等材料种类提供独立显式选择；新增`tool_input`不扩大旧manifest、已存grant或原metadata权限，显式重新授权才进入新epoch。第一方材料读取不授予Trace外发。新V1字段／材料的兼容与负向授权回归见[独立兼容测试](../service/test/isolated/trajectory-workbench-compat.test.ts)；当前读端继续接纳未提供新字段的旧V1事实，不承诺旧闭合schema读端透明理解新增种类。
+新增`tool_input`不扩大旧manifest、已存grant或原metadata权限，显式重新授权才进入新epoch。第一方材料读取不授予Trace外发。新V1字段／材料的兼容与负向授权回归见[独立兼容测试](../service/test/isolated/trajectory-workbench-compat.test.ts)；当前读端继续接纳未提供新字段的旧V1事实，不承诺旧闭合schema读端透明理解新增种类。
 
 2026-11-09，macOS arm64／Bun1.4.4／Chrome156.0.8078.81，以关闭diagnostics的生产Vite资产和隔离bridge执行[连续浏览器回归](test/trajectory-browser-runner.fixture.ts)，实际组件按确认原型对齐四泳道／刻度网格、轻量图标筛选与搜索、彩色类型标签、层级细线、轮次分组、行尾观测时长／状态、蓝色选中态及详情层次。`prototype-dark-wide.png`、`prototype-light-wide.png`是实际1024px容器裁图，沿真实分隔条恢复40%详情并关闭回放；`prototype-drawer.png`是300px窄栏全高详情。独立图审和主Agent逐图核对均无剩余视觉阻断，示例正文没有被填入生产metadata。本机原始证据已缺失。
 
@@ -240,7 +240,7 @@ Agent loop与原Run／执行轮次为同一个分组，不再在Run内增第二�
 
 含证据导出只复制当前获准的类型化材料。旧封存 Artifact 观察若曾将私有 Model 封装标为可用，准确的 `artifact_scope_denied` 只使该通用材料在包内缺失；对应 Model typed Evidence 仍独立读取。其他 scope／身份／完整性／取消失败继续中止发布，不能借导出放宽通用下载。仅事件包或未封装的可选材料，在原 event/ref 已验证后于材料区显示“此包未包含该材料”；不把正常缺少可选材料显示成整个轨迹读取失败。错误范围／引用、字节损坏和实际读取失败仍明确报错。
 
-[Trace 设置](src/native-trace-settings.tsx)通过 [闭合 bridge](src/native-trace-bridge.ts)及 Main／生成 Client 管理本机 Host。安装、配置、grant 与 enable 分开，所有外发许可默认关闭；password 提交即清空，不进入草稿或设置快照。历史任务的扫描、连续 ACK、死信与 [OTel 远端状态](../service/src/trace-integrations/opentelemetry/README.md)分开；写入结果未知只读刷新，原工具／Full 模式不授予外发权。本地字段校验保留在表单，RPC、安装列表及远端状态查询失败经统一错误 Toast；成功和进行中不进入 Toast。已确认写入后的刷新失败不改报写入未知；投递／死信等业务历史仍保留，切换安装或作用域后不投递旧请求的提示。
+桌面设置浮窗已移除「轨迹与集成」。[设置桥](src/native-settings-bridge.ts)的白名单同时移除 Trace 管理请求和回执。既有 Trace 配置和投递仍由[本机服务](../service/src/trace-extensions/README.md)负责。
 
 Main 的在途 open／Evidence read 进入原 owner 的关闭屏障；迟到 lease 先登记再核选择，关闭等待这些请求并释放准确原资源。单文件 reader／writer 共享原 close promise；关闭失败保留实际 FileHandle 和原失败原因，不以重开替换。多次初始离线打开串行复用同一窗口建立过程。相关回归归 [Main reader](test/isolated/native-trajectory.test.ts)、[文件 owner](test/isolated/native-trajectory-files.test.ts)及[容器](test/isolated/native-trajectory-bundle.test.ts)。面板展示回调按其原 render baseline 合并实际变动字段，避免列表模式／锚点更新覆盖 loader 已推进的 descriptor 或播放游标；[差量回归](test/trajectory-presentation-state.test.ts)核这些交错。
 
@@ -250,7 +250,7 @@ Main 的在途 open／Evidence read 进入原 owner 的关闭屏障；迟到 lea
 
 [真实导出夹具](test/trajectory-export-native-driver.fixture.ts)另在同一原 Profile 完成11阶段：生产按钮→系统 SaveDialog→Main／Caller／真实 HTTP→原子包，再分别冷打开仅事件包与含证据包。夹具只替代系统选路，等待时文件均未发布；两包同为 upper30／28事件，仅事件30998字节／0材料，含证据1163784字节／24材料。99次有限HTTP包含旧私有Artifact的8次准确拒绝；24个材料lease全部关闭，typed原前缀仍可读。前后业务水位30→30、Execution／Command／Interaction和逐条事实摘要相同、Provider／审批调用0，三个Electron进程正常退出，无临时包；原仅事件缺材料时的全局错误误义已修，[冷读定向夹具](test/trajectory-export-cold-missing.fixture.ts)只复验该包的5阶段，最终 该组原始材料 确认局部缺失说明、关闭后正常seek／返回30，包SHA不变、零网络／Profile／页面错误且exit0；原失败图保持。受控renderer恢复过程也观察到unknown、并行child、原Model结果未知、Recovery及新尝试按序出现，原未知不改写为成功。本机原始证据已缺失。
 
-Trace 设置的最终生产 Native 经真实 Main／Client／候选 Service 完成空态→安装但未授权／未开启→独立当前 Session 范围与 metadata 授权→凭据提交清空→停用／撤权→卸载。卸载清除所选详情与动作，不再 inspect 已退休安装；[DOM回归](test/isolated/native-trace-settings-dom.test.tsx)4项33断言通过。过程 cursor 2→2、Model数0、renderer错误0。本机 OS 凭据绑定返回 `service_unavailable`，只确认失败被保留、密码清空及显式清理，未取得 OS 写入成功资格；非活动句柄显示“不可用”。以上限本机源码／候选构建，未据此取得安装版、Linux／Windows或远程 Collector 后端资格。本机原始证据已缺失。
+已退役的 Trace 设置页面曾在生产 Native 经真实 Main／Client／候选 Service 完成空态→安装但未授权／未开启→独立当前 Session 范围与 metadata 授权→凭据提交清空→停用／撤权→卸载。卸载清除所选详情与动作，不再 inspect 已退休安装。过程 cursor 2→2、Model数0、renderer错误0。本机 OS 凭据绑定返回 `service_unavailable`，只确认失败被保留、密码清空及显式清理，未取得 OS 写入成功资格；非活动句柄显示“不可用”。以上限本机源码／候选构建，未据此取得安装版、Linux／Windows或远程 Collector 后端资格。本机原始证据已缺失。
 
 
 [Native transcript](src/native-transcript.ts)对原 Run 的 `necessary_condition_unsatisfied` 使用已知完成条件失败说明，保留已保存的正文与工具结果；不把该事实误写成模型连接失败或没有最终回复。异常摘要和正文沿同一处选择，原上下文失败、中断及未知原因的说明保持。该展示不修改完成条件、审批、版本、工具回执或重试资格。[真实 DOM 整文件](test/isolated/native-transcript-dom.test.tsx)25项／483断言通过，包含已有输出后的失败与冷重建、零重复和无运行中状态；Desktop类型检查1291文件、全仓6558文件／9 projects及定向Biome通过。
@@ -329,7 +329,7 @@ Office、Microsoft 365 和 PDF 的文件图标由 UI 的[文件格式映射](../
 
 [输入附件 hook](src/native-input-images.ts)在准备完成、移除及接纳发送回执后维护会话草稿；[闭合 IPC](src/input-images-bridge.ts)只传受限附件描述与 Main 已准备的 ID，原图预览按有界块读取，blob URL 不落盘。[Main 附件存储](electron/pending-attachments.ts)沿[私有 UI SQLite](electron/private-data.ts)保存原字节块及本机引用描述，继承固定 profile、生命周期租约、私有目录／文件、拒绝符号／硬链接、FULL 同步及事务边界。既有本机路径引用不复制内容、不借恢复读取任意路径；实际读取仍走原 Agent 权限。
 
-草稿严格绑定 Store／Workspace／根 Session；新对话使用工作区独立的准备范围。后台保存重新核当前会话身份、未删除及根会话，不因界面切走而改投。保存采用修订 CAS，已删除会话的独立墓碑拒绝首次保存的迟到写；未知写仅在读回内容与本窗口已知版本一致时恢复，不覆盖其他窗口的新内容。恢复不发业务 POST。Main 将发送的准确条目版本与原 command 绑定，在同一私有事务处理 accepted／applied 回执时核销，仅移除相同 ID、内容 hash／URI 及描述的原条目，保留后加附件或同 ID 的新内容。冷查回使用原 command，不重新上传或提交来清草稿。首发创建会话后明确失败时，准备范围与已建会话通过私库原子迁移交接；迁移响应丢失不把旧准备内容自动写回，保留错误并要求完全重开应用按两端真实状态核对。迁移期间新添加／移除的附件仍按后继修订处理。
+草稿严格绑定 Store／Workspace／根 Session；新对话使用工作区独立的准备范围。后台保存重新核当前会话身份、未删除及根会话，不因界面切走而改投。保存采用修订 CAS，已删除会话的独立墓碑拒绝首次保存的迟到写；未知写仅在读回内容与本窗口已知版本一致时恢复，不覆盖其他窗口的新内容。恢复不发业务 POST。Main 将发送的准确条目版本与原 command 绑定，在同一私有事务处理 accepted／applied 回执时核销，仅移除相同 ID、内容 hash／URI 及描述的原条目，保留后加附件或同 ID 的新内容。冷查回使用原 command，不重新上传或提交来清草稿。首条输入未应用时仍以准备范围为准。确认首发失败后恢复原草稿，后续编辑保留自己的修订。旧制品已显示的会话仍沿原范围迁移规则核对。迁移期间新添加／移除的附件仍按后继修订处理。
 
 每草稿最多10张图片、每图16MiB、图片合计64MiB；普通文件副本每个及每草稿合计256MiB。私有库全部未发送字节合计320MiB、描述合计16MiB，最多4096份范围、65536个删除墓碑及256份待保留发送绑定；容量满明确拒绝新保存，不淘汰未知请求或旧草稿。移除、精确发送核销及会话删除清理相应字节块，调用者 journal 清理同步清理其绑定。已记录非空原件的字节块全部缺失时，SQLite 读取为该项标记 `attachment_bytes_missing`，Composer 卡片保留原名称并显示「文件 404」。字节不完整或 hash 校验失败仍显示失效提示。失效附件阻止发送，移除后草稿可继续使用。临时窗口预算不足保持持久字节完好并提示。
 
@@ -697,7 +697,7 @@ Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)�
 
 旧读取的失败与成功使用同一展示归属：refresh 的 state 和 select/draft.read 捕获 generation、viewIntent 与 Main 退出生命周期 epoch，迟到拒绝不影响后来的页面；全局目录绑定 generation 与生命周期。读取、会话和草稿失败沿原局部状态、提交记录与后台恢复核实；诊断开关不再开启这些错误的全局Toast。只有普通客户端独立业务入口可提交临时消息，后台读取不会清除或继承它。原全局“操作未完成” AlertDialog 已移除；[NativeToast](src/native-message.tsx)通过 Portal 脱离会话正文与滚动布局，通常挂到 `document.body`，按会话区域的 CSS anchor 固定位置与宽度，避开标题栏和右侧网页。原 `beforeConversation` 渲染入口保留标题栏布局判断。设置中的错误 Toast 挂在当前设置 Dialog，仍只临时显示一条；同一呈现内更换挂载点保留原剩余时间，失去原挂载点的 hover／focus 不留下暂停。设置表单仅在字段校验处保留局部异常提示，业务提交错误使用 Toast，不复制为设置行内错误。消息停留6秒，hover或焦点在消息内时暂停，可以明确关闭；准确 occurrence ID 使旧定时器、关闭动作和未提交渲染不能清除继任消息。
 
-[错误反馈宿主](src/native-error-feedback.ts)仅管理当前呈现中的消息、关闭和寿命，不成为业务状态或回执。原 Native 根通过可选 `ErrorFeedbackContext` 消息回调覆盖会话与设置的实际 React 子树（含 Portal）；复制、附件／图片准备、模型选择，以及提供商／模型／Skills／Trace 设置沿此入口反馈。未提供回调的独立消费者保留原可见反馈。回调捕获 generation、Store、Session、view/page intent 与当前页面类别的呈现身份，同一身份保持稳定；切换会话、设置类别或关闭设置立即退役旧提示与回调，返回同名会话也不能接纳旧失败。普通错误与原审批队列互斥，只有当前有效消息暂停审批；关闭、超时和换页不清除原审批 command 或解除未知写入保护。成功和正常进行中不进入 Toast，字段校验保留就地。设置后台自动重读同一失败按 episode 去重，主动重试或恢复后的新失败可再次反馈。
+[错误反馈宿主](src/native-error-feedback.ts)仅管理当前呈现中的消息、关闭和寿命，不成为业务状态或回执。原 Native 根通过可选 `ErrorFeedbackContext` 消息回调覆盖会话与设置的实际 React 子树（含 Portal）；复制、附件／图片准备、模型选择，以及提供商／模型／Skills 设置沿此入口反馈。未提供回调的独立消费者保留原可见反馈。回调捕获 generation、Store、Session、view/page intent 与当前页面类别的呈现身份，同一身份保持稳定；切换会话、设置类别或关闭设置立即退役旧提示与回调，返回同名会话也不能接纳旧失败。普通错误与原审批队列互斥，只有当前有效消息暂停审批；关闭、超时和换页不清除原审批 command 或解除未知写入保护。成功和正常进行中不进入 Toast，字段校验保留就地。设置后台自动重读同一失败按 episode 去重，主动重试或恢复后的新失败可再次反馈。
 
 目录不可用无论来自本次目录 GET，还是 Main 状态观察中的 `directory.unavailable`，均由同一原作用域的后台只读恢复重新核实。确认同 Store、原观察作用域仍有效的目录恢复成功后，唤醒该作用域已有的其他只读恢复，沿原 key 和并发上限重新核实，不再额外等待旧退避档位；仍在途的同 key 读取不重复启动。原答复只查询已保存的 Command；确认该原答复回执后也唤醒同作用域已登记的目录恢复，不把缓存的 unknown 当作连接恢复，不因核实目录重新发送答案或工具。当前可见作用域的只读失败按 250／500／1000ms 退避并保持 1 秒上限，最多两项并发；这只影响原读取，不调用模型或重投答案。会话切换、隐藏、Store／generation 变化与退出仍撤销所属恢复。
 
@@ -1581,6 +1581,12 @@ Renderer按generation、Store和history epoch清空有界显示缓存，按会�
 新 Store 完整交互历史的[真实 HTTP／Core／SDK／Main 回归](../../tests/isolated/unified-agent/client-interactions.test.ts)保问题 schema／答案、计划完整内容与修改反馈、child 原审批与 accepted revision、取消和完整大附件，核首次及冷只读、默认当前查询隔离、旧卡回答拒绝、Fork 不补后来记录与零新水位／Model。[现有安装版问答窗口](test/isolated/native-restored-questionnaire-bundle.test.ts)继续沿原 Questionnaire／ToolRow，并从会话工具读取同一份原 Interaction 请求／选项 ID／自由文本对象；实际选项标签仍由原工具回执展示。三个真实 macOS 窗口核源、Fork 空历史、包内 CLI 恢复后的首次与冷读、关闭及三 Service 普通退出／双 EX。原 120／45／10 秒期限和原断言保留，actual0／1pass／24Bun及全部 driver／77.95秒，Provider2、原答案 POST1、恢复阅读 POST0和封存来源 Run GET0。直接七文件33pass／758断言与各 owner／root types通过；准确新增断言失败及未验范围归[恢复历史进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09恢复后完整交互历史)。本片没有新的计划／审批 installed 窗口，完整 PC 与阶段退出资格保持。
 
 ## Native 项目会话目录
+
+桌面首发由 [Main](electron/conversation.ts) 以同一创建身份绑定首条输入。首条输入应用前，[Store 目录](../../packages/agent/src/storage/sqlite/directory.ts)保留已发布会话列表，原准备草稿继续可恢复。首发失败或未知保留请求证据；进入会话和核销准备正文需原输入应用事实。
+
+[本机发送日志](electron/private-data.ts)按命令 ID 保存原申请，没有累计发送次数或日志总字节数准入上限。已应用记录从发送待处理状态退出，保留按原 ID 查询能力。界面投影仅附带近期已应用记录。后续提交退出上一次已确认的内存状态，未知结果继续核对。保存新输入无需先查询旧轮次或清理记录。
+
+同一准备草稿修订在首条请求落地前由原身份持有，重复请求复用原回执。恢复只查询原命令，定时任务或其他会话的导航不会提前打开准备中的会话。已有会话在请求派发前切靶时，Main 只终结仍持本地首次派发权的原记录，并保留原草稿。若原命令已派发，仍按原身份处理回执。另一会话的提交保留正在核对的输入和停止申请。[Main 回归](test/native-conversation.test.ts)、[输入回归](test/input.test.ts)及[导航回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖这些交接。
 
 选中会话的权限模式与工作区信任并行核对，共用一对连接身份复核。持久事件按实际投影更新，已知 Artifact 注册与 Job 输出片段无需重读目录或环境，文件交付只校准对应文件视图。Run 终态、待批变化、成员变化和未知事件沿原目录对账，重连仍核完整快照。 [SDK 组合读取](../../packages/client/README.md) · [Main 读取计数](test/native-caller.test.ts) · [隔离 HTTP 与 SSE 回归](test/isolated/native-history-incremental-http.test.ts)
 

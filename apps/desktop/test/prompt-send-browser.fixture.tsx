@@ -36,8 +36,7 @@ let pending: Extract<NativeRequest, { method: 'submit' | 'conversation.send' }> 
 let pendingDraft: FixtureDraft | undefined;
 let acknowledge: ((value: InputMetadata) => void) | undefined;
 let acknowledgeFirst: ((value: NativeConversationResult) => void) | undefined;
-let heldFirstSession: string | undefined;
-let resumeFirstSelection: (() => void) | undefined;
+let firstPreparation: NativeState['creationSubmissions'][number] | undefined;
 let fileReadRevoked = false;
 const histories = new Map<string, Message[]>(
   persisted?.histories ?? [
@@ -147,10 +146,6 @@ const bridge: NativeBridge = {
         return result;
       }
     }
-    if (request.method === 'select' && request.sessionId === heldFirstSession)
-      await new Promise<void>((resolve) => {
-        resumeFirstSelection = resolve;
-      });
     if (request.method === 'submit') {
       posts.push(request);
       persist();
@@ -216,6 +211,7 @@ const bridge: NativeBridge = {
         historyEpoch: historyIsolation ? 0 : epoch,
         ...(historyIsolation && { outputFilesDisplay: historyIsolation.display(id) }),
         inputSubmissions: [...submissions],
+        creationSubmissions: firstPreparation ? [firstPreparation] : result.creationSubmissions,
         selection: {
           ...result.selection,
           ...(historyIsolation && {
@@ -296,26 +292,35 @@ const control = {
     acknowledge = undefined;
     transport.publish();
   },
+  publishFirstPreparation() {
+    if (pending?.method !== 'conversation.send' || !acknowledgeFirst)
+      throw Error('first_send_not_pending');
+    firstPreparation = {
+      input: { ...pending.creation, firstInputCommandId: pending.intent.commandId },
+      phase: 'created',
+    };
+    transport.publish();
+  },
   rejectFirst() {
     if (pending?.method !== 'conversation.send' || !acknowledgeFirst)
       throw Error('first_send_not_pending');
-    heldFirstSession = pending.creation.sessionId;
-    transport.registerSession(heldFirstSession);
+    histories.delete(pending.creation.sessionId);
+    runs.delete(pending.creation.sessionId);
+    drafts.delete(pending.creation.sessionId);
+    persist();
     acknowledgeFirst({
       kind: 'conversation',
       commandId: pending.intent.commandId,
       phase: 'failed',
       stage: 'input',
-      creation: { input: pending.creation, phase: 'created' },
-      code: 'native_asset_unavailable',
+      creation: {
+        input: { ...pending.creation, firstInputCommandId: pending.intent.commandId },
+        phase: 'created',
+      },
+      code: 'caller_capacity_exceeded',
     });
     acknowledgeFirst = undefined;
     transport.publish();
-  },
-  releaseFirstSelection() {
-    heldFirstSession = undefined;
-    resumeFirstSelection?.();
-    resumeFirstSelection = undefined;
   },
   save() {
     if (!pending || !('content' in pending.intent)) throw Error('prompt_missing');

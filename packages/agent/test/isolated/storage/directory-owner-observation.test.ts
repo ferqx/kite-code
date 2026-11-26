@@ -1,11 +1,13 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '../../../src/profile';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
+import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 
 /** Store.close releases the actual owner flock without settling the durable Run. */
 test('readonly directory observes original owner lock loss without settling or acquiring work, and preserves another live root', async () => {
@@ -120,5 +122,79 @@ test('readonly directory observes original owner lock loss without settling or a
   } finally {
     for (const store of stores.reverse()) await store.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a first-input session enters both directories only after its bound input is applied', () => {
+  const db = new Database(':memory:');
+  for (const migration of ['0001-baseline.sql', '0002-trajectory-facts.sql'])
+    db.exec(
+      readFileSync(
+        new URL(`../../../src/storage/migrations/${migration}`, import.meta.url),
+        'utf8',
+      ),
+    );
+  db.run("INSERT INTO storage_meta(singleton,store_id,format_major) VALUES(1,'store',1)");
+  db.run("INSERT INTO workspace(id,root_uri,name) VALUES('w','file:///owned','owned')");
+  const operations = new SqliteOperations(db, false);
+  const caller = { expectedStoreId: 'store', subjectId: 'user' };
+
+  try {
+    for (const id of ['ordinary', 'failed-first', 'successful-first']) {
+      operations.call('createSession', [
+        {
+          ...caller,
+          sessionId: id,
+          commandId: `create-${id}`,
+          workspaceId: 'w',
+          title: '',
+          ...(id === 'ordinary' ? {} : { firstInputCommandId: `input-${id}` }),
+        },
+      ]);
+    }
+    const expectDirectory = (expected: string[]) => {
+      const sessions = operations.call('listSessions', []) as Awaited<
+        ReturnType<Store['listSessions']>
+      >;
+      const directory = operations.call('listSessionDirectory', [caller]) as Awaited<
+        ReturnType<Store['listSessionDirectory']>
+      >;
+      expect(sessions.map((session) => session.id).sort()).toEqual(expected);
+      expect(directory.items.map((item) => item.session.id).sort()).toEqual(expected);
+    };
+    expectDirectory(['ordinary']);
+    const session = operations.call('getSession', ['failed-first']) as Awaited<
+      ReturnType<Store['getSession']>
+    >;
+    expect(session?.id).toBe('failed-first');
+    const input = { kind: 'run.start', content: 'original request' } as const;
+    expect(() =>
+      operations.call('acceptCommand', [
+        {
+          ...caller,
+          sessionId: 'failed-first',
+          commandId: 'different-command',
+          request: input,
+        },
+      ]),
+    ).toThrow('session_not_found');
+    for (const sessionId of ['failed-first', 'successful-first']) {
+      operations.call('acceptCommand', [
+        {
+          ...caller,
+          sessionId,
+          commandId: `input-${sessionId}`,
+          request: input,
+        },
+      ]);
+    }
+    expectDirectory(['ordinary']);
+    db.run("UPDATE command SET status='rejected' WHERE id='input-failed-first'");
+    expectDirectory(['ordinary']);
+    db.run("UPDATE command SET status='applied' WHERE id='input-successful-first'");
+    expectDirectory(['ordinary', 'successful-first']);
+  } finally {
+    operations.releaseStatements();
+    db.close();
   }
 });

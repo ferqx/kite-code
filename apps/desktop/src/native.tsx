@@ -844,6 +844,9 @@ function NativeDesktopContent({
     created?: true;
   }>();
   const sendLoading = sending && !firstSendProgress?.created;
+  const firstInputAwaitingApplication =
+    firstSubmission?.result?.phase === 'accepted' &&
+    !firstConversationPublished(firstSubmission.result);
   const latestInputCommands = useRef(new Map<string, string>());
   const [inputDeliveries, setInputDeliveries] = useState(
     new Map<
@@ -2847,15 +2850,16 @@ function NativeDesktopContent({
         original &&
         (original.result?.phase === 'unknown' ||
           (original.result?.phase === 'accepted' &&
-            state?.inputSubmissions.some(
-              (input) =>
-                input.intent.commandId === original.commandId && input.phase === 'accepted',
-            ))) &&
+            (firstInputAwaitingApplication ||
+              state?.inputSubmissions.some(
+                (input) =>
+                  input.intent.commandId === original.commandId && input.phase === 'accepted',
+              )))) &&
         !scheduledTasksView &&
         original.creation.expectedStoreId === directory?.storeId &&
         (preparing || sessionId === original.creation.sessionId)
       ) {
-        const page = pageIntent.current;
+        const page = firstOpenPage.current;
         add(`conversation:${original.commandId}`, async () => {
           const result = await bridge.request({
             method: 'conversation.lookup',
@@ -3231,8 +3235,14 @@ function NativeDesktopContent({
       pageIntent.current++;
       if (firstRef.current) {
         firstOpenPage.current = pageIntent.current;
-        const creation = firstRef.current.result?.creation;
-        if (creation?.phase === 'created' && creation.input.expectedStoreId === directory?.storeId)
+        const result = firstRef.current.result;
+        const creation = result?.creation;
+        if (
+          creation?.phase === 'created' &&
+          result &&
+          firstConversationPublished(result) &&
+          creation.input.expectedStoreId === directory?.storeId
+        )
           void report(() => select(creation.input.sessionId, false));
       }
       setScheduledTasksView(false);
@@ -3257,7 +3267,8 @@ function NativeDesktopContent({
     setPreparing(true);
     if (newPermission === undefined && selection?.permissions)
       setNewPermission(selection.permissions.mode.mode);
-    if (firstRef.current?.result?.phase !== 'unknown' && !pending) setFirstSubmission(undefined);
+    if (firstRef.current?.result?.phase !== 'unknown' && !pending && !firstInputAwaitingApplication)
+      setFirstSubmission(undefined);
     const target = workspaceId ?? directory?.workspaces[0]?.id;
     if (target && preparationReadsReady && state?.pendingAttachmentDrafts) {
       const targetScope = JSON.stringify([directory?.storeId, 'new-conversation', target]);
@@ -3586,7 +3597,7 @@ function NativeDesktopContent({
     value: NativeConversationResult,
     original: NonNullable<typeof firstSubmission>,
     current: number,
-    page: number,
+    page: number | undefined,
     sendingReceipt = false,
   ) {
     const previous = firstRef.current;
@@ -3599,7 +3610,9 @@ function NativeDesktopContent({
     const nextSubmission = { ...original, result: value };
     firstRef.current = nextSubmission;
     setFirstSubmission(nextSubmission);
-    if (value.creation?.phase === 'created') markFirstCreation(original.commandId);
+    const provisional = value.creation?.input.firstInputCommandId === original.commandId;
+    const published = firstConversationPublished(value);
+    if (value.creation?.phase === 'created' && published) markFirstCreation(original.commandId);
     if (sendingReceipt && (value.phase === 'failed' || value.phase === 'unknown'))
       setSending(false);
     if (
@@ -3612,7 +3625,7 @@ function NativeDesktopContent({
     // Directory observation is recoverable independently of the known receipt.
     // Do not turn an acknowledged submission back into unknown or stop handoff.
     if (value.phase !== 'sending') void readDirectory().catch(() => {});
-    if (value.creation?.phase === 'created') {
+    if (value.creation?.phase === 'created' && published) {
       if (original.preparationScope && original.savedPreparationRevision !== undefined) {
         const saved = noteDraftStates.current.get(original.preparationScope);
         if (saved) saved.consumedCommand = original.commandId;
@@ -3678,11 +3691,23 @@ function NativeDesktopContent({
         // receipt lookups leave that activation and its read retries in place.
         await select(sessionId, false).catch(() => {});
       }
-    } else if (
-      value.phase !== 'accepted' &&
-      newDraftRevision.current === original.preparationRevision
-    )
-      setNewDraft((draft) => draft || original.draft.content);
+    } else {
+      if (provisional && value.phase === 'failed' && original.preparationScope) {
+        const draft = noteDraftStates.current.get(original.preparationScope);
+        if (draft?.consumedCommand === original.commandId) draft.consumedCommand = undefined;
+      }
+      if (
+        (provisional ? value.phase === 'failed' : value.phase !== 'accepted') &&
+        newDraftRevision.current === original.preparationRevision
+      )
+        setNewDraft((draft) => draft || original.draft.content);
+    }
+  }
+  function firstConversationPublished(result: NativeConversationResult) {
+    return (
+      result.creation?.input.firstInputCommandId !== result.commandId ||
+      result.input?.command?.status === 'applied'
+    );
   }
   function markFirstCreation(commandId: string) {
     setFirstSendProgress((progress) =>
@@ -3722,7 +3747,8 @@ function NativeDesktopContent({
       imageDrafts.get(newImageScope).some((image) => image.loading || image.error) ||
       imageDrafts.files(newImageScope).some((file) => file.error) ||
       preparationAttachmentsBlocked ||
-      firstSubmission?.result?.phase === 'unknown'
+      firstSubmission?.result?.phase === 'unknown' ||
+      firstInputAwaitingApplication
     )
       return;
     const current = generation.current,
@@ -4819,6 +4845,7 @@ function NativeDesktopContent({
     const current = state?.generation;
     if (
       !confirmedFirstCreation ||
+      confirmedFirstCreation.input.firstInputCommandId !== undefined ||
       !original ||
       original.result ||
       original.creation.commandId !== confirmedFirstCreation.input.commandId ||
@@ -7925,7 +7952,8 @@ function NativeDesktopContent({
                   newBranch.storeId !== directory.storeId ||
                   contextBusy ||
                   !newModelReady.choice?.modelId ||
-                  firstSubmission?.result?.phase === 'unknown',
+                  firstSubmission?.result?.phase === 'unknown' ||
+                  firstInputAwaitingApplication,
                 inputLabel: '新对话草稿',
                 sendLabel: '发送首条消息',
                 permission: preparedPermission,

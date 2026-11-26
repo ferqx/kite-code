@@ -95,7 +95,7 @@ import {
   readSessionDesktopShell,
   saveDesktopShellPreference,
 } from './desktop-shell';
-import { readDirectory } from './directory';
+import { publishedSessionCreation, readDirectory } from './directory';
 import { assertDispatchReadSet } from './dispatch-read-set';
 import { readExecutionEvidence } from './execution-evidence';
 import {
@@ -239,6 +239,7 @@ type Input = {
     name: string;
     workspaceId: string;
     title: string;
+    firstInputCommandId?: string;
     reason: string;
     needsReview?: boolean;
     configuration: Json;
@@ -1452,10 +1453,15 @@ export class SqliteOperations {
       case 'createSession':
         return this.tx(() => {
           const storeId = this.identity(input.expectedStoreId);
+          if (input.firstInputCommandId === input.commandId)
+            throw new AgentError('invalid_input_request');
           const request = {
             kind: 'session.create',
             workspaceId: input.workspaceId,
             title: input.title,
+            ...(input.firstInputCommandId !== undefined
+              ? { firstInputCommandId: input.firstInputCommandId }
+              : {}),
           };
           const digest = hash(request);
           const prior = this.row('SELECT * FROM command WHERE id=?', input.commandId);
@@ -1538,7 +1544,10 @@ export class SqliteOperations {
       }
       case 'listSessions':
         return this.rows(
-          'SELECT * FROM session WHERE id>? AND delete_requested=0 AND parent_id IS NULL ORDER BY id LIMIT ?',
+          `SELECT s.* FROM session s WHERE s.id>? AND s.delete_requested=0 AND s.parent_id IS NULL
+            AND NOT EXISTS(SELECT 1 FROM command c
+              WHERE c.session_id=s.id AND c.kind='session.create' AND NOT ${publishedSessionCreation})
+            ORDER BY s.id LIMIT ?`,
           input?.afterId ?? '',
           limit(input?.limit),
         ).map((row) => this.session(row));

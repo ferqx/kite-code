@@ -303,6 +303,7 @@ export type NativeCreation = {
     commandId: string;
     sessionId: string;
     title: string;
+    firstInputCommandId?: string;
   };
   phase: 'pending' | 'unknown' | 'created' | 'rejected';
   code?: string;

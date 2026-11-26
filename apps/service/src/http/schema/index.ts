@@ -1382,6 +1382,7 @@ export const schemas = {
     sessionId: id,
     workspaceId: id,
     title: z.string().max(512),
+    firstInputCommandId: id.optional(),
   }),
   ResumeRunRequest: z.strictObject({
     kind: z.literal('run.resume'),
