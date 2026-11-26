@@ -86,7 +86,7 @@ Root即时删除旧端口的动作准入，只聚合React提交中间的缺失�
 - 保持旧 PNG 衔接：已有真实过程证实旧宽正文、暗空与最终恢复；无法满足连续缩小。
 - 仅删除 hide 或放宽 same-geometry retain：大缩窗可只剩窄条真实页；提前按新 anchor 移动则能覆盖旧聊天。
 - 裁剪旧新槽交集：大变化可能为空，不能保证原页持续可见。
-- 超尺寸 Root 放在父 View 中：本机 plain 与 radius1 均出现 Root 洋红区覆盖真实网页；可信点击亦命中越界 Root。私有材料保留于 `.cache/browser-native-clip-probe-20261031`，不算产品资格。
+- 超尺寸 Root 放在父 View 中：本机 plain 与 radius1 均出现 Root 洋红区覆盖真实网页；可信点击亦命中越界 Root。不算产品资格。本机原始证据已缺失。
 - 将全部混合 reader／编辑器都迁入新 Renderer：现有 ReactNode、草稿、注释和业务所有权不能安全直接序列化，超出所需范围。
 - 仅把边界计算移入原生LayoutManager：固定Electron44.3.0虽未在当前类型／API文档声明`setLayout`，源码导出及实际二进制均支持；隔离三个WebContentsView原型已由该回调独占几何应用。真实缩小仍露出窗口内13图像像素宽的品红底色，窗口和桌面原帧共同确认，故不将它接入普通产品当作消除闪烁的修复。原页保留及回调先于JS resize不构成所有surface同帧提交证据；完整过程归Desktop owner。
 - 只恢复Chromium原生外窗等待入口：固定版本AsyncLiveResize默认关闭，Electron未转发相应父类；私有delegate转发与feature组合已实测74次进入等待分支。窗口和真实桌面源仍有内部品红带，故不采用默认关闭的feature或私有运行时注入作为产品修复。等待父Widget compositor帧也不等于所有网页surface新内容与外窗同刻提交；当前源码还不能将默认配置问题定因为缺失super或永久live-resize状态。后续引擎补丁可能影响构建、签名和升级维护，需要明确扩大实施范围，不能由本轮失败原型默认为正式依赖。
@@ -109,9 +109,11 @@ Root即时删除旧端口的动作准入，只聚合React提交中间的缺失�
 
 ## Native resize phase evidence
 
+当前可从[原生浏览器窗口回归](../../../../apps/desktop/test/isolated/native-browser.test.ts)、[Root 窗口尺寸回归](../../../../apps/desktop/test/isolated/native-root-window.test.ts)。重跑相关行为。真实系统拖窗的逐帧视觉结论依赖单独的窗口过程。
+
 首次生产组合实机发现初次宿主错误依赖绘制后的scope，已改用页面本身的Store／Session归属；页面归属不等待首次绘制。scope、导航及Root新绑定仍各自核实。后继冻结组合实际保留原页、表单与固定阅读段落；scrollY随网页重排改变，但同段落viewport top保持，不能只要求数值scrollY恒定。
 
-`attempt-002`窗口源及`attempt-004-native-display`受纯色隔离背景保护的真实桌面源，都观察到窗口内部右灰带。后者为真实系统边缘拖拽；网页／Chrome右界先于外窗边界约一帧，排除了仅窗口录制源伪影的解释。两轮失败和未执行的步骤保留在 `.cache/browser-recheck-20261030/ordinary-dev/observations/native-layout-20261031`，不授无闪烁资格。
+`attempt-002`窗口源及`attempt-004-native-display`受纯色隔离背景保护的真实桌面源，都观察到窗口内部右灰带。后者为真实系统边缘拖拽；网页／Chrome右界先于外窗边界约一帧，排除了仅窗口录制源伪影的解释。两轮均有失败和未执行步骤，未取得无闪烁资格。本机原始证据已缺失。
 
 [固定Electron delegate](https://github.com/electron/electron/blob/v44.3.0/shell/browser/ui/cocoa/electron_ns_window_delegate.mm#L203-L206)在原生windowDidResize内、super之后直接通知JavaScript resize。当前候选将Root／Chrome／page与UI viewport的实际更新合并到原生回调后的同一Main批次，事件内先废弃旧坐标依据和Chrome动作；它只改变布局执行phase，不使用延时常量、截图衔接或越界overscan。该phase已由冻结`app-005-post-native`及`attempt-005-native-display`否定其消除闪烁的结论：原页、表单、阅读段落与header拖窗通过，但真实桌面帧73（PTS1.825秒）和95（PTS2.233333秒）仍见窗口内部右灰带。后置JS批次不是CA／WindowServer原子提交保证；不能将调度延后作为已完成修复。当前候选保留未交付状态，停止等价实机重跑，不能据定向测试、正常退出或最终截图将本Note标记implemented。
 

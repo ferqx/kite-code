@@ -41,8 +41,10 @@ MCP 来源目录／连接与按需工具发现仍用于配置来源、延迟接�
 
 ## Verification
 
+当前的相关验证入口见[Service 工具退役回归](../../../../apps/service/test/isolated/tool-retirement.test.ts)、[真实模型工具套件](../../../../tests/e2e/live/model/README.md#全工具真实模型)。
+
 2026-11-02，Windows x64／Bun1.4.3，在 `840f71b31` 的任务工作树实施；主分支同期的 Desktop 链接修复 `0dc1e3b7b` 独立保留。实际执行 `bun run typecheck`，八 workspace 及根类型检查通过；Agent build、统一 API 生成核对、Agent 边界、文档结构／影响、测试归属与计划证据门禁通过。
 
 简化读取与原结果呈现／取消三份文件13项119断言通过；工具退役3项55断言、实际 Service 默认装配11项145断言、原生资产保护、普通 Skill 选择与目录、独立 Planning、知识关闭／冷恢复、CLI 参数及宿主、Client 和 TUI 回归分别通过。知识关闭夹具改用真实 Windows 私有目录而非 `mode:0700`，未放宽生产 ACL。默认检查点与 Fork 的完整回归通过。原 TUI paired／shared 两项实际键盘过程记录45个变化帧，对照原分支47帧，核目录、分页、刷新中切换、迟到读取隔离、重开、原草稿及正常退出；切换期间的清屏中间帧在原分支同样存在，这些结果不等于完整客户端视觉或发布验收。
 
-扩展回归中以下既有失败均在未修改的主分支 `0dc1e3b7b` 对照复现：大文件 Runtime 的5秒时限、257次读取长任务的45秒时限，Skills／用户 Skill 目录的 Windows symlink 权限，以及 Cookie checkpoint 与 Session logs 的 symlink／私有 ACL 夹具前置。它们不是本次退役引入，不修改断言、增加等待预算或降低产品保护来取得通过；仍未取得这些完整文件的 Windows 资格。shared Skills 与 built-package 的现有平台 skip 保持。原始命令日志与 TUI 过程帧保留在本机 `.cache/tool-surface-prune-20261102/`，不作为跨平台或完整默认集证据。
+扩展回归中以下既有失败均在未修改的主分支 `0dc1e3b7b` 对照复现：大文件 Runtime 的5秒时限、257次读取长任务的45秒时限，Skills／用户 Skill 目录的 Windows symlink 权限，以及 Cookie checkpoint 与 Session logs 的 symlink／私有 ACL 夹具前置。它们不是本次退役引入，不修改断言、增加等待预算或降低产品保护来取得通过；仍未取得这些完整文件的 Windows 资格。shared Skills 与 built-package 的现有平台 skip 保持。不作为跨平台或完整默认集证据。本机原始证据已缺失。

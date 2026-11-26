@@ -32,11 +32,11 @@ Windows [Shell 权限装配](shell.ts)从实际 PowerShell AST 或 Bash 字面�
 
 Windows Auto 将未能静态确认效果的 PowerShell 交给同一 Shell 风险审核。单一字面量路径的 PowerShell 脚本调用可提供有界正文。原 Tool 与准确自身 Job 共用经核实的风险审核与高风险人答，派发时复核工作目录、范围和已审核文件。 [Windows 原生 Service 回归](../../../../apps/service/test/isolated/windows-shell-auto.test.ts)
 
-2026-11-18 Full 修复在 Windows x64 的 PowerShell 5.1.26100.10066、PowerShell 7.6.9 上通过两种执行身份和三种模式的回归。权限、约束、派发范围、运行中模式及 Shell 准确批准复用用例共 51 项通过，7,673 个文件类型检查通过。隔离 Kite Native 开发制品使用受控本地模型，三条会话分别在 5.1、7 和 Git Bash 中执行含变量／条件及本地文件写入的命令，PowerShell 还包含函数与动态原生调用。三条 Run 均 completed，原 Tool 与 Job 均成功、零工具审批卡，3 个原生 Job 均确认清理和进程树停止；窗口保单个用户消息和最终回复，无页面错误。过程、截图与 SQLite 核验在本机 `.cache/kite-full-shell-window-961ffb17/`。此范围不代替真实模型 PPT 复测或安装发布资格。
+2026-11-18 Full 修复在 Windows x64 的 PowerShell 5.1.26100.10066、PowerShell 7.6.9 上通过两种执行身份和三种模式的回归。权限、约束、派发范围、运行中模式及 Shell 准确批准复用用例共 51 项通过，7,673 个文件类型检查通过。隔离 Kite Native 开发制品使用受控本地模型，三条会话分别在 5.1、7 和 Git Bash 中执行含变量／条件及本地文件写入的命令，PowerShell 还包含函数与动态原生调用。三条 Run 均 completed，原 Tool 与 Job 均成功、零工具审批卡，3 个原生 Job 均确认清理和进程树停止；窗口保单个用户消息和最终回复，无页面错误。此范围不代替真实模型 PPT 复测或安装发布资格。
 
 后续在 Shell 类型统一后的隔离 Kite Native 开发制品，真实 OpenAI `gpt-6-luna`／high 的 PowerShell 7.6.9 与 Git Shell PPT 任务均在提交前通过普通 UI 确认 Full。12 个原 Shell Job 的持久派发权限叶均为 `full`，工具审批记录和待批卡为零；两份 PPT 均完成交付。Git 的未保存驻留状态失败及 PowerShell 复合脚本退出码误判由 [Shell owner](../jobs/README.md#类型统一后的真实模型复测)定位，均非审批等待。范围、模型快照限制及客户端首开问题保持各自事实；本轮未修改权限决定或审批实现。
 
-补充检查保留两组既有失败。`windows-shell-auto.test.ts` 的两种后端仍按旧断言预期超时审核只调用一次，当前会执行三次有界重试；修复前代码对照同样失败，修复后首轮 PowerShell 另受 40 秒等待窗口影响。`shell-risk-review.test.ts` 的 20 个用例在 Windows Profile 初始化阶段被 `windows_path_security_denied` 拒绝，修复前也全部复现，尚未进入待审 Shell。原断言、时限和 ACL 均未修改。对照日志分别为本机 `.cache/powershell-full-approval-auto-baseline.log`／`powershell-full-approval-auto-regression.log` 与 `.cache/powershell-full-approval-risk-baseline.log`／`powershell-full-approval-risk-regression.log`，不将这些结果计为通过或扩大本次 Full 修复的资格。
+补充检查保留两组既有失败。`windows-shell-auto.test.ts` 的两种后端仍按旧断言预期超时审核只调用一次，当前会执行三次有界重试；修复前代码对照同样失败，修复后首轮 PowerShell 另受 40 秒等待窗口影响。`shell-risk-review.test.ts` 的 20 个用例在 Windows Profile 初始化阶段被 `windows_path_security_denied` 拒绝，修复前也全部复现，尚未进入待审 Shell。原断言、时限和 ACL 均未修改。
 
 AND 合成后若领域解释器未被共同选择，沿独立 generic checker 的合同检查；注册工具原有领域材料限制仍保留，不能因此取得跨调用 `reused_approval` 资格。准确 Auto 父链与历史超时继续按各自原证明核验；新审批模型检查技术失败一律停止，不用风险解释器替代独立 checker。
 

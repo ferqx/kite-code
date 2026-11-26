@@ -76,7 +76,7 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 
 ## 入口与职责
 
-2026-11-10，Windows x64／Bun1.4.4，本次命名、资源、元数据、owner交接、普通执行围栏和恢复15份完整文件共196项／2024断言通过；其中Runtime命名43项／477断言、发布24项／144断言。实际日志为本机`.cache/lifecycle-all-agent-coverage.log`，备份替换Store及旧reader兼容性归[Storage](src/storage/README.md#session-标题写入)。这些定向通过不覆盖下述原全量失败。
+2026-11-10，Windows x64／Bun1.4.4，本次命名、资源、元数据、owner交接、普通执行围栏和恢复15份完整文件共196项／2024断言通过；其中Runtime命名43项／477断言、发布24项／144断言。备份替换Store及旧reader兼容性归[Storage](src/storage/README.md#session-标题写入)。这些定向通过不覆盖下述原全量失败。本机原始证据已缺失。
 
 默认子 Agent 为 `general／explore`，子 Agent 不开放 `wait_agent_events`，主 Agent 保留等待子任务事件的能力；工具、任务指导及共享工作区边界归 [Task owner](src/extensions/task/README.md)。[Runtime](src/runtime.ts)保留当前版本同身份续作与冷恢复，完整父子 Tool／Job 身份、原 Model 请求、权限及 Source 仍严格核验。冷恢复只在原 Store／child Session／carrier／root work 全部核准后，向 Host resolver 提供冻结的 `originalRun`；原 initializer 不重跑，计划等 Host 绑定必须使用该原身份。不重建升级前旧角色目录或转换旧工具声明；定义变化时明确拒绝，不能用同名角色或历史快照扩大当前权限。已完成历史保持原身份只读，不清库、不改写；默认装配归 [Service owner](../../apps/service/README.md)。
 
@@ -92,9 +92,9 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 
 首条普通输入的标题兜底由启动前 Action 的原子 claim 保存，配置失败、首轮失败和空白仍保原文兜底，手动名称优先。新输入不调用旧分类流程或捕获分类修订；保留的 sessionInputMetadata 接点及 raw／decision／clarification 收据只服务准确历史来源解析。已发布／关闭的尝试不重开，历史读取不补发命名。
 
-原全量429任务为342通过／87失败，整体返回1；完整文件摘要2563pass／450fail／183skip，Browser execute在已失败后的清理挂起中终止，故该摘要不是含其全部用例的完整总数。85个失败文件对照中，449个当前失败名称有448个HEAD同名失败；唯一独有名称所在协作整文件宿主复验11项／239断言通过。私有路径、平台、旧断言及原生构建限制保留，不能把名称交集当作原因全部一致。维护资产夹具不创建Runtime或调度命名，其超时后原生构建错误不构成本次命名路径的通过证据。原始对照为`.cache/lifecycle-head-agent-final.comparison.json`及其所引日志。
+原全量429任务为342通过／87失败，整体返回1；完整文件摘要2563pass／450fail／183skip，Browser execute在已失败后的清理挂起中终止，故该摘要不是含其全部用例的完整总数。85个失败文件对照中，449个当前失败名称有448个HEAD同名失败；唯一独有名称所在协作整文件宿主复验11项／239断言通过。私有路径、平台、旧断言及原生构建限制保留，不能把名称交集当作原因全部一致。维护资产夹具不创建Runtime或调度命名，其超时后原生构建错误不构成本次命名路径的通过证据。本机原始证据已缺失。
 
-千次顺序子轮次在当前工作树达到原250秒时限；HEAD曾以原测试在228.44秒通过，随后同缓存路径、同依赖及原生资产的未改原测试中，HEAD和当前非TUI源码均达到250秒。前600次SQL累计接近，尚无稳定当前独有差异；不放宽时限、不授予千次耗时资格。原始输出为`.cache/lifecycle-child-history-{head,current}-controlled-original.log`，诊断不替代原测试。
+千次顺序子轮次在当前工作树达到原250秒时限；HEAD曾以原测试在228.44秒通过，随后同缓存路径、同依赖及原生资产的未改原测试中，HEAD和当前非TUI源码均达到250秒。前600次SQL累计接近，尚无稳定当前独有差异；不放宽时限、不授予千次耗时资格。诊断不替代原测试。本机原始证据已缺失。
 
 
 [统一执行](src/execution/index.ts)和[InteractionGate](src/execution/interactions.ts)区分业务信息与单次执行确认。`requestInteractionWithReceipt(question/plan_review)` 保存请求时完整 `informationPermission`，模式变化不取消原业务卡；接纳原答案前只计算原 Execution 的当前权限，硬拒绝仍拒绝，需人工或需审核只允许接纳信息，不因此启动审核或授予效果。当前控制读集的 SQL CAS 变化最多触发三次即刻重新观察；不重投卡、重复人答、调用模型或加入固定等待，其他身份、来源、版本、取消冲突不重试。持有自身执行槽、serial 资源或继承资源的执行请求信息时立即失败；业务等待须使用不持这些资源的定义，不自动暂停或释放活跃 lease。[信息回归](test/isolated/execution/information-permissions.test.ts)维护这些交错及资源边界。

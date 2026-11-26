@@ -2,13 +2,15 @@
 
 ## 普通CLI生命周期验证
 
-2026-11-10，Windows x64／Bun1.4.4，按原CLI计划排除61个TUI／Ink／PTY交互文件，执行34任务／74文件：25任务通过／9失败，235pass／20fail／26skip，整体返回1。原根批次41文件164项通过，包含原128条journal的300秒专用时限；未改原时限。9个失败文件的20个失败均在独立HEAD对照重现；Skill缓存诊断确认原5秒进程期限先得到143，后续EBUSY不覆盖该原错误。维护4项在同一发布依赖复制的symlink EPERM处失败，尚未运行CLI；其余旧问答schema、冷恢复断言、长输出时限和原生收尾限制保留，不宣称全量或发布资格。原始日志为本机`.cache/lifecycle-all-cli-nontui-coverage.log`和`.cache/lifecycle-head-cli-{failures,extra-failures,last-failures}.log`。默认实际argv／paired的42个进程场景及标题取消／真实退出证据归[Service测量](../service/README.md#生命周期性能测量)；TUI候选仍未交付。
+可重跑的当前入口见[CLI 宿主生命周期](test/isolated/host-lifecycle.test.ts)、[测试选择与运行方式](../../tests/README.md)。 2026-11-26 在 Windows x64／Bun 1.4.4 重跑该宿主测试文件，三项取消相关用例仍失败，表现为取消终态缺失或子进程退出码为 1。该结果与下方历史批次分别记录。
+
+2026-11-10，Windows x64／Bun1.4.4，按原CLI计划排除61个TUI／Ink／PTY交互文件，执行34任务／74文件：25任务通过／9失败，235pass／20fail／26skip，整体返回1。原根批次41文件164项通过，包含原128条journal的300秒专用时限；未改原时限。9个失败文件的20个失败均在独立HEAD对照重现；Skill缓存诊断确认原5秒进程期限先得到143，后续EBUSY不覆盖该原错误。维护4项在同一发布依赖复制的symlink EPERM处失败，尚未运行CLI；其余旧问答schema、冷恢复断言、长输出时限和原生收尾限制保留，不宣称全量或发布资格。默认实际argv／paired的42个进程场景及标题取消／真实退出证据归[Service测量](../service/README.md#生命周期性能测量)；TUI候选仍未交付。本机原始证据已缺失。
 
 ## 会话历史读取
 
 当前 [TUI Host](host/tui.tsx) 通过[会话读取器](host/tui-session.ts)分别读取执行、历史、操作准入和其他展示信息。首次打开会话按 View 的 `nextSeq` 上界分页读完整历史。支持 `message_changes` 的服务随后按变更游标合并消息更新和删除，保持同一条消息的序号；分页失败保留上一份完整历史，游标过期或服务不支持增量时重读完整基线。Host 持有单次事件流，断线先撤销活动与操作资格，再核实同一 Service 和 Store 后重开；[观察恢复](host/tui-observation.ts)在 ready 后重建读取基线并刷新原会话。[只读工作区观察](host/tui-workspace-observer.ts)也允许读取增量历史和核实连接，继续拒绝写入和未列入允许列表的方法。操作准入读取失败时，已经核实的历史仍可阅读。定向回归见[历史](test/tui-history.test.ts)、[会话读取](test/tui-session.test.ts)与[只读工作区](test/tui-workspace-observer.test.ts)。
 
-2026-11-11，Windows x64／Bun 1.4.4，`83fcdcb87` 加当前 TUI 工作树。定向 11 个完整文件共 143 项通过。隔离共享 Service 的实际 80×24 PTY 连续观察 14 个变化帧，核对同序号正文更新时未增加完整历史扫描、断线时撤下活动提示并保留正文和草稿、重连后恢复观察、任务完成及正常退出后的冷重开。整个过程仅有一次原模型调用，TUI 未重发任务，重开后正文和草稿各保留一份。原始观察在本机 `.cache/tui-delivery-pty-final.log`。缺失工作区的只读增量路径由上述组合回归验证，共享 Service 的 PTY 结果仅覆盖其原工作区有效时的终端过程。
+2026-11-11，Windows x64／Bun 1.4.4，`83fcdcb87` 加当前 TUI 工作树。定向 11 个完整文件共 143 项通过。隔离共享 Service 的实际 80×24 PTY 连续观察 14 个变化帧，核对同序号正文更新时未增加完整历史扫描、断线时撤下活动提示并保留正文和草稿、重连后恢复观察、任务完成及正常退出后的冷重开。整个过程仅有一次原模型调用，TUI 未重发任务，重开后正文和草稿各保留一份。缺失工作区的只读增量路径由上述组合回归验证，共享 Service 的 PTY 结果仅覆盖其原工作区有效时的终端过程。本机原始证据已缺失。
 
 2026-11-09，Windows x64／Bun1.4.4，`4a527742c` 加当时工作树的历史记录报告历史读取与[观察回归](test/tui-observation.test.ts)共8项／31断言，以及全仓 typecheck、公开 API、测试归属、文档结构／影响和跨包边界检查通过。CLI owned 全量运行出现本地 HTTP `network_outcome_unknown` 及临时目录硬链接 `EPERM`，宿主复验四个普通分片共205项通过／5项跳过，首个独占 ask-user-stdio 文件20项通过／3项失败后停止，失败涉及默认问答参数校验与 waiting_interaction。该历史记录未取得完整回归或真实 PTY 过程验收资格。
 

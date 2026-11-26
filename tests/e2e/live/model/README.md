@@ -675,7 +675,7 @@ KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=/absolute/own
 
 `r6/`另核短引用下Full子任务中断复用、Full／Auto同一child的MCP首次与追发，以及请求批准MCP全链路；`r7/`三模式Worktree创建／观察／删除均各一次，观察零新Job，另有Auto MCP全链路。命令沿下方入口和相应scenario，未换模型或改写回复。`r5/`的工作区内外、并发消息、准确停止和Client断线只读恢复等通过证据按未变化路径复用；其中原Full错抄引用、Auto内层Job审核误拒绝及Manual引导答复码缺失仍保failed，不能把后续定向通过解释为该旧批次全过。更早r1–r4失败同样保留。Store／审核回执1及API /v1保持。
 
-2026-11-03，恢复回执、Windows 准入及运行时闭包修复后，`live-all-luna-low-08` 七组再次通过：固定 `gpt-6-luna/low`，46次实际请求均HTTP200，30个内置工具和1个动态MCP工具全部成功且回到模型。实际原子Shell停止、控制目录空、同一子Agent两轮323／667与资源关闭均确认，运行内源码摘要一致。已逐请求复核工具调用、结果接管与最终正文；后续只为Service测试夹具补上非空类型断言，生产路径及本测试入口未再改变。报告和完整原始请求／事件保留在本机 `.cache/tool-surface-prune-round2/live-all-luna-low-08.json` 及其 `.workspace`，范围仍为Windows源码Service与合成MCP，不代替完整客户端视觉或安装发行资格。
+2026-11-03，恢复回执、Windows 准入及运行时闭包修复后，`live-all-luna-low-08` 七组再次通过：固定 `gpt-6-luna/low`，46次实际请求均HTTP200，30个内置工具和1个动态MCP工具全部成功且回到模型。实际原子Shell停止、控制目录空、同一子Agent两轮323／667与资源关闭均确认，运行内源码摘要一致。已逐请求复核工具调用、结果接管与最终正文；后续只为Service测试夹具补上非空类型断言，生产路径及本测试入口未再改变。范围仍为Windows源码Service与合成MCP，不代替完整客户端视觉或安装发行资格。本机原始证据已缺失。
 
 [全工具入口](model-tools-all.live.ts)支持本机Windows／macOS，通过`--model=gpt-6-luna --reasoning-effort=medium`复用已授权本地登录，`--mode=accept_edits|auto|full`选择真实权限；不修改用户默认模型或凭据。沿真实Service／Client HTTP、SQLite、Files、原生Shell、内置rg、Skill和MCP装配执行，逐次核实际wire与工具消费。MCP使用本机合成HTTP Server，网页读取使用实际`web_fetch`访问受控回环页，Browser由Native入口另验。2026-11-07按用户要求移除测试模型请求／轮数、会话总时限、单场景时限及额外HTTP期限；显式Luna不加输出token硬上限，完整会话自然结算。SIGINT／SIGTERM只触发原signal取消和原资源收尾，生产审核、执行和取消期限仍保持。
 
@@ -692,7 +692,7 @@ bun tests/e2e/live/model/model-tools-all.live.ts --mode=auto --model=gpt-6-luna 
 
 2026-11-03，Windows x64／Bun1.4.3，当前工具退役工作树：最终 `live-all-luna-low-07` 七组通过，50次真实请求均HTTP200，30个内置工具和1个动态MCP工具全部成功执行且回到模型；实际子结果为323／667，Shell全树停止、控制目录空和资源关闭确认。已逐段复核原调用、回执、消息顺序和最终正文。测试发现并修复默认MCP来源只接受首次child.start、拒绝同一Session追发轮的问题；取消参数说明区分准确Shell句柄与新取消意图ID。来源继承受控回归4项／266断言，Shell／模型投影9项／103断言通过。
 
-此前失败原样保留，包括宿主权限／直连失败、夹具缺工作区锁、真实MCP追发故障及模型误用取消ID／漏传MCP generation。早期`04`脚本虽打印passed，过程复核发现第二child失败，附加review判为失败；不能当作全工具通过证据。准确本机原件位于`.cache/tool-surface-prune-round2/`。此结论限定上述模型和本机源码Service，不代表任意远端MCP、完整UI、其他平台、安装或发布资格。
+此前失败原样保留，包括宿主权限／直连失败、夹具缺工作区锁、真实MCP追发故障及模型误用取消ID／漏传MCP generation。早期`04`脚本虽打印passed，过程复核发现第二child失败，附加review判为失败；不能当作全工具通过证据。此结论限定上述模型和本机源码Service，不代表任意远端MCP、完整UI、其他平台、安装或发布资格。本机原始证据已缺失。
 
 ### 扩展工具场景
 
@@ -726,7 +726,7 @@ bun tests/e2e/live/model/model-tools-all.live.ts --extended --mode=auto --model=
 | 同一子Agent的MCP首次／追发 | 1 | `live-extended-luna-low-04-mcp.json` |
 | 未连接父schema拒绝、失败子轮原工具证据进入父模型及准确报告 | 1 | `live-extended-luna-low-06-boundary.json` |
 
-准确本机原件保留在 `.cache/tool-surface-prune-round2/`。`01/02/05` 整体仍为 failed，不改写；失败包括测试错读行窗字段、模型误传preset／误用等待工具／漏传MCP绑定。过程复核还发现 `02` 的负向场景虽脚本通过，最终文本却把“父级未连接”误说为“没有连接”；附加 `.review.json` 明确判该项失败。Runtime随后修复失败子轮清空原工具取证的问题，`06` 实际父输入含已成功的连接回执，最终正文保留未观察业务效果的不确定性。该修复只触及 failed 子轮的可读取证，前述8项和两项定向成功用例所经过的正常／取消路径未改；原代码、载荷、Source及副作用断言可据其范围复用。
+`01/02/05` 整体仍为 failed，不改写；失败包括测试错读行窗字段、模型误传preset／误用等待工具／漏传MCP绑定。过程复核还发现 `02` 的负向场景虽脚本通过，最终文本却把“父级未连接”误说为“没有连接”；当时的附加复核将该项判为失败。Runtime随后修复失败子轮清空原工具取证的问题，`06` 实际父输入含已成功的连接回执，最终正文保留未观察业务效果的不确定性。该修复只触及 failed 子轮的可读取证，前述8项和两项定向成功用例所经过的正常／取消路径未改；原代码、载荷、Source及副作用断言可据其范围复用。本机原始证据已缺失。
 
 修复后另跑 `live-all-luna-low-09.json`：七组、44次实际HTTP200，30个内置工具和1个动态MCP工具全部成功并回到模型。新增6轮扩展尝试合计192次真实请求，加本轮全工具基线共236次；全部wire均核 `gpt-6-luna/low`，各轮源码输入无漂移、资源关闭确认且控制目录空。失败子取证及MCP／取证／结算／通知回归7文件28项950断言通过，八workspace类型检查通过。上述数据不保证低思考模型永不误用参数；实际失败及其随后纠正均保留，HTTP200也不代替业务验收。
 
@@ -1013,7 +1013,7 @@ Runner 在权限为 `0700` 的临时根目录内创建隔离的 Kite 配置和 W
 
 2026-10-19（UTC）本轮已实际运行当前工具 smoke 和协作 CLI 的23个变体，使用配置默认的 `deepseek-v4-flash / chat-completions`，不是固定 Provider。逐变体结果、六处 Runtime/Store 修复、进度历史状态误报及夹具修正统一归[本轮执行记录](collaboration-v1.1-cases.md#2026-10-19utc真实执行结果)。I03 保留原 `inconclusive/semantic_review` 报告，独立语义结论另存；该矩阵列出的69个主用例、普通客户端窗口、其他平台和尚未运行的精确交错没有整体取得真实模型资格。早期 failed/inconclusive 与修复后 passed 同时保留。最终相同工作树摘要的23个CLI变体已完成整组复验：22项机械判定通过，I03由机械安全加独立语义复核通过；两项工具smoke也通过，共164次实际HTTP。准确模型、摘要、原始状态及未覆盖边界见上述记录；真实模型整组后的Shell错误快照、损坏report证明及测试等待修正另列代码摘要；最终第七轮默认945文件／748job（含7 exclusive）完整通过、代码输入零漂移，不冒称同一新版本的付费重跑。
 
-- 2026-10-19，Windows x64、Bun 1.4.3、Electron 44.3.0，本任务工作树；真实用户配置的 `deepseek`／`deepseek-v4-flash`／Chat Completions，正常公网网络。通过自有隔离 Profile、合成 Workspace 和普通 Native 开发窗口，经 `+` 两个原生选择器分别选外部 INI 与直接 PNG，再发送；两次 Model 和一次 `files.read_path` 成功，Run `completed`。读取准确 INI 字段、识别图片文字和两个红色方块；封存 Model 输入核原图 Base64 字节、后继实际文件内容、消息正文未改写且文件／图片元数据独立；未选的外部说明未进入输入，无 `context_source_unavailable`。启动／复核命令为 `bun .cache/attachment-cards-e68af6a7-8e05-4353-b253-1f7df0e2151c/native-live.ts` 和同目录 `verify.ts`；这是本次合成数据的临时夹具，原始 Store／配置不作为发布证据，保留脱敏 `report.json`。复现需重新建立独立夹具并明确真实模型授权，不从用户真实目录读取内容。结果限该模型／协议／平台，不覆盖 PDF 正文解析、其他提供商或 Responses 真实端点；实现与确定性回归入口见 [Native owner](../../../../apps/desktop/README.md#markdown-与附件输入)。
+- 2026-10-19，Windows x64、Bun 1.4.3、Electron 44.3.0，本任务工作树；真实用户配置的 `deepseek`／`deepseek-v4-flash`／Chat Completions，正常公网网络。通过自有隔离 Profile、合成 Workspace 和普通 Native 开发窗口，经 `+` 两个原生选择器分别选外部 INI 与直接 PNG，再发送；两次 Model 和一次 `files.read_path` 成功，Run `completed`。读取准确 INI 字段、识别图片文字和两个红色方块；封存 Model 输入核原图 Base64 字节、后继实际文件内容、消息正文未改写且文件／图片元数据独立；未选的外部说明未进入输入，无 `context_source_unavailable`。历史窗口驱动和独立复核脚本均为本机临时夹具。复现需重新建立独立夹具并明确真实模型授权，不从用户真实目录读取内容。结果限该模型／协议／平台，不覆盖 PDF 正文解析、其他提供商或 Responses 真实端点；实现与确定性回归入口见 [Native owner](../../../../apps/desktop/README.md#markdown-与附件输入)。本机原始证据已缺失。
 
 - 2026-10-18，macOS arm64、Bun 1.4.2、HEAD `bcf70ce84` 上的工具表面工作树；使用现有默认 provider `deepseek`、model `deepseek-v4-flash`、`chat-completions`，配置的 `reasoningEffort:medium` 保持，测试输出上限为4096。直接网络实际11次HTTP均200；`files`（6次请求）和 `agents`（5次，包含真实child）通过，共11次工具调用、10份parent热/冷完整公开快照。准确终态、子结果 `323`、任务目标和磁盘效果均独立断言。命令为 `KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=<自有绝对路径>`；最终runner耗时11.916秒，Provider实报输入34921/output1524 token。此前调试首次因测试使用字符串比较对象键顺序误报快照差异，修正后完整两场景通过；本轮三次runner实际合计29次请求，无换模型/协议或自动重试。只保留脱敏报告，不保留请求或响应正文。此证据不覆盖Native/Windows/Linux、其他模型、真实MCP远端或完整Service客户端。
 - 2026-07-22，provider `deepseek`，model `deepseek-v4-flash`，正常网络条件。

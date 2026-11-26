@@ -76,17 +76,17 @@ Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存
 | 2048² 透明噪声 WebP | 2345ms | 3917 / 4199ms |
 | 界面 PNG 连续30次 | 281ms | 879 / 937ms |
 
-主 Service/benchmark 进程 RSS 峰值528MiB，连续30次界面图阶段从408回落至268MiB；解码子进程不在该数值中，Windows Job 另限制512MiB，不承诺整机或主进程硬内存上限。最大10ms采样间隔470ms：已修复大块发布的连续同步写入与重复 Blob 采用回读，仍有同步元数据／JSON及系统调用开销。此前同 JPEG 独立批次最大间隔904ms，修复后473ms；这是响应性证据，不是严格单变量吞吐比较。完整数据保留于本机 `.cache/image-read-implementation-20261104/benchmark-final-04.json` 和原失败／中间批次；不据有限回落证明长期无泄漏。
+主 Service/benchmark 进程 RSS 峰值528MiB，连续30次界面图阶段从408回落至268MiB；解码子进程不在该数值中，Windows Job 另限制512MiB，不承诺整机或主进程硬内存上限。最大10ms采样间隔470ms：已修复大块发布的连续同步写入与重复 Blob 采用回读，仍有同步元数据／JSON及系统调用开销。此前同 JPEG 独立批次最大间隔904ms，修复后473ms；这是响应性证据，不是严格单变量吞吐比较。不据有限回落证明长期无泄漏。本机原始证据已缺失。
 
-封闭配置和退出未知收口后，正式Agent再次构建通过；最终界面图独立6次复测全部成功，工具P50为234ms，整链路P50／P95为727／1068ms，主进程峰值257MiB、最大采样间隔176ms，报告为`.cache/image-read-implementation-20261104/benchmark-ui-final-05.json`。其余54次数据按未改变的解码、发布和封存路径复用；独立小批次不作为与前表的严格性能对照。
+封闭配置和退出未知收口后，正式Agent再次构建通过；最终界面图独立6次复测全部成功，工具P50为234ms，整链路P50／P95为727／1068ms，主进程峰值257MiB、最大采样间隔176ms，其余54次数据按未改变的解码、发布和封存路径复用；独立小批次不作为与前表的严格性能对照。本机原始证据已缺失。
 
 同日10图增量：严格回归覆盖一次10张顺序、11张／空列表／混用／重复的零源读取拒绝、中途损坏／取消零交图、真实高熵PNG跨16MiB整批拒绝，以及单图授权不能替代混合原件批次。默认Service实际将10张放入同一Tool消息，经两种SDK编码核完整有序图像、11张拒绝、冷重开与Fork；原PDF和32MiB历史门禁复验通过。Native按原执行引用核第10张、拒绝第11张及错误scope／名称数目／单张和总字节，实际页面核10张折叠／重开／切会话，过程证据归[Desktop owner](../../../../../apps/desktop/README.md)。
 
-当前批次[性能runner](../../../../../tests/e2e/live/model/image-reading.benchmark.ts)的`--case=ui-batch10`为6次调用、共60张1920×1080合成界面图，每次10个不同路径而字节相同，实际解码／完整读取均执行，Blob内容去重。6次全部成功，整批PNG约1.04MiB，整链路P50／P95为2943／3501ms，主进程峰值303MiB、最大采样间隔144ms，报告为`.cache/image-read-implementation-20261104/benchmark-batch10-01.json`。这是有限的固定模型和可去重样本，不证明10张高熵大图、长期SLO或总内存硬限额；前表保留原单图范围。
+当前批次[性能runner](../../../../../tests/e2e/live/model/image-reading.benchmark.ts)的`--case=ui-batch10`为6次调用、共60张1920×1080合成界面图，每次10个不同路径而字节相同，实际解码／完整读取均执行，Blob内容去重。6次全部成功，整批PNG约1.04MiB，整链路P50／P95为2943／3501ms，主进程峰值303MiB、最大采样间隔144ms，这是有限的固定模型和可去重样本，不证明10张高熵大图、长期SLO或总内存硬限额；前表保留原单图范围。本机原始证据已缺失。
 
-同日更名前的[真实视觉 runner](../../../../../tests/e2e/live/model/image-vision.live.ts)经默认装配和现有 `deepseek-v4-flash`／Chat Completions，两次HTTP200、一次成功的本地图片工具调用，准确识别随机六字符与红7／蓝3柱图；源路径已删除。没有 OCR、替换模型回复或协议回退。报告为本机 `.cache/image-read-implementation-20261104/vision-01.json`。这不保证任意图片识别率、其他平台、完整 Native 窗口或安装发行资格。
+同日更名前的[真实视觉 runner](../../../../../tests/e2e/live/model/image-vision.live.ts)经默认装配和现有 `deepseek-v4-flash`／Chat Completions，两次HTTP200、一次成功的本地图片工具调用，准确识别随机六字符与红7／蓝3柱图；源路径已删除。没有 OCR、替换模型回复或协议回退。这不保证任意图片识别率、其他平台、完整 Native 窗口或安装发行资格。本机原始证据已缺失。
 
-2026-11-04更名后再次实际调用同一已配置模型：单图和`--images=10`两次独立联验均通过，各为2次HTTP200、一次成功`view_images`，共4次实际HTTP。10图样本使用不同随机六字符及柱图数值，真实模型一次以有序`paths`读取全部已保存原件，后继请求图像数为10，最终JSON的10个代码与20个数值逐图完全匹配，数组顺序保持。两次都先删除工作区源文件，没有OCR、回复替换、模型／协议回退或外围重试。报告分别为本机`.cache/image-read-implementation-20261104/vision-view-images-single-01.json`和`vision-view-images-batch10-01.json`；新的批次报告只保存逐图布尔判定及有限元数据，原请求／回答按原Runtime保存在隔离Profile中。此为单一模型的两份合成样本，不推广为任意图片、其他模型或平台的识别率保证。
+2026-11-04更名后再次实际调用同一已配置模型：单图和`--images=10`两次独立联验均通过，各为2次HTTP200、一次成功`view_images`，共4次实际HTTP。10图样本使用不同随机六字符及柱图数值，真实模型一次以有序`paths`读取全部已保存原件，后继请求图像数为10，最终JSON的10个代码与20个数值逐图完全匹配，数组顺序保持。两次都先删除工作区源文件，没有OCR、回复替换、模型／协议回退或外围重试。新的批次报告只保存逐图布尔判定及有限元数据，原请求／回答按原Runtime保存在隔离Profile中。此为单一模型的两份合成样本，不推广为任意图片、其他模型或平台的识别率保证。本机原始证据已缺失。
 
 默认 Service 已接入准确会话文件适配器；持久取舍见[会话文件决定](../../../../../.agents/notes/implemented/architecture/2026-10-23-persistent-session-files.md)，客户端和发行资格分别见 [Desktop](../../../../../apps/desktop/README.md)与 [Terminal](../../../../../apps/cli/docs/terminal-release.md)。默认宿主的 `files.read@5` 组合以下能力，`files.write@3` 新建时补齐工作区父目录，edit 保持版本 2。
 
@@ -160,7 +160,7 @@ Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF W
 
 ## 内部内容搜索与历史结果
 
-2026-10-25，Windows x64／Bun1.4.3，`aefb47472` 加本次查询 diff：同一仓库、同一原生后端的只读前后对照中，`packages/agent/**/README.md` 查找由2762ms降至289ms（均41项），`packages` 中的 `autoReview` 内容搜索由20017ms降至4809ms（均返回30条，实际检查文件由2348降至1172）；根 `AGENTS.md` 查找为1192ms，仅返回3个未忽略路径。忽略域变化意味着不承诺两种模式返回相同产物命中，`respect_ignore:false` 可明确读取原普通范围。入口与结果保留于本机 `.cache/file-query-performance.ts`／`.cache/file-query-performance.json`；这是当前本机文件查询对照，不代表所有工作区、完整客户端切换延迟或内存峰值。Files五份完整回归50项744断言通过，覆盖原生六工具、父规则继承／否定、分页、宏任务取消、目录联接拒绝与关闭边界；Windows 的链接夹具使用真实目录 junction，POSIX 保原 symlink。
+2026-10-25，Windows x64／Bun1.4.3，`aefb47472` 加本次查询 diff：同一仓库、同一原生后端的只读前后对照中，`packages/agent/**/README.md` 查找由2762ms降至289ms（均41项），`packages` 中的 `autoReview` 内容搜索由20017ms降至4809ms（均返回30条，实际检查文件由2348降至1172）；根 `AGENTS.md` 查找为1192ms，仅返回3个未忽略路径。忽略域变化意味着不承诺两种模式返回相同产物命中，`respect_ignore:false` 可明确读取原普通范围。这是当前本机文件查询对照，不代表所有工作区、完整客户端切换延迟或内存峰值。Files五份完整回归50项744断言通过，覆盖原生六工具、父规则继承／否定、分页、宏任务取消、目录联接拒绝与关闭边界；Windows 的链接夹具使用真实目录 junction，POSIX 保原 symlink。本机原始证据已缺失。
 
 模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `offset`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部读取沿同一呈现路径：按当前模式获准的安全可编辑目标展示真实完整基线，其他只读结果不补造编辑基线。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
 

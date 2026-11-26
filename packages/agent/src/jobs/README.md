@@ -88,7 +88,7 @@ Runner 按完整转义命令行的 UTF-8 字节数选择 Git Bash 启动方式�
 
 同日以当前 Runner 在隔离 Kite Native 开发制品中，用已有 OpenAI 连接的 `gpt-6-luna`／high 和完全访问复测五页中文「新品上市计划」。PowerShell 7.6.9 与 Git Bash（Git for Windows 2.56.1）分别执行 7／16 个 Shell Job，各有一次跨命令丢失未保存驻留修改而报 `Slide 1 not found`，随后模型自行完成保存与交付。23 个 Job 均确认清理和进程树停止，轮次结束及冷导出时均无所属 OfficeCLI 残留，PPTX 独占读取通过；未出现管道拒绝或共享冲突。`locale 'zh-CN' inferred from OS user culture` 是 CLI 的信息提示，未造成该命令失败。
 
-两份归档文件经 ZIP／可编辑文本结构核对，并由 Microsoft PowerPoint 16.0 只读打开、导出全部五页且原件摘要不变。Kite 冷重开均显示五页且无模型重放；PowerShell 首次预览在 22 秒内未显示五页，冷重开恢复，首开原因尚未确认。原始 Job、进程、模型与成品证据分别位于本机 `.cache/kite-ps7-ppt-retest-20261117-d152d6f6/evidence/` 和 `.cache/kite-ps7-ppt-retest-20261117-ac6e702c/evidence/`。
+两份归档文件经 ZIP／可编辑文本结构核对，并由 Microsoft PowerPoint 16.0 只读打开、导出全部五页且原件摘要不变。Kite 冷重开均显示五页且无模型重放；PowerShell 首次预览在 22 秒内未显示五页，冷重开恢复，首开原因尚未确认。
 
 22 条可核验业务输入快照均为 OpenAI／Responses／`gpt-6-luna`／high，并携带实际方言与通用进程指引；另 9 条输入快照读取返回 `model_input_hash_mismatch`，保留为独立核验限制，不计为 Shell 执行失败。本轮未改审批、执行审核或客户端，核对的 1,704 个已跟踪文件内容哈希保持一致。以上仅覆盖本机 Windows x64 开发制品与完全访问，不扩大工作区受限管道或安装发布资格。
 
@@ -116,23 +116,25 @@ Runner 从 PowerShell AST 识别独立命令，再按实际 Job 内的命令解�
 
 ### 类型统一后的真实模型复测
 
+当前可重跑[Windows Shell 原生 Job 回归](../../test/isolated/jobs/windows-shell.test.ts)、[Service 审批和派发回归](../../../../apps/service/test/isolated/windows-shell-auto.test.ts)。历史模型和成品观察另按下文的本机范围阅读。
+
 2026-11-18，在 Windows x64／Bun 1.4.4／Electron 44.3.0 的隔离 Kite Native 开发制品，用现有 OpenAI 连接的 `gpt-6-luna`／high／完全访问复测同一五页中文「新品上市计划」任务。PowerShell 类型自动选中 7.6.9，Git Shell 使用 Git for Windows 2.56.1；OfficeCLI 仍为同一字节的 1.0.161。两个 Run 均完成，分别执行 5／7 个 Shell Job，12 个 Job 的派发权限叶均为 Full，均确认清理及进程树停止，工具审批为零。持续进程观察、任务结束及冷导出后的检查均无所属 OfficeCLI 残留；两份交付原件独占读取通过，未见命名管道拒绝或共享冲突。
 
 Git Shell 有一个真实失败 Job：先前命令 `create/open/add slide/get` 未保存就退出，原 Job 正常停止驻留进程，下一命令报告 `previous session ... without flushing` 和 `Slide 1 not found (total: 0)`。模型自行改为同一命令内批量编辑、保存及关闭，成功重建并交付。`locale 'zh-CN' inferred from OS user culture` 在两类 Shell 都出现，仍为信息提示。
 
 PowerShell 的 5 个 Job 虽均记录 exit 0，逐行检查仍发现 `officecli help pptx view screenshot` 报 `unknown verb 'view'`。同字节 CLI 独立执行返回 1，原生 PowerShell 5.1.26100.10066 和 7.6.9 执行原复合命令也均返回 1，Kite 却结算为成功。进一步用不依赖 OfficeCLI 的 `Write-Output 'before'; cmd.exe /d /c exit 23`，两版本原生 `-Command` 均返回 1，原 Kite Job 均为 0；追加显式 `exit $LASTEXITCODE` 时两边均为 23，主动用后续输出处理错误时两边均为 0。修前差异位于 [PowerShell 启动包装](../../../../native/windows-sandbox-runner/src/lib.rs)的 `build_powershell_command_line` 复合脚本分支；不能据成功 Job 数断言全部内部命令成功，也不能把此问题归于 CLI 或审批。修复同时保留显式退出及脚本主动处理非零结果的语义，验证见下文。
 
-两份冷导出 PPTX 均为五页、按指定顺序包含可编辑文本，后四页各有两条可执行要点。Microsoft PowerPoint 16.0 只读打开并导出全部十页，逐页检查文字与排版，原件摘要未变。Kite 的首开及冷读差异归 [Desktop owner](../../../../apps/desktop/README.md#windows-集成终端-shell)。19 次业务模型请求中，15 份可读输入快照确认 OpenAI／Responses／`gpt-6-luna`／high、实际方言和通用进程指引，另 4 份读取返回 `model_input_hash_mismatch`，仍是独立核验限制。原始命令、双流、权限、过程、成品、版本对照与最小复现位于本机 `.cache/kite-shell-ppt-retest-20261118-46d1f9c1/evidence/`。本轮只复测和定位，测试期间所核对负责目录的 919 个文件摘要未变，未改 Shell、审批或 OfficeCLI 实现；这不构成安装发布或其他机器的资格。
+两份冷导出 PPTX 均为五页、按指定顺序包含可编辑文本，后四页各有两条可执行要点。Microsoft PowerPoint 16.0 只读打开并导出全部十页，逐页检查文字与排版，原件摘要未变。Kite 的首开及冷读差异归 [Desktop owner](../../../../apps/desktop/README.md#windows-集成终端-shell)。19 次业务模型请求中，15 份可读输入快照确认 OpenAI／Responses／`gpt-6-luna`／high、实际方言和通用进程指引，另 4 份读取返回 `model_input_hash_mismatch`，仍是独立核验限制。原始命令、双流、权限、过程、成品、版本对照与最小复现位于该组原始材料。本轮只复测和定位，测试期间所核对负责目录的 919 个文件摘要未变，未改 Shell、审批或 OfficeCLI 实现；这不构成安装发布或其他机器的资格。
 
 同日后续修复上述通用包装错误。PowerShell 5.1.26100.10066 和本机最高 7.6.9 各以 14 组原生 `-Command` 对照真实受管 Job，覆盖末尾失败、主动处理、显式退出、管道、提前返回、参数与 begin/end、函数／类及 `$script:` 作用域；28 个 Job 全部按预期结算并确认清理。原 `rg | Out-String` 用例也按原生管道失败语义核对为 1。原生 Runner 45 项测试通过，协议仍为 V7，未修改审批或 OfficeCLI。工具描述明确进程内未保存状态不能跨调用保留，已确认清理的终态还向后续模型说明从落盘文件继续；原 stdout／stderr 与回执不被改写。相关验证及通用反馈归 [Shell 工具](../tools/shell.README.md)。原四条输入读取失败由 Service 响应 schema 漏保留图片造成，补全后同一历史 19 条全部完整核验，模型调用总数仍为 19；实现与完整性边界归 [Service owner](../../../../apps/service/README.md)。首次复测的失败事实保留为修前证据。
 
 最终退出状态回归进一步覆盖 trap、using namespace、`#requires`，并按真实 AST 能力在支持的安装上核 clean 根块，合计 37 个受管 Job 与 37 次原生对照通过。原错误帮助复合命令和三组最小命令另在两种安装各重放一次，八组退出码、清理与停止均一致，原错误命令现在准确返回 1。本机缓存中一次构建目录清理与测试并发导致的资产缺失属于验证夹具竞态，先完成正常构建后串行重跑通过，未放宽资产核验。
 
-修后真实模型三段 Run 共执行 14 个 Shell Job：PowerShell 首次未交付，原生对照确认是模型参数和语法错误；原会话一次继续后只新增一个成功 Job 并交付。Git Shell 保留一次不支持的帮助命令失败和一次未保存状态丢失，模型自行恢复。所有 Job 均确认清理／进程树停止，Full 工具审批为零；最终两份可编辑五页 PPTX 均可打开。23 条实际请求完整核验，其中两条含最终进程作用域反馈；真实模型和最终窗口范围见 [Desktop owner](../../../../apps/desktop/README.md#windows-集成终端-shell)。没有为 CLI 保活已结束 Job 或隐式保存；原命令仍在运行时的后台监督和取消关系保持。原始与恢复证据分别在本机 `.cache/kite-shell-ppt-retest-20261118-afb18de4/evidence/`、`evidence-recovery/`。
+修后真实模型三段 Run 共执行 14 个 Shell Job：PowerShell 首次未交付，原生对照确认是模型参数和语法错误；原会话一次继续后只新增一个成功 Job 并交付。Git Shell 保留一次不支持的帮助命令失败和一次未保存状态丢失，模型自行恢复。所有 Job 均确认清理／进程树停止，Full 工具审批为零；最终两份可编辑五页 PPTX 均可打开。23 条实际请求完整核验，其中两条含最终进程作用域反馈；真实模型和最终窗口范围见 [Desktop owner](../../../../apps/desktop/README.md#windows-集成终端-shell)。没有为 CLI 保活已结束 Job 或隐式保存；原命令仍在运行时的后台监督和取消关系保持。
 
 同日接续复验使用两个全新会话和相同任务、OpenAI `gpt-6-luna`／high／Full，PowerShell 7.6.9 与 Git Shell 分别执行 10／13 个 Job，均在一次用户提交内自行交付。PowerShell 无失败 Job；Git 有三次准确上报的失败：把本次 Job 的 `KITE_OUTPUT_DIR` 跨调用复用导致文件不存在、未保存幻灯片导致后续批处理读取零页，以及开启 CLI 的 `OFFICECLI_RESIDENT_FLUSH=each` 后一次批处理报「无法删除要被替换的文件」。后者的原派发为 `windows-full-job / full_access / internet`，原 Job 清理与进程树停止均确认；错误不能记成审批拒绝。模型随后自行恢复并交付。23 个 Job 的派发模式均为 Full，工具审批为零，结束与冷导出检查未发现所属驻留残留或持续文件占用。
 
-文件替换异常仍未定位：保存的文件副本来自后续恢复后，不能冒称故障发生前的原件。对同字节 CLI，在该恢复后副本上直接启动驻留程序，分别以 each／auto 执行原 50 项批处理、保存及关闭均成功；同副本的受管 PowerShell Full Job 也成功并确认清理。这些对照未复现原文件／启动状态，不能据此归因于 CLI、Job 生命周期或权限，也不能将本轮 Shell 执行写成全绿。两份最终 PPTX 均通过五页可编辑结构、PowerPoint 16.0 十页导出／逐页检查及原件摘要核对；首次与冷预览均约 0.8 秒，32 条实际模型输入完整核验。证据沿用本机 `.cache/kite-shell-ppt-retest-20261118-8ca63a9e/evidence/`，包含原三次失败、进程与独占读取、加载轨迹、输入读取和文件替换隔离对照。复验期间 919 份负责文件摘要无变化，未修改实现、审批或 OfficeCLI；本机开发制品与原首开延迟未定位的边界保持。
+文件替换异常仍未定位：保存的文件副本来自后续恢复后，不能冒称故障发生前的原件。对同字节 CLI，在该恢复后副本上直接启动驻留程序，分别以 each／auto 执行原 50 项批处理、保存及关闭均成功；同副本的受管 PowerShell Full Job 也成功并确认清理。这些对照未复现原文件／启动状态，不能据此归因于 CLI、Job 生命周期或权限，也不能将本轮 Shell 执行写成全绿。两份最终 PPTX 均通过五页可编辑结构、PowerPoint 16.0 十页导出／逐页检查及原件摘要核对；首次与冷预览均约 0.8 秒，32 条实际模型输入完整核验。证据沿用该组原始材料，包含原三次失败、进程与独占读取、加载轨迹、输入读取和文件替换隔离对照。复验期间 919 份负责文件摘要无变化，未修改实现、审批或 OfficeCLI；本机开发制品与原首开延迟未定位的边界保持。
 
 ## 默认 macOS 宿主 Shell
 
@@ -204,7 +206,7 @@ Linux `protectedFiles` 复用既有目录 mask；2026-11-06 后普通 Service �
 
 Bubblewrap `--dev /dev` 保留私有 devpts。非 root 的 Bubblewrap 0.12.0 为 devpts 创建首层 UID 0 映射后会进入第二层 user namespace，原 mount namespace 仍归父 user namespace；仅持当前 namespace 的 CAP_SYS_ADMIN 不能直接 seal。init 的新 mount namespace 只在 P 后、任何业务 fork 前创建，不改变 PID／user namespace、路径布局或权限范围，不重新挂载 devpts。unshare 失败仍执行原清 capability／NNP 尾段，随后保留 unknown，无 root receipt、业务启动或 fallback；原 remount 只追加限制并复核原 RO／身份。child 的 mount／unshare／setns syscall 禁止保持。它不新增递归 private 操作，也不承诺消除既有 inbound mount propagation。
 
-2026-11-11，`5235a7134` 的独立副本加本次 mount namespace 修复，在 Linux 6.18.57 x64、非 root UID1000／Bun1.4.4／Bubblewrap0.12.0 的同桌面真实环境执行 `bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/jobs/linux-native-shell.test.ts`，8项／244断言、零失败／跳过，exit0。涵盖 Workspace／Full／confined、只读来源投影、认证遮蔽、网络交集、脱离后代自然结束与取消；新增整例核 mount namespace owner=current userns、child effective/permitted/inheritable capabilities全零、temp封闭flags、namespace/mount操作拒绝、无 shared mount、PTY主从双向读写与关闭后节点清理。原始日志为本次隔离副本 `.cache/mount-fix/native.log`。[受控 C 回归](../../test/isolated/jobs/linux-init-mount.test.ts)另核精确cap前置、P→unshare→inspect顺序、保RO/原flags及unshare EPERM／ENOSPC失败继续清cap；调用真实main但模拟内核交接，证明失败无fork/root receipt，仅保unknown诊断。它不代真实内核故障注入。x64非root本机证据不扩为root／arm64、安装产品完整链、RSS／完整观测或production资格；旧unknown不回写、不重放。
+2026-11-11，`5235a7134` 的独立副本加本次 mount namespace 修复，在 Linux 6.18.57 x64、非 root UID1000／Bun1.4.4／Bubblewrap0.12.0 的同桌面真实环境执行 `bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/jobs/linux-native-shell.test.ts`，8项／244断言、零失败／跳过，exit0。涵盖 Workspace／Full／confined、只读来源投影、认证遮蔽、网络交集、脱离后代自然结束与取消；新增整例核 mount namespace owner=current userns、child effective/permitted/inheritable capabilities全零、temp封闭flags、namespace/mount操作拒绝、无 shared mount、PTY主从双向读写与关闭后节点清理。[受控 C 回归](../../test/isolated/jobs/linux-init-mount.test.ts)另核精确cap前置、P→unshare→inspect顺序、保RO/原flags及unshare EPERM／ENOSPC失败继续清cap；调用真实main但模拟内核交接，证明失败无fork/root receipt，仅保unknown诊断。它不代真实内核故障注入。x64非root本机证据不扩为root／arm64、安装产品完整链、RSS／完整观测或production资格；旧unknown不回写、不重放。本机原始证据已缺失。
 
 [普通 Linux Job](linux-shell.ts)持续排空真实双流，沿原输出预算保存 UTF-8、gap 和一个 terminal；公开输入仍只有 command。自然根的 WNOWAIT／准确 waitpid 后在本 namespace 内清理剩余后代直到 ECHILD。正常 ended 还须原 wrapper 实际 exit0／close、双流 EOF、两枚原 pidfd 死亡和每个原 FD 严格关闭，随后才能删除原 temp。可信 worker 的 cancel/dispose 同时等待 adapter 完成严格输出解码、终态发布和 temp 清理，不以 native completion 单独代替 Job 收尾；失败的 dispose 不永久缓存拒绝，重试仍核原监督与清理事实。[隔离收尾回归](../../test/isolated/jobs/linux-trusted-shell-completion.test.ts)调用实际 adapter，替换原生 owner 与准备层，覆盖活动 Job 释放、串行／并行取消及未知和输出错误；它不授予 Linux 原生资格。`--die-with-parent` 只为 crash fallback，不能代正常证明。首个 unknown 保持不变；有效原 init pidfd可作一次清理，Close 未确认不重试，强持原对象。同步启动或准备清理未知通过原 facade／handle交回 Runtime，dispose继续失败，resource与binding lease不提前释放。
 

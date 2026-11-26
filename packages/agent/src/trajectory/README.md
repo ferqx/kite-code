@@ -73,7 +73,7 @@ Files 的 `file_change` 读取已封存的 UTF-8 有界 text、原 before／afte
 
 2026-11-08，`e8a483d65` 加本次工作树、macOS／Bun 1.4.4：Reader 与 flow 矩阵 11 项／110 断言通过；与 schema／preflight／构建合跑共 27 项／212 断言通过。Model input Inspector、完整 Model output、流式 Evidence 与 Jobs 合跑 25 项／277 断言通过，包含真实 17 MiB 输入／输出和旧 gap 检查点；Files 整文件 6 项／98 断言通过。backup 9 项／86、restore 11 项／190、GC 6 项／108，以及 DB10 profile 1 项／32 断言通过；Windows 维护 4 项仅按平台跳过，不记 Windows 资格。backup／GC／DB10 使用独立进程选择的真实动态 SQLite 3.51.3，没有与默认引擎测试混用初始化状态。这些记录证明对应断言，不外推 Native 过程体验、真实远程 Provider 或完整发行资格。
 
-同一工作树另执行 Agent owner 的429个原计划作业，复用已完成作业并补齐未执行部分；本次闭包与 reader 提取所需的测试夹具修正后，412作业通过，17个既有作业仍失败。未修改的 HEAD 源码独立副本使用相同外部依赖、原 workspace 映射和相同原生 Files 资产，对照也在这17个作业失败：包括旧 Task cursor／Files 参数或展示夹具、规划／Ask 参数、Model retry 预期、Windows专属准备、旧私库格式及 PTY 英文按钮预期。没有将这些用例计为通过，后半段未触达的断言仍未取得资格。原始 host／remaining／HEAD 对照日志保留于本机 `.cache/trajectory-agent-tests-*.log`；原模型／工具／业务语义未为其失败放宽。默认执行环境另直接拒绝既有 worker 的嵌套 macOS sandbox，宿主权限下原 browser execute 和 human-async 整文件分别83／67项通过；人工接管默认环境的瞬时状态漏采仍只记为时序敏感观察，不与该权限限制混为一谈。
+同一工作树另执行 Agent owner 的429个原计划作业，复用已完成作业并补齐未执行部分；本次闭包与 reader 提取所需的测试夹具修正后，412作业通过，17个既有作业仍失败。未修改的 HEAD 源码独立副本使用相同外部依赖、原 workspace 映射和相同原生 Files 资产，对照也在这17个作业失败：包括旧 Task cursor／Files 参数或展示夹具、规划／Ask 参数、Model retry 预期、Windows专属准备、旧私库格式及 PTY 英文按钮预期。没有将这些用例计为通过，后半段未触达的断言仍未取得资格。原模型／工具／业务语义未为其失败放宽。默认执行环境另直接拒绝既有 worker 的嵌套 macOS sandbox，宿主权限下原 browser execute 和 human-async 整文件分别83／67项通过；人工接管默认环境的瞬时状态漏采仍只记为时序敏感观察，不与该权限限制混为一谈。本机原始证据已缺失。
 
 同环境另以真实 Runtime 创建大于 inline 阈值的 Model 输入／输出，保存原 event/ref 后关闭并通过公开 backup／restore 更换 Store，再由新 readonly Runtime 调用原 `readTrajectoryEvidence`：117702 字节输入视图与 126070 字节输出视图逐字节相同，原事件出处保持，当前 Store 使用新身份，读取前后 metadata 不变；Model 总调用仅原来的一次，冷读 Model／permission 端口均配置为调用即失败。此检查直接覆盖新 Evidence 接口的恢复接缝；17 MiB 容量和损坏边界仍由上述整文件回归承担。
 

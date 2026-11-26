@@ -32,11 +32,11 @@ Windows原对象pin现以实际读取/遍历权限建立共享保护，区域锁
 
 [OfficeCLI](../../packages/agent/src/jobs/officecli-runtime.ts) 和 [ripgrep](../../packages/agent/src/jobs/ripgrep.ts) 由 Agent build 按平台和架构选择固定的上游发行资产。缓存与下载均按各自固定的大小和 SHA-256 校验，ripgrep 另校验解包后的可执行文件。当前目标仅封存自己的程序，PPTX、XLSX 和 DOCX 三项 OfficeCLI 技能与许可及第三方声明一同进入 Terminal／Native inventory。macOS 签名刷新包内实际摘要，清单保留上游摘要。运行期直接读取随包工具目录。实际制品与环境范围归 [Shell owner](../../packages/agent/src/jobs/README.md) 和 [办公资源 owner](../../packages/agent/src/tools/documents/README.md)。
 
-2026-11-18 目录改名和技能改编后，重建本机 Windows x64 Native 候选与归档。核对包内 `docx`、`pptx`、`xlsx` 的正文摘要，以及 OfficeCLI 程序和上游许可文件。记录在本机 `.cache/kite-officecli-kite-skills-win-x64-62b9/officecli-package-proof.json`。
+2026-11-18 目录改名和技能改编后，重建本机 Windows x64 Native 候选与归档。核对包内 `docx`、`pptx`、`xlsx` 的正文摘要，以及 OfficeCLI 程序和上游许可文件。[配套程序打包回归](../../packages/agent/test/isolated/jobs/ripgrep-package.test.ts)可重跑仓库外启动、配套 OfficeCLI 查找、版本读取与完整性校验。
 
-2026-11-18 目录收敛后重建本机 Windows x64 Native 候选与归档。包内 OfficeCLI 技能目录与 inventory 均只含三种基础格式。独立 PDF 资源、OfficeCLI 1.0.161 可执行文件及许可通过完整性核验，归档 SHA-256 与构建记录一致。记录在本机 `.cache/kite-officecli-base-skills-win-x64-ec61/officecli-package-proof.json`。
+2026-11-18 目录收敛后重建本机 Windows x64 Native 候选与归档。包内 OfficeCLI 技能目录与 inventory 均只含三种基础格式。独立 PDF 资源、OfficeCLI 1.0.161 可执行文件及许可通过完整性核验，归档 SHA-256 与构建记录一致。
 
-2026-11-18 技能目录收敛前，本机 Windows x64 Native 候选与归档通过核验，内含官方 OfficeCLI 1.0.161 Windows x64 程序和 11 个已调整的技能。真实 OpenAI `gpt-6.1-terra`／medium／Full 在同源码的隔离 Kite 开发客户端用 PowerShell 7.6.9 与 Git Shell 各跑一次五页 PPT。两轮都直接调用随包程序，无安装和版本探测。包括子任务在内的 14 条 Shell 命令全部成功并确认清理，工具审批、驻留残留与持续占用均为零。两份成品经 PowerPoint 逐页打开并通过 Kite 冷预览。PowerShell 首次预览检查曾超时，后续冷检的空格匹配误判在复测脚本中纠正。构建与实测记录分别在本机 `.cache/kite-officecli-win-x64-release-66e4d801/officecli-package-proof.json` 和 `.cache/kite-shell-ppt-retest-20261118-0b0cee45/evidence/bundled-officecli-retest-proof.json`。macOS 与 Linux 的资产映射已核对上游发布元数据，平台实包验收仍按各自发行入口。
+2026-11-18 技能目录收敛前，本机 Windows x64 Native 候选与归档通过核验，内含官方 OfficeCLI 1.0.161 Windows x64 程序和 11 个已调整的技能。真实 OpenAI `gpt-6.1-terra`／medium／Full 在同源码的隔离 Kite 开发客户端用 PowerShell 7.6.9 与 Git Shell 各跑一次五页 PPT。两轮都直接调用随包程序，无安装和版本探测。包括子任务在内的 14 条 Shell 命令全部成功并确认清理，工具审批、驻留残留与持续占用均为零。两份成品经 PowerPoint 逐页打开并通过 Kite 冷预览。PowerShell 首次预览检查曾超时，后续冷检的空格匹配误判在复测脚本中纠正。macOS 与 Linux 的资产映射已核对上游发布元数据，平台实包验收仍按各自发行入口。
 
 2026-10-16 本机 Windows 的 companion／完整 Agent 包搬迁已实际通过，准确命令与范围归 [Files owner](../../packages/agent/src/tools/files/README.md#node-api-文件后端)。2026-10-17，Bun1.4.2 的受限 RVA delay imports 在新 console 副本中提前物化为普通 imports，私有 Bun 子进程编译 verifier，C 中间输出与源目录 pin 分离；最终仍强制无 delay directory、System32 导入与原 ACL／完整 manifest。实际 Windows Terminal 整包39,306文件已构建并全量核验，候选自带 Bun／CLI／Files 已执行；准确身份、命令、验证及旧 POSIX 夹具限制归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-managed-terminal-当前实现)。不据此授完整 installed、Native、其他平台或发布资格。
 

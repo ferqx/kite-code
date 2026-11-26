@@ -140,7 +140,7 @@ Windows 受管安装解包时，同名普通文件只在本次私有暂存目录
 
 2026-11-12 Windows x64 本机构建生成 220,193,792 字节的桌面安装 EXE，SHA-256 为 `c756c300fd05e11e27b41bec34297f12e0e3c736c696dc9a80f93c66734cf75f`。候选 `8fd91a51896815438e9fb6183ab9d738f0fe1c49ba90a3da07a7fc7881b6629e` 由正式校验器核对包内 Service 与 Runner V7。使用同一归档生成独立安装登记的验证安装器，测试路径位于仓库外。EXE 使用本地生产配置构建，签名与公开发布资格仍按正式发布门禁核验。
 
-同一候选在两个独立 Profile 启动真实桌面窗口。无 Git 的 PowerShell 组实际观察发送、工具运行、人工批准与拒绝、原 Job 停止以及下一条命令恢复。确认外部写入和联网分别在授权后才产生效果。完整 Git Bash 组实际运行中文管道和工作树查询。两组都从窗口菜单正常退出，核实原 Main 与 Service 死亡并冷读持久终态。卸载移除测试登记、启动器和快捷方式，保留两个测试 Profile，正式安装登记与快捷方式摘要一致。窗口过程和持久证据在本机 `.cache/powershell-fallback-a45ca81cf/installed-v7-0ada4db1.json`，原生权限矩阵归 [Windows Shell 沙箱](../../../docs/active/windows-shell-sandbox.md)。
+同一候选在两个独立 Profile 启动真实桌面窗口。无 Git 的 PowerShell 组实际观察发送、工具运行、人工批准与拒绝、原 Job 停止以及下一条命令恢复。确认外部写入和联网分别在授权后才产生效果。完整 Git Bash 组实际运行中文管道和工作树查询。两组都从窗口菜单正常退出，核实原 Main 与 Service 死亡并冷读持久终态。卸载移除测试登记、启动器和快捷方式，保留两个测试 Profile，正式安装登记与快捷方式摘要一致。原生权限矩阵归 [Windows Shell 沙箱](../../../docs/active/windows-shell-sandbox.md)。本机原始证据已缺失。
 
 2026-11-12 集成终端 Shell 的本地未签名候选 `0ca18542297ec2b3d344d8ed9d96afabe9dcd292140bd8904bab8000bb44627e` 通过正式制品校验器。Windows x64 安装 EXE 为 220,323,328 字节，SHA-256 为 `585f3e1d4044bb12338f747bfb8f1801ff0558b7b974ff5b8f95418990e14bf8`。同一归档的验证安装器使用独立安装登记与 Profile。设置行为与窗口验证归 [Desktop owner](../README.md#windows-集成终端-shell)。
 

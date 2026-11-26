@@ -86,7 +86,7 @@ Shell交付的原子终态、私有索引、collector恢复与Fork只读来源�
 
 ## Session 标题写入
 
-2026-11-10，旧reader兼容性补验：未修改HEAD `4a527742c` 的readonly Store实际打开本任务已关闭的隔离Native Profile，成功读取7个新格式attempt及其原Session／Run／Execution；原数据库SHA256、Command／Execution数量和change cursor逐项保持，未运行Runtime或提交业务。原始结果为本机`.cache/lifecycle-old-reader.json`。这只证明该原格式下的旧只读投影可读，不授予旧Runtime接管活动新Job或直接降级写入的资格；未知执行和原owner恢复约束保持。
+2026-11-10，旧reader兼容性补验：未修改HEAD `4a527742c` 的readonly Store实际打开本任务已关闭的隔离Native Profile，成功读取7个新格式attempt及其原Session／Run／Execution；原数据库SHA256、Command／Execution数量和change cursor逐项保持，未运行Runtime或提交业务。这只证明该原格式下的旧只读投影可读，不授予旧Runtime接管活动新Job或直接降级写入的资格；未知执行和原owner恢复约束保持。本机原始证据已缺失。
 
 [消息写入](sqlite/operations.ts)不隐式改名。默认[命名扩展](../business/session-title/index.ts)已消费[专用 fallback 事务](sqlite/session-title-operations.ts)：核当前 Store／根 Session／主体、准确首输入摘要、空历史／无 Run／无手动命名／旧 marker，原子写 fallback、稳定 session.rename 收据和私有 automatic-title-attempt 版本1。自动 fallback／发布不推进 controlRevision；公共 rename 保持原 CAS／递增，两个入口不能复用对方 namespace 的同 ID 收据。旧 marker 和恢复到其他 Store 的记录不被重新接纳。
 
@@ -94,7 +94,7 @@ Shell交付的原子终态、私有索引、collector恢复与Fork只读来源�
 
 2026-11-10 Windows真实私有Profile备份／恢复补验包含待发布和已发布两种记录：[发布整文件](../../test/isolated/storage/session-title-publication.test.ts)24项／144断言通过。替换Store保原标题、完整私有record、已提交原收据及Run／Execution的旧origin；旧owner先由物理门禁拒绝，新owner下的旧Store及改填新Store的旧来源分别拒绝，且不推进cursor、不重写标题或record。记录保留不构成新Store的自动发布资格。原先预期先报Store错误的断言已按实际前置owner门禁修正，三层边界均单独验证。
 
-同日以独立依赖的HEAD `4a527742c` Store按只读模式打开已关闭的隔离Native Profile，实际读出新私有record、runless detached命名Job及`internal_metadata`终态、4个已完成Run与11条原消息，Store身份及cursor755均不变。通用旧Store reader可读这些原事实，旧业务解释器的`automatic-title` key仍按原规则，不消费新key。该证据在本机`.cache/lifecycle-legacy-read.log`，只证明读取兼容，不授予旧Runtime调度、继续新命名或直接降级执行资格；不能从数据库与公开版本未变推导这些资格。
+同日以独立依赖的HEAD `4a527742c` Store按只读模式打开已关闭的隔离Native Profile，实际读出新私有record、runless detached命名Job及`internal_metadata`终态、4个已完成Run与11条原消息，Store身份及cursor755均不变。通用旧Store reader可读这些原事实，旧业务解释器的`automatic-title` key仍按原规则，不消费新key。只证明读取兼容，不授予旧Runtime调度、继续新命名或直接降级执行资格；不能从数据库与公开版本未变推导这些资格。本机原始证据已缺失。
 
 [效果域](sqlite/session-title-scope.ts)核完整来源，不以定义名／detached／runless／自报 purpose 授予豁免。准确 Job 的[终态投递](sqlite/job-operations.ts)为 suppressed／internal_metadata，不入业务邮箱；派发前明确拒绝的原 Job 同事务关闭资格。[owner 门禁](sqlite/owner-dispatch.ts)只忽略已关闭／发布的准确命名 Job／Model，普通未知仍阻断；按50项有界分页检查候选，普通未知仍阻断；准确输出collector在取得物理owner后按其独立来源恢复。冷 acquire 在 frontend 取得物理根锁排除旧 supervisor 后关闭准确遗留资格，普通恢复门禁失败会回滚闭合；原 running／unknown 不改写，不重发 Provider。主 Run [恢复检查](sqlite/run-resume-operations.ts)不把准确独立命名纳入主 checkpoint。显式 resume 提交在持有准确物理恢复锁并核验原配置／checkpoint 后，同事务关闭失主命名资格，保留原输入截取 fallback 和原执行事实；提交失败不留下半闭合。恢复完成后可正常释放 owner，无需关闭整个 Store 才允许其他 Runtime 接管。
 

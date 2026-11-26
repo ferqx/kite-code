@@ -757,7 +757,7 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 
 本轮修复了 Native SSE ready 与显式选择互相取消的竞态，以及真实 TUI 独立 Job／异步 spawn 交接引起的 Static 前缀重建和阅读位置跳动；80×24 删除确认合并重复警示和快捷键后仍保完整风险、原目标、默认保留与独立确认。测试夹具按当前公开 Tool、明确模型选择、直接原命令、Agent mailbox、封存版本及完整 Artifact 后端核实，未恢复隐藏前台 Task、旧 human wrapper 或放宽权限、未知效果、清理与期限。最后的自动审核例使用原总预算等待权威 VT 消费已收到的真实父正文，完整文件复验为 9 pass／134 assertions。最终根及八 workspace 类型检查、八 workspace 构建均通过。
 
-剩余失败包含 [Native 缓存回切](../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx) 时原已展开 Tool DOM 丢失，以及当前 `files.write@3` 尚未进入 [TUI 文件变化预览](../packages/ui/src/tui/execution-projection.tsx) 支持分支；原断言保留。另有旧版本 pin、旧输入包装证明、未明确选择模型的物理窗口夹具和未核清的取消／清理／负载失败。Terminal／Windows predecessor 的 lock 与 patch 库存拒绝已用 HEAD blobs 与当前字节独立对照，清理前后得到相同拒绝，未改批准摘要或门禁。全部原始作业、完整复验、源码冻结及失败清单保存在 `.cache/full-tests-20261026-215708/summary.json`；本次结论是全库存已执行、整体未通过，不能代替完整产品或发布验收。
+剩余失败包含 [Native 缓存回切](../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx) 时原已展开 Tool DOM 丢失，以及当前 `files.write@3` 尚未进入 [TUI 文件变化预览](../packages/ui/src/tui/execution-projection.tsx) 支持分支；原断言保留。另有旧版本 pin、旧输入包装证明、未明确选择模型的物理窗口夹具和未核清的取消／清理／负载失败。Terminal／Windows predecessor 的 lock 与 patch 库存拒绝已用 HEAD blobs 与当前字节独立对照，清理前后得到相同拒绝，未改批准摘要或门禁。全部原始作业、完整复验、源码冻结及失败清单保存在 原记录；本次结论是全库存已执行、整体未通过，不能代替完整产品或发布验收。本机原始证据已缺失。
 
 2026-10-27，继续修复上述失败，用户明确将 TUI 暂缓。本轮按当前磁盘与默认计划重新核对：1249 个有限测试文件由当前非 TUI 的 987 个、当前 TUI 的 193 个及仅保留源码的旧 `apps/kite-cli/test` 69 个组成；旧 CLI 中也有 TUI 命名，分区时只计入旧 CLI，不重复计算。非 TUI 为默认 955 个与补充 32 个，零交叉、零缺失；未新增永久 skip 或修改默认发现／调度范围。
 
@@ -767,6 +767,6 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 
 两个失败修复后，开发重载、开发启动、开发 Shell、Native Electron、普通开发 renderer 诊断关闭及两个 predecessor 输入拒绝共七个完整文件重新执行，42 pass／0 fail／942 assertions，沿原隔离与期限。全量审计期间 3025 个源码／配置输入逐字节及 mode 未变；审计后仅三个开发实现文件、上述 Native 夹具和已有开发重载测试共五个非文档输入变化，其实际消费者已补完整文件验证，其余原成功记录按未变输入复用。原 120 个非 TUI 失败文件现均有完整文件通过证据，新增 Native Electron 失败也已修复；当前 987 文件范围无未修复失败。这是全量执行加受影响完整文件复验的结论，不能表述为一次未过滤的标准 `bun run test` 全绿。
 
-最终依赖初始化仍沿本轮实际 `bun install --frozen-lockfile` 和 Files 原生 postinstall 通过记录，根 manifest／lock 字节未改；最后开发监听变更后，八 workspace 构建、根及八 workspace 类型检查再次通过。非 TUI Biome、架构／同源 API／workspace、测试归属、计划证据和文档门禁按本次最终输入核对。默认及补充原有 70 项 skip 保留，含本机平台条件和缺少显式外部 baseline checkout 的离线对照；不计为对应资格。TUI 原失败与格式问题按用户要求暂缓，本机受控 Provider／Electron 结果不取得真实付费模型、其他平台原生或完整发布资格。原审计、修复复验及最终输入记录保存在 `.cache/full-tests-fix-20261026/summary.json`，此前失败证据继续保留。
+最终依赖初始化仍沿本轮实际 `bun install --frozen-lockfile` 和 Files 原生 postinstall 通过记录，根 manifest／lock 字节未改；最后开发监听变更后，八 workspace 构建、根及八 workspace 类型检查再次通过。非 TUI Biome、架构／同源 API／workspace、测试归属、计划证据和文档门禁按本次最终输入核对。默认及补充原有 70 项 skip 保留，含本机平台条件和缺少显式外部 baseline checkout 的离线对照；不计为对应资格。TUI 原失败与格式问题按用户要求暂缓，本机受控 Provider／Electron 结果不取得真实付费模型、其他平台原生或完整发布资格。原审计、修复复验及最终输入记录保存在 原记录，此前失败证据继续保留。本机原始证据已缺失。
 
 同日提交前，实际 staged 格式门禁要求处理此前暂缓的 TUI 格式诊断。本轮仅应用安全排版／import 排序，并在面板 reset effect 中显式读取原 `identity`，保留原依赖及变化时归零行为；未采用删除依赖的 unsafe fix。相对上述最终源码快照，十个变化文件均属于 TUI，实现与断言没有继续扩展；非 TUI 输入保持原字节。提交前再次检查构建、类型和实际提交门禁，这些静态结果不改变 TUI 尚未通过完整验收的结论。

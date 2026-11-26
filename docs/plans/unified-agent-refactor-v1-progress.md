@@ -6294,7 +6294,7 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 
 **原生资源源代码已有耐久副本，但仍部分。** 固定 Bun `744846f844374847c902b5e7fd59b4342a51ef99` 的[补丁与准确元数据](../../native/runtime-observer/README.md)保存 Job<C>全部请求及 POSIX FilePoll 实际生命周期，不只取消链或Hive inline池；census只保原生身份／状态、不持JS或owner，所有钩子与snapshot同一短锁。原行为／取消链／ACK不改。独立审查实际找到并修复三项观测逻辑：真实unregister Err永久invalid；Closing条目到真实Hive回收才release；Job在原KeepAlive unref后释放census和native storage。六项独立Rust模块测试／格式实际0，涵盖并发、4096条无容量限制、地址复用、sticky未知与Closing；不冒称真实spill／全部runtime集成。私有 `bun:jsc.getResourceCensus`真实读该ledger，64bit保十进制，分配失败为null／unknown、partial与uncovered不隐藏。timer、socket／独立HTTPloop、Worker、其他请求／native addon、WindowsPoll尚未接齐，coverageComplete始终false，没有替三stub或formal metrics。
 
-**必要 native build 真实失败，未绕过。** 耐久私有源码checkout与LLVM21.1.8／CMake3.31.10／Ninja1.13.0／独立Rust nightly-2026-07-20环境已就绪；LLVM官方1,503,047,352B档案SHA `b95bdd32a33a81ee4d40363aaeb26728a26783fcef26a4d80f65457433ea4669`匹配，未改global Rust default／shell profile／安装Bun。release configure实际0。首两次build真实失败于原histogram `NAN`未声明；补头仍失败，最终改为标准`numeric_limits<double>::quiet_NaN()`，原空histogram返回NaN语义保持，无删assert。原installed Bun minos13.0／SDK26.5经vtool只读确认；私有构建显式保minos13.0。第三次仍实际1于本机SDK27 OS_LOG `stack_protector_ignore`属性不被所需LLVM21.1.8识别，原`-Werror`和错误保持，不继续下载SDK／环境矩阵或运行新Runtime。三份log分别为 `.cache/bun-resource-runtime/native-census-build.log`、`native-census-build-second.log`、`native-census-build-third.log`；正式binary／安装／候选资产未替换。补丁最终SHA `476ded14cdbdefe80ef853f652c735abadc1b4761b7750bfe93715310b498a1b`，准确base上的 `git apply --unidiff-zero --reverse --check` 0；不是仅存在临时checkout的实现，不称native build或完整资源通过。
+**必要 native build 真实失败，未绕过。** 耐久私有源码checkout与LLVM21.1.8／CMake3.31.10／Ninja1.13.0／独立Rust nightly-2026-07-20环境已就绪；LLVM官方1,503,047,352B档案SHA `b95bdd32a33a81ee4d40363aaeb26728a26783fcef26a4d80f65457433ea4669`匹配，未改global Rust default／shell profile／安装Bun。release configure实际0。首两次build真实失败于原histogram `NAN`未声明；补头仍失败，最终改为标准`numeric_limits<double>::quiet_NaN()`，原空histogram返回NaN语义保持，无删assert。原installed Bun minos13.0／SDK26.5经vtool只读确认；私有构建显式保minos13.0。第三次仍实际1于本机SDK27 OS_LOG `stack_protector_ignore`属性不被所需LLVM21.1.8识别，原`-Werror`和错误保持，不继续下载SDK／环境矩阵或运行新Runtime。补丁最终SHA `476ded14cdbdefe80ef853f652c735abadc1b4761b7750bfe93715310b498a1b`，准确base上的 `git apply --unidiff-zero --reverse --check` 0；不是仅存在临时checkout的实现，不称native build或完整资源通过。本机原始证据已缺失。
 
 **出生计数真实入口已实现。** [独立sampler](../../scripts/runtime/unified-soak-coalition.ts)读取私有libSystem `coalition_info_resource_usage(u64,ptr,u64)->i32` 的明确16byte前缀，调用前后核原PID unique ID／pidversion／coalition ID，失败、sentinel或guardian不活关系保null，不猜完整struct或改现有树清空证明。[完整纯测试](../../tests/isolated/unified-agent/unified-soak-coalition.test.ts)3pass／12expects、根types与Biome0，独立源码审查接受。一次本机自身非独占coalition真实调用实际0：PID2692／unique1192061／version1708446／CID1319，started710296／exited710232；收据 `/private/tmp/kite-v13-own-coalition-prefix-20261013.result.json` SHA `f8481f83f198fb3610af44c4a36ec256151627dd38bf51d7545aa076445cc12b`。这是Mach task累计数，exec替换也计数，不能与unique进程数直接凑平；原guardian最终保存、全流身份、启动／收束边界、丢失及逐项对账尚未接入。ES系统tool有entitlement但需要实际root／FDA；用户本轮收束采集，未执行、不声称有系统完整事件来源。
 
@@ -6302,13 +6302,15 @@ Web owner同步实际负责边界；手册原定位、焦点及间距合同已�
 
 ## 2026-10-14：恢复两门禁与原生构建、Timer 实际准入
 
+当前可分开重跑[原生 Store 构建回归](../../packages/agent/test/isolated/storage/build.test.ts)、[定时任务服务回归](../../apps/desktop/test/isolated/scheduled-tasks.test.ts)。这些入口覆盖各自断言，历史生命周期组合另按下文的当时输入与结果阅读。
+
 用户重新要求闭合 RSS 与完整资源／出生后代，再确认整体退出。本轮沿五项依赖实施，不改原 RSS32MiB／八outer／九点、身份／清理和 formal 缺项拒绝。已恢复实际 Goal，Win/Linux 仍发布前实测，Web／ChatGPT顺序及仅本地提交范围保持。
 
 确定构建缺口为原生 Darwin 忽略已有 `--macos-sdk`，固定 LLVM21.1.8 被默认 SDK27 的新属性阻断。本机已有 Bun 固定的 SDK26.5；三行配置修复保默认检测、minos13.0 与 Werror，必要默认／显式／非法路径核对通过。完整 native build 实际0，未下载 SDK、未替正式 Bun。
 
 EventLoopTimer 新接移动稳定 token 和真实调度／取消／最终 Drop。独立审查修复 imminent 与 heap 的 pending 合并以及 Immediate teardown；真实运行另发现未启用 timeout 的 Subprocess 内嵌字段被误计4→5，旧错误日志和 raw 收据保留。首次 harness 自造 Bun.sleep Timer 的4→102也保留，已改用原文件 Job 推进事件循环、不强制 GC；原聚合释放断言不变，源码 lazy admission 修复未 armed placeholder，并保已准入 Dormant 到最终 Drop。当前 native 核心9pass／0fail／无warning，完整构建实际0；同真实入口观察8个Job、3个FilePoll，live2→2、generation2→56、原实际child退出0及双EOF，最终入口actual0。
 
-耐久补丁 SHA `68d6d0bddd297397f41e579dfccb30c82f82eebdda357591b75f22f89ce534cc`，准确base上 `git apply --cached --check --unidiff-zero` 实际0；当前部分binary SHA `da9325f5fa8ead88f3a996e0d771710a43402487e997cd67b78232ae7b61a309`。最终build log `.cache/bun-resource-runtime/native-census-timer-admission-build.log` SHA `a35d225a2d9fa55852aa67445b7f4081cd708515282aa2a590ab1ea03eaf8e29`；生命周期result `.cache/bun-resource-runtime/native-census-admission-lifecycle-result.json` SHA `c0f14aea6843bd393127d3b9b4a0168b2063ffa152a70d7280234ee89e7a54ea`。源码耐久副本及验证入口归 [native owner](../../native/runtime-observer/README.md)。
+耐久补丁 SHA `68d6d0bddd297397f41e579dfccb30c82f82eebdda357591b75f22f89ce534cc`，准确base上 `git apply --cached --check --unidiff-zero` 实际0；当前部分binary SHA `da9325f5fa8ead88f3a996e0d771710a43402487e997cd67b78232ae7b61a309`。最终build log 原日志 SHA `a35d225a2d9fa55852aa67445b7f4081cd708515282aa2a590ab1ea03eaf8e29`；生命周期result 原记录 SHA `c0f14aea6843bd393127d3b9b4a0168b2063ffa152a70d7280234ee89e7a54ea`。源码耐久副本及验证入口归 [native owner](../../native/runtime-observer/README.md)。本机原始证据已缺失。
 
 连续来源还需本机系统条件：传统 ES 的普通UID能力检查实际5／ERR_NOT_PRIVILEGED；Apple eslogger 签名已有client entitlement，工具 `sudo -n true` 仍因缺会话失败。曾准备一次仅自有短命目标的有界校准，但用户最新要求停止过度检查和采集，未执行的辅助脚本已删除；不再请求系统认证，不授ready／flush或完整出生。macOS27新增的descendants／sync API不能在当前26.7运行。完整资源仍缺socket／HTTP后台loop、Worker、其他请求／native addon及部分timer ref，当前coverageComplete=false；v1／v2 formal 原硬拒绝保持，后续实际来源须版本化接线。
 
@@ -6350,7 +6352,7 @@ Terminal路径选取现复用所属host的资产错误翻译，CLI／TUI保pure 
 
 当前 Bun 的小 TypedArray 在第一次读取 `.buffer` 时可能移动底层存储：本机有界对照中 `new Uint8Array(44)` 的前后 `ptr` 不同，显式 ArrayBuffer backing 的前后地址相同。`TOKEN_USER` 返回的 SID 是缓冲区内的指针，事后 materialize 导致原地址失效。私有路径、媒体、候选 scope 和 daemon security 四个原 leaf 均改为在 `GetTokenInformation` 前分配 ArrayBuffer，保原 lifetime 引用、SID／DACL／identity 检查和关闭失败保留，不放宽权限、不修复既有对象 ACL。定位副本只增加失败位置，未替换产品或原测试；原失败保留。修复后原 private Profile/Worker/WAL/config/cold logs 和 unsafe ACL 拒绝两项实际通过，不能据此声称整个文件或 Windows 资格通过。
 
-**原始默认测试未通过。** `bun run test` 保原四槽调度及 Windows 串行合同，当前发现756文件／613作业（28并发作业、585独占）。首批四个 Desktop 作业中一个实际1，其他三个由 runner 收尾为143，后续609作业未派发。已见真实失败含 POSIX renderer file URL、固定 `/usr/bin/git`、`/private/tmp`、完整 descriptor 未到 verified，以及大附件等待超时；不把它们全部归为夹具问题。日志 `D:\Code\kite-code\.cache\windows-v13-20261014\default.log` SHA `d974c18c152fea069ef4720d3712ccd199814316bdb6b235f4a22fec047da853`。SID修复后没有盲重跑整轮，以下原完整专项仍有失败，wholeDefault=false。
+**原始默认测试未通过。** `bun run test` 保原四槽调度及 Windows 串行合同，当前发现756文件／613作业（28并发作业、585独占）。首批四个 Desktop 作业中一个实际1，其他三个由 runner 收尾为143，后续609作业未派发。已见真实失败含 POSIX renderer file URL、固定 `/usr/bin/git`、`/private/tmp`、完整 descriptor 未到 verified，以及大附件等待超时；不把它们全部归为夹具问题。日志 原日志 SHA `d974c18c152fea069ef4720d3712ccd199814316bdb6b235f4a22fec047da853`。SID修复后没有盲重跑整轮，以下原完整专项仍有失败，wholeDefault=false。本机原始证据已缺失。
 
 随后26份原完整文件各用独立 `bun test --parallel=1 --max-concurrency=1 <file>` 执行，保原预算和全部断言，无 test-name 过滤、平台替身或 availability skip。12文件退出0、14文件退出1；原文件最终总结合33pass／34fail／4个原非适用平台skip／2个未处理error／481expects，不与默认中断子记录叠加统计。
 
@@ -6365,9 +6367,9 @@ Terminal路径选取现复用所属host的资产错误翻译，CLI／TUI保pure 
 | 四份Service正式恢复 | 全部文件失败；前三份主恢复在`/private/tmp`建根即ENOENT，第四份仍有私有目录ACL／broken pipe及2个error，未进入完整恢复证明 |
 | ConPTY scrollback、development-cli | 两文件失败；真实80×24ConPTY的完整material计数缺两项，CLI保目录symlink权限与Windows endpoint反例，不删检查点或放宽deadline |
 
-正式 `release:build --directory .cache/windows-v13-20261014/terminal-candidate` 实际1／`artifact_scope_denied`，该验证输出父目录保原继承ACL，未修ACL或放宽准入；不能由这次拒绝推候选本体已构建。Node原生测试另独立确认缺MSVC。未取得Terminal／Native候选，因此安装／升级回退／installed TUI／Native窗口与保数据卸载未执行。默认Shell的原Windows guard、原RSS32MiB／八outer和全资源／出生后代门禁保持，本轮不跑长时采集，不外推Linux或hosted Actions。
+正式 `release:build --directory <隔离输出目录>` 实际1／`artifact_scope_denied`，该验证输出父目录保原继承ACL，未修ACL或放宽准入；不能由这次拒绝推候选本体已构建。Node原生测试另独立确认缺MSVC。未取得Terminal／Native候选，因此安装／升级回退／installed TUI／Native窗口与保数据卸载未执行。默认Shell的原Windows guard、原RSS32MiB／八outer和全资源／出生后代门禁保持，本轮不跑长时采集，不外推Linux或hosted Actions。本机原始证据已缺失。
 
-原日志、各独立进程退出码／用时和SHA保本机 `D:\Code\kite-code\.cache\windows-v13-20261014\`，`native-batch-results.json`、`qualification-results.json`、`recovery-results.json`、`client-results.json`与`summary.json`分别保完整输入和统计，属于本机证据、不随Git交付。最终代码再次八workspace build0、根及八workspace typecheck0、六个代码文件Biome0、文档结构／实际影响检查0；全仓架构守卫在沙箱内及普通本机权限下均未完成，已准确停止所属检查进程，保两份不完整log，不记通过。公共接口、产品语义和模块边界未改，已核手册、Agent／Service owner与active原合同；不以本机红改写产品承诺。文档同步 `iteration_complete` 判定blocked，原因是Windows默认及专项仍有实际失败，不准备Git交付。本轮Windows已实际验证但未通过，37能力和wholeV13／phaseExit仍未闭合；未stage、commit、push、PR、安装发布或dispatch Actions。
+原日志、各独立进程退出码／用时和SHA保该组原始材料，`native-batch-results.json`、`qualification-results.json`、`recovery-results.json`、`client-results.json`与`summary.json`分别保完整输入和统计，属于本机证据、不随Git交付。最终代码再次八workspace build0、根及八workspace typecheck0、六个代码文件Biome0、文档结构／实际影响检查0；全仓架构守卫在沙箱内及普通本机权限下均未完成，已准确停止所属检查进程，保两份不完整log，不记通过。公共接口、产品语义和模块边界未改，已核手册、Agent／Service owner与active原合同；不以本机红改写产品承诺。文档同步 `iteration_complete` 判定blocked，原因是Windows默认及专项仍有实际失败，不准备Git交付。本轮Windows已实际验证但未通过，37能力和wholeV13／phaseExit仍未闭合；未stage、commit、push、PR、安装发布或dispatch Actions。本机原始证据已缺失。
 
 后续桌面开发与提交核对：用户已授权将当前全部改动一起提交。本机 MSVC／Windows SDK 已安装，显式 `desktop:dev` 自动准备构建环境，并支持 UI Fast Refresh 与 Service 源码新版本重载；准确实现和真实 Windows 窗口证据归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。提交检查另发现 Store／rollback 夹具的 POSIX 临时路径、目录权限及子进程 file URL 问题，改用系统 tmpdir、原私有目录端口与标准 file URL 后，原两份完整文件 13 项／52 条断言通过；原断言、Store 逻辑及安全约束不变。前述默认中断、媒体／Files／恢复失败仍保留，不把开发窗口或提交检查通过写成完整 Windows／三平台资格。
 
@@ -6433,6 +6435,8 @@ D08 明确排除旧 Kite Store/State 导入。旧 Store9/11 确属旧格式，�
 
 ## 2026-10-15：完整 TUI 旅程收尾
 
+当前 PTY 入口见[TUI 端到端测试说明](../../tests/e2e/README.md)、[会话持久化场景](../../tests/tui-system/scenarios/session-persistence.test.ts)、[PTY 呈现收尾场景](../../tests/tui-system/scenarios/presentation-closeout.test.ts)。
+
 子步骤按真实父 Task、child Session 与 child Run 读取各自原通知，不把父 Run 通知当后代历史；原交叠完整文件 1 pass／23 assertions。活动模型和主题切换只修正旧夹具的正式模型声明、真实菜单选择与独立确认，产品面板无需修改；原完整文件 2 pass／16 assertions，活动 Run 不重启、下一 Run 路由及恰两次模型请求保持。
 
 Files 连续 V4 → V3 → V2 恢复、两个新会话、恢复点来源、真实恢复数量与返回输入已在原完整旅程 1 pass／16 assertions／7.76 秒通过。Host 只读核原两腿成功、实际 journal 与当前身份，UI 在准确范围才切换会话；第二阶段继续独立明确操作。原结果的正式可选 `textChange` 不再被额外七字段守卫误拒，Schema、原文件与漂移检查保持。Client／Host／Controller／面板 23 pass／246 assertions，原实际第二阶段漂移 2 pass／20 assertions；证据为 `/private/tmp/kite-original-file-rewind-scope-complete.log`、`/private/tmp/kite-file-recovery-proof-closure-complete.log` 和 `/private/tmp/kite-rewind-actual-second-leg-final.log`。
@@ -6468,7 +6472,7 @@ Question Esc 的真实 `caller_job_scope_unavailable` 已在正式链闭合：�
 
 受影响的原 Sub-agent Approval 整文件再次暴露并发夹具错误：empty-search 后续请求可在全局第五次到达，原第五／第六固定回应使真实结果合同错配。仅该旅程按准确子任务原文与原 tool call ID 绑定四份首次响应及一次 continuation，未知或重复来源直接失败，不修改生产调度和通用 Mock 合同。完整 9 pass／120 assertions／24.17 秒，原四个 carrier、300ms 取消窗口、30 秒预算、排队后继及完整终态来源保持；证据为 `/private/tmp/kite-original-subagent-cancel-source-matched-final.log`，原红保留在 `/private/tmp/kite-tui-original-stable-review-affected-20261015.log`。
 
-最终八 workspace build 与根／八 workspace 类型检查实际退出 0。已核普通 `npm run tui` 的本地候选不会自动随源码更新，当前 Terminal 候选重新生成并完整验证，在原、新候选 exclusive 使用锁下切到 `dist/unified-terminal`；原完整候选保存在 `.cache/unified-terminal-before-tui-20261015`，没有停止用户进程或更改 Profile。当前 candidate 为 `28f819c4e2799a3f1c8382eced92cf3d78c67365aeff80e2a9ccf4a344563498`，原选择为 `3d19878ea3d77e24279a1dbb06bbe0d83afdf840ddea8987ff92ff3254583733`；构建／选择证据为 `/private/tmp/kite-tui-current-local-terminal-build-20261015.log` 与 `/private/tmp/kite-tui-current-local-terminal-selected-20261015.log`。这是本地候选准备，不是安装、发布或新阶段资格。
+最终八 workspace build 与根／八 workspace 类型检查实际退出 0。已核普通 `npm run tui` 的本地候选不会自动随源码更新，当前 Terminal 候选重新生成并完整验证，在原、新候选 exclusive 使用锁下切到 `dist/unified-terminal`；没有停止用户进程或更改 Profile。当前 candidate 为 `28f819c4e2799a3f1c8382eced92cf3d78c67365aeff80e2a9ccf4a344563498`，原选择为 `3d19878ea3d77e24279a1dbb06bbe0d83afdf840ddea8987ff92ff3254583733`；构建／选择证据为 `/private/tmp/kite-tui-current-local-terminal-build-20261015.log` 与 `/private/tmp/kite-tui-current-local-terminal-selected-20261015.log`。这是本地候选准备，不是安装、发布或新阶段资格。本机原始证据已缺失。
 
 
 第五轮完整默认 `/private/tmp/kite-tui-final-default-stable-review-811-20261015.log` 保留实际退出 1：新源码合同还暴露了 Provider 最新真人／最后 Tool 假设、无效果 Planning 普通审批、显式 Model 重试及压缩消费来源前提。按实际已批准合同逐原完整文件修正，同来源的剩余夹具一次静态核对后集中迁移，不用连续盲跑全量定位。Files 六整文件 11 pass／882 assertions、Native 五整文件 7 pass／1370 assertions、原 unified-soak 48 pass／167 assertions。SDK 一次 Provider 尝试由每个真实 Model Execution ID、HTTP、partial／typed failure 和原可见重试链独立证明，不将 Run 总请求五次伪装成一次；原资源／RSS／正式资格拒绝断言保持，未新增性能采集。
@@ -6483,7 +6487,7 @@ shared cold-run 的 `run_configuration_mismatch` 继续沿实际差异定位，�
 
 完整 Question／Overlay／renderer 三文件 40 pass／248 assertions，新增真实异步提交、丢回执、原查询、其他会话草稿隔离与已知未提交后一次修正；原零字长度断言移到实际无效 Enter 后保留，长度、Unicode、空答案零 POST、原 ID 和取消断言不删除。受影响原 Question Esc 和 Tool Parse Error 两完整终端文件 2 pass／19 assertions；证据为 `/private/tmp/kite-tui-user-question-review-leaf-complete-20261015.log` 与 `/private/tmp/kite-tui-user-review-original-question-errors-20261015.log`。根及八 workspace 类型检查、八 workspace build 通过，后续只读复核没有发现这三项的剩余缺陷。
 
-当前普通 `npm run tui` 的本地 Terminal 已用同一最终源码重建并经原／新候选 exclusive 使用锁完整核验后更新；candidate 为 `f680e256e7d723362597a2842fc7d6c37ab9e958fcc7a004519e18e739d09d78`，此前完整候选保留在 `.cache/unified-terminal-before-question-review-20261015`。没有停止用户进程或更改 Profile，选择证据为 `/private/tmp/kite-tui-user-review-selected-terminal-20261015.log`。最终完整默认回归正在 `/private/tmp/kite-tui-final-default-reviewed-complete-811-20261015.log` 运行；未取得完整回归结果前不宣布完整交付，Win/Linux 原生、32MiB RSS 和完整资源／出生观测继续保留后置发布资格。
+当前普通 `npm run tui` 的本地 Terminal 已用同一最终源码重建并经原／新候选 exclusive 使用锁完整核验后更新；candidate 为 `f680e256e7d723362597a2842fc7d6c37ab9e958fcc7a004519e18e739d09d78`。没有停止用户进程或更改 Profile，选择证据为 `/private/tmp/kite-tui-user-review-selected-terminal-20261015.log`。最终完整默认回归正在 `/private/tmp/kite-tui-final-default-reviewed-complete-811-20261015.log` 运行；未取得完整回归结果前不宣布完整交付，Win/Linux 原生、32MiB RSS 和完整资源／出生观测继续保留后置发布资格。本机原始证据已缺失。
 
 
 第六轮完整默认 `/private/tmp/kite-tui-final-default-reviewed-complete-811-20261015.log` 实际退出 1 并完成排空：Required 五例是旧 child User JSON 包装假设，按准确双来源和原裸文迁移后原完整 12 pass／146 assertions；原等待时限、同一 completion candidate、零轮询及取消范围保留。after-turn 的明确夹具人类 ceiling 保 Task／carrier 两个独立真实审批，默认产品不恢复严格审批；由此定位实际计划 child 装配缺口。现默认角色先经 Agent 排除准确根问答定义，自动 Planning 工具仅凭父冻结 owner／ID／version、当前真实定义及未显式禁用装配，未知工具原拒绝保持。原 after-turn、per-run Planning child 及角色三完整文件 20 pass／214 assertions；child 的两基础来源按准确合同与自身 Run ID 核验，不借父计划来源。独立只读复核未发现该资格修复的剩余缺口，Core 完整配置比较不变。证据为 `/private/tmp/kite-task-required-exact-child-input-final.log` 与 `/private/tmp/kite-default-child-qualified-tools-complete-final-20261015.log`。
@@ -6492,7 +6496,7 @@ Source Approval 原 PTY 完整旅程 1 pass／282 assertions／22.82 秒，五�
 
 按新真实来源修正 Native 三文件对“最后 User 就是真人”的假设：只核原准确任务标记；Native stdin 完整通过，原安装驱动明确测试诊断模式后 1 pass／35 assertions，正常产品不显示这些诊断。Native 真版本回退的旧 DTO 缺少新 Message／Execution 字段，真实 SQL 原数据未丢；专属 probe 补准确持久字段及原完整字节／hash证明，保全部原四目录比较与未知字段守卫，原完整版本用例仍在必要验收。未修改固定前驱或实际旧制品。
 
-新 child 资格修复后的原生产 Prompt 与 Sub-agent Approval 两整文件再次 10 pass／153 assertions，根及八 workspace 类型、八 workspace build 与架构检查通过；其余未受影响原 52 文件证据复用。普通本地 Terminal 当前 candidate 为 `3287efabc2b28566980911cac9fc4c024a3bf86baf72d0aec9d79e5d24788523`，经完整校验及原／新 exclusive 使用锁选择，前一完整候选保留于 `.cache/unified-terminal-before-child-qualification-20261015`。新完整默认 `/private/tmp/kite-tui-final-default-qualified-complete-811-20261015.log` 正在以原 811 文件／638 jobs 运行，结果未完成前不计整体通过。
+新 child 资格修复后的原生产 Prompt 与 Sub-agent Approval 两整文件再次 10 pass／153 assertions，根及八 workspace 类型、八 workspace build 与架构检查通过；其余未受影响原 52 文件证据复用。普通本地 Terminal 当前 candidate 为 `3287efabc2b28566980911cac9fc4c024a3bf86baf72d0aec9d79e5d24788523`，经完整校验及原／新 exclusive 使用锁选择。新完整默认 `/private/tmp/kite-tui-final-default-qualified-complete-811-20261015.log` 正在以原 811 文件／638 jobs 运行，结果未完成前不计整体通过。本机原始证据已缺失。
 
 
 第七轮完整默认在 Workflow 的旧失败终态断言处实际退出 1；随后只补跑原未启动的 595 个正式作业，全部排空，558 pass／37 fail，最后七个 exclusive 均已实际执行。两段合计覆盖原 811 文件／638 作业，原失败完整保留，不能记作一次全绿。用户明确选择保持已知工具错误后的恢复：越界 Tool 必须 failed、零 dispatch／零副作用，只有准确回灌原 call 后的合法 Model 结果才可继续。Workflow、禁用／child AskUser 与新禁用 Files 的冲突测试按此合同补准确历史、Scope、零问卷／答复或零文件效果证明；没有修改生产权限规则来迎合旧终态预期。
@@ -6518,7 +6522,7 @@ Files 三范围、丢回执及两次强杀窗口的四原完整文件随后全�
 
 无 Ctrl+T 后受影响的 scrollback 与恢复原 Model 两完整文件 6 pass／277 assertions／10.93 秒；原正式 Terminal 导出完整文件 1 pass／20 assertions／61.23 秒，actual 0。三百万字符终端正文、空 Enter 两向、原 Artifact refs、首次文件冻结、第二份超过 8MiB 的正文与 reasoning、两文件 0600、准确两次 Model／零审核、Scope／零重放和所属 Service 正常退出全部保留，PTY 明确 normal=true／code=0／failure=null。证据为 `/private/tmp/kite-no-ctrl-t-reading-original-wholes-20261015.log` 与 `/private/tmp/kite-export-no-ctrl-t-original-whole.log`；未提高 30／90 秒预算。
 
-根与八 workspace 类型、八 workspace build、边界／workspace／API／测试归属及文档检查通过。最终本地 Terminal 由当前冻结源码构建并按原使用锁校验选择，candidate=`86b51b37674f9585e7850888562345087003ae3bc4627c73d10df7cb50add538`，前一候选保留于 `.cache/unified-terminal-before-tui-final-20261015`；未停止用户进程或更改 Profile。当前 `bun run test:tui:system` 正以全库存 112 文件（含全部原 52 旅程）统一运行，结果未完成前不计完整通过。Win/Linux 只配置 Actions 与备注，原 32MiB RSS／完整资源／出生观测继续保留为未取得的发布资格，不启动新的采集或宣布 V1.3 阶段退出。
+根与八 workspace 类型、八 workspace build、边界／workspace／API／测试归属及文档检查通过。最终本地 Terminal 由当前冻结源码构建并按原使用锁校验选择，candidate=`86b51b37674f9585e7850888562345087003ae3bc4627c73d10df7cb50add538`；未停止用户进程或更改 Profile。当前 `bun run test:tui:system` 正以全库存 112 文件（含全部原 52 旅程）统一运行，结果未完成前不计完整通过。Win/Linux 只配置 Actions 与备注，原 32MiB RSS／完整资源／出生观测继续保留为未取得的发布资格，不启动新的采集或宣布 V1.3 阶段退出。本机原始证据已缺失。
 
 
 最终统一 TUI 首轮实际 75 个完整文件通过、项目 MCP 审批一例失败，其余 36 个未启动，命令退出 1；没有记作一次全绿。失败发生在已保存准确原决定后，夹具只等旧 Source 页也含有的服务器名便按 Enter，新目录事实到达使早选详情失效。现只把最后一步迁到“当前 MCP 目录＋真实 ready 计数＋准确选中服务器行”后独立 Enter，全部原批准、mutation、零模型／零 stdio 进程和最后重试连接断言与 10／30 秒预算保留，无产品源码变化。原完整文件复验 1 pass／14 assertions／3.79 秒，actual 0；证据 `/private/tmp/kite-mcp-project-ready-directory-final.log`。其余 75 文件证据继续适用，仅补跑原库存中尚未启动的 36 文件，选择脚本核全 112 库存、准确原失败与已通过身份，不过滤任何未解决失败。
@@ -6542,7 +6546,7 @@ Files 三范围、丢回执及两次强杀窗口的四原完整文件随后全�
 
 必要局部验证包括主屏／滚动／焦点／Footer 四完整文件 23 pass／254 assertions、14 行并发与真实 TTY 显示来源两例 2 pass／11 assertions、真实配置与 Host 显示两完整文件 21 pass／142 assertions。原输入七文件 41 pass、MCP 四 owner 完整文件 47 pass、真实模型／Files 五完整文件 9 pass、错误页及真实 Host 两文件 3 pass，以及其余未变投影证据按适用源码复用，没有盲跑全部 816 个默认文件或新增性能采集。根与八 workspace 类型检查、最终八 workspace 构建、边界／workspace／API／测试归属和文档强制检查在本地提交范围核验；末次类型检查纠正了新增夹具的 Run 完成状态为真实 `completed`，原两例随后完整通过。
 
-最终本地 Terminal 由收束源码构建，candidate=`d2af38cf1e1198d3ff73e312e07a2dc457b8a021f2e1fb3bce3682a5d6aebc6a`，选择时持原制品使用锁，前一候选保留于 `.cache/unified-terminal-before-parity-final-20261015`。本轮仅本地提交，不 push、不触发 Actions。Win/Linux 继续按用户决定留正式发布前平台验证，Actions 接线和备注保留；原 32MiB RSS、完整资源／出生观测仍是未取得的发布资格，不据本轮 UI 迁移声明全 V1.3 或阶段退出。
+最终本地 Terminal 由收束源码构建，candidate=`d2af38cf1e1198d3ff73e312e07a2dc457b8a021f2e1fb3bce3682a5d6aebc6a`，选择时持原制品使用锁。本轮仅本地提交，不 push、不触发 Actions。Win/Linux 继续按用户决定留正式发布前平台验证，Actions 接线和备注保留；原 32MiB RSS、完整资源／出生观测仍是未取得的发布资格，不据本轮 UI 迁移声明全 V1.3 或阶段退出。本机原始证据已缺失。
 
 ## 2026-10-15：客户端 UI 迁移缺口与回归收束
 

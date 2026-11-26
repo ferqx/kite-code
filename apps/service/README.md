@@ -42,7 +42,9 @@ Native 只读 `GET /v1/sessions/:id/execution-root` 复用同一解析器，核�
 
 默认 Files 装配依次组合工作区检查点、只读输入、Plan owner 协调与会话输出；请求分类和 execute 使用同一准确目标 revision，不放开整个 Profile。`read_file` 限于源码与工程文本。PDF 和其他文档通过受管 Shell 处理，上传文档使用已准备的工作区副本。PDF 页图在 `view_images` 显式读取时通过原 Artifact 和 Runtime 交接。 [Files](../../packages/agent/src/tools/files/README.md) · [文档助手](../../packages/agent/src/tools/documents/README.md) · [默认宿主联验](test/isolated/planning-configuration.test.ts)
 
-Files 写入检查点从原成功模型请求确定触发消息。带文件的输入按原绑定的导入和工作副本重建模型实际收到的附件路径，再核对完整正文和准确来源 ID。当前文件内容无需读取，证明无法核对时仍拒绝写入。[默认配对回归](test/isolated/file-checkpoint-default.test.ts)覆盖附文件的首轮、无附件的后续轮次和三种恢复权限模式。Windows 源码 Desktop 使用 Codex `gpt-6-luna`／`medium` 实际读取首条输入的 `sample-alpha.txt`，写入并读回 `ps-check-attachment-note.md`，持久检查点指向原首条消息。记录位于本机 `.cache/conversation-powershell-evidence-20261126/attached-turn.json`。
+Files 写入检查点从原成功模型请求确定触发消息。带文件的输入按原绑定的导入和工作副本重建模型实际收到的附件路径，再核对完整正文和准确来源 ID。当前文件内容无需读取，证明无法核对时仍拒绝写入。[默认配对回归](test/isolated/file-checkpoint-default.test.ts)覆盖附文件的首轮、无附件的后续轮次和三种恢复权限模式。
+
+2026-11-26，Windows 源码 Desktop 与配套 Service 使用 Codex `gpt-6-luna`／`medium` 完成一次带附件的首轮。模型读取首条输入的 `sample-alpha.txt`，写入并读回 `ps-check-attachment-note.md`。本次写入生成一条持久检查点，触发消息核实为原首条用户消息。
 
 带文件工作副本的会话通过现有 Service Fork 接口保留所选消息和原附件引用，并重建 Files 检查点。准备工作副本的内部记录在回执中标记省略。源会话删除后，分支仍可按自身权限读取保留的所选附件。继承的检查点经所选消息、封存模型调用及原附件绑定核对，并按当前分支独立审批恢复。覆盖入口见[真实配对分叉回归](test/isolated/file-checkpoint-fork.test.ts)。
 
@@ -132,7 +134,7 @@ Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短
 
 ### 生命周期性能测量
 
-本机非TUI开发范围已完成命名、启动优化与客户端过程核对；原全量Service162任务／163文件为118任务通过／44失败，859pass／114fail／68skip，整体返回1，日志为`.cache/lifecycle-all-service-coverage.log`。44个失败文件的114个当前失败均有HEAD同名失败；再以同目录、独立依赖与原生资产顺序切换HEAD／当前26份源码，7个原因有差异的完整文件均得到同一15个失败，原始结果为`.cache/lifecycle-service-cause-{head,current}-controlled.log`，源码已恢复。旧参数断言、私有目录／平台检查和清理错误保留，不宣称全量通过。
+本机非TUI开发范围已完成命名、启动优化与客户端过程核对；原全量Service162任务／163文件为118任务通过／44失败，859pass／114fail／68skip，整体返回1，44个失败文件的114个当前失败均有HEAD同名失败；再以同目录、独立依赖与原生资产顺序切换HEAD／当前26份源码，7个原因有差异的完整文件均得到同一15个失败，源码已恢复。旧参数断言、私有目录／平台检查和清理错误保留，不宣称全量通过。本机原始证据已缺失。
 
 准备／Web清理的缓存诊断确认，HEAD同样先在`opening_store`得到`data_unavailable`，随后EPIPE覆盖原错误；恢复准备也在原私有路径检查失败，未取得该文件恢复资格。进程清理的EBUSY及补齐资产后Files边界旧参数断言均在HEAD重现。Client全量24任务／46文件为250pass／1fail，唯一恢复用例的60秒超时在补齐原生运行器的HEAD上同样重现。它们不替代本节测量或定向命名证据，也未因本次交付放宽保护。
 
@@ -143,7 +145,7 @@ Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短
 | 短历史 | 253.07／295.97ms | 112.09／130.58ms | 1.07ms | 0 |
 | 长历史 | 458.14／503.17ms | 107.80／121.79ms | 1.79ms | 0 |
 
-原300ms／600ms／20ms预算未改；旧短历史311.26ms的未通过事实保留在后文和原数据。新原始结果为本机 `.cache/session-lifecycle-performance.after-config-read.json`，129个非 seed 样本，最终 drain 11.60ms。普通8次、8路／32路突发共48次标题全发布；40路过载32发布、8次 `session_title_capacity_exceeded` 保 fallback，全部40个主 Run completed。标题许可峰值仍4，等待申请 hook 峰值29含立即拒绝者，实际等待许可上限仍28；32路标题等待P95为7915.67ms。没有用该结果放宽并发、排队或调用预算，也不推导其他主机、远端或更高突发的成功率。此前与类型检查重叠的整组只作为 `.after-config-read.with-typecheck.json` 诊断保留，不作性能验收。
+原300ms／600ms／20ms预算未改；旧短历史311.26ms的未通过事实保留在后文和原数据。129个非 seed 样本，最终 drain 11.60ms。普通8次、8路／32路突发共48次标题全发布；40路过载32发布、8次 `session_title_capacity_exceeded` 保 fallback，全部40个主 Run completed。标题许可峰值仍4，等待申请 hook 峰值29含立即拒绝者，实际等待许可上限仍28；32路标题等待P95为7915.67ms。没有用该结果放宽并发、排队或调用预算，也不推导其他主机、远端或更高突发的成功率。此前与类型检查重叠的整组只作为 `.after-config-read.with-typecheck.json` 诊断保留，不作性能验收。本机原始证据已缺失。
 
 本次受影响配置／平台／MCP选择原生三文件25项通过、1项POSIX用例在Windows跳过，共250断言；Service 的四份完整文件首次为23通过／4失败／2个测试间错误，失败涉及旧模型 Files 参数、正文基线呈现和重试终态等待。仅还原 `config/files.ts` 至 HEAD、其余候选不变，同四例仍全部失败，确认并非本次读去重新增。夹具现已按既有 Files 合同省略 create 的空基线、传回准确 `base_ref`，保留完整基线及最终字节断言；终态等待沿原5秒总期限查询准确原 Run，避免等待者反复全读历史。沿原 Windows runner 的30秒默认测试时限复验，assembly-http 整文件5项通过，configuration 整文件11项／160断言通过；此前同一生产候选的 session-model-protocol 4项／38断言和 session-title 7项／125断言仍适用。原失败记录保留，不把首次结果改写为通过。独立进程分布见下文，Native 的验证边界归[Desktop owner](../desktop/README.md#执行观察与操作准入)；本次命名故障组合与Native可见过程已补验，范围和限制以各owner当前证据为准。
 
@@ -158,7 +160,7 @@ Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短
 
 两个独立进程的总退出P95为2758.04／2964.50ms，和上表一样沿父进程单调时钟观察。首份trace的CLI／Service导入、SDK准入和Run.finishedAt对齐使用墙钟，跨进程阶段差值只保留为诊断，不能当作已同步的单调分段或单次配置解析耗时。夹具现为每个子进程另记`monotonicAt`，后续只在同一进程内相减；墙钟只关联准确身份，启动／Provider／terminal／退出仍由父进程单调时钟测量。这里没有改等待间隔、跳过真实准备或把冷过程混入原300／600ms warm主请求预算。下方另补同路径源码对照。
 
-正常20次命名均发布；20次已有历史重开零额外命名。3秒／10秒延迟场景只各1例，不报告分位数：业务terminal为2654.78／2685.48ms，实际退出为2739.75／2789.13ms，均早于标题Provider的原延迟；关闭沿现有取消和真实drain，原尝试以`title_cancelled`关闭并保fallback，Job保留真实`service_shutdown`失败及`internal_metadata`抑制事实，未伪造成成功。完整22个Profile后查20份published、2份closed、零pending，40次正常主调用加2次延迟主调用均只一次。原始样本、阶段与冷读核验在本机`.cache/session-lifecycle-process-20-e2e8a742-58c0-4a88-886c-c3180499c97a`的`.json`／`.analysis.json`／`.title-audit.json`；首次夹具误调用Store方法的失败记录保留，不作性能验收。
+正常20次命名均发布；20次已有历史重开零额外命名。3秒／10秒延迟场景只各1例，不报告分位数：业务terminal为2654.78／2685.48ms，实际退出为2739.75／2789.13ms，均早于标题Provider的原延迟；关闭沿现有取消和真实drain，原尝试以`title_cancelled`关闭并保fallback，Job保留真实`service_shutdown`失败及`internal_metadata`抑制事实，未伪造成成功。完整22个Profile后查20份published、2份closed、零pending，40次正常主调用加2次延迟主调用均只一次。首次夹具误调用Store方法的失败记录保留，不作性能验收。本机原始证据已缺失。
 
 后续在同一缓存源码路径和独立按原锁文件复制安装的依赖上，先运行HEAD `4a527742c`，再仅覆盖当前26份非TUI Agent／Service源码；原生资产未改，源码摘要随样本保存，主工作树未切换。两版各20个新Profile、20次重开及两个标题延迟场景，均42／42通过。HEAD只调整夹具的旧marker读取断言，不改旧生产代码；当前夹具核新发布状态。以下均为父进程单调时钟、nearest-rank P50／P95：
 
@@ -171,9 +173,9 @@ Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短
 
 新Profile的当前P95更高，且样本随次序明显漂移：当前前4次Provider为3601–3889ms，后10次为2525–2835ms；HEAD重开后段也较前段慢。这里保留全部样本，不删慢值、不改原warm预算，也不把重开较快解释为已隔离的算法收益或整体冷启动加速。单进程分段另核CLI导入、SDK准入、Service导入和资源关闭；未用跨PID墙钟相减归因。
 
-3秒／10秒标题延迟各1例中，HEAD的主Provider→terminal为3277.57／10189.34ms，当前为492.65／492.13ms；当前总退出3198.12／3095.17ms。两个当前标题调用均未完成即被关闭取消，原记录为closed／`title_cancelled`，原Job保真实failed／`internal_metadata`，主Run仍completed。当前20次正常标题全published，20次重开零新增标题，42次主调用各一次、退出码全0。原始文件在本机`.cache/lifecycle-head-agent-4a527742c/.cache/session-lifecycle-process-20-de50d1cc-816b-4579-b1ed-e721ea7b4d18.json`（HEAD）和`session-lifecycle-process-20-e6258a74-b0f8-4313-93e8-4cf96fc69da6.json`（当前），同名`.monotonic-analysis.json`／`.audit.json`保分段与事实核验；不外推安装版、真实远端Provider或其他平台资格。
+3秒／10秒标题延迟各1例中，HEAD的主Provider→terminal为3277.57／10189.34ms，当前为492.65／492.13ms；当前总退出3198.12／3095.17ms。两个当前标题调用均未完成即被关闭取消，原记录为closed／`title_cancelled`，原Job保真实failed／`internal_metadata`，主Run仍completed。当前20次正常标题全published，20次重开零新增标题，42次主调用各一次、退出码全0。不外推安装版、真实远端Provider或其他平台资格。本机原始证据已缺失。
 
-隔离[测量夹具](test/fixtures/session-lifecycle-performance.ts)在默认 Service／实际 compatible SDK／SQLite／HTTP 上采集启动、配置准备、Provider 入口、正式完成、最终 View 读取和独立标题许可。hooks 只在测试制品内安装，不存在 dev／prod 开启入口。2026-11-09，Windows x64／Bun1.4.4，4a527742c 加当前工作树，固定配置 tools:[] 并保宿主必选目录，主 Provider 延迟10ms、标题100ms／1000ms；一份冷 profile、同进程热态，不是进程冷启、付费远端或客户端绘制资格。原始基线保留在本机 .cache/session-lifecycle-performance.before-first-run-query.json。
+隔离[测量夹具](test/fixtures/session-lifecycle-performance.ts)在默认 Service／实际 compatible SDK／SQLite／HTTP 上采集启动、配置准备、Provider 入口、正式完成、最终 View 读取和独立标题许可。hooks 只在测试制品内安装，不存在 dev／prod 开启入口。2026-11-09，Windows x64／Bun1.4.4，4a527742c 加当前工作树，固定配置 tools:[] 并保宿主必选目录，主 Provider 延迟10ms、标题100ms／1000ms；一份冷 profile、同进程热态，不是进程冷启、付费远端或客户端绘制资格。本机原始证据已缺失。
 
 | 固定场景 | 样本 | 提交到 Provider P50／P95 | 配置准备 P50 | 其中协议检查 View P50／P95 |
 | --- | --- | --- | --- | --- |
@@ -184,7 +186,7 @@ Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短
 
 标题正常8次和8路／32路突发共48次均发布，实际标题许可峰值4；32路、1秒标题 Provider 组的许可等待P95 7498.28ms、最大7508.62ms，同时等待申请峰值28。由此选择默认独立并发4、等待上限28、排队预算8秒；宿主配置较低 modelConcurrency 时保其较低并发并同比缩小等待上限（每许可7个等待），高于4不增加标题并发。实际调用另保原10秒取消，不把排队计入调用预算。后测结果如下；隔离许可不推导共享 Store／CPU 或远端零竞争。
 
-同夹具后测原始数据为本机 .cache/session-lifecycle-performance.after-first-run-query.json，129个非 seed 样本。短历史提交到 Provider P50／P95为245.39／311.26ms，协议窄读0.68／1.09ms；长历史为476.87／511.38ms，窄读0.83／1.01ms。两组准备阶段各20次均为零 getView；长历史与窄读预算通过，短历史P95超过固定300ms，该轮明确未通过，预算不变，后续配置读去重的独立验收见本节前表。首轮只有1个样本，两次冷 profile 的缓存／JIT条件不足以把单次变化解释成优化收益；未报告P99。最终 View 的长历史观察仍约188ms，不能从窄查询推导客户端终态绘制已优化。
+129个非 seed 样本。短历史提交到 Provider P50／P95为245.39／311.26ms，协议窄读0.68／1.09ms；长历史为476.87／511.38ms，窄读0.83／1.01ms。两组准备阶段各20次均为零 getView；长历史与窄读预算通过，短历史P95超过固定300ms，该轮明确未通过，预算不变，后续配置读去重的独立验收见本节前表。首轮只有1个样本，两次冷 profile 的缓存／JIT条件不足以把单次变化解释成优化收益；未报告P99。最终 View 的长历史观察仍约188ms，不能从窄查询推导客户端终态绘制已优化。本机原始证据已缺失。
 
 后测正常8次、8路突发和32路／1秒标题 Provider 共48次仍全部发布；40路过载32次发布、8次因容量界保 fallback，所有40个主 Run 正式 completed，标题并发峰值4。计时 hook 中尚未返回的 acquire 峰值29包含立即被拒的申请，真实等待上限仍由资源实现与定向测试核为28；不是29个队列许可。完整资源7项／41断言和 Runtime 的溢出反例归 Agent。当前预算仅约束这个本机合成场景，不外推真实远端成功率或所有共享资源零竞争。
 
@@ -667,7 +669,7 @@ Shell 请求描述按准确 kind／定义／版本限定，合法同名 Model �
 | 32槽，优化前 | 2858ms | 34ms | 48秒 |
 | 32槽，优化后 | 553ms | 32ms | 40秒 |
 
-两种优化后场景仍取得上述执行／取消／独立状态／全关闭断言，校验 FD 与缓冲上限不变。原始结果位于本机 `.cache/` 下的 `windows-shell-load-default-d1e7b227-ac44-4fa3-9a2f-f12fedc6e5ee`、`windows-shell-load-32-74669924-c7a9-4c31-90ff-48dc45196496`（优化前）及 `windows-shell-load-default-2bfc497e-e63f-45a1-8da5-a9e0d23397e2`、`windows-shell-load-32-cc905044-9533-4ed1-aa8b-fd4c8b216c0c`（优化后）的 `RESULT.json`。定位 profile 位于 `.cache/windows-shell-load-profile/`，其数据不混入无 profiler 比较。后续采样已不见原秒级 Ajv 编译／同步 Shell temp 删除峰值，剩余长峰主要落在会话锁路径复核、Store 请求序列化和 Artifact 权限／持久发布，尚未修复。因此本次交付限定三条路径的优化与32会话正确性验证，**不宣称完整32会话链路或 Native 窗口始终无卡顿**；压测没有 Native 窗口观察，原三会话界面资格独立保留。
+两种优化后场景仍取得上述执行／取消／独立状态／全关闭断言，校验 FD 与缓冲上限不变。单独采集的定位 profile 数据不计入无 profiler 对照。后续采样已不见原秒级 Ajv 编译／同步 Shell temp 删除峰值，剩余长峰主要落在会话锁路径复核、Store 请求序列化和 Artifact 权限／持久发布，尚未修复。因此本次交付限定三条路径的优化与32会话正确性验证，**不宣称完整32会话链路或 Native 窗口始终无卡顿**；压测没有 Native 窗口观察，原三会话界面资格独立保留。本机部分原始证据已缺失。
 
 同轮相关18份完整测试文件143项通过；另两条既有断言失败分别是旧模型投影用例仍调用已退役的 `define_validation_checks`、Responses 400错误的请求次数预期3而实际8。前者替换为 Git HEAD 的修前模型工具模块、后者在隔离副本加载修前配置及模型工具模块，均复现同样失败，未改退役工具或 SDK 重试策略来通过本轮。缓存、分轮检查、来源／信任漂移、原 Run 封存、真实 Shell 清理等待与 unknown 的新断言通过；类型、八 workspace 构建、边界、测试归属及文档检查通过。上述两条旧断言仍保留，不把这份定向结果称为全仓测试通过。
 
@@ -938,9 +940,11 @@ Native `file_recovery` 仅在实际唯一 `builtin.files` 登记 `files.checkpoi
 
 ## HTTP OAuth 与原认证结果
 
+当前 Service 的复跑入口见[MCP OAuth 会话](test/isolated/mcp-oauth-session.test.ts)、[用户 MCP 管理](test/isolated/user-mcp-management.test.ts)。
+
 2026-11-02 Windows x64／Bun1.4.3，按用户最新要求以 MCP 主流程收尾：添加、实际 OAuth 协议与回跳、独立审批、连接／重连、工具调用、取消／停止和冷启动／备份恢复沿本机隔离 Service、Node 与真实 PTY 的已完成完整文件验证。原37份失败文件均已取得定向完整文件通过证据。修复包括自有私有 TEMP、普通 Workspace scope 发布、Node Windows access 资产、真实 ACL／reparse 反例和平台原生进程证据；测试等待沿实测成本设置，未改产品时限、工具／协议版本或原权限门禁。
 
-扩展清单第一轮执行96／126文件，94通过／2失败，保留于`.cache/mcp-regression-fixes-20261101/complete-final`。来源增删 PTY 把历史正文中的 saved 误当成当前查询完成，已改为准确原申请／Store／Session 的面板终态等待，并整文件复验通过；冷连接夹具的 Windows 制品构建等待由30秒对齐为120秒，业务与清理期限保持，原冷连接主流程的完整通过证据继续适用。第二轮完成19文件／0失败，含该来源增删和工具完整元数据的暖冷 PTY；原输入、日志和过程帧保留于`.cache/mcp-regression-fixes-20261101/complete-verified`。用户随后明确不再扩大测试，两轮协调进程已停止，自有子进程退出确认；完整126文件未完成，不作为全量或其他平台／发行资格。清屏保留导出输入的实际修复与原合同核对归[TUI owner](../../packages/ui/src/tui/README.md)。
+扩展清单第一轮执行96／126文件，94通过／2失败。来源增删 PTY 把历史正文中的 saved 误当成当前查询完成，已改为准确原申请／Store／Session 的面板终态等待，并整文件复验通过；冷连接夹具的 Windows 制品构建等待由30秒对齐为120秒，业务与清理期限保持，原冷连接主流程的完整通过证据继续适用。第二轮完成19文件／0失败，含该来源增删和工具完整元数据的暖冷 PTY；用户随后明确不再扩大测试，两轮协调进程已停止，自有子进程退出确认；完整126文件未完成，不作为全量或其他平台／发行资格。清屏保留导出输入的实际修复与原合同核对归[TUI owner](../../packages/ui/src/tui/README.md)。本机原始证据已缺失。
 
 ### 自定义 MCP 表单与启动配置
 
@@ -952,13 +956,13 @@ Native `file_recovery` 仅在实际唯一 `builtin.files` 登记 `files.checkpoi
 
 2026-11-01 Windows x64／Bun1.4.3／Node24.15.0：[实际 STDIO](test/isolated/user-mcp-stdio-windows.test.ts)通过独立 Node MCP 的完整 argv（空格／引号）、cwd、显式非秘密变量和私有变量传递、发现及断开；官方 npm `@modelcontextprotocol/server-memory` 通过 `npx -y` 从隔离缓存首次安装，完成协议握手、取得 `read_graph` 工具及原 Job 停止。两场景共13断言。HTTP 新增2项14断言通过，核真实 Bearer／标头、零读取列表、变量值不入配置／SQL／响应、缺失值零 RPC与重试恢复、401不打开浏览器。启动器路径专项2项通过，HTTP port与OAuth资源回归10项81断言通过，Windows port3项通过。UI证据归[Desktop owner](../desktop/README.md#native-mcp-完整设置)。
 
-2026-11-01 Windows x64／Bun1.4.3 后续复验：用户管理完整28项317断言通过，包含 credential／OAuth 各自两个 Workspace 的真实连接 Job、独立 permission gate、准确原凭据和零远程工具调用。实测每份 Workspace 的完整原生 Source 检查与连接约12–14秒；夹具的 Windows waiter 改为30秒、双 Workspace 整例90秒，其他平台原5秒／20秒保持，未删除或放宽业务断言。Source 两文件30项302断言通过：采用原生私有 ACL／junction 夹具，保硬链接拒绝；Windows 根替换被真实锁句柄提前拒绝，文件字节保持；发布后故障在平台实际执行的校验／sync窗口注入。原22／7基线仍归`.cache/mcp-custom-forms-baseline`。这取得本机上述 Source／Run 资格，不代替其他平台或正式安装发布；完整 MCP inventory 的其他结果单独按本轮实际记录核对。
+2026-11-01 Windows x64／Bun1.4.3 后续复验：用户管理完整28项317断言通过，包含 credential／OAuth 各自两个 Workspace 的真实连接 Job、独立 permission gate、准确原凭据和零远程工具调用。实测每份 Workspace 的完整原生 Source 检查与连接约12–14秒；夹具的 Windows waiter 改为30秒、双 Workspace 整例90秒，其他平台原5秒／20秒保持，未删除或放宽业务断言。Source 两文件30项302断言通过：采用原生私有 ACL／junction 夹具，保硬链接拒绝；Windows 根替换被真实锁句柄提前拒绝，文件字节保持；发布后故障在平台实际执行的校验／sync窗口注入。原 22／7 基线独立于本次复验。这取得本机上述 Source／Run 资格，不代替其他平台或正式安装发布；完整 MCP inventory 的其他结果单独按本轮实际记录核对。本机原始证据已缺失。
 
-同轮完整 MCP 清单由当前八 workspace、原 TUI inventory 的 MCP 路径／标题及相邻凭据用例选取，按原 `runTestJob`、Windows 私有 Bun、隔离、完整文件和原预算串行执行125文件，86通过／39失败。随后修复 Native Main 夹具未关闭自有 Workspace 协调器的 `EBUSY`，以及 schema 启动夹具未规范 Windows 路径分隔符的等待停滞；两份完整文件复验通过，加新增 Node Main 校验构建回归，当前126文件89通过／37失败。原清单、日志、原结果与定向复验保留于`.cache/mcp-regression-20261101`。未通过项仍包含源码外制品 ACL／维护资源、其他 Source／child／metadata 等待、POSIX／Linux 夹具和 TUI／CI断言，未取得完整 Windows MCP 资格。私有 TEMP 对照仅确认制品父目录门禁可继续推进，随后仍被原系统程序输入 ACL 门禁拒绝；未修改系统权限、放宽门禁或把此范围当作通过。
+同轮完整 MCP 清单由当前八 workspace、原 TUI inventory 的 MCP 路径／标题及相邻凭据用例选取，按原 `runTestJob`、Windows 私有 Bun、隔离、完整文件和原预算串行执行125文件，86通过／39失败。随后修复 Native Main 夹具未关闭自有 Workspace 协调器的 `EBUSY`，以及 schema 启动夹具未规范 Windows 路径分隔符的等待停滞；两份完整文件复验通过，加新增 Node Main 校验构建回归，当前126文件89通过／37失败。未通过项仍包含源码外制品 ACL／维护资源、其他 Source／child／metadata 等待、POSIX／Linux 夹具和 TUI／CI断言，未取得完整 Windows MCP 资格。私有 TEMP 对照仅确认制品父目录门禁可继续推进，随后仍被原系统程序输入 ACL 门禁拒绝；未修改系统权限、放宽门禁或把此范围当作通过。本机原始证据已缺失。
 
 用户设置 owner 的有限失败回执保留 SDK `StreamableHTTPError` 的状态类别：404 接口不存在、400／405／406／415 不接受当前端点请求、401 未认证、403 拒绝访问、408／504 超时、429 限流及其他5xx服务错误。只转换为有限 MCP code，不返回 SDK message、远端响应体或头；现有字符串原因保持，未知类型仍用安全回退。[管理器回归](test/isolated/user-mcp-management.test.ts)通过实际回环 HTTP 响应核对404／405／403／429／503、秘密响应体不进入回执，以及失败清理后重试不出现旧连接占用。连接失败只有在所属 transport 停止得到确认后才投影 failed；停止未知仍保 outcome_unknown，与普通失败分开。
 
-2026-11-01 Windows／Bun1.4.3，`bun test ./apps/service/test/isolated/user-mcp-management.test.ts --timeout 20000`运行26项：24项通过，含5项新增真实回环 HTTP 错误、元数据、精确取消、停止／配置失效清理及 OAuth 登录／刷新／清除／撤销。隔离夹具的 Windows 正常授权期限由1秒改为有界5秒；原1秒条件在未修改的 HEAD 管理器中同样返回 `mcp_oauth_timeout`，生产授权期限未变。两项 real connection Jobs 分别在 credential／oauth 的 `connect-one` 上触及原5000ms `waitForCommand` 期限；替换回 HEAD 管理器、保留当前夹具后两项同样超时，基线输入归`.cache/mcp-feedback-baseline`。本轮没有改 Agent Run／Job 路径或放宽该断言，这两项 Windows 资格仍未取得；有限设置错误分类与明确停止的上述24项结果不替代它们。
+2026-11-01 Windows／Bun1.4.3，`bun test ./apps/service/test/isolated/user-mcp-management.test.ts --timeout 20000`运行26项：24项通过，含5项新增真实回环 HTTP 错误、元数据、精确取消、停止／配置失效清理及 OAuth 登录／刷新／清除／撤销。隔离夹具的 Windows 正常授权期限由1秒改为有界5秒；原1秒条件在未修改的 HEAD 管理器中同样返回 `mcp_oauth_timeout`，生产授权期限未变。两项 real connection Jobs 分别在 credential／oauth 的 `connect-one` 上触及原5000ms `waitForCommand` 期限；替换回 HEAD 管理器、保留当前夹具后两项同样超时，本轮没有改 Agent Run／Job 路径或放宽该断言，这两项 Windows 资格仍未取得；有限设置错误分类与明确停止的上述24项结果不替代它们。本机原始证据已缺失。
 
 Native 用户级设置使用独立 [user-mcp-management](src/user-mcp-management.ts) owner 与 `user_mcp_settings` capability。`GET/POST /v1/config/user/mcp` 读取和管理用户来源；`GET /v1/config/user/mcp/operations/:commandId` 只查原操作，`POST .../:commandId/cancel` 取消准确原操作；`GET /v1/config/user/mcp/tools` 读取当前用户连接的固定 generation 工具 metadata。闭合 schema 拒绝 Session、Workspace、范围切换及秘密。请求绑定真实 Store／认证 subject，来源固定 user，不读取项目配置、Workspace 或 trust，也不创建隐式实体。原 Session MCP Actions 与运行时项目来源保留。
 
