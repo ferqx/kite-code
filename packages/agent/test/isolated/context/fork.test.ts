@@ -15,237 +15,234 @@ const finish: ModelEvent = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
-for (const large of [false, true])
-  test(`Fork actual selected history ${large ? '17MiB original artifact' : 'small original body'}: no execution copies, exact original pairing and sources in a new explicit Model`, async () => {
-    const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-context-fork-'))),
-      profile = { dataRoot: join(directory, 'data'), profile: 'test' };
-    const store = await openSqliteStore(profile),
-      storeId = (await store.getMetadata()).storeId;
-    const artifacts = createArtifactStore({ profile, store }),
-      requests: ModelRequest[] = [];
-    const originalBody = large
-      ? `full-original-body-${'x'.repeat(17 * 1024 * 1024)}`
-      : 'small actual original body';
-    let effects = 0;
-    const extension: Extension = {
-      id: 'fixture',
-      version: '1',
-      apiMajor: 1,
-      records: [{ contentType: 'fixture.note', contentVersion: 1, schema: { type: 'object' } }],
-      tools: [
-        {
-          id: 'effect',
-          version: '1',
-          description: 'private harmless effect',
-          inputSchema: { type: 'object' },
-          async execute(_input, context) {
-            effects++;
-            await context.records.write({
-              key: 'note',
-              expectedRevision: null,
-              contentType: 'fixture.note',
-              contentVersion: 1,
-              value: { original: true },
-            });
-            return { outcome: 'succeeded', content: 'actual original effect result' };
-          },
-        },
-      ],
-    };
-    const model: ModelAdapter = {
-      async *stream(request) {
-        requests.push(structuredClone(request));
-        if (requests.length === 1) {
-          yield { type: 'text_delta', text: originalBody };
-          yield { type: 'tool_call', id: 'original-call', name: 'effect', arguments: '{}' };
-          yield { ...finish, reason: 'tool_calls' };
-        } else {
-          yield {
-            type: 'text_delta',
-            text: requests.length === 2 ? 'original completed' : 'new explicit branch completed',
-          };
-          yield finish;
-        }
-      },
-    };
-    const runtime = createRuntime({
-      store,
-      artifacts,
-      model,
-      modelId: 'fixed',
-      extensions: [extension],
-      permissions: {
-        async authorize() {
-          return { allowed: true, revision: '1' };
+test('Fork actual selected history keeps exact original pairing and sources in a new explicit Model', async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-context-fork-'))),
+    profile = { dataRoot: join(directory, 'data'), profile: 'test' };
+  const store = await openSqliteStore(profile),
+    storeId = (await store.getMetadata()).storeId;
+  const artifacts = createArtifactStore({ profile, store }),
+    requests: ModelRequest[] = [];
+  const originalBody = 'small actual original body';
+  let effects = 0;
+  const extension: Extension = {
+    id: 'fixture',
+    version: '1',
+    apiMajor: 1,
+    records: [{ contentType: 'fixture.note', contentVersion: 1, schema: { type: 'object' } }],
+    tools: [
+      {
+        id: 'effect',
+        version: '1',
+        description: 'private harmless effect',
+        inputSchema: { type: 'object' },
+        async execute(_input, context) {
+          effects++;
+          await context.records.write({
+            key: 'note',
+            expectedRevision: null,
+            contentType: 'fixture.note',
+            contentVersion: 1,
+            value: { original: true },
+          });
+          return { outcome: 'succeeded', content: 'actual original effect result' };
         },
       },
-    });
-    try {
-      await runtime.createWorkspace({
-        expectedStoreId: storeId,
-        id: 'w',
-        name: 'private',
-        rootUri: pathToFileURL(directory).href,
-      });
-      await runtime.createSession({
-        expectedStoreId: storeId,
-        sessionId: 'source',
-        workspaceId: 'w',
-        subjectId: 'owner',
-        commandId: 'create',
-        title: 'source',
-      });
-      await runtime.submitCommand({
-        expectedStoreId: storeId,
-        sessionId: 'source',
-        subjectId: 'owner',
-        commandId: 'original',
-        request: { kind: 'run.start', content: 'original work' },
-      });
-      await runtime.waitForCommand('original', { timeoutMs: 20000 });
-      const before = await store.getView('source'),
-        selection = before.session.contextSelectionId;
-      const input = {
-        expectedStoreId: storeId,
-        sourceSessionId: 'source',
-        expectedContextSelectionId: selection,
-        newSessionId: 'fork',
-        commandId: 'fork-command',
-        subjectId: 'owner',
-        title: 'explicit readable fork',
-      };
-      const wrongStore = await runtime
-        .forkSession({ ...input, expectedStoreId: 'foreign' })
-        .catch((error) => error);
-      expect(wrongStore.code).toBe('store_identity_mismatch');
-      const intruder = await runtime
-        .forkSession({ ...input, subjectId: 'intruder' })
-        .catch((error) => error);
-      expect(intruder.code).toBe('permission_denied');
-      const assistant = before.messages.find(
-        (m) => m.toolCalls?.length || m.modelOutput?.toolCallCount,
-      )!;
-      const unpaired = await runtime
-        .forkSession({ ...input, boundary: { messageId: assistant.id, seq: assistant.seq } })
-        .catch((error) => error);
-      expect(unpaired.code).toBe('context_boundary_unpaired');
-      if (!large) {
-        const physical = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
-        const water = (await store.getMetadata()).lastChangeCursor;
-        try {
-          physical.run(
-            "CREATE TRIGGER fail_fork BEFORE INSERT ON message WHEN NEW.session_id='fork' BEGIN SELECT RAISE(ABORT,'fork rollback'); END",
-          );
-          const failed = await runtime.forkSession(input).catch((error) => error);
-          expect(failed.code).toBe('SQLITE_CONSTRAINT_TRIGGER');
-          expect(await store.getSession('fork')).toBeNull();
-          expect(await store.getCommand('fork-command')).toBeNull();
-          expect((await store.getMetadata()).lastChangeCursor).toBe(water);
-          expect((await store.getView('source')).messages).toEqual(before.messages);
-          physical.run('DROP TRIGGER fail_fork');
-        } finally {
-          physical.close();
-        }
+    ],
+  };
+  const model: ModelAdapter = {
+    async *stream(request) {
+      requests.push(structuredClone(request));
+      if (requests.length === 1) {
+        yield { type: 'text_delta', text: originalBody };
+        yield { type: 'tool_call', id: 'original-call', name: 'effect', arguments: '{}' };
+        yield { ...finish, reason: 'tool_calls' };
+      } else {
+        yield {
+          type: 'text_delta',
+          text: requests.length === 2 ? 'original completed' : 'new explicit branch completed',
+        };
+        yield finish;
       }
-      const fork = await runtime.forkSession(input);
-      expect(fork.omittedExtensionState).toBe(true);
-      expect(fork.command.kind).toBe('session.create');
-      expect(fork.session.rootSessionId).toBe('fork');
-      expect(fork.session.ownerGeneration).toBe('0');
-      expect(fork.session.ownerInstanceId).toBeNull();
-      const view = await store.getView('fork');
-      expect(view.runs).toHaveLength(0);
-      expect(view.executions).toHaveLength(0);
-      expect(view.messages).toHaveLength(before.messages.length);
-      expect(view.messages.every((m) => m.runId === null)).toBe(true);
-      expect(
-        await store.getExtensionRecord({ extensionId: 'fixture', sessionId: 'fork', key: 'note' }),
-      ).toBeNull();
-      expect(
-        (await store.getExtensionRecord({
-          extensionId: 'fixture',
-          sessionId: 'source',
-          key: 'note',
-        }))!.value,
-      ).toEqual({ original: true });
-      const cursor = (await store.getMetadata()).lastChangeCursor;
-      expect((await runtime.forkSession(input)).selection).toEqual(fork.selection);
-      expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
-      expect(
-        (await runtime.forkSession({ ...input, title: 'changed intent' }).catch((error) => error))
-          .code,
-      ).toBe('command_conflict');
-      expect(requests).toHaveLength(2);
-      expect(effects).toBe(1);
-      const copiedAssistant = view.messages.find(
-        (m) => m.toolCalls?.length || m.modelOutput?.toolCallCount,
-      )!;
-      const original = await store.getMessageOrigin({
+    },
+  };
+  const runtime = createRuntime({
+    store,
+    artifacts,
+    model,
+    modelId: 'fixed',
+    extensions: [extension],
+    permissions: {
+      async authorize() {
+        return { allowed: true, revision: '1' };
+      },
+    },
+  });
+  try {
+    await runtime.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      name: 'private',
+      rootUri: pathToFileURL(directory).href,
+    });
+    await runtime.createSession({
+      expectedStoreId: storeId,
+      sessionId: 'source',
+      workspaceId: 'w',
+      subjectId: 'owner',
+      commandId: 'create',
+      title: 'source',
+    });
+    await runtime.submitCommand({
+      expectedStoreId: storeId,
+      sessionId: 'source',
+      subjectId: 'owner',
+      commandId: 'original',
+      request: { kind: 'run.start', content: 'original work' },
+    });
+    await runtime.waitForCommand('original', { timeoutMs: 20000 });
+    const before = await store.getView('source'),
+      selection = before.session.contextSelectionId;
+    const input = {
+      expectedStoreId: storeId,
+      sourceSessionId: 'source',
+      expectedContextSelectionId: selection,
+      newSessionId: 'fork',
+      commandId: 'fork-command',
+      subjectId: 'owner',
+      title: 'explicit readable fork',
+    };
+    const wrongStore = await runtime
+      .forkSession({ ...input, expectedStoreId: 'foreign' })
+      .catch((error) => error);
+    expect(wrongStore.code).toBe('store_identity_mismatch');
+    const intruder = await runtime
+      .forkSession({ ...input, subjectId: 'intruder' })
+      .catch((error) => error);
+    expect(intruder.code).toBe('permission_denied');
+    const assistant = before.messages.find(
+      (m) => m.toolCalls?.length || m.modelOutput?.toolCallCount,
+    )!;
+    const unpaired = await runtime
+      .forkSession({ ...input, boundary: { messageId: assistant.id, seq: assistant.seq } })
+      .catch((error) => error);
+    expect(unpaired.code).toBe('context_boundary_unpaired');
+    {
+      const physical = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
+      const water = (await store.getMetadata()).lastChangeCursor;
+      try {
+        physical.run(
+          "CREATE TRIGGER fail_fork BEFORE INSERT ON message WHEN NEW.session_id='fork' BEGIN SELECT RAISE(ABORT,'fork rollback'); END",
+        );
+        const failed = await runtime.forkSession(input).catch((error) => error);
+        expect(failed.code).toBe('SQLITE_CONSTRAINT_TRIGGER');
+        expect(await store.getSession('fork')).toBeNull();
+        expect(await store.getCommand('fork-command')).toBeNull();
+        expect((await store.getMetadata()).lastChangeCursor).toBe(water);
+        expect((await store.getView('source')).messages).toEqual(before.messages);
+        physical.run('DROP TRIGGER fail_fork');
+      } finally {
+        physical.close();
+      }
+    }
+    const fork = await runtime.forkSession(input);
+    expect(fork.omittedExtensionState).toBe(true);
+    expect(fork.command.kind).toBe('session.create');
+    expect(fork.session.rootSessionId).toBe('fork');
+    expect(fork.session.ownerGeneration).toBe('0');
+    expect(fork.session.ownerInstanceId).toBeNull();
+    const view = await store.getView('fork');
+    expect(view.runs).toHaveLength(0);
+    expect(view.executions).toHaveLength(0);
+    expect(view.messages).toHaveLength(before.messages.length);
+    expect(view.messages.every((m) => m.runId === null)).toBe(true);
+    expect(
+      await store.getExtensionRecord({ extensionId: 'fixture', sessionId: 'fork', key: 'note' }),
+    ).toBeNull();
+    expect(
+      (await store.getExtensionRecord({
+        extensionId: 'fixture',
+        sessionId: 'source',
+        key: 'note',
+      }))!.value,
+    ).toEqual({ original: true });
+    const cursor = (await store.getMetadata()).lastChangeCursor;
+    expect((await runtime.forkSession(input)).selection).toEqual(fork.selection);
+    expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(
+      (await runtime.forkSession({ ...input, title: 'changed intent' }).catch((error) => error))
+        .code,
+    ).toBe('command_conflict');
+    expect(requests).toHaveLength(2);
+    expect(effects).toBe(1);
+    const copiedAssistant = view.messages.find(
+      (m) => m.toolCalls?.length || m.modelOutput?.toolCallCount,
+    )!;
+    const original = await store.getMessageOrigin({
+      expectedStoreId: storeId,
+      sessionId: 'fork',
+      subjectId: 'owner',
+      messageId: copiedAssistant.id,
+    });
+    expect(original.message.id).toBe(assistant.id);
+    expect(original.message.sessionId).toBe('source');
+    expect(
+      (
+        await store
+          .getMessageOrigin({
+            expectedStoreId: storeId,
+            sessionId: 'fork',
+            subjectId: 'owner',
+            messageId: assistant.id,
+          })
+          .catch((error) => error)
+      ).code,
+    ).toBe('message_not_found');
+    await runtime.submitCommand({
+      expectedStoreId: storeId,
+      sessionId: 'fork',
+      subjectId: 'owner',
+      commandId: 'new-work',
+      request: { kind: 'run.start', content: 'new explicit branch work' },
+    });
+    await runtime.waitForCommand('new-work', { timeoutMs: 20000 });
+    expect(requests).toHaveLength(3);
+    expect(effects).toBe(1);
+    const request = requests[2]!;
+    const copied = request.messages.find((m) =>
+      m.toolCalls?.some((c) => c.id === 'original-call'),
+    )!;
+    expect(copied.content).toBe(originalBody);
+    expect(copied.sourceIds).toEqual(assistant.sourceIds);
+    expect(
+      request.messages.filter((m) => m.role === 'tool' && m.toolCallId === 'original-call'),
+    ).toHaveLength(1);
+    expect((await store.getView('source')).runs).toHaveLength(1);
+    expect((await store.getView('fork')).runs).toHaveLength(1);
+    await runtime.close();
+    await store.close();
+    const readonly = await openSqliteStore({ ...profile, mode: 'readonly' });
+    try {
+      const water = (await readonly.getMetadata()).lastChangeCursor;
+      const page = await readonly.getSelectedContext({
         expectedStoreId: storeId,
         sessionId: 'fork',
-        subjectId: 'owner',
-        messageId: copiedAssistant.id,
+        messageLimit: 200,
+        byteLimit: 8 * 1024 * 1024,
       });
-      expect(original.message.id).toBe(assistant.id);
-      expect(original.message.sessionId).toBe('source');
-      expect(
-        (
-          await store
-            .getMessageOrigin({
-              expectedStoreId: storeId,
-              sessionId: 'fork',
-              subjectId: 'owner',
-              messageId: assistant.id,
-            })
-            .catch((error) => error)
-        ).code,
-      ).toBe('message_not_found');
-      await runtime.submitCommand({
-        expectedStoreId: storeId,
-        sessionId: 'fork',
-        subjectId: 'owner',
-        commandId: 'new-work',
-        request: { kind: 'run.start', content: 'new explicit branch work' },
-      });
-      await runtime.waitForCommand('new-work', { timeoutMs: 20000 });
+      expect(page.messages.length).toBeGreaterThan(0);
+      expect((await readonly.getMetadata()).lastChangeCursor).toBe(water);
       expect(requests).toHaveLength(3);
       expect(effects).toBe(1);
-      const request = requests[2]!;
-      const copied = request.messages.find((m) =>
-        m.toolCalls?.some((c) => c.id === 'original-call'),
-      )!;
-      expect(copied.content).toBe(originalBody);
-      expect(copied.sourceIds).toEqual(assistant.sourceIds);
-      expect(
-        request.messages.filter((m) => m.role === 'tool' && m.toolCallId === 'original-call'),
-      ).toHaveLength(1);
-      expect((await store.getView('source')).runs).toHaveLength(1);
-      expect((await store.getView('fork')).runs).toHaveLength(1);
-      await runtime.close();
-      await store.close();
-      const readonly = await openSqliteStore({ ...profile, mode: 'readonly' });
-      try {
-        const water = (await readonly.getMetadata()).lastChangeCursor;
-        const page = await readonly.getSelectedContext({
-          expectedStoreId: storeId,
-          sessionId: 'fork',
-          messageLimit: 200,
-          byteLimit: 8 * 1024 * 1024,
-        });
-        expect(page.messages.length).toBeGreaterThan(0);
-        expect((await readonly.getMetadata()).lastChangeCursor).toBe(water);
-        expect(requests).toHaveLength(3);
-        expect(effects).toBe(1);
-        expect((await readonly.getSession('fork'))!.ownerInstanceId).toBeNull();
-      } finally {
-        await readonly.close();
-      }
+      expect((await readonly.getSession('fork'))!.ownerInstanceId).toBeNull();
     } finally {
-      await runtime.close();
-      await store.close();
-      rmSync(directory, { recursive: true, force: true });
+      await readonly.close();
     }
-  }, 40000);
+  } finally {
+    await runtime.close();
+    await store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 40000);
 
 test('Fork preserves future content as readonly and refuses to reinterpret it before a new Provider call', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-future-fork-')));

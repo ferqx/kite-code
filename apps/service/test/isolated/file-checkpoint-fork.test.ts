@@ -22,6 +22,7 @@ import type {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 import { createFileCheckpointProvider } from '../fixtures/file-checkpoint-provider';
@@ -60,7 +61,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
     ? 'default same-Session selector retains consumed Model proof and rejects an excluded trigger without effects'
     : combined
       ? 'default code leg then Fork preserves actual new inode and restores earlier A through current independent Ask'
-      : 'default session-only two Forks preserve unselected B receipts, sealed original head and exact aliases for early A restore', async () => {
+      : 'default session-only two Forks preserve the attached trigger, unselected B receipts and sealed original head for early A restore', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-file-checkpoint-fork-'))),
       workspace = join(root, 'workspace');
     mkdirSync(workspace);
@@ -74,7 +75,10 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
     writeFileSync(join(workspace, 'AGENTS.md'), agents);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
     privateDirectory(profile.profilePath);
-    const { provider, requests, steps, model } = createFileCheckpointProvider();
+    const continueFork = 'FORK_ATTACHMENT_CONTINUE: read the selected original attachment';
+    const { provider, requests, steps, model } = createFileCheckpointProvider({
+      [continueFork]: 'fork',
+    });
     writeFileSync(
       userConfiguration.path,
       JSON.stringify({
@@ -145,6 +149,30 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
           })
         ).state,
       ).toBe('applied');
+      const attachmentBytes = Buffer.from('Original selected attachment\r\n');
+      const attachment =
+        scenario === 'fork'
+          ? await client.uploadInputFile(
+              's',
+              {
+                expectedStoreId: storeId,
+                id: 'fork-proof-input',
+                name: 'fork-proof.txt',
+                mediaType: 'text/plain',
+                size: String(attachmentBytes.length),
+                hash: hash(attachmentBytes),
+              },
+              new Response(attachmentBytes).body!,
+            )
+          : undefined;
+      if (attachment) {
+        await client.prepareWorkingInputs({
+          expectedStoreId: storeId,
+          targetSessionId: 's',
+          commandId: 'first',
+          files: [attachment],
+        });
+      }
       for (const [commandId, content] of [
         ['first', 'FIRST_ACTUAL_RUN: read then update original and create first file'],
         ['second', 'New task: SECOND_ACTUAL_RUN: read then update original and create second file'],
@@ -154,6 +182,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
           commandId,
           kind: 'run.start',
           content,
+          ...(commandId === 'first' && attachment ? { files: [attachment] } : {}),
         });
         const command = await until(
           () => client.getCommand(commandId),
@@ -404,6 +433,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
         restoreSequence++;
         const commandId = `restore-${restoreSequence}`;
         const before = stamp(originalPath);
+        const beforeRequests = requests.length;
         const pending = await child!.client.invokeExtension(sessionId, {
           expectedStoreId: storeId,
           commandId,
@@ -430,7 +460,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
         expect(card.runId).toBeNull();
         expect(card.kind).toBe('approval');
         expect(stamp(originalPath)).toEqual(before);
-        expect(requests).toHaveLength(8);
+        expect(requests).toHaveLength(beforeRequests);
         const planned = await child!.client.getExecution(card.executionId);
         expect(planned).toMatchObject({
           kind: 'job',
@@ -635,6 +665,22 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       expect(firstFork.omittedExtensionState).toBe(
         firstFork.namespaceReport?.some((entry) => entry.omitted > 0) ?? false,
       );
+      if (attachment) {
+        expect(firstFork.namespaceReport).toContainEqual(
+          expect.objectContaining({
+            extensionId: 'builtin.files',
+            contentType: 'builtin.files.input-preparation',
+            mode: 'omit',
+            omitted: 1,
+          }),
+        );
+        const copiedPreparation = await reader.getExtensionRecord({
+          sessionId: 'fork-one',
+          extensionId: 'builtin.files',
+          key: 'input-preparation/first/fork-proof-input',
+        });
+        expect(copiedPreparation).toBeNull();
+      }
       expect(
         firstFork.namespaceReport?.find(
           (item) => item.extensionId === 'builtin.files' && item.mode === 'rebuild',
@@ -649,6 +695,12 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       expect(
         selectedFirst.messages.some((message) => message.content.startsWith('FIRST_ACTUAL_RUN')),
       ).toBe(true);
+      if (attachment) {
+        const copiedInput = selectedFirst.messages.find((message) =>
+          message.content.startsWith('FIRST_ACTUAL_RUN'),
+        );
+        expect(copiedInput?.files).toEqual([attachment]);
+      }
       expect(
         selectedFirst.messages.some((message) =>
           message.content.startsWith('New task: SECOND_ACTUAL_RUN'),
@@ -840,11 +892,58 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
         );
         expect(afterDrift).toEqual(firstPreview);
       }
+      if (attachment) {
+        const live = child!.client;
+        const sourceView = await live.getView('s');
+        const deletion = await live.deleteSession('s', {
+          expectedStoreId: storeId,
+          commandId: 'retire-fork-source',
+          ifRevision: sourceView.session.controlRevision,
+        });
+        expect(deletion.session.deletedAt).toBeGreaterThan(0);
+        expect(
+          await live.queryExtension(restoreSession, 'builtin.files', 'files.checkpoint.detail', {
+            pointId: point.id,
+          }),
+        ).toEqual(firstPreview);
+        const commandId = 'read-in-selected-fork';
+        await live.startRun(restoreSession, {
+          expectedStoreId: storeId,
+          commandId,
+          kind: 'run.start',
+          content: continueFork,
+        });
+        const command = await until(
+          () => live.getCommand(commandId),
+          (value) => value.status === 'applied',
+        );
+        const { runId } = command.receipt as { runId: string };
+        const continuation = await until(
+          () => live.getRun(runId),
+          (run) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status),
+        );
+        expect(continuation.status, continuation.reason ?? undefined).toBe('completed');
+        expect(steps.get('fork')).toBe(2);
+        const attachmentRead = requests
+          .at(-1)!
+          .messages.filter((message) => message.role === 'tool')
+          .at(-1);
+        expect(
+          taskQualityPresentedRead(attachmentRead?.content ?? '')?.content,
+          attachmentRead?.content,
+        ).toBe(attachmentBytes.toString('utf8'));
+        expect(
+          (await live.getView(restoreSession)).executions.filter(
+            (execution) => execution.runId === runId && execution.kind === 'tool',
+          ),
+        ).toMatchObject([{ definitionId: 'files.read', status: 'succeeded' }]);
+      }
+      const requestCount = attachment ? 10 : 8;
       const finalRestore = await restore(restoreSession, point.id, 'early-a-in-current-fork');
       expect(readFileSync(originalPath)).toEqual(original);
       expect(existsSync(join(workspace, 'first-created.txt'))).toBe(false);
       expect(existsSync(join(workspace, 'second-created.txt'))).toBe(false);
-      expect(requests).toHaveLength(8);
+      expect(requests).toHaveLength(requestCount);
       expect(finalRestore.execution.sessionId).toBe(restoreSession);
       expect(finalRestore.execution.id).not.toBe(middleRestore?.execution.id);
       expect(finalRestore.execution.runId).toBeNull();
@@ -878,7 +977,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       expect(await reader.getView(restoreSession)).toEqual(viewBefore);
       expect((await reader.getMetadata()).lastChangeCursor).toBe(metadataBefore.lastChangeCursor);
       expect(stamp(originalPath)).toEqual(bytesBefore);
-      expect(requests).toHaveLength(8);
+      expect(requests).toHaveLength(requestCount);
       const coldModel = await child.client.getModelInput('s', source.modelExecutionId);
       const { snapshotCursor: liveCursor, ...immutableModel } = model;
       const { snapshotCursor: coldCursor, ...immutableColdModel } = coldModel;
@@ -890,5 +989,5 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       provider.stop(true);
       rmSync(root, { recursive: true, force: true });
     }
-  }, 30000);
+  }, 50000);
 }

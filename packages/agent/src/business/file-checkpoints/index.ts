@@ -12,6 +12,7 @@ import type {
   ToolContext,
   ToolDefinition,
 } from '../../extensions';
+import { inputFileContent } from '../../input-files';
 import { canonicalJson } from '../../json';
 import { AgentError } from '../../storage/types';
 import { createWorkspaceFiles, type FileBaseline, type WorkspaceFiles } from '../../tools/files';
@@ -942,17 +943,25 @@ export function createFileCheckpointing(options: FileCheckpointOptions) {
       )
         fail('checkpoint_source_unconfirmed');
       if (selectedPoint(checkpoint)) {
-        const trigger = await projection.getMessage(checkpoint.boundary.triggerMessageId);
+        const trigger = await projection.getMessage(
+          checkpoint.boundary.triggerMessageId,
+          original.modelExecutionId,
+        );
+        const content =
+          trigger.files === undefined
+            ? trigger.content
+            : trigger.modelInputFiles && inputFileContent(trigger.content, trigger.modelInputFiles);
         if (
           trigger.sessionId !== checkpoint.boundary.sessionId ||
           trigger.seq !== checkpoint.boundary.triggerSeq ||
           trigger.runId !== checkpoint.boundary.runId ||
           trigger.role !== 'user' ||
           trigger.status !== 'complete' ||
+          content === undefined ||
           !input.request.messages.some(
             (message) =>
               message.role === 'user' &&
-              message.content === trigger.content &&
+              message.content === content &&
               equal(message.sourceIds ?? [], trigger.sourceIds ?? [trigger.id]),
           )
         )

@@ -458,6 +458,8 @@ MCP 选择另用 CLI host 私有 `ui/mcp-selection-intents.json@1`，普通五�
 
 Files完整原字节原语由独立[checkpoint leaf](../../packages/agent/src/business/file-checkpoints/README.md)捕获原Tool/Model/Run选择、完整preimage和实际postimage，当前Store观察与原Source保持各自身份。Files rebuild封存完整业务时间线与有限来源，selected aliases决定目标资格，未selected后像只作连续性证明；v2 restore/effect ledger记录真实新inode或confirmed missing，旧v1只读不回填。准确failed Job与完整空ledger共同证明的零效果失败保为no-op证据，pending/partial/unknown继续拒绝；任何一次性批准都不复制。默认两层Fork、code恢复后更早点、A→B、same-S selector及Web闭合只读都有实际资格。独立Action的人类Ask与通用[group/context/record/projection最终SQL](../../packages/agent/src/storage/README.md)不承诺跨文件/两leg原子；CLI/TUI/Native三种范围与组合unknown持久caller仍按已确认设计实施。
 
+Files 检查点分叉保留选中原消息的附件来源。宿主准备工作副本的记录参加原事务的漂移检查，并在分叉回执中报告省略。恢复核验经封存的原消息别名和原模型调用重建附件路径、比对完整已封存的输入与来源 ID，原会话删除后仅保留这条精确的历史读取能力。[Files 检查点](../../packages/agent/src/business/file-checkpoints/README.md) · [Service 回归](../../apps/service/test/isolated/file-checkpoint-fork.test.ts)
+
 通用 Action 的 prepare 固定原完整 contextRevision 与 scoped records/missing/list；用户 Ask 后只能重新核当前 quiescence，不替换原上下文和读集。final dispatch SQL 先核实际 root/descendants safety 再核原 context，carrier 在 dispatching/running/unknown 持续封闭新效果。adapter 的合法写入消耗原 absence 后不再将其当最终提交前条件，child 则独立核当前权限/来源/必要条件。真实竞态及独立 unseen extension 证明分别归 [Store owner](../../packages/agent/src/storage/README.md)和[取舍](../../.agents/notes/implemented/architecture/2026-10-03-guarded-actions-pin-original-context-and-group.md)，不推导所有外部 IO 可原子化。
 
 runless 后代只沿有限真实 Execution/Command 链继承原 provenance；准确封存的新版权限检查可观察其 planned target，但不取得原 Action collector/guard 或目标派发权。旧 `authorization.review` child 的解析、上下文排除、ownership 交接及派发适配已移除；新版检查继续核完整执行组、原上下文与最终批准证明，不能以后来静止状态洗掉原上下文。完整条件与实际负例由上述 Store owner 维护。

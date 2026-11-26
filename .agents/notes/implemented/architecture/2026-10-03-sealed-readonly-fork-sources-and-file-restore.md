@@ -34,6 +34,8 @@ Host 准备期核原 Execution/Command/Session/Run/subject/Workspace/decisionSou
 
 Files rebuild 由独立业务规则保存 Fork 时完整 checkpoint/file-chain metadata、准确原 A/B origin Store/Session/Tool/Model/Artifact identities、当前物理状态对应的真实已确认文件 baseline 与有限 readonly delegation。point eligibility 按真实 selected aliases 判断；后像 receipt 可作为恢复证据保留，不因它没有 selected trigger 就丢掉。普通 Query/Action 不把 derived namespace record 重标为原 point 身份，不靠 head/URL/hash 猜源 scope。
 
+附件工作副本准备记录属于原输入派发。Fork 事务继续核实这些记录的版本和完整性，业务重建时省略确切的宿主准备记录并计入回执。检查点核验沿封存原消息和原模型读取原来的附件绑定，以完整的模型所见正文和来源 ID 判断触发消息。该读取只提供历史文件元数据，分支按自己的权限核验每次读取或恢复。
+
 每次恢复只在 `files.restore` 或 remove 的实际返回已经确认时发布新的 confirmed post baseline（含实际 inode/hash/size 或已确认 missing），逐文件 CAS 与 journal 保原 restore/execution identity。失败、取消、unknown、部分发布不能用预期 preimage 冒充确认结果；原 journal phase 和实际 carrier Execution 状态各自保留。新的 Fork 再转交已经封存的 subset，不收集 Fork 后新增 Source effects/refs。
 
 ### Callers and Browser observation
@@ -50,6 +52,7 @@ Web 仅新增闭合只读目录、preview detail、restore-status。宿主固定
 - 重用 live records observer、重读 source head 或猜旧 revision：会让来源 Session 的后来变化污染历史 Fork，且不能恢复已修改的旧 metadata；保留 Fork-time 完整业务 snapshot 与封存 source proof。
 - 放宽普通 `getExecution`、Artifact reader 或重标来源到当前 Session：会使相同 subject 的任意 foreign execution 可读，掩盖原 Store/Session 因果；保持原 reader 范围并新增精确 private projection。
 - 在 Fork SQL 中识别 Files checkpoint ID/JSON、或让 Core 合成文件历史：破坏通用宿主边界；Core 仅核 trusted rule 声明与通用原事实，文件 metadata/eligibility/confirmed baseline 归 Files leaf。
+- 将工作副本准备记录登记为可供扩展写入的业务类型，或把未知记录统一降为可省略：前者改变输入准备的写权限，后者弱化检查点完整性。宿主仅识别已有且形状正确的私有准备记录，派生历史按原别名重新核对。
 - 两个 restore leg 伪装原子、unknown 后重发或替换 IDs：无法撤销已发布物理效果，也会重复写或创建分支；保存完整原 caller intent，逐 leg 呈现并只查原命令。
 
 ## 当前验证

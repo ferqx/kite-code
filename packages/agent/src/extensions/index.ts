@@ -307,7 +307,11 @@ export interface ForkSourceProjection {
     readonly current: ForkMessageAlias;
     readonly aliases: readonly ForkMessageAlias[];
   }[];
-  getMessage(messageId: string): Promise<import('../storage/types').ForkSourceMessage>;
+  /** The Files owner can request historical model attachment references for an exact sealed Model. */
+  getMessage(
+    messageId: string,
+    modelExecutionId?: string,
+  ): Promise<import('../storage/types').ForkSourceMessage>;
   readonly sources: readonly import('../storage/types').ForkReadonlySource[];
   getExecution(id: string): Promise<PublicExecution | null>;
   getRun(id: string): Promise<PublicRun | null>;

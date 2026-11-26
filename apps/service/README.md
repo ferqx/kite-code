@@ -42,6 +42,10 @@ Native 只读 `GET /v1/sessions/:id/execution-root` 复用同一解析器，核�
 
 默认 Files 装配依次组合工作区检查点、只读输入、Plan owner 协调与会话输出；请求分类和 execute 使用同一准确目标 revision，不放开整个 Profile。`read_file` 限于源码与工程文本。PDF 和其他文档通过受管 Shell 处理，上传文档使用已准备的工作区副本。PDF 页图在 `view_images` 显式读取时通过原 Artifact 和 Runtime 交接。 [Files](../../packages/agent/src/tools/files/README.md) · [文档助手](../../packages/agent/src/tools/documents/README.md) · [默认宿主联验](test/isolated/planning-configuration.test.ts)
 
+Files 写入检查点从原成功模型请求确定触发消息。带文件的输入按原绑定的导入和工作副本重建模型实际收到的附件路径，再核对完整正文和准确来源 ID。当前文件内容无需读取，证明无法核对时仍拒绝写入。[默认配对回归](test/isolated/file-checkpoint-default.test.ts)覆盖附文件的首轮、无附件的后续轮次和三种恢复权限模式。Windows 源码 Desktop 使用 Codex `gpt-6-luna`／`medium` 实际读取首条输入的 `sample-alpha.txt`，写入并读回 `ps-check-attachment-note.md`，持久检查点指向原首条消息。记录位于本机 `.cache/conversation-powershell-evidence-20261126/attached-turn.json`。
+
+带文件工作副本的会话通过现有 Service Fork 接口保留所选消息和原附件引用，并重建 Files 检查点。准备工作副本的内部记录在回执中标记省略。源会话删除后，分支仍可按自身权限读取保留的所选附件。继承的检查点经所选消息、封存模型调用及原附件绑定核对，并按当前分支独立审批恢复。覆盖入口见[真实配对分叉回归](test/isolated/file-checkpoint-fork.test.ts)。
+
 [最终 Files 目录装配](src/file-checkpoint-configuration.ts)统一英文工具与 path 说明：三种模式均支持普通外部读取、写入和编辑，请求批准先人批，有效 Full 直接授权；Auto 普通工作区读取免模型审核，普通外部文本隔离读取后仅对存在正文审核释放，缺失直接反馈；写入／编辑仍经自动审核；获准且可安全编辑的外部读取才有完整基线。准确附件和当前计划仍保专用范围，参数语义和版本不变；Files 批准不授予其他工具权限，Shell 的独立请求仍经过自身策略和原任务限制。普通文件确定缺失以成功观察及 `exists:false` 进入下一模型，不造正文或基线；私有文件缺失、保护失败与损坏不因此降成正常观察。[三模式目录及结果回归](test/isolated/full-external-files.test.ts)核实际默认装配和下一模型交接；UI 与真实模型资格另由实际观察及原测试记录说明。
 
 2026-11-16，macOS ARM64／Bun1.4.4：默认装配的[私有读取冷恢复](test/isolated/private-read-recovery.test.ts)4项87断言与[真实工作树冷恢复](test/isolated/worktree-read-recovery.test.ts)1项32断言同次通过。前者核审核落库后 SIGKILL 的零正文发布／零新增读取执行与审查，后者核原 epoch 1 Model／Files 调用恢复、exit 后回原根，均经真实 HTTP。未逐 syscall 计数，也不代替 Shell 执行、其他平台或真实客户端验收；准确边界见 [Files owner](../../packages/agent/src/tools/files/README.md#auto-文本读取的私有快照)。

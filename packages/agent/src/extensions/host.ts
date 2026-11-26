@@ -384,9 +384,13 @@ export class ExtensionHost {
           sessionId,
           aliases: structuredClone(observed.aliases),
           sources: structuredClone(observed.proof.sources),
-          getMessage: async (messageId) => {
+          getMessage: async (messageId, modelExecutionId) => {
             await recheck();
-            const message = await this.options.store.readForkSourceMessage({ ...input, messageId });
+            const message = await this.options.store.readForkSourceMessage({
+              ...input,
+              messageId,
+              modelExecutionId,
+            });
             await recheck();
             return message;
           },

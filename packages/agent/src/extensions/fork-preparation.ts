@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isWorkingInputPreparation } from '../input-working-files';
 import { canonicalJson } from '../json';
 import type { Store } from '../storage/port';
 import {
@@ -133,6 +134,9 @@ export async function prepareNamespaceFork(
           try {
             if (row.rawText !== null) value = JSON.parse(row.rawText) as Json;
           } catch {}
+          // Working-copy preparation is private input admission state. It stays
+          // in the transaction's source stamps and out of business snapshots.
+          if (!registered && isWorkingInputPreparation(row, value, input.sourceSessionId)) continue;
           if (!registered || value === undefined || !recordValidator(registered.schema)(value)) {
             if (rule.onUnsupported === 'reject') throw new AgentError('fork_record_unsupported');
             continue;

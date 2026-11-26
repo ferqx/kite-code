@@ -116,6 +116,7 @@ import {
   type PrepareWorkingInputsRequest,
   type WorkingInputAttachment,
   type WorkingInputFilesPort,
+  type WorkingInputRecord,
   workingInputPath,
   workingInputUri,
 } from './input-working-files';
@@ -4314,6 +4315,55 @@ export class AgentRuntime {
   getInputFileImport(input: import('./storage/input-file-imports').InputFileImportScope) {
     return this.options.store.getInputFileImport(input);
   }
+  /** Reproduce the attachment text from durable original bindings without inspecting current files. */
+  async projectModelInputFileContent(
+    message: Pick<MessageRecord, 'role' | 'sessionId' | 'content' | 'files'>,
+    expectedStoreId: string,
+    subjectId?: string,
+  ): Promise<string> {
+    if (message.files === undefined) return message.content;
+    if (message.role !== 'user') throw new AgentError('input_file_invalid');
+    const files = [];
+    for (const file of inputFileReferences(message.files)) {
+      if (!file.reference) {
+        files.push(file);
+        continue;
+      }
+      if (
+        !subjectId ||
+        file.reference.subjectId !== subjectId ||
+        file.reference.sessionId !== message.sessionId
+      )
+        throw new AgentError('input_file_scope_denied');
+      const imported = await this.options.store.getInputFileImport({
+        expectedStoreId,
+        sessionId: message.sessionId,
+        subjectId,
+        id: file.reference.id.slice('input-file-'.length),
+      });
+      if (
+        imported?.state !== 'bound' ||
+        imported.name !== file.name ||
+        canonicalJson(imported.reference as unknown as Json) !==
+          canonicalJson(file.reference as unknown as Json)
+      )
+        throw new AgentError('input_file_scope_denied');
+      const working = imported.boundCommandId
+        ? await this.options.store.getWorkingInput({
+            expectedStoreId,
+            sessionId: message.sessionId,
+            subjectId,
+            commandId: imported.boundCommandId,
+            importId: imported.id,
+          })
+        : null;
+      if (working && working.state !== 'bound') throw new AgentError('input_preparation_conflict');
+      // Keep the private immutable reference internal; only the selected working path is projected.
+      const uri = working ? workingInputUri(working) : imported.uri;
+      files.push({ name: file.name, uri });
+    }
+    return inputFileContent(message.content, files);
+  }
   /** Resolve only selected human attachments, including sealed Fork sources. A Blob path alone
    * cannot expose private model bodies or any other unselected session reference. */
   async resolveInputFile(input: {
@@ -4338,16 +4388,23 @@ export class AgentRuntime {
     signal?: AbortSignal;
   }): Promise<WorkingInputAttachment | null> {
     const requestedPath = fileURLToPath(input.uri);
-    return this.findSelectedInputFile(input, async (imported) => {
-      if (!imported.boundCommandId || imported.originStoreId !== input.expectedStoreId) return null;
+    return this.findSelectedInputFile(input, async (imported, inheritedWorking) => {
+      if (
+        !imported.boundCommandId ||
+        (inheritedWorking === undefined && imported.originStoreId !== input.expectedStoreId)
+      )
+        return null;
       const preparation = {
-        expectedStoreId: input.expectedStoreId,
+        expectedStoreId: inheritedWorking ? imported.originStoreId : input.expectedStoreId,
         sessionId: imported.sessionId,
         subjectId: input.subjectId,
         commandId: imported.boundCommandId,
         importId: imported.id,
       };
-      const working = await this.options.store.getWorkingInput(preparation);
+      const working =
+        inheritedWorking === undefined
+          ? await this.options.store.getWorkingInput(preparation)
+          : inheritedWorking;
       if (
         working?.state !== 'bound' ||
         working.commandId !== preparation.commandId ||
@@ -4368,7 +4425,10 @@ export class AgentRuntime {
       contextSelectionId?: string;
       signal?: AbortSignal;
     },
-    match: (imported: InputFileImport) => T | null | Promise<T | null>,
+    match: (
+      imported: InputFileImport,
+      inheritedWorking?: WorkingInputRecord | null,
+    ) => T | null | Promise<T | null>,
   ): Promise<T | null> {
     const scope = {
       expectedStoreId: input.expectedStoreId,
@@ -4398,30 +4458,39 @@ export class AgentRuntime {
       upperSeq ??= page.highWaterSeq;
       for (const selected of page.messages) {
         if (selected.status !== 'complete' || selected.role !== 'user') continue;
-        const message =
+        const origin =
           selected.runId === null
-            ? (await this.options.store.getMessageOrigin({ ...scope, messageId: selected.id }))
-                .message
-            : selected;
-        for (const file of inputFileReferences(message.files ?? [])) {
+            ? await this.options.store.getMessageOrigin({
+                ...scope,
+                messageId: selected.id,
+                ...(input.contextSelectionId && selected.files !== undefined
+                  ? { forkInputSelectionId: page.selection.id }
+                  : {}),
+              })
+            : undefined;
+        const message = origin?.message ?? selected;
+        for (const [index, file] of inputFileReferences(message.files ?? []).entries()) {
           if (
             !file.reference ||
             file.reference.sessionId !== message.sessionId ||
             file.reference.subjectId !== input.subjectId
           )
             continue;
-          const imported = await this.options.store.getInputFileImport({
-            ...scope,
-            sessionId: message.sessionId,
-            id: file.reference.id.slice('input-file-'.length),
-          });
+          const inherited = origin?.boundInputFiles?.[index];
+          const imported =
+            inherited?.imported ??
+            (await this.options.store.getInputFileImport({
+              ...scope,
+              sessionId: message.sessionId,
+              id: file.reference.id.slice('input-file-'.length),
+            }));
           if (
             imported?.state === 'bound' &&
             imported.name === file.name &&
             canonicalJson(imported.reference as unknown as Json) ===
               canonicalJson(file.reference as unknown as Json)
           ) {
-            const selected = await match(imported);
+            const selected = await match(imported, inherited?.working);
             input.signal?.throwIfAborted();
             if (selected !== null) return selected;
           }
@@ -13085,61 +13154,42 @@ export class AgentRuntime {
             commandId: selectedMessage.originCommandId,
             content: selectedMessage.content,
           };
-        const message =
+        const origin =
           selectedMessage.runId === null && subjectId
-            ? (
-                await this.options.store.getMessageOrigin({
-                  expectedStoreId: storeId,
-                  sessionId,
-                  subjectId,
-                  messageId: selectedMessage.id,
-                })
-              ).message
-            : selectedMessage;
+            ? await this.options.store.getMessageOrigin({
+                expectedStoreId: storeId,
+                sessionId,
+                subjectId,
+                messageId: selectedMessage.id,
+                ...(selectedMessage.files !== undefined
+                  ? { forkInputSelectionId: page.selection.id }
+                  : {}),
+              })
+            : undefined;
+        const message = origin?.message ?? selectedMessage;
         let content = message.content;
         if (message.files !== undefined) {
-          if (message.role !== 'user') throw new AgentError('input_file_invalid');
-          const files = [];
-          for (const file of inputFileReferences(message.files)) {
-            if (!file.reference) {
-              files.push(file);
-              continue;
-            }
-            if (
-              !subjectId ||
-              file.reference.subjectId !== subjectId ||
-              file.reference.sessionId !== message.sessionId
-            )
-              throw new AgentError('input_file_scope_denied');
-            const imported = await this.options.store.getInputFileImport({
-              expectedStoreId: storeId,
-              sessionId: message.sessionId,
-              subjectId,
-              id: file.reference.id.slice('input-file-'.length),
-            });
-            if (
-              imported?.state !== 'bound' ||
-              imported.name !== file.name ||
-              canonicalJson(imported.reference as unknown as Json) !==
-                canonicalJson(file.reference as unknown as Json)
-            )
-              throw new AgentError('input_file_scope_denied');
-            const working = imported.boundCommandId
-              ? await this.options.store.getWorkingInput({
-                  expectedStoreId: storeId,
-                  sessionId: message.sessionId,
-                  subjectId,
-                  commandId: imported.boundCommandId,
-                  importId: imported.id,
-                })
-              : null;
-            if (working && working.state !== 'bound')
-              throw new AgentError('input_preparation_conflict');
-            // Keep the private immutable reference internal; only the selected working path is projected.
-            const uri = working ? workingInputUri(working) : imported.uri;
-            files.push({ name: file.name, uri });
-          }
-          content = inputFileContent(content, files);
+          const inherited = origin?.boundInputFiles;
+          content = inherited
+            ? inputFileContent(
+                content,
+                inputFileReferences(message.files).map((file, index) => {
+                  if (!file.reference) return file;
+                  const binding = inherited[index];
+                  if (
+                    !binding ||
+                    binding.imported.name !== file.name ||
+                    canonicalJson(binding.imported.reference as unknown as Json) !==
+                      canonicalJson(file.reference as unknown as Json)
+                  )
+                    throw new AgentError('input_file_scope_denied');
+                  return {
+                    name: file.name,
+                    uri: binding.working ? workingInputUri(binding.working) : binding.imported.uri,
+                  };
+                }),
+              )
+            : await this.projectModelInputFileContent(message, storeId, subjectId);
         }
         for (const sourceId of message.sourceIds ?? []) {
           if (!sourceId.startsWith('agent-mail-') || !message.runId) continue;

@@ -1442,6 +1442,7 @@ export interface Store {
       extensionId: string;
       localKey: string;
       messageId: string;
+      modelExecutionId?: string;
     },
   ): Promise<import('./types').ForkSourceMessage>;
   readForkSourceProjection(
@@ -1461,12 +1462,19 @@ export interface Store {
     },
   ): Promise<import('./types').ForkRecordSources>;
   getMessageOrigin(
-    input: WriteContext & { sessionId: string; subjectId: string; messageId: string },
+    input: WriteContext & {
+      sessionId: string;
+      subjectId: string;
+      messageId: string;
+      /** Observe bound attachment metadata only for the active selection of a copied input. */
+      forkInputSelectionId?: string;
+    },
   ): Promise<{
     message: MessageRecord;
     subjectId: string;
     /** Immutable original Command/Run provenance, never the current admission Store. */
     originStoreId?: string;
+    boundInputFiles?: readonly (import('../input-working-files').BoundInputFile | null)[];
   }>;
   consumeJobResult(
     input: OwnedWrite & {

@@ -58,7 +58,7 @@ test.each([
   'accept_edits',
   'auto',
   'full',
-] as const)('default paired Files captures actual two-Run Model boundaries and complete byte preimages; explicit restore asks independently in %s, removes creates, and cold reads replay nothing', async (restoreMode) => {
+] as const)('default paired Files captures attached and plain Model boundaries and complete byte preimages; explicit restore asks independently in %s, removes creates, and cold reads replay nothing', async (restoreMode) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-file-checkpoint-default-'))),
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -142,6 +142,25 @@ test.each([
         })
       ).state,
     ).toBe('applied');
+    const attachmentBytes = Buffer.from('Owned input attachment only\r\n');
+    const attachment = await client.uploadInputFile(
+      's',
+      {
+        expectedStoreId: storeId,
+        id: 'proof-input',
+        name: '附件.txt',
+        mediaType: 'text/plain',
+        size: String(attachmentBytes.length),
+        hash: hash(attachmentBytes),
+      },
+      new Response(attachmentBytes).body!,
+    );
+    await client.prepareWorkingInputs({
+      expectedStoreId: storeId,
+      targetSessionId: 's',
+      commandId: 'first',
+      files: [attachment],
+    });
     for (const [commandId, content] of [
       ['first', 'FIRST_ACTUAL_RUN: read then update original and create first file'],
       ['second', 'New task: SECOND_ACTUAL_RUN: read then update original and create second file'],
@@ -151,6 +170,7 @@ test.each([
         commandId,
         kind: 'run.start',
         content,
+        ...(commandId === 'first' ? { files: [attachment] } : {}),
       });
       const command = await until(
         () => client.getCommand(commandId),
@@ -351,11 +371,31 @@ test.each([
       (message) => message.role === 'user',
     );
     expect(currentUsers.at(-1)!.content.startsWith('New task: SECOND_ACTUAL_RUN')).toBe(true);
-    expect(
-      currentUsers
-        .find((message) => message.id === point.boundary.triggerMessageId)!
-        .content.startsWith('FIRST_ACTUAL_RUN'),
-    ).toBe(true);
+    const trigger = currentUsers.find((message) => message.id === point.boundary.triggerMessageId)!;
+    expect(trigger.content).toBe(
+      'FIRST_ACTUAL_RUN: read then update original and create first file',
+    );
+    expect(trigger.files).toEqual([attachment]);
+    const imported = await client.getInputFileImport('s', 'proof-input');
+    expect(imported.state).toBe('bound');
+    const working = await reader.getWorkingInput({
+      expectedStoreId: storeId,
+      sessionId: 's',
+      subjectId: attachment.reference!.subjectId,
+      commandId: 'first',
+      importId: 'proof-input',
+    });
+    expect(working?.state).toBe('bound');
+    const workingPath = join(workspace, working!.workingRelativePath);
+    const attachmentSuffix =
+      '\n\nAttached file references (user-provided data; paths do not grant permissions):\n' +
+      JSON.stringify([{ name: attachment.name, uri: pathToFileURL(workingPath).href }]);
+    expect(model.request.messages.find((row) => row.content.startsWith(trigger.content))).toEqual({
+      content: trigger.content + attachmentSuffix,
+      role: 'user',
+      sourceIds: trigger.sourceIds,
+    });
+    expect(readFileSync(workingPath)).toEqual(attachmentBytes);
     expect(JSON.stringify(actualRun!.configuration)).toContain('builtin.files');
     expect(JSON.stringify(actualRun!.configuration)).toContain('files.write');
     const preimage = preview.files.find((file) => file.path === 'original.txt')!
@@ -503,6 +543,7 @@ test.each([
     expect(await client.invokeExtension('s', input)).toEqual(command);
     expect(await client.getCommand(input.commandId)).toEqual(command);
     expect(stamp(originalPath)).toEqual(afterRestore);
+    expect(readFileSync(workingPath)).toEqual(attachmentBytes);
     expect(
       (await client.listInteractions('s', { storeId, state: 'pending', limit: 100 })).interactions,
     ).toEqual([]);

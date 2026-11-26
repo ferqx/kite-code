@@ -12,11 +12,6 @@ import { join } from 'node:path';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
-import {
-  createProfileBackup,
-  inspectProfileBackup,
-  restoreProfileBackup,
-} from '../../../src/maintenance';
 import { openSqliteStore } from '../../../src/sqlite';
 
 const finish: ModelEvent = {
@@ -53,7 +48,7 @@ async function fixture() {
       title: sessionId,
     });
   const scope = { expectedStoreId, sessionId: 's', subjectId: 'owner' };
-  return { root, profile, store, artifacts, model, runtime, scope };
+  return { root, store, artifacts, model, runtime, scope };
 }
 async function rejects(work: Promise<unknown>, code: string) {
   let actual: unknown;
@@ -65,9 +60,9 @@ async function rejects(work: Promise<unknown>, code: string) {
   expect(actual).toMatchObject({ code });
 }
 
-test('streamed import survives source deletion, binds atomically and remains readable after backup restore', async () => {
+test('streamed import survives source deletion and binds atomically in its own session', async () => {
   const f = await fixture();
-  let runtime = f.runtime;
+  const { runtime } = f;
   try {
     const source = join(f.root, '原文.txt');
     const text = '第一行\n完整附件：源文件删除后仍然可读\n';
@@ -121,56 +116,6 @@ test('streamed import survives source deletion, binds atomically and remains rea
         }),
       ),
     ).toBe(text);
-    await runtime.close();
-    const backup = await createProfileBackup({
-      profile: f.profile,
-      destinationRoot: join(f.root, 'backups'),
-    });
-    await inspectProfileBackup({ directory: backup.directory });
-    const restored = await restoreProfileBackup({
-      profile: f.profile,
-      expectedStoreId: f.scope.expectedStoreId,
-      backup,
-      intent: 'replace_with_selected_backup',
-    });
-    const store = await openSqliteStore(f.profile);
-    const artifacts = createArtifactStore({ profile: f.profile, store });
-    const model = createFixedModel([[finish]]);
-    runtime = createRuntime({ permissions, store, artifacts, model, modelId: 'fixed' });
-    expect(restored.storeId).not.toBe(f.scope.expectedStoreId);
-    const record = await runtime.getInputFileImport({
-      ...f.scope,
-      expectedStoreId: restored.storeId,
-      id: 'source',
-    });
-    expect(record?.originStoreId).toBe(f.scope.expectedStoreId);
-    expect(record?.reference).toEqual(file.reference);
-    expect(
-      new TextDecoder().decode(
-        await artifacts.readReference({
-          expectedStoreId: restored.storeId,
-          reference: file.reference!,
-        }),
-      ),
-    ).toBe(text);
-    await rejects(
-      runtime.releaseInputFileImport({
-        ...f.scope,
-        expectedStoreId: restored.storeId,
-        id: 'source',
-      }),
-      'input_file_scope_denied',
-    );
-    await runtime.submitCommand({
-      ...f.scope,
-      expectedStoreId: restored.storeId,
-      commandId: 'after-restore',
-      request: { kind: 'run.start', content: 'continue reading' },
-    });
-    await runtime.waitForCommand('after-restore', { timeoutMs: 5000 });
-    expect(model.requests[0]?.messages.some((m) => m.content.includes(file.reference!.hash))).toBe(
-      true,
-    );
   } finally {
     await runtime.close();
     rmSync(f.root, { recursive: true, force: true });

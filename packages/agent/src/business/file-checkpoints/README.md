@@ -10,6 +10,10 @@
 
 `readBoundary(actualToolContext,actualPublicExecution)` 返回 `{boundary,modelExecutionId,modelInputHash}`。boundary 保存实际 Store/W/S/Run 和原 Run 的不可变 selection，live 捕获还须与当前 Session selection 相同；`triggerMessageId/triggerSeq` 是本次 Model 实际消费的最后 User 输入，其之前完整恢复边界为 `messageId/messageSeq`，首次输入之前为 null/0。宿主从原 Tool 的真实 Model decisionSource、成功 Model 的完整 sealed input 和准确来源映射取得这些事实。Model input、JSONC、known IDs/hash、有限 view 不替代证明；缺 callback 拒绝 capture，零文件修改。point ID 只哈希 boundary，不含某一次 Model proof，避免同一输入的连续 Model 创建多个首 preimage 窗口。
 
+带文件的 User 输入由宿主按消息的原附件绑定重建模型正文。模型组装和检查点核验复用原导入与工作副本的投影，完整模型正文及来源 ID 都须吻合；已封存的工作路径来自记录，文件的现时字节和目录内容与该证明无关。[默认 Service 接线](../../../../../apps/service/src/file-checkpoint-configuration.ts)
+
+继承的检查点通过 sealed Fork projection 核对已选原输入和同一原 Run 的封存模型调用。附件名称、引用、绑定命令和工作路径来自原会话的持久记录。原会话已删除而来源仍保留时，恢复继续核实该精确只读证明；打开原附件和恢复写入各自沿当前权限办理。[配对回归](../../../../../apps/service/test/isolated/file-checkpoint-fork.test.ts)
+
 leaf 再核原 Tool 的 Session/Run/Store、`files.write@2|3`／`files.edit@2`、attempt/inputDigest 与活跃原 Run。dispatching/running 可捕获，planned 不可。每个 first/last/pending Source 保存实际 Tool/Run/definition/version/attempt/inputDigest 和原 Model ID/full input hash。context signal 和 namespace writer 继续核 owner/祖先，不扩大权限。
 
 capture 注入时 write/edit 声明 Workspace serial key `files.mutation`，宿主必须装配现有 public Workspace OS-lock backend；缺失明确 workspace_resource_lock_unavailable。锁覆盖捕获→mutation→封存，不锁任意外部 editor。普通未注入 Tools 不新增资源声明。可信 protectedPaths 使用 Files 原语的闭合相对路径组件 prefix，不由 Model/JSONC/HTTP提供。

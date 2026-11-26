@@ -178,7 +178,7 @@ Run安全观察完整流式扫描递归成员，执行组安全观察完整流�
 
 [getMessageOrigin](sqlite/fork-operations.ts)在原只读事务中核当前准入 Store、主体／Session 与每层 sealed Message／Part，另从原 Message 明确绑定的 Command 或 Run 读取固定 `origin_store_id`。显式输入 Command 优先于所在 Run，查询只取原出处和准确 Session，不取来源 Run 的后来状态。私有 [Store port](port.ts)返回可选 `originStoreId`，未记录绑定时保持缺省；明确绑定缺失则拒绝为 `fork_origin_unverifiable`，不能补当前 Store。它只为 Service 投影原历史来源，不构成执行、审批、恢复或读取其他来源的 authority。
 
-[冷恢复回归](../../test/isolated/context/restored-origin.test.ts)经真实 Core／SQLite 的普通 Run 与一次 harmless fixture Tool、明确 Fork、严格关闭和公开维护备份恢复为新 Store，核四条原用户／Model／Tool 消息的完整身份与内容、冷只读原 Store 和零新水位／Model／效果。原 [Fork 回归](../../test/isolated/context/fork.test.ts)继续核完整大正文、配对、未来格式及拒绝边界；公共 HTTP 与实际 PC 的范围归 [Service](../../../../apps/service/README.md)及 [Native](../../../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。本片不改 SQL baseline、维护资产格式或公共 HTTP schema。
+[冷恢复回归](../../test/isolated/context/restored-origin.test.ts)经真实 Core／SQLite 的普通 Run 与一次 harmless fixture Tool、明确 Fork、严格关闭和公开维护备份恢复为新 Store，核四条原用户／Model／Tool 消息的完整身份与内容、冷只读原 Store 和零新水位／Model／效果。原 [Fork 回归](../../test/isolated/context/fork.test.ts)继续核配对、未来格式及拒绝边界；公共 HTTP 与实际 PC 的范围归 [Service](../../../../apps/service/README.md)及 [Native](../../../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。本片不改 SQL baseline、维护资产格式或公共 HTTP schema。
 
 ## 当前会话视图
 

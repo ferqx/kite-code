@@ -1,4 +1,5 @@
 import { expect } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 import type { Json } from '@kite-ai/agent/extensions';
 import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 
@@ -9,36 +10,48 @@ type ProviderBody = {
 
 /** Real local SDK transport for the same read/update/create journey in each caller. */
 export function createFileCheckpointProvider(
-  additionalMarkers: Record<string, 'first' | 'second'> = {},
+  additionalMarkers: Record<string, 'first' | 'second' | 'fork'> = {},
 ) {
   const requests: ProviderBody[] = [],
     steps = new Map<string, number>();
+  const attachmentPrefix =
+    '\n\nAttached file references (user-provided data; paths do not grant permissions):\n';
+  const markers = new Map<string, 'first' | 'second' | 'fork'>([
+    ['FIRST_ACTUAL_RUN: read then update original and create first file', 'first'],
+    ['SECOND_ACTUAL_RUN: read then update original and create second file', 'second'],
+    ...Object.entries(additionalMarkers),
+  ]);
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request): Promise<Response> {
       const body = (await request.json()) as ProviderBody;
       requests.push(body);
-      const user = body.messages
+      const key = body.messages
         .slice()
         .reverse()
-        .find(
-          (message) =>
-            message.role === 'user' &&
-            /^(?:New task: )?(FIRST|SECOND)_ACTUAL_RUN:/.test(message.content),
-        )?.content;
-      const markers: Record<string, string> = {
-        'FIRST_ACTUAL_RUN: read then update original and create first file': 'first',
-        'SECOND_ACTUAL_RUN: read then update original and create second file': 'second',
-        ...additionalMarkers,
-      };
-      const key = user === undefined ? undefined : markers[user.replace(/^New task: /, '')];
+        .filter((message) => message.role === 'user')
+        .map((message) =>
+          markers.get(message.content.split(attachmentPrefix, 1)[0]!.replace(/^New task: /, '')),
+        )
+        .find((marker) => marker !== undefined);
       if (!key) throw Error('actual_file_user_marker_unavailable');
       const step = steps.get(key) ?? 0;
-      if (step >= 4) throw Error('actual_file_model_route_exhausted');
+      if (step >= (key === 'fork' ? 2 : 4)) throw Error('actual_file_model_route_exhausted');
       steps.set(key, step + 1);
       let call: { name: string; input: Json } | null = null;
-      if (step === 0) call = { name: 'read_file', input: { path: 'original.txt', limit: 10000 } };
+      if (key === 'fork') {
+        if (step === 0) {
+          const selected = body.messages.find(
+            (message) => message.role === 'user' && message.content.startsWith('FIRST_ACTUAL_RUN:'),
+          );
+          const projected = selected?.content.split(attachmentPrefix)[1];
+          const [attachment] = JSON.parse(projected ?? '[]') as { uri: string }[];
+          if (!attachment) throw Error('actual_fork_attachment_missing');
+          call = { name: 'read_file', input: { path: fileURLToPath(attachment.uri) } };
+        }
+      } else if (step === 0)
+        call = { name: 'read_file', input: { path: 'original.txt', limit: 10000 } };
       else if (step === 1) {
         const read = body.messages.filter((message) => message.role === 'tool').at(-1);
         if (!read) throw Error('actual_file_read_baseline_missing');

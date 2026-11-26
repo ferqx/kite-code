@@ -31,7 +31,7 @@ An exact registered operation-result completion ref may consume known terminal s
 
 复制的历史消息保存 SQL 私有原 message 链，Store 从原创建命令和相同主体核实每个链接、Part 和来源；调用者 JSON 或已知 hash 不能授予跨 Session 读取。Core 在新的明确 Run 中以此证明读取原 Artifact 完整正文，原 scope/Store/subject/Execution 保持不变，不重新绑定 blob 引用或执行原操作。已选且已消费/explicit 的结果仅复制不可变来源引用；未接纳的结果不会自动出现。重复 Fork 返回原回执，selection/边界或 title 改变拒绝。未来 Part 格式按原样保留可读历史，但新的 Model 输入拒绝 fork_content_unsupported，不能把未知格式转换成可执行资格。
 
-[fork.test.ts](../../../../test/isolated/context/fork.test.ts) 使用真实临时 SQLite/Core 和固定 Model，覆盖小正文、≥17MiB 原输出及下一次完整输入、精确配对、原 namespace 省略、真实触发器整体回滚、同 ID 零新事件、原 scope 授权、readonly 重开零 Model/效果、已知失败结果的唯一低信任来源、空/已排除边界、未来格式和实际未知 Job/活动组拒绝。Session rename/delete 由独立管理模块负责；扩展 copy/rebuild 的可信登记和原子派生见 [lifecycle owner](../../../extensions/fork/README.md)。
+[fork.test.ts](../../../../test/isolated/context/fork.test.ts) 使用真实临时 SQLite/Core 和固定 Model，覆盖原正文进入下一次输入、精确配对、原 namespace 省略、真实触发器整体回滚、同 ID 零新事件、原 scope 授权、readonly 重开零 Model/效果、已知失败结果的唯一低信任来源、空/已排除边界、未来格式和实际未知 Job/活动组拒绝。Session rename/delete 由独立管理模块负责；扩展 copy/rebuild 的可信登记和原子派生见 [lifecycle owner](../../../extensions/fork/README.md)。
 
 [压缩 owner](compression.README.md) 维护单选纯算法 slot、同 Loop 的真实 Model 摘要、原范围/Artifact 来源、原子发布与窗口预检 reset；它保留历史及 selection，查询不触发收费。
 

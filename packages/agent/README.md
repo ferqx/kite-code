@@ -58,7 +58,7 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 
 ## 用户图片输入
 
-普通文件附件通过 start/steer/follow-up 的可选 `files` 保存最多 128 个附件，原消息正文保持用户原文。新上传沿 Artifact 流式发布原件，[当前基线](src/storage/migrations/0001-baseline.sql)保存稳定导入 ID、准确 Store／Session／subject 与引用；消息准入事务同时核验并绑定，释放与绑定互斥。原件不另复制到 `inputs/`。模型只得到可按需读取的准确定位信息，Files 在读取时反查所选消息来源并校验完整字节；同 hash 不代表相同访问权。旧 `{name,uri}` 保持路径引用，不后台读取或迁移。文本、PDF 页读取及输出文件见 Files owner；[输入文件测试](test/isolated/artifacts/input-files.test.ts)覆盖删源、错会话、稳定重试及新 Store 恢复。
+普通文件附件通过 start/steer/follow-up 的可选 `files` 保存最多 128 个附件，原消息正文保持用户原文。新上传沿 Artifact 流式发布原件，[当前基线](src/storage/migrations/0001-baseline.sql)保存稳定导入 ID、准确 Store／Session／subject 与引用；消息准入事务同时核验并绑定，释放与绑定互斥。原件不另复制到 `inputs/`。模型只得到可按需读取的准确定位信息，Files 在读取时反查所选消息来源并校验完整字节；同 hash 不代表相同访问权。旧 `{name,uri}` 保持路径引用，不后台读取或迁移。文本、PDF 页读取及输出文件见 Files owner；[输入文件测试](test/isolated/artifacts/input-files.test.ts)覆盖删源、错会话、稳定重试与释放和绑定的竞态。
 
 [Runtime.uploadInputImage](src/runtime.ts)先按准确 Store/Session/subject 核作用域，再校验 PNG、JPEG、WebP、GIF 的 canonical base64、格式头和单张 16 MiB 限制，以既有 Artifact owner 发布不可变 session 引用；不接收路径或 URL。`run.start/input.steer/input.follow_up` 的可选 `images` 是名称与完整引用，同次新输入最多 10 张、总量最多 64 MiB；受理事务先核数量，再比对原登记元数据，不能跨会话借用、改写 hash 或凭空声明引用。
 
@@ -439,3 +439,5 @@ Store 的锁与事务见[存储 owner](src/storage/README.md)。[Runtime 实测]
 内置[办公技能与资源](src/tools/documents/README.md)提供 OfficeCLI 的 Word、Excel、PPT 技能以及现有 PDF 技能。任务通过既有 Shell 使用当前环境的 `officecli` 或 PDF helper，沿原模型工具定义。[Shell 输出收集](src/business/output-collection.README.md)在生产者确实结束后独立归档不可变文件，保留原 Run 和文件身份。列举、预览、保存与继续修改沿现有文件接口。
 
 输入继续使用原合法input import；[宿主工作副本](src/tools/input-working-files.ts)在命令提交前复制到工作区，Store登记映射并在原输入绑定事务标记bound。模型只看到该工作路径；同command/import重入复用原记录，不覆盖已绑定副本，历史Blob始终只读。此端口由宿主注入，Runtime不导入native文件实现。[安全回归](test/isolated/tools/input-working-files.test.ts)验证路径/链接、Unicode名称、partial/hash失败与绑定后保留编辑。
+
+分支继续执行时，Runtime 通过当前选择内的消息副本逐层核对来源，沿原绑定读取附件元数据。源会话删除后，已有分支仍可使用尚保留的所选来源。新读取经分支自己的权限和实际文件核验；原会话的工作副本准备记录及审批均由原会话持有。[分支继续与恢复回归](../../apps/service/test/isolated/file-checkpoint-fork.test.ts)

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { inputFileReferences } from '../../input-files';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type ContextSelection, type Json } from '../types';
@@ -6,11 +7,14 @@ import { activeCompression, historyOnlyCompression } from './compression-operati
 import { filter, pairBoundary, selected } from './context-selection-operations';
 import { bindDesktopShell } from './desktop-shell';
 import { applyNamespacePlan, validateNamespacePlan } from './fork-namespaces';
+import { readBoundInputFileInTransaction } from './input-file-imports';
 import type { SqliteOperations } from './operations';
 import { forkSessionExecutionRoot } from './session-execution-root';
 
 type Row = Record<string, string | number | bigint | null>;
 const hash = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
+const forkMessageId = (sessionId: string, messageId: string) =>
+  `fork-message-${hash([sessionId, messageId])}`;
 const parse = <T>(value: Row[string] | undefined): T => JSON.parse(String(value)) as T;
 function creator(db: SqliteOperations, sessionId: string, subjectId: string): Row {
   const row = db.row('SELECT * FROM session WHERE id=?', sessionId);
@@ -81,6 +85,227 @@ export function messageOriginRow(db: SqliteOperations, row: Row, subjectId: stri
   creator(db, String(current.session_id), subjectId);
   return current;
 }
+
+function forkFact<T extends object>(raw: Row[string] | undefined, deny: () => never): T {
+  let value: unknown;
+  try {
+    value = JSON.parse(String(raw));
+  } catch {
+    return deny();
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return deny();
+  return value as T;
+}
+
+function forkCreation(db: SqliteOperations, session: Row, subjectId: string, deny: () => never) {
+  const command = db.row(
+    "SELECT * FROM command WHERE session_id=? AND kind='session.create'",
+    session.id!,
+  );
+  if (!command || command.status !== 'applied' || command.subject_id !== subjectId) return deny();
+  const request = forkFact<{
+    kind: string;
+    workspaceId?: string;
+    fork?: { sourceSessionId: string; expectedContextSelectionId: string };
+  }>(command.request_json, deny);
+  const receipt = forkFact<{
+    sessionId: string;
+    sourceSessionId?: string;
+    sourceSelectionId?: string;
+    sourceUpperSeq?: string;
+    selectionId?: string;
+  }>(command.receipt_json, deny);
+  if (
+    request.kind !== 'session.create' ||
+    hash(request as Json) !== command.request_digest ||
+    receipt.sessionId !== session.id
+  )
+    return deny();
+  return { command, request, receipt };
+}
+
+function forkSelection(
+  db: SqliteOperations,
+  session: Row,
+  creation: ReturnType<typeof forkCreation>,
+  selectionId: string,
+  deny: () => never,
+) {
+  const snapshot = db.row('SELECT * FROM context_snapshot WHERE id=?', selectionId);
+  if (snapshot) {
+    const selection = forkFact<ContextSelection>(snapshot.request_json, deny);
+    if (
+      snapshot.session_id !== session.id ||
+      snapshot.selection_id !== selectionId ||
+      snapshot.kind !== 'selection' ||
+      selection.id !== selectionId ||
+      selection.sessionId !== session.id ||
+      !Array.isArray(selection.ranges)
+    )
+      return deny();
+    return { selection, raw: snapshot.request_json };
+  }
+  // An ordinary Session starts with an implicit selection. A Fork always saves
+  // its initial selection, as does each later explicit selection change.
+  if (
+    creation.request.fork !== undefined ||
+    creation.receipt.selectionId !== undefined ||
+    creation.request.workspaceId !== session.workspace_id
+  )
+    return deny();
+  const first = db.row(
+    "SELECT * FROM command WHERE session_id=? AND kind='context.select' AND status='applied' ORDER BY seq LIMIT 1",
+    session.id!,
+  );
+  const request =
+    first && forkFact<{ expectedContextSelectionId: string }>(first.request_json, deny);
+  if (
+    request
+      ? request.expectedContextSelectionId !== selectionId ||
+        first.subject_id !== creation.command.subject_id ||
+        hash(request as Json) !== first.request_digest
+      : session.context_selection_id !== selectionId
+  )
+    return deny();
+  const selection: ContextSelection = {
+    id: selectionId,
+    sessionId: String(session.id),
+    previousSelectionId: null,
+    boundaryMessageId: null,
+    boundarySeq: '0',
+    tailFromSeq: '0',
+    ranges: [],
+  };
+  return { selection, raw: null };
+}
+
+type ForkLink = {
+  sessionId: string;
+  upper: bigint;
+  selection: ContextSelection;
+  proof: [Row[string], Row[string], Row[string]];
+};
+
+/** Shared by selected attachment reads and sealed readonly projections in their read transaction. */
+export function readForkLineage(
+  db: SqliteOperations,
+  current: Row,
+  subjectId: string,
+  deny: () => never,
+  throughSessionId?: string,
+) {
+  if (current.delete_requested || current.parent_id !== null) return deny();
+  let node = current;
+  let creation = forkCreation(db, node, subjectId, deny);
+  const { selection } = forkSelection(db, node, creation, String(node.context_selection_id), deny);
+  const links: ForkLink[] = [];
+  const seen = new Set([node.id]);
+  while (node.id !== throughSessionId && creation.request.fork !== undefined) {
+    const { command, request, receipt } = creation;
+    const fork = request.fork;
+    if (
+      typeof fork?.sourceSessionId !== 'string' ||
+      typeof fork.expectedContextSelectionId !== 'string' ||
+      receipt.sourceSessionId !== fork.sourceSessionId ||
+      receipt.sourceSelectionId !== fork.expectedContextSelectionId ||
+      typeof receipt.sourceUpperSeq !== 'string' ||
+      !/^(0|[1-9][0-9]{0,18})$/.test(receipt.sourceUpperSeq) ||
+      BigInt(receipt.sourceUpperSeq) > 9223372036854775807n ||
+      links.length >= 64 ||
+      seen.has(fork.sourceSessionId)
+    )
+      return deny();
+    const source = db.row('SELECT * FROM session WHERE id=?', fork.sourceSessionId);
+    if (
+      !source ||
+      source.parent_id !== null ||
+      source.workspace_id !== current.workspace_id ||
+      db.session(source).historyPurgedAt !== undefined
+    )
+      return deny();
+    creation = forkCreation(db, source, subjectId, deny);
+    const saved = forkSelection(db, source, creation, fork.expectedContextSelectionId, deny);
+    links.push({
+      sessionId: fork.sourceSessionId,
+      upper: BigInt(receipt.sourceUpperSeq),
+      selection: saved.selection,
+      proof: [command.request_json!, command.receipt_json!, saved.raw ?? null],
+    });
+    seen.add(source.id);
+    node = source;
+  }
+  if (throughSessionId !== undefined && node.id !== throughSessionId) return deny();
+  return { selection, links };
+}
+
+export function forkMessageAliases(
+  db: SqliteOperations,
+  links: readonly ForkLink[],
+  copy: Row,
+  original: Row,
+  subjectId: string,
+  deny: () => never,
+) {
+  const rows = [copy];
+  let alias = copy;
+  for (const link of links) {
+    if (alias.id === original.id) break;
+    if (BigInt(alias.seq!) > link.upper) return deny();
+    const range = filter(link.selection, 'seq');
+    const next = db.row(
+      `SELECT * FROM message WHERE session_id=? AND seq=? AND role=? AND status='complete' AND ${range.sql}`,
+      link.sessionId,
+      alias.seq!,
+      alias.role!,
+      ...range.args,
+    );
+    if (
+      !next ||
+      next.source_json !== alias.source_json ||
+      forkMessageId(String(alias.session_id), String(next.id)) !== alias.id ||
+      messageOriginRow(db, next, subjectId).id !== original.id
+    )
+      return deny();
+    rows.push(next);
+    alias = next;
+  }
+  if (alias.id !== original.id) return deny();
+  return rows;
+}
+
+/** Verify the selected copy before observing original attachment metadata. */
+function assertSelectedForkInput(
+  db: SqliteOperations,
+  current: Row,
+  copy: Row,
+  original: Row,
+  subjectId: string,
+  selectionId: string,
+) {
+  const deny = (): never => {
+    throw new AgentError('fork_origin_unverifiable');
+  };
+  if (
+    current.context_selection_id !== selectionId ||
+    copy.status !== 'complete' ||
+    copy.role !== 'user' ||
+    copy.fork_source_message_id !== original.id ||
+    String(copy.seq) !== String(original.seq)
+  )
+    return deny();
+  const { selection, links } = readForkLineage(
+    db,
+    current,
+    subjectId,
+    deny,
+    String(original.session_id),
+  );
+  const range = filter(selection, 'seq');
+  if (!db.row(`SELECT id FROM message WHERE id=? AND ${range.sql}`, copy.id!, ...range.args))
+    return deny();
+  forkMessageAliases(db, links, copy, original, subjectId, deny);
+}
+
 export function getMessageOrigin(
   db: SqliteOperations,
   input: Parameters<Store['getMessageOrigin']>[0],
@@ -88,7 +313,7 @@ export function getMessageOrigin(
   db.db.run('BEGIN');
   try {
     db.identity(input.expectedStoreId);
-    creator(db, input.sessionId, input.subjectId);
+    const current = creator(db, input.sessionId, input.subjectId);
     const message = db.row(
       'SELECT * FROM message WHERE id=? AND session_id=?',
       input.messageId,
@@ -121,10 +346,40 @@ export function getMessageOrigin(
         : undefined;
     if ((original.originCommandId || original.runId) && !provenance)
       throw new AgentError('fork_origin_unverifiable');
+    let boundInputFiles: (import('../../input-working-files').BoundInputFile | null)[] | undefined;
+    if (
+      input.forkInputSelectionId !== undefined &&
+      message.fork_source_message_id &&
+      original.files !== undefined
+    ) {
+      const files = inputFileReferences(original.files);
+      if (files.some((file) => file.reference)) {
+        assertSelectedForkInput(
+          db,
+          current,
+          message,
+          actual,
+          input.subjectId,
+          input.forkInputSelectionId,
+        );
+        if (typeof provenance?.origin_store_id !== 'string')
+          throw new AgentError('fork_origin_unverifiable');
+        const scope = {
+          expectedStoreId: input.expectedStoreId,
+          originStoreId: provenance.origin_store_id,
+          sessionId: original.sessionId,
+          subjectId: input.subjectId,
+        };
+        boundInputFiles = files.map((file) =>
+          file.reference ? readBoundInputFileInTransaction(db, scope, file) : null,
+        );
+      }
+    }
     const result = {
       message: original,
       subjectId: input.subjectId,
       ...(provenance ? { originStoreId: String(provenance.origin_store_id) } : {}),
+      ...(boundInputFiles ? { boundInputFiles } : {}),
     };
     db.db.run('COMMIT');
     return result;
@@ -267,7 +522,7 @@ export function forkSession(
       ...f.args,
     )) {
       const original = messageOriginRow(db, row, input.subjectId),
-        id = `fork-message-${hash([input.newSessionId, String(row.id)])}`;
+        id = forkMessageId(input.newSessionId, String(row.id));
       db.run(
         'INSERT INTO message(id,session_id,run_id,seq,role,status,source_json,fork_source_message_id) VALUES(?,?,NULL,?,?,?,?,?)',
         id,

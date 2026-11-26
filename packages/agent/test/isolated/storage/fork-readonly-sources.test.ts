@@ -13,6 +13,7 @@ import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { DispatchInput } from '../../../src/storage/port';
 import type { ForkSourceObservation, Json } from '../../../src/storage/types';
+import { createWorkingInputFiles } from '../../../src/tools/input-working-files';
 
 function gate() {
   let release!: () => void;
@@ -40,6 +41,7 @@ async function fixture(
   namespace = false,
   ask = false,
   largeInput = false,
+  withAttachment = false,
 ) {
   const root = temporaryDirectory('kite-fork-record-sources-'),
     profile = { dataRoot: join(root, 'profile'), profile: 'test' };
@@ -53,6 +55,7 @@ async function fixture(
     savedProjection: import('../../../src/extensions').ForkSourceProjection | undefined,
     detachedRead: Promise<unknown> | undefined;
   const anchor = 'bundle';
+  const extensionId = withAttachment ? 'builtin.files' : 'fixture';
   const artifacts = createArtifactStore({ profile, store });
   let artifactId = '';
   const namespaceSnapshots: string[][] = [];
@@ -111,7 +114,7 @@ async function fixture(
     },
   };
   const extension: Extension = {
-    id: 'fixture',
+    id: extensionId,
     version: '1',
     apiMajor: 1,
     records: [
@@ -261,6 +264,7 @@ async function fixture(
     model,
     extensions: [extension],
     artifacts,
+    ...(withAttachment ? { workingInputFiles: createWorkingInputFiles() } : {}),
     permissions: {
       async authorize(request) {
         if (ask && request.definitionId === 'fixture/effect')
@@ -291,6 +295,23 @@ async function fixture(
     workspaceId: 'w',
     title: 'original',
   });
+  const attachment = withAttachment
+    ? await runtime.uploadInputFile({
+        ...base,
+        sessionId: 's',
+        id: 'source',
+        name: 'source.txt',
+        mediaType: 'text/plain',
+        content: new Blob(['Original input attachment']).stream(),
+      })
+    : undefined;
+  if (attachment)
+    await runtime.prepareWorkingInputs({
+      ...base,
+      targetSessionId: 's',
+      commandId: 'work',
+      files: [attachment],
+    });
   await runtime.submitCommand({
     ...base,
     commandId: 'work',
@@ -298,6 +319,7 @@ async function fixture(
     request: {
       kind: 'run.start',
       content: largeInput ? '始終'.repeat(55000) : 'actual original user',
+      ...(attachment ? { files: [attachment] } : {}),
     },
   });
   await runtime.waitForCommand('work', { timeoutMs: 5000 });
@@ -316,14 +338,14 @@ async function fixture(
   const physical = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
   const read = (
     sessionId = 'f2',
-    extensionId = 'fixture',
+    sourceExtensionId = extensionId,
     subjectId = 'owner',
     localKey = anchor,
   ) =>
     store.readForkSourceProjection({
       expectedStoreId: storeId,
       sessionId,
-      extensionId,
+      extensionId: sourceExtensionId,
       subjectId,
       localKey,
     });
@@ -737,6 +759,120 @@ test('legal User command ID colliding with source Model never becomes Execution 
   }
 });
 
+test('attached Fork input is projected only for the original alias and its sealed Model', async () => {
+  const f = await fixture(1, undefined, false, false, false, true);
+  try {
+    const model = (await f.read()).proof.sources.find((source) => source.kind === 'model')!;
+    const original = (await f.store.listMessages('s')).find((message) => message.role === 'user')!;
+    const aliases = (await f.read()).aliases.find((entry) =>
+      entry.aliases.some((alias) => alias.messageId === original.id),
+    )!;
+    const input = {
+      ...f.base,
+      sessionId: 'f2',
+      extensionId: 'builtin.files',
+      localKey: 'bundle',
+      messageId: original.id,
+      modelExecutionId: model.executionId,
+    };
+    const message = await f.store.readForkSourceMessage(input);
+    expect(message.modelInputFiles).toEqual([
+      { name: 'source.txt', uri: expect.stringContaining('/.kite-inputs/') },
+    ]);
+    expect(
+      await code(f.store.readForkSourceMessage({ ...input, messageId: aliases.current.messageId })),
+    ).toBe('fork_source_unverifiable');
+    expect(
+      await code(f.store.readForkSourceMessage({ ...input, modelExecutionId: f.toolId() })),
+    ).toBe('fork_source_unverifiable');
+    const source = (await f.store.getSession('s'))!;
+    await f.runtime.deleteSession({
+      ...f.base,
+      sessionId: 's',
+      commandId: 'delete-attachment-source',
+      ifRevision: source.controlRevision,
+    });
+    const selectionId = (await f.store.getSession('f2'))!.contextSelectionId;
+    const liveInput = {
+      ...f.base,
+      sessionId: 'f2',
+      messageId: aliases.current.messageId,
+      forkInputSelectionId: selectionId,
+    };
+    expect((await f.store.getMessageOrigin(liveInput)).boundInputFiles).toMatchObject([
+      { imported: { id: 'source', sessionId: 's' }, working: { state: 'bound' } },
+    ]);
+    expect(await code(f.store.getMessageOrigin({ ...liveInput, subjectId: 'foreign' }))).toBe(
+      'permission_denied',
+    );
+    expect(
+      await code(f.store.getMessageOrigin({ ...liveInput, forkInputSelectionId: 'old-selection' })),
+    ).toBe('fork_origin_unverifiable');
+    const snapshot = f.physical
+      .query<{ request_json: string }, [string]>(
+        'SELECT request_json FROM context_snapshot WHERE id=?',
+      )
+      .get(selectionId)!.request_json;
+    f.physical.run(
+      "UPDATE context_snapshot SET request_json=json_set(request_json,'$.tailFromSeq',?,'$.ranges',json('[]')) WHERE id=?",
+      [aliases.current.seq, selectionId],
+    );
+    expect(await code(f.store.getMessageOrigin(liveInput))).toBe('fork_origin_unverifiable');
+    f.physical.run('UPDATE context_snapshot SET request_json=? WHERE id=?', [
+      snapshot,
+      selectionId,
+    ]);
+    f.physical.run(
+      "UPDATE extension_record SET fork_provenance_json='{}' WHERE scope_id='s' AND key='input-preparation/work/source'",
+    );
+    expect(await code(f.store.readForkSourceMessage(input))).toBe('input_preparation_conflict');
+    expect(await code(f.store.getMessageOrigin(liveInput))).toBe('input_preparation_conflict');
+    expect(f.counts()).toEqual({ calls: 2, effects: 0 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('a missing intermediate Fork selection blocks attachment and sealed-source reads', async () => {
+  const f = await fixture(1, undefined, false, false, false, true);
+  try {
+    const source = (await f.store.getSession('s'))!;
+    const first = (await f.store.getSession('f1'))!;
+    const branch = (await f.store.getSession('f2'))!;
+    const original = (await f.store.listMessages('s')).find((message) => message.role === 'user')!;
+    const before = await f.read();
+    const alias = before.aliases.find((entry) =>
+      entry.aliases.some((item) => item.messageId === original.id),
+    )!.current;
+    const input = {
+      ...f.base,
+      sessionId: branch.id,
+      messageId: alias.messageId,
+      forkInputSelectionId: branch.contextSelectionId,
+    };
+    await f.runtime.selectContext({
+      ...f.base,
+      sessionId: source.id,
+      commandId: 'rewind-after-fork',
+      expectedContextSelectionId: source.contextSelectionId,
+      boundary: null,
+    });
+    expect((await f.read()).binding).toEqual(before.binding);
+    expect((await f.store.getMessageOrigin(input)).boundInputFiles).toHaveLength(1);
+    expect(
+      f.physical.run(
+        "DELETE FROM context_snapshot WHERE id=? AND session_id=? AND kind='selection'",
+        [first.contextSelectionId, first.id],
+      ).changes,
+    ).toBe(1);
+    expect(await code(f.store.getMessageOrigin(input))).toBe('fork_origin_unverifiable');
+    expect(await code(f.read())).toBe('fork_source_unverifiable');
+    expect(f.counts()).toEqual({ calls: 2, effects: 0 });
+  } finally {
+    await f.close();
+  }
+});
+
 for (const drift of [false, true])
   test(`actual Ask accepted original proof ${drift ? 'rejects drift' : 'dispatches once'}`, async () => {
     const f = await fixture(1, undefined, false, true);
@@ -811,8 +947,12 @@ test('sealed full Model input larger than Worker metadata is read exactly throug
 test('readonly projection reconstructs actual Fork ancestry and rejects a sealed cycle', async () => {
   const f = await fixture();
   try {
+    const original = (await f.store.getCommand('fork-f1'))!;
+    const request = original.request as { kind: string; fork: { sourceSessionId: string } };
+    const cycle = { ...request, fork: { ...request.fork, sourceSessionId: 'f1' } };
     f.physical.run(
-      "UPDATE command SET request_json=json_set(request_json,'$.fork.sourceSessionId','f1'),receipt_json=json_set(receipt_json,'$.sourceSessionId','f1') WHERE id='fork-f1'",
+      "UPDATE command SET request_json=?,request_digest=?,receipt_json=json_set(receipt_json,'$.sourceSessionId','f1') WHERE id='fork-f1'",
+      [JSON.stringify(cycle), await semanticDigest(cycle as Json)],
     );
     expect(await code(f.read())).toBe('fork_source_unverifiable');
     expect(f.counts().effects).toBe(0);

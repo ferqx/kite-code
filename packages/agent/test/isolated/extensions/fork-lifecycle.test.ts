@@ -7,8 +7,22 @@ import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension, RecordDefinition, ToolContext } from '../../../src/extensions';
+import {
+  type PublicForkInput,
+  prepareNamespaceFork,
+} from '../../../src/extensions/fork-preparation';
+import {
+  type WorkingInputRecord,
+  workingInputNamespace,
+  workingInputPath,
+  workingInputRecordKey,
+  workingInputRecordType,
+  workingInputRecordVersion,
+} from '../../../src/input-working-files';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
+import type { Store } from '../../../src/storage/port';
+import type { ForkNamespacePage } from '../../../src/storage/types';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -439,6 +453,112 @@ test('future content is preserved in source and safely omitted; exact unsupporte
     await f.close();
   }
 }, 20000);
+
+test('private input preparation remains stamped while only valid working copies may bypass the Files rebuild schema', async () => {
+  const input: PublicForkInput = {
+    expectedStoreId: 'store',
+    sourceSessionId: 'source',
+    subjectId: 'owner',
+    expectedContextSelectionId: 'selection',
+    newSessionId: 'target',
+    commandId: 'fork',
+    title: 'Fork',
+  };
+  const scope = { ...input, sessionId: input.sourceSessionId, commandId: 'run', importId: 'text' };
+  const identity = { device: '123', inode: '456' };
+  const preparation: WorkingInputRecord = {
+    commandId: scope.commandId,
+    importId: scope.importId,
+    inputRefId: 'input-file-text',
+    workingRelativePath: workingInputPath(scope, `${'测'.repeat(200)}.txt`),
+    workspaceRootUri: pathToFileURL(import.meta.dir).href,
+    state: 'bound',
+    rootIdentity: identity,
+    fileIdentity: identity,
+  };
+  const privateRow = {
+    seq: '1',
+    extensionId: workingInputNamespace,
+    key: workingInputRecordKey(scope),
+    revision: '2',
+    contentType: workingInputRecordType,
+    contentVersion: workingInputRecordVersion,
+    originStoreId: input.expectedStoreId,
+    rawDigest: 'private-digest',
+    rawText: JSON.stringify(preparation),
+    forkProvenance: null,
+  };
+  const businessRow = {
+    ...privateRow,
+    seq: '2',
+    key: 'checkpoint',
+    contentType: 'builtin.files.checkpoint',
+    rawDigest: 'checkpoint-digest',
+    rawText: '{}',
+  };
+  const extension: Extension = {
+    id: workingInputNamespace,
+    version: '1',
+    apiMajor: 1,
+    records: [
+      {
+        contentType: businessRow.contentType,
+        contentVersion: businessRow.contentVersion,
+        schema: { type: 'object' },
+        fork: {
+          mode: 'rebuild',
+          version: '1',
+          sourceScope: 'namespace',
+          onUnsupported: 'reject',
+          async prepare({ namespaceRecords }) {
+            expect(namespaceRecords?.map((record) => record.key)).toEqual([businessRow.key]);
+            return [
+              {
+                key: 'rebuilt',
+                contentType: businessRow.contentType,
+                contentVersion: 1,
+                value: {},
+              },
+            ];
+          },
+        },
+      },
+    ],
+  };
+  function prepare(row: ForkNamespacePage['records'][number]) {
+    const store = {
+      async readForkNamespacePage(): Promise<ForkNamespacePage> {
+        return {
+          snapshotCursor: '1',
+          dataVersion: '1',
+          sourceUpperSeq: '0',
+          selectedMessages: [],
+          records: [row, businessRow],
+          nextAfterSeq: null,
+        };
+      },
+    } as unknown as Store;
+    return prepareNamespaceFork(store, [extension], input);
+  }
+  const original = await prepare(privateRow);
+  expect(original?.sources[0]).toMatchObject({
+    key: privateRow.key,
+    rawDigest: privateRow.rawDigest,
+  });
+  expect(original?.writes.map(({ sourceKeys }) => sourceKeys)).toEqual([[businessRow.key]]);
+  expect(original?.report[0]).toMatchObject({ mode: 'omit', omitted: 1, rebuilt: 0, copied: 0 });
+  for (const invalid of [
+    { contentType: 'builtin.files.unregistered' },
+    { contentVersion: 2 },
+    { key: 'input-preparation/run/other' },
+    { originStoreId: 'wrong-store' },
+    { forkProvenance: { mode: 'copy' } },
+    { rawText: '{"state":"bound"}' },
+  ])
+    await expect(prepare({ ...privateRow, ...invalid })).rejects.toMatchObject({
+      code: 'fork_record_unsupported',
+    });
+});
 
 test('copy/rebuild does not remap full 17MiB original Model media or replay it on cold reads', async () => {
   const f = await fixture({ large: true });

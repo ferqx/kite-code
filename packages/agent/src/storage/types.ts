@@ -1304,6 +1304,8 @@ export interface SessionLogPage {
 
 /** Only exact selected Fork aliases; original identities and complete persisted parts. */
 export interface ForkSourceMessage extends MessageRecord {
+  /** Model attachment references projected from the exact original bindings when requested by Files. */
+  modelInputFiles?: readonly InputFileReference[];
   parts: readonly {
     ordinal: number;
     kind: string;

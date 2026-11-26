@@ -1,4 +1,9 @@
 import {
+  workingInputRecordType as contentType,
+  workingInputRecordVersion as contentVersion,
+  isWorkingInputRecord,
+  workingInputNamespace as namespace,
+  workingInputRecordKey as recordKey,
   type WorkingInputRecord,
   type WorkingInputScope,
   workingInputPath,
@@ -7,10 +12,6 @@ import { canonicalJson } from '../../json';
 import { AgentError, type Json } from '../types';
 import type { SqliteOperations } from './operations';
 
-const namespace = 'builtin.files';
-const contentType = 'builtin.files.input-preparation';
-const recordKey = (input: WorkingInputScope) =>
-  `input-preparation/${input.commandId}/${input.importId}`;
 function scope(ops: SqliteOperations, input: WorkingInputScope) {
   ops.identity(input.expectedStoreId);
   if (![input.commandId, input.importId].every((id) => /^[A-Za-z0-9_-]{1,100}$/.test(id)))
@@ -42,7 +43,11 @@ function scope(ops: SqliteOperations, input: WorkingInputScope) {
     throw new AgentError('input_preparation_conflict');
   return { rootUri: String(row.root_uri), imported, command };
 }
-function read(ops: SqliteOperations, input: WorkingInputScope): WorkingInputRecord | null {
+/** Internal exact-row reader for callers that already proved the original scope in this transaction. */
+export function readWorkingInputInTransaction(
+  ops: SqliteOperations,
+  input: WorkingInputScope,
+): WorkingInputRecord | null {
   const row = ops.row(
     "SELECT * FROM extension_record WHERE extension_id=? AND scope_kind='session' AND scope_id=? AND key=?",
     namespace,
@@ -52,11 +57,24 @@ function read(ops: SqliteOperations, input: WorkingInputScope): WorkingInputReco
   if (!row) return null;
   if (
     row.content_type !== contentType ||
-    Number(row.content_version) !== 1 ||
-    row.origin_store_id !== input.expectedStoreId
+    Number(row.content_version) !== contentVersion ||
+    row.origin_store_id !== input.expectedStoreId ||
+    row.fork_provenance_json !== null
   )
     throw new AgentError('input_preparation_conflict');
-  return JSON.parse(String(row.json)) as WorkingInputRecord;
+  let value: unknown;
+  try {
+    value = JSON.parse(String(row.json));
+  } catch {
+    throw new AgentError('input_preparation_conflict');
+  }
+  if (
+    !isWorkingInputRecord(value) ||
+    value.commandId !== input.commandId ||
+    value.importId !== input.importId
+  )
+    throw new AgentError('input_preparation_conflict');
+  return value;
 }
 export function getWorkingInput(
   ops: SqliteOperations,
@@ -65,7 +83,7 @@ export function getWorkingInput(
   ops.db.run('BEGIN');
   try {
     scope(ops, input);
-    const result = read(ops, input);
+    const result = readWorkingInputInTransaction(ops, input);
     ops.db.run('COMMIT');
     return result;
   } catch (error) {
@@ -80,7 +98,7 @@ export function registerWorkingInput(
   return ops.tx(() => {
     const actual = scope(ops, input),
       record = input.record,
-      old = read(ops, input);
+      old = readWorkingInputInTransaction(ops, input);
     if (
       record.commandId !== input.commandId ||
       record.importId !== input.importId ||
@@ -104,11 +122,12 @@ export function registerWorkingInput(
     if (actual.command || actual.imported.state !== 'prepared')
       throw new AgentError('input_preparation_too_late');
     ops.run(
-      "INSERT INTO extension_record(extension_id,scope_kind,scope_id,key,revision,content_type,content_version,origin_store_id,json) VALUES(?,'session',?,?,1,?,1,?,?)",
+      "INSERT INTO extension_record(extension_id,scope_kind,scope_id,key,revision,content_type,content_version,origin_store_id,json) VALUES(?,'session',?,?,1,?,?,?,?)",
       namespace,
       input.sessionId,
       recordKey(input),
       contentType,
+      contentVersion,
       input.expectedStoreId,
       canonicalJson(record as unknown as Json),
     );
@@ -118,7 +137,7 @@ export function registerWorkingInput(
 }
 /** Called within original input admission: never changes a frozen command afterwards. */
 export function bindWorkingInput(ops: SqliteOperations, input: WorkingInputScope): void {
-  const record = read(ops, input);
+  const record = readWorkingInputInTransaction(ops, input);
   if (!record) return; // Previously persisted inputs remain readable.
   if (
     record.commandId !== input.commandId ||

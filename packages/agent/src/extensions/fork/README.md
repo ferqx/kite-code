@@ -17,6 +17,8 @@ copy 的语义是受理时已提交的 Session 业务快照，不承诺任意旧
 
 `rebuild.sourceScope: 'namespace'` 是可信注册的显式选项；默认仍仅传当前 content type/version 组的 `records`。选项开启时额外传入 `namespaceRecords`：由宿主按当前已登记 schema 校验的同 extension 全记录，原 `records` 继续区分正在重建的组。输入递归冻结，没有外 namespace 或 I/O；输出 provenance 的 sourceKeys 固定为这份同 namespace 集合。unknown/invalid 的 omit/reject 沿该规则决定；需要完整快照的规则使用 reject。namespace 输入最多 64 条并沿用 1MiB Fork 准备预算，不能截断成完整快照；此限制只约束显式观察/重建，不是累计 Session 历史配额。
 
+宿主私有的 `builtin.files.input-preparation@1` 工作副本只绑定原 Session 的输入命令。分叉准备核对准确类型、版本、key、来源、形状及原会话路径归属后，省略该私有记录。它仍计入原事务读集和省略回执，业务重建输入与其 provenance 排除该记录。未知版本、形状或归属失配仍依原规则处理。记录继续由宿主写入，扩展通过 [分叉准备](../fork-preparation.ts)只观察获准的业务数据。[定向回归](../../../test/isolated/extensions/fork-lifecycle.test.ts)
+
 `ReadContext.readForkRecordSources(localKey)` 是当前 Session、当前 extension 的只读观察。宿主只从真实 local record 的封存 provenance、实际 applied Fork command/request/receipt 和同 subject/Workspace 的有限祖先链推导原 keys；不接受 foreign Session、Store、namespace 或任意原 key 参数。返回 binding 固定为 version/localKey/digest，以及真实当前 anchor/祖先记录（含原 Session/origin）；不存在按旧 revision 猜记录的能力。原 source revision/raw hash 漂移立即 unavailable，业务历史快照须由自己的纯 rebuild 保存。当前 selected 完整 Message、原 origin/parts、每层 Fork selection/upper 同时参与 binding，既不以 seq 单独证明分支，也不把 Action/Ask 的非 Message 水位当漂移。null Fork boundary 是真实空历史，upper 为 0。
 
 Host 在自己拥有的 Action prepare/execute、Query 与 context capture callback 完成后关闭这个 observer；准备期观察自动加入私有读集。Model Tool context 不开放该 observer。记录按 extensionId/Session/key 去重，与普通记录共享最多 64 条、32KiB stamp/binding 总预算；单次祖先图、证明及 Message 内容观察共享 1MiB，最多 64 层，Message/part 各最多 8192 项，循环、超限和无法核实均拒绝。只读端口不授予原 Run/Execution/Artifact 全 Session 阅读资格，更不授执行/审批权。
@@ -37,6 +39,8 @@ Fork 最终 SQL 在原实际 source group 已静止且没有 accepted work 时�
 `ReadContext.openForkSourceProjection(localKey)` 仅由当前实际 Session/namespace anchor 开放精确集合。projection 的 storeId 是当前观察 Store，sources 保各自原 Session/originStore/Run/Execution，Tool 的 modelExecutionId 为实际自动绑定。getExecution/getRun 只读精确声明集合；readModelInput/output 沿原 full reader，完整 bodyHash 与封存 proof 一致；artifacts.read 只允许精确已声明 refs，读取结束后再核原 anchor/来源并校验完整 bytes/hash。普通 getExecution/getRun/artifacts 范围保持。Query 返回这些准确 refs 时 Host 再核原 projection proof，不能把任意 foreign ref 混入。
 
 aliases 按当前完整 selected Message 与每层真实 applied Fork receipt/selection/upper 重建，列出当前及所有真实中间祖先 ID/seq，不以 sourceIds 或 seq 单独推来源。getMessage(messageId) 只返回这些 exact alias 的原完整 Message 与新增有限 ordered parts（ordinal/kind/contentVersion/revision/value）；不是 foreign Session 列表。parts 上限 8192、完整返回 1MiB；无法完整返回则拒绝。全部原 Message/parts 摘要进入 binding。合法 User commandId 可与 Model executionId 相同，只有 actual assistant+Model 关系形成 Model 证明。未选中 Tool 的 readonly 后像证据不使它的 trigger 变为可选节点。
+
+封存来源和分支附件共用 [SQL 来源链核验](../../storage/sqlite/fork-operations.ts)。每一层都核创建回执、主体、工作区、原选择和实际复制消息。无快照时，只有能证实属于普通源会话的初始选择才可按隐式范围处理。中间分叉或后续选择的快照缺失时拒绝读取。附件仍须经过当前分支的选择核验，检查点仍须经过原有封存来源和恢复权限核验。
 
 当前namespace仍须为未删除root。准确历史祖先允许已tombstone但未清理的root，仍核原creator／subject／Workspace／receipt／selection和全部sealed stamps；来源删除不扩大一般reader或执行许可，来源已清理则拒绝。离线GC保留存活Fork依赖的整条来源链，合同见[维护owner](../../maintenance/README.md#显式无引用附件-gc)。
 

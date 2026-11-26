@@ -390,18 +390,24 @@ export function createDefaultFileCheckpointConfiguration(options: {
     );
     if (actual.selection.id !== run.contextSelectionId) fail('checkpoint_model_boundary_conflict');
     const users = await consumedUsers(bound, snapshot, command.subjectId, signal);
-    const trigger = actual.messages
-      .filter(
-        (message) =>
-          message.runId === run.id &&
-          message.role === 'user' &&
-          users.some(
-            (user) =>
-              canonical([...user.sourceIds]) === canonical(message.sourceIds ?? [message.id]) &&
-              user.content === message.content,
-          ),
-      )
-      .at(-1);
+    let trigger: MessageRecord | undefined;
+    for (let index = actual.messages.length - 1; index >= 0; index--) {
+      const message = actual.messages[index]!;
+      if (message.runId !== run.id || message.role !== 'user') continue;
+      const ids = canonical(message.sourceIds ?? [message.id]);
+      const matchingUsers = users.filter((user) => canonical([...user.sourceIds]) === ids);
+      if (matchingUsers.length === 0) continue;
+      signal?.throwIfAborted();
+      const content = await runtime.projectModelInputFileContent(
+        message,
+        storeId,
+        command.subjectId,
+      );
+      if (matchingUsers.some((user) => user.content === content)) {
+        trigger = message;
+        break;
+      }
+    }
     if (!trigger) fail('checkpoint_model_boundary_unavailable');
     const before = actual.messages
       .filter((message) => BigInt(message.seq) < BigInt(trigger.seq))

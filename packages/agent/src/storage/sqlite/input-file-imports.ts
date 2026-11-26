@@ -2,12 +2,13 @@ import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { artifactPath } from '../../artifacts-files';
 import { inputFileReferences } from '../../input-files';
+import { type BoundInputFile, workingInputPath } from '../../input-working-files';
 import { canonicalJson } from '../../json';
 import type { InputFileImport, InputFileImportScope } from '../input-file-imports';
 import type { Store } from '../port';
-import { AgentError, type ArtifactReference, type Json } from '../types';
+import { AgentError, type ArtifactReference, type InputFileReference, type Json } from '../types';
 import { lookupArtifactReference } from './artifact-operations';
-import { bindWorkingInput } from './input-working-files';
+import { bindWorkingInput, readWorkingInputInTransaction } from './input-working-files';
 import type { SqliteOperations } from './operations';
 
 function scope(ops: SqliteOperations, input: InputFileImportScope, write: boolean) {
@@ -24,7 +25,11 @@ function scope(ops: SqliteOperations, input: InputFileImportScope, write: boolea
     throw new AgentError('input_files_unavailable');
 }
 
-function read(ops: SqliteOperations, input: InputFileImportScope): InputFileImport | null {
+/** Read within an existing transaction after the caller verifies the original session and subject. */
+export function readInputFileImportInTransaction(
+  ops: SqliteOperations,
+  input: InputFileImportScope,
+): InputFileImport | null {
   const row = ops.row(
     'SELECT * FROM input_file_import WHERE id=? AND session_id=? AND subject_id=?',
     input.id,
@@ -65,12 +70,79 @@ export function getInputFileImport(
   ops.db.run('BEGIN');
   try {
     scope(ops, input, false);
-    const result = read(ops, input);
+    const result = readInputFileImportInTransaction(ops, input);
     ops.db.run('COMMIT');
     return result;
   } catch (error) {
     return ops.rollback(error);
   }
+}
+
+/** Metadata for a verified selected original message, using the original Store for its binding. */
+export function readBoundInputFileInTransaction(
+  ops: SqliteOperations,
+  input: Omit<InputFileImportScope, 'id'> & { originStoreId: string },
+  file: InputFileReference,
+): BoundInputFile {
+  const reference = file.reference;
+  if (
+    !reference ||
+    reference.subjectId !== input.subjectId ||
+    reference.sessionId !== input.sessionId ||
+    reference.storeId !== input.originStoreId
+  )
+    throw new AgentError('input_file_scope_denied');
+  const importId = reference.id.slice('input-file-'.length);
+  const imported = readInputFileImportInTransaction(ops, { ...input, id: importId });
+  if (
+    imported?.state !== 'bound' ||
+    imported.name !== file.name ||
+    imported.originStoreId !== input.originStoreId ||
+    !imported.boundCommandId ||
+    canonicalJson(imported.reference as unknown as Json) !==
+      canonicalJson(reference as unknown as Json)
+  )
+    throw new AgentError('input_file_scope_denied');
+  const commandId = imported.boundCommandId;
+  const command = ops.row(
+    'SELECT session_id,subject_id,origin_store_id,kind,request_json FROM command WHERE id=?',
+    commandId,
+  );
+  if (
+    command?.session_id !== input.sessionId ||
+    command.subject_id !== input.subjectId ||
+    command.origin_store_id !== input.originStoreId ||
+    !['run.start', 'input.steer', 'input.follow_up'].includes(String(command.kind))
+  )
+    throw new AgentError('input_file_scope_denied');
+  const request = JSON.parse(String(command.request_json)) as { kind?: string; files?: unknown };
+  if (
+    request.kind !== command.kind ||
+    !inputFileReferences(request.files).some(
+      (entry) =>
+        entry.name === file.name &&
+        entry.reference &&
+        canonicalJson(entry.reference as unknown as Json) ===
+          canonicalJson(reference as unknown as Json),
+    )
+  )
+    throw new AgentError('input_file_scope_denied');
+  const scope = {
+    expectedStoreId: input.originStoreId,
+    sessionId: input.sessionId,
+    subjectId: input.subjectId,
+    commandId,
+    importId,
+  };
+  const working = readWorkingInputInTransaction(ops, scope);
+  if (
+    working &&
+    (working.state !== 'bound' ||
+      working.inputRefId !== reference.id ||
+      working.workingRelativePath !== workingInputPath(scope, file.name))
+  )
+    throw new AgentError('input_preparation_conflict');
+  return { imported, working };
 }
 
 export function registerInputFileImport(
@@ -92,7 +164,7 @@ export function registerInputFileImport(
       reference.scope.id !== input.sessionId
     )
       throw new AgentError('input_file_scope_denied');
-    const old = read(ops, input);
+    const old = readInputFileImportInTransaction(ops, input);
     if (old) {
       if (old.state === 'released') throw new AgentError('input_file_released');
       if (
@@ -129,7 +201,7 @@ export function registerInputFileImport(
       Date.now(),
     );
     ops.event(input.sessionId, input.id, 'input_file.prepared');
-    return read(ops, input)!;
+    return readInputFileImportInTransaction(ops, input)!;
   });
 }
 
@@ -139,7 +211,7 @@ export function releaseInputFileImport(
 ): InputFileImport {
   return ops.tx(() => {
     scope(ops, input, true);
-    const file = read(ops, input);
+    const file = readInputFileImportInTransaction(ops, input);
     if (!file) throw new AgentError('input_file_not_found');
     if (file.originStoreId !== input.expectedStoreId)
       throw new AgentError('input_file_scope_denied');
@@ -151,7 +223,7 @@ export function releaseInputFileImport(
     // Other Artifact consumers can hold this reference. Release revokes admission;
     // physical reclamation belongs to history GC, which proves all dependencies dead.
     ops.event(input.sessionId, input.id, 'input_file.released');
-    return read(ops, input)!;
+    return readInputFileImportInTransaction(ops, input)!;
   });
 }
 
@@ -166,7 +238,7 @@ export function admitInputFiles(
     if (!file.reference) continue;
     const target = { ...input, id: file.reference.id.slice('input-file-'.length) };
     scope(ops, target, true);
-    const imported = read(ops, target);
+    const imported = readInputFileImportInTransaction(ops, target);
     if (
       !imported ||
       imported.originStoreId !== input.expectedStoreId ||

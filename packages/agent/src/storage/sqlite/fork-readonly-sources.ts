@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ForkReadSourceDeclaration } from '../../extensions/fork';
+import { inputFileReferences } from '../../input-files';
+import { workingInputNamespace, workingInputUri } from '../../input-working-files';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
 import type { Store } from '../port';
@@ -10,11 +12,13 @@ import {
   type ForkReadonlySource,
   type ForkSourceObservation,
   type Json,
+  type MessageRecord,
 } from '../types';
 import { historyOnlyCompression } from './compression-operations';
-import { filter, selected } from './context-selection-operations';
+import { filter } from './context-selection-operations';
 import { readExecutionGroupSafety } from './execution-group-safety';
-import { messageOriginRow } from './fork-operations';
+import { forkMessageAliases, messageOriginRow, readForkLineage } from './fork-operations';
+import { readBoundInputFileInTransaction } from './input-file-imports';
 import type { SqliteOperations } from './operations';
 import { outputArtifactForExecution } from './output-collection';
 
@@ -548,51 +552,8 @@ export function forkSourceProjection(
   db.identity(input.expectedStoreId);
   const a = anchor(db, input, input.localKey);
   const current = session(db, input.sessionId, input.subjectId);
-  const chain: { session: Row; upper: bigint; selection: ReturnType<typeof selected> }[] = [];
-  let node = current;
-  const seen = new Set<string>([input.sessionId]);
-  const links: unknown[] = [];
-  for (;;) {
-    const c = db.row(
-      "SELECT * FROM command WHERE session_id=? AND kind='session.create'",
-      node.id!,
-    );
-    if (!c) return fail();
-    const req = obj(parse(c.request_json));
-    if (!req.fork) break;
-    if (chain.length >= 64) return fail();
-    const f = obj(req.fork),
-      r = obj(parse(c.receipt_json));
-    if (
-      typeof f.sourceSessionId !== 'string' ||
-      r.sourceSessionId !== f.sourceSessionId ||
-      r.sourceSelectionId !== f.expectedContextSelectionId ||
-      r.sessionId !== node.id ||
-      seen.has(f.sourceSessionId)
-    )
-      return fail();
-    const source = session(db, f.sourceSessionId, input.subjectId, true);
-    if (source.workspace_id !== current.workspace_id) return fail();
-    const snap = db.row(
-      "SELECT request_json FROM context_snapshot WHERE id=? AND session_id=? AND kind='selection'",
-      String(f.expectedContextSelectionId),
-      f.sourceSessionId,
-    );
-    const selection = snap
-      ? parse(snap.request_json)
-      : {
-          id: f.expectedContextSelectionId,
-          sessionId: f.sourceSessionId,
-          ranges: [],
-          tailFromSeq: '0',
-        };
-    chain.push({ session: source, upper: BigInt(String(r.sourceUpperSeq)), selection });
-    links.push([c.request_json, c.receipt_json, snap?.request_json ?? null]);
-    seen.add(String(source.id));
-    node = source;
-  }
-  const selection = selected(db, current),
-    q = filter(selection, 'seq');
+  const { selection, links } = readForkLineage(db, current, input.subjectId, fail);
+  const q = filter(selection, 'seq');
   const messages = db.rows(
     `SELECT * FROM message WHERE session_id=? AND status='complete' AND ${q.sql} AND ${historyOnlyCompression()} ORDER BY seq LIMIT 8193`,
     input.sessionId,
@@ -601,36 +562,11 @@ export function forkSourceProjection(
   if (messages.length > 8192) return fail();
   const aliases = messages.map((m) => {
     const original = messageOriginRow(db, m, input.subjectId);
-    if (!seen.has(String(original.session_id))) return fail();
-    const values = [{ sessionId: input.sessionId, messageId: String(m.id), seq: String(m.seq) }];
-    for (const link of chain) {
-      const seq = BigInt(String(m.seq));
-      if (
-        seq > link.upper ||
-        !(
-          seq > BigInt(link.selection.tailFromSeq) ||
-          link.selection.ranges.some((r) => seq > BigInt(r.afterSeq) && seq <= BigInt(r.throughSeq))
-        )
-      )
-        break;
-      const rows = db.rows(
-        "SELECT * FROM message WHERE session_id=? AND seq=? AND role=? AND status='complete'",
-        link.session.id!,
-        m.seq!,
-        m.role!,
-      );
-      const matches = rows.filter((x) => {
-        const o = messageOriginRow(db, x, input.subjectId);
-        return (
-          o.id === original.id &&
-          o.session_id === original.session_id &&
-          x.source_json === m.source_json
-        );
-      });
-      if (matches.length !== 1) return fail();
-      const x = matches[0]!;
-      values.push({ sessionId: String(x.session_id), messageId: String(x.id), seq: String(x.seq) });
-    }
+    const values = forkMessageAliases(db, links, m, original, input.subjectId, fail).map((row) => ({
+      sessionId: String(row.session_id),
+      messageId: String(row.id),
+      seq: String(row.seq),
+    }));
     return { current: values[0]!, aliases: values };
   });
   const payload = [
@@ -644,7 +580,7 @@ export function forkSourceProjection(
     a.command.request_json,
     a.command.receipt_json,
     selection,
-    links,
+    links.map((link) => link.proof),
     aliases,
     aliases.flatMap((x) => x.aliases.map((y) => [y.messageId, stamp(db, 'message', y.messageId)])),
     a.proof,
@@ -670,6 +606,38 @@ export function readForkSourceProjection(
   }
 }
 
+/** Project original attachment metadata through the exact selected Model source. */
+function modelInputFiles(
+  db: SqliteOperations,
+  input: Parameters<Store['readForkSourceMessage']>[0],
+  proof: ForkReadonlyProof,
+  row: Row,
+  message: MessageRecord,
+) {
+  const model = proof.sources.find((source) => source.executionId === input.modelExecutionId);
+  if (
+    input.extensionId !== workingInputNamespace ||
+    model?.kind !== 'model' ||
+    model.sessionId !== message.sessionId ||
+    model.runId === null ||
+    model.runId !== message.runId ||
+    message.role !== 'user' ||
+    messageOriginRow(db, row, input.subjectId).id !== row.id
+  )
+    return fail();
+  const scope = {
+    expectedStoreId: input.expectedStoreId,
+    originStoreId: model.originStoreId,
+    sessionId: message.sessionId,
+    subjectId: input.subjectId,
+  };
+  return inputFileReferences(message.files).map((file) => {
+    if (!file.reference) return file;
+    const { imported, working } = readBoundInputFileInTransaction(db, scope, file);
+    return { name: file.name, uri: working ? workingInputUri(working) : imported.uri };
+  });
+}
+
 export function readForkSourceMessage(
   db: SqliteOperations,
   input: Parameters<Store['readForkSourceMessage']>[0],
@@ -681,8 +649,12 @@ export function readForkSourceMessage(
       return fail();
     const row = db.row('SELECT * FROM message WHERE id=?', input.messageId);
     if (!row) return fail();
+    const message = db.messageRecords([row])[0]!;
     const result = {
-      ...db.messageRecords([row])[0]!,
+      ...message,
+      ...(input.modelExecutionId !== undefined && message.files !== undefined
+        ? { modelInputFiles: modelInputFiles(db, input, p.proof, row, message) }
+        : {}),
       parts: db
         .rows(
           'SELECT ordinal,kind,content_version,revision,json FROM message_part WHERE message_id=? ORDER BY ordinal LIMIT 8193',
