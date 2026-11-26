@@ -25,7 +25,11 @@ async function until<T>(read: () => T | Promise<T | undefined> | undefined): Pro
     await Bun.sleep(10);
   }
 }
-async function lifecycle(interleaveCancellation = false, loseCancelResponse = false) {
+async function lifecycle(scenario: 'eof' | 'pending-read' | 'lost-response' | 'console') {
+  const consoleInput = scenario === 'console';
+  const interleaveCancellation = scenario === 'pending-read' || scenario === 'lost-response';
+  const loseCancelResponse = scenario === 'lost-response';
+  const pipeInterrupt = process.platform === 'win32' && scenario === 'eof';
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-lifecycle-')));
   const workspace = join(root, 'workspace');
   privateDirectory(workspace);
@@ -86,7 +90,7 @@ async function lifecycle(interleaveCancellation = false, loseCancelResponse = fa
     );
     const driver = join(root, 'driver.ts');
     // The parent opens the window only after proving EOF preserved the original work.
-    // The existing host hook then delivers SIGINT while a real interaction read is pending.
+    // The existing host hook interrupts over a real interaction response before it can be used.
     const signalPath = join(root, 'cancel-window');
     writeFileSync(
       driver,
@@ -95,47 +99,93 @@ async function lifecycle(interleaveCancellation = false, loseCancelResponse = fa
 import { runSelectedCLI } from ${JSON.stringify(join(import.meta.dir, '../../host/index.ts'))};
 import { parseCLIArguments } from ${JSON.stringify(join(import.meta.dir, '../../src/arguments.ts'))};
 import { withCtrlC } from ${JSON.stringify(join(import.meta.dir, '../../src/index.ts'))};
-try { process.exitCode=await withCtrlC(signal => runSelectedCLI({arguments:parseCLIArguments(process.argv.slice(2)),artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'new',cwd:${JSON.stringify(workspace)},stdin:process.stdin,signal,write:line=>process.stdout.write(line+'\\n'),prompt:line=>process.stderr.write(line),onLaunched({client}) {
-const cancel=client.cancelCommand.bind(client);let cancels=0;client.cancelCommand=async(...args)=>{cancels++;process.stdout.write('cancel calls '+cancels+'\\n');const response=await cancel(...args);if(${JSON.stringify(loseCancelResponse)})throw Error('lost_cancel_response');return response;};
-const original=client.listInteractions.bind(client);let interleaved=false;
-client.listInteractions=async (...args)=>{const page=await original(...args);if(!interleaved && existsSync(${JSON.stringify(signalPath)})){interleaved=true;const interrupted=new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));process.kill(process.pid,'SIGINT');await interrupted;process.stdout.write('cancel interleaved after pending read\\n');}return page;};
-}})); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; }
+try {
+  process.exitCode = await withCtrlC(signal => runSelectedCLI({
+    arguments: parseCLIArguments(process.argv.slice(2)),
+    artifact: ${JSON.stringify(artifact)},
+    dataRoot: ${JSON.stringify(profile.dataRoot)},
+    profile: 'new',
+    cwd: ${JSON.stringify(workspace)},
+    stdin: process.stdin,
+    signal,
+    write: line => process.stdout.write(line + '\\n'),
+    prompt: line => process.stderr.write(line),
+    onLaunched({client}) {
+      const cancel = client.cancelCommand.bind(client);
+      let cancels = 0;
+      client.cancelCommand = async (...args) => {
+        process.stdout.write('cancel calls ' + ++cancels + '\\n');
+        const response = await cancel(...args);
+        if (${loseCancelResponse}) {
+          process.stdout.write('cancel response dropped after Service receipt\\n');
+          throw Error('lost_cancel_response');
+        }
+        return response;
+      };
+      const original = client.listInteractions.bind(client);
+      let interleaved = false;
+      client.listInteractions = async (...args) => {
+        const page = await original(...args);
+        if (!interleaved && page.interactions.length && existsSync(${JSON.stringify(signalPath)})) {
+          interleaved = true;
+          process.emit('SIGINT');
+          if (!signal.aborted) throw Error('driver_interrupt_not_delivered');
+          process.stdout.write('cancel interleaved after pending read\\n');
+        }
+        return page;
+      };
+    },
+  }));
+} catch (error) {
+  process.stderr.write(String(error?.code ?? 'driver_failed') + '\\n');
+  process.exitCode = 1;
+}
 `
         : `import { runCLIProcess } from ${JSON.stringify(join(import.meta.dir, '../../host/main.ts'))};
-try { process.exitCode=await runCLIProcess({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'new',cwd:${JSON.stringify(workspace)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; }
+${pipeInterrupt ? "process.once('message', message => { if (message === 'interrupt') process.emit('SIGINT'); });" : ''}
+try { process.exitCode=await runCLIProcess({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'new',cwd:${JSON.stringify(workspace)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; } finally { if (process.connected) process.disconnect(); }
 `,
     );
-    const running = Bun.spawn(
-      [process.execPath, driver, 'run', '--thread', 'cli', '--task', 'question'],
-      {
-        cwd: root,
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' },
-      },
-    );
-    child = running;
-    running.stdin.end();
     let output = '';
+    const decoder = new TextDecoder();
+    const argv = [process.execPath, driver, 'run', '--thread', 'cli', '--task', 'question'];
+    const processOptions = { cwd: root, env: { PATH: process.env.PATH ?? '', LANG: 'C.UTF-8' } };
+    const piped = consoleInput
+      ? undefined
+      : Bun.spawn(argv, {
+          ...processOptions,
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          ...(pipeInterrupt ? { ipc: () => {} } : {}),
+        });
+    const running =
+      piped ??
+      Bun.spawn(argv, {
+        ...processOptions,
+        terminal: {
+          cols: 240,
+          rows: 30,
+          data(_terminal, bytes) {
+            output += decoder.decode(bytes, { stream: true });
+          },
+        },
+      });
+    child = running;
+    piped?.stdin.end();
     const outputTask = (async () => {
-      const reader = running.stdout.getReader(),
-        decoder = new TextDecoder();
-      for (;;) {
-        const next = await reader.read();
-        if (next.done) break;
-        output += decoder.decode(next.value, { stream: true });
-      }
-      reader.releaseLock();
+      if (!piped) return;
+      for await (const bytes of piped.stdout) output += decoder.decode(bytes, { stream: true });
+      output += decoder.decode();
     })();
-    const errorTask = new Response(running.stderr).text();
-    await until(() => (output.includes('Paired host remains active') ? true : undefined));
-    const intent = JSON.parse(
-      output
-        .split('\n')
-        .find((line) => line.startsWith('work intent '))!
-        .slice(12),
-    ) as { commandId: string; storeId: string; sessionId: string };
+    const errorTask = piped ? new Response(piped.stderr).text() : Promise.resolve('');
+    const waitingText = consoleInput ? 'Approve harmless fixture' : 'Paired host remains active';
+    await until(() => (output.includes(waitingText) ? true : undefined));
+    const intent = JSON.parse(output.match(/work intent (\{[^\r\n]+\})/)![1]!) as {
+      commandId: string;
+      storeId: string;
+      sessionId: string;
+    };
     expect(intent).toMatchObject({ storeId, sessionId: 'cli' });
     await Bun.sleep(200);
     expect(child.exitCode).toBeNull();
@@ -150,12 +200,32 @@ try { process.exitCode=await runCLIProcess({artifact:${JSON.stringify(artifact)}
     expect(pending[0]!.answer).toBeNull();
     expect(existsSync(join(profile.profilePath, 'effect'))).toBe(false);
     if (interleaveCancellation) writeFileSync(signalPath, 'cancel');
-    else child.kill('SIGINT');
-    if (interleaveCancellation) await until(() => (running.exitCode !== null ? true : undefined));
-    expect(await child.exited).toBe(130);
+    else if (consoleInput) running.terminal!.write('\x03');
+    // A Windows pipe child has no console Ctrl+C to send. Bun's kill can terminate
+    // it with 130 without entering the listener, so inject at the listener in that fixture.
+    else if (pipeInterrupt) piped!.send('interrupt');
+    else running.kill('SIGINT');
+    await until(() => (running.exitCode !== null ? true : undefined));
+    const exit = await running.exited;
     await outputTask;
-    if (interleaveCancellation) expect(output).toContain('cancel interleaved after pending read');
-    expect(output).toContain(`terminal ${intent.commandId} cancelled`);
+    const stderr = await errorTask;
+    expect(exit, `stdout:\n${output}\nstderr:\n${stderr}`).toBe(130);
+    expect(running.signalCode).toBeNull();
+    if (interleaveCancellation) {
+      expect(output).toContain('cancel interleaved after pending read');
+      expect(output.match(/^cancel calls \d+/gm)).toEqual(['cancel calls 1']);
+    }
+    const terminal = `terminal ${intent.commandId} cancelled`;
+    const prior = loseCancelResponse
+      ? `terminal ${intent.commandId} outcome_unknown`
+      : `cancel accepted ${intent.commandId}`;
+    if (loseCancelResponse) {
+      expect(output).toContain('cancel response dropped after Service receipt');
+      expect(output).not.toContain(`cancel accepted ${intent.commandId}`);
+    }
+    expect(output).toContain(prior);
+    expect(output).toContain(terminal);
+    expect(output.indexOf(terminal)).toBeGreaterThan(output.indexOf(prior));
     expect(output).toContain(
       "Paired host exit stops only this Service instance's remaining owned work",
     );
@@ -174,12 +244,13 @@ try { process.exitCode=await runCLIProcess({artifact:${JSON.stringify(artifact)}
         .length,
     ).toBe(1);
     expect(existsSync(join(profile.profilePath, 'effect'))).toBe(false);
-    expect(await errorTask).not.toContain('Bearer');
+    expect(stderr).not.toContain('Bearer');
   } finally {
     if (child && child.exitCode === null) {
       child.kill();
       await child.exited;
     }
+    child?.terminal?.close();
     await peer.close();
     rmSync(root, { recursive: true, force: true });
   }
@@ -187,17 +258,23 @@ try { process.exitCode=await runCLIProcess({artifact:${JSON.stringify(artifact)}
 
 test(
   'actual CLI stdin EOF preserves its original pending work; Ctrl+C cancels it precisely and host exit leaves another Service work pending',
-  () => lifecycle(),
+  () => lifecycle('eof'),
   20000,
 );
 test(
   'Ctrl+C delivered inside a pending-interaction response still cancels the original CLI work and preserves peer work',
-  () => lifecycle(true),
+  () => lifecycle('pending-read'),
   20000,
 );
 
 test(
   'lost cancellation response is observed without repeating the saved cancellation intent',
-  () => lifecycle(true, true),
+  () => lifecycle('lost-response'),
+  20000,
+);
+
+test.skipIf(process.platform !== 'win32')(
+  'Windows console Ctrl+C prints the exact cancellation terminal before exiting 130',
+  () => lifecycle('console'),
   20000,
 );

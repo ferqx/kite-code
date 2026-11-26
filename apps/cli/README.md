@@ -2,7 +2,9 @@
 
 ## 普通CLI生命周期验证
 
-可重跑的当前入口见[CLI 宿主生命周期](test/isolated/host-lifecycle.test.ts)、[测试选择与运行方式](../../tests/README.md)。 2026-11-26 在 Windows x64／Bun 1.4.4 重跑该宿主测试文件，三项取消相关用例仍失败，表现为取消终态缺失或子进程退出码为 1。该结果与下方历史批次分别记录。
+可重跑的当前入口见[CLI 宿主生命周期](test/isolated/host-lifecycle.test.ts)。Windows x64／Bun 1.4.4 的单进程探针确认，Bun 父进程用 `child.kill('SIGINT')` 会直接结束管道子进程并报告 130，CLI 的中断监听器未执行。子进程调用 `process.kill(process.pid, 'SIGINT')` 会直接退出 1，中断监听器和驱动的异常处理都未执行。
+
+EOF 夹具保留真实管道关闭，Windows 由测试子进程通过 IPC 触发实际 `SIGINT` 监听器。交互读回执夹具在真实待审批响应即将返回时触发同一监听器。独立 Windows ConPTY 用例从终端发送 Ctrl+C，核对原命令的取消终态先于退出码 130。取消回复丢失用例核对仅提交一次取消，随后从原命令读到取消终态。同组用例同时核对另一 Service 所属工作继续等待，原工具未执行。
 
 2026-11-10，Windows x64／Bun1.4.4，按原CLI计划排除61个TUI／Ink／PTY交互文件，执行34任务／74文件：25任务通过／9失败，235pass／20fail／26skip，整体返回1。原根批次41文件164项通过，包含原128条journal的300秒专用时限；未改原时限。9个失败文件的20个失败均在独立HEAD对照重现；Skill缓存诊断确认原5秒进程期限先得到143，后续EBUSY不覆盖该原错误。维护4项在同一发布依赖复制的symlink EPERM处失败，尚未运行CLI；其余旧问答schema、冷恢复断言、长输出时限和原生收尾限制保留，不宣称全量或发布资格。默认实际argv／paired的42个进程场景及标题取消／真实退出证据归[Service测量](../service/README.md#生命周期性能测量)；TUI候选仍未交付。本机原始证据已缺失。
 
