@@ -2,6 +2,7 @@
 import type { Message, Run } from '@kite-ai/client';
 import { createRoot } from 'react-dom/client';
 import type { InputMetadata } from '../src/input';
+import type { NativePendingAttachments } from '../src/input-images-bridge';
 import { NativeDesktop } from '../src/native';
 import type {
   NativeBridge,
@@ -38,6 +39,26 @@ let acknowledge: ((value: InputMetadata) => void) | undefined;
 let acknowledgeFirst: ((value: NativeConversationResult) => void) | undefined;
 let firstPreparation: NativeState['creationSubmissions'][number] | undefined;
 let fileReadRevoked = false;
+const withAttachments = new URLSearchParams(location.search).has('attachments');
+const attachmentDrafts = new Map<string, NativePendingAttachments>(
+  JSON.parse(sessionStorage.getItem('prompt-fixture-attachments') ?? 'null') ??
+    ['a', 'new-conversation'].map((scope) => [
+      scope,
+      {
+        kind: 'input.attachments',
+        revision: 1,
+        attachments: [
+          {
+            id: `file-${scope}`,
+            kind: 'reference',
+            name: '原草稿附件.pdf',
+            uri: 'file:///fixture/original.pdf',
+            state: 'ready',
+          },
+        ],
+      },
+    ]),
+);
 const histories = new Map<string, Message[]>(
   persisted?.histories ?? [
     ['a', []],
@@ -83,6 +104,14 @@ function persist() {
 const bridge: NativeBridge = {
   ...transport.bridge,
   async request(request) {
+    if (withAttachments && request.method === 'input.attachments.read')
+      return (
+        attachmentDrafts.get(request.sessionId) ?? {
+          kind: 'input.attachments',
+          revision: 0,
+          attachments: [],
+        }
+      );
     if (historyIsolation) {
       if (request.method === 'select') historyIsolation.activate();
       if (request.method === 'messages') return historyIsolation.readMessages(request);
@@ -209,6 +238,7 @@ const bridge: NativeBridge = {
       return {
         ...result,
         historyEpoch: historyIsolation ? 0 : epoch,
+        ...(withAttachments && { pendingAttachmentDrafts: true }),
         ...(historyIsolation && { outputFilesDisplay: historyIsolation.display(id) }),
         inputSubmissions: [...submissions],
         creationSubmissions: firstPreparation ? [firstPreparation] : result.creationSubmissions,
@@ -264,6 +294,13 @@ const control = {
         revision: pendingDraft.revision + 1,
         consumedFrom: { revision: pendingDraft.revision, commandId: value.intent.commandId },
       });
+    if (withAttachments && pending?.attachmentRevision !== undefined) {
+      const scope = pending.method === 'conversation.send' ? 'new-conversation' : pending.sessionId;
+      const draft = attachmentDrafts.get(scope)!;
+      if (draft.revision !== pending.attachmentRevision) throw Error('wrong_attachment_revision');
+      attachmentDrafts.set(scope, { ...draft, revision: draft.revision + 1, attachments: [] });
+      sessionStorage.setItem('prompt-fixture-attachments', JSON.stringify([...attachmentDrafts]));
+    }
     if (pending?.method === 'conversation.send') {
       transport.registerSession(pending.creation.sessionId);
       acknowledgeFirst?.({
@@ -362,6 +399,7 @@ const control = {
       status: 'complete',
       seq: String(histories.get(id)!.length + 1),
       content: pending.intent.content,
+      files: 'files' in pending.intent ? pending.intent.files : undefined,
       createdAt: Date.now(),
       humanInput: {
         inputCommandId: `business-${sequence}`,

@@ -11,6 +11,7 @@ import type {} from './prompt-send-browser.fixture';
 
 const directory = import.meta.dir;
 const historyIsolation = process.argv.includes('--history-isolation');
+const attachmentSending = process.argv.includes('--attachment-sending-only');
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'prompt-send-browser-'));
@@ -538,7 +539,7 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
   await page.addInitScript((theme) => localStorage.setItem('kite.desktop.theme', theme), theme);
   const observations = [];
   try {
-    await page.goto(server.url.toString());
+    await page.goto(new URL(attachmentSending ? '?attachments' : '', server.url).toString());
     for (const first of [false, true]) {
       if (first) {
         await page.getByRole('button', { name: '新对话', exact: true }).click();
@@ -560,6 +561,9 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
       const input = page.locator('textarea.prompt-editor');
       const source = first ? '新会话首条消息' : '已有会话的新消息';
       const next = first ? '首条发送等待时继续输入 雪🙂' : '下一条草稿 雪🙂';
+      const composerAttachment = page.locator('form .composer-attachment-name');
+      if (attachmentSending)
+        await composerAttachment.filter({ hasText: '原草稿附件.pdf' }).waitFor();
       await input.fill(source);
       await page.locator('.composer-action:not([disabled])').waitFor();
       await input.press('End');
@@ -581,6 +585,10 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
             same: input === original,
             value: input.value,
             submittedVisible: !!document.querySelector('.message.user.sending'),
+            composerAttachments: form.querySelectorAll('.composer-attachment-name').length,
+            attachmentMessages: [...document.querySelectorAll('.message.user')].filter((message) =>
+              message.textContent?.includes('原草稿附件.pdf'),
+            ).length,
             disabled: input.disabled,
             readOnly: input.readOnly,
             focused: document.activeElement === input,
@@ -594,11 +602,16 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
           if (state.observing) requestAnimationFrame(frame);
         };
         requestAnimationFrame(frame);
+        return new Promise((resolve) => requestAnimationFrame(resolve));
       });
       const beforePosts = await page.evaluate(() => window.promptSendFixture.posts.length);
       await input.press('Enter');
       await page.locator('.composer-action[aria-busy="true"]').waitFor();
       await page.locator('.message.user.sending').waitFor();
+      if (attachmentSending) {
+        await page.locator('.message.user.sending').getByText('原草稿附件.pdf').waitFor();
+        assert.equal(await composerAttachment.count(), 0);
+      }
       assert.equal(await promptText(input), '');
       assert.equal(await input.isEnabled(), true);
       assert.equal(await input.getAttribute('readonly'), null);
@@ -628,6 +641,11 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
       await page.evaluate(() => window.promptSendFixture.save());
       await page.evaluate(() => window.promptSendFixture.reply());
       await page.locator('.message.assistant').last().waitFor();
+      if (attachmentSending)
+        await page
+          .locator('.message.user[data-message-id^="saved-"]')
+          .getByText('原草稿附件.pdf')
+          .waitFor();
       await page.evaluate(
         () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
       );
@@ -640,6 +658,8 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
                 same: boolean;
                 value: string;
                 submittedVisible: boolean;
+                composerAttachments: number;
+                attachmentMessages: number;
                 disabled: boolean;
                 readOnly: boolean;
                 focused: boolean;
@@ -667,6 +687,16 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
         '',
         'the first visible sending frame clears the draft',
       );
+      if (attachmentSending) {
+        assert.ok(frames.some((frame) => frame.composerAttachments === 1));
+        assert.ok(frames.some((frame) => frame.submittedVisible && frame.attachmentMessages === 1));
+        for (const frame of frames)
+          assert.equal(
+            frame.composerAttachments + frame.attachmentMessages,
+            1,
+            'the attachment is visible only once through dispatch and saved history',
+          );
+      }
       assert.ok(
         frames.every(
           (frame) =>
@@ -731,6 +761,10 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
     const restored = page.locator('textarea.prompt-editor:not([readonly])');
     await restored.waitFor();
     assert.equal(await promptText(restored), '');
+    if (attachmentSending) {
+      assert.equal(await page.locator('form .composer-attachment-name').count(), 0);
+      assert.equal(await page.locator('.message.user').getByText('原草稿附件.pdf').count(), 1);
+    }
     assert.equal(await page.evaluate(() => window.promptSendFixture.posts.length), 4);
     assert.deepEqual(errors, []);
   } finally {
@@ -743,6 +777,10 @@ async function verifyPromptScenarios() {
     for (const width of [1280, 800]) {
       if (process.argv.includes('--feedback-only')) {
         cases.push({ theme, width, ...(await verifySendFeedback(theme, width)) });
+        continue;
+      }
+      if (attachmentSending) {
+        cases.push({ theme, width, inputSending: await verifySendingInput(theme, width) });
         continue;
       }
       if (process.argv.includes('--sending-only')) {

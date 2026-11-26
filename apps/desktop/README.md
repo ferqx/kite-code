@@ -459,6 +459,10 @@ Agent输出图片与消息本地图片链接在[右侧预览](electron/output-pr
 
 ## 真实输入消息的唯一展示
 
+首发、首发失败后重试及已有会话发送都在[桌面 renderer](src/native.tsx)显示投递占位时，从输入区暂时隐藏同一草稿范围内本次提交的图片和文件 ID。派发前保存期间仍显示原附件。确认受理后由附件草稿按原回执核销，明确未受理或结果待确认时由原草稿恢复显示。后来添加的附件不参与本次隐藏或核销。原占位由对应持久消息接管。验证入口为[完整 Native 输入回归](test/isolated/native-new-conversation-dom.test.tsx)和[发送过程浏览器夹具](test/prompt-send-browser-runner.fixture.ts)的 `--attachment-sending-only`。
+
+2026-11-26，Windows 浏览器夹具用生产 renderer 和受控回执，覆盖首发与续发、深浅主题和 800px／1280px 窗宽。322 个采样帧内，本次文件卡始终恰好出现一次，从输入区随发送占位移入消息，直到持久消息接管。发送期间保留编辑焦点和下一条草稿，冷重开只读历史。明确未受理后恢复附件、首发失败后重试及后来添加的附件由 DOM 回归覆盖。本轮未运行 Electron 安装版。
+
 首次发送与已有会话的引导／后续输入在构造原意图时共用 [promptTextForSend](src/prompt-text.ts)，只去掉末尾连续 CR／LF；发送占位与实际消息使用相同正文，编辑草稿保留原字节以供失败恢复及版本比较。Main 的自动草稿证明、[caller journal](electron/caller-journal.ts)准入和[私有草稿消费](electron/private-data.ts)允许原文或仅去尾换行的正文对应；仍核准确 Store／Session／草稿 revision 及原文 SHA，不因转换清除后来编辑。旧请求原文继续可读，不改写历史。纯函数、[Native DOM](test/isolated/native-new-conversation-dom.test.tsx)、[Main](test/native-caller.test.ts)和[真实 Node 冷读](test/isolated/native-prompt-draft-store.test.ts)分别验证转换、发送／恢复、原证明与受理后的持久清理。2026-10-25，Windows x64／Bun1.4.3：上述四文件125项、Desktop类型及定向Biome通过。隔离生产页面实际观察三个尾部换行的首发与续发、占位接管、草稿清空和回复完成；Native 请求及受控 Responses wire 均保留两个内部换行与两个尾部空格，末尾 CR／LF 为零，证据归本机既有 原记录。浏览器夹具的假草稿 ID 先前不符合正式 SHA 形状，首轮失败后按现有 Main 单测对齐该替身，未放宽生产校验；真实持久清理由 Node 用例单独证明，仍不代证完整 Electron 安装包。本机原始证据已缺失。
 
 新消息直接进入当前主 Agent；首次发送保留一条用户消息及实际 Agent 回复，没有额外的“关联工作”判定答复。运行中引导进入原轮次安全检查点，排队等待仍沿原队列；UI 不靠过滤新回复掩盖重复。相同正文的两次提交保持两个独立输入，冷重开只读取原历史。普通输入的本地投递占位在原持久用户消息到达后交接。新 `run.start` 消息在原事务保存 `originCommandId`，历史先于 Run View 到达时也能核对原提交并立即接管，不短暂多出用户消息；此路径同样适用于 Responses；带 `originMessage` 的继承记录不能消费当前 Store 的投递占位。旧历史中仅有 `sourceIds` 的原 `run.start` 消息也须核同 Store／Session／Run 与准确原 Command，不按正文比较或合并独立提交。Run 状态先于历史到达时，本地输入仍按原 Command 绑定该轮次，位于该轮状态、工具和回复之前；连续引导输入按原输入身份保存因果前驱，前条从本地转为持久消息时也不反转后条。

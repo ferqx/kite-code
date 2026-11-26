@@ -6771,9 +6771,12 @@ test('a created first-send failure retries attachments from that Session, not a 
     if (first.method !== 'conversation.send') throw Error('missing_first_send');
     expect(first.attachmentRevision).toBe(2);
     expect(first.attachmentSessionId).toBeUndefined();
+    expect(f.host.querySelector('.message.user.sending')?.textContent).toContain('first.pdf');
+    expect(f.host.querySelector('form .composer-attachments')?.textContent).toBeUndefined();
     await f.resolve('failed');
     await f.until(() => !!f.input('当前会话私有草稿'));
     await f.until(() => (saved.get(first.creation.sessionId)?.attachments.length ?? 0) === 1);
+    expect(f.host.querySelector('form .composer-attachment-name')?.textContent).toBe('first.pdf');
     await f.edit('Explicit retry', '当前会话私有草稿');
     await f.click('发送明确的新轮次');
     await f.until(() => f.calls.filter((call) => call.method === 'conversation.send').length === 2);
@@ -6783,6 +6786,8 @@ test('a created first-send failure retries attachments from that Session, not a 
       attachmentRevision: saved.get(first.creation.sessionId)!.revision,
       intent: { files: [{ name: 'first.pdf', uri: 'file:///original/first.pdf' }] },
     });
+    expect(f.host.querySelector('.message.user.sending')?.textContent).toContain('first.pdf');
+    expect(f.host.querySelector('form .composer-attachments')?.textContent).toBeUndefined();
     await f.resolve('accepted');
     await f.until(() => f.host.querySelector('form .composer-attachments') === null);
     expect(saved.get(first.creation.sessionId)?.attachments).toHaveLength(0);
@@ -6912,6 +6917,8 @@ for (const prior of ['submitting', 'unknown', 'accepted'] as const)
       await f.edit('Definitely unsent attachment message', '当前会话私有草稿');
       await f.click('发送明确的新轮次');
       await f.until(() => !!submitted);
+      expect(f.host.querySelector('.message.user.sending')?.textContent).toContain('original.pdf');
+      expect(f.host.querySelector('form .composer-attachments')?.textContent).toBeUndefined();
       await f.refreshFacts();
       await f.edit('Later draft must stay', '当前会话私有草稿');
       await act(async () => release());

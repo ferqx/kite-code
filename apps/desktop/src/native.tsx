@@ -838,6 +838,7 @@ function NativeDesktopContent({
     key: string;
     commandId: string;
     draft: { content: string };
+    attachmentIds: readonly string[];
   }>();
   const [firstSendProgress, setFirstSendProgress] = useState<{
     commandId: string;
@@ -4511,9 +4512,10 @@ function NativeDesktopContent({
         sessionId,
         draft: submittedDraft,
       });
-      // Hide the exact submitted text in the same render as the sending bubble.
-      // Its draft still belongs to the original session until acceptance.
-      setDispatchingInputDraft({ key: draftKey, commandId, draft: submittedDraft });
+      const attachmentIds = [...imageIds, ...files.map((file) => file.id)];
+      // Hand off the submitted draft's presentation to the sending bubble.
+      // The original draft and attachment bytes still belong to the session until acceptance.
+      setDispatchingInputDraft({ key: draftKey, commandId, draft: submittedDraft, attachmentIds });
       setInputDeliveries((previous) => {
         const predecessor = [...previous]
           .reverse()
@@ -4601,11 +4603,7 @@ function NativeDesktopContent({
       browserNotes.settle(commandId, value && 'phase' in value ? value.phase : 'unknown', draftKey);
       const accepted =
         value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase);
-      if (accepted)
-        imageDrafts.accepted(draftKey, attachmentRevision, [
-          ...imageIds,
-          ...files.map((file) => file.id),
-        ]);
+      if (accepted) imageDrafts.accepted(draftKey, attachmentRevision, attachmentIds);
       if (accepted && current === generation.current) {
         if (value && 'draft' in value)
           rememberConsumedDraft(
@@ -7129,6 +7127,30 @@ function NativeDesktopContent({
       return '';
     return fallback;
   }
+  function visibleComposerAttachments(key: string) {
+    const files = imageDrafts.files(key);
+    const images = imageDrafts.get(key);
+    const hidden =
+      dispatchingInputDraft?.key === key && !rejectedInputs.has(dispatchingInputDraft.commandId)
+        ? dispatchingInputDraft.attachmentIds
+        : firstVisible &&
+            firstSubmission.imageScope === key &&
+            !rejectedInputs.has(firstSubmission.commandId) &&
+            (!firstSubmission.result ||
+              firstSubmission.result.phase === 'sending' ||
+              firstInputAwaitingApplication)
+          ? [
+              ...(firstSubmission.imageIds ?? []),
+              ...(firstSubmission.files?.map((file) => file.id) ?? []),
+            ]
+          : undefined;
+    if (!hidden?.length) return { files, images };
+    const submitted = new Set(hidden);
+    return {
+      files: files.filter((file) => !submitted.has(file.id)),
+      images: images.filter((image) => !submitted.has(image.id)),
+    };
+  }
   const sessionPage = (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
@@ -7850,10 +7872,9 @@ function NativeDesktopContent({
               contextHasInput:
                 browserNotes.get(imageScope(cachedComposer.storeId, cachedComposer.sessionId))
                   .length > 0,
-              files: imageDrafts.files(
+              ...visibleComposerAttachments(
                 imageScope(cachedComposer.storeId, cachedComposer.sessionId),
               ),
-              images: imageDrafts.get(imageScope(cachedComposer.storeId, cachedComposer.sessionId)),
               onRemoveFile: () => {},
               onRemoveImage: () => {},
               context: (
@@ -7911,7 +7932,7 @@ function NativeDesktopContent({
                 scopeKey: newImageScope,
                 onFileReferences: imageDrafts.fileReferences,
                 imageLimit: inputImageCount,
-                files: imageDrafts.files(newImageScope),
+                ...visibleComposerAttachments(newImageScope),
                 imageError:
                   (noteSaveError.key === newTextScope ? noteSaveError.message : '') ||
                   (preparationAttachmentReadError ? undefined : imageDrafts.error(newImageScope)),
@@ -7919,7 +7940,6 @@ function NativeDesktopContent({
                   imageDrafts.validateAttachments(newImageScope, images, files),
                 onFilesSelected: (files) => imageDrafts.addFiles(newImageScope, files),
                 onRemoveFile: (id) => imageDrafts.removeIds([id]),
-                images: imageDrafts.get(newImageScope),
                 onImageFiles: (files) => {
                   return imageDrafts.add(newImageScope, files);
                 },
@@ -8058,7 +8078,9 @@ function NativeDesktopContent({
                   scopeKey: imageScope(selection.storeId, selection.session.id),
                   onFileReferences: imageDrafts.fileReferences,
                   imageLimit: inputImageCount,
-                  files: imageDrafts.files(imageScope(selection.storeId, selection.session.id)),
+                  ...visibleComposerAttachments(
+                    imageScope(selection.storeId, selection.session.id),
+                  ),
                   imageError:
                     (noteSaveError.key === imageScope(selection.storeId, selection.session.id) &&
                     !browserNotes.get(imageScope(selection.storeId, selection.session.id)).length
@@ -8077,7 +8099,6 @@ function NativeDesktopContent({
                       files,
                     ),
                   onRemoveFile: (id) => imageDrafts.removeIds([id]),
-                  images: imageDrafts.get(imageScope(selection.storeId, selection.session.id)),
                   onImageFiles: (files) => {
                     return imageDrafts.add(
                       imageScope(selection.storeId, selection.session.id),
