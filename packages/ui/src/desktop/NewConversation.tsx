@@ -27,7 +27,7 @@ export interface NewConversationProps {
 export function NewConversationWelcome() {
   return (
     <section className="new-conversation-welcome" aria-label="新对话">
-      <h1>今天想在这个空间完成什么？</h1>
+      <h1>今天想在这个项目中完成什么？</h1>
     </section>
   );
 }
@@ -119,7 +119,7 @@ export function ProjectSelector(props: {
 }) {
   return (
     <ContextMenu
-      name="项目空间"
+      name="项目"
       label={props.projects.find((project) => project.id === props.value)?.label ?? '选择项目'}
       icon={Folder01Icon}
       selected={props.value}

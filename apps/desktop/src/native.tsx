@@ -799,7 +799,7 @@ function NativeDesktopContent({
   useEffect(() => {
     if (startup !== 'ready' || workspaceRemovalUnavailable === undefined) return;
     if (workspaceRemovalUnavailable && !removalUnavailableReported.current)
-      showOperationMessage('暂时无法确认空间移除结果。');
+      showOperationMessage('暂时无法确认项目移除结果。');
     removalUnavailableReported.current = workspaceRemovalUnavailable;
   }, [startup, workspaceRemovalUnavailable, showOperationMessage]);
   const workspaceRemovalResults = useMemo(
@@ -1923,9 +1923,7 @@ function NativeDesktopContent({
       if (startupPhase.current === 'ready') return;
       startupDirectoryUnavailable.current = false;
       startupPhase.current = 'failed';
-      setStartupError(
-        /^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '请重新尝试准备工作空间。',
-      );
+      setStartupError(/^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '请重新尝试准备项目。');
       setStartup('failed');
       try {
         const status = await bridge.startupStatus?.();
@@ -3302,7 +3300,7 @@ function NativeDesktopContent({
     if (value.phase === 'failed') {
       showOperationMessage(
         value.error === 'permission_denied'
-          ? '当前用户无权移除此空间。'
+          ? '当前用户无权移除此项目。'
           : '本地服务拒绝了此次移除。',
       );
       return;
@@ -3452,7 +3450,7 @@ function NativeDesktopContent({
 
   function showSessionMutationResult(submission: NativeSessionSubmission) {
     if (submission.phase === 'unknown')
-      showOperationMessage('会话操作结果待确认。请从空间栏查询结果。');
+      showOperationMessage('会话操作结果待确认。请从项目栏查询结果。');
     else if (submission.phase === 'failed')
       showOperationMessage(directorySessionError(submission.error));
   }
@@ -3566,7 +3564,7 @@ function NativeDesktopContent({
         await chooseWorkspace(picked.workspaceId, observedDirectory).catch(() => {});
       },
       false,
-      '添加空间',
+      '添加项目',
     );
   }
   function firstIntent(
@@ -7632,7 +7630,7 @@ function NativeDesktopContent({
         addWorkspace: () => void addWorkspace(),
         removeWorkspace: directory?.unavailable
           ? undefined
-          : (id) => void report(() => removeWorkspace(id), true, '移除空间'),
+          : (id) => void report(() => removeWorkspace(id), true, '移除项目'),
         workspaceRemovalResults,
         manageSession: directory?.canManageSessions ? openSessionDialog : undefined,
         sessionMutationBusy:

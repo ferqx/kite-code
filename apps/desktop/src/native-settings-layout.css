@@ -32,7 +32,11 @@
   letter-spacing: -0.02em;
 }
 .kite-client .native-settings-rail > .sidebar-navigation-list {
-  gap: 8px;
+  gap: calc(2 * var(--sidebar-section-gap));
+}
+.kite-client .native-settings-rail .sidebar-navigation-heading {
+  min-height: var(--icon-button-size-sm);
+  margin-block-end: calc(var(--sidebar-section-gap) - var(--sidebar-navigation-row-gap));
 }
 .kite-client .native-settings-page {
   display: flex;

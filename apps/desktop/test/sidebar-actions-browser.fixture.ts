@@ -449,7 +449,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       const rowActions = '.space-new-session,.space-more';
       const selector = `.session-search-trigger,.space-add,${rowActions}`;
       const search = page.getByRole('button', { name: '搜索会话', exact: true });
-      const add = page.getByRole('button', { name: '添加空间', exact: true });
+      const add = page.getByRole('button', { name: '添加项目', exact: true });
       const appearance = (button: Locator) =>
         button.evaluate((node) => {
           const { backgroundColor, borderRadius, boxShadow, color, height, width } =
@@ -788,20 +788,24 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         fixture.publish();
       });
       const navigationColor = await tasks.evaluate((node) => getComputedStyle(node).color);
+      const headingColor = theme === 'light' ? 'rgb(102, 102, 102)' : 'rgb(181, 181, 181)';
       const moreSessions = page.getByRole('button', { name: '展开更多', exact: true });
       const emptySpace = page.getByText('暂无聊天', { exact: true });
-      const expectNavigationColor = async (labels: Locator) => {
+      const expectNavigationColor = async (labels: Locator, color = navigationColor) => {
         const colors = await labels.evaluateAll((nodes) =>
           nodes.map((node) => getComputedStyle(node).color),
         );
         assert.ok(colors.length > 0);
-        assert.deepEqual([...new Set(colors)], [navigationColor]);
+        assert.deepEqual([...new Set(colors)], [color]);
       };
       await expect(moreSessions).toBeVisible();
       await expect(emptySpace).toBeVisible();
-      const directoryLabels = page.locator(
-        '.nav-label > span, .workspace-directory .nav-copy strong',
-      );
+      const directoryLabels = page.locator('.workspace-directory .nav-copy strong');
+      const projectHeading = page
+        .getByRole('complementary', { name: '项目与会话' })
+        .locator('.nav-label');
+      await expect(projectHeading.locator('> span')).toHaveText('项目');
+      await expect(projectHeading.locator('> span')).toHaveCSS('color', headingColor);
       await expectNavigationColor(directoryLabels);
       await expect(moreSessions).toHaveCSS('color', navigationColor);
       await expect(emptySpace).toHaveCSS('color', navigationColor);
@@ -820,8 +824,8 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         });
       const headingStyle = (heading: Locator) =>
         heading.evaluate((node) => {
-          const { minHeight, paddingInlineStart, fontSize, fontWeight } = getComputedStyle(node);
-          return { minHeight, paddingInlineStart, fontSize, fontWeight };
+          const { height, paddingInlineStart, fontSize, fontWeight } = getComputedStyle(node);
+          return { height, paddingInlineStart, fontSize, fontWeight };
         });
       const expectCenteredNavigation = async (actions: Locator) => {
         const rows = await actions.evaluateAll((buttons) => {
@@ -848,7 +852,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         }
       };
       const primaryRow = await rowStyle(tasks);
-      const spaceHeading = await headingStyle(page.locator('.nav-label'));
+      const primaryHeading = await headingStyle(projectHeading);
       assert.deepEqual(await rowStyle(page.locator('.space-row').first()), primaryRow);
       await expectCenteredNavigation(
         page.locator('.primary-navigation .sidebar-navigation-action'),
@@ -856,12 +860,16 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await page.getByRole('button', { name: '用户菜单', exact: true }).click();
       await page.getByRole('menuitem', { name: '设置', exact: true }).click();
       const settingsLabels = page.locator(
-        '.native-settings-rail-heading, .native-settings-rail nav :is(.sidebar-navigation-heading > span, button > span)',
+        '.native-settings-rail-heading, .native-settings-rail nav button > span',
+      );
+      const settingsHeadings = page.locator(
+        '.native-settings-rail .sidebar-navigation-heading > span',
       );
       const appearanceCategory = page.getByRole('button', { name: '外观', exact: true });
       const generalCategory = page.getByRole('button', { name: '常规', exact: true });
       await expect(appearanceCategory).toBeVisible();
       await expectNavigationColor(settingsLabels);
+      await expectNavigationColor(settingsHeadings, headingColor);
       const settingsActions = page.locator('.native-settings-rail .sidebar-navigation-action');
       await expectCenteredNavigation(settingsActions);
       await page.locator('html').evaluate((node) => {
@@ -878,7 +886,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         await headingStyle(
           page.locator('.native-settings-rail .sidebar-navigation-heading').first(),
         ),
-        spaceHeading,
+        primaryHeading,
       );
       const settingsGroup = page
         .locator('.native-settings-rail section.sidebar-navigation-list')
@@ -895,6 +903,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await page.mouse.move(1100, 650);
       await expectNavigationBackground(appearanceCategory, selectedBackground);
       await expectNavigationColor(settingsLabels);
+      await expectNavigationColor(settingsHeadings, headingColor);
       await page.locator('.native-settings-rail').screenshot({
         path: path.join(artifact, `sidebar-${theme}-settings-color.png`),
       });
@@ -906,6 +915,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await expect(appearanceCategory).toBeFocused();
       await expectNavigationBackground(appearanceCategory, selectedBackground);
       await expectNavigationColor(settingsLabels);
+      await expectNavigationColor(settingsHeadings, headingColor);
       await expectCenteredNavigation(settingsActions);
       await page.getByRole('button', { name: '关闭设置', exact: true }).click();
       await expect(draft).toHaveValue('Draft A');
@@ -952,7 +962,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         return null;
       };
     });
-    await touch.getByRole('button', { name: '添加空间', exact: true }).click();
+    await touch.getByRole('button', { name: '添加项目', exact: true }).click();
     await touch.waitForFunction(
       () => document.querySelector<HTMLButtonElement>('.space-add')!.disabled,
     );

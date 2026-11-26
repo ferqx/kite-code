@@ -62,6 +62,8 @@ body {
   --sidebar-motion-duration: 180ms;
   --sidebar-motion-easing: ease-out;
   --sidebar-inline-padding: 12px;
+  --sidebar-section-gap: 4px;
+  --sidebar-navigation-row-gap: 2px;
   --background: #fafafa;
   --page-background: var(--background);
   --card: #fff;
@@ -426,7 +428,7 @@ body {
   .sidebar {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--sidebar-section-gap);
     width: 100%;
     min-width: 0;
     flex: 1;
@@ -487,10 +489,10 @@ body {
   .sidebar-navigation-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--sidebar-navigation-row-gap);
   }
   .primary-navigation {
-    margin-block: 8px 4px;
+    margin-block: 8px var(--sidebar-section-gap);
   }
   :is(.sidebar-navigation-row, .space-new-session, .space-more, .connection .button) {
     height: 32px;
@@ -542,6 +544,10 @@ body {
     min-height: 24px;
     padding-inline: 10px 0;
     font-size: 14px;
+    line-height: normal;
+  }
+  .sidebar-navigation-heading > span {
+    color: var(--muted-foreground);
   }
   .nav-label button:where(:not([data-size^="icon"])) {
     font-size: inherit;

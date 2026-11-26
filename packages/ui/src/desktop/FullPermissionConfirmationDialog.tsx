@@ -97,11 +97,11 @@ function confirmationCopy(props: ApplicationConfirmationDialogProps) {
       return fullPermissionConfirmationCopy[props.language];
     case 'workspace-removal':
       return {
-        title: `移除空间“${props.label}”？`,
+        title: `移除项目“${props.label}”？`,
         description:
           '将移除本地项目登记及全部会话列表，并请求停止运行中的任务。历史先保留；任务结束并过宽限期后，可在退出客户端后通过离线维护清理。未结束或结果未知的执行证据会继续保留。不会删除工作目录中的文件。',
-        cancel: '保留空间',
-        confirm: '移除空间',
+        cancel: '保留项目',
+        confirm: '移除项目',
       };
     case 'skill-uninstall':
       return {

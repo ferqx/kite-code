@@ -234,8 +234,8 @@ test('a missing or replaced bridge retires its listener and cannot report the pr
 test('workspace removal uses the shared warning, fixed copy and explicit Cancel/Escape/confirm decisions', async () => {
   const f = await fixture();
   const label = '<img src=x onerror=alert(1)> 工作空间';
-  const cancel = '保留空间';
-  const confirm = '移除空间';
+  const cancel = '保留项目';
+  const confirm = '移除项目';
   const next = (requestId: string): NonNullable<NativeGlobalDialogState> => ({
     requestId,
     language: 'zh',
@@ -246,7 +246,7 @@ test('workspace removal uses the shared warning, fixed copy and explicit Cancel/
   try {
     await f.show(next('cancel'));
     const dialog = document.querySelector('[role="alertdialog"]')!;
-    expect(dialog.textContent).toContain(`移除空间“${label}”？`);
+    expect(dialog.textContent).toContain(`移除项目“${label}”？`);
     expect(dialog.textContent).toContain(
       '将移除本地项目登记及全部会话列表，并请求停止运行中的任务。历史先保留；任务结束并过宽限期后，可在退出客户端后通过离线维护清理。未结束或结果未知的执行证据会继续保留。不会删除工作目录中的文件。',
     );

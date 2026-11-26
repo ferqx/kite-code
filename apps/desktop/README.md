@@ -24,6 +24,8 @@
 
 [两栏布局](src/native-settings-layout.tsx)和[设置工作区](src/native-settings-workspace.tsx)复用现有业务页和表单：宽窗左侧分类、右侧列表与详情互换；窄窗逐级进入，长表单正文独立滚动，原操作栏固定。Mac 浮窗独立留出至少 52px 顶部及 24px 底部，在最小高度也不覆盖原生窗口控制按钮。MCP 保留新增、连接管理和 OAuth 授权，提供商保留原新增／编辑与模型配置。不为设计稿添加独立通用测试接口。用户主动放弃未保存的 MCP 或提供商字段前必须确认；真实写入与授权仍使用原提交身份。
 
+设置浮窗的分类列表使用主题侧栏实色，内容和返回区域使用主题内容实色。窗口级原生材质由 Main 设置在主窗口上。 [分类布局](src/native-settings-layout.css)
+
 2026-11-21，macOS arm64／Electron 44.3.0，隔离原生窗口验证设置层序、右侧 Browser 原视图和鼠标动作连续、权限浮层往返、深浅主题、列表与表单返回及最小窗布局。初测 800px 最小窗无法达到旧的紧凑阈值，修正后 770px 浮窗的表单占满 768px 内容区。开关／切页／菜单／确认过程有 836 帧 DOM 与样式采样并交叉核实际合成截图，未见稳定流程中闪白或错层，首个冷窗出现前未纳入帧采样。隔离 Service 的 Trace 未装能力：Root 和浮窗都返回同一 `capability_unavailable`；错误提示未闪入下一分类。同版本原生设置实窗另核默认编辑器切换、提供商校验保留输入与保存、模型启用、MCP 校验与新增，以及隔离授权回执从等待到已登录；核技能详情、网页搜索重读及跳转、Trace 无效参数反馈。该证据不等价于外部 OAuth、Windows 实窗或安装版资格。
 
 ## 办公输出文件
@@ -805,9 +807,9 @@ Windows 导航的 [Native CSS](src/native-tailwind.css) 将宽侧栏和窄窗口
 
 [Main](electron/main.ts)通过[外观选择](electron/native-window-appearance.ts)按实际 Windows build 选材质。build 22621 起使用 Electron `backgroundMaterial: mica`，支持范围见 [Electron](https://www.electronjs.org/docs/latest/api/base-window#winsetbackgroundmaterialmaterial-windows)及 [DWM](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type)。build 17763 至 22620 使用同一桌面制品已校验的 [Windows Node-API 后端](native/windows-access/README.md)，在自己的根 HWND 上尝试系统 Acrylic。后端查系统透明开关、高对比度、节电和远程会话，仅在 DWM 接受模糊与客户区玻璃时开放透明背景。主题、系统设置、合成变化与窗口重显时由 Main 重查，失败时 Root 与原生窗口使用主题实色。更早 Windows 和 Linux 走实色，macOS 使用 Vibrancy。具体取舍见 [Windows 窗口材质与布局记录](../../.agents/notes/implemented/feature/2026-11-25-windows-acrylic-layout.md)。
 
-`getWindowAppearance()`沿前述窗口守卫只读 Main 选择，不从构建机、NODE_ENV或浏览器 User Agent猜支持情况。renderer在挂载前读取闭合 `mica/acrylic/vibrancy/none`，读取失败或旧bridge缺此端口时按 `none`；这项外观读取不依赖 Service成功连接。报告原生材质的 Native 窗口共用透明 root／body／Frame／shell作为材质承载层，窗口顶栏直接显示原生材质；`.client-sidebar-panel` 叠上述半透明主题灰色，内部 `.sidebar-header`／`.sidebar` 保持透明，窄侧栏使用同一背景规则。主面板、会话header及main保留实色背景，输入框与用户消息共用输入区底色，卡片沿所属主题。设置dialog透明，分类侧栏与返回区沿同一左栏灰色玻璃层，右侧设置内容和编辑栏保留原实色背景，面板圆角和留白按下文平台规则处理；未确认材质时保留原实色设置背景。共享Web不消费Native材质标记，Windows／Linux 独立32px顶栏及原运行权限保持。
+`getWindowAppearance()`沿前述窗口守卫只读 Main 选择，不从构建机、NODE_ENV或浏览器 User Agent猜支持情况。renderer在挂载前读取闭合 `mica/acrylic/vibrancy/none`，读取失败或旧bridge缺此端口时按 `none`；这项外观读取不依赖 Service成功连接。报告原生材质的 Native 窗口共用透明 root／body／Frame／shell作为材质承载层，窗口顶栏直接显示原生材质；`.client-sidebar-panel` 叠上述半透明主题灰色，内部 `.sidebar-header`／`.sidebar` 保持透明，窄侧栏使用同一背景规则。主面板、会话header及main保留实色背景，输入框与用户消息共用输入区底色，卡片沿所属主题。共享Web不消费Native材质标记，Windows／Linux 独立32px顶栏及原运行权限保持。
 
-设置是同级视图切换：[Native页面](src/native.tsx)将settingsOpen交给SessionPage.covered，主panel树保持挂载和原几何，以opacity0退出绘制，inert／aria-hidden退出交互，避免玻璃侧栏叠出下层正文、边缘或导航文字。保持挂载用于保留未发送草稿、阅读位置和panel状态，不执行会话重选、任务取消或新业务申请。窄侧栏原模态在covered期间关闭，返回后按原开关恢复；原返回自动聚焦在切换期间被抑制，设置自身仍有Radix焦点范围与Escape关闭。设置内容位于panel同级的overlays，明确showOverlay=false，不渲染会压暗材质或透出旧页面的遮罩；设置reader随原内容打开／关闭，Core／Service的authority与运行状态保持。
+设置通过[独立浮窗](#设置浮窗)合成，主页面保持挂载以保留草稿、阅读位置和面板状态。
 
 Windows 的 `.native-window-content` 由平台样式统一保留四周 6px 留白。Windows 10、Windows 11 与实色回退都使用相同的三栏圆角外框和 32px 独立顶栏。内部 `.client-content-frame` 宽高占满、外边距为 0，左侧导航和右侧工具仍沿原分隔线开合和调宽。工作区内的标题和收展按钮不重复计算外层留白。[设置浮窗](#设置浮窗)沿独立视图尺寸渲染。macOS 保持 0px 外留白和直角铺满。
 
@@ -877,6 +879,8 @@ Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Ski
 同日用 Windows Electron 44.3.0 在独立主视图和设置 WebContentsView 加载两份实际生产入口。两处加载同一共享 UI 样式，深浅主题下的导航字体、行高和图文垂直中心一致。原独立设置入口缺少 Windows 平台标记，侧栏采用 12px 默认内边距，标签从栏边 46px 开始。补齐入口标记后，两处均采用 6px 内边距，标签从栏边 40px 开始。隔离桥下的修复前后样式
 
 独立 Windows 设置 WebContentsView 的截图复现了图文偏差。对调两视图的图标和标签后，半像素纵坐标额外引入约 1 个物理像素的偏差，同一内容放在同一坐标时绘制一致。两处导航统一使用共享行样式和平台留白，Windows 将浮窗顶部贴合设备像素，移除设置分类单独的图文偏移。独立 Electron 改变缩放后仍核对浮窗顶边与共享行样式，窄窗返回分类后两处行样式一致。
+
+2026-11-26，Windows／Electron 44.3.0 的隔离生产渲染器对照主视图与设置页的分组标题，深浅主题及窄窗返回时的字号、字重、颜色和文字起点一致。标题与首行间距为 4px，行间距为 2px，分组间隔为 8px。Chromium 逐帧核对设置切页、主题切换、窄窗焦点返回及关闭重开。 [设置布局样式](src/native-settings-layout.css) · [布局回归](test/isolated/native-settings-layout-dom.test.tsx)
 
 2026-10-19 Windows x64／Bun 1.4.3／Chrome 155.0.8059.82，在 `f734245a` 加当前未提交源码上，用隔离夹具加载实际 SessionPage、Sidebar 与 Native 编译样式，Windows／macOS CSS 标记下亮暗、Mica／Vibrancy／实色、窄侧栏、选中导航与设置分类选择器共14组对照：悬停／按下底色不一致的采样由64处降为0。键盘按下空间标题只绘制一层背景，焦点提示、透明承载层、草稿和主区普通按钮的原按下反馈保持；页面无异常，定向 CSS Biome 与文档检查通过。设置页仅核选择器夹具，未复验真实 Service、Electron 实窗或系统材质最终合成。
 
@@ -1632,11 +1636,11 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 空间批量移除
 
-空间移除不在对话区插入常驻提示。显式操作的未知结果、拒绝及后台移除记录变为无法读取时，通过原非模态 Toast 临时呈现；同一次读取异常不会因刷新重复弹出。原申请未知时，「空间」旁显示查询图标；即使原空间不在目录中，也可从菜单选原空间查询结果，不重新提交。[Native DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)核等待与刷新、Toast 关闭与去重、草稿保持、原 ID 查询、成功目录更新和拒绝。
+项目移除不在对话区插入常驻提示。显式操作的未知结果、拒绝及后台移除记录变为无法读取时，通过原非模态 Toast 临时呈现；同一次读取异常不会因刷新重复弹出。原申请未知时，「项目」旁显示查询图标；即使原项目不在目录中，也可从菜单选原项目查询结果，不重新提交。[Native DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)核等待与刷新、Toast 关闭与去重、草稿保持、原 ID 查询、成功目录更新和拒绝。
 
-原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的空间行将移除入口收进更多菜单，新对话与更多图标均为14px并沿原悬浮／键盘焦点显示；选择“移除空间”才调用原回调。[Main](electron/main.ts)通过主窗口所属的共享确认Overlay显示完整移除风险，默认和取消均为「保留空间」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他空间的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
+原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的项目行将移除入口收进更多菜单，新对话与更多图标均为14px并沿原悬浮／键盘焦点显示；选择“移除项目”才调用原回调。[Main](electron/main.ts)通过主窗口所属的共享确认Overlay显示完整移除风险，默认和取消均为「保留项目」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他项目的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
 
-[Store 批量事务](../../packages/agent/src/storage/sqlite/workspace-removal.ts) 一次保存全部根及子 Session tombstone、停止边界和原 Workspace receipt，目录同时隐藏；它不逐条等待，不冒充资源停止。回复丢失／不可信则保存 unknown，重开只展示原申请，明确从侧栏菜单选择原空间才用原 Store／Workspace／Command GET；其他 Store／主体在 HTTP 前拒绝，不改绑、不自动再提交。可信 4xx 显示未移除。目录状态未核实或私有申请不能保存时拒绝新移除。
+[Store 批量事务](../../packages/agent/src/storage/sqlite/workspace-removal.ts) 一次保存全部根及子 Session tombstone、停止边界和原 Workspace receipt，目录同时隐藏；它不逐条等待，不冒充资源停止。回复丢失／不可信则保存 unknown，重开只展示原申请，明确从侧栏菜单选择原项目才用原 Store／Workspace／Command GET；其他 Store／主体在 HTTP 前拒绝，不改绑、不自动再提交。可信 4xx 显示未移除。目录状态未核实或私有申请不能保存时拒绝新移除。
 
 首次保存移除申请在同一 FULL 事务惰性增加 `workspace_removal_intents`，私有 `user_version` 从 DB7 升至 DB8；没有移除申请的旧流程继续 DB7。闭合原申请最多128项／256KiB，只允许 submitting→unknown，不保存重发资格或当前路径。离线维护的 DB8／manifest v17 字节范围由 [maintenance owner](../../packages/agent/src/maintenance/README.md#desktop-db8-与-manifest-v17)负责。
 

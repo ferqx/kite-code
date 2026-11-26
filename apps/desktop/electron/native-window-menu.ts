@@ -25,7 +25,7 @@ export function nativeWindowMenuTemplate(options: {
           click: () => options.dispatch('new-conversation'),
         },
         {
-          label: '添加空间…',
+          label: '添加项目…',
           accelerator: 'Ctrl+O',
           registerAccelerator: false,
           enabled: options.applicationEnabled,

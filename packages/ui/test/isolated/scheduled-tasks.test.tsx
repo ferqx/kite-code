@@ -323,9 +323,7 @@ test('a removed project cannot save', async () => {
       onClose={() => {}}
     />,
   );
-  expect(document.querySelector('button[aria-label="项目空间"]')!.hasAttribute('disabled')).toBe(
-    true,
-  );
+  expect(document.querySelector('button[aria-label="项目"]')!.hasAttribute('disabled')).toBe(true);
   expect(
     [...document.querySelectorAll('button')].find((item) => item.textContent === '保存')!.disabled,
   ).toBe(true);
@@ -454,7 +452,7 @@ test('shared project and model-effort selectors save selected IDs and effort wit
   await changeField('[aria-label="名称"]', 'Nightly checks');
   await changeField('textarea', 'Inspect changes');
   await click('高级');
-  expect(document.querySelector('button[aria-label="项目空间"]')).toBeNull();
+  expect(document.querySelector('button[aria-label="项目"]')).toBeNull();
   await click('高级');
   expect(document.querySelector<HTMLInputElement>('[aria-label="名称"]')!.value).toBe(
     'Nightly checks',
@@ -464,7 +462,7 @@ test('shared project and model-effort selectors save selected IDs and effort wit
   expect(document.querySelector('[aria-label="运行设置"]')!.textContent).toContain('思考程度');
   await act(async () =>
     document
-      .querySelector('button[aria-label="项目空间"]')!
+      .querySelector('button[aria-label="项目"]')!
       .dispatchEvent(
         new dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0, ctrlKey: false }),
       ),

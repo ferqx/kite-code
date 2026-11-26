@@ -551,7 +551,7 @@ try {
   await scheduledEditor
     .getByRole('textbox', { name: '定时任务说明', exact: true })
     .fill('核对原项目\n🙂');
-  const projectChoice = scheduledEditor.getByRole('button', { name: '项目空间', exact: true });
+  const projectChoice = scheduledEditor.getByRole('button', { name: '项目', exact: true });
   await projectChoice.click();
   const projects = scheduledEditor.getByRole('menuitemradio');
   assert.deepEqual(await projects.allTextContents(), ['Native bundled']);

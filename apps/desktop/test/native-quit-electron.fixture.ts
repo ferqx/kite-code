@@ -250,7 +250,7 @@ try {
   const normalPage = await nativeRootPage(app, 10000);
   await normalPage.locator('.session-header').waitFor();
   await until(
-    () => normalPage.getByRole('button', { name: '项目空间', exact: true }).isEnabled(),
+    () => normalPage.getByRole('button', { name: '项目', exact: true }).isEnabled(),
     10000,
     'normal quit sample did not finish initial project preparation',
   );

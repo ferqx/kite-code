@@ -151,6 +151,7 @@ test('file actions use existing application entry points while close and quit re
     dispatch: (action) => actions.push(action),
   });
   const file = template[0]!.submenu as import('electron').MenuItemConstructorOptions[];
+  expect(file[1]!.label).toBe('添加项目…');
   for (const item of file.slice(0, 3))
     item.click!(undefined as never, undefined, undefined as never);
   expect(actions).toEqual(['new-conversation', 'add-workspace', 'settings']);

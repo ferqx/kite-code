@@ -301,7 +301,7 @@ test('Native reuses the scheduled page and editor with real projects, model vali
     );
     await act(async () =>
       editor
-        .querySelector('[aria-label="项目空间"]')!
+        .querySelector('[aria-label="项目"]')!
         .dispatchEvent(
           new f.dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0, ctrlKey: false }),
         ),
@@ -314,7 +314,7 @@ test('Native reuses the scheduled page and editor with real projects, model vali
         .find((item) => item.textContent === 'Empty Workspace')!
         .click(),
     );
-    expect(editor.querySelector('[aria-label="项目空间"]')!.textContent).toBe('Empty Workspace');
+    expect(editor.querySelector('[aria-label="项目"]')!.textContent).toBe('Empty Workspace');
     expect(editor.querySelector('[data-model-trigger]')!.textContent).toBe('model');
     expect(editor.querySelector('select')).toBeNull();
     await act(async () =>

@@ -1253,7 +1253,7 @@ function SessionPageContent({
       <header className="sidebar-header" onMouseDown={handleHeaderMouseDown}>
         <strong className="brand">Kite</strong>
       </header>
-      <aside className="sidebar" aria-label="空间与会话">
+      <aside className="sidebar" aria-label="项目与会话">
         <MemoizedSidebar
           workspaces={props.workspaces}
           sessionSearch={props.covered ? undefined : props.sessionSearch}
@@ -1465,7 +1465,7 @@ function SessionPageContent({
                     : '暂无可查看的会话',
                 detail: props.selected
                   ? '当前会话没有可展示的历史消息。'
-                  : '从左侧空间中点击会话即可加载消息。',
+                  : '从左侧项目列表中选择会话即可加载消息。',
               }
             : undefined
       }

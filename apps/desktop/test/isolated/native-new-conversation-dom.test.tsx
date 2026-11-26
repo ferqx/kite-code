@@ -3796,7 +3796,7 @@ test('ordinary permission mode progress stays in its trigger while unknown and f
 
 test('global preparation selects the default first space while project entries, manual choices and refresh keep their scope', async () => {
   const f = fixture();
-  const project = () => f.host.querySelector<HTMLButtonElement>('[aria-label="项目空间"]')!;
+  const project = () => f.host.querySelector<HTMLButtonElement>('[aria-label="项目"]')!;
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('新对话');
@@ -3849,17 +3849,17 @@ test('startup preparation selects the default first space after directory loadin
       expect(f.input()).toBeNull();
       expect(f.calls.some((call) => call.method === 'conversation.branch')).toBe(false);
       await f.releaseDirectory();
-      expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe(
+      expect(f.host.querySelector('[aria-label="项目"]')?.textContent).toBe(
         workspaceIds.length ? 'Ordinary directory' : '选择项目',
       );
       await act(async () => {
-        const project = f.host.querySelector<HTMLButtonElement>('[aria-label="项目空间"]')!;
+        const project = f.host.querySelector<HTMLButtonElement>('[aria-label="项目"]')!;
         project.focus();
         project.dispatchEvent(
           new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
         );
       });
-      const menu = f.host.querySelector('[role="menu"][aria-label="项目空间"]')!;
+      const menu = f.host.querySelector('[role="menu"][aria-label="项目"]')!;
       expect(menu).not.toBeNull();
       expect(menu.querySelectorAll('[role="menuitemradio"]')).toHaveLength(workspaceIds.length);
       expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(workspaceIds.length ? 1 : 0);
@@ -3895,7 +3895,7 @@ test('startup preparation selects the default first space after directory loadin
 
 test('preparation displays its target throughout branch reads and preserves same-project controls on repeated clicks', async () => {
   const f = fixture();
-  const project = () => f.host.querySelector<HTMLButtonElement>('[aria-label="项目空间"]')!;
+  const project = () => f.host.querySelector<HTMLButtonElement>('[aria-label="项目"]')!;
   const branch = () => f.host.querySelector<HTMLButtonElement>('[aria-label="分支"]');
   const current = () =>
     [...f.host.querySelectorAll('.sidebar [aria-current="page"]')].map((e) => e.textContent);
@@ -3967,7 +3967,7 @@ test('project and branch metadata failures stay silent without qualifying a firs
     f.rejectBranch();
     await f.click('新对话');
     expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
-    expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe('Workspace');
+    expect(f.host.querySelector('[aria-label="项目"]')?.textContent).toBe('Workspace');
     expect(f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')?.disabled).toBe(
       true,
     );
@@ -3990,7 +3990,7 @@ test('project and branch metadata failures stay silent without qualifying a firs
     await f.click('刷新分支');
     expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
     await act(async () => {
-      const project = f.host.querySelector<HTMLButtonElement>('[aria-label="项目空间"]')!;
+      const project = f.host.querySelector<HTMLButtonElement>('[aria-label="项目"]')!;
       project.focus();
       project.dispatchEvent(
         new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
@@ -4030,9 +4030,9 @@ test('adding a project keeps branch discovery silent and an ordinary directory c
     await f.click('新对话');
     await f.edit('work in an ordinary folder');
     f.rejectBranch();
-    await f.click('添加空间');
+    await f.click('添加项目');
     expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
-    expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe('Ordinary directory');
+    expect(f.host.querySelector('[aria-label="项目"]')?.textContent).toBe('Ordinary directory');
     expect(f.host.querySelector('[aria-label="分支"]')).toBeNull();
     expect(promptValue(f.input())).toBe('work in an ordinary folder');
     await f.click('在 Ordinary directory 中新建对话');
@@ -4076,11 +4076,11 @@ test('a successful workspace registration is not relabelled by its subsequent di
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.edit('keep the unsent draft');
-    await f.click('添加空间');
+    await f.click('添加项目');
     expect(failedReads).toBe(1);
     expect(f.calls.filter((call) => call.method === 'workspace.pick')).toHaveLength(1);
     expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
-    expect(f.host.body.textContent).not.toContain('添加空间遇到问题');
+    expect(f.host.body.textContent).not.toContain('添加项目遇到问题');
     expect(f.host.body.textContent).not.toContain('结果待确认');
     expect(promptValue(f.input())).toBe('keep the unsent draft');
     await f.until(() => f.calls.filter((call) => call.method === 'directory').length >= 3);
@@ -4094,7 +4094,7 @@ test('a successful workspace registration is not relabelled by its subsequent di
 
 test('a pending default first space cannot override a later project entry and the default owns the first send', async () => {
   const f = fixture();
-  const project = () => f.host.querySelector('[aria-label="项目空间"]')?.textContent;
+  const project = () => f.host.querySelector('[aria-label="项目"]')?.textContent;
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Ordinary directory 中新建对话');
@@ -4148,7 +4148,7 @@ test('original global/project preparation and page navigation retain independent
     expect(f.host.querySelector('.new-conversation-welcome')).not.toBeNull();
     await f.edit('prepare draft');
     expect(f.host.querySelector('.new-conversation-welcome h1')?.textContent).toBe(
-      '今天想在这个空间完成什么？',
+      '今天想在这个项目中完成什么？',
     );
     expect(f.host.querySelector('.new-conversation-welcome button')).toBeNull();
     expect(f.host.querySelector('.task-suggestions')).toBeNull();
@@ -6084,7 +6084,7 @@ test('an applied workspace removal is not relabelled or resubmitted when its dir
     expect(failDirectory).toBe(false);
     expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
     expect(f.host.body.textContent).not.toContain('移除结果待确认');
-    expect(f.host.body.textContent).not.toContain('移除空间遇到问题');
+    expect(f.host.body.textContent).not.toContain('移除项目遇到问题');
     await f.until(() => f.calls.filter((call) => call.method === 'directory').length >= 3);
     expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(1);
     expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
@@ -6124,7 +6124,7 @@ test('workspace removal keeps the conversation clear and retains the original lo
 
     await f.finishWorkspaceRemoval('unknown');
     const resultTrigger = () =>
-      f.host.querySelector<HTMLButtonElement>('.nav-label [aria-label="查询空间移除结果"]');
+      f.host.querySelector<HTMLButtonElement>('.nav-label [aria-label="查询项目移除结果"]');
     await f.until(() => !!resultTrigger());
     expect(notices()).toHaveLength(0);
     expect(f.host.querySelector('main')?.textContent).not.toContain('移除结果待确认');
@@ -6175,11 +6175,11 @@ test('workspace removal storage and rejection notices are temporary and are not 
     const rejected = { ...removal, phase: 'failed', error: 'permission_denied' } as const;
     await f.publishWorkspaceRemovals([rejected], true);
     await f.until(() => !!f.host.querySelector('.native-toast'));
-    expect(text()).not.toContain('当前用户无权移除此空间');
+    expect(text()).not.toContain('当前用户无权移除此项目');
     expect(f.host.querySelector('.native-toast')?.textContent).toContain(
-      '暂时无法确认空间移除结果',
+      '暂时无法确认项目移除结果',
     );
-    expect(f.host.querySelector('main')?.textContent).not.toContain('暂时无法确认空间移除结果');
+    expect(f.host.querySelector('main')?.textContent).not.toContain('暂时无法确认项目移除结果');
     expect(f.host.querySelector('.space-removal-results')).toBeNull();
     await f.click('关闭提示');
     await f.publishWorkspaceRemovals([rejected], true);
@@ -6196,8 +6196,8 @@ test('workspace removal storage and rejection notices are temporary and are not 
     await f.finishWorkspaceRemoval('failed', 'permission_denied');
     await f.until(() => !!f.host.querySelector('.native-toast'));
     expect(f.host.querySelectorAll('.native-toast')).toHaveLength(1);
-    expect(f.host.querySelector('.native-toast')?.textContent).toContain('当前用户无权移除此空间');
-    expect(f.host.querySelector('main')?.textContent).not.toContain('当前用户无权移除此空间');
+    expect(f.host.querySelector('.native-toast')?.textContent).toContain('当前用户无权移除此项目');
+    expect(f.host.querySelector('main')?.textContent).not.toContain('当前用户无权移除此项目');
     await f.click('关闭提示');
     await f.publishWorkspaceRemovals([rejected], true);
     expect(f.host.querySelector('.native-toast')).toBeNull();
@@ -8033,7 +8033,7 @@ for (const outcome of ['recovers', 'scope stays unavailable', 'other read failur
     const send = () => f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')!;
     try {
       await act(async () => f.root.render(<NativeDesktop />));
-      await f.until(() => !!f.host.querySelector('[aria-label="项目空间"]'));
+      await f.until(() => !!f.host.querySelector('[aria-label="项目"]'));
       expect(reads).toHaveLength(0);
       expect(send().disabled).toBe(true);
       expect(toast()).toBeNull();
@@ -8078,7 +8078,7 @@ for (const outcome of ['recovers', 'scope stays unavailable', 'other read failur
         }
         if (outcome === 'scope stays unavailable') {
           await f.click('在 Ordinary directory 中新建对话');
-          expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe(
+          expect(f.host.querySelector('[aria-label="项目"]')?.textContent).toBe(
             'Ordinary directory',
           );
           expect(reads).toHaveLength(failedReads);

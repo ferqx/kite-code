@@ -113,9 +113,9 @@ Desktop入口导出现有[Popover](src/desktop/components/ui/popover.tsx)的 Roo
 
 2026-10-23，Windows x64／Chrome 155，实际 Conversation 与生产编译 CSS 在深浅主题、1280／390px 四组隔离浏览器检查中通过：逐步观察悬停→复制成功、复制失败及键盘聚焦，按钮始终 32px、图标 16px、圆角 8px，最终回复按钮与下一条消息保留 6px 间距，无横向溢出或页面错误。原[消息复制回归](test/isolated/desktop-message-copy.test.tsx)3项／48断言和 UI typecheck 通过；未重验完整安装版 Electron。
 
-桌面 [共享样式](src/desktop/style.css)的空间添加按钮与行内编辑按钮使用透明背景和图标变色反馈；Composer 的聚焦边色／阴影遵循宿主根元素的 `data-input-modality`，pointer 状态不保留焦点装饰。未提供该状态的宿主沿原焦点规则。Dialog／Sheet 关闭按钮使用 `focus-visible` 提示；Native 的统一鼠标／键盘判定和窗口验证由 [Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)负责。
+桌面 [共享样式](src/desktop/style.css)的项目添加按钮与行内编辑按钮使用透明背景和图标变色反馈；Composer 的聚焦边色／阴影遵循宿主根元素的 `data-input-modality`，pointer 状态不保留焦点装饰。未提供该状态的宿主沿原焦点规则。Dialog／Sheet 关闭按钮使用 `focus-visible` 提示；Native 的统一鼠标／键盘判定和窗口验证由 [Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)负责。
 
-[Sidebar](src/desktop/Sidebar.tsx) 的空间标题常驻搜索会话和添加空间，两个入口共用 `ghost`／`icon-sm` 公共按钮。目录选择等待及其他写入期间，添加按钮原位常显并沿用原禁用条件。行内新对话和更多由独立的 `.sidebar-actions` 容器负责显隐。父容器隐藏时，子按钮样式或选择器优先级变化均不会使其显现。悬停、行内聚焦、菜单打开及触屏仍按原条件显示。禁用沿用公共按钮的透明度。父容器保留布局与键盘访问，禁用和业务串行门禁仍由原按钮及宿主执行。[默认浏览器回归](../../apps/desktop/test/isolated/sidebar-actions-browser.test.ts)构建生产 CSS 并通过原 Native 处理函数覆盖标题按钮常驻与样式一致、目录选择等待／取消、发送等待／未知回执恢复、逐帧显隐、DOM 身份、Tab、菜单和触屏；同时强制将按钮设为 `opacity:.65!important`，验证父层仍能保持隐藏。它进入默认测试和 Required unit；[测试准备](../../tests/README.md#侧栏显隐浏览器回归)说明浏览器依赖。
+[Sidebar](src/desktop/Sidebar.tsx) 的「项目」标题旁常驻搜索会话和添加项目入口，两个入口共用 `ghost`／`icon-sm` 公共按钮。目录选择等待及其他写入期间，添加按钮原位常显并沿用原禁用条件。行内新对话和更多由独立的 `.sidebar-actions` 容器负责显隐。父容器隐藏时，子按钮样式或选择器优先级变化均不会使其显现。悬停、行内聚焦、菜单打开及触屏仍按原条件显示。禁用沿用公共按钮的透明度。父容器保留布局与键盘访问，禁用和业务串行门禁仍由原按钮及宿主执行。[默认浏览器回归](../../apps/desktop/test/isolated/sidebar-actions-browser.test.ts)构建生产 CSS 并通过原 Native 处理函数覆盖标题按钮常驻与样式一致、目录选择等待／取消、发送等待／未知回执恢复、逐帧显隐、DOM 身份、Tab、菜单和触屏；同时强制将按钮设为 `opacity:.65!important`，验证父层仍能保持隐藏。它进入默认测试和 Required unit；[测试准备](../../tests/README.md#侧栏显隐浏览器回归)说明浏览器依赖。
 
 有更多操作的会话行让按钮与运行转圈共用右侧位置，转圈显示时不为按钮另外留出宽度。悬停或菜单打开时仅显示按钮，标题宽度和无障碍状态描述不变；待输入、未读与工作树标记仍可显示。默认浏览器回归覆盖深浅主题的图标位置、会话行悬停、移开、菜单打开与关闭。
 

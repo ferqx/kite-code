@@ -102,7 +102,14 @@ test('settings routes share a retained list and a separate editor host in one wo
     await act(async () => root.render(<Fixture webSearch />));
     expect(button('网页搜索')).toBeDefined();
     const categories = [...target.querySelectorAll('.native-settings-rail nav button')];
-    expect(categories).toHaveLength(7);
+    expect(categories.map((category) => category.textContent)).toEqual([
+      '常规',
+      '外观',
+      '提供商与模型',
+      'MCP',
+      '技能',
+      '网页搜索',
+    ]);
     for (const category of categories) {
       expect(category.getAttribute('data-variant')).toBe('plain');
       expect(category.classList.contains('transition-none')).toBe(true);

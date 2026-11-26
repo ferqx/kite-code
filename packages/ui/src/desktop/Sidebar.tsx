@@ -186,7 +186,7 @@ const WorkspaceHeader = memo(function WorkspaceHeader(props: {
                     onSelect={() => props.onRemove?.(props.id)}
                   >
                     <HugeiconsIcon icon={Delete02Icon} />
-                    移除空间
+                    移除项目
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -561,7 +561,7 @@ export function Sidebar({
           )}
         </SidebarNavigationList>
       )}
-      <SidebarNavigationHeading className="nav-label" label="空间">
+      <SidebarNavigationHeading className="nav-label" label="项目">
         {props.sessionSearch && (
           <Button
             ref={searchTrigger}
@@ -615,14 +615,14 @@ export function Sidebar({
                 className="space-removal-results"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="查询空间移除结果"
-                title="查询空间移除结果"
+                aria-label="查询项目移除结果"
+                title="查询项目移除结果"
                 disabled={props.mutationBusy}
               >
                 <HugeiconsIcon icon={Clock01Icon} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="sidebar-menu" aria-label="查询空间移除结果">
+            <DropdownMenuContent align="end" className="sidebar-menu" aria-label="查询项目移除结果">
               <DropdownMenuLabel className="sidebar-menu-label">查看移除结果</DropdownMenuLabel>
               {actions.workspaceRemovalResults.map((result) => (
                 <DropdownMenuItem
@@ -643,8 +643,8 @@ export function Sidebar({
             className="space-add"
             variant="ghost"
             size="icon-sm"
-            aria-label="添加空间"
-            title="添加空间"
+            aria-label="添加项目"
+            title="添加项目"
             disabled={props.mutationBusy}
             onClick={actions.addWorkspace}
           >

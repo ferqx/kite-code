@@ -320,8 +320,8 @@ test('unclassified failures never invent an unknown outcome or echo private caus
     'token=private\n at cause:7',
   ]) {
     expect(humanReadableOperationError(code)).toBe('此操作遇到问题，请先查看当前状态。');
-    expect(humanReadableOperationError(code, '移除空间')).toBe(
-      '移除空间遇到问题，请先查看当前状态。',
+    expect(humanReadableOperationError(code, '移除项目')).toBe(
+      '移除项目遇到问题，请先查看当前状态。',
     );
   }
 });

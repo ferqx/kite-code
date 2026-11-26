@@ -626,7 +626,7 @@ try {
   }));
   assert.equal(cancellation.dialogs[0]!.defaultId, 0);
   assert.equal(cancellation.dialogs[0]!.cancelId, 0);
-  assert.deepEqual(cancellation.dialogs[0]!.buttons, ['保留空间', '移除空间']);
+  assert.deepEqual(cancellation.dialogs[0]!.buttons, ['保留项目', '移除项目']);
   assert.ok(cancellation.dialogs[0]!.detail.includes('未结束或结果未知的执行证据会继续保留'));
   assert.equal(cancellation.physical.filter((r) => r.method === 'POST').length, 0);
   assert.ok((await state()).directory!.workspaces.some((w) => w.id === workspace.id));
@@ -725,8 +725,8 @@ try {
     },
     join(home!, 'workspace'),
   );
-  await page.getByRole('button', { name: '添加空间', exact: true }).locator('..').hover();
-  await page.getByRole('button', { name: '添加空间', exact: true }).click();
+  await page.getByRole('button', { name: '添加项目', exact: true }).locator('..').hover();
+  await page.getByRole('button', { name: '添加项目', exact: true }).click();
   await until(
     state,
     (value) =>
