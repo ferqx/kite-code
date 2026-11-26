@@ -13,6 +13,7 @@ import {
   type ReactNode,
   type RefObject,
   useCallback,
+  useContext,
   useDeferredValue,
   useEffect,
   useId,
@@ -20,6 +21,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { useConversationActivity } from '../conversation-activity';
 import {
@@ -79,6 +81,17 @@ export interface ToolActivityState {
   expandedItems: Readonly<Record<string, boolean>>;
   onToggle: (open: boolean) => void;
   onToggleItem: (id: string, open: boolean) => void;
+}
+
+type RetainedEntry = {
+  facts: readonly unknown[];
+  content: ReactNode;
+  openTurns: string[];
+  traceProcesses: Map<string, boolean>;
+};
+
+function sameEntryFacts(before: readonly unknown[], after: readonly unknown[]) {
+  return before.length === after.length && before.every((fact, i) => Object.is(fact, after[i]));
 }
 
 /** Only confirmed guidance shares its original Turn's process, including local sending. */
@@ -210,13 +223,13 @@ function TurnElapsed({
 function TurnSummary({
   label,
   open,
-  disabled,
+  readOnly,
   contentIds,
   children,
 }: {
   label: string;
   open: boolean;
-  disabled?: boolean;
+  readOnly?: boolean;
   contentIds?: string;
   children: ReactNode;
 }) {
@@ -226,7 +239,7 @@ function TurnSummary({
         <Button
           className="agent-turn-summary"
           variant="ghost"
-          disabled={disabled}
+          readOnly={readOnly}
           aria-label={`${label}，${open ? '收起' : '展开'}本轮处理过程`}
           {...(contentIds ? { 'aria-controls': contentIds } : {})}
         >
@@ -237,6 +250,45 @@ function TurnSummary({
         </Button>
       </CollapsibleTrigger>
     </div>
+  );
+}
+
+function latestReplyStore() {
+  let current: string | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => current,
+    set(next: string | undefined) {
+      if (next === current) return;
+      current = next;
+      for (const notify of listeners) notify();
+    },
+    subscribe(notify: () => void) {
+      listeners.add(notify);
+      return () => {
+        listeners.delete(notify);
+      };
+    },
+  };
+}
+
+const LatestReplyContext = createContext<ReturnType<typeof latestReplyStore> | undefined>(
+  undefined,
+);
+const noReplySubscription = () => () => {};
+
+function MessageMetadata({ replyId, children }: { replyId?: string; children: ReactNode }) {
+  const latestReply = useContext(LatestReplyContext);
+  const defaultVisible = () => !!replyId && replyId === latestReply?.get();
+  const visible = useSyncExternalStore(
+    replyId && latestReply ? latestReply.subscribe : noReplySubscription,
+    defaultVisible,
+    defaultVisible,
+  );
+  return (
+    <footer className="message-meta" data-default-visible={visible || undefined}>
+      {children}
+    </footer>
   );
 }
 
@@ -257,7 +309,7 @@ const MessageItem = memo(function MessageItem({
   renderContent,
   renderAttachments,
   showMetadata = true,
-  showMetadataByDefault = false,
+  latestReplyCandidate = false,
   turnOutputs,
   synchronizeTurnOutputs = false,
 }: {
@@ -277,7 +329,7 @@ const MessageItem = memo(function MessageItem({
   renderContent?: (message: Message) => ReactNode;
   renderAttachments?: (message: Message) => ReactNode;
   showMetadata?: boolean;
-  showMetadataByDefault?: boolean;
+  latestReplyCandidate?: boolean;
   turnOutputs?: ReactNode;
   synchronizeTurnOutputs?: boolean;
 }) {
@@ -566,7 +618,7 @@ const MessageItem = memo(function MessageItem({
         {turnOutputs}
       </InitialTurnOutputPresentationContext>
       {hasMetadata && (
-        <footer className="message-meta" data-default-visible={showMetadataByDefault || undefined}>
+        <MessageMetadata replyId={latestReplyCandidate ? message.id : undefined}>
           {copyText && (
             <MessageCopyButton
               text={copyText}
@@ -584,7 +636,7 @@ const MessageItem = memo(function MessageItem({
               时间未知
             </span>
           )}
-        </footer>
+        </MessageMetadata>
       )}
     </article>
   );
@@ -598,14 +650,17 @@ export const ConversationTurnElementContext = createContext<
   RefObject<HTMLDivElement | null> | undefined
 >(undefined);
 
-function ConversationTurnEntry({ children, ...props }: ComponentProps<'div'>) {
+const ConversationTurnEntry = memo(function ConversationTurnEntry({
+  children,
+  ...props
+}: ComponentProps<'div'>) {
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div {...props} ref={ref}>
       <ConversationTurnElementContext value={ref}>{children}</ConversationTurnElementContext>
     </div>
   );
-}
+});
 
 export function Conversation({
   messages: incomingMessages,
@@ -635,6 +690,7 @@ export function Conversation({
   traceTurns = false,
   pendingTraceToolTurns,
   renderReasoning,
+  historyEntryFacts,
 }: {
   messages: readonly Message[];
   loading: boolean;
@@ -684,8 +740,11 @@ export function Conversation({
   /** Saved Turns with receipts whose first presentation is still being verified. */
   pendingTraceToolTurns?: ReadonlySet<string>;
   renderReasoning?: (message: Message, open: boolean) => ReactNode;
+  /** Exact host facts read by a saved entry's renderers, including read authority and output revisions. */
+  historyEntryFacts?: (messages: readonly Message[], turnId?: string) => readonly unknown[];
 }) {
   const traceContentId = useId();
+  const [latestReply] = useState(latestReplyStore);
   const presented = useRef(false);
   // Keep the first large tree interruptible by a later navigation. Once shown,
   // history and streaming changes always reconcile against the current reading.
@@ -751,6 +810,8 @@ export function Conversation({
   const [expanded, setExpanded] = useState(reading.current.expanded);
   const committedOpenTurns = useRef<readonly string[]>([]);
   const committedTraceProcesses = useRef<ReadonlyMap<string, boolean>>(new Map());
+  const committedEntries = useRef<ReadonlyMap<string, RetainedEntry>>(new Map());
+  const messageSignatures = useRef(new WeakMap<Message, string>());
   if (previousResume.current !== readingActivity.resume) {
     previousResume.current = readingActivity.resume;
     traceDisclosure.current = false;
@@ -1292,7 +1353,7 @@ export function Conversation({
             renderContent={renderMessageContent}
             renderAttachments={renderMessageAttachments}
             showMetadata={placement !== 'process' || message.role === 'user'}
-            showMetadataByDefault={placement === 'result' && message === latestFinalReply}
+            latestReplyCandidate={placement === 'result' && message.finalReply === true}
             copyText={
               agentResult?.contentComplete && placement === 'standalone'
                 ? (message.copyText ?? undefined)
@@ -1588,7 +1649,7 @@ export function Conversation({
           <TurnSummary
             label={processLabel}
             open={open}
-            disabled={showElapsed && !open && pendingTraceToolTurns?.has(entry.turnId)}
+            readOnly={showElapsed && !open && pendingTraceToolTurns?.has(entry.turnId)}
             contentIds={segments
               .filter((segment) => segment.collapsible)
               .map(({ start }) => processId(start))
@@ -1820,7 +1881,87 @@ export function Conversation({
               message.role === 'system') &&
               !message.settled)),
       );
-    return { entries, renderEntry, empty: entries.length === 0, busy };
+    const entryFacts = (entry: (typeof entries)[number]) => {
+      if (!historyEntryFacts || !traceTurns || loading) return;
+      const { turnId } = entry;
+      if (turnId && turnId === turnActivity?.turnId) return;
+      const rows = entry.groups.flat();
+      const terminal = turnId ? terminalByTurn.get(turnId) : undefined;
+      const final = turnId ? finalReplyByTurn.get(turnId) : undefined;
+      if (turnId && !terminal && !final) return;
+      if (
+        !rows.length ||
+        rows.some((row) => row.delivery || (!terminal && (!row.settled || row.tracePending)))
+      )
+        return;
+
+      const timing = turnId ? timingByTurn.get(turnId) : undefined;
+      const keys = new Set<string>([`trace-turn:${entry.key}`]);
+      if (turnId) keys.add(`turn:${turnId}:complete`);
+      const related = rows.flatMap((row) =>
+        row.role === 'tool' ? (children.get(row.id.slice(5)) ?? []) : [],
+      );
+      for (const row of [...rows, ...related]) {
+        const key = row.presentationKey ?? row.id;
+        for (const id of [
+          row.id,
+          key,
+          traceKey(row),
+          `activity:${key}`,
+          `activity-group:${row.presentationGroupId ?? key}`,
+        ])
+          keys.add(id);
+        for (const step of row.steps ?? []) keys.add(`subagent-step:${step.id}`);
+        if (row.role === 'subagent')
+          for (const tool of childTools.get(row.id.slice(9)) ?? []) keys.add(tool.id);
+      }
+      const messageSignature = (row: Message) => {
+        let signature = messageSignatures.current.get(row);
+        if (signature === undefined) {
+          signature = JSON.stringify(row);
+          messageSignatures.current.set(row, signature);
+        }
+        return signature;
+      };
+      const hostFacts = historyEntryFacts(rows, turnId);
+      const childRows = [...rows, ...related].filter((row) => row.role === 'subagent');
+      return [
+        diagnostics,
+        openFile,
+        writeClipboardText,
+        onOpenChildSession,
+        turnId,
+        terminal,
+        final?.id,
+        timing?.turnStartedAtMs,
+        timing?.turnFinishedAtMs,
+        lastEntryByTurn.get(turnId ?? '') === entry,
+        turnId && pendingTraceToolTurns?.has(turnId),
+        runningToolTurns.has(turnId ?? ''),
+        thinkingTurns.has(turnId ?? ''),
+        entry.groups.length,
+        ...entry.groups.flatMap((group) => [group.length, ...group.map(messageSignature)]),
+        related.length,
+        ...related.map(messageSignature),
+        childRows.length,
+        ...childRows.flatMap((row) => {
+          const id = row.id.slice(9);
+          const tools = childTools.get(id) ?? [];
+          return [childSessionIdsByTaskId?.get(id), tools.length, ...tools.map(messageSignature)];
+        }),
+        keys.size,
+        ...[...keys].flatMap((key) => [key, expanded[key], restoredExpanded.current.has(key)]),
+        ...hostFacts,
+      ];
+    };
+    return {
+      entries,
+      entryFacts,
+      renderEntry,
+      latestReplyId: latestFinalReply?.id,
+      empty: entries.length === 0,
+      busy,
+    };
   }, [
     messages,
     turnActivity,
@@ -1835,6 +1976,7 @@ export function Conversation({
     traceTurns,
     pendingTraceToolTurns,
     renderReasoning,
+    historyEntryFacts,
     childSessionIdsByTaskId,
     onOpenChildSession,
     openFile,
@@ -1846,10 +1988,19 @@ export function Conversation({
     traceContentId,
   ]);
   const { empty, busy } = projection;
-  const { entryContent, openTurns, traceProcesses, markers } = useMemo(() => {
+  useLayoutEffect(
+    () => latestReply.set(projection.latestReplyId),
+    [latestReply, projection.latestReplyId],
+  );
+  const { entryContent, openTurns, traceProcesses, markers, retainedEntries } = useMemo(() => {
     const openTurns: string[] = [];
     const traceProcesses = new Map<string, boolean>();
     const markers: ConversationMessageMarker[] = [];
+    const retainedEntries = new Map<string, RetainedEntry>();
+    const appendReading = (turns: string[], processes: Map<string, boolean>) => {
+      openTurns.push(...turns);
+      for (const [id, open] of processes) traceProcesses.set(id, open);
+    };
     const entryContent = projection.entries.map((entry) => {
       const message = entry.groups[0]?.[0];
       const isMarker = messageNavigation && !loading && message && isNavigationMessage(message);
@@ -1860,8 +2011,28 @@ export function Conversation({
             message.text.slice(0, 80).replace(/\s+/g, ' ').trim() ||
             (message.hasAttachments ? '附件' : ''),
         });
-      if (!preserveReadingAnchor && !isMarker)
-        return projection.renderEntry(entry, openTurns, traceProcesses);
+      const facts = projection.entryFacts(entry);
+      const before = committedEntries.current.get(entry.key);
+      let body: ReactNode;
+      if (facts && before && sameEntryFacts(before.facts, facts)) {
+        retainedEntries.set(entry.key, before);
+        appendReading(before.openTurns, before.traceProcesses);
+        body = before.content;
+      } else if (facts) {
+        const turns: string[] = [];
+        const processes = new Map<string, boolean>();
+        body = projection.renderEntry(entry, turns, processes);
+        retainedEntries.set(entry.key, {
+          facts,
+          content: body,
+          openTurns: turns,
+          traceProcesses: processes,
+        });
+        appendReading(turns, processes);
+      } else {
+        body = projection.renderEntry(entry, openTurns, traceProcesses);
+      }
+      if (!preserveReadingAnchor && !isMarker) return body;
       const Entry = entry.turnId ? ConversationTurnEntry : 'div';
       return (
         <Entry
@@ -1873,16 +2044,17 @@ export function Conversation({
           }
           data-conversation-message-marker={isMarker ? entry.key : undefined}
         >
-          {projection.renderEntry(entry, openTurns, traceProcesses)}
+          {body}
         </Entry>
       );
     });
-    return { entryContent, openTurns, traceProcesses, markers };
+    return { entryContent, openTurns, traceProcesses, markers, retainedEntries };
   }, [projection, preserveReadingAnchor, messageNavigation, loading]);
   useLayoutEffect(() => {
     committedOpenTurns.current = openTurns;
     committedTraceProcesses.current = traceProcesses;
-  }, [openTurns, traceProcesses]);
+    committedEntries.current = retainedEntries;
+  }, [openTurns, traceProcesses, retainedEntries]);
   const markerKeys = JSON.stringify(markers.map((marker) => marker.key));
   // Refresh the targets when the mounted input identities change or the cached DOM reconnects.
   useLayoutEffect(() => {
@@ -2045,7 +2217,9 @@ export function Conversation({
                     </p>
                   </div>
                 ) : (
-                  entryContent
+                  <LatestReplyContext.Provider value={latestReply}>
+                    {entryContent}
+                  </LatestReplyContext.Provider>
                 ))}
             </div>
           </section>

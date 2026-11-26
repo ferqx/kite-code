@@ -1,11 +1,12 @@
 import type { Message } from '@kite-ai/client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { NativeFileChange } from './file-changes-bridge';
 import type { NativeBridge, NativeResult, NativeSelection } from './native-bridge';
 import { nativeReadDeadline } from './native-read-deadline';
 import { sameToolReceipt } from './native-tool-messages';
 
 type FileTargetRead = { receipt: Message; entry?: NativeFileChange };
+type VerifiedFileTargetRead = { receipt: Message; entry: NativeFileChange };
 
 /** Both retained file consumers read the same exact metadata; bodies remain lazy. */
 export function useNativeFileTargets({
@@ -16,6 +17,7 @@ export function useNativeFileTargets({
   messages,
   includeRead = false,
   suspended = false,
+  historyPending = false,
 }: {
   bridge?: NativeBridge;
   generation: number;
@@ -24,6 +26,7 @@ export function useNativeFileTargets({
   messages: readonly Message[];
   includeRead?: boolean;
   suspended?: boolean;
+  historyPending?: boolean;
 }) {
   const storeId = selection?.storeId,
     sessionId = selection?.session.id,
@@ -164,16 +167,57 @@ export function useNativeFileTargets({
     suspended,
   ]);
   const sameScope = state.scope === scope && state.bridge === bridge;
-  const entries = useMemo(() => {
-    if (!sameScope) return [];
+  const verified = useMemo(() => {
     const originals = new Map(candidates.map((receipt) => [receipt.id, receipt]));
-    return state.reads.flatMap(({ receipt, entry }) => {
-      const original = originals.get(receipt.id);
-      return entry && original && sameToolReceipt(receipt, original) ? [entry] : [];
-    });
+    const checked = new Set<string>();
+    const reads = !sameScope
+      ? []
+      : state.reads.flatMap(({ receipt, entry }) => {
+          const original = originals.get(receipt.id);
+          if (!original || !sameToolReceipt(receipt, original)) return [];
+          checked.add(receipt.id);
+          return entry ? [{ receipt, entry }] : [];
+        });
+    return { reads, checked, entries: reads.map(({ entry }) => entry) };
   }, [sameScope, candidates, state.reads]);
+  const displayScope =
+    includeRead && hasSelection
+      ? JSON.stringify([generation, storeId, sessionId, workspaceId])
+      : undefined;
+  const displayed = useRef<
+    { owner: string; bridge?: NativeBridge; reads: VerifiedFileTargetRead[] } | undefined
+  >(undefined);
+  const displayReads = useMemo(() => {
+    const prior = displayed.current;
+    if (!displayScope || prior?.owner !== displayScope || prior.bridge !== bridge)
+      return verified.reads;
+    const originals = new Map(messages.map((message) => [message.id, message]));
+    const current = new Set(verified.reads.map(({ receipt }) => receipt.id));
+    const retained = prior.reads.filter(({ receipt }) => {
+      const original = originals.get(receipt.id);
+      return (
+        !current.has(receipt.id) &&
+        (original ? sameToolReceipt(receipt, original) : historyPending) &&
+        (historyPending || !verified.checked.has(receipt.id))
+      );
+    });
+    return retained.length ? [...verified.reads, ...retained] : verified.reads;
+  }, [displayScope, bridge, verified, messages, historyPending]);
+  // A superseded observation withdraws action authority immediately. The same
+  // conversation can keep its exact prior target while fresh metadata is pending.
+  useLayoutEffect(() => {
+    displayed.current = displayScope
+      ? { owner: displayScope, bridge, reads: displayReads }
+      : undefined;
+  }, [displayScope, bridge, displayReads]);
+  const displayEntries = useMemo(
+    () =>
+      displayReads === verified.reads ? verified.entries : displayReads.map(({ entry }) => entry),
+    [displayReads, verified],
+  );
   return {
-    entries,
+    entries: verified.entries,
+    displayEntries,
     loading: !sameScope || state.loading,
     error: sameScope ? state.error : undefined,
     retry: () => setRevision((value) => value + 1),

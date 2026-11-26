@@ -275,6 +275,10 @@ export function useNativeOutputFiles(input: {
     setRequest((previous) => (previous?.scope === key ? previous : undefined));
   }, [key]);
   const sequence = useRef(0);
+  const operationHandlers = useRef({ onEdit: input.onEdit, onError: input.onError });
+  useLayoutEffect(() => {
+    operationHandlers.current = { onEdit: input.onEdit, onError: input.onError };
+  });
   const actions = {
     onOpen: (file: OutputFileSummary) => {
       if (currentKey.current !== key || !cache.valid(rootKey)) return;
@@ -295,7 +299,7 @@ export function useNativeOutputFiles(input: {
       } catch (error) {
         if (currentKey.current !== key || !cache.valid(rootKey)) return;
         const code = error instanceof Error ? error.message : undefined;
-        input.onError?.(
+        operationHandlers.current.onError?.(
           code === 'output_open_in_app_unsupported'
             ? '此格式无法从 Kite 直接交给桌面应用打开，可使用「另存为」'
             : code === 'output_open_in_app_failed'
@@ -308,7 +312,7 @@ export function useNativeOutputFiles(input: {
       if (currentKey.current !== key || !cache.valid(rootKey)) return;
       void input.bridge
         ?.request({ method: 'outputs.save', generation: input.generation, target: target(file) })
-        .catch(() => input.onError?.('另存失败，请重试'));
+        .catch(() => operationHandlers.current.onError?.('另存失败，请重试'));
     },
     onReveal: async (file: OutputFileSummary) => {
       if (currentKey.current !== key || !cache.valid(rootKey)) return;
@@ -320,12 +324,14 @@ export function useNativeOutputFiles(input: {
         });
       } catch {
         if (currentKey.current === key && cache.valid(rootKey))
-          input.onError?.('无法在资源管理器中显示文件，请重试');
+          operationHandlers.current.onError?.('无法在资源管理器中显示文件，请重试');
       }
     },
     onEdit: (file: OutputFileSummary, context?: OfficeEditContext) => {
       if (currentKey.current !== key || !cache.valid(rootKey)) return;
-      void input.onEdit(file, context).catch(() => input.onError?.('无法附加文件，请重试'));
+      void operationHandlers.current
+        .onEdit(file, context)
+        .catch(() => operationHandlers.current.onError?.('无法附加文件，请重试'));
     },
   };
   const readable = !!(
@@ -337,7 +343,30 @@ export function useNativeOutputFiles(input: {
   const cachedWindow = (window: string) =>
     cache.valid(rootKey) ? cache.peek<Versioned<FilePage>>(`window/${window}`)?.value : undefined;
   const hasCards = (window: string) => !!cachedWindow(window)?.items.length;
+  const turnOutputFacts = (sessionId: string | undefined, turnId: string, child = false) => {
+    const runId = nativeOutputRunId(turnId, input.storeId, sessionId);
+    if (!runId) return [];
+    const related = child
+      ? sources.filter((source) => source.sessionId === sessionId && source.runId === runId)
+      : (sourcesByParent.get(runId) ?? []).map(({ source }) => source);
+    return [
+      input.bridge,
+      cache,
+      rootKey,
+      readable,
+      sourcesChecked,
+      fileRevision(sessionId, runId),
+      JSON.stringify(
+        related.map((source) => [
+          source,
+          fileRevision(source.sessionId, source.runId),
+          !child && input.turnLabel(source.runId),
+        ]),
+      ),
+    ];
+  };
   return {
+    turnOutputFacts,
     closeFile: (file: SessionFileTarget) => {
       if ('handleId' in file)
         void input.bridge
@@ -595,8 +624,8 @@ function OutputFileReader(input: OutputReaderInput) {
   const markChecked = useContext(TurnOutputCheckContext);
   const reportChecked = useRef(markChecked);
   reportChecked.current = markChecked;
-  useSyncExternalStore(input.cache.subscribe, input.cache.snapshot, input.cache.snapshot);
-  const scopeValid = input.cache.valid(input.rootKey);
+  const readScopeValid = () => input.cache.valid(input.rootKey);
+  const scopeValid = useSyncExternalStore(input.cache.subscribe, readScopeValid, readScopeValid);
   const windowKey = outputWindowKey(input.rootKey, input.sessionId, input.runId, input.sourceKey);
   const cacheKey = `window/${windowKey}`;
   const [saved, savePage] = useState(() => ({

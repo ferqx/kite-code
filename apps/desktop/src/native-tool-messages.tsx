@@ -716,6 +716,14 @@ export class NativeToolPresentation {
     return prior?.message.id === message.id ? prior.fact : undefined;
   }
 
+  retainsLiveRow(message: DesktopMessage) {
+    return (
+      message.executionUnconfirmed === true &&
+      message.id.startsWith('native-execution:') &&
+      this.complete.get(message.presentationKey ?? message.id)?.message.id === message.id
+    );
+  }
+
   project(
     scope: string,
     messages: readonly DesktopMessage[],
@@ -725,6 +733,7 @@ export class NativeToolPresentation {
       execution: NativeToolExecution & Partial<Pick<Execution, 'toolInput'>>;
     }[],
     boundary?: { bridge: unknown; key: string },
+    pendingMessageIds?: ReadonlySet<string>,
   ): DesktopMessage[] {
     if (boundary && (boundary.bridge !== this.bridge || boundary.key !== this.boundary)) {
       this.bridge = boundary.bridge;
@@ -770,6 +779,17 @@ export class NativeToolPresentation {
         const started = this.started.get(key);
         return [started === undefined ? message : { ...message, toolStartOrder: started }];
       }
+      const prior = this.complete.get(key)?.message;
+      if (
+        !entry &&
+        message.presentationKey &&
+        prior?.id.startsWith('native-execution:') &&
+        pendingMessageIds?.has(message.id)
+      ) {
+        // The receipt owns the same execution, but its input may span multiple pages.
+        // Keep the previously verified row mounted until the complete receipt takes over.
+        return [{ ...prior, executionUnconfirmed: true, toolStopping: false }];
+      }
       const pending = facts.some(
         (fact) =>
           fact.inputPending &&
@@ -783,7 +803,6 @@ export class NativeToolPresentation {
         this.complete.delete(key);
         return [];
       }
-      const prior = this.complete.get(key)?.message;
       if (!prior) return [];
       return [
         {
@@ -1516,20 +1535,21 @@ export function useNativeToolMessages({
     observedJobs,
   ]);
   const error = state.scope === scope ? state.error : undefined;
-  const pendingMessageIds = new Set(
-    error
-      ? []
-      : eligible
-          .filter((message) => {
-            if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
-              return true;
-            const previous = cache.current.read.get(message.id);
-            return (
-              !previous || previous.commandPending || !sameToolReceipt(previous.message, message)
-            );
-          })
-          .map((message) => message.id),
-  );
+  const pendingMessageIds = useMemo(() => {
+    if (state.scope === scope && state.error) return new Set<string>();
+    return new Set(
+      eligible
+        .filter((message) => {
+          if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
+            return true;
+          const previous = cache.current.read.get(message.id);
+          return (
+            !previous || previous.commandPending || !sameToolReceipt(previous.message, message)
+          );
+        })
+        .map((message) => message.id),
+    );
+  }, [eligible, retryRevision, scope, state]);
   return {
     pendingMessageIds,
     entries: useMemo(() => {

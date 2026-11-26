@@ -6,10 +6,12 @@ import { NativeDesktop } from '../src/native';
 import type {
   NativeBridge,
   NativeConversationResult,
+  NativeDraft,
   NativeRequest,
   NativeState,
 } from '../src/native-bridge';
 import { backgroundItem } from './background-item.fixture';
+import { historyIsolationFixture } from './history-isolation.fixture';
 import { sessionSwitchBridge } from './session-switch-bridge.fixture';
 import '../src/native-tailwind.css';
 import '../src/native-startup.css';
@@ -18,22 +20,25 @@ import '@kite-ai/ui/desktop/style.css';
 const transport = sessionSwitchBridge({ active: false, sameModel: true, cacheMetrics: false });
 const sample =
   '# 标题\n\n**说明：**后续中文与 *斜体*、`code`。\n\n| 名称 | 值 |\n| :--- | ---: |\n| 表格 | 12 |\n\n> [!NOTE]\n> 共享公式 $E=mc^2$\n\n- 第一项\n- 第二项\n\n```typescript\nconst text = "雪🙂";\n```\n\n```mermaid\ngraph LR\nA --> B\n```\n\n[本地文件](src/a.ts)';
+type FixtureDraft = Pick<NativeDraft, 'content' | 'revision' | 'consumedFrom'>;
 const persisted = JSON.parse(sessionStorage.getItem('prompt-fixture-history') ?? 'null') as {
   epoch: number;
   sequence: number;
   histories: [string, Message[]][];
   runs: [string, Run[]][];
   submissions: InputMetadata[];
-  drafts: [string, string][];
+  drafts: [string, FixtureDraft][];
   posts: NativeRequest[];
 } | null;
 let epoch = persisted?.epoch ?? 0;
 let sequence = persisted?.sequence ?? 0;
 let pending: Extract<NativeRequest, { method: 'submit' | 'conversation.send' }> | undefined;
+let pendingDraft: FixtureDraft | undefined;
 let acknowledge: ((value: InputMetadata) => void) | undefined;
 let acknowledgeFirst: ((value: NativeConversationResult) => void) | undefined;
 let heldFirstSession: string | undefined;
 let resumeFirstSelection: (() => void) | undefined;
+let fileReadRevoked = false;
 const histories = new Map<string, Message[]>(
   persisted?.histories ?? [
     ['a', []],
@@ -46,11 +51,14 @@ const runs = new Map<string, Run[]>(
     ['b', []],
   ],
 );
+const historyIsolation = new URLSearchParams(location.search).has('history-isolation')
+  ? historyIsolationFixture(histories, runs)
+  : undefined;
 const submissions: InputMetadata[] = persisted?.submissions ?? [];
-const drafts = new Map(
+const drafts = new Map<string, FixtureDraft>(
   persisted?.drafts ?? [
-    ['a', sample],
-    ['b', '另一会话草稿'],
+    ['a', { content: sample, revision: 1 }],
+    ['b', { content: '另一会话草稿', revision: 1 }],
   ],
 );
 const posts: NativeRequest[] = persisted?.posts ?? [];
@@ -76,6 +84,60 @@ function persist() {
 const bridge: NativeBridge = {
   ...transport.bridge,
   async request(request) {
+    if (historyIsolation) {
+      if (request.method === 'select') historyIsolation.activate();
+      if (request.method === 'messages') return historyIsolation.readMessages(request);
+      if (request.method === 'outputs.sources')
+        return { kind: 'outputs.sources', scope: request.scope, sources: [] };
+      if (request.method === 'outputs.query') return historyIsolation.readOutputs(request);
+      if (request.method === 'fileTargets.list') {
+        const observation = await historyIsolation.readFileTargets();
+        const result = await transport.bridge.request(request);
+        if (result && 'kind' in result && result.kind === 'fileTargets.page' && 'entries' in result)
+          return {
+            ...result,
+            entries: request.messageIds
+              .filter((id) => id.startsWith('old-tool-'))
+              .map((id) => ({
+                messageId: id,
+                changeId: observation ? `target-${id}-${observation}` : `target-${id}`,
+                path: `原档-${id.slice('old-tool-'.length)}.md`,
+                operation: 'read' as const,
+                preview: 'unavailable' as const,
+                openable: true,
+              })),
+          };
+        return result;
+      }
+      if (request.method === 'fileChanges.open') {
+        historyIsolation.targetOpens.push(request.changeId);
+        return null;
+      }
+      if (request.method === 'toolMessages.list') {
+        const result = await transport.bridge.request(request);
+        if (
+          result &&
+          'kind' in result &&
+          result.kind === 'toolMessages.page' &&
+          'entries' in result
+        )
+          return {
+            ...result,
+            entries: request.messageIds
+              .filter((id) => id.startsWith('old-tool-'))
+              .map((messageId) => ({
+                messageId,
+                executionId: messageId.replace('old-tool', 'old-exe'),
+                definitionId: 'files.read',
+                definitionVersion: '4',
+                status: 'succeeded' as const,
+                resultRevision: '1',
+                target: `原档-${messageId.slice('old-tool-'.length)}.md`,
+              })),
+          };
+        return result;
+      }
+    }
     if (request.method === 'select' && request.sessionId === heldFirstSession)
       await new Promise<void>((resolve) => {
         resumeFirstSelection = resolve;
@@ -84,6 +146,7 @@ const bridge: NativeBridge = {
       posts.push(request);
       persist();
       pending = request;
+      pendingDraft = drafts.get(request.sessionId);
       return new Promise<InputMetadata>((resolve) => {
         acknowledge = resolve;
       });
@@ -93,7 +156,8 @@ const bridge: NativeBridge = {
       pending = request;
       histories.set(request.creation.sessionId, []);
       runs.set(request.creation.sessionId, []);
-      drafts.set(request.creation.sessionId, request.intent.content);
+      pendingDraft = { content: request.intent.content, revision: 1 };
+      drafts.set(request.creation.sessionId, pendingDraft);
       persist();
       return new Promise<NativeConversationResult>((resolve) => {
         acknowledgeFirst = resolve;
@@ -102,15 +166,19 @@ const bridge: NativeBridge = {
     if (request.method === 'lookupInput')
       return submissions.find((entry) => entry.intent.commandId === request.commandId) ?? null;
     if (request.method === 'draft.read' || request.method === 'draft.write') {
-      if (request.method === 'draft.write') drafts.set(request.sessionId, request.content);
-      if (request.method === 'draft.write') persist();
+      let saved = drafts.get(request.sessionId) ?? { content: '', revision: 1 };
+      if (request.method === 'draft.write') {
+        if (saved.revision !== request.revision) throw Error('draft_revision_conflict');
+        saved = { content: request.content, revision: saved.revision + 1 };
+        drafts.set(request.sessionId, saved);
+        persist();
+      }
       return {
         id: request.sessionId,
         storeId: 'store',
-        workspaceId: 'w',
+        workspaceId: request.sessionId === 'new-conversation' ? 'new-conversation' : 'w',
         rootSessionId: request.sessionId,
-        revision: request.method === 'draft.write' ? request.revision + 1 : 1,
-        content: drafts.get(request.sessionId) ?? '',
+        ...saved,
       };
     }
     if (request.method === 'messages')
@@ -136,11 +204,19 @@ const bridge: NativeBridge = {
       const id = result.selection.session.id;
       return {
         ...result,
-        historyEpoch: epoch,
+        historyEpoch: historyIsolation ? 0 : epoch,
+        ...(historyIsolation && { outputFilesDisplay: historyIsolation.display(id) }),
         inputSubmissions: [...submissions],
         selection: {
           ...result.selection,
-          runs: runs.get(id)!,
+          ...(historyIsolation && {
+            viewSelection:
+              (result.selection.viewSelection ?? result.selection.viewGeneration) +
+              historyIsolation.selectionOffset(),
+          }),
+          ...(historyIsolation && fileReadRevoked && { permissionUnavailable: true }),
+          runs: historyIsolation ? structuredClone(runs.get(id)!) : runs.get(id)!,
+          ...historyIsolation?.cursor(),
           session: {
             ...result.selection.session,
             nextSeq: String(
@@ -177,7 +253,12 @@ const control = {
   accept() {
     const value = metadata('accepted');
     submissions.push(value);
-    drafts.set(pendingSessionId(), '');
+    if (pendingDraft && drafts.get(value.sessionId) === pendingDraft)
+      drafts.set(value.sessionId, {
+        content: '',
+        revision: pendingDraft.revision + 1,
+        consumedFrom: { revision: pendingDraft.revision, commandId: value.intent.commandId },
+      });
     if (pending?.method === 'conversation.send') {
       transport.registerSession(pending.creation.sessionId);
       acknowledgeFirst?.({
@@ -197,6 +278,12 @@ const control = {
   },
   unknown() {
     acknowledge?.(metadata('unknown'));
+    acknowledge = undefined;
+    transport.publish();
+  },
+  reject() {
+    if (!acknowledge) throw Error('send_not_pending');
+    acknowledge(metadata('rejected'));
     acknowledge = undefined;
     transport.publish();
   },
@@ -253,7 +340,7 @@ const control = {
       },
     };
     runs.get(id)!.push(run);
-    histories.get(id)!.push({
+    const message: Message = {
       id: `saved-${sequence}`,
       sessionId: id,
       runId: run.id,
@@ -266,8 +353,12 @@ const control = {
         inputCommandId: `business-${sequence}`,
         publicCommandId: pending.intent.commandId,
       },
-    });
-    epoch++;
+    };
+    histories.get(id)!.push(message);
+    if (historyIsolation) {
+      historyIsolation.changed(message);
+      historyIsolation.start(run.id);
+    } else epoch++;
     persist();
     transport.publish();
   },
@@ -288,6 +379,56 @@ const control = {
     });
     epoch++;
     persist();
+    transport.publish();
+  },
+  stream(text: string) {
+    if (!historyIsolation) throw Error('history_fixture_unavailable');
+    const id = pendingSessionId();
+    const run = runs.get(id)!.at(-1)!;
+    const history = histories.get(id)!;
+    const previous = history.at(-1);
+    const message: Message =
+      previous?.id === `reply-${sequence}`
+        ? { ...previous, content: previous.content + text }
+        : {
+            id: `reply-${sequence}`,
+            sessionId: id,
+            role: 'assistant',
+            runId: run.id,
+            seq: String(history.length + 1),
+            status: 'incomplete',
+            content: text,
+          };
+    if (previous?.id === message.id) history[history.length - 1] = message;
+    else history.push(message);
+    historyIsolation.changed(message);
+    transport.publish();
+  },
+  finishStream() {
+    if (!historyIsolation) throw Error('history_fixture_unavailable');
+    const id = pendingSessionId();
+    const run = runs.get(id)!.at(-1)!;
+    const history = histories.get(id)!;
+    Object.assign(run, { status: 'completed', isActive: false, finishedAt: Date.now() });
+    const message: Message = { ...history.at(-1)!, status: 'complete' };
+    history[history.length - 1] = message;
+    historyIsolation.addFile(run.id, '新轮次产出.pdf');
+    historyIsolation.changed(message);
+    transport.publish();
+  },
+  publishLateOutput() {
+    historyIsolation?.addFile('old-run-1', '旧轮晚到.pdf');
+    transport.publish();
+  },
+  outputQueries: historyIsolation?.queries,
+  targetOpens: historyIsolation?.targetOpens,
+  holdNextRescan: historyIsolation?.holdNextRescan,
+  rescanStarted: historyIsolation?.rescanStarted,
+  releaseRescan: historyIsolation?.releaseRescan,
+  fileTargetsPending: historyIsolation?.fileTargetsPending,
+  releaseFileTargets: historyIsolation?.releaseFileTargets,
+  setHistoricalFileReadRevoked(revoked: boolean) {
+    fileReadRevoked = revoked;
     transport.publish();
   },
   refresh: transport.publish,

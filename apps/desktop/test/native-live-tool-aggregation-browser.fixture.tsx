@@ -51,7 +51,7 @@ const run: Run = {
   createdAt: Date.now(),
   finishedAt: null,
   reason: null,
-  ...(__KITE_FIXTURE_EMPTY_MODEL_CHOICE__
+  ...(__KITE_FIXTURE_EMPTY_MODEL_CHOICE__ || new URLSearchParams(location.search).has('tool-motion')
     ? {
         configuration: {
           modelId: 'model-a',
@@ -97,7 +97,7 @@ const nativeShellCases = new Map<
     operation: 'execute' | 'launch' | 'read' | 'wait' | 'stop';
   }
 >();
-let nativeShellMetadataHeld = false;
+let nativeShellMetadataHeld: boolean | 'continuation' = false;
 const nativeShellMetadataPending: (() => void)[] = [];
 const nativeShellMetadataPages: { entries: unknown[]; modelStatuses: string[] }[] = [];
 const pending: (() => void)[] = [];
@@ -153,7 +153,7 @@ const definitions = [
   ['shell.execute', '1', { command: 'rg ToolActivity src' }],
   ['files.edit', '2', { path: 'src/entry.ts' }],
 ] as const;
-function add(index: number) {
+function add(index: number, recordCall = false) {
   const [definitionId, definitionVersion, toolInput] =
     definitions[(index - 1) % definitions.length]!;
   const execution: Execution = {
@@ -173,6 +173,20 @@ function add(index: number) {
   };
   executions.push(execution);
   facts.set(execution.id, execution);
+  if (recordCall)
+    messages.push({
+      id: `model-${index}`,
+      role: 'assistant',
+      status: 'complete',
+      content: '',
+      firstOutput: 'tool_calls',
+      sessionId: 'a',
+      runId: run.id,
+      seq: String(messages.length + 1),
+      toolCalls: [
+        { id: execution.toolCallId!, name: definitionId, arguments: JSON.stringify(toolInput) },
+      ],
+    });
 }
 const bridge: NativeBridge = {
   ...control.bridge,
@@ -286,7 +300,10 @@ const bridge: NativeBridge = {
           runs: selected ? [run] : [],
           executions: selected
             ? executions.map((execution) => {
-                if (!nativeShellCases.size) return execution;
+                if (
+                  ![...nativeShellCases.values()].some(({ execution: item }) => item === execution)
+                )
+                  return execution;
                 const { toolInput: _savedInput, ...observed } = execution;
                 return observed;
               })
@@ -319,7 +336,11 @@ const bridge: NativeBridge = {
       'scope' in result
     ) {
       if (nativeShellCases.size || worktreeErrorsEnabled) {
-        if (nativeShellMetadataHeld)
+        if (
+          nativeShellMetadataHeld &&
+          (nativeShellMetadataHeld !== 'continuation' ||
+            Object.keys(request.commandOffsets ?? {}).length > 0)
+        )
           await new Promise<void>((resolve) => nativeShellMetadataPending.push(resolve));
         const response = await fetch('/native-shell-metadata', {
           method: 'POST',
@@ -466,7 +487,7 @@ export interface LiveAggregationFixture {
       | 'failed-provider-read-next',
   ): Promise<SettingsFixtureSnapshot>;
   pending(): number;
-  add(index: number): void;
+  add(index: number, recordCall?: boolean): void;
   settle(
     index: number,
     status?: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown',
@@ -501,7 +522,7 @@ export interface LiveAggregationFixture {
   completeNativeShellModel(kind: NativeShellCase): Message;
   phaseNativeShell(kind: NativeShellCase, phase: 'auto' | 'human' | 'running'): void;
   nativeShellMetadataPages(): { entries: unknown[]; modelStatuses: string[] }[];
-  holdNativeShellMetadata(): void;
+  holdNativeShellMetadata(continuationOnly?: boolean): void;
   releaseNativeShellMetadata(): void;
   nativeShellMetadataPending(): number;
 }
@@ -671,8 +692,8 @@ window.liveAggregationFixture = {
     for (const release of historyPending.splice(0)) release();
   },
   historyPending: () => historyPending.length,
-  holdNativeShellMetadata() {
-    nativeShellMetadataHeld = true;
+  holdNativeShellMetadata(continuationOnly = false) {
+    nativeShellMetadataHeld = continuationOnly ? 'continuation' : true;
   },
   releaseNativeShellMetadata() {
     nativeShellMetadataHeld = false;
@@ -1296,14 +1317,17 @@ window.liveAggregationFixture = {
     else messages[previous] = message;
     control.publish();
   },
-  add(index) {
-    add(index);
+  add(index, recordCall) {
+    add(index, recordCall);
     control.publish();
   },
   settle(index, status = 'succeeded', remove = false) {
     const execution = facts.get(`execution-${index}`)!;
     execution.status = status;
     execution.resultRevision = '1';
+    const content = JSON.stringify({ result: raw, execution: execution.id });
+    if (messages.some((message) => message.id === `model-${index}`))
+      execution.result = { outcome: status, content };
     messages.push({
       id: `receipt-${index}`,
       role: 'tool',
@@ -1313,7 +1337,7 @@ window.liveAggregationFixture = {
       seq: String(messages.length + 1),
       sourceIds: [execution.id],
       toolCallId: execution.toolCallId,
-      content: JSON.stringify({ result: raw, execution: execution.id }),
+      content,
     });
     if (remove) executions.splice(executions.indexOf(execution), 1);
     control.publish();

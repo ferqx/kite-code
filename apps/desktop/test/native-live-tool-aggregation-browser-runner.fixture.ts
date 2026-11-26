@@ -90,6 +90,7 @@ declare global {
 }
 const directory = import.meta.dir;
 const handoff = process.env.KITE_AGGREGATION_SCENARIO === 'model-handoff';
+const toolMotion = process.env.KITE_AGGREGATION_SCENARIO === 'tool-motion';
 const longGroup = process.env.KITE_AGGREGATION_SCENARIO === 'long-group';
 const toolDetails = process.env.KITE_AGGREGATION_SCENARIO === 'tool-details';
 const nativeShell = process.env.KITE_AGGREGATION_SCENARIO === 'native-shell';
@@ -632,7 +633,11 @@ const server = Bun.serve({
       : new Response(null, { status: 404 });
   },
 });
-const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel: 'chrome' });
+const browser = await chromium.launch({
+  headless: true,
+  chromiumSandbox: true,
+  ...(process.argv.includes('--bundled-chromium') ? {} : { channel: 'chrome' }),
+});
 const report = {
   browser: browser.version(),
   scenario: worktreeErrors
@@ -641,15 +646,17 @@ const report = {
       ? settingsModels
         ? 'settings-models'
         : 'settings-nav'
-      : handoff
-        ? 'model-handoff'
-        : longGroup
-          ? 'long-group'
-          : toolDetails
-            ? 'tool-details'
-            : nativeShell
-              ? 'native-shell'
-              : 'mixed-tools',
+      : toolMotion
+        ? 'tool-motion'
+        : handoff
+          ? 'model-handoff'
+          : longGroup
+            ? 'long-group'
+            : toolDetails
+              ? 'tool-details'
+              : nativeShell
+                ? 'native-shell'
+                : 'mixed-tools',
   baseline: baseline
     ? 'current code with only toolDeclaration hidden projection disabled in isolated build'
     : undefined,
@@ -671,7 +678,7 @@ try {
         { theme: 'light' as const, width: 550 },
         { theme: 'dark' as const, width: 550 },
       ]
-    : handoff || longGroup || toolDetails || nativeShell || worktreeErrors
+    : handoff || longGroup || toolDetails || nativeShell || worktreeErrors || toolMotion
       ? [
           { theme: 'light' as const, width: 1280 },
           { theme: 'dark' as const, width: 780 },
@@ -701,7 +708,8 @@ try {
       void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {});
     });
     await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 75, everyNthFrame: 1 });
-    await page.addInitScript(() => {
+    await page.addInitScript((toolMotion) => {
+      if (toolMotion) return;
       const identities = new WeakMap<Element, number>();
       let next = 1,
         mutations = 0;
@@ -874,8 +882,10 @@ try {
         }),
       );
       requestAnimationFrame(tick);
-    });
-    await page.goto(`${server.url}${toolDetails ? '?island=tool-details' : ''}`);
+    }, toolMotion);
+    await page.goto(
+      `${server.url}${toolDetails ? '?island=tool-details' : toolMotion ? '?tool-motion' : ''}`,
+    );
     if (!toolDetails) await page.getByRole('button', { name: 'Session A', exact: true }).click();
     await page.waitForFunction(
       () =>
@@ -890,6 +900,176 @@ try {
       await page.waitForTimeout(350);
       await page.screenshot({ path: path.join(artifact, `${label}-${name}.png`) });
     };
+    if (toolMotion) {
+      await page.setViewportSize({ width, height: 560 });
+      await page.evaluate(() => {
+        window.liveAggregationFixture.add(1, true);
+        window.liveAggregationFixture.startNativeShell('execute-live');
+        window.liveAggregationFixture.phaseNativeShell('execute-live', 'running');
+        for (const index of [2, 4, 7, 8, 9, 11, 14]) window.liveAggregationFixture.add(index, true);
+      });
+      const trigger = page.locator('.conversation-trace > button').first();
+      await trigger.waitFor();
+      // Observe individual rows, not just the outer trace node and its final rectangle.
+      const probe = await page.evaluateHandle(() => {
+        const frames: ReturnType<typeof snapshot>[] = [];
+        const state = { frames, running: true };
+        const identities = new WeakMap<Element, number>();
+        let nextId = 0;
+        const identity = (node: Element) => {
+          if (!identities.has(node)) identities.set(node, ++nextId);
+          return identities.get(node);
+        };
+        function snapshot() {
+          const trace = document.querySelector('.conversation-trace');
+          const viewport = document.querySelector('.conversation-viewport');
+          const panel = trace?.querySelector(':scope > .collapsible-motion-content');
+          return {
+            phase: window.liveAggregationPhase,
+            top: viewport?.scrollTop,
+            height: panel?.getBoundingClientRect().height,
+            rows: [...(trace?.querySelectorAll('.tool-activity') ?? [])].map((row) => {
+              const header = row.querySelector(':scope > [data-trace-line]');
+              const icon = header?.querySelector('[data-slot="trace-icon"] svg');
+              const box = header?.getBoundingClientRect();
+              return {
+                row: identity(row),
+                icon: icon && identity(icon),
+                shape: icon?.innerHTML,
+                text: header?.textContent,
+                open: header?.getAttribute('aria-expanded'),
+                y: box?.y,
+                height: box?.height,
+                iconY: icon?.getBoundingClientRect().y,
+                iconOpacity: icon && getComputedStyle(icon).opacity,
+              };
+            }),
+          };
+        }
+        const sample = () => {
+          if (!state.running) return;
+          state.frames.push(snapshot());
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+        return state;
+      });
+      await page.evaluate(() => {
+        window.liveAggregationPhase = 'motion-open';
+      });
+      await trigger.click();
+      await page.waitForTimeout(450);
+      const shell = page.locator('.conversation-trace-steps .shell-activity > button').first();
+      await shell.waitFor();
+      await stage('motion-before-receipt');
+      await page.evaluate(() => {
+        window.liveAggregationPhase = 'motion-receipt-held';
+        window.liveAggregationFixture.holdNativeShellMetadata(true);
+        window.liveAggregationFixture.settleNativeShell('execute-live');
+      });
+      await page.waitForFunction(
+        () => window.liveAggregationFixture.nativeShellMetadataPending() > 0,
+      );
+      await stage('motion-receipt-held');
+      assert.equal(await page.locator('.conversation-trace-steps .shell-output').count(), 0);
+      await stage('motion-receipt-continued', () =>
+        window.liveAggregationFixture.releaseNativeShellMetadata(),
+      );
+      await shell.getByText('已运行', { exact: true }).waitFor();
+      await page.evaluate(() => {
+        window.liveAggregationPhase = 'motion-shell-expanded';
+      });
+      await shell.click();
+      await stage('motion-shell-expanded');
+      await page.getByText('Native execute-live 原输出', { exact: false }).waitFor();
+      await page.evaluate(() => {
+        window.liveAggregationPhase = 'motion-shell-collapsed';
+      });
+      await shell.click();
+      await stage('motion-shell-collapsed');
+      await page.evaluate(() => {
+        window.liveAggregationPhase = 'motion-read-failure-held';
+        window.liveAggregationFixture.holdNativeShellMetadata();
+        window.liveAggregationFixture.settle(1, 'failed', true);
+      });
+      await page.waitForFunction(
+        () => window.liveAggregationFixture.nativeShellMetadataPending() > 0,
+      );
+      await stage('motion-read-failure-held');
+      await stage('motion-read-failure', () =>
+        window.liveAggregationFixture.releaseNativeShellMetadata(),
+      );
+      await stage('motion-finished', () => {
+        for (const index of [2, 4, 7, 8, 9, 11, 14])
+          window.liveAggregationFixture.settle(index, 'succeeded', true);
+        window.liveAggregationFixture.finish();
+      });
+      const measured = await probe.evaluate((state) => {
+        state.running = false;
+        return state.frames;
+      });
+      await Bun.write(path.join(artifact, `${label}-tool-motion.json`), JSON.stringify(measured));
+      await cdp.send('Page.stopScreencast');
+      report.cases.push({ theme, width, errors, screenshotFrames, samples: [] });
+      assert.deepEqual(errors, []);
+      const before = measured.filter((frame) => frame.phase === 'motion-before-receipt').at(-1)!;
+      const receiptFrames = measured.filter((frame) =>
+        ['motion-receipt-held', 'motion-receipt-continued'].includes(frame.phase),
+      );
+      assert.equal(before.rows.length, 9);
+      assert.ok(receiptFrames.length > 2);
+      const rows = (frame: typeof before) =>
+        frame.rows.map(({ row, icon, shape, y, height, open, iconY, iconOpacity }) => ({
+          row,
+          icon,
+          shape,
+          y,
+          height,
+          open,
+          iconY,
+          iconOpacity,
+        }));
+      for (const frame of receiptFrames) {
+        assert.deepEqual(
+          rows(frame),
+          rows(before),
+          `${frame.phase}: collapsed rows moved or remounted`,
+        );
+        assert.equal(frame.top, before.top);
+      }
+      const pendingReadFailure = measured.filter(
+        (frame) => frame.phase === 'motion-read-failure-held',
+      );
+      assert.ok(pendingReadFailure.length > 2);
+      assert.ok(
+        pendingReadFailure.every((frame) => frame.rows[0]?.icon === before.rows[0]?.icon),
+        'the original read icon was replaced while its failed receipt was being verified',
+      );
+      const readFailure = measured.filter((frame) => frame.phase === 'motion-read-failure');
+      assert.ok(readFailure.some((frame) => frame.rows[0]?.open === 'false'));
+      assert.ok(
+        readFailure.every((frame) => frame.rows[0]?.shape === before.rows[0]?.shape),
+        'the read icon changed glyph when the tool failure took over',
+      );
+      assert.equal(await page.locator('.native-toast-card').count(), 0);
+      for (const [phase, direction] of [
+        ['motion-shell-expanded', 1],
+        ['motion-shell-collapsed', -1],
+      ] as const) {
+        const frames = measured.filter((frame) => frame.phase === phase);
+        assert.ok(frames.every((frame) => frame.rows[1]?.icon === before.rows[1]?.icon));
+        const positions = frames.map((frame) => frame.rows[2]!.y!);
+        assert.ok(Math.max(...positions) - Math.min(...positions) > 100);
+        assert.ok(
+          positions.every(
+            (y, index) => index === 0 || direction * (y - positions[index - 1]!) >= -1,
+          ),
+          `${phase}: an adjacent collapsed row reversed direction during the animation`,
+        );
+      }
+      await page.close();
+      continue;
+    }
     const commandPreviewGeometry = async (item: ReturnType<typeof page.locator>) => {
       const geometry = await item.locator('.shell-command-block').evaluate((node) => ({
         height: node.getBoundingClientRect().height,
@@ -5031,6 +5211,7 @@ try {
     0,
     'empty/tool-only Model split or replaced the original tool aggregate',
   );
+  if (toolMotion) console.log(JSON.stringify({ toolMotionCases: report.cases.length }));
 } finally {
   console.log(JSON.stringify({ artifact }));
   await browser.close();

@@ -91,6 +91,12 @@ Excel 网格按设备像素对齐共享边界，绘制和虚拟测量使用相�
 
 [会话阅读回归](../../packages/ui/test/isolated/desktop-conversation-window-dom.test.tsx)核对连续时间线、刷新和重开后的阅读锚点。[原生 HTTP 回归](test/isolated/native-history-incremental-http.test.ts)用 SQLite 和实际 Service 核对 5,001 条连续历史、原正文分块及事件流中断后的同一记录接管。测试制品的执行记录从展开的原行按准确 resultRevision 读取结果。
 
+已显示的历史轮次按自身消息和读权限复用展示。父会话及子详情向共享 Conversation 提供准确的原消息、工具回执和文件读取条件，产出列表按其所属 Run、子来源和版本更新。旧文件的操作仍沿当前准入核验。[会话交互浏览器回归](test/isolated/conversation-interactions-browser.test.ts)从发送、持久消息接管、流式分段观察到结束，核对旧消息、工具和附件的 React 执行次数、节点身份、阅读位置及请求次数，并验证迟到产物只补进原轮次。
+
+已核实的工具文件路径在历史重扫和权限撤销期间沿用原按钮与图标，通过共享只读门禁暂停操作并保持外观。打开前按原会话、读取范围与文件目标再次核对。[历史轮次浏览器回归](test/history-isolation-browser.fixture.ts)分别暂停新观察范围的完整历史重扫及后续文件目标读取，再模拟准入撤销，核对各阶段的按钮、图标、样式、尺寸和打开请求。[产出缓存 DOM 回归](test/isolated/native-output-cache-dom.test.tsx)在下一轮开始、迟到交付读取挂起和追加期间核对两轮文件卡、预览按钮焦点及各轮的读取次数。
+
+2026-11-26 Windows 源码 Desktop／配套 Service 用 Codex `gpt-6-luna`／`medium` 冷启动重开含两份实际 Markdown 交付的会话。下一轮经过本地占位接管、完整历史基线重扫、文件目标重新核对、真实 Files 读取与回复结束。在 2,296 个采样帧中，三个旧工具按钮与图标和两张旧产出卡保持原节点，阅读位置及其行位置最大位移 0 CSS px。迟到交付另由上述受控用例覆盖。记录位于本机 `.cache/conversation-powershell-evidence-20261126/post-delivery-summary.json`。
+
 Windows 本机的[隔离浏览器回归](test/initial-render-performance-browser-runner.fixture.ts)实测 180 轮、360 条正文可直接从最新滚动到第一条。流式回复更新后注入历史读取失败，已显示的 368 条消息仍保留，恢复后新一轮自动进入时间线，阅读锚点位移为 0 CSS 像素。该次样本首次可读约 1.08 秒，最初最长主线程任务约 0.98 秒。报告保存在本机 `.cache/initial-render-prod-WWOeA4/report.json`，使用生产组件和隔离事实桥。
 
 此前的轮次占位版本在 2026-11-14 使用 Windows x64／Electron 44.3.0 本机开发构建验收。原「子代理等待时间」与独立的 5,001 条长历史均完成切换、退出应用后重新选择、断开和恢复实际本机 SSE。隔离探针只记录视口几何及请求类型，断开各自 Main 的事件流后暂缓重连，其余请求仍走配套 Service。两个会话离线时保留原文，恢复后提示消失，未观察到重复消息或任务重发。长历史冷开时从 40 条近期记录接到 5,001 个位置，最新消息相对视口顶部始终为 436 CSS 像素。中段 8 个占位自动补成原正文，首锚点始终为 −7 CSS 像素，切回与断线恢复期间保持该锚点和已读正文。早期构建曾在索引接管后离开尾部 114 CSS 像素，重连时已读轮次短暂退回占位。修复后复验通过。完整退出重开按现有行为从最新消息开始。本机几何及请求记录位于 `.cache/native-session-pages-win/`，范围为 Windows 开发构建及配套本机 Service。
@@ -351,6 +357,8 @@ accepted 后若原 Command 最终被权威拒绝，且完整冻结历史与 Run 
 
 2026-11-07补修输入区闪烁，仍基于`556398400`加当前工作树、Windows x64／Bun1.4.4／Chrome156.0.8078.80：发送等待原本使原生textarea disabled、透明度降到0.55并丢焦，首发历史接管又因启用`synchronizePresentation`重建准备身份而隐藏footer一帧。Composer现只阻止重复提交，loading期间输入保持可编辑；SessionPage记住未启用屏障时已显示的准确scope，保存记录接管不重新隐藏，同scope资格不跨会话沿用。首发等待中的新编辑即时绑定原创建意图的目标Session，受理只消费原草稿；可见Session接管后才清理准备页副本，回执丢失也不覆盖新编辑或显式清空。[输入回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)、[页面回归](../../packages/ui/test/isolated/desktop-session-page-render.test.tsx)及[Native新对话回归](test/isolated/native-new-conversation-dom.test.tsx)按准确`./`路径逐文件`bun test --parallel=1 --max-concurrency=1`，共143项／2614断言通过，保留不同scope加载、页壳重用、未知恢复及附件断言；其余未变Markdown、复制、滚动和transcript结论沿前述证据。生产浏览器夹具补核深浅×1280／800px的新旧会话loading中编辑、重复Enter／form零重发、受理后新草稿保留、随后连续发送，以及逐帧原生节点、透明度、焦点、边框和光圈稳定；原四组Markdown、折叠、历史和冷重开同跑。最终报告见本机`.cache/prompt-send-browser-Ktx917`，最终源码资产在`.cache/prompt-send-browser-vOMug3/dist`；修前禁用变暗、首发隐藏帧及逐步观察材料在`.cache/prompt-input-flicker-20261107`。UI／Desktop类型、UI Desktop构建、格式、边界、测试归属及文档检查通过；仍仅为浏览器生产renderer与隔离桥，不扩展Electron安装、真实Service／Provider或其他平台资格。
 [transcript](src/native-transcript.ts)以已保存用户消息的`humanInput.publicCommandId`或`originCommandId`提供稳定`presentationKey`；旧记录仅有sourceIds时，[Native](src/native.tsx)只在当前Store／Session的原Run确认该来源后使用其原commandId。继承记录不能借用当前投递身份；相同正文不会用于关联，独立两次输入保留两条。稳定标识只负责展示，不替代物理消息ID、业务回执或操作权限。[首条消息回归](test/isolated/native-new-conversation-dom.test.tsx)核Markdown与附件在延迟选择／历史交接过程中的原节点；[transcript回归](test/isolated/native-transcript-dom.test.tsx)核当前输入、已保存消息、选区、两条同文与冷挂载。
+
+已有会话通过本地保存后，在同一次 Renderer 更新中插入发送占位并隐藏该次提交的正文，原会话草稿仍由受理回执按原快照核销。失败或结果未知时恢复原文，期间编辑过的草稿按快照身份保留。[发送浏览器夹具](test/prompt-send-browser-runner.fixture.ts)的 `--sending-only` 在 Windows／Chrome 158 的深浅主题和 1280／800px 窗口核对了首帧清空、输入焦点、历史先于回执、失败恢复、发送期间继续编辑及冷重开。结果覆盖生产 Renderer 和隔离测试桥。
 
 首条输入的回复进度由 [Native](src/native.tsx) 按原 Store、会话及提交身份投影。提交当帧显示本地准备，原 Run 接管前保留该状态。确认本轮主模型已经派发时切换为思考，等首段正文接管。已核实的 Run 和本地状态用原提交身份共享一个会话展示节点，确认执行后不会因之后的读取交接重新显示准备。模型重连、终态及提交失败继续用所属的真实事实。[会话控制器](src/controller.ts) 直接消费会话协调返回且已核实的新 View，成功路径省去一次相同的 GET。[首条消息回归](test/isolated/native-new-conversation-dom.test.tsx) 分别暂停受理、选中、Run 和模型派发，并核对首个流式正文与终态。
 
@@ -1262,6 +1270,8 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 只有已确认 completed 且非活动 Run 的最后一条完整、支持格式、无工具调用且后面无工具结果的助手消息才成为最终回复。原起止时间与终态供原组件显示耗时／失败／停止；无法核对时保原消息，活动视图失效显示“上次确认状态”，不补造成功或计时。最终回复资格与正式 Web 共用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts)；Native 显式选择 `copyScope=final`，保[桌面手册](../../docs/handbook/clients/desktop/README.md)只复制完整最终回复、不含同轮工具前说明的合同，Web 整轮范围不扩到 Native。大正文预览的 `copyText=null`；仅最终段原 reader 已验证并显示的准确正文启用“复制本轮Agent回复”，关闭正文、换消息身份或换scope即撤销。本地 Map 只持有当前已显示内容，不写持久日志或格式。
 
 同一准确 Run 中相邻、已核实的 Files read2/3/4、glob2、search2/3、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
+
+主会话中，实时工具行与保存回执以同一个 Store／Session／Run／Execution 展示身份交接。[工具投影](src/native-tool-messages.tsx)在回执读取及命令续页期间保留已核实的原行，暂停显示该行的运行状态；完整回执就绪后原位接管，当前读取和操作仍核原资格。[浏览器回归](test/native-live-tool-aggregation-browser-runner.fixture.ts)的 `tool-motion` 场景在 Windows Chrome 的浅色 1280px 和深色 780px 窗口暂停长命令的回执续页。修前 Shell 行暂时消失，后续折叠行上移 32 CSS px；修后两组均保持原图标和行位置，手动展开仍读取原结果。证据覆盖生产 Renderer 和隔离测试桥。
 
 默认 `ask_user` v1 的历史回执沿原成功 Execution／准确结果读取；从唯一原 Model call 读取 q1–q3 的实际问题，历史页缺该调用时可读取同一原 Execution 中匹配 `toolCallId` 的已保存参数，回答保原人类选项标签与自由文本。`{cancelled:true}` 显示“已取消回答”，工具仍按实际 succeeded，Run 可继续；这不是停止任务。请求来源缺失或冲突时保留已核实的答案，未来版本只保原文。原审批的当前接入见下一节；原记录另由[交互历史](#原交互记录只读历史)读取，所有封存／恢复组合及完整 PC 核对尚未关闭。
 

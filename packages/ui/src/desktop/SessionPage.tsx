@@ -238,6 +238,7 @@ export interface SessionPageProps {
   renderMessageContent?: (message: Message) => ReactNode;
   renderTurnOutputs?: React.ComponentProps<typeof Conversation>['renderTurnOutputs'];
   renderTurnDetails?: React.ComponentProps<typeof Conversation>['renderTurnDetails'];
+  historyEntryFacts?: React.ComponentProps<typeof Conversation>['historyEntryFacts'];
   focusMessage?: React.ComponentProps<typeof Conversation>['focusMessage'];
   renderMessageAttachments?: (message: Message) => ReactNode;
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
@@ -1438,6 +1439,7 @@ function SessionPageContent({
       renderMessageContent={props.renderMessageContent}
       renderTurnOutputs={props.renderTurnOutputs}
       renderTurnDetails={props.renderTurnDetails}
+      historyEntryFacts={props.historyEntryFacts}
       focusMessage={props.focusMessage}
       renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}

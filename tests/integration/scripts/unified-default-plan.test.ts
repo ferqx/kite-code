@@ -180,6 +180,7 @@ test('required Agent Linux shards partition runtime and shared coverage while le
     'apps/cli/test/file-candidate-windows-records.test.ts',
     'apps/service/test/isolated/responses-loop.test.ts',
     'packages/client/test/sse.test.ts',
+    'apps/desktop/test/isolated/conversation-interactions-browser.test.ts',
     'apps/desktop/test/isolated/native-main-scheduling-lifecycle.test.ts',
     'apps/desktop/test/isolated/native-session-anomalies-electron.test.ts',
     'apps/web/test/isolated/assets.test.ts',

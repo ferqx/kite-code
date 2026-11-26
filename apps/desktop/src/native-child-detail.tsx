@@ -33,6 +33,7 @@ export interface NativeChildDetailProps {
   readActive: boolean;
   writeClipboardText?: (text: string) => Promise<void>;
   renderTurnOutputs?: ComponentProps<typeof Conversation>['renderTurnOutputs'];
+  turnOutputFacts?: (turnId: string) => readonly unknown[];
   onTitleChange: (title: string) => void;
   /** Owned by the parent so switching tabs retains bounded reading data, without hidden readers. */
   readingCache?: ReadingStateCache;
@@ -51,6 +52,7 @@ export function NativeChildDetail({
   readActive,
   writeClipboardText,
   renderTurnOutputs,
+  turnOutputFacts,
   onTitleChange,
   readingCache,
 }: NativeChildDetailProps) {
@@ -70,10 +72,8 @@ export function NativeChildDetail({
       ? detail.facts
       : undefined;
   const title = facts?.session.title ?? detail?.title;
-  const activity = useMemo(
-    () => ({ readActive: readActive && !!facts && !detail?.loading, resume: 0 }),
-    [readActive, facts, detail?.loading],
-  );
+  const readingActive = readActive && !!facts && !detail?.loading;
+  const activity = useMemo(() => ({ readActive: readingActive, resume: 0 }), [readingActive]);
   useEffect(() => {
     if (title) onTitleChange(title);
   }, [title, onTitleChange]);
@@ -348,6 +348,47 @@ export function NativeChildDetail({
           renderTurnOutputs={renderTurnOutputs}
           renderMessageAttachments={(model) => renderImages(model.id)}
           renderToolActivity={renderTools}
+          historyEntryFacts={
+            turnOutputFacts || !renderTurnOutputs
+              ? (rows, turnId) => [
+                  bridge,
+                  readingKey,
+                  readingActive,
+                  imagePreviews,
+                  diagnostics,
+                  ...rows.flatMap((row) => {
+                    const id = row.reasoningSource ?? row.id;
+                    const live =
+                      row.role === 'tool'
+                        ? liveTools.find((tool) => tool.message.id === id)?.execution
+                        : undefined;
+                    const toolFacts =
+                      row.role === 'tool'
+                        ? JSON.stringify([
+                            facts?.presentation?.tools?.find((entry) => entry.messageId === id),
+                            facts?.presentation?.fileTargets?.find(
+                              (entry) => entry.messageId === id,
+                            ),
+                            toolPresentation.current.retainedFact(row),
+                            live,
+                          ])
+                        : undefined;
+                    return [
+                      originals.get(id),
+                      outputs.get(id),
+                      facts?.presentation?.textHandles?.find((entry) => entry.messageId === id)
+                        ?.handle,
+                      facts?.presentation?.imageHandles?.find((entry) => entry.messageId === id)
+                        ?.handle,
+                      toolFacts,
+                      !!live && executionUnconfirmed,
+                      !!live && !!detail?.error,
+                    ];
+                  }),
+                  ...(turnId ? (turnOutputFacts?.(turnId) ?? []) : []),
+                ]
+              : undefined
+          }
           traceTurns
           preserveReadingAnchor
           renderReasoning={(model, open) => {

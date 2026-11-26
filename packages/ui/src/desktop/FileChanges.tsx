@@ -106,6 +106,7 @@ export function FileDiff({
   onLayoutChange,
   inline = false,
   openFile,
+  fileOpenBlocked,
 }: {
   message: Message;
   path?: string;
@@ -114,6 +115,7 @@ export function FileDiff({
   onLayoutChange?: (layout: 'split' | 'unified') => void;
   inline?: boolean;
   openFile?: (path: string) => void;
+  fileOpenBlocked?: boolean;
 }) {
   const source =
     message.toolResult?.stdout || message.toolResult?.stderr || '工具没有返回可读差异。';
@@ -128,6 +130,7 @@ export function FileDiff({
       onLayoutChange={onLayoutChange}
       copyText={inline ? source : undefined}
       openFile={openFile}
+      fileOpenBlocked={fileOpenBlocked}
     />
   );
 }
@@ -193,6 +196,7 @@ function DiffReader({
   onLayoutChange,
   copyText,
   openFile,
+  fileOpenBlocked,
 }: {
   model: DiffModel;
   path?: string;
@@ -201,6 +205,7 @@ function DiffReader({
   onLayoutChange?: (layout: 'split' | 'unified') => void;
   copyText?: string;
   openFile?: (path: string) => void;
+  fileOpenBlocked?: boolean;
 }) {
   const inline = copyText !== undefined;
   const [localLayout, setLayout] = useState<'split' | 'unified'>('split');
@@ -280,7 +285,12 @@ function DiffReader({
     >
       <div className="file-diff-toolbar">
         {inline && path && openFile ? (
-          <Button className="file-diff-path file-link" title={path} onClick={() => openFile(path)}>
+          <Button
+            className="file-diff-path file-link"
+            title={path}
+            readOnly={fileOpenBlocked}
+            onClick={() => openFile(path)}
+          >
             {clipDiffLine(diffFileName(path))}
           </Button>
         ) : (

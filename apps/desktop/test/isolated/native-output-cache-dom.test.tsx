@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import type { OutputFileSummary } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode, useRef } from 'react';
 import { NativeOutputDisplayVersions } from '../../electron/output-display-versions';
@@ -67,6 +68,9 @@ test('shared output views refresh only affected windows and retire revoked or re
     fail = false;
   let content = 'old';
   let pendingReplacement: Promise<void> | undefined;
+  let pendingOldDelivery: Promise<void> | undefined;
+  let showNextTurn = false;
+  let receivedOldDelivery = false;
   let freeze = false,
     showCold = true;
   let retainedView: ReactNode;
@@ -88,27 +92,44 @@ test('shared output views refresh only affected windows and retire revoked or re
         return { kind: 'outputs.sources', scope: request.scope, sources };
       }
       if (request.method === 'outputs.query') {
-        const name = `${owner}-${request.scope.sessionId}-${content}.txt`;
+        const run = request.runId ?? 'run';
+        const file = (ownerRunId: string, fileId: string, name: string): OutputFileSummary => ({
+          storeId: request.scope.storeId,
+          sessionId: request.scope.sessionId,
+          ownerRunId,
+          fileId,
+          locator: { kind: 'delivery', key: `delivery/1/${ownerRunId}/${fileId}` },
+          name,
+          size: '1',
+          mediaType: 'text/plain',
+          publishedAt: '2026-11-16T00:00:00Z',
+        });
+        const items = [
+          file(
+            run,
+            run === 'next-run' ? 'next' : 'file',
+            run === 'next-run'
+              ? '新轮输出.txt'
+              : `${owner}-${request.scope.sessionId}-${content}.txt`,
+          ),
+        ];
+        const hasLateDelivery =
+          request.scope.sessionId === 'a' && run === 'run' && receivedOldDelivery;
+        if (hasLateDelivery) {
+          items.push(file('run', 'late', '旧轮迟到输出.txt'));
+          if (request.runId === 'run' && pendingOldDelivery) await pendingOldDelivery;
+        }
+        if (showNextTurn && !request.runId && request.scope.sessionId === 'a') {
+          items.push(file('next-run', 'next', '新轮输出.txt'));
+        }
         if (pendingReplacement) await pendingReplacement;
         return {
           kind: 'outputs.page',
           page: {
             scope: request.scope,
-            revision: '1',
+            revision: hasLateDelivery ? '2' : '1',
             collections: [],
-            items: [
-              {
-                storeId: request.scope.storeId,
-                sessionId: request.scope.sessionId,
-                ownerRunId: request.runId ?? 'run',
-                fileId: 'file',
-                locator: { kind: 'delivery', key: 'delivery/1/producer/file' },
-                name,
-                size: '1',
-                mediaType: 'text/plain',
-                publishedAt: '2026-11-16T00:00:00Z',
-              },
-            ],
+            items,
           },
         };
       }
@@ -148,6 +169,11 @@ test('shared output views refresh only affected windows and retire revoked or re
           <Entry kind="child">
             {outputs.renderChildTurnOutputs('a-child', { turnId: turn('a-child', 'child-run') })}
           </Entry>
+          {showNextTurn && (
+            <section data-next-turn="">
+              {outputs.renderTurnOutputs({ turnId: turn(session, 'next-run') })}
+            </section>
+          )}
           {showCold && (
             <Entry kind="cold">
               {outputs.renderTurnOutputs({ turnId: turn(session, 'cold') })}
@@ -352,6 +378,64 @@ test('shared output views refresh only affected windows and retire revoked or re
       generation++;
     });
     await replaceScope(() => versions.reset());
+    // Keep two mounted turns while the older delivery's exact read is in flight.
+    const oldTurn = document.querySelector('[data-turn]')!;
+    const oldCard = oldTurn.querySelector('.output-file-card')!;
+    const oldFile = oldCard.querySelector<HTMLButtonElement>('[aria-label^="预览"]')!;
+    await act(async () => oldFile.focus());
+    expect(document.activeElement).toBe(oldFile);
+    const queryRunIds = (since: number) =>
+      calls
+        .slice(since)
+        .flatMap((request) =>
+          request.method === 'outputs.query' && request.scope.sessionId === 'a' && request.runId
+            ? [request.runId]
+            : [],
+        );
+    const beforeNext = calls.length;
+    versions.changed({ ...sessionChange('a'), type: 'run.started', objectId: 'next-run' });
+    await render('a');
+    expect(queryRunIds(beforeNext)).toEqual([]);
+    expect(oldTurn.querySelector('.output-file-card')).toBe(oldCard);
+    showNextTurn = true;
+    versions.changed({ ...sessionChange('a'), type: 'run.finished', objectId: 'next-run' });
+    await render('a');
+    expect(queryRunIds(beforeNext)).toEqual(['next-run']);
+    const nextTurn = document.querySelector('[data-next-turn]')!;
+    const nextCard = nextTurn.querySelector('.output-file-card')!;
+    expect(nextCard.textContent).toContain('新轮输出');
+    expect(oldTurn.querySelector('.output-file-card')).toBe(oldCard);
+    expect(document.activeElement).toBe(oldFile);
+
+    const beforeLate = calls.length;
+    const delivery = Promise.withResolvers<void>();
+    pendingOldDelivery = delivery.promise;
+    receivedOldDelivery = true;
+    versions.changed({
+      ...sessionChange('a'),
+      type: 'extension.record_updated',
+      objectId: 'builtin.files/delivery/1/run/late',
+      payload: { outputRunId: 'run' },
+    });
+    try {
+      await render('a');
+      expect(queryRunIds(beforeLate)).toEqual(['run']);
+      expect(oldTurn.querySelectorAll('.output-file-card')).toHaveLength(1);
+      expect(oldTurn.querySelector('.output-file-card')).toBe(oldCard);
+      expect(nextTurn.querySelector('.output-file-card')).toBe(nextCard);
+      expect(document.activeElement).toBe(oldFile);
+    } finally {
+      pendingOldDelivery = undefined;
+      await act(async () => delivery.resolve());
+    }
+    const oldCards = oldTurn.querySelectorAll('.output-file-card');
+    expect(oldCards).toHaveLength(2);
+    expect(oldCards[0]).toBe(oldCard);
+    expect(oldCards[1]?.textContent).toContain('旧轮迟到输出');
+    expect(nextTurn.querySelectorAll('.output-file-card')).toHaveLength(1);
+    expect(nextTurn.querySelector('.output-file-card')).toBe(nextCard);
+    expect(document.activeElement).toBe(oldFile);
+    expect(queryRunIds(beforeLate)).toEqual(['run']);
     expect(calls.every((r) => r.method === 'outputs.sources' || r.method === 'outputs.query')).toBe(
       true,
     );

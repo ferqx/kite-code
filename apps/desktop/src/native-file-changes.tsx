@@ -27,6 +27,7 @@ function ChangeDetail({
   disclosure,
   child = false,
   openFile,
+  fileOpenBlocked,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -36,6 +37,7 @@ function ChangeDetail({
   disclosure?: { open: boolean; cache: NativeDisplayCache<NativeFileChangeDetail> };
   child?: boolean;
   openFile?: (path: string) => void;
+  fileOpenBlocked?: boolean;
 }) {
   const conversationReadActive = useConversationReadActive();
   const readActive = !disclosure || (disclosure.open && conversationReadActive);
@@ -162,6 +164,7 @@ function ChangeDetail({
             <Button
               className="file-diff-path file-link"
               title={entry.path}
+              readOnly={fileOpenBlocked}
               onClick={() => openFile(entry.path!)}
             >
               {entry.path.split(/[/\\]/).at(-1) || entry.path}
@@ -197,7 +200,12 @@ function ChangeDetail({
   return (
     <>
       {!inlineEdit && entry.path && entry.openable && (
-        <Button className="file-link" disabled={opening} onClick={() => void open()}>
+        <Button
+          className="file-link"
+          disabled={opening}
+          readOnly={fileOpenBlocked}
+          onClick={() => void open()}
+        >
           打开当前文件：{entry.path}
         </Button>
       )}
@@ -251,6 +259,7 @@ function ChangeDetail({
               scope="operation"
               inline={inlineEdit}
               openFile={openFile}
+              fileOpenBlocked={fileOpenBlocked}
             />
           )}
         </>
@@ -292,6 +301,7 @@ export function NativeOperationDiff({
   cache: NativeDisplayCache<NativeFileChangeDetail>;
   child?: boolean;
   openFile?: (path: string) => void;
+  fileOpenBlocked?: boolean;
 }) {
   return <ChangeDetail {...props} view="diff" disclosure={{ open, cache }} />;
 }

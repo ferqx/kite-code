@@ -15,6 +15,7 @@ export type NativeToolRenderer = NonNullable<
 type Options = {
   tools: readonly NativeToolMessageFact[];
   retainedFact: (message: DesktopMessage) => NativeToolMessageFact | undefined;
+  retainsLiveRow?: (message: DesktopMessage) => boolean;
   targets?: readonly NativeFileChange[];
   liveTools: ReturnType<typeof liveToolMessages>;
   executionUnconfirmed: boolean;
@@ -35,6 +36,7 @@ type Options = {
     openFile?: (path: string) => void,
   ) => ReactNode;
   openFileForTarget?: (entry: NativeFileChange) => ((path: string) => void) | undefined;
+  fileOpenBlockedForTarget?: (entry: NativeFileChange) => boolean;
 };
 
 export function renderNativeToolGroup(
@@ -183,7 +185,8 @@ export function renderNativeToolGroup(
         (model) =>
           !displayTools.some((entry) => entry.messageId === model.id) &&
           !displayTargets.some((entry) => entry.messageId === model.id) &&
-          !options.liveTools.some((entry) => entry.message.id === model.id),
+          !options.liveTools.some((entry) => entry.message.id === model.id) &&
+          !options.retainsLiveRow?.(model),
       )
       .map((model) => model.id),
   );
@@ -330,6 +333,13 @@ export function renderNativeToolGroup(
           ((model) => {
             const target = displayTargets.find((entry) => entry.messageId === model.id);
             return target && options.openFileForTarget?.(target);
+          })
+        }
+        fileOpenBlockedForMessage={
+          options.fileOpenBlockedForTarget &&
+          ((model) => {
+            const target = displayTargets.find((entry) => entry.messageId === model.id);
+            return !!target && !!options.fileOpenBlockedForTarget?.(target);
           })
         }
       />

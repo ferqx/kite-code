@@ -962,10 +962,12 @@ function ShellOutput({
 export function ToolRow({
   message,
   openFile,
+  fileOpenBlocked,
   label,
 }: {
   message: Message;
   openFile?: (path: string) => void;
+  fileOpenBlocked?: boolean;
   label?: string;
   showReadFailure?: boolean;
 }) {
@@ -990,7 +992,11 @@ export function ToolRow({
             {target && (
               <span className="tool-step-target" title={target}>
                 {file && openFile ? (
-                  <Button className="file-link" onClick={() => openFile(target)}>
+                  <Button
+                    className="file-link"
+                    readOnly={fileOpenBlocked}
+                    onClick={() => openFile(target)}
+                  >
                     {target}
                   </Button>
                 ) : (
@@ -1050,6 +1056,7 @@ export function ToolActivity({
   onToggle,
   openFile,
   openFileForMessage,
+  fileOpenBlockedForMessage,
   renderChildren,
   receiptDetails,
   renderItem,
@@ -1086,6 +1093,8 @@ export function ToolActivity({
   onToggle: (open: boolean) => void;
   openFile?: (path: string) => void;
   openFileForMessage?: (message: Message) => ((path: string) => void) | undefined;
+  /** Temporary read admission does not change the verified file target's presentation. */
+  fileOpenBlockedForMessage?: (message: Message) => boolean;
   /** Confirmed receipt replaces generic raw output; only invoke when the owning tool is expanded. */
   receiptDetails?: (message: Message) => (() => ReactNode) | undefined;
   renderChildren: (toolCallId: string, expanded: boolean, messageId: string) => ReactNode;
@@ -1117,6 +1126,7 @@ export function ToolActivity({
   const [approvalFocused, setApprovalFocused] = useState(false);
   const message = messages[0]!;
   const messageOpenFile = openFileForMessage ? openFileForMessage(message) : openFile;
+  const fileOpenBlocked = fileOpenBlockedForMessage?.(message);
   let ask = message.ask;
   if (!ask && message.toolName === 'ask_user' && message.toolResult?.stdout) {
     try {
@@ -1434,7 +1444,12 @@ export function ToolActivity({
             </Button>
           </div>
         ) : read && !itemIssue ? (
-          <ToolRow message={message} openFile={messageOpenFile} label={ownSummaryTitle} />
+          <ToolRow
+            message={message}
+            openFile={messageOpenFile}
+            fileOpenBlocked={fileOpenBlocked}
+            label={ownSummaryTitle}
+          />
         ) : edit && !itemIssue ? (
           <TraceLine
             asChild
@@ -1466,6 +1481,7 @@ export function ToolActivity({
                       <Button
                         className="file-link"
                         title={target}
+                        readOnly={fileOpenBlocked}
                         onClick={() => messageOpenFile(target)}
                       >
                         {target}
@@ -1526,6 +1542,7 @@ export function ToolActivity({
                                   openFile={
                                     openFileForMessage ? openFileForMessage(item) : openFile
                                   }
+                                  fileOpenBlocked={fileOpenBlockedForMessage?.(item)}
                                 />
                               ) : (
                                 <ToolActivity
@@ -1539,6 +1556,7 @@ export function ToolActivity({
                                   parentDisclosureOpen={open && parentDisclosureOpen}
                                   openFile={openFile}
                                   openFileForMessage={openFileForMessage}
+                                  fileOpenBlockedForMessage={fileOpenBlockedForMessage}
                                   childDetail={childDetailForMessage?.(item)}
                                   receiptDetails={receiptDetails}
                                   renderChildren={renderChildren}
@@ -1581,6 +1599,7 @@ export function ToolActivity({
                         path={target}
                         inline={inlineEdit}
                         openFile={messageOpenFile}
+                        fileOpenBlocked={fileOpenBlocked}
                       />
                     ))}
                   {ask && (

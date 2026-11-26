@@ -5,10 +5,12 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium, type Locator, type Page } from 'playwright';
 import { build } from 'vite';
+import { countHistoryRenders, verifyHistoryIsolation } from './history-isolation-browser.fixture';
 import { promptText } from './prompt-editor-text.fixture';
 import type {} from './prompt-send-browser.fixture';
 
 const directory = import.meta.dir;
+const historyIsolation = process.argv.includes('--history-isolation');
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'prompt-send-browser-'));
@@ -21,7 +23,7 @@ if (!existing)
     root: path.dirname(directory),
     configFile: false,
     envFile: false,
-    plugins: [react(), tailwindcss()],
+    plugins: [...(historyIsolation ? [countHistoryRenders()] : []), react(), tailwindcss()],
     base: './',
     logLevel: 'error',
     define: { __KITE_DESKTOP_TEST_DIAGNOSTICS__: 'false', 'process.env.NODE_ENV': '"production"' },
@@ -58,7 +60,7 @@ console.log(JSON.stringify({ url: server.url.toString(), artifact }));
 if (process.argv.includes('--serve')) await new Promise(() => {});
 const browser = await chromium.launch({
   headless: !process.argv.includes('--observe'),
-  channel: 'chrome',
+  ...(process.argv.includes('--bundled-chromium') ? {} : { channel: 'chrome' }),
   chromiumSandbox: true,
 });
 if (process.argv.includes('--observe')) {
@@ -415,6 +417,8 @@ async function verifyMarkdownEdges(theme: 'light' | 'dark', width: number) {
 
 async function verifySendFeedback(theme: 'light' | 'dark', width: number) {
   const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme });
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript((theme) => localStorage.setItem('kite.desktop.theme', theme), theme);
   const alert = page.locator('.native-toast-card');
   const input = page.locator('textarea.prompt-editor');
@@ -427,9 +431,11 @@ async function verifySendFeedback(theme: 'light' | 'dark', width: number) {
     await input.waitFor();
     const source = `# 长消息\n\n${'需要完整保留的正文。\n\n'.repeat(25)}`;
     await input.fill(source);
-    await input.press('Enter');
+    if (width === 1280) await input.press('Enter');
+    else await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
     await loading.waitFor();
     await page.getByRole('button', { name: '展开用户消息', exact: true }).waitFor();
+    assert.equal(await promptText(input), '', 'the visible sending message leaves an empty editor');
     assert.equal(await alert.count(), 0);
     await page.getByRole('button', { name: '结果未知', exact: true }).click();
     await alert.waitFor();
@@ -464,6 +470,26 @@ async function verifySendFeedback(theme: 'light' | 'dark', width: number) {
     assert.equal(await page.evaluate(() => window.promptSendFixture.posts.length), 1);
 
     await page.setViewportSize({ width, height: 1000 });
+    const failed = '已有会话发送被拒绝';
+    await input.fill(failed);
+    await input.press('Enter');
+    await loading.waitFor();
+    await page.locator('.message.user.sending').waitFor();
+    assert.equal(await promptText(input), '');
+    await page.evaluate(() => window.promptSendFixture.reject());
+    await alert.waitFor();
+    assert.equal(await promptText(input), failed);
+    assert.equal(await page.locator('.message.user').count(), 1);
+    assert.equal(await loading.count(), 0);
+
+    await input.press('Enter');
+    await loading.waitFor();
+    await page.keyboard.insertText('等待期间输入的新草稿');
+    await page.evaluate(() => window.promptSendFixture.reject());
+    await alert.waitFor();
+    assert.equal(await promptText(input), '等待期间输入的新草稿');
+    assert.equal(await page.locator('.message.user').count(), 1);
+
     await page.getByRole('button', { name: '新对话', exact: true }).click();
     await page.locator('[data-model-trigger]').click();
     await page
@@ -501,14 +527,17 @@ async function verifySendFeedback(theme: 'light' | 'dark', width: number) {
     await page.getByRole('button', { name: 'Session B', exact: true }).click();
     await alert.waitFor({ state: 'detached' });
     assert.equal(await transcriptNotices.count(), 0);
-    assert.equal(await page.evaluate(() => window.promptSendFixture.posts.length), 2);
+    assert.equal(await page.evaluate(() => window.promptSendFixture.posts.length), 4);
+    assert.deepEqual(errors, []);
   } finally {
     await page.close();
   }
-  return { receiptUnconfirmed: true, firstRejectionDuringSelection: true };
+  return { receiptUnconfirmed: true, existingRejection: true, firstRejectionDuringSelection: true };
 }
 async function verifySendingInput(theme: 'light' | 'dark', width: number) {
   const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme });
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await page.addInitScript((theme) => localStorage.setItem('kite.desktop.theme', theme), theme);
   const observations = [];
   try {
@@ -537,7 +566,11 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
       await input.fill(source);
       await page.locator('.composer-action:not([disabled])').waitFor();
       await input.press('End');
-      await page.waitForTimeout(150);
+      await input.evaluate(async (element) => {
+        const form = element.closest('form')!;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await Promise.all(form.getAnimations().map((animation) => animation.finished));
+      });
       await page.evaluate(() => {
         const original = document.querySelector<HTMLTextAreaElement>('textarea.prompt-editor')!;
         const state = { observing: true, frames: [] as unknown[] };
@@ -550,6 +583,7 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
           state.frames.push({
             same: input === original,
             value: input.value,
+            submittedVisible: !!document.querySelector('.message.user.sending'),
             disabled: input.disabled,
             readOnly: input.readOnly,
             focused: document.activeElement === input,
@@ -567,9 +601,13 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
       const beforePosts = await page.evaluate(() => window.promptSendFixture.posts.length);
       await input.press('Enter');
       await page.locator('.composer-action[aria-busy="true"]').waitFor();
+      await page.locator('.message.user.sending').waitFor();
+      assert.equal(await promptText(input), '');
       assert.equal(await input.isEnabled(), true);
       assert.equal(await input.getAttribute('readonly'), null);
-      await input.press('Control+a');
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
       await page.keyboard.insertText(next);
       await input.press('Enter');
       await page.evaluate(() =>
@@ -604,6 +642,7 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
               frames: {
                 same: boolean;
                 value: string;
+                submittedVisible: boolean;
                 disabled: boolean;
                 readOnly: boolean;
                 focused: boolean;
@@ -625,6 +664,12 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
         JSON.stringify(frames, null, 2),
       );
       assert.ok(frames.length > 1);
+      const firstVisibleFrame = frames.find((frame) => frame.submittedVisible);
+      assert.equal(
+        firstVisibleFrame?.value,
+        '',
+        'the first visible sending frame clears the draft',
+      );
       assert.ok(
         frames.every(
           (frame) =>
@@ -666,11 +711,14 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
         }),
         next,
       );
+      // Saved history can arrive before the submission promise resolves.
+      await page.evaluate(() => window.promptSendFixture.save());
+      await page.locator('.message.user[data-message-id^="saved-"]').nth(1).waitFor();
+      assert.equal(await promptText(input), '');
       await page.evaluate(() => window.promptSendFixture.accept());
       await page.waitForFunction(
         () => document.querySelector<HTMLTextAreaElement>('textarea.prompt-editor')?.value === '',
       );
-      await page.evaluate(() => window.promptSendFixture.save());
       await page.evaluate(() => window.promptSendFixture.reply());
       await page.locator('.composer-action:not([aria-busy])').waitFor();
       assert.equal(
@@ -679,16 +727,31 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
       );
       observations.push({ first, frames });
     }
+    await page.reload();
+    await page.getByRole('button', { name: 'Session A', exact: true }).click();
+    await page.locator('.message.user[data-message-id^="saved-"]').nth(1).waitFor();
+    assert.equal(await page.locator('.message.user').count(), 2);
+    const restored = page.locator('textarea.prompt-editor:not([readonly])');
+    await restored.waitFor();
+    assert.equal(await promptText(restored), '');
+    assert.equal(await page.evaluate(() => window.promptSendFixture.posts.length), 4);
+    assert.deepEqual(errors, []);
   } finally {
     await page.close();
   }
   return observations;
 }
-try {
+async function verifyPromptScenarios() {
   for (const theme of ['light', 'dark'] as const)
     for (const width of [1280, 800]) {
       if (process.argv.includes('--feedback-only')) {
         cases.push({ theme, width, ...(await verifySendFeedback(theme, width)) });
+        continue;
+      }
+      if (process.argv.includes('--sending-only')) {
+        const inputSending = await verifySendingInput(theme, width);
+        const sendFeedback = await verifySendFeedback(theme, width);
+        cases.push({ theme, width, inputSending, sendFeedback });
         continue;
       }
       const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme });
@@ -1018,6 +1081,16 @@ try {
     JSON.stringify({ browser: browser.version(), cases }, null, 2),
   );
   console.log(JSON.stringify({ passed: cases.length, artifact }));
+}
+try {
+  if (historyIsolation)
+    console.log(
+      JSON.stringify({
+        ...(await verifyHistoryIsolation(browser, server.url, artifact)),
+        artifact,
+      }),
+    );
+  else await verifyPromptScenarios();
 } finally {
   await browser.close();
   server.stop(true);

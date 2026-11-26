@@ -30,11 +30,13 @@
 
 上一轮[独立边界回归](isolated/scripts/unified-agent-boundary.test.ts)整文件实际20项通过、1项失败：本机 Windows 在创建文件符号链接时返回 `EPERM`，沙箱外重试相同，尚未进入该例的链接拒绝断言。该轮边界实现与测试文件未修改，未加平台 skip 或放宽链接判断；静态 pre-release architecture／API 检查已通过，不将此结果记为完整边界回归或三平台资格。
 
-## 侧栏显隐浏览器回归
+## 桌面浏览器回归
 
 [侧栏回归](../apps/desktop/test/isolated/sidebar-actions-browser.test.ts)由默认 `bun run test` 和 Required unit 收集，在独立进程中以 `NODE_ENV=production` 构建实际 Native 页面及生产 CSS。它沿[既有浏览器夹具](../apps/desktop/test/session-shell-browser-runner.fixture.ts)的 `--sidebar-actions` 分支检查深浅主题的标题按钮常驻与样式一致、发送逐帧显隐、添加空间等待与取消、DOM 保留、键盘／菜单及触屏；按钮最高优先级透明度的变异也不能使父容器中的隐藏操作显现。没有浏览器时测试失败，不静默跳过。
 
 本机可使用已安装的 Google Chrome；安装了当前锁定 Playwright 配套 Chromium 时自动优先使用它。Required unit 使用 `bun apps/desktop/node_modules/playwright/cli.js install --with-deps chromium` 准备配套浏览器，通过固定的 `PLAYWRIGHT_BROWSERS_PATH` 供安装与隔离 HOME 下的测试共同读取。定向命令为 `bun test apps/desktop/test/isolated/sidebar-actions-browser.test.ts`；纯 DOM 测试继续核原事件、菜单和节点合同，不替代此处的真实 CSS 绘制断言。该夹具使用隔离 bridge，不调用模型、原生目录选择器或用户数据，也不代表完整安装窗口资格。
+
+[会话交互 E2E](e2e/README.md#桌面会话交互)也由默认计划和 Required unit 收集，覆盖提示词发送的首帧清空、思维链工具回执接管时的图标和折叠行稳定性，以及新轮次更新时的历史消息与附件渲染隔离。
 
 ## 质量作业冷安装与边界缓存
 

@@ -67,12 +67,16 @@ function retainChildDisplay(next: NativeBackgroundChild, previous?: NativeBackgr
   const sameOutputs =
     modelOutputs.length === previous.modelOutputs.length &&
     modelOutputs.every((entry, index) => entry === previous.modelOutputs[index]);
+  const previousMessages = new Map(previous.messages.map((message) => [message.id, message]));
+  const messages = next.messages.map((message) => {
+    const prior = previousMessages.get(message.id);
+    return prior && (message === prior || JSON.stringify(message) === JSON.stringify(prior))
+      ? prior
+      : message;
+  });
   const sameMessages =
-    next.messages.length === previous.messages.length &&
-    next.messages.every((message, index) => {
-      const prior = previous.messages[index];
-      return message === prior || JSON.stringify(message) === JSON.stringify(prior);
-    });
+    messages.length === previous.messages.length &&
+    messages.every((message, index) => message === previous.messages[index]);
   if (sameOutputs && sameMessages) {
     const { modelOutputs: _outputs, messages: _messages, afterSeq: _afterSeq, ...display } = next;
     const {
@@ -85,7 +89,7 @@ function retainChildDisplay(next: NativeBackgroundChild, previous?: NativeBackgr
   }
   return {
     ...next,
-    messages: sameMessages ? previous.messages : next.messages,
+    messages: sameMessages ? previous.messages : messages,
     modelOutputs: sameOutputs ? previous.modelOutputs : modelOutputs,
   };
 }

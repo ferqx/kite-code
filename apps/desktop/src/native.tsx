@@ -47,7 +47,11 @@ import {
   composeBrowserDraft,
 } from './browser-annotation-content';
 import { BrowserAnnotationDrafts } from './browser-annotation-drafts';
-import type { DesktopEditor, NativeFileChangeDetail } from './file-changes-bridge';
+import type {
+  DesktopEditor,
+  NativeFileChange,
+  NativeFileChangeDetail,
+} from './file-changes-bridge';
 import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
 import { NativeApproval } from './native-approval';
@@ -830,6 +834,11 @@ function NativeDesktopContent({
   const [, recoveryVisibilityChanged] = useState(0);
   const [pending, setPending] = useState(false);
   const [sending, setSending] = useState(false);
+  const [dispatchingInputDraft, setDispatchingInputDraft] = useState<{
+    key: string;
+    commandId: string;
+    draft: { content: string };
+  }>();
   const [firstSendProgress, setFirstSendProgress] = useState<{
     commandId: string;
     created?: true;
@@ -2647,6 +2656,7 @@ function NativeDesktopContent({
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     includeRead: true,
+    historyPending: historyState.phase !== 'complete' || !!selection?.viewLoading,
   });
   const submittedInteractionIds = JSON.stringify(
     (state?.selection?.interactions ?? [])
@@ -4475,6 +4485,9 @@ function NativeDesktopContent({
         sessionId,
         draft: submittedDraft,
       });
+      // Hide the exact submitted text in the same render as the sending bubble.
+      // Its draft still belongs to the original session until acceptance.
+      setDispatchingInputDraft({ key: draftKey, commandId, draft: submittedDraft });
       setInputDeliveries((previous) => {
         const predecessor = [...previous]
           .reverse()
@@ -4537,6 +4550,8 @@ function NativeDesktopContent({
           return next;
         });
         return;
+      } finally {
+        setDispatchingInputDraft(undefined);
       }
       setInputDeliveries((previous) => {
         const next = new Map(previous),
@@ -5275,6 +5290,7 @@ function NativeDesktopContent({
             bridge,
             key: JSON.stringify([state?.generation, directory?.storeId ?? selection?.storeId]),
           },
+          toolMessages.pendingMessageIds,
         );
     // Older saved inputs may identify their command only through the exact
     // local Run and sourceIds. Keep that proven alias across later refreshes.
@@ -5392,6 +5408,7 @@ function NativeDesktopContent({
     directory?.storeId,
     transcript.messages,
     toolMessages.entries,
+    toolMessages.pendingMessageIds,
     liveTools,
     pendingInputModels,
     inputDeliveries,
@@ -5405,9 +5422,9 @@ function NativeDesktopContent({
   ]);
   const pendingTraceToolTurns = toolMessages.loading ? new Set<string>() : undefined;
   if (pendingTraceToolTurns) {
-    const shown = new Set(messageModels.map((message) => message.id));
-    for (const { id, turnId } of transcript.messages) {
-      if (turnId && toolMessages.pendingMessageIds.has(id) && !shown.has(id))
+    const shown = new Set(messageModels.map(({ id, presentationKey }) => presentationKey ?? id));
+    for (const { id, turnId, presentationKey } of transcript.messages) {
+      if (turnId && toolMessages.pendingMessageIds.has(id) && !shown.has(presentationKey ?? id))
         pendingTraceToolTurns.add(turnId);
     }
   }
@@ -6439,6 +6456,61 @@ function NativeDesktopContent({
     selection && directory?.storeId === selection.storeId && !directory.unavailable
       ? directory.workspaces.find(({ id }) => id === selection.session.workspaceId)?.rootUri
       : undefined;
+  const messageReadAvailable =
+    !!selection &&
+    !selection.viewLoading &&
+    historyState.phase === 'complete' &&
+    !directory?.unavailable;
+  const fileTargetsById = new Map(fileTargets.entries.map((target) => [target.messageId, target]));
+  const displayedFileTargetsById = new Map(
+    fileTargets.displayEntries.map((target) => [target.messageId, target]),
+  );
+  const isVerifiedFileTarget = (target: NativeFileChange) => {
+    const current = fileTargetsById.get(target.messageId);
+    return current?.changeId === target.changeId && current.path === target.path;
+  };
+  const toolFileScope =
+    state &&
+    selection &&
+    JSON.stringify([
+      state.generation,
+      selection.storeId,
+      selection.session.id,
+      selection.session.workspaceId,
+      selection.viewSelection ?? selection.viewGeneration,
+      state.historyEpoch ?? 0,
+    ]);
+  const toolFileReadAvailable = messageReadAvailable && !selection?.permissionUnavailable;
+  const toolFileAccess = useRef<
+    | {
+        scope: string;
+        sessionId: string;
+        generation: number;
+        epoch: number;
+        nonce: number;
+        bridge: NativeBridge;
+        editor: DesktopEditor;
+        targets: ReadonlyMap<string, NativeFileChange>;
+      }
+    | undefined
+  >(undefined);
+  useLayoutEffect(() => {
+    toolFileAccess.current =
+      toolFileReadAvailable && toolFileScope && state && selection
+        ? {
+            scope: toolFileScope,
+            sessionId: selection.session.id,
+            generation: state.generation,
+            epoch: readLifecycle.current.epoch,
+            nonce: viewIntent.current,
+            bridge,
+            editor,
+            targets: fileTargetsById,
+          }
+        : undefined;
+  });
+  const terminalObserved = (message: Message) =>
+    modelOutputTerminalObserved(message, selection?.executions ?? [], runMessages.runs);
   const openNativeWebLink = (url: string) => {
     if (
       !state ||
@@ -6516,11 +6588,7 @@ function NativeDesktopContent({
   ): ReactNode => {
     const message = messagesById.get(model.id);
     const firstPending = firstVisible && !firstSaved && model.id === firstSubmission.commandId;
-    const openable =
-      !!selection &&
-      !selection.viewLoading &&
-      historyState.phase === 'complete' &&
-      !directory?.unavailable;
+    const openable = messageReadAvailable;
     if (message?.deferredText && selection && state) {
       if (model.shell || model.toolName === 'shell_execute') return null;
       return (
@@ -6638,11 +6706,7 @@ function NativeDesktopContent({
                 )
               : undefined
           }
-          terminalObserved={modelOutputTerminalObserved(
-            message,
-            selection.executions,
-            runMessages.runs,
-          )}
+          terminalObserved={terminalObserved(message)}
           canReadRestoredOrigin
           openFile={openFile}
           fileRootUri={messageFileRootUri}
@@ -6740,7 +6804,8 @@ function NativeDesktopContent({
     const rendered = renderNativeToolGroup(group, controls, {
       tools: toolMessages.entries,
       retainedFact: (model) => toolPresentation.current.retainedFact(model),
-      targets: fileTargets.entries,
+      retainsLiveRow: (model) => toolPresentation.current.retainsLiveRow(model),
+      targets: fileTargets.displayEntries,
       liveTools,
       executionUnconfirmed,
       observationUnavailable: !!(selection?.viewLoading || selection?.permissionUnavailable),
@@ -6834,35 +6899,120 @@ function NativeDesktopContent({
             entry={entry}
             openFile={openFile}
             editor={editor}
-            open={open}
+            open={open && isVerifiedFileTarget(entry)}
             cache={operationDiffs.current}
+            fileOpenBlocked={!toolFileReadAvailable || !isVerifiedFileTarget(entry)}
           />
         ) : null,
+      fileOpenBlockedForTarget: (target) => !toolFileReadAvailable || !isVerifiedFileTarget(target),
       openFileForTarget: (target) => {
-        if (
-          !selection ||
-          !state ||
-          selection.viewLoading ||
-          historyState.phase !== 'complete' ||
-          directory?.unavailable ||
-          !target?.openable ||
-          !target.path
-        )
-          return;
+        if (!toolFileScope || !target.openable || !target.path) return;
+        // A cached history row keeps its verified button through read transitions.
+        // Invoke only under the current scope and against the current verified target.
         return (path) => {
-          if (path !== target.path) return;
+          const access = toolFileAccess.current;
+          const current = access?.targets.get(target.messageId);
+          if (
+            !access ||
+            access.scope !== toolFileScope ||
+            access.bridge !== bridge ||
+            selected.current !== access.sessionId ||
+            !isCurrentRead(access.generation, access.epoch, access.nonce) ||
+            path !== target.path ||
+            current?.path !== target.path ||
+            current.changeId !== target.changeId ||
+            !current.openable
+          )
+            return;
           void report(() =>
-            bridge.request({
+            access.bridge.request({
               method: 'fileChanges.open',
-              generation: state.generation,
-              changeId: target.changeId,
-              editor,
+              generation: access.generation,
+              changeId: current.changeId,
+              editor: access.editor,
             }),
           );
         };
       },
     });
     return plan ? <div className="native-plan-review-message">{rendered}</div> : rendered;
+  };
+  const toolFactsById = new Map(toolMessages.entries.map((fact) => [fact.messageId, fact]));
+  const liveToolsById = new Map(liveTools.map((tool) => [tool.message.id, tool.execution]));
+  const historyEntryFacts: NonNullable<SessionPageProps['historyEntryFacts']> = (rows, turnId) => {
+    const planRun = turnId && planHistoryRuns.get(turnId);
+    return [
+      bridge,
+      replyDisplayScope,
+      imageDrafts.previews,
+      state?.historyEpoch,
+      selection?.viewSelection ?? selection?.viewGeneration,
+      selection?.session.workspaceId,
+      selection?.permissionUnavailable,
+      selection?.canReadModelOutput,
+      selection?.canReadWebSearchEvidence,
+      messageReadAvailable,
+      historyState.phase === 'unavailable',
+      preparing,
+      reasoningAccessEpoch,
+      messageFileRootUri,
+      editor,
+      ...rows.flatMap((row) => {
+        const original = messagesById.get(row.reasoningSource ?? row.id);
+        const facts: unknown[] = [original];
+        if (original && row.role === 'assistant') facts.push(terminalObserved(original));
+        if (original && row.reasoningSource)
+          facts.push(history.current?.inlineReasoningRevision(original));
+        if (row.role === 'tool') {
+          const tool = toolFactsById.get(row.id);
+          const live = liveToolsById.get(row.id);
+          const child = nativeAgentActivityForTool(environment.agentActivities, original, tool);
+          facts.push(
+            tool,
+            fileTargetsById.get(row.id),
+            displayedFileTargetsById.get(row.id),
+            toolMessages.pendingMessageIds.has(row.id),
+            toolPresentation.current.retainedFact(row),
+            toolPresentation.current.retainsLiveRow(row),
+            JSON.stringify(child?.childAgent),
+            child?.executionId,
+            child?.sessionId,
+            !!child && childReadAvailable,
+            JSON.stringify(live),
+            !!live && executionUnconfirmed,
+            !!live && !!(selection?.viewLoading || selection?.permissionUnavailable),
+          );
+          if (row.toolName === 'planning.review') {
+            const executionId = original?.sourceIds?.[0] ?? live?.id;
+            const carried = lastPlanDocument.current;
+            facts.push(
+              planReviewRows.get(row.presentationKey ?? ''),
+              carried?.executionId === executionId && carried?.scope === planDocumentScope
+                ? carried
+                : undefined,
+              state?.interactionSubmissions.find(
+                ({ interaction }) =>
+                  interaction.kind === 'plan_review' &&
+                  interaction.executionId === executionId &&
+                  interaction.runId ===
+                    (original?.originMessage?.runId ?? original?.runId ?? live?.runId) &&
+                  interaction.sessionId ===
+                    (original?.originMessage?.sessionId ??
+                      original?.sessionId ??
+                      live?.sessionId) &&
+                  interaction.originStoreId ===
+                    (original?.originMessage?.storeId ?? live?.originStoreId ?? selection?.storeId),
+              )?.interaction,
+            );
+          }
+        }
+        return facts;
+      }),
+      planRun,
+      planRun ? planProgress.read : undefined,
+      planRun ? planFocusScope : undefined,
+      ...(turnId ? outputFiles.turnOutputFacts(selection?.session.id, turnId) : []),
+    ];
   };
   const windowFrame = (content: ReactNode) =>
     nativeWindow ? (
@@ -6940,6 +7090,16 @@ function NativeDesktopContent({
       .some((note) => note.status !== 'ready') ||
     (firstSubmission?.creation.sessionId === selection.session.id &&
       firstSubmission.result?.phase === 'unknown');
+  function visibleComposerDraft(key: string, fallback: string) {
+    const snapshot = draftCache.current.get(key);
+    if (
+      dispatchingInputDraft?.key === key &&
+      snapshot === dispatchingInputDraft.draft &&
+      !(inputIssue?.id === dispatchingInputDraft.commandId && inputScopeKey === key)
+    )
+      return '';
+    return fallback;
+  }
   const sessionPage = (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
@@ -7052,6 +7212,7 @@ function NativeDesktopContent({
       renderMessageContent={renderNativeMessage}
       renderMessageAttachments={renderNativeAttachments}
       renderToolActivity={renderNativeTools}
+      historyEntryFacts={historyEntryFacts}
       traceTurns
       pendingTraceToolTurns={pendingTraceToolTurns}
       renderReasoning={(model, open) => {
@@ -7363,6 +7524,7 @@ function NativeDesktopContent({
           onTitleChange={onTitleChange}
           readingCache={childReadings.current}
           renderTurnOutputs={(turn) => outputFiles.renderChildTurnOutputs(sessionId, turn)}
+          turnOutputFacts={(turnId) => outputFiles.turnOutputFacts(sessionId, turnId, true)}
           writeClipboardText={window.kiteNative?.writeClipboardText}
         />
       )}
@@ -7630,9 +7792,11 @@ function NativeDesktopContent({
         cachedComposer
           ? {
               scopeKey: imageScope(cachedComposer.storeId, cachedComposer.sessionId),
-              draft:
+              draft: visibleComposerDraft(
+                imageScope(cachedComposer.storeId, cachedComposer.sessionId),
                 draftCache.current.get(imageScope(cachedComposer.storeId, cachedComposer.sessionId))
                   ?.content ?? cachedComposer.draft,
+              ),
               onChange: () => {},
               onSend: () => {},
               onCancel: () => {},
@@ -7804,7 +7968,10 @@ function NativeDesktopContent({
               }
             : canCompose && selection && state
               ? {
-                  draft,
+                  draft: visibleComposerDraft(
+                    imageScope(selection.storeId, selection.session.id),
+                    draft,
+                  ),
                   contextHasInput:
                     browserNotes.get(imageScope(selection.storeId, selection.session.id)).length >
                     0,
