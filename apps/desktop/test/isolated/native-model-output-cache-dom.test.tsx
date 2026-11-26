@@ -131,6 +131,8 @@ test('Native automatically renders the verified reply and retains exact copy DOM
   };
   const published: (string | undefined)[] = [],
     writes: string[] = [];
+  const bodyRead = Promise.withResolvers<ModelOutputSnapshot>();
+  let reads = 0;
   function Reply() {
     const [copy, setCopy] = useState<string>();
     return (
@@ -146,6 +148,7 @@ test('Native automatically renders the verified reply and retains exact copy DOM
             role: 'assistant',
             settled: true,
             finalReply: true,
+            createdAtMs: 1234567890000,
             text: 'PREVIEW',
             copyText: copy ?? null,
           },
@@ -157,7 +160,10 @@ test('Native automatically renders the verified reply and retains exact copy DOM
           <NativeModelOutputMessage
             message={message}
             storeId="store"
-            verifiedSnapshot={snapshot}
+            onRead={() => {
+              reads++;
+              return bodyRead.promise;
+            }}
             onContent={(text) => {
               published.push(text);
               setCopy(text);
@@ -186,16 +192,24 @@ test('Native automatically renders the verified reply and retains exact copy DOM
   };
   try {
     await render();
+    const button = host.querySelector<HTMLButtonElement>('.message-copy')!;
+    expect(button?.closest('footer')?.querySelector('time')).not.toBeNull();
+    expect(reads).toBe(1);
+    await act(async () => button.click());
+    expect(writes).toEqual(['']);
+    expect(reads).toBe(1);
+    await act(async () => bodyRead.resolve(snapshot));
+    expect(host.querySelector('.message-copy') === button).toBe(true);
     expect(host.querySelector('.model-output-message > button')).toBeNull();
     expect(host.querySelector('.model-output-message > p')).toBeNull();
-    const button = host.querySelector<HTMLButtonElement>('.message-copy')!;
     const codeButton = host.querySelector<HTMLButtonElement>(
       '[data-slot="code-block-copy-button"]',
     )!;
     expect(codeButton).not.toBeNull();
     const body = host.querySelector('.message-markdown p')!;
     await act(async () => button.click());
-    expect(writes).toEqual([content]);
+    expect(writes).toEqual(['', content]);
+    expect(reads).toBe(1);
     expect(button.getAttribute('data-copy-state')).toBe('copied');
     Object.defineProperty(dom.window.document, 'hidden', { configurable: true, value: true });
     await act(async () =>
@@ -213,17 +227,17 @@ test('Native automatically renders the verified reply and retains exact copy DOM
     expect(button.getAttribute('data-copy-state')).toBe('copied');
     await act(async () => button.click());
     await act(async () => codeButton.click());
-    expect(writes).toEqual([content]);
+    expect(writes).toEqual(['', content]);
     await render();
     expect(host.querySelector('.message-copy') === button).toBe(true);
     expect(published.at(-1)).toBe(content);
     await act(async () => codeButton.click());
-    expect(writes).toEqual([content, code]);
+    expect(writes).toEqual(['', content, code]);
     await render('b');
     await render('b', true, 'other-store');
     expect(published.at(-1)).toBeUndefined();
     await act(async () => codeButton.click());
-    expect(writes).toEqual([content, code]);
+    expect(writes).toEqual(['', content, code]);
   } finally {
     await act(async () => root.unmount());
     accounting.restore();

@@ -297,9 +297,18 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
   const fail = () =>
     act(async () => pending.at(-1)!.reject(Error('model_output_identity_mismatch')));
   try {
+    available = false;
+    await render();
+    expect(host.textContent).toBe('');
+    expect(reads).toBe(0);
+    available = true;
     await render();
     await fail();
-    expect(host.querySelector('[role="status"]')?.textContent).toContain('暂时无法读取思考内容');
+    expect(host.textContent).toBe('');
+    revision = 'empty';
+    await render();
+    await finish('');
+    expect(host.textContent).toBe('');
     open = false;
     await render();
     open = true;
@@ -340,6 +349,14 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
     await render();
     expect(reads).toBe(pausedReads);
     expect(host.textContent).toBe(verified);
+
+    // A trace can be rebuilt before the streamed body gets a complete revision.
+    mounted++;
+    revision = 'same-source-new-revision';
+    await render();
+    expect(reads).toBe(pausedReads);
+    expect(host.textContent).toBe(verified);
+    expect(host.querySelector('[role="status"]')).toBeNull();
 
     active = true;
     available = true;
@@ -391,6 +408,20 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
     await render();
     expect(reads).toBe(finalReads + 4);
     expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
+    await finish('VERIFIED_FINAL_REASONING');
+
+    active = false;
+    available = false;
+    mounted++;
+    revision = 'same-source-complete-revision-changed';
+    await render();
+    expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
+    expect(reads).toBe(finalReads + 4);
+    active = true;
+    available = true;
+    await render();
+    expect(reads).toBe(finalReads + 5);
+    expect(host.textContent).toBe('VERIFIED_FINAL_REASONING');
     const revokedRead = pending.at(-1)!;
     authorized = false;
     await render();
@@ -401,7 +432,7 @@ test('verified reasoning survives a read epoch without reviving revoked, unrelat
     authorized = true;
     await render();
     expect(host.textContent).toBe('');
-    expect(reads).toBe(finalReads + 5);
+    expect(reads).toBe(finalReads + 6);
     await finish('NEWLY_VERIFIED_AFTER_CAPABILITY_RESTORED');
     expect(host.textContent).toBe('NEWLY_VERIFIED_AFTER_CAPABILITY_RESTORED');
 

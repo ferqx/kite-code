@@ -186,13 +186,14 @@ test('child automatically shows the verified body and rejected replacement revok
     expect(
       f.host.querySelector('[data-slot="code-block-copy-button"]')?.getAttribute('aria-disabled'),
     ).toBe('true');
-    expect(f.host.querySelector('.message-copy') === null).toBe(true);
+    await f.click('复制本轮Agent回复');
+    expect(f.writes).toEqual([code, '']);
     await act(async () => oldCode.click());
-    expect(f.writes).toEqual([code]);
+    expect(f.writes).toEqual([code, '']);
     await f.render(facts);
     await f.click('复制代码');
     await f.click('复制本轮Agent回复');
-    expect(f.writes).toEqual([code, code, content]);
+    expect(f.writes).toEqual([code, '', code, content]);
   }));
 
 test('child pause preserves disabled copy feedback and code DOM, and resuming keeps automatic body copy accurate', async () =>
@@ -247,9 +248,9 @@ test('child copy eligibility does not survive a rejected replacement snapshot or
       expect(
         f.host.querySelector('[data-slot="code-block-copy-button"]')?.getAttribute('aria-disabled'),
       ).toBe('true');
-      expect(f.host.querySelector('.message-copy') === null).toBe(true);
+      await f.click('复制本轮Agent回复');
     }
-    expect(f.writes).toEqual([]);
+    expect(f.writes).toEqual(['', '', '', '']);
   }));
 
 test('valid child, store, generation and execution replacements retire old controls and publish only the new body', async () =>

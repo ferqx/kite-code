@@ -11,7 +11,7 @@ export const CodeCopyEligibilityContext = createContext(true);
 
 /** Exact-text clipboard feedback shared by messages and code blocks. */
 export function useTextCopy(
-  text: string,
+  text: string | undefined,
   writeClipboardText?: (text: string) => Promise<void>,
   disabled = false,
 ) {
@@ -63,7 +63,7 @@ export function useTextCopy(
   const copyMessage = useCallback(async () => {
     if (
       !mounted.current ||
-      !text ||
+      text === undefined ||
       current.current.disabled ||
       current.current.writer !== writer ||
       current.current.text !== text

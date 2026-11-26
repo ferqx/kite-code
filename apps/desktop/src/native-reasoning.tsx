@@ -11,6 +11,7 @@ import { prepareNativeMarkdown } from './native-markdown';
 export type NativeReasoningBody = {
   text: string;
   prepared?: PreparedDesktopMarkdown;
+  revision?: string;
   readEpoch?: number;
 };
 
@@ -65,11 +66,11 @@ export function renderNativeReasoning({
   return (
     <NativeReasoning
       key={key}
+      bodyKey={key}
       cache={cache}
       open={open}
       settled={original.status === 'complete' && (original.outputBody?.complete ?? true)}
       revision={JSON.stringify([
-        key,
         original.status,
         original.outputBody?.complete,
         original.outputBody?.reasoningBytes,
@@ -83,6 +84,7 @@ export function renderNativeReasoning({
 
 /** The trace requests only the public reasoning text and closes an in-flight read on disclosure. */
 export function NativeReasoning({
+  bodyKey,
   open,
   revision,
   readEpoch,
@@ -90,6 +92,7 @@ export function NativeReasoning({
   read,
   cache,
 }: {
+  bodyKey: string;
   open: boolean;
   revision: string;
   readEpoch?: number;
@@ -101,11 +104,10 @@ export function NativeReasoning({
   const reader = useRef(read);
   reader.current = read;
   const available = !!read;
-  const [result, setResult] = useState<{ body?: NativeReasoningBody; failed?: boolean }>(() => ({
-    body: settled ? cache.get(revision) : undefined,
-  }));
-  const displayed = useRef(result.body);
-  displayed.current = result.body;
+  // Presentation survives regrouping and revision changes. A cache hit alone grants no read.
+  const [body, setBody] = useState(() => cache.get(bodyKey));
+  const displayed = useRef(body);
+  displayed.current = body;
   const reading = useRef<{
     signal: AbortSignal;
     busy: boolean;
@@ -121,7 +123,7 @@ export function NativeReasoning({
       controller.abort();
       reading.current = undefined;
     };
-  }, [open, readActive, available, cache, readEpoch]);
+  }, [open, readActive, available, bodyKey, cache, readEpoch]);
   useEffect(() => {
     const current = reading.current;
     if (!open || !current) return;
@@ -129,25 +131,15 @@ export function NativeReasoning({
     if (current.busy) return;
     current.busy = true;
     const { signal } = current;
-    const failed = () => {
-      if (!signal.aborted)
-        setResult((previous) =>
-          signal.aborted || previous.body || previous.failed ? previous : { failed: true },
-        );
-    };
     async function readVersion(target: { revision: string; settled: boolean }) {
-      const cached = target.settled ? cache.get(target.revision) : undefined;
-      if (cached && (!displayed.current || cached.readEpoch === readEpoch)) {
-        if (displayed.current?.text !== cached.text) setResult({ body: cached });
-        if (cached.readEpoch === readEpoch) return;
-      }
+      const cached = target.settled ? cache.get(bodyKey) : undefined;
+      if (cached?.revision === target.revision && cached.readEpoch === readEpoch) return;
       if (!readActive || !available) return;
       const text = await reader.current?.(signal);
-      if (text === undefined || signal.aborted) return;
-      if (!text) return failed();
+      if (!text || signal.aborted) return;
       const previous = displayed.current;
       if (previous?.text === text) {
-        if (target.settled) cache.set(target.revision, { ...previous, readEpoch });
+        cache.set(bodyKey, { ...previous, revision: target.revision, readEpoch });
         return;
       }
       const prepared =
@@ -155,31 +147,20 @@ export function NativeReasoning({
           ? await prepareNativeMarkdown(text, signal).catch(() => undefined)
           : undefined;
       if (signal.aborted) return;
-      const body = { text, prepared, readEpoch };
-      if (target.settled) cache.set(target.revision, body);
+      const next = { text, prepared, revision: target.revision, readEpoch };
+      cache.set(bodyKey, next);
       startTransition(() =>
-        setResult((previous) =>
-          signal.aborted || previous.body?.text === text ? previous : { body },
-        ),
+        setBody((previous) => (signal.aborted || previous?.text === text ? previous : next)),
       );
     }
     void (async () => {
       while (current.next && !signal.aborted) {
         const target = current.next;
         current.next = undefined;
-        await readVersion(target).catch(failed);
+        await readVersion(target).catch(() => undefined);
       }
       current.busy = false;
     })();
-  }, [open, readActive, available, cache, revision, readEpoch, settled]);
-  return (
-    <>
-      {result.body?.text && (
-        <MessageContent text={result.body.text} prepared={result.body.prepared} />
-      )}
-      {open && !result.body && (!available || result.failed) && (
-        <p role="status">暂时无法读取思考内容，重新展开可重试。</p>
-      )}
-    </>
-  );
+  }, [open, readActive, available, bodyKey, cache, revision, readEpoch, settled]);
+  return body?.text ? <MessageContent text={body.text} prepared={body.prepared} /> : null;
 }

@@ -220,7 +220,18 @@ test('actual Conversation copies only original settled user and host-confirmed f
     expect(defaultFooterMessage()?.getAttribute('data-message-id')).toBe('a2');
     await render(messages);
     expect(defaultFooterMessage()?.getAttribute('data-message-id')).toBe('preview');
-    expect(defaultFooterMessage()?.querySelector('.message-copy')).toBeNull();
+    const preview = defaultFooterMessage()!;
+    const previewCopy = preview.querySelector<HTMLButtonElement>('.message-copy')!;
+    expect(previewCopy.getAttribute('aria-label')).toBe('复制本轮Agent回复');
+    expect(preview.querySelector('.message-time')).not.toBeNull();
+    await click(previewCopy);
+    expect(writes).toEqual(['']);
+    await render([...messages.slice(0, -1), { ...messages.at(-1)!, copyText: '原始完整回复' }]);
+    expect(defaultFooterMessage()?.querySelector('.message-copy') === previewCopy).toBe(true);
+    await click(previewCopy);
+    expect(writes).toEqual(['', '原始完整回复']);
+    await render(messages);
+    writes.length = 0;
     const time = host.querySelector('.message.user time')!;
     expect(time.getAttribute('datetime')).toBe(new Date(1234567890000).toISOString());
     expect(time.getAttribute('title')).toContain('2009年');
@@ -236,9 +247,10 @@ test('actual Conversation copies only original settled user and host-confirmed f
       intermediate.dispatchEvent(new dom.window.FocusEvent('focusin', { bubbles: true }));
     });
     expect(intermediate.querySelector('.message-meta') === null).toBe(true);
-    expect(buttons()).toHaveLength(2);
+    expect(buttons()).toHaveLength(3);
     expect(buttons().map((button) => button.getAttribute('aria-label'))).toEqual([
       '复制本轮用户消息',
+      '复制本轮Agent回复',
       '复制本轮Agent回复',
     ]);
     await click(buttons()[0]!);

@@ -275,12 +275,14 @@ test('actual Conversation exposes code copy only for its verified final copy and
   try {
     for (const state of ['streaming', 'unverified'] as const) {
       await render(state);
-      expect(button()).toBeNull();
+      expect(button()?.disabled).toBe(true);
+      await act(async () => button()?.click());
+      expect(calls).toEqual([]);
     }
     await render('preview');
     const pre = host.querySelector('pre')!;
     expect(pre.querySelector('code')!.textContent).toBe('const original = "漢字🙂";\n');
-    expect(button()).toBeNull();
+    expect(button()?.disabled).toBe(true);
     await render('verified');
     expect(host.querySelector('pre')).toBe(pre);
     const oldButton = button()!;
@@ -288,7 +290,7 @@ test('actual Conversation exposes code copy only for its verified final copy and
     await act(async () => oldButton.click());
     expect(calls).toEqual(['const original = "漢字🙂";\n']);
     await render('preview');
-    expect(button()).toBeNull();
+    expect(button()?.disabled).toBe(true);
     expect(host.querySelector('pre')).toBe(pre);
     await act(async () => {
       oldButton.click();

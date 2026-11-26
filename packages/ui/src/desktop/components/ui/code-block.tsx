@@ -93,7 +93,11 @@ function CodeBlockCopyButton({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button> & { value: string; contentLabel?: string }) {
-  const { copyState, copyMessage, readActive } = useTextCopy(value, undefined, props.disabled);
+  const { copyState, copyMessage, readActive } = useTextCopy(
+    value || undefined,
+    undefined,
+    props.disabled,
+  );
   const label =
     copyState === 'copied'
       ? `已复制${contentLabel}`

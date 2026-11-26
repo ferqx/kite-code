@@ -6893,13 +6893,15 @@ function NativeDesktopContent({
       renderFileChange: (entry, open, openFile) =>
         state ? (
           <NativeOperationDiff
-            key={entry.changeId}
+            scope={replyDisplayScope}
+            receipt={messagesById.get(entry.messageId)}
             bridge={bridge}
             generation={state.generation}
             entry={entry}
             openFile={openFile}
             editor={editor}
-            open={open && isVerifiedFileTarget(entry)}
+            open={open}
+            readAvailable={toolFileReadAvailable && isVerifiedFileTarget(entry)}
             cache={operationDiffs.current}
             fileOpenBlocked={!toolFileReadAvailable || !isVerifiedFileTarget(entry)}
           />

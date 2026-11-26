@@ -1067,6 +1067,98 @@ try {
           `${phase}: an adjacent collapsed row reversed direction during the animation`,
         );
       }
+
+      await page.reload();
+      await page.getByRole('button', { name: 'Session A', exact: true }).click();
+      await page.evaluate(() => {
+        const fixture = window.liveAggregationFixture;
+        fixture.startNativeShell('execute-live');
+        fixture.phaseNativeShell('execute-live', 'running');
+        fixture.settleNativeShell('execute-live');
+      });
+      const standalone = page.locator('.conversation-trace .shell-activity > button').first();
+      await standalone.getByText('已运行', { exact: true }).waitFor();
+      await standalone.click();
+      const output = page
+        .locator('.shell-output')
+        .filter({ hasText: 'Native execute-live 原输出' });
+      await output.waitFor({ state: 'visible' });
+      const continuity = await page.evaluateHandle(
+        (toolBody) => {
+          const frames: {
+            phase: string | undefined;
+            toolIntact: boolean;
+            reasoningIntact: boolean;
+            warning: boolean;
+          }[] = [];
+          const originalOutput = toolBody.textContent;
+          const state = { running: true, frames, thought: null as Element | null };
+          const sample = () => {
+            if (!state.running) return;
+            frames.push({
+              phase: window.liveAggregationPhase,
+              toolIntact: toolBody.isConnected && toolBody.textContent === originalOutput,
+              reasoningIntact:
+                !state.thought ||
+                (state.thought.isConnected && state.thought.textContent === '原思考正文。'),
+              warning: !!document
+                .querySelector('.conversation-viewport')
+                ?.textContent?.includes('暂时无法读取思考内容'),
+            });
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+          return state;
+        },
+        (await output.elementHandle())!,
+      );
+      await page.evaluate(() => window.liveAggregationFixture.model('motion-thought', 'reasoning'));
+      const thought = page.locator('.conversation-reasoning > button').first();
+      await thought.click();
+      const firstParagraph = page.getByText('原思考正文。', { exact: true });
+      await firstParagraph.waitFor({ state: 'visible' });
+      await continuity.evaluate(
+        (state, original) => {
+          state.thought = original;
+        },
+        (await firstParagraph.elementHandle())!,
+      );
+      await stage('motion-reasoning-read-held', async () => {
+        const fixture = window.liveAggregationFixture;
+        fixture.holdModelOutput();
+        await fixture.model('motion-thought', 'reasoning-complete');
+        fixture.startNativeShell('execute');
+        fixture.phaseNativeShell('execute', 'running');
+      });
+      await page.waitForFunction(() => window.liveAggregationFixture.modelOutputPending() > 0);
+      await page.locator('.shell-activity [data-status="running"]').first().waitFor();
+      const continuityFrames = await continuity.evaluate((state) => {
+        state.running = false;
+        return state.frames;
+      });
+      assert.ok(
+        continuityFrames.filter(({ phase }) => phase === 'motion-reasoning-read-held').length > 2,
+      );
+      assert.ok(
+        continuityFrames.every(
+          ({ toolIntact, reasoningIntact, warning }) => toolIntact && reasoningIntact && !warning,
+        ),
+        `open content briefly changed: ${JSON.stringify(
+          continuityFrames
+            .filter((frame) => !frame.toolIntact || !frame.reasoningIntact || frame.warning)
+            .slice(0, 5),
+        )}`,
+      );
+      await stage('motion-reasoning-read-resumed', () =>
+        window.liveAggregationFixture.releaseModelOutput(),
+      );
+      await page.getByText('已核对后续记录。', { exact: true }).waitFor();
+      await output.waitFor({ state: 'visible' });
+      await Bun.write(
+        path.join(artifact, `${label}-open-content-motion.json`),
+        JSON.stringify(continuityFrames),
+      );
+      assert.deepEqual(errors, []);
       await page.close();
       continue;
     }

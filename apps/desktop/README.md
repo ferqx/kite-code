@@ -93,7 +93,7 @@ Excel 网格按设备像素对齐共享边界，绘制和虚拟测量使用相�
 
 已显示的历史轮次按自身消息和读权限复用展示。父会话及子详情向共享 Conversation 提供准确的原消息、工具回执和文件读取条件，产出列表按其所属 Run、子来源和版本更新。旧文件的操作仍沿当前准入核验。[会话交互浏览器回归](test/isolated/conversation-interactions-browser.test.ts)从发送、持久消息接管、流式分段观察到结束，核对旧消息、工具和附件的 React 执行次数、节点身份、阅读位置及请求次数，并验证迟到产物只补进原轮次。
 
-已核实的工具文件路径在历史重扫和权限撤销期间沿用原按钮与图标，通过共享只读门禁暂停操作并保持外观。打开前按原会话、读取范围与文件目标再次核对。[历史轮次浏览器回归](test/history-isolation-browser.fixture.ts)分别暂停新观察范围的完整历史重扫及后续文件目标读取，再模拟准入撤销，核对各阶段的按钮、图标、样式、尺寸和打开请求。[产出缓存 DOM 回归](test/isolated/native-output-cache-dom.test.tsx)在下一轮开始、迟到交付读取挂起和追加期间核对两轮文件卡、预览按钮焦点及各轮的读取次数。
+已核实的工具文件路径在历史重扫和权限撤销期间沿用原按钮与图标，通过共享只读门禁暂停操作并保持外观。已展开的文件差异沿原工具回执和会话身份保留正文及界面状态。重扫后，差异重新核对和打开文件都使用当前已验证的 `changeId`。[历史轮次浏览器回归](test/history-isolation-browser.fixture.ts)分别暂停完整历史重扫、文件目标读取及新标识下的差异读取，再模拟准入撤销，核对原按钮、图标、已展开差异的节点和正文，以及打开请求。[产出缓存 DOM 回归](test/isolated/native-output-cache-dom.test.tsx)在下一轮开始、迟到交付读取挂起和追加期间核对两轮文件卡、预览按钮焦点及各轮的读取次数。
 
 2026-11-26 Windows 源码 Desktop／配套 Service 用 Codex `gpt-6-luna`／`medium` 冷启动重开含两份实际 Markdown 交付的会话。下一轮经过本地占位接管、完整历史基线重扫、文件目标重新核对、真实 Files 读取与回复结束。在 2,296 个采样帧中，三个旧工具按钮与图标和两张旧产出卡保持原节点，阅读位置及其行位置最大位移 0 CSS px。迟到交付另由上述受控用例覆盖。记录位于本机 `.cache/conversation-powershell-evidence-20261126/post-delivery-summary.json`。
 
@@ -743,7 +743,7 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，无
 
 ## 原消息复制与标题栏缩放
 
-冷开已结束的会话时，[Native](src/native.tsx)仅对最新一条待核实的普通最终回复请求首屏等待。正文不超过 64 KiB 且原读取准入已具备时，[SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)沿现有加载指示最多等待 250 ms，原正文读取器保持挂载并按同一身份读取。完整正文和复制资格就绪即展示历史及输入区，超时先展示已有历史。缓存回切和已展示页面保持当前阅读。
+冷开已结束的会话时，[Native](src/native.tsx)仅对最新一条待核实的普通最终回复请求首屏等待。正文不超过 64 KiB 且原读取准入已具备时，[SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)沿现有加载指示最多等待 250 ms，原正文读取器保持挂载并按同一身份读取。正文就绪即展示历史及输入区，超时先展示已有历史。缓存回切和已展示页面保持当前阅读。
 
 Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。Windows／Linux 的沉浸式窗口顶栏单独占32px，内容区从 y=32px 开始；Mica 会话面板另按下文圆角留白内缩。macOS 将原生窗口按钮与48px业务 header 整合，内容区从 y=0 开始，不再额外保留32px空行。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:17}`，与业务 header 垂直居中。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
 
@@ -1245,7 +1245,7 @@ Native 主会话由 [desktopTranscript](src/native-transcript.ts)投影准确 Ru
 
 [思考详情](src/native-reasoning.tsx)仅在手动展开时读取原消息的公开模型输出，沿 [Main 的模型输出租约](electron/model-output-reads.ts) 核对原 Store、会话、Run、Execution 和正文完整性。切换或收起结束当前读取；已显示的同源思考在短暂校准期间保留。思考正文复用回复正文的 `MessageContent` 排版。首次读取在正文就绪后启动收展动画，较长正文的 Markdown 解析复用后台 worker。已完成且核实的正文按原消息和版本缓存在有界展示缓存中。断线推进的历史 epoch 只重启读取，不再改变同一连接／Store／Session／Run／Execution 的思考显示身份；当前展开的已核正文在离线及重连校准期间保留，恢复后重新读取，不能借展示缓存恢复操作资格。明确移除模型输出读取能力时，顶层同时清正文缓存并更新会话树作用域，折叠、后台页和正在加载的保留树也不能在能力恢复后复活旧正文；连接／Store 边界另清缓存。这是能力移除的防御性失效，不表示新增动态主体 ACL。[思考 DOM 回归](test/isolated/native-reasoning-dom.test.tsx)覆盖流式、同源 epoch 重核、终态缓存、迟到响应、准确身份切换及能力移除时的两层缓存失效。2026-11-16，macOS／Electron44.3，基线 `73f26b48` 加此修复的隔离 Main／Renderer／配对 Service、SQLite 与本地合成模型流在首思考展开时物理断开 Main→Service：修前已读113字符被不可读提示替换约787ms，恢复边界另有一帧空正文；修后649帧原展开节点与顶部位置保持，无空正文或替换提示，离线113字符完整保留，重连补齐。原 Run／Command、唯一 `run.start`、3次 Model／3次工具及正常退出重启后的零重发均核对；草稿与暖历史保持。原红证据和候选 `kite-native-reasoning-recovery73candidate-C79FFN` 的 JSON／原图保留在本机测试临时根，窗口证据由真实渲染器捕获，不是远端真实模型、OS合成画面或跨平台资格。新增 DOM 整文件8项151断言通过。工具摘要按已核实的动作归纳，文件新建由原 `builtin.files` 结果确认，Shell 详情继续调用原 `ShellOutput`。只读子详情继续使用既有流程。
 
-上述普通 Electron 窗口回归在思维链运行时同时展开已完成的文件读取结果和已经读到的思考。后续工具启动、结算、元数据延迟和接管期间，44 帧渲染采样和 11 次 DOM 变动检查中，原结果节点、思考正文、开合状态、选中文字和焦点均保持。之后继续手动开合，并核对轮次完成及重载。思考的显示身份取原消息、来源及正文版本。同源补读失败或返回空正文时保留已核实内容，读取到相同正文时沿用原渲染节点。首次读取失败继续提供原重试反馈。[思考 DOM 回归](test/isolated/native-reasoning-dom.test.tsx)覆盖读回失败及恢复路径。
+上述普通 Electron 窗口回归在思维链运行时同时展开已完成的文件读取结果和已经读到的思考。后续工具启动、结算、元数据延迟和接管期间，44 帧渲染采样和 11 次 DOM 变动检查中，原结果节点、思考正文、开合状态、选中文字和焦点均保持。之后继续手动开合，并核对轮次完成及重载。已核实的流式和完成正文按原消息及模型执行身份放入有界展示缓存。正文版本和读取代次用于决定是否重读，权限撤回沿原边界清除展示。同源补读失败或返回空正文时保留已核实内容，首次正文缺失时留空。[思考 DOM 回归](test/isolated/native-reasoning-dom.test.tsx)覆盖流式及完成版本变化时的重挂、冷读结果为空、撤权和迟到响应。
 
 2026-11-25，Windows x64 隔离开发窗口使用本地受控模型核对单条思考。公开正文展开时，标题从「思考中」原位切到「已思考」，思考与回复各显示一次，原展开、草稿、输入焦点和滚动位置保持。核对手动收起、切回及冷重开后展开至正文完整可见。两次窗口正常退出，全程一次模型请求。阶段截图与 27 条状态变化保存在本机 `.cache/reasoning-status-window-b0370ec9/`。多步链及执行状态待核实的标题由[共享 UI 回归](../../packages/ui/test/desktop-reasoning-turns.test.tsx)覆盖。
 
@@ -1267,7 +1267,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 没有 `outputBody` 的普通历史正文按 generation／viewSelection／Store／Session／Message 的 inline 身份保持组件，不因 epoch 重新挂载相同 Markdown；当前文件回调有无仍随核验状态变化。带 `outputBody` 的组件保原 epoch key，完整读取、关闭、换 scope 的撤销仍沿原边界；inline／body 分支切换同样重新挂载。共享正文身份仅按原八项字段 memo，任一字段变更仍清理原已读结果，不以展示组件保持借用旧全文或动作许可。
 
-只有已确认 completed 且非活动 Run 的最后一条完整、支持格式、无工具调用且后面无工具结果的助手消息才成为最终回复。原起止时间与终态供原组件显示耗时／失败／停止；无法核对时保原消息，活动视图失效显示“上次确认状态”，不补造成功或计时。最终回复资格与正式 Web 共用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts)；Native 显式选择 `copyScope=final`，保[桌面手册](../../docs/handbook/clients/desktop/README.md)只复制完整最终回复、不含同轮工具前说明的合同，Web 整轮范围不扩到 Native。大正文预览的 `copyText=null`；仅最终段原 reader 已验证并显示的准确正文启用“复制本轮Agent回复”，关闭正文、换消息身份或换scope即撤销。本地 Map 只持有当前已显示内容，不写持久日志或格式。
+只有已确认 completed 且非活动 Run 的最后一条完整、支持格式、无工具调用且后面无工具结果的助手消息才成为最终回复。原起止时间与终态供原组件显示耗时／失败／停止；无法核对时保原消息，活动视图失效显示“上次确认状态”，不补造成功或计时。最终回复资格与正式 Web 共用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts)；Native 显式选择 `copyScope=final`，只投影最终回复的原文。消息级复制按钮随最终回复的信息栏显示，点击时借用正文渲染已有的准确值。大正文尚未取得时 `copyText=null`，此时点击写入空字符串。复制按钮不发正文读取请求。关闭正文或换消息身份会清除已持有的正文值，换 scope 撤销旧回调。本地 Map 只持有当前已显示内容，不写持久日志或格式。
 
 同一准确 Run 中相邻、已核实的 Files read2/3/4、glob2、search2/3、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
 

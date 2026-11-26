@@ -89,6 +89,30 @@ async function verifyOldFileTargetThroughRescan(page: Page, oldTurn: Locator) {
   assert.equal(initial.disabled, false);
   assert.equal(initial.readGated, false);
   assert.equal(initial.businessDisabled, false);
+  await oldTurn.locator('button.tool-diff-toggle').click();
+  const diff = oldTurn.locator('.file-diff[data-inline="true"]');
+  const line = diff.getByText('修改后的正文', { exact: true });
+  await line.waitFor({ state: 'visible' });
+  const retainedDiff = await diff.evaluateHandle((node) => {
+    const text = node.textContent;
+    const frames: boolean[] = [];
+    let changes = 0;
+    let frame: number;
+    const observer = new MutationObserver((records) => (changes += records.length));
+    observer.observe(node, { childList: true, subtree: true });
+    const sample = () => {
+      frames.push(node.isConnected && node.textContent === text);
+      frame = requestAnimationFrame(sample);
+    };
+    frame = requestAnimationFrame(sample);
+    return {
+      stop: () => {
+        cancelAnimationFrame(frame);
+        observer.disconnect();
+        return { frames, changes };
+      },
+    };
+  });
   const editor = page.locator('textarea.prompt-editor');
   await editor.fill('下一轮触发历史重新核对');
   await editor.press('Enter');
@@ -105,6 +129,9 @@ async function verifyOldFileTargetThroughRescan(page: Page, oldTurn: Locator) {
     return probe.state();
   });
   assert.deepEqual(blocked, { ...initial, disabled: true, readGated: true });
+  assert.deepEqual(await page.evaluate(() => window.promptSendFixture.diffReads), [
+    'target-old-tool-edit',
+  ]);
   await target.evaluate((button) => (button as HTMLButtonElement).click());
   assert.deepEqual(await page.evaluate(() => window.promptSendFixture.targetOpens), [
     'target-old-tool-1',
@@ -118,6 +145,9 @@ async function verifyOldFileTargetThroughRescan(page: Page, oldTurn: Locator) {
     return probe.state();
   });
   assert.deepEqual(metadataPending, blocked);
+  assert.deepEqual(await page.evaluate(() => window.promptSendFixture.diffReads), [
+    'target-old-tool-edit',
+  ]);
   await target.evaluate((button) => (button as HTMLButtonElement).click());
   assert.deepEqual(await page.evaluate(() => window.promptSendFixture.targetOpens), [
     'target-old-tool-1',
@@ -131,6 +161,13 @@ async function verifyOldFileTargetThroughRescan(page: Page, oldTurn: Locator) {
   ]);
   const restored = await retained.evaluate((probe) => probe.state());
   assert.deepEqual(restored, initial);
+  await page.waitForFunction(() => window.promptSendFixture.diffReads?.length === 2);
+  await line.waitFor({ state: 'visible' });
+  assert.deepEqual(await page.evaluate(() => window.promptSendFixture.diffReads), [
+    'target-old-tool-edit',
+    'target-old-tool-edit-1',
+  ]);
+  await page.evaluate(() => window.promptSendFixture.releaseDiff!());
   await page.evaluate(() => window.promptSendFixture.setHistoricalFileReadRevoked(true));
   await oldTurn.locator('button.file-link:disabled', { hasText: '原档-1.md' }).waitFor();
   const revoked = await retained.evaluate((probe) => probe.state());
@@ -141,7 +178,11 @@ async function verifyOldFileTargetThroughRescan(page: Page, oldTurn: Locator) {
     'target-old-tool-1-1',
   ]);
   await retained.evaluate((probe) => probe.stop());
-  return { initial, blocked, metadataPending, restored, revoked };
+  const diffFrames = await retainedDiff.evaluate((probe) => probe.stop());
+  assert.ok(diffFrames.frames.length > 3);
+  assert.ok(diffFrames.frames.every(Boolean), 'the opened file diff briefly disappeared');
+  assert.equal(diffFrames.changes, 0, 'the opened file diff replaced its content nodes');
+  return { initial, blocked, metadataPending, restored, revoked, diffFrames };
 }
 
 export async function verifyHistoryIsolation(browser: Browser, url: URL, artifact: string) {
@@ -170,6 +211,8 @@ export async function verifyHistoryIsolation(browser: Browser, url: URL, artifac
       const disclosure = oldTurn.locator('button.agent-turn-summary');
       if ((await disclosure.getAttribute('aria-expanded')) === 'false') await disclosure.click();
       await oldTurn.locator('.conversation-trace-process').waitFor();
+      const group = oldTurn.locator('.conversation-trace > button.conversation-trace-trigger');
+      if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
       await oldTurn.getByRole('button', { name: '原档-1.md', exact: true }).waitFor();
       await oldTurn.evaluate(async (element) => {
         const animations = element.getAnimations({ subtree: true });

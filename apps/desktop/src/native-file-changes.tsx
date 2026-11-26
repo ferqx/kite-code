@@ -34,19 +34,25 @@ function ChangeDetail({
   entry: NativeFileChange;
   editor: DesktopEditor;
   view?: 'diff' | 'snapshot';
-  disclosure?: { open: boolean; cache: NativeDisplayCache<NativeFileChangeDetail> };
+  disclosure?: {
+    open: boolean;
+    readAvailable?: boolean;
+    key: string;
+    cache: NativeDisplayCache<NativeFileChangeDetail>;
+  };
   child?: boolean;
   openFile?: (path: string) => void;
   fileOpenBlocked?: boolean;
 }) {
   const conversationReadActive = useConversationReadActive();
-  const readActive = !disclosure || (disclosure.open && conversationReadActive);
+  const readActive =
+    !disclosure ||
+    (disclosure.open && conversationReadActive && disclosure.readAvailable !== false);
   const diffCache = disclosure?.cache;
   const inlineEdit = !!disclosure && (entry.operation === 'edit' || entry.operation === 'write');
-  // Main issues a fresh change ID whenever it verifies a file target for a new scope.
-  const cacheKey = JSON.stringify([generation, entry.changeId]);
+  const cacheKey = disclosure?.key ?? '';
   const [body, setBody] = useState<NativeFileChangeDetail | undefined>(() =>
-    readActive && entry.preview === 'available' ? diffCache?.get(cacheKey) : undefined,
+    entry.preview === 'available' ? diffCache?.get(cacheKey) : undefined,
   );
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
@@ -55,7 +61,7 @@ function ChangeDetail({
   useEffect(() => {
     if (!readActive || entry.preview === 'unavailable') return;
     const cached = diffCache?.get(cacheKey);
-    if (cached) {
+    if (cached?.changeId === entry.changeId) {
       setBody(cached);
       return;
     }
@@ -73,7 +79,7 @@ function ChangeDetail({
         .catch(() => {});
     };
     setError('');
-    setBody(undefined);
+    if (!diffCache) setBody(undefined);
     const request = bridge.request(
       child
         ? {
@@ -156,6 +162,7 @@ function ChangeDetail({
       ? { toolResult: { ok: true, stdout: body.text, status: 'success' } as const }
       : {}),
   };
+  const displayError = disclosure && body?.text !== undefined ? '' : error;
   if (inlineEdit && body?.text === undefined) {
     return (
       <div className="file-diff" data-inline="true">
@@ -175,12 +182,12 @@ function ChangeDetail({
             </span>
           )}
         </div>
-        {error && (
+        {displayError && (
           <p className="file-diff-notice" role="alert">
-            {error}
+            {displayError}
           </p>
         )}
-        {error && entry.preview === 'available' && (
+        {displayError && entry.preview === 'available' && (
           <Button
             onClick={() => {
               diffCache?.delete(cacheKey);
@@ -190,13 +197,13 @@ function ChangeDetail({
             重新读取历史内容
           </Button>
         )}
-        {!error && (entry.preview === 'unavailable' || body) && (
+        {!displayError && (entry.preview === 'unavailable' || body) && (
           <p className="file-diff-notice">历史记录未保存可读差异，不会从当前文件内容重建。</p>
         )}
       </div>
     );
   }
-  if (disclosure && entry.preview === 'available' && !body && !error) return null;
+  if (disclosure && entry.preview === 'available' && !body && !displayError) return null;
   return (
     <>
       {!inlineEdit && entry.path && entry.openable && (
@@ -209,8 +216,8 @@ function ChangeDetail({
           打开当前文件：{entry.path}
         </Button>
       )}
-      {error && <p role="alert">{error}</p>}
-      {error && entry.preview === 'available' && (
+      {displayError && <p role="alert">{displayError}</p>}
+      {displayError && entry.preview === 'available' && (
         <Button
           onClick={() => {
             diffCache?.delete(cacheKey);
@@ -263,7 +270,7 @@ function ChangeDetail({
             />
           )}
         </>
-      ) : !disclosure && !error ? (
+      ) : !disclosure && !displayError ? (
         <p role="status">正在读取本次{view === 'diff' ? '差异' : '历史版本'}…</p>
       ) : null}
     </>
@@ -289,21 +296,56 @@ export function NativeOutputFile(props: {
 
 /** Mounted only by the confirmed tool's expanded disclosure. */
 export function NativeOperationDiff({
+  scope,
+  receipt,
   open,
+  readAvailable,
   cache,
   ...props
 }: {
+  scope?: string;
+  receipt?: Message;
   bridge: NativeBridge;
   generation: number;
   entry: NativeFileChange;
   editor: DesktopEditor;
   open: boolean;
+  readAvailable?: boolean;
   cache: NativeDisplayCache<NativeFileChangeDetail>;
   child?: boolean;
   openFile?: (path: string) => void;
   fileOpenBlocked?: boolean;
 }) {
-  return <ChangeDetail {...props} view="diff" disclosure={{ open, cache }} />;
+  // The receipt owns display; changeId is a current observation used only for requests.
+  const key = JSON.stringify(
+    receipt && scope !== undefined
+      ? [
+          scope,
+          receipt.id,
+          receipt.sessionId,
+          receipt.seq,
+          receipt.runId,
+          receipt.originMessage,
+          receipt.sourceIds,
+          receipt.toolCallId,
+          receipt.status,
+          receipt.contentFormat,
+          receipt.deferredText?.sha256,
+          receipt.content,
+          props.entry.path,
+          props.entry.operation,
+          props.entry.preview,
+        ]
+      : [props.generation, props.entry.changeId],
+  );
+  return (
+    <ChangeDetail
+      key={key}
+      {...props}
+      view="diff"
+      disclosure={{ open, readAvailable, cache, key }}
+    />
+  );
 }
 
 /** Original FileChanges presentation; metadata scans and expanded bodies own only GETs. */

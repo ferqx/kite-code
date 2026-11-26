@@ -270,7 +270,7 @@ test('a single Agent wait in the current trace opens directly to its result', ()
   }
 });
 
-test('a new multi-step trace stays closed and restores the previously open tool on demand', async () => {
+test('an open standalone tool keeps its detail when a new step joins the trace', async () => {
   await withConversationRoot(async (host, root) => {
     const later: Message = {
       id: 'later',
@@ -330,14 +330,14 @@ test('a new multi-step trace stays closed and restores the previously open tool 
       const groupToggle = trace.querySelector<HTMLButtonElement>(
         ':scope > .conversation-trace-trigger',
       )!;
-      expect(groupToggle.getAttribute('aria-expanded')).toBe('false');
-      expect(trace.querySelectorAll('.conversation-trace-steps').length).toBe(0);
-      expect(trace.querySelectorAll('.tool-activity').length).toBe(0);
-      await act(async () => groupToggle.click());
+      expect(groupToggle.getAttribute('aria-expanded')).toBe('true');
       expect(trace.querySelectorAll('.conversation-trace-steps > .tool-activity')).toHaveLength(2);
       const firstTool = trace.querySelector('.conversation-trace-steps > .tool-activity')!;
       const firstToggle = firstTool.querySelector('button[aria-expanded]')!;
       const firstDetail = firstTool.querySelector('.tool-activity-content')!;
+      expect(firstTool === tool).toBe(true);
+      expect(firstToggle === toggle).toBe(true);
+      expect(firstDetail === detail).toBe(true);
       expect(firstToggle.getAttribute('aria-expanded')).toBe('true');
       expect(firstDetail.textContent).toContain(output);
       await draw([earlier, { ...later, status: 'completed', settled: true }]);

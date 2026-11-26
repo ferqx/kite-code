@@ -282,7 +282,8 @@ export function NativeChildDetail({
       renderFileChange: bridge
         ? (entry, open, openFile) => (
             <NativeOperationDiff
-              key={entry.changeId}
+              scope={readingKey}
+              receipt={originals.get(entry.messageId)}
               bridge={bridge}
               generation={generation}
               entry={entry}

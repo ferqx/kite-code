@@ -101,14 +101,20 @@ const bridge: NativeBridge = {
               .map((id) => ({
                 messageId: id,
                 changeId: observation ? `target-${id}-${observation}` : `target-${id}`,
-                path: `原档-${id.slice('old-tool-'.length)}.md`,
-                operation: 'read' as const,
-                preview: 'unavailable' as const,
+                ...(id === 'old-tool-edit'
+                  ? { path: '原差异.md', operation: 'edit' as const, preview: 'available' as const }
+                  : {
+                      path: `原档-${id.slice('old-tool-'.length)}.md`,
+                      operation: 'read' as const,
+                      preview: 'unavailable' as const,
+                    }),
                 openable: true,
               })),
           };
         return result;
       }
+      if (request.method === 'fileChanges.detail')
+        return historyIsolation.readDiff(request.changeId);
       if (request.method === 'fileChanges.open') {
         historyIsolation.targetOpens.push(request.changeId);
         return null;
@@ -128,11 +134,14 @@ const bridge: NativeBridge = {
               .map((messageId) => ({
                 messageId,
                 executionId: messageId.replace('old-tool', 'old-exe'),
-                definitionId: 'files.read',
-                definitionVersion: '4',
+                definitionId: messageId === 'old-tool-edit' ? 'files.edit' : 'files.read',
+                definitionVersion: messageId === 'old-tool-edit' ? '2' : '4',
                 status: 'succeeded' as const,
                 resultRevision: '1',
-                target: `原档-${messageId.slice('old-tool-'.length)}.md`,
+                target:
+                  messageId === 'old-tool-edit'
+                    ? '原差异.md'
+                    : `原档-${messageId.slice('old-tool-'.length)}.md`,
               })),
           };
         return result;
@@ -422,6 +431,8 @@ const control = {
   },
   outputQueries: historyIsolation?.queries,
   targetOpens: historyIsolation?.targetOpens,
+  diffReads: historyIsolation?.diffReads,
+  releaseDiff: historyIsolation?.releaseDiff,
   holdNextRescan: historyIsolation?.holdNextRescan,
   rescanStarted: historyIsolation?.rescanStarted,
   releaseRescan: historyIsolation?.releaseRescan,

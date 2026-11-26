@@ -142,6 +142,8 @@ async function settingsRequest(input?: NativeRequest, action?: string) {
 }
 const modelSnapshots = new Map<string, ModelOutputSnapshot>();
 const modelReaders = new Map<string, Uint8Array>();
+let holdModelOutput = false;
+const pendingModelOutputs: (() => void)[] = [];
 let historyHeld = false;
 const historyPending: (() => void)[] = [];
 const definitions = [
@@ -225,6 +227,7 @@ const bridge: NativeBridge = {
     if (request.method === 'modelOutput.open') {
       const snapshot = modelSnapshots.get(request.executionId);
       if (!snapshot) throw Error('fixture_model_snapshot_missing');
+      if (holdModelOutput) await new Promise<void>((resolve) => pendingModelOutputs.push(resolve));
       const wire = new TextEncoder().encode(JSON.stringify(snapshot));
       modelReaders.set(request.readId, wire);
       return {
@@ -497,8 +500,18 @@ export interface LiveAggregationFixture {
   finish(): void;
   model(
     id: string,
-    phase: 'empty' | 'empty-no-body' | 'tool-only' | 'body-preview-empty' | 'narration',
+    phase:
+      | 'empty'
+      | 'empty-no-body'
+      | 'tool-only'
+      | 'body-preview-empty'
+      | 'narration'
+      | 'reasoning'
+      | 'reasoning-complete',
   ): Promise<void>;
+  holdModelOutput(): void;
+  releaseModelOutput(): void;
+  modelOutputPending(): number;
   holdHistory(): void;
   releaseHistory(): void;
   historyPending(): number;
@@ -1248,22 +1261,32 @@ window.liveAggregationFixture = {
     };
   },
   async model(id, phase) {
-    const complete = phase === 'tool-only' || phase === 'narration';
+    const reasoningOnly = phase === 'reasoning' || phase === 'reasoning-complete';
+    const complete =
+      phase === 'tool-only' || phase === 'narration' || phase === 'reasoning-complete';
     const content =
       phase === 'body-preview-empty' || phase === 'narration' ? '接着核对下一组工具。' : '';
+    const reasoning =
+      phase === 'reasoning-complete'
+        ? '原思考正文。\n\n已核对后续记录。'
+        : phase === 'reasoning'
+          ? '原思考正文。'
+          : '';
+    const reasoningBytes = String(new TextEncoder().encode(reasoning).length);
     const output = {
       content,
-      reasoning: '',
+      reasoning,
       complete,
-      toolCalls: complete
-        ? [
-            {
-              id: 'call-2',
-              name: 'files.write',
-              arguments: '{"path":"src/output.ts","content":"fixture"}',
-            },
-          ]
-        : [],
+      toolCalls:
+        complete && !reasoningOnly
+          ? [
+              {
+                id: 'call-2',
+                name: 'files.write',
+                arguments: '{"path":"src/output.ts","content":"fixture"}',
+              },
+            ]
+          : [],
     };
     const bytes = new TextEncoder().encode(canonicalModelBody(output));
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
@@ -1284,7 +1307,7 @@ window.liveAggregationFixture = {
       bodyHash: hash,
       bodyBytes: String(bytes.length),
       contentBytes: String(new TextEncoder().encode(content).length),
-      reasoningBytes: '0',
+      reasoningBytes,
       snapshotCursor: '1',
       output,
     });
@@ -1297,8 +1320,9 @@ window.liveAggregationFixture = {
       role: 'assistant',
       status: complete ? 'complete' : 'incomplete',
       content: phase === 'narration' ? content : '',
-      firstOutput:
-        phase === 'tool-only' || phase === 'empty' || phase === 'empty-no-body'
+      firstOutput: reasoningOnly
+        ? 'reasoning'
+        : phase === 'tool-only' || phase === 'empty' || phase === 'empty-no-body'
           ? 'tool_calls'
           : 'content',
       sourceIds: [executionId],
@@ -1307,7 +1331,7 @@ window.liveAggregationFixture = {
         executionId,
         complete,
         contentBytes: String(new TextEncoder().encode(content).length),
-        reasoningBytes: '0',
+        reasoningBytes,
         toolCallCount: output.toolCalls.length,
       },
       ...(complete ? { toolCalls: output.toolCalls } : {}),
@@ -1317,6 +1341,14 @@ window.liveAggregationFixture = {
     else messages[previous] = message;
     control.publish();
   },
+  holdModelOutput() {
+    holdModelOutput = true;
+  },
+  releaseModelOutput() {
+    holdModelOutput = false;
+    for (const release of pendingModelOutputs.splice(0)) release();
+  },
+  modelOutputPending: () => pendingModelOutputs.length,
   add(index, recordCall) {
     add(index, recordCall);
     control.publish();

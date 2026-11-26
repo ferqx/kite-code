@@ -38,7 +38,7 @@ export interface Message {
   readonly turnFinishedAtMs?: number;
   /** A settled model response with no following tool calls is the Turn's final reply. */
   readonly finalReply?: boolean;
-  /** Verified copy body; null keeps a preview from being copied as a complete reply. */
+  /** Original copy body. Null marks a preview and copies an empty string at the final reply control. */
   readonly copyText?: string | null;
   /** Client-local delivery state used before the runtime projection owns the message. */
   readonly delivery?: 'sending' | 'failed' | 'unknown';

@@ -619,7 +619,7 @@ const MessageItem = memo(function MessageItem({
       </InitialTurnOutputPresentationContext>
       {hasMetadata && (
         <MessageMetadata replyId={latestReplyCandidate ? message.id : undefined}>
-          {copyText && (
+          {copyText !== undefined && (
             <MessageCopyButton
               text={copyText}
               copyRole={copyRole}
@@ -1146,7 +1146,7 @@ export function Conversation({
     const assistantTurnCopies = new Map(
       [...finalReplyByTurn.values()].map((message) => [
         message.id,
-        message.copyText === null ? undefined : (message.copyText ?? message.text),
+        message.copyText === null ? '' : (message.copyText ?? message.text),
       ]),
     );
     // Contiguous tools share one activity regardless of definition or result

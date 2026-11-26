@@ -12,9 +12,11 @@ export function historyIsolationFixture(
   const files: OutputFileSummary[] = [];
   const queries: (string | undefined)[] = [];
   const targetOpens: string[] = [];
+  const diffReads: string[] = [];
   let selectionOffset = 0;
   let rescan: { barrier: Promise<void>; release: () => void; started: boolean } | undefined;
   let targets: { barrier: Promise<void>; release: () => void; started: boolean } | undefined;
+  let newDiff: ReturnType<typeof Promise.withResolvers<void>> | undefined;
   const addFile = (runId: string, name: string) => {
     const fileId = `${runId}-${files.length}`;
     files.push({
@@ -88,6 +90,14 @@ export function historyIsolationFixture(
       toolCallId: `old-call-${index}`,
       content: JSON.stringify({ path: `原档-${index}.md`, content: `已读取旧文档 ${index}` }),
     });
+    if (index === 1)
+      row({
+        id: 'old-tool-edit',
+        role: 'tool',
+        sourceIds: ['old-exe-edit'],
+        toolCallId: 'old-call-edit',
+        content: JSON.stringify({ path: '原差异.md' }),
+      });
     row({
       id: `old-reply-${index}`,
       role: 'assistant',
@@ -100,6 +110,23 @@ export function historyIsolationFixture(
   return {
     queries,
     targetOpens,
+    diffReads,
+    releaseDiff() {
+      newDiff?.resolve();
+    },
+    async readDiff(changeId: string) {
+      if (changeId === 'target-old-tool-edit-1') {
+        newDiff ??= Promise.withResolvers<void>();
+        diffReads.push(changeId);
+        await newDiff.promise;
+      } else if (changeId === 'target-old-tool-edit') diffReads.push(changeId);
+      else throw Error('fixture_diff_wrong_observation');
+      return {
+        kind: 'fileChanges.detail' as const,
+        changeId,
+        text: '--- a/original.md\n+++ b/original.md\n@@ -1 +1 @@\n-修改前的正文\n+修改后的正文\n',
+      };
+    },
     selectionOffset: () => selectionOffset,
     holdNextRescan() {
       selectionOffset++;

@@ -2137,7 +2137,7 @@ test('a host-confirmed standalone message preserves process boundaries and one f
   }
 });
 
-test('the original final reply copies only the automatically verified body and a paused body revokes that copy', async () => {
+test('the final reply shows copy while its body loads and uses only the current original text', async () => {
   const f = fixture(),
     copied: string[] = [],
     content = '完整最终正文 雪🙂\r\nEND',
@@ -2220,19 +2220,23 @@ test('the original final reply copies only the automatically verified body and a
   }
   try {
     await act(async () => f.root.render(<Harness />));
-    expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).toBeNull();
+    const copy = f.host.querySelector<HTMLButtonElement>('[aria-label="复制本轮Agent回复"]')!;
+    expect(copy.closest('footer')?.querySelector('.message-time')).not.toBeNull();
+    await act(async () => copy.click());
+    expect(copied).toEqual(['']);
     expect(reads).toBe(1);
     expect(f.host.querySelector('.model-output-message > button')).toBeNull();
     expect(f.host.querySelector('.model-output-message > p')).toBeNull();
     await act(async () => completeRead(snapshot));
     expect(f.host.textContent).toContain('END');
-    const copy = f.host.querySelector<HTMLButtonElement>('[aria-label="复制本轮Agent回复"]')!;
-    expect(copy).not.toBeNull();
+    expect(f.host.querySelector('[data-message-id="final"] .message-copy') === copy).toBe(true);
     await act(async () => copy.click());
-    expect(copied).toEqual([content]);
+    expect(copied).toEqual(['', content]);
     await act(async () => f.root.render(<Harness paused />));
-    expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).toBeNull();
+    expect(f.host.querySelector('[data-message-id="final"] .message-copy') === copy).toBe(true);
     expect(f.host.textContent).toContain('PREVIEW');
+    await act(async () => copy.click());
+    expect(copied).toEqual(['', content, '']);
     expect(reads).toBe(1);
   } finally {
     await f.close();
