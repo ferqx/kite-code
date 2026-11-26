@@ -2,12 +2,15 @@ import {
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
 
 const minimum = 200;
 const maximum = 420;
+const conversationMinimum = 360;
+export const separatorWidth = 8;
 const preferenceKey = 'kite.web.navigationWidth.v1';
 function savedWidth(browser: Window) {
   try {
@@ -24,15 +27,23 @@ function savedWidth(browser: Window) {
 function narrowWindow(browser: Window) {
   return browser.innerWidth <= 640;
 }
+function widthLimit(browser: Window) {
+  const available = browser.document.documentElement.clientWidth || browser.innerWidth;
+  return Math.max(minimum, Math.min(maximum, available - separatorWidth - conversationMinimum));
+}
 
 /** Local layout only; it has no Client, Session or execution authority. */
 export function useNavigation(browser: Window, suspended: boolean) {
-  const [width, setWidth] = useState(() => savedWidth(browser));
+  const [preferredWidth, setWidth] = useState(() => savedWidth(browser));
+  const [limit, setLimit] = useState(() => widthLimit(browser));
+  const width = Math.min(preferredWidth, limit);
   const [narrow, setNarrow] = useState(() => narrowWindow(browser));
   const currentNarrow = useRef(narrow);
   const [open, setOpen] = useState(() => !narrowWindow(browser));
   const [dragging, setDragging] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLElement>(null);
+  const separator = useRef<HTMLHRElement>(null);
   const drag = useRef<(() => void) | undefined>(undefined);
   const remember = (next: number) => {
     try {
@@ -48,11 +59,15 @@ export function useNavigation(browser: Window, suspended: boolean) {
   useEffect(() => {
     const resize = () => {
       const next = narrowWindow(browser);
+      setLimit(widthLimit(browser));
       if (currentNarrow.current !== next) {
         drag.current?.();
         currentNarrow.current = next;
         setNarrow(next);
         setOpen(!next);
+        const focused = browser.document.activeElement;
+        if (next && (panel.current?.contains(focused) || focused === separator.current))
+          toggle.current?.focus();
       }
     };
     const stop = () => drag.current?.();
@@ -72,8 +87,12 @@ export function useNavigation(browser: Window, suspended: boolean) {
   useEffect(() => {
     if (suspended) drag.current?.();
   }, [suspended]);
+  const overlayOpen = narrow && open;
+  useLayoutEffect(() => {
+    if (overlayOpen && !suspended) panel.current?.focus();
+  }, [overlayOpen, suspended]);
   useEffect(() => {
-    if (suspended || !narrow || !open) return;
+    if (suspended || !overlayOpen) return;
     const closeOverlayOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       event.preventDefault();
@@ -81,7 +100,7 @@ export function useNavigation(browser: Window, suspended: boolean) {
     };
     browser.addEventListener('keydown', closeOverlayOnEscape);
     return () => browser.removeEventListener('keydown', closeOverlayOnEscape);
-  }, [browser, narrow, open, suspended, close]);
+  }, [browser, overlayOpen, suspended, close]);
   function start(event: ReactPointerEvent) {
     if (suspended || narrow || event.button !== 0 || !Number.isFinite(event.clientX)) return;
     drag.current?.();
@@ -101,7 +120,7 @@ export function useNavigation(browser: Window, suspended: boolean) {
     };
     const cancel = () => {
       remove();
-      setWidth(original);
+      setWidth(preferredWidth);
       setOpen(true);
     };
     const pointerCancel = (next: PointerEvent) => {
@@ -113,7 +132,7 @@ export function useNavigation(browser: Window, suspended: boolean) {
       folded = requested < minimum / 2;
       setOpen(!folded);
       if (!folded) {
-        latest = Math.round(Math.max(minimum, Math.min(maximum, requested)));
+        latest = Math.round(Math.max(minimum, Math.min(widthLimit(browser), requested)));
         setWidth(latest);
       }
     };
@@ -122,9 +141,10 @@ export function useNavigation(browser: Window, suspended: boolean) {
       move(next);
       remove();
       if (folded) {
-        setWidth(original);
+        setWidth(preferredWidth);
         close();
-      } else remember(latest);
+      } else if (latest === original) setWidth(preferredWidth);
+      else remember(latest);
     };
     drag.current = cancel;
     browser.addEventListener('pointermove', move);
@@ -133,15 +153,20 @@ export function useNavigation(browser: Window, suspended: boolean) {
   }
   return {
     width,
+    limit,
     narrow,
     open,
+    overlayOpen,
     dragging,
     toggle,
+    panel,
+    separator,
     close,
     toggleOpen() {
       if (!suspended) {
         drag.current?.();
-        setOpen((prior) => !prior);
+        if (open) close();
+        else setOpen(true);
       }
     },
     onPointerDown: start,
@@ -156,7 +181,7 @@ export function useNavigation(browser: Window, suspended: boolean) {
         event.key === 'Home'
           ? minimum
           : event.key === 'End'
-            ? maximum
+            ? limit
             : event.key === 'ArrowLeft'
               ? width - 10
               : event.key === 'ArrowRight'
@@ -164,7 +189,8 @@ export function useNavigation(browser: Window, suspended: boolean) {
                 : undefined;
       if (next !== undefined) {
         event.preventDefault();
-        const bounded = Math.max(minimum, Math.min(maximum, next));
+        const bounded = Math.max(minimum, Math.min(limit, next));
+        if (bounded === width) return;
         setWidth(bounded);
         remember(bounded);
       }

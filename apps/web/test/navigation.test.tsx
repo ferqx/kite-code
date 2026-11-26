@@ -227,6 +227,12 @@ test('keyboard separator has bounded ARIA values and local finite preferences, w
     expect(bar.getAttribute('aria-valuenow')).toBe('320');
     await f.key(bar, 'End');
     expect(bar.getAttribute('aria-valuenow')).toBe('420');
+    await f.resize(641);
+    expect(bar.getAttribute('aria-valuemax')).toBe('273');
+    expect(bar.getAttribute('aria-valuenow')).toBe('273');
+    expect(f.dom.window.localStorage.getItem('kite.web.navigationWidth.v1')).toBe('420');
+    await f.resize(1024);
+    expect(bar.getAttribute('aria-valuenow')).toBe('420');
     await f.key(bar, 'Home');
     await f.key(bar, 'ArrowLeft');
     expect(bar.getAttribute('aria-valuenow')).toBe('200');
@@ -256,6 +262,8 @@ test('narrow directory opening, exact session selection and Escape preserve sele
   try {
     expect(f.nav().hidden).toBe(true);
     await f.click(f.button('Open directory'));
+    expect(f.document.activeElement?.id).toBe(f.nav().id);
+    expect(f.document.querySelector('main')?.hasAttribute('inert')).toBe(true);
     await f.click(
       [...f.document.querySelectorAll('button')].find(
         (button) => button.textContent === 'Workspace',
@@ -270,6 +278,7 @@ test('narrow directory opening, exact session selection and Escape preserve sele
     await f.click(f.button('Open directory'));
     await f.key(f.nav(), 'Escape');
     expect(f.nav().hidden).toBe(true);
+    expect(f.document.querySelector('main')?.hasAttribute('inert')).toBe(false);
     expect(f.document.activeElement).toBe(f.button('Open directory'));
     await f.click(f.button('Open directory'));
     f.button('Close directory').focus();

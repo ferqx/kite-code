@@ -17,7 +17,7 @@ import {
   liveSwitchDelta,
   liveSwitchReply,
 } from '../../desktop/test/live-session-switch.fixture';
-import { createTrustedAssets } from '../src/assets';
+import { buildWebAssets } from '../build-assets';
 
 const desktop = createRequire(resolve(import.meta.dir, '../../desktop/package.json'));
 const { chromium } = desktop('playwright');
@@ -156,16 +156,10 @@ try {
     });
     if (id === 2) await runtime.waitForCommand('run-2', { timeoutMs: 5000 });
   }
-  const built = await Bun.build({
-    entrypoints: [resolve(import.meta.dir, '../src/browser.tsx')],
-    target: 'browser',
-    minify: true,
-    define: { 'process.env.NODE_ENV': '"production"' },
-  });
-  if (!built.success) throw new AggregateError(built.logs);
+  const built = await buildWebAssets();
   gateway = startDevelopmentWeb({
     admittedClient: client,
-    assets: (await createTrustedAssets(await built.outputs[0]!.text())).assets,
+    assets: built.assets,
   });
   const browser = await chromium.launch({
     channel: 'chrome',

@@ -37,7 +37,10 @@ test('actual browser build produces only fixed verified assets and source-indepe
     expect(Buffer.from(favicon![1]!, 'base64')).toEqual(
       readFileSync(join(import.meta.dir, '../../../desktop/app-icon.ico')),
     );
-    expect(assets.get('/app.js')?.content).not.toContain('from"react"');
+    const script = assets.get('/app.js')!.content;
+    expect(script).not.toContain('from"react"');
+    expect(script).not.toContain('Download the React DevTools for a better development experience');
+    expect(Buffer.byteLength(script)).toBeLessThan(6 * 1024 * 1024);
     expect(JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'))).toEqual(
       module.assetManifest,
     );

@@ -5,4 +5,4 @@ export {
   type ModelInputSnapshot,
   ModelInputs,
   readModelDirectory,
-} from '@kite-ai/ui';
+} from '@kite-ai/ui/browser';

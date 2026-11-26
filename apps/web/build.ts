@@ -1,19 +1,8 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createTrustedAssets } from './src/assets';
+import { buildWebAssets } from './build-assets';
 
-// This build host is outside browser source. Output paths are fixed, never browser inputs.
-const build = await Bun.build({
-  entrypoints: [join(import.meta.dir, 'src/browser.tsx')],
-  target: 'browser',
-  format: 'esm',
-  minify: true,
-  splitting: false,
-});
-if (!build.success) throw new AggregateError(build.logs, 'web_bundle_failed');
-const output = build.outputs.find((item) => item.kind === 'entry-point');
-if (!output || build.outputs.length !== 1) throw new Error('unexpected_web_outputs');
-const { assets, manifest } = await createTrustedAssets(await output.text());
+const { assets, manifest } = await buildWebAssets();
 const destination = join(import.meta.dir, 'dist');
 await mkdir(destination, { recursive: true });
 for (const [path, asset] of assets)

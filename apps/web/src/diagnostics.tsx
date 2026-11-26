@@ -7,7 +7,7 @@ import {
   type SelectedContextPage,
 } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
-import { ContextPanel } from '@kite-ai/ui';
+import { ContextPanel } from '@kite-ai/ui/browser';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type DiagnosticPort = Pick<

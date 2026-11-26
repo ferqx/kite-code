@@ -68,6 +68,8 @@ Windows 安装包在私有解包树中替换同名普通文件。写入或验包
 
 Native 的 Word、Excel、PPT 浏览器渲染脚本进入完整制品库存。标准 Terminal 与 Native 均包含四个固定 Office Skill、PDF helper 和独立字体。 [文档资产边界](../../packages/agent/src/tools/documents/README.md#固定资产与执行边界)
 
+Terminal 中的独立 Web 使用与开发入口相同的[生产构建](../../apps/web/build-assets.ts)。HTML、JavaScript 和 CSS 三个固定资产及其 manifest 纳入候选库存，Daemon 核对选定清单及字节后交给只读 Gateway。 [Web 资产验证](../../apps/web/README.md#有限可信资产)
+
 `bun run release:macos-dmg` 将 arm64 桌面专用 Native 候选放入可拖拽的 `Kite Desktop.app`，并在只读映像中提供指向 `/Applications` 的快捷方式。制品保留桌面服务和本平台运行资源，构建核验排除 `node_modules`、CLI/TUI 和独立 Terminal Web 入口。Finder 管理复制、替换和移到废纸篓，应用启动继续验证包内候选。指定 Developer ID 身份和公证 profile 时，从源码构建并在计算清单摘要前签署内部程序。外层 DMG 完成公证、附票和校验后生成最终摘要。Developer ID 实机证据及正式发布仍走原门禁。构建参数和实机证据归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#macos-dmg)。
 
 候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.4。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。当前 fault-soak 与完整 blocked collection 同样要求1.4.4，原迭代、期限、source／receipt／资源拒绝门禁不变；历史1.4.2记录保留其原环境，不能替代新基线证据。

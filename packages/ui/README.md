@@ -1,3 +1,7 @@
+## 浏览器入口
+
+[@kite-ai/ui/browser](src/browser.ts)汇集 Web 实际使用的共享 Markdown、复制、诊断及目录控件。由同一份组件源码向 Web 提供展示，生产 Web 产物避免携带 Electron 的 Markdown 高亮和图表依赖。当前构建和客户端验证见 [Web owner](../../apps/web/README.md#有限可信资产)。
+
 ## 会话搜索
 
 [Sidebar](src/desktop/Sidebar.tsx)通过宿主提供的 `sessionSearch` 范围和可用性接入[SessionSearch](src/desktop/SessionSearch.tsx)，搜索材料来自完整会话／项目展示目录。数量不完整或来源失效与无匹配分别展示；同名项目使用可选登记位置辨识。搜索框为空时只显示最近 7 天更新的会话，关键词搜索覆盖完整目录。结果在同一列表中展示，滚动到底部附近或用方向键可继续浏览。行间距为 4px，悬停和选中复用侧栏导航底色，悬停底色即时切换。面板高度随可用视口确定。异步宿主等待新查询时可保留上一次查询的结果和滚动位置或空结果提示。空结果提示取决于已确认的查询。收到新查询结果后替换列表并回到顶部，等待期间暂停打开结果。搜索期间原侧栏目录隐藏但保留挂载，取消恢复折叠状态与焦点，打开沿原宿主回调。[DOM回归](test/isolated/desktop-session-search.test.tsx)覆盖旧会话、重名、键盘／输入法、排序刷新后选中项滚动、范围变化、空结果交接、失效及恢复。当前 Native 数据边界和验证限制见[Desktop owner](../../apps/desktop/README.md#侧栏会话搜索)。

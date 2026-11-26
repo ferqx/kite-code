@@ -595,7 +595,7 @@ test('persisted pagehide retains document/reading state, pauses reads, and pages
     const pausedReads = f.state.reads;
     expect(f.state.closed).toBe(0);
     expect(f.dom.window.document.querySelector('[aria-label="History"]')).toBe(history);
-    expect(f.dom.window.document.querySelector('.web-page')?.hasAttribute('inert')).toBe(true);
+    expect(f.dom.window.document.querySelector('.web-layout')?.hasAttribute('inert')).toBe(true);
     await act(async () =>
       f.dom.window.document.dispatchEvent(new f.dom.window.Event('visibilitychange')),
     );
@@ -617,7 +617,7 @@ test('persisted pagehide retains document/reading state, pauses reads, and pages
     await settle(() => f.state.reads > pausedReads);
     expect(f.dom.window.document.querySelector('[aria-label="History"]')).toBe(history);
     expect(history.scrollTop).toBe(123);
-    expect(f.dom.window.document.querySelector('.web-page')?.hasAttribute('inert')).toBe(false);
+    expect(f.dom.window.document.querySelector('.web-layout')?.hasAttribute('inert')).toBe(false);
     expect(f.state.closed).toBe(0);
   } finally {
     resume?.();
@@ -647,7 +647,7 @@ test('bfcache restore identity failure preserves original document paused, issue
     );
     expect(f.dom.window.document.body.textContent).toContain('browser_identity_mismatch');
     expect(f.dom.window.document.querySelectorAll('[data-message-id]')).toHaveLength(201);
-    expect(f.dom.window.document.querySelector('.web-page')?.hasAttribute('inert')).toBe(true);
+    expect(f.dom.window.document.querySelector('.web-layout')?.hasAttribute('inert')).toBe(true);
     expect(f.state.reads).toBe(reads);
     expect(f.state.pages).toBe(pages);
     expect(f.state.closed).toBe(0);
@@ -749,7 +749,11 @@ test('an identity refusal after admission remains blocking while ordinary read f
     await settle(() =>
       f.dom.window.document.body.textContent!.includes('Read-only identity unavailable'),
     );
-    expect(f.dom.window.document.querySelector('.web-page')?.hasAttribute('inert')).toBe(true);
+    const document = f.dom.window.document;
+    expect(document.querySelector('.web-layout')?.hasAttribute('inert')).toBe(true);
+    expect(document.querySelector('header')?.hasAttribute('inert')).toBe(true);
+    expect(document.querySelector('[role="alert"]')?.closest('[inert]')).toBeNull();
+    expect(document.activeElement?.textContent).toBe('Reload page');
     expect(f.dom.window.document.querySelectorAll('[data-message-id]')).toHaveLength(201);
     expect(f.state.closed).toBe(0);
   } finally {

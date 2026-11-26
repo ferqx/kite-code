@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.tsx",
+    "./browser": "./src/browser.ts",
     "./tui": "./src/tui/index.tsx",
     "./desktop": "./src/desktop/index.ts",
     "./desktop/confirmation": "./src/desktop/confirmation.ts",
@@ -16,7 +17,7 @@
     "./tui/ink": "./src/tui/ink.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.tsx --target=browser --packages=bundle --external=react --external=react-dom --external=@kite-ai/client --outdir=dist && bun scripts/build-tui.ts --outdir=dist/tui && bun run scripts/build-desktop.ts --outdir=dist/desktop",
+    "build": "bun build ./src/index.tsx ./src/browser.ts --target=browser --packages=bundle --external=react --external=react-dom --external=@kite-ai/client --outdir=dist && bun scripts/build-tui.ts --outdir=dist/tui && bun run scripts/build-desktop.ts --outdir=dist/desktop",
     "typecheck": "bun check -p tsconfig.json",
     "test": "bun test ./test"
   },

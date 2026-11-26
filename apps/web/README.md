@@ -12,6 +12,8 @@
 
 [双活动会话 Chrome 回归](test/live-session-switch-browser-runner.fixture.ts)连接真实 Cookie 网关与 SQLite。A 展开失败工具并选中结果文字，B 展开同名工具的成功结果并恢复跟随末尾。两边持续输出带代码块和表格的回复，经过静态会话并反复互切，B 先在后台结束。回归核对展开项、阅读位置和工具执行次数，并逐项比较 A、B 最终正文与各自输出端的完整片段序列。`--slow-history` 为历史响应增加 320 毫秒延迟，并将 A 的一次增量响应保留到静态会话出现后才释放。
 
+2026-11-26，Windows Chrome 158 的 `--slow-history` 用本轮生产构建采样 3,119 帧。迟到的 A 增量没有覆盖静态会话，返回 A 时保持原阅读位置，B 继续跟随末尾。两边最终正文与工具结果各归所属会话，页面异常为 0。
+
 [控制器测试](test/controller.test.ts)使用 fake Browser 公共 port，验证 200+1 完整页、最后分配序号、scope/快照冲突、可见性/活动/单飞、迟到身份和 stale；[DOM 页面测试](test/page.test.tsx)通过 React/JSDOM 验证目录导航、全部历史、真实 cancelled/outcome_unknown、旧快照保留、页面可见性、后退/根导航、迟到响应与拒绝身份。它们不是原生浏览器资格。[真实 Service 测试](../service/test/isolated/development-web.test.ts)使用固定 Model、临时 SQLite、真实 partial、Cookie Gateway 与 HTTP，验证零业务写和页面关闭时原工作继续。当前为本机 macOS 证据，不代表安装或三平台发行。
 
 页面只在 cookie 身份准入成功后读取目录。工作区展开时使用原 Browser `listAllSessionDirectory`，只有完整同 snapshot 的根会话与 activity 才交给私有[目录展示](src/directory.tsx)。按已封存 `updatedAt` 降序排列，null 置后、同时间保原分配顺序；各空间独立显示 5 条，再显示 10 条，收起重开回 5 条。旧身份便利入口保留兼容用途，正式 Web 已不再用它读取活动目录。会话路由使用 `/sessions/<id>`，popstate 与直接链接由当前 controller 读取；回到根目录会清除选择及轮询。document visibilitychange 实际连接 controller，可见且实际 isActive 才定时读。页面卸载只释放所属观察器/目录请求；pagehide 另显式清理 browser cookie session，仍不取消 Runtime。Cookie续建和单次请求重试由 Browser SDK 处理；页面层仅在失败后退避发起新的只读校准，不提交业务命令。原 Run 展示元数据读取也按所属 scope 退避重读，取消或隐藏后停止。
@@ -26,9 +28,11 @@
 
 DOM 测试共用私有 [global descriptor 夹具](test/globals.fixture.ts)安装所需全局并恢复原属性描述符；每个测试继续自行配置 JSDOM、浏览器 API stub、React 生命周期和业务 port。夹具不进入生产构建，也不把 DOM 测试提升为真实浏览器资格。
 
-私有 [navigation](src/navigation.tsx) 只管理浏览器本地布局，不接收 Client 或执行身份。宽屏目录默认 200 px，可用 pointer 拖动分隔线调整至 420 px；窗口仍为宽屏时保留像素宽度，由内容区适应剩余空间。拖至 100 px 以下折叠，顶栏按钮重开并恢复最后合法宽度。导航 DOM 保持挂载，目录展开项、选中会话及 History/Model/context/Job 所属读取不因折叠或 resize 重建。
+私有 [navigation](src/navigation.tsx) 只管理浏览器本地布局。宽屏目录默认 200 px，空间充足时可用 pointer 拖动分隔线调整至 420 px。窗口缩放时以可用宽度扣除分隔线和 360 px 会话阅读区计算目录上限，窗口临时收窄期间保留用户的宽度偏好。拖至 100 px 以下折叠，顶栏重开恢复当时可用的宽度。目录 DOM、展开项、会话选择和所属读取跨折叠及缩放保留。
 
-分隔线是可聚焦的垂直 separator，发布 200–420 的 ARIA 值；左右键每次调整 10 px，Home/End 到边界，Enter/Escape 折叠并将焦点返回顶栏按钮。640 px 及以下初始关闭目录，按钮打开覆盖侧栏；选择真实会话或按 Escape 关闭，焦点在顶栏关闭按钮时也有效并回到打开按钮。已有目录 handler 消费的 Escape 不重复执行。选择仍使用原 controller，宽窄屏切换不改变 Session 或执行权限。
+分隔线是可聚焦的垂直 separator，发布当前宽度及当时可用的 200–420 px 范围。左右键每次调整 10 px，Home/End 到可用边界，Enter/Escape 折叠并将焦点返回顶栏按钮。640 px 及以下初始关闭目录。打开覆盖侧栏时焦点进入目录，覆盖下的会话内容置为 `inert`。选择会话或按 Escape 关闭后焦点回到顶栏按钮。已有目录 handler 消费的 Escape 优先处理。
+
+[访问错误](src/access-error.tsx)位于冻结的历史和控件之外，初始准入失败、重开页面身份失败和已准入后的身份变化均提供可聚焦的 Reload page。原内容可作为冻结视图保留。浅色和深色主题使用各自的错误色。
 
 同源 `kite.web.navigationWidth.v1` 只保存 200–420 的三位整数，不保存正文、路径、身份或折叠状态；未知、越界、非整数和 storage 拒绝均有限回退至 200 px，不读取旧客户端 preference。未完成的 pointer 操作遇到取消、窗口失焦、document 隐藏或页面暂停时回到操作前宽度，不保存中间值。静态 scoped CSS 随受 manifest 校验的 app.js 交付，不加载额外 URL 或 legacy 业务组件。
 
@@ -36,7 +40,9 @@ DOM 测试共用私有 [global descriptor 夹具](test/globals.fixture.ts)安装
 
 ## 有限可信资产
 
-[build.ts](build.ts)是显式构建宿主，不进入 browser source。build 将 React/Client/UI 离线打包为固定 `/app.js`，同时产出 `/index.html` 和 `/app.css`、`dist/manifest.json`、source-independent `dist/assets.js` 与 `assets.d.ts`。`@kite-ai/web/assets` 的 `getTrustedAssets()` 返回新 ReadonlyMap，`assetManifest` 保存每个固定 path/MIME/UTF-8 size/SHA256；类型入口是源码声明，不要求 clean checkout 已有 dist。宿主先调用公共 `validateTrustedAssets(assets,assetManifest)`，再将这个固定 Map 注入 Gateway，不提供任意目录、URL 或文件代理。
+[build.ts](build.ts)与 [Terminal 制品构建](../../scripts/release/terminal-bundle.ts)共用[生产构建](build-assets.ts)。浏览器从 [UI 浏览器子入口](../../packages/ui/src/browser.ts)使用现有共享组件，构建显式选择生产 React，离线打包为固定 `/app.js`，同时产出 `/index.html`、`/app.css`、`dist/manifest.json`、source-independent `dist/assets.js` 和 `assets.d.ts`。`@kite-ai/web/assets` 提供固定资产及 path/MIME/UTF-8 size/SHA256。开发宿主调用 `validateTrustedAssets`，Terminal Daemon 读取并核实所选 manifest，Gateway 仅提供已核实的固定资产。
+
+2026-11-26 在 Windows x64／Bun 1.4.4／Chrome 158 使用[现有 SQLite 和 Cookie Gateway 预览夹具](../../tests/fixtures/unified-agent/web-preview.ts)加载生产资产。浏览器实际收到的 `/app.js` 从 11,408,302 降至 4,932,994 字节。逐步将视口从 1024 缩到 320 px，再放大，页面宽度始终等于视口，420 px 偏好恢复。375 px 下 Tab 保持在可见控件，Escape 返回目录按钮，A → B → A 恢复 A 的阅读位置。模拟连接中断后原四条消息保留，刷新恢复。身份不匹配时 Chrome 无障碍树包含错误，浅色对比度为 6.98:1，Enter 执行 Reload page 后恢复原地址和历史。此证据覆盖本机 Web 开发资产，Terminal 安装资格归发行 owner。
 
 Web 开发构建与 Terminal 制品共用的[资产生成器](src/assets.ts)将[桌面白底 ICO](../desktop/app-icon.ico)嵌入 `/index.html` 的标签页图标声明，随页面一起校验。现有[资产构建测试](test/isolated/assets.test.ts)核对图标字节与桌面源文件一致。
 
@@ -50,6 +56,8 @@ Web 开发构建与 Terminal 制品共用的[资产生成器](src/assets.ts)将[
 会话正文现使用公共 UI `SafeMessageMarkdown`，保留完整消息并按 GFM 排版。原 HTML 显示为转义文本、图片仅显示替代文字、相对文件路径不启动本地编辑器。正文与消息阅读列同宽，不添加独立限宽或内边距；非消息区不可选中。
 
 History 为独立滚动区域，首次进入定位最新，向上阅读时刷新保持原位置，可显式回到最新。会话内复制仅包含当前已展开的原消息正文；Cmd/Ctrl+A 限于当前 History，输入、textarea、select 与 contenteditable 不劫持。工具详情使用原消息 ID 独立展开，不从名称猜测分类或 Turn。页面内最多保留 32 个会话的滚动 metadata，每会话最多 256 个展开 ID，不保存旧正文；返回会话重读实际接口后恢复位置和展开。重载不承诺恢复。
+
+同轮 Chrome 使用临时 SQLite 分页读取 210 条固定模型夹具消息，Ctrl+A 可选中首尾原文。单次暖页切换从点击到全部条目出现约 572 ms，期间 CDP 记录约 111 ms 脚本工作、10 ms 布局和 5 ms 样式重算。样本主要开销不在布局，结果只代表该夹具和本机。
 
 已发送的 complete 用户消息逐条提供共享 [MessageCopyButton](../../packages/ui/src/desktop/MessageCopyButton.tsx)，直接复制原公共 `message.content` 字符串，保留 Unicode、CRLF、Markdown 与脚本字面量，不从渲染 DOM 重建文本。按钮按当前 Store/Session/message ID 挂载，悬停或键盘聚焦可见；成功勾保留两秒，失败可重试，正文变化／隐藏／暂停／换会话清除旧反馈与所属定时器。只调用本页面 `navigator.clipboard.writeText`，不增加 HTTP 写入、模型调用或任务操作；未知格式的原诊断保持，复制不解释或升级其内容。助手整轮复制沿准确 Run metadata 与当前已读完整正文核实，见下一段；不以相邻消息推造回合。
 

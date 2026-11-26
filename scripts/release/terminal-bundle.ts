@@ -39,7 +39,7 @@ import {
   verifyEmbeddedRuntimeBundle,
   windowsDesktopRuntimeEntries,
 } from '../../apps/service/src/runtime-assets';
-import { createTrustedAssets } from '../../apps/web/src/assets';
+import { buildWebAssets } from '../../apps/web/build-assets';
 import { agentBundledDependencies } from '../../packages/agent/scripts/bundled-dependencies';
 import { desktopModuleSpecifier } from '../../packages/agent/scripts/desktop-bundling';
 import { acquireArtifactAccess } from '../../packages/agent/src/artifact-access';
@@ -682,17 +682,7 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
           );
         rmSync(launchers.root, { recursive: true, force: false });
       }
-      const web = await Bun.build({
-        entrypoints: [join(repository, 'apps/web/src/browser.tsx')],
-        target: 'browser',
-        format: 'esm',
-        minify: true,
-        splitting: false,
-      });
-      if (!web.success || web.outputs.length !== 1) throw Error('terminal_web_build_failed');
-      const { assets, manifest: webManifest } = await createTrustedAssets(
-        await web.outputs[0]!.text(),
-      );
+      const { assets, manifest: webManifest } = await buildWebAssets(repository);
       mkdirSync(join(root, 'web'), { mode: 0o700 });
       for (const [path, asset] of assets)
         writeFileSync(join(root, 'web', path.slice(1)), asset.content);

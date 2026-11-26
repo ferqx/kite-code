@@ -2,6 +2,7 @@ import { ClientError } from '@kite-ai/client';
 import { type BrowserClient, createBrowserClient } from '@kite-ai/client/browser';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
+import { AccessError } from './access-error';
 import { WebPage } from './page';
 
 /** The document supplies only its same-origin page identity, never a Native credential. */
@@ -25,21 +26,13 @@ export async function mountWebPage(input: {
   function renderPage() {
     if (disposed || !admitted || !client) return;
     root.render(
-      <>
-        {suspended && (
-          <p role={resumeError ? 'alert' : 'status'}>
-            {resumeError
-              ? `Read-only identity unavailable · ${resumeError}. Reload this document to select its current identity.`
-              : 'Read-only observation paused; original page identity must be verified before resuming.'}
-          </p>
-        )}
-        <WebPage
-          client={client}
-          window={browser}
-          pollIntervalMs={input.pollIntervalMs}
-          suspended={suspended}
-        />
-      </>,
+      <WebPage
+        client={client}
+        window={browser}
+        pollIntervalMs={input.pollIntervalMs}
+        suspended={suspended}
+        resumeError={resumeError}
+      />,
     );
   }
   const pagehide = (event: PageTransitionEvent) => {
@@ -111,11 +104,13 @@ export async function mountWebPage(input: {
   } catch (error) {
     if (!disposed && !suspended)
       root.render(
-        <p role="alert">
-          Read-only connection unavailable ·{' '}
-          {error instanceof ClientError ? error.code : 'browser_read_unavailable'}. Reload this
-          document to select its current identity.
-        </p>,
+        <div className="web-page" data-theme="dark">
+          <AccessError
+            browser={browser}
+            code={error instanceof ClientError ? error.code : 'browser_read_unavailable'}
+            connection
+          />
+        </div>,
       );
   }
   return { dispose };

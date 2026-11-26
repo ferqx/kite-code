@@ -3,7 +3,7 @@ import {
   type SessionDirectoryActivity,
   type SessionDirectoryPage,
 } from '@kite-ai/client';
-import { Badge, Spinner, Tooltip, TooltipContent, TooltipTrigger } from '@kite-ai/ui/desktop';
+import { Badge, Spinner, Tooltip, TooltipContent, TooltipTrigger } from '@kite-ai/ui/browser';
 import { type ReactElement, type ReactNode, useEffect, useState } from 'react';
 
 export type DirectorySession = SessionDirectoryPage['items'][number] & {

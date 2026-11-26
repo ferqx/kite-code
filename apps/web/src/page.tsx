@@ -2,12 +2,14 @@ import { type BrowserWorkspaceList, ClientError, type Message } from '@kite-ai/c
 import type { BrowserClient } from '@kite-ai/client/browser';
 import {
   completeRunReplies,
+  MessageCopyButton,
   ModelOutputMessage,
   modelOutputTerminalObserved,
   SafeMessageMarkdown,
-} from '@kite-ai/ui';
-import { MessageCopyButton, TooltipProvider } from '@kite-ai/ui/desktop';
+  TooltipProvider,
+} from '@kite-ai/ui/browser';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AccessError } from './access-error';
 import { BackgroundExecutions } from './background';
 import { WebController, type WebUpdate } from './controller';
 import { Diagnostics } from './diagnostics';
@@ -21,7 +23,7 @@ import {
 } from './directory';
 import { FileCheckpoints } from './file-checkpoints';
 import { ModelInputs } from './model-input';
-import { navigationCSS, useNavigation } from './navigation';
+import { navigationCSS, separatorWidth, useNavigation } from './navigation';
 import { useRunFacts } from './run-facts';
 import { RuntimeLogs } from './runtime-logs';
 
@@ -54,6 +56,7 @@ export interface WebPageOptions {
   readonly window: Window;
   readonly pollIntervalMs?: number;
   readonly suspended?: boolean;
+  readonly resumeError?: string;
 }
 
 /** Read-only presentation. Directory and selected history have separate owned readers. */
@@ -62,8 +65,8 @@ export function WebPage({
   window: browser,
   pollIntervalMs,
   suspended = false,
+  resumeError,
 }: WebPageOptions) {
-  const navigation = useNavigation(browser, suspended);
   const [pageVisible, setPageVisible] = useState(browser.document.visibilityState !== 'hidden');
   const visibleOutput = useRef(new Map<string, { key: string; text: string }>());
   const currentOutputs = useRef(new Map<string, string>());
@@ -81,6 +84,13 @@ export function WebPage({
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
   const [loadingSessions, setLoadingSessions] = useState<Record<string, boolean>>({});
   const [update, setUpdate] = useState<WebUpdate>();
+  const accessError =
+    resumeError ??
+    (/(?:identity_mismatch|store_changed|connection_not_admitted)$/.test(update?.error ?? '')
+      ? update?.error
+      : undefined);
+  const blocked = suspended || !!accessError;
+  const navigation = useNavigation(browser, blocked);
   const [logModel, setLogModel] = useState<{
     sessionId: string;
     storeId: string;
@@ -414,25 +424,19 @@ export function WebPage({
       setCopyStatus('Copy unavailable; select message text to copy.');
     }
   }
-  const identityFailure = /(?:identity_mismatch|store_changed|connection_not_admitted)$/.test(
-    update?.error ?? '',
-  );
   const connectionError =
     update?.error === 'browser_read_unavailable' || update?.error === 'browser_session_unavailable';
   return (
-    <div
-      className="web-page"
-      data-theme={dark ? 'dark' : 'light'}
-      inert={suspended || identityFailure}
-    >
+    <div className="web-page" data-theme={dark ? 'dark' : 'light'}>
       <style>{navigationCSS + directoryCSS}</style>
-      {identityFailure && (
-        <p role="alert">
-          Read-only identity unavailable · {update?.error}. Reload this document to select its
-          current identity.
+      {accessError ? (
+        <AccessError browser={browser} code={accessError} />
+      ) : suspended ? (
+        <p role="status" className="web-access">
+          Read-only observation paused; original page identity must be verified before resuming.
         </p>
-      )}
-      <header>
+      ) : null}
+      <header inert={blocked}>
         <button
           type="button"
           ref={navigation.toggle}
@@ -459,18 +463,21 @@ export function WebPage({
       </header>
       <div
         className="web-layout"
+        inert={blocked}
         data-navigation={navigation.narrow ? 'narrow' : 'wide'}
         data-dragging={navigation.dragging}
         style={{
           gridTemplateColumns:
             navigation.narrow || !navigation.open
               ? 'minmax(0,1fr)'
-              : `${navigation.width}px 8px minmax(360px,1fr)`,
+              : `${navigation.width}px ${separatorWidth}px minmax(0,1fr)`,
         }}
       >
         <nav
           id="web-navigation"
           className="web-navigation"
+          ref={navigation.panel}
+          tabIndex={navigation.narrow ? -1 : undefined}
           hidden={!navigation.open}
           inert={!navigation.open}
           aria-label="Workspaces and sessions"
@@ -611,19 +618,20 @@ export function WebPage({
         </nav>
         {!navigation.narrow && navigation.open && (
           <hr
+            ref={navigation.separator}
             tabIndex={0}
             className="navigation-resize"
             aria-label="Resize directory"
             aria-orientation="vertical"
             aria-controls="web-navigation"
             aria-valuemin={200}
-            aria-valuemax={420}
+            aria-valuemax={navigation.limit}
             aria-valuenow={navigation.width}
             onPointerDown={navigation.onPointerDown}
             onKeyDown={navigation.onKeyDown}
           />
         )}
-        <main aria-label="Conversation">
+        <main aria-label="Conversation" inert={navigation.overlayOpen}>
           {!update && <p>Select a session to read its history.</p>}
           {update && (
             <>
