@@ -18,6 +18,22 @@ html[data-input-modality="pointer"] :focus {
   outline: none !important;
 }
 
+:where(html:not([data-input-modality="pointer"])) [data-slot="button"]:focus-visible {
+  outline: 2px solid var(--foreground, CanvasText);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+:where(html:not([data-input-modality="pointer"]))
+  [data-slot="button"]:focus-visible:where([data-variant="destructive"]) {
+  outline-color: var(--error-foreground, CanvasText);
+}
+
+@media (forced-colors: active) {
+  :where(html:not([data-input-modality="pointer"])) [data-slot="button"]:focus-visible {
+    outline-color: CanvasText;
+  }
+}
+
 :root {
   --native-content-shadow: 0 1px 6px rgb(0 0 0 / 6%);
   --native-content-border: rgb(0 0 0 / 5%);
@@ -1025,6 +1041,18 @@ html[data-native-window][data-platform="macos"] .kite-client .client-panels::aft
 .native-browser-toolbar [data-status="error"] {
   color: var(--destructive);
 }
+.native-browser-toolbar:has(.native-browser-address-error) {
+  height: auto;
+  max-height: none;
+}
+.native-browser-address-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 2px;
+  color: var(--error-foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 @container native-browser (max-width: 359px) {
   .native-browser-toolbar {
     grid-template-columns: 28px minmax(0, 1fr) max-content;
@@ -1062,6 +1090,9 @@ html[data-native-window][data-platform="macos"] .kite-client .client-panels::aft
   .native-browser-address:focus-visible:where(:root:not([data-input-modality="pointer"]) *) {
   outline: none;
   border-color: var(--input);
+}
+.kite-client .native-browser-toolbar .native-browser-address[aria-invalid="true"] {
+  border-color: var(--error-foreground);
 }
 .native-browser-surface {
   position: relative;

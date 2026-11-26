@@ -1,5 +1,5 @@
 import { Button } from '@kite-ai/ui/desktop';
-import appIcon from '../app-icon.ico';
+import { NativeStartupFrame } from './native-startup-frame';
 
 function startupMessage(error: string | undefined): string | undefined {
   switch (error) {
@@ -31,23 +31,15 @@ export function NativeStartup({
   onRetry?: () => void;
 }) {
   return (
-    <main
-      className="kite-client desktop-startup"
-      aria-label="Kite 启动页"
-      aria-busy={phase === 'loading'}
-    >
-      <div className="desktop-startup-content">
-        <img src={appIcon} width="56" height="56" alt="" />
-        <h1>Kite</h1>
-        {phase === 'failed' && (
-          <>
-            <p role="alert">启动未完成：{startupMessage(error)}</p>
-            {onSaveDiagnostic && <Button onClick={onSaveDiagnostic}>保存诊断</Button>}
-            {diagnosticSaveError && <p role="alert">{diagnosticSaveError}</p>}
-            {onRetry && <Button onClick={onRetry}>重新尝试</Button>}
-          </>
-        )}
-      </div>
-    </main>
+    <NativeStartupFrame loading={phase === 'loading'}>
+      {phase === 'failed' && (
+        <>
+          <p role="alert">启动未完成：{startupMessage(error)}</p>
+          {onSaveDiagnostic && <Button onClick={onSaveDiagnostic}>保存诊断</Button>}
+          {diagnosticSaveError && <p role="alert">{diagnosticSaveError}</p>}
+          {onRetry && <Button onClick={onRetry}>重新尝试</Button>}
+        </>
+      )}
+    </NativeStartupFrame>
   );
 }

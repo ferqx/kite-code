@@ -8,6 +8,7 @@ export interface NativeBrowserMenuRect {
 
 export interface NativeBrowserToolbarPresentation {
   readonly address: string;
+  readonly addressIssue?: string;
   readonly loading: boolean;
   readonly hasPage: boolean;
   readonly canGoBack: boolean;

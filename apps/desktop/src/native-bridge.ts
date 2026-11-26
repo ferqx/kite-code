@@ -1291,7 +1291,9 @@ export interface NativeBridge {
   presentPreviewLayoutAsync?(
     input: NativePreviewLayoutRequest,
   ): Promise<NativePreviewLayoutIdentity>;
-  subscribePreviewPresentation?(listener: () => void): () => void;
+  subscribePreviewPresentation?(
+    listener: (interrupted?: NativePreviewLayoutIdentity) => void,
+  ): () => void;
   subscribeOfficePreviewFrameClosed?(
     listener: (event: import('./native-preview-layout-bridge').OfficePreviewFrameClosed) => void,
   ): () => void;

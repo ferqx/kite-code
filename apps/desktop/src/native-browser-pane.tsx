@@ -137,6 +137,8 @@ export function NativeBrowserPane({
   const [savedState, setState] = useState(() => ({ owner, value: blank() }));
   const state = savedState.owner === owner ? savedState.value : blank();
   const [address, setAddress] = useState(state.url);
+  const [addressIssue, setAddressIssue] = useState<string>();
+  const addressRevision = useRef(0);
   const [issue, setIssue] = useState<string>();
   const [presentationIssue, setPresentationIssue] = useState<string>();
   const [menuIssue, setMenuIssue] = useState<string>();
@@ -174,6 +176,7 @@ export function NativeBrowserPane({
       const active = document.activeElement;
       if (active instanceof HTMLElement && toolbar.current?.contains(active)) active.blur();
       setAddress(current.current.state.url);
+      setAddressIssue(undefined);
       setIssue(undefined);
       setPresentationIssue(undefined);
       setMenuIssue(undefined);
@@ -201,8 +204,8 @@ export function NativeBrowserPane({
     onTitleChange(state.title || '新标签页');
   }, [state.title, onTitleChange]);
   useEffect(() => {
-    if (!focused.current) setAddress(state.url);
-  }, [state.url]);
+    if (!focused.current && !addressIssue) setAddress(state.url);
+  }, [state.url, addressIssue]);
   useLayoutEffect(() => {
     if (visible) return;
     focused.current = false;
@@ -465,6 +468,7 @@ export function NativeBrowserPane({
 
   const request = async (input: Exclude<NativeBrowserRequest, { action: 'grant' }>) => {
     if (!current.current.visible || current.current.owner !== owner) return;
+    const submittedAddress = input.action === 'navigate' ? ++addressRevision.current : undefined;
     setIssue(undefined);
     if (!host?.browserRequest) {
       setIssue(requestError(null));
@@ -475,8 +479,25 @@ export function NativeBrowserPane({
       const next = await host.browserRequest(draft ? { ...input, draft } : input);
       // State events can be newer than an IPC reply from the same document.
       if (stateSequence.current === sequence) apply(next);
+      if (
+        submittedAddress !== undefined &&
+        submittedAddress === addressRevision.current &&
+        identity.current.token === owner &&
+        mounted.current
+      )
+        setAddressIssue(undefined);
     } catch (cause) {
-      if (mounted.current && identity.current.token === owner) setIssue(requestError(cause));
+      if (!mounted.current || identity.current.token !== owner) return;
+      if (input.action === 'navigate') {
+        if (submittedAddress !== addressRevision.current) return;
+        const code = cause instanceof Error ? cause.message : '';
+        if (code === 'invalid_browser_address' || code === 'unsupported_browser_protocol') {
+          setAddress(input.input);
+          setAddressIssue(requestError(cause));
+          return;
+        }
+      }
+      setIssue(requestError(cause));
     }
   };
   const error =
@@ -531,6 +552,7 @@ export function NativeBrowserPane({
   const notesAvailable = !!annotate && !!state.control?.browserId;
   const data: NativeBrowserToolbarPresentation = {
     address,
+    addressIssue,
     loading: state.loading,
     hasPage: !!state.url,
     canGoBack: state.canGoBack,
@@ -546,11 +568,15 @@ export function NativeBrowserPane({
     if (!visible || identity.current.token !== owner) return;
     switch (action.type) {
       case 'address-change':
-        if (canNavigate && action.value.length <= 2048) setAddress(action.value);
+        if (canNavigate && action.value.length <= 2048) {
+          addressRevision.current++;
+          setAddressIssue(undefined);
+          setAddress(action.value);
+        }
         return;
       case 'address-focus':
         focused.current = action.focused && canNavigate;
-        if (!focused.current) setAddress(state.url);
+        if (!focused.current && !addressIssue) setAddress(state.url);
         return;
       case 'navigate':
         if (canNavigate) void request({ action: 'navigate', id, input: address });

@@ -51,22 +51,23 @@ export function NativeLocalFilePreview({
     >();
     const previewId = crypto.randomUUID();
     preview.current = previewId;
+    const unavailable = (reason?: 'access' | 'interrupted') => {
+      if (cancelled) return;
+      revoked = true;
+      ready = false;
+      setStatus(
+        reason === 'access'
+          ? { message: '文件或访问权限已变化，请关闭后重新打开' }
+          : { message: '预览已中断', retry: true },
+      );
+    };
     const frame = createOfficePreviewFrame(
       viewport.current,
       bridge,
       generation,
       previewId,
       target.name,
-      (reason) => {
-        if (cancelled) return;
-        revoked = true;
-        ready = false;
-        setStatus(
-          reason === 'access'
-            ? { message: '文件或访问权限已变化，请关闭后重新打开' }
-            : { message: '预览已中断', retry: true },
-        );
-      },
+      unavailable,
     );
     const bounds = () => {
       const rect = viewport.current!.getBoundingClientRect();
@@ -83,6 +84,7 @@ export function NativeLocalFilePreview({
       generation,
       previewId,
       setIssue,
+      unavailable,
     );
     setStatus('loading');
     setRequestOpen(false);

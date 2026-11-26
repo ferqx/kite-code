@@ -9,6 +9,7 @@ export function presentNativePreview(
   generation: number,
   previewId: string,
   onIssue?: (message: string) => void,
+  onInterrupted?: () => void,
 ) {
   let stopped = false,
     ready = false,
@@ -19,6 +20,10 @@ export function presentNativePreview(
   let dirty = false;
   let rejected = '';
   let paintFailed = false;
+  const moving = () =>
+    !!node.closest(
+      '[data-slot="resizable-panel-group"]:is([data-animate-width="true"], :has(> [data-separator="active"]))',
+    );
   const report = (cause: unknown) => {
     const code =
       cause instanceof Error
@@ -70,10 +75,7 @@ export function presentNativePreview(
     }
     const key = JSON.stringify(measured);
     if (!force && (rejected === key || (!hidden && last === key))) return;
-    const moving = node.closest(
-      '[data-slot="resizable-panel-group"]:is([data-animate-width="true"], :has(> [data-separator="active"]))',
-    );
-    if (hidden || force || moving) {
+    if (hidden || force || moving()) {
       inFlight = undefined;
       dirty = false;
       const request = { generation, previewId, presentationRevision: ++revision, ...measured };
@@ -115,25 +117,43 @@ export function presentNativePreview(
         }
       });
   };
-  // Keep position tracking until full animation equivalence is qualified. Unchanged
-  // measurements issue no IPC; both file entry points share this single policy.
+  let scheduled: number | undefined;
   const unobserve = observeNativeContent(
     node,
     () => publish(),
-    () => publish(),
-    true,
+    () => {
+      if (scheduled !== undefined) return;
+      scheduled = window.requestAnimationFrame(() => {
+        scheduled = undefined;
+        publish();
+      });
+    },
+    () => !stopped && !paintFailed && !node.ownerDocument.hidden && moving(),
   );
-  const unwatch = bridge.subscribePreviewPresentation?.(() => publish(true));
+  const stop = () => {
+    stopped = true;
+    inFlight = undefined;
+    if (scheduled !== undefined) window.cancelAnimationFrame(scheduled);
+    unobserve();
+    unwatch?.();
+  };
+  const unwatch = bridge.subscribePreviewPresentation?.((interrupted) => {
+    if (stopped) return;
+    if (!interrupted) publish(true);
+    else if (interrupted.previewId === previewId && interrupted.generation === generation) {
+      stop();
+      onInterrupted?.();
+    }
+  });
   return {
     ready() {
       ready = true;
       publish(true);
     },
     dispose() {
+      if (stopped) return;
       withdraw();
-      stopped = true;
-      unobserve();
-      unwatch?.();
+      stop();
     },
   };
 }

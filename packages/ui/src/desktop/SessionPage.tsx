@@ -466,6 +466,7 @@ function SessionPageContent({
   detailClose.current = props.detailPanel?.onClose;
   const workspaceDetails = !!props.workspaceTab || !!props.fileChangesContent;
   const rightSidebarFormOpen = !!scheduledEditor && !!props.scheduledTasks && !hostDetailsOpen;
+  const [scheduledEditorOverlay, setScheduledEditorOverlay] = useState(false);
   const tabsToggle = useRef<HTMLButtonElement>(null);
   const [dockFits, setDockFits] = useState(true);
   const dockWidth = useRef<
@@ -481,6 +482,15 @@ function SessionPageContent({
     const measure = () => {
       const width = group.getBoundingClientRect().width;
       if (width <= 0) return; // A hidden window cannot establish its available space.
+      const editor = rightSidebarFormOpen && group.querySelector<HTMLElement>('#details');
+      const overlay =
+        !!editor &&
+        group.ownerDocument.defaultView?.getComputedStyle(editor).position === 'absolute';
+      if (overlay && group.querySelector('#content')?.contains(group.ownerDocument.activeElement)) {
+        const field = editor.querySelector<HTMLElement>('.scheduled-editor input:not(:disabled)');
+        (field ?? editor.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus();
+      }
+      setScheduledEditorOverlay(overlay);
       const fits = width >= SESSION_DOCK_MIN_WIDTH;
       if (!fits && !rightSidebarFormOpen) {
         if (dockWidth.current) dockWidth.current.restoring = true;
@@ -1540,6 +1550,7 @@ function SessionPageContent({
         <ResizableHandle
           key={sidebarOpen ? 'navigation-open' : 'navigation-closed'}
           id="navigation-resize"
+          aria-label="项目侧栏宽度"
           disabled={!sidebarOpen}
           className="collapsible-sidebar-handle"
           data-open={sidebarOpen ? 'true' : 'false'}
@@ -1568,7 +1579,7 @@ function SessionPageContent({
         >
           <div
             className="client-content-frame"
-            data-scheduled-editor={scheduledEditor && props.scheduledTasks ? 'true' : undefined}
+            data-scheduled-editor={rightSidebarFormOpen ? 'true' : undefined}
           >
             <ResizablePanelGroup
               id="content-layout"
@@ -1610,6 +1621,7 @@ function SessionPageContent({
             >
               <ResizablePanel
                 id="content"
+                inert={rightSidebarFormOpen && scheduledEditorOverlay}
                 {...contentSizing}
                 data-native-browser-layout={JSON.stringify(contentSizing)}
                 style={{ overflow: 'hidden' }}
@@ -1838,6 +1850,7 @@ function SessionPageContent({
                 <ResizableHandle
                   key={rightSidebarOpen ? 'details-open' : 'details-closed'}
                   id="details-resize"
+                  aria-label="会话详情栏宽度"
                   className="collapsible-sidebar-handle"
                   data-open={rightSidebarOpen ? 'true' : 'false'}
                   disabled={!rightSidebarOpen}

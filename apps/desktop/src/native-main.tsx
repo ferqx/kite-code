@@ -1,5 +1,7 @@
+import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { installNativeInputModality } from './native-input-modality';
+import { NativeStartupFrame } from './native-startup-frame';
 
 import { applyTheme, readThemePreference } from './native-theme';
 import './native-tailwind.css';
@@ -16,15 +18,48 @@ else if (/Windows/i.test(navigator.userAgent))
   document.documentElement.dataset.platform = 'windows';
 const root = createRoot(document.getElementById('root')!);
 applyTheme(readThemePreference());
-const appearance = await window.kiteNative?.getWindowAppearance?.().catch(() => undefined);
-document.documentElement.dataset.windowMaterial = appearance?.backgroundMaterial ?? 'none';
-const { NativeDesktop } = await import('./native');
-root.render(
-  <NativeDesktop
-    nativeWindow
-    testDiagnostics={
-      typeof __KITE_DESKTOP_TEST_DIAGNOSTICS__ !== 'undefined' &&
-      __KITE_DESKTOP_TEST_DIAGNOSTICS__ === true
-    }
-  />,
-);
+document.documentElement.dataset.windowMaterial = 'none';
+flushSync(() => root.render(<NativeStartupFrame loading />));
+void applyWindowMaterial();
+
+async function applyWindowMaterial() {
+  try {
+    const appearance = await window.kiteNative?.getWindowAppearance?.();
+    document.documentElement.dataset.windowMaterial = appearance?.backgroundMaterial ?? 'none';
+  } catch {
+    // Window material is optional. The theme supplies the background.
+  }
+}
+
+async function loadDesktop() {
+  try {
+    const { NativeDesktop } = await import('./native');
+    root.render(
+      <NativeDesktop
+        nativeWindow
+        testDiagnostics={
+          typeof __KITE_DESKTOP_TEST_DIAGNOSTICS__ !== 'undefined' &&
+          __KITE_DESKTOP_TEST_DIAGNOSTICS__ === true
+        }
+      />,
+    );
+  } catch {
+    root.render(
+      <NativeStartupFrame loading={false}>
+        <p role="alert">启动未完成：桌面界面加载失败。</p>
+        <button
+          type="button"
+          className="button"
+          data-slot="button"
+          onClick={() => location.reload()}
+        >
+          重新尝试
+        </button>
+      </NativeStartupFrame>,
+    );
+  }
+}
+
+// Let the window present the startup shell before the workspace CSS and scripts load.
+if (document.readyState === 'complete') void loadDesktop();
+else window.addEventListener('load', loadDesktop, { once: true });

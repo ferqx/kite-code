@@ -340,6 +340,22 @@ const bridge: NativeBridge &
   subscribePreviewPresentation(listener) {
     const receive = (_event: unknown, value: unknown) => {
       if (value === true) listener();
+      else if (
+        value &&
+        typeof value === 'object' &&
+        'previewId' in value &&
+        'generation' in value
+      ) {
+        const { previewId, generation } = value;
+        if (
+          typeof previewId === 'string' &&
+          /^[A-Za-z0-9_-]{1,128}$/.test(previewId) &&
+          typeof generation === 'number' &&
+          Number.isSafeInteger(generation) &&
+          generation >= 0
+        )
+          listener({ previewId, generation });
+      }
     };
     ipcRenderer.on(nativePreviewPresentationChannel, receive);
     return () => ipcRenderer.removeListener(nativePreviewPresentationChannel, receive);

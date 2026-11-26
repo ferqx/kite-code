@@ -109,23 +109,24 @@ function FilePreview(props: Props) {
       };
     };
     let ready = false;
-    let frameUnavailable = false;
+    let previewUnavailable = false;
+    const unavailable = (reason?: 'access' | 'interrupted') => {
+      if (cancelled) return;
+      previewUnavailable = true;
+      ready = false;
+      setStatus(
+        reason === 'access'
+          ? { message: '文件或访问权限已变化，请关闭后重新打开', sourceUnavailable: true }
+          : { message: '预览已中断', retry: true },
+      );
+    };
     const frame = createOfficePreviewFrame(
       viewport.current!,
       bridge,
       props.generation,
       previewId,
       file.name,
-      (reason) => {
-        if (cancelled) return;
-        frameUnavailable = true;
-        ready = false;
-        setStatus(
-          reason === 'access'
-            ? { message: '文件或访问权限已变化，请关闭后重新打开', sourceUnavailable: true }
-            : { message: '预览已中断', retry: true },
-        );
-      },
+      unavailable,
     );
     let reading = false;
     const submitted = new Set<string>();
@@ -238,6 +239,7 @@ function FilePreview(props: Props) {
         if (message) setIssue('');
         setStatus(message ? { message } : 'ready');
       },
+      unavailable,
     );
     void bridge
       .request({
@@ -248,10 +250,10 @@ function FilePreview(props: Props) {
         bounds: bounds(),
       })
       .then(async (result) => {
-        if (cancelled || frameUnavailable) return;
+        if (cancelled || previewUnavailable) return;
         const prepared = !!result && 'kind' in result && result.kind === 'outputs.preview';
         if (prepared && result.status === 'frame') await frame.load(result.url);
-        if (cancelled || frameUnavailable) return;
+        if (cancelled || previewUnavailable) return;
         ready = prepared && (result.status === 'ready' || result.status === 'frame');
         setStatus(ready ? 'ready' : filePreviewFailure());
         if (ready) presentation.ready();
@@ -268,7 +270,7 @@ function FilePreview(props: Props) {
         }
       })
       .catch((error) => {
-        if (!cancelled && !frameUnavailable) setStatus(filePreviewFailure(error));
+        if (!cancelled && !previewUnavailable) setStatus(filePreviewFailure(error));
       });
     const timer = setInterval(() => void read(), 200);
     return () => {

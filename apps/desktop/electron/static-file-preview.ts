@@ -52,8 +52,13 @@ export function markdownPreview(text: string): string {
           : `<ul>${content()}</ul>`;
       case 'listItem':
         return `<li>${content()}</li>`;
-      case 'table':
-        return `<table><tbody>${content()}</tbody></table>`;
+      case 'table': {
+        const [header, ...rows] = node.children ?? [];
+        const headings = (header?.children ?? [])
+          .map((cell) => `<th scope="col">${(cell.children ?? []).map(render).join('')}</th>`)
+          .join('');
+        return `<div class="table-scroll"><table><thead><tr>${headings}</tr></thead><tbody>${rows.map(render).join('')}</tbody></table></div>`;
+      }
       case 'tableRow':
         return `<tr>${content()}</tr>`;
       case 'tableCell':
@@ -93,8 +98,10 @@ pre{white-space:pre-wrap;tab-size:4}
 :not(pre)>code{padding:1px 4px;border-radius:4px;background:var(--office-selected)}
 pre:has(>code),blockquote{padding:9px 12px;background:var(--office-card);border:1px solid var(--office-border);border-radius:6px}
 blockquote{margin-inline:0;border-inline-start:3px solid var(--office-muted)}
-table{display:block;max-width:100%;overflow:auto;border-collapse:collapse}
-td{border-block-end:1px solid var(--office-border);padding:6px 10px;text-align:start}tr:first-child{font-weight:600}
+.table-scroll{max-width:100%;overflow:auto;margin-block-end:12px}
+table{margin:0;border-collapse:collapse}
+:is(th,td){border-block-end:1px solid var(--office-border);padding:6px 10px;text-align:start}
+th{font-weight:600}
 hr{border:0;border-block-start:1px solid var(--office-border)}
 </style></head><body class="${kind}">${body}</body></html>`;
 }

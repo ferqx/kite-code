@@ -44,6 +44,10 @@ PDF 分页预览收到 `pdf_font_invalid` 时在内容区提示换用嵌入可�
 
 办公预览在宿主视口中等待已准入子帧渲染就绪，期间保留宿主焦点和加载指示。隐藏或最小化的窗口在显示后继续等待渲染，避免消耗等待首个动画帧的超时预算。图片和普通文件的原生预览仍先在未附加到窗口的视图中完成首次导航。此前在独立视图实现中，原故障附件从文件卡打开呈现五页，并实测了翻到第 4 页、关闭重开、失败重试和忽略已关闭预览的晚到结果。
 
+[独立预览](electron/output-preview.ts)进程退出时 Main 退役原视图，并向应用主文档通知对应的预览 ID 和连接代次。交付和原路径预览共用匹配与退订规则，在同一标签内通过原有重试入口重新核对来源。原生位置订阅由尺寸、滚动、可见性与布局变化触发。只有面板宽度动画或拖动期间逐帧跟踪，确保裁切与视口对齐。[位置订阅](src/native-preview-presentation.ts) · [取舍](../../.agents/notes/implemented/architecture/2026-11-26-independent-file-preview-lifecycle.md)。[静态 Markdown](electron/static-file-preview.ts)用列标题表达表格，继续把文件自带的 HTML 和资源地址当作无权限文本处理。
+
+2026-11-26，Windows x64／Electron 44.3.0，使用生产构建的 Main、preload 和渲染器以及隔离 SQLite Profile。点击会话历史中的 Markdown 原路径，独立视图可见后检查无障碍树，表格包含两项列标题。静止 500ms 没有读取预览视口几何，9 次连续拖动测量跟随边界。缩到 800px 暂隐，拉宽时同一视图在 34 个样本中重新对齐。让独立进程退出后，原内容区显示一条中断提示，按 Enter 重开后再切换到文本文件，核对实际正文。此轮实窗使用本机原路径样本。
+
 [Main](electron/native-ipc.ts)按连接代次跟踪待核验的打开请求。关闭操作按原预览 ID 和连接代次撤销对应请求。切换或断开会话前先核实请求所属的连接，当前打开请求完成原文件的来源与权限核验后才取得视图。交付文件、原路径和已有 Office 副本共用这个顺序。[Windows Electron 回归](test/isolated/office-preview-security.test.ts)控制同一文件重开的回执顺序，并在核验期间投递其他连接代次的请求，检查当前预览内容和视图释放。
 
 2026-11-19 在 Windows x64／Electron 44.3.0 的普通窗口用已归档的五页 PPT 做修前修后对照。预览读取被控制为旧请求晚于新请求。基线 `6b59a1bd9` 关闭新预览并显示「预览失败」。修后新请求从加载直接进入可见的五页预览，关闭后再次打开也显示五页。原会话保持 10 次模型调用。
@@ -683,7 +687,9 @@ Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)�
 
 2026-10-14 Windows x64／Bun 1.4.2，启动页 DOM 完整文件3项／58断言通过；实际 Chrome headless 按 renderer 的 CSS 顺序载入当前 Tailwind 编译结果、启动样式与共享 CSS，核亮／暗、Native Mica／无材质／非 Native、准备中／失败共12种组合：Mica 启动容器及其承载层透明，其他组合保原实色，文字与重试按钮保主题颜色。定向 Biome、文档结构与影响检查通过；此 CSS 验证不代证 Windows 桌面的最终材质合成，Main 的材质选择未改。
 
-[NativeStartup](src/native-startup.tsx)在加载和启动失败时显示[白底 Kite 图标](app-icon.ico)，布局沿用[启动样式](src/native-startup.css)，按钮仍用原共享 Button。[正式入口](src/native.tsx)先完成现有 Main 的 attach 与首屏完整 Workspace／Session 目录观察，再显示原 SessionPage；尚未核实的目录不能进入，空目录与未配置模型可以进入处理。没有人为最短停留时间，不另建服务或执行路径。
+[启动入口](src/native-main.tsx)先提交同一[启动外框](src/native-startup-frame.tsx)，并行读取可选窗口材质，在 Electron 首次窗口加载事件后导入工作区模块。材质尚未返回时使用主题背景。模块加载失败可在启动页重试整个文档。[NativeStartup](src/native-startup.tsx)继续负责服务初始化的进度、诊断和重试。[正式入口](src/native.tsx)完成 Main attach 和首屏 Workspace／Session 目录观察后显示 SessionPage，空目录与未配置模型可以进入处理。
+
+2026-11-26，Windows x64／Electron 44.3.0 隔离 Profile 实窗在工作区脚本的首次请求被延迟并取消时，依次显示启动外框和失败提示。按 Enter 后再次显示启动外框，工作区正常接管，窗口材质 IPC 此时尚未返回。延迟和失败由隔离夹具注入。
 
 2026-11-25 在 Windows x64 的隔离 Electron 窗口中加载正式构建的渲染器，控制启动桥接结果，依次确认首次加载、失败、重试和进入主界面。每次显示启动页时只有一个 56px 白底图标，渲染资源与桌面 ICO 字节一致。
 
@@ -938,7 +944,9 @@ Service 完成原 Runtime、HTTP 资源、正文流及 Store 收尾后，最后�
 
 会话 header 的“标签页”图标打开[共享 SessionTabs](../../packages/ui/src/desktop/SessionTabs.tsx)，默认新标签页，工具区以卡片网格展示“变更”和“执行轨迹”。关闭最后一个网页、变更或子详情标签会沿原收起逻辑关闭右侧栏并返回顶栏按钮，再次打开显示新的空白页。旧直接“文件变更”按钮移除；原调宽、折叠、主题与无下边框 header 保留。标签模型在响应式 Group 之外，侧栏收起与窗口缩放不销毁网页；明确关闭网页或退出 Main 才销毁相应 WebContents；换阅读 scope、页面卸载及 Root renderer 导航／崩溃只退休展示，重建后先按 Main 清单恢复准确 ID 的原页。Main 重启不宣称原文档存活。工具与子详情 reader 仅在当前可见标签挂载，覆盖／切换／收起会释放读取。环境卡打开子 Agent 时选择原 Session／Execution 的详情标签，重复打开复用原项；全部标签共享8项上限。每次明确点击的单调请求 ID 只消费一次，等待实际阅读 scope 就绪后才打开；切会话、临时选择状态或返回原父会话不重放旧导航，不据此关闭当前任务面板。主会话始终保持显示与自身读取，子详情的准确目标、正文与操作门禁见[环境与子详情 owner](#native-当前会话环境信息与子详情)。
 
-[renderer adapter](src/native-browser-pane.tsx)通过[封闭浏览器 port](src/native-browser-bridge.ts)发送导航与可见 viewport，preload 只交付有限操作与有界显示 metadata。[Main controller](electron/native-browser.ts)复用当前主窗口、准确 mainFrame 和 renderer URL 的 sender 校验，校验地址后才分配最多8个 WebContentsView。顶层导航只支持 HTTP／HTTPS；网页的 WebSocket 子资源可使用无凭据的 ws／wss，不开放对应的顶层或子框架导航。纯文本交 Bing 搜索，localhost 默认 HTTP，普通域名默认 HTTPS。地址栏聚焦编辑期间保留输入，失焦后同步最后确认的页面地址，包含重定向结果。历史操作使用 Electron navigationHistory；网页弹窗的 HTTP 链接在当前标签打开，下载与外部协议拒绝并保留必要错误。
+[renderer adapter](src/native-browser-pane.tsx)通过[封闭浏览器 port](src/native-browser-bridge.ts)发送导航与可见 viewport，preload 只交付有限操作与有界显示 metadata。[Main controller](electron/native-browser.ts)复用当前主窗口、准确 mainFrame 和 renderer URL 的 sender 校验，校验地址后才分配最多8个 WebContentsView。顶层导航只支持 HTTP／HTTPS；网页的 WebSocket 子资源可使用无凭据的 ws／wss，不开放对应的顶层或子框架导航。纯文本交 Bing 搜索，localhost 默认 HTTP，普通域名默认 HTTPS。正常失焦同步最后确认的页面地址，包含重定向结果。地址验证失败时保留当前输入，在字段旁关联错误，输入改变后撤下旧错误。历史操作使用 Electron navigationHistory；网页弹窗的 HTTP 链接在当前标签打开，下载与外部协议拒绝并保留必要错误。
+
+2026-11-26，Windows x64／Electron 44.3.0 实窗的新标签以 Enter 提交不完整地址，输入保留，焦点留在地址栏，无障碍树暴露无效状态、错误描述和警报。输入有效本机 HTTP 地址后，行内错误消失，实际浏览视图收到并展示网页。项目侧栏和会话详情栏的分隔控件在同一实窗暴露各自名称，方向键能调宽。
 
 网页使用独立非持久 session，无应用 preload，sandbox／contextIsolation／webSecurity 开启，Node、webview、DevTools 和权限申请关闭。网页不共享应用 Cookie 或 Service port；手动网页本身不开放通用执行端口；当前普通页的受控 Agent 接入归[统一浏览器入口](#统一浏览器入口候选2026-10-28)，导入、扩展、下载和跨 Main 重启的持久标签／文档不由该手动入口提供。renderer 依据活动标签、窗口可见性、覆盖层和实际几何隐藏／定位 native view，网页 viewport 先与所属 ResizablePanel 的实际边界取交集，并观察该面板尺寸使原生网页随宽度动画逐帧裁切；完全折叠或收起结束后不保留可绘制内容。Main 再按 root zoom 和内容边界夹紧；Root 重载隐藏原页，Main 退出才清理网页，Cookie 只留内存。取舍见[浏览器隔离决定](../../.agents/notes/implemented/architecture/2026-10-20-sidebar-browser-isolation.md)，产品操作归[桌面手册](../../docs/handbook/clients/desktop/README.md)。Main／preload 更新需要完全退出并重启。
 
@@ -1683,6 +1691,10 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 同日本次 review 以合成 HOME、独立 Profile 和 Electron 数据目录，启动普通 development Main、真实配套 Service 与生产 renderer（`testDiagnostics:false`），通过本机无认证 SSE 核实已有成功历史后的准备拒绝。原 Command 经 unknown／accepted／rejected 收敛，拒绝不新增 Run／Message；完全退出重开后保留旧回复和失败，原 caller 数与模型请求数不增，之后明确新发送成功，顺序保持 user→assistant→failure→user→assistant。首窗110帧与重开745帧中，冷历史和后续发送均无欢迎页回闪、重复或旧失败漂移，输入最终为空。原驱动因合成端点把附加 runtime-state 当作用户文本、返回相同回复而等待另一字符串超时；失败日志完整保留，独立只读 Core 和原过程帧核实两个 completed Run、两条真实用户消息和稳定展示，不能称原驱动全绿。没有读取真实认证或改动原用户 Profile。本机原始证据已缺失。
 
 ## Native 定时任务
+
+[会话页](../../packages/ui/src/desktop/SessionPage.tsx)按实际右栏布局识别窄区覆盖。覆盖开始时，将列表中的焦点转到编辑器并停用被覆盖的主区。切回并排时保留编辑草稿并重新启用列表。键盘按钮使用[Desktop 专用焦点环](src/native-tailwind.css)，Windows 强制配色使用系统颜色。
+
+2026-11-26，Windows x64／Electron 44.3.0 实窗中，800px 宽度下按 Enter 打开表单，焦点进入名称字段，21 次 Tab 没有进入覆盖区，取消回到原新建按钮，拉宽到 1380px 后保留草稿。截图像素采样中，「定时任务」的焦点环浅色为 14.59:1，深色为 13.26:1，Chromium 强制配色模拟为 21:1。鼠标点击没有显示键盘焦点环。
 
 模块统一称为“定时任务”，侧栏、页面、新建／编辑面板、搜索、筛选、空状态与删除确认使用同一名称；侧栏入口、空状态和任务卡片统一使用公共图标库的闹钟图标。对应公共UI、无障碍名称与测试定位保持一致。此次命名和图标调整不改变持久字段、IPC、调度、运行及恢复语义。
 

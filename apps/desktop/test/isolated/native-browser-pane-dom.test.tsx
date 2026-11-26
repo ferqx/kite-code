@@ -621,9 +621,10 @@ test('failed navigation shows a browser error page, retries once and preserves t
         .dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true })),
     );
     expect(document.querySelector('.native-browser-start')).toBeNull();
-    expect(document.querySelector('[data-status="error"]')?.getAttribute('title')).toContain(
+    expect(document.querySelector('.native-browser-toolbar [role="alert"]')?.textContent).toContain(
       'HTTP',
     );
+    expect(input.getAttribute('aria-invalid')).toBe('true');
     expect(f.withdrawals).toHaveLength(withdrawals + 1);
   } finally {
     await f.close();
@@ -1238,6 +1239,55 @@ test('scope retirement rejects a blurred IME tail and only a newly focused addre
     expect(f.requests.filter((request) => request.action === 'navigate')).toEqual([
       { action: 'navigate', id: 'page', input: 'https://example.test/new-draft' },
     ]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an empty browser tab links address validation to the focused field and retires stale errors', async () => {
+  const f = await fixture({
+    id: 'page',
+    url: '',
+    title: '新标签页',
+    canGoBack: false,
+    canGoForward: false,
+    loading: false,
+  });
+  let reject!: (cause: Error) => void;
+  const submit = () =>
+    f.flush(() =>
+      f
+        .address()
+        .form!.dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true })),
+    );
+  try {
+    f.requestHook((input) =>
+      input.action === 'navigate'
+        ? new Promise((_resolve, fail) => {
+            reject = fail;
+          })
+        : Promise.resolve(f.state()),
+    );
+    await f.show();
+    await f.edit('https://');
+    await submit();
+    await f.flush(() => reject(Error('invalid_browser_address')));
+    const address = f.address();
+    expect(document.activeElement).toBe(address);
+    expect(address.value).toBe('https://');
+    expect(address.getAttribute('aria-invalid')).toBe('true');
+    const issue = document.getElementById(address.getAttribute('aria-describedby')!);
+    expect(issue?.getAttribute('role')).toBe('alert');
+    expect(issue?.textContent).toBe('请输入有效的网址或搜索内容。');
+    await f.flush(() => address.blur());
+    expect(address.value).toBe('https://');
+    await f.edit('https://');
+    await submit();
+    await f.edit('https://example.test/');
+    await f.flush(() => reject(Error('invalid_browser_address')));
+    expect(address.value).toBe('https://example.test/');
+    expect(address.hasAttribute('aria-invalid')).toBe(false);
+    expect(document.querySelector('[role="alert"]')).toBeNull();
   } finally {
     await f.close();
   }

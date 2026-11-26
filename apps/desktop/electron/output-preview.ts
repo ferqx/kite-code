@@ -24,6 +24,7 @@ import {
 } from '../src/native-content-geometry';
 import type { NativeImageDisplayMediaType } from '../src/native-image-display-bridge';
 import {
+  type NativePreviewLayoutIdentity,
   type NativePreviewLayoutRequest,
   nativePreviewPresentationChannel,
   type OfficePreviewFrameClosed,
@@ -571,6 +572,20 @@ export class NativeOutputPreview {
       });
       view.setVisible(false);
       active.view = view;
+      view.webContents.once('render-process-gone', () => {
+        if (this.active !== active) return;
+        this.close(active.id);
+        const root = input.window.webContents;
+        if (root.isDestroyed()) return;
+        try {
+          root.send(nativePreviewPresentationChannel, {
+            previewId: active.id,
+            generation: active.generation,
+          } satisfies NativePreviewLayoutIdentity);
+        } catch {
+          // The Root may also have retired while the child process was exiting.
+        }
+      });
       // While the small request view is open, keep its original selection and page still.
       view.webContents.on('before-input-event', (event) => {
         if (active.request) event.preventDefault();
@@ -1379,7 +1394,7 @@ export class NativeOutputPreview {
     if (active.checkTimer) clearInterval(active.checkTimer);
     if (active.view) {
       if (!active.window.isDestroyed()) active.window.contentView.removeChildView(active.view);
-      active.view.webContents.close();
+      if (!active.view.webContents.isDestroyed()) active.view.webContents.close();
     }
     if (active.directory && !active.pending)
       void rm(active.directory, { recursive: true, force: true }).catch(() => {});

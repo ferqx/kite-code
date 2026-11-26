@@ -1,7 +1,10 @@
 import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import type { NativeBridge } from '../../src/native-bridge';
-import type { NativePreviewLayoutRequest } from '../../src/native-preview-layout-bridge';
+import type {
+  NativePreviewLayoutIdentity,
+  NativePreviewLayoutRequest,
+} from '../../src/native-preview-layout-bridge';
 import { presentNativePreview } from '../../src/native-preview-presentation';
 
 test('preview presentation shares clipping, synchronous motion and ordered withdrawal without reopening files', async () => {
@@ -34,13 +37,17 @@ test('preview presentation shares clipping, synchronous motion and ordered withd
   const node = document.getElementById('node')!;
   const clip = document.getElementById('clip')!;
   let left = 100;
-  node.getBoundingClientRect = () => new DOMRect(left, 30, 300, 300);
+  let reads = 0;
+  node.getBoundingClientRect = () => {
+    reads++;
+    return new DOMRect(left, 30, 300, 300);
+  };
   clip.getBoundingClientRect = () => new DOMRect(150, 40, 200, 200);
   const sync: NativePreviewLayoutRequest[] = [],
     async: NativePreviewLayoutRequest[] = [];
   let resolve: (() => void) | undefined;
   let rejectWithdrawal = false;
-  let wake: (() => void) | undefined;
+  let wake: ((interrupted?: NativePreviewLayoutIdentity) => void) | undefined;
   const bridge = {
     presentPreviewLayout(input: NativePreviewLayoutRequest) {
       sync.push(input);
@@ -52,23 +59,32 @@ test('preview presentation shares clipping, synchronous motion and ordered withd
         resolve = done;
       });
     },
-    subscribePreviewPresentation(listener: () => void) {
+    subscribePreviewPresentation(listener: (interrupted?: NativePreviewLayoutIdentity) => void) {
       wake = listener;
       return () => {
         wake = undefined;
       };
     },
   } as unknown as NativeBridge;
-  const controller = presentNativePreview(node, bridge, 7, 'preview');
+  let interrupted = 0;
+  const controller = presentNativePreview(node, bridge, 7, 'preview', undefined, () => {
+    interrupted++;
+  });
   const tick = () => new Promise((done) => setTimeout(done, 40));
+  const scroll = () => window.dispatchEvent(new dom.window.Event('scroll'));
   try {
     expect(sync).toHaveLength(0);
     controller.ready();
     expect(sync.at(-1)!.bounds).toMatchObject({ x: 150, y: 40, width: 200, height: 200 });
     left = 180;
+    const idleReads = reads;
+    await tick();
+    expect(reads).toBe(idleReads);
+    scroll();
     await tick();
     expect(async).toHaveLength(1);
     left = 200;
+    scroll();
     await tick();
     expect(async).toHaveLength(1);
     clip.style.visibility = 'hidden';
@@ -87,8 +103,18 @@ test('preview presentation shares clipping, synchronous motion and ordered withd
     left = 210;
     await tick();
     expect(sync.at(-1)!.bounds!.x).toBe(210);
+    left = 215;
+    await tick();
+    expect(sync.at(-1)!.bounds!.x).toBe(215);
     expect(async.length).toBe(asyncCount);
     clip.dataset.animateWidth = 'false';
+    await tick();
+    const settledReads = reads;
+    await tick();
+    expect(reads).toBe(settledReads);
+    wake?.({ previewId: 'retired', generation: 7 });
+    wake?.({ previewId: 'preview', generation: 6 });
+    expect(interrupted).toBe(0);
     const previous = sync.at(-1)!.presentationRevision;
     wake?.();
     expect(sync.at(-1)!.presentationRevision).toBeGreaterThan(previous);
@@ -96,6 +122,19 @@ test('preview presentation shares clipping, synchronous motion and ordered withd
     expect(() => controller.dispose()).not.toThrow();
     expect(sync.at(-1)!.bounds).toBeNull();
     expect(wake).toBeUndefined();
+    rejectWithdrawal = false;
+    const successor = presentNativePreview(node, bridge, 7, 'successor', undefined, () => {
+      interrupted++;
+    });
+    successor.ready();
+    const staleListener = wake;
+    staleListener?.({ previewId: 'successor', generation: 7 });
+    staleListener?.({ previewId: 'successor', generation: 7 });
+    successor.ready();
+    successor.dispose();
+    expect(interrupted).toBe(1);
+    expect(wake).toBeUndefined();
+    expect(sync.at(-1)!.bounds).not.toBeNull();
     const issues: string[] = [];
     const missing = presentNativePreview(node, {} as NativeBridge, 7, 'missing', (issue) =>
       issues.push(issue),
@@ -134,11 +173,13 @@ test('preview presentation shares clipping, synchronous motion and ordered withd
       failed.ready();
       if (asyncFailure) {
         left++;
+        scroll();
         await tick();
       }
       const count = attempts;
       notify?.();
       left++;
+      scroll();
       await tick();
       expect(attempts).toBe(count);
       expect(messages).toEqual(['预览绘制失败，请关闭后重新打开。']);

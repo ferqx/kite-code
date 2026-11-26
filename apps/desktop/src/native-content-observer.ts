@@ -3,14 +3,25 @@ export function observeNativeContent(
   node: HTMLElement,
   publish: () => void,
   schedule: () => void,
-  trackPosition = false,
+  trackPosition?: () => boolean,
 ) {
   const doc = node.ownerDocument;
+  let frame: number | undefined;
+  const tick = () => {
+    frame = undefined;
+    publish();
+    if (trackPosition?.()) frame = window.requestAnimationFrame(tick);
+  };
+  const changed = () => {
+    if (frame !== undefined) return;
+    if (trackPosition?.()) frame = window.requestAnimationFrame(tick);
+    else schedule();
+  };
   const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(publish);
   resize?.observe(node);
   for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement)
     resize?.observe(ancestor);
-  const mutations = new MutationObserver(schedule);
+  const mutations = new MutationObserver(changed);
   mutations.observe(doc.body, {
     subtree: true,
     childList: true,
@@ -19,6 +30,7 @@ export function observeNativeContent(
       'style',
       'class',
       'data-native-browser-layout',
+      'data-animate-width',
       'data-state',
       'data-separator',
       'hidden',
@@ -29,23 +41,15 @@ export function observeNativeContent(
     attributeFilter: ['data-theme', 'class'],
   });
   window.addEventListener('resize', publish);
-  window.addEventListener('scroll', schedule, true);
+  window.addEventListener('scroll', changed, true);
   doc.addEventListener('visibilitychange', publish);
-  let stopped = false,
-    frame: number | undefined;
-  const tick = () => {
-    if (stopped) return;
-    publish();
-    frame = window.requestAnimationFrame(tick);
-  };
-  if (trackPosition) frame = window.requestAnimationFrame(tick);
+  if (trackPosition?.()) frame = window.requestAnimationFrame(tick);
   return () => {
-    stopped = true;
     resize?.disconnect();
     mutations.disconnect();
     if (frame !== undefined) window.cancelAnimationFrame(frame);
     window.removeEventListener('resize', publish);
-    window.removeEventListener('scroll', schedule, true);
+    window.removeEventListener('scroll', changed, true);
     doc.removeEventListener('visibilitychange', publish);
   };
 }

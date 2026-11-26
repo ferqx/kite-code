@@ -63,6 +63,7 @@ export function NativeBrowserToolbar({
         </>
       }
       address={data.address}
+      addressIssue={data.addressIssue}
       loading={data.loading}
       hasPage={data.hasPage}
       canGoBack={data.canGoBack}

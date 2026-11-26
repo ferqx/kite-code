@@ -13,6 +13,8 @@ describe('static file preview without document authority', () => {
       '<ul>',
       '<li>',
       '<table>',
+      '<thead><tr><th scope="col">字段</th><th scope="col">值</th></tr></thead>',
+      '<tbody><tr><td>A</td><td>1</td></tr></tbody>',
       '<td>A</td>',
       '<pre><code>alert(1)',
     ])

@@ -15,7 +15,7 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ReactNode } from 'react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ChildAgentIcon } from './ApprovalHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Button } from './ui';
@@ -178,6 +178,7 @@ function newBrowserTab(): SessionTab {
 export interface SessionBrowserToolbarProps {
   readonly tools?: ReactNode;
   readonly address: string;
+  readonly addressIssue?: string;
   readonly loading: boolean;
   readonly hasPage: boolean;
   readonly canGoBack: boolean;
@@ -198,6 +199,7 @@ export function BrowserOptionsIcon() {
 }
 export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
   const composing = useRef(false);
+  const issueId = useId();
   return (
     <form
       className="native-browser-toolbar"
@@ -250,6 +252,8 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
       <input
         className="native-browser-address"
         aria-label="搜索或输入网址"
+        aria-invalid={props.addressIssue ? true : undefined}
+        aria-describedby={props.addressIssue ? issueId : undefined}
         placeholder="搜索或输入网址"
         value={props.address}
         readOnly={props.canNavigate === false}
@@ -281,6 +285,11 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         }}
       />
       <div className="native-browser-tools">{props.tools}</div>
+      {props.addressIssue && (
+        <p id={issueId} className="native-browser-address-error" role="alert">
+          {props.addressIssue}
+        </p>
+      )}
     </form>
   );
 }
